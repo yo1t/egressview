@@ -29,6 +29,8 @@ https://github.com/user-attachments/assets/9360b145-60cb-46b1-8489-898d7ea62b60
 
 Visualise NAT session data as a force-directed network graph, animated arcs on a world map, and time-series trend charts — all updating in real time.
 
+The sidebar lists every device on your LAN, enriched with hostnames, vendor names, and model info beyond just IP and MAC addresses. Select a device to filter the map and graph to show only its active connections.
+
 ## Screenshots
 
 ![widemap1](docs/widemap1.png)
