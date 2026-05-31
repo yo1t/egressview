@@ -57,7 +57,7 @@ Widemap shows you *where* every device on your home or office network is connect
 ## Quick Start
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/widemap.git
+git clone https://github.com/yo1t/widemap.git
 cd widemap
 npm install
 npm start
