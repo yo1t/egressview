@@ -23,7 +23,7 @@ Widemap shows you *where* every device on your home or office network is connect
 
 ## Demo
 
-<video src="docs/widemap-redacted.mp4" controls width="800"></video>
+https://github.com/user-attachments/assets/9360b145-60cb-46b1-8489-898d7ea62b60
 
 ## Screenshots
 
