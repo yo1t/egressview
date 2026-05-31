@@ -25,6 +25,8 @@ Widemap shows you *where* every device on your home or office network is connect
 
 https://github.com/user-attachments/assets/9360b145-60cb-46b1-8489-898d7ea62b60
 
+> UI language: English / Japanese selectable
+
 ## Screenshots
 
 ![widemap1](docs/widemap1.png)
