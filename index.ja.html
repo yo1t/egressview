@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Widemap — リアルタイムネットワーク接続可視化ツール</title>
+  <meta name="description" content="Where Is Data Exiting? Map All Paths. LANデバイスのインターネット接続先をリアルタイムに世界地図上で可視化。Yamaha RTXルーター＋ASUS WiFiアクセスポイント対応。">
+  <meta name="keywords" content="ネットワーク監視, ネットワーク可視化, Yamaha RTX, ASUS ルーター, NATセッション, リアルタイム地図, 接続マップ, ホームネットワーク, LAN監視, オープンソース">
+  <meta name="author" content="Yoichi Takizawa">
+  <link rel="canonical" href="https://yo1t.github.io/widemap/index.ja.html">
+  <meta property="og:title" content="Widemap — リアルタイムネットワーク接続可視化ツール">
+  <meta property="og:description" content="ネットワーク上の全デバイスが「どこと通信しているか」をリアルタイムに世界地図上で表示します。">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://yo1t.github.io/widemap/index.ja.html">
+  <meta property="og:image" content="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Widemap — リアルタイムネットワーク接続可視化ツール">
+  <meta name="twitter:description" content="ネットワーク上の全デバイスが「どこと通信しているか」をリアルタイムに世界地図上で表示します。">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png">
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+      --green: #3fb950;
+      --purple: #bc8cff;
+      --orange: #d29922;
+      --tag-bg: #1f2937;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 48px 24px 40px;
+      text-align: center;
+    }
+    header h1 {
+      font-size: 2.4rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 12px;
+    }
+    header h1 span { color: var(--accent); }
+    header p {
+      font-size: 1.05rem;
+      color: var(--muted);
+      max-width: 640px;
+      margin: 0 auto 20px;
+    }
+    .badges { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 28px; }
+    .badges img { height: 20px; }
+
+    .links {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 18px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .btn:hover { border-color: var(--accent); background: #1c2230; text-decoration: none; color: var(--accent-hover); }
+    .btn.primary { background: #21262d; border-color: #8b949e; }
+    .btn.release { border-color: var(--green); color: var(--green); }
+    .btn.release:hover { background: #0d1f14; color: #56d364; }
+    .btn svg { flex-shrink: 0; }
+
+    main { max-width: 860px; margin: 0 auto; padding: 48px 24px; }
+
+    section { margin-bottom: 48px; }
+    h2 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    h2 .icon { font-size: 1rem; }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 6px; }
+    .card p { font-size: 0.85rem; color: var(--muted); }
+
+    .quick-start {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+    }
+    pre {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      margin-top: 12px;
+    }
+    code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+    .comment { color: var(--muted); }
+
+    .screenshot-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    .screenshot-grid img {
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .arch-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+      overflow-x: auto;
+    }
+    .arch-block pre { border: none; padding: 0; margin: 0; background: transparent; }
+
+    .lang-notice {
+      background: #161b22;
+      border-bottom: 1px solid var(--border);
+      text-align: center;
+      padding: 10px 16px;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .lang-notice a {
+      color: var(--accent);
+      font-weight: 500;
+      margin-left: 6px;
+    }
+
+    footer {
+      text-align: center;
+      padding: 32px 24px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    footer a { color: var(--muted); }
+    footer a:hover { color: var(--accent); }
+
+    @media (max-width: 600px) {
+      header h1 { font-size: 1.8rem; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="lang-notice">
+  🌐 This page is also available in English.
+  <a href="index.html">Read in English →</a>
+</div>
+
+<header>
+  <h1><span>Widemap</span></h1>
+  <p>Where Is Data Exiting? Map All Paths. — LANデバイスのインターネット接続先をリアルタイムに世界地図上で可視化するツール。</p>
+  <div class="badges">
+    <a href="https://opensource.org/licenses/AGPL-3.0"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
+    <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node.js 18+"></a>
+  </div>
+  <div class="links">
+    <a class="btn primary" href="https://github.com/yo1t/widemap">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      ソースコード
+    </a>
+    <a class="btn" href="https://github.com/yo1t/widemap/issues">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/><path fill-rule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z"/></svg>
+      Issues
+    </a>
+    <a class="btn" href="https://github.com/yo1t/widemap/blob/main/README.ja.md">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0114.25 16H1.75A1.75 1.75 0 010 14.25V1.75zm1.75-.25a.25.25 0 00-.25.25v12.5c0 .138.112.25.25.25h12.5a.25.25 0 00.25-.25V1.75a.25.25 0 00-.25-.25H1.75zM3.5 3.75a.75.75 0 01.75-.75h7a.75.75 0 010 1.5h-7a.75.75 0 01-.75-.75zm.75 2.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z"/></svg>
+      README
+    </a>
+  </div>
+</header>
+
+<main>
+
+  <!-- 機能 -->
+  <section id="features">
+    <h2><span class="icon">✦</span> 機能</h2>
+    <div class="card-grid">
+      <div class="card">
+        <h3>リアルタイム世界地図</h3>
+        <p>全ての外向き接続をインタラクティブな地図上にプロット。設置場所から接続先へのアニメーションアーク表示。</p>
+      </div>
+      <div class="card">
+        <h3>Yamaha RTX 連携</h3>
+        <p>Yamaha RTXルーターにSSH接続し、NATセッションテーブルを5秒ごとにパース。RTX1200〜RTX1300、RTX810/830対応。</p>
+      </div>
+      <div class="card">
+        <h3>ASUS WiFi AP 対応</h3>
+        <p>L2クライアント情報を取得 — WiFi帯域、信号強度、トラフィック量、AiMeshトポロジー。</p>
+      </div>
+      <div class="card">
+        <h3>スマートデバイス識別</h3>
+        <p>OUI、mDNS/Bonjour、SSDP、NetBIOS、Appleモデル辞書（200機種以上、「iPhone 15 Pro」レベルまで特定）。</p>
+      </div>
+      <div class="card">
+        <h3>IPエンリッチメント</h3>
+        <p>全接続先に対して逆引きDNS、RDAP組織名検索、GeoIP（都市レベルの緯度経度）を自動付与。</p>
+      </div>
+      <div class="card">
+        <h3>7日間の履歴保存</h3>
+        <p>接続履歴を永続保存。時系列チャート、接続先別統計、セッション数棒グラフで分析。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- スクリーンショット -->
+  <section id="screenshots">
+    <h2><span class="icon">◈</span> スクリーンショット</h2>
+    <div class="screenshot-grid">
+      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png" alt="Widemap 世界地図ビュー — LANデバイスからグローバル接続先への通信を表示" loading="lazy">
+      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap2.png" alt="Widemap グラフビュー — ネットワークトポロジー表示" loading="lazy">
+      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap3.png" alt="Widemap 統計ビュー — 接続履歴チャート" loading="lazy">
+    </div>
+  </section>
+
+  <!-- アーキテクチャ -->
+  <section id="architecture">
+    <h2><span class="icon">⬡</span> アーキテクチャ</h2>
+    <div class="arch-block">
+      <pre><code>┌─────────────────┐   SSH    ┌──────────────┐
+│  Yamaha RTX     │◄────────►│              │
+│  (NATテーブル)   │          │   Widemap    │   WebSocket
+└─────────────────┘          │   Server     │◄──────────► ブラウザ
+┌─────────────────┐  HTTP    │  (Node.js)   │
+│  ASUS WiFi AP   │◄────────►│              │
+│  (クライアント)   │          └──────────────┘
+└─────────────────┘               │
+                          ┌───────┴───────┐
+                          │ エンリッチメント │
+                          │ • 逆引きDNS    │
+                          │ • RDAP (組織名) │
+                          │ • GeoIP        │
+                          │ • OUI ベンダー  │
+                          │ • mDNS/SSDP    │
+                          └───────────────┘</code></pre>
+    </div>
+  </section>
+
+  <!-- クイックスタート -->
+  <section id="quickstart">
+    <h2><span class="icon">▶</span> クイックスタート</h2>
+    <div class="quick-start">
+      <p style="font-size:0.9rem; color:var(--muted); margin-bottom:4px;">クローン、インストール、起動：</p>
+      <pre><code><span class="comment"># リポジトリをクローン</span>
+git clone https://github.com/yo1t/widemap.git
+cd widemap
+npm install
+
+<span class="comment"># サーバーを起動</span>
+npm start
+
+<span class="comment"># ブラウザで開く</span>
+open http://localhost:3000</code></pre>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:16px;">初回起動時に管理トークンがコンソールに表示されます。ブラウザで入力して認証後、設定パネルからルーター接続を設定してください。</p>
+    </div>
+  </section>
+
+  <!-- 対応ハードウェア -->
+  <section id="hardware">
+    <h2><span class="icon">◎</span> 対応ハードウェア</h2>
+    <div class="card-grid">
+      <div class="card">
+        <h3>Yamaha RTX（L3/L4）</h3>
+        <p>RTX1200, RTX1210, RTX1220, RTX1300, RTX810, RTX830, NVR500, NVR510, NVR700W — SSH＋NATディスクリプタ対応の全モデル。</p>
+      </div>
+      <div class="card">
+        <h3>ASUS WiFi AP（L2）</h3>
+        <p>RT-AXシリーズ、RT-ACシリーズ、ZenWiFi（AiMesh） — 標準Web管理画面を持つ全モデル（APモード/AiMesh使用）。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Issues -->
+  <section id="issues">
+    <h2><span class="icon">◎</span> Issues &amp; フィードバック</h2>
+    <div class="quick-start">
+      <p style="font-size:0.9rem; color:var(--muted); margin-bottom:16px;">
+        バグ報告や機能リクエストはGitHubのIssueからお願いします。
+      </p>
+      <div style="display:flex; gap:12px; flex-wrap:wrap;">
+        <a class="btn" href="https://github.com/yo1t/widemap/issues">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/><path fill-rule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z"/></svg>
+          全てのIssueを見る
+        </a>
+        <a class="btn" href="https://github.com/yo1t/widemap/issues/new">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z"/></svg>
+          新しいIssue
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- リンク -->
+  <section id="links">
+    <h2><span class="icon">⬡</span> リンク</h2>
+    <div class="card-grid">
+      <div class="card">
+        <h3><a href="https://github.com/yo1t/widemap">GitHub リポジトリ</a></h3>
+        <p>ソースコード、Issue、Pull Request、コントリビューションガイドライン。</p>
+      </div>
+      <div class="card">
+        <h3><a href="https://github.com/yo1t/widemap/blob/main/README.ja.md">README（日本語）</a></h3>
+        <p>完全なドキュメント：セットアップ、設定、機能、セキュリティ。</p>
+      </div>
+      <div class="card">
+        <h3><a href="https://github.com/yo1t/widemap/blob/main/README.md">README (English)</a></h3>
+        <p>Full documentation: setup, configuration, features, and security.</p>
+      </div>
+      <div class="card">
+        <h3><a href="https://github.com/yo1t/widemap/blob/main/LICENSE">ライセンス (AGPL-3.0)</a></h3>
+        <p>自由に使用・改変可能。ネットワークサービスとして提供する場合は変更の公開が必要。</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <p>
+    <a href="https://github.com/yo1t/widemap">Widemap</a> は
+    <a href="https://github.com/yo1t/widemap/blob/main/LICENSE">AGPL-3.0 ライセンス</a>で公開されています。
+    &nbsp;·&nbsp;
+    Yamaha および ASUS とは無関係であり、推奨を受けていません。
+  </p>
+</footer>
+
+</body>
+</html>
