@@ -7,7 +7,7 @@
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green)
 
-> 🇬🇧 [English README](README.md)
+> 🇬🇧 [English README](README.md) | 🌐 [プロジェクトページ](https://yo1t.github.io/widemap/index.ja.html)
 
 ---
 

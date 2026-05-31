@@ -7,7 +7,7 @@ Widemap shows you *where* every device on your home or office network is connect
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green)
 
-> 🇯🇵 [日本語版 README はこちら](README.ja.md)
+> 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/widemap/)
 
 ---
 
