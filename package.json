@@ -1,5 +1,5 @@
 {
-  "name": "asus-router-monitor",
+  "name": "widemap",
   "version": "1.0.0",
   "description": "ASUS router real-time network traffic visualizer",
   "main": "server.js",
