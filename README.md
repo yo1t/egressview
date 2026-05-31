@@ -1,6 +1,6 @@
 # Widemap
 
-**Real-time network connection visualizer for Yamaha RTX routers + ASUS WiFi APs**
+**Real-time network connection visualizer for Yamaha RTX routers + ASUS WiFi Access Points**
 
 Widemap shows you *where* every device on your home or office network is connecting to — in real time, on a world map.
 
@@ -17,7 +17,7 @@ Widemap shows you *where* every device on your home or office network is connect
 - Enriches each destination IP with **reverse DNS**, **RDAP** (organization name), and **GeoIP** (latitude/longitude/city)
 - Plots all connections on an interactive **world map** with animated arcs
 - Identifies local devices using **OUI vendor lookup**, **mDNS/Bonjour**, **SSDP**, **NetBIOS**, and an **Apple model dictionary** (resolves down to "iPhone 15 Pro")
-- Optionally connects to an **ASUS router** to get WiFi client details (band, signal strength, traffic rates)
+- Optionally connects to an **ASUS WiFi access point** (used as AP/mesh, not as a router) to get WiFi client details (band, signal strength, traffic rates, AiMesh topology)
 - Keeps a **7-day connection history** with persistent storage
 - Single-page dark-themed UI with graph view, map view, and statistics
 
@@ -35,7 +35,7 @@ Widemap shows you *where* every device on your home or office network is connect
 │  (NAT table)    │          │   Widemap    │   WebSocket
 └─────────────────┘          │   Server     │◄──────────► Browser
 ┌─────────────────┐  HTTP    │  (Node.js)   │
-│  ASUS Router    │◄────────►│              │
+│  ASUS WiFi AP   │◄────────►│              │
 │  (Client list)  │          └──────────────┘
 └─────────────────┘               │
                           ┌───────┴───────┐
@@ -52,7 +52,7 @@ Widemap shows you *where* every device on your home or office network is connect
 
 - **Node.js** 18+
 - **Yamaha RTX** router with SSH access enabled (RTX1200, RTX1210, RTX1220, RTX1300, etc.)
-- (Optional) **ASUS router** with web admin enabled
+- (Optional) **ASUS WiFi access point** with web admin enabled (used as AP/mesh mode, not as a router)
 
 ## Quick Start
 
@@ -99,11 +99,13 @@ All settings are stored in `.widemap.json` (auto-generated, gitignored). You can
 - Auto-reconnects on SSH timeout or connection loss
 - TOFU (Trust On First Use) host key verification
 
-### L2: ASUS Router (WiFi Client Monitoring)
+### L2: ASUS WiFi Access Point (Mesh-capable, Client Monitoring)
+
+The ASUS device is used as a **WiFi access point (AP mode or AiMesh)**, not as a router. Yamaha RTX handles all L3 routing and NAT. The ASUS AP provides L2 client visibility:
 
 - SHA256 challenge-response authentication
 - Client list with connection type (wired/2.4G/5G/6G), RSSI, traffic rates
-- AiMesh node discovery
+- AiMesh node discovery (multi-AP topology)
 - Auto token refresh
 
 ### Device Identification
@@ -139,8 +141,8 @@ Any model with SSH access and NAT descriptor support:
 - RTX810, RTX830
 - NVR500, NVR510, NVR700W
 
-### ASUS (L2)
-Any model with the standard web admin interface:
+### ASUS WiFi AP (L2, Mesh-capable)
+Any model with the standard web admin interface, used in AP mode or AiMesh:
 - RT-AX series (AX86U, AX88U, AX92U, etc.)
 - RT-AC series
 - ZenWiFi (AiMesh)
