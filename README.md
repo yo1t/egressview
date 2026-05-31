@@ -75,6 +75,35 @@ On first startup, an **admin token** is printed to the console:
 
 Open `http://localhost:3000` and enter the token. Then configure your router connections via the Settings panel (⚙).
 
+> **Note:** The admin token is generated once on first startup and saved in `.widemap.json`. If you lose it, delete `.widemap.json` and restart — a new token will be generated.
+
+## Admin Token
+
+The admin token protects all API endpoints and the WebSocket connection. It is required every time you open the browser UI.
+
+### Where to find it
+
+1. **First startup** — printed to the console (stdout) as shown above
+2. **After first startup** — stored in `.widemap.json` (field: `adminToken`)
+
+### If you lose the token
+
+```bash
+# Option 1: Read from the config file
+cat .widemap.json | grep adminToken
+
+# Option 2: Reset (generates a new token)
+rm .widemap.json
+npm start
+```
+
+### How it works
+
+- The browser prompts for the token on first access and stores it in `localStorage`
+- Every API request includes the token in the `X-Admin-Token` header
+- WebSocket connections pass the token via Socket.IO handshake auth
+- Token comparison uses `crypto.timingSafeEqual` to prevent timing attacks
+
 ## Configuration
 
 All settings are stored in `.widemap.json` (auto-generated, gitignored). You can also use environment variables:
