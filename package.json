@@ -1,7 +1,7 @@
 {
   "name": "widemap",
   "version": "1.0.0",
-  "description": "ASUS router real-time network traffic visualizer",
+  "description": "Widemap — Where Is Data Exiting? Map All Paths. Real-time visualisation of LAN devices and their internet destinations.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
