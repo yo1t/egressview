@@ -27,6 +27,8 @@ https://github.com/user-attachments/assets/9360b145-60cb-46b1-8489-898d7ea62b60
 
 > UI language: English / Japanese selectable
 
+Visualise NAT session data as a force-directed network graph, animated arcs on a world map, and time-series trend charts — all updating in real time.
+
 ## Screenshots
 
 ![widemap1](docs/widemap1.png)
