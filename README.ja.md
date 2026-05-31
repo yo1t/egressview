@@ -25,6 +25,8 @@
 
 https://github.com/user-attachments/assets/9360b145-60cb-46b1-8489-898d7ea62b60
 
+> UI言語: 英語 / 日本語 切り替え可能
+
 ## スクリーンショット
 
 ![widemap1](docs/widemap1.png)
