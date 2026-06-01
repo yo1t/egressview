@@ -1,0 +1,25 @@
+project_name: widemap
+
+fail_on_findings: true
+
+global_settings:
+  severity_threshold: MEDIUM
+
+  ignore_paths:
+    - path: 'node_modules/**'
+      reason: 'Third-party dependencies'
+    - path: '.ash/**'
+      reason: 'ASH output directory'
+
+  suppressions:
+    - path: 'server.js'
+      rule_id: 'SECRET-SECRET-KEYWORD'
+      line_start: 891
+      line_end: 891
+      reason: 'False positive - password variable name in input validation, not a hardcoded secret'
+
+scanners:
+  semgrep:
+    enabled: true
+    options:
+      config: p/owasp-top-ten

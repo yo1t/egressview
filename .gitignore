@@ -25,3 +25,6 @@ backlog.md
 *.key
 id_rsa*
 id_ed25519*
+# ASH セキュリティスキャン出力（結果は毎回変わる）
+.ash/ash_output/
+# 設定ファイル (.ash/.ash.yaml) はコミット対象
