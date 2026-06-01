@@ -39,7 +39,7 @@ const io = new Server(server, {
 const SUBPATH = (process.env.SUBPATH || '').replace(/\/$/, '');
 
 const DEFAULT_ROUTER_IP = process.env.ROUTER_IP || '192.168.1.1';
-const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL_MS || '2000');
+const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL_MS || '60000');
 const PORT = parseInt(process.env.PORT || '3000');
 
 // ── SSRF protection: allow only private IP ranges ─────────────────────
@@ -401,7 +401,7 @@ function parseNatDetail(text) {
   return sessions;
 }
 
-function waitForPrompt(timeoutMs = 25000) {
+function waitForPrompt(timeoutMs = 45000) {
   return new Promise((resolve, reject) => {
     if (shellBuf.endsWith('> ')) { resolve(shellBuf); return; }
     shellResolve = resolve;
@@ -453,7 +453,7 @@ function connectYamaha() {
         console.error('[yamaha] shell error:', err.message);
         yamahaConnecting = false;
         io.emit('yamaha-status', { ready: false, message: 'シェル要求失敗: ' + err.message });
-        scheduleYamahaReconnect(15000);
+        scheduleYamahaReconnect(5000);
         return;
       }
       yamahaShell = stream;
@@ -473,8 +473,8 @@ function connectYamaha() {
       stream.on('close', () => {
         yamahaReady = false;
         yamahaConnecting = false;
-        console.log('[yamaha] Shell closed, reconnecting in 10s…');
-        scheduleYamahaReconnect(10000);
+        console.log('[yamaha] Shell closed, reconnecting in 3s…');
+        scheduleYamahaReconnect(3000);
       });
 
       // Initialise
@@ -495,7 +495,7 @@ function connectYamaha() {
           yamahaConnecting = false;
           console.error('[yamaha] init error:', e.message);
           io.emit('yamaha-status', { ready: false, message: '初期化失敗: ' + e.message });
-          scheduleYamahaReconnect(15000);
+          scheduleYamahaReconnect(5000);
         }
       }, 500);
     });
@@ -506,7 +506,7 @@ function connectYamaha() {
     yamahaReady = false;
     yamahaConnecting = false;
     io.emit('yamaha-status', { ready: false, message: 'SSH接続失敗: ' + err.message });
-    scheduleYamahaReconnect(15000);
+    scheduleYamahaReconnect(5000);
   });
 
   // SSH host key verification (TOFU: Trust On First Use)
@@ -617,15 +617,15 @@ async function pollYamahaConnections() {
   } catch (err) {
     console.error('[yamaha] poll error:', err.message);
     if (err.message.includes('timeout')) {
-      // Timeout = unresponsive session → reset connection and reconnect
+      // Timeout = unresponsive session → reset connection and reconnect (fast backoff)
       console.log('[yamaha] Timeout detected, resetting connection…');
       yamahaReady = false;
       if (yamahaConn) { try { yamahaConn.end(); } catch {} }
-      scheduleYamahaReconnect(5000);
+      scheduleYamahaReconnect(3000);
       return;
     }
   }
-  setTimeout(pollYamahaConnections, 5000);
+  setTimeout(pollYamahaConnections, 60000); // 60s: lighter load; ASUS (2s) handles real-time traffic
 }
 
 // ─── Auth state ───────────────────────────────────────────────────────────────
@@ -1072,8 +1072,34 @@ function parseMeshNodes(raw) {
   }));
 }
 
+// Auto-renew the ASUS token using stored credentials when it has expired.
+// Falls back to notifying the client only after a few consecutive failures.
+let asusRenewFailures = 0;
+const ASUS_RENEW_MAX_FAILURES = 3;
+
+async function ensureAsusAuth() {
+  if (authToken && Date.now() < tokenExpiry) return true;
+  if (!asusEnabled || !lastAsusUser || !lastAsusPass) return false;
+  try {
+    const token = await loginToRouter(routerIp, lastAsusUser, lastAsusPass);
+    authToken = token;
+    tokenExpiry = Date.now() + 25 * 60 * 1000;
+    asusRenewFailures = 0;
+    console.log('[auth] ASUS token auto-renewed');
+    return true;
+  } catch (e) {
+    asusRenewFailures++;
+    console.error(`[auth] ASUS auto-renew failed (${asusRenewFailures}/${ASUS_RENEW_MAX_FAILURES}):`, e.message);
+    if (asusRenewFailures >= ASUS_RENEW_MAX_FAILURES) {
+      io.emit('auth-required', { message: 'ASUSの自動再認証に失敗しました。設定から再ログインしてください。' });
+      stopPolling();
+    }
+    return false;
+  }
+}
+
 async function poll() {
-  if (!authToken || Date.now() > tokenExpiry) return;
+  if (!await ensureAsusAuth()) return;
   try {
     const now = Date.now();
     const [clientRaw, netdevRaw, meshRaw] = await Promise.all([

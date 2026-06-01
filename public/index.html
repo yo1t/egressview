@@ -12,7 +12,7 @@
     --green: #10b981; --yellow: #f59e0b; --red: #ef4444;
     --purple: #8b5cf6; --cyan: #06b6d4;
   }
-  body { background: var(--bg); color: var(--text); font-family: 'SF Mono','Fira Code',monospace; font-size: 13px; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+  body { background: var(--bg); color: var(--text); font-family: 'SF Mono','Fira Code',monospace; font-size: 13px; overflow: hidden; height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 
   /* ── Settings overlay ────────────────────────────── */
   #settings-overlay {
@@ -397,10 +397,12 @@
 
   /* ── Mobile layout (≤768px) ─────────────────────── */
   @media (max-width: 768px) {
-    /* Main as vertical stack + scrollable (so oversized content is reachable) */
-    .main { flex-direction: column; overflow-y: auto; }
-    /* Graph/Map/Stats use fixed heights */
-    #graph-container, #map-container, #stats-container { flex: 0 0 auto; height: 33vh; min-height: 200px; }
+    /* Mobile: scroll the whole page (body), not just .main.
+       Header is position:sticky and stays at the top. */
+    body { overflow-y: auto; overflow-x: hidden; height: auto; min-height: 100dvh; }
+    .main { flex-direction: column; overflow: visible; }
+    /* Graph/Map/Stats use fixed heights (only the active one is shown via display) */
+    #graph-container, #map-container, #stats-container { flex: 0 0 auto; height: 38vh; min-height: 220px; }
     /* In stats mode, give the chart area a bit more room */
     body.is-stats-mode #stats-container { height: 55vh; }
     /* Mobile: shrink chart padding, compact legend */
@@ -409,11 +411,11 @@
     .chart-mode-btn { padding: 2px 5px; font-size: 9px; }
     .stats-legend { font-size: 9px; gap: 4px; }
     .stats-axis text { font-size: 9px; }
-    /* Device list + connections panel: ensure a minimum height (scroll to view) */
+    /* Device list + connections panel: fill remaining space, no bottom gap */
     .side-panel {
       width: 100% !important;
-      flex: 0 0 auto;
-      min-height: 40vh;
+      flex: 1 1 auto;
+      min-height: 45vh;
       max-height: none;
       border-left: none;
       border-top: 1px solid var(--border);
@@ -422,17 +424,25 @@
        device list uses the full area when connections panel is hidden */
     .device-list { flex: 1 1 0; min-height: 0; }
     .conn-panel  { flex: 1 1 0; max-height: none !important; min-height: 0; }
-    /* Header wraps, hide unessential info */
-    header { flex-wrap: wrap; gap: 8px; padding: 8px 10px; }
-    header h1 { font-size: 14px; }
+    /* Header: pin to top, allow wrapping, keep compact */
+    header {
+      position: sticky; top: 0; z-index: 20;
+      flex-wrap: wrap; gap: 6px; padding: 6px 8px;
+    }
+    header h1 { font-size: 13px; }
     .header-stats { display: none; }
-    .conn-badges { flex-wrap: wrap; }
-    .conn-badge .badge-layer { font-size: 9px; }
-    .conn-badge .badge-ip { font-size: 10px; }
-    /* Compact tab and period selector */
-    .view-tab { padding: 3px 8px; font-size: 10px; }
+    .conn-badges { gap: 3px; }
+    .conn-badge { padding: 2px 5px; }
+    .conn-badge .badge-layer { font-size: 8px; }
+    .conn-badge .badge-dot { width: 5px; height: 5px; }
+    .conn-badge .badge-ip { font-size: 9px; }
+    .view-tabs { padding: 1px; }
+    .view-tab { padding: 3px 7px; font-size: 10px; }
+    .time-filter { padding: 1px 3px; gap: 4px; }
     .time-filter-label { display: none; }
     .time-filter select { font-size: 10px; padding: 2px; }
+    .time-custom-input { font-size: 9px; padding: 1px 2px; max-width: 110px; }
+    .settings-btn { padding: 3px 6px; font-size: 12px; }
     /* Hide legend (gets in the way on small screens) */
     .legend { display: none; }
     .last-update { font-size: 9px; top: 4px; right: 6px; }
@@ -445,9 +455,14 @@
     /* Smaller device search box */
     .device-search { width: 100px; }
   }
-  /* Even narrower screens */
+  /* Even narrower screens (small phones in portrait) */
   @media (max-width: 480px) {
+    /* Hide the brand text — status dot + view tabs are enough identification */
+    header h1 { display: none; }
+    /* Connection badges hidden to free up horizontal space */
     .conn-badges { display: none; }
+    /* Even more compact tabs */
+    .view-tab { padding: 2px 5px; font-size: 9px; }
     .panel-header { font-size: 10px; }
   }
 </style>
