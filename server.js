@@ -579,12 +579,12 @@ asus.configure({
 });
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
-server.listen(PORT, async () => {
+server.listen(PORT, () => {
   console.log(`Widemap: http://localhost:${PORT}`);
   loadConfig();
   ensureAdminToken();
   loadNotes();
-  await history.loadConnectionHistory();
+  history.loadConnectionHistory();
   console.log(`Router IP: ${asus.getRouterIp()}`);
   deviceId.loadOuiDb();
   yamaha.connectYamaha(() => {
