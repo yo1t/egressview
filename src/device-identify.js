@@ -76,94 +76,23 @@ function getOuiVendor(mac) {
   return ouiDb.get(prefix) || null;
 }
 
-// ─── Apple model identifier → product name dictionary ─────────────────────
-const APPLE_MODELS = {
-  'MacBookAir10,1':'MacBook Air (M1, 2020)',
-  'Mac14,2':'MacBook Air (M2, 2022)',
-  'Mac14,15':'MacBook Air 15" (M2, 2023)',
-  'Mac15,12':'MacBook Air 13" (M3, 2024)', 'Mac15,13':'MacBook Air 15" (M3, 2024)',
-  'Mac16,12':'MacBook Air 13" (M4, 2025)', 'Mac16,13':'MacBook Air 15" (M4, 2025)',
-  'MacBookPro17,1':'MacBook Pro 13" (M1, 2020)',
-  'MacBookPro18,1':'MacBook Pro 16" (M1 Pro/Max, 2021)', 'MacBookPro18,2':'MacBook Pro 16" (M1 Pro/Max, 2021)',
-  'MacBookPro18,3':'MacBook Pro 14" (M1 Pro/Max, 2021)', 'MacBookPro18,4':'MacBook Pro 14" (M1 Pro/Max, 2021)',
-  'Mac14,7':'MacBook Pro 13" (M2, 2022)',
-  'Mac14,5':'MacBook Pro 16" (M2 Pro/Max, 2023)','Mac14,6':'MacBook Pro 16" (M2 Pro/Max, 2023)',
-  'Mac14,9':'MacBook Pro 14" (M2 Pro/Max, 2023)','Mac14,10':'MacBook Pro 14" (M2 Pro/Max, 2023)',
-  'Mac15,3':'MacBook Pro 14" (M3, 2023)',
-  'Mac15,6':'MacBook Pro 14" (M3 Pro, 2023)','Mac15,8':'MacBook Pro 14" (M3 Max, 2023)','Mac15,10':'MacBook Pro 14" (M3 Max, 2023)',
-  'Mac15,7':'MacBook Pro 16" (M3 Pro, 2023)','Mac15,9':'MacBook Pro 16" (M3 Max, 2023)','Mac15,11':'MacBook Pro 16" (M3 Max, 2023)',
-  'Mac16,1':'MacBook Pro 14" (M4, 2024)',
-  'Mac16,6':'MacBook Pro 14" (M4 Pro, 2024)','Mac16,8':'MacBook Pro 14" (M4 Max, 2024)',
-  'Mac16,5':'MacBook Pro 16" (M4 Pro, 2024)','Mac16,7':'MacBook Pro 16" (M4 Max, 2024)',
-  'Macmini9,1':'Mac mini (M1, 2020)',
-  'Mac14,3':'Mac mini (M2, 2023)', 'Mac14,12':'Mac mini (M2 Pro, 2023)',
-  'Mac16,10':'Mac mini (M4, 2024)', 'Mac16,11':'Mac mini (M4 Pro, 2024)',
-  'Mac13,1':'Mac Studio (M1 Max, 2022)','Mac13,2':'Mac Studio (M1 Ultra, 2022)',
-  'Mac14,13':'Mac Studio (M2 Max, 2023)','Mac14,14':'Mac Studio (M2 Ultra, 2023)',
-  'Mac14,8':'Mac Pro (M2 Ultra, 2023)',
-  'iMac21,1':'iMac 24" (M1, 2021)','iMac21,2':'iMac 24" (M1, 2021)',
-  'Mac15,4':'iMac 24" (M3, 2023)','Mac15,5':'iMac 24" (M3, 2023)',
-  'Mac16,2':'iMac 24" (M4, 2024)','Mac16,3':'iMac 24" (M4, 2024)',
-  'iPhone10,1':'iPhone 8','iPhone10,4':'iPhone 8','iPhone10,2':'iPhone 8 Plus','iPhone10,5':'iPhone 8 Plus',
-  'iPhone10,3':'iPhone X','iPhone10,6':'iPhone X',
-  'iPhone11,2':'iPhone XS','iPhone11,4':'iPhone XS Max','iPhone11,6':'iPhone XS Max','iPhone11,8':'iPhone XR',
-  'iPhone12,1':'iPhone 11','iPhone12,3':'iPhone 11 Pro','iPhone12,5':'iPhone 11 Pro Max','iPhone12,8':'iPhone SE (2nd gen)',
-  'iPhone13,1':'iPhone 12 mini','iPhone13,2':'iPhone 12','iPhone13,3':'iPhone 12 Pro','iPhone13,4':'iPhone 12 Pro Max',
-  'iPhone14,4':'iPhone 13 mini','iPhone14,5':'iPhone 13','iPhone14,2':'iPhone 13 Pro','iPhone14,3':'iPhone 13 Pro Max',
-  'iPhone14,6':'iPhone SE (3rd gen)','iPhone14,7':'iPhone 14','iPhone14,8':'iPhone 14 Plus',
-  'iPhone15,2':'iPhone 14 Pro','iPhone15,3':'iPhone 14 Pro Max','iPhone15,4':'iPhone 15','iPhone15,5':'iPhone 15 Plus',
-  'iPhone16,1':'iPhone 15 Pro','iPhone16,2':'iPhone 15 Pro Max',
-  'iPhone17,3':'iPhone 16','iPhone17,4':'iPhone 16 Plus','iPhone17,1':'iPhone 16 Pro','iPhone17,2':'iPhone 16 Pro Max','iPhone17,5':'iPhone 16e',
-  'iPad8,1':'iPad Pro 11" (1st gen)','iPad11,1':'iPad mini (5th gen)','iPad11,3':'iPad Air (3rd gen)',
-  'iPad11,6':'iPad (8th gen)','iPad12,1':'iPad (9th gen)','iPad13,1':'iPad Air (4th gen)',
-  'iPad13,4':'iPad Pro 11" (3rd gen)','iPad13,8':'iPad Pro 12.9" (5th gen)',
-  'iPad13,16':'iPad Air (5th gen)','iPad13,18':'iPad (10th gen)',
-  'iPad14,1':'iPad mini (6th gen)','iPad14,3':'iPad Pro 11" (4th gen)','iPad14,5':'iPad Pro 12.9" (6th gen)',
-  'iPad14,8':'iPad Air 11" (M2, 2024)','iPad14,10':'iPad Air 13" (M2, 2024)',
-  'iPad15,3':'iPad Air 11" (M3, 2025)','iPad15,5':'iPad Air 13" (M3, 2025)',
-  'iPad16,1':'iPad mini (7th gen)','iPad16,3':'iPad Pro 11" (M4, 2024)','iPad16,5':'iPad Pro 13" (M4, 2024)',
-  'Watch4,1':'Apple Watch Series 4','Watch5,1':'Apple Watch Series 5','Watch6,1':'Apple Watch SE',
-  'Watch6,3':'Apple Watch Series 6','Watch6,12':'Apple Watch Series 7','Watch6,14':'Apple Watch Series 8',
-  'Watch7,1':'Apple Watch SE (2nd gen)','Watch7,3':'Apple Watch Series 9','Watch7,5':'Apple Watch Ultra 2',
-  'AppleTV5,3':'Apple TV HD','AppleTV6,2':'Apple TV 4K',
-  'AppleTV11,1':'Apple TV 4K (2nd gen)','AppleTV14,1':'Apple TV 4K (3rd gen)',
-  'AudioAccessory1,1':'HomePod','AudioAccessory5,1':'HomePod mini','AudioAccessory6,1':'HomePod (2nd gen)',
-};
+// ─── Data files (separated for easy maintenance) ─────────────────────────────
+const APPLE_MODELS = require('./data/apple-models.json');
 
 function lookupAppleModel(id) {
   if (!id) return null;
   return APPLE_MODELS[id] || null;
 }
 
-// ─── Vendor category inference ────────────────────────────────────────────
+// ─── Vendor category inference (data-driven) ─────────────────────────────
+const VENDOR_CATEGORIES = require('./data/vendor-categories.json');
+
 function inferVendorCategory(vendor) {
   if (!vendor) return null;
   const v = vendor.toLowerCase();
-  if (v.includes('apple')) return { brand: 'Apple', category: 'Apple機器' };
-  if (v.includes('amazon')) return { brand: 'Amazon', category: 'Amazon機器 (Echo/Fire TV/Kindle等)' };
-  if (v.includes('google')) return { brand: 'Google', category: 'Google機器 (Nest/Chromecast/Pixel等)' };
-  if (v.includes('sonos')) return { brand: 'Sonos', category: 'Sonos スピーカー' };
-  if (v.includes('roku')) return { brand: 'Roku', category: 'Roku ストリーミング' };
-  if (v.includes('nintendo')) return { brand: 'Nintendo', category: 'Nintendo ゲーム機' };
-  if (v.includes('sony')) return { brand: 'Sony', category: 'Sony 機器 (PlayStation/TV等)' };
-  if (v.includes('microsoft')) return { brand: 'Microsoft', category: 'Microsoft 機器 (Xbox/Surface等)' };
-  if (v.includes('philips')) return { brand: 'Philips', category: 'Philips 機器 (Hue等)' };
-  if (v.includes('raspberry pi')) return { brand: 'RasPi', category: 'Raspberry Pi' };
-  if (v.includes('espressif')) return { brand: 'Espressif', category: 'ESP32/ESP8266 IoT機器' };
-  if (v.includes('shenzhen tp-link')) return { brand: 'TP-Link', category: 'TP-Link 機器' };
-  if (v.includes('asustek')) return { brand: 'ASUS', category: 'ASUS 機器' };
-  if (v.includes('yamaha')) return { brand: 'Yamaha', category: 'Yamaha 機器' };
-  if (v.includes('switchbot')) return { brand: 'SwitchBot', category: 'SwitchBot IoT' };
-  if (v.includes('netatmo')) return { brand: 'Netatmo', category: 'Netatmo IoT' };
-  if (v.includes('canon')) return { brand: 'Canon', category: 'Canon (プリンタ/カメラ)' };
-  if (v.includes('seiko epson')) return { brand: 'Epson', category: 'Epson プリンタ/スキャナ' };
-  if (v.includes('hewlett packard') || v.includes('hp ')) return { brand: 'HP', category: 'HP 機器' };
-  if (v.includes('lg electronics')) return { brand: 'LG', category: 'LG 機器 (TV/家電)' };
-  if (v.includes('samsung')) return { brand: 'Samsung', category: 'Samsung 機器' };
-  if (v.includes('panasonic')) return { brand: 'Panasonic', category: 'Panasonic 機器' };
-  if (v.includes('intel ')) return { brand: 'Intel', category: 'Intel チップ搭載機 (PC/IoT)' };
-  if (v.includes('lite-on') || v.includes('liteon')) return { brand: 'LiteOn', category: 'LiteOn製造 (Amazon Echoの可能性大)' };
-  if (v.includes('foxconn') || v.includes('hon hai')) return { brand: 'Foxconn', category: 'Foxconn製造 (受託製造業者)' };
+  for (const entry of VENDOR_CATEGORIES) {
+    if (v.includes(entry.match)) return { brand: entry.brand, category: entry.category };
+  }
   return null;
 }
 
@@ -292,26 +221,8 @@ function probeMdns(ip, timeoutMs = 1500) {
   });
 }
 
-// ─── Bonjour ──────────────────────────────────────────────────────────────────
-const BONJOUR_TYPES = [
-  'airplay', 'airdrop', 'companion-link', 'device-info', 'homekit', 'raop', 'hap',
-  'apple-mobdev2', 'apple-pairable', 'sleep-proxy', 'touch-able',
-  'amzn-alexa', 'amzn-wplay', 'amzn-tap', 'amzn-zigbee', 'amzn-rok', 'amzn-music',
-  'lg-mrcp', 'lg-mc', 'lgsmart', 'lg2nd-screen',
-  'samsungmsf', 'sectv', 'samsung-ssd-c2',
-  'psnpipe', 'acn-link', 'aquos',
-  'rsp',
-  'dial',
-  'plexmediasvr', 'synology-photo', 'syncthing',
-  'sonos', 'soundtouch', 'heos-audio', 'yxc', 'musiccast',
-  'shield', 'gamestream',
-  'wemo', 'tasmota', 'esphome', 'home-assistant', 'shelly',
-  'http', 'https', 'http-alt', 'ssh', 'sftp-ssh', 'workstation',
-  'smb', 'afpovertcp', 'nfs', 'webdav',
-  'ipps', 'ipp', 'printer', 'pdl-datastream', 'uscan', 'uscans',
-  'googlecast', 'spotify-connect', 'hue', 'matter', 'esphomelib',
-  'nvstream', 'rfb', 'vnc',
-];
+// ─── Bonjour (data-driven) ─────────────────────────────────────────────────
+const BONJOUR_TYPES = require('./data/bonjour-types.json');
 
 let bonjourInstance = null;
 function getBonjour() {

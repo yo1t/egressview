@@ -1,0 +1,19 @@
+[
+  "airplay", "airdrop", "companion-link", "device-info", "homekit", "raop", "hap",
+  "apple-mobdev2", "apple-pairable", "sleep-proxy", "touch-able",
+  "amzn-alexa", "amzn-wplay", "amzn-tap", "amzn-zigbee", "amzn-rok", "amzn-music",
+  "lg-mrcp", "lg-mc", "lgsmart", "lg2nd-screen",
+  "samsungmsf", "sectv", "samsung-ssd-c2",
+  "psnpipe", "acn-link", "aquos",
+  "rsp",
+  "dial",
+  "plexmediasvr", "synology-photo", "syncthing",
+  "sonos", "soundtouch", "heos-audio", "yxc", "musiccast",
+  "shield", "gamestream",
+  "wemo", "tasmota", "esphome", "home-assistant", "shelly",
+  "http", "https", "http-alt", "ssh", "sftp-ssh", "workstation",
+  "smb", "afpovertcp", "nfs", "webdav",
+  "ipps", "ipp", "printer", "pdl-datastream", "uscan", "uscans",
+  "googlecast", "spotify-connect", "hue", "matter", "esphomelib",
+  "nvstream", "rfb", "vnc"
+]
