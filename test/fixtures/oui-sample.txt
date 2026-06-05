@@ -1,0 +1,7 @@
+# Wireshark OUI manuf sample
+# Format: prefix\tshortname\tfullname
+CC:28:AA	ASUSTeK	ASUSTeK COMPUTER INC.
+A4:83:E7	Apple	Apple, Inc.
+DC:A6:32	Raspberr	Raspberry Pi Trading Ltd
+30:B5:C2	TP-LINK	TP-LINK TECHNOLOGIES CO.,LTD.
+00:1A:2B	AyecomTe	Ayecom Technology Co., Ltd.

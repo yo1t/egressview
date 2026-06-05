@@ -5,7 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node --test test/unit/parsers.test.js test/integration/yamaha.test.js test/integration/asus.test.js",
+    "test:unit": "node --test test/unit/parsers.test.js",
+    "test:integration": "node --test test/integration/yamaha.test.js test/integration/asus.test.js"
   },
   "dependencies": {
     "axios": "^1.7.0",
