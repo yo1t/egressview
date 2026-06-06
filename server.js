@@ -605,7 +605,18 @@ server.listen(PORT, () => {
   setInterval(() => history.snapshotHistory(), 10 * 60 * 1000);
   setInterval(() => history.compactHistoryLog(), 30 * 60 * 1000);
   // Threat intel: fetch on startup and every hour
-  threatIntel.fetchThreatIntel();
+  threatIntel.fetchThreatIntel().then(() => {
+    // Re-match all existing connections against freshly loaded threat feeds
+    const connectionHistory = history.getConnectionHistory();
+    let matched = 0;
+    for (const [key, entry] of connectionHistory) {
+      const host = entry.dstHost || entry.dst;
+      const threat = threatIntel.matchThreatIntel(entry.dst, host);
+      if (threat) { entry.threat = threat; matched++; }
+      else { entry.threat = null; }
+    }
+    if (matched) console.log(`[threat-intel] Re-matched ${matched} existing connections`);
+  });
   setInterval(() => threatIntel.fetchThreatIntel(), 60 * 60 * 1000);
 });
 
