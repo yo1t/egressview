@@ -42,6 +42,7 @@ let homeCountry  = 'JP';
 let uiLanguage   = 'ja';
 let autoInvestigate = false;
 let adminToken   = '';
+let retentionDays = 730; // 2 years default
 let latestConnections = [];
 
 // ─── Config file ──────────────────────────────────────────────────────────────
@@ -69,6 +70,7 @@ function loadConfig() {
     if (data.general?.homeCountry) homeCountry = data.general.homeCountry;
     if (data.general?.language && ['ja','en'].includes(data.general.language)) uiLanguage = data.general.language;
     if (typeof data.general?.autoInvestigate === 'boolean') autoInvestigate = data.general.autoInvestigate;
+    if (data.general?.retentionDays) retentionDays = data.general.retentionDays;
     if (data.adminToken) adminToken = data.adminToken;
     console.log('[config] Loaded:', CONFIG_FILE);
     return data;
@@ -82,7 +84,7 @@ function saveConfig() {
   const data = {
     yamaha: { ip: yamaha.getIp(), user: yamaha.getUser(), pass: process.env.YAMAHA_PASS || '', enabled: yamaha.isEnabled(), hostFp: yamaha.getHostFp() },
     asus: { ip: asus.getRouterIp(), user: asus.getUser(), pass: '' },
-    general: { homeCountry, language: uiLanguage, autoInvestigate },
+    general: { homeCountry, language: uiLanguage, autoInvestigate, retentionDays },
     adminToken,
   };
   // Re-read to preserve passwords (they are not stored in module state getters)
@@ -435,7 +437,7 @@ const ALLOWED_COUNTRIES = new Set([
   'AU','NZ','CN','KR','TW','HK','SG','IN','BR','RU',
 ]);
 app.post('/api/config/general', requireAdmin, (req, res) => {
-  const { homeCountry: hc, language: lang, autoInvestigate: ai } = req.body;
+  const { homeCountry: hc, language: lang, autoInvestigate: ai, retentionDays: rd } = req.body;
   if (hc) {
     if (!ALLOWED_COUNTRIES.has(hc)) return res.status(400).json({ error: '無効な国コードです' });
     homeCountry = hc;
@@ -449,8 +451,13 @@ app.post('/api/config/general', requireAdmin, (req, res) => {
     if (ai) console.log('[auto-investigate] enabled');
     else    console.log('[auto-investigate] disabled');
   }
+  if (rd && [7, 30, 90, 180, 365, 730].includes(Number(rd))) {
+    retentionDays = Number(rd);
+    history.setRetentionDays(retentionDays);
+    console.log(`[config] Retention set to ${retentionDays} days`);
+  }
   saveConfig();
-  res.json({ success: true, homeCountry, language: uiLanguage, autoInvestigate });
+  res.json({ success: true, homeCountry, language: uiLanguage, autoInvestigate, retentionDays });
 });
 
 app.get('/api/status', requireAdmin, (req, res) => {
@@ -542,6 +549,7 @@ io.on('connection', socket => {
     homeCountry,
     language: uiLanguage,
     autoInvestigate,
+    retentionDays,
     notes,
   });
   if (asus.isEnabled() && !asus.isAuthenticated()) {
@@ -594,6 +602,7 @@ server.listen(PORT, () => {
   loadConfig();
   ensureAdminToken();
   loadNotes();
+  history.setRetentionDays(retentionDays);
   history.loadConnectionHistory();
   console.log(`Router IP: ${asus.getRouterIp()}`);
   deviceId.loadOuiDb();

@@ -7,7 +7,8 @@ const path = require('path');
 
 const DB_PATH = path.join(__dirname, '..', '.widemap.db');
 const JSONL_PATH = path.join(__dirname, '..', '.widemap.connections.jsonl');
-const HISTORY_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const HISTORY_TTL_MS = 2 * 365 * 24 * 60 * 60 * 1000; // 2 years (default)
+let historyTtlMs = HISTORY_TTL_MS;
 
 let db = null;
 let stmtUpsert = null;
@@ -126,7 +127,7 @@ function migrateFromJsonl() {
 
   console.log('[history] Migrating JSONL to SQLite...');
   const data = fs.readFileSync(sourcePath, 'utf8');
-  const cutoff = Date.now() - HISTORY_TTL_MS;
+  const cutoff = Date.now() - historyTtlMs;
   let imported = 0, skipped = 0;
 
   const insertMany = db.transaction((lines) => {
@@ -152,7 +153,7 @@ function migrateFromJsonl() {
 
 // Load all active entries into memory cache
 function loadIntoMemory() {
-  const cutoff = Date.now() - HISTORY_TTL_MS;
+  const cutoff = Date.now() - historyTtlMs;
   const rows = stmtSelectAll.all(cutoff);
   connectionHistory.clear();
   for (const row of rows) {
@@ -193,7 +194,7 @@ function snapshotHistory() {
 // Delete old entries from SQLite
 function compactHistoryLog() {
   if (!db) return;
-  const cutoff = Date.now() - HISTORY_TTL_MS;
+  const cutoff = Date.now() - historyTtlMs;
   const info = stmtDeleteOld.run(cutoff);
   if (info.changes > 0) {
     console.log(`[history] Pruned ${info.changes} old entries from SQLite`);
@@ -202,13 +203,18 @@ function compactHistoryLog() {
 
 // Prune memory cache
 function pruneHistory() {
-  const cutoff = Date.now() - HISTORY_TTL_MS;
+  const cutoff = Date.now() - historyTtlMs;
   for (const [k, v] of connectionHistory) {
     if (v.lastSeen < cutoff) connectionHistory.delete(k);
   }
 }
 
 function getConnectionHistory() { return connectionHistory; }
+
+function setRetentionDays(days) {
+  historyTtlMs = days * 24 * 60 * 60 * 1000;
+  console.log(`[history] Retention set to ${days} days (${historyTtlMs}ms)`);
+}
 
 function closeDb() {
   if (db) {
@@ -224,6 +230,7 @@ module.exports = {
   compactHistoryLog,
   pruneHistory,
   getConnectionHistory,
+  setRetentionDays,
   closeDb,
   HISTORY_TTL_MS,
 };

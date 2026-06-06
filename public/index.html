@@ -675,6 +675,17 @@
               メモが未記入のノードに対してバックグラウンドで ARP / mDNS / ポート調査を行い、メモを自動生成します（既存メモは上書きしません）。
             </p>
           </div>
+          <div class="form-group" style="margin-top:18px">
+            <label class="form-label" data-i18n="settings.general.retention">ログ保存期間</label>
+            <select id="s-retention" class="form-input">
+              <option value="7">7日</option>
+              <option value="30">30日</option>
+              <option value="90">90日</option>
+              <option value="180">6ヶ月</option>
+              <option value="365">1年</option>
+              <option value="730" selected>2年</option>
+            </select>
+          </div>
           <button class="connect-btn" id="general-save-btn" style="margin-top:16px" data-i18n="settings.btn.save">保存</button>
           <div class="settings-status" id="general-status"></div>
         </div>
@@ -990,6 +1001,7 @@ const I18N = {
     'settings.general.lang':'言語 (Language)',
     'settings.general.auto':'不明ノードを自動調査',
     'settings.general.auto.note':'メモが未記入のノードに対してバックグラウンドで ARP / mDNS / ポート調査を行い、メモを自動生成します（既存メモは上書きしません / 24時間以内に調査済みの IP は再調査しません）。',
+    'settings.general.retention':'ログ保存期間',
     // Conn badge
     'badge.unused':'未使用', 'badge.ready':'接続中', 'badge.timeout':'セッション切れ',
     'badge.error':'失敗', 'badge.waiting':'接続中…',
@@ -1086,6 +1098,7 @@ const I18N = {
     'settings.general.lang':'Language (言語)',
     'settings.general.auto':'Auto-investigate unknown nodes',
     'settings.general.auto.note':'For nodes without a saved note, run ARP / mDNS / port scan in the background and auto-generate notes (existing notes are not overwritten / each IP is re-scanned at most once per 24h).',
+    'settings.general.retention':'Log retention period',
     'badge.unused':'Unused', 'badge.ready':'Connected', 'badge.timeout':'Session expired',
     'badge.error':'Failed', 'badge.waiting':'Connecting…',
     'stats.title.timeline':'Sessions per destination (over time)',
@@ -2267,6 +2280,9 @@ socket.on('config', cfg => {
   if (typeof cfg.autoInvestigate === 'boolean') {
     document.getElementById('s-auto-investigate').checked = cfg.autoInvestigate;
   }
+  if (cfg.retentionDays) {
+    document.getElementById('s-retention').value = String(cfg.retentionDays);
+  }
   if (cfg.language && cfg.language !== currentLang) {
     currentLang = cfg.language;
     document.getElementById('s-language').value = currentLang;
@@ -2288,11 +2304,12 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
   const newCountry = document.getElementById('s-home-country').value;
   const newLang    = document.getElementById('s-language').value;
   const newAuto    = document.getElementById('s-auto-investigate').checked;
+  const newRetention = parseInt(document.getElementById('s-retention').value);
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + t('settings.btn.saving');
   try {
     const res = await apiFetch('__BASE__/api/config/general', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ homeCountry: newCountry, language: newLang, autoInvestigate: newAuto }),
+      body: JSON.stringify({ homeCountry: newCountry, language: newLang, autoInvestigate: newAuto, retentionDays: newRetention }),
     });
     if (res.ok) {
       homeCountry = newCountry;
