@@ -2497,7 +2497,8 @@ async function backupRestore(name) {
   }
 }
 
-document.getElementById('backup-upload-input').addEventListener('change', async (e) => {
+const backupUploadInput = document.getElementById('backup-upload-input');
+if (backupUploadInput) backupUploadInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const msg = currentLang === 'ja'
@@ -2694,12 +2695,12 @@ function stopGraph() {
 }
 
 // ─── World Map ────────────────────────────────────────────────────────────────
-let worldGeo = null;
-let mapSvg = null, mapG = null, mapProjection = null, mapPath = null;
-let mapMode = false;
-let currentMapK = 1;
-let mapParticles = [];
-let mapAnimId = null;
+var worldGeo = null;
+var mapSvg = null, mapG = null, mapProjection = null, mapPath = null;
+var mapMode = false;
+var currentMapK = 1;
+var mapParticles = [];
+var mapAnimId = null;
 var homeCountry = 'JP'; // configurable
 
 // Per-country: capital / centre coordinates
@@ -3270,9 +3271,9 @@ function toLocalDatetimeStr(d) {
 });
 
 // ─── View tabs ────────────────────────────────────────────────────────────────
-let currentView = 'graph';
-let statsMode = false;
-let logMode = false;
+var currentView = 'graph';
+var statsMode = false;
+var logMode = false;
 function switchView(view) {
   currentView = view;
   mapMode   = (view === 'map');
