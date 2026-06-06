@@ -3004,7 +3004,11 @@ let logThreatFilter = null; // null | 'safe' | 'danger'
 function getLogCellValue(c, col) {
   switch (col) {
     case 'threatTag': return c.threat ? c.threat.tag : '';
-    case 'src': return c.srcDnsName || c.srcMdnsName || c.src;
+    case 'src': {
+      const dns = c.srcDnsName ? c.srcDnsName.split('.')[0] : null;
+      const mdns = c.srcMdnsName ? c.srcMdnsName.replace(/\.local$/, '') : null;
+      return mdns || dns || c.src;
+    }
     case 'dst': return c.dstHost && c.dstHost !== c.dst ? c.dstHost : c.dst;
     case 'dport': return String(c.dport);
     case 'proto': return c.proto;
@@ -3103,7 +3107,9 @@ function updateLogView() {
     const threatTagCell = isThreat
       ? `<td><span class="log-badge-danger">${esc(t('log.badge.danger'))}</span> <span class="log-threat-tag" title="${esc(c.threat.tag + ' [' + c.threat.matchType + ': ' + c.threat.matchValue + ']')}">${esc(c.threat.tag)}</span></td>`
       : `<td><span class="log-badge-safe">${esc(t('log.badge.safe'))}</span></td>`;
-    const srcLabel = c.srcDnsName || c.srcMdnsName || c.src;
+    const srcShortDns = c.srcDnsName ? c.srcDnsName.split('.')[0] : null;
+    const srcShortMdns = c.srcMdnsName ? c.srcMdnsName.replace(/\.local$/, '') : null;
+    const srcLabel = srcShortMdns || srcShortDns || c.src;
     const dstLabel = c.dstHost && c.dstHost !== c.dst ? c.dstHost : c.dst;
     const flag = (c.country && c.country.length === 2)
       ? String.fromCodePoint(0x1F1E0 + c.country.charCodeAt(0) - 65, 0x1F1E0 + c.country.charCodeAt(1) - 65)
