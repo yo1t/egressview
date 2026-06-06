@@ -307,18 +307,61 @@
   <section id="quickstart">
     <h2><span class="icon">▶</span> クイックスタート</h2>
     <div class="quick-start">
-      <p style="font-size:0.9rem; color:var(--muted); margin-bottom:4px;">クローン、インストール、起動：</p>
-      <pre><code><span class="comment"># リポジトリをクローン</span>
-git clone https://github.com/yo1t/widemap.git
+
+      <p style="font-size:0.95rem; font-weight:600; margin-bottom:12px;">Step 1 — 事前準備</p>
+      <table style="width:100%; border-collapse:collapse; font-size:0.85rem; margin-bottom:20px;">
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:8px 6px; width:28px;">✅</td>
+          <td style="padding:8px 6px;">Mac / PC / Raspberry Pi に Node.js 18以上をインストール</td>
+          <td style="padding:8px 6px; text-align:right;"><a href="https://nodejs.org" target="_blank">nodejs.org →</a></td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:8px 6px;">✅</td>
+          <td style="padding:8px 6px;">Yamaha RTX ルーターの SSH を有効化</td>
+          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-yamaha.ja.md">設定ガイド →</a></td>
+        </tr>
+        <tr>
+          <td style="padding:8px 6px; color:var(--muted);">☐</td>
+          <td style="padding:8px 6px; color:var(--muted);">（任意）ASUS WiFi AP の Web 管理画面を有効化</td>
+          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-asus.ja.md">設定ガイド →</a></td>
+        </tr>
+      </table>
+
+      <p style="font-size:0.95rem; font-weight:600; margin-bottom:4px;">Step 2 — インストールと起動</p>
+      <pre><code>git clone https://github.com/yo1t/widemap.git
 cd widemap
 npm install
+npm start</code></pre>
 
-<span class="comment"># サーバーを起動</span>
-npm start
+      <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:4px;">Step 3 — ブラウザを開いて管理トークンを入力</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:4px;">初回起動時にコンソールにトークンが表示されます：</p>
+      <pre><code><span class="comment">══════════════════════════════════════
+  Widemap admin token (initial):
+  a1b2c3d4e5f6...
+  → ブラウザ初回アクセス時に入力
+══════════════════════════════════════</span></code></pre>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;"><code>http://localhost:3000</code> を開いてトークンを入力してください。</p>
 
-<span class="comment"># ブラウザで開く</span>
-open http://localhost:3000</code></pre>
-      <p style="font-size:0.85rem; color:var(--muted); margin-top:16px;">初回起動時に管理トークンがコンソールに表示されます。ブラウザで入力して認証後、設定パネルからルーター接続を設定してください。</p>
+      <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:8px;">Step 4 — 設定パネル（⚙）でルーター情報を入力</p>
+      <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:6px 8px; color:var(--muted);">Yamaha RTX の IP</td>
+          <td style="padding:6px 8px;">ルーターの LAN 側 IP（例: <code>192.168.1.1</code>）</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:6px 8px; color:var(--muted);">SSH ユーザー名 / パスワード</td>
+          <td style="padding:6px 8px;"><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-yamaha.ja.md">Yamaha 設定ガイド</a>で設定したもの</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:6px 8px; color:var(--muted);">NAT ディスクリプタ番号</td>
+          <td style="padding:6px 8px;">ルーターで <code>show nat descriptor</code> を実行 — 通常は <code>100</code></td>
+        </tr>
+        <tr>
+          <td style="padding:6px 8px; color:var(--muted);">ASUS AP の IP / パスワード</td>
+          <td style="padding:6px 8px;">AP の LAN 側 IP と管理者パスワード（<a href="https://github.com/yo1t/widemap/blob/main/docs/setup-asus.ja.md">ASUS 設定ガイド</a>）</td>
+        </tr>
+      </table>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;">数秒後にデバイスと接続先が地図に表示されはじめます。</p>
     </div>
   </section>
 
@@ -372,6 +415,14 @@ open http://localhost:3000</code></pre>
       <div class="card">
         <h3><a href="https://github.com/yo1t/widemap/blob/main/README.md">README (English)</a></h3>
         <p>Full documentation: setup, configuration, features, and security.</p>
+      </div>
+      <div class="card">
+        <h3><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-yamaha.ja.md">Yamaha RTX 設定ガイド</a></h3>
+        <p>Yamaha RTX ルーターの SSH を有効化するステップバイステップ手順。</p>
+      </div>
+      <div class="card">
+        <h3><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-asus.ja.md">ASUS AP 設定ガイド</a></h3>
+        <p>ASUS アクセスポイントを Widemap 用に設定する手順。</p>
       </div>
       <div class="card">
         <h3><a href="https://github.com/yo1t/widemap/blob/main/LICENSE">ライセンス (AGPL-3.0)</a></h3>

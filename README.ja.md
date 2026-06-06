@@ -70,12 +70,24 @@ https://github.com/user-attachments/assets/9360b145-60cb-46b1-8489-898d7ea62b60
 
 ## クイックスタート
 
+### Step 1 — 事前準備チェックリスト
+
+| | 必要なもの | 設定ガイド |
+|--|-----------|-----------|
+| ✅ | Mac/PC/Raspberry Pi に Node.js 18以上をインストール | [nodejs.org](https://nodejs.org) |
+| ✅ | Yamaha RTX ルーターの SSH を有効化 | [設定ガイド →](docs/setup-yamaha.ja.md) |
+| ☐ | （任意）ASUS WiFi AP の Web 管理画面を有効化 | [設定ガイド →](docs/setup-asus.ja.md) |
+
+### Step 2 — インストールと起動
+
 ```bash
 git clone https://github.com/yo1t/widemap.git
 cd widemap
 npm install
 npm start
 ```
+
+### Step 3 — ブラウザを開いて管理トークンを入力
 
 初回起動時に**管理トークン**がコンソールに表示されます：
 
@@ -87,7 +99,20 @@ npm start
 ══════════════════════════════════════════════════════════════
 ```
 
-`http://localhost:3000` を開いてトークンを入力し、設定パネル（⚙）からルーター接続を設定してください。
+`http://localhost:3000` を開いてトークンを入力してください。
+
+### Step 4 — ルーターの接続情報を設定
+
+設定パネル（⚙）を開いてルーター情報を入力します：
+
+| 項目 | 確認場所 |
+|------|---------|
+| Yamaha RTX の IP アドレス | ルーターの LAN 側 IP（例: `192.168.1.1`） |
+| SSH ユーザー名 / パスワード | [Yamaha 設定ガイド](docs/setup-yamaha.ja.md) で設定したもの |
+| NAT ディスクリプタ番号 | ルーターで `show nat descriptor` を実行 — 通常は `100` |
+| ASUS AP の IP / パスワード | AP の LAN 側 IP と管理者パスワード（[ASUS 設定ガイド](docs/setup-asus.ja.md)） |
+
+数秒後にデバイスと接続先が地図に表示されはじめます。
 
 > **注意:** 管理トークンは初回起動時に1度だけ生成され、`.widemap.json` に保存されます。紛失した場合は `.widemap.json` を削除して再起動すれば新しいトークンが生成されます。
 

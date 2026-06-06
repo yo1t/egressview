@@ -70,12 +70,24 @@ The sidebar lists every device on your LAN, enriched with hostnames, vendor name
 
 ## Quick Start
 
+### Step 1 — Prerequisites checklist
+
+| | Requirement | Setup guide |
+|--|-------------|-------------|
+| ✅ | Node.js 18+ installed on your Mac/PC/Raspberry Pi | [nodejs.org](https://nodejs.org) |
+| ✅ | Yamaha RTX router with SSH enabled | [Setup guide →](docs/setup-yamaha.md) |
+| ☐ | (Optional) ASUS WiFi AP with web admin enabled | [Setup guide →](docs/setup-asus.md) |
+
+### Step 2 — Install and launch
+
 ```bash
 git clone https://github.com/yo1t/widemap.git
 cd widemap
 npm install
 npm start
 ```
+
+### Step 3 — Open the browser and enter the admin token
 
 On first startup, an **admin token** is printed to the console:
 
@@ -87,7 +99,20 @@ On first startup, an **admin token** is printed to the console:
 ══════════════════════════════════════════════════════════════
 ```
 
-Open `http://localhost:3000` and enter the token. Then configure your router connections via the Settings panel (⚙).
+Open `http://localhost:3000` and enter the token.
+
+### Step 4 — Configure your router
+
+Open the Settings panel (⚙) and enter your router details:
+
+| Field | Where to find it |
+|-------|-----------------|
+| Yamaha RTX IP | Your router's LAN IP (e.g. `192.168.1.1`) |
+| SSH username / password | The login you set up in [Yamaha setup guide](docs/setup-yamaha.md) |
+| NAT descriptor number | Run `show nat descriptor` on the router — typically `100` |
+| ASUS AP IP / password | The AP's LAN IP and admin password ([ASUS setup guide](docs/setup-asus.md)) |
+
+Within a few seconds, devices and connections will start appearing on the map.
 
 > **Note:** The admin token is generated once on first startup and saved in `.widemap.json`. If you lose it, delete `.widemap.json` and restart — a new token will be generated.
 
