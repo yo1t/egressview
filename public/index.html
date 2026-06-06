@@ -238,6 +238,17 @@
   .log-badge-clickable { cursor: pointer; transition: box-shadow 0.15s, transform 0.1s; }
   .log-badge-clickable:hover { box-shadow: 0 0 0 2px rgba(255,255,255,0.15); transform: scale(1.05); }
   .log-filter-active { box-shadow: 0 0 0 2px var(--accent); transform: scale(1.08); }
+  .threat-clickable { cursor: pointer; }
+  .threat-detail-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 2000; display: flex; align-items: center; justify-content: center; }
+  .threat-detail-overlay.hidden { display: none; }
+  .threat-detail-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; width: 520px; max-width: calc(100vw - 20px); max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+  .threat-detail-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 13px; color: #ef4444; }
+  .threat-detail-body { padding: 16px 18px; }
+  .threat-detail-body table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .threat-detail-body th { text-align: left; padding: 5px 8px; color: var(--muted); font-weight: 600; white-space: nowrap; width: 30%; vertical-align: top; }
+  .threat-detail-body td { padding: 5px 8px; word-break: break-all; }
+  .threat-detail-body tr { border-bottom: 1px solid var(--border); }
+  .threat-detail-body .section-title { font-size: 11px; font-weight: 700; color: var(--accent); margin: 12px 0 6px; padding-top: 8px; border-top: 1px solid var(--border); }
   .log-sort-icon { cursor: pointer; opacity: 0.4; font-size: 10px; margin-left: 2px; }
   .log-sort-icon:hover { opacity: 1; }
   .log-sort-icon.asc::after { content: ' ↑'; }
@@ -809,6 +820,16 @@
           <button id="log-search-clear" data-i18n="log.filter.clear">クリア</button>
           <button id="log-search-close" data-i18n="log.filter.close">閉じる</button>
         </div>
+      </div>
+    </div>
+    <!-- Threat detail popup -->
+    <div id="threat-detail-overlay" class="threat-detail-overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+      <div class="threat-detail-card">
+        <div class="threat-detail-header">
+          <span>🚨 脅威検出 詳細</span>
+          <button class="settings-close" onclick="document.getElementById('threat-detail-overlay').classList.add('hidden')">✕</button>
+        </div>
+        <div class="threat-detail-body" id="threat-detail-body"></div>
       </div>
     </div>
   </div>
@@ -3115,7 +3136,7 @@ function updateLogView() {
       ? String.fromCodePoint(0x1F1E0 + c.country.charCodeAt(0) - 65, 0x1F1E0 + c.country.charCodeAt(1) - 65)
       : '';
     const timeStr = c.lastSeen ? new Date(c.lastSeen).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-    return `<tr class="${isThreat ? 'threat-row' : ''}">
+    return `<tr class="${isThreat ? 'threat-row threat-clickable' : ''}" ${isThreat ? `onclick="showThreatDetail(this)" data-threat='${esc(JSON.stringify({src:c.src,srcLabel,dst:c.dst,dstLabel,dport:c.dport,proto:c.proto,country:c.country||'',org:c.org||'',city:c.city||'',dstHost:c.dstHost||'',srcMac:c.srcMac||'',srcVendor:c.srcVendor||'',firstSeen:c.firstSeen||0,lastSeen:c.lastSeen||0,ttl:c.ttl||0,threat:c.threat}))}'` : ''}>
       <td title="${esc(c.src)}">${esc(srcLabel)}</td>
       <td title="${esc(c.dst)}">${esc(dstLabel)}</td>
       ${threatTagCell}
@@ -3242,6 +3263,94 @@ logSearchInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') document.getElementById('log-search-apply').click();
   if (e.key === 'Escape') logSearchPopup.classList.add('hidden');
 });
+
+// ─── Threat Detail Popup ──────────────────────────────────────────────────────
+function showThreatDetail(tr) {
+  const raw = tr.dataset.threat;
+  if (!raw) return;
+  let d;
+  try { d = JSON.parse(raw); } catch { return; }
+  const fmtTime = (ts) => ts ? new Date(ts).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' }) : '—';
+  const flag = (d.country && d.country.length === 2)
+    ? String.fromCodePoint(0x1F1E0 + d.country.charCodeAt(0) - 65, 0x1F1E0 + d.country.charCodeAt(1) - 65) + ' '
+    : '';
+  const existingNote = lookupNote(d.src, d.srcMac) || '';
+
+  const body = document.getElementById('threat-detail-body');
+  body.innerHTML = `
+    <div class="section-title">🚨 脅威情報</div>
+    <table>
+      <tr><th>フィード</th><td>${esc(d.threat.source)}</td></tr>
+      <tr><th>脅威タグ</th><td>${esc(d.threat.tag)}</td></tr>
+      <tr><th>マッチ種別</th><td>${esc(d.threat.matchType)}</td></tr>
+      <tr><th>マッチ値</th><td>${esc(d.threat.matchValue)}</td></tr>
+    </table>
+    <div class="section-title">📡 通信情報</div>
+    <table>
+      <tr><th>送信元 IP</th><td>${esc(d.src)}</td></tr>
+      <tr><th>送信元名</th><td>${esc(d.srcLabel || d.src)}</td></tr>
+      <tr><th>送信元 MAC</th><td>${esc(d.srcMac || '—')}</td></tr>
+      <tr><th>送信元ベンダー</th><td>${esc(d.srcVendor || '—')}</td></tr>
+      <tr><th>宛先 IP</th><td>${esc(d.dst)}</td></tr>
+      <tr><th>宛先ホスト</th><td>${esc(d.dstHost || d.dst)}</td></tr>
+      <tr><th>宛先ポート</th><td>${d.dport} / ${esc(d.proto)}</td></tr>
+      <tr><th>TTL</th><td>${d.ttl || '—'}</td></tr>
+    </table>
+    <div class="section-title">🌍 地理・組織情報</div>
+    <table>
+      <tr><th>国</th><td>${flag}${esc(d.country || '—')}</td></tr>
+      <tr><th>都市</th><td>${esc(d.city || '—')}</td></tr>
+      <tr><th>組織</th><td>${esc(d.org || '—')}</td></tr>
+    </table>
+    <div class="section-title">⏱ 時間</div>
+    <table>
+      <tr><th>初回検出</th><td>${fmtTime(d.firstSeen)}</td></tr>
+      <tr><th>最終通信</th><td>${fmtTime(d.lastSeen)}</td></tr>
+    </table>
+    <div class="section-title">📝 メモ・調査</div>
+    <div style="margin-bottom:8px;">
+      <textarea id="threat-detail-note" style="width:100%;min-height:60px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:11px;padding:8px;resize:vertical;" placeholder="${esc(t('note.placeholder'))}">${esc(existingNote)}</textarea>
+    </div>
+    <div style="display:flex;gap:6px;">
+      <button class="connect-btn" style="flex:1;font-size:11px;padding:5px 10px;" onclick="threatDetailInvestigate('${esc(d.src)}')">${t('note.investigate')}</button>
+      <button class="connect-btn" style="flex:1;font-size:11px;padding:5px 10px;" onclick="threatDetailSaveNote('${esc(d.src)}','${esc(d.srcMac || '')}')">${t('note.save')}</button>
+    </div>
+    <div id="threat-detail-status" style="font-size:10px;color:var(--muted);margin-top:6px;"></div>
+  `;
+  document.getElementById('threat-detail-overlay').classList.remove('hidden');
+}
+
+async function threatDetailInvestigate(ip) {
+  const statusEl = document.getElementById('threat-detail-status');
+  statusEl.textContent = t('note.investigating');
+  try {
+    const r = await apiFetch('__BASE__/api/notes/draft', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip }),
+    });
+    const data = await r.json();
+    const ta = document.getElementById('threat-detail-note');
+    const sep = ta.value ? '\n---\n' : '';
+    ta.value = ta.value + sep + (data.draft || '(no info)');
+    statusEl.textContent = '調査完了 ✓';
+  } catch (e) {
+    statusEl.textContent = t('note.investigate.fail') + ': ' + e.message;
+  }
+}
+
+async function threatDetailSaveNote(ip, mac) {
+  const ta = document.getElementById('threat-detail-note');
+  const statusEl = document.getElementById('threat-detail-status');
+  try {
+    await apiFetch('__BASE__/api/notes', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip, mac: mac || undefined, note: ta.value }),
+    });
+    statusEl.textContent = '保存しました ✓';
+  } catch (e) {
+    statusEl.textContent = '保存失敗: ' + e.message;
+  }
+}
 
 // Init
 resize();
