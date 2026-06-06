@@ -870,7 +870,7 @@
     <div id="threat-detail-overlay" class="threat-detail-overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
       <div class="threat-detail-card">
         <div class="threat-detail-header">
-          <span>🚨 脅威検出 詳細</span>
+          <span data-i18n="threat.detail.title">🚨 脅威検出 詳細</span>
           <button class="settings-close" onclick="document.getElementById('threat-detail-overlay').classList.add('hidden')">✕</button>
         </div>
         <div class="threat-detail-body" id="threat-detail-body"></div>
@@ -965,6 +965,17 @@ const I18N = {
     'settings.threat.desc':'外部の脅威インテリジェンスフィードからマルウェアC2/配布元IPリストをダウンロードし、NAT セッションと突合します。',
     'settings.threat.feeds':'取得するフィード', 'settings.threat.interval':'更新頻度',
     'threat.detail.title':'🚨 脅威検出 詳細',
+    'threat.confidence.low':'Low — 正規サービス上のマルウェア配布報告',
+    'threat.confidence.high':'High — 既知の悪意あるホスト',
+    'threat.tag.low':'URLhaus: {domain} 上でマルウェア配布が報告されています（要パス確認）',
+    'threat.section.feed':'脅威フィード情報', 'threat.section.conn':'通信情報',
+    'threat.section.geo':'地理・組織情報', 'threat.section.time':'時間', 'threat.section.note':'メモ・調査',
+    'threat.label.feed':'フィード', 'threat.label.tag':'脅威タグ', 'threat.label.confidence':'信頼度',
+    'threat.label.matchType':'マッチ種別', 'threat.label.matchValue':'マッチ値', 'threat.label.url':'元URL',
+    'threat.label.srcIp':'送信元 IP', 'threat.label.srcName':'送信元名', 'threat.label.srcMac':'送信元 MAC',
+    'threat.label.srcVendor':'送信元ベンダー', 'threat.label.dstIp':'宛先 IP', 'threat.label.dstHost':'宛先ホスト',
+    'threat.label.dstPort':'宛先ポート', 'threat.label.country':'国', 'threat.label.city':'都市',
+    'threat.label.org':'組織', 'threat.label.firstSeen':'初回検出', 'threat.label.lastSeen':'最終通信',
     'threat.guidance.high':'🚨 この宛先は脅威インテリジェンスフィードに登録された既知の悪意あるホストです。\n\n推奨アクション:\n1. この端末でアクセスした覚えのない通信であれば、マルウェア感染の可能性があります\n2. 該当端末のウイルススキャンを実施してください\n3. 必要に応じてルーターでこの IP をブロックしてください\n4. 通信が継続している場合は、端末をネットワークから隔離することを推奨します',
     'threat.guidance.low':'⚠️ この宛先ドメインは正規のサービス（GitHub, Dropbox 等）ですが、このドメイン上の特定の URL がマルウェア配布元として脅威フィードに報告されています。\n\n上記「元URL」が報告されたマルウェア配布パスです。\n\n【重要】本ツールは NAT セッション（IP/ポート）のみ記録しているため、端末が実際にこの URL にアクセスしたかは判別できません。同じドメインへの正常なアクセス（別のリポジトリ、別のファイル等）も同様に表示されます。\n\n推奨アクション:\n1. 送信元の端末でブラウザ履歴・ダウンロード履歴を確認し、上記「元URL」へのアクセス記録があるか調査してください\n2. アクセス記録がある場合 → 即座にウイルススキャンを実施してください\n3. この端末が通常このドメインにアクセスする理由がない場合は、マルウェアによる自動通信の可能性があります\n4. アクセス記録が見つからない場合でも、悪意のあるマルウェアは履歴を削除することがあるため、端末の挙動に不審な点がないか確認してください\n5. 問題なしと判断できたら、メモに「確認済み: 正常な利用」と記録してください',
     'settings.field.ip':'IP アドレス', 'settings.field.user':'ユーザー名', 'settings.field.pass':'パスワード',
@@ -1050,6 +1061,17 @@ const I18N = {
     'settings.threat.desc':'Download malware C2/distribution IP lists from external threat intelligence feeds and match against NAT sessions.',
     'settings.threat.feeds':'Feeds to fetch', 'settings.threat.interval':'Update frequency',
     'threat.detail.title':'🚨 Threat Detection Detail',
+    'threat.confidence.low':'Low — Malware reported on legitimate service',
+    'threat.confidence.high':'High — Known malicious host',
+    'threat.tag.low':'URLhaus: Malware distribution reported on {domain} (check URL path)',
+    'threat.section.feed':'Threat Feed Info', 'threat.section.conn':'Connection Info',
+    'threat.section.geo':'Geolocation / Organization', 'threat.section.time':'Timing', 'threat.section.note':'Note / Investigation',
+    'threat.label.feed':'Feed', 'threat.label.tag':'Threat Tag', 'threat.label.confidence':'Confidence',
+    'threat.label.matchType':'Match Type', 'threat.label.matchValue':'Match Value', 'threat.label.url':'Original URL',
+    'threat.label.srcIp':'Source IP', 'threat.label.srcName':'Source Name', 'threat.label.srcMac':'Source MAC',
+    'threat.label.srcVendor':'Source Vendor', 'threat.label.dstIp':'Destination IP', 'threat.label.dstHost':'Destination Host',
+    'threat.label.dstPort':'Destination Port', 'threat.label.country':'Country', 'threat.label.city':'City',
+    'threat.label.org':'Organization', 'threat.label.firstSeen':'First Seen', 'threat.label.lastSeen':'Last Seen',
     'threat.guidance.high':'🚨 This destination is a known malicious host registered in threat intelligence feeds.\n\nRecommended actions:\n1. If you do not recognise this connection, the device may be infected with malware\n2. Run a virus scan on the affected device\n3. Consider blocking this IP on your router\n4. If connections persist, isolate the device from the network',
     'threat.guidance.low':'⚠️ This destination domain is a legitimate service (GitHub, Dropbox, etc.), but a specific URL on this domain has been reported as distributing malware.\n\nThe "Original URL" above is the reported malware distribution path.\n\n[Important] This tool only records NAT sessions (IP/port), so it cannot determine whether your device actually accessed this specific URL. Normal usage of the same domain (different repositories, files, etc.) will also appear here.\n\nRecommended actions:\n1. Check the source device\'s browser/download history for access to the "Original URL"\n2. If access is found → immediately run a virus scan on the device\n3. If this device has no reason to access this domain, it may indicate automated malware activity\n4. Even if no history is found, be aware that sophisticated malware may delete access logs — check the device for any suspicious behaviour\n5. Once confirmed safe, record "Confirmed: normal usage" in the note below',
     'settings.field.ip':'IP Address', 'settings.field.user':'Username', 'settings.field.pass':'Password',
@@ -3390,38 +3412,38 @@ function showThreatDetail(tr) {
         : '<span class="log-badge-danger" style="font-size:11px;padding:3px 8px;">' + esc(t('log.badge.danger')) + '</span>'}
     </div>
     <div style="font-size:11px;line-height:1.6;color:var(--text);white-space:pre-wrap;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:12px;">${esc(d.threat.confidence === 'low' ? t('threat.guidance.low') : t('threat.guidance.high'))}</div>
-    <div class="section-title">📋 脅威フィード情報</div>
+    <div class="section-title">📋 ${t('threat.section.feed')}</div>
     <table>
-      <tr><th>フィード</th><td>${esc(d.threat.source)}</td></tr>
-      <tr><th>脅威タグ</th><td>${esc(d.threat.tag)}</td></tr>
-      <tr><th>信頼度</th><td>${d.threat.confidence === 'low' ? '⚠️ Low (正規サービス上のマルウェア)' : '🚨 High'}</td></tr>
-      <tr><th>マッチ種別</th><td>${esc(d.threat.matchType)}</td></tr>
-      <tr><th>マッチ値</th><td>${esc(d.threat.matchValue)}</td></tr>
-      ${d.threat.url ? `<tr><th>元URL</th><td style="word-break:break-all;font-size:10px;">${esc(d.threat.url)}</td></tr>` : ''}
+      <tr><th>${t('threat.label.feed')}</th><td>${esc(d.threat.source)}</td></tr>
+      <tr><th>${t('threat.label.tag')}</th><td>${esc(d.threat.confidence === 'low' ? t('threat.tag.low').replace('{domain}', d.threat.matchValue) : d.threat.tag)}</td></tr>
+      <tr><th>${t('threat.label.confidence')}</th><td>${d.threat.confidence === 'low' ? '⚠️ ' + t('threat.confidence.low') : '🚨 ' + t('threat.confidence.high')}</td></tr>
+      <tr><th>${t('threat.label.matchType')}</th><td>${esc(d.threat.matchType)}</td></tr>
+      <tr><th>${t('threat.label.matchValue')}</th><td>${esc(d.threat.matchValue)}</td></tr>
+      ${d.threat.url ? `<tr><th>${t('threat.label.url')}</th><td style="word-break:break-all;font-size:10px;">${esc(d.threat.url)}</td></tr>` : ''}
     </table>
-    <div class="section-title">📡 通信情報</div>
+    <div class="section-title">📡 ${t('threat.section.conn')}</div>
     <table>
-      <tr><th>送信元 IP</th><td>${esc(d.src)}</td></tr>
-      <tr><th>送信元名</th><td>${esc(d.srcLabel || d.src)}</td></tr>
-      <tr><th>送信元 MAC</th><td>${esc(d.srcMac || '—')}</td></tr>
-      <tr><th>送信元ベンダー</th><td>${esc(d.srcVendor || '—')}</td></tr>
-      <tr><th>宛先 IP</th><td>${esc(d.dst)}</td></tr>
-      <tr><th>宛先ホスト</th><td>${esc(d.dstHost || d.dst)}</td></tr>
-      <tr><th>宛先ポート</th><td>${d.dport} / ${esc(d.proto)}</td></tr>
+      <tr><th>${t('threat.label.srcIp')}</th><td>${esc(d.src)}</td></tr>
+      <tr><th>${t('threat.label.srcName')}</th><td>${esc(d.srcLabel || d.src)}</td></tr>
+      <tr><th>${t('threat.label.srcMac')}</th><td>${esc(d.srcMac || '—')}</td></tr>
+      <tr><th>${t('threat.label.srcVendor')}</th><td>${esc(d.srcVendor || '—')}</td></tr>
+      <tr><th>${t('threat.label.dstIp')}</th><td>${esc(d.dst)}</td></tr>
+      <tr><th>${t('threat.label.dstHost')}</th><td>${esc(d.dstHost || d.dst)}</td></tr>
+      <tr><th>${t('threat.label.dstPort')}</th><td>${d.dport} / ${esc(d.proto)}</td></tr>
       <tr><th>TTL</th><td>${d.ttl || '—'}</td></tr>
     </table>
-    <div class="section-title">🌍 地理・組織情報</div>
+    <div class="section-title">🌍 ${t('threat.section.geo')}</div>
     <table>
-      <tr><th>国</th><td>${flag}${esc(d.country || '—')}</td></tr>
-      <tr><th>都市</th><td>${esc(d.city || '—')}</td></tr>
-      <tr><th>組織</th><td>${esc(d.org || '—')}</td></tr>
+      <tr><th>${t('threat.label.country')}</th><td>${flag}${esc(d.country || '—')}</td></tr>
+      <tr><th>${t('threat.label.city')}</th><td>${esc(d.city || '—')}</td></tr>
+      <tr><th>${t('threat.label.org')}</th><td>${esc(d.org || '—')}</td></tr>
     </table>
-    <div class="section-title">⏱ 時間</div>
+    <div class="section-title">⏱ ${t('threat.section.time')}</div>
     <table>
-      <tr><th>初回検出</th><td>${fmtTime(d.firstSeen)}</td></tr>
-      <tr><th>最終通信</th><td>${fmtTime(d.lastSeen)}</td></tr>
+      <tr><th>${t('threat.label.firstSeen')}</th><td>${fmtTime(d.firstSeen)}</td></tr>
+      <tr><th>${t('threat.label.lastSeen')}</th><td>${fmtTime(d.lastSeen)}</td></tr>
     </table>
-    <div class="section-title">📝 メモ・調査</div>
+    <div class="section-title">📝 ${t('threat.section.note')}</div>
     <div style="margin-bottom:8px;">
       <textarea id="threat-detail-note" style="width:100%;min-height:60px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:11px;padding:8px;resize:vertical;" placeholder="${esc(t('note.placeholder'))}">${esc(existingNote)}</textarea>
     </div>
