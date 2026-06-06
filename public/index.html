@@ -598,6 +598,10 @@
                 <input id="s-yamaha-pass" class="form-input" type="password" autocomplete="off">
               </div>
             </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="settings.field.nat">NAT ディスクリプタ番号</label>
+              <input id="s-yamaha-nat" class="form-input" type="text" placeholder="100" value="100" autocomplete="off" style="width:80px;">
+            </div>
           </div>
           <button class="connect-btn" id="yamaha-connect-btn" data-i18n="settings.btn.connect">接続</button>
           <div class="settings-status" id="yamaha-status"></div>
@@ -1038,6 +1042,7 @@ const I18N = {
     'threat.guidance.high':'🚨 この宛先は脅威インテリジェンスフィードに登録された既知の悪意あるホストです。\n\n推奨アクション:\n1. この端末でアクセスした覚えのない通信であれば、マルウェア感染の可能性があります\n2. 該当端末のウイルススキャンを実施してください\n3. 必要に応じてルーターでこの IP をブロックしてください\n4. 通信が継続している場合は、端末をネットワークから隔離することを推奨します',
     'threat.guidance.low':'⚠️ この宛先ドメインは正規のサービス（GitHub, Dropbox 等）ですが、このドメイン上の特定の URL がマルウェア配布元として脅威フィードに報告されています。\n\n上記「元URL」が報告されたマルウェア配布パスです。\n\n【重要】本ツールは NAT セッション（IP/ポート）のみ記録しているため、端末が実際にこの URL にアクセスしたかは判別できません。同じドメインへの正常なアクセス（別のリポジトリ、別のファイル等）も同様に表示されます。\n\n推奨アクション:\n1. 送信元の端末でブラウザ履歴・ダウンロード履歴を確認し、上記「元URL」へのアクセス記録があるか調査してください\n2. アクセス記録がある場合 → 即座にウイルススキャンを実施してください\n3. この端末が通常このドメインにアクセスする理由がない場合は、マルウェアによる自動通信の可能性があります\n4. アクセス記録が見つからない場合でも、悪意のあるマルウェアは履歴を削除することがあるため、端末の挙動に不審な点がないか確認してください\n5. 問題なしと判断できたら、メモに「確認済み: 正常な利用」と記録してください',
     'settings.field.ip':'IP アドレス', 'settings.field.user':'ユーザー名', 'settings.field.pass':'パスワード',
+    'settings.field.nat':'NAT ディスクリプタ番号',
     'settings.pass.saved':'（保存済み — 変更する場合のみ入力）', 'settings.pass.empty':'パスワード',
     'settings.btn.connect':'接続', 'settings.btn.disable':'無効化を反映',
     'settings.btn.connecting':'接続中…', 'settings.btn.disabling':'反映中…',
@@ -1145,6 +1150,7 @@ const I18N = {
     'threat.guidance.high':'🚨 This destination is a known malicious host registered in threat intelligence feeds.\n\nRecommended actions:\n1. If you do not recognise this connection, the device may be infected with malware\n2. Run a virus scan on the affected device\n3. Consider blocking this IP on your router\n4. If connections persist, isolate the device from the network',
     'threat.guidance.low':'⚠️ This destination domain is a legitimate service (GitHub, Dropbox, etc.), but a specific URL on this domain has been reported as distributing malware.\n\nThe "Original URL" above is the reported malware distribution path.\n\n[Important] This tool only records NAT sessions (IP/port), so it cannot determine whether your device actually accessed this specific URL. Normal usage of the same domain (different repositories, files, etc.) will also appear here.\n\nRecommended actions:\n1. Check the source device\'s browser/download history for access to the "Original URL"\n2. If access is found → immediately run a virus scan on the device\n3. If this device has no reason to access this domain, it may indicate automated malware activity\n4. Even if no history is found, be aware that sophisticated malware may delete access logs — check the device for any suspicious behaviour\n5. Once confirmed safe, record "Confirmed: normal usage" in the note below',
     'settings.field.ip':'IP Address', 'settings.field.user':'Username', 'settings.field.pass':'Password',
+    'settings.field.nat':'NAT Descriptor Number',
     'settings.pass.saved':'(Saved — leave blank to keep)', 'settings.pass.empty':'Password',
     'settings.btn.connect':'Connect', 'settings.btn.disable':'Apply (Disable)',
     'settings.btn.connecting':'Connecting…', 'settings.btn.disabling':'Applying…',
@@ -1337,6 +1343,8 @@ document.getElementById('yamaha-connect-btn').addEventListener('click', async ()
     body.yamahaUser = document.getElementById('s-yamaha-user').value.trim() || undefined;
     const pw = document.getElementById('s-yamaha-pass').value;
     if (pw) body.yamahaPass = pw; // omit if empty (server uses saved password)
+    const nat = document.getElementById('s-yamaha-nat').value.trim();
+    if (nat) body.yamahaNat = nat;
   }
   const ok = await connectRouter(body, 'yamaha-status', 'yamaha-connect-btn', 'enable-yamaha');
   if (ok) {
@@ -2307,6 +2315,7 @@ socket.on('config', cfg => {
   if (cfg.asusUser)   document.getElementById('s-asus-user').value     = cfg.asusUser;
   if (cfg.yamahaIp)   document.getElementById('s-yamaha-ip').value     = cfg.yamahaIp;
   if (cfg.yamahaUser) document.getElementById('s-yamaha-user').value   = cfg.yamahaUser;
+  if (cfg.yamahaNat)  document.getElementById('s-yamaha-nat').value    = cfg.yamahaNat;
   // Passwords are not sent in plaintext for security; show "saved" placeholder instead
   const asusPwEl = document.getElementById('s-asus-pass');
   asusPwEl.placeholder = cfg.asusPassSet ? t('settings.pass.saved') : t('settings.pass.empty');

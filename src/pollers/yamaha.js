@@ -274,6 +274,7 @@ function isEnabled() { return yamahaEnabled; }
 function getIp() { return yamahaIp; }
 function getUser() { return yamahaUser; }
 function hasPass() { return !!yamahaPass; }
+function getNat() { return natDescriptor; }
 function getHostFp() { return yamahaHostFp; }
 function needsArpRefresh() { return Date.now() - yamahaArpLastRefresh > YAMAHA_ARP_REFRESH_MS; }
 
@@ -295,6 +296,7 @@ module.exports = {
   getIp,
   getUser,
   hasPass,
+  getNat,
   getHostFp,
   needsArpRefresh,
   needsNdpRefresh,

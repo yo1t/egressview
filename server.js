@@ -59,6 +59,7 @@ function loadConfig() {
         pass: data.yamaha.pass || '',
         enabled: data.yamaha.enabled !== false,
         hostFp: data.yamaha.hostFp || '',
+        natDescriptor: data.yamaha.nat || '100',
       });
     }
     if (data.asus) {
@@ -354,7 +355,7 @@ app.post('/api/nonce', requireAdmin, async (req, res) => {
 // Login / setup
 app.post('/api/login', requireAdmin, async (req, res) => {
   const { username, password, routerIp: ip,
-          yamahaIp: yIp, yamahaUser: yUser, yamahaPass: yPass } = req.body;
+          yamahaIp: yIp, yamahaUser: yUser, yamahaPass: yPass, yamahaNat: yNat } = req.body;
   const doAsus   = req.body.doAsus;
   const doYamaha = req.body.doYamaha;
 
@@ -411,7 +412,7 @@ app.post('/api/login', requireAdmin, async (req, res) => {
 
   // ── Yamaha ──
   if (doYamaha === true) {
-    yamaha.configure({ enabled: true, ip: yIp || yamaha.getIp(), user: yUser || yamaha.getUser() });
+    yamaha.configure({ enabled: true, ip: yIp || yamaha.getIp(), user: yUser || yamaha.getUser(), natDescriptor: yNat || undefined });
     // Persist Yamaha password
     if (yPass) {
       try {
@@ -420,6 +421,7 @@ app.post('/api/login', requireAdmin, async (req, res) => {
         cfg.yamaha.ip = yIp || yamaha.getIp();
         cfg.yamaha.user = yUser || yamaha.getUser();
         cfg.yamaha.pass = yPass;
+        cfg.yamaha.nat = yNat || cfg.yamaha.nat || '100';
         cfg.yamaha.enabled = true;
         fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), { mode: 0o600 });
       } catch {}
@@ -611,6 +613,7 @@ io.on('connection', socket => {
     yamahaEnabled: yamaha.isEnabled(),
     yamahaIp: yamaha.getIp(),
     yamahaUser: yamaha.getUser(),
+    yamahaNat: yamaha.getNat(),
     yamahaPassSet: yamaha.hasPass(),
     yamahaReady: yamaha.isReady(),
     homeCountry,
