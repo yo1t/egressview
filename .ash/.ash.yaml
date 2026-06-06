@@ -14,8 +14,8 @@ global_settings:
   suppressions:
     - path: 'server.js'
       rule_id: 'SECRET-SECRET-KEYWORD'
-      line_start: 368
-      line_end: 368
+      line_start: 374
+      line_end: 374
       reason: 'False positive - password variable name in input validation, not a hardcoded secret'
 
 scanners:

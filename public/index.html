@@ -2282,6 +2282,7 @@ socket.on('config', cfg => {
   }
   if (cfg.retentionDays) {
     document.getElementById('s-retention').value = String(cfg.retentionDays);
+    document.getElementById('s-retention').dataset.saved = String(cfg.retentionDays);
   }
   if (cfg.language && cfg.language !== currentLang) {
     currentLang = cfg.language;
@@ -2305,6 +2306,14 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
   const newLang    = document.getElementById('s-language').value;
   const newAuto    = document.getElementById('s-auto-investigate').checked;
   const newRetention = parseInt(document.getElementById('s-retention').value);
+  // Confirm if retention is being shortened
+  const currentRetention = parseInt(document.getElementById('s-retention').dataset.saved || '730');
+  if (newRetention < currentRetention) {
+    const msg = currentLang === 'ja'
+      ? `ログ保存期間を ${currentRetention}日 → ${newRetention}日 に短縮します。\n${newRetention}日より古いログは次回の定期削除で消去されます。\n\n続行しますか？`
+      : `Reducing log retention from ${currentRetention} to ${newRetention} days.\nLogs older than ${newRetention} days will be deleted on next cleanup.\n\nContinue?`;
+    if (!confirm(msg)) { btn.disabled = false; btn.textContent = t('settings.btn.save'); return; }
+  }
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + t('settings.btn.saving');
   try {
     const res = await apiFetch('__BASE__/api/config/general', {
@@ -2321,6 +2330,7 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
         if (statsMode) updateStats();
       }
       showStatus('general-status', t('settings.status.saved'), true);
+      document.getElementById('s-retention').dataset.saved = String(newRetention);
       // Re-render map if shown
       if (mapMode && worldGeo) { stopMapAnim(); renderWorldMap(); updateMapDots(); startMapAnim(); }
     } else {

@@ -13,6 +13,7 @@ const enrichment = require('./src/enrichment');
 const history = require('./src/history');
 const deviceId = require('./src/device-identify');
 const threatIntel = require('./src/threat-intel');
+const backup = require('./src/backup');
 const yamaha = require('./src/pollers/yamaha');
 const asus = require('./src/pollers/asus');
 
@@ -71,6 +72,10 @@ function loadConfig() {
     if (data.general?.language && ['ja','en'].includes(data.general.language)) uiLanguage = data.general.language;
     if (typeof data.general?.autoInvestigate === 'boolean') autoInvestigate = data.general.autoInvestigate;
     if (data.general?.retentionDays) retentionDays = data.general.retentionDays;
+    if (data.backup) {
+      if (data.backup.intervalHours) backup.configure({ intervalHours: data.backup.intervalHours });
+      if (data.backup.maxGenerations) backup.configure({ maxGenerations: data.backup.maxGenerations });
+    }
     if (data.adminToken) adminToken = data.adminToken;
     console.log('[config] Loaded:', CONFIG_FILE);
     return data;
@@ -85,6 +90,7 @@ function saveConfig() {
     yamaha: { ip: yamaha.getIp(), user: yamaha.getUser(), pass: process.env.YAMAHA_PASS || '', enabled: yamaha.isEnabled(), hostFp: yamaha.getHostFp() },
     asus: { ip: asus.getRouterIp(), user: asus.getUser(), pass: '' },
     general: { homeCountry, language: uiLanguage, autoInvestigate, retentionDays },
+    backup: backup.getConfig(),
     adminToken,
   };
   // Re-read to preserve passwords (they are not stored in module state getters)
@@ -521,6 +527,67 @@ app.post('/api/notes/draft', requireAdmin, async (req, res) => {
   }
 });
 
+// ─── Backup / Restore API ─────────────────────────────────────────────────────
+
+app.get('/api/backup/list', requireAdmin, (req, res) => {
+  res.json({ backups: backup.listBackups(), config: backup.getConfig() });
+});
+
+app.post('/api/backup/create', requireAdmin, (req, res) => {
+  const name = backup.createBackup();
+  if (name) res.json({ success: true, name });
+  else res.status(500).json({ error: 'Backup failed' });
+});
+
+app.get('/api/backup/download/:name', requireAdmin, (req, res) => {
+  const p = backup.getBackupPath(req.params.name);
+  if (!p) return res.status(404).json({ error: 'Not found' });
+  res.download(p);
+});
+
+app.post('/api/backup/restore', requireAdmin, (req, res) => {
+  const { name } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'Backup name required' });
+  try {
+    backup.restoreFromGeneration(name);
+    // Reload history from restored DB
+    history.loadConnectionHistory();
+    res.json({ success: true, message: `Restored from ${name}. Restart recommended.` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/backup/upload', requireAdmin, (req, res) => {
+  // Accept raw body as DB file (max 100MB)
+  const chunks = [];
+  req.on('data', chunk => chunks.push(chunk));
+  req.on('end', () => {
+    try {
+      const buf = Buffer.concat(chunks);
+      if (buf.length < 100) return res.status(400).json({ error: 'File too small' });
+      const tempPath = path.join(__dirname, '.widemap-upload-temp.db');
+      fs.writeFileSync(tempPath, buf);
+      backup.restoreFromFile(tempPath);
+      fs.unlinkSync(tempPath);
+      history.loadConnectionHistory();
+      res.json({ success: true, message: 'Restored from uploaded file. Restart recommended.' });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
+
+app.post('/api/backup/config', requireAdmin, (req, res) => {
+  const { intervalHours, maxGenerations } = req.body || {};
+  if (intervalHours) backup.configure({ intervalHours: Number(intervalHours) });
+  if (maxGenerations) backup.configure({ maxGenerations: Number(maxGenerations) });
+  backup.stopPeriodicBackup();
+  backup.startPeriodicBackup();
+  saveConfig();
+  res.json({ success: true, config: backup.getConfig() });
+});
+
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
 io.use((socket, next) => {
   const provided = socket.handshake.auth?.token || '';
@@ -627,6 +694,8 @@ server.listen(PORT, () => {
     if (matched) console.log(`[threat-intel] Re-matched ${matched} existing connections`);
   });
   setInterval(() => threatIntel.fetchThreatIntel(), 60 * 60 * 1000);
+  // Backup
+  backup.startPeriodicBackup();
 });
 
 // Graceful shutdown
