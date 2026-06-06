@@ -741,7 +741,7 @@
 
           <div class="pane-title" style="cursor:default;font-size:12px;margin-bottom:12px" data-i18n="settings.slack.section">🔔 Slack通知</div>
           <p style="font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.5" data-i18n="settings.slack.desc">
-            脅威検出時に Slack DM で通知します。Bot Token と通知先ユーザーIDが必要です。
+            脅威検出時に Slack DM で通知します。
           </p>
           <div class="form-group">
             <label style="display:flex;align-items:center;gap:8px;font-size:11px;cursor:pointer;">
@@ -751,11 +751,20 @@
           </div>
           <div class="form-group" style="margin-top:10px">
             <label class="form-label" data-i18n="settings.slack.token">Bot Token</label>
-            <input type="password" id="s-slack-token" class="form-input" placeholder="xoxb-..." autocomplete="off">
+            <div style="display:flex;gap:6px;">
+              <input type="password" id="s-slack-token" class="form-input" placeholder="xoxb-..." autocomplete="off" style="flex:1">
+              <button class="connect-btn" id="slack-verify-btn" style="white-space:nowrap;font-size:10px;padding:4px 10px" data-i18n="settings.slack.verify">接続確認</button>
+            </div>
+            <div id="slack-workspace-info" style="font-size:10px;color:var(--green);margin-top:4px;display:none"></div>
           </div>
           <div class="form-group">
-            <label class="form-label" data-i18n="settings.slack.userid">通知先ユーザーID</label>
-            <input type="text" id="s-slack-userid" class="form-input" placeholder="U01XXXXXXX" autocomplete="off">
+            <label class="form-label" data-i18n="settings.slack.username">通知先ユーザー名</label>
+            <div style="display:flex;gap:6px;">
+              <input type="text" id="s-slack-username" class="form-input" placeholder="@username" autocomplete="off" style="flex:1">
+              <button class="connect-btn" id="slack-lookup-btn" style="white-space:nowrap;font-size:10px;padding:4px 10px" data-i18n="settings.slack.lookup">検索</button>
+            </div>
+            <div id="slack-user-info" style="font-size:10px;color:var(--green);margin-top:4px;display:none"></div>
+            <input type="hidden" id="s-slack-userid">
           </div>
           <div class="form-group">
             <label class="form-label" data-i18n="settings.slack.cooldown">同一宛先の再通知間隔</label>
@@ -769,7 +778,7 @@
           </div>
           <div style="margin-top:12px">
             <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener noreferrer"
-               style="font-size:10px;color:var(--accent);text-decoration:none" data-i18n="settings.slack.create">🔗 Slack Appを作成する</a>
+               style="font-size:10px;color:var(--accent);text-decoration:none" data-i18n="settings.slack.create">🔗 Slack Appを作成する（chat:write, users:read スコープ必要）</a>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px">
             <button class="connect-btn" id="slack-save-btn" data-i18n="settings.btn.save">保存</button>
@@ -1066,10 +1075,12 @@ const I18N = {
     'settings.threat.desc':'外部の脅威インテリジェンスフィードからマルウェアC2/配布元IPリストをダウンロードし、NAT セッションと突合します。',
     'settings.threat.feeds':'取得するフィード', 'settings.threat.interval':'更新頻度',
     'settings.slack.section':'🔔 Slack通知',
-    'settings.slack.desc':'脅威検出時に Slack DM で通知します。Bot Token と通知先ユーザーIDが必要です。',
+    'settings.slack.desc':'脅威検出時に Slack DM で通知します。',
     'settings.slack.enable':'Slack通知を有効化',
     'settings.slack.token':'Bot Token',
-    'settings.slack.userid':'通知先ユーザーID',
+    'settings.slack.verify':'接続確認',
+    'settings.slack.username':'通知先ユーザー名',
+    'settings.slack.lookup':'検索',
     'settings.slack.cooldown':'同一宛先の再通知間隔',
     'settings.slack.cooldown.15m':'15分', 'settings.slack.cooldown.30m':'30分',
     'settings.slack.cooldown.1h':'1時間', 'settings.slack.cooldown.3h':'3時間', 'settings.slack.cooldown.6h':'6時間',
@@ -1185,10 +1196,12 @@ const I18N = {
     'settings.threat.desc':'Download malware C2/distribution IP lists from external threat intelligence feeds and match against NAT sessions.',
     'settings.threat.feeds':'Feeds to fetch', 'settings.threat.interval':'Update frequency',
     'settings.slack.section':'🔔 Slack Notifications',
-    'settings.slack.desc':'Receive a Slack DM when a threat is detected. Requires a Bot Token and your Slack User ID.',
+    'settings.slack.desc':'Receive a Slack DM when a threat is detected.',
     'settings.slack.enable':'Enable Slack notifications',
     'settings.slack.token':'Bot Token',
-    'settings.slack.userid':'Notify User ID',
+    'settings.slack.verify':'Verify',
+    'settings.slack.username':'Notify username',
+    'settings.slack.lookup':'Search',
     'settings.slack.cooldown':'Re-notify interval (same destination)',
     'settings.slack.cooldown.15m':'15 min', 'settings.slack.cooldown.30m':'30 min',
     'settings.slack.cooldown.1h':'1 hour', 'settings.slack.cooldown.3h':'3 hours', 'settings.slack.cooldown.6h':'6 hours',
@@ -2490,13 +2503,77 @@ document.getElementById('threat-save-btn').addEventListener('click', () => {
 });
 
 // ─── Slack notification settings UI ──────────────────────────────────────────
+document.getElementById('slack-verify-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('slack-verify-btn');
+  const token = document.getElementById('s-slack-token').value.trim();
+  if (!token) { showStatus('slack-status', 'Token required', false); return; }
+  btn.disabled = true;
+  try {
+    const r = await apiFetch('__BASE__/api/slack/verify', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const data = await r.json();
+    const info = document.getElementById('slack-workspace-info');
+    if (data.ok) {
+      info.style.display = 'block';
+      info.style.color = 'var(--green)';
+      info.textContent = `✓ ${data.team} (${data.user})`;
+    } else {
+      info.style.display = 'block';
+      info.style.color = '#ef4444';
+      info.textContent = '✗ ' + (data.error || 'Failed');
+    }
+  } catch (e) {
+    showStatus('slack-status', e.message, false);
+  } finally { btn.disabled = false; }
+});
+
+document.getElementById('slack-lookup-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('slack-lookup-btn');
+  const username = document.getElementById('s-slack-username').value.trim();
+  const token = document.getElementById('s-slack-token').value.trim();
+  if (!username) { showStatus('slack-status', 'Username required', false); return; }
+  // Use saved token if field is empty
+  let useToken = token;
+  if (!useToken) {
+    // Try to get from server config
+    try {
+      const r = await apiFetch('__BASE__/api/config/slack');
+      const d = await r.json();
+      if (d.config?.tokenSet) useToken = '__SAVED__'; // signal server to use stored token
+    } catch {}
+  }
+  btn.disabled = true;
+  try {
+    const r = await apiFetch('__BASE__/api/slack/lookup-user', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, token: useToken !== '__SAVED__' ? useToken : undefined }),
+    });
+    const data = await r.json();
+    const info = document.getElementById('slack-user-info');
+    if (data.ok) {
+      info.style.display = 'block';
+      info.style.color = 'var(--green)';
+      info.textContent = `✓ ${data.realName || data.displayName || data.name} (${data.userId})`;
+      document.getElementById('s-slack-userid').value = data.userId;
+    } else {
+      info.style.display = 'block';
+      info.style.color = '#ef4444';
+      info.textContent = '✗ ' + (data.error === 'user_not_found' ? (currentLang === 'ja' ? 'ユーザーが見つかりません' : 'User not found') : data.error);
+    }
+  } catch (e) {
+    showStatus('slack-status', e.message, false);
+  } finally { btn.disabled = false; }
+});
+
 document.getElementById('slack-save-btn').addEventListener('click', async () => {
   const btn = document.getElementById('slack-save-btn');
   btn.disabled = true; btn.textContent = t('settings.btn.saving');
   try {
     const token = document.getElementById('s-slack-token').value.trim();
     await apiFetch('__BASE__/api/config/slack', {
-      method: 'POST',
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         enabled: document.getElementById('s-slack-enabled').checked,
         token: token || undefined,
@@ -2527,11 +2604,15 @@ document.getElementById('slack-test-btn').addEventListener('click', async () => 
 });
 
 (function loadSlackSettings() {
-  apiFetch('__BASE__/api/config/slack').then(data => {
+  apiFetch('__BASE__/api/config/slack').then(async r => {
+    const data = await r.json();
     if (!data) return;
     document.getElementById('s-slack-enabled').checked = !!data.config?.enabled;
     if (data.config?.userId) document.getElementById('s-slack-userid').value = data.config.userId;
     if (data.config?.cooldownMinutes) document.getElementById('s-slack-cooldown').value = String(data.config.cooldownMinutes);
+    if (data.config?.tokenSet) {
+      document.getElementById('s-slack-token').placeholder = currentLang === 'ja' ? '(保存済み)' : '(saved)';
+    }
   }).catch(() => {});
 })();
 

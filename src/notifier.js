@@ -144,4 +144,70 @@ async function test() {
 function _setHttpPost(fn) { _httpPost = fn; }
 function _resetCooldown() { _cooldown.clear(); }
 
-module.exports = { configure, getConfig, notify, test, _buildMessage, _setHttpPost, _resetCooldown };
+// ─── Slack API helpers ────────────────────────────────────────────────────────
+
+function _slackGet(method, token) {
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'slack.com',
+      path: `/api/${method}`,
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` },
+    }, res => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch { resolve({ ok: false, error: 'invalid_json' }); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+// Verify token and get workspace info
+async function verifyToken(token) {
+  if (!token) return { ok: false, error: 'token_missing' };
+  try {
+    const result = await _slackGet('auth.test', token);
+    if (result.ok) {
+      return { ok: true, team: result.team, teamId: result.team_id, user: result.user, userId: result.user_id };
+    }
+    return { ok: false, error: result.error || 'unknown' };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// Look up user by username (display name or real name)
+async function lookupUser(username, token) {
+  if (!token || !username) return { ok: false, error: 'missing_params' };
+  const name = username.replace(/^@/, '').toLowerCase();
+  try {
+    // Use users.list (paginated, but for small workspaces one page is enough)
+    let cursor = '';
+    for (let page = 0; page < 5; page++) {
+      const path = `/api/users.list?limit=200${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`;
+      const result = await _slackGet(`users.list?limit=200${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`, token);
+      if (!result.ok) return { ok: false, error: result.error };
+      const match = (result.members || []).find(m => {
+        if (m.deleted || m.is_bot) return false;
+        const n = (m.name || '').toLowerCase();
+        const dn = (m.profile?.display_name || '').toLowerCase();
+        const rn = (m.real_name || '').toLowerCase();
+        return n === name || dn === name || rn === name;
+      });
+      if (match) {
+        return { ok: true, userId: match.id, name: match.name, realName: match.real_name, displayName: match.profile?.display_name };
+      }
+      cursor = result.response_metadata?.next_cursor;
+      if (!cursor) break;
+    }
+    return { ok: false, error: 'user_not_found' };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+module.exports = { configure, getConfig, notify, test, verifyToken, lookupUser, _buildMessage, _setHttpPost, _resetCooldown };
