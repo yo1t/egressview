@@ -982,7 +982,7 @@ const I18N = {
     'log.filter.placeholder':'検索条件...',
     'log.filter.apply':'適用', 'log.filter.clear':'クリア', 'log.filter.close':'閉じる',
     'log.filter.from':'開始', 'log.filter.to':'終了',
-    'log.badge.safe':'未検出', 'log.badge.danger':'要注意', 'log.badge.warn':'要確認',
+    'log.badge.safe':'未検出', 'log.badge.danger':'検出', 'log.badge.warn':'要確認',
   },  en: {
     'tab.graph': '📊 Graph Map', 'tab.map': '🗺 World Map', 'tab.stats': '📈 Statistics', 'tab.log': '📋 Conn Log',
     'period': 'Period', 'devices': 'Devices', 'wan.rx': 'WAN ↓', 'wan.tx': 'WAN ↑',
@@ -1056,7 +1056,7 @@ const I18N = {
     'log.filter.placeholder':'Search...',
     'log.filter.apply':'Apply', 'log.filter.clear':'Clear', 'log.filter.close':'Close',
     'log.filter.from':'From', 'log.filter.to':'To',
-    'log.badge.safe':'Clear', 'log.badge.danger':'Alert', 'log.badge.warn':'Review',
+    'log.badge.safe':'Clear', 'log.badge.danger':'Detected', 'log.badge.warn':'Review',
   },
 };
 function t(key) { return (I18N[currentLang] && I18N[currentLang][key]) || I18N.ja[key] || key; }
@@ -3082,6 +3082,13 @@ function updateLogView() {
   }
 
   // Apply threat badge filter
+  // Count threats BEFORE applying badge filter (always show full counts)
+  const allConnsForCount = conns; // after column filters but before badge filter
+  const threatCount = allConnsForCount.filter(c => c.threat && c.threat.confidence !== 'low').length;
+  const warnCount = allConnsForCount.filter(c => c.threat && c.threat.confidence === 'low').length;
+  const safeCount = allConnsForCount.length - threatCount - warnCount;
+
+  // Apply threat badge filter
   if (logThreatFilter === 'danger') {
     conns = conns.filter(c => c.threat && c.threat.confidence !== 'low');
   } else if (logThreatFilter === 'warn') {
@@ -3103,10 +3110,7 @@ function updateLogView() {
     return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
   });
 
-  const threatCount = conns.filter(c => c.threat && c.threat.confidence !== 'low').length;
-  const warnCount = conns.filter(c => c.threat && c.threat.confidence === 'low').length;
-  countEl.textContent = `${conns.length} ${t('log.sessions')}`;
-  const safeCount = conns.length - threatCount - warnCount;
+  countEl.textContent = `${allConnsForCount.length} ${t('log.sessions')}`;
   threatCountEl.style.display = 'inline';
   const safeActive = logThreatFilter === 'safe' ? ' log-filter-active' : '';
   const warnActive = logThreatFilter === 'warn' ? ' log-filter-active' : '';
