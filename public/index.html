@@ -336,8 +336,8 @@
   .device-card.wifi-5g { border-left: 3px solid var(--purple); }
   .device-card.wifi-6g { border-left: 3px solid #eab308; }
   .node-badge { display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 3px; margin-left: 6px; vertical-align: middle; font-weight: 600; }
-  .proto-badges { display: flex; gap: 3px; margin: 3px 0; }
-  .proto-badge { display: inline-block; font-size: 8px; padding: 1px 4px; border-radius: 3px; font-weight: 700; letter-spacing: 0.3px; }
+  .proto-badges { display: none; }
+  .proto-badge { display: inline-block; font-size: 8px; padding: 1px 4px; border-radius: 3px; font-weight: 700; letter-spacing: 0.3px; vertical-align: middle; margin-right: 2px; }
   .proto-v4 { background: #22c55e33; color: #22c55e; border: 1px solid #22c55e55; }
   .proto-v6-green { background: #22c55e33; color: #22c55e; border: 1px solid #22c55e55; }
   .proto-v6-grey { background: #6b728033; color: #9ca3af; border: 1px solid #6b728055; }
@@ -1525,7 +1525,6 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
           <span class="node-badge" style="background:${nodeColor}22;color:${nodeColor};border:1px solid ${nodeColor}44"></span>
         </div>
         <div class="device-name empty"></div>
-        <div class="proto-badges"></div>
         <div class="device-meta empty"></div>
         <div class="device-resolved empty"></div>
         <div class="device-note empty"></div>
@@ -1578,16 +1577,16 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
       nameEl.textContent = '';
       nameEl.className = 'device-name empty';
     }
-    // Meta: OUI vendor · connection type
+    // Meta: protocol badges + OUI vendor · connection type
     const metaEl = card.querySelector('.device-meta');
     const metaParts = [c.vendor, typeLabel(c.type)].filter(Boolean);
-    if (metaParts.length) {
-      metaEl.textContent = metaParts.join(' · ');
-      metaEl.className = 'device-meta';
-    } else {
-      metaEl.textContent = '';
-      metaEl.className = 'device-meta empty';
+    let badgeHtml = '<span class="proto-badge proto-v4">IPv4</span>';
+    if (c.ipv6Addrs && c.ipv6Addrs.length > 0) {
+      badgeHtml += '<span class="proto-badge proto-v6-grey">IPv6</span>';
     }
+    const metaText = metaParts.length ? ' ' + metaParts.join(' · ') : '';
+    metaEl.innerHTML = badgeHtml + metaText;
+    metaEl.className = 'device-meta';
     // Name resolution: DNS / mDNS (omit if same as already-known name)
     const resolvedEl = card.querySelector('.device-resolved');
     const known = new Set([c.name, c.ip].filter(Boolean));
@@ -1604,15 +1603,6 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
     card.querySelector('.node-badge').textContent = papNode?.model?.replace(/RT-BE/,'') || 'Main';
     card.querySelector('.node-badge').style.background = nodeColor + '22';
     card.querySelector('.node-badge').style.color = nodeColor;
-    // Protocol badges: IPv4 (always, since NAT visible) + IPv6 (if NDP detected)
-    const protoBadges = card.querySelector('.proto-badges');
-    if (protoBadges) {
-      let html = '<span class="proto-badge proto-v4">IPv4</span>';
-      if (c.ipv6Addrs && c.ipv6Addrs.length > 0) {
-        html += '<span class="proto-badge proto-v6-grey">IPv6</span>';
-      }
-      protoBadges.innerHTML = html;
-    }
     card.querySelector('.rx-val').textContent = fmtBytes(c.rxRate);
     card.querySelector('.tx-val').textContent = fmtBytes(c.txRate);
     const rxPct = Math.min(100, (c.rxRate / maxRate) * 100);
