@@ -964,6 +964,9 @@ const I18N = {
     'settings.tab.threat':'脅威検出', 'settings.section.threat':'🛡️ 脅威検出設定',
     'settings.threat.desc':'外部の脅威インテリジェンスフィードからマルウェアC2/配布元IPリストをダウンロードし、NAT セッションと突合します。',
     'settings.threat.feeds':'取得するフィード', 'settings.threat.interval':'更新頻度',
+    'threat.detail.title':'🚨 脅威検出 詳細',
+    'threat.guidance.high':'🚨 この宛先は脅威インテリジェンスフィードに登録された既知の悪意あるホストです。\n\n推奨アクション:\n1. この端末でアクセスした覚えのない通信であれば、マルウェア感染の可能性があります\n2. 該当端末のウイルススキャンを実施してください\n3. 必要に応じてルーターでこの IP をブロックしてください\n4. 通信が継続している場合は、端末をネットワークから隔離することを推奨します',
+    'threat.guidance.low':'⚠️ この宛先ドメインは正規のサービス（GitHub, Dropbox 等）ですが、脅威フィードにマルウェア配布元として登録された URL が存在します。\n\n本ツールでは実際にどの URL パスにアクセスしたかは判別できません（NAT セッションは IP/ポートのみ記録）。\n\n推奨アクション:\n1. 上記「元URL」のパスに心当たりがあるか確認してください\n2. 正規の利用（コード取得、ファイルダウンロード等）であれば問題ありません\n3. 不審なファイルをダウンロードした覚えがある場合はウイルススキャンを実施してください\n4. 確認が取れたら、このアラートはメモに「確認済み」と記録して問題ありません',
     'settings.field.ip':'IP アドレス', 'settings.field.user':'ユーザー名', 'settings.field.pass':'パスワード',
     'settings.pass.saved':'（保存済み — 変更する場合のみ入力）', 'settings.pass.empty':'パスワード',
     'settings.btn.connect':'接続', 'settings.btn.disable':'無効化を反映',
@@ -1046,6 +1049,9 @@ const I18N = {
     'settings.tab.threat':'Threat Intel', 'settings.section.threat':'🛡️ Threat Detection Settings',
     'settings.threat.desc':'Download malware C2/distribution IP lists from external threat intelligence feeds and match against NAT sessions.',
     'settings.threat.feeds':'Feeds to fetch', 'settings.threat.interval':'Update frequency',
+    'threat.detail.title':'🚨 Threat Detection Detail',
+    'threat.guidance.high':'🚨 This destination is a known malicious host registered in threat intelligence feeds.\n\nRecommended actions:\n1. If you do not recognise this connection, the device may be infected with malware\n2. Run a virus scan on the affected device\n3. Consider blocking this IP on your router\n4. If connections persist, isolate the device from the network',
+    'threat.guidance.low':'⚠️ This destination domain is a legitimate service (GitHub, Dropbox, etc.) but a URL on it was reported as a malware distribution point.\n\nThis tool cannot determine the exact URL path accessed (NAT sessions only record IP/port).\n\nRecommended actions:\n1. Check whether you recognise the "Original URL" path shown above\n2. If this is normal usage (code checkout, file download), this is safe to ignore\n3. If you downloaded suspicious files recently, run a virus scan\n4. Once verified, you may record "Confirmed safe" in the note below',
     'settings.field.ip':'IP Address', 'settings.field.user':'Username', 'settings.field.pass':'Password',
     'settings.pass.saved':'(Saved — leave blank to keep)', 'settings.pass.empty':'Password',
     'settings.btn.connect':'Connect', 'settings.btn.disable':'Apply (Disable)',
@@ -3377,7 +3383,16 @@ function showThreatDetail(tr) {
 
   const body = document.getElementById('threat-detail-body');
   body.innerHTML = `
-    <div class="section-title">🚨 脅威情報</div>
+    <div class="section-title">${t('threat.detail.title')}</div>
+    <div style="margin:8px 0;">
+      ${d.threat.confidence === 'low'
+        ? '<span class="log-badge-warn" style="font-size:11px;padding:3px 8px;">' + esc(t('log.badge.warn')) + '</span>'
+        : '<span class="log-badge-danger" style="font-size:11px;padding:3px 8px;">' + esc(t('log.badge.danger')) + '</span>'}
+    </div>
+    <div style="font-size:11px;line-height:1.6;color:var(--text);white-space:pre-wrap;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:12px;">
+      ${esc(d.threat.confidence === 'low' ? t('threat.guidance.low') : t('threat.guidance.high'))}
+    </div>
+    <div class="section-title">📋 脅威フィード情報</div>
     <table>
       <tr><th>フィード</th><td>${esc(d.threat.source)}</td></tr>
       <tr><th>脅威タグ</th><td>${esc(d.threat.tag)}</td></tr>
