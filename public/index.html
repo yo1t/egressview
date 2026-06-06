@@ -219,6 +219,22 @@
     background: var(--bg); padding: 10px; gap: 10px;
   }
   .stats-header { font-size: 12px; font-weight: 600; color: var(--text); padding: 4px 8px; }
+  /* Connection Log */
+  #log-container { display: none; flex-direction: column; flex: 1; overflow: hidden; background: var(--bg); padding: 10px; gap: 8px; }
+  .log-header { font-size: 12px; font-weight: 600; color: var(--text); padding: 4px 8px; display: flex; align-items: center; gap: 8px; }
+  .log-title { font-size: 13px; }
+  .log-threat-badge { background: #ef4444; color: #fff; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; }
+  .log-table-wrap { flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+  .log-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .log-table th { position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left; font-weight: 600; color: var(--muted); white-space: nowrap; }
+  .log-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .log-table tr:hover { background: rgba(59,130,246,0.06); }
+  .log-table tr.threat-row { background: rgba(239,68,68,0.08); }
+  .log-table tr.threat-row:hover { background: rgba(239,68,68,0.14); }
+  .log-threat-icon { color: #ef4444; font-weight: bold; }
+  .log-threat-tag { font-size: 9px; color: #ef4444; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+  /* Threat indicator in conn-panel */
+  .conn-threat { color: #ef4444; font-size: 10px; margin-left: 4px; }
   .stats-chart {
     flex: 1; min-height: 180px;
     background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -631,6 +647,7 @@
     <button class="view-tab active" id="btn-graph" data-i18n="tab.graph">📊 グラフマップ</button>
     <button class="view-tab" id="btn-map" data-i18n="tab.map">🗺 地図</button>
     <button class="view-tab" id="btn-stats" data-i18n="tab.stats">📈 統計情報</button>
+    <button class="view-tab" id="btn-log" data-i18n="tab.log">📋 通信ログ</button>
   </div>
   <div class="time-filter">
     <span class="time-filter-label" data-i18n="period">期間</span>
@@ -717,6 +734,31 @@
       <small style="font-size:10px" data-i18n="stats.empty.line2">期間や選択デバイスを変更してみてください</small>
     </div>
   </div>
+  <!-- Connection Log View -->
+  <div id="log-container" style="display:none">
+    <div class="log-header">
+      <span class="log-title">📋 通信ログ</span>
+      <span id="log-threat-count" class="log-threat-badge" style="display:none"></span>
+      <span id="log-count" style="color:var(--muted);font-size:11px;margin-left:8px;"></span>
+    </div>
+    <div class="log-table-wrap">
+      <table class="log-table" id="log-table">
+        <thead>
+          <tr>
+            <th>脅威</th>
+            <th>送信元</th>
+            <th>宛先</th>
+            <th>ポート</th>
+            <th>Proto</th>
+            <th>国</th>
+            <th>組織</th>
+            <th>最終通信</th>
+          </tr>
+        </thead>
+        <tbody id="log-tbody"></tbody>
+      </table>
+    </div>
+  </div>
   <div id="graph-container">
     <svg id="graph"></svg>
     <div class="graph-tooltip" id="tooltip"></div>
@@ -781,7 +823,7 @@ let currentLang = 'ja';
 const I18N = {
   ja: {
     // Header / Tabs
-    'tab.graph': '📊 グラフマップ', 'tab.map': '🗺 地図', 'tab.stats': '📈 統計情報',
+    'tab.graph': '📊 グラフマップ', 'tab.map': '🗺 地図', 'tab.stats': '📈 統計情報', 'tab.log': '📋 通信ログ',
     'period': '期間', 'devices': '接続デバイス', 'wan.rx': 'WAN ↓', 'wan.tx': 'WAN ↑',
     'settings.title': '⚙ 設定',
     'period.live': 'リアルタイム (15分以内)', 'period.1h':'1時間以内', 'period.3h':'3時間以内',
@@ -852,7 +894,7 @@ const I18N = {
     'note.investigate.fail':'調査に失敗しました', 'note.edit.tip':'メモを編集',
   },
   en: {
-    'tab.graph': '📊 Graph Map', 'tab.map': '🗺 World Map', 'tab.stats': '📈 Statistics',
+    'tab.graph': '📊 Graph Map', 'tab.map': '🗺 World Map', 'tab.stats': '📈 Statistics', 'tab.log': '📋 Conn Log',
     'period': 'Period', 'devices': 'Devices', 'wan.rx': 'WAN ↓', 'wan.tx': 'WAN ↑',
     'settings.title': '⚙ Settings',
     'period.live': 'Live (last 15 min)', 'period.1h':'Last hour', 'period.3h':'Last 3 hours',
@@ -1799,8 +1841,10 @@ function updateConnPanel(selectedIp) {
         : '';
       const rdapStr = (flag || c.org) ? `${flag} ${c.org || c.country || ''}`.trim() : '';
       const rdapLine = rdapStr ? `<span class="conn-rdap">${esc(rdapStr)}</span>` : '';
-      return `<div class="conn-row">
+      const threatIcon = c.threat ? `<span class="conn-threat" title="${esc(c.threat.tag)}">🚨</span>` : '';
+      return `<div class="conn-row${c.threat ? ' threat-row' : ''}">
         <span class="conn-proto">${esc(c.proto)}</span>
+        ${threatIcon}
         <span class="conn-host" title="${esc(c.dst)}:${esc(c.dport)}">
           <span class="conn-hostname">${esc(label)}</span>${rdapLine}
         </span>
@@ -2238,6 +2282,7 @@ socket.on('connections-update', data => {
   }
   if (mapMode) updateMapDots();
   if (statsMode) updateStats();
+  if (logMode) updateLogView();
   // Immediately update the panel for the currently selected device
   const selNode = nodes.find(n => n.id === selectedMac);
   const selIp   = selNode?.client?.ip || null;
@@ -2841,30 +2886,86 @@ function toLocalDatetimeStr(d) {
 // ─── View tabs ────────────────────────────────────────────────────────────────
 let currentView = 'graph';
 let statsMode = false;
+let logMode = false;
 function switchView(view) {
   currentView = view;
   mapMode   = (view === 'map');
   statsMode = (view === 'stats');
+  logMode   = (view === 'log');
   document.getElementById('graph-container').style.display = view === 'graph' ? 'flex' : 'none';
   document.getElementById('map-container').style.display   = view === 'map'   ? 'flex' : 'none';
   document.getElementById('stats-container').style.display = view === 'stats' ? 'flex' : 'none';
+  document.getElementById('log-container').style.display   = view === 'log'   ? 'flex' : 'none';
   document.getElementById('btn-graph').classList.toggle('active', view === 'graph');
   document.getElementById('btn-map').classList.toggle('active',   view === 'map');
   document.getElementById('btn-stats').classList.toggle('active', view === 'stats');
+  document.getElementById('btn-log').classList.toggle('active',   view === 'log');
   document.body.classList.toggle('is-stats-mode', view === 'stats');
   if (view === 'map') requestAnimationFrame(() => initWorldMap());
   else                stopMapAnim();
   if (view === 'stats') requestAnimationFrame(updateStats);
+  if (view === 'log')   requestAnimationFrame(updateLogView);
 }
 document.getElementById('btn-graph').addEventListener('click', () => switchView('graph'));
 document.getElementById('btn-map').addEventListener('click',   () => switchView('map'));
 document.getElementById('btn-stats').addEventListener('click', () => switchView('stats'));
+document.getElementById('btn-log').addEventListener('click',   () => switchView('log'));
 
 // ─── Device search ────────────────────────────────────────────────────────────
 document.getElementById('device-search-input').addEventListener('input', () => {
   applyFilter(lastClients);
   applyGraphFilter();
 });
+
+// ─── Connection Log View ──────────────────────────────────────────────────────
+function updateLogView() {
+  if (!logMode) return;
+  const tbody = document.getElementById('log-tbody');
+  const countEl = document.getElementById('log-count');
+  const threatCountEl = document.getElementById('log-threat-count');
+
+  const conns = getFilteredConnections();
+  // Sort: threats first, then by lastSeen desc
+  const sorted = [...conns].sort((a, b) => {
+    if (a.threat && !b.threat) return -1;
+    if (!a.threat && b.threat) return 1;
+    return (b.lastSeen || 0) - (a.lastSeen || 0);
+  });
+
+  const threatCount = sorted.filter(c => c.threat).length;
+  countEl.textContent = `${sorted.length} セッション`;
+  if (threatCount > 0) {
+    threatCountEl.style.display = 'inline';
+    threatCountEl.textContent = `🚨 ${threatCount} 脅威検出`;
+  } else {
+    threatCountEl.style.display = 'none';
+  }
+
+  // Render max 500 rows for performance
+  const rows = sorted.slice(0, 500);
+  tbody.innerHTML = rows.map(c => {
+    const isThreat = !!c.threat;
+    const threatCell = isThreat
+      ? `<td><span class="log-threat-icon">🚨</span><br><span class="log-threat-tag" title="${esc(c.threat.tag)}">${esc(c.threat.source)}</span></td>`
+      : '<td></td>';
+    const srcLabel = c.srcDnsName || c.srcMdnsName || c.src;
+    const dstLabel = c.dstHost && c.dstHost !== c.dst ? c.dstHost : c.dst;
+    const flag = (c.country && c.country.length === 2)
+      ? String.fromCodePoint(0x1F1E0 + c.country.charCodeAt(0) - 65, 0x1F1E0 + c.country.charCodeAt(1) - 65)
+      : '';
+    const timeStr = c.lastSeen ? new Date(c.lastSeen).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '';
+    return `<tr class="${isThreat ? 'threat-row' : ''}">
+      ${threatCell}
+      <td title="${esc(c.src)}">${esc(srcLabel)}</td>
+      <td title="${esc(c.dst)}">${esc(dstLabel)}</td>
+      <td>${c.dport}</td>
+      <td>${esc(c.proto)}</td>
+      <td>${flag} ${esc(c.country || '')}</td>
+      <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(c.org || '')}">${esc(c.org || '')}</td>
+      <td>${timeStr}</td>
+    </tr>`;
+  }).join('');
+}
 
 // Init
 resize();
