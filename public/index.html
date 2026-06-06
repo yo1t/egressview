@@ -769,8 +769,8 @@
           <tr>
             <th data-col="threat"><span data-i18n="log.col.threat">脅威</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="threat">🔍</span></th>
             <th data-col="src"><span data-i18n="log.col.src">送信元</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="src">🔍</span></th>
-            <th data-col="threatTag"><span data-i18n="log.col.threatTag">脅威詳細</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="threatTag">🔍</span></th>
             <th data-col="dst"><span data-i18n="log.col.dst">宛先</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="dst">🔍</span></th>
+            <th data-col="threatTag"><span data-i18n="log.col.threatTag">脅威詳細</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="threatTag">🔍</span></th>
             <th data-col="dport"><span data-i18n="log.col.dport">ポート</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="dport">🔍</span></th>
             <th data-col="proto"><span data-i18n="log.col.proto">Proto</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="proto">🔍</span></th>
             <th data-col="country"><span data-i18n="log.col.country">国</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="country">🔍</span></th>
@@ -3094,8 +3094,8 @@ function updateLogView() {
     return `<tr class="${isThreat ? 'threat-row' : ''}">
       ${threatCell}
       <td title="${esc(c.src)}">${esc(srcLabel)}</td>
-      ${threatTagCell}
       <td title="${esc(c.dst)}">${esc(dstLabel)}</td>
+      ${threatTagCell}
       <td>${c.dport}</td>
       <td>${esc(c.proto)}</td>
       <td>${flag} ${esc(c.country || '')}</td>
