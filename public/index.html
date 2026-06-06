@@ -1522,7 +1522,6 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
         <div style="display:flex;align-items:center;gap:4px">
           <div class="device-title" style="flex:1"></div>
           <span class="device-note-edit" title="${esc(t('note.edit.tip'))}">📝</span>
-          <span class="node-badge" style="background:${nodeColor}22;color:${nodeColor};border:1px solid ${nodeColor}44"></span>
         </div>
         <div class="device-name empty"></div>
         <div class="device-meta empty"></div>
@@ -1577,13 +1576,15 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
       nameEl.textContent = '';
       nameEl.className = 'device-name empty';
     }
-    // Meta: protocol badges + OUI vendor · connection type
+    // Meta: protocol badges + node badge + OUI vendor · connection type
     const metaEl = card.querySelector('.device-meta');
     const metaParts = [c.vendor, typeLabel(c.type)].filter(Boolean);
     let badgeHtml = '<span class="proto-badge proto-v4">IPv4</span>';
     if (c.ipv6Addrs && c.ipv6Addrs.length > 0) {
       badgeHtml += '<span class="proto-badge proto-v6-grey">IPv6</span>';
     }
+    const nodeBadgeText = papNode?.model?.replace(/RT-BE/,'') || 'Main';
+    badgeHtml += `<span class="node-badge" style="background:${nodeColor}22;color:${nodeColor};border:1px solid ${nodeColor}44">${nodeBadgeText}</span>`;
     const metaText = metaParts.length ? ' ' + metaParts.join(' · ') : '';
     metaEl.innerHTML = badgeHtml + metaText;
     metaEl.className = 'device-meta';
@@ -1600,9 +1601,6 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
       resolvedEl.textContent = '';
       resolvedEl.className = 'device-resolved empty';
     }
-    card.querySelector('.node-badge').textContent = papNode?.model?.replace(/RT-BE/,'') || 'Main';
-    card.querySelector('.node-badge').style.background = nodeColor + '22';
-    card.querySelector('.node-badge').style.color = nodeColor;
     card.querySelector('.rx-val').textContent = fmtBytes(c.rxRate);
     card.querySelector('.tx-val').textContent = fmtBytes(c.txRate);
     const rxPct = Math.min(100, (c.rxRate / maxRate) * 100);
