@@ -2521,7 +2521,8 @@ document.getElementById('backup-upload-input').addEventListener('change', async 
 });
 
 // Load backup list when backup tab is opened
-document.querySelector('[data-tab="backup"]').addEventListener('click', () => loadBackupList());
+const backupTabBtn = document.querySelector('[data-tab="backup"]');
+if (backupTabBtn) backupTabBtn.addEventListener('click', () => loadBackupList());
 
 socket.on('auth-required', () => {
   document.getElementById('disconnected-banner').style.display = 'block';
@@ -2699,7 +2700,7 @@ let mapMode = false;
 let currentMapK = 1;
 let mapParticles = [];
 let mapAnimId = null;
-let homeCountry = 'JP'; // configurable
+var homeCountry = 'JP'; // configurable
 
 // Per-country: capital / centre coordinates
 const COUNTRY_COORDS = {
