@@ -232,7 +232,9 @@
   .log-table tr.threat-row { background: rgba(239,68,68,0.08); }
   .log-table tr.threat-row:hover { background: rgba(239,68,68,0.14); }
   .log-threat-icon { color: #ef4444; font-weight: bold; }
-  .log-threat-tag { font-size: 9px; color: #ef4444; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+  .log-threat-tag { font-size: 9px; color: #ef4444; max-width: 200px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; cursor: default; }
+  .log-badge-danger { display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 700; background: #ef444433; color: #ef4444; border: 1px solid #ef444455; margin-right: 4px; }
+  .log-badge-safe { display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 600; background: #22c55e22; color: #4ade80; border: 1px solid #22c55e44; }
   .log-sort-icon { cursor: pointer; opacity: 0.4; font-size: 10px; margin-left: 2px; }
   .log-sort-icon:hover { opacity: 1; }
   .log-sort-icon.asc::after { content: ' ↑'; }
@@ -754,7 +756,7 @@
   <!-- Connection Log View -->
   <div id="log-container" style="display:none">
     <div class="log-header">
-      <span class="log-title">📋 通信ログ</span>
+      <span class="log-title" data-i18n="log.title">📋 通信ログ</span>
       <span id="log-threat-count" class="log-threat-badge" style="display:none"></span>
       <span id="log-count" style="color:var(--muted);font-size:11px;margin-left:8px;"></span>
     </div>
@@ -762,15 +764,15 @@
       <table class="log-table" id="log-table">
         <thead>
           <tr>
-            <th data-col="threat">脅威 <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="threat">🔍</span></th>
-            <th data-col="src">送信元 <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="src">🔍</span></th>
-            <th data-col="threatTag">脅威詳細 <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="threatTag">🔍</span></th>
-            <th data-col="dst">宛先 <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="dst">🔍</span></th>
-            <th data-col="dport">ポート <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="dport">🔍</span></th>
-            <th data-col="proto">Proto <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="proto">🔍</span></th>
-            <th data-col="country">国 <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="country">🔍</span></th>
-            <th data-col="org">組織 <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="org">🔍</span></th>
-            <th data-col="lastSeen">最終通信 <span class="log-sort-icon">⇅</span></th>
+            <th data-col="threat"><span data-i18n="log.col.threat">脅威</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="threat">🔍</span></th>
+            <th data-col="src"><span data-i18n="log.col.src">送信元</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="src">🔍</span></th>
+            <th data-col="threatTag"><span data-i18n="log.col.threatTag">脅威詳細</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="threatTag">🔍</span></th>
+            <th data-col="dst"><span data-i18n="log.col.dst">宛先</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="dst">🔍</span></th>
+            <th data-col="dport"><span data-i18n="log.col.dport">ポート</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="dport">🔍</span></th>
+            <th data-col="proto"><span data-i18n="log.col.proto">Proto</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="proto">🔍</span></th>
+            <th data-col="country"><span data-i18n="log.col.country">国</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="country">🔍</span></th>
+            <th data-col="org"><span data-i18n="log.col.org">組織</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="org">🔍</span></th>
+            <th data-col="lastSeen"><span data-i18n="log.col.lastSeen">最終通信</span> <span class="log-sort-icon">⇅</span></th>
           </tr>
         </thead>
         <tbody id="log-tbody"></tbody>
@@ -779,18 +781,18 @@
     <!-- Search filter popup -->
     <div id="log-search-popup" class="log-search-popup hidden">
       <div class="log-search-popup-inner">
-        <div class="log-search-popup-title" id="log-search-popup-title">フィルター</div>
+        <div class="log-search-popup-title" id="log-search-popup-title" data-i18n="log.filter.title">フィルター</div>
         <select id="log-search-mode">
-          <option value="contains">含む</option>
-          <option value="startsWith">で始まる</option>
-          <option value="endsWith">で終わる</option>
-          <option value="regex">正規表現</option>
+          <option value="contains" data-i18n="log.filter.contains">含む</option>
+          <option value="startsWith" data-i18n="log.filter.startsWith">で始まる</option>
+          <option value="endsWith" data-i18n="log.filter.endsWith">で終わる</option>
+          <option value="regex" data-i18n="log.filter.regex">正規表現</option>
         </select>
-        <input type="text" id="log-search-input" placeholder="検索条件..." autocomplete="off">
+        <input type="text" id="log-search-input" data-i18n-placeholder="log.filter.placeholder" placeholder="検索条件..." autocomplete="off">
         <div class="log-search-popup-actions">
-          <button id="log-search-apply">適用</button>
-          <button id="log-search-clear">クリア</button>
-          <button id="log-search-close">閉じる</button>
+          <button id="log-search-apply" data-i18n="log.filter.apply">適用</button>
+          <button id="log-search-clear" data-i18n="log.filter.clear">クリア</button>
+          <button id="log-search-close" data-i18n="log.filter.close">閉じる</button>
         </div>
       </div>
     </div>
@@ -928,8 +930,19 @@ const I18N = {
     'note.placeholder':'例: リビングのSwitchBot ハブ', 'note.investigate':'🔍 自動調査',
     'note.investigating':'🔍 調査中…', 'note.cancel':'キャンセル', 'note.save':'保存',
     'note.investigate.fail':'調査に失敗しました', 'note.edit.tip':'メモを編集',
-  },
-  en: {
+    // Connection Log
+    'log.title':'📋 通信ログ', 'log.sessions':'セッション',
+    'log.threat.detected':'脅威検出',
+    'log.col.threat':'脅威', 'log.col.src':'送信元', 'log.col.threatTag':'脅威詳細',
+    'log.col.dst':'宛先', 'log.col.dport':'ポート', 'log.col.proto':'Proto',
+    'log.col.country':'国', 'log.col.org':'組織', 'log.col.lastSeen':'最終通信',
+    'log.filter.title':'フィルター',
+    'log.filter.contains':'含む', 'log.filter.startsWith':'で始まる',
+    'log.filter.endsWith':'で終わる', 'log.filter.regex':'正規表現',
+    'log.filter.placeholder':'検索条件...',
+    'log.filter.apply':'適用', 'log.filter.clear':'クリア', 'log.filter.close':'閉じる',
+    'log.badge.safe':'未検出', 'log.badge.danger':'要注意',
+  },  en: {
     'tab.graph': '📊 Graph Map', 'tab.map': '🗺 World Map', 'tab.stats': '📈 Statistics', 'tab.log': '📋 Conn Log',
     'period': 'Period', 'devices': 'Devices', 'wan.rx': 'WAN ↓', 'wan.tx': 'WAN ↑',
     'settings.title': '⚙ Settings',
@@ -990,6 +1003,18 @@ const I18N = {
     'note.placeholder':'e.g. Living room SwitchBot hub', 'note.investigate':'🔍 Investigate',
     'note.investigating':'🔍 Investigating…', 'note.cancel':'Cancel', 'note.save':'Save',
     'note.investigate.fail':'Investigation failed', 'note.edit.tip':'Edit note',
+    // Connection Log
+    'log.title':'📋 Connection Log', 'log.sessions':'sessions',
+    'log.threat.detected':'threats detected',
+    'log.col.threat':'Threat', 'log.col.src':'Source', 'log.col.threatTag':'Threat Detail',
+    'log.col.dst':'Destination', 'log.col.dport':'Port', 'log.col.proto':'Proto',
+    'log.col.country':'Country', 'log.col.org':'Organization', 'log.col.lastSeen':'Last Seen',
+    'log.filter.title':'Filter',
+    'log.filter.contains':'Contains', 'log.filter.startsWith':'Starts with',
+    'log.filter.endsWith':'Ends with', 'log.filter.regex':'Regex',
+    'log.filter.placeholder':'Search...',
+    'log.filter.apply':'Apply', 'log.filter.clear':'Clear', 'log.filter.close':'Close',
+    'log.badge.safe':'Clear', 'log.badge.danger':'Alert',
   },
 };
 function t(key) { return (I18N[currentLang] && I18N[currentLang][key]) || I18N.ja[key] || key; }
@@ -3015,10 +3040,10 @@ function updateLogView() {
   });
 
   const threatCount = conns.filter(c => c.threat).length;
-  countEl.textContent = `${conns.length} セッション`;
+  countEl.textContent = `${conns.length} ${t('log.sessions')}`;
   if (threatCount > 0) {
     threatCountEl.style.display = 'inline';
-    threatCountEl.textContent = `🚨 ${threatCount} 脅威検出`;
+    threatCountEl.textContent = `🚨 ${threatCount} ${t('log.threat.detected')}`;
   } else {
     threatCountEl.style.display = 'none';
   }
@@ -3039,8 +3064,8 @@ function updateLogView() {
       ? `<td><span class="log-threat-icon">🚨</span></td>`
       : '<td></td>';
     const threatTagCell = isThreat
-      ? `<td><span class="log-threat-tag" title="${esc(c.threat.tag)}">${esc(c.threat.source)} — ${esc(c.threat.tag)}</span></td>`
-      : '<td></td>';
+      ? `<td><span class="log-badge-danger">${esc(t('log.badge.danger'))}</span> <span class="log-threat-tag" title="${esc(c.threat.tag + ' [' + c.threat.matchType + ': ' + c.threat.matchValue + ']')}">${esc(c.threat.tag)}</span></td>`
+      : `<td><span class="log-badge-safe">${esc(t('log.badge.safe'))}</span></td>`;
     const srcLabel = c.srcDnsName || c.srcMdnsName || c.src;
     const dstLabel = c.dstHost && c.dstHost !== c.dst ? c.dstHost : c.dst;
     const flag = (c.country && c.country.length === 2)
@@ -3087,7 +3112,7 @@ document.querySelectorAll('.log-search-icon').forEach(icon => {
     e.stopPropagation();
     const col = icon.dataset.col;
     logSearchTargetCol = col;
-    document.getElementById('log-search-popup-title').textContent = `フィルター: ${icon.parentElement.textContent.trim().split(' ')[0]}`;
+    document.getElementById('log-search-popup-title').textContent = `${t('log.filter.title')}: ${t('log.col.' + col)}`;
     // Restore existing filter
     const existing = logFilters[col];
     logSearchMode.value = existing?.mode || 'contains';
