@@ -736,6 +736,46 @@
           <div style="margin-top:12px;font-size:10px;color:var(--muted);line-height:1.5" id="threat-feed-status"></div>
           <button class="connect-btn" id="threat-save-btn" style="margin-top:16px" data-i18n="settings.btn.save">保存</button>
           <div class="settings-status" id="threat-status"></div>
+
+          <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
+
+          <div class="pane-title" style="cursor:default;font-size:12px;margin-bottom:12px" data-i18n="settings.slack.section">🔔 Slack通知</div>
+          <p style="font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.5" data-i18n="settings.slack.desc">
+            脅威検出時に Slack DM で通知します。Bot Token と通知先ユーザーIDが必要です。
+          </p>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;font-size:11px;cursor:pointer;">
+              <input type="checkbox" id="s-slack-enabled" style="accent-color:var(--accent)">
+              <span data-i18n="settings.slack.enable">Slack通知を有効化</span>
+            </label>
+          </div>
+          <div class="form-group" style="margin-top:10px">
+            <label class="form-label" data-i18n="settings.slack.token">Bot Token</label>
+            <input type="password" id="s-slack-token" class="form-input" placeholder="xoxb-..." autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-i18n="settings.slack.userid">通知先ユーザーID</label>
+            <input type="text" id="s-slack-userid" class="form-input" placeholder="U01XXXXXXX" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-i18n="settings.slack.cooldown">同一宛先の再通知間隔</label>
+            <select id="s-slack-cooldown" class="form-input">
+              <option value="15" data-i18n="settings.slack.cooldown.15m">15分</option>
+              <option value="30" data-i18n="settings.slack.cooldown.30m">30分</option>
+              <option value="60" selected data-i18n="settings.slack.cooldown.1h">1時間</option>
+              <option value="180" data-i18n="settings.slack.cooldown.3h">3時間</option>
+              <option value="360" data-i18n="settings.slack.cooldown.6h">6時間</option>
+            </select>
+          </div>
+          <div style="margin-top:12px">
+            <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener noreferrer"
+               style="font-size:10px;color:var(--accent);text-decoration:none" data-i18n="settings.slack.create">🔗 Slack Appを作成する</a>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="connect-btn" id="slack-save-btn" data-i18n="settings.btn.save">保存</button>
+            <button class="connect-btn" id="slack-test-btn" style="background:transparent;border-color:var(--accent);color:var(--accent)" data-i18n="settings.slack.test">テスト送信</button>
+          </div>
+          <div class="settings-status" id="slack-status"></div>
         </div>
         <!-- Backup / Restore -->
         <div class="settings-pane" id="pane-backup">
@@ -1025,6 +1065,17 @@ const I18N = {
     'settings.backup.upload':'ファイルからリストア',
     'settings.threat.desc':'外部の脅威インテリジェンスフィードからマルウェアC2/配布元IPリストをダウンロードし、NAT セッションと突合します。',
     'settings.threat.feeds':'取得するフィード', 'settings.threat.interval':'更新頻度',
+    'settings.slack.section':'🔔 Slack通知',
+    'settings.slack.desc':'脅威検出時に Slack DM で通知します。Bot Token と通知先ユーザーIDが必要です。',
+    'settings.slack.enable':'Slack通知を有効化',
+    'settings.slack.token':'Bot Token',
+    'settings.slack.userid':'通知先ユーザーID',
+    'settings.slack.cooldown':'同一宛先の再通知間隔',
+    'settings.slack.cooldown.15m':'15分', 'settings.slack.cooldown.30m':'30分',
+    'settings.slack.cooldown.1h':'1時間', 'settings.slack.cooldown.3h':'3時間', 'settings.slack.cooldown.6h':'6時間',
+    'settings.slack.create':'🔗 Slack Appを作成する',
+    'settings.slack.test':'テスト送信', 'settings.slack.test.sending':'送信中…',
+    'settings.slack.test.ok':'✓ テスト送信しました', 'settings.slack.test.fail':'送信失敗: ',
     'settings.threat.30m':'30分ごと', 'settings.threat.1h':'1時間ごと', 'settings.threat.3h':'3時間ごと',
     'settings.threat.6h':'6時間ごと', 'settings.threat.12h':'12時間ごと', 'settings.threat.24h':'24時間ごと',
     'threat.detail.title':'🚨 脅威検出 詳細',
@@ -1133,6 +1184,17 @@ const I18N = {
     'settings.backup.upload':'Restore from file',
     'settings.threat.desc':'Download malware C2/distribution IP lists from external threat intelligence feeds and match against NAT sessions.',
     'settings.threat.feeds':'Feeds to fetch', 'settings.threat.interval':'Update frequency',
+    'settings.slack.section':'🔔 Slack Notifications',
+    'settings.slack.desc':'Receive a Slack DM when a threat is detected. Requires a Bot Token and your Slack User ID.',
+    'settings.slack.enable':'Enable Slack notifications',
+    'settings.slack.token':'Bot Token',
+    'settings.slack.userid':'Notify User ID',
+    'settings.slack.cooldown':'Re-notify interval (same destination)',
+    'settings.slack.cooldown.15m':'15 min', 'settings.slack.cooldown.30m':'30 min',
+    'settings.slack.cooldown.1h':'1 hour', 'settings.slack.cooldown.3h':'3 hours', 'settings.slack.cooldown.6h':'6 hours',
+    'settings.slack.create':'🔗 Create a Slack App',
+    'settings.slack.test':'Send test', 'settings.slack.test.sending':'Sending…',
+    'settings.slack.test.ok':'✓ Test message sent', 'settings.slack.test.fail':'Send failed: ',
     'settings.threat.30m':'Every 30 min', 'settings.threat.1h':'Every hour', 'settings.threat.3h':'Every 3 hours',
     'settings.threat.6h':'Every 6 hours', 'settings.threat.12h':'Every 12 hours', 'settings.threat.24h':'Every 24 hours',
     'threat.detail.title':'🚨 Threat Detection Detail',
@@ -2426,6 +2488,52 @@ document.getElementById('threat-save-btn').addEventListener('click', () => {
   localStorage.setItem('widemap_threat_config', JSON.stringify(config));
   showStatus('threat-status', t('settings.status.saved'), true);
 });
+
+// ─── Slack notification settings UI ──────────────────────────────────────────
+document.getElementById('slack-save-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('slack-save-btn');
+  btn.disabled = true; btn.textContent = t('settings.btn.saving');
+  try {
+    const token = document.getElementById('s-slack-token').value.trim();
+    await apiFetch('__BASE__/api/config/slack', {
+      method: 'POST',
+      body: JSON.stringify({
+        enabled: document.getElementById('s-slack-enabled').checked,
+        token: token || undefined,
+        userId: document.getElementById('s-slack-userid').value.trim(),
+        cooldownMinutes: parseInt(document.getElementById('s-slack-cooldown').value),
+      }),
+    });
+    if (token) document.getElementById('s-slack-token').value = '';
+    showStatus('slack-status', t('settings.status.saved'), true);
+  } catch (e) {
+    showStatus('slack-status', t('err.serverGeneric') + e.message, false);
+  } finally {
+    btn.disabled = false; btn.textContent = t('settings.btn.save');
+  }
+});
+
+document.getElementById('slack-test-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('slack-test-btn');
+  btn.disabled = true; btn.textContent = t('settings.slack.test.sending');
+  try {
+    await apiFetch('__BASE__/api/slack/test', { method: 'POST', body: '{}' });
+    showStatus('slack-status', t('settings.slack.test.ok'), true);
+  } catch (e) {
+    showStatus('slack-status', t('settings.slack.test.fail') + e.message, false);
+  } finally {
+    btn.disabled = false; btn.textContent = t('settings.slack.test');
+  }
+});
+
+(function loadSlackSettings() {
+  apiFetch('__BASE__/api/config/slack').then(data => {
+    if (!data) return;
+    document.getElementById('s-slack-enabled').checked = !!data.config?.enabled;
+    if (data.config?.userId) document.getElementById('s-slack-userid').value = data.config.userId;
+    if (data.config?.cooldownMinutes) document.getElementById('s-slack-cooldown').value = String(data.config.cooldownMinutes);
+  }).catch(() => {});
+})();
 
 // Load threat settings from localStorage on init
 (function loadThreatSettings() {
