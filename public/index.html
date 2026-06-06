@@ -3063,13 +3063,8 @@ function updateLogView() {
   const threatCount = conns.filter(c => c.threat).length;
   countEl.textContent = `${conns.length} ${t('log.sessions')}`;
   const safeCount = conns.length - threatCount;
-  if (threatCount > 0) {
-    threatCountEl.style.display = 'inline';
-    threatCountEl.innerHTML = `<span class="log-badge-safe">${t('log.badge.safe')}: ${safeCount}</span> <span class="log-badge-danger">${t('log.badge.danger')}: ${threatCount}</span>`;
-  } else {
-    threatCountEl.style.display = 'inline';
-    threatCountEl.innerHTML = `<span class="log-badge-safe">${t('log.badge.safe')}: ${safeCount}</span>`;
-  }
+  threatCountEl.style.display = 'inline';
+  threatCountEl.innerHTML = `<span class="log-badge-safe">${t('log.badge.safe')}: ${safeCount}</span> <span class="log-badge-danger">${t('log.badge.danger')}: ${threatCount}</span>`;
 
   // Update sort icon state
   document.querySelectorAll('#log-table th').forEach(th => {
