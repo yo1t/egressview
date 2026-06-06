@@ -570,6 +570,10 @@
           <span class="tab-badge">🛡️</span>
           <span class="tab-name" data-i18n="settings.tab.threat">脅威検出</span>
         </button>
+        <button class="settings-tab" data-tab="backup">
+          <span class="tab-badge">💾</span>
+          <span class="tab-name" data-i18n="settings.tab.backup">バックアップ</span>
+        </button>
       </nav>
       <!-- Right: content -->
       <div class="settings-panes">
@@ -728,6 +732,42 @@
           <div style="margin-top:12px;font-size:10px;color:var(--muted);line-height:1.5" id="threat-feed-status"></div>
           <button class="connect-btn" id="threat-save-btn" style="margin-top:16px" data-i18n="settings.btn.save">保存</button>
           <div class="settings-status" id="threat-status"></div>
+        </div>
+        <!-- Backup / Restore -->
+        <div class="settings-pane" id="pane-backup">
+          <div class="pane-title" style="cursor:default" data-i18n="settings.section.backup">💾 バックアップ・リストア</div>
+          <div class="form-group">
+            <label class="form-label" data-i18n="settings.backup.interval">バックアップ頻度</label>
+            <select id="s-backup-interval" class="form-input">
+              <option value="6">6時間ごと</option>
+              <option value="12">12時間ごと</option>
+              <option value="24" selected>24時間ごと（毎日）</option>
+              <option value="168">1週間ごと</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-top:8px">
+            <label class="form-label" data-i18n="settings.backup.generations">保持世代数</label>
+            <select id="s-backup-generations" class="form-input">
+              <option value="3">3世代</option>
+              <option value="5">5世代</option>
+              <option value="7" selected>7世代</option>
+              <option value="10">10世代</option>
+              <option value="14">14世代</option>
+            </select>
+          </div>
+          <button class="connect-btn" id="backup-config-save" style="margin-top:12px" data-i18n="settings.btn.save">保存</button>
+          <div class="settings-status" id="backup-config-status"></div>
+          <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px;">
+            <label class="form-label" data-i18n="settings.backup.list">バックアップ一覧</label>
+            <div id="backup-list" style="font-size:11px;color:var(--muted);margin:8px 0;max-height:150px;overflow-y:auto;"></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+              <button class="connect-btn" id="backup-create-btn" data-i18n="settings.backup.create">今すぐバックアップ</button>
+              <label class="connect-btn" style="cursor:pointer;" data-i18n="settings.backup.upload">ファイルからリストア
+                <input type="file" id="backup-upload-input" accept=".db" style="display:none">
+              </label>
+            </div>
+            <div class="settings-status" id="backup-action-status"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -973,6 +1013,10 @@ const I18N = {
     'settings.section.l3l4':'Yamaha RTX (SSH)', 'settings.section.l2':'ASUS WiFi AP',
     'settings.section.general':'一般設定',
     'settings.tab.threat':'脅威検出', 'settings.section.threat':'🛡️ 脅威検出設定',
+    'settings.tab.backup':'バックアップ', 'settings.section.backup':'💾 バックアップ・リストア',
+    'settings.backup.interval':'バックアップ頻度', 'settings.backup.generations':'保持世代数',
+    'settings.backup.list':'バックアップ一覧', 'settings.backup.create':'今すぐバックアップ',
+    'settings.backup.upload':'ファイルからリストア',
     'settings.threat.desc':'外部の脅威インテリジェンスフィードからマルウェアC2/配布元IPリストをダウンロードし、NAT セッションと突合します。',
     'settings.threat.feeds':'取得するフィード', 'settings.threat.interval':'更新頻度',
     'threat.detail.title':'🚨 脅威検出 詳細',
@@ -1070,6 +1114,10 @@ const I18N = {
     'settings.section.l3l4':'Yamaha RTX (SSH)', 'settings.section.l2':'ASUS WiFi AP',
     'settings.section.general':'General Settings',
     'settings.tab.threat':'Threat Intel', 'settings.section.threat':'🛡️ Threat Detection Settings',
+    'settings.tab.backup':'Backup', 'settings.section.backup':'💾 Backup & Restore',
+    'settings.backup.interval':'Backup frequency', 'settings.backup.generations':'Generations to keep',
+    'settings.backup.list':'Backup list', 'settings.backup.create':'Backup now',
+    'settings.backup.upload':'Restore from file',
     'settings.threat.desc':'Download malware C2/distribution IP lists from external threat intelligence feeds and match against NAT sessions.',
     'settings.threat.feeds':'Feeds to fetch', 'settings.threat.interval':'Update frequency',
     'threat.detail.title':'🚨 Threat Detection Detail',
@@ -2373,6 +2421,107 @@ document.getElementById('threat-save-btn').addEventListener('click', () => {
     if (config.intervalMin) document.getElementById('s-threat-interval').value = String(config.intervalMin);
   } catch {}
 })();
+
+// ─── Backup settings UI ───────────────────────────────────────────────────────
+async function loadBackupList() {
+  try {
+    const r = await apiFetch('__BASE__/api/backup/list');
+    const data = await r.json();
+    const listEl = document.getElementById('backup-list');
+    if (data.config) {
+      document.getElementById('s-backup-interval').value = String(data.config.intervalHours);
+      document.getElementById('s-backup-generations').value = String(data.config.maxGenerations);
+    }
+    if (!data.backups || data.backups.length === 0) {
+      listEl.innerHTML = '<div style="padding:4px;">' + (currentLang === 'ja' ? 'バックアップなし' : 'No backups') + '</div>';
+      return;
+    }
+    listEl.innerHTML = data.backups.reverse().map(b => {
+      const size = (b.size / 1024 / 1024).toFixed(1) + ' MB';
+      const date = new Date(b.created).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US');
+      return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid var(--border);">
+        <span style="flex:1">${date} (${size})</span>
+        <button class="connect-btn" style="font-size:9px;padding:2px 6px;" onclick="backupDownload('${b.name}')">DL</button>
+        <button class="connect-btn" style="font-size:9px;padding:2px 6px;" onclick="backupRestore('${b.name}')">Restore</button>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('backup-list').textContent = 'Error: ' + e.message;
+  }
+}
+
+document.getElementById('backup-config-save').addEventListener('click', async () => {
+  try {
+    await apiFetch('__BASE__/api/backup/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        intervalHours: parseInt(document.getElementById('s-backup-interval').value),
+        maxGenerations: parseInt(document.getElementById('s-backup-generations').value),
+      }),
+    });
+    showStatus('backup-config-status', t('settings.status.saved'), true);
+  } catch (e) {
+    showStatus('backup-config-status', 'Error: ' + e.message, false);
+  }
+});
+
+document.getElementById('backup-create-btn').addEventListener('click', async () => {
+  try {
+    const r = await apiFetch('__BASE__/api/backup/create', { method: 'POST' });
+    const data = await r.json();
+    showStatus('backup-action-status', data.success ? '✓ ' + data.name : 'Failed', data.success);
+    loadBackupList();
+  } catch (e) {
+    showStatus('backup-action-status', 'Error: ' + e.message, false);
+  }
+});
+
+function backupDownload(name) {
+  window.open('__BASE__/api/backup/download/' + encodeURIComponent(name));
+}
+
+async function backupRestore(name) {
+  const msg = currentLang === 'ja'
+    ? `バックアップ "${name}" からリストアします。\n現在のデータは上書きされます（リストア前にバックアップが自動作成されます）。\n\n続行しますか？`
+    : `Restore from "${name}"?\nCurrent data will be overwritten (a safety backup is created first).\n\nContinue?`;
+  if (!confirm(msg)) return;
+  try {
+    const r = await apiFetch('__BASE__/api/backup/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const data = await r.json();
+    showStatus('backup-action-status', data.success ? '✓ Restored. Reload recommended.' : data.error, data.success);
+  } catch (e) {
+    showStatus('backup-action-status', 'Error: ' + e.message, false);
+  }
+}
+
+document.getElementById('backup-upload-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const msg = currentLang === 'ja'
+    ? `ファイル "${file.name}" からリストアします。\n現在のデータは上書きされます。\n\n続行しますか？`
+    : `Restore from "${file.name}"?\nCurrent data will be overwritten.\n\nContinue?`;
+  if (!confirm(msg)) { e.target.value = ''; return; }
+  try {
+    const buf = await file.arrayBuffer();
+    const r = await apiFetch('__BASE__/api/backup/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: buf,
+    });
+    const data = await r.json();
+    showStatus('backup-action-status', data.success ? '✓ Restored. Reload recommended.' : data.error, data.success);
+    loadBackupList();
+  } catch (err) {
+    showStatus('backup-action-status', 'Error: ' + err.message, false);
+  }
+  e.target.value = '';
+});
+
+// Load backup list when backup tab is opened
+document.querySelector('[data-tab="backup"]').addEventListener('click', () => loadBackupList());
 
 socket.on('auth-required', () => {
   document.getElementById('disconnected-banner').style.display = 'block';
