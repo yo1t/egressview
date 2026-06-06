@@ -548,6 +548,10 @@
           <span class="tab-badge" data-i18n="settings.tab.general">一般</span>
           <span class="tab-name">General</span>
         </button>
+        <button class="settings-tab" data-tab="threat">
+          <span class="tab-badge">🛡️</span>
+          <span class="tab-name" data-i18n="settings.tab.threat">脅威検出</span>
+        </button>
       </nav>
       <!-- Right: content -->
       <div class="settings-panes">
@@ -767,7 +771,6 @@
       <table class="log-table" id="log-table">
         <thead>
           <tr>
-            <th data-col="threat"><span data-i18n="log.col.threat">脅威</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="threat">🔍</span></th>
             <th data-col="src"><span data-i18n="log.col.src">送信元</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="src">🔍</span></th>
             <th data-col="dst"><span data-i18n="log.col.dst">宛先</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="dst">🔍</span></th>
             <th data-col="threatTag"><span data-i18n="log.col.threatTag">脅威詳細</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="threatTag">🔍</span></th>
@@ -2995,7 +2998,6 @@ const logFilters = {}; // col → { mode, value }
 
 function getLogCellValue(c, col) {
   switch (col) {
-    case 'threat': return c.threat ? '1' : '0';
     case 'threatTag': return c.threat ? c.threat.tag : '';
     case 'src': return c.srcDnsName || c.srcMdnsName || c.src;
     case 'dst': return c.dstHost && c.dstHost !== c.dst ? c.dstHost : c.dst;
@@ -3079,9 +3081,6 @@ function updateLogView() {
   const rows = conns.slice(0, 500);
   tbody.innerHTML = rows.map(c => {
     const isThreat = !!c.threat;
-    const threatCell = isThreat
-      ? `<td><span class="log-threat-icon">🚨</span></td>`
-      : '<td></td>';
     const threatTagCell = isThreat
       ? `<td><span class="log-badge-danger">${esc(t('log.badge.danger'))}</span> <span class="log-threat-tag" title="${esc(c.threat.tag + ' [' + c.threat.matchType + ': ' + c.threat.matchValue + ']')}">${esc(c.threat.tag)}</span></td>`
       : `<td><span class="log-badge-safe">${esc(t('log.badge.safe'))}</span></td>`;
@@ -3092,7 +3091,6 @@ function updateLogView() {
       : '';
     const timeStr = c.lastSeen ? new Date(c.lastSeen).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
     return `<tr class="${isThreat ? 'threat-row' : ''}">
-      ${threatCell}
       <td title="${esc(c.src)}">${esc(srcLabel)}</td>
       <td title="${esc(c.dst)}">${esc(dstLabel)}</td>
       ${threatTagCell}
