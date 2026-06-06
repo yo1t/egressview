@@ -233,6 +233,23 @@
   .log-table tr.threat-row:hover { background: rgba(239,68,68,0.14); }
   .log-threat-icon { color: #ef4444; font-weight: bold; }
   .log-threat-tag { font-size: 9px; color: #ef4444; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+  .log-sort-icon { cursor: pointer; opacity: 0.4; font-size: 10px; margin-left: 2px; }
+  .log-sort-icon:hover { opacity: 1; }
+  .log-sort-icon.asc::after { content: ' ↑'; }
+  .log-sort-icon.desc::after { content: ' ↓'; }
+  .log-search-icon { cursor: pointer; opacity: 0.4; font-size: 10px; margin-left: 3px; }
+  .log-search-icon:hover { opacity: 1; }
+  .log-search-icon.active { opacity: 1; color: var(--accent); }
+  .log-search-popup { position: absolute; z-index: 1000; }
+  .log-search-popup.hidden { display: none; }
+  .log-search-popup-inner { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); min-width: 220px; }
+  .log-search-popup-title { font-size: 11px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+  .log-search-popup select, .log-search-popup input { width: 100%; padding: 5px 8px; margin-bottom: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 11px; font-family: inherit; }
+  .log-search-popup input:focus { border-color: var(--accent); outline: none; }
+  .log-search-popup-actions { display: flex; gap: 4px; }
+  .log-search-popup-actions button { flex: 1; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--text); font-size: 10px; cursor: pointer; }
+  .log-search-popup-actions button:hover { border-color: var(--accent); }
+  #log-search-apply { background: var(--accent); color: #fff; border-color: var(--accent); }
   /* Threat indicator in conn-panel */
   .conn-threat { color: #ef4444; font-size: 10px; margin-left: 4px; }
   .stats-chart {
@@ -745,18 +762,37 @@
       <table class="log-table" id="log-table">
         <thead>
           <tr>
-            <th>脅威</th>
-            <th>送信元</th>
-            <th>宛先</th>
-            <th>ポート</th>
-            <th>Proto</th>
-            <th>国</th>
-            <th>組織</th>
-            <th>最終通信</th>
+            <th data-col="threat">脅威 <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="threat">🔍</span></th>
+            <th data-col="src">送信元 <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="src">🔍</span></th>
+            <th data-col="threatTag">脅威詳細 <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="threatTag">🔍</span></th>
+            <th data-col="dst">宛先 <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="dst">🔍</span></th>
+            <th data-col="dport">ポート <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="dport">🔍</span></th>
+            <th data-col="proto">Proto <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="proto">🔍</span></th>
+            <th data-col="country">国 <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="country">🔍</span></th>
+            <th data-col="org">組織 <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="org">🔍</span></th>
+            <th data-col="lastSeen">最終通信 <span class="log-sort-icon">⇅</span></th>
           </tr>
         </thead>
         <tbody id="log-tbody"></tbody>
       </table>
+    </div>
+    <!-- Search filter popup -->
+    <div id="log-search-popup" class="log-search-popup hidden">
+      <div class="log-search-popup-inner">
+        <div class="log-search-popup-title" id="log-search-popup-title">フィルター</div>
+        <select id="log-search-mode">
+          <option value="contains">含む</option>
+          <option value="startsWith">で始まる</option>
+          <option value="endsWith">で終わる</option>
+          <option value="regex">正規表現</option>
+        </select>
+        <input type="text" id="log-search-input" placeholder="検索条件..." autocomplete="off">
+        <div class="log-search-popup-actions">
+          <button id="log-search-apply">適用</button>
+          <button id="log-search-clear">クリア</button>
+          <button id="log-search-close">閉じる</button>
+        </div>
+      </div>
     </div>
   </div>
   <div id="graph-container">
@@ -2918,22 +2954,68 @@ document.getElementById('device-search-input').addEventListener('input', () => {
 });
 
 // ─── Connection Log View ──────────────────────────────────────────────────────
+const logSortState = { col: 'lastSeen', dir: 'desc' };
+const logFilters = {}; // col → { mode, value }
+
+function getLogCellValue(c, col) {
+  switch (col) {
+    case 'threat': return c.threat ? '1' : '0';
+    case 'threatTag': return c.threat ? c.threat.tag : '';
+    case 'src': return c.srcDnsName || c.srcMdnsName || c.src;
+    case 'dst': return c.dstHost && c.dstHost !== c.dst ? c.dstHost : c.dst;
+    case 'dport': return String(c.dport);
+    case 'proto': return c.proto;
+    case 'country': return c.country || '';
+    case 'org': return c.org || '';
+    case 'lastSeen': return String(c.lastSeen || 0);
+    default: return '';
+  }
+}
+
+function logMatchFilter(value, filter) {
+  if (!filter || !filter.value) return true;
+  const v = value.toLowerCase();
+  const f = filter.value.toLowerCase();
+  switch (filter.mode) {
+    case 'contains': return v.includes(f);
+    case 'startsWith': return v.startsWith(f);
+    case 'endsWith': return v.endsWith(f);
+    case 'regex':
+      try { return new RegExp(filter.value, 'i').test(value); }
+      catch { return true; }
+    default: return true;
+  }
+}
+
 function updateLogView() {
   if (!logMode) return;
   const tbody = document.getElementById('log-tbody');
   const countEl = document.getElementById('log-count');
   const threatCountEl = document.getElementById('log-threat-count');
 
-  const conns = getFilteredConnections();
-  // Sort: threats first, then by lastSeen desc
-  const sorted = [...conns].sort((a, b) => {
-    if (a.threat && !b.threat) return -1;
-    if (!a.threat && b.threat) return 1;
-    return (b.lastSeen || 0) - (a.lastSeen || 0);
+  let conns = getFilteredConnections();
+
+  // Apply column filters
+  for (const [col, filter] of Object.entries(logFilters)) {
+    if (!filter || !filter.value) continue;
+    conns = conns.filter(c => logMatchFilter(getLogCellValue(c, col), filter));
+  }
+
+  // Sort
+  const { col, dir } = logSortState;
+  conns.sort((a, b) => {
+    let av = getLogCellValue(a, col);
+    let bv = getLogCellValue(b, col);
+    // Numeric sort for port and time
+    if (col === 'dport' || col === 'lastSeen' || col === 'threat') {
+      av = parseFloat(av) || 0; bv = parseFloat(bv) || 0;
+      return dir === 'asc' ? av - bv : bv - av;
+    }
+    return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
   });
 
-  const threatCount = sorted.filter(c => c.threat).length;
-  countEl.textContent = `${sorted.length} セッション`;
+  const threatCount = conns.filter(c => c.threat).length;
+  countEl.textContent = `${conns.length} セッション`;
   if (threatCount > 0) {
     threatCountEl.style.display = 'inline';
     threatCountEl.textContent = `🚨 ${threatCount} 脅威検出`;
@@ -2941,12 +3023,23 @@ function updateLogView() {
     threatCountEl.style.display = 'none';
   }
 
-  // Render max 500 rows for performance
-  const rows = sorted.slice(0, 500);
+  // Update sort icon state
+  document.querySelectorAll('#log-table th').forEach(th => {
+    const icon = th.querySelector('.log-sort-icon');
+    if (!icon) return;
+    const c = th.dataset.col;
+    icon.className = 'log-sort-icon' + (c === col ? ` ${dir}` : '');
+  });
+
+  // Render max 500 rows
+  const rows = conns.slice(0, 500);
   tbody.innerHTML = rows.map(c => {
     const isThreat = !!c.threat;
     const threatCell = isThreat
-      ? `<td><span class="log-threat-icon">🚨</span><br><span class="log-threat-tag" title="${esc(c.threat.tag)}">${esc(c.threat.source)}</span></td>`
+      ? `<td><span class="log-threat-icon">🚨</span></td>`
+      : '<td></td>';
+    const threatTagCell = isThreat
+      ? `<td><span class="log-threat-tag" title="${esc(c.threat.tag)}">${esc(c.threat.source)} — ${esc(c.threat.tag)}</span></td>`
       : '<td></td>';
     const srcLabel = c.srcDnsName || c.srcMdnsName || c.src;
     const dstLabel = c.dstHost && c.dstHost !== c.dst ? c.dstHost : c.dst;
@@ -2957,6 +3050,7 @@ function updateLogView() {
     return `<tr class="${isThreat ? 'threat-row' : ''}">
       ${threatCell}
       <td title="${esc(c.src)}">${esc(srcLabel)}</td>
+      ${threatTagCell}
       <td title="${esc(c.dst)}">${esc(dstLabel)}</td>
       <td>${c.dport}</td>
       <td>${esc(c.proto)}</td>
@@ -2966,6 +3060,86 @@ function updateLogView() {
     </tr>`;
   }).join('');
 }
+
+// Sort: click on column header
+document.querySelectorAll('#log-table th[data-col]').forEach(th => {
+  th.addEventListener('click', (e) => {
+    if (e.target.classList.contains('log-search-icon')) return; // don't sort when clicking search
+    const col = th.dataset.col;
+    if (logSortState.col === col) {
+      logSortState.dir = logSortState.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      logSortState.col = col;
+      logSortState.dir = 'desc';
+    }
+    updateLogView();
+  });
+});
+
+// Search popup logic
+let logSearchTargetCol = null;
+const logSearchPopup = document.getElementById('log-search-popup');
+const logSearchInput = document.getElementById('log-search-input');
+const logSearchMode  = document.getElementById('log-search-mode');
+
+document.querySelectorAll('.log-search-icon').forEach(icon => {
+  icon.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const col = icon.dataset.col;
+    logSearchTargetCol = col;
+    document.getElementById('log-search-popup-title').textContent = `フィルター: ${icon.parentElement.textContent.trim().split(' ')[0]}`;
+    // Restore existing filter
+    const existing = logFilters[col];
+    logSearchMode.value = existing?.mode || 'contains';
+    logSearchInput.value = existing?.value || '';
+    // Position popup near the icon
+    const rect = icon.getBoundingClientRect();
+    logSearchPopup.style.top = (rect.bottom + 4) + 'px';
+    logSearchPopup.style.left = Math.min(rect.left, window.innerWidth - 240) + 'px';
+    logSearchPopup.classList.remove('hidden');
+    logSearchInput.focus();
+  });
+});
+
+document.getElementById('log-search-apply').addEventListener('click', () => {
+  if (!logSearchTargetCol) return;
+  const val = logSearchInput.value.trim();
+  if (val) {
+    logFilters[logSearchTargetCol] = { mode: logSearchMode.value, value: val };
+    document.querySelector(`.log-search-icon[data-col="${logSearchTargetCol}"]`)?.classList.add('active');
+  } else {
+    delete logFilters[logSearchTargetCol];
+    document.querySelector(`.log-search-icon[data-col="${logSearchTargetCol}"]`)?.classList.remove('active');
+  }
+  logSearchPopup.classList.add('hidden');
+  updateLogView();
+});
+
+document.getElementById('log-search-clear').addEventListener('click', () => {
+  if (!logSearchTargetCol) return;
+  delete logFilters[logSearchTargetCol];
+  document.querySelector(`.log-search-icon[data-col="${logSearchTargetCol}"]`)?.classList.remove('active');
+  logSearchInput.value = '';
+  logSearchPopup.classList.add('hidden');
+  updateLogView();
+});
+
+document.getElementById('log-search-close').addEventListener('click', () => {
+  logSearchPopup.classList.add('hidden');
+});
+
+// Close popup on outside click
+document.addEventListener('click', (e) => {
+  if (!logSearchPopup.contains(e.target) && !e.target.classList.contains('log-search-icon')) {
+    logSearchPopup.classList.add('hidden');
+  }
+});
+
+// Enter key in search input
+logSearchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('log-search-apply').click();
+  if (e.key === 'Escape') logSearchPopup.classList.add('hidden');
+});
 
 // Init
 resize();
