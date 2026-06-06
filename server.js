@@ -12,6 +12,7 @@ const { isAllowedRouterIp, htmlEscape } = require('./src/utils');
 const enrichment = require('./src/enrichment');
 const history = require('./src/history');
 const deviceId = require('./src/device-identify');
+const threatIntel = require('./src/threat-intel');
 const yamaha = require('./src/pollers/yamaha');
 const asus = require('./src/pollers/asus');
 
@@ -269,6 +270,7 @@ async function pollYamahaConnections() {
         lat:     geo?.lat  ?? null,
         lon:     geo?.lon  ?? null,
         city:    geo?.city ?? null,
+        threat:  threatIntel.matchThreatIntel(s.dst, host) || null,
       };
       const key = `${s.src}|${s.dst}|${s.dport}|${s.proto}`;
       const existing = connectionHistory.get(key);
@@ -602,6 +604,9 @@ server.listen(PORT, () => {
   // Periodic snapshot/compaction
   setInterval(() => history.snapshotHistory(), 10 * 60 * 1000);
   setInterval(() => history.compactHistoryLog(), 30 * 60 * 1000);
+  // Threat intel: fetch on startup and every hour
+  threatIntel.fetchThreatIntel();
+  setInterval(() => threatIntel.fetchThreatIntel(), 60 * 60 * 1000);
 });
 
 // Graceful shutdown

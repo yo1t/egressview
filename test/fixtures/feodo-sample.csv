@@ -1,0 +1,5 @@
+# Feodo Tracker Blocklist (sample for testing)
+# First seen,DstIP,DstPort,Last Online,C2 Status
+2024-01-15 10:00:00,185.215.113.43,447,2024-01-15,online
+2024-01-14 08:00:00,91.215.85.142,443,2024-01-14,online
+2024-01-13 12:00:00,45.155.205.233,8080,2024-01-13,offline
