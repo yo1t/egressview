@@ -9,6 +9,8 @@ node_modules/
 .widemap.db
 .widemap.db-wal
 .widemap.db-shm
+.widemap-backups/
+.widemap-upload-temp.db
 .widemap.notes.json
 .oui_cache.txt
 server.log
