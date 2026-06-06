@@ -2683,6 +2683,7 @@ function applyTimeFilter() {
   else            buildGraphFromConnections();
   if (mapMode)    updateMapDots();
   if (statsMode)  updateStats();
+  if (logMode)    updateLogView();
   const selNode = nodes.find(n => n.id === selectedMac);
   updateConnPanel(selNode?.client?.ip || null);
 }
