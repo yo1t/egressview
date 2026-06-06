@@ -611,6 +611,25 @@ app.post('/api/slack/test', requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/slack/verify', requireAdmin, async (req, res) => {
+  const { token } = req.body || {};
+  const result = await notifier.verifyToken(token);
+  res.json(result);
+});
+
+app.post('/api/slack/lookup-user', requireAdmin, async (req, res) => {
+  let { username, token } = req.body || {};
+  // If no token provided, use the stored one
+  if (!token) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+      token = cfg.slack?.token || '';
+    } catch {}
+  }
+  const result = await notifier.lookupUser(username, token);
+  res.json(result);
+});
+
 app.post('/api/backup/config', requireAdmin, (req, res) => {
   const { intervalHours, maxGenerations } = req.body || {};
   if (intervalHours) backup.configure({ intervalHours: Number(intervalHours) });
