@@ -215,6 +215,43 @@ async function fetchNatSessions() {
   return parseNatDetail(raw);
 }
 
+// IPv6 NDP cache: MAC → IPv6 address(es)
+const yamahaNdpCache = new Map(); // mac → [ipv6, ...]
+let yamahaNdpLastRefresh = 0;
+const YAMAHA_NDP_REFRESH_MS = 120 * 1000; // every 2 min
+
+async function refreshYamahaNdp() {
+  if (!yamahaEnabled || !yamahaReady) return;
+  try {
+    const raw = await yamahaExec('show ipv6 neighbor cache');
+    const newMap = new Map();
+    // Parse lines like: "240d:1a:55e:ed00:5de6:a5c8:44fb:a1e5    6c:99:9d:88:88:a0 LAN1  REACHABLE"
+    const re = /([0-9a-fA-F:]{6,45})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\s+LAN1\s+\w+/g;
+    let m;
+    while ((m = re.exec(raw)) !== null) {
+      const ipv6 = m[1];
+      const mac = m[2].toLowerCase();
+      // Skip link-local (fe80::)
+      if (ipv6.startsWith('fe80:')) continue;
+      if (!newMap.has(mac)) newMap.set(mac, []);
+      newMap.get(mac).push(ipv6);
+    }
+    yamahaNdpCache.clear();
+    for (const [k, v] of newMap) yamahaNdpCache.set(k, v);
+    yamahaNdpLastRefresh = Date.now();
+    console.log(`[yamaha-ndp] cache refreshed: ${newMap.size} entries`);
+  } catch (e) {
+    console.error('[yamaha-ndp] refresh failed:', e.message);
+  }
+}
+
+function getNdpByMac(mac) {
+  if (!mac) return null;
+  return yamahaNdpCache.get(mac.toLowerCase()) || null;
+}
+
+function needsNdpRefresh() { return Date.now() - yamahaNdpLastRefresh > YAMAHA_NDP_REFRESH_MS; }
+
 function disconnect() {
   yamahaEnabled = false;
   yamahaReady = false;
@@ -248,9 +285,11 @@ module.exports = {
   yamahaExec,
   parseNatDetail,
   refreshYamahaArp,
+  refreshYamahaNdp,
   fetchNatSessions,
   getArpCache,
   getArpMac,
+  getNdpByMac,
   isReady,
   isEnabled,
   getIp,
@@ -258,4 +297,5 @@ module.exports = {
   hasPass,
   getHostFp,
   needsArpRefresh,
+  needsNdpRefresh,
 };

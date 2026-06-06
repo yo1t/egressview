@@ -246,6 +246,9 @@ async function pollYamahaConnections() {
     if (yamaha.needsArpRefresh()) {
       await yamaha.refreshYamahaArp();
     }
+    if (yamaha.needsNdpRefresh()) {
+      await yamaha.refreshYamahaNdp();
+    }
 
     const connectionHistory = history.getConnectionHistory();
     latestConnections = sessions.map(s => {
@@ -566,6 +569,11 @@ asus.configure({
   onAuthRequired: (msg) => io.emit('auth-required', { message: msg }),
   onPollError: (msg) => io.emit('poll-error', { message: msg }),
   onNetworkUpdate: (data) => {
+    // Attach IPv6 addresses from NDP cache (by MAC)
+    for (const c of data.clients) {
+      const ipv6 = yamaha.getNdpByMac(c.mac);
+      c.ipv6Addrs = ipv6 || null;
+    }
     io.emit('network-update', data);
     if (autoInvestigate) {
       for (const c of data.clients) {
