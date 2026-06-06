@@ -103,4 +103,38 @@ describe('i18n completeness', () => {
     const missing = [...dataKeys].filter(k => !enKeys.has(k));
     assert.equal(missing.length, 0, `data-i18n keys not in en:\n  ${missing.join('\n  ')}`);
   });
+
+  it('all option elements with Japanese text have data-i18n attribute', () => {
+    const optionRe = /<option[^>]*>([^<]+)<\/option>/g;
+    const problems = [];
+    let m;
+    while ((m = optionRe.exec(html)) !== null) {
+      const fullTag = m[0];
+      const text = m[1].trim();
+      // Skip country selector and language selector (intentionally bilingual with flags)
+      if (fullTag.includes('s-home-country') || fullTag.includes('s-language')) continue;
+      if (/^[\u{1F1E0}-\u{1F1FF}]/u.test(text)) continue; // starts with flag emoji
+      if (/[\u3000-\u9FFF\uF900-\uFAFF]/.test(text) && !fullTag.includes('data-i18n')) {
+        problems.push(text.substring(0, 40));
+      }
+    }
+    const unique = [...new Set(problems)];
+    assert.equal(unique.length, 0, `Options with Japanese but no data-i18n:\n  ${unique.join('\n  ')}`);
+  });
+
+  it('all visible text elements with Japanese have data-i18n (labels, buttons, spans)', () => {
+    // Check <label>, <button>, <span>, <div> with class form-label/pane-title that contain Japanese but no data-i18n
+    const tagRe = /<(?:label|button|span|div)[^>]*class="[^"]*(?:form-label|pane-title|log-title)[^"]*"[^>]*>([^<]+)</g;
+    const problems = [];
+    let m;
+    while ((m = tagRe.exec(html)) !== null) {
+      const fullTag = m[0];
+      const text = m[1].trim();
+      if (/[\u3000-\u9FFF\uF900-\uFAFF]/.test(text) && !fullTag.includes('data-i18n')) {
+        problems.push(text.substring(0, 40));
+      }
+    }
+    const unique = [...new Set(problems)];
+    assert.equal(unique.length, 0, `UI elements with Japanese but no data-i18n:\n  ${unique.join('\n  ')}`);
+  });
 });

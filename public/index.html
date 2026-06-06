@@ -682,12 +682,12 @@
           <div class="form-group" style="margin-top:18px">
             <label class="form-label" data-i18n="settings.general.retention">ログ保存期間</label>
             <select id="s-retention" class="form-input">
-              <option value="7">7日</option>
-              <option value="30">30日</option>
-              <option value="90">90日</option>
-              <option value="180">6ヶ月</option>
-              <option value="365">1年</option>
-              <option value="730" selected>2年</option>
+              <option value="7" data-i18n="settings.retention.7d">7日</option>
+              <option value="30" data-i18n="settings.retention.30d">30日</option>
+              <option value="90" data-i18n="settings.retention.90d">90日</option>
+              <option value="180" data-i18n="settings.retention.6m">6ヶ月</option>
+              <option value="365" data-i18n="settings.retention.1y">1年</option>
+              <option value="730" selected data-i18n="settings.retention.2y">2年</option>
             </select>
           </div>
           <button class="connect-btn" id="general-save-btn" style="margin-top:16px" data-i18n="settings.btn.save">保存</button>
@@ -721,12 +721,12 @@
           <div class="form-group" style="margin-top:12px">
             <label class="form-label" data-i18n="settings.threat.interval">更新頻度</label>
             <select id="s-threat-interval" class="form-input">
-              <option value="30">30分ごと</option>
-              <option value="60" selected>1時間ごと</option>
-              <option value="180">3時間ごと</option>
-              <option value="360">6時間ごと</option>
-              <option value="720">12時間ごと</option>
-              <option value="1440">24時間ごと</option>
+              <option value="30" data-i18n="settings.threat.30m">30分ごと</option>
+              <option value="60" selected data-i18n="settings.threat.1h">1時間ごと</option>
+              <option value="180" data-i18n="settings.threat.3h">3時間ごと</option>
+              <option value="360" data-i18n="settings.threat.6h">6時間ごと</option>
+              <option value="720" data-i18n="settings.threat.12h">12時間ごと</option>
+              <option value="1440" data-i18n="settings.threat.24h">24時間ごと</option>
             </select>
           </div>
           <div style="margin-top:12px;font-size:10px;color:var(--muted);line-height:1.5" id="threat-feed-status"></div>
@@ -739,20 +739,20 @@
           <div class="form-group">
             <label class="form-label" data-i18n="settings.backup.interval">バックアップ頻度</label>
             <select id="s-backup-interval" class="form-input">
-              <option value="6">6時間ごと</option>
-              <option value="12">12時間ごと</option>
-              <option value="24" selected>24時間ごと（毎日）</option>
-              <option value="168">1週間ごと</option>
+              <option value="6" data-i18n="settings.backup.6h">6時間ごと</option>
+              <option value="12" data-i18n="settings.backup.12h">12時間ごと</option>
+              <option value="24" selected data-i18n="settings.backup.24h">24時間ごと（毎日）</option>
+              <option value="168" data-i18n="settings.backup.1w">1週間ごと</option>
             </select>
           </div>
           <div class="form-group" style="margin-top:8px">
             <label class="form-label" data-i18n="settings.backup.generations">保持世代数</label>
             <select id="s-backup-generations" class="form-input">
-              <option value="3">3世代</option>
-              <option value="5">5世代</option>
-              <option value="7" selected>7世代</option>
-              <option value="10">10世代</option>
-              <option value="14">14世代</option>
+              <option value="3" data-i18n="settings.backup.gen3">3世代</option>
+              <option value="5" data-i18n="settings.backup.gen5">5世代</option>
+              <option value="7" selected data-i18n="settings.backup.gen7">7世代</option>
+              <option value="10" data-i18n="settings.backup.gen10">10世代</option>
+              <option value="14" data-i18n="settings.backup.gen14">14世代</option>
             </select>
           </div>
           <button class="connect-btn" id="backup-config-save" style="margin-top:12px" data-i18n="settings.btn.save">保存</button>
@@ -1015,10 +1015,14 @@ const I18N = {
     'settings.tab.threat':'脅威検出', 'settings.section.threat':'🛡️ 脅威検出設定',
     'settings.tab.backup':'バックアップ', 'settings.section.backup':'💾 バックアップ・リストア',
     'settings.backup.interval':'バックアップ頻度', 'settings.backup.generations':'保持世代数',
+    'settings.backup.6h':'6時間ごと', 'settings.backup.12h':'12時間ごと', 'settings.backup.24h':'24時間ごと（毎日）', 'settings.backup.1w':'1週間ごと',
+    'settings.backup.gen3':'3世代', 'settings.backup.gen5':'5世代', 'settings.backup.gen7':'7世代', 'settings.backup.gen10':'10世代', 'settings.backup.gen14':'14世代',
     'settings.backup.list':'バックアップ一覧', 'settings.backup.create':'今すぐバックアップ',
     'settings.backup.upload':'ファイルからリストア',
     'settings.threat.desc':'外部の脅威インテリジェンスフィードからマルウェアC2/配布元IPリストをダウンロードし、NAT セッションと突合します。',
     'settings.threat.feeds':'取得するフィード', 'settings.threat.interval':'更新頻度',
+    'settings.threat.30m':'30分ごと', 'settings.threat.1h':'1時間ごと', 'settings.threat.3h':'3時間ごと',
+    'settings.threat.6h':'6時間ごと', 'settings.threat.12h':'12時間ごと', 'settings.threat.24h':'24時間ごと',
     'threat.detail.title':'🚨 脅威検出 詳細',
     'threat.confidence.low':'Low — 正規サービス上のマルウェア配布報告',
     'threat.confidence.high':'High — 既知の悪意あるホスト',
@@ -1046,6 +1050,8 @@ const I18N = {
     'settings.general.auto':'不明ノードを自動調査',
     'settings.general.auto.note':'メモが未記入のノードに対してバックグラウンドで ARP / mDNS / ポート調査を行い、メモを自動生成します（既存メモは上書きしません / 24時間以内に調査済みの IP は再調査しません）。',
     'settings.general.retention':'ログ保存期間',
+    'settings.retention.7d':'7日', 'settings.retention.30d':'30日', 'settings.retention.90d':'90日',
+    'settings.retention.6m':'6ヶ月', 'settings.retention.1y':'1年', 'settings.retention.2y':'2年',
     // Conn badge
     'badge.unused':'未使用', 'badge.ready':'接続中', 'badge.timeout':'セッション切れ',
     'badge.error':'失敗', 'badge.waiting':'接続中…',
@@ -1116,10 +1122,14 @@ const I18N = {
     'settings.tab.threat':'Threat Intel', 'settings.section.threat':'🛡️ Threat Detection Settings',
     'settings.tab.backup':'Backup', 'settings.section.backup':'💾 Backup & Restore',
     'settings.backup.interval':'Backup frequency', 'settings.backup.generations':'Generations to keep',
+    'settings.backup.6h':'Every 6 hours', 'settings.backup.12h':'Every 12 hours', 'settings.backup.24h':'Every 24 hours (daily)', 'settings.backup.1w':'Every week',
+    'settings.backup.gen3':'3 generations', 'settings.backup.gen5':'5 generations', 'settings.backup.gen7':'7 generations', 'settings.backup.gen10':'10 generations', 'settings.backup.gen14':'14 generations',
     'settings.backup.list':'Backup list', 'settings.backup.create':'Backup now',
     'settings.backup.upload':'Restore from file',
     'settings.threat.desc':'Download malware C2/distribution IP lists from external threat intelligence feeds and match against NAT sessions.',
     'settings.threat.feeds':'Feeds to fetch', 'settings.threat.interval':'Update frequency',
+    'settings.threat.30m':'Every 30 min', 'settings.threat.1h':'Every hour', 'settings.threat.3h':'Every 3 hours',
+    'settings.threat.6h':'Every 6 hours', 'settings.threat.12h':'Every 12 hours', 'settings.threat.24h':'Every 24 hours',
     'threat.detail.title':'🚨 Threat Detection Detail',
     'threat.confidence.low':'Low — Malware reported on legitimate service',
     'threat.confidence.high':'High — Known malicious host',
@@ -1147,6 +1157,8 @@ const I18N = {
     'settings.general.auto':'Auto-investigate unknown nodes',
     'settings.general.auto.note':'For nodes without a saved note, run ARP / mDNS / port scan in the background and auto-generate notes (existing notes are not overwritten / each IP is re-scanned at most once per 24h).',
     'settings.general.retention':'Log retention period',
+    'settings.retention.7d':'7 days', 'settings.retention.30d':'30 days', 'settings.retention.90d':'90 days',
+    'settings.retention.6m':'6 months', 'settings.retention.1y':'1 year', 'settings.retention.2y':'2 years',
     'badge.unused':'Unused', 'badge.ready':'Connected', 'badge.timeout':'Session expired',
     'badge.error':'Failed', 'badge.waiting':'Connecting…',
     'stats.title.timeline':'Sessions per destination (over time)',
