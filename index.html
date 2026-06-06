@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Widemap — Real-time Network Connection Visualizer</title>
-  <meta name="description" content="Where Is Data Exiting? Map All Paths. Real-time visualisation of LAN devices and their internet destinations on a world map. Supports Yamaha RTX routers and ASUS WiFi access points.">
-  <meta name="keywords" content="network monitor, network visualizer, Yamaha RTX, ASUS router, NAT session, real-time map, connection map, home network, LAN monitor, open source">
+  <title>Widemap — Home / SOHO Network Security Monitor</title>
+  <meta name="description" content="Where Is Data Exiting? Map All Paths. Passively monitor every LAN device's outbound connections on a real-time world map. Automatic C2/botnet threat detection, Slack alerts. Works with Yamaha RTX routers — no new hardware required.">
+  <meta name="keywords" content="network security monitor, IoT security, home network security, SOHO security, Yamaha RTX, network visualizer, C2 detection, botnet detection, threat intelligence, LAN monitor, open source">
   <meta name="author" content="Yoichi Takizawa">
   <link rel="canonical" href="https://yo1t.github.io/widemap/">
-  <meta property="og:title" content="Widemap — Real-time Network Connection Visualizer">
-  <meta property="og:description" content="See where every device on your network is connecting to — in real time, on a world map.">
+  <meta property="og:title" content="Widemap — Home / SOHO Network Security Monitor">
+  <meta property="og:description" content="Passively monitor every LAN device's outbound connections on a real-time world map. Automatic C2/botnet threat detection and Slack alerts — no new hardware required.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://yo1t.github.io/widemap/">
   <meta property="og:image" content="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Widemap — Real-time Network Connection Visualizer">
-  <meta name="twitter:description" content="See where every device on your network is connecting to — in real time, on a world map.">
+  <meta name="twitter:title" content="Widemap — Home / SOHO Network Security Monitor">
+  <meta name="twitter:description" content="Passively monitor every LAN device's outbound connections on a real-time world map. Automatic C2/botnet threat detection and Slack alerts — no new hardware required.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png">
   <style>
     :root {
@@ -192,7 +192,7 @@
 
 <header>
   <h1><span>Widemap</span></h1>
-  <p>Where Is Data Exiting? Map All Paths. — Real-time visualisation of LAN devices and their internet destinations on a world map.</p>
+  <p>Where Is Data Exiting? Map All Paths. — Know what every device on your home or SOHO network is actually connecting to. Real-time world map, automatic threat detection, instant Slack alerts.</p>
   <div class="badges">
     <a href="https://opensource.org/licenses/AGPL-3.0"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
     <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node.js 18+"></a>
@@ -214,6 +214,38 @@
 </header>
 
 <main>
+
+  <!-- Why Widemap -->
+  <section id="why">
+    <h2><span class="icon">🔒</span> For Home / SOHO Security</h2>
+    <p style="font-size:0.95rem; color:var(--muted); margin-bottom:20px;">Modern home and SOHO networks run 20–40 devices — smart TVs, IP cameras, NAS drives, Wi-Fi speakers, IoT appliances, and more. Many of these devices have minimal security hygiene and unknown outbound behaviors. Any of them can be silently compromised.</p>
+    <div class="card-grid">
+      <div class="card">
+        <h3>Passive, Zero-Impact</h3>
+        <p>Reads the router's NAT session table over SSH — no inline traffic interception, no throughput penalty, no latency added to your network.</p>
+      </div>
+      <div class="card">
+        <h3>Per-Device Visibility</h3>
+        <p>See exactly which IoT device or PC made which outbound connection. Device identity resolved via OUI, mDNS, SSDP, NetBIOS, and Apple model dictionary.</p>
+      </div>
+      <div class="card">
+        <h3>Automatic Threat Detection</h3>
+        <p>Every connection checked in real time against Feodo Tracker, ThreatFox, URLhaus, and Spamhaus DROP. Flags C2 servers, botnets, and malware distribution hosts.</p>
+      </div>
+      <div class="card">
+        <h3>Instant Alerts</h3>
+        <p>Slack DM the moment any device on your network connects to a known threat. Configurable cooldown per destination — no notification spam.</p>
+      </div>
+      <div class="card">
+        <h3>No Hardware Changes</h3>
+        <p>Works with your existing Yamaha RTX router. Install on any Mac, PC, or Raspberry Pi on your LAN — nothing inline, nothing between your router and the internet.</p>
+      </div>
+      <div class="card">
+        <h3>Fully Local &amp; Private</h3>
+        <p>All processing runs on your machine. No traffic data is sent to the cloud. Enrichment lookups (GeoIP, RDAP, reverse DNS) use only destination IPs.</p>
+      </div>
+    </div>
+  </section>
 
   <!-- Features -->
   <section id="features">
@@ -246,6 +278,10 @@
       <div class="card">
         <h3>🛡️ Threat Detection</h3>
         <p>Matches all connections against Feodo Tracker, ThreatFox, URLhaus, and Spamhaus DROP. Three confidence levels with actionable guidance.</p>
+      </div>
+      <div class="card">
+        <h3>🔔 Slack Notifications</h3>
+        <p>Instant Slack DM when a threat is detected. Configurable cooldown per destination. Message language follows the UI language setting.</p>
       </div>
       <div class="card">
         <h3>📋 Connection Log</h3>

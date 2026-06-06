@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Widemap — リアルタイムネットワーク接続可視化ツール</title>
-  <meta name="description" content="Where Is Data Exiting? Map All Paths. LANデバイスのインターネット接続先をリアルタイムに世界地図上で可視化。Yamaha RTXルーター＋ASUS WiFiアクセスポイント対応。">
-  <meta name="keywords" content="ネットワーク監視, ネットワーク可視化, Yamaha RTX, ASUS ルーター, NATセッション, リアルタイム地図, 接続マップ, ホームネットワーク, LAN監視, オープンソース">
+  <title>Widemap — 家庭・SOHO向けネットワークセキュリティモニター</title>
+  <meta name="description" content="Where Is Data Exiting? Map All Paths. LAN内の全デバイスの通信先をリアルタイムに世界地図上で可視化。C2/ボットネット自動検出、Slackアラート対応。Yamaha RTXルーター専用 — 追加ハードウェア不要。">
+  <meta name="keywords" content="ネットワークセキュリティ, IoTセキュリティ, ホームネットワークセキュリティ, SOHO, Yamaha RTX, ネットワーク可視化, C2検出, ボットネット検出, 脅威インテリジェンス, LAN監視, オープンソース">
   <meta name="author" content="Yoichi Takizawa">
   <link rel="canonical" href="https://yo1t.github.io/widemap/index.ja.html">
-  <meta property="og:title" content="Widemap — リアルタイムネットワーク接続可視化ツール">
-  <meta property="og:description" content="ネットワーク上の全デバイスが「どこと通信しているか」をリアルタイムに世界地図上で表示します。">
+  <meta property="og:title" content="Widemap — 家庭・SOHO向けネットワークセキュリティモニター">
+  <meta property="og:description" content="LAN内の全デバイスの通信先をリアルタイムに世界地図上で可視化。C2/ボットネット自動検出、Slackアラート対応。追加ハードウェア不要。">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://yo1t.github.io/widemap/index.ja.html">
   <meta property="og:image" content="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Widemap — リアルタイムネットワーク接続可視化ツール">
-  <meta name="twitter:description" content="ネットワーク上の全デバイスが「どこと通信しているか」をリアルタイムに世界地図上で表示します。">
+  <meta name="twitter:title" content="Widemap — 家庭・SOHO向けネットワークセキュリティモニター">
+  <meta name="twitter:description" content="LAN内の全デバイスの通信先をリアルタイムに世界地図上で可視化。C2/ボットネット自動検出、Slackアラート対応。追加ハードウェア不要。">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png">
   <style>
     :root {
@@ -192,7 +192,7 @@
 
 <header>
   <h1><span>Widemap</span></h1>
-  <p>Where Is Data Exiting? Map All Paths. — LANデバイスのインターネット接続先をリアルタイムに世界地図上で可視化するツール。</p>
+  <p>Where Is Data Exiting? Map All Paths. — 家庭・SOHOのLAN内デバイスが「何と通信しているか」をリアルタイムに可視化。自動脅威検出とSlackアラート対応。追加ハードウェア不要。</p>
   <div class="badges">
     <a href="https://opensource.org/licenses/AGPL-3.0"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
     <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node.js 18+"></a>
@@ -214,6 +214,38 @@
 </header>
 
 <main>
+
+  <!-- 家庭・SOHOセキュリティ -->
+  <section id="why">
+    <h2><span class="icon">🔒</span> 家庭・SOHOのセキュリティ対策として</h2>
+    <p style="font-size:0.95rem; color:var(--muted); margin-bottom:20px;">現代の家庭・SOHOネットワークには、スマートTV・IPカメラ・NAS・Wi-Fiスピーカー・IoT機器など20〜40台以上が接続されています。これらの多くはファームウェア更新が不定期で、どこに通信しているか把握されていません。一度侵害されると、C2サーバーへのデータ流出やボットネット加担が静かに進みます。</p>
+    <div class="card-grid">
+      <div class="card">
+        <h3>パッシブ・ゼロインパクト</h3>
+        <p>ルーターのNATセッションテーブルをSSHで読み取るだけ。通信の中継・傍受なし、スループット低下なし、レイテンシ追加なし。</p>
+      </div>
+      <div class="card">
+        <h3>デバイス単位の可視性</h3>
+        <p>どのIoT機器・PCがどこに通信しているかを把握。OUI・mDNS・SSDP・NetBIOS・Appleモデル辞書でデバイスを自動識別。</p>
+      </div>
+      <div class="card">
+        <h3>自動脅威検出</h3>
+        <p>Feodo Tracker・ThreatFox・URLhaus・Spamhaus DROPとリアルタイムに全接続を照合。C2サーバー・ボットネット・マルウェア配布元を検出。</p>
+      </div>
+      <div class="card">
+        <h3>即時アラート</h3>
+        <p>LAN内の任意のデバイスが既知の脅威に接続した瞬間にSlack DM通知。宛先ごとのクールダウン設定で通知スパムを防止。</p>
+      </div>
+      <div class="card">
+        <h3>ハードウェア変更不要</h3>
+        <p>既存のYamaha RTXルーターと共存。Mac・PC・Raspberry Piにインストールするだけ。通信経路の変更なし。</p>
+      </div>
+      <div class="card">
+        <h3>完全ローカル・プライバシー重視</h3>
+        <p>全処理はローカルで完結。通信データをクラウドに送信しません。エンリッチメント（GeoIP・RDAP・逆引DNS）は接続先IPのみ使用。</p>
+      </div>
+    </div>
+  </section>
 
   <!-- 機能 -->
   <section id="features">
@@ -246,6 +278,10 @@
       <div class="card">
         <h3>🛡️ 脅威検出</h3>
         <p>Feodo Tracker、ThreatFox、URLhaus、Spamhaus DROP と全接続を自動突合。3段階の信頼度で推奨アクションを表示。</p>
+      </div>
+      <div class="card">
+        <h3>🔔 Slack通知</h3>
+        <p>脅威検出時に Slack DM で即時通知。宛先ごとのクールダウン設定でスパムを防止。UI言語に連動して日本語/英語で送信。</p>
       </div>
       <div class="card">
         <h3>📋 通信ログ</h3>

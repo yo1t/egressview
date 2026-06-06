@@ -1,8 +1,10 @@
 # Widemap
 
-**Real-time network connection visualizer for Yamaha RTX routers + ASUS WiFi Access Points**
+**Home / SOHO Network Security Monitor — Real-time visibility into every LAN device's outbound connections**
 
-Widemap shows you *where* every device on your home or office network is connecting to — in real time, on a world map.
+Is your smart TV phoning home to unexpected servers? Are your IP cameras, IoT appliances, or NAS boxes making connections you never authorised? Widemap answers these questions by passively monitoring every outbound connection from every device on your LAN and displaying them on an interactive world map — in real time, with automatic threat detection.
+
+No new hardware. No inline traffic interception. Works via your existing Yamaha RTX router's NAT session table.
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green)
@@ -11,15 +13,28 @@ Widemap shows you *where* every device on your home or office network is connect
 
 ---
 
+## For Home / SOHO Security
+
+Modern home and SOHO networks run 20–40 devices: smart TVs, IP cameras, NAS drives, Wi-Fi speakers, printers, network switches, PCs, and smartphones. Many of these — especially IoT equipment — update infrequently and have unknown outbound behaviors. Any of them can be silently compromised and begin exfiltrating data or relaying traffic for a botnet.
+
+Widemap answers the question most home users can't ask: *what is each device on my network actually connecting to?*
+
+- **Passive, zero-impact monitoring** — reads the router's NAT session table over SSH; no inline tap, no throughput penalty, no latency added
+- **Per-device visibility** — every connection tagged to the source device (vendor, model, hostname) via OUI, mDNS, SSDP, and NetBIOS
+- **Automatic threat detection** — every connection checked in real time against Feodo Tracker, ThreatFox, URLhaus, and Spamhaus DROP
+- **Instant Slack alerts** — DM the moment any device connects to a known C2 server or malware distribution host
+- **No hardware changes** — runs on any Mac, PC, or Raspberry Pi alongside your existing Yamaha RTX router
+
 ## What it does
 
 - Connects to a **Yamaha RTX** router via SSH and reads the NAT session table every 5 seconds
+- **Threat intelligence**: matches all connections against Feodo Tracker, ThreatFox, URLhaus, and Spamhaus DROP feeds (auto-refreshed hourly)
+- **Slack notifications**: sends a DM when a threat is detected (configurable cooldown, language-aware)
+- Identifies local devices using **OUI vendor lookup**, **mDNS/Bonjour**, **SSDP**, **NetBIOS**, and an **Apple model dictionary** (resolves down to "iPhone 15 Pro")
 - Enriches each destination IP with **reverse DNS**, **RDAP** (organization name), and **GeoIP** (latitude/longitude/city)
 - Plots all connections on an interactive **world map** with animated arcs
-- Identifies local devices using **OUI vendor lookup**, **mDNS/Bonjour**, **SSDP**, **NetBIOS**, and an **Apple model dictionary** (resolves down to "iPhone 15 Pro")
 - Optionally connects to an **ASUS WiFi access point** (used as AP/mesh, not as a router) to get WiFi client details (band, signal strength, traffic rates, AiMesh topology)
 - Keeps a **7-day connection history** in **SQLite** (WAL mode, crash-safe)
-- **Threat intelligence**: matches all connections against Feodo Tracker, ThreatFox, URLhaus, and Spamhaus DROP feeds (auto-refreshed hourly)
 - **Connection log**: sortable/searchable table of all sessions with threat status badges
 - Single-page dark-themed UI with graph view, map view, statistics, and connection log
 
@@ -204,6 +219,14 @@ The ASUS device is used as a **WiFi access point (AP mode or AiMesh)**, not as a
 - Detailed threat popup with actionable guidance per confidence level
 - Auto-refresh feeds every hour (configurable)
 
+### Slack Notifications
+
+- Sends a **Slack DM** when a threat is detected
+- Configurable per-destination cooldown (default 1 hour) to prevent notification spam
+- Message language follows the UI language setting (English / Japanese)
+- Test-send button in settings to verify configuration
+- Requires a Slack Bot Token and your User ID (`U01XXXXXXX`) — set up via Settings → Threat Detection
+
 ### Security
 
 - Admin token authentication (timing-safe comparison)
@@ -234,7 +257,7 @@ Any model with the standard web admin interface, used in AP mode or AiMesh:
 - [x] ~~Threat intelligence (C2/botnet detection via Feodo, ThreatFox, URLhaus, Spamhaus)~~
 - [x] ~~Connection log with sortable/searchable table~~
 - [x] ~~IPv4/IPv6 protocol badges (NDP detection)~~
-- [ ] Alert notifications (Slack/email webhook)
+- [x] ~~Alert notifications (Slack DM — threat detection with cooldown and language support)~~
 - [ ] OpenWrt / MikroTik / pfSense support
 - [ ] DNS log monitoring (L7 visibility)
 - [ ] IPv6 traffic monitoring (packet mirror method)
