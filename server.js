@@ -13,6 +13,7 @@ const enrichment = require('./src/enrichment');
 const history = require('./src/history');
 const deviceId = require('./src/device-identify');
 const threatIntel = require('./src/threat-intel');
+const notifier = require('./src/notifier');
 const backup = require('./src/backup');
 const yamaha = require('./src/pollers/yamaha');
 const asus = require('./src/pollers/asus');
@@ -77,6 +78,7 @@ function loadConfig() {
       if (data.backup.intervalHours) backup.configure({ intervalHours: data.backup.intervalHours });
       if (data.backup.maxGenerations) backup.configure({ maxGenerations: data.backup.maxGenerations });
     }
+    if (data.slack) notifier.configure({ ...data.slack, language: uiLanguage });
     if (data.adminToken) adminToken = data.adminToken;
     console.log('[config] Loaded:', CONFIG_FILE);
     return data;
@@ -92,6 +94,7 @@ function saveConfig() {
     asus: { ip: asus.getRouterIp(), user: asus.getUser(), pass: '' },
     general: { homeCountry, language: uiLanguage, autoInvestigate, retentionDays },
     backup: backup.getConfig(),
+    slack: { ...notifier.getConfig(), tokenSet: undefined },
     adminToken,
   };
   // Re-read to preserve passwords (they are not stored in module state getters)
@@ -99,6 +102,7 @@ function saveConfig() {
     const existing = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
     if (existing.yamaha?.pass) data.yamaha.pass = existing.yamaha.pass;
     if (existing.asus?.pass) data.asus.pass = existing.asus.pass;
+    if (existing.slack?.token) data.slack.token = existing.slack.token;
   } catch {}
   try {
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
@@ -286,6 +290,7 @@ async function pollYamahaConnections() {
       const isNew = !existing;
       const entry = { ...enriched, firstSeen: existing?.firstSeen ?? now, lastSeen: now };
       connectionHistory.set(key, entry);
+      if (entry.threat) notifier.notify(entry);
       if (isNew) history.appendHistoryLog(entry);
       return entry;
     });
@@ -453,6 +458,7 @@ app.post('/api/config/general', requireAdmin, (req, res) => {
   if (lang) {
     if (!['ja','en'].includes(lang)) return res.status(400).json({ error: 'invalid language' });
     uiLanguage = lang;
+    notifier.configure({ language: lang });
   }
   if (typeof ai === 'boolean') {
     autoInvestigate = ai;
@@ -578,6 +584,31 @@ app.post('/api/backup/upload', requireAdmin, (req, res) => {
       res.status(500).json({ error: e.message });
     }
   });
+});
+
+app.get('/api/config/slack', requireAdmin, (req, res) => {
+  res.json({ config: notifier.getConfig() });
+});
+
+app.post('/api/config/slack', requireAdmin, (req, res) => {
+  const { enabled, token, userId, cooldownMinutes } = req.body || {};
+  notifier.configure({
+    enabled: typeof enabled === 'boolean' ? enabled : undefined,
+    token: typeof token === 'string' && token ? token : undefined,
+    userId: typeof userId === 'string' ? userId : undefined,
+    cooldownMinutes: typeof cooldownMinutes === 'number' ? cooldownMinutes : undefined,
+  });
+  saveConfig();
+  res.json({ success: true, config: notifier.getConfig() });
+});
+
+app.post('/api/slack/test', requireAdmin, async (req, res) => {
+  const result = await notifier.test();
+  if (result.ok) {
+    res.json({ success: true });
+  } else {
+    res.status(400).json({ success: false, error: result.error });
+  }
 });
 
 app.post('/api/backup/config', requireAdmin, (req, res) => {
