@@ -3083,7 +3083,9 @@ function updateLogView() {
 
   // Apply threat badge filter
   if (logThreatFilter === 'danger') {
-    conns = conns.filter(c => !!c.threat);
+    conns = conns.filter(c => c.threat && c.threat.confidence !== 'low');
+  } else if (logThreatFilter === 'warn') {
+    conns = conns.filter(c => c.threat && c.threat.confidence === 'low');
   } else if (logThreatFilter === 'safe') {
     conns = conns.filter(c => !c.threat);
   }
@@ -3101,15 +3103,21 @@ function updateLogView() {
     return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
   });
 
-  const threatCount = conns.filter(c => c.threat).length;
+  const threatCount = conns.filter(c => c.threat && c.threat.confidence !== 'low').length;
+  const warnCount = conns.filter(c => c.threat && c.threat.confidence === 'low').length;
   countEl.textContent = `${conns.length} ${t('log.sessions')}`;
-  const safeCount = conns.length - threatCount;
+  const safeCount = conns.length - threatCount - warnCount;
   threatCountEl.style.display = 'inline';
   const safeActive = logThreatFilter === 'safe' ? ' log-filter-active' : '';
+  const warnActive = logThreatFilter === 'warn' ? ' log-filter-active' : '';
   const dangerActive = logThreatFilter === 'danger' ? ' log-filter-active' : '';
-  threatCountEl.innerHTML = `<span class="log-badge-safe log-badge-clickable${safeActive}" id="log-filter-safe">${t('log.badge.safe')}: ${safeCount}</span> <span class="log-badge-danger log-badge-clickable${dangerActive}" id="log-filter-danger">${t('log.badge.danger')}: ${threatCount}</span>`;
+  threatCountEl.innerHTML = `<span class="log-badge-safe log-badge-clickable${safeActive}" id="log-filter-safe">${t('log.badge.safe')}: ${safeCount}</span> <span class="log-badge-warn log-badge-clickable${warnActive}" id="log-filter-warn">${t('log.badge.warn')}: ${warnCount}</span> <span class="log-badge-danger log-badge-clickable${dangerActive}" id="log-filter-danger">${t('log.badge.danger')}: ${threatCount}</span>`;
   document.getElementById('log-filter-safe').addEventListener('click', () => {
     logThreatFilter = logThreatFilter === 'safe' ? null : 'safe';
+    updateLogView();
+  });
+  document.getElementById('log-filter-warn').addEventListener('click', () => {
+    logThreatFilter = logThreatFilter === 'warn' ? null : 'warn';
     updateLogView();
   });
   document.getElementById('log-filter-danger').addEventListener('click', () => {
