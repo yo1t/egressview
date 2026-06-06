@@ -678,6 +678,46 @@
           <button class="connect-btn" id="general-save-btn" style="margin-top:16px" data-i18n="settings.btn.save">保存</button>
           <div class="settings-status" id="general-status"></div>
         </div>
+        <!-- Threat Intel settings -->
+        <div class="settings-pane" id="pane-threat">
+          <div class="pane-title" style="cursor:default" data-i18n="settings.section.threat">🛡️ 脅威検出設定</div>
+          <p style="font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.5" data-i18n="settings.threat.desc">
+            外部の脅威インテリジェンスフィードからマルウェアC2/配布元IPリストをダウンロードし、NAT セッションと突合します。
+          </p>
+          <div class="form-group">
+            <label class="form-label" data-i18n="settings.threat.feeds">取得するフィード</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0;cursor:pointer;">
+              <input type="checkbox" id="s-feed-feodo" checked style="accent-color:var(--accent)">
+              <span>Feodo Tracker — Emotet/Dridex/TrickBot C2</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0;cursor:pointer;">
+              <input type="checkbox" id="s-feed-threatfox" checked style="accent-color:var(--accent)">
+              <span>ThreatFox — マルウェア IOC (IP:port)</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0;cursor:pointer;">
+              <input type="checkbox" id="s-feed-urlhaus" checked style="accent-color:var(--accent)">
+              <span>URLhaus — マルウェア配布 URL</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0;cursor:pointer;">
+              <input type="checkbox" id="s-feed-spamhaus" checked style="accent-color:var(--accent)">
+              <span>Spamhaus DROP — ハイジャック済み IP 範囲</span>
+            </label>
+          </div>
+          <div class="form-group" style="margin-top:12px">
+            <label class="form-label" data-i18n="settings.threat.interval">更新頻度</label>
+            <select id="s-threat-interval" class="form-input">
+              <option value="30">30分ごと</option>
+              <option value="60" selected>1時間ごと</option>
+              <option value="180">3時間ごと</option>
+              <option value="360">6時間ごと</option>
+              <option value="720">12時間ごと</option>
+              <option value="1440">24時間ごと</option>
+            </select>
+          </div>
+          <div style="margin-top:12px;font-size:10px;color:var(--muted);line-height:1.5" id="threat-feed-status"></div>
+          <button class="connect-btn" id="threat-save-btn" style="margin-top:16px" data-i18n="settings.btn.save">保存</button>
+          <div class="settings-status" id="threat-status"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -921,6 +961,9 @@ const I18N = {
     'settings.tab.l3l4':'ルーター', 'settings.tab.l2':'WiFi AP', 'settings.tab.general':'General',
     'settings.section.l3l4':'Yamaha RTX (SSH)', 'settings.section.l2':'ASUS WiFi AP',
     'settings.section.general':'一般設定',
+    'settings.tab.threat':'脅威検出', 'settings.section.threat':'🛡️ 脅威検出設定',
+    'settings.threat.desc':'外部の脅威インテリジェンスフィードからマルウェアC2/配布元IPリストをダウンロードし、NAT セッションと突合します。',
+    'settings.threat.feeds':'取得するフィード', 'settings.threat.interval':'更新頻度',
     'settings.field.ip':'IP アドレス', 'settings.field.user':'ユーザー名', 'settings.field.pass':'パスワード',
     'settings.pass.saved':'（保存済み — 変更する場合のみ入力）', 'settings.pass.empty':'パスワード',
     'settings.btn.connect':'接続', 'settings.btn.disable':'無効化を反映',
@@ -1000,6 +1043,9 @@ const I18N = {
     'settings.tab.l3l4':'Router', 'settings.tab.l2':'WiFi AP', 'settings.tab.general':'General',
     'settings.section.l3l4':'Yamaha RTX (SSH)', 'settings.section.l2':'ASUS WiFi AP',
     'settings.section.general':'General Settings',
+    'settings.tab.threat':'Threat Intel', 'settings.section.threat':'🛡️ Threat Detection Settings',
+    'settings.threat.desc':'Download malware C2/distribution IP lists from external threat intelligence feeds and match against NAT sessions.',
+    'settings.threat.feeds':'Feeds to fetch', 'settings.threat.interval':'Update frequency',
     'settings.field.ip':'IP Address', 'settings.field.user':'Username', 'settings.field.pass':'Password',
     'settings.pass.saved':'(Saved — leave blank to keep)', 'settings.pass.empty':'Password',
     'settings.btn.connect':'Connect', 'settings.btn.disable':'Apply (Disable)',
@@ -2241,6 +2287,37 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
     btn.disabled = false; btn.textContent = t('settings.btn.save');
   }
 });
+
+// Save threat settings (client-side only for now — stored in localStorage)
+document.getElementById('threat-save-btn').addEventListener('click', () => {
+  const config = {
+    feeds: {
+      feodo: document.getElementById('s-feed-feodo').checked,
+      threatfox: document.getElementById('s-feed-threatfox').checked,
+      urlhaus: document.getElementById('s-feed-urlhaus').checked,
+      spamhaus: document.getElementById('s-feed-spamhaus').checked,
+    },
+    intervalMin: parseInt(document.getElementById('s-threat-interval').value),
+  };
+  localStorage.setItem('widemap_threat_config', JSON.stringify(config));
+  showStatus('threat-status', t('settings.status.saved'), true);
+});
+
+// Load threat settings from localStorage on init
+(function loadThreatSettings() {
+  try {
+    const raw = localStorage.getItem('widemap_threat_config');
+    if (!raw) return;
+    const config = JSON.parse(raw);
+    if (config.feeds) {
+      document.getElementById('s-feed-feodo').checked = config.feeds.feodo !== false;
+      document.getElementById('s-feed-threatfox').checked = config.feeds.threatfox !== false;
+      document.getElementById('s-feed-urlhaus').checked = config.feeds.urlhaus !== false;
+      document.getElementById('s-feed-spamhaus').checked = config.feeds.spamhaus !== false;
+    }
+    if (config.intervalMin) document.getElementById('s-threat-interval').value = String(config.intervalMin);
+  } catch {}
+})();
 
 socket.on('auth-required', () => {
   document.getElementById('disconnected-banner').style.display = 'block';
