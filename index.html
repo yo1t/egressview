@@ -307,18 +307,61 @@
   <section id="quickstart">
     <h2><span class="icon">▶</span> Quick Start</h2>
     <div class="quick-start">
-      <p style="font-size:0.9rem; color:var(--muted); margin-bottom:4px;">Clone, install, and run:</p>
-      <pre><code><span class="comment"># Clone the repository</span>
-git clone https://github.com/yo1t/widemap.git
+
+      <p style="font-size:0.95rem; font-weight:600; margin-bottom:12px;">Step 1 — Prerequisites</p>
+      <table style="width:100%; border-collapse:collapse; font-size:0.85rem; margin-bottom:20px;">
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:8px 6px; width:28px;">✅</td>
+          <td style="padding:8px 6px;">Node.js 18+ on your Mac / PC / Raspberry Pi</td>
+          <td style="padding:8px 6px; text-align:right;"><a href="https://nodejs.org" target="_blank">nodejs.org →</a></td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:8px 6px;">✅</td>
+          <td style="padding:8px 6px;">Yamaha RTX router — SSH access enabled</td>
+          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-yamaha.md">Setup guide →</a></td>
+        </tr>
+        <tr>
+          <td style="padding:8px 6px; color:var(--muted);">☐</td>
+          <td style="padding:8px 6px; color:var(--muted);">(Optional) ASUS WiFi AP — web admin enabled</td>
+          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-asus.md">Setup guide →</a></td>
+        </tr>
+      </table>
+
+      <p style="font-size:0.95rem; font-weight:600; margin-bottom:4px;">Step 2 — Install and launch</p>
+      <pre><code>git clone https://github.com/yo1t/widemap.git
 cd widemap
 npm install
+npm start</code></pre>
 
-<span class="comment"># Start the server</span>
-npm start
+      <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:4px;">Step 3 — Open the browser and enter the admin token</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:4px;">On first startup the token is printed to the console:</p>
+      <pre><code><span class="comment">══════════════════════════════════════
+  Widemap admin token (initial):
+  a1b2c3d4e5f6...
+  → Enter this in the browser
+══════════════════════════════════════</span></code></pre>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;">Open <code>http://localhost:3000</code> and enter the token.</p>
 
-<span class="comment"># Open in browser</span>
-open http://localhost:3000</code></pre>
-      <p style="font-size:0.85rem; color:var(--muted); margin-top:16px;">On first startup, an admin token is printed to the console. Enter it in the browser to authenticate, then configure your router connections via the Settings panel.</p>
+      <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:8px;">Step 4 — Configure your router in Settings (⚙)</p>
+      <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:6px 8px; color:var(--muted);">Yamaha RTX IP</td>
+          <td style="padding:6px 8px;">LAN IP of your router (e.g. <code>192.168.1.1</code>)</td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:6px 8px; color:var(--muted);">SSH username / password</td>
+          <td style="padding:6px 8px;">Set up in the <a href="https://github.com/yo1t/widemap/blob/main/docs/setup-yamaha.md">Yamaha guide</a></td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:6px 8px; color:var(--muted);">NAT descriptor number</td>
+          <td style="padding:6px 8px;">Run <code>show nat descriptor</code> on the router — typically <code>100</code></td>
+        </tr>
+        <tr>
+          <td style="padding:6px 8px; color:var(--muted);">ASUS AP IP / password</td>
+          <td style="padding:6px 8px;">AP's LAN IP and admin password (<a href="https://github.com/yo1t/widemap/blob/main/docs/setup-asus.md">ASUS guide</a>)</td>
+        </tr>
+      </table>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;">Devices and connections will start appearing on the map within a few seconds.</p>
     </div>
   </section>
 
@@ -372,6 +415,14 @@ open http://localhost:3000</code></pre>
       <div class="card">
         <h3><a href="https://github.com/yo1t/widemap/blob/main/README.ja.md">README (日本語)</a></h3>
         <p>日本語版ドキュメント：セットアップ、設定、機能、セキュリティ。</p>
+      </div>
+      <div class="card">
+        <h3><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-yamaha.md">Yamaha RTX Setup Guide</a></h3>
+        <p>Step-by-step guide to enable SSH on your Yamaha RTX router.</p>
+      </div>
+      <div class="card">
+        <h3><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-asus.md">ASUS AP Setup Guide</a></h3>
+        <p>How to configure your ASUS access point for Widemap.</p>
       </div>
       <div class="card">
         <h3><a href="https://github.com/yo1t/widemap/blob/main/LICENSE">License (AGPL-3.0)</a></h3>
