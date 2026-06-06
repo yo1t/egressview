@@ -235,6 +235,9 @@
   .log-threat-tag { font-size: 9px; color: #ef4444; max-width: 200px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; cursor: default; }
   .log-badge-danger { display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 700; background: #ef444433; color: #ef4444; border: 1px solid #ef444455; margin-right: 4px; }
   .log-badge-safe { display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 600; background: #22c55e22; color: #4ade80; border: 1px solid #22c55e44; }
+  .log-badge-clickable { cursor: pointer; transition: box-shadow 0.15s, transform 0.1s; }
+  .log-badge-clickable:hover { box-shadow: 0 0 0 2px rgba(255,255,255,0.15); transform: scale(1.05); }
+  .log-filter-active { box-shadow: 0 0 0 2px var(--accent); transform: scale(1.08); }
   .log-sort-icon { cursor: pointer; opacity: 0.4; font-size: 10px; margin-left: 2px; }
   .log-sort-icon:hover { opacity: 1; }
   .log-sort-icon.asc::after { content: ' ↑'; }
@@ -2996,6 +2999,7 @@ document.getElementById('device-search-input').addEventListener('input', () => {
 // ─── Connection Log View ──────────────────────────────────────────────────────
 const logSortState = { col: 'lastSeen', dir: 'desc' };
 const logFilters = {}; // col → { mode, value }
+let logThreatFilter = null; // null | 'safe' | 'danger'
 
 function getLogCellValue(c, col) {
   switch (col) {
@@ -3048,6 +3052,13 @@ function updateLogView() {
     conns = conns.filter(c => logMatchFilter(getLogCellValue(c, col), filter));
   }
 
+  // Apply threat badge filter
+  if (logThreatFilter === 'danger') {
+    conns = conns.filter(c => !!c.threat);
+  } else if (logThreatFilter === 'safe') {
+    conns = conns.filter(c => !c.threat);
+  }
+
   // Sort
   const { col, dir } = logSortState;
   conns.sort((a, b) => {
@@ -3065,7 +3076,17 @@ function updateLogView() {
   countEl.textContent = `${conns.length} ${t('log.sessions')}`;
   const safeCount = conns.length - threatCount;
   threatCountEl.style.display = 'inline';
-  threatCountEl.innerHTML = `<span class="log-badge-safe">${t('log.badge.safe')}: ${safeCount}</span> <span class="log-badge-danger">${t('log.badge.danger')}: ${threatCount}</span>`;
+  const safeActive = logThreatFilter === 'safe' ? ' log-filter-active' : '';
+  const dangerActive = logThreatFilter === 'danger' ? ' log-filter-active' : '';
+  threatCountEl.innerHTML = `<span class="log-badge-safe log-badge-clickable${safeActive}" id="log-filter-safe">${t('log.badge.safe')}: ${safeCount}</span> <span class="log-badge-danger log-badge-clickable${dangerActive}" id="log-filter-danger">${t('log.badge.danger')}: ${threatCount}</span>`;
+  document.getElementById('log-filter-safe').addEventListener('click', () => {
+    logThreatFilter = logThreatFilter === 'safe' ? null : 'safe';
+    updateLogView();
+  });
+  document.getElementById('log-filter-danger').addEventListener('click', () => {
+    logThreatFilter = logThreatFilter === 'danger' ? null : 'danger';
+    updateLogView();
+  });
 
   // Update sort icon state
   document.querySelectorAll('#log-table th').forEach(th => {
