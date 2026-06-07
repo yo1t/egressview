@@ -22,8 +22,13 @@ const RDAP_TTL_MS   = 24 * 60 * 60 * 1000; // 24h
 const RDAP_FAIL_TTL =  5 * 60 * 1000;       // 5min retry on failure
 
 const geoCache    = new Map(); // ip → {lat, lon, city, countryCode, expires}
-const GEO_TTL_MS  = 24 * 60 * 60 * 1000;
-const GEO_FAIL_TTL =  5 * 60 * 1000;
+const GEO_TTL_MS       = 24 * 60 * 60 * 1000;
+const GEO_FAIL_TTL     =  5 * 60 * 1000;
+const GEO_PERMANENT_TTL = 100 * 365 * 24 * 60 * 60 * 1000; // ~100年: プライベートIP用
+
+// プライベート / ループバック / 特殊 IP は geo 解決不能なので永続キャッシュ対象
+const PRIVATE_IP_RE = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1([01]\d|2[0-7]))\.|0\.0\.0\.0$|::1$|[Ff][CcDd])/;
+function isPrivateIp(ip) { return PRIVATE_IP_RE.test(ip); }
 
 // ─── External API observability ───────────────────────────────────────────────
 const apiStats = {
@@ -86,6 +91,20 @@ function initDb(dbPath) {
     geoCache.set(row.ip, { lat: row.lat, lon: row.lon, city: row.city, countryCode: row.countryCode, expires: row.expires });
   }
   console.log(`[enrichment] Cache loaded: ${rdapRows.length} RDAP, ${geoRows.length} geo entries`);
+
+  // 既存のプライベート IP エントリ（失敗 null）を永続 TTL にアップグレード
+  const privUpgradeNow = Date.now();
+  const nullGeoRows = db.prepare('SELECT ip FROM geo_cache WHERE lat IS NULL').all();
+  let upgraded = 0;
+  for (const row of nullGeoRows) {
+    if (isPrivateIp(row.ip)) {
+      const entry = { lat: null, lon: null, city: null, countryCode: null, expires: privUpgradeNow + GEO_PERMANENT_TTL };
+      geoCache.set(row.ip, entry);
+      stmtUpsertGeo.run({ ip: row.ip, lat: null, lon: null, city: null, countryCode: null, expires: entry.expires });
+      upgraded++;
+    }
+  }
+  if (upgraded > 0) console.log(`[enrichment] ${upgraded} private IP geo entries upgraded to permanent TTL`);
 }
 
 function reopen() {
@@ -149,6 +168,16 @@ function httpPostJson(url, body) {
 
 async function lookupGeoBatch(ips) {
   const now = Date.now();
+
+  // プライベート/ループバック/特殊 IP は永続 TTL でキャッシュ（API 呼び出し不要）
+  for (const ip of ips) {
+    if (isPrivateIp(ip)) {
+      const entry = { lat: null, lon: null, city: null, countryCode: null, expires: now + GEO_PERMANENT_TTL };
+      geoCache.set(ip, entry);
+      _persistGeo(ip, entry);
+    }
+  }
+
   const toFetch = ips.filter(ip => { const c = geoCache.get(ip); return !c || now >= c.expires; });
   if (!toFetch.length) return;
   for (let i = 0; i < toFetch.length; i += 100) {
