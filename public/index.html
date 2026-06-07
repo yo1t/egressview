@@ -272,7 +272,24 @@
   .log-search-popup-actions { display: flex; gap: 4px; }
   .log-search-popup-actions button { flex: 1; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--text); font-size: 10px; cursor: pointer; }
   .log-search-popup-actions button:hover { border-color: var(--accent); }
-  #log-search-apply { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #log-search-apply, #dv-search-apply { background: var(--accent); color: #fff; border-color: var(--accent); }
+  /* ── Device detail panel ── */
+  #dv-detail-panel { width: 360px; min-width: 280px; border-left: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; overflow: hidden; }
+  #dv-detail-panel.hidden { display: none !important; }
+  .dv-detail-header { padding: 10px 12px 8px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+  .dv-detail-title { font-size: 13px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dv-detail-body { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .dv-detail-row { display: flex; gap: 6px; font-size: 11px; }
+  .dv-detail-label { color: var(--muted); min-width: 76px; flex-shrink: 0; }
+  .dv-detail-value { color: var(--text); word-break: break-all; }
+  .dv-detail-note-ta { width: 100%; min-height: 80px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-size: 11px; font-family: inherit; padding: 6px 8px; resize: vertical; box-sizing: border-box; }
+  .dv-detail-note-ta:focus { border-color: var(--accent); outline: none; }
+  .dv-detail-actions { display: flex; gap: 6px; padding: 0 12px 12px; }
+  .dv-detail-actions button { flex: 1; padding: 5px 8px; font-size: 11px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; }
+  .dv-detail-actions button:hover { border-color: var(--accent); color: var(--accent); }
+  .dv-detail-actions .btn-save { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .dv-detail-actions .btn-save:hover { opacity: 0.85; }
+  #dv-detail-filter-badge { margin-left: 8px; }
   /* Threat indicator in conn-panel */
   .conn-threat { color: #ef4444; font-size: 10px; margin-left: 4px; }
   .stats-chart {
@@ -1061,28 +1078,65 @@
     <div class="log-header">
       <span class="log-title" data-i18n="devices.title">🖥 端末一覧</span>
       <span id="devices-count" style="color:var(--muted);font-size:11px;margin-left:8px;"></span>
+      <span id="dv-device-filter" style="margin-left:8px;display:none"></span>
+      <button id="dv-clear-filters-btn" style="display:none;margin-left:6px;padding:2px 8px;font-size:10px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;">フィルタ解除</button>
       <button id="devices-refresh-btn" style="margin-left:auto;padding:3px 10px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text);cursor:pointer;" data-i18n="devices.refresh">更新</button>
     </div>
-    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-      <input id="devices-search" type="text" placeholder="IP / MAC / 名前 / ベンダー…" autocomplete="off"
-        style="flex:1;min-width:180px;max-width:320px;padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--text);">
-    </div>
-    <div class="log-table-wrap">
-      <table class="log-table" id="devices-table">
-        <thead>
-          <tr>
-            <th data-col="ip"        class="dv-sort" data-i18n="devices.col.ip">IP</th>
-            <th data-col="mac"       class="dv-sort" data-i18n="devices.col.mac">MAC</th>
-            <th data-col="vendor"    class="dv-sort" data-i18n="devices.col.vendor">ベンダー</th>
-            <th data-col="name"      class="dv-sort" data-i18n="devices.col.name">名前</th>
-            <th data-col="ipv6"      data-i18n="devices.col.ipv6">IPv6</th>
-            <th data-col="sources"   data-i18n="devices.col.sources">ソース</th>
-            <th data-col="firstSeen" class="dv-sort" data-i18n="devices.col.firstSeen">初回確認</th>
-            <th data-col="lastSeen"  class="dv-sort" data-i18n="devices.col.lastSeen">最終確認</th>
-          </tr>
-        </thead>
-        <tbody id="devices-tbody"></tbody>
-      </table>
+    <!-- main area: table + detail panel side by side -->
+    <div style="display:flex;flex:1;overflow:hidden;gap:0;min-height:0;">
+      <div style="display:flex;flex-direction:column;flex:1;overflow:hidden;min-width:0;gap:8px;">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <input id="devices-search" type="text" placeholder="IP / MAC / 名前 / ベンダー…" autocomplete="off"
+            style="flex:1;min-width:180px;max-width:320px;padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--text);">
+        </div>
+        <div class="log-table-wrap" style="position:relative;">
+          <table class="log-table" id="devices-table">
+            <thead>
+              <tr>
+                <th data-col="ip">       <span data-i18n="devices.col.ip">IP</span>         <span class="log-sort-icon">⇅</span><span class="log-search-icon dv-search-icon" data-col="ip">🔍</span></th>
+                <th data-col="mac">      <span data-i18n="devices.col.mac">MAC</span>        <span class="log-sort-icon">⇅</span><span class="log-search-icon dv-search-icon" data-col="mac">🔍</span></th>
+                <th data-col="vendor">   <span data-i18n="devices.col.vendor">ベンダー</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon dv-search-icon" data-col="vendor">🔍</span></th>
+                <th data-col="name">     <span data-i18n="devices.col.name">名前</span>       <span class="log-sort-icon">⇅</span><span class="log-search-icon dv-search-icon" data-col="name">🔍</span></th>
+                <th data-col="ipv6">     <span data-i18n="devices.col.ipv6">IPv6</span></th>
+                <th data-col="sources">  <span data-i18n="devices.col.sources">ソース</span></th>
+                <th data-col="firstSeen"><span data-i18n="devices.col.firstSeen">初回確認</span> <span class="log-sort-icon">⇅</span></th>
+                <th data-col="lastSeen"> <span data-i18n="devices.col.lastSeen">最終確認</span> <span class="log-sort-icon">⇅</span></th>
+              </tr>
+            </thead>
+            <tbody id="devices-tbody"></tbody>
+          </table>
+          <!-- column search popup (shared with devices only) -->
+          <div id="dv-search-popup" class="log-search-popup hidden">
+            <div class="log-search-popup-inner">
+              <div class="log-search-popup-title" id="dv-search-popup-title">フィルター</div>
+              <select id="dv-search-mode">
+                <option value="contains" data-i18n="log.filter.contains">含む</option>
+                <option value="startsWith" data-i18n="log.filter.startsWith">で始まる</option>
+                <option value="endsWith" data-i18n="log.filter.endsWith">で終わる</option>
+                <option value="regex" data-i18n="log.filter.regex">正規表現</option>
+              </select>
+              <input type="text" id="dv-search-input" placeholder="検索条件..." autocomplete="off">
+              <div class="log-search-popup-actions">
+                <button id="dv-search-apply" data-i18n="log.filter.apply">適用</button>
+                <button id="dv-search-clear" data-i18n="log.filter.clear">クリア</button>
+                <button id="dv-search-close" data-i18n="log.filter.close">閉じる</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- device detail panel -->
+      <div id="dv-detail-panel" class="hidden">
+        <div class="dv-detail-header">
+          <span class="dv-detail-title" id="dv-detail-title">—</span>
+          <button id="dv-detail-close" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:2px 4px;">✕</button>
+        </div>
+        <div class="dv-detail-body" id="dv-detail-body"></div>
+        <div class="dv-detail-actions">
+          <button id="dv-detail-investigate" data-i18n="note.investigate">🔍 自動調査</button>
+          <button id="dv-detail-save" class="btn-save" data-i18n="note.save">保存</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2040,6 +2094,10 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
         if (statsMode) updateStats();
         updateConnPanel(selectedMac ? c.ip : null);
         if (logMode) updateLogView();
+        if (devicesMode) {
+          dvSelectedIp = selectedIp;
+          renderDevicesTable();
+        }
       });
       // Only the edit-icon click opens the edit modal
       card.querySelector('.device-note-edit').addEventListener('click', (e) => {
@@ -4157,26 +4215,23 @@ async function threatDetailSaveNote(ip, mac) {
 // ─── Device Inventory View ───────────────────────────────────────────────────
 var devicesData = [];
 var devicesSortState = { col: 'lastSeen', dir: 'desc' };
+var dvFilters = {};          // col → { mode, value }
+var dvSearchTargetCol = null;
+var dvSelectedIp = null;     // IP filter from sidebar click
+var dvDetailDevice = null;   // currently open device
 
 function fmtTs(ts) {
   if (!ts) return '—';
   const d = new Date(ts);
   return d.toLocaleDateString() + ' ' + d.toTimeString().slice(0, 5);
 }
-
-function fmtMac(mac) {
-  return mac || '—';
-}
-
 function deviceName(d) {
   return d.mdnsName || d.dnsName || d.netbiosName || '—';
 }
-
 function deviceIpv6(d) {
   if (!d.ipv6Addrs || !d.ipv6Addrs.length) return '—';
   return d.ipv6Addrs.slice(0, 2).join(', ');
 }
-
 function getDeviceSortValue(d, col) {
   switch (col) {
     case 'ip':        return d.ip || '';
@@ -4188,72 +4243,296 @@ function getDeviceSortValue(d, col) {
     default:          return '';
   }
 }
+function getDvCellValue(d, col) {
+  switch (col) {
+    case 'ip':     return d.ip || '';
+    case 'mac':    return d.mac || '';
+    case 'vendor': return d.vendor || '';
+    case 'name':   return deviceName(d) === '—' ? '' : deviceName(d);
+    default:       return '';
+  }
+}
+function dvMatchFilter(value, filter) {
+  if (!filter || !filter.value) return true;
+  const v = value.toLowerCase();
+  const q = filter.value.toLowerCase();
+  switch (filter.mode) {
+    case 'startsWith': return v.startsWith(q);
+    case 'endsWith':   return v.endsWith(q);
+    case 'regex':
+      try { return new RegExp(filter.value, 'i').test(value); } catch { return true; }
+    default:           return v.includes(q);
+  }
+}
 
 function renderDevicesTable() {
   const search = (document.getElementById('devices-search').value || '').toLowerCase();
+  const filterBadgeEl = document.getElementById('dv-device-filter');
+  const clearFiltersBtn = document.getElementById('dv-clear-filters-btn');
+
+  // Sidebar device filter
+  if (dvSelectedIp) {
+    filterBadgeEl.style.display = 'inline';
+    filterBadgeEl.innerHTML = `<span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;cursor:pointer" id="dv-filter-clear">${esc(dvSelectedIp)} のみ ✕</span>`;
+    document.getElementById('dv-filter-clear').onclick = () => { dvSelectedIp = null; renderDevicesTable(); };
+  } else {
+    filterBadgeEl.style.display = 'none';
+  }
+
+  // Show "clear filters" button if any column filter is active
+  const hasColFilter = Object.values(dvFilters).some(f => f && f.value);
+  clearFiltersBtn.style.display = (hasColFilter || dvSelectedIp) ? '' : 'none';
+
   let rows = devicesData.filter(d => {
-    if (!search) return true;
-    return (d.ip || '').includes(search) ||
-      (d.mac || '').toLowerCase().includes(search) ||
-      (d.vendor || '').toLowerCase().includes(search) ||
-      deviceName(d).toLowerCase().includes(search);
+    // Sidebar IP filter
+    if (dvSelectedIp && d.ip !== dvSelectedIp) return false;
+    // Global text search
+    if (search) {
+      const hit = (d.ip || '').includes(search) ||
+        (d.mac || '').toLowerCase().includes(search) ||
+        (d.vendor || '').toLowerCase().includes(search) ||
+        deviceName(d).toLowerCase().includes(search);
+      if (!hit) return false;
+    }
+    // Column filters
+    for (const [col, filter] of Object.entries(dvFilters)) {
+      if (!filter || !filter.value) continue;
+      if (!dvMatchFilter(getDvCellValue(d, col), filter)) return false;
+    }
+    return true;
   });
 
   rows.sort((a, b) => {
     const av = getDeviceSortValue(a, devicesSortState.col);
     const bv = getDeviceSortValue(b, devicesSortState.col);
-    const cmp = typeof av === 'number' ? av - bv : av.localeCompare(bv);
+    const cmp = typeof av === 'number' ? av - bv : (av + '').localeCompare(bv + '');
     return devicesSortState.dir === 'asc' ? cmp : -cmp;
   });
 
+  // Update sort icons
+  document.querySelectorAll('#devices-table th[data-col]').forEach(th => {
+    const icon = th.querySelector('.log-sort-icon');
+    if (!icon) return;
+    const c = th.dataset.col;
+    icon.className = 'log-sort-icon' + (c === devicesSortState.col ? ` ${devicesSortState.dir}` : '');
+  });
+  // Update filter icons
+  document.querySelectorAll('.dv-search-icon').forEach(icon => {
+    const c = icon.dataset.col;
+    icon.classList.toggle('active', !!(dvFilters[c] && dvFilters[c].value));
+  });
+
   const tbody = document.getElementById('devices-tbody');
+  const note = lookupNote; // closure
   tbody.innerHTML = rows.map(d => {
     const name = deviceName(d);
     const ipv6 = deviceIpv6(d);
     const sources = (d.sources || '').split(',').filter(Boolean).join(' · ');
-    return `<tr>
-      <td style="font-family:monospace">${d.ip}</td>
-      <td style="font-family:monospace;color:var(--muted)">${fmtMac(d.mac)}</td>
+    const noteText = lookupNote(d.ip, d.mac);
+    const isOpen = dvDetailDevice && dvDetailDevice.ip === d.ip;
+    return `<tr class="${isOpen ? 'selected' : ''}" style="cursor:pointer" data-ip="${esc(d.ip)}">
+      <td style="font-family:monospace">${esc(d.ip)}</td>
+      <td style="font-family:monospace;color:var(--muted)">${d.mac ? esc(d.mac) : '<span style="opacity:.4">—</span>'}</td>
       <td>${d.vendor ? esc(d.vendor) : '<span style="color:var(--muted)">—</span>'}</td>
       <td>${name !== '—' ? esc(name) : '<span style="color:var(--muted)">—</span>'}</td>
       <td style="font-family:monospace;font-size:10px;color:var(--muted)">${ipv6 !== '—' ? esc(ipv6) : '—'}</td>
-      <td style="color:var(--muted);font-size:10px">${sources || '—'}</td>
+      <td style="color:var(--muted);font-size:10px">${esc(sources) || '—'}</td>
       <td style="color:var(--muted);font-size:10px">${fmtTs(d.firstSeen)}</td>
       <td style="color:var(--muted);font-size:10px">${fmtTs(d.lastSeen)}</td>
     </tr>`;
   }).join('');
 
+  // Row click → detail panel
+  tbody.querySelectorAll('tr[data-ip]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const d = devicesData.find(x => x.ip === tr.dataset.ip);
+      if (d) openDvDetail(d);
+    });
+  });
+
   const countEl = document.getElementById('devices-count');
-  if (countEl) countEl.textContent = rows.length + ' 台' + (search ? '（フィルター中）' : '');
+  if (countEl) countEl.textContent = rows.length + ' 台' + (rows.length < devicesData.length ? '（フィルター中）' : '');
 }
 
+// ── Device detail panel ───────────────────────────────────────────────────────
+function openDvDetail(d) {
+  dvDetailDevice = d;
+  document.getElementById('dv-detail-panel').classList.remove('hidden');
+  document.getElementById('dv-detail-title').textContent = d.ip + (d.mac ? ' / ' + d.mac : '');
+
+  const name = deviceName(d);
+  const ipv6List = (d.ipv6Addrs || []).filter(Boolean);
+  const sources = (d.sources || '').split(',').filter(Boolean).join(', ');
+  const noteText = lookupNote(d.ip, d.mac);
+
+  document.getElementById('dv-detail-body').innerHTML = `
+    ${d.vendor ? `<div class="dv-detail-row"><span class="dv-detail-label">ベンダー</span><span class="dv-detail-value">${esc(d.vendor)}</span></div>` : ''}
+    ${name !== '—' ? `<div class="dv-detail-row"><span class="dv-detail-label">名前</span><span class="dv-detail-value">${esc(name)}</span></div>` : ''}
+    ${d.dnsName  ? `<div class="dv-detail-row"><span class="dv-detail-label">DNS</span><span class="dv-detail-value" style="font-size:10px">${esc(d.dnsName)}</span></div>` : ''}
+    ${d.mdnsName ? `<div class="dv-detail-row"><span class="dv-detail-label">mDNS</span><span class="dv-detail-value">${esc(d.mdnsName)}</span></div>` : ''}
+    ${d.netbiosName ? `<div class="dv-detail-row"><span class="dv-detail-label">NetBIOS</span><span class="dv-detail-value">${esc(d.netbiosName)}</span></div>` : ''}
+    ${ipv6List.length ? `<div class="dv-detail-row"><span class="dv-detail-label">IPv6</span><span class="dv-detail-value" style="font-family:monospace;font-size:10px">${ipv6List.map(esc).join('<br>')}</span></div>` : ''}
+    <div class="dv-detail-row"><span class="dv-detail-label">ソース</span><span class="dv-detail-value">${esc(sources) || '—'}</span></div>
+    <div class="dv-detail-row"><span class="dv-detail-label">初回確認</span><span class="dv-detail-value">${fmtTs(d.firstSeen)}</span></div>
+    <div class="dv-detail-row"><span class="dv-detail-label">最終確認</span><span class="dv-detail-value">${fmtTs(d.lastSeen)}</span></div>
+    <div style="margin-top:4px;font-size:11px;color:var(--muted);margin-bottom:2px">メモ</div>
+    <textarea class="dv-detail-note-ta" id="dv-detail-note-ta" placeholder="${esc(t('note.placeholder'))}">${esc(noteText)}</textarea>
+    <div id="dv-investigate-result" style="font-size:10px;color:var(--muted);margin-top:4px;white-space:pre-wrap;"></div>
+  `;
+  // Re-render table to highlight selected row
+  renderDevicesTable();
+}
+
+document.getElementById('dv-detail-close').addEventListener('click', () => {
+  dvDetailDevice = null;
+  document.getElementById('dv-detail-panel').classList.add('hidden');
+  renderDevicesTable();
+});
+
+document.getElementById('dv-detail-save').addEventListener('click', async () => {
+  if (!dvDetailDevice) return;
+  const note = document.getElementById('dv-detail-note-ta').value;
+  const ip = dvDetailDevice.ip, mac = dvDetailDevice.mac || '';
+  try {
+    await apiFetch('__BASE__/api/notes', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip, mac, note }),
+    });
+    const key = (ip && mac) ? `${ip}|${mac}` : ip || mac;
+    for (const k of Object.keys(notesMap)) {
+      const [kip, kmac] = k.split('|');
+      if ((ip && kip === ip) || (mac && (kmac === mac || kip === mac))) delete notesMap[k];
+    }
+    if (note.trim()) notesMap[key] = note.trim();
+    refreshAllNotes();
+    const btn = document.getElementById('dv-detail-save');
+    const orig = btn.textContent;
+    btn.textContent = '✓ 保存済';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  } catch (e) {
+    alert(t('err.serverGeneric') + e.message);
+  }
+});
+
+document.getElementById('dv-detail-investigate').addEventListener('click', async () => {
+  if (!dvDetailDevice) return;
+  const ip = dvDetailDevice.ip;
+  const btn = document.getElementById('dv-detail-investigate');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = t('note.investigating');
+  const resultEl = document.getElementById('dv-investigate-result');
+  if (resultEl) resultEl.textContent = '';
+  try {
+    const r = await apiFetch('__BASE__/api/notes/draft', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip }),
+    });
+    const data = await r.json();
+    const ta = document.getElementById('dv-detail-note-ta');
+    if (ta) {
+      const sep = ta.value.trim() ? '\n---\n' : '';
+      ta.value = ta.value.trim() + sep + (data.draft || '(no info)');
+    }
+  } catch (e) {
+    const resultEl2 = document.getElementById('dv-investigate-result');
+    if (resultEl2) resultEl2.textContent = t('note.investigate.fail') + ': ' + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
+  }
+});
+
+// ── Column sort ───────────────────────────────────────────────────────────────
+document.querySelectorAll('#devices-table th[data-col]').forEach(th => {
+  th.style.cursor = 'pointer';
+  th.addEventListener('click', e => {
+    if (e.target.classList.contains('dv-search-icon')) return;
+    const col = th.dataset.col;
+    const sortable = ['ip','mac','vendor','name','firstSeen','lastSeen'];
+    if (!sortable.includes(col)) return;
+    if (devicesSortState.col === col) {
+      devicesSortState.dir = devicesSortState.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      devicesSortState.col = col;
+      devicesSortState.dir = (col === 'lastSeen' || col === 'firstSeen') ? 'desc' : 'asc';
+    }
+    renderDevicesTable();
+  });
+});
+
+// ── Column filter popup ───────────────────────────────────────────────────────
+const dvSearchPopup = document.getElementById('dv-search-popup');
+const dvSearchInput = document.getElementById('dv-search-input');
+const dvSearchMode  = document.getElementById('dv-search-mode');
+
+document.querySelectorAll('.dv-search-icon').forEach(icon => {
+  icon.addEventListener('click', e => {
+    e.stopPropagation();
+    dvSearchTargetCol = icon.dataset.col;
+    document.getElementById('dv-search-popup-title').textContent =
+      (t('log.filter.title') || 'フィルター') + ': ' + (t('devices.col.' + dvSearchTargetCol) || dvSearchTargetCol);
+    const existing = dvFilters[dvSearchTargetCol];
+    dvSearchInput.value  = existing?.value || '';
+    dvSearchMode.value   = existing?.mode  || 'contains';
+    // Position near icon
+    const rect = icon.getBoundingClientRect();
+    const wrap = document.getElementById('devices-table').closest('.log-table-wrap');
+    const wr = wrap.getBoundingClientRect();
+    dvSearchPopup.style.top  = (rect.bottom - wr.top + 4) + 'px';
+    dvSearchPopup.style.left = Math.min(rect.left - wr.left, wr.width - 240) + 'px';
+    dvSearchPopup.classList.remove('hidden');
+    dvSearchInput.focus();
+  });
+});
+
+document.getElementById('dv-search-apply').addEventListener('click', () => {
+  if (!dvSearchTargetCol) return;
+  dvFilters[dvSearchTargetCol] = { mode: dvSearchMode.value, value: dvSearchInput.value };
+  dvSearchPopup.classList.add('hidden');
+  renderDevicesTable();
+});
+document.getElementById('dv-search-clear').addEventListener('click', () => {
+  if (dvSearchTargetCol) delete dvFilters[dvSearchTargetCol];
+  dvSearchInput.value = '';
+  dvSearchPopup.classList.add('hidden');
+  renderDevicesTable();
+});
+document.getElementById('dv-search-close').addEventListener('click', () => {
+  dvSearchPopup.classList.add('hidden');
+});
+dvSearchInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('dv-search-apply').click();
+  if (e.key === 'Escape') dvSearchPopup.classList.add('hidden');
+});
+document.addEventListener('click', e => {
+  if (!dvSearchPopup.contains(e.target) && !e.target.classList.contains('dv-search-icon')) {
+    dvSearchPopup.classList.add('hidden');
+  }
+});
+
+document.getElementById('dv-clear-filters-btn').addEventListener('click', () => {
+  Object.keys(dvFilters).forEach(k => delete dvFilters[k]);
+  dvSelectedIp = null;
+  renderDevicesTable();
+});
+
+// ── Load data ─────────────────────────────────────────────────────────────────
 async function loadDevicesView() {
   try {
     const res = await apiFetch('__BASE__/api/devices');
     if (!res.ok) throw new Error(res.statusText);
     const data = await res.json();
     devicesData = data.devices || [];
+    // Refresh detail if open
+    if (dvDetailDevice) {
+      const fresh = devicesData.find(d => d.ip === dvDetailDevice.ip);
+      if (fresh) openDvDetail(fresh);
+    }
     renderDevicesTable();
   } catch (e) {
     console.error('[devices] load failed:', e);
     document.getElementById('devices-count').textContent = '読み込み失敗: ' + e.message;
   }
 }
-
-// Sort click
-document.querySelectorAll('#devices-table .dv-sort').forEach(th => {
-  th.style.cursor = 'pointer';
-  th.addEventListener('click', () => {
-    const col = th.getAttribute('data-col');
-    if (devicesSortState.col === col) {
-      devicesSortState.dir = devicesSortState.dir === 'asc' ? 'desc' : 'asc';
-    } else {
-      devicesSortState.col = col;
-      devicesSortState.dir = col === 'lastSeen' || col === 'firstSeen' ? 'desc' : 'asc';
-    }
-    renderDevicesTable();
-  });
-});
 
 document.getElementById('devices-search').addEventListener('input', renderDevicesTable);
 document.getElementById('devices-refresh-btn').addEventListener('click', loadDevicesView);
