@@ -118,16 +118,30 @@ async function lookupRdap(ip) {
   }
 }
 
+// PTR reverse-lookup results that are not useful as display names.
+// These are machine-generated hostnames that convey less info than the raw IP.
+const PTR_JUNK_RE = /ec2-[\d-]+\.compute(?:-1)?\.amazonaws\.com$|\.compute\.internal$|\.static\.\S+\.fttx\.|ip-\d+-\d+-\d+-\d+\.|ptr\d|\.in-addr\.arpa$/i;
+
+function isPtrJunk(host) {
+  if (!host) return true;
+  if (PTR_JUNK_RE.test(host)) return true;
+  // Heuristic: hostname that starts with the IP octets reversed (e.g. "192-168-1-1.example.com")
+  if (/^\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3}\./.test(host)) return true;
+  return false;
+}
+
 async function reverseDns(ip) {
   const now = Date.now();
   const cached = dnsCache.get(ip);
+  // dnsmasq forward-DNS entries take priority — never overwrite with PTR
+  if (cached && cached.source === 'dnsmasq') return cached.host;
   if (cached && now < cached.expires) return cached.host;
   try {
     const [host] = await dns.reverse(ip);
-    dnsCache.set(ip, { host, expires: now + DNS_TTL_MS });
+    dnsCache.set(ip, { host, expires: now + DNS_TTL_MS, source: 'ptr' });
     return host;
   } catch {
-    dnsCache.set(ip, { host: ip, expires: now + 60_000 });
+    dnsCache.set(ip, { host: ip, expires: now + 60_000, source: 'ptr' });
     return ip;
   }
 }
@@ -138,6 +152,7 @@ function getGeoCache() { return geoCache; }
 
 module.exports = {
   reverseDns,
+  isPtrJunk,
   lookupRdap,
   lookupGeoBatch,
   getDnsCache,

@@ -578,6 +578,10 @@
           <span class="tab-badge">💾</span>
           <span class="tab-name" data-i18n="settings.tab.backup">バックアップ</span>
         </button>
+        <button class="settings-tab" data-tab="datasource">
+          <span class="tab-badge">📡</span>
+          <span class="tab-name">データソース</span>
+        </button>
       </nav>
       <!-- Right: content -->
       <div class="settings-panes">
@@ -823,6 +827,58 @@
             </div>
             <div class="settings-status" id="backup-action-status"></div>
           </div>
+        </div>
+        <!-- Data Sources -->
+        <div class="settings-pane" id="pane-datasource">
+          <div class="pane-title" style="cursor:default">📡 データソース設定</div>
+          <p style="font-size:10px;color:var(--muted);margin-bottom:16px;line-height:1.5">
+            宛先ホスト名を解決するためのデータソースを設定します。<br>
+            有効にしたソースからのドメイン名が通信ログなどに表示されます。
+          </p>
+
+          <!-- dnsmasq DNS query log -->
+          <label class="pane-title" style="margin-bottom:8px">
+            <input type="checkbox" id="enable-dnsmasq" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
+            <span>DNS クエリログ (dnsmasq)</span>
+          </label>
+          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px">
+            EC2 上の dnsmasq クエリログをテールし、デバイスごとの DNS 解決結果を宛先ホスト名に反映します。<br>
+            PTR 逆引きより優先され、<code style="font-size:10px;color:var(--cyan)">data.meethue.com</code> のような意味のある名前が表示されます。
+          </p>
+          <div class="section-inputs" id="dnsmasq-inputs">
+            <div class="form-group">
+              <label class="form-label">ログファイルパス</label>
+              <input id="s-dnsmasq-logfile" class="form-input" type="text"
+                     placeholder="/var/log/dnsmasq-queries.log" autocomplete="off">
+            </div>
+          </div>
+
+          <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+
+          <!-- [INSPECT] syslog — future -->
+          <div style="opacity:0.45;pointer-events:none">
+            <label class="pane-title" style="margin-bottom:6px">
+              <input type="checkbox" disabled style="width:14px;height:14px;flex-shrink:0">
+              <span>[INSPECT] TCP セッション補完 <span style="font-size:9px;color:var(--yellow);margin-left:6px">準備中</span></span>
+            </label>
+            <p style="font-size:10px;color:var(--muted);line-height:1.5;padding-left:22px;margin-bottom:10px">
+              Yamaha syslog の [INSPECT] ログを解析して NAT セッションを補完します。
+            </p>
+          </div>
+
+          <!-- [DHCPD] syslog — future -->
+          <div style="opacity:0.45;pointer-events:none">
+            <label class="pane-title" style="margin-bottom:6px">
+              <input type="checkbox" disabled style="width:14px;height:14px;flex-shrink:0">
+              <span>[DHCPD] IP→MAC リアルタイム追跡 <span style="font-size:9px;color:var(--yellow);margin-left:6px">準備中</span></span>
+            </label>
+            <p style="font-size:10px;color:var(--muted);line-height:1.5;padding-left:22px;margin-bottom:10px">
+              Yamaha syslog の [DHCPD] ログからリアルタイムで IP→MAC を追跡します。
+            </p>
+          </div>
+
+          <button class="connect-btn" id="datasource-save-btn" style="margin-top:8px">保存</button>
+          <div class="settings-status" id="datasource-status"></div>
         </div>
       </div>
     </div>
@@ -2456,6 +2512,14 @@ socket.on('config', cfg => {
     document.getElementById('disconnected-banner').style.display = 'block';
     settingsBtn.classList.add('alert');
   }
+  // Data sources
+  if (cfg.dnsmasqLogFile) {
+    document.getElementById('s-dnsmasq-logfile').value = cfg.dnsmasqLogFile;
+  }
+  if (typeof cfg.dnsmasqEnabled === 'boolean') {
+    document.getElementById('enable-dnsmasq').checked = cfg.dnsmasqEnabled;
+    toggleSection('dnsmasq-inputs', 'enable-dnsmasq', null);
+  }
 });
 
 // Save general settings
@@ -2687,6 +2751,35 @@ document.getElementById('backup-config-save').addEventListener('click', async ()
     showStatus('backup-config-status', t('settings.status.saved'), true);
   } catch (e) {
     showStatus('backup-config-status', 'Error: ' + e.message, false);
+  }
+});
+
+// ── Data sources save ────────────────────────────────────────────────────────
+document.getElementById('enable-dnsmasq').addEventListener('change', () => {
+  toggleSection('dnsmasq-inputs', 'enable-dnsmasq', null);
+});
+
+document.getElementById('datasource-save-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('datasource-save-btn');
+  btn.disabled = true;
+  try {
+    const enabled  = document.getElementById('enable-dnsmasq').checked;
+    const logFile  = document.getElementById('s-dnsmasq-logfile').value.trim()
+                     || '/var/log/dnsmasq-queries.log';
+    const r = await apiFetch('__BASE__/api/config/datasources', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dnsmasq: { enabled, logFile } }),
+    });
+    const data = await r.json();
+    if (data.success) {
+      showStatus('datasource-status', '✓ 保存しました', true);
+    } else {
+      showStatus('datasource-status', data.error || 'エラー', false);
+    }
+  } catch (e) {
+    showStatus('datasource-status', 'Error: ' + e.message, false);
+  } finally {
+    btn.disabled = false;
   }
 });
 

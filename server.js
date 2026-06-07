@@ -48,6 +48,8 @@ let adminToken   = '';
 let retentionDays = 730; // 2 years default
 let latestConnections = [];
 let knownMacs = new Set();
+let dnsmasqEnabled  = true;
+let dnsmasqLogFile  = '/var/log/dnsmasq-queries.log';
 
 // ─── Config file ──────────────────────────────────────────────────────────────
 const CONFIG_FILE = path.join(__dirname, '.widemap.json');
@@ -83,14 +85,17 @@ function loadConfig() {
     }
     if (data.slack) notifier.configure({ ...data.slack, language: uiLanguage });
     if (data.adminToken) adminToken = data.adminToken;
+    dnsmasqEnabled = data.dnsmasq?.enabled !== false;
+    dnsmasqLogFile = data.dnsmasq?.logFile || '/var/log/dnsmasq-queries.log';
     dnsmasqLog.configure({
-      logFile: data.dnsmasq?.logFile || '/var/log/dnsmasq-queries.log',
-      enabled: data.dnsmasq?.enabled !== false,
+      logFile: dnsmasqLogFile,
+      enabled: dnsmasqEnabled,
       onDnsQuery: ({ clientIp, domain, resolvedIp }) => {
         if (resolvedIp) {
           enrichment.getDnsCache().set(resolvedIp, {
             host: domain,
             expires: Date.now() + 5 * 60 * 1000,
+            source: 'dnsmasq',
           });
         }
       },
@@ -111,6 +116,7 @@ function saveConfig() {
     backup: backup.getConfig(),
     slack: { ...notifier.getConfig(), tokenSet: undefined },
     adminToken,
+    dnsmasq: { enabled: dnsmasqEnabled, logFile: dnsmasqLogFile },
   };
   // Re-read to preserve passwords (they are not stored in module state getters)
   try {
@@ -281,7 +287,14 @@ async function pollYamahaConnections() {
 
     const connectionHistory = history.getConnectionHistory();
     latestConnections = sessions.map(s => {
-      const host = enrichment.getDnsCache().get(s.dst)?.host || s.dst;
+      const dnsCached = enrichment.getDnsCache().get(s.dst);
+      let host = s.dst;
+      if (dnsCached && dnsCached.expires > Date.now()) {
+        // dnsmasq forward-DNS names always win; skip PTR junk names
+        if (dnsCached.source === 'dnsmasq' || !enrichment.isPtrJunk(dnsCached.host)) {
+          host = dnsCached.host;
+        }
+      }
       const rdap = enrichment.getRdapCache().get(s.dst);
       const geo  = enrichment.getGeoCache().get(s.dst);
       const srcMac = resolveMacByIp(s.src);
@@ -599,6 +612,41 @@ app.post('/api/backup/restore', requireAdmin, (req, res) => {
   }
 });
 
+// ─── Data sources config API ──────────────────────────────────────────────────
+
+app.get('/api/config/datasources', requireAdmin, (req, res) => {
+  res.json({
+    dnsmasq: { enabled: dnsmasqEnabled, logFile: dnsmasqLogFile },
+  });
+});
+
+app.post('/api/config/datasources', requireAdmin, (req, res) => {
+  const { dnsmasq } = req.body || {};
+  if (dnsmasq) {
+    if (typeof dnsmasq.enabled === 'boolean') dnsmasqEnabled = dnsmasq.enabled;
+    if (typeof dnsmasq.logFile === 'string' && dnsmasq.logFile.trim()) {
+      dnsmasqLogFile = dnsmasq.logFile.trim();
+    }
+    dnsmasqLog.stop();
+    dnsmasqLog.configure({
+      logFile: dnsmasqLogFile,
+      enabled: dnsmasqEnabled,
+      onDnsQuery: ({ clientIp, domain, resolvedIp }) => {
+        if (resolvedIp) {
+          enrichment.getDnsCache().set(resolvedIp, {
+            host: domain,
+            expires: Date.now() + 5 * 60 * 1000,
+            source: 'dnsmasq',
+          });
+        }
+      },
+    });
+    if (dnsmasqEnabled) dnsmasqLog.start();
+  }
+  saveConfig();
+  res.json({ success: true, dnsmasq: { enabled: dnsmasqEnabled, logFile: dnsmasqLogFile } });
+});
+
 app.post('/api/backup/upload', requireAdmin, (req, res) => {
   // Accept raw body as DB file (max 100MB)
   const chunks = [];
@@ -728,6 +776,8 @@ io.on('connection', socket => {
     autoInvestigate,
     retentionDays,
     notes,
+    dnsmasqEnabled,
+    dnsmasqLogFile,
   });
   if (asus.isEnabled() && !asus.isAuthenticated()) {
     socket.emit('auth-required', { message: 'セッションが切れています' });
