@@ -92,6 +92,11 @@ async function lookupGeoBatch(ips) {
     } catch (err) {
       recordApiFail('geo', err);
       console.error('[geo] batch error:', err.message);
+      // Rate-limit 対策: エラー時はチャンク内の未キャッシュ IP を 30 分間リトライ抑制
+      const rateLimitTtl = 30 * 60 * 1000;
+      chunk.forEach(ip => {
+        if (!geoCache.has(ip)) geoCache.set(ip, { lat: null, lon: null, expires: now + rateLimitTtl });
+      });
     }
   }
 }
