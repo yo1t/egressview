@@ -19,6 +19,7 @@ const yamaha = require('./src/pollers/yamaha');
 const asus = require('./src/pollers/asus');
 const dnsmasqLog    = require('./src/pollers/dnsmasq-log');
 const inspectSyslog = require('./src/pollers/inspect-syslog');
+const dhcpdSyslog   = require('./src/pollers/dhcpd-syslog');
 
 const app = express();
 const server = http.createServer(app);
@@ -53,6 +54,8 @@ let dnsmasqEnabled  = true;
 let dnsmasqLogFile  = '/var/log/dnsmasq-queries.log';
 let inspectEnabled  = true;
 let inspectLogFile  = '/var/log/yamaha-router.log';
+let dhcpdEnabled    = true;
+let dhcpdLogFile    = '/var/log/yamaha-router.log';
 
 // Debounce timer for [INSPECT] connections-update emissions
 let inspectEmitTimer = null;
@@ -103,6 +106,9 @@ function loadConfig() {
     }
     if (data.slack) notifier.configure({ ...data.slack, language: uiLanguage });
     if (data.adminToken) adminToken = data.adminToken;
+    dhcpdEnabled = data.dhcpd?.enabled !== false;
+    dhcpdLogFile = data.dhcpd?.logFile || '/var/log/yamaha-router.log';
+    dhcpdSyslog.configure({ logFile: dhcpdLogFile, enabled: dhcpdEnabled });
     inspectEnabled = data.inspect?.enabled !== false;
     inspectLogFile = data.inspect?.logFile || '/var/log/yamaha-router.log';
     inspectSyslog.configure({
@@ -143,6 +149,7 @@ function saveConfig() {
     adminToken,
     dnsmasq: { enabled: dnsmasqEnabled, logFile: dnsmasqLogFile },
     inspect: { enabled: inspectEnabled, logFile: inspectLogFile },
+    dhcpd:   { enabled: dhcpdEnabled,   logFile: dhcpdLogFile   },
   };
   // Re-read to preserve passwords (they are not stored in module state getters)
   try {
@@ -189,6 +196,8 @@ function resolveMacByIp(ip) {
   if (!ip) return null;
   const asusMac = asus.getClientMac(ip);
   if (asusMac) return asusMac;
+  const dhcpdMac = dhcpdSyslog.getMacByIp(ip);
+  if (dhcpdMac) return dhcpdMac;
   return yamaha.getArpMac(ip);
 }
 
@@ -722,6 +731,7 @@ app.get('/api/config/datasources', requireAdmin, (req, res) => {
   res.json({
     dnsmasq: { enabled: dnsmasqEnabled, logFile: dnsmasqLogFile },
     inspect: { enabled: inspectEnabled, logFile: inspectLogFile },
+    dhcpd:   { enabled: dhcpdEnabled,   logFile: dhcpdLogFile   },
   });
 });
 
@@ -757,11 +767,22 @@ app.post('/api/config/datasources', requireAdmin, (req, res) => {
     inspectSyslog.configure({ logFile: inspectLogFile, enabled: inspectEnabled, onSession: handleInspectSession });
     if (inspectEnabled) inspectSyslog.start();
   }
+  const { dhcpd } = req.body || {};
+  if (dhcpd) {
+    if (typeof dhcpd.enabled === 'boolean') dhcpdEnabled = dhcpd.enabled;
+    if (typeof dhcpd.logFile === 'string' && dhcpd.logFile.trim()) {
+      dhcpdLogFile = dhcpd.logFile.trim();
+    }
+    dhcpdSyslog.stop();
+    dhcpdSyslog.configure({ logFile: dhcpdLogFile, enabled: dhcpdEnabled });
+    if (dhcpdEnabled) dhcpdSyslog.start();
+  }
   saveConfig();
   res.json({
     success: true,
     dnsmasq: { enabled: dnsmasqEnabled, logFile: dnsmasqLogFile },
     inspect: { enabled: inspectEnabled, logFile: inspectLogFile },
+    dhcpd:   { enabled: dhcpdEnabled,   logFile: dhcpdLogFile   },
   });
 });
 
@@ -898,6 +919,8 @@ io.on('connection', socket => {
     dnsmasqLogFile,
     inspectEnabled,
     inspectLogFile,
+    dhcpdEnabled,
+    dhcpdLogFile,
   });
   if (asus.isEnabled() && !asus.isAuthenticated()) {
     socket.emit('auth-required', { message: 'セッションが切れています' });
@@ -961,6 +984,7 @@ server.listen(PORT, () => {
   });
   dnsmasqLog.start();
   inspectSyslog.start();
+  dhcpdSyslog.start();
 
   // Periodic snapshot/compaction
   setInterval(() => history.snapshotHistory(), 10 * 60 * 1000);
@@ -990,6 +1014,7 @@ function shutdown() {
   try { history.closeDb(); } catch {}
   try { dnsmasqLog.stop(); } catch {}
   try { inspectSyslog.stop(); } catch {}
+  try { dhcpdSyslog.stop(); } catch {}
   process.exit(0);
 }
 process.on('SIGINT',  shutdown);

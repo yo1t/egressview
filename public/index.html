@@ -874,15 +874,21 @@
 
           <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
 
-          <!-- [DHCPD] syslog — future -->
-          <div style="opacity:0.45;pointer-events:none">
-            <label class="pane-title" style="margin-bottom:6px">
-              <input type="checkbox" disabled style="width:14px;height:14px;flex-shrink:0">
-              <span>[DHCPD] IP→MAC リアルタイム追跡 <span style="font-size:9px;color:var(--yellow);margin-left:6px">準備中</span></span>
-            </label>
-            <p style="font-size:10px;color:var(--muted);line-height:1.5;padding-left:22px;margin-bottom:10px">
-              Yamaha syslog の [DHCPD] ログからリアルタイムで IP→MAC を追跡します。
-            </p>
+          <!-- [DHCPD] syslog -->
+          <label class="pane-title" style="margin-bottom:8px">
+            <input type="checkbox" id="enable-dhcpd" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
+            <span>[DHCPD] IP→MAC リアルタイム追跡</span>
+          </label>
+          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px">
+            Yamaha syslog の [DHCPD] エントリ（Allocates/Extends）をリアルタイムで解析し、IP→MAC マッピングを維持します。<br>
+            送信元デバイスの特定精度が向上します。通常は [INSPECT] と同じパスを指定します。
+          </p>
+          <div class="section-inputs" id="dhcpd-inputs">
+            <div class="form-group">
+              <label class="form-label">ログファイルパス</label>
+              <input id="s-dhcpd-logfile" class="form-input" type="text"
+                     placeholder="/var/log/yamaha-router.log" autocomplete="off">
+            </div>
           </div>
 
           <button class="connect-btn" id="datasource-save-btn" style="margin-top:8px">保存</button>
@@ -2535,6 +2541,13 @@ socket.on('config', cfg => {
     document.getElementById('enable-inspect').checked = cfg.inspectEnabled;
     toggleSection('inspect-inputs', 'enable-inspect', null);
   }
+  if (cfg.dhcpdLogFile) {
+    document.getElementById('s-dhcpd-logfile').value = cfg.dhcpdLogFile;
+  }
+  if (typeof cfg.dhcpdEnabled === 'boolean') {
+    document.getElementById('enable-dhcpd').checked = cfg.dhcpdEnabled;
+    toggleSection('dhcpd-inputs', 'enable-dhcpd', null);
+  }
 });
 
 // Save general settings
@@ -2776,6 +2789,9 @@ document.getElementById('enable-dnsmasq').addEventListener('change', () => {
 document.getElementById('enable-inspect').addEventListener('change', () => {
   toggleSection('inspect-inputs', 'enable-inspect', null);
 });
+document.getElementById('enable-dhcpd').addEventListener('change', () => {
+  toggleSection('dhcpd-inputs', 'enable-dhcpd', null);
+});
 
 document.getElementById('datasource-save-btn').addEventListener('click', async () => {
   const btn = document.getElementById('datasource-save-btn');
@@ -2790,6 +2806,11 @@ document.getElementById('datasource-save-btn').addEventListener('click', async (
       inspect: {
         enabled: document.getElementById('enable-inspect').checked,
         logFile: document.getElementById('s-inspect-logfile').value.trim()
+                 || '/var/log/yamaha-router.log',
+      },
+      dhcpd: {
+        enabled: document.getElementById('enable-dhcpd').checked,
+        logFile: document.getElementById('s-dhcpd-logfile').value.trim()
                  || '/var/log/yamaha-router.log',
       },
     };
