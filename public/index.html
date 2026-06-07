@@ -908,6 +908,7 @@
     <button class="view-tab" id="btn-map" data-i18n="tab.map">🗺 地図</button>
     <button class="view-tab" id="btn-stats" data-i18n="tab.stats">📈 統計情報</button>
     <button class="view-tab" id="btn-log" data-i18n="tab.log">📋 通信ログ</button>
+    <button class="view-tab" id="btn-devices" data-i18n="tab.devices">🖥 端末一覧</button>
   </div>
   <div class="time-filter">
     <span class="time-filter-label" data-i18n="period">期間</span>
@@ -1055,6 +1056,36 @@
       </div>
     </div>
   </div>
+  <!-- ── Device Inventory View ─────────────────────────────────────────── -->
+  <div id="devices-container" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg);padding:10px;gap:8px;">
+    <div class="log-header">
+      <span class="log-title" data-i18n="devices.title">🖥 端末一覧</span>
+      <span id="devices-count" style="color:var(--muted);font-size:11px;margin-left:8px;"></span>
+      <button id="devices-refresh-btn" style="margin-left:auto;padding:3px 10px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text);cursor:pointer;" data-i18n="devices.refresh">更新</button>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <input id="devices-search" type="text" placeholder="IP / MAC / 名前 / ベンダー…" autocomplete="off"
+        style="flex:1;min-width:180px;max-width:320px;padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--text);">
+    </div>
+    <div class="log-table-wrap">
+      <table class="log-table" id="devices-table">
+        <thead>
+          <tr>
+            <th data-col="ip"        class="dv-sort" data-i18n="devices.col.ip">IP</th>
+            <th data-col="mac"       class="dv-sort" data-i18n="devices.col.mac">MAC</th>
+            <th data-col="vendor"    class="dv-sort" data-i18n="devices.col.vendor">ベンダー</th>
+            <th data-col="name"      class="dv-sort" data-i18n="devices.col.name">名前</th>
+            <th data-col="ipv6"      data-i18n="devices.col.ipv6">IPv6</th>
+            <th data-col="sources"   data-i18n="devices.col.sources">ソース</th>
+            <th data-col="firstSeen" class="dv-sort" data-i18n="devices.col.firstSeen">初回確認</th>
+            <th data-col="lastSeen"  class="dv-sort" data-i18n="devices.col.lastSeen">最終確認</th>
+          </tr>
+        </thead>
+        <tbody id="devices-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <div id="graph-container">
     <svg id="graph"></svg>
     <div class="graph-tooltip" id="tooltip"></div>
@@ -1119,7 +1150,10 @@ let currentLang = 'ja';
 const I18N = {
   ja: {
     // Header / Tabs
-    'tab.graph': '📊 グラフマップ', 'tab.map': '🗺 地図', 'tab.stats': '📈 統計情報', 'tab.log': '📋 通信ログ',
+    'tab.graph': '📊 グラフマップ', 'tab.map': '🗺 地図', 'tab.stats': '📈 統計情報', 'tab.log': '📋 通信ログ', 'tab.devices': '🖥 端末一覧',
+    'devices.title': '🖥 端末一覧', 'devices.refresh': '更新',
+    'devices.col.ip': 'IP', 'devices.col.mac': 'MAC', 'devices.col.vendor': 'ベンダー', 'devices.col.name': '名前',
+    'devices.col.ipv6': 'IPv6', 'devices.col.sources': 'ソース', 'devices.col.firstSeen': '初回確認', 'devices.col.lastSeen': '最終確認',
     'period': '期間', 'devices': '接続デバイス', 'wan.rx': 'WAN ↓', 'wan.tx': 'WAN ↑',
     'settings.title': '⚙ 設定',
     'period.live': 'リアルタイム (15分以内)', 'period.1h':'1時間以内', 'period.3h':'3時間以内',
@@ -1247,7 +1281,10 @@ const I18N = {
     'log.filter.from':'開始', 'log.filter.to':'終了',
     'log.badge.safe':'未検出', 'log.badge.danger':'検出', 'log.badge.warn':'要確認',
   },  en: {
-    'tab.graph': '📊 Graph Map', 'tab.map': '🗺 World Map', 'tab.stats': '📈 Statistics', 'tab.log': '📋 Conn Log',
+    'tab.graph': '📊 Graph Map', 'tab.map': '🗺 World Map', 'tab.stats': '📈 Statistics', 'tab.log': '📋 Conn Log', 'tab.devices': '🖥 Devices',
+    'devices.title': '🖥 Devices', 'devices.refresh': 'Refresh',
+    'devices.col.ip': 'IP', 'devices.col.mac': 'MAC', 'devices.col.vendor': 'Vendor', 'devices.col.name': 'Name',
+    'devices.col.ipv6': 'IPv6', 'devices.col.sources': 'Sources', 'devices.col.firstSeen': 'First Seen', 'devices.col.lastSeen': 'Last Seen',
     'period': 'Period', 'devices': 'Devices', 'wan.rx': 'WAN ↓', 'wan.tx': 'WAN ↑',
     'settings.title': '⚙ Settings',
     'period.live': 'Live (last 15 min)', 'period.1h':'Last hour', 'period.3h':'Last 3 hours',
@@ -3700,29 +3737,35 @@ function toLocalDatetimeStr(d) {
 var currentView = 'graph';
 var statsMode = false;
 var logMode = false;
+var devicesMode = false;
 function switchView(view) {
   currentView = view;
-  mapMode   = (view === 'map');
-  statsMode = (view === 'stats');
-  logMode   = (view === 'log');
-  document.getElementById('graph-container').style.display = view === 'graph' ? 'flex' : 'none';
-  document.getElementById('map-container').style.display   = view === 'map'   ? 'flex' : 'none';
-  document.getElementById('stats-container').style.display = view === 'stats' ? 'flex' : 'none';
-  document.getElementById('log-container').style.display   = view === 'log'   ? 'flex' : 'none';
-  document.getElementById('btn-graph').classList.toggle('active', view === 'graph');
-  document.getElementById('btn-map').classList.toggle('active',   view === 'map');
-  document.getElementById('btn-stats').classList.toggle('active', view === 'stats');
-  document.getElementById('btn-log').classList.toggle('active',   view === 'log');
+  mapMode     = (view === 'map');
+  statsMode   = (view === 'stats');
+  logMode     = (view === 'log');
+  devicesMode = (view === 'devices');
+  document.getElementById('graph-container').style.display   = view === 'graph'   ? 'flex' : 'none';
+  document.getElementById('map-container').style.display     = view === 'map'     ? 'flex' : 'none';
+  document.getElementById('stats-container').style.display   = view === 'stats'   ? 'flex' : 'none';
+  document.getElementById('log-container').style.display     = view === 'log'     ? 'flex' : 'none';
+  document.getElementById('devices-container').style.display = view === 'devices' ? 'flex' : 'none';
+  document.getElementById('btn-graph').classList.toggle('active',   view === 'graph');
+  document.getElementById('btn-map').classList.toggle('active',     view === 'map');
+  document.getElementById('btn-stats').classList.toggle('active',   view === 'stats');
+  document.getElementById('btn-log').classList.toggle('active',     view === 'log');
+  document.getElementById('btn-devices').classList.toggle('active', view === 'devices');
   document.body.classList.toggle('is-stats-mode', view === 'stats');
-  if (view === 'map') requestAnimationFrame(() => initWorldMap());
-  else                stopMapAnim();
-  if (view === 'stats') requestAnimationFrame(updateStats);
-  if (view === 'log')   requestAnimationFrame(updateLogView);
+  if (view === 'map')     requestAnimationFrame(() => initWorldMap());
+  else                    stopMapAnim();
+  if (view === 'stats')   requestAnimationFrame(updateStats);
+  if (view === 'log')     requestAnimationFrame(updateLogView);
+  if (view === 'devices') requestAnimationFrame(loadDevicesView);
 }
-document.getElementById('btn-graph').addEventListener('click', () => switchView('graph'));
-document.getElementById('btn-map').addEventListener('click',   () => switchView('map'));
-document.getElementById('btn-stats').addEventListener('click', () => switchView('stats'));
-document.getElementById('btn-log').addEventListener('click',   () => switchView('log'));
+document.getElementById('btn-graph').addEventListener('click',   () => switchView('graph'));
+document.getElementById('btn-map').addEventListener('click',     () => switchView('map'));
+document.getElementById('btn-stats').addEventListener('click',   () => switchView('stats'));
+document.getElementById('btn-log').addEventListener('click',     () => switchView('log'));
+document.getElementById('btn-devices').addEventListener('click', () => switchView('devices'));
 
 // ─── Device search ────────────────────────────────────────────────────────────
 document.getElementById('device-search-input').addEventListener('input', () => {
@@ -4110,6 +4153,111 @@ async function threatDetailSaveNote(ip, mac) {
     statusEl.textContent = '保存失敗: ' + e.message;
   }
 }
+
+// ─── Device Inventory View ───────────────────────────────────────────────────
+var devicesData = [];
+var devicesSortState = { col: 'lastSeen', dir: 'desc' };
+
+function fmtTs(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return d.toLocaleDateString() + ' ' + d.toTimeString().slice(0, 5);
+}
+
+function fmtMac(mac) {
+  return mac || '—';
+}
+
+function deviceName(d) {
+  return d.mdnsName || d.dnsName || d.netbiosName || '—';
+}
+
+function deviceIpv6(d) {
+  if (!d.ipv6Addrs || !d.ipv6Addrs.length) return '—';
+  return d.ipv6Addrs.slice(0, 2).join(', ');
+}
+
+function getDeviceSortValue(d, col) {
+  switch (col) {
+    case 'ip':        return d.ip || '';
+    case 'mac':       return d.mac || '';
+    case 'vendor':    return (d.vendor || '').toLowerCase();
+    case 'name':      return deviceName(d).toLowerCase();
+    case 'firstSeen': return d.firstSeen || 0;
+    case 'lastSeen':  return d.lastSeen  || 0;
+    default:          return '';
+  }
+}
+
+function renderDevicesTable() {
+  const search = (document.getElementById('devices-search').value || '').toLowerCase();
+  let rows = devicesData.filter(d => {
+    if (!search) return true;
+    return (d.ip || '').includes(search) ||
+      (d.mac || '').toLowerCase().includes(search) ||
+      (d.vendor || '').toLowerCase().includes(search) ||
+      deviceName(d).toLowerCase().includes(search);
+  });
+
+  rows.sort((a, b) => {
+    const av = getDeviceSortValue(a, devicesSortState.col);
+    const bv = getDeviceSortValue(b, devicesSortState.col);
+    const cmp = typeof av === 'number' ? av - bv : av.localeCompare(bv);
+    return devicesSortState.dir === 'asc' ? cmp : -cmp;
+  });
+
+  const tbody = document.getElementById('devices-tbody');
+  tbody.innerHTML = rows.map(d => {
+    const name = deviceName(d);
+    const ipv6 = deviceIpv6(d);
+    const sources = (d.sources || '').split(',').filter(Boolean).join(' · ');
+    return `<tr>
+      <td style="font-family:monospace">${d.ip}</td>
+      <td style="font-family:monospace;color:var(--muted)">${fmtMac(d.mac)}</td>
+      <td>${d.vendor ? esc(d.vendor) : '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${name !== '—' ? esc(name) : '<span style="color:var(--muted)">—</span>'}</td>
+      <td style="font-family:monospace;font-size:10px;color:var(--muted)">${ipv6 !== '—' ? esc(ipv6) : '—'}</td>
+      <td style="color:var(--muted);font-size:10px">${sources || '—'}</td>
+      <td style="color:var(--muted);font-size:10px">${fmtTs(d.firstSeen)}</td>
+      <td style="color:var(--muted);font-size:10px">${fmtTs(d.lastSeen)}</td>
+    </tr>`;
+  }).join('');
+
+  const countEl = document.getElementById('devices-count');
+  if (countEl) countEl.textContent = rows.length + ' 台' + (search ? '（フィルター中）' : '');
+}
+
+async function loadDevicesView() {
+  try {
+    const res = await fetch('__BASE__/api/devices', {
+      headers: { 'X-Admin-Token': localStorage.getItem('adminToken') || '' }
+    });
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    devicesData = data.devices || [];
+    renderDevicesTable();
+  } catch (e) {
+    console.error('[devices] load failed:', e);
+  }
+}
+
+// Sort click
+document.querySelectorAll('#devices-table .dv-sort').forEach(th => {
+  th.style.cursor = 'pointer';
+  th.addEventListener('click', () => {
+    const col = th.getAttribute('data-col');
+    if (devicesSortState.col === col) {
+      devicesSortState.dir = devicesSortState.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      devicesSortState.col = col;
+      devicesSortState.dir = col === 'lastSeen' || col === 'firstSeen' ? 'desc' : 'asc';
+    }
+    renderDevicesTable();
+  });
+});
+
+document.getElementById('devices-search').addEventListener('input', renderDevicesTable);
+document.getElementById('devices-refresh-btn').addEventListener('click', loadDevicesView);
 
 // Init
 resize();

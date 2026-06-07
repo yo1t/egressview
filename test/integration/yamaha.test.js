@@ -7,6 +7,11 @@
 // - No credentials are logged or written to test output
 // - Baseline file contains only aggregate metrics (no IP addresses or session details)
 
+if (!process.env.RUN_INTEGRATION) {
+  console.log('[yamaha] Skipping integration tests (set RUN_INTEGRATION=1 to run)');
+  process.exit(0);
+}
+
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

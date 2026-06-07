@@ -20,6 +20,7 @@ const asus = require('./src/pollers/asus');
 const dnsmasqLog    = require('./src/pollers/dnsmasq-log');
 const inspectSyslog = require('./src/pollers/inspect-syslog');
 const dhcpdSyslog   = require('./src/pollers/dhcpd-syslog');
+const devices       = require('./src/devices');
 
 const app = express();
 const server = http.createServer(app);
@@ -167,6 +168,22 @@ function saveConfig() {
   }
 }
 
+/**
+ * Atomically merge credential fields into one section of the config file.
+ * Use when a new plaintext secret is received (login/setup routes).
+ * `saveConfig()` preserves existing secrets, but does not know newly-entered ones.
+ */
+function persistSecret(section, updates) {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    cfg[section] = { ...(cfg[section] || {}), ...updates };
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+    try { fs.chmodSync(CONFIG_FILE, 0o600); } catch {}
+  } catch (e) {
+    console.error('[config] persistSecret failed:', e.message);
+  }
+}
+
 // ─── Admin token ──────────────────────────────────────────────────────────────
 function ensureAdminToken() {
   if (!adminToken) {
@@ -201,15 +218,20 @@ function resolveMacByIp(ip) {
   return yamaha.getArpMac(ip);
 }
 
-// ─── [INSPECT] session handler ───────────────────────────────────────────────
-function handleInspectSession(session) {
-  const now = Date.now();
+// ─── Shared connection record helper ─────────────────────────────────────────
+/**
+ * Enrich a session from caches, upsert into connectionHistory, notify.
+ * @param {object} session  - { src, sport, dst, dport, proto, ttl? }
+ * @param {number} [now]    - timestamp (defaults to Date.now())
+ * @returns {{ entry, key, isNew }}
+ */
+function recordConnection(session, now = Date.now()) {
   const { src, sport, dst, dport, proto } = session;
 
   const srcMac  = resolveMacByIp(src);
   const srcMeta = deviceId.getNodeMeta(src, srcMac);
 
-  // Synchronous enrichment from existing caches
+  // Resolve dstHost: prefer dnsmasq > PTR (if not junk) > raw IP
   const dnsCached = enrichment.getDnsCache().get(dst);
   let dstHost = dst;
   if (dnsCached && dnsCached.expires > now) {
@@ -217,11 +239,12 @@ function handleInspectSession(session) {
       dstHost = dnsCached.host;
     }
   }
+
   const rdap = enrichment.getRdapCache().get(dst);
   const geo  = enrichment.getGeoCache().get(dst);
 
   const enriched = {
-    src, sport, dst, dport, proto,
+    src, sport: sport ?? null, dst, dport, proto,
     srcMac,
     srcVendor:   srcMeta.vendor,
     srcDnsName:  srcMeta.dnsName,
@@ -233,11 +256,11 @@ function handleInspectSession(session) {
     lon:     geo?.lon  ?? null,
     city:    geo?.city ?? null,
     threat:  threatIntel.matchThreatIntel(dst, dstHost) || null,
-    ttl:     0,
+    ttl:     session.ttl ?? 0,
   };
 
-  const key = `${src}|${dst}|${dport}|${proto}`;
   const connectionHistory = history.getConnectionHistory();
+  const key      = `${src}|${dst}|${dport}|${proto}`;
   const existing = connectionHistory.get(key);
   const isNew    = !existing;
   const entry    = { ...enriched, firstSeen: existing?.firstSeen ?? now, lastSeen: now };
@@ -251,9 +274,34 @@ function handleInspectSession(session) {
   }
   if (isNew) history.appendHistoryLog(entry);
 
+  // Update device inventory
+  devices.upsert({
+    ip:        entry.src,
+    mac:       entry.srcMac      || null,
+    vendor:    entry.srcVendor   || null,
+    dnsName:   entry.srcDnsName  || null,
+    mdnsName:  entry.srcMdnsName || null,
+    firstSeen: entry.firstSeen,
+    lastSeen:  entry.lastSeen,
+    source:    proto === 'TCP' ? 'inspect' : 'nat',
+  });
+
+  return { entry, key, isNew };
+}
+
+// ─── [INSPECT] session handler ───────────────────────────────────────────────
+function handleInspectSession(session) {
+  const now = Date.now();
+  const { dst } = session;
+
+  const rdap = enrichment.getRdapCache().get(dst);
+  const geo  = enrichment.getGeoCache().get(dst);
+
+  const { key } = recordConnection(session, now);
+
   // Async: enrich missing geo/rdap/ptr in background (fire-and-forget)
-  const needsAsync = !rdap || !geo;
-  if (needsAsync) {
+  if (!rdap || !geo) {
+    const connectionHistory = history.getConnectionHistory();
     Promise.allSettled([
       enrichment.reverseDns(dst),
       enrichment.lookupRdap(dst),
@@ -398,46 +446,8 @@ async function pollYamahaConnections() {
       await yamaha.refreshYamahaNdp();
     }
 
-    const connectionHistory = history.getConnectionHistory();
     latestConnections = sessions.map(s => {
-      const dnsCached = enrichment.getDnsCache().get(s.dst);
-      let host = s.dst;
-      if (dnsCached && dnsCached.expires > Date.now()) {
-        // dnsmasq forward-DNS names always win; skip PTR junk names
-        if (dnsCached.source === 'dnsmasq' || !enrichment.isPtrJunk(dnsCached.host)) {
-          host = dnsCached.host;
-        }
-      }
-      const rdap = enrichment.getRdapCache().get(s.dst);
-      const geo  = enrichment.getGeoCache().get(s.dst);
-      const srcMac = resolveMacByIp(s.src);
-      const srcMeta = deviceId.getNodeMeta(s.src, srcMac);
-      const enriched = {
-        ...s,
-        srcMac,
-        srcVendor:   srcMeta.vendor,
-        srcDnsName:  srcMeta.dnsName,
-        srcMdnsName: srcMeta.mdnsName,
-        dstHost: host,
-        country: rdap?.country || geo?.countryCode || null,
-        org:     rdap?.org     || null,
-        lat:     geo?.lat  ?? null,
-        lon:     geo?.lon  ?? null,
-        city:    geo?.city ?? null,
-        threat:  threatIntel.matchThreatIntel(s.dst, host) || null,
-      };
-      const key = `${s.src}|${s.dst}|${s.dport}|${s.proto}`;
-      const existing = connectionHistory.get(key);
-      const isNew = !existing;
-      const entry = { ...enriched, firstSeen: existing?.firstSeen ?? now, lastSeen: now };
-      connectionHistory.set(key, entry);
-      if (entry.threat) notifier.notify(entry);
-      if (entry.srcMac && !knownMacs.has(entry.srcMac)) {
-        knownMacs.add(entry.srcMac);
-        notifier.notifyNewDevice(entry);
-        io.emit('new-device', entry);
-      }
-      if (isNew) history.appendHistoryLog(entry);
+      const { entry } = recordConnection(s, now);
       return entry;
     });
 
@@ -544,15 +554,7 @@ app.post('/api/login', requireAdmin, async (req, res) => {
       await asus.login(targetIp, username, finalPass);
       asus.startPolling(POLL_INTERVAL);
       saveConfig();
-      // Persist ASUS password
-      try {
-        const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-        cfg.asus = cfg.asus || {};
-        cfg.asus.ip = targetIp;
-        cfg.asus.user = username;
-        cfg.asus.pass = finalPass;
-        fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), { mode: 0o600 });
-      } catch {}
+      persistSecret('asus', { ip: targetIp, user: username, pass: finalPass });
       console.log(`[auth] ASUS logged in as ${username} @ ${targetIp}`);
     } catch (err) {
       console.error('[auth] ASUS login failed:', err.message);
@@ -569,16 +571,7 @@ app.post('/api/login', requireAdmin, async (req, res) => {
     yamaha.configure({ enabled: true, ip: yIp || yamaha.getIp(), user: yUser || yamaha.getUser(), natDescriptor: yNat || undefined });
     // Persist Yamaha password
     if (yPass) {
-      try {
-        const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-        cfg.yamaha = cfg.yamaha || {};
-        cfg.yamaha.ip = yIp || yamaha.getIp();
-        cfg.yamaha.user = yUser || yamaha.getUser();
-        cfg.yamaha.pass = yPass;
-        cfg.yamaha.nat = yNat || cfg.yamaha.nat || '100';
-        cfg.yamaha.enabled = true;
-        fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), { mode: 0o600 });
-      } catch {}
+      persistSecret('yamaha', { ip: yIp || yamaha.getIp(), user: yUser || yamaha.getUser(), pass: yPass, nat: yNat || '100', enabled: true });
       yamaha.configure({ pass: yPass });
     }
     yamaha.reconnect();
@@ -624,7 +617,11 @@ app.post('/api/config/general', requireAdmin, (req, res) => {
 });
 
 app.get('/api/status', requireAdmin, (req, res) => {
-  res.json({ authenticated: asus.isAuthenticated(), routerIp: asus.getRouterIp() });
+  res.json({
+    authenticated: asus.isAuthenticated(),
+    routerIp: asus.getRouterIp(),
+    enrichment: enrichment.getApiStats(),
+  });
 });
 
 // Notes API
@@ -691,6 +688,22 @@ app.get('/api/connections', requireAdmin, (req, res) => {
   const to   = req.query.to   != null && req.query.to   !== '' ? parseInt(req.query.to)   : null;
   const connections = history.queryByTimeRange(from, to);
   res.json({ connections, serverTime: Date.now() });
+});
+
+// ─── Device Inventory API ────────────────────────────────────────────────────
+
+app.get('/api/devices', requireAdmin, (req, res) => {
+  const all = devices.getAll();
+  // Attach current IPv6 addresses from NDP cache (keyed by MAC)
+  for (const d of all) {
+    if (d.mac) {
+      const ipv6 = yamaha.getNdpByMac(d.mac);
+      d.ipv6Addrs = ipv6 || null;
+    } else {
+      d.ipv6Addrs = null;
+    }
+  }
+  res.json({ devices: all });
 });
 
 // ─── Backup / Restore API ─────────────────────────────────────────────────────
@@ -786,11 +799,26 @@ app.post('/api/config/datasources', requireAdmin, (req, res) => {
   });
 });
 
+const UPLOAD_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
+
 app.post('/api/backup/upload', requireAdmin, (req, res) => {
   // Accept raw body as DB file (max 100MB)
   const chunks = [];
-  req.on('data', chunk => chunks.push(chunk));
+  let received = 0;
+  let aborted = false;
+
+  req.on('data', chunk => {
+    if (aborted) return;
+    received += chunk.length;
+    if (received > UPLOAD_MAX_BYTES) {
+      aborted = true;
+      req.destroy();
+      return res.status(413).json({ error: `File too large (max ${UPLOAD_MAX_BYTES / 1024 / 1024}MB)` });
+    }
+    chunks.push(chunk);
+  });
   req.on('end', () => {
+    if (aborted) return;
     try {
       const buf = Buffer.concat(chunks);
       if (buf.length < 100) return res.status(400).json({ error: 'File too small' });
@@ -827,13 +855,10 @@ app.post('/api/config/slack', requireAdmin, (req, res) => {
     cooldownMinutes: typeof cooldownMinutes === 'number' ? cooldownMinutes : undefined,
   });
   // Persist sensitive/extra fields directly (getConfig() intentionally omits token)
-  try {
-    const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    cfg.slack = cfg.slack || {};
-    if (typeof token === 'string' && token) cfg.slack.token = token;
-    if (typeof displayName === 'string') cfg.slack.displayName = displayName;
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), { mode: 0o600 });
-  } catch {}
+  const slackUpdates = {};
+  if (typeof token === 'string' && token) slackUpdates.token = token;
+  if (typeof displayName === 'string') slackUpdates.displayName = displayName;
+  if (Object.keys(slackUpdates).length) persistSecret('slack', slackUpdates);
   saveConfig();
   const fileCfg = (() => { try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch { return {}; } })();
   res.json({ success: true, config: { ...notifier.getConfig(), displayName: fileCfg.slack?.displayName || '' } });
@@ -977,6 +1002,8 @@ server.listen(PORT, () => {
   history.setRetentionDays(retentionDays);
   history.loadConnectionHistory();
   knownMacs = history.getKnownMacs();
+  devices.initDb();
+  devices.seedFromConnectionHistory(history.getConnectionHistory());
   console.log(`Router IP: ${asus.getRouterIp()}`);
   deviceId.loadOuiDb();
   yamaha.connectYamaha(() => {

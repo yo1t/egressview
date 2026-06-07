@@ -7,6 +7,11 @@
 // - No credentials are logged or written to test output
 // - Test does not store session tokens beyond the test run
 
+if (!process.env.RUN_INTEGRATION) {
+  console.log('[asus] Skipping integration tests (set RUN_INTEGRATION=1 to run)');
+  process.exit(0);
+}
+
 const { describe, it, before } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

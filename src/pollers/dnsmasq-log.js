@@ -1,37 +1,27 @@
 // dnsmasq query log poller: tail logs and report client/domain/IP resolutions
 'use strict';
 
-const fs = require('fs');
-const readline = require('readline');
-const { spawn } = require('child_process');
+const { createTailPoller } = require('./tail-helper');
 
 const DEFAULT_LOG_FILE = '/var/log/dnsmasq-queries.log';
-const RESTART_DELAY_MS = 5000;
 const PENDING_TTL_MS = 60 * 1000;
 
-let logFile = DEFAULT_LOG_FILE;
+let logFile       = DEFAULT_LOG_FILE;
 let dnsmasqEnabled = true;
-let onDnsQuery = () => {};
-
-let tailProc = null;
-let lineReader = null;
-let restartTimer = null;
-let warnedMissing = false;
-let started = false;
+let onDnsQuery    = () => {};
 
 const pendingByDomain = new Map();
 const cnameRoots = [];
 
 function configure(cfg) {
-  if (cfg.logFile !== undefined) logFile = cfg.logFile || DEFAULT_LOG_FILE;
-  if (cfg.enabled !== undefined) dnsmasqEnabled = cfg.enabled;
-  if (cfg.onDnsQuery) onDnsQuery = cfg.onDnsQuery;
+  if (cfg.logFile    !== undefined) logFile        = cfg.logFile || DEFAULT_LOG_FILE;
+  if (cfg.enabled    !== undefined) dnsmasqEnabled = cfg.enabled;
+  if (cfg.onDnsQuery)               onDnsQuery     = cfg.onDnsQuery;
 }
 
 function parseTime(line) {
   const m = line.match(/^([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+/);
   if (!m) return new Date();
-
   const [, month, day, hour, minute, second] = m;
   const year = new Date().getFullYear();
   const parsed = new Date(`${month} ${parseInt(day, 10)} ${year} ${hour}:${minute}:${second}`);
@@ -54,21 +44,21 @@ function parseLine(line) {
   const query = line.match(/dnsmasq\[\d+\]: query\[(A|AAAA)\] (\S+) from (\S+)/);
   if (query) {
     return {
-      type: 'query',
-      qtype: query[1],
-      domain: query[2],
+      type:     'query',
+      qtype:    query[1],
+      domain:   query[2],
       clientIp: query[3],
-      time: parseTime(line),
+      time:     parseTime(line),
     };
   }
 
   const reply = line.match(/dnsmasq\[\d+\]: reply (\S+) is (\S+)/);
   if (reply) {
     return {
-      type: 'reply',
-      domain: reply[1],
+      type:       'reply',
+      domain:     reply[1],
       resolvedIp: isIpv4(reply[2]) ? reply[2] : null,
-      rawValue: reply[2],
+      rawValue:   reply[2],
     };
   }
 
@@ -77,13 +67,11 @@ function parseLine(line) {
 
 function prunePending() {
   const oldest = Date.now() - PENDING_TTL_MS;
-
   for (const [domain, items] of pendingByDomain) {
     const active = items.filter(item => item.createdAt >= oldest);
     if (active.length) pendingByDomain.set(domain, active);
     else pendingByDomain.delete(domain);
   }
-
   for (let i = cnameRoots.length - 1; i >= 0; i--) {
     if (cnameRoots[i].createdAt < oldest || !hasPending(cnameRoots[i].domain)) {
       cnameRoots.splice(i, 1);
@@ -93,15 +81,13 @@ function prunePending() {
 
 function queueQuery(entry) {
   prunePending();
-
   const item = {
-    domain: entry.domain,
-    qtype: entry.qtype,
+    domain:   entry.domain,
+    qtype:    entry.qtype,
     clientIp: normalizeClientIp(entry.clientIp),
-    time: entry.time,
+    time:     entry.time,
     createdAt: Date.now(),
   };
-
   if (!pendingByDomain.has(entry.domain)) pendingByDomain.set(entry.domain, []);
   pendingByDomain.get(entry.domain).push(item);
 }
@@ -114,11 +100,9 @@ function hasPending(domain) {
 function takePending(domain, preferredType) {
   const items = pendingByDomain.get(domain);
   if (!items || !items.length) return null;
-
   let idx = -1;
   if (preferredType) idx = items.findIndex(item => item.qtype === preferredType);
   if (idx < 0) idx = 0;
-
   const item = items.splice(idx, 1)[0];
   if (!items.length) pendingByDomain.delete(domain);
   return item;
@@ -126,12 +110,7 @@ function takePending(domain, preferredType) {
 
 function emitQuery(query, resolvedIp) {
   try {
-    onDnsQuery({
-      clientIp: query.clientIp,
-      domain: query.domain,
-      resolvedIp,
-      time: query.time,
-    });
+    onDnsQuery({ clientIp: query.clientIp, domain: query.domain, resolvedIp, time: query.time });
   } catch (e) {
     console.error('[dnsmasq-log] onDnsQuery failed:', e.message);
   }
@@ -146,155 +125,66 @@ function rememberCnameRoot(domain) {
 
 function takeCnameRoot() {
   prunePending();
-
   while (cnameRoots.length) {
     const root = cnameRoots.shift();
     if (hasPending(root.domain)) return root.domain;
   }
-
   return null;
 }
 
 function resolveDirectReply(entry) {
-  if (entry.rawValue === '<CNAME>') {
-    rememberCnameRoot(entry.domain);
-    return true;
-  }
-
+  if (entry.rawValue === '<CNAME>') { rememberCnameRoot(entry.domain); return true; }
   if (entry.rawValue === 'NODATA-IPv6') {
     const query = takePending(entry.domain, 'AAAA');
     if (query) emitQuery(query, null);
     return !!query;
   }
-
   const preferredType = entry.resolvedIp ? 'A' : null;
   const query = takePending(entry.domain, preferredType);
   if (!query) return false;
-
   emitQuery(query, entry.resolvedIp);
   return true;
 }
 
 function resolveCnameReply(entry) {
   if (entry.rawValue === '<CNAME>') return false;
-
   const rootDomain = takeCnameRoot();
   if (!rootDomain) return false;
-
   const preferredType = entry.resolvedIp ? 'A' : null;
   const query = takePending(rootDomain, preferredType);
   if (!query) return false;
-
   emitQuery(query, entry.resolvedIp);
   return true;
 }
 
 function handleEntry(entry) {
-  if (entry.type === 'query') {
-    queueQuery(entry);
-    return;
-  }
-
+  if (entry.type === 'query') { queueQuery(entry); return; }
   if (entry.type === 'reply') {
     if (resolveDirectReply(entry)) return;
     resolveCnameReply(entry);
   }
 }
 
-function handleLine(line) {
-  const entry = parseLine(line);
-  if (!entry) return;
-  handleEntry(entry);
-}
-
-function clearRestartTimer() {
-  if (restartTimer) {
-    clearTimeout(restartTimer);
-    restartTimer = null;
-  }
-}
-
-function cleanupTail() {
-  if (lineReader) {
-    try { lineReader.close(); } catch {}
-    lineReader = null;
-  }
-
-  if (tailProc) {
-    const proc = tailProc;
-    tailProc = null;
-    try { proc.removeAllListeners(); } catch {}
-    try { proc.kill(); } catch {}
-  }
-}
-
-function scheduleRestart() {
-  if (!started || !dnsmasqEnabled || restartTimer) return;
-  restartTimer = setTimeout(() => {
-    restartTimer = null;
-    startTail();
-  }, RESTART_DELAY_MS);
-}
-
-function startTail() {
-  if (!started || !dnsmasqEnabled || tailProc) return;
-
-  if (!fs.existsSync(logFile)) {
-    if (!warnedMissing) {
-      console.warn(`[dnsmasq-log] Log file not found, waiting: ${logFile}`);
-      warnedMissing = true;
-    }
-    scheduleRestart();
-    return;
-  }
-
-  warnedMissing = false;
-
-  const proc = spawn('sudo', ['tail', '-F', logFile], { stdio: ['ignore', 'pipe', 'pipe'] });
-  tailProc = proc;
-  lineReader = readline.createInterface({ input: proc.stdout });
-
-  lineReader.on('line', handleLine);
-
-  proc.stderr.on('data', chunk => {
-    const text = chunk.toString('utf8').trim();
-    if (text) console.warn('[dnsmasq-log] tail:', text);
-  });
-
-  proc.on('error', err => {
-    console.error('[dnsmasq-log] tail failed:', err.message);
-    cleanupTail();
-    scheduleRestart();
-  });
-
-  proc.on('close', code => {
-    cleanupTail();
-    if (started && dnsmasqEnabled) {
-      console.warn(`[dnsmasq-log] tail stopped (${code}), restarting soon`);
-      scheduleRestart();
-    }
-  });
-}
-
-function start() {
-  if (!dnsmasqEnabled) return;
-  if (started) return;
-
-  started = true;
-  clearRestartTimer();
-  startTail();
-}
+const poller = createTailPoller({
+  name:       'dnsmasq-log',
+  getLogFile: () => logFile,
+  isEnabled:  () => dnsmasqEnabled,
+  onLine: line => {
+    const entry = parseLine(line);
+    if (!entry) return;
+    handleEntry(entry);
+  },
+});
 
 function stop() {
-  started = false;
-  clearRestartTimer();
-  cleanupTail();
+  poller.stop();
   pendingByDomain.clear();
   cnameRoots.length = 0;
 }
 
 module.exports = {
   configure,
-  start,
+  start: poller.start,
   stop,
+  _parseLine: parseLine,
 };

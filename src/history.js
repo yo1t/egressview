@@ -24,8 +24,8 @@ function _secureDbFiles() {
   }
 }
 
-function initDb() {
-  db = new Database(DB_PATH);
+function initDb(dbPath) {
+  db = new Database(dbPath || DB_PATH);
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
   _secureDbFiles();
@@ -248,6 +248,22 @@ function closeDb() {
   }
 }
 
+// ─── Test helper ─────────────────────────────────────────────────────────────
+
+/** Re-initialize with an in-memory SQLite DB for unit tests. */
+function _initForTest() {
+  if (db) { try { db.close(); } catch {} db = null; }
+  connectionHistory.clear();
+  initDb(':memory:');
+}
+
+/** Insert into DB AND sync to in-memory Map (for WebSocket filter tests). */
+function _appendAndLoad(entry) {
+  appendHistoryLog(entry);
+  const key = `${entry.src}|${entry.dst}|${entry.dport ?? 0}|${entry.proto || 'TCP'}`;
+  connectionHistory.set(key, { ...entry, dport: entry.dport ?? 0, proto: entry.proto || 'TCP' });
+}
+
 module.exports = {
   loadConnectionHistory,
   appendHistoryLog,
@@ -260,4 +276,6 @@ module.exports = {
   setRetentionDays,
   closeDb,
   HISTORY_TTL_MS,
+  _initForTest,
+  _appendAndLoad,
 };

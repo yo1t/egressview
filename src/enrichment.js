@@ -16,6 +16,19 @@ const geoCache    = new Map(); // ip → {lat, lon, city, countryCode, expires}
 const GEO_TTL_MS  = 24 * 60 * 60 * 1000;
 const GEO_FAIL_TTL =  5 * 60 * 1000;
 
+// ─── External API observability ───────────────────────────────────────────────
+const apiStats = {
+  rdap: { ok: 0, fail: 0, lastOkAt: null, lastFailAt: null, lastError: null },
+  geo:  { ok: 0, fail: 0, lastOkAt: null, lastFailAt: null, lastError: null },
+  ptr:  { ok: 0, fail: 0, lastOkAt: null, lastFailAt: null, lastError: null },
+};
+
+function recordApiOk(name)  { const s = apiStats[name]; s.ok++;   s.lastOkAt   = Date.now(); }
+function recordApiFail(name, err) {
+  const s = apiStats[name]; s.fail++; s.lastFailAt = Date.now(); s.lastError  = err?.message || String(err);
+}
+function getApiStats() { return apiStats; }
+
 function httpsGetJson(url, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error('too many redirects'));
@@ -75,7 +88,9 @@ async function lookupGeoBatch(ips) {
         }
       });
       console.log(`[geo] ${ok}/${chunk.length} IPs geo-resolved`);
+      recordApiOk('geo');
     } catch (err) {
+      recordApiFail('geo', err);
       console.error('[geo] batch error:', err.message);
     }
   }
@@ -110,8 +125,10 @@ async function lookupRdap(ip) {
     const result = { country, org, expires: now + RDAP_TTL_MS };
     rdapCache.set(ip, result);
     console.log(`[rdap] ${ip} → ${country} / ${org}`);
+    recordApiOk('rdap');
     return result;
   } catch (err) {
+    recordApiFail('rdap', err);
     const result = { country: null, org: null, expires: now + RDAP_FAIL_TTL };
     rdapCache.set(ip, result);
     return result;
@@ -139,8 +156,10 @@ async function reverseDns(ip) {
   try {
     const [host] = await dns.reverse(ip);
     dnsCache.set(ip, { host, expires: now + DNS_TTL_MS, source: 'ptr' });
+    recordApiOk('ptr');
     return host;
-  } catch {
+  } catch (err) {
+    recordApiFail('ptr', err);
     dnsCache.set(ip, { host: ip, expires: now + 60_000, source: 'ptr' });
     return ip;
   }
@@ -158,4 +177,5 @@ module.exports = {
   getDnsCache,
   getRdapCache,
   getGeoCache,
+  getApiStats,
 };

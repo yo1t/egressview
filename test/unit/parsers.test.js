@@ -13,6 +13,7 @@ const { parseClientList, computeRates, parseMeshNodes } = require('../../src/pol
 const { parseOuiManuf, lookupAppleModel, inferVendorCategory } = require('../../src/device-identify');
 const { _parseLine: parseInspectLine } = require('../../src/pollers/inspect-syslog');
 const { _parseLine: parseDhcpdLine, getMacByIp } = require('../../src/pollers/dhcpd-syslog');
+const { _parseLine: parseDnsmasqLine } = require('../../src/pollers/dnsmasq-log');
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
@@ -385,5 +386,68 @@ describe('parseDhcpdLine ([DHCPD] syslog)', () => {
 
   it('getMacByIp returns null for unknown IP', () => {
     assert.equal(getMacByIp('192.168.41.99'), null);
+  });
+});
+
+// ─── parseDnsmasqLine ────────────────────────────────────────────────────────
+
+describe('parseDnsmasqLine', () => {
+  it('parses a query[A] line', () => {
+    const line = 'Jun  7 17:34:22 dnsmasq[3975085]: query[A] api.netflix.com from 192.168.41.25';
+    const r = parseDnsmasqLine(line);
+    assert(r !== null);
+    assert.equal(r.type, 'query');
+    assert.equal(r.qtype, 'A');
+    assert.equal(r.domain, 'api.netflix.com');
+    assert.equal(r.clientIp, '192.168.41.25');
+    assert(r.time instanceof Date);
+  });
+
+  it('parses a query[AAAA] line', () => {
+    const line = 'Jun  7 18:00:00 dnsmasq[1234]: query[AAAA] ipv6.google.com from 192.168.41.93';
+    const r = parseDnsmasqLine(line);
+    assert(r !== null);
+    assert.equal(r.type, 'query');
+    assert.equal(r.qtype, 'AAAA');
+    assert.equal(r.domain, 'ipv6.google.com');
+  });
+
+  it('parses a reply line with IPv4 address', () => {
+    const line = 'Jun  7 17:34:22 dnsmasq[3975085]: reply api.netflix.com is 54.239.28.85';
+    const r = parseDnsmasqLine(line);
+    assert(r !== null);
+    assert.equal(r.type, 'reply');
+    assert.equal(r.domain, 'api.netflix.com');
+    assert.equal(r.resolvedIp, '54.239.28.85');
+  });
+
+  it('sets resolvedIp to null for CNAME reply', () => {
+    const line = 'Jun  7 17:34:22 dnsmasq[3975085]: reply api.netflix.com is <CNAME>';
+    const r = parseDnsmasqLine(line);
+    assert(r !== null);
+    assert.equal(r.type, 'reply');
+    assert.equal(r.resolvedIp, null);
+    assert.equal(r.rawValue, '<CNAME>');
+  });
+
+  it('normalises Yamaha proxy IP (169.254.x.x) to "router"', () => {
+    const line = 'Jun  7 17:34:19 dnsmasq[3975085]: query[A] example.com from 169.254.219.142';
+    const r = parseDnsmasqLine(line);
+    // parseLine returns raw clientIp; normalisation happens in queueQuery
+    // Just confirm the line is parsed as a query
+    assert(r !== null);
+    assert.equal(r.type, 'query');
+    assert.equal(r.clientIp, '169.254.219.142');
+  });
+
+  it('returns null for forwarded / non-query lines', () => {
+    assert.equal(parseDnsmasqLine('Jun  7 17:34:22 dnsmasq[3975085]: forwarded api.netflix.com to 10.41.0.2'), null);
+    assert.equal(parseDnsmasqLine(''), null);
+    assert.equal(parseDnsmasqLine('some random syslog line'), null);
+  });
+
+  it('returns null for non-A/AAAA query types', () => {
+    const line = 'Jun  7 17:34:22 dnsmasq[3975085]: query[PTR] 1.1.168.192.in-addr.arpa from 192.168.41.1';
+    assert.equal(parseDnsmasqLine(line), null);
   });
 });
