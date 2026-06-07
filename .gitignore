@@ -20,6 +20,7 @@ backlog.md
 # 開発ツールのローカル設定（家庭内IP等を含む可能性）
 .claude/settings.local.json
 .claude/
+.kiro/
 # OS / エディタ
 .DS_Store
 .idea/
@@ -31,8 +32,7 @@ backlog.md
 *.key
 id_rsa*
 id_ed25519*
-# ASH セキュリティスキャン出力（結果は毎回変わる）
-.ash/ash_output/
-# 設定ファイル (.ash/.ash.yaml) はコミット対象
+# ASH セキュリティスキャン（設定・出力ともローカル専用）
+.ash/
 # テストのベースライン（実機データに依存）
 test/fixtures/baseline.json
