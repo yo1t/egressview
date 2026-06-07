@@ -12,6 +12,7 @@ const DHCPD_RE = /\[DHCPD\]\s+\S+\s+(?:Allocates|Extends)\s+([\d.]+):\s+([0-9a-f
 
 let logFile      = DEFAULT_LOG_FILE;
 let dhcpdEnabled = true;
+let onLease      = () => {}; // callback: ({ ip, mac }) => void
 
 // ip → { mac, seenAt }
 const ipMacMap = new Map();
@@ -19,6 +20,7 @@ const ipMacMap = new Map();
 function configure(cfg) {
   if (cfg.logFile !== undefined) logFile      = cfg.logFile || DEFAULT_LOG_FILE;
   if (cfg.enabled !== undefined) dhcpdEnabled = cfg.enabled;
+  if (cfg.onLease)               onLease      = cfg.onLease;
 }
 
 function parseLine(line) {
@@ -36,6 +38,7 @@ const poller = createTailPoller({
     const entry = parseLine(line);
     if (!entry) return;
     ipMacMap.set(entry.ip, { mac: entry.mac, seenAt: Date.now() });
+    try { onLease(entry); } catch {}
   },
 });
 

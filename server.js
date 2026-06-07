@@ -225,7 +225,7 @@ function resolveMacByIp(ip) {
  * @param {number} [now]    - timestamp (defaults to Date.now())
  * @returns {{ entry, key, isNew }}
  */
-function recordConnection(session, now = Date.now()) {
+function recordConnection(session, now = Date.now(), source = 'nat') {
   const { src, sport, dst, dport, proto } = session;
 
   const srcMac  = resolveMacByIp(src);
@@ -283,7 +283,7 @@ function recordConnection(session, now = Date.now()) {
     mdnsName:  entry.srcMdnsName || null,
     firstSeen: entry.firstSeen,
     lastSeen:  entry.lastSeen,
-    source:    proto === 'TCP' ? 'inspect' : 'nat',
+    source,
   });
 
   return { entry, key, isNew };
@@ -297,7 +297,7 @@ function handleInspectSession(session) {
   const rdap = enrichment.getRdapCache().get(dst);
   const geo  = enrichment.getGeoCache().get(dst);
 
-  const { key } = recordConnection(session, now);
+  const { key } = recordConnection(session, now, 'inspect');
 
   // Async: enrich missing geo/rdap/ptr in background (fire-and-forget)
   if (!rdap || !geo) {
@@ -444,6 +444,13 @@ async function pollYamahaConnections() {
     }
     if (yamaha.needsNdpRefresh()) {
       await yamaha.refreshYamahaNdp();
+      // Push updated IPv6 info into device inventory
+      for (const [ip, mac] of yamaha.getArpCache()) {
+        const ipv6 = yamaha.getNdpByMac(mac);
+        if (ipv6 && ipv6.length) {
+          devices.upsert({ ip, mac, ipv6Addr: ipv6[0], lastSeen: Date.now(), source: 'ndp' });
+        }
+      }
     }
 
     latestConnections = sessions.map(s => {
@@ -812,8 +819,9 @@ app.post('/api/backup/upload', requireAdmin, (req, res) => {
     received += chunk.length;
     if (received > UPLOAD_MAX_BYTES) {
       aborted = true;
-      req.destroy();
-      return res.status(413).json({ error: `File too large (max ${UPLOAD_MAX_BYTES / 1024 / 1024}MB)` });
+      res.status(413).json({ error: `File too large (max ${UPLOAD_MAX_BYTES / 1024 / 1024}MB)` });
+      req.resume(); // drain remaining data without destroying the socket
+      return;
     }
     chunks.push(chunk);
   });
@@ -980,6 +988,17 @@ asus.configure({
     for (const c of data.clients) {
       const ipv6 = yamaha.getNdpByMac(c.mac);
       c.ipv6Addrs = ipv6 || null;
+      // Feed into device inventory (L2 — most reliable IP/MAC source)
+      devices.upsert({
+        ip:      c.ip,
+        mac:     c.mac     || null,
+        vendor:  c.vendor  || null,
+        mdnsName: c.mdnsName || null,
+        dnsName:  c.dnsName  || null,
+        ipv6Addr: (ipv6 && ipv6[0]) || null,
+        lastSeen: Date.now(),
+        source:  'asus',
+      });
     }
     io.emit('network-update', data);
     if (autoInvestigate) {
@@ -991,6 +1010,13 @@ asus.configure({
   onSaveConfig: saveConfig,
   lookupVendor: deviceId.lookupVendor,
   getNodeMeta: deviceId.getNodeMeta,
+});
+
+// Feed DHCP leases into device inventory
+dhcpdSyslog.configure({
+  onLease: ({ ip, mac }) => {
+    devices.upsert({ ip, mac, lastSeen: Date.now(), source: 'dhcp' });
+  },
 });
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
