@@ -257,7 +257,7 @@
       </div>
       <div class="card">
         <h3>Yamaha RTX 連携</h3>
-        <p>Yamaha RTXルーターにSSH接続し、NATセッションテーブルを5秒ごとにパース。RTX1200〜RTX1300、RTX810/830対応。</p>
+        <p>Yamaha RTXルーターにSSH接続し、NATセッションテーブルを60秒ごとに取得。[INSPECT] syslog で短命 TCP セッションを補完。RTX1200〜RTX1300、RTX810/830対応。</p>
       </div>
       <div class="card">
         <h3>ASUS WiFi AP 対応</h3>
@@ -268,12 +268,16 @@
         <p>OUI、mDNS/Bonjour、SSDP、NetBIOS、Appleモデル辞書（200機種以上、「iPhone 15 Pro」レベルまで特定）。</p>
       </div>
       <div class="card">
+        <h3>📡 DNS ベース宛先名解決</h3>
+        <p>ローカルの dnsmasq クエリログを監視し、デバイスごとの DNS 解決結果（例: <code>data.meethue.com</code>）を宛先名に反映。PTR 逆引きより優先して表示。</p>
+      </div>
+      <div class="card">
         <h3>IPエンリッチメント</h3>
         <p>全接続先に対して逆引きDNS、RDAP組織名検索、GeoIP（都市レベルの緯度経度）を自動付与。</p>
       </div>
       <div class="card">
-        <h3>7日間の履歴保存（SQLite）</h3>
-        <p>接続履歴をSQLite（WALモード、クラッシュセーフ）で永続保存。時系列チャート、接続先別統計、セッション数棒グラフで分析。</p>
+        <h3>接続履歴保存（SQLite）</h3>
+        <p>接続履歴をSQLite（WALモード、クラッシュセーフ）で永続保存。保持期間は最大2年まで設定可能。時系列チャート・接続先別統計で分析。</p>
       </div>
       <div class="card">
         <h3>🛡️ 脅威検出</h3>
@@ -318,24 +322,30 @@
   <section id="architecture">
     <h2><span class="icon">⬡</span> アーキテクチャ</h2>
     <div class="arch-block">
-      <pre><code>┌─────────────────┐   SSH    ┌──────────────┐
-│  Yamaha RTX     │◄────────►│              │
-│  (NATテーブル)   │          │   Widemap    │   WebSocket
-└─────────────────┘          │   Server     │◄──────────► ブラウザ
-┌─────────────────┐  HTTP    │  (Node.js)   │
-│  ASUS WiFi AP   │◄────────►│              │
-│  (クライアント)   │          └──────┬───────┘
-└─────────────────┘                 │
-                    ┌───────────────┼───────────────┐
-                    │               │               │
-              ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐
-              │エンリッチ  │  │ 脅威      │  │  SQLite   │
-              │ • 逆引DNS │  │インテル   │  │  履歴     │
-              │ • RDAP    │  │ • Feodo   │  │  (WAL)    │
-              │ • GeoIP   │  │ • TFox    │  └───────────┘
-              │ • OUI     │  │ • URLhaus │
-              │ • mDNS    │  │ • DROP    │
-              └───────────┘  └───────────┘</code></pre>
+      <pre><code>┌─────────────────┐  SSH(NAT)   ┌──────────────────────┐
+│  Yamaha RTX     │◄───────────►│                      │
+│  [INSPECT] log  │  syslog/UDP │   Widemap Server     │  WebSocket
+│  [DHCPD] log    │────────────►│   (Node.js)          │◄──────────► ブラウザ
+└─────────────────┘             │                      │
+┌─────────────────┐  HTTP       │  ポーラー:            │
+│  ASUS WiFi AP   │◄───────────►│  • yamaha (SSH)      │
+│  (クライアント)   │             │  • asus (HTTP)       │
+└─────────────────┘             │  • inspect-syslog    │
+┌─────────────────┐  tail -F    │  • dhcpd-syslog      │
+│  dnsmasq        │────────────►│  • dnsmasq-log       │
+│  クエリログ      │             └──────────┬───────────┘
+└─────────────────┘                        │
+                       ┌───────────────────┼───────────────┐
+                       │                   │               │
+                 ┌─────┴──────┐  ┌─────────┴───┐  ┌───────┴───┐
+                 │エンリッチ   │  │ 脅威インテル  │  │  SQLite   │
+                 │ • dnsmasq  │  │ • Feodo      │  │  履歴     │
+                 │ • 逆引DNS  │  │ • ThreatFox  │  │  (WAL)    │
+                 │ • RDAP     │  │ • URLhaus    │  └───────────┘
+                 │ • GeoIP    │  │ • DROP       │
+                 │ • OUI      │  └─────────────┘
+                 │ • mDNS     │
+                 └────────────┘</code></pre>
     </div>
   </section>
 

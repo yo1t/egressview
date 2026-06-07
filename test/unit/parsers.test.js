@@ -11,6 +11,8 @@ const { isAllowedRouterIp, htmlEscape } = require('../../src/utils');
 const { parseNatDetail } = require('../../src/pollers/yamaha');
 const { parseClientList, computeRates, parseMeshNodes } = require('../../src/pollers/asus');
 const { parseOuiManuf, lookupAppleModel, inferVendorCategory } = require('../../src/device-identify');
+const { _parseLine: parseInspectLine } = require('../../src/pollers/inspect-syslog');
+const { _parseLine: parseDhcpdLine, getMacByIp } = require('../../src/pollers/dhcpd-syslog');
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
@@ -312,5 +314,76 @@ describe('parseMeshNodes', () => {
   it('returns empty array for missing data', () => {
     assert.deepEqual(parseMeshNodes({}), []);
     assert.deepEqual(parseMeshNodes({ get_cfg_clientlist: [] }), []);
+  });
+});
+
+describe('parseInspectLine ([INSPECT] syslog)', () => {
+  it('parses a TCP INSPECT entry', () => {
+    const line = 'Jun  7 18:54:52 169.254.219.142  [INSPECT] LAN2[out][101098] TCP 192.168.41.73:54791 > 20.184.175.13:443 (2026/06/07 18:52:57)';
+    const r = parseInspectLine(line);
+    assert(r !== null, 'Should parse successfully');
+    assert.equal(r.proto, 'tcp');
+    assert.equal(r.src, '192.168.41.73');
+    assert.equal(r.sport, 54791);
+    assert.equal(r.dst, '20.184.175.13');
+    assert.equal(r.dport, 443);
+  });
+
+  it('parses a UDP INSPECT entry', () => {
+    const line = 'Jun  7 10:00:00 169.254.219.142  [INSPECT] LAN2[out][101098] UDP 192.168.41.111:12345 > 8.8.8.8:53 (2026/06/07 10:00:00)';
+    const r = parseInspectLine(line);
+    assert(r !== null);
+    assert.equal(r.proto, 'udp');
+    assert.equal(r.dport, 53);
+  });
+
+  it('returns null for non-INSPECT lines', () => {
+    assert.equal(parseInspectLine('Jun  7 18:54:51 169.254.219.142  [IKE][1] DPD: send R-U-THERE'), null);
+    assert.equal(parseInspectLine(''), null);
+    assert.equal(parseInspectLine('some random log line'), null);
+  });
+
+  it('returns null for INSPECT lines without IP:port pattern', () => {
+    assert.equal(parseInspectLine('[INSPECT] LAN2[out][101098] ICMP no-port-here'), null);
+  });
+
+  it('returns a Date object for time field', () => {
+    const line = 'Jun  7 18:54:52 169.254.219.142  [INSPECT] LAN2[out][101098] TCP 192.168.41.73:54791 > 20.184.175.13:443 (2026/06/07 18:52:57)';
+    const r = parseInspectLine(line);
+    assert(r.time instanceof Date, 'time should be a Date');
+  });
+});
+
+describe('parseDhcpdLine ([DHCPD] syslog)', () => {
+  it('parses an Allocates entry', () => {
+    const line = 'Jun  7 18:38:11 169.254.219.142  [DHCPD] LAN1(port10) Allocates 192.168.41.27: 34:f6:2d:ef:25:48';
+    const r = parseDhcpdLine(line);
+    assert(r !== null, 'Should parse successfully');
+    assert.equal(r.ip, '192.168.41.27');
+    assert.equal(r.mac, '34:f6:2d:ef:25:48');
+  });
+
+  it('parses an Extends entry', () => {
+    const line = 'Jun  7 18:38:04 169.254.219.142  [DHCPD] LAN1(port10) Extends 192.168.41.31: de:ea:2f:13:ab:54';
+    const r = parseDhcpdLine(line);
+    assert(r !== null);
+    assert.equal(r.ip, '192.168.41.31');
+    assert.equal(r.mac, 'de:ea:2f:13:ab:54');
+  });
+
+  it('normalises MAC to lowercase', () => {
+    const line = 'Jun  7 00:00:00 x  [DHCPD] LAN1(port10) Allocates 192.168.41.50: AA:BB:CC:DD:EE:FF';
+    const r = parseDhcpdLine(line);
+    assert(r !== null);
+    assert.equal(r.mac, 'aa:bb:cc:dd:ee:ff');
+  });
+
+  it('returns null for non-DHCPD lines', () => {
+    assert.equal(parseDhcpdLine('[INSPECT] LAN2[out][101098] TCP 192.168.41.1:1 > 1.2.3.4:80'), null);
+    assert.equal(parseDhcpdLine(''), null);
+  });
+
+  it('getMacByIp returns null for unknown IP', () => {
+    assert.equal(getMacByIp('192.168.41.99'), null);
   });
 });

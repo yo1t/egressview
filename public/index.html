@@ -580,7 +580,7 @@
         </button>
         <button class="settings-tab" data-tab="datasource">
           <span class="tab-badge">📡</span>
-          <span class="tab-name">データソース</span>
+          <span class="tab-name" data-i18n="settings.tab.datasource">データソース</span>
         </button>
       </nav>
       <!-- Right: content -->
@@ -830,7 +830,7 @@
         </div>
         <!-- Data Sources -->
         <div class="settings-pane" id="pane-datasource">
-          <div class="pane-title" style="cursor:default">📡 データソース設定</div>
+          <div class="pane-title" style="cursor:default" data-i18n="settings.section.datasource">📡 データソース設定</div>
           <p style="font-size:10px;color:var(--muted);margin-bottom:16px;line-height:1.5">
             宛先ホスト名を解決するためのデータソースを設定します。<br>
             有効にしたソースからのドメイン名が通信ログなどに表示されます。
@@ -847,7 +847,7 @@
           </p>
           <div class="section-inputs" id="dnsmasq-inputs">
             <div class="form-group">
-              <label class="form-label">ログファイルパス</label>
+              <label class="form-label" data-i18n="settings.datasource.logfile">ログファイルパス</label>
               <input id="s-dnsmasq-logfile" class="form-input" type="text"
                      placeholder="/var/log/dnsmasq-queries.log" autocomplete="off">
             </div>
@@ -866,7 +866,7 @@
           </p>
           <div class="section-inputs" id="inspect-inputs">
             <div class="form-group">
-              <label class="form-label">ログファイルパス</label>
+              <label class="form-label" data-i18n="settings.datasource.logfile">ログファイルパス</label>
               <input id="s-inspect-logfile" class="form-input" type="text"
                      placeholder="/var/log/yamaha-router.log" autocomplete="off">
             </div>
@@ -885,7 +885,7 @@
           </p>
           <div class="section-inputs" id="dhcpd-inputs">
             <div class="form-group">
-              <label class="form-label">ログファイルパス</label>
+              <label class="form-label" data-i18n="settings.datasource.logfile">ログファイルパス</label>
               <input id="s-dhcpd-logfile" class="form-input" type="text"
                      placeholder="/var/log/yamaha-router.log" autocomplete="off">
             </div>
@@ -1141,6 +1141,8 @@ const I18N = {
     'settings.section.general':'一般設定',
     'settings.tab.threat':'脅威検出', 'settings.section.threat':'🛡️ 脅威検出設定',
     'settings.tab.backup':'バックアップ', 'settings.section.backup':'💾 バックアップ・リストア',
+    'settings.tab.datasource':'データソース', 'settings.section.datasource':'📡 データソース設定',
+    'settings.datasource.logfile':'ログファイルパス',
     'settings.backup.interval':'バックアップ頻度', 'settings.backup.generations':'保持世代数',
     'settings.backup.6h':'6時間ごと', 'settings.backup.12h':'12時間ごと', 'settings.backup.24h':'24時間ごと（毎日）', 'settings.backup.1w':'1週間ごと',
     'settings.backup.gen3':'3世代', 'settings.backup.gen5':'5世代', 'settings.backup.gen7':'7世代', 'settings.backup.gen10':'10世代', 'settings.backup.gen14':'14世代',
@@ -1263,6 +1265,8 @@ const I18N = {
     'settings.section.general':'General Settings',
     'settings.tab.threat':'Threat Intel', 'settings.section.threat':'🛡️ Threat Detection Settings',
     'settings.tab.backup':'Backup', 'settings.section.backup':'💾 Backup & Restore',
+    'settings.tab.datasource':'Data Sources', 'settings.section.datasource':'📡 Data Sources',
+    'settings.datasource.logfile':'Log File Path',
     'settings.backup.interval':'Backup frequency', 'settings.backup.generations':'Generations to keep',
     'settings.backup.6h':'Every 6 hours', 'settings.backup.12h':'Every 12 hours', 'settings.backup.24h':'Every 24 hours (daily)', 'settings.backup.1w':'Every week',
     'settings.backup.gen3':'3 generations', 'settings.backup.gen5':'5 generations', 'settings.backup.gen7':'7 generations', 'settings.backup.gen10':'10 generations', 'settings.backup.gen14':'14 generations',

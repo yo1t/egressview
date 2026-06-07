@@ -27,15 +27,19 @@ Widemap answers the question most home users can't ask: *what is each device on 
 
 ## What it does
 
-- Connects to a **Yamaha RTX** router via SSH and reads the NAT session table every 5 seconds
+- Connects to a **Yamaha RTX** router via SSH and reads the NAT session table every 60 seconds
+- **[INSPECT] syslog supplement** — tails the Yamaha syslog in real time to capture short-lived TCP sessions that complete within the 60-second polling gap
+- **dnsmasq DNS query log** — tails the EC2/server-side dnsmasq log to resolve destination IPs to meaningful domain names (e.g. `data.meethue.com`) per client device; forward DNS names take priority over PTR reverse lookups
+- **[DHCPD] syslog tracking** — tails Yamaha DHCP events (Allocates/Extends) for real-time IP→MAC mapping
 - **Threat intelligence**: matches all connections against Feodo Tracker, ThreatFox, URLhaus, and Spamhaus DROP feeds (auto-refreshed hourly)
 - **Slack notifications**: sends a DM when a threat is detected (configurable cooldown, language-aware)
 - Identifies local devices using **OUI vendor lookup**, **mDNS/Bonjour**, **SSDP**, **NetBIOS**, and an **Apple model dictionary** (resolves down to "iPhone 15 Pro")
 - Enriches each destination IP with **reverse DNS**, **RDAP** (organization name), and **GeoIP** (latitude/longitude/city)
 - Plots all connections on an interactive **world map** with animated arcs
 - Optionally connects to an **ASUS WiFi access point** (used as AP/mesh, not as a router) to get WiFi client details (band, signal strength, traffic rates, AiMesh topology)
-- Keeps a **7-day connection history** in **SQLite** (WAL mode, crash-safe)
+- Keeps a **connection history** in **SQLite** (WAL mode, crash-safe; configurable retention up to 2 years)
 - **Connection log**: sortable/searchable table of all sessions with threat status badges
+- **📡 Data Sources tab** — configure each data source (dnsmasq / [INSPECT] / [DHCPD]) independently from the settings UI
 - Single-page dark-themed UI with graph view, map view, statistics, and connection log
 
 ## Demo
@@ -57,24 +61,30 @@ The sidebar lists every device on your LAN, enriched with hostnames, vendor name
 ## Architecture
 
 ```
-┌─────────────────┐   SSH    ┌──────────────┐
-│  Yamaha RTX     │◄────────►│              │
-│  (NAT table)    │          │   Widemap    │   WebSocket
-└─────────────────┘          │   Server     │◄──────────► Browser
-┌─────────────────┐  HTTP    │  (Node.js)   │
-│  ASUS WiFi AP   │◄────────►│              │
-│  (Client list)  │          └──────┬───────┘
-└─────────────────┘                 │
-                    ┌───────────────┼───────────────┐
-                    │               │               │
-              ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐
-              │ Enrichment│  │  Threat   │  │  SQLite   │
-              │ • Rev DNS │  │  Intel    │  │  History  │
-              │ • RDAP    │  │ • Feodo   │  │  (WAL)    │
-              │ • GeoIP   │  │ • TFox    │  └───────────┘
-              │ • OUI     │  │ • URLhaus │
-              │ • mDNS    │  │ • DROP    │
-              └───────────┘  └───────────┘
+┌─────────────────┐  SSH (NAT)  ┌──────────────────────┐
+│  Yamaha RTX     │◄───────────►│                      │
+│  [INSPECT] log  │  syslog/UDP │   Widemap Server     │  WebSocket
+│  [DHCPD] log    │────────────►│   (Node.js)          │◄──────────► Browser
+└─────────────────┘             │                      │
+┌─────────────────┐  HTTP       │  Pollers:            │
+│  ASUS WiFi AP   │◄───────────►│  • yamaha (SSH)      │
+│  (Client list)  │             │  • asus (HTTP)       │
+└─────────────────┘             │  • inspect-syslog    │
+┌─────────────────┐  tail -F    │  • dhcpd-syslog      │
+│  dnsmasq        │────────────►│  • dnsmasq-log       │
+│  query log      │             └──────────┬───────────┘
+└─────────────────┘                        │
+                       ┌───────────────────┼───────────────┐
+                       │                   │               │
+                 ┌─────┴─────┐  ┌─────────┴───┐  ┌───────┴───┐
+                 │ Enrichment│  │  Threat Intel│  │  SQLite   │
+                 │ • dnsmasq │  │  • Feodo     │  │  History  │
+                 │ • Rev DNS │  │  • ThreatFox │  │  (WAL)    │
+                 │ • RDAP    │  │  • URLhaus   │  └───────────┘
+                 │ • GeoIP   │  │  • DROP      │
+                 │ • OUI     │  └─────────────┘
+                 │ • mDNS    │
+                 └───────────┘
 ```
 
 ## Requirements

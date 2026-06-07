@@ -131,4 +131,4 @@ function stop() {
   ipMacMap.clear();
 }
 
-module.exports = { configure, start, stop, getMacByIp, getMap };
+module.exports = { configure, start, stop, getMacByIp, getMap, _parseLine: parseLine };

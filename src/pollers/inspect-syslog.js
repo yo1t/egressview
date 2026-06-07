@@ -123,4 +123,4 @@ function stop() {
   cleanupTail();
 }
 
-module.exports = { configure, start, stop };
+module.exports = { configure, start, stop, _parseLine: parseLine };

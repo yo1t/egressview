@@ -257,7 +257,7 @@
       </div>
       <div class="card">
         <h3>Yamaha RTX Integration</h3>
-        <p>SSH into your Yamaha RTX router and parse NAT session tables every 5 seconds. Supports RTX1200–RTX1300, RTX810/830.</p>
+        <p>SSH into your Yamaha RTX router and read NAT session tables every 60 seconds. [INSPECT] syslog fills in short-lived TCP sessions missed between polls. Supports RTX1200–RTX1300, RTX810/830.</p>
       </div>
       <div class="card">
         <h3>ASUS WiFi AP Support</h3>
@@ -268,12 +268,16 @@
         <p>Identify devices via OUI, mDNS/Bonjour, SSDP, NetBIOS, and an Apple model dictionary (200+ models down to "iPhone 15 Pro").</p>
       </div>
       <div class="card">
+        <h3>📡 DNS-Based Destination Names</h3>
+        <p>Tails a local dnsmasq query log to map destination IPs to meaningful domain names per device (e.g. <code>data.meethue.com</code>). Forward DNS takes priority over PTR reverse lookups.</p>
+      </div>
+      <div class="card">
         <h3>IP Enrichment</h3>
         <p>Automatic reverse DNS, RDAP organization lookup, and GeoIP (city-level latitude/longitude) for every destination.</p>
       </div>
       <div class="card">
-        <h3>7-Day History (SQLite)</h3>
-        <p>Persistent connection history in SQLite (WAL mode, crash-safe) with time-series charts, per-destination statistics, and session-count bar graphs.</p>
+        <h3>Connection History (SQLite)</h3>
+        <p>Persistent connection history in SQLite (WAL mode, crash-safe) with configurable retention up to 2 years, time-series charts, and per-destination statistics.</p>
       </div>
       <div class="card">
         <h3>🛡️ Threat Detection</h3>
@@ -318,24 +322,30 @@
   <section id="architecture">
     <h2><span class="icon">⬡</span> Architecture</h2>
     <div class="arch-block">
-      <pre><code>┌─────────────────┐   SSH    ┌──────────────┐
-│  Yamaha RTX     │◄────────►│              │
-│  (NAT table)    │          │   Widemap    │   WebSocket
-└─────────────────┘          │   Server     │◄──────────► Browser
-┌─────────────────┐  HTTP    │  (Node.js)   │
-│  ASUS WiFi AP   │◄────────►│              │
-│  (Client list)  │          └──────┬───────┘
-└─────────────────┘                 │
-                    ┌───────────────┼───────────────┐
-                    │               │               │
-              ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐
-              │ Enrichment│  │  Threat   │  │  SQLite   │
-              │ • Rev DNS │  │  Intel    │  │  History  │
-              │ • RDAP    │  │ • Feodo   │  │  (WAL)    │
-              │ • GeoIP   │  │ • TFox    │  └───────────┘
-              │ • OUI     │  │ • URLhaus │
-              │ • mDNS    │  │ • DROP    │
-              └───────────┘  └───────────┘</code></pre>
+      <pre><code>┌─────────────────┐  SSH(NAT)   ┌──────────────────────┐
+│  Yamaha RTX     │◄───────────►│                      │
+│  [INSPECT] log  │  syslog/UDP │   Widemap Server     │  WebSocket
+│  [DHCPD] log    │────────────►│   (Node.js)          │◄──────────► Browser
+└─────────────────┘             │                      │
+┌─────────────────┐  HTTP       │  Pollers:            │
+│  ASUS WiFi AP   │◄───────────►│  • yamaha (SSH)      │
+│  (Client list)  │             │  • asus (HTTP)       │
+└─────────────────┘             │  • inspect-syslog    │
+┌─────────────────┐  tail -F    │  • dhcpd-syslog      │
+│  dnsmasq        │────────────►│  • dnsmasq-log       │
+│  query log      │             └──────────┬───────────┘
+└─────────────────┘                        │
+                       ┌───────────────────┼───────────────┐
+                       │                   │               │
+                 ┌─────┴─────┐  ┌─────────┴───┐  ┌───────┴───┐
+                 │ Enrichment│  │ Threat Intel │  │  SQLite   │
+                 │ • dnsmasq │  │ • Feodo      │  │  History  │
+                 │ • Rev DNS │  │ • ThreatFox  │  │  (WAL)    │
+                 │ • RDAP    │  │ • URLhaus    │  └───────────┘
+                 │ • GeoIP   │  │ • DROP       │
+                 │ • OUI     │  └─────────────┘
+                 │ • mDNS    │
+                 └───────────┘</code></pre>
     </div>
   </section>
 
