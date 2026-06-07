@@ -174,6 +174,7 @@ function loadIntoMemory() {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 function loadConnectionHistory() {
+  if (db) { try { db.close(); } catch {} db = null; }  // close stale connection before reopening
   initDb();
   migrateFromJsonl();
   loadIntoMemory();

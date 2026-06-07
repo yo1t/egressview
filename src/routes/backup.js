@@ -43,6 +43,7 @@ module.exports = function backupRoutes(ctx) {
       history.loadConnectionHistory();
       runtime.setKnownMacs(history.getKnownMacs());
       devices.reopen();                               // re-open DB connection to read restored data
+      devices.seedFromConnectionHistory(history.getConnectionHistory()); // backfill devices from restored history
       res.json({ success: true, message: `Restored from ${name}. Restart recommended.` });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -78,6 +79,7 @@ module.exports = function backupRoutes(ctx) {
         history.loadConnectionHistory();
         runtime.setKnownMacs(history.getKnownMacs());
         devices.reopen();                             // re-open DB connection to read restored data
+        devices.seedFromConnectionHistory(history.getConnectionHistory()); // backfill devices from restored history
         res.json({ success: true, message: 'Restored from uploaded file. Restart recommended.' });
       } catch (e) {
         res.status(500).json({ error: e.message });
