@@ -196,7 +196,7 @@ async function pollYamahaConnections() {
 
     const unique = [...new Set(sessions.map(s => s.dst))];
     await Promise.allSettled(unique.map(ip => enrichment.reverseDns(ip)));
-    await Promise.allSettled(unique.map(ip => enrichment.lookupRdap(ip)));
+    await enrichment.lookupRdapBatch(unique);   // throttled: 5並列ずつ処理
     await enrichment.lookupGeoBatch(unique);
 
     const now = Date.now();

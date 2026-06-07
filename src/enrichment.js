@@ -232,6 +232,19 @@ async function lookupRdap(ip) {
   }
 }
 
+// ─── Throttled RDAP batch ─────────────────────────────────────────────────────
+
+/**
+ * RDAP lookups with concurrency limit to avoid hammering rdap.arin.net.
+ * Processes IPs in groups of `concurrency` (default 5), awaiting each group
+ * before starting the next. Cache hits are free; only uncached IPs hit the API.
+ */
+async function lookupRdapBatch(ips, concurrency = 5) {
+  for (let i = 0; i < ips.length; i += concurrency) {
+    await Promise.allSettled(ips.slice(i, i + concurrency).map(ip => lookupRdap(ip)));
+  }
+}
+
 // ─── PTR lookup ───────────────────────────────────────────────────────────────
 
 const PTR_JUNK_RE = /ec2-[\d-]+\.compute(?:-1)?\.amazonaws\.com$|\.compute\.internal$|\.static\.\S+\.fttx\.|ip-\d+-\d+-\d+-\d+\.|ptr\d|\.in-addr\.arpa$/i;
@@ -283,6 +296,7 @@ module.exports = {
   reverseDns,
   isPtrJunk,
   lookupRdap,
+  lookupRdapBatch,
   lookupGeoBatch,
   getDnsCache,
   getRdapCache,
