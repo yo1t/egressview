@@ -19,11 +19,11 @@ const DNS_TTL_MS  = 5 * 60 * 1000;
 
 const rdapCache   = new Map(); // ip → {country, org, expires}
 const RDAP_TTL_MS   = 24 * 60 * 60 * 1000; // 24h
-const RDAP_FAIL_TTL =  5 * 60 * 1000;       // 5min retry on failure
+const RDAP_FAIL_TTL = 60 * 60 * 1000;       // 60min retry on failure
 
 const geoCache    = new Map(); // ip → {lat, lon, city, countryCode, expires}
 const GEO_TTL_MS       = 24 * 60 * 60 * 1000;
-const GEO_FAIL_TTL     =  5 * 60 * 1000;
+const GEO_FAIL_TTL     = 60 * 60 * 1000;
 const GEO_PERMANENT_TTL = 100 * 365 * 24 * 60 * 60 * 1000; // ~100年: プライベートIP用
 
 // プライベート / ループバック / 特殊 IP は geo 解決不能なので永続キャッシュ対象
