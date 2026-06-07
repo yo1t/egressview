@@ -23,7 +23,7 @@ telnet 192.168.1.1
 
 ```
 # Widemap 専用ユーザーを作成（"widemap" とパスワードは任意の値に変更してください）
-login user widemap yourpassword
+login user widemap yourpassword <!-- pragma: allowlist secret -->
 ```
 
 > **ポイント:** 管理者アカウントではなく専用ユーザーを使うことで、万が一の認証情報漏洩時の影響範囲を限定できます。
@@ -165,7 +165,7 @@ Widemap の設定パネル（⚙）を開き、以下を入力します：
 
 **認証に失敗する**
 - `show login user` でユーザー名を確認してください
-- パスワードを再設定: `login user widemap newpassword` → `save`
+- パスワードを再設定: `login user widemap newpassword` → `save` <!-- pragma: allowlist secret -->
 
 **Widemap にセッションが表示されない**
 - NAT ディスクリプタ番号が `show nat descriptor` の結果と一致しているか確認してください

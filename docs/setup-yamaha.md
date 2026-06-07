@@ -23,7 +23,7 @@ telnet 192.168.1.1
 
 ```
 # Create a dedicated user for Widemap (replace "widemap" and "yourpassword")
-login user widemap yourpassword
+login user widemap yourpassword <!-- pragma: allowlist secret -->
 ```
 
 > **Tip:** Use a dedicated user rather than the administrator account. This limits the scope of access if the credentials are ever compromised.
