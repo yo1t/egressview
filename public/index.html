@@ -855,16 +855,24 @@
 
           <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
 
-          <!-- [INSPECT] syslog — future -->
-          <div style="opacity:0.45;pointer-events:none">
-            <label class="pane-title" style="margin-bottom:6px">
-              <input type="checkbox" disabled style="width:14px;height:14px;flex-shrink:0">
-              <span>[INSPECT] TCP セッション補完 <span style="font-size:9px;color:var(--yellow);margin-left:6px">準備中</span></span>
-            </label>
-            <p style="font-size:10px;color:var(--muted);line-height:1.5;padding-left:22px;margin-bottom:10px">
-              Yamaha syslog の [INSPECT] ログを解析して NAT セッションを補完します。
-            </p>
+          <!-- [INSPECT] syslog -->
+          <label class="pane-title" style="margin-bottom:8px">
+            <input type="checkbox" id="enable-inspect" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
+            <span>[INSPECT] TCP セッション補完</span>
+          </label>
+          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px">
+            Yamaha syslog の [INSPECT] エントリをリアルタイムで解析し、60秒ポーリングで取りこぼした短命 TCP セッションを補完します。<br>
+            <span style="color:var(--cyan)">EC2 に届く Yamaha syslog ファイルのパスを指定してください。</span>
+          </p>
+          <div class="section-inputs" id="inspect-inputs">
+            <div class="form-group">
+              <label class="form-label">ログファイルパス</label>
+              <input id="s-inspect-logfile" class="form-input" type="text"
+                     placeholder="/var/log/yamaha-router.log" autocomplete="off">
+            </div>
           </div>
+
+          <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
 
           <!-- [DHCPD] syslog — future -->
           <div style="opacity:0.45;pointer-events:none">
@@ -2520,6 +2528,13 @@ socket.on('config', cfg => {
     document.getElementById('enable-dnsmasq').checked = cfg.dnsmasqEnabled;
     toggleSection('dnsmasq-inputs', 'enable-dnsmasq', null);
   }
+  if (cfg.inspectLogFile) {
+    document.getElementById('s-inspect-logfile').value = cfg.inspectLogFile;
+  }
+  if (typeof cfg.inspectEnabled === 'boolean') {
+    document.getElementById('enable-inspect').checked = cfg.inspectEnabled;
+    toggleSection('inspect-inputs', 'enable-inspect', null);
+  }
 });
 
 // Save general settings
@@ -2758,17 +2773,29 @@ document.getElementById('backup-config-save').addEventListener('click', async ()
 document.getElementById('enable-dnsmasq').addEventListener('change', () => {
   toggleSection('dnsmasq-inputs', 'enable-dnsmasq', null);
 });
+document.getElementById('enable-inspect').addEventListener('change', () => {
+  toggleSection('inspect-inputs', 'enable-inspect', null);
+});
 
 document.getElementById('datasource-save-btn').addEventListener('click', async () => {
   const btn = document.getElementById('datasource-save-btn');
   btn.disabled = true;
   try {
-    const enabled  = document.getElementById('enable-dnsmasq').checked;
-    const logFile  = document.getElementById('s-dnsmasq-logfile').value.trim()
-                     || '/var/log/dnsmasq-queries.log';
+    const body = {
+      dnsmasq: {
+        enabled: document.getElementById('enable-dnsmasq').checked,
+        logFile: document.getElementById('s-dnsmasq-logfile').value.trim()
+                 || '/var/log/dnsmasq-queries.log',
+      },
+      inspect: {
+        enabled: document.getElementById('enable-inspect').checked,
+        logFile: document.getElementById('s-inspect-logfile').value.trim()
+                 || '/var/log/yamaha-router.log',
+      },
+    };
     const r = await apiFetch('__BASE__/api/config/datasources', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dnsmasq: { enabled, logFile } }),
+      body: JSON.stringify(body),
     });
     const data = await r.json();
     if (data.success) {

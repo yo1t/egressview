@@ -17,7 +17,8 @@ const notifier = require('./src/notifier');
 const backup = require('./src/backup');
 const yamaha = require('./src/pollers/yamaha');
 const asus = require('./src/pollers/asus');
-const dnsmasqLog = require('./src/pollers/dnsmasq-log');
+const dnsmasqLog    = require('./src/pollers/dnsmasq-log');
+const inspectSyslog = require('./src/pollers/inspect-syslog');
 
 const app = express();
 const server = http.createServer(app);
@@ -50,6 +51,23 @@ let latestConnections = [];
 let knownMacs = new Set();
 let dnsmasqEnabled  = true;
 let dnsmasqLogFile  = '/var/log/dnsmasq-queries.log';
+let inspectEnabled  = true;
+let inspectLogFile  = '/var/log/yamaha-router.log';
+
+// Debounce timer for [INSPECT] connections-update emissions
+let inspectEmitTimer = null;
+function scheduleInspectEmit() {
+  if (inspectEmitTimer) return;
+  inspectEmitTimer = setTimeout(() => {
+    inspectEmitTimer = null;
+    const cutoff = Date.now() - 86400_000;
+    io.emit('connections-update', {
+      connections: [...history.getConnectionHistory().values()].filter(c => c.lastSeen >= cutoff),
+      serverTime: Date.now(),
+      partial: true,
+    });
+  }, 1000);
+}
 
 // ─── Config file ──────────────────────────────────────────────────────────────
 const CONFIG_FILE = path.join(__dirname, '.widemap.json');
@@ -85,6 +103,13 @@ function loadConfig() {
     }
     if (data.slack) notifier.configure({ ...data.slack, language: uiLanguage });
     if (data.adminToken) adminToken = data.adminToken;
+    inspectEnabled = data.inspect?.enabled !== false;
+    inspectLogFile = data.inspect?.logFile || '/var/log/yamaha-router.log';
+    inspectSyslog.configure({
+      logFile:   inspectLogFile,
+      enabled:   inspectEnabled,
+      onSession: handleInspectSession,
+    });
     dnsmasqEnabled = data.dnsmasq?.enabled !== false;
     dnsmasqLogFile = data.dnsmasq?.logFile || '/var/log/dnsmasq-queries.log';
     dnsmasqLog.configure({
@@ -117,6 +142,7 @@ function saveConfig() {
     slack: { ...notifier.getConfig(), tokenSet: undefined },
     adminToken,
     dnsmasq: { enabled: dnsmasqEnabled, logFile: dnsmasqLogFile },
+    inspect: { enabled: inspectEnabled, logFile: inspectLogFile },
   };
   // Re-read to preserve passwords (they are not stored in module state getters)
   try {
@@ -164,6 +190,84 @@ function resolveMacByIp(ip) {
   const asusMac = asus.getClientMac(ip);
   if (asusMac) return asusMac;
   return yamaha.getArpMac(ip);
+}
+
+// ─── [INSPECT] session handler ───────────────────────────────────────────────
+function handleInspectSession(session) {
+  const now = Date.now();
+  const { src, sport, dst, dport, proto } = session;
+
+  const srcMac  = resolveMacByIp(src);
+  const srcMeta = deviceId.getNodeMeta(src, srcMac);
+
+  // Synchronous enrichment from existing caches
+  const dnsCached = enrichment.getDnsCache().get(dst);
+  let dstHost = dst;
+  if (dnsCached && dnsCached.expires > now) {
+    if (dnsCached.source === 'dnsmasq' || !enrichment.isPtrJunk(dnsCached.host)) {
+      dstHost = dnsCached.host;
+    }
+  }
+  const rdap = enrichment.getRdapCache().get(dst);
+  const geo  = enrichment.getGeoCache().get(dst);
+
+  const enriched = {
+    src, sport, dst, dport, proto,
+    srcMac,
+    srcVendor:   srcMeta.vendor,
+    srcDnsName:  srcMeta.dnsName,
+    srcMdnsName: srcMeta.mdnsName,
+    dstHost,
+    country: rdap?.country || geo?.countryCode || null,
+    org:     rdap?.org     || null,
+    lat:     geo?.lat  ?? null,
+    lon:     geo?.lon  ?? null,
+    city:    geo?.city ?? null,
+    threat:  threatIntel.matchThreatIntel(dst, dstHost) || null,
+    ttl:     0,
+  };
+
+  const key = `${src}|${dst}|${dport}|${proto}`;
+  const connectionHistory = history.getConnectionHistory();
+  const existing = connectionHistory.get(key);
+  const isNew    = !existing;
+  const entry    = { ...enriched, firstSeen: existing?.firstSeen ?? now, lastSeen: now };
+  connectionHistory.set(key, entry);
+
+  if (entry.threat) notifier.notify(entry);
+  if (entry.srcMac && !knownMacs.has(entry.srcMac)) {
+    knownMacs.add(entry.srcMac);
+    notifier.notifyNewDevice(entry);
+    io.emit('new-device', entry);
+  }
+  if (isNew) history.appendHistoryLog(entry);
+
+  // Async: enrich missing geo/rdap/ptr in background (fire-and-forget)
+  const needsAsync = !rdap || !geo;
+  if (needsAsync) {
+    Promise.allSettled([
+      enrichment.reverseDns(dst),
+      enrichment.lookupRdap(dst),
+      enrichment.lookupGeoBatch([dst]),
+    ]).then(() => {
+      const e = connectionHistory.get(key);
+      if (!e) return;
+      const dc2  = enrichment.getDnsCache().get(dst);
+      const now2 = Date.now();
+      if (dc2 && dc2.expires > now2) {
+        if (dc2.source === 'dnsmasq' || !enrichment.isPtrJunk(dc2.host)) e.dstHost = dc2.host;
+      }
+      const r2 = enrichment.getRdapCache().get(dst);
+      const g2 = enrichment.getGeoCache().get(dst);
+      e.country = r2?.country || g2?.countryCode || e.country;
+      e.org     = r2?.org     || e.org;
+      e.lat     = g2?.lat  ?? e.lat;
+      e.lon     = g2?.lon  ?? e.lon;
+      e.city    = g2?.city ?? e.city;
+    }).catch(() => {});
+  }
+
+  scheduleInspectEmit();
 }
 
 // ─── Notes ────────────────────────────────────────────────────────────────────
@@ -617,11 +721,12 @@ app.post('/api/backup/restore', requireAdmin, (req, res) => {
 app.get('/api/config/datasources', requireAdmin, (req, res) => {
   res.json({
     dnsmasq: { enabled: dnsmasqEnabled, logFile: dnsmasqLogFile },
+    inspect: { enabled: inspectEnabled, logFile: inspectLogFile },
   });
 });
 
 app.post('/api/config/datasources', requireAdmin, (req, res) => {
-  const { dnsmasq } = req.body || {};
+  const { dnsmasq, inspect } = req.body || {};
   if (dnsmasq) {
     if (typeof dnsmasq.enabled === 'boolean') dnsmasqEnabled = dnsmasq.enabled;
     if (typeof dnsmasq.logFile === 'string' && dnsmasq.logFile.trim()) {
@@ -643,8 +748,21 @@ app.post('/api/config/datasources', requireAdmin, (req, res) => {
     });
     if (dnsmasqEnabled) dnsmasqLog.start();
   }
+  if (inspect) {
+    if (typeof inspect.enabled === 'boolean') inspectEnabled = inspect.enabled;
+    if (typeof inspect.logFile === 'string' && inspect.logFile.trim()) {
+      inspectLogFile = inspect.logFile.trim();
+    }
+    inspectSyslog.stop();
+    inspectSyslog.configure({ logFile: inspectLogFile, enabled: inspectEnabled, onSession: handleInspectSession });
+    if (inspectEnabled) inspectSyslog.start();
+  }
   saveConfig();
-  res.json({ success: true, dnsmasq: { enabled: dnsmasqEnabled, logFile: dnsmasqLogFile } });
+  res.json({
+    success: true,
+    dnsmasq: { enabled: dnsmasqEnabled, logFile: dnsmasqLogFile },
+    inspect: { enabled: inspectEnabled, logFile: inspectLogFile },
+  });
 });
 
 app.post('/api/backup/upload', requireAdmin, (req, res) => {
@@ -778,6 +896,8 @@ io.on('connection', socket => {
     notes,
     dnsmasqEnabled,
     dnsmasqLogFile,
+    inspectEnabled,
+    inspectLogFile,
   });
   if (asus.isEnabled() && !asus.isAuthenticated()) {
     socket.emit('auth-required', { message: 'セッションが切れています' });
@@ -840,6 +960,7 @@ server.listen(PORT, () => {
     yamaha.refreshYamahaArp().then(() => pollYamahaConnections());
   });
   dnsmasqLog.start();
+  inspectSyslog.start();
 
   // Periodic snapshot/compaction
   setInterval(() => history.snapshotHistory(), 10 * 60 * 1000);
@@ -868,6 +989,7 @@ function shutdown() {
   try { history.snapshotHistory(); } catch {}
   try { history.closeDb(); } catch {}
   try { dnsmasqLog.stop(); } catch {}
+  try { inspectSyslog.stop(); } catch {}
   process.exit(0);
 }
 process.on('SIGINT',  shutdown);
