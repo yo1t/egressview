@@ -14,8 +14,8 @@ global_settings:
   suppressions:
     - path: 'server.js'
       rule_id: 'SECRET-SECRET-KEYWORD'
-      line_start: 380
-      line_end: 380
+      line_start: 387
+      line_end: 387
       reason: 'False positive - password variable name in input validation, not a hardcoded secret'
     - path: 'docs/setup-yamaha.md'
       rule_id: 'SECRET-SECRET-KEYWORD'

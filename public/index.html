@@ -392,6 +392,7 @@
   .device-card.wifi-5g { border-left: 3px solid var(--purple); }
   .device-card.wifi-6g { border-left: 3px solid #eab308; }
   .node-badge { display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 3px; margin-left: 6px; vertical-align: middle; font-weight: 600; }
+  .new-badge { display: inline-block; font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: #0d4f2a; color: #3fb950; border: 1px solid #3fb95044; text-transform: uppercase; letter-spacing: 0.05em; margin-left: 4px; vertical-align: middle; }
   .proto-badges { display: none; }
   .proto-badge { display: inline-block; font-size: 8px; padding: 1px 4px; border-radius: 3px; font-weight: 700; letter-spacing: 0.3px; vertical-align: middle; margin-right: 2px; }
   .proto-v4 { background: #22c55e33; color: #22c55e; border: 1px solid #22c55e55; }
@@ -455,6 +456,9 @@
   .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .last-update { position: absolute; top: 10px; right: 10px; font-size: 10px; color: var(--muted); }
   #error-banner { display: none; background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.4); color: var(--red); padding: 8px 16px; font-size: 12px; text-align: center; flex-shrink: 0; }
+  #toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  .toast { background: #161b22; border: 1px solid #3fb95066; color: #e6edf3; padding: 10px 16px; border-radius: 8px; font-size: 0.85rem; box-shadow: 0 4px 16px rgba(0,0,0,0.4); opacity: 0; transform: translateY(8px); transition: opacity 0.2s, transform 0.2s; pointer-events: none; max-width: 320px; }
+  .toast.show { opacity: 1; transform: translateY(0); }
 
   /* ── Mobile layout (≤768px) ─────────────────────── */
   @media (max-width: 768px) {
@@ -890,6 +894,7 @@
   <button onclick="openSettings()" data-i18n="banner.button">⚙ 設定から再接続</button>
 </div>
 <div id="error-banner"></div>
+<div id="toast-container"></div>
 
 <div class="main">
   <div id="map-container" style="display:none">
@@ -1085,6 +1090,7 @@ const I18N = {
     'settings.slack.create':'🔗 Slack Appを作成する',
     'settings.slack.test':'テスト送信', 'settings.slack.test.sending':'送信中…',
     'settings.slack.test.ok':'✓ テスト送信しました', 'settings.slack.test.fail':'送信失敗: ',
+    'device.new':'NEW', 'device.new.toast':'🆕 新規デバイスを検出しました',
     'settings.threat.30m':'30分ごと', 'settings.threat.1h':'1時間ごと', 'settings.threat.3h':'3時間ごと',
     'settings.threat.6h':'6時間ごと', 'settings.threat.12h':'12時間ごと', 'settings.threat.24h':'24時間ごと',
     'threat.detail.title':'🚨 脅威検出 詳細',
@@ -1206,6 +1212,7 @@ const I18N = {
     'settings.slack.create':'🔗 Create a Slack App',
     'settings.slack.test':'Send test', 'settings.slack.test.sending':'Sending…',
     'settings.slack.test.ok':'✓ Test message sent', 'settings.slack.test.fail':'Send failed: ',
+    'device.new':'NEW', 'device.new.toast':'🆕 New device detected',
     'settings.threat.30m':'Every 30 min', 'settings.threat.1h':'Every hour', 'settings.threat.3h':'Every 3 hours',
     'settings.threat.6h':'Every 6 hours', 'settings.threat.12h':'Every 12 hours', 'settings.threat.24h':'Every 24 hours',
     'threat.detail.title':'🚨 Threat Detection Detail',
@@ -1949,7 +1956,7 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
       nameEl.textContent = '';
       nameEl.className = 'device-name empty';
     }
-    // Meta: protocol badges + node badge + OUI vendor · connection type
+    // Meta: protocol badges + node badge + NEW badge + OUI vendor · connection type
     const metaEl = card.querySelector('.device-meta');
     const metaParts = [c.vendor, typeLabel(c.type)].filter(Boolean);
     let badgeHtml = '<span class="proto-badge proto-v4">IPv4</span>';
@@ -1958,6 +1965,9 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
     }
     const nodeBadgeText = papNode?.model?.replace(/RT-BE/,'') || 'Main';
     badgeHtml += `<span class="node-badge" style="background:${nodeColor}22;color:${nodeColor};border:1px solid ${nodeColor}44">${nodeBadgeText}</span>`;
+    if (c.deviceFirstSeen && Date.now() - c.deviceFirstSeen < 60 * 60 * 1000) {
+      badgeHtml += `<span class="new-badge">${t('device.new')}</span>`;
+    }
     const metaText = metaParts.length ? ' ' + metaParts.join(' · ') : '';
     metaEl.innerHTML = badgeHtml + metaText;
     metaEl.className = 'device-meta';
@@ -2784,14 +2794,19 @@ socket.on('network-update', data => {
 function buildGraphFromConnections() {
   // Do not early-return: still call buildGraph with empty arrays to clear the graph
   const filtered = getFilteredConnections();
-  const srcCounts = new Map();
-  const srcMeta   = new Map(); // ip → {mac, vendor, dnsName, mdnsName}
+  const srcCounts    = new Map();
+  const srcMeta      = new Map(); // ip → {mac, vendor, dnsName, mdnsName}
+  const srcFirstSeen = new Map(); // ip → min firstSeen
   for (const c of filtered) {
     srcCounts.set(c.src, (srcCounts.get(c.src) || 0) + 1);
     if (!srcMeta.has(c.src) && (c.srcMac || c.srcVendor || c.srcDnsName || c.srcMdnsName)) {
       srcMeta.set(c.src, {
         mac: c.srcMac, vendor: c.srcVendor, dnsName: c.srcDnsName, mdnsName: c.srcMdnsName,
       });
+    }
+    if (c.firstSeen) {
+      const cur = srcFirstSeen.get(c.src);
+      if (!cur || c.firstSeen < cur) srcFirstSeen.set(c.src, c.firstSeen);
     }
   }
   const syntheticClients = [...srcCounts.keys()].map(ip => {
@@ -2800,6 +2815,7 @@ function buildGraphFromConnections() {
       mac: m.mac || ip, ip, name: ip, type: '0',
       rxRate: 0, txRate: 0, rssi: null, amesh_papMac: null,
       vendor: m.vendor || '', dnsName: m.dnsName || null, mdnsName: m.mdnsName || null,
+      deviceFirstSeen: srcFirstSeen.get(ip) || 0,
     };
   });
   buildGraph({
@@ -2887,6 +2903,26 @@ socket.on('poll-error', err => {
   errorBanner.textContent = 'ポーリングエラー: ' + err.message;
   errorBanner.style.display = 'block';
 });
+
+socket.on('new-device', entry => {
+  const name = entry.srcMdnsName || entry.srcDnsName || entry.src;
+  const vendor = entry.srcVendor ? ` — ${entry.srcVendor}` : '';
+  showToast(`${t('device.new.toast')}\n${name}${vendor}`);
+});
+
+function showToast(message, durationMs = 5000) {
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.style.whiteSpace = 'pre-line';
+  el.textContent = message;
+  container.appendChild(el);
+  requestAnimationFrame(() => { requestAnimationFrame(() => { el.classList.add('show'); }); });
+  setTimeout(() => {
+    el.classList.remove('show');
+    el.addEventListener('transitionend', () => el.remove(), { once: true });
+  }, durationMs);
+}
 
 function stopGraph() {
   if (simulation) { simulation.stop(); simulation = null; }

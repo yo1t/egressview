@@ -213,6 +213,83 @@ describe('_buildMessage', () => {
   });
 });
 
+describe('notifyNewDevice()', () => {
+  function makeDeviceEntry(overrides = {}) {
+    return {
+      src: '192.168.1.50',
+      srcMac: 'aa:bb:cc:dd:ee:ff',
+      srcVendor: 'Samsung',
+      srcMdnsName: 'Galaxy-S25',
+      srcDnsName: null,
+      lastSeen: 1700000000000,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    notifier.configure({ enabled: false, token: '', userId: '' });
+  });
+
+  it('returns false when disabled', async () => {
+    notifier.configure({ enabled: false, token: 'xoxb-x', userId: 'U01' });
+    assert.equal(await notifier.notifyNewDevice(makeDeviceEntry()), false);
+  });
+
+  it('returns false when token is empty', async () => {
+    notifier.configure({ enabled: true, token: '', userId: 'U01' });
+    assert.equal(await notifier.notifyNewDevice(makeDeviceEntry()), false);
+  });
+
+  it('returns false when userId is empty', async () => {
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: '' });
+    assert.equal(await notifier.notifyNewDevice(makeDeviceEntry()), false);
+  });
+
+  it('returns true on success', async () => {
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01' });
+    notifier._setHttpPost(async () => ({ ok: true }));
+    assert.equal(await notifier.notifyNewDevice(makeDeviceEntry()), true);
+  });
+
+  it('returns false on Slack API error', async () => {
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01' });
+    notifier._setHttpPost(async () => ({ ok: false, error: 'invalid_auth' }));
+    assert.equal(await notifier.notifyNewDevice(makeDeviceEntry()), false);
+  });
+
+  it('message includes device IP', async () => {
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01' });
+    let captured = null;
+    notifier._setHttpPost(async (body) => { captured = body; return { ok: true }; });
+    await notifier.notifyNewDevice(makeDeviceEntry());
+    assert(captured.text.includes('192.168.1.50'), 'IP missing from message');
+  });
+
+  it('message includes vendor when present', async () => {
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01' });
+    let captured = null;
+    notifier._setHttpPost(async (body) => { captured = body; return { ok: true }; });
+    await notifier.notifyNewDevice(makeDeviceEntry());
+    assert(captured.text.includes('Samsung'), 'vendor missing from message');
+  });
+
+  it('message omits vendor line when absent', async () => {
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01' });
+    let captured = null;
+    notifier._setHttpPost(async (body) => { captured = body; return { ok: true }; });
+    await notifier.notifyNewDevice(makeDeviceEntry({ srcVendor: null }));
+    assert(!captured.text.includes('ベンダー') && !captured.text.includes('Vendor:'), 'vendor line should be absent');
+  });
+
+  it('message sent to configured userId', async () => {
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U99XYZ' });
+    let captured = null;
+    notifier._setHttpPost(async (body) => { captured = body; return { ok: true }; });
+    await notifier.notifyNewDevice(makeDeviceEntry());
+    assert.equal(captured.channel, 'U99XYZ');
+  });
+});
+
 describe('_buildMessage — language', () => {
   it('ja: uses Japanese labels', () => {
     const msg = notifier._buildMessage(makeEntry(), 'ja');

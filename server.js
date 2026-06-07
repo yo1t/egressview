@@ -46,6 +46,7 @@ let autoInvestigate = false;
 let adminToken   = '';
 let retentionDays = 730; // 2 years default
 let latestConnections = [];
+let knownMacs = new Set();
 
 // ─── Config file ──────────────────────────────────────────────────────────────
 const CONFIG_FILE = path.join(__dirname, '.widemap.json');
@@ -68,6 +69,7 @@ function loadConfig() {
         routerIp: data.asus.ip || DEFAULT_ROUTER_IP,
         user: data.asus.user || '',
         pass: data.asus.pass || '',
+        enabled: data.asus.enabled ?? false,
       });
     }
     if (data.general?.homeCountry) homeCountry = data.general.homeCountry;
@@ -90,8 +92,8 @@ function loadConfig() {
 
 function saveConfig() {
   const data = {
-    yamaha: { ip: yamaha.getIp(), user: yamaha.getUser(), pass: process.env.YAMAHA_PASS || '', enabled: yamaha.isEnabled(), hostFp: yamaha.getHostFp() },
-    asus: { ip: asus.getRouterIp(), user: asus.getUser(), pass: '' },
+    yamaha: { ip: yamaha.getIp(), user: yamaha.getUser(), pass: process.env.YAMAHA_PASS || '', enabled: yamaha.isEnabled(), hostFp: yamaha.getHostFp(), nat: yamaha.getNat() },
+    asus: { ip: asus.getRouterIp(), user: asus.getUser(), pass: '', enabled: asus.isEnabled() },
     general: { homeCountry, language: uiLanguage, autoInvestigate, retentionDays },
     backup: backup.getConfig(),
     slack: { ...notifier.getConfig(), tokenSet: undefined },
@@ -291,6 +293,11 @@ async function pollYamahaConnections() {
       const entry = { ...enriched, firstSeen: existing?.firstSeen ?? now, lastSeen: now };
       connectionHistory.set(key, entry);
       if (entry.threat) notifier.notify(entry);
+      if (entry.srcMac && !knownMacs.has(entry.srcMac)) {
+        knownMacs.add(entry.srcMac);
+        notifier.notifyNewDevice(entry);
+        io.emit('new-device', entry);
+      }
       if (isNew) history.appendHistoryLog(entry);
       return entry;
     });
@@ -412,6 +419,7 @@ app.post('/api/login', requireAdmin, async (req, res) => {
     }
   } else if (doAsus === false) {
     asus.disable();
+    saveConfig();
     console.log('[auth] ASUS disabled');
   }
 
@@ -560,6 +568,7 @@ app.post('/api/backup/restore', requireAdmin, (req, res) => {
     backup.restoreFromGeneration(name);
     // Reload history from restored DB
     history.loadConnectionHistory();
+    knownMacs = history.getKnownMacs();
     res.json({ success: true, message: `Restored from ${name}. Restart recommended.` });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -579,6 +588,7 @@ app.post('/api/backup/upload', requireAdmin, (req, res) => {
       backup.restoreFromFile(tempPath);
       fs.unlinkSync(tempPath);
       history.loadConnectionHistory();
+      knownMacs = history.getKnownMacs();
       res.json({ success: true, message: 'Restored from uploaded file. Restart recommended.' });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -598,6 +608,15 @@ app.post('/api/config/slack', requireAdmin, (req, res) => {
     userId: typeof userId === 'string' ? userId : undefined,
     cooldownMinutes: typeof cooldownMinutes === 'number' ? cooldownMinutes : undefined,
   });
+  // Persist token directly (getConfig() intentionally omits it, so saveConfig() alone can't capture new tokens)
+  if (typeof token === 'string' && token) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+      cfg.slack = cfg.slack || {};
+      cfg.slack.token = token;
+      fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+    } catch {}
+  }
   saveConfig();
   res.json({ success: true, config: notifier.getConfig() });
 });
@@ -724,6 +743,7 @@ server.listen(PORT, () => {
   loadNotes();
   history.setRetentionDays(retentionDays);
   history.loadConnectionHistory();
+  knownMacs = history.getKnownMacs();
   console.log(`Router IP: ${asus.getRouterIp()}`);
   deviceId.loadOuiDb();
   yamaha.connectYamaha(() => {

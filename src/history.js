@@ -18,10 +18,17 @@ let stmtDeleteOld = null;
 // In-memory cache (same interface as before for Socket.IO emissions)
 const connectionHistory = new Map();
 
+function _secureDbFiles() {
+  for (const suffix of ['', '-shm', '-wal']) {
+    try { fs.chmodSync(DB_PATH + suffix, 0o600); } catch {}
+  }
+}
+
 function initDb() {
   db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
+  _secureDbFiles();
 
   // Integrity check on startup
   const integrity = db.pragma('integrity_check');
@@ -32,6 +39,7 @@ function initDb() {
     db = new Database(DB_PATH);
     db.pragma('journal_mode = WAL');
     db.pragma('busy_timeout = 5000');
+    _secureDbFiles();
   }
 
   db.exec(`
@@ -211,6 +219,13 @@ function pruneHistory() {
 
 function getConnectionHistory() { return connectionHistory; }
 
+function getKnownMacs() {
+  if (!db) return new Set();
+  return new Set(
+    db.prepare('SELECT DISTINCT srcMac FROM connections WHERE srcMac IS NOT NULL').all().map(r => r.srcMac)
+  );
+}
+
 function setRetentionDays(days) {
   historyTtlMs = days * 24 * 60 * 60 * 1000;
   console.log(`[history] Retention set to ${days} days (${historyTtlMs}ms)`);
@@ -230,6 +245,7 @@ module.exports = {
   compactHistoryLog,
   pruneHistory,
   getConnectionHistory,
+  getKnownMacs,
   setRetentionDays,
   closeDb,
   HISTORY_TTL_MS,

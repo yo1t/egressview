@@ -127,6 +127,44 @@ const _TEST_MSG = {
   en: '✅ Widemap — Slack notifications configured. You will receive a DM here when a threat is detected.',
 };
 
+const _NEW_DEVICE_MSG = {
+  ja: {
+    title:  (name, ip) => `🆕 *新規デバイス検出* — ${name}`,
+    ip:     (ip)       => `*IPアドレス:* ${ip}`,
+    vendor: (v)        => `*ベンダー:* ${v}`,
+    mac:    (m)        => `*MAC:* ${m}`,
+    time:   (ts)       => `*検出時刻:* ${new Date(ts).toLocaleString('ja-JP')}`,
+  },
+  en: {
+    title:  (name, ip) => `🆕 *New Device Detected* — ${name}`,
+    ip:     (ip)       => `*IP Address:* ${ip}`,
+    vendor: (v)        => `*Vendor:* ${v}`,
+    mac:    (m)        => `*MAC:* ${m}`,
+    time:   (ts)       => `*Detected at:* ${new Date(ts).toLocaleString('en-US')}`,
+  },
+};
+
+async function notifyNewDevice(entry) {
+  if (!_enabled || !_token || !_userId) return false;
+  const L = _NEW_DEVICE_MSG[_language] || _NEW_DEVICE_MSG.ja;
+  const name = entry.srcMdnsName || entry.srcDnsName || entry.src;
+  const lines = [
+    L.title(name, entry.src),
+    L.ip(entry.src),
+    entry.srcVendor ? L.vendor(entry.srcVendor) : null,
+    entry.srcMac    ? L.mac(entry.srcMac)        : null,
+    L.time(entry.lastSeen),
+  ].filter(Boolean).join('\n');
+  try {
+    const result = await _httpPost({ channel: _userId, text: lines }, _token);
+    if (!result.ok) { console.error('[notifier] new-device Slack error:', result.error); return false; }
+    return true;
+  } catch (err) {
+    console.error('[notifier] notifyNewDevice failed:', err.message);
+    return false;
+  }
+}
+
 async function test() {
   if (!_token || !_userId) return { ok: false, error: 'token_or_userid_missing' };
   try {
@@ -210,4 +248,4 @@ async function lookupUser(username, token) {
   }
 }
 
-module.exports = { configure, getConfig, notify, test, verifyToken, lookupUser, _buildMessage, _setHttpPost, _resetCooldown };
+module.exports = { configure, getConfig, notify, notifyNewDevice, test, verifyToken, lookupUser, _buildMessage, _setHttpPost, _resetCooldown };
