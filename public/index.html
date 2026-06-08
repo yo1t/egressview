@@ -290,6 +290,17 @@
   .dv-detail-actions .btn-save { background: var(--accent); color: #fff; border-color: var(--accent); }
   .dv-detail-actions .btn-save:hover { opacity: 0.85; }
   #dv-detail-filter-badge { margin-left: 8px; }
+  /* ── Merge candidate cards ── */
+  .dv-merge-section { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px; display: flex; flex-direction: column; gap: 6px; }
+  .dv-merge-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .dv-merge-card { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 3px; }
+  .dv-merge-card-info { color: var(--text); word-break: break-all; }
+  .dv-merge-card-score { color: var(--muted); font-size: 10px; }
+  .dv-merge-card-btns { display: flex; gap: 6px; margin-top: 4px; }
+  .dv-merge-card-btns button { flex: 1; padding: 3px 6px; font-size: 10px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--text); }
+  .dv-merge-card-btns .btn-merge { background: #10b981; color: #fff; border-color: #10b981; }
+  .dv-merge-card-btns .btn-merge:hover { opacity: 0.85; }
+  .dv-merge-card-btns .btn-reject:hover { border-color: #ef4444; color: #ef4444; }
   /* Threat indicator in conn-panel */
   .conn-threat { color: #ef4444; font-size: 10px; margin-left: 4px; }
   .stats-chart {
@@ -4219,6 +4230,7 @@ var dvFilters = {};          // col → { mode, value }
 var dvSearchTargetCol = null;
 var dvSelectedIp = null;     // IP filter from sidebar click
 var dvDetailDevice = null;   // currently open device
+var mergeCandidatesCache = [];  // pending merge candidates from API
 
 function fmtTs(ts) {
   if (!ts) return '—';
@@ -4354,6 +4366,16 @@ function renderDevicesTable() {
   if (countEl) countEl.textContent = rows.length + ' 台' + (rows.length < devicesData.length ? '（フィルター中）' : '');
 }
 
+// ── Merge candidates ─────────────────────────────────────────────────────────
+async function loadMergeCandidates() {
+  try {
+    const res = await apiFetch('__BASE__/api/devices/merge-candidates?status=pending');
+    if (!res.ok) return;
+    const data = await res.json();
+    mergeCandidatesCache = data.candidates || [];
+  } catch (e) { /* ignore */ }
+}
+
 // ── Device detail panel ───────────────────────────────────────────────────────
 function openDvDetail(d) {
   dvDetailDevice = d;
@@ -4363,7 +4385,39 @@ function openDvDetail(d) {
   const name = deviceName(d);
   const ipv6List = (d.ipv6Addrs || []).filter(Boolean);
   const sources = (d.sources || '').split(',').filter(Boolean).join(', ');
-  const noteText = lookupNote(d.ip, d.mac);
+  const noteText = d.note != null ? d.note : lookupNote(d.ip, d.mac);
+
+  // Build merge candidates section for this device
+  const myCandidates = d.deviceId
+    ? mergeCandidatesCache.filter(c => c.deviceIdA === d.deviceId || c.deviceIdB === d.deviceId)
+    : [];
+  let mergeSectionHtml = '';
+  if (myCandidates.length > 0) {
+    const cards = myCandidates.map(c => {
+      const isA      = c.deviceIdA === d.deviceId;
+      const otherId  = isA ? c.deviceIdB : c.deviceIdA;
+      const otherIp  = isA ? c.ipB       : c.ipA;
+      const otherMac = isA ? c.macB      : c.macA;
+      const otherName= isA ? (c.mdnsNameB || c.dnsNameB) : (c.mdnsNameA || c.dnsNameA);
+      const scoreStr = (c.score * 100).toFixed(0) + '%';
+      const reasons  = Array.isArray(c.reasons) ? c.reasons.join(', ') : (c.reasons || '');
+      const label    = [otherIp, otherMac, otherName].filter(Boolean).join(' / ');
+      return `
+        <div class="dv-merge-card" data-candidate-id="${esc(String(c.id))}" data-other-id="${esc(otherId || '')}">
+          <div class="dv-merge-card-info">${esc(label || otherId || '—')}</div>
+          <div class="dv-merge-card-score">類似度: ${scoreStr}${reasons ? '　' + esc(reasons) : ''}</div>
+          <div class="dv-merge-card-btns">
+            <button class="btn-merge" data-action="merge">🔀 この端末に統合</button>
+            <button class="btn-reject" data-action="reject">✕ 却下</button>
+          </div>
+        </div>`;
+    }).join('');
+    mergeSectionHtml = `
+      <div class="dv-merge-section">
+        <div class="dv-merge-title">🔀 名寄せ候補</div>
+        ${cards}
+      </div>`;
+  }
 
   document.getElementById('dv-detail-body').innerHTML = `
     ${d.vendor ? `<div class="dv-detail-row"><span class="dv-detail-label">ベンダー</span><span class="dv-detail-value">${esc(d.vendor)}</span></div>` : ''}
@@ -4375,6 +4429,7 @@ function openDvDetail(d) {
     <div class="dv-detail-row"><span class="dv-detail-label">ソース</span><span class="dv-detail-value">${esc(sources) || '—'}</span></div>
     <div class="dv-detail-row"><span class="dv-detail-label">初回確認</span><span class="dv-detail-value">${fmtTs(d.firstSeen)}</span></div>
     <div class="dv-detail-row"><span class="dv-detail-label">最終確認</span><span class="dv-detail-value">${fmtTs(d.lastSeen)}</span></div>
+    ${mergeSectionHtml}
     <div style="margin-top:4px;font-size:11px;color:var(--muted);margin-bottom:2px">メモ</div>
     <textarea class="dv-detail-note-ta" id="dv-detail-note-ta" placeholder="${esc(t('note.placeholder'))}">${esc(noteText)}</textarea>
     <div id="dv-investigate-result" style="font-size:10px;color:var(--muted);margin-top:4px;white-space:pre-wrap;"></div>
@@ -4438,6 +4493,37 @@ document.getElementById('dv-detail-investigate').addEventListener('click', async
     if (resultEl2) resultEl2.textContent = t('note.investigate.fail') + ': ' + e.message;
   } finally {
     btn.disabled = false; btn.textContent = orig;
+  }
+});
+
+// ── Merge / reject action buttons (event delegation on detail body) ────────────
+document.getElementById('dv-detail-body').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn || !dvDetailDevice) return;
+  const card = btn.closest('.dv-merge-card');
+  if (!card) return;
+  const action      = btn.dataset.action;
+  const candidateId = Number(card.dataset.candidateId);
+  const otherId     = card.dataset.otherId;
+  btn.disabled = true;
+  try {
+    if (action === 'merge') {
+      const res = await apiFetch('__BASE__/api/devices/merge', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keepId: dvDetailDevice.deviceId, dropId: otherId }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || res.statusText); }
+    } else if (action === 'reject') {
+      const res = await apiFetch('__BASE__/api/devices/reject', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: candidateId }),
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || res.statusText); }
+    }
+    await loadDevicesView();   // refreshes candidates + devices + re-opens detail
+  } catch (err) {
+    alert('エラー: ' + err.message);
+    btn.disabled = false;
   }
 });
 
@@ -4518,11 +4604,15 @@ document.getElementById('dv-clear-filters-btn').addEventListener('click', () => 
 // ── Load data ─────────────────────────────────────────────────────────────────
 async function loadDevicesView() {
   try {
-    const res = await apiFetch('__BASE__/api/devices');
+    // Load merge candidates and device list in parallel
+    const [, res] = await Promise.all([
+      loadMergeCandidates(),
+      apiFetch('__BASE__/api/devices'),
+    ]);
     if (!res.ok) throw new Error(res.statusText);
     const data = await res.json();
     devicesData = data.devices || [];
-    // Refresh detail if open
+    // Refresh detail if open (re-renders with updated candidates)
     if (dvDetailDevice) {
       const fresh = devicesData.find(d => d.ip === dvDetailDevice.ip);
       if (fresh) openDvDetail(fresh);
