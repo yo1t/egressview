@@ -135,7 +135,7 @@
 | ✅ P1-2 | poller 共通ライフサイクルの整理 | `start/stop/reconnect`、tail 再試行、enabled 状態管理が poller ごとに増えている | `src/pollers/tail-helper.js` で `createTailPoller()` ファクトリを作成。3 poller すべてを ~45 行に削減 |
 | ✅ P1-3 | 履歴・enrichment 更新ロジックの共通化 | Yamaha poll と INSPECT handler に、接続履歴 upsert、通知、未知デバイス検出、非同期 enrichment が重複している | `recordConnection(session, now)` を server.js に追加。両ハンドラから利用 |
 | ✅ P1-4 | device table / inventory を作る | ASUS/DHCPD/ARP/NDP/NAT/INSPECT/DNSMASQ/mDNS から十分な端末情報が取れているが、現状は接続履歴・メタ情報・notes に分散している | `src/devices.js` 追加。`devices` テーブル（SQLite）で ip/mac/vendor/names/ipv6/firstSeen/lastSeen/sources 集約。起動時に接続履歴からシード。9件ユニットテスト追加 |
-| 🔄 P1-5 | `deviceId` と観測値ベースの名寄せを導入 | IP は DHCP で変わり、MAC もプライバシーMAC/仮想NICで変わるため、どちらも安定した主キーにならない。端末一覧・メモ・信頼状態を長期的に安定させるには内部IDが必要 | **2026-06-09 step 1a〜6,8 完了**（deviceId + backfill + observations + observeDevice + isStableMac + computeMergeScore + merge candidates API + notes UUID 対応）。step 7（手動 merge/split UI）のみ残。step 1d は contract phase。 |
+| ✅ P1-5 | `deviceId` と観測値ベースの名寄せを導入 | IP は DHCP で変わり、MAC もプライバシーMAC/仮想NICで変わるため、どちらも安定した主キーにならない。端末一覧・メモ・信頼状態を長期的に安定させるには内部IDが必要 | **2026-06-09 step 1a〜8 完了**（deviceId + backfill + observations + observeDevice + isStableMac + computeMergeScore + merge candidates API + notes UUID 対応 + 手動 merge/split UI）。step 1d のみ contract phase で保留。 |
 | ✅ P1-6 | 端末一覧ビューを追加 | Widemap は既に端末情報を多く取得しているが、現状はグラフ/通信ログ中心で「LAN内に何がいるか」を一覧で確認しづらい | `GET /api/devices` 追加（NDP IPv6付き）。UI に「🖥 端末一覧」タブ追加。IP/MAC/ベンダー/名前/IPv6/ソース/初回・最終確認。検索・列フィルタ・ソート対応。行クリックで詳細パネル（メモ編集・自動調査）。右サイドバーからの IP フィルタ連動 |
 | ✅ P1-7 | 外部 API 依存の可観測性を改善 | RDAP/Geo/Threat feed の失敗がユーザーから見えにくい | `src/enrichment.js` に `apiStats` 追加。rdap/geo/ptr の ok/fail/lastOkAt/lastFailAt/lastError を `GET /api/status` で公開 |
 
@@ -154,7 +154,7 @@ IP は DHCP で変わる可能性があり、MAC も Apple のプライベート
 | ✅ 4 | stable MAC 一致の自動紐付け | `isStableMac()` でグローバルユニーク MAC（bit1=0）のみ自動紐付け。privacy MAC / 仮想 NIC・broadcast・all-zero は統合しない | isStableMac テスト8件 PASS。stable MAC + IP変更 → 同一 deviceId の自動リンクテスト PASS。2026-06-09 完了 |
 | ✅ 5 | hostname / mDNS / vendor / recent IP のスコアリング | mDNS/hostname/vendor/recent IP を補助証拠として score 化。強い一致だけ自動、曖昧な一致は候補にする | `computeMergeScore()` 実装。mDNS+0.5/dnsName+0.3/vendor+0.15。threshold 0.4 で candidates 保存。2026-06-09 完了 |
 | ✅ 6 | merge candidate API | `device_merge_candidates` を追加し、候補の理由・score・status を保存する | `device_merge_candidates` テーブル + `getMergeCandidates()` / `approveMerge()` / `rejectCandidate()`。`GET /api/devices/merge-candidates` / `POST /api/devices/merge` / `POST /api/devices/reject`。2026-06-09 完了 |
-| 7 | 手動 merge / split UI | 端末詳細で merge 候補を表示し、ユーザーが統合・分離できるようにする | 端末一覧から手動 merge/split が可能。notes/trust の移行先 deviceId も保たれる |
+| ✅ 7 | 手動 merge / split UI | 端末詳細で merge 候補を表示し、ユーザーが統合・分離できるようにする | 端末詳細パネルに「🔀 名寄せ候補」セクションを追加。類似度・理由・相手端末の IP/MAC/名前を表示。「統合」→ POST /api/devices/merge、「却下」→ POST /api/devices/reject。操作後は devices + candidates を自動リロード。2026-06-09 完了 |
 | ✅ 8 | notes / trust / device detail を `deviceId` 紐付けへ移行 | IP/MACベースのメモを `deviceId` 中心へ移す。既存メモは互換読み込みまたは migration する。`devices.noteKey` カラムの扱いも整理 | `notes.isSafeKey()` に UUID 対応。`getForDevice(deviceId, ip, mac)` フォールバック実装。`POST /api/notes` が deviceId を正規キーとして自動解決・マイグレーション。`GET /api/devices` に `note` フィールド。2026-06-09 完了 |
 
 **最初の実装単位（P1-5 初期フェーズ）: 1a〜1c、2〜4 を完了させる。** 1d（contract phase）は 2〜4 が安定した後に実施する。5〜8 はその後。特に Apple 系 private MAC は誤統合しやすいため、最初は自動統合せず merge 候補扱いにする。
