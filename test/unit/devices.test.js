@@ -529,3 +529,67 @@ describe('devices: step 6 — merge candidates', () => {
     assert.equal(candidates.length, 0, '候補なし');
   });
 });
+
+// ─── P1-8: deviceStatus / archiveDevice / unarchiveDevice ─────────────────────
+
+describe('devices: P1-8 — status and archive', () => {
+  beforeEach(() => devicesModule._initForTest());
+
+  it('deviceStatus: 24h 以内 → active', () => {
+    assert.equal(devicesModule.deviceStatus(Date.now() - 1000), 'active');
+  });
+  it('deviceStatus: 2日前 → recent', () => {
+    assert.equal(devicesModule.deviceStatus(Date.now() - 2 * 24 * 60 * 60 * 1000), 'recent');
+  });
+  it('deviceStatus: 10日前 → stale', () => {
+    assert.equal(devicesModule.deviceStatus(Date.now() - 10 * 24 * 60 * 60 * 1000), 'stale');
+  });
+
+  it('getAll() に status フィールドが含まれる', () => {
+    devicesModule.observeDevice({ ip: '10.8.0.1', source: 'nat' });
+    const all = devicesModule.getAll();
+    assert.ok(all.length > 0);
+    assert.ok(['active', 'recent', 'stale'].includes(all[0].status), 'status は active/recent/stale');
+  });
+
+  it('archiveDevice → getAll() から除外される', () => {
+    const id = devicesModule.observeDevice({ ip: '10.8.1.1', source: 'nat' });
+    assert.ok(devicesModule.getAll().some(d => d.deviceId === id), '元は含まれる');
+
+    const ok = devicesModule.archiveDevice(id);
+    assert.ok(ok, 'archive 成功');
+    assert.ok(!devicesModule.getAll().some(d => d.deviceId === id), 'getAll から除外');
+  });
+
+  it('archiveDevice → getAll({ includeArchived: true }) には含まれ status=archived', () => {
+    const id = devicesModule.observeDevice({ ip: '10.8.1.2', source: 'nat' });
+    devicesModule.archiveDevice(id);
+    const all = devicesModule.getAll({ includeArchived: true });
+    const archived = all.find(d => d.deviceId === id);
+    assert.ok(archived,                      'includeArchived: true で取得できる');
+    assert.equal(archived.status, 'archived', 'status === archived');
+  });
+
+  it('unarchiveDevice → getAll() に戻る', () => {
+    const id = devicesModule.observeDevice({ ip: '10.8.1.3', source: 'nat' });
+    devicesModule.archiveDevice(id);
+    assert.ok(!devicesModule.getAll().some(d => d.deviceId === id), 'アーカイブ後は非表示');
+
+    const ok = devicesModule.unarchiveDevice(id);
+    assert.ok(ok, 'unarchive 成功');
+    const restored = devicesModule.getAll().find(d => d.deviceId === id);
+    assert.ok(restored,                      'getAll に戻る');
+    assert.ok(restored.archivedAt == null,   'archivedAt がクリアされる');
+    assert.ok(restored.status !== 'archived', 'status が archived でなくなる');
+  });
+
+  it('archiveDevice: 存在しない deviceId → false', () => {
+    assert.equal(devicesModule.archiveDevice('non-existent-uuid'), false);
+  });
+
+  it('archiveDevice: 既にアーカイブ済み → false（二重アーカイブ不可）', () => {
+    const id = devicesModule.observeDevice({ ip: '10.8.1.4', source: 'nat' });
+    devicesModule.archiveDevice(id);
+    assert.equal(devicesModule.archiveDevice(id), false, '二重アーカイブは false');
+  });
+});

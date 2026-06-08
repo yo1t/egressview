@@ -290,6 +290,20 @@
   .dv-detail-actions .btn-save { background: var(--accent); color: #fff; border-color: var(--accent); }
   .dv-detail-actions .btn-save:hover { opacity: 0.85; }
   #dv-detail-filter-badge { margin-left: 8px; }
+  /* ── P1-8: status filter bar ── */
+  .dv-status-bar { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+  .dv-status-btn { padding: 2px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: 12px; background: transparent; color: var(--muted); cursor: pointer; white-space: nowrap; transition: border-color .15s, color .15s; }
+  .dv-status-btn:hover { border-color: var(--accent); color: var(--text); }
+  .dv-status-btn.sel { border-color: var(--accent); color: var(--accent); background: rgba(59,130,246,0.08); }
+  .dv-status-count { font-size: 10px; opacity: .7; }
+  /* status dots used in table rows and detail panel */
+  .s-active   { color: #10b981; }
+  .s-recent   { color: #3b82f6; }
+  .s-stale    { color: #f59e0b; }
+  .s-archived { color: var(--muted); }
+  /* row dimming by status */
+  tr.row-stale   td { opacity: .65; }
+  tr.row-archived td { opacity: .45; text-decoration: line-through; }
   /* ── Merge candidate cards ── */
   .dv-merge-section { border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px; display: flex; flex-direction: column; gap: 6px; }
   .dv-merge-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
@@ -1100,6 +1114,13 @@
           <input id="devices-search" type="text" placeholder="IP / MAC / 名前 / ベンダー…" autocomplete="off"
             style="flex:1;min-width:180px;max-width:320px;padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--text);">
         </div>
+        <!-- P1-8: status filter bar -->
+        <div class="dv-status-bar" id="dv-status-bar">
+          <button class="dv-status-btn sel" data-status="active">🟢 Active <span class="dv-status-count" id="cnt-active"></span></button>
+          <button class="dv-status-btn sel" data-status="recent">🔵 Recent <span class="dv-status-count" id="cnt-recent"></span></button>
+          <button class="dv-status-btn"     data-status="stale">🟡 Stale  <span class="dv-status-count" id="cnt-stale"></span></button>
+          <button class="dv-status-btn"     data-status="archived">⬜ Archived <span class="dv-status-count" id="cnt-archived"></span></button>
+        </div>
         <div class="log-table-wrap" style="position:relative;">
           <table class="log-table" id="devices-table">
             <thead>
@@ -1145,6 +1166,7 @@
         <div class="dv-detail-body" id="dv-detail-body"></div>
         <div class="dv-detail-actions">
           <button id="dv-detail-investigate" data-i18n="note.investigate">🔍 自動調査</button>
+          <button id="dv-detail-archive">📦 アーカイブ</button>
           <button id="dv-detail-save" class="btn-save" data-i18n="note.save">保存</button>
         </div>
       </div>
@@ -4243,6 +4265,8 @@ var dvSearchTargetCol = null;
 var dvSelectedIp = null;     // IP filter from sidebar click
 var dvDetailDevice = null;   // currently open device
 var mergeCandidatesCache = [];  // pending merge candidates from API
+// P1-8: status filter — active/recent/stale/archived
+var dvStatusFilter = new Set(['active', 'recent']);
 
 function fmtTs(ts) {
   if (!ts) return '—';
@@ -4307,7 +4331,20 @@ function renderDevicesTable() {
   const hasColFilter = Object.values(dvFilters).some(f => f && f.value);
   clearFiltersBtn.style.display = (hasColFilter || dvSelectedIp) ? '' : 'none';
 
+  // P1-8: update status counts and filter buttons
+  const statusCounts = { active: 0, recent: 0, stale: 0, archived: 0 };
+  for (const d of devicesData) statusCounts[d.status || 'stale']++;
+  ['active','recent','stale','archived'].forEach(s => {
+    const el = document.getElementById('cnt-' + s);
+    if (el) el.textContent = '(' + (statusCounts[s] || 0) + ')';
+  });
+  document.querySelectorAll('.dv-status-btn').forEach(btn => {
+    btn.classList.toggle('sel', dvStatusFilter.has(btn.dataset.status));
+  });
+
   let rows = devicesData.filter(d => {
+    // P1-8: status filter
+    if (!dvStatusFilter.has(d.status || 'stale')) return false;
     // Sidebar IP filter
     if (dvSelectedIp && d.ip !== dvSelectedIp) return false;
     // Global text search
@@ -4354,7 +4391,8 @@ function renderDevicesTable() {
     const sources = (d.sources || '').split(',').filter(Boolean).join(' · ');
     const noteText = lookupNote(d.ip, d.mac);
     const isOpen = dvDetailDevice && dvDetailDevice.ip === d.ip;
-    return `<tr class="${isOpen ? 'selected' : ''}" style="cursor:pointer" data-ip="${esc(d.ip)}">
+    const statusCls = d.status === 'stale' ? 'row-stale' : d.status === 'archived' ? 'row-archived' : '';
+    return `<tr class="${isOpen ? 'selected' : ''} ${statusCls}" style="cursor:pointer" data-ip="${esc(d.ip)}">
       <td style="font-family:monospace">${esc(d.ip)}</td>
       <td style="font-family:monospace;color:var(--muted)">${d.mac ? esc(d.mac) : '<span style="opacity:.4">—</span>'}</td>
       <td>${d.vendor ? esc(d.vendor) : '<span style="color:var(--muted)">—</span>'}</td>
@@ -4375,7 +4413,12 @@ function renderDevicesTable() {
   });
 
   const countEl = document.getElementById('devices-count');
-  if (countEl) countEl.textContent = rows.length + ' 台' + (rows.length < devicesData.length ? '（フィルター中）' : '');
+  if (countEl) {
+    const total = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+    const extra = rows.length < devicesData.filter(d => dvStatusFilter.has(d.status || 'stale')).length
+      ? '（フィルター中）' : '';
+    countEl.textContent = rows.length + ' 台' + extra + ' / 合計 ' + total + ' 台';
+  }
 }
 
 // ── Merge candidates ─────────────────────────────────────────────────────────
@@ -4431,7 +4474,25 @@ function openDvDetail(d) {
       </div>`;
   }
 
+  // P1-8: archive button label
+  const archiveBtn = document.getElementById('dv-detail-archive');
+  if (archiveBtn) {
+    if (d.status === 'archived') {
+      archiveBtn.textContent = '📤 復元';
+      archiveBtn.title = 'アーカイブを解除して通常一覧に戻す';
+    } else {
+      archiveBtn.textContent = '📦 アーカイブ';
+      archiveBtn.title = '端末を一覧から非表示にする（データは保持）';
+    }
+  }
+
+  // P1-8: status badge
+  const statusLabels = { active: '🟢 Active', recent: '🔵 Recent', stale: '🟡 Stale', archived: '⬜ Archived' };
+  const statusCls    = { active: 's-active', recent: 's-recent', stale: 's-stale', archived: 's-archived' };
+  const statusStr    = d.status || 'stale';
+
   document.getElementById('dv-detail-body').innerHTML = `
+    <div class="dv-detail-row"><span class="dv-detail-label">状態</span><span class="dv-detail-value ${statusCls[statusStr]}">${statusLabels[statusStr] || statusStr}</span></div>
     ${d.vendor ? `<div class="dv-detail-row"><span class="dv-detail-label">ベンダー</span><span class="dv-detail-value">${esc(d.vendor)}</span></div>` : ''}
     ${name !== '—' ? `<div class="dv-detail-row"><span class="dv-detail-label">名前</span><span class="dv-detail-value">${esc(name)}</span></div>` : ''}
     ${d.dnsName  ? `<div class="dv-detail-row"><span class="dv-detail-label">DNS</span><span class="dv-detail-value" style="font-size:10px">${esc(d.dnsName)}</span></div>` : ''}
@@ -4546,6 +4607,48 @@ document.getElementById('dv-detail-body').addEventListener('click', async (e) =>
   }
 });
 
+// ── P1-8: archive / unarchive button ─────────────────────────────────────────
+document.getElementById('dv-detail-archive').addEventListener('click', async () => {
+  if (!dvDetailDevice) return;
+  const btn = document.getElementById('dv-detail-archive');
+  const isArchived = dvDetailDevice.status === 'archived';
+  const endpoint = isArchived ? 'unarchive' : 'archive';
+  btn.disabled = true;
+  try {
+    const res = await apiFetch(`__BASE__/api/devices/${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId: dvDetailDevice.deviceId }),
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error || res.statusText); }
+    // After archive: close panel (device may leave current filter).
+    // After unarchive: reload to show it in active/recent/stale.
+    if (!isArchived) {
+      dvDetailDevice = null;
+      document.getElementById('dv-detail-panel').classList.add('hidden');
+    }
+    await loadDevicesView();
+  } catch (err) {
+    alert('エラー: ' + err.message);
+    btn.disabled = false;
+  }
+});
+
+// ── P1-8: status filter buttons ───────────────────────────────────────────────
+document.getElementById('dv-status-bar').addEventListener('click', e => {
+  const btn = e.target.closest('.dv-status-btn');
+  if (!btn) return;
+  const s = btn.dataset.status;
+  if (!s) return;
+  // 'archived' tab: toggle + also need to (re-)fetch with includeArchived when turning on
+  if (dvStatusFilter.has(s)) {
+    // Don't allow deselecting all
+    if (dvStatusFilter.size > 1) dvStatusFilter.delete(s);
+  } else {
+    dvStatusFilter.add(s);
+  }
+  renderDevicesTable();
+});
+
 // ── Column sort ───────────────────────────────────────────────────────────────
 document.querySelectorAll('#devices-table th[data-col]').forEach(th => {
   th.style.cursor = 'pointer';
@@ -4623,10 +4726,10 @@ document.getElementById('dv-clear-filters-btn').addEventListener('click', () => 
 // ── Load data ─────────────────────────────────────────────────────────────────
 async function loadDevicesView() {
   try {
-    // Load merge candidates and device list in parallel
+    // Always fetch with includeArchived=1 so status filter works client-side without re-fetching
     const [, res] = await Promise.all([
       loadMergeCandidates(),
-      apiFetch('__BASE__/api/devices'),
+      apiFetch('__BASE__/api/devices?includeArchived=1'),
     ]);
     if (!res.ok) throw new Error(res.statusText);
     const data = await res.json();

@@ -15,13 +15,13 @@ module.exports = function devicesRoutes(ctx) {
   const { requireAdmin, devices, notes, yamaha } = ctx;
   const router = Router();
 
-  // GET /api/devices
-  // Returns all devices with IPv6 addresses and notes attached.
+  // GET /api/devices[?includeArchived=1]
+  // Returns devices with status (active/recent/stale/archived), IPv6, and notes.
   router.get('/devices', requireAdmin, (req, res) => {
-    const all = devices.getAll();
+    const includeArchived = req.query.includeArchived === '1';
+    const all = devices.getAll({ includeArchived });
     for (const d of all) {
       d.ipv6Addrs = d.mac ? (yamaha.getNdpByMac(d.mac) || null) : null;
-      // Attach note: look up by deviceId first, fall back to IP/MAC
       d.note = notes
         ? notes.getForDevice(d.deviceId, d.ip, d.mac) || null
         : null;
@@ -74,6 +74,26 @@ module.exports = function devicesRoutes(ctx) {
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id が必要です' });
     devices.rejectCandidate(id);
+    res.json({ success: true });
+  });
+
+  // POST /api/devices/archive  — manually archive a device
+  // Body: { deviceId }
+  router.post('/devices/archive', requireAdmin, (req, res) => {
+    const { deviceId } = req.body || {};
+    if (!deviceId) return res.status(400).json({ error: 'deviceId が必要です' });
+    const ok = devices.archiveDevice(deviceId);
+    if (!ok) return res.status(404).json({ error: 'デバイスが見つからないか既にアーカイブ済みです' });
+    res.json({ success: true });
+  });
+
+  // POST /api/devices/unarchive  — restore an archived device
+  // Body: { deviceId }
+  router.post('/devices/unarchive', requireAdmin, (req, res) => {
+    const { deviceId } = req.body || {};
+    if (!deviceId) return res.status(400).json({ error: 'deviceId が必要です' });
+    const ok = devices.unarchiveDevice(deviceId);
+    if (!ok) return res.status(404).json({ error: 'デバイスが見つかりません' });
     res.json({ success: true });
   });
 

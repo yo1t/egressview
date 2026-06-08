@@ -483,11 +483,61 @@ function rejectCandidate(candidateId) {
   return true;
 }
 
+// ─── Status ───────────────────────────────────────────────────────────────────
+
+/**
+ * Compute display status from lastSeen timestamp.
+ * 'active'  : seen within 24 h
+ * 'recent'  : seen within 7 days
+ * 'stale'   : not seen for 7+ days
+ */
+function deviceStatus(lastSeen) {
+  const age = Date.now() - (lastSeen || 0);
+  if (age < 24 * 60 * 60 * 1000)      return 'active';
+  if (age < 7  * 24 * 60 * 60 * 1000) return 'recent';
+  return 'stale';
+}
+
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
-function getAll() {
+/**
+ * Return all devices with a computed `status` field.
+ * @param {{ includeArchived?: boolean }} [opts]
+ */
+function getAll({ includeArchived = false } = {}) {
   if (!db) return [];
-  return stmtSelectAll.all();
+  const rows = includeArchived
+    ? db.prepare('SELECT * FROM devices ORDER BY lastSeen DESC').all()
+    : stmtSelectAll.all();
+  return rows.map(d => ({
+    ...d,
+    status: d.archivedAt != null ? 'archived' : deviceStatus(d.lastSeen),
+  }));
+}
+
+/**
+ * Manually archive a device (soft-delete without merge).
+ * @returns {boolean}
+ */
+function archiveDevice(deviceId) {
+  if (!db) return false;
+  const r = db.prepare(
+    'UPDATE devices SET archivedAt = ? WHERE deviceId = ? AND archivedAt IS NULL'
+  ).run(Date.now(), deviceId);
+  return r.changes > 0;
+}
+
+/**
+ * Restore an archived device back to active tracking.
+ * Clears archivedAt and mergedInto so the device becomes visible again.
+ * @returns {boolean}
+ */
+function unarchiveDevice(deviceId) {
+  if (!db) return false;
+  const r = db.prepare(
+    'UPDATE devices SET archivedAt = NULL, mergedInto = NULL WHERE deviceId = ?'
+  ).run(deviceId);
+  return r.changes > 0;
 }
 
 function getByIp(ip) {
@@ -550,10 +600,13 @@ module.exports = {
   reopen,
   upsert,
   observeDevice,
+  deviceStatus,
   getAll,
   getByIp,
   getByMac,
   getByDeviceId,
+  archiveDevice,
+  unarchiveDevice,
   isStableMac,
   computeMergeScore,
   getMergeCandidates,
