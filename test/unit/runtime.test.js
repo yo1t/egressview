@@ -62,8 +62,12 @@ function makeDeviceId() {
 }
 
 function makeDevices() {
-  const upserted = [];
-  return { upsert: (d) => upserted.push(d), _upserted: upserted };
+  const observed = [];
+  return {
+    upsert:        (d) => observed.push(d),
+    observeDevice: (d) => observed.push(d),
+    _upserted: observed,   // alias: 既存テストとの後方互換
+  };
 }
 
 function makeAsus(mac = null) {

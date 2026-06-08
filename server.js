@@ -209,7 +209,7 @@ async function pollYamahaConnections() {
       for (const [ip, mac] of yamaha.getArpCache()) {
         const ipv6 = yamaha.getNdpByMac(mac);
         if (ipv6 && ipv6.length) {
-          devices.upsert({ ip, mac, ipv6Addr: ipv6[0], lastSeen: Date.now(), source: 'ndp' });
+          devices.observeDevice({ ip, mac, ipv6Addr: ipv6[0], lastSeen: Date.now(), source: 'ndp' });
         }
       }
     }
@@ -364,10 +364,11 @@ asus.configure({
     for (const c of data.clients) {
       const ipv6 = yamaha.getNdpByMac(c.mac);
       c.ipv6Addrs = ipv6 || null;
-      devices.upsert({
+      devices.observeDevice({
         ip: c.ip, mac: c.mac || null, vendor: c.vendor || null,
         mdnsName: c.mdnsName || null, dnsName: c.dnsName || null,
         ipv6Addr: (ipv6 && ipv6[0]) || null,
+        asusName: c.name || null,
         lastSeen: Date.now(), source: 'asus',
       });
     }
@@ -385,7 +386,7 @@ asus.configure({
 
 dhcpdSyslog.configure({
   onLease: ({ ip, mac }) => {
-    devices.upsert({ ip, mac, lastSeen: Date.now(), source: 'dhcp' });
+    devices.observeDevice({ ip, mac, lastSeen: Date.now(), source: 'dhcp' });
   },
 });
 

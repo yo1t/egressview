@@ -133,7 +133,7 @@ function recordConnection(session, now = Date.now(), source = 'nat') {
   }
   if (isNew) _history.appendHistoryLog(entry);
 
-  _devices.upsert({
+  _devices.observeDevice({
     ip:        entry.src,
     mac:       entry.srcMac      || null,
     vendor:    entry.srcVendor   || null,
