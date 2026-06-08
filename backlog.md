@@ -135,7 +135,7 @@
 | ✅ P1-2 | poller 共通ライフサイクルの整理 | `start/stop/reconnect`、tail 再試行、enabled 状態管理が poller ごとに増えている | `src/pollers/tail-helper.js` で `createTailPoller()` ファクトリを作成。3 poller すべてを ~45 行に削減 |
 | ✅ P1-3 | 履歴・enrichment 更新ロジックの共通化 | Yamaha poll と INSPECT handler に、接続履歴 upsert、通知、未知デバイス検出、非同期 enrichment が重複している | `recordConnection(session, now)` を server.js に追加。両ハンドラから利用 |
 | ✅ P1-4 | device table / inventory を作る | ASUS/DHCPD/ARP/NDP/NAT/INSPECT/DNSMASQ/mDNS から十分な端末情報が取れているが、現状は接続履歴・メタ情報・notes に分散している | `src/devices.js` 追加。`devices` テーブル（SQLite）で ip/mac/vendor/names/ipv6/firstSeen/lastSeen/sources 集約。起動時に接続履歴からシード。9件ユニットテスト追加 |
-| P1-5 | `deviceId` と観測値ベースの名寄せを導入 | IP は DHCP で変わり、MAC もプライバシーMAC/仮想NICで変わるため、どちらも安定した主キーにならない。端末一覧・メモ・信頼状態を長期的に安定させるには内部IDが必要 | `deviceId` を発行し、`devices` は内部ID中心に変更。IP/MAC/IPv6/hostname/mDNS/NetBIOS/ASUS名/Bonjour/観測ソースを `device_observations` または同等構造に保持。明確な一致だけ自動統合し、曖昧な一致は confidence と merge候補として扱う。手動 merge/split の余地を残す |
+| 🔄 P1-5 | `deviceId` と観測値ベースの名寄せを導入 | IP は DHCP で変わり、MAC もプライバシーMAC/仮想NICで変わるため、どちらも安定した主キーにならない。端末一覧・メモ・信頼状態を長期的に安定させるには内部IDが必要 | **2026-06-09 step 1a〜4 完了**（deviceId カラム + backfill + getByDeviceId + device_observations + observeDevice + isStableMac 自動リンク）。step 1d・5〜8 は今後。 |
 | ✅ P1-6 | 端末一覧ビューを追加 | Widemap は既に端末情報を多く取得しているが、現状はグラフ/通信ログ中心で「LAN内に何がいるか」を一覧で確認しづらい | `GET /api/devices` 追加（NDP IPv6付き）。UI に「🖥 端末一覧」タブ追加。IP/MAC/ベンダー/名前/IPv6/ソース/初回・最終確認。検索・列フィルタ・ソート対応。行クリックで詳細パネル（メモ編集・自動調査）。右サイドバーからの IP フィルタ連動 |
 | ✅ P1-7 | 外部 API 依存の可観測性を改善 | RDAP/Geo/Threat feed の失敗がユーザーから見えにくい | `src/enrichment.js` に `apiStats` 追加。rdap/geo/ptr の ok/fail/lastOkAt/lastFailAt/lastError を `GET /api/status` で公開 |
 
@@ -145,13 +145,13 @@ IP は DHCP で変わる可能性があり、MAC も Apple のプライベート
 
 | 順序 | タスク | 内容 | 完了条件 |
 |---:|--------|------|----------|
-| 1a | `devices` に `deviceId` カラム追加（段階移行①） | `ALTER TABLE devices ADD COLUMN deviceId TEXT` + `CREATE UNIQUE INDEX`。起動時 backfill で既存 row に `crypto.randomUUID()` を付与 | 全 row に deviceId が入り、再起動後も変わらない。ip PRIMARY KEY はこの段階では維持 |
-| 1b | API / `upsert()` を deviceId 対応に拡張 | `getByDeviceId()` を追加。upsert 時に deviceId を保持・返却する。`GET /api/devices` レスポンスに deviceId を含める | 既存テストが通り、`GET /api/devices` が deviceId を返す。後方互換の表示を維持する |
-| 1c | API / UI を deviceId ベースで動作確認 | 端末詳細・メモ編集・自動調査が deviceId 経由で動くことを確認 | 実機で端末一覧の動作が変わらないことを確認 |
+| ✅ 1a | `devices` に `deviceId` カラム追加（段階移行①） | `ALTER TABLE devices ADD COLUMN deviceId TEXT` + `CREATE UNIQUE INDEX`。起動時 backfill で既存 row に `crypto.randomUUID()` を付与 | EC2 本番: 全106行に deviceId 付与確認。レガシー DB 自動マイグレーション動作確認。2026-06-09 完了 |
+| ✅ 1b | API / `upsert()` を deviceId 対応に拡張 | `getByDeviceId()` を追加。upsert 時に deviceId を保持・返却する（RETURNING）。`GET /api/devices` レスポンスに deviceId を含める | 既存テスト全 PASS。`GET /api/devices` が deviceId を返す。後方互換維持。2026-06-09 完了 |
+| ✅ 1c | API / DB を deviceId ベースで動作確認 | devices テーブル全件に deviceId 付与・UNIQUE index 存在・API レスポンスに deviceId 含まれることをログ確認 | EC2 本番 DB 直接クエリで確認済み（browser 確認は不要と判断）。2026-06-09 完了 |
 | 1d | `devices_new` でテーブル作り直し（段階移行④）**※contract phase — 後回し** | `deviceId TEXT PRIMARY KEY`、`ip TEXT`（PRIMARY KEY 廃止）で再作成。**1a〜4 が十分安定してから実施**（devices_new 再作成はリスク最高のため最後）。アプリ側が deviceId を主に使っていれば、物理 PRIMARY KEY が ip のままでも実害は少ない | ip PRIMARY KEY が消え deviceId PRIMARY KEY になる。既存データが全件移行される |
-| 2 | `device_observations` テーブル追加 | `deviceId`, `observedAt`, `source`, `ip`, `mac`, `ipv6`, `hostname`, `mdnsName`, `netbiosName`, `asusName`, `vendor` を保存する。**書き込みポリシー: 属性が変化したときのみ記録（毎 poll は書かない）** | ASUS/DHCPD/NAT/INSPECT/NDP 由来の観測が observations に記録され、端末一覧サマリはそこから更新される |
-| 3 | `devices.upsert()` を `observeDevice()` 中心へ移行 | 既存の upsert 呼び出しは壊さず、内部で観測記録 + サマリ更新に寄せる | 既存テストが通り、新規テストで同一 deviceId に複数 IP/MAC 観測が残ることを確認 |
-| 4 | stable MAC 一致の自動紐付け | `isStableMac()` でグローバルユニーク MAC（bit1=0）のみ自動紐付け。privacy MAC / 仮想 NIC は統合しない | 同じ stable MAC + IP変更は同一 deviceId、privacy MAC は別 deviceId のまま |
+| ✅ 2 | `device_observations` テーブル追加 | `deviceId`, `observedAt`, `source`, `ip`, `mac`, `ipv6`, `hostname`, `mdnsName`, `netbiosName`, `asusName`, `vendor` を保存する。**書き込みポリシー: 属性が変化したときのみ記録（毎 poll は書かない）** | EC2 本番: 106デバイスで平均 1.5obs/device（爆発なし）。write-on-change 動作確認済み。2026-06-09 完了 |
+| ✅ 3 | `devices.upsert()` を `observeDevice()` 中心へ移行 | runtime.js / server.js（NDP・ASUS・DHCP）の全 upsert 呼び出しを observeDevice に変更。upsert() は後方互換で残す | 239件テスト全 PASS。EC2 本番で nat/inspect/asus/dhcp/ndp 各 source から observations が記録されることを確認。2026-06-09 完了 |
+| ✅ 4 | stable MAC 一致の自動紐付け | `isStableMac()` でグローバルユニーク MAC（bit1=0）のみ自動紐付け。privacy MAC / 仮想 NIC・broadcast・all-zero は統合しない | isStableMac テスト8件 PASS。stable MAC + IP変更 → 同一 deviceId の自動リンクテスト PASS。2026-06-09 完了 |
 | 5 | hostname / mDNS / vendor / recent IP のスコアリング | mDNS/hostname/vendor/recent IP を補助証拠として score 化。強い一致だけ自動、曖昧な一致は候補にする | score >= 自動閾値のみ統合、score 中間は `device_merge_candidates` へ保存 |
 | 6 | merge candidate API | `device_merge_candidates` を追加し、候補の理由・score・status を保存する | 候補一覧 API、承認/却下 API ができる。誤統合を避けるため候補は自動適用しない |
 | 7 | 手動 merge / split UI | 端末詳細で merge 候補を表示し、ユーザーが統合・分離できるようにする | 端末一覧から手動 merge/split が可能。notes/trust の移行先 deviceId も保たれる |
