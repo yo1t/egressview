@@ -492,8 +492,13 @@ describe('devices: step 6 — merge candidates', () => {
     const ok = devicesModule.approveMerge(idA, idB);
     assert.ok(ok);
 
-    // B が消えている
-    assert.equal(devicesModule.getByDeviceId(idB), null, 'dropId の row が消える');
+    // B はソフトデリート（archivedAt 設定、mergedInto = idA）
+    const dropped = devicesModule.getByDeviceId(idB);
+    assert.ok(dropped != null,               'dropId の row は残る（soft delete）');
+    assert.ok(dropped.archivedAt != null,    'dropId は archivedAt が設定される');
+    assert.equal(dropped.mergedInto, idA,    'dropId.mergedInto === keepId');
+    // getAll() や getByIp() にはアーカイブ済みが含まれない
+    assert.ok(!devicesModule.getAll().some(d => d.deviceId === idB), 'getAll には含まれない');
     // A が残っている
     assert.ok(devicesModule.getByDeviceId(idA), 'keepId の row が残る');
     // 候補が approved になっている

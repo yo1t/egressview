@@ -77,6 +77,16 @@ function initDb(dbPath) {
   }
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_deviceId ON devices(deviceId)');
 
+  // P1-8: soft-delete columns ─────────────────────────────────────────────────
+  // archivedAt: set on merge/manual archive; archivedAt IS NULL = active device
+  // mergedInto: deviceId of the surviving device after a merge
+  if (!cols.includes('archivedAt')) {
+    db.exec('ALTER TABLE devices ADD COLUMN archivedAt INTEGER DEFAULT NULL');
+  }
+  if (!cols.includes('mergedInto')) {
+    db.exec('ALTER TABLE devices ADD COLUMN mergedInto TEXT DEFAULT NULL');
+  }
+
   const _backfill = db.transaction(() => {
     const rows = db.prepare('SELECT ip FROM devices WHERE deviceId IS NULL').all();
     const fill = db.prepare('UPDATE devices SET deviceId = ? WHERE ip = ?');
@@ -147,14 +157,15 @@ function initDb(dbPath) {
         ELSE sources || ',' || @newSource
       END,
       noteKey     = COALESCE(@noteKey,     noteKey),
-      deviceId    = COALESCE(deviceId,     excluded.deviceId)
+      deviceId    = COALESCE(deviceId,     excluded.deviceId),
+      archivedAt  = devices.archivedAt    -- NEVER overwrite: preserve archived/merged status
     RETURNING deviceId
   `);
 
-  stmtSelectAll      = db.prepare('SELECT * FROM devices ORDER BY lastSeen DESC');
-  stmtSelectIp       = db.prepare('SELECT * FROM devices WHERE ip = ?');
-  stmtSelectMac      = db.prepare('SELECT * FROM devices WHERE mac = ?');
-  stmtSelectDeviceId = db.prepare('SELECT * FROM devices WHERE deviceId = ?');
+  stmtSelectAll      = db.prepare('SELECT * FROM devices WHERE archivedAt IS NULL ORDER BY lastSeen DESC');
+  stmtSelectIp       = db.prepare('SELECT * FROM devices WHERE ip = ?');           // includes archived (needed for merge detection)
+  stmtSelectMac      = db.prepare('SELECT * FROM devices WHERE mac = ? AND archivedAt IS NULL');
+  stmtSelectDeviceId = db.prepare('SELECT * FROM devices WHERE deviceId = ?');     // includes archived (needed for approveMerge)
 
   stmtLastObservation = db.prepare(`
     SELECT ip, mac, ipv6, hostname, mdnsName, netbiosName, asusName, vendor
@@ -173,10 +184,10 @@ function initDb(dbPath) {
   `);
 
   stmtByMdns = db.prepare(
-    'SELECT * FROM devices WHERE mdnsName = ? AND deviceId != ? COLLATE NOCASE'
+    'SELECT * FROM devices WHERE mdnsName = ? AND deviceId != ? AND archivedAt IS NULL COLLATE NOCASE'
   );
   stmtByDns = db.prepare(
-    'SELECT * FROM devices WHERE dnsName  = ? AND deviceId != ? COLLATE NOCASE'
+    'SELECT * FROM devices WHERE dnsName  = ? AND deviceId != ? AND archivedAt IS NULL COLLATE NOCASE'
   );
   stmtUpsertCandidate = db.prepare(`
     INSERT INTO device_merge_candidates
@@ -234,6 +245,15 @@ function observeDevice(d) {
 
   // ── 1. Look up by IP ──────────────────────────────────────────────────────
   let existingDevice = d.ip ? stmtSelectIp.get(d.ip) : null;
+
+  // ── 1a. Archived IP guard ─────────────────────────────────────────────────
+  // If the IP row is archived (merged away), do not re-create a device for it.
+  // Observations from this IP belong to the surviving device (mergedInto) but
+  // for simplicity we silently drop them here; the keepId device still gets
+  // observations via its own current IP on the next poll.
+  if (existingDevice && existingDevice.archivedAt != null) {
+    return null;
+  }
 
   // ── 2. Stable-MAC auto-link ───────────────────────────────────────────────
   if (!existingDevice && d.mac && isStableMac(d.mac)) {
@@ -435,8 +455,11 @@ function approveMerge(keepId, dropId) {
     `).run(drop.mac, drop.vendor, drop.dnsName, drop.mdnsName,
            drop.netbiosName, drop.ipv6Addr, drop.firstSeen, keepId);
 
-    // 3. Delete the dropped device row
-    db.prepare('DELETE FROM devices WHERE deviceId = ?').run(dropId);
+    // 3. Soft-delete the dropped device (archive instead of DELETE)
+    //    archivedAt IS NOT NULL → excluded from getAll / observeDevice / stmtSelectMac
+    //    mergedInto  tracks which device absorbed it (for audit/future unarchive)
+    db.prepare('UPDATE devices SET archivedAt = ?, mergedInto = ? WHERE deviceId = ?')
+      .run(Date.now(), keepId, dropId);
 
     // 4. Mark all pending candidates involving either device as approved
     db.prepare(`
@@ -469,7 +492,8 @@ function getAll() {
 
 function getByIp(ip) {
   if (!db) return null;
-  return stmtSelectIp.get(ip) || null;
+  const row = stmtSelectIp.get(ip);
+  return (row && row.archivedAt == null) ? row : null;
 }
 
 function getByMac(mac) {
