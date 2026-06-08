@@ -114,3 +114,54 @@ describe('notes.clearByIpMac', () => {
     assert.equal(notes.get('10.0.0.1'), 'keep');
   });
 });
+
+// ─── Step 8: UUID key + getForDevice ─────────────────────────────────────────
+
+describe('notes: step 8 — UUID key support', () => {
+  beforeEach(resetNotes);
+
+  it('isSafeKey: UUID 形式を受け付ける', () => {
+    assert.ok(notes.isSafeKey('550e8400-e29b-41d4-a716-446655440000'));
+  });
+
+  it('isSafeKey: 不正 UUID は拒否する', () => {
+    assert.ok(!notes.isSafeKey('not-a-uuid'));
+    assert.ok(!notes.isSafeKey('550e8400-e29b-41d4-a716-44665544000Z'));  // Z は16進外
+  });
+
+  it('UUID キーでメモを保存・取得できる', () => {
+    const id = '550e8400-e29b-41d4-a716-446655440001';
+    notes.set(id, 'device note');
+    assert.equal(notes.get(id), 'device note');
+  });
+});
+
+describe('notes: step 8 — getForDevice', () => {
+  beforeEach(resetNotes);
+
+  it('deviceId キーが最優先で返る', () => {
+    const id = '550e8400-e29b-41d4-a716-446655440002';
+    notes.set(id, 'canonical note');
+    notes.set('10.0.0.1', 'old ip note');
+    assert.equal(notes.getForDevice(id, '10.0.0.1', null), 'canonical note');
+  });
+
+  it('deviceId がなければ IP|MAC キーにフォールバック', () => {
+    notes.set('10.0.0.2|aa:bb:cc:00:00:01', 'composite note');
+    assert.equal(notes.getForDevice(null, '10.0.0.2', 'aa:bb:cc:00:00:01'), 'composite note');
+  });
+
+  it('IP|MAC もなければ IP 単体にフォールバック', () => {
+    notes.set('10.0.0.3', 'ip note');
+    assert.equal(notes.getForDevice(null, '10.0.0.3', null), 'ip note');
+  });
+
+  it('MAC 単体にフォールバック', () => {
+    notes.set('aa:bb:cc:00:00:02', 'mac note');
+    assert.equal(notes.getForDevice(null, null, 'aa:bb:cc:00:00:02'), 'mac note');
+  });
+
+  it('どのキーにもメモがなければ null を返す', () => {
+    assert.equal(notes.getForDevice('non-existent-id', '1.2.3.4', null), null);
+  });
+});

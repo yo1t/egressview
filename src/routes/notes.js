@@ -8,12 +8,13 @@ const { isAllowedRouterIp } = require('../utils');
  * @param {{
  *   requireAdmin,
  *   notes: import('../notes'),
+ *   devices: import('../devices'),
  *   io,
  *   yamaha, deviceId
  * }} ctx
  */
 module.exports = function notesRoutes(ctx) {
-  const { requireAdmin, notes, io, yamaha, deviceId } = ctx;
+  const { requireAdmin, notes, devices, io, yamaha, deviceId } = ctx;
   const router = Router();
 
   // GET /api/notes
@@ -22,26 +23,54 @@ module.exports = function notesRoutes(ctx) {
   });
 
   // POST /api/notes
+  // Accepts { ip, mac, note } (legacy) or { deviceId, note } (new canonical form).
+  // When ip/mac is provided and the device has a deviceId in the inventory,
+  // the note is stored under deviceId (step 8: notes follow the device, not the IP).
   router.post('/notes', requireAdmin, (req, res) => {
-    const { ip, mac, note } = req.body || {};
-    let key = '';
-    if (ip && mac)        key = `${ip}|${mac}`;
-    else if (ip)          key = ip;
-    else if (mac)         key = mac;
-    else if (req.body?.key) key = req.body.key;
+    const { ip, mac, note, deviceId: reqDeviceId } = req.body || {};
 
-    if (!notes.isSafeKey(key)) {
-      return res.status(400).json({ error: 'invalid key (IP/MAC形式のみ)' });
+    // ── Resolve canonical key ──────────────────────────────────────────────
+    let canonicalId = reqDeviceId || null;
+
+    // Auto-lookup deviceId from devices table when ip/mac is provided
+    if (!canonicalId && devices) {
+      const device = ip ? devices.getByIp(ip)
+                       : (mac ? devices.getByMac(mac)?.[0] : null);
+      canonicalId = device?.deviceId || null;
     }
 
+    let key = canonicalId || '';
+    if (!key) {
+      if (ip && mac)        key = `${ip}|${mac}`;
+      else if (ip)          key = ip;
+      else if (mac)         key = mac;
+      else if (req.body?.key) key = req.body.key;
+    }
+
+    if (!notes.isSafeKey(key)) {
+      return res.status(400).json({ error: 'invalid key (IP/MAC または deviceId 形式のみ)' });
+    }
+
+    // ── Migrate old IP/MAC note to deviceId key ────────────────────────────
+    if (canonicalId && (ip || mac)) {
+      const oldKey = ip && mac ? `${ip}|${mac}` : (ip || mac);
+      const oldNote = notes.get(oldKey);
+      if (oldNote && !notes.get(canonicalId)) {
+        notes.set(canonicalId, oldNote);
+      }
+      // Remove stale IP/MAC-keyed copies
+      if (ip || mac) notes.clearByIpMac(ip, mac);
+    }
+
+    // ── Write ──────────────────────────────────────────────────────────────
     if (typeof note === 'string') {
       const trimmed = note.trim().substring(0, 500);
       if (trimmed) {
-        if (ip || mac) notes.clearByIpMac(ip, mac);
         notes.set(key, trimmed);
       } else {
+        notes.del(key);
+        // Also clean up any remaining IP/MAC entries for this device
         if (ip || mac) notes.clearByIpMac(ip, mac);
-        else           notes.del(key);
       }
     }
 

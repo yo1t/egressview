@@ -7,8 +7,10 @@ const path = require('path');
 
 const NOTES_FILE = path.join(__dirname, '..', '.widemap.notes.json');
 
-// Allowed key: an IPv4 address, a MAC address, or their combination separated by |
+// Allowed key: an IPv4 address, a MAC address, their combination separated by |,
+// OR a UUID (deviceId-based canonical key introduced in P1-5 step 8).
 const NOTE_KEY_RE = /^(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})(?:\|(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}))?$/;
+const UUID_RE     = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** @type {Object.<string, string>} */
 let notes = Object.create(null);
@@ -16,7 +18,23 @@ let notes = Object.create(null);
 // ─── Key validation ───────────────────────────────────────────────────────────
 
 function isSafeKey(k) {
-  return typeof k === 'string' && k.length <= 96 && NOTE_KEY_RE.test(k);
+  if (typeof k !== 'string' || k.length > 96) return false;
+  return NOTE_KEY_RE.test(k) || UUID_RE.test(k);
+}
+
+/**
+ * Look up a note for a device using deviceId first (canonical), then IP|MAC fallbacks.
+ * @param {string|null} deviceId
+ * @param {string|null} ip
+ * @param {string|null} mac
+ * @returns {string|null}
+ */
+function getForDevice(deviceId, ip, mac) {
+  if (deviceId && notes[deviceId]) return notes[deviceId];
+  if (ip && mac && notes[`${ip}|${mac}`]) return notes[`${ip}|${mac}`];
+  if (ip  && notes[ip])  return notes[ip];
+  if (mac && notes[mac]) return notes[mac];
+  return null;
 }
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
@@ -81,4 +99,4 @@ function has(ip, mac) {
   return false;
 }
 
-module.exports = { isSafeKey, load, save, getAll, get, set, del, clearByIpMac, has };
+module.exports = { isSafeKey, load, save, getAll, get, set, del, clearByIpMac, has, getForDevice };

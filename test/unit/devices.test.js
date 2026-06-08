@@ -418,3 +418,109 @@ describe('devices: step 4 — stable MAC auto-linking', () => {
     assert.equal(devicesModule.getByDeviceId(id1)?.ip, '10.0.0.51', 'deviceId が新 IP を指す');
   });
 });
+
+// ─── Step 5: computeMergeScore ────────────────────────────────────────────────
+
+describe('devices: step 5 — computeMergeScore', () => {
+  const { computeMergeScore } = devicesModule;
+
+  it('同一 deviceId → score 0', () => {
+    const d = { deviceId: 'aaa', mdnsName: 'test', dnsName: null, vendor: null };
+    const { score } = computeMergeScore(d, d);
+    assert.equal(score, 0);
+  });
+
+  it('mdnsName 完全一致 → score 0.5', () => {
+    const a = { deviceId: 'aaa', mdnsName: 'Johns-iPhone.local', dnsName: null, vendor: null };
+    const b = { deviceId: 'bbb', mdnsName: 'Johns-iPhone.local', dnsName: null, vendor: null };
+    const { score, reasons } = computeMergeScore(a, b);
+    assert.equal(score, 0.5);
+    assert.ok(reasons.some(r => r.includes('mdnsName')));
+  });
+
+  it('dnsName 完全一致 → score 0.3', () => {
+    const a = { deviceId: 'aaa', mdnsName: null, dnsName: 'my-laptop', vendor: null };
+    const b = { deviceId: 'bbb', mdnsName: null, dnsName: 'my-laptop', vendor: null };
+    const { score } = computeMergeScore(a, b);
+    assert.equal(score, 0.3);
+  });
+
+  it('vendor 一致 → score 0.15', () => {
+    const a = { deviceId: 'aaa', mdnsName: null, dnsName: null, vendor: 'Apple, Inc.' };
+    const b = { deviceId: 'bbb', mdnsName: null, dnsName: null, vendor: 'Apple, Inc.' };
+    const { score } = computeMergeScore(a, b);
+    assert.equal(score, 0.15);
+  });
+
+  it('mdnsName + dnsName 一致 → score 0.8（上限）', () => {
+    const a = { deviceId: 'aaa', mdnsName: 'MyPC.local', dnsName: 'my-pc', vendor: 'Dell' };
+    const b = { deviceId: 'bbb', mdnsName: 'MyPC.local', dnsName: 'my-pc', vendor: 'Dell' };
+    const { score } = computeMergeScore(a, b);
+    assert.ok(score >= 0.8, 'score >= 0.8');
+  });
+
+  it('名前なし → score 0', () => {
+    const a = { deviceId: 'aaa', mdnsName: null, dnsName: null, vendor: null };
+    const b = { deviceId: 'bbb', mdnsName: null, dnsName: null, vendor: null };
+    const { score } = computeMergeScore(a, b);
+    assert.equal(score, 0);
+  });
+
+  it('大文字小文字を無視して一致', () => {
+    const a = { deviceId: 'aaa', mdnsName: 'My-Device.local', dnsName: null, vendor: null };
+    const b = { deviceId: 'bbb', mdnsName: 'my-device.local', dnsName: null, vendor: null };
+    const { score } = computeMergeScore(a, b);
+    assert.equal(score, 0.5);
+  });
+});
+
+// ─── Step 6: merge candidates ─────────────────────────────────────────────────
+
+describe('devices: step 6 — merge candidates', () => {
+  it('同じ mdnsName の2デバイスが candidate として記録される', () => {
+    devicesModule.observeDevice({ ip: '10.5.0.1', mdnsName: 'shared-host.local', source: 'nat' });
+    devicesModule.observeDevice({ ip: '10.5.0.2', mdnsName: 'shared-host.local', source: 'nat' });
+    const candidates = devicesModule.getMergeCandidates('pending');
+    assert.equal(candidates.length, 1, '候補が1件');
+    assert.ok(candidates[0].score >= 0.4, 'score >= 0.4');
+  });
+
+  it('approveMerge: observations が keepId に移る', () => {
+    const idA = devicesModule.observeDevice({ ip: '10.5.1.1', mdnsName: 'merge-me.local', source: 'nat' });
+    const idB = devicesModule.observeDevice({ ip: '10.5.1.2', mdnsName: 'merge-me.local', source: 'nat' });
+
+    const ok = devicesModule.approveMerge(idA, idB);
+    assert.ok(ok);
+
+    // B が消えている
+    assert.equal(devicesModule.getByDeviceId(idB), null, 'dropId の row が消える');
+    // A が残っている
+    assert.ok(devicesModule.getByDeviceId(idA), 'keepId の row が残る');
+    // 候補が approved になっている
+    const approved = devicesModule.getMergeCandidates('approved');
+    assert.ok(approved.some(c =>
+      (c.deviceIdA === idA || c.deviceIdB === idA) &&
+      (c.deviceIdA === idB || c.deviceIdB === idB)
+    ), '候補が approved になる');
+  });
+
+  it('rejectCandidate: 候補が rejected になる', () => {
+    devicesModule.observeDevice({ ip: '10.5.2.1', mdnsName: 'reject-test.local', source: 'nat' });
+    devicesModule.observeDevice({ ip: '10.5.2.2', mdnsName: 'reject-test.local', source: 'nat' });
+    const [candidate] = devicesModule.getMergeCandidates('pending');
+    assert.ok(candidate, '候補が存在する');
+
+    devicesModule.rejectCandidate(candidate.id);
+    const pending = devicesModule.getMergeCandidates('pending');
+    assert.equal(pending.length, 0, 'pending がゼロになる');
+    const rejected = devicesModule.getMergeCandidates('rejected');
+    assert.ok(rejected.length > 0, 'rejected に移動');
+  });
+
+  it('異なる mdnsName → candidate が作られない', () => {
+    devicesModule.observeDevice({ ip: '10.5.3.1', mdnsName: 'device-x.local', source: 'nat' });
+    devicesModule.observeDevice({ ip: '10.5.3.2', mdnsName: 'device-y.local', source: 'nat' });
+    const candidates = devicesModule.getMergeCandidates('pending');
+    assert.equal(candidates.length, 0, '候補なし');
+  });
+});

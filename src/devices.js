@@ -8,8 +8,12 @@ const crypto   = require('crypto');
 
 const DB_PATH = path.join(__dirname, '..', '.widemap.db');
 
+// Merge candidate thresholds
+const CANDIDATE_SCORE = 0.4;  // save for manual review
+// AUTO_MERGE_SCORE = 0.8 — reserved, not enabled (too risky without user confirmation)
+
 let db        = null;
-let _dbPath   = DB_PATH;   // remembers the path used, so reopen() uses the same one
+let _dbPath   = DB_PATH;
 let stmtUpsert            = null;
 let stmtSelectAll         = null;
 let stmtSelectIp          = null;
@@ -17,18 +21,15 @@ let stmtSelectMac         = null;
 let stmtSelectDeviceId    = null;
 let stmtLastObservation   = null;
 let stmtInsertObservation = null;
+let stmtByMdns            = null;
+let stmtByDns             = null;
+let stmtUpsertCandidate   = null;
 
 // ─── isStableMac ──────────────────────────────────────────────────────────────
 
 /**
  * Returns true if mac is a globally unique (OUI-assigned) hardware MAC.
- * Returns false for:
- *   - privacy / locally-administered MACs (bit1 of first octet = 1)
- *   - broadcast (ff:ff:ff:ff:ff:ff)
- *   - all-zero (00:00:00:00:00:00)
- *   - invalid / null input
- *
- * Only globally unique MACs are stable enough to use as device-identity anchors.
+ * Returns false for privacy/locally-administered MACs, broadcast, all-zero, or invalid input.
  */
 function isStableMac(mac) {
   if (!mac || !/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(mac)) return false;
@@ -40,13 +41,12 @@ function isStableMac(mac) {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 function initDb(dbPath) {
-  // Re-use connection history DB (same file), or use provided path for tests
   _dbPath = dbPath || DB_PATH;
   db = new Database(_dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
 
-  // ── Core devices table (legacy schema; deviceId added below via migration) ──
+  // ── Core devices table ───────────────────────────────────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS devices (
       ip          TEXT PRIMARY KEY,
@@ -61,28 +61,25 @@ function initDb(dbPath) {
       sources     TEXT NOT NULL DEFAULT '',
       noteKey     TEXT
     );
-    CREATE INDEX IF NOT EXISTS idx_devices_mac     ON devices(mac);
+    CREATE INDEX IF NOT EXISTS idx_devices_mac      ON devices(mac);
     CREATE INDEX IF NOT EXISTS idx_devices_lastSeen ON devices(lastSeen);
   `);
 
-  // Step 1a — migrate: add deviceId column if absent ──────────────────────────
+  // Step 1a: deviceId column migration + backfill ────────────────────────────
   const cols = db.prepare('PRAGMA table_info(devices)').all().map(c => c.name);
   if (!cols.includes('deviceId')) {
     db.exec('ALTER TABLE devices ADD COLUMN deviceId TEXT');
   }
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_deviceId ON devices(deviceId)');
 
-  // Step 1a — backfill: assign UUIDs to rows that predate this migration ───────
   const _backfill = db.transaction(() => {
     const rows = db.prepare('SELECT ip FROM devices WHERE deviceId IS NULL').all();
     const fill = db.prepare('UPDATE devices SET deviceId = ? WHERE ip = ?');
-    for (const row of rows) {
-      fill.run(crypto.randomUUID(), row.ip);
-    }
+    for (const row of rows) fill.run(crypto.randomUUID(), row.ip);
   });
   _backfill();
 
-  // Step 2 — device_observations table ──────────────────────────────────────────
+  // Step 2: device_observations table ─────────────────────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS device_observations (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,11 +101,25 @@ function initDb(dbPath) {
       ON device_observations(source, observedAt DESC);
   `);
 
+  // Step 6: device_merge_candidates table ──────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS device_merge_candidates (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      deviceIdA  TEXT    NOT NULL,
+      deviceIdB  TEXT    NOT NULL,
+      score      REAL    NOT NULL,
+      reasons    TEXT    NOT NULL DEFAULT '[]',
+      status     TEXT    NOT NULL DEFAULT 'pending',
+      createdAt  INTEGER NOT NULL,
+      resolvedAt INTEGER,
+      UNIQUE(deviceIdA, deviceIdB)
+    );
+    CREATE INDEX IF NOT EXISTS idx_merge_status
+      ON device_merge_candidates(status, createdAt DESC);
+  `);
+
   // ── Prepared statements ──────────────────────────────────────────────────────
 
-  // RETURNING deviceId lets us get the canonical deviceId in one round-trip.
-  // For new rows:     returns the @deviceId we passed in.
-  // For existing rows: COALESCE(deviceId, excluded.deviceId) keeps the stored one.
   stmtUpsert = db.prepare(`
     INSERT INTO devices
       (ip, mac, vendor, dnsName, mdnsName, netbiosName, ipv6Addr,
@@ -155,28 +166,29 @@ function initDb(dbPath) {
       (@deviceId, @observedAt, @source,
        @ip, @mac, @ipv6, @hostname, @mdnsName, @netbiosName, @asusName, @vendor)
   `);
+
+  stmtByMdns = db.prepare(
+    'SELECT * FROM devices WHERE mdnsName = ? AND deviceId != ? COLLATE NOCASE'
+  );
+  stmtByDns = db.prepare(
+    'SELECT * FROM devices WHERE dnsName  = ? AND deviceId != ? COLLATE NOCASE'
+  );
+  stmtUpsertCandidate = db.prepare(`
+    INSERT INTO device_merge_candidates
+      (deviceIdA, deviceIdB, score, reasons, status, createdAt)
+    VALUES (?, ?, ?, ?, 'pending', ?)
+    ON CONFLICT(deviceIdA, deviceIdB) DO UPDATE SET
+      score   = MAX(score,   excluded.score),
+      reasons = excluded.reasons
+    WHERE status = 'pending'
+  `);
 }
 
 // ─── Upsert ───────────────────────────────────────────────────────────────────
 
 /**
- * Upsert a device observation into the summary devices table.
- * Returns the canonical deviceId for this device (existing or newly assigned).
- *
- * @param {object} d
- * @param {string}  d.ip          Required
- * @param {string}  [d.deviceId]  Pass to preserve a specific deviceId (e.g. from MAC-based lookup)
- * @param {string}  [d.mac]
- * @param {string}  [d.vendor]
- * @param {string}  [d.dnsName]
- * @param {string}  [d.mdnsName]
- * @param {string}  [d.netbiosName]
- * @param {string}  [d.ipv6Addr]
- * @param {number}  [d.firstSeen]
- * @param {number}  [d.lastSeen]
- * @param {string}  [d.source]    Short tag, e.g. 'nat', 'dhcp', 'inspect', 'arp', 'mdns'
- * @param {string}  [d.noteKey]
- * @returns {string|null}  deviceId
+ * Upsert a device into the summary devices table.
+ * Returns the canonical deviceId for this device.
  */
 function upsert(d) {
   if (!db) return null;
@@ -202,16 +214,14 @@ function upsert(d) {
 // ─── observeDevice ────────────────────────────────────────────────────────────
 
 /**
- * Higher-level device tracking.  In addition to updating the devices summary
- * table (like upsert), it:
- *   1. Attempts stable-MAC auto-linking: if the IP is new but the MAC is
- *      globally unique and matches exactly one known device, the existing
- *      deviceId is reused and the row's IP is migrated.
- *   2. Writes a device_observation only when attributes actually change
- *      (write-on-change policy).
+ * Higher-level device tracking. In addition to upsert():
+ *   1. stable-MAC auto-linking: if IP is new but MAC is globally unique and matches
+ *      exactly one known device, reuse its deviceId and migrate the row's IP.
+ *   2. write-on-change: writes device_observations only when attributes change.
+ *   3. merge candidate detection: when a name-bearing device changes, checks for
+ *      other devices with matching mdnsName/dnsName and saves merge candidates.
  *
- * @param {object} d  — same shape as upsert(), plus optional `ipv6` / `asusName`
- * @returns {string|null}  deviceId
+ * @returns {string|null} deviceId
  */
 function observeDevice(d) {
   if (!db) return null;
@@ -220,14 +230,11 @@ function observeDevice(d) {
   // ── 1. Look up by IP ──────────────────────────────────────────────────────
   let existingDevice = d.ip ? stmtSelectIp.get(d.ip) : null;
 
-  // ── 2. Stable-MAC auto-link (step 4) ──────────────────────────────────────
-  // When the IP is new but the MAC is globally-unique and we recognise it,
-  // migrate the existing device row to the new IP instead of creating a new one.
+  // ── 2. Stable-MAC auto-link ───────────────────────────────────────────────
   if (!existingDevice && d.mac && isStableMac(d.mac)) {
     const byMac = stmtSelectMac.all(d.mac);
     if (byMac.length === 1 && d.ip) {
       const candidate = byMac[0];
-      // Only migrate if the new IP is not already occupied by a different device
       const newIpTaken = stmtSelectIp.get(d.ip);
       if (!newIpTaken) {
         db.prepare('UPDATE devices SET ip = ?, lastSeen = ? WHERE deviceId = ?')
@@ -250,7 +257,7 @@ function observeDevice(d) {
     lastSeen:    d.lastSeen    ?? now,
     source:      d.source,
     noteKey:     d.noteKey     || null,
-    deviceId:    existingDevice?.deviceId,   // pass canonical id; upsert won't overwrite if row already has one
+    deviceId:    existingDevice?.deviceId,
   });
 
   // ── 4. Write observation (write-on-change) ────────────────────────────────
@@ -265,19 +272,25 @@ function observeDevice(d) {
     vendor:      d.vendor      || null,
   };
 
-  if (deviceId && _hasObservationChanged(deviceId, d.source || 'nat', attrs)) {
+  const changed = deviceId && _hasObservationChanged(deviceId, d.source || 'nat', attrs);
+  if (changed) {
     stmtInsertObservation.run({
       deviceId,
-      observedAt:  now,
-      source:      d.source || 'nat',
+      observedAt: now,
+      source:     d.source || 'nat',
       ...attrs,
     });
+
+    // ── 5. Merge candidate check ─────────────────────────────────────────
+    // Only when name data is present — these are the scoring signals
+    if (d.mdnsName || d.dnsName) {
+      checkMergeCandidates(deviceId);
+    }
   }
 
   return deviceId;
 }
 
-/** Returns true when the new attribute set differs from the last stored observation. */
 function _hasObservationChanged(deviceId, source, attrs) {
   const last = stmtLastObservation.get(deviceId, source);
   if (!last) return true;
@@ -285,27 +298,177 @@ function _hasObservationChanged(deviceId, source, attrs) {
   return keys.some(k => (attrs[k] || null) !== (last[k] || null));
 }
 
+// ─── Merge scoring (step 5) ──────────────────────────────────────────────────
+
+/**
+ * Compute a similarity score between two device rows.
+ * Considers soft evidence (names, vendor) — not MAC (handled by isStableMac auto-link).
+ *
+ * @param {object} a
+ * @param {object} b
+ * @returns {{ score: number, reasons: string[] }}  score is 0-1
+ */
+function computeMergeScore(a, b) {
+  if (!a || !b || a.deviceId === b.deviceId) return { score: 0, reasons: [] };
+
+  let score = 0;
+  const reasons = [];
+
+  // mDNS name (strong: device-announced, usually globally unique hostname like "Johns-iPhone.local")
+  if (a.mdnsName && b.mdnsName &&
+      a.mdnsName.toLowerCase() === b.mdnsName.toLowerCase()) {
+    score += 0.5;
+    reasons.push(`mdnsName="${a.mdnsName}"`);
+  }
+
+  // DNS/hostname (medium: assigned by DHCP or reverse-DNS, may not be unique)
+  if (a.dnsName && b.dnsName &&
+      a.dnsName.toLowerCase() === b.dnsName.toLowerCase()) {
+    score += 0.3;
+    reasons.push(`dnsName="${a.dnsName}"`);
+  }
+
+  // Vendor (weak: many devices share a vendor string)
+  if (a.vendor && b.vendor && a.vendor === b.vendor) {
+    score += 0.15;
+    reasons.push(`vendor="${a.vendor}"`);
+  }
+
+  return { score: Math.min(score, 1), reasons };
+}
+
+// ─── Merge candidate detection (step 6) ──────────────────────────────────────
+
+/**
+ * After a device's name data changes, search for other devices that share the
+ * same mdnsName or dnsName and save as merge candidates if score >= CANDIDATE_SCORE.
+ */
+function checkMergeCandidates(deviceId) {
+  if (!db) return;
+  const device = stmtSelectDeviceId.get(deviceId);
+  if (!device) return;
+
+  // Collect matching devices (deduplicated)
+  const seen  = new Set();
+  const peers = [];
+
+  const addPeers = (rows) => {
+    for (const r of rows) {
+      if (!seen.has(r.deviceId)) { seen.add(r.deviceId); peers.push(r); }
+    }
+  };
+
+  if (device.mdnsName) addPeers(stmtByMdns.all(device.mdnsName, deviceId));
+  if (device.dnsName)  addPeers(stmtByDns.all(device.dnsName,  deviceId));
+
+  for (const other of peers) {
+    const { score, reasons } = computeMergeScore(device, other);
+    if (score < CANDIDATE_SCORE) continue;
+
+    // Canonical ordering: smaller deviceId first (prevents (A,B) vs (B,A) duplicates)
+    const [idA, idB] = device.deviceId < other.deviceId
+      ? [device.deviceId, other.deviceId]
+      : [other.deviceId, device.deviceId];
+
+    stmtUpsertCandidate.run(idA, idB, score, JSON.stringify(reasons), Date.now());
+  }
+}
+
+/**
+ * Return merge candidates, joined with both device rows for context.
+ * @param {'pending'|'approved'|'rejected'|'all'} status
+ */
+function getMergeCandidates(status = 'pending') {
+  if (!db) return [];
+  const where = status === 'all' ? '' : 'WHERE c.status = ?';
+  const args  = status === 'all' ? []  : [status];
+  return db.prepare(`
+    SELECT
+      c.id, c.deviceIdA, c.deviceIdB, c.score, c.reasons, c.status,
+      c.createdAt, c.resolvedAt,
+      a.ip as ipA, a.mac as macA, a.vendor as vendorA,
+      a.mdnsName as mdnsNameA, a.dnsName as dnsNameA,
+      b.ip as ipB, b.mac as macB, b.vendor as vendorB,
+      b.mdnsName as mdnsNameB, b.dnsName as dnsNameB
+    FROM device_merge_candidates c
+    LEFT JOIN devices a ON a.deviceId = c.deviceIdA
+    LEFT JOIN devices b ON b.deviceId = c.deviceIdB
+    ${where}
+    ORDER BY c.score DESC, c.createdAt DESC
+  `).all(...args);
+}
+
+/**
+ * Approve a merge: fold dropId into keepId, reassign observations, delete dropId.
+ * @returns {boolean}
+ */
+function approveMerge(keepId, dropId) {
+  if (!db) return false;
+  const keep = stmtSelectDeviceId.get(keepId);
+  const drop = stmtSelectDeviceId.get(dropId);
+  if (!keep || !drop) return false;
+
+  db.transaction(() => {
+    // 1. Reassign all observations from drop → keep
+    db.prepare('UPDATE device_observations SET deviceId = ? WHERE deviceId = ?')
+      .run(keepId, dropId);
+
+    // 2. Fill any null fields in keep from drop
+    db.prepare(`
+      UPDATE devices SET
+        mac         = COALESCE(mac,         ?),
+        vendor      = COALESCE(vendor,      ?),
+        dnsName     = COALESCE(dnsName,     ?),
+        mdnsName    = COALESCE(mdnsName,    ?),
+        netbiosName = COALESCE(netbiosName, ?),
+        ipv6Addr    = COALESCE(ipv6Addr,    ?),
+        firstSeen   = MIN(firstSeen,        ?)
+      WHERE deviceId = ?
+    `).run(drop.mac, drop.vendor, drop.dnsName, drop.mdnsName,
+           drop.netbiosName, drop.ipv6Addr, drop.firstSeen, keepId);
+
+    // 3. Delete the dropped device row
+    db.prepare('DELETE FROM devices WHERE deviceId = ?').run(dropId);
+
+    // 4. Mark all pending candidates involving either device as approved
+    db.prepare(`
+      UPDATE device_merge_candidates
+      SET status = 'approved', resolvedAt = ?
+      WHERE (deviceIdA IN (?,?) OR deviceIdB IN (?,?)) AND status = 'pending'
+    `).run(Date.now(), keepId, dropId, keepId, dropId);
+  })();
+
+  return true;
+}
+
+/**
+ * Reject a merge candidate by id.
+ */
+function rejectCandidate(candidateId) {
+  if (!db) return false;
+  db.prepare(`
+    UPDATE device_merge_candidates SET status = 'rejected', resolvedAt = ? WHERE id = ?
+  `).run(Date.now(), candidateId);
+  return true;
+}
+
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
-/** @returns {Array} all devices, newest-last-seen first */
 function getAll() {
   if (!db) return [];
   return stmtSelectAll.all();
 }
 
-/** @returns {object|null} */
 function getByIp(ip) {
   if (!db) return null;
   return stmtSelectIp.get(ip) || null;
 }
 
-/** @returns {Array} */
 function getByMac(mac) {
   if (!db) return [];
   return stmtSelectMac.all(mac);
 }
 
-/** @returns {object|null} */
 function getByDeviceId(deviceId) {
   if (!db) return null;
   return stmtSelectDeviceId.get(deviceId) || null;
@@ -313,10 +476,6 @@ function getByDeviceId(deviceId) {
 
 // ─── Populate from existing connection history ─────────────────────────────
 
-/**
- * Seed devices table from connection history at startup.
- * Runs once; rows already present are updated (UPSERT is idempotent).
- */
 function seedFromConnectionHistory(connectionHistory) {
   if (!db) return;
   const seed = db.transaction(() => {
@@ -337,13 +496,8 @@ function seedFromConnectionHistory(connectionHistory) {
   seed();
 }
 
-// ─── Reopen (after backup restore) ────────────────────────────────────────────
+// ─── Reopen ───────────────────────────────────────────────────────────────────
 
-/**
- * Close the current connection and reopen the DB file.
- * Call this after backup.restoreFromGeneration / restoreFromFile so the module
- * reads the restored data rather than the stale in-memory SQLite connection.
- */
 function reopen() {
   if (db) { try { db.close(); } catch {} db = null; }
   initDb(_dbPath);
@@ -368,6 +522,10 @@ module.exports = {
   getByMac,
   getByDeviceId,
   isStableMac,
+  computeMergeScore,
+  getMergeCandidates,
+  approveMerge,
+  rejectCandidate,
   seedFromConnectionHistory,
   _initForTest,
 };
