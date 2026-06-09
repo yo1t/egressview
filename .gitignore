@@ -40,3 +40,7 @@ test/fixtures/baseline.json
 test-results/
 playwright-report/
 .widemap.pid
+
+# Playwright test output
+test-results/
+playwright-report/
