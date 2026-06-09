@@ -259,15 +259,43 @@ app.get(['/', '/index.html'], (req, res) => {
         .replace(/__BASE__/g, htmlEscape(SUBPATH))
   );
 });
+// Serve static assets at both root and SUBPATH (for deployments behind a subpath proxy)
+if (SUBPATH) app.use(SUBPATH, express.static(path.join(__dirname, 'public')));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '64kb' }));
+
+// ─── Threat intel re-match + client notification ──────────────────────────────
+// Called after fetchThreatIntel() completes (startup + hourly refresh).
+// Re-evaluates threat field for all in-memory connections, then pushes a
+// partial connections-update so connected clients see updated threat badges
+// without needing to manually trigger an API fetch.
+
+function reMatchAndNotify() {
+  const connectionHistory = history.getConnectionHistory();
+  const updated = [];
+  for (const [, entry] of connectionHistory) {
+    const host     = entry.dstHost || entry.dst;
+    const threat   = threatIntel.matchThreatIntel(entry.dst, host);
+    const newThreat = threat || null;
+    if (JSON.stringify(entry.threat) !== JSON.stringify(newThreat)) {
+      entry.threat = newThreat;
+      updated.push(entry);
+    }
+  }
+  if (updated.length) {
+    console.log(`[threat-intel] Re-matched ${updated.length} connections, notifying clients`);
+    io.emit('connections-update', { connections: updated, serverTime: Date.now(), partial: true, delta: true });
+  } else {
+    console.log('[threat-intel] Re-match complete, no threat changes');
+  }
+}
 
 // ─── Mount routes ─────────────────────────────────────────────────────────────
 
 const routeCtx = {
   requireAdmin,
   getAdminToken:       () => appState.adminToken,
-  asus, yamaha, enrichment, notifier, history, devices, deviceId, backup,
+  asus, yamaha, enrichment, threatIntel, notifier, history, devices, deviceId, backup,
   dnsmasqLog, inspectSyslog, dhcpdSyslog,
   runtime, notes, io,
   saveConfig,
@@ -330,11 +358,14 @@ io.on('connection', socket => {
   }
   const connectionHistory = history.getConnectionHistory();
   if (yamaha.isEnabled() && connectionHistory.size) {
-    const cutoff = Date.now() - 86400_000;
+    // Initial emit: last 1h only — fast first render. Client fetches full 24h
+    // in the background via GET /api/connections after the initial paint.
+    const cutoff = Date.now() - 3_600_000; // 1h
     socket.emit('connections-update', {
       connections: [...connectionHistory.values()].filter(c => c.lastSeen >= cutoff),
       serverTime:  Date.now(),
       partial:     true,
+      initialLoad: true,
     });
   }
 });
@@ -434,17 +465,9 @@ server.listen(PORT, () => {
   setInterval(() => history.compactHistoryLog(),  30 * 60 * 1000);
 
   threatIntel.fetchThreatIntel().then(() => {
-    const connectionHistory = history.getConnectionHistory();
-    let matched = 0;
-    for (const [, entry] of connectionHistory) {
-      const host   = entry.dstHost || entry.dst;
-      const threat = threatIntel.matchThreatIntel(entry.dst, host);
-      if (threat) { entry.threat = threat; matched++; }
-      else          entry.threat = null;
-    }
-    if (matched) console.log(`[threat-intel] Re-matched ${matched} existing connections`);
+    reMatchAndNotify();
   });
-  setInterval(() => threatIntel.fetchThreatIntel(), 60 * 60 * 1000);
+  setInterval(() => threatIntel.fetchThreatIntel().then(reMatchAndNotify), 60 * 60 * 1000);
 
   backup.startPeriodicBackup();
 });

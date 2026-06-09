@@ -132,17 +132,19 @@ async function fetchThreatIntel() {
     axios.get('https://www.spamhaus.org/drop/drop.txt', { timeout: 30000, responseType: 'text' }),
   ]);
 
+  // Build into staging structures first — only swap live data after all parsing succeeds.
+  // This prevents a partial/failed fetch from wiping existing threat intel mid-cycle.
+  const newIps    = new Map(threatIps);     // start from current data
+  const newDomains = new Map(threatDomains);
+  const newCidrs  = [...threatCidrs];
   let totalIps = 0, totalDomains = 0, totalCidrs = 0;
-
-  // Clear and rebuild
-  threatIps.clear();
-  threatDomains.clear();
-  threatCidrs.length = 0;
 
   // Feodo Tracker
   if (results[0].status === 'fulfilled') {
     const entries = parseFeodoTracker(results[0].value.data);
-    for (const e of entries) { threatIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
+    // Feodo/ThreatFox own the IP namespace — clear just that source's entries then repopulate
+    for (const [ip, v] of newIps) { if (v.source === 'feodo') newIps.delete(ip); }
+    for (const e of entries) { newIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
     totalIps += entries.length;
     console.log(`[threat-intel] Feodo: ${entries.length} IPs`);
   } else {
@@ -152,38 +154,50 @@ async function fetchThreatIntel() {
   // ThreatFox
   if (results[1].status === 'fulfilled') {
     const entries = parseThreatFox(results[1].value.data);
-    for (const e of entries) { threatIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
+    for (const [ip, v] of newIps) { if (v.source === 'threatfox') newIps.delete(ip); }
+    for (const e of entries) { newIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
     totalIps += entries.length;
     console.log(`[threat-intel] ThreatFox: ${entries.length} IOCs`);
   } else {
     console.error('[threat-intel] ThreatFox fetch failed:', results[1].reason?.message);
   }
 
-  // URLhaus
+  // URLhaus — owns both IPs and domains with 'urlhaus' source
   if (results[2].status === 'fulfilled') {
     const entries = parseUrlhaus(results[2].value.data);
+    for (const [ip,  v] of newIps)     { if (v.source === 'urlhaus') newIps.delete(ip); }
+    for (const [dom, v] of newDomains) { if (v.source === 'urlhaus') newDomains.delete(dom); }
     for (const e of entries) {
-      if (e.type === 'ip') { threatIps.set(e.value, { source: e.source, tag: e.tag, url: e.url, confidence: e.confidence }); totalIps++; }
-      else { threatDomains.set(e.value, { source: e.source, tag: e.tag, url: e.url, confidence: e.confidence }); totalDomains++; }
+      if (e.type === 'ip') { newIps.set(e.value,     { source: e.source, tag: e.tag, url: e.url, confidence: e.confidence }); totalIps++; }
+      else                  { newDomains.set(e.value, { source: e.source, tag: e.tag, url: e.url, confidence: e.confidence }); totalDomains++; }
     }
     console.log(`[threat-intel] URLhaus: ${entries.length} entries (IPs + domains)`);
   } else {
-    console.error('[threat-intel] URLhaus fetch failed:', results[2].reason?.message);
+    // Keep existing URLhaus data rather than wiping it on transient failure
+    totalDomains += [...newDomains.values()].filter(v => v.source === 'urlhaus').length;
+    console.error('[threat-intel] URLhaus fetch failed (keeping previous data):', results[2].reason?.message);
   }
 
-  // Spamhaus DROP
+  // Spamhaus DROP — owns CIDRs
   if (results[3].status === 'fulfilled') {
     const entries = parseSpamhausDrop(results[3].value.data);
-    threatCidrs.push(...entries);
+    newCidrs.length = 0;
+    newCidrs.push(...entries);
     totalCidrs = entries.length;
     console.log(`[threat-intel] Spamhaus DROP: ${entries.length} CIDRs`);
   } else {
-    console.error('[threat-intel] Spamhaus DROP fetch failed:', results[3].reason?.message);
+    totalCidrs = newCidrs.length;
+    console.error('[threat-intel] Spamhaus DROP fetch failed (keeping previous data):', results[3].reason?.message);
   }
+
+  // Atomic swap: replace live structures only after all parsing is complete
+  threatIps.clear();    for (const [k, v] of newIps)     threatIps.set(k, v);
+  threatDomains.clear(); for (const [k, v] of newDomains) threatDomains.set(k, v);
+  threatCidrs.length = 0; threatCidrs.push(...newCidrs);
 
   lastFetch = Date.now();
   fetching = false;
-  console.log(`[threat-intel] Ready: ${totalIps} IPs, ${totalDomains} domains, ${totalCidrs} CIDRs`);
+  console.log(`[threat-intel] Ready: ${[...threatIps.values()].length} IPs, ${[...threatDomains.values()].length} domains, ${threatCidrs.length} CIDRs`);
 }
 
 // ─── Match a connection against threat intel ──────────────────────────────────

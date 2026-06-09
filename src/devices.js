@@ -571,7 +571,7 @@ function getByDeviceId(deviceId) {
 // ─── Startup: stale merge-candidate batch ─────────────────────────────────
 
 /**
- * Run checkMergeCandidates() for every non-archived stale device (lastSeen > 7 days).
+ * Run checkMergeCandidates() for every non-archived stale device (lastSeen older than 7 days).
  * Called once at startup so devices that haven't been observed recently still
  * get their duplicate candidates surfaced for manual review.
  * @returns {number} number of stale devices scanned

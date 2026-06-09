@@ -2345,7 +2345,11 @@ socket.on('connections-update', data => {
   if (data.partial) {
     // Merge: update/add entries without discarding older ones loaded via API
     const map = new Map(allConnections.map(c => [`${c.src}|${c.dst}|${c.dport}|${c.proto}`, c]));
-    for (const c of incoming) map.set(`${c.src}|${c.dst}|${c.dport}|${c.proto}`, c);
+    for (const c of incoming) {
+      const key = `${c.src}|${c.dst}|${c.dport}|${c.proto}`;
+      const prev = map.get(key);
+      map.set(key, { ...prev, ...c, threat: c.threat || prev?.threat || null });
+    }
     allConnections = [...map.values()];
   } else {
     allConnections = incoming;
@@ -2364,6 +2368,29 @@ socket.on('connections-update', data => {
   const selNode = nodes.find(n => n.id === selectedMac);
   const selIp   = selNode?.client?.ip || null;
   updateConnPanel(selIp);
+
+  // Initial load sent only 1h. Fetch the remaining 24h in the background
+  // and merge so real-time deltas that arrived during the fetch are not lost.
+  if (data.initialLoad) {
+    const from24h = Date.now() - 86_400_000;
+    apiFetch(`${_BASE}/api/connections?from=${from24h}`)
+      .then(r => r.json())
+      .then(d => {
+        const map = new Map(allConnections.map(c => [`${c.src}|${c.dst}|${c.dport}|${c.proto}`, c]));
+        for (const c of d.connections || []) {
+          const key = `${c.src}|${c.dst}|${c.dport}|${c.proto}`;
+          const prev = map.get(key);
+          map.set(key, { ...prev, ...c, threat: c.threat || prev?.threat || null });
+        }
+        allConnections = [...map.values()];
+        dataRangeFrom = from24h;
+        if (!asusActive) buildGraphFromConnections(); else updateOrgGraph();
+        if (mapMode) updateMapDots();
+        if (statsMode) updateStats();
+        if (logMode) updateLogView();
+      })
+      .catch(e => console.warn('[connections] background 24h fetch failed:', e));
+  }
 });
 
 socket.on('poll-error', err => {

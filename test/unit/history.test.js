@@ -123,11 +123,30 @@ describe('queryByTimeRange', () => {
 
 });
 
-// ─── 24h initial-payload filter (partial: true logic) ─────────────────────────
-// server.js: connections = [...getConnectionHistory().values()].filter(c => c.lastSeen >= cutoff)
-// These tests verify the same 86400s window via queryByTimeRange and the in-memory Map.
+// ─── Initial-payload filter ────────────────────────────────────────────────────
+// P2-4: server emits only the last 1h on initial WS connect (initialLoad: true).
+// Client then background-fetches the remaining 24h and merges with existing data.
+// Tests below cover:
+//   1. 1h initial emit window (server behaviour)
+//   2. 24h background-fetch window (queryByTimeRange helper)
+//   3. in-memory Map mirrors queryByTimeRange
 
-describe('24h initial connection filter (partial: true)', () => {
+describe('initial connection filter (P2-4: 1h initial emit + 24h background fetch)', () => {
+
+  it('1h initial emit: excludes entries older than 1h', () => {
+    const now    = Date.now();
+    const cutoff = now - 3_600_000; // 1h — matches server.js P2-4
+
+    // Use _appendAndLoad so entries appear in the in-memory Map (same as server.js path)
+    history._appendAndLoad({ src: '192.168.1.1', dst: '10.0.0.9', dport: 80,  proto: 'TCP', firstSeen: now - 7_200_000, lastSeen: now - 7_200_000 }); // 2h ago
+    history._appendAndLoad({ src: '192.168.1.1', dst: '10.0.0.8', dport: 443, proto: 'TCP', firstSeen: now - 1_000,     lastSeen: now - 1_000     }); // recent
+
+    const wsPayload = [...history.getConnectionHistory().values()]
+      .filter(c => c.lastSeen >= cutoff);
+
+    assert.equal(wsPayload.length, 1, 'only entry within 1h should appear in initial emit');
+    assert.equal(wsPayload[0].dst, '10.0.0.8');
+  });
 
   it('queryByTimeRange with 24h cutoff excludes entries older than 24h', () => {
     const now  = Date.now();
@@ -154,20 +173,20 @@ describe('24h initial connection filter (partial: true)', () => {
     assert(results.every(r => r.lastSeen >= cutoff), 'all results must be within 24h');
   });
 
-  it('in-memory Map filter mirrors queryByTimeRange for WebSocket emit', () => {
+  it('in-memory Map filter mirrors queryByTimeRange for background 24h fetch', () => {
     const now    = Date.now();
-    const cutoff = now - 86400_000;
+    const cutoff = now - 86400_000; // 24h — used by client background fetch
 
     // _appendAndLoad populates both DB and in-memory Map
     history._appendAndLoad({ src: '192.168.1.1', dst: '10.0.0.1', dport: 80,  proto: 'TCP', firstSeen: now - 90_000_000, lastSeen: now - 90_000_000 });
     history._appendAndLoad({ src: '192.168.1.1', dst: '10.0.0.2', dport: 443, proto: 'TCP', firstSeen: now - 1000,       lastSeen: now - 1000       });
 
-    // Simulate what server.js does for the initial WebSocket send
-    const wsPayload = [...history.getConnectionHistory().values()]
+    // Simulate what the client background-fetches via GET /api/connections?from=<24h>
+    const bgPayload = [...history.getConnectionHistory().values()]
       .filter(c => c.lastSeen >= cutoff);
 
-    assert.equal(wsPayload.length, 1, 'only 1 recent entry should appear in initial WS payload');
-    assert.equal(wsPayload[0].dst, '10.0.0.2');
+    assert.equal(bgPayload.length, 1, 'only 1 recent entry should appear in background 24h fetch');
+    assert.equal(bgPayload[0].dst, '10.0.0.2');
   });
 
 });
