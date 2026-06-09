@@ -1,0 +1,95 @@
+// ─── Connections panel ────────────────────────────────────────────────────────
+let allConnections = [];
+let serverTimeOffset = 0; // diff between client and server clocks (ms)
+let currentTimeFilter = '1h';
+// Oldest timestamp we have loaded in allConnections (Date.now()-24h after initial WS load)
+let dataRangeFrom = Date.now() - 86400_000;
+
+// Period filter: returns [from, to] against lastSeen (null = no limit)
+let customRangeFrom = null; // ms (for custom filter)
+let customRangeTo   = null;
+function getTimeRange() {
+  const now = Date.now() + serverTimeOffset; // server time basis
+  switch (currentTimeFilter) {
+    // Live: sessions observed within the last 15 min (matches Yamaha NAT default TTL=15min)
+    case 'live':      return { from: now - 15 * 60_000,   to: null };
+    case '1h':        return { from: now - 3600_000,      to: null };
+    case '3h':        return { from: now - 3 * 3600_000,  to: null };
+    case '6h':        return { from: now - 6 * 3600_000,  to: null };
+    case '12h':       return { from: now - 12 * 3600_000, to: null };
+    case '24h':       return { from: now - 86400_000,     to: null };
+    case '7d':        return { from: now - 604800_000,    to: null };
+    case 'today': {
+      const d = new Date(now); d.setHours(0,0,0,0);
+      return { from: d.getTime(), to: null };
+    }
+    case 'yesterday': {
+      const d = new Date(now); d.setHours(0,0,0,0);
+      return { from: d.getTime() - 86400_000, to: d.getTime() };
+    }
+    case 'custom':    return { from: customRangeFrom, to: customRangeTo };
+    case 'all':       return { from: null, to: null };
+    default:          return { from: null, to: null };
+  }
+}
+function getFilteredConnections() {
+  const { from, to, minTtl = 0 } = getTimeRange();
+  return allConnections.filter(c => {
+    // All filters judge by lastSeen: "connections active within the period"
+    // live=15min means currently active; 1h means seen in last hour (superset of live), etc.
+    const t = c.lastSeen || c.firstSeen || 0;
+    if (from !== null && t < from) return false;
+    if (to   !== null && t > to)   return false;
+    if (minTtl && (c.ttl || 0) < minTtl) return false;
+    return true;
+  });
+}
+
+function updateConnPanel(selectedIp) {
+  const panel = document.getElementById('conn-panel');
+  const list  = document.getElementById('conn-list');
+  const title = document.getElementById('conn-panel-title');
+  const count = document.getElementById('conn-count');
+
+  if (!selectedIp) { panel.style.display = 'none'; return; }
+
+  const conns = getFilteredConnections().filter(c => c.src === selectedIp);
+  panel.style.display = 'flex';
+  title.textContent = `${t('panel.conn')} — ${selectedIp}`;
+  count.textContent = conns.length ? `${conns.length} ${t('panel.conn.session')}` : '';
+
+  if (!conns.length) {
+    list.innerHTML = `<div class="conn-empty">${esc(t('panel.conn.empty'))}</div>`;
+    return;
+  }
+
+  // Group by destination host
+  const byHost = new Map();
+  for (const c of conns) {
+    const key = `${c.dstHost}:${c.dport}`;
+    if (!byHost.has(key)) byHost.set(key, { ...c, count: 0 });
+    byHost.get(key).count++;
+  }
+
+  list.innerHTML = [...byHost.values()]
+    .sort((a, b) => b.count - a.count)
+    .map(c => {
+      const label   = c.dstHost !== c.dst ? c.dstHost : c.dst;
+      const port    = c.dport === 443 ? 'HTTPS' : c.dport === 80 ? 'HTTP' : `:${c.dport}`;
+      const cnt     = c.count > 1 ? ` ×${c.count}` : '';
+      const flag    = (c.country && c.country.length === 2)
+        ? String.fromCodePoint(0x1F1E0 + c.country.charCodeAt(0) - 65, 0x1F1E0 + c.country.charCodeAt(1) - 65)
+        : '';
+      const rdapStr = (flag || c.org) ? `${flag} ${c.org || c.country || ''}`.trim() : '';
+      const rdapLine = rdapStr ? `<span class="conn-rdap">${esc(rdapStr)}</span>` : '';
+      const threatIcon = c.threat ? `<span class="conn-threat" title="${esc(c.threat.tag)}">🚨</span>` : '';
+      return `<div class="conn-row${c.threat ? ' threat-row' : ''}">
+        <span class="conn-proto">${esc(c.proto)}</span>
+        ${threatIcon}
+        <span class="conn-host" title="${esc(c.dst)}:${esc(c.dport)}">
+          <span class="conn-hostname">${esc(label)}</span>${rdapLine}
+        </span>
+        <span class="conn-port">${esc(port)}${esc(cnt)}</span>
+      </div>`;
+    }).join('');
+}

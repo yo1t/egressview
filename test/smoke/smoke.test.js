@@ -34,6 +34,36 @@ test('js/i18n.js is served (200)', async ({ request }) => {
   expect(res.status()).toBe(200);
 });
 
+// ① Phase 2 で分割した全 JS ファイルが 200 で配信されること
+const PHASE2_JS_FILES = [
+  'utils.js', 'connections-panel.js', 'auth-socket.js', 'graph.js',
+  'settings.js', 'map.js', 'stats.js', 'time-filter.js',
+  'view-tabs.js', 'log.js', 'threat-popup.js', 'devices.js', 'main.js',
+];
+for (const file of PHASE2_JS_FILES) {
+  test(`js/${file} is served (200)`, async ({ request }) => {
+    const res = await request.get(`${BASE}/js/${file}`);
+    expect(res.status()).toBe(200);
+  });
+}
+
+// ② index.html にインライン JS が残っていないこと（誤って巻き戻し検出）
+test('index.html has no inline script block with JS code', async ({ request }) => {
+  const res = await request.get(`${BASE}/`);
+  const body = await res.text();
+  expect(body).not.toMatch(/<script>\s*const _BASE/);
+  expect(body).not.toMatch(/<script>\s*\/\/ ─/);
+});
+
+// ③ index.html が期待する <script src> タグを含むこと
+test('index.html references expected script files', async ({ request }) => {
+  const res = await request.get(`${BASE}/`);
+  const body = await res.text();
+  for (const f of ['utils.js', 'graph.js', 'settings.js', 'devices.js', 'main.js']) {
+    expect(body, `index.html should reference ${f}`).toContain(`/js/${f}`);
+  }
+});
+
 // ─── JS integrity test (no auth required) ────────────────────────────────────
 // Catches ReferenceError / SyntaxError from wrong load order in Phase 2.
 
