@@ -4,6 +4,9 @@
 
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
+const fs   = require('fs');
+const os   = require('os');
+const path = require('path');
 const b = require('../../src/beacons');
 
 const T0 = 1_700_000_000_000;
@@ -117,6 +120,30 @@ describe('upsertBeacon / getBeacons', () => {
     assert.equal(rows[0].dst, '2.2.2.2');
     assert.equal(rows[1].dst, '3.3.3.3');
     assert.equal(rows[2].dst, '1.1.1.1');
+  });
+});
+
+// ── reopen() ──────────────────────────────────────────────────────────────────
+
+describe('reopen', () => {
+  it('reopens the same on-disk DB file without losing data', () => {
+    // Use a real temp file so we can verify data survives a close+reopen cycle.
+    const tmp = path.join(os.tmpdir(), `beacons-reopen-test-${Date.now()}.db`);
+    try {
+      b._resetForTest(tmp);                           // initDb(tmp) → _lastDbPath = tmp
+      b.upsertBeacon(makeCandidate({ dst: '9.9.9.9' }));
+      assert.equal(b.getBeacons().length, 1);
+
+      b.reopen();                                     // no argument → must use _lastDbPath (tmp)
+      assert.equal(b.getBeacons().length, 1, 'data should survive reopen() with no argument');
+      assert.equal(b.getBeacons()[0].dst, '9.9.9.9');
+    } finally {
+      b._closeForTest();
+      try { fs.unlinkSync(tmp); } catch {}
+      try { fs.unlinkSync(tmp + '-wal'); } catch {}
+      try { fs.unlinkSync(tmp + '-shm'); } catch {}
+      b._resetForTest();                              // back to :memory: for subsequent tests
+    }
   });
 });
 
