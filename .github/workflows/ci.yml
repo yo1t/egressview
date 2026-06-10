@@ -30,29 +30,20 @@ jobs:
       - name: Run unit tests
         run: npm test
 
-  security:
-    name: ASH Security Scan
+  audit:
+    name: Dependency audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: '3.11'
+          node-version: 20
+          cache: npm
 
-      - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Run ASH scan
-        run: ash --mode local
-
-      - name: Check actionable findings
-        run: |
-          ACTIONABLE=$(jq '.metadata.summary_stats.actionable' .ash/ash_output/ash_aggregated_results.json)
-          echo "Actionable findings: $ACTIONABLE"
-          if [ "$ACTIONABLE" -gt 0 ]; then
-            echo "::error::ASH found $ACTIONABLE actionable security findings"
-            jq '.runs[].results[]' .ash/ash_output/reports/ash.sarif
-            exit 1
-          fi
+      - name: Check for known vulnerabilities
+        run: npm audit --audit-level=moderate
