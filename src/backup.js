@@ -5,8 +5,11 @@ const logger = require('./logger');
 const fs = require('fs');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, '..', '.widemap.db');
-const BACKUP_DIR = path.join(__dirname, '..', '.widemap-backups');
+const DEFAULT_DB_PATH    = path.join(__dirname, '..', '.widemap.db');
+const DEFAULT_BACKUP_DIR = path.join(__dirname, '..', '.widemap-backups');
+
+let DB_PATH    = DEFAULT_DB_PATH;
+let BACKUP_DIR = DEFAULT_BACKUP_DIR;
 
 let backupIntervalTimer = null;
 let backupIntervalHours = 24; // default: daily
@@ -124,6 +127,16 @@ function getConfig() {
   return { intervalHours: backupIntervalHours, maxGenerations };
 }
 
+/** Override DB and backup directory paths for unit testing. */
+function _setPathsForTest(dbPath, backupDir) {
+  DB_PATH    = dbPath;
+  BACKUP_DIR = backupDir;
+  // Reset config to defaults so tests start from a known state
+  backupIntervalHours = 24;
+  maxGenerations      = 7;
+  stopPeriodicBackup();
+}
+
 module.exports = {
   configure,
   createBackup,
@@ -134,4 +147,5 @@ module.exports = {
   startPeriodicBackup,
   stopPeriodicBackup,
   getConfig,
+  _setPathsForTest,
 };
