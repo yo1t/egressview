@@ -4,6 +4,7 @@
 const { Router } = require('express');
 const path = require('path');
 const fs   = require('fs');
+const { parsePositiveInt } = require('../utils');
 
 const UPLOAD_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
 
@@ -16,7 +17,7 @@ const UPLOAD_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
  * }} ctx
  */
 module.exports = function backupRoutes(ctx) {
-  const { requireAdmin, backup, history, runtime, devices, enrichment, appRoot } = ctx;
+  const { requireAdmin, backup, history, runtime, devices, enrichment, beacons, appRoot } = ctx;
   const router = Router();
 
   router.get('/backup/list', requireAdmin, (req, res) => {
@@ -45,6 +46,7 @@ module.exports = function backupRoutes(ctx) {
       devices.reopen();                               // re-open DB connection to read restored data
       devices.seedFromConnectionHistory(history.getConnectionHistory()); // backfill devices from restored history
       enrichment.reopen();                            // RDAP/Geo キャッシュも restore 後の DB から再ロード
+      if (beacons) beacons.reopen();                  // beacon events / candidates も restore 後の DB から再ロード
       res.json({ success: true, message: `Restored from ${name}. Restart recommended.` });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -82,6 +84,7 @@ module.exports = function backupRoutes(ctx) {
         devices.reopen();                             // re-open DB connection to read restored data
         devices.seedFromConnectionHistory(history.getConnectionHistory()); // backfill devices from restored history
         enrichment.reopen();                          // RDAP/Geo キャッシュも restore 後の DB から再ロード
+        if (beacons) beacons.reopen();                // beacon events / candidates も restore 後の DB から再ロード
         res.json({ success: true, message: 'Restored from uploaded file. Restart recommended.' });
       } catch (e) {
         res.status(500).json({ error: e.message });
@@ -91,8 +94,16 @@ module.exports = function backupRoutes(ctx) {
 
   router.post('/backup/config', requireAdmin, (req, res) => {
     const { intervalHours, maxGenerations } = req.body || {};
-    if (intervalHours)  backup.configure({ intervalHours: Number(intervalHours) });
-    if (maxGenerations) backup.configure({ maxGenerations: Number(maxGenerations) });
+    if (intervalHours != null) {
+      const h = parsePositiveInt(intervalHours);
+      if (h === null) return res.status(400).json({ error: 'intervalHours は 1 以上の整数で指定してください' });
+      backup.configure({ intervalHours: h });
+    }
+    if (maxGenerations != null) {
+      const g = parsePositiveInt(maxGenerations);
+      if (g === null) return res.status(400).json({ error: 'maxGenerations は 1 以上の整数で指定してください' });
+      backup.configure({ maxGenerations: g });
+    }
     backup.stopPeriodicBackup();
     backup.startPeriodicBackup();
     ctx.saveConfig();

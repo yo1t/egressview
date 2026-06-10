@@ -1,5 +1,6 @@
 // OUI vendor lookup, mDNS, SSDP, NetBIOS, Apple model dictionary, investigation
 'use strict';
+const logger = require('./logger');
 
 const axios = require('axios');
 const crypto = require('crypto');
@@ -14,7 +15,7 @@ const { isAllowedRouterIp } = require('./utils');
 // bonjour-service is a heavyweight optional dep
 let Bonjour = null;
 try { Bonjour = require('bonjour-service').default || require('bonjour-service').Bonjour; }
-catch { console.warn('[bonjour] bonjour-service not installed (Phase2 mDNS skipped)'); }
+catch { logger.warn('[bonjour] bonjour-service not installed (Phase2 mDNS skipped)'); }
 
 // ─── OUI vendor database ──────────────────────────────────────────────────────
 const OUI_URL   = 'https://www.wireshark.org/download/automated/data/manuf';
@@ -45,24 +46,24 @@ async function loadOuiDb() {
     const stat = fs.statSync(OUI_CACHE);
     if (Date.now() - stat.mtimeMs < OUI_TTL) {
       text = fs.readFileSync(OUI_CACHE, 'utf8');
-      console.log(`[oui] Cache loaded (${ouiDb.size || '…'} entries)`);
+      logger.info(`[oui] Cache loaded (${ouiDb.size || '…'} entries)`);
     }
   } catch {}
 
   if (!text) {
-    console.log('[oui] Downloading Wireshark OUI database…');
+    logger.info('[oui] Downloading Wireshark OUI database…');
     try {
       const res = await axios.get(OUI_URL, { timeout: 30000, responseType: 'text' });
       text = res.data;
       fs.writeFileSync(OUI_CACHE, text);
     } catch (err) {
-      console.error('[oui] Download failed:', err.message);
+      logger.error('[oui] Download failed:', err.message);
       return;
     }
   }
 
   ouiDb = parseOuiManuf(text);
-  console.log(`[oui] ${ouiDb.size.toLocaleString()} OUI entries ready`);
+  logger.info(`[oui] ${ouiDb.size.toLocaleString()} OUI entries ready`);
 }
 
 function lookupVendor(mac) {
@@ -249,7 +250,7 @@ function probeBonjourForIp(ip, timeoutMs = 3000) {
         browsers.push(browser);
       }
     } catch (e) {
-      console.error('[bonjour] error:', e.message);
+      logger.error('[bonjour] error:', e.message);
     }
     setTimeout(() => {
       browsers.forEach(b => { try { b.stop(); } catch {} });
@@ -336,7 +337,7 @@ async function investigateIp(ip, { ouiDb: ouiDbRef, yamahaExec, yamahaEnabled, y
       const m = raw.match(re);
       if (m) return m[1].toLowerCase();
     } catch (e) {
-      console.error('[arp] error:', e.message);
+      logger.error('[arp] error:', e.message);
     }
     return null;
   }

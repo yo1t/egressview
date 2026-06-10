@@ -5,6 +5,7 @@
 // ─── Injected dependencies ────────────────────────────────────────────────────
 let _io, _history, _enrichment, _threatIntel, _notifier, _deviceId, _devices;
 let _asus, _yamaha, _dhcpdSyslog;
+let _beacons = null; // optional: injected when beacons module is available
 
 // ─── Module state ─────────────────────────────────────────────────────────────
 let knownMacs = new Set();
@@ -31,6 +32,7 @@ function init(deps) {
   _asus        = deps.asus;
   _yamaha      = deps.yamaha;
   _dhcpdSyslog = deps.dhcpdSyslog;
+  _beacons     = deps.beacons || null;
 }
 
 // ─── Debounced emit for [INSPECT] sessions ────────────────────────────────────
@@ -156,7 +158,16 @@ function handleInspectSession(session) {
   const rdap = _enrichment.getRdapCache().get(dst);
   const geo  = _enrichment.getGeoCache().get(dst);
 
-  const { key } = recordConnection(session, now, 'inspect');
+  const { key, entry } = recordConnection(session, now, 'inspect');
+
+  // Record precise-timestamp event for beacon detection
+  if (_beacons) {
+    _beacons.appendEvent({
+      src: entry.src, dst: entry.dst, dstHost: entry.dstHost,
+      dport: entry.dport, proto: entry.proto,
+      seenAt: now, source: 'inspect',
+    });
+  }
 
   // Async: enrich missing geo/rdap/ptr in background (fire-and-forget)
   if (!rdap || !geo) {

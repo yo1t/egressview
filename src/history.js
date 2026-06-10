@@ -1,5 +1,6 @@
 // Connection history: SQLite-backed storage (better-sqlite3 — native, WAL mode)
 'use strict';
+const logger = require('./logger');
 
 const Database = require('better-sqlite3');
 const fs = require('fs');
@@ -33,7 +34,7 @@ function initDb(dbPath) {
   // Integrity check on startup
   const integrity = db.pragma('integrity_check');
   if (integrity[0]?.integrity_check !== 'ok') {
-    console.error('[history] Database integrity check failed, recreating...');
+    logger.error('[history] Database integrity check failed, recreating...');
     db.close();
     fs.unlinkSync(DB_PATH);
     db = new Database(DB_PATH);
@@ -92,7 +93,7 @@ function initDb(dbPath) {
   stmtSelectAll = db.prepare(`SELECT * FROM connections WHERE lastSeen >= ?`);
   stmtDeleteOld = db.prepare(`DELETE FROM connections WHERE lastSeen < ?`);
 
-  console.log('[history] SQLite database initialized (WAL mode)');
+  logger.info('[history] SQLite database initialized (WAL mode)');
 }
 
 function upsertEntry(entry) {
@@ -133,7 +134,7 @@ function migrateFromJsonl() {
   const count = db.prepare('SELECT COUNT(*) as cnt FROM connections').get();
   if (count.cnt > 0) return;
 
-  console.log('[history] Migrating JSONL to SQLite...');
+  logger.info('[history] Migrating JSONL to SQLite...');
   const data = fs.readFileSync(sourcePath, 'utf8');
   const cutoff = Date.now() - historyTtlMs;
   let imported = 0, skipped = 0;
@@ -156,7 +157,7 @@ function migrateFromJsonl() {
   if (sourcePath === JSONL_PATH) {
     fs.renameSync(JSONL_PATH, JSONL_PATH + '.migrated');
   }
-  console.log(`[history] Migration complete: ${imported} imported, ${skipped} skipped`);
+  logger.info(`[history] Migration complete: ${imported} imported, ${skipped} skipped`);
 }
 
 // Load all active entries into memory cache
@@ -168,7 +169,7 @@ function loadIntoMemory() {
     const key = `${row.src}|${row.dst}|${row.dport}|${row.proto}`;
     connectionHistory.set(key, row);
   }
-  console.log(`[history] Loaded ${connectionHistory.size} sessions from SQLite`);
+  logger.info(`[history] Loaded ${connectionHistory.size} sessions from SQLite`);
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -184,7 +185,7 @@ function appendHistoryLog(entry) {
   try {
     upsertEntry(entry);
   } catch (err) {
-    console.error('[history] upsert error:', err.message);
+    logger.error('[history] upsert error:', err.message);
   }
 }
 
@@ -197,7 +198,7 @@ function snapshotHistory() {
     }
   });
   upsertMany();
-  console.log(`[history] Snapshot ${connectionHistory.size} entries to SQLite`);
+  logger.info(`[history] Snapshot ${connectionHistory.size} entries to SQLite`);
 }
 
 // Delete old entries from SQLite
@@ -206,7 +207,7 @@ function compactHistoryLog() {
   const cutoff = Date.now() - historyTtlMs;
   const info = stmtDeleteOld.run(cutoff);
   if (info.changes > 0) {
-    console.log(`[history] Pruned ${info.changes} old entries from SQLite`);
+    logger.info(`[history] Pruned ${info.changes} old entries from SQLite`);
   }
 }
 
@@ -239,7 +240,7 @@ function getKnownMacs() {
 
 function setRetentionDays(days) {
   historyTtlMs = days * 24 * 60 * 60 * 1000;
-  console.log(`[history] Retention set to ${days} days (${historyTtlMs}ms)`);
+  logger.info(`[history] Retention set to ${days} days (${historyTtlMs}ms)`);
 }
 
 function closeDb() {

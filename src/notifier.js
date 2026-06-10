@@ -1,4 +1,5 @@
 'use strict';
+const logger = require('./logger');
 
 const https = require('https');
 
@@ -112,12 +113,12 @@ async function notify(entry) {
       text: _buildMessage(entry),
     }, _token);
     if (!result.ok) {
-      console.error('[notifier] Slack error:', result.error);
+      logger.error('[notifier] Slack error:', result.error);
       return false;
     }
     return true;
   } catch (err) {
-    console.error('[notifier] Slack post failed:', err.message);
+    logger.error('[notifier] Slack post failed:', err.message);
     return false;
   }
 }
@@ -157,10 +158,10 @@ async function notifyNewDevice(entry) {
   ].filter(Boolean).join('\n');
   try {
     const result = await _httpPost({ channel: _userId, text: lines }, _token);
-    if (!result.ok) { console.error('[notifier] new-device Slack error:', result.error); return false; }
+    if (!result.ok) { logger.error('[notifier] new-device Slack error:', result.error); return false; }
     return true;
   } catch (err) {
-    console.error('[notifier] notifyNewDevice failed:', err.message);
+    logger.error('[notifier] notifyNewDevice failed:', err.message);
     return false;
   }
 }

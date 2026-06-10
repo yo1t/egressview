@@ -1,5 +1,6 @@
 // Yamaha RTX SSH poller: connect, execute commands, parse NAT sessions
 'use strict';
+const logger = require('../logger');
 
 const crypto = require('crypto');
 const { Client: SshClient } = require('ssh2');
@@ -84,11 +85,11 @@ function scheduleYamahaReconnect(ms) {
 function connectYamaha(onReady) {
   if (!yamahaEnabled) return;
   if (!yamahaIp || !yamahaUser || !yamahaPass) {
-    console.log('[yamaha] credentials not configured yet — skip connect');
+    logger.info('[yamaha] credentials not configured yet — skip connect');
     return;
   }
   if (yamahaConnecting) {
-    console.log('[yamaha] Connect already in progress, skip');
+    logger.info('[yamaha] Connect already in progress, skip');
     return;
   }
   if (yamahaReconnectTimer) { clearTimeout(yamahaReconnectTimer); yamahaReconnectTimer = null; }
@@ -103,7 +104,7 @@ function connectYamaha(onReady) {
   conn.on('ready', () => {
     conn.shell({ term: 'vt100', cols: 220, rows: 500 }, (err, stream) => {
       if (err) {
-        console.error('[yamaha] shell error:', err.message);
+        logger.error('[yamaha] shell error:', err.message);
         yamahaConnecting = false;
         onStatus({ ready: false, message: 'シェル要求失敗: ' + err.message });
         scheduleYamahaReconnect(5000);
@@ -125,7 +126,7 @@ function connectYamaha(onReady) {
       stream.on('close', () => {
         yamahaReady = false;
         yamahaConnecting = false;
-        console.log('[yamaha] Shell closed, reconnecting in 3s…');
+        logger.info('[yamaha] Shell closed, reconnecting in 3s…');
         scheduleYamahaReconnect(3000);
       });
 
@@ -137,12 +138,12 @@ function connectYamaha(onReady) {
           await waitForPrompt(5000);
           yamahaReady = true;
           yamahaConnecting = false;
-          console.log('[yamaha] Connected to RTX — ready');
+          logger.info('[yamaha] Connected to RTX — ready');
           onStatus({ ready: true, message: '接続済み' });
           if (onReady) onReady();
         } catch (e) {
           yamahaConnecting = false;
-          console.error('[yamaha] init error:', e.message);
+          logger.error('[yamaha] init error:', e.message);
           onStatus({ ready: false, message: '初期化失敗: ' + e.message });
           scheduleYamahaReconnect(5000);
         }
@@ -151,7 +152,7 @@ function connectYamaha(onReady) {
   });
 
   conn.on('error', err => {
-    console.error('[yamaha] SSH error:', err.message);
+    logger.error('[yamaha] SSH error:', err.message);
     yamahaReady = false;
     yamahaConnecting = false;
     onStatus({ ready: false, message: 'SSH接続失敗: ' + err.message });
@@ -165,14 +166,14 @@ function connectYamaha(onReady) {
     if (!yamahaHostFp) {
       yamahaHostFp = fp;
       onSaveConfig();
-      console.log('[yamaha] Host key recorded (TOFU):', fp.substring(0, 16) + '...');
+      logger.info('[yamaha] Host key recorded (TOFU):', fp.substring(0, 16) + '...');
       return true;
     }
     if (fp !== yamahaHostFp) {
-      console.error('[yamaha] ⚠️ HOST KEY MISMATCH! Possible MITM attack.');
-      console.error(`  Expected: ${yamahaHostFp.substring(0, 16)}...`);
-      console.error(`  Got:      ${fp.substring(0, 16)}...`);
-      console.error('  鍵を更新する場合は .widemap.json の yamaha.hostFp を削除してください');
+      logger.error('[yamaha] ⚠️ HOST KEY MISMATCH! Possible MITM attack.');
+      logger.error(`  Expected: ${yamahaHostFp.substring(0, 16)}...`);
+      logger.error(`  Got:      ${fp.substring(0, 16)}...`);
+      logger.error('  鍵を更新する場合は .widemap.json の yamaha.hostFp を削除してください');
       return false;
     }
     return true;
@@ -204,9 +205,9 @@ async function refreshYamahaArp() {
     yamahaArpCache.clear();
     for (const [k, v] of newMap) yamahaArpCache.set(k, v);
     yamahaArpLastRefresh = Date.now();
-    console.log(`[yamaha-arp] cache refreshed: ${newMap.size} entries`);
+    logger.info(`[yamaha-arp] cache refreshed: ${newMap.size} entries`);
   } catch (e) {
-    console.error('[yamaha-arp] refresh failed:', e.message);
+    logger.error('[yamaha-arp] refresh failed:', e.message);
   }
 }
 
@@ -239,9 +240,9 @@ async function refreshYamahaNdp() {
     yamahaNdpCache.clear();
     for (const [k, v] of newMap) yamahaNdpCache.set(k, v);
     yamahaNdpLastRefresh = Date.now();
-    console.log(`[yamaha-ndp] cache refreshed: ${newMap.size} entries`);
+    logger.info(`[yamaha-ndp] cache refreshed: ${newMap.size} entries`);
   } catch (e) {
-    console.error('[yamaha-ndp] refresh failed:', e.message);
+    logger.error('[yamaha-ndp] refresh failed:', e.message);
   }
 }
 

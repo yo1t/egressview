@@ -26,10 +26,12 @@ const dhcpdSyslog     = require('./src/pollers/dhcpd-syslog');
 const devices         = require('./src/devices');
 
 // ─── Extracted modules ────────────────────────────────────────────────────────
-const notes       = require('./src/notes');
-const configIo    = require('./src/config');       // file I/O only
-const runtime     = require('./src/runtime');
-const investigation = require('./src/investigation');
+const notes          = require('./src/notes');
+const configIo       = require('./src/config');       // file I/O only
+const runtime        = require('./src/runtime');
+const investigation  = require('./src/investigation');
+const beacons        = require('./src/beacons');
+const beaconDetector = require('./src/beacon-detector');
 
 // ─── Route factories ──────────────────────────────────────────────────────────
 const authRoutes        = require('./src/routes/auth');
@@ -39,6 +41,7 @@ const devicesRoutes     = require('./src/routes/devices');
 const backupRoutes      = require('./src/routes/backup');
 const configRoutes      = require('./src/routes/config');
 const slackRoutes       = require('./src/routes/slack');
+const beaconsRoutes     = require('./src/routes/beacons');
 
 // ─── Environment ──────────────────────────────────────────────────────────────
 const SUBPATH           = (process.env.SUBPATH || '').replace(/\/$/, '');
@@ -191,6 +194,10 @@ function requireAdmin(req, res, next) {
 
 // ─── Yamaha polling loop ──────────────────────────────────────────────────────
 
+// Track session keys seen in the previous poll to detect newly-appeared sessions
+// (used for poll-based beacon event recording when [INSPECT] is unavailable).
+let lastPollKeys = new Set();
+
 async function pollYamahaConnections() {
   if (!yamaha.isEnabled() || !yamaha.isReady()) return;
   try {
@@ -215,6 +222,28 @@ async function pollYamahaConnections() {
     }
 
     sessions.forEach(s => runtime.recordConnection(s, now));
+
+    // Poll-based beacon event recording: only used as fallback when INSPECT syslog is
+    // disabled.  When inspectEnabled=true, INSPECT provides precise TCP session-close
+    // timestamps; writing poll events on top would duplicate observations with ±60 s
+    // precision and skew the CoV calculation.
+    // lastPollKeys is updated unconditionally so the delta is accurate when the setting toggles.
+    const currentPollKeys = new Set(sessions.map(s => `${s.src}|${s.dst}|${s.dport}|${s.proto}`));
+    if (!appState.inspectEnabled) {
+      for (const s of sessions) {
+        const key = `${s.src}|${s.dst}|${s.dport}|${s.proto}`;
+        if (!lastPollKeys.has(key)) {
+          const entry = history.getConnectionHistory().get(key);
+          beacons.appendEvent({
+            src: s.src, dst: s.dst,
+            dstHost: entry?.dstHost || s.dst,
+            dport: s.dport, proto: s.proto,
+            seenAt: now, source: 'poll',
+          });
+        }
+      }
+    }
+    lastPollKeys = currentPollKeys;
 
     history.pruneHistory();
 
@@ -297,7 +326,7 @@ const routeCtx = {
   getAdminToken:       () => appState.adminToken,
   asus, yamaha, enrichment, threatIntel, notifier, history, devices, deviceId, backup,
   dnsmasqLog, inspectSyslog, dhcpdSyslog,
-  runtime, notes, io,
+  runtime, notes, io, beacons,
   saveConfig,
   persistSecret:       (section, updates) => configIo.persistSecret(section, updates, CONFIG_FILE),
   configFile:          CONFIG_FILE,
@@ -315,6 +344,7 @@ app.use('/api', devicesRoutes(routeCtx));
 app.use('/api', backupRoutes({ ...routeCtx, saveConfig }));
 app.use('/api', configRoutes(routeCtx));
 app.use('/api', slackRoutes(routeCtx));
+app.use('/api', beaconsRoutes({ requireAdmin, beacons }));
 
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
 
@@ -374,7 +404,7 @@ io.on('connection', socket => {
 
 runtime.init({
   io, history, enrichment, threatIntel, notifier, deviceId, devices,
-  asus, yamaha, dhcpdSyslog,
+  asus, yamaha, dhcpdSyslog, beacons,
 });
 
 investigation.init({
@@ -452,6 +482,7 @@ server.listen(PORT, () => {
     console.log(`[devices] stale merge check: ${staleChecked} device(s) scanned for duplicates`);
   }
   enrichment.initDb();
+  beacons.initDb();
   console.log(`Router IP: ${asus.getRouterIp()}`);
   deviceId.loadOuiDb();
   yamaha.connectYamaha(() => {
@@ -468,6 +499,16 @@ server.listen(PORT, () => {
     reMatchAndNotify();
   });
   setInterval(() => threatIntel.fetchThreatIntel().then(reMatchAndNotify), 60 * 60 * 1000);
+
+  // Beacon detection: scan hourly, prune stale events
+  function runBeaconScan() {
+    const events     = beacons.getEvents();
+    const candidates = beaconDetector.detectBeacons(events);
+    for (const c of candidates) beacons.upsertBeacon(c);
+    const pruned = beacons.pruneEvents();
+    console.log(`[beacons] scan: ${candidates.length} candidate(s) from ${events.length} events (pruned ${pruned} old events)`);
+  }
+  setInterval(runBeaconScan, 60 * 60 * 1000);
 
   backup.startPeriodicBackup();
 });

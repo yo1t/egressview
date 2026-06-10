@@ -1,5 +1,6 @@
 // Database backup and restore
 'use strict';
+const logger = require('./logger');
 
 const fs = require('fs');
 const path = require('path');
@@ -25,7 +26,7 @@ function ensureBackupDir() {
 // Create a backup copy of the DB file
 function createBackup() {
   if (!fs.existsSync(DB_PATH)) {
-    console.log('[backup] No database to backup');
+    logger.info('[backup] No database to backup');
     return null;
   }
   ensureBackupDir();
@@ -34,11 +35,11 @@ function createBackup() {
   const backupPath = path.join(BACKUP_DIR, backupName);
   try {
     fs.copyFileSync(DB_PATH, backupPath);
-    console.log(`[backup] Created: ${backupName}`);
+    logger.info(`[backup] Created: ${backupName}`);
     pruneOldBackups();
     return backupName;
   } catch (err) {
-    console.error('[backup] Failed:', err.message);
+    logger.error('[backup] Failed:', err.message);
     return null;
   }
 }
@@ -53,7 +54,7 @@ function pruneOldBackups() {
   for (const f of toRemove) {
     try {
       fs.unlinkSync(path.join(BACKUP_DIR, f.name));
-      console.log(`[backup] Pruned: ${f.name}`);
+      logger.info(`[backup] Pruned: ${f.name}`);
     } catch {}
   }
 }
@@ -92,7 +93,7 @@ function restoreFromFile(sourcePath) {
   createBackup();
   // Replace current DB
   fs.copyFileSync(sourcePath, DB_PATH);
-  console.log(`[backup] Restored from: ${path.basename(sourcePath)}`);
+  logger.info(`[backup] Restored from: ${path.basename(sourcePath)}`);
 }
 
 // Restore from a named backup generation
@@ -107,7 +108,7 @@ function startPeriodicBackup() {
   stopPeriodicBackup();
   const intervalMs = backupIntervalHours * 60 * 60 * 1000;
   backupIntervalTimer = setInterval(createBackup, intervalMs);
-  console.log(`[backup] Periodic backup every ${backupIntervalHours}h, keep ${maxGenerations} generations`);
+  logger.info(`[backup] Periodic backup every ${backupIntervalHours}h, keep ${maxGenerations} generations`);
   // Create initial backup if none exist
   if (listBackups().length === 0) createBackup();
 }

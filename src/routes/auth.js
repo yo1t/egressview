@@ -1,5 +1,6 @@
 // Routes: admin token verification, ASUS nonce, router login/setup
 'use strict';
+const logger = require('../logger');
 
 const { Router } = require('express');
 const crypto = require('crypto');
@@ -87,15 +88,15 @@ module.exports = function authRoutes(ctx) {
         asus.startPolling(POLL_INTERVAL);
         saveConfig();
         persistSecret('asus', { ip: targetIp, user: username, pass: finalPass });
-        console.log(`[auth] ASUS logged in as ${username} @ ${targetIp}`);
+        logger.info(`[auth] ASUS logged in as ${username} @ ${targetIp}`);
       } catch (err) {
-        console.error('[auth] ASUS login failed:', err.message);
+        logger.error('[auth] ASUS login failed:', err.message);
         return res.status(401).json({ error: 'ASUS認証失敗（IP・ユーザー名・パスワードを確認してください）' });
       }
     } else if (doAsus === false) {
       asus.disable();
       saveConfig();
-      console.log('[auth] ASUS disabled');
+      logger.info('[auth] ASUS disabled');
     }
 
     // ── Yamaha ──
@@ -107,12 +108,12 @@ module.exports = function authRoutes(ctx) {
       }
       yamaha.reconnect();
       saveConfig();
-      console.log(`[auth] Yamaha config updated: ${yamaha.getIp()}`);
+      logger.info(`[auth] Yamaha config updated: ${yamaha.getIp()}`);
     } else if (doYamaha === false) {
       yamaha.disconnect();
       setLatestConnections([]);
       saveConfig();
-      console.log('[auth] Yamaha disabled');
+      logger.info('[auth] Yamaha disabled');
     }
 
     res.json({ success: true, routerIp: doAsus ? asus.getRouterIp() : undefined });

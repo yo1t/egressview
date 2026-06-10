@@ -1,5 +1,6 @@
 // dnsmasq query log poller: tail logs and report client/domain/IP resolutions
 'use strict';
+const logger = require('../logger');
 
 const { createTailPoller } = require('./tail-helper');
 
@@ -112,7 +113,7 @@ function emitQuery(query, resolvedIp) {
   try {
     onDnsQuery({ clientIp: query.clientIp, domain: query.domain, resolvedIp, time: query.time });
   } catch (e) {
-    console.error('[dnsmasq-log] onDnsQuery failed:', e.message);
+    logger.error('[dnsmasq-log] onDnsQuery failed:', e.message);
   }
 }
 

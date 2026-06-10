@@ -1,5 +1,6 @@
 // DNS reverse lookup, RDAP, GeoIP batch enrichment
 'use strict';
+const logger = require('./logger');
 
 const http = require('http');
 const https = require('https');
@@ -92,7 +93,7 @@ function initDb(dbPath) {
   for (const row of geoRows) {
     geoCache.set(row.ip, { lat: row.lat, lon: row.lon, city: row.city, countryCode: row.countryCode, expires: row.expires });
   }
-  console.log(`[enrichment] Cache loaded: ${rdapRows.length} RDAP, ${geoRows.length} geo entries`);
+  logger.info(`[enrichment] Cache loaded: ${rdapRows.length} RDAP, ${geoRows.length} geo entries`);
 
   // 既存のプライベート IP エントリ（失敗 null）を永続 TTL にアップグレード
   const privUpgradeNow = Date.now();
@@ -106,7 +107,7 @@ function initDb(dbPath) {
       upgraded++;
     }
   }
-  if (upgraded > 0) console.log(`[enrichment] ${upgraded} private IP geo entries upgraded to permanent TTL`);
+  if (upgraded > 0) logger.info(`[enrichment] ${upgraded} private IP geo entries upgraded to permanent TTL`);
 }
 
 function reopen() {
@@ -204,11 +205,11 @@ async function lookupGeoBatch(ips) {
           _persistGeo(r.query, entry);
         }
       });
-      console.log(`[geo] ${ok}/${chunk.length} IPs geo-resolved`);
+      logger.info(`[geo] ${ok}/${chunk.length} IPs geo-resolved`);
       recordApiOk('geo');
     } catch (err) {
       recordApiFail('geo', err);
-      console.error('[geo] batch error:', err.message);
+      logger.error('[geo] batch error:', err.message);
       // Rate-limit 対策: エラー時はチャンク内の未キャッシュ IP を 30 分間リトライ抑制
       const rateLimitTtl = 30 * 60 * 1000;
       chunk.forEach(ip => {
@@ -257,7 +258,7 @@ async function _doLookupRdap(ip, generation = rdapGeneration) {
     if (generation === rdapGeneration) {
       rdapCache.set(ip, result);
       _persistRdap(ip, result);
-      console.log(`[rdap] ${ip} → ${country} / ${org}`);
+      logger.info(`[rdap] ${ip} → ${country} / ${org}`);
     }
     recordApiOk('rdap');
     return result;

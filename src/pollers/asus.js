@@ -1,5 +1,6 @@
 // ASUS router poller: authentication, client list, netdev, mesh nodes
 'use strict';
+const logger = require('../logger');
 
 const axios = require('axios');
 const crypto = require('crypto');
@@ -174,11 +175,11 @@ async function ensureAsusAuth() {
     authToken = token;
     tokenExpiry = Date.now() + 25 * 60 * 1000;
     asusRenewFailures = 0;
-    console.log('[auth] ASUS token auto-renewed');
+    logger.info('[auth] ASUS token auto-renewed');
     return true;
   } catch (e) {
     asusRenewFailures++;
-    console.error(`[auth] ASUS auto-renew failed (${asusRenewFailures}/${ASUS_RENEW_MAX_FAILURES}):`, e.message);
+    logger.error(`[auth] ASUS auto-renew failed (${asusRenewFailures}/${ASUS_RENEW_MAX_FAILURES}):`, e.message);
     if (asusRenewFailures >= ASUS_RENEW_MAX_FAILURES) {
       onAuthRequired('ASUSの自動再認証に失敗しました。設定から再ログインしてください。');
       stopPolling();
@@ -220,12 +221,12 @@ async function poll() {
     });
   } catch (err) {
     if (err.message === 'TOKEN_EXPIRED') {
-      console.log('[poll] Token expired, requiring re-login');
+      logger.info('[poll] Token expired, requiring re-login');
       authToken = null;
       onAuthRequired('セッションが切れました。再ログインしてください。');
       stopPolling();
     } else {
-      console.error('[poll error]', err.message);
+      logger.error('[poll error]', err.message);
       onPollError(err.message);
     }
   }

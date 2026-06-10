@@ -23,7 +23,7 @@ function switchView(view) {
   if (view === 'map')     requestAnimationFrame(() => initWorldMap());
   else                    stopMapAnim();
   if (view === 'stats')   requestAnimationFrame(updateStats);
-  if (view === 'log')     requestAnimationFrame(updateLogView);
+  if (view === 'log')     requestAnimationFrame(() => { updateLogView(); loadBeacons(); });
   if (view === 'devices') requestAnimationFrame(loadDevicesView);
 }
 document.getElementById('btn-graph').addEventListener('click',   () => switchView('graph'));

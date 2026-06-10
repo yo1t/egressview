@@ -2,6 +2,7 @@
 'use strict';
 
 const { Router } = require('express');
+const { parseTimestamp } = require('../utils');
 
 function attachThreats(connections, threatIntel) {
   if (!threatIntel || typeof threatIntel.matchThreatIntel !== 'function') return connections;
@@ -19,8 +20,12 @@ function connectionsRoutes(ctx) {
   const router = Router();
 
   router.get('/connections', requireAdmin, (req, res) => {
-    const from = req.query.from != null && req.query.from !== '' ? parseInt(req.query.from) : null;
-    const to   = req.query.to   != null && req.query.to   !== '' ? parseInt(req.query.to)   : null;
+    const from = parseTimestamp(req.query.from);
+    const to   = parseTimestamp(req.query.to);
+    if (req.query.from != null && req.query.from !== '' && from === null)
+      return res.status(400).json({ error: 'invalid "from" timestamp' });
+    if (req.query.to   != null && req.query.to   !== '' && to   === null)
+      return res.status(400).json({ error: 'invalid "to" timestamp' });
     const connections = attachThreats(history.queryByTimeRange(from, to), threatIntel);
     res.json({ connections, serverTime: Date.now() });
   });

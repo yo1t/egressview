@@ -2,6 +2,7 @@
 // loadFile / saveFile / persistSecret operate only on the JSON config file.
 // Applying loaded config to pollers is the caller's responsibility (server.js).
 'use strict';
+const logger = require('./logger');
 
 const fs   = require('fs');
 const path = require('path');
@@ -46,7 +47,7 @@ function persistSecret(section, updates, file = DEFAULT_CONFIG_FILE) {
     cfg[section] = { ...(cfg[section] || {}), ...updates };
     saveFile(cfg, file);
   } catch (e) {
-    console.error('[config] persistSecret failed:', e.message);
+    logger.error('[config] persistSecret failed:', e.message);
   }
 }
 

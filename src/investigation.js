@@ -1,6 +1,7 @@
 // Auto-investigation queue: enrich new LAN devices with nmap/DNS/OUI lookup.
 // Dependencies injected via init() for testability.
 'use strict';
+const logger = require('./logger');
 
 const { isAllowedRouterIp } = require('./utils');
 
@@ -65,7 +66,7 @@ async function _run(ip, mac) {
   investigatedAt.set(ip, Date.now());
   if (_notes.has(ip, mac)) return;
   try {
-    console.log(`[auto-investigate] start ${ip} (mac=${mac || '?'})`);
+    logger.info(`[auto-investigate] start ${ip} (mac=${mac || '?'})`);
     const result = await _deviceId.investigateIp(ip, {
       ouiDb:         _deviceId.getOuiDb(),
       yamahaExec:    _yamaha.isReady() ? _yamaha.yamahaExec : null,
@@ -79,9 +80,9 @@ async function _run(ip, mac) {
     _notes.set(key, ('[Auto] ' + result.draft).substring(0, 500));
     _notes.save();
     _io.emit('notes-update', { notes: _notes.getAll() });
-    console.log(`[auto-investigate] saved ${ip}`);
+    logger.info(`[auto-investigate] saved ${ip}`);
   } catch (e) {
-    console.error(`[auto-investigate] ${ip} failed: ${e.message}`);
+    logger.error(`[auto-investigate] ${ip} failed: ${e.message}`);
   }
 }
 

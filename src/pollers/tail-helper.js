@@ -1,6 +1,7 @@
 // Shared tail-F lifecycle helper for syslog pollers.
 // Handles: process spawn, readline, auto-restart on exit/error, missing-file retry.
 'use strict';
+const logger = require('../logger');
 
 const fs = require('fs');
 const readline = require('readline');
@@ -50,7 +51,7 @@ function createTailPoller({ name, getLogFile, isEnabled, onLine }) {
 
     if (!fs.existsSync(logFile)) {
       if (!warnedMissing) {
-        console.warn(`[${name}] Log file not found, waiting: ${logFile}`);
+        logger.warn(`[${name}] Log file not found, waiting: ${logFile}`);
         warnedMissing = true;
       }
       scheduleRestart();
@@ -64,27 +65,27 @@ function createTailPoller({ name, getLogFile, isEnabled, onLine }) {
 
     lineReader.on('line', line => {
       try { onLine(line); } catch (e) {
-        console.error(`[${name}] onLine error:`, e.message);
+        logger.error(`[${name}] onLine error:`, e.message);
       }
     });
 
     proc.stderr.on('data', chunk => {
       const text = chunk.toString('utf8').trim();
-      if (text) console.warn(`[${name}] tail stderr:`, text);
+      if (text) logger.warn(`[${name}] tail stderr:`, text);
     });
     proc.on('error', err => {
-      console.error(`[${name}] tail spawn error:`, err.message);
+      logger.error(`[${name}] tail spawn error:`, err.message);
       cleanup(); scheduleRestart();
     });
     proc.on('close', code => {
       cleanup();
       if (started && isEnabled()) {
-        console.warn(`[${name}] tail stopped (${code}), restarting soon`);
+        logger.warn(`[${name}] tail stopped (${code}), restarting soon`);
         scheduleRestart();
       }
     });
 
-    console.log(`[${name}] tailing ${logFile}`);
+    logger.info(`[${name}] tailing ${logFile}`);
   }
 
   function start() {

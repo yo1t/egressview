@@ -1,6 +1,7 @@
 // Notes: per-device memo storage keyed by IP, MAC, or IP|MAC.
 // Pure module — no external module dependencies.
 'use strict';
+const logger = require('./logger');
 
 const fs   = require('fs');
 const path = require('path');
@@ -48,7 +49,7 @@ function load() {
       if (isSafeKey(k) && typeof parsed[k] === 'string') { notes[k] = parsed[k]; kept++; }
       else { dropped++; }
     }
-    console.log(`[notes] Loaded ${kept} entries${dropped ? ` (dropped ${dropped} unsafe)` : ''}`);
+    logger.info(`[notes] Loaded ${kept} entries${dropped ? ` (dropped ${dropped} unsafe)` : ''}`);
   } catch {
     notes = Object.create(null);
   }
@@ -59,7 +60,7 @@ function save() {
     fs.writeFileSync(NOTES_FILE, JSON.stringify(notes, null, 2), { mode: 0o600 });
     try { fs.chmodSync(NOTES_FILE, 0o600); } catch {}
   } catch (e) {
-    console.error('[notes] save failed:', e.message);
+    logger.error('[notes] save failed:', e.message);
   }
 }
 

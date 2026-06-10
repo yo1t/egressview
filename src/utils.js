@@ -26,4 +26,42 @@ function htmlEscape(s) {
   }[c]));
 }
 
-module.exports = { isAllowedRouterIp, htmlEscape };
+// ── Query param parsers ────────────────────────────────────────────────
+
+/**
+ * Parse a Unix epoch millisecond timestamp from a query param string.
+ * Returns the integer value, or null if the value is absent or not a
+ * finite integer (guards against parseInt('abc') → NaN being silently
+ * passed into SQLite queries).
+ *
+ * @param {string|undefined|null} val  - raw value from req.query
+ * @returns {number|null}
+ */
+function parseTimestamp(val) {
+  if (val == null || val === '') return null;
+  // Reject anything that isn't a plain integer string (no trailing garbage,
+  // no decimal point).  parseInt('123abc') would silently return 123, which
+  // could let malformed query params slip through.
+  if (!/^-?\d+$/.test(String(val))) return null;
+  const n = parseInt(val, 10);
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
+/**
+ * Parse a positive integer from a request body value.
+ * Accepts numbers and numeric strings.
+ * Returns the integer value, or null if the value is absent, not a
+ * number, not finite, or not ≥ 1.
+ *
+ * @param {*} val
+ * @returns {number|null}
+ */
+function parsePositiveInt(val) {
+  if (val == null) return null;
+  const n = Number(val);
+  if (!Number.isFinite(n) || n < 1 || Math.floor(n) !== n) return null;
+  return n;
+}
+
+module.exports = { isAllowedRouterIp, htmlEscape, parseTimestamp, parsePositiveInt };

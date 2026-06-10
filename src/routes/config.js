@@ -1,5 +1,6 @@
 // Routes: general settings and data-source configuration
 'use strict';
+const logger = require('../logger');
 
 const { Router } = require('express');
 
@@ -55,12 +56,12 @@ module.exports = function configRoutes(ctx) {
     }
     if (typeof ai === 'boolean') {
       appState.autoInvestigate = ai;
-      console.log(`[auto-investigate] ${ai ? 'enabled' : 'disabled'}`);
+      logger.info(`[auto-investigate] ${ai ? 'enabled' : 'disabled'}`);
     }
     if (rd && [7, 30, 90, 180, 365, 730].includes(Number(rd))) {
       appState.retentionDays = Number(rd);
       history.setRetentionDays(appState.retentionDays);
-      console.log(`[config] Retention set to ${appState.retentionDays} days`);
+      logger.info(`[config] Retention set to ${appState.retentionDays} days`);
     }
 
     saveConfig();
