@@ -1,8 +1,8 @@
+'use strict';
+
 require('dotenv').config();
 // Prefer IPv4 (prevents external HTTPS from stalling on IPv6, e.g. on EC2)
 try { require('dns').setDefaultResultOrder('ipv4first'); } catch {}
-
-'use strict';
 
 const express = require('express');
 const http    = require('http');

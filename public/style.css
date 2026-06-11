@@ -237,12 +237,15 @@
   .log-filter-active { box-shadow: 0 0 0 2px var(--accent); transform: scale(1.08); }
 
   /* ── Beacon banner ────────────────────────────────────────────── */
-  #beacon-banner { border-bottom: 1px solid rgba(251,191,36,0.25); background: rgba(251,191,36,0.07); }
+  /* flex-shrink:0 — the banner keeps its natural height inside #log-container's
+     flex column; the candidate list scrolls internally (max-height) so the
+     log table below always retains its own space and scrollbar */
+  #beacon-banner { flex-shrink: 0; border-bottom: 1px solid rgba(251,191,36,0.25); background: rgba(251,191,36,0.07); }
   #beacon-banner-bar { display: flex; align-items: center; gap: 8px; padding: 5px 10px; cursor: pointer; user-select: none; font-size: 12px; font-weight: 600; color: #fbbf24; }
   #beacon-banner-bar:hover { background: rgba(251,191,36,0.12); }
   .beacon-chevron { font-size: 9px; transition: transform 0.2s; }
   .beacon-chevron.open { transform: rotate(180deg); }
-  #beacon-list { padding: 0 8px 8px; }
+  #beacon-list { padding: 0 8px 8px; max-height: 40vh; overflow-y: auto; }
   .beacon-table { width: 100%; border-collapse: collapse; font-size: 11px; }
   .beacon-table th { color: var(--muted); font-weight: 600; text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); }
   .beacon-table td { padding: 5px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }

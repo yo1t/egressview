@@ -4,6 +4,7 @@ const logger = require('./logger');
 
 const fs = require('fs');
 const path = require('path');
+const Database = require('better-sqlite3');
 
 const DEFAULT_DB_PATH    = path.join(__dirname, '..', '.widemap.db');
 const DEFAULT_BACKUP_DIR = path.join(__dirname, '..', '.widemap-backups');
@@ -26,8 +27,11 @@ function ensureBackupDir() {
   }
 }
 
-// Create a backup copy of the DB file
-function createBackup() {
+// Create a backup of the DB using SQLite's online backup API.
+// db.backup() takes a consistent snapshot including WAL contents, unlike a
+// plain file copy which would miss transactions not yet checkpointed into
+// the main DB file.
+async function createBackup() {
   if (!fs.existsSync(DB_PATH)) {
     logger.info('[backup] No database to backup');
     return null;
@@ -36,14 +40,23 @@ function createBackup() {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
   const backupName = `widemap_${timestamp}.db`;
   const backupPath = path.join(BACKUP_DIR, backupName);
+  // Only clean up the target file on failure if WE created it — a backup
+  // taken in the same second as a previous one shares the timestamped name,
+  // and we must not delete that earlier (good) backup.
+  const existedBefore = fs.existsSync(backupPath);
+  let src = null;
   try {
-    fs.copyFileSync(DB_PATH, backupPath);
+    src = new Database(DB_PATH, { fileMustExist: true });
+    await src.backup(backupPath);
     logger.info(`[backup] Created: ${backupName}`);
     pruneOldBackups();
     return backupName;
   } catch (err) {
     logger.error('[backup] Failed:', err.message);
+    if (!existedBefore) { try { fs.unlinkSync(backupPath); } catch {} }  // remove partial backup
     return null;
+  } finally {
+    if (src) { try { src.close(); } catch {} }
   }
 }
 
@@ -88,32 +101,37 @@ function getBackupPath(name) {
 }
 
 // Restore from a backup file (replaces current DB)
-function restoreFromFile(sourcePath) {
+async function restoreFromFile(sourcePath) {
   if (!fs.existsSync(sourcePath)) {
     throw new Error('Backup file not found');
   }
   // Create a safety backup of current DB before restoring
-  createBackup();
-  // Replace current DB
+  await createBackup();
+  // Replace current DB. Backup files are closed snapshots (no live WAL),
+  // so a plain copy is safe here. Remove stale WAL/SHM of the old DB so
+  // they are not replayed against the restored file.
   fs.copyFileSync(sourcePath, DB_PATH);
+  for (const suffix of ['-wal', '-shm']) {
+    try { fs.unlinkSync(DB_PATH + suffix); } catch {}
+  }
   logger.info(`[backup] Restored from: ${path.basename(sourcePath)}`);
 }
 
 // Restore from a named backup generation
-function restoreFromGeneration(name) {
+async function restoreFromGeneration(name) {
   const p = getBackupPath(name);
   if (!p) throw new Error('Backup not found: ' + name);
-  restoreFromFile(p);
+  await restoreFromFile(p);
 }
 
 // Start periodic backup
 function startPeriodicBackup() {
   stopPeriodicBackup();
   const intervalMs = backupIntervalHours * 60 * 60 * 1000;
-  backupIntervalTimer = setInterval(createBackup, intervalMs);
+  backupIntervalTimer = setInterval(() => { createBackup().catch(() => {}); }, intervalMs);
   logger.info(`[backup] Periodic backup every ${backupIntervalHours}h, keep ${maxGenerations} generations`);
   // Create initial backup if none exist
-  if (listBackups().length === 0) createBackup();
+  if (listBackups().length === 0) createBackup().catch(() => {});
 }
 
 function stopPeriodicBackup() {

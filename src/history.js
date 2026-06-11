@@ -25,21 +25,72 @@ function _secureDbFiles() {
   }
 }
 
+function _openDb(p) {
+  const d = new Database(p);
+  d.pragma('journal_mode = WAL');
+  d.pragma('busy_timeout = 5000');
+  return d;
+}
+
+function _isDbHealthy(d) {
+  try { return d.pragma('integrity_check')[0]?.integrity_check === 'ok'; }
+  catch { return false; }
+}
+
+function _removeDbFiles(p) {
+  for (const suffix of ['', '-wal', '-shm']) {
+    try { fs.unlinkSync(p + suffix); } catch {}
+  }
+}
+
+/**
+ * Copy the most recent backup generation over `targetPath`.
+ * Backup files are closed snapshots, so a plain copy is safe.
+ * @returns {boolean} true if a backup was copied
+ */
+function _tryRestoreLatestBackup(targetPath) {
+  try {
+    const backup = require('./backup');  // lazy: backup.js has no dependency on history.js
+    const list = backup.listBackups();   // sorted oldest first
+    if (!list.length) return false;
+    const latest = list[list.length - 1];
+    const p = backup.getBackupPath(latest.name);
+    if (!p) return false;
+    fs.copyFileSync(p, targetPath);
+    logger.info(`[history] Restored from backup: ${latest.name}`);
+    return true;
+  } catch (e) {
+    logger.error('[history] Backup restore failed:', e.message);
+    return false;
+  }
+}
+
 function initDb(dbPath) {
-  db = new Database(dbPath || DB_PATH);
-  db.pragma('journal_mode = WAL');
-  db.pragma('busy_timeout = 5000');
+  const actualPath = dbPath || DB_PATH;
+  // A heavily corrupted file can throw on open (SQLITE_NOTADB from the first
+  // pragma), so treat open failure and integrity failure the same way.
+  try { db = _openDb(actualPath); } catch { db = null; }
   _secureDbFiles();
 
-  // Integrity check on startup
-  const integrity = db.pragma('integrity_check');
-  if (integrity[0]?.integrity_check !== 'ok') {
-    logger.error('[history] Database integrity check failed, recreating...');
-    db.close();
-    fs.unlinkSync(DB_PATH);
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('busy_timeout = 5000');
+  // Integrity check on startup; on failure, try the latest backup before
+  // falling back to an empty database.
+  if (!db || !_isDbHealthy(db)) {
+    logger.error('[history] Database integrity check failed');
+    if (db) { try { db.close(); } catch {} }
+    _removeDbFiles(actualPath);
+
+    if (_tryRestoreLatestBackup(actualPath)) {
+      try { db = _openDb(actualPath); } catch { db = null; }
+      if (!db || !_isDbHealthy(db)) {
+        logger.error('[history] Restored backup is also corrupt, recreating empty DB');
+        if (db) { try { db.close(); } catch {} }
+        _removeDbFiles(actualPath);
+        db = _openDb(actualPath);
+      }
+    } else {
+      logger.warn('[history] No usable backup found, recreating empty DB');
+      db = _openDb(actualPath);
+    }
     _secureDbFiles();
   }
 
@@ -252,11 +303,11 @@ function closeDb() {
 
 // ─── Test helper ─────────────────────────────────────────────────────────────
 
-/** Re-initialize with an in-memory SQLite DB for unit tests. */
-function _initForTest() {
+/** Re-initialize with an in-memory SQLite DB (or a given path) for unit tests. */
+function _initForTest(dbPath) {
   if (db) { try { db.close(); } catch {} db = null; }
   connectionHistory.clear();
-  initDb(':memory:');
+  initDb(dbPath || ':memory:');
 }
 
 /** Insert into DB AND sync to in-memory Map (for WebSocket filter tests). */

@@ -175,7 +175,7 @@ All settings are stored in `.widemap.json` (auto-generated, gitignored). You can
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3000` | HTTP server port |
-| `POLL_INTERVAL_MS` | `2000` | ASUS polling interval (ms) |
+| `POLL_INTERVAL_MS` | `60000` | ASUS polling interval (ms) |
 | `ROUTER_IP` | `192.168.1.1` | Default ASUS router IP |
 | `YAMAHA_IP` | — | Yamaha RTX IP address |
 | `YAMAHA_USER` | — | Yamaha SSH username |

@@ -190,3 +190,69 @@ describe('initial connection filter (P2-4: 1h initial emit + 24h background fetc
   });
 
 });
+
+// ─── Corrupt DB recovery (integrity check → backup restore) ───────────────────
+
+describe('corrupt DB recovery', () => {
+  const fs   = require('fs');
+  const os   = require('os');
+  const path = require('path');
+  const Database = require('better-sqlite3');
+  const backup   = require('../../src/backup');
+
+  function makeConnectionsDb(p, dst) {
+    const d = new Database(p);
+    d.pragma('journal_mode = WAL');
+    d.exec(`CREATE TABLE IF NOT EXISTS connections (
+      src TEXT NOT NULL, dst TEXT NOT NULL, dport INTEGER NOT NULL, proto TEXT NOT NULL,
+      sport INTEGER, ttl INTEGER, srcMac TEXT, srcVendor TEXT, srcDnsName TEXT, srcMdnsName TEXT,
+      dstHost TEXT, country TEXT, org TEXT, lat REAL, lon REAL, city TEXT,
+      firstSeen INTEGER NOT NULL, lastSeen INTEGER NOT NULL,
+      PRIMARY KEY (src, dst, dport, proto)
+    )`);
+    d.prepare(`INSERT INTO connections (src, dst, dport, proto, firstSeen, lastSeen)
+               VALUES ('192.168.1.1', ?, 443, 'TCP', ?, ?)`).run(dst, Date.now(), Date.now());
+    d.close();
+  }
+
+  it('restores from the latest backup when the DB file is corrupt', () => {
+    const tmpDir    = fs.mkdtempSync(path.join(os.tmpdir(), 'widemap-history-recovery-'));
+    const dbPath    = path.join(tmpDir, 'test.db');
+    const backupDir = path.join(tmpDir, 'backups');
+    try {
+      // A good backup exists…
+      fs.mkdirSync(backupDir, { recursive: true });
+      makeConnectionsDb(path.join(backupDir, 'widemap_2025-01-01_00-00-00.db'), '203.0.113.99');
+      backup._setPathsForTest(dbPath, backupDir);
+
+      // …and the live DB file is garbage
+      fs.writeFileSync(dbPath, 'this is not a sqlite database');
+
+      history._initForTest(dbPath);   // integrity fails → restore from backup
+
+      const rows = history.queryByTimeRange(null, null);
+      assert.equal(rows.length, 1, 'row from the backup should be present');
+      assert.equal(rows[0].dst, '203.0.113.99');
+    } finally {
+      history._initForTest();         // back to :memory: for subsequent tests
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to an empty DB when no backup exists', () => {
+    const tmpDir    = fs.mkdtempSync(path.join(os.tmpdir(), 'widemap-history-recovery-'));
+    const dbPath    = path.join(tmpDir, 'test.db');
+    const emptyDir  = path.join(tmpDir, 'backups-empty');
+    try {
+      backup._setPathsForTest(dbPath, emptyDir);
+      fs.writeFileSync(dbPath, 'garbage');
+
+      history._initForTest(dbPath);   // integrity fails → no backup → empty DB
+
+      assert.equal(history.queryByTimeRange(null, null).length, 0);
+    } finally {
+      history._initForTest();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});

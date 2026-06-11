@@ -24,8 +24,8 @@ module.exports = function backupRoutes(ctx) {
     res.json({ backups: backup.listBackups(), config: backup.getConfig() });
   });
 
-  router.post('/backup/create', requireAdmin, (req, res) => {
-    const name = backup.createBackup();
+  router.post('/backup/create', requireAdmin, async (req, res) => {
+    const name = await backup.createBackup();
     if (name) res.json({ success: true, name });
     else res.status(500).json({ error: 'Backup failed' });
   });
@@ -36,11 +36,11 @@ module.exports = function backupRoutes(ctx) {
     res.download(p);
   });
 
-  router.post('/backup/restore', requireAdmin, (req, res) => {
+  router.post('/backup/restore', requireAdmin, async (req, res) => {
     const { name } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Backup name required' });
     try {
-      backup.restoreFromGeneration(name);
+      await backup.restoreFromGeneration(name);
       history.loadConnectionHistory();
       runtime.setKnownMacs(history.getKnownMacs());
       devices.reopen();                               // re-open DB connection to read restored data
@@ -70,14 +70,14 @@ module.exports = function backupRoutes(ctx) {
       chunks.push(chunk);
     });
 
-    req.on('end', () => {
+    req.on('end', async () => {
       if (aborted) return;
       try {
         const buf = Buffer.concat(chunks);
         if (buf.length < 100) return res.status(400).json({ error: 'File too small' });
         const tempPath = path.join(appRoot, '.widemap-upload-temp.db');
         fs.writeFileSync(tempPath, buf);
-        backup.restoreFromFile(tempPath);
+        await backup.restoreFromFile(tempPath);
         fs.unlinkSync(tempPath);
         history.loadConnectionHistory();
         runtime.setKnownMacs(history.getKnownMacs());

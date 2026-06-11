@@ -175,7 +175,7 @@ npm start
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
 | `PORT` | `3000` | HTTPサーバーポート |
-| `POLL_INTERVAL_MS` | `2000` | ASUSポーリング間隔（ミリ秒） |
+| `POLL_INTERVAL_MS` | `60000` | ASUSポーリング間隔（ミリ秒） |
 | `ROUTER_IP` | `192.168.1.1` | ASUSルーターのデフォルトIP |
 | `YAMAHA_IP` | — | Yamaha RTXのIPアドレス |
 | `YAMAHA_USER` | — | Yamaha SSHユーザー名 |
