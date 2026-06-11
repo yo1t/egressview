@@ -178,3 +178,57 @@ describe('detectBeacons', () => {
     assert.equal(results[0].dstHost, 'example.com');
   });
 });
+
+// ─── Whitelist (P2-20) ────────────────────────────────────────────────────────
+
+describe('whitelistDomains option', () => {
+  const { isWhitelistedHost } = require('../../src/beacon-detector');
+
+  function regularEvents(dstHost, n = 6) {
+    const T0 = 1_700_000_000_000;
+    return Array.from({ length: n }, (_, i) => ({
+      src: '192.168.1.5', dst: '93.184.216.34', dstHost,
+      dport: 443, proto: 'tcp', seenAt: T0 + i * 300_000,
+    }));
+  }
+
+  it('isWhitelistedHost: exact match', () => {
+    assert.equal(isWhitelistedHost('amazonaws.com', ['amazonaws.com']), true);
+  });
+
+  it('isWhitelistedHost: subdomain match', () => {
+    assert.equal(isWhitelistedHost('kinesis.us-east-1.amazonaws.com', ['amazonaws.com']), true);
+  });
+
+  it('isWhitelistedHost: no partial-string match (evil-amazonaws.com)', () => {
+    assert.equal(isWhitelistedHost('evil-amazonaws.com', ['amazonaws.com']), false);
+  });
+
+  it('isWhitelistedHost: case-insensitive', () => {
+    assert.equal(isWhitelistedHost('API.Amazon.COM', ['amazon.com']), true);
+  });
+
+  it('isWhitelistedHost: null host never matches', () => {
+    assert.equal(isWhitelistedHost(null, ['amazon.com']), false);
+  });
+
+  it('detectBeacons excludes whitelisted dstHost', () => {
+    const events = regularEvents('kinesis.us-east-1.amazonaws.com');
+    const without = detectBeacons(events);
+    const withWl  = detectBeacons(events, { whitelistDomains: ['amazonaws.com'] });
+    assert.equal(without.length, 1, 'detected without whitelist');
+    assert.equal(withWl.length, 0, 'excluded with whitelist');
+  });
+
+  it('detectBeacons keeps non-whitelisted hosts', () => {
+    const events = regularEvents('c2.suspicious.example');
+    const result = detectBeacons(events, { whitelistDomains: ['amazonaws.com'] });
+    assert.equal(result.length, 1);
+  });
+
+  it('events without dstHost are not affected by whitelist', () => {
+    const events = regularEvents(null);
+    const result = detectBeacons(events, { whitelistDomains: ['amazonaws.com'] });
+    assert.equal(result.length, 1, 'IP-only events still detected');
+  });
+});

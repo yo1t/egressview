@@ -58,7 +58,7 @@ function updateLogView() {
     conns = conns.filter(c => c.src === selectedIp || (selectedMac && c.srcMac === selectedMac));
     if (deviceFilterEl) {
       deviceFilterEl.style.display = 'inline';
-      deviceFilterEl.innerHTML = `<span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;cursor:pointer" title="${esc(t('log.deviceFilter.clear') || 'クリア')}" id="log-device-filter-clear">${esc(selectedIp)} のみ ✕</span>`;
+      deviceFilterEl.innerHTML = `<span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;cursor:pointer" title="${esc(t('log.deviceFilter.clear'))}" id="log-device-filter-clear">${esc(tVars('log.deviceFilter.only', { value: selectedIp }))}</span>`;
       const clearBtn = document.getElementById('log-device-filter-clear');
       if (clearBtn) clearBtn.addEventListener('click', () => {
         selectedMac = null;

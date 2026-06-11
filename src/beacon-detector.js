@@ -14,11 +14,22 @@
 const PRIVATE_RE = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|169\.254\.)/;
 
 const DEFAULTS = {
-  minObs:        4,            // minimum observations per group
-  maxCov:        0.5,          // max coefficient of variation (0 = perfectly regular)
-  minIntervalMs: 60_000,       // 1 minute  — faster is just normal traffic
-  maxIntervalMs: 4 * 3600_000, // 4 hours   — slower is too sparse to flag
+  minObs:           4,            // minimum observations per group
+  maxCov:           0.5,          // max coefficient of variation (0 = perfectly regular)
+  minIntervalMs:    60_000,       // 1 minute  — faster is just normal traffic
+  maxIntervalMs:    4 * 3600_000, // 4 hours   — slower is too sparse to flag
+  whitelistDomains: [],           // dstHost suffixes to skip (known-benign vendor telemetry)
 };
+
+/**
+ * True if `host` equals one of the whitelist domains or is a subdomain of one.
+ * Matching is case-insensitive; null/empty hosts never match.
+ */
+function isWhitelistedHost(host, whitelistDomains) {
+  if (!host || !whitelistDomains || !whitelistDomains.length) return false;
+  const h = String(host).toLowerCase();
+  return whitelistDomains.some(d => h === d || h.endsWith('.' + d));
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -50,12 +61,14 @@ function coefficientOfVariation(values) {
  * @returns {Array<BeaconCandidate>}  Sorted by intervalCov ASC (most regular first).
  */
 function detectBeacons(events, opts = {}) {
-  const { minObs, maxCov, minIntervalMs, maxIntervalMs } = { ...DEFAULTS, ...opts };
+  const { minObs, maxCov, minIntervalMs, maxIntervalMs, whitelistDomains } = { ...DEFAULTS, ...opts };
+  const wl = (whitelistDomains || []).map(d => String(d).toLowerCase());
 
   // Group events by connection key
   const groups = new Map();
   for (const e of events) {
     if (PRIVATE_RE.test(e.dst)) continue;
+    if (isWhitelistedHost(e.dstHost, wl)) continue;  // known-benign vendor telemetry
     const key = `${e.src}|${e.dst}|${e.dport}|${e.proto}`;
     if (!groups.has(key)) groups.set(key, { meta: e, times: [] });
     groups.get(key).times.push(e.seenAt);
@@ -105,4 +118,4 @@ function detectBeacons(events, opts = {}) {
   return candidates.sort((a, b) => a.intervalCov - b.intervalCov);
 }
 
-module.exports = { detectBeacons, _median: median, _cov: coefficientOfVariation };
+module.exports = { detectBeacons, isWhitelistedHost, DEFAULTS, _median: median, _cov: coefficientOfVariation };

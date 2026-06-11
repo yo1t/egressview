@@ -357,6 +357,62 @@ document.getElementById('datasource-save-btn').addEventListener('click', async (
   }
 });
 
+// ── Beacon detection settings (P2-20) ─────────────────────────────────────────
+
+async function loadBeaconConfig() {
+  try {
+    const r = await apiFetch(_BASE+'/api/beacons/config');
+    const { config } = await r.json();
+    if (!config) return;
+    document.getElementById('s-beacon-enabled').checked = config.enabled !== false;
+    document.getElementById('s-beacon-minobs').value    = config.minObs;
+    document.getElementById('s-beacon-maxcov').value    = config.maxCov;
+    document.getElementById('s-beacon-minint').value    = Math.round(config.minIntervalMs / 60000);
+    document.getElementById('s-beacon-maxint').value    = Math.round(config.maxIntervalMs / 60000);
+    document.getElementById('s-beacon-scaninterval').value = String(Math.round(config.scanIntervalMs / 60000));
+    document.getElementById('s-beacon-whitelist').value = (config.whitelistDomains || []).join('\n');
+    document.getElementById('s-beacon-orgs').value      = (config.orgAllowlist || []).join('\n');
+  } catch (e) { /* settings pane stays at defaults */ }
+}
+
+document.getElementById('beacon-save-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('beacon-save-btn');
+  btn.disabled = true;
+  try {
+    const lines = id => document.getElementById(id).value
+      .split('\n').map(s => s.trim()).filter(Boolean);
+    const body = {
+      enabled:          document.getElementById('s-beacon-enabled').checked,
+      minObs:           parseInt(document.getElementById('s-beacon-minobs').value, 10) || 4,
+      maxCov:           parseFloat(document.getElementById('s-beacon-maxcov').value) || 0.5,
+      minIntervalMs:    (parseInt(document.getElementById('s-beacon-minint').value, 10) || 1) * 60000,
+      maxIntervalMs:    (parseInt(document.getElementById('s-beacon-maxint').value, 10) || 240) * 60000,
+      scanIntervalMs:   parseInt(document.getElementById('s-beacon-scaninterval').value, 10) * 60000,
+      whitelistDomains: lines('s-beacon-whitelist'),
+      orgAllowlist:     lines('s-beacon-orgs'),
+    };
+    const r = await apiFetch(_BASE+'/api/beacons/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (data.success) {
+      showStatus('beacon-status', '✓ 保存しました（再スキャン実行中）', true);
+      if (typeof loadBeacons === 'function') setTimeout(loadBeacons, 2000); // refresh banner after rescan
+    } else {
+      showStatus('beacon-status', data.error || 'エラー', false);
+    }
+  } catch (e) {
+    showStatus('beacon-status', 'Error: ' + e.message, false);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// Load beacon config when the threat tab is opened
+const threatTabBtn = document.querySelector('[data-tab="threat"]');
+if (threatTabBtn) threatTabBtn.addEventListener('click', loadBeaconConfig);
+
 document.getElementById('backup-create-btn').addEventListener('click', async () => {
   try {
     const r = await apiFetch(_BASE+'/api/backup/create', { method: 'POST' });

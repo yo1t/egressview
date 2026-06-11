@@ -221,6 +221,69 @@
 
           <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
 
+          <!-- Beacon detection (P2-20) -->
+          <label class="pane-title" style="margin-bottom:8px;font-size:12px">
+            <input type="checkbox" id="s-beacon-enabled" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
+            <span data-i18n="settings.beacon.section">⏱ ビーコン検出（C2ハートビート）</span>
+          </label>
+          <p style="font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.5;padding-left:22px" data-i18n="settings.beacon.desc">
+            同一宛先への一定間隔の通信（C2ハートビートの典型パターン）を自動検出します。候補は通信ログタブのバナーに表示されます。
+          </p>
+          <div class="section-inputs" id="beacon-inputs">
+            <div class="settings-row">
+              <div class="form-group">
+                <label class="form-label" data-i18n="settings.beacon.minObs">最低観測回数</label>
+                <input id="s-beacon-minobs" class="form-input" type="number" min="2" step="1" placeholder="4">
+              </div>
+              <div class="form-group">
+                <label class="form-label" data-i18n="settings.beacon.maxCov">最大変動係数（規則性）</label>
+                <input id="s-beacon-maxcov" class="form-input" type="number" min="0.05" max="2" step="0.05" placeholder="0.5">
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="form-group">
+                <label class="form-label" data-i18n="settings.beacon.minInterval">最小間隔（分）</label>
+                <input id="s-beacon-minint" class="form-input" type="number" min="1" step="1" placeholder="1">
+              </div>
+              <div class="form-group">
+                <label class="form-label" data-i18n="settings.beacon.maxInterval">最大間隔（分）</label>
+                <input id="s-beacon-maxint" class="form-input" type="number" min="2" step="1" placeholder="240">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="settings.beacon.scanInterval">スキャン間隔</label>
+              <select id="s-beacon-scaninterval" class="form-input">
+                <option value="15" data-i18n="settings.beacon.15m">15分ごと</option>
+                <option value="30" data-i18n="settings.beacon.30m">30分ごと</option>
+                <option value="60" selected data-i18n="settings.beacon.1h">1時間ごと</option>
+                <option value="180" data-i18n="settings.beacon.3h">3時間ごと</option>
+                <option value="360" data-i18n="settings.beacon.6h">6時間ごと</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="settings.beacon.whitelist">除外ドメイン（1行に1件、サブドメイン含む）</label>
+              <textarea id="s-beacon-whitelist" class="form-input" rows="6"
+                        style="resize:vertical;font-family:monospace;font-size:10px;line-height:1.6"
+                        placeholder="amazonaws.com&#10;netflix.com" spellcheck="false"></textarea>
+              <p style="font-size:9px;color:var(--muted);margin-top:3px;line-height:1.5" data-i18n="settings.beacon.whitelistHint">
+                既知の良性 telemetry（IoT ベンダーのクラウド等）を候補から除外します。
+              </p>
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="settings.beacon.orgs">除外組織（RDAP org 部分一致、1行に1件）</label>
+              <textarea id="s-beacon-orgs" class="form-input" rows="4"
+                        style="resize:vertical;font-family:monospace;font-size:10px;line-height:1.6"
+                        placeholder="Amazon&#10;Google" spellcheck="false"></textarea>
+              <p style="font-size:9px;color:var(--muted);margin-top:3px;line-height:1.5" data-i18n="settings.beacon.orgsHint">
+                ホスト名が解決できない宛先にも効きます。脅威フィードに該当する宛先は除外されず候補に残ります。
+              </p>
+            </div>
+            <button class="connect-btn" id="beacon-save-btn" data-i18n="settings.btn.save">保存</button>
+            <div class="settings-status" id="beacon-status"></div>
+          </div>
+
+          <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
+
           <div class="pane-title" style="cursor:default;font-size:12px;margin-bottom:12px" data-i18n="settings.slack.section">🔔 Slack通知</div>
           <p style="font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.5" data-i18n="settings.slack.desc">
             脅威検出時に Slack DM で通知します。
@@ -448,7 +511,7 @@
   </div>
   <div id="stats-container" style="display:none">
     <div class="stats-header">
-      <span id="stats-title">統計情報</span>
+      <span id="stats-title" data-i18n="tab.stats">📈 統計情報</span>
       <span id="stats-subtitle" style="color:var(--muted);font-size:11px;margin-left:8px;"></span>
     </div>
     <div class="stats-chart" id="stats-timeline">
@@ -543,14 +606,14 @@
       <span class="log-title" data-i18n="devices.title">🖥 端末一覧</span>
       <span id="devices-count" style="color:var(--muted);font-size:11px;margin-left:8px;"></span>
       <span id="dv-device-filter" style="margin-left:8px;display:none"></span>
-      <button id="dv-clear-filters-btn" style="display:none;margin-left:6px;padding:2px 8px;font-size:10px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;">フィルタ解除</button>
+      <button id="dv-clear-filters-btn" style="display:none;margin-left:6px;padding:2px 8px;font-size:10px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;" data-i18n="devices.clearFilters">フィルタ解除</button>
       <button id="devices-refresh-btn" style="margin-left:auto;padding:3px 10px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text);cursor:pointer;" data-i18n="devices.refresh">更新</button>
     </div>
     <!-- main area: table + detail panel side by side -->
     <div style="display:flex;flex:1;overflow:hidden;gap:0;min-height:0;">
       <div style="display:flex;flex-direction:column;flex:1;overflow:hidden;min-width:0;gap:8px;">
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-          <input id="devices-search" type="text" placeholder="IP / MAC / 名前 / ベンダー…" autocomplete="off"
+          <input id="devices-search" type="text" data-i18n-placeholder="devices.search.placeholder" placeholder="IP / MAC / 名前 / ベンダー…" autocomplete="off"
             style="flex:1;min-width:180px;max-width:320px;padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--text);">
         </div>
         <!-- P1-8: status filter bar -->
@@ -579,14 +642,14 @@
           <!-- column search popup (shared with devices only) -->
           <div id="dv-search-popup" class="log-search-popup hidden">
             <div class="log-search-popup-inner">
-              <div class="log-search-popup-title" id="dv-search-popup-title">フィルター</div>
+              <div class="log-search-popup-title" id="dv-search-popup-title" data-i18n="log.filter.title">フィルター</div>
               <select id="dv-search-mode">
                 <option value="contains" data-i18n="log.filter.contains">含む</option>
                 <option value="startsWith" data-i18n="log.filter.startsWith">で始まる</option>
                 <option value="endsWith" data-i18n="log.filter.endsWith">で終わる</option>
                 <option value="regex" data-i18n="log.filter.regex">正規表現</option>
               </select>
-              <input type="text" id="dv-search-input" placeholder="検索条件..." autocomplete="off">
+              <input type="text" id="dv-search-input" data-i18n-placeholder="log.filter.placeholder" placeholder="検索条件..." autocomplete="off">
               <div class="log-search-popup-actions">
                 <button id="dv-search-apply" data-i18n="log.filter.apply">適用</button>
                 <button id="dv-search-clear" data-i18n="log.filter.clear">クリア</button>
@@ -605,7 +668,7 @@
         <div class="dv-detail-body" id="dv-detail-body"></div>
         <div class="dv-detail-actions">
           <button id="dv-detail-investigate" data-i18n="note.investigate">🔍 自動調査</button>
-          <button id="dv-detail-archive">📦 アーカイブ</button>
+          <button id="dv-detail-archive" data-i18n="devices.archive" data-i18n-title="devices.archive.title" title="端末を一覧から非表示にする（データは保持）">📦 アーカイブ</button>
           <button id="dv-detail-save" class="btn-save" data-i18n="note.save">保存</button>
         </div>
       </div>

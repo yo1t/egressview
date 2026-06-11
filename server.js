@@ -61,6 +61,31 @@ const appState = {
   dnsmasqEnabled: true,  dnsmasqLogFile: '/var/log/dnsmasq-queries.log',
   inspectEnabled: true,  inspectLogFile: '/var/log/yamaha-router.log',
   dhcpdEnabled:   true,  dhcpdLogFile:   '/var/log/yamaha-router.log',
+  beaconConfig: {
+    enabled:        true,
+    minObs:         4,
+    maxCov:         0.5,
+    minIntervalMs:  60_000,
+    maxIntervalMs:  4 * 3600_000,
+    scanIntervalMs: 60 * 60 * 1000,
+    // Known-benign vendor telemetry — defaults measured against production
+    // false positives on 2026-06-12 (296 candidates, all vendor heartbeats)
+    whitelistDomains: [
+      'amazonaws.com', 'amazon.com', 'amazon.co.jp', 'aws.dev',
+      'amazonalexa.com', 'cloudfront.net',
+      'firetvcaptiveportal.com', 'mmechocaptiveportal.com',
+      'netflix.com', 'nflxvideo.net',
+      'daikinsmartdb.jp',
+      'time.apple.com', 'push.apple.com',
+      'windows.com', 'windowsupdate.com',
+    ],
+    // RDAP org substrings — candidates resolving to these orgs are excluded
+    // unless the destination also hits a threat-intel feed
+    orgAllowlist: [
+      'Amazon', 'Google', 'Microsoft', 'Apple', 'Akamai',
+      'Netflix', 'Fastly', 'Cloudflare', 'GitHub', 'New Relic',
+    ],
+  },
 };
 
 // 差分 push 用タイムスタンプ: 前回 broadcast 以降に更新された接続だけを送信するため
@@ -113,6 +138,18 @@ function loadConfig() {
   if (data.slack)      notifier.configure({ ...data.slack, language: appState.uiLanguage });
   if (data.adminToken) appState.adminToken = data.adminToken;
 
+  if (data.beacons && typeof data.beacons === 'object') {
+    const bc = appState.beaconConfig;
+    if (typeof data.beacons.enabled === 'boolean')        bc.enabled        = data.beacons.enabled;
+    if (Number.isFinite(data.beacons.minObs))             bc.minObs         = data.beacons.minObs;
+    if (Number.isFinite(data.beacons.maxCov))             bc.maxCov         = data.beacons.maxCov;
+    if (Number.isFinite(data.beacons.minIntervalMs))      bc.minIntervalMs  = data.beacons.minIntervalMs;
+    if (Number.isFinite(data.beacons.maxIntervalMs))      bc.maxIntervalMs  = data.beacons.maxIntervalMs;
+    if (Number.isFinite(data.beacons.scanIntervalMs))     bc.scanIntervalMs = data.beacons.scanIntervalMs;
+    if (Array.isArray(data.beacons.whitelistDomains))     bc.whitelistDomains = data.beacons.whitelistDomains;
+    if (Array.isArray(data.beacons.orgAllowlist))         bc.orgAllowlist     = data.beacons.orgAllowlist;
+  }
+
   appState.dhcpdEnabled  = data.dhcpd?.enabled  !== false;
   appState.dhcpdLogFile  = data.dhcpd?.logFile   || '/var/log/yamaha-router.log';
   appState.inspectEnabled = data.inspect?.enabled !== false;
@@ -151,6 +188,7 @@ function saveConfig() {
     dnsmasq: { enabled: appState.dnsmasqEnabled, logFile: appState.dnsmasqLogFile },
     inspect: { enabled: appState.inspectEnabled, logFile: appState.inspectLogFile },
     dhcpd:   { enabled: appState.dhcpdEnabled,   logFile: appState.dhcpdLogFile   },
+    beacons: appState.beaconConfig,
   };
   // Re-read to preserve passwords (not held in module state getters)
   try {
@@ -319,6 +357,47 @@ function reMatchAndNotify() {
   }
 }
 
+// ─── Beacon detection scan ────────────────────────────────────────────────────
+
+let beaconScanTimer = null;
+
+function runBeaconScan() {
+  const cfg = appState.beaconConfig;
+  if (!cfg.enabled) return;
+
+  const events = beacons.getEvents();
+  const detected = beaconDetector.detectBeacons(events, {
+    minObs:           cfg.minObs,
+    maxCov:           cfg.maxCov,
+    minIntervalMs:    cfg.minIntervalMs,
+    maxIntervalMs:    cfg.maxIntervalMs,
+    whitelistDomains: cfg.whitelistDomains,
+  });
+
+  // RDAP org allowlist: drop candidates resolving to known-benign vendors.
+  // A threat-intel hit overrides the allowlist — never hide a flagged dst.
+  const allow = cfg.orgAllowlist.map(o => o.toLowerCase());
+  const candidates = detected.filter(c => {
+    if (threatIntel.matchThreatIntel(c.dst, c.dstHost || c.dst)) return true;
+    const org = (enrichment.getRdapCache().get(c.dst)?.org || '').toLowerCase();
+    return !org || !allow.some(a => org.includes(a));
+  });
+
+  for (const c of candidates) beacons.upsertBeacon(c);
+  const removed = beacons.pruneCandidatesNotIn(
+    candidates.map(c => `${c.src}|${c.dst}|${c.dport}|${c.proto}`)
+  );
+  const pruned = beacons.pruneEvents();
+  console.log(`[beacons] scan: ${candidates.length} candidate(s) from ${events.length} events ` +
+              `(${detected.length - candidates.length} org-allowlisted, ${removed} stale removed, ${pruned} old events pruned)`);
+}
+
+/** (Re)start the periodic scan using the configured interval. */
+function scheduleBeaconScan() {
+  if (beaconScanTimer) clearInterval(beaconScanTimer);
+  beaconScanTimer = setInterval(runBeaconScan, appState.beaconConfig.scanIntervalMs);
+}
+
 // ─── Mount routes ─────────────────────────────────────────────────────────────
 
 const routeCtx = {
@@ -344,7 +423,10 @@ app.use('/api', devicesRoutes(routeCtx));
 app.use('/api', backupRoutes({ ...routeCtx, saveConfig }));
 app.use('/api', configRoutes(routeCtx));
 app.use('/api', slackRoutes(routeCtx));
-app.use('/api', beaconsRoutes({ requireAdmin, beacons }));
+app.use('/api', beaconsRoutes({
+  requireAdmin, beacons, appState, saveConfig,
+  onConfigChange: () => { scheduleBeaconScan(); runBeaconScan(); },
+}));
 
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
 
@@ -500,15 +582,7 @@ server.listen(PORT, () => {
   });
   setInterval(() => threatIntel.fetchThreatIntel().then(reMatchAndNotify), 60 * 60 * 1000);
 
-  // Beacon detection: scan hourly, prune stale events
-  function runBeaconScan() {
-    const events     = beacons.getEvents();
-    const candidates = beaconDetector.detectBeacons(events);
-    for (const c of candidates) beacons.upsertBeacon(c);
-    const pruned = beacons.pruneEvents();
-    console.log(`[beacons] scan: ${candidates.length} candidate(s) from ${events.length} events (pruned ${pruned} old events)`);
-  }
-  setInterval(runBeaconScan, 60 * 60 * 1000);
+  scheduleBeaconScan();
 
   backup.startPeriodicBackup();
 });

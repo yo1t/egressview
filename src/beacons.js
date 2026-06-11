@@ -90,9 +90,17 @@ function pruneEvents(before) {
 /**
  * Insert or update a beacon candidate.
  * Matches on (src, dst, dport, proto) with status='candidate'.
+ * If the user dismissed this key, the dismissal is sticky: re-detection
+ * on the next scan must NOT resurrect it as a new candidate row.
  */
 function upsertBeacon(c) {
   if (!db) return;
+  const dismissed = db.prepare(`
+    SELECT id FROM beacons
+    WHERE src=? AND dst=? AND dport=? AND proto=? AND status='dismissed'
+  `).get(c.src, c.dst, c.dport, c.proto);
+  if (dismissed) return;
+
   const existing = db.prepare(`
     SELECT id FROM beacons
     WHERE src=? AND dst=? AND dport=? AND proto=? AND status='candidate'
@@ -113,6 +121,35 @@ function upsertBeacon(c) {
     `).run(c.src, c.dst, c.dstHost || null, c.dport, c.proto,
            c.intervalMs, c.intervalCov, c.obsCount, c.firstSeen, c.lastSeen, Date.now());
   }
+}
+
+/**
+ * Remove candidate rows that were NOT re-detected by the current scan.
+ * Each scan analyses the full event window, so a candidate missing from
+ * `detectedKeys` is stale — e.g. the pattern stopped, or a new whitelist
+ * entry now excludes it.  Dismissed rows are kept (user decision record).
+ *
+ * @param {string[]} detectedKeys  Array of "src|dst|dport|proto" keys.
+ * @returns {number}  Number of rows removed.
+ */
+function pruneCandidatesNotIn(detectedKeys) {
+  if (!db) return 0;
+  const keep = new Set(detectedKeys);
+  const rows = db.prepare(
+    "SELECT id, src, dst, dport, proto FROM beacons WHERE status='candidate'"
+  ).all();
+  const del = db.prepare('DELETE FROM beacons WHERE id=?');
+  let removed = 0;
+  const tx = db.transaction(() => {
+    for (const r of rows) {
+      if (!keep.has(`${r.src}|${r.dst}|${r.dport}|${r.proto}`)) {
+        del.run(r.id);
+        removed++;
+      }
+    }
+  });
+  tx();
+  return removed;
 }
 
 /** Return all beacons, most regular (lowest CoV) first. */
@@ -164,6 +201,7 @@ module.exports = {
   getEvents,
   pruneEvents,
   upsertBeacon,
+  pruneCandidatesNotIn,
   getBeacons,
   dismissBeacon,
   _resetForTest,

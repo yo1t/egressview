@@ -307,6 +307,10 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
         currentLang = newLang;
         applyI18n();
         Object.keys(connState).forEach(updateConnBadge);
+        if (typeof renderBeaconBanner === 'function') renderBeaconBanner();
+        if (typeof updateLogView === 'function' && currentView === 'log') updateLogView();
+        if (typeof renderDevicesTable === 'function' && currentView === 'devices') renderDevicesTable();
+        if (typeof updateFilterTabs === 'function' && lastMeshNodes && lastClients) updateFilterTabs(lastMeshNodes, lastMainMac || '', lastClients);
         // Re-render stats if shown (to update legend labels)
         if (statsMode) updateStats();
       }

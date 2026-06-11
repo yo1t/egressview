@@ -175,3 +175,65 @@ describe('dismissBeacon', () => {
     assert.equal(b.getBeacons().length, 2); // module returns all
   });
 });
+
+// ─── Sticky dismiss + stale-candidate pruning (P2-20) ─────────────────────────
+
+describe('sticky dismiss', () => {
+  before(() => b._resetForTest());
+
+  it('upsertBeacon does NOT resurrect a dismissed key', () => {
+    b.upsertBeacon(makeCandidate({ dst: '9.8.7.6' }));
+    const [{ id }] = b.getBeacons();
+    b.dismissBeacon(id);
+
+    // Next scan re-detects the same pattern → must stay dismissed-only
+    b.upsertBeacon(makeCandidate({ dst: '9.8.7.6' }));
+    const rows = b.getBeacons();
+    assert.equal(rows.length, 1, 'no new candidate row created');
+    assert.equal(rows[0].status, 'dismissed');
+  });
+
+  it('a different key is still inserted normally', () => {
+    b.upsertBeacon(makeCandidate({ dst: '6.7.8.9' }));
+    const cands = b.getBeacons().filter(r => r.status === 'candidate');
+    assert.equal(cands.length, 1);
+    assert.equal(cands[0].dst, '6.7.8.9');
+  });
+});
+
+describe('pruneCandidatesNotIn', () => {
+  before(() => b._resetForTest());
+
+  it('removes candidates absent from the detected set, keeps detected ones', () => {
+    b.upsertBeacon(makeCandidate({ dst: '1.1.1.1' }));
+    b.upsertBeacon(makeCandidate({ dst: '2.2.2.2' }));
+    b.upsertBeacon(makeCandidate({ dst: '3.3.3.3' }));
+
+    const keep = [`192.168.1.5|2.2.2.2|443|tcp`];
+    const removed = b.pruneCandidatesNotIn(keep);
+
+    assert.equal(removed, 2);
+    const rows = b.getBeacons();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].dst, '2.2.2.2');
+  });
+
+  it('keeps dismissed rows even when not re-detected', () => {
+    b._resetForTest();
+    b.upsertBeacon(makeCandidate({ dst: '5.5.5.5' }));
+    const [{ id }] = b.getBeacons();
+    b.dismissBeacon(id);
+
+    const removed = b.pruneCandidatesNotIn([]);  // nothing re-detected
+    assert.equal(removed, 0, 'dismissed rows are not pruned');
+    assert.equal(b.getBeacons()[0].status, 'dismissed');
+  });
+
+  it('empty detected set removes all candidates', () => {
+    b._resetForTest();
+    b.upsertBeacon(makeCandidate({ dst: '7.7.7.7' }));
+    b.upsertBeacon(makeCandidate({ dst: '8.8.8.8' }));
+    assert.equal(b.pruneCandidatesNotIn([]), 2);
+    assert.equal(b.getBeacons().length, 0);
+  });
+});

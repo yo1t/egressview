@@ -57,7 +57,7 @@ function renderDevicesTable() {
   // Sidebar device filter
   if (dvSelectedIp) {
     filterBadgeEl.style.display = 'inline';
-    filterBadgeEl.innerHTML = `<span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;cursor:pointer" id="dv-filter-clear">${esc(dvSelectedIp)} のみ ✕</span>`;
+    filterBadgeEl.innerHTML = `<span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;cursor:pointer" id="dv-filter-clear">${esc(tVars('devices.filter.only', { value: dvSelectedIp }))}</span>`;
     document.getElementById('dv-filter-clear').onclick = () => { dvSelectedIp = null; renderDevicesTable(); };
   } else {
     filterBadgeEl.style.display = 'none';
@@ -151,8 +151,8 @@ function renderDevicesTable() {
   if (countEl) {
     const total = Object.values(statusCounts).reduce((a, b) => a + b, 0);
     const extra = rows.length < devicesData.filter(d => dvStatusFilter.has(d.status || 'stale')).length
-      ? '（フィルター中）' : '';
-    countEl.textContent = rows.length + ' 台' + extra + ' / 合計 ' + total + ' 台';
+      ? t('devices.count.filtered') : '';
+    countEl.textContent = tVars('devices.count', { visible: rows.length, filtered: extra, total });
   }
 }
 
@@ -195,16 +195,16 @@ function openDvDetail(d) {
       return `
         <div class="dv-merge-card" data-candidate-id="${esc(String(c.id))}" data-other-id="${esc(otherId || '')}">
           <div class="dv-merge-card-info">${esc(label || otherId || '—')}</div>
-          <div class="dv-merge-card-score">類似度: ${scoreStr}${reasons ? '　' + esc(reasons) : ''}</div>
+          <div class="dv-merge-card-score">${esc(tVars('devices.merge.score', { score: scoreStr }))}${reasons ? ' ' + esc(reasons) : ''}</div>
           <div class="dv-merge-card-btns">
-            <button class="btn-merge" data-action="merge">🔀 この端末に統合</button>
-            <button class="btn-reject" data-action="reject">✕ 却下</button>
+            <button class="btn-merge" data-action="merge">${esc(t('devices.merge.into'))}</button>
+            <button class="btn-reject" data-action="reject">${esc(t('devices.merge.reject'))}</button>
           </div>
         </div>`;
     }).join('');
     mergeSectionHtml = `
       <div class="dv-merge-section">
-        <div class="dv-merge-title">🔀 名寄せ候補</div>
+        <div class="dv-merge-title">${esc(t('devices.merge.title'))}</div>
         ${cards}
       </div>`;
   }
@@ -213,32 +213,37 @@ function openDvDetail(d) {
   const archiveBtn = document.getElementById('dv-detail-archive');
   if (archiveBtn) {
     if (d.status === 'archived') {
-      archiveBtn.textContent = '📤 復元';
-      archiveBtn.title = 'アーカイブを解除して通常一覧に戻す';
+      archiveBtn.textContent = t('devices.unarchive');
+      archiveBtn.title = t('devices.unarchive.title');
     } else {
-      archiveBtn.textContent = '📦 アーカイブ';
-      archiveBtn.title = '端末を一覧から非表示にする（データは保持）';
+      archiveBtn.textContent = t('devices.archive');
+      archiveBtn.title = t('devices.archive.title');
     }
   }
 
   // P1-8: status badge
-  const statusLabels = { active: '🟢 Active', recent: '🔵 Recent', stale: '🟡 Stale', archived: '⬜ Archived' };
+  const statusLabels = {
+    active: t('devices.status.active'),
+    recent: t('devices.status.recent'),
+    stale: t('devices.status.stale'),
+    archived: t('devices.status.archived'),
+  };
   const statusCls    = { active: 's-active', recent: 's-recent', stale: 's-stale', archived: 's-archived' };
   const statusStr    = d.status || 'stale';
 
   document.getElementById('dv-detail-body').innerHTML = `
-    <div class="dv-detail-row"><span class="dv-detail-label">状態</span><span class="dv-detail-value ${statusCls[statusStr]}">${statusLabels[statusStr] || statusStr}</span></div>
-    ${d.vendor ? `<div class="dv-detail-row"><span class="dv-detail-label">ベンダー</span><span class="dv-detail-value">${esc(d.vendor)}</span></div>` : ''}
-    ${name !== '—' ? `<div class="dv-detail-row"><span class="dv-detail-label">名前</span><span class="dv-detail-value">${esc(name)}</span></div>` : ''}
+    <div class="dv-detail-row"><span class="dv-detail-label">${esc(t('devices.detail.status'))}</span><span class="dv-detail-value ${statusCls[statusStr]}">${esc(statusLabels[statusStr] || statusStr)}</span></div>
+    ${d.vendor ? `<div class="dv-detail-row"><span class="dv-detail-label">${esc(t('devices.detail.vendor'))}</span><span class="dv-detail-value">${esc(d.vendor)}</span></div>` : ''}
+    ${name !== '—' ? `<div class="dv-detail-row"><span class="dv-detail-label">${esc(t('devices.detail.name'))}</span><span class="dv-detail-value">${esc(name)}</span></div>` : ''}
     ${d.dnsName  ? `<div class="dv-detail-row"><span class="dv-detail-label">DNS</span><span class="dv-detail-value" style="font-size:10px">${esc(d.dnsName)}</span></div>` : ''}
     ${d.mdnsName ? `<div class="dv-detail-row"><span class="dv-detail-label">mDNS</span><span class="dv-detail-value">${esc(d.mdnsName)}</span></div>` : ''}
     ${d.netbiosName ? `<div class="dv-detail-row"><span class="dv-detail-label">NetBIOS</span><span class="dv-detail-value">${esc(d.netbiosName)}</span></div>` : ''}
     ${ipv6List.length ? `<div class="dv-detail-row"><span class="dv-detail-label">IPv6</span><span class="dv-detail-value" style="font-family:monospace;font-size:10px">${ipv6List.map(esc).join('<br>')}</span></div>` : ''}
-    <div class="dv-detail-row"><span class="dv-detail-label">ソース</span><span class="dv-detail-value">${esc(sources) || '—'}</span></div>
-    <div class="dv-detail-row"><span class="dv-detail-label">初回確認</span><span class="dv-detail-value">${fmtTs(d.firstSeen)}</span></div>
-    <div class="dv-detail-row"><span class="dv-detail-label">最終確認</span><span class="dv-detail-value">${fmtTs(d.lastSeen)}</span></div>
+    <div class="dv-detail-row"><span class="dv-detail-label">${esc(t('devices.detail.sources'))}</span><span class="dv-detail-value">${esc(sources) || '—'}</span></div>
+    <div class="dv-detail-row"><span class="dv-detail-label">${esc(t('devices.detail.firstSeen'))}</span><span class="dv-detail-value">${fmtTs(d.firstSeen)}</span></div>
+    <div class="dv-detail-row"><span class="dv-detail-label">${esc(t('devices.detail.lastSeen'))}</span><span class="dv-detail-value">${fmtTs(d.lastSeen)}</span></div>
     ${mergeSectionHtml}
-    <div style="margin-top:4px;font-size:11px;color:var(--muted);margin-bottom:2px">メモ</div>
+    <div style="margin-top:4px;font-size:11px;color:var(--muted);margin-bottom:2px">${esc(t('devices.detail.note'))}</div>
     <textarea class="dv-detail-note-ta" id="dv-detail-note-ta" placeholder="${esc(t('note.placeholder'))}">${esc(noteText)}</textarea>
     <div id="dv-investigate-result" style="font-size:10px;color:var(--muted);margin-top:4px;white-space:pre-wrap;"></div>
   `;
@@ -277,7 +282,7 @@ document.getElementById('dv-detail-save').addEventListener('click', async () => 
     refreshAllNotes();
     const btn = document.getElementById('dv-detail-save');
     const orig = btn.textContent;
-    btn.textContent = '✓ 保存済';
+    btn.textContent = t('devices.saved');
     setTimeout(() => { btn.textContent = orig; }, 1500);
   } catch (e) {
     alert(t('err.serverGeneric') + e.message);
@@ -337,7 +342,7 @@ document.getElementById('dv-detail-body').addEventListener('click', async (e) =>
     }
     await loadDevicesView();   // refreshes candidates + devices + re-opens detail
   } catch (err) {
-    alert('エラー: ' + err.message);
+    alert(t('err.serverGeneric') + err.message);
     btn.disabled = false;
   }
 });
@@ -363,7 +368,7 @@ document.getElementById('dv-detail-archive').addEventListener('click', async () 
     }
     await loadDevicesView();
   } catch (err) {
-    alert('エラー: ' + err.message);
+    alert(t('err.serverGeneric') + err.message);
     btn.disabled = false;
   }
 });
@@ -412,7 +417,7 @@ document.querySelectorAll('.dv-search-icon').forEach(icon => {
     e.stopPropagation();
     dvSearchTargetCol = icon.dataset.col;
     document.getElementById('dv-search-popup-title').textContent =
-      (t('log.filter.title') || 'フィルター') + ': ' + (t('devices.col.' + dvSearchTargetCol) || dvSearchTargetCol);
+      t('log.filter.title') + ': ' + (t('devices.col.' + dvSearchTargetCol) || dvSearchTargetCol);
     const existing = dvFilters[dvSearchTargetCol];
     dvSearchInput.value  = existing?.value || '';
     dvSearchMode.value   = existing?.mode  || 'contains';
@@ -477,7 +482,7 @@ async function loadDevicesView() {
     renderDevicesTable();
   } catch (e) {
     console.error('[devices] load failed:', e);
-    document.getElementById('devices-count').textContent = '読み込み失敗: ' + e.message;
+    document.getElementById('devices-count').textContent = tVars('devices.loadFailed', { error: e.message });
   }
 }
 

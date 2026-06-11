@@ -6,11 +6,13 @@ var beaconListOpen = false;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtBeaconInterval(ms) {
-  if (ms < 60_000)    return `${Math.round(ms / 1000)}秒`;
-  if (ms < 3600_000)  return `${Math.round(ms / 60_000)}分`;
+  if (ms < 60_000)    return tVars('beacon.interval.sec', { count: Math.round(ms / 1000) });
+  if (ms < 3600_000)  return tVars('beacon.interval.min', { count: Math.round(ms / 60_000) });
   const h = Math.floor(ms / 3600_000);
   const m = Math.round((ms % 3600_000) / 60_000);
-  return m > 0 ? `${h}時間${m}分` : `${h}時間`;
+  return m > 0
+    ? tVars('beacon.interval.hourMin', { hours: h, minutes: m })
+    : tVars('beacon.interval.hour', { count: h });
 }
 
 function beaconSrcLabel(srcIp) {
@@ -72,7 +74,7 @@ function renderBeaconBanner() {
   }
 
   banner.style.display = 'block';
-  label.textContent = `⏱ ビーコン候補 ${beaconData.length}件`;
+  label.textContent = tVars('beacon.banner', { count: beaconData.length });
   chevron.classList.toggle('open', beaconListOpen);
   list.style.display = beaconListOpen ? 'block' : 'none';
   if (beaconListOpen) renderBeaconList(list);
@@ -94,19 +96,19 @@ function renderBeaconList(container) {
       <td><span class="${covCls}">${covPct}%</span></td>
       <td style="color:var(--muted)">${b.obsCount}</td>
       <td style="color:var(--muted);font-size:10px;white-space:nowrap">${first}<br>${last}</td>
-      <td><button class="beacon-dismiss-btn" data-id="${b.id}">却下</button></td>
+      <td><button class="beacon-dismiss-btn" data-id="${b.id}">${esc(t('beacon.dismiss'))}</button></td>
     </tr>`;
   }).join('');
 
   container.innerHTML = `
     <table class="beacon-table">
       <thead><tr>
-        <th>送信元</th>
-        <th>宛先</th>
-        <th>間隔</th>
-        <th title="変動係数 — 低いほど規則的">規則性</th>
-        <th>観測数</th>
-        <th>初回 / 最終</th>
+        <th>${esc(t('beacon.col.src'))}</th>
+        <th>${esc(t('beacon.col.dst'))}</th>
+        <th>${esc(t('beacon.col.interval'))}</th>
+        <th title="${esc(t('beacon.col.regularityTitle'))}">${esc(t('beacon.col.regularity'))}</th>
+        <th>${esc(t('beacon.col.obs'))}</th>
+        <th>${esc(t('beacon.col.firstLast'))}</th>
         <th></th>
       </tr></thead>
       <tbody>${rows}</tbody>

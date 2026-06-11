@@ -100,6 +100,7 @@ let lastMeshNodes = [];
 let lastRouterIp = '';
 let lastSatellites = [];
 let lastClients = [];
+let lastMainMac = '';
 
 // Per-AiMesh-node identity colour
 const MESH_COLORS = ['#f59e0b','#f97316','#14b8a6','#a78bfa','#fb7185'];
@@ -122,6 +123,7 @@ function buildGraph(data) {
   // Identify the main router MAC
   const mainNode = meshNodes.find(n => n.ip === data.routerIp);
   const mainMac = mainNode?.mac || '';
+  lastMainMac = mainMac;
 
   // Satellite nodes (other than main router)
   const satellites = meshNodes.filter(n => n.ip !== data.routerIp);
@@ -378,7 +380,7 @@ function updateFilterTabs(meshNodes, mainMac, clients) {
     });
     tabs.appendChild(btn);
   };
-  addTab('all', '全て');
+  addTab('all', t('panel.tab.all'));
   meshNodes.forEach(n => addTab(n.mac, n.model || 'Node'));
 }
 
