@@ -320,18 +320,18 @@ describe('parseMeshNodes', () => {
 
 describe('parseInspectLine ([INSPECT] syslog)', () => {
   it('parses a TCP INSPECT entry', () => {
-    const line = 'Jun  7 18:54:52 169.254.219.142  [INSPECT] LAN2[out][101098] TCP 192.168.41.73:54791 > 20.184.175.13:443 (2026/06/07 18:52:57)';
+    const line = 'Jun  7 18:54:52 192.0.2.1  [INSPECT] LAN2[out][101098] TCP 192.168.1.73:54791 > 203.0.113.13:443 (2026/06/07 18:52:57)';
     const r = parseInspectLine(line);
     assert(r !== null, 'Should parse successfully');
     assert.equal(r.proto, 'tcp');
-    assert.equal(r.src, '192.168.41.73');
+    assert.equal(r.src, '192.168.1.73');
     assert.equal(r.sport, 54791);
-    assert.equal(r.dst, '20.184.175.13');
+    assert.equal(r.dst, '203.0.113.13');
     assert.equal(r.dport, 443);
   });
 
   it('parses a UDP INSPECT entry', () => {
-    const line = 'Jun  7 10:00:00 169.254.219.142  [INSPECT] LAN2[out][101098] UDP 192.168.41.111:12345 > 8.8.8.8:53 (2026/06/07 10:00:00)';
+    const line = 'Jun  7 10:00:00 192.0.2.1  [INSPECT] LAN2[out][101098] UDP 192.168.1.111:12345 > 198.51.100.53:53 (2026/06/07 10:00:00)';
     const r = parseInspectLine(line);
     assert(r !== null);
     assert.equal(r.proto, 'udp');
@@ -339,7 +339,7 @@ describe('parseInspectLine ([INSPECT] syslog)', () => {
   });
 
   it('returns null for non-INSPECT lines', () => {
-    assert.equal(parseInspectLine('Jun  7 18:54:51 169.254.219.142  [IKE][1] DPD: send R-U-THERE'), null);
+    assert.equal(parseInspectLine('Jun  7 18:54:51 192.0.2.1  [IKE][1] DPD: send R-U-THERE'), null);
     assert.equal(parseInspectLine(''), null);
     assert.equal(parseInspectLine('some random log line'), null);
   });
@@ -349,7 +349,7 @@ describe('parseInspectLine ([INSPECT] syslog)', () => {
   });
 
   it('returns a Date object for time field', () => {
-    const line = 'Jun  7 18:54:52 169.254.219.142  [INSPECT] LAN2[out][101098] TCP 192.168.41.73:54791 > 20.184.175.13:443 (2026/06/07 18:52:57)';
+    const line = 'Jun  7 18:54:52 192.0.2.1  [INSPECT] LAN2[out][101098] TCP 192.168.1.73:54791 > 203.0.113.13:443 (2026/06/07 18:52:57)';
     const r = parseInspectLine(line);
     assert(r.time instanceof Date, 'time should be a Date');
   });
@@ -357,35 +357,35 @@ describe('parseInspectLine ([INSPECT] syslog)', () => {
 
 describe('parseDhcpdLine ([DHCPD] syslog)', () => {
   it('parses an Allocates entry', () => {
-    const line = 'Jun  7 18:38:11 169.254.219.142  [DHCPD] LAN1(port10) Allocates 192.168.41.27: 34:f6:2d:ef:25:48';
+    const line = 'Jun  7 18:38:11 192.0.2.1  [DHCPD] LAN1(port10) Allocates 192.168.1.27: aa:bb:cc:dd:ee:01';
     const r = parseDhcpdLine(line);
     assert(r !== null, 'Should parse successfully');
-    assert.equal(r.ip, '192.168.41.27');
-    assert.equal(r.mac, '34:f6:2d:ef:25:48');
+    assert.equal(r.ip, '192.168.1.27');
+    assert.equal(r.mac, 'aa:bb:cc:dd:ee:01');
   });
 
   it('parses an Extends entry', () => {
-    const line = 'Jun  7 18:38:04 169.254.219.142  [DHCPD] LAN1(port10) Extends 192.168.41.31: de:ea:2f:13:ab:54';
+    const line = 'Jun  7 18:38:04 192.0.2.1  [DHCPD] LAN1(port10) Extends 192.168.1.31: aa:bb:cc:dd:ee:02';
     const r = parseDhcpdLine(line);
     assert(r !== null);
-    assert.equal(r.ip, '192.168.41.31');
-    assert.equal(r.mac, 'de:ea:2f:13:ab:54');
+    assert.equal(r.ip, '192.168.1.31');
+    assert.equal(r.mac, 'aa:bb:cc:dd:ee:02');
   });
 
   it('normalises MAC to lowercase', () => {
-    const line = 'Jun  7 00:00:00 x  [DHCPD] LAN1(port10) Allocates 192.168.41.50: AA:BB:CC:DD:EE:FF';
+    const line = 'Jun  7 00:00:00 x  [DHCPD] LAN1(port10) Allocates 192.168.1.50: AA:BB:CC:DD:EE:FF';
     const r = parseDhcpdLine(line);
     assert(r !== null);
     assert.equal(r.mac, 'aa:bb:cc:dd:ee:ff');
   });
 
   it('returns null for non-DHCPD lines', () => {
-    assert.equal(parseDhcpdLine('[INSPECT] LAN2[out][101098] TCP 192.168.41.1:1 > 1.2.3.4:80'), null);
+    assert.equal(parseDhcpdLine('[INSPECT] LAN2[out][101098] TCP 192.168.1.1:1 > 203.0.113.4:80'), null);
     assert.equal(parseDhcpdLine(''), null);
   });
 
   it('getMacByIp returns null for unknown IP', () => {
-    assert.equal(getMacByIp('192.168.41.99'), null);
+    assert.equal(getMacByIp('192.168.1.99'), null);
   });
 });
 
@@ -393,36 +393,36 @@ describe('parseDhcpdLine ([DHCPD] syslog)', () => {
 
 describe('parseDnsmasqLine', () => {
   it('parses a query[A] line', () => {
-    const line = 'Jun  7 17:34:22 dnsmasq[3975085]: query[A] api.netflix.com from 192.168.41.25';
+    const line = 'Jun  7 17:34:22 dnsmasq[1234]: query[A] example.com from 192.168.1.25';
     const r = parseDnsmasqLine(line);
     assert(r !== null);
     assert.equal(r.type, 'query');
     assert.equal(r.qtype, 'A');
-    assert.equal(r.domain, 'api.netflix.com');
-    assert.equal(r.clientIp, '192.168.41.25');
+    assert.equal(r.domain, 'example.com');
+    assert.equal(r.clientIp, '192.168.1.25');
     assert(r.time instanceof Date);
   });
 
   it('parses a query[AAAA] line', () => {
-    const line = 'Jun  7 18:00:00 dnsmasq[1234]: query[AAAA] ipv6.google.com from 192.168.41.93';
+    const line = 'Jun  7 18:00:00 dnsmasq[1234]: query[AAAA] ipv6.example.com from 192.168.1.93';
     const r = parseDnsmasqLine(line);
     assert(r !== null);
     assert.equal(r.type, 'query');
     assert.equal(r.qtype, 'AAAA');
-    assert.equal(r.domain, 'ipv6.google.com');
+    assert.equal(r.domain, 'ipv6.example.com');
   });
 
   it('parses a reply line with IPv4 address', () => {
-    const line = 'Jun  7 17:34:22 dnsmasq[3975085]: reply api.netflix.com is 54.239.28.85';
+    const line = 'Jun  7 17:34:22 dnsmasq[1234]: reply example.com is 198.51.100.85';
     const r = parseDnsmasqLine(line);
     assert(r !== null);
     assert.equal(r.type, 'reply');
-    assert.equal(r.domain, 'api.netflix.com');
-    assert.equal(r.resolvedIp, '54.239.28.85');
+    assert.equal(r.domain, 'example.com');
+    assert.equal(r.resolvedIp, '198.51.100.85');
   });
 
   it('sets resolvedIp to null for CNAME reply', () => {
-    const line = 'Jun  7 17:34:22 dnsmasq[3975085]: reply api.netflix.com is <CNAME>';
+    const line = 'Jun  7 17:34:22 dnsmasq[1234]: reply example.com is <CNAME>';
     const r = parseDnsmasqLine(line);
     assert(r !== null);
     assert.equal(r.type, 'reply');
@@ -431,23 +431,23 @@ describe('parseDnsmasqLine', () => {
   });
 
   it('normalises Yamaha proxy IP (169.254.x.x) to "router"', () => {
-    const line = 'Jun  7 17:34:19 dnsmasq[3975085]: query[A] example.com from 169.254.219.142';
+    const line = 'Jun  7 17:34:19 dnsmasq[1234]: query[A] example.com from 169.254.0.1';
     const r = parseDnsmasqLine(line);
     // parseLine returns raw clientIp; normalisation happens in queueQuery
     // Just confirm the line is parsed as a query
     assert(r !== null);
     assert.equal(r.type, 'query');
-    assert.equal(r.clientIp, '169.254.219.142');
+    assert.equal(r.clientIp, '169.254.0.1');
   });
 
   it('returns null for forwarded / non-query lines', () => {
-    assert.equal(parseDnsmasqLine('Jun  7 17:34:22 dnsmasq[3975085]: forwarded api.netflix.com to 10.41.0.2'), null);
+    assert.equal(parseDnsmasqLine('Jun  7 17:34:22 dnsmasq[1234]: forwarded example.com to 192.0.2.53'), null);
     assert.equal(parseDnsmasqLine(''), null);
     assert.equal(parseDnsmasqLine('some random syslog line'), null);
   });
 
   it('returns null for non-A/AAAA query types', () => {
-    const line = 'Jun  7 17:34:22 dnsmasq[3975085]: query[PTR] 1.1.168.192.in-addr.arpa from 192.168.41.1';
+    const line = 'Jun  7 17:34:22 dnsmasq[1234]: query[PTR] 1.1.168.192.in-addr.arpa from 192.168.1.1';
     assert.equal(parseDnsmasqLine(line), null);
   });
 });

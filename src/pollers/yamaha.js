@@ -226,7 +226,7 @@ async function refreshYamahaNdp() {
   try {
     const raw = await yamahaExec('show ipv6 neighbor cache');
     const newMap = new Map();
-    // Parse lines like: "240d:1a:55e:ed00:5de6:a5c8:44fb:a1e5    6c:99:9d:88:88:a0 LAN1  REACHABLE"
+    // Parse lines like: "2001:db8:0:ed00:5de6:a5c8:44fb:a1e5    aa:bb:cc:dd:ee:ff LAN1  REACHABLE"
     const re = /([0-9a-fA-F:]{6,45})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\s+LAN1\s+\w+/g;
     let m;
     while ((m = re.exec(raw)) !== null) {

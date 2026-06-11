@@ -1,5 +1,5 @@
 // [INSPECT] syslog poller: tail Yamaha router syslog for completed TCP session events
-// Format: [INSPECT] LAN2[out][101098] TCP 192.168.41.73:52371 > 18.176.56.231:443 (2026/06/07 17:33:19)
+// Format: [INSPECT] LAN2[out][101098] TCP 192.168.1.73:52371 > 203.0.113.231:443 (2026/06/07 17:33:19)
 'use strict';
 
 const { createTailPoller } = require('./tail-helper');

@@ -1,5 +1,5 @@
 // [DHCPD] syslog poller: real-time IP→MAC tracking from Yamaha DHCP events
-// Format: [DHCPD] LAN1(port10) Allocates/Extends 192.168.41.27: 34:f6:2d:ef:25:48
+// Format: [DHCPD] LAN1(port10) Allocates/Extends 192.168.1.27: aa:bb:cc:dd:ee:ff
 'use strict';
 
 const { createTailPoller } = require('./tail-helper');
