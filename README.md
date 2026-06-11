@@ -282,4 +282,4 @@ Source code: https://github.com/yo1t/widemap
 
 ## Contributing
 
-Issues and pull requests are welcome. Please open an issue first for major changes. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines, and [SECURITY.md](SECURITY.md) for how to report vulnerabilities privately.
+Issues and pull requests are welcome. Please open an issue first for major changes. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines, [ROADMAP.md](ROADMAP.md) for what's planned, and [SECURITY.md](SECURITY.md) for how to report vulnerabilities privately.

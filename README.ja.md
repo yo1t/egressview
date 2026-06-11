@@ -282,4 +282,4 @@ Copyright (C) 2025 Yoichi Takizawa
 
 ## コントリビュート
 
-Issue や Pull Request を歓迎します。大きな変更の場合は、先に Issue で相談してください。開発環境のセットアップとガイドラインは [CONTRIBUTING.md](CONTRIBUTING.md)、脆弱性の非公開報告方法は [SECURITY.md](SECURITY.md) を参照してください。
+Issue や Pull Request を歓迎します。大きな変更の場合は、先に Issue で相談してください。開発環境のセットアップとガイドラインは [CONTRIBUTING.md](CONTRIBUTING.md)、今後の計画は [ROADMAP.ja.md](ROADMAP.ja.md)、脆弱性の非公開報告方法は [SECURITY.md](SECURITY.md) を参照してください。
