@@ -126,28 +126,28 @@
           <div class="form-group">
             <label class="form-label" data-i18n="settings.general.country">ネットワーク機器の設置場所（国）</label>
             <select id="s-home-country" class="form-input">
-              <option value="JP">🇯🇵 日本</option>
-              <option value="US">🇺🇸 アメリカ合衆国</option>
-              <option value="CA">🇨🇦 カナダ</option>
-              <option value="GB">🇬🇧 イギリス</option>
-              <option value="DE">🇩🇪 ドイツ</option>
-              <option value="FR">🇫🇷 フランス</option>
-              <option value="IT">🇮🇹 イタリア</option>
-              <option value="ES">🇪🇸 スペイン</option>
-              <option value="NL">🇳🇱 オランダ</option>
-              <option value="SE">🇸🇪 スウェーデン</option>
-              <option value="CH">🇨🇭 スイス</option>
-              <option value="NO">🇳🇴 ノルウェー</option>
-              <option value="AU">🇦🇺 オーストラリア</option>
-              <option value="NZ">🇳🇿 ニュージーランド</option>
-              <option value="CN">🇨🇳 中国</option>
-              <option value="KR">🇰🇷 韓国</option>
-              <option value="TW">🇹🇼 台湾</option>
-              <option value="HK">🇭🇰 香港</option>
-              <option value="SG">🇸🇬 シンガポール</option>
-              <option value="IN">🇮🇳 インド</option>
-              <option value="BR">🇧🇷 ブラジル</option>
-              <option value="RU">🇷🇺 ロシア</option>
+              <option value="JP" data-i18n="settings.country.JP">🇯🇵 日本</option>
+              <option value="US" data-i18n="settings.country.US">🇺🇸 アメリカ合衆国</option>
+              <option value="CA" data-i18n="settings.country.CA">🇨🇦 カナダ</option>
+              <option value="GB" data-i18n="settings.country.GB">🇬🇧 イギリス</option>
+              <option value="DE" data-i18n="settings.country.DE">🇩🇪 ドイツ</option>
+              <option value="FR" data-i18n="settings.country.FR">🇫🇷 フランス</option>
+              <option value="IT" data-i18n="settings.country.IT">🇮🇹 イタリア</option>
+              <option value="ES" data-i18n="settings.country.ES">🇪🇸 スペイン</option>
+              <option value="NL" data-i18n="settings.country.NL">🇳🇱 オランダ</option>
+              <option value="SE" data-i18n="settings.country.SE">🇸🇪 スウェーデン</option>
+              <option value="CH" data-i18n="settings.country.CH">🇨🇭 スイス</option>
+              <option value="NO" data-i18n="settings.country.NO">🇳🇴 ノルウェー</option>
+              <option value="AU" data-i18n="settings.country.AU">🇦🇺 オーストラリア</option>
+              <option value="NZ" data-i18n="settings.country.NZ">🇳🇿 ニュージーランド</option>
+              <option value="CN" data-i18n="settings.country.CN">🇨🇳 中国</option>
+              <option value="KR" data-i18n="settings.country.KR">🇰🇷 韓国</option>
+              <option value="TW" data-i18n="settings.country.TW">🇹🇼 台湾</option>
+              <option value="HK" data-i18n="settings.country.HK">🇭🇰 香港</option>
+              <option value="SG" data-i18n="settings.country.SG">🇸🇬 シンガポール</option>
+              <option value="IN" data-i18n="settings.country.IN">🇮🇳 インド</option>
+              <option value="BR" data-i18n="settings.country.BR">🇧🇷 ブラジル</option>
+              <option value="RU" data-i18n="settings.country.RU">🇷🇺 ロシア</option>
             </select>
           </div>
           <p style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.6"
@@ -228,19 +228,19 @@
             <label class="form-label" data-i18n="settings.threat.feeds">取得するフィード</label>
             <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0;cursor:pointer;">
               <input type="checkbox" id="s-feed-feodo" checked style="accent-color:var(--accent)">
-              <span>Feodo Tracker — Emotet/Dridex/TrickBot C2</span>
+              <span data-i18n="settings.threat.feed.feodo">Feodo Tracker — Emotet/Dridex/TrickBot C2</span>
             </label>
             <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0;cursor:pointer;">
               <input type="checkbox" id="s-feed-threatfox" checked style="accent-color:var(--accent)">
-              <span>ThreatFox — マルウェア IOC (IP:port)</span>
+              <span data-i18n="settings.threat.feed.threatfox">ThreatFox — Malware IOC (IP:port)</span>
             </label>
             <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0;cursor:pointer;">
               <input type="checkbox" id="s-feed-urlhaus" checked style="accent-color:var(--accent)">
-              <span>URLhaus — マルウェア配布 URL</span>
+              <span data-i18n="settings.threat.feed.urlhaus">URLhaus — Malware distribution URLs</span>
             </label>
             <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0;cursor:pointer;">
               <input type="checkbox" id="s-feed-spamhaus" checked style="accent-color:var(--accent)">
-              <span>Spamhaus DROP — ハイジャック済み IP 範囲</span>
+              <span data-i18n="settings.threat.feed.spamhaus">Spamhaus DROP — Hijacked IP ranges</span>
             </label>
           </div>
           <div class="form-group" style="margin-top:12px">
@@ -406,24 +406,24 @@
         </div>
         <!-- Data Sources -->
         <div class="settings-pane" id="pane-datasource">
-          <div class="pane-title" style="cursor:default" data-i18n="settings.section.datasource">📡 データソース設定</div>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:16px;line-height:1.5">
-            宛先ホスト名を解決するためのデータソースを設定します。<br>
-            有効にしたソースからのドメイン名が通信ログなどに表示されます。
+          <div class="pane-title" style="cursor:default" data-i18n="settings.section.datasource">📡 Data Sources</div>
+          <p style="font-size:10px;color:var(--muted);margin-bottom:16px;line-height:1.5" data-i18n-html="settings.datasource.desc">
+            Configure the data sources used to resolve destination hostnames.<br>
+            Domain names from enabled sources appear in the connection log and related views.
           </p>
 
           <!-- dnsmasq DNS query log -->
           <label class="pane-title" style="margin-bottom:8px">
             <input type="checkbox" id="enable-dnsmasq" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
-            <span>DNS クエリログ (dnsmasq)</span>
+            <span data-i18n="settings.datasource.dnsmasq">DNS query log (dnsmasq)</span>
           </label>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px">
-            EC2 上の dnsmasq クエリログをテールし、デバイスごとの DNS 解決結果を宛先ホスト名に反映します。<br>
-            PTR 逆引きより優先され、<code style="font-size:10px;color:var(--cyan)">data.meethue.com</code> のような意味のある名前が表示されます。
+          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px" data-i18n-html="settings.datasource.dnsmasq.desc">
+            Tail the dnsmasq query log on the server and attach per-device DNS resolution results to destination hostnames.<br>
+            These names take priority over PTR reverse lookups, so meaningful names such as <code style="font-size:10px;color:var(--cyan)">example.com</code> are shown.
           </p>
           <div class="section-inputs" id="dnsmasq-inputs">
             <div class="form-group">
-              <label class="form-label" data-i18n="settings.datasource.logfile">ログファイルパス</label>
+              <label class="form-label" data-i18n="settings.datasource.logfile">Log File Path</label>
               <input id="s-dnsmasq-logfile" class="form-input" type="text"
                      placeholder="/var/log/dnsmasq-queries.log" autocomplete="off">
             </div>
@@ -434,15 +434,15 @@
           <!-- [INSPECT] syslog -->
           <label class="pane-title" style="margin-bottom:8px">
             <input type="checkbox" id="enable-inspect" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
-            <span>[INSPECT] TCP セッション補完</span>
+            <span data-i18n="settings.datasource.inspect">[INSPECT] TCP session supplement</span>
           </label>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px">
-            Yamaha syslog の [INSPECT] エントリをリアルタイムで解析し、60秒ポーリングで取りこぼした短命 TCP セッションを補完します。<br>
-            <span style="color:var(--cyan)">EC2 に届く Yamaha syslog ファイルのパスを指定してください。</span>
+          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px" data-i18n-html="settings.datasource.inspect.desc">
+            Parse Yamaha syslog [INSPECT] entries in real time to supplement short-lived TCP sessions missed by 60-second polling.<br>
+            <span style="color:var(--cyan)">Specify the Yamaha syslog file path received by the server.</span>
           </p>
           <div class="section-inputs" id="inspect-inputs">
             <div class="form-group">
-              <label class="form-label" data-i18n="settings.datasource.logfile">ログファイルパス</label>
+              <label class="form-label" data-i18n="settings.datasource.logfile">Log File Path</label>
               <input id="s-inspect-logfile" class="form-input" type="text"
                      placeholder="/var/log/yamaha-router.log" autocomplete="off">
             </div>
@@ -453,21 +453,21 @@
           <!-- [DHCPD] syslog -->
           <label class="pane-title" style="margin-bottom:8px">
             <input type="checkbox" id="enable-dhcpd" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
-            <span>[DHCPD] IP→MAC リアルタイム追跡</span>
+            <span data-i18n="settings.datasource.dhcpd">[DHCPD] Real-time IP-to-MAC tracking</span>
           </label>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px">
-            Yamaha syslog の [DHCPD] エントリ（Allocates/Extends）をリアルタイムで解析し、IP→MAC マッピングを維持します。<br>
-            送信元デバイスの特定精度が向上します。通常は [INSPECT] と同じパスを指定します。
+          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px" data-i18n-html="settings.datasource.dhcpd.desc">
+            Parse Yamaha syslog [DHCPD] entries (Allocates/Extends) in real time and maintain IP-to-MAC mappings.<br>
+            This improves source-device identification. Usually this uses the same path as [INSPECT].
           </p>
           <div class="section-inputs" id="dhcpd-inputs">
             <div class="form-group">
-              <label class="form-label" data-i18n="settings.datasource.logfile">ログファイルパス</label>
+              <label class="form-label" data-i18n="settings.datasource.logfile">Log File Path</label>
               <input id="s-dhcpd-logfile" class="form-input" type="text"
                      placeholder="/var/log/yamaha-router.log" autocomplete="off">
             </div>
           </div>
 
-          <button class="connect-btn" id="datasource-save-btn" style="margin-top:8px">保存</button>
+          <button class="connect-btn" id="datasource-save-btn" style="margin-top:8px" data-i18n="settings.btn.save">Save</button>
           <div class="settings-status" id="datasource-status"></div>
         </div>
       </div>
@@ -533,7 +533,7 @@
       <span class="stat-value" style="color:var(--red)" id="hdr-wan-tx">—</span>
     </div>
   </div>
-  <button class="settings-btn" id="settings-btn" title="設定">⚙</button>
+  <button class="settings-btn" id="settings-btn" data-i18n-title="settings.title" title="設定">⚙</button>
 </header>
 
 <div id="disconnected-banner">

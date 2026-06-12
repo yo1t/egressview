@@ -29,7 +29,7 @@ Widemap answers the question most home users can't ask: *what is each device on 
 
 - Connects to a **Yamaha RTX** router via SSH and reads the NAT session table every 60 seconds
 - **[INSPECT] syslog supplement** — tails the Yamaha syslog in real time to capture short-lived TCP sessions that complete within the 60-second polling gap
-- **dnsmasq DNS query log** — tails the EC2/server-side dnsmasq log to resolve destination IPs to meaningful domain names (e.g. `data.meethue.com`) per client device; forward DNS names take priority over PTR reverse lookups
+- **dnsmasq DNS query log** — tails the EC2/server-side dnsmasq log to resolve destination IPs to meaningful domain names (e.g. `example.com`) per client device; forward DNS names take priority over PTR reverse lookups
 - **[DHCPD] syslog tracking** — tails Yamaha DHCP events (Allocates/Extends) for real-time IP→MAC mapping
 - **Threat intelligence**: matches all connections against Feodo Tracker, ThreatFox, URLhaus, and Spamhaus DROP feeds (auto-refreshed hourly)
 - **Slack notifications**: sends a DM when a threat is detected (configurable cooldown, language-aware)

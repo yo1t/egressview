@@ -29,7 +29,7 @@ Wideemapは、多くの家庭ユーザーが答えを持てていない問いに
 
 - **Yamaha RTX** ルーターにSSH接続し、NATセッションテーブルを60秒ごとに取得
 - **[INSPECT] syslog 補完** — Yamaha syslog をリアルタイムで監視し、60秒ポーリングの間に完了した短命 TCP セッションを補完
-- **dnsmasq DNS クエリログ** — EC2/サーバー側の dnsmasq ログを監視し、デバイスごとの DNS 解決結果（例: `data.meethue.com`）を宛先ホスト名に反映。逆引き DNS より優先
+- **dnsmasq DNS クエリログ** — EC2/サーバー側の dnsmasq ログを監視し、デバイスごとの DNS 解決結果（例: `example.com`）を宛先ホスト名に反映。逆引き DNS より優先
 - **[DHCPD] syslog 追跡** — Yamaha の DHCP イベント（Allocates/Extends）をリアルタイムで解析し、IP→MAC マッピングを維持
 - **脅威インテリジェンス**: Feodo Tracker、ThreatFox、URLhaus、Spamhaus DROP フィードと全接続を突合（1時間ごと自動更新）
 - **Slack通知**: 脅威検出時に Slack DM で通知（クールダウン設定・言語対応）

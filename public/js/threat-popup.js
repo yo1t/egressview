@@ -75,7 +75,7 @@ async function threatDetailInvestigate(ip) {
     const ta = document.getElementById('threat-detail-note');
     const sep = ta.value ? '\n---\n' : '';
     ta.value = ta.value + sep + (data.draft || '(no info)');
-    statusEl.textContent = '調査完了 ✓';
+    statusEl.textContent = t('note.investigate.done');
   } catch (e) {
     statusEl.textContent = t('note.investigate.fail') + ': ' + e.message;
   }
@@ -89,8 +89,8 @@ async function threatDetailSaveNote(ip, mac) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ip, mac: mac || undefined, note: ta.value }),
     });
-    statusEl.textContent = '保存しました ✓';
+    statusEl.textContent = t('settings.status.saved');
   } catch (e) {
-    statusEl.textContent = '保存失敗: ' + e.message;
+    statusEl.textContent = t('settings.status.saveFailed') + ': ' + e.message;
   }
 }

@@ -18,6 +18,13 @@ function describeThisDevice() {
   return os ? `${browser} on ${os}` : browser;
 }
 
+function refreshSavedPlaceholders() {
+  ['s-asus-pass', 's-yamaha-pass', 's-slack-token'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.dataset.saved === 'true') el.placeholder = t('settings.pass.saved');
+  });
+}
+
 // Password login → per-device session token, stored under the same key so
 // apiFetch / Socket.IO need no changes.  A legacy admin token already in
 // localStorage keeps working — the server accepts both credentials.
@@ -165,7 +172,7 @@ document.getElementById('note-save').addEventListener('click', async () => {
 });
 document.getElementById('note-investigate-btn').addEventListener('click', async () => {
   if (!noteEditIp) {
-    alert('IP アドレスがないため調査できません');
+    alert(t('note.investigate.noIp'));
     return;
   }
   const btn = document.getElementById('note-investigate-btn');
@@ -211,8 +218,8 @@ function updateConnBadge(key) {
   } else {
     badge.classList.add('err');
     // s.err is an internal state string; translate for display
-    const errLabel = s.err === 'セッション切れ' ? t('badge.timeout')
-                   : s.err === '失敗'           ? t('badge.error')
+    const errLabel = s.err === 'session-expired' ? t('badge.timeout')
+                   : s.err === 'failed'          ? t('badge.error')
                    : s.err || t('badge.waiting');
     ipEl.textContent = errLabel;
     badge.title = prefix + ' — ' + errLabel;
@@ -228,8 +235,10 @@ socket.on('config', cfg => {
   // Passwords are not sent in plaintext for security; show "saved" placeholder instead
   const asusPwEl = document.getElementById('s-asus-pass');
   asusPwEl.placeholder = cfg.asusPassSet ? t('settings.pass.saved') : t('settings.pass.empty');
+  asusPwEl.dataset.saved = cfg.asusPassSet ? 'true' : 'false';
   const yamahaPwEl = document.getElementById('s-yamaha-pass');
   yamahaPwEl.placeholder = cfg.yamahaPassSet ? t('settings.pass.saved') : t('settings.pass.empty');
+  yamahaPwEl.dataset.saved = cfg.yamahaPassSet ? 'true' : 'false';
   if (cfg.yamahaEnabled !== undefined) {
     yamahaConfigured = cfg.yamahaEnabled;
     document.getElementById('enable-yamaha').checked = yamahaConfigured;
@@ -266,6 +275,7 @@ socket.on('config', cfg => {
     currentLang = cfg.language;
     document.getElementById('s-language').value = currentLang;
     applyI18n();
+    refreshSavedPlaceholders();
     // Re-render dynamic UI (existing badges/statuses) too
     Object.keys(connState).forEach(updateConnBadge);
   } else if (cfg.language) {
@@ -309,9 +319,7 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
   // Confirm if retention is being shortened
   const currentRetention = parseInt(document.getElementById('s-retention').dataset.saved || '730');
   if (newRetention < currentRetention) {
-    const msg = currentLang === 'ja'
-      ? `ログ保存期間を ${currentRetention}日 → ${newRetention}日 に短縮します。\n${newRetention}日より古いログは次回の定期削除で消去されます。\n\n続行しますか？`
-      : `Reducing log retention from ${currentRetention} to ${newRetention} days.\nLogs older than ${newRetention} days will be deleted on next cleanup.\n\nContinue?`;
+    const msg = tVars('settings.confirm.retention', { current: currentRetention, next: newRetention });
     if (!confirm(msg)) { btn.disabled = false; btn.textContent = t('settings.btn.save'); return; }
   }
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + t('settings.btn.saving');
@@ -325,6 +333,7 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
       if (newLang !== currentLang) {
         currentLang = newLang;
         applyI18n();
+        refreshSavedPlaceholders();
         Object.keys(connState).forEach(updateConnBadge);
         if (typeof renderBeaconBanner === 'function') renderBeaconBanner();
         if (typeof updateLogView === 'function' && currentView === 'log') updateLogView();
@@ -338,10 +347,10 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
       // Re-render map if shown
       if (mapMode && worldGeo) { stopMapAnim(); renderWorldMap(); updateMapDots(); startMapAnim(); }
     } else {
-      showStatus('general-status', '保存失敗', false);
+      showStatus('general-status', t('settings.status.saveFailed'), false);
     }
   } catch (e) {
-    showStatus('general-status', 'エラー: ' + e.message, false);
+    showStatus('general-status', tVars('settings.error.withMessage', { message: e.message }), false);
   } finally {
     btn.disabled = false; btn.textContent = t('settings.btn.save');
   }

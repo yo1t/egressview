@@ -107,8 +107,7 @@ document.getElementById('yamaha-connect-btn').addEventListener('click', async ()
 document.getElementById('asus-connect-btn').addEventListener('click', async () => {
   const doAsus = document.getElementById('enable-asus').checked;
   const passEl = document.getElementById('s-asus-pass');
-  // Even if password is empty, use the saved one if placeholder shows "saved"
-  const hasSavedPass = /保存済み/.test(passEl.placeholder);
+  const hasSavedPass = passEl.dataset.saved === 'true';
   if (doAsus) {
     const user = document.getElementById('s-asus-user').value.trim();
     const pass = passEl.value;
@@ -186,7 +185,7 @@ document.getElementById('slack-lookup-btn').addEventListener('click', async () =
     } else {
       info.style.display = 'block';
       info.style.color = '#ef4444';
-      info.textContent = '✗ ' + (data.error === 'user_not_found' ? (currentLang === 'ja' ? 'ユーザーが見つかりません' : 'User not found') : data.error);
+      info.textContent = '✗ ' + (data.error === 'user_not_found' ? t('settings.slack.userNotFound') : data.error);
     }
   } catch (e) {
     showStatus('slack-status', e.message, false);
@@ -244,7 +243,8 @@ document.getElementById('slack-test-btn').addEventListener('click', async () => 
     if (data.config?.displayName) document.getElementById('s-slack-username').value = data.config.displayName;
     if (data.config?.cooldownMinutes) document.getElementById('s-slack-cooldown').value = String(data.config.cooldownMinutes);
     if (data.config?.tokenSet) {
-      document.getElementById('s-slack-token').placeholder = currentLang === 'ja' ? '(保存済み)' : '(saved)';
+      document.getElementById('s-slack-token').placeholder = t('settings.pass.saved');
+      document.getElementById('s-slack-token').dataset.saved = 'true';
     }
   }).catch(() => {});
 })();
@@ -276,7 +276,7 @@ async function loadBackupList() {
       document.getElementById('s-backup-generations').value = String(data.config.maxGenerations);
     }
     if (!data.backups || data.backups.length === 0) {
-      listEl.innerHTML = '<div style="padding:4px;">' + (currentLang === 'ja' ? 'バックアップなし' : 'No backups') + '</div>';
+      listEl.innerHTML = '<div style="padding:4px;">' + t('settings.backup.none') + '</div>';
       return;
     }
     listEl.innerHTML = data.backups.reverse().map(b => {
@@ -285,11 +285,11 @@ async function loadBackupList() {
       return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid var(--border);">
         <span style="flex:1">${date} (${size})</span>
         <button class="connect-btn" style="font-size:9px;padding:2px 6px;" onclick="backupDownload('${b.name}')">DL</button>
-        <button class="connect-btn" style="font-size:9px;padding:2px 6px;" onclick="backupRestore('${b.name}')">Restore</button>
+        <button class="connect-btn" style="font-size:9px;padding:2px 6px;" onclick="backupRestore('${b.name}')">${t('settings.backup.restore')}</button>
       </div>`;
     }).join('');
   } catch (e) {
-    document.getElementById('backup-list').textContent = 'Error: ' + e.message;
+    document.getElementById('backup-list').textContent = tVars('settings.error.withMessage', { message: e.message });
   }
 }
 
@@ -304,7 +304,7 @@ document.getElementById('backup-config-save').addEventListener('click', async ()
     });
     showStatus('backup-config-status', t('settings.status.saved'), true);
   } catch (e) {
-    showStatus('backup-config-status', 'Error: ' + e.message, false);
+    showStatus('backup-config-status', tVars('settings.error.withMessage', { message: e.message }), false);
   }
 });
 
@@ -346,12 +346,12 @@ document.getElementById('datasource-save-btn').addEventListener('click', async (
     });
     const data = await r.json();
     if (data.success) {
-      showStatus('datasource-status', '✓ 保存しました', true);
+      showStatus('datasource-status', t('settings.status.saved'), true);
     } else {
-      showStatus('datasource-status', data.error || 'エラー', false);
+      showStatus('datasource-status', data.error || t('settings.error.generic'), false);
     }
   } catch (e) {
-    showStatus('datasource-status', 'Error: ' + e.message, false);
+    showStatus('datasource-status', tVars('settings.error.withMessage', { message: e.message }), false);
   } finally {
     btn.disabled = false;
   }
@@ -362,9 +362,7 @@ document.getElementById('datasource-save-btn').addEventListener('click', async (
 // with a login session, so we just display the new value once for copying.
 
 document.getElementById('token-regen-btn').addEventListener('click', async () => {
-  const msg = currentLang === 'ja'
-    ? 'API トークンを再生成します。\n古いトークンを使っているスクリプト・自動化は失敗するようになります。\n\n続行しますか？'
-    : 'Regenerate the API token?\nScripts/automation using the old token will stop working.\n\nContinue?';
+  const msg = t('settings.token.confirm');
   if (!confirm(msg)) return;
   const btn = document.getElementById('token-regen-btn');
   btn.disabled = true;
@@ -372,15 +370,13 @@ document.getElementById('token-regen-btn').addEventListener('click', async () =>
     const r = await apiFetch(_BASE+'/api/admin/regenerate-token', { method: 'POST' });
     const data = await r.json();
     if (data.success && data.token) {
-      prompt(currentLang === 'ja'
-        ? '新しい API トークン（この画面でしか表示されません。必要ならコピーしてください）:'
-        : 'New API token (shown only once — copy it if needed):', data.token);
-      showStatus('token-status', currentLang === 'ja' ? '✓ 再生成しました' : '✓ Regenerated', true);
+      prompt(t('settings.token.prompt'), data.token);
+      showStatus('token-status', t('settings.token.regenerated'), true);
     } else {
       showStatus('token-status', data.error || 'Error', false);
     }
   } catch (e) {
-    showStatus('token-status', 'Error: ' + e.message, false);
+    showStatus('token-status', tVars('settings.error.withMessage', { message: e.message }), false);
   } finally {
     btn.disabled = false;
   }
@@ -393,7 +389,7 @@ document.getElementById('pw-change-btn').addEventListener('click', async () => {
   const current = document.getElementById('s-pw-current').value;
   const next    = document.getElementById('s-pw-new').value;
   if (next.length < 8) {
-    showStatus('pw-status', currentLang === 'ja' ? '新しいパスワードは8文字以上にしてください' : 'New password must be at least 8 characters', false);
+    showStatus('pw-status', t('settings.password.tooShort'), false);
     return;
   }
   btn.disabled = true;
@@ -410,13 +406,13 @@ document.getElementById('pw-change-btn').addEventListener('click', async () => {
     if (data.success) {
       document.getElementById('s-pw-current').value = '';
       document.getElementById('s-pw-new').value = '';
-      showStatus('pw-status', currentLang === 'ja' ? `✓ 変更しました（他セッション失効: ${data.revoked}件）` : `✓ Changed (${data.revoked} other session(s) revoked)`, true);
+      showStatus('pw-status', tVars('settings.password.changed', { count: data.revoked }), true);
       loadSessionsList();
     } else {
       showStatus('pw-status', data.error || 'Error', false);
     }
   } catch (e) {
-    showStatus('pw-status', 'Error: ' + e.message, false);
+    showStatus('pw-status', tVars('settings.error.withMessage', { message: e.message }), false);
   } finally {
     btn.disabled = false;
   }
@@ -507,13 +503,13 @@ document.getElementById('beacon-save-btn').addEventListener('click', async () =>
     });
     const data = await r.json();
     if (data.success) {
-      showStatus('beacon-status', '✓ 保存しました（再スキャン実行中）', true);
+      showStatus('beacon-status', t('settings.beacon.savedScanning'), true);
       if (typeof loadBeacons === 'function') setTimeout(loadBeacons, 2000); // refresh banner after rescan
     } else {
-      showStatus('beacon-status', data.error || 'エラー', false);
+      showStatus('beacon-status', data.error || t('settings.error.generic'), false);
     }
   } catch (e) {
-    showStatus('beacon-status', 'Error: ' + e.message, false);
+    showStatus('beacon-status', tVars('settings.error.withMessage', { message: e.message }), false);
   } finally {
     btn.disabled = false;
   }
@@ -539,9 +535,7 @@ function backupDownload(name) {
 }
 
 async function backupRestore(name) {
-  const msg = currentLang === 'ja'
-    ? `バックアップ "${name}" からリストアします。\n現在のデータは上書きされます（リストア前にバックアップが自動作成されます）。\n\n続行しますか？`
-    : `Restore from "${name}"?\nCurrent data will be overwritten (a safety backup is created first).\n\nContinue?`;
+  const msg = tVars('settings.backup.confirmRestore', { name });
   if (!confirm(msg)) return;
   try {
     const r = await apiFetch(_BASE+'/api/backup/restore', {
@@ -549,9 +543,9 @@ async function backupRestore(name) {
       body: JSON.stringify({ name }),
     });
     const data = await r.json();
-    showStatus('backup-action-status', data.success ? '✓ Restored. Reload recommended.' : data.error, data.success);
+    showStatus('backup-action-status', data.success ? t('settings.backup.restored') : data.error, data.success);
   } catch (e) {
-    showStatus('backup-action-status', 'Error: ' + e.message, false);
+    showStatus('backup-action-status', tVars('settings.error.withMessage', { message: e.message }), false);
   }
 }
 
@@ -559,9 +553,7 @@ const backupUploadInput = document.getElementById('backup-upload-input');
 if (backupUploadInput) backupUploadInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  const msg = currentLang === 'ja'
-    ? `ファイル "${file.name}" からリストアします。\n現在のデータは上書きされます。\n\n続行しますか？`
-    : `Restore from "${file.name}"?\nCurrent data will be overwritten.\n\nContinue?`;
+  const msg = tVars('settings.backup.confirmUpload', { name: file.name });
   if (!confirm(msg)) { e.target.value = ''; return; }
   try {
     const buf = await file.arrayBuffer();
@@ -571,10 +563,10 @@ if (backupUploadInput) backupUploadInput.addEventListener('change', async (e) =>
       body: buf,
     });
     const data = await r.json();
-    showStatus('backup-action-status', data.success ? '✓ Restored. Reload recommended.' : data.error, data.success);
+    showStatus('backup-action-status', data.success ? t('settings.backup.restored') : data.error, data.success);
     loadBackupList();
   } catch (err) {
-    showStatus('backup-action-status', 'Error: ' + err.message, false);
+    showStatus('backup-action-status', tVars('settings.error.withMessage', { message: err.message }), false);
   }
   e.target.value = '';
 });

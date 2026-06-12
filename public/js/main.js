@@ -4,7 +4,7 @@ socket.on('auth-required', () => {
   document.getElementById('disconnected-banner').style.display = 'block';
   settingsBtn.classList.add('alert');
   connState.l2.ready = false;
-  connState.l2.err   = 'セッション切れ';
+  connState.l2.err   = 'session-expired';
   updateConnBadge('l2');
   if (asusActive) {
     stopGraph();
@@ -18,7 +18,7 @@ socket.on('yamaha-status', s => {
   showStatus('yamaha-status', s.message, s.ready);
   connState.l3l4.enabled = yamahaConfigured;
   connState.l3l4.ready   = s.ready;
-  connState.l3l4.err     = s.ready ? '' : '失敗';
+  connState.l3l4.err     = s.ready ? '' : 'failed';
   updateConnBadge('l3l4');
   if (!s.ready && yamahaConfigured && !asusActive) {
     const banner = document.getElementById('disconnected-banner');
@@ -111,7 +111,7 @@ socket.on('connections-update', data => {
 });
 
 socket.on('poll-error', err => {
-  errorBanner.textContent = 'ポーリングエラー: ' + err.message;
+  errorBanner.textContent = tVars('err.poll', { message: err.message });
   errorBanner.style.display = 'block';
 });
 

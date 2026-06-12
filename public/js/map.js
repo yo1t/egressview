@@ -88,14 +88,14 @@ async function initWorldMap() {
   const loadMsg = d3.select(mc).append('div')
     .style('position','absolute').style('inset','0').style('display','flex')
     .style('align-items','center').style('justify-content','center')
-    .style('color','#4b6a8a').style('font-size','13px').text('🌐 地図データを読み込み中…');
+    .style('color','#4b6a8a').style('font-size','13px').text(t('map.loading'));
   try {
     const topo = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
     worldGeo = topojson.feature(topo, topo.objects.countries);
     loadMsg.remove();
     renderWorldMap();
   } catch(err) {
-    loadMsg.text('地図データの読み込みに失敗しました'); console.error('[map]', err);
+    loadMsg.text(t('map.loadFailed')); console.error('[map]', err);
   }
 }
 
