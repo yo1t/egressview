@@ -6,6 +6,7 @@ var currentMapK = 1;
 var mapParticles = [];
 var mapAnimId = null;
 var homeCountry = 'JP'; // configurable
+var mapColorScale = null; // session-count colour ramp (set in updateMapDots)
 
 // Per-country: capital / centre coordinates
 const COUNTRY_COORDS = {
@@ -62,10 +63,11 @@ function buildMapPoints() {
     if (!orgMap.has(key)) orgMap.set(key, {
       key, org: c.org || c.dstHost || c.dst,
       lat: c.lat, lon: c.lon, city: c.city || '', country: c.country || '',
-      srcs: new Map(), maxTtl: 0,
+      srcs: new Map(), maxTtl: 0, threat: false,
     });
     const e = orgMap.get(key);
     e.srcs.set(c.src, (e.srcs.get(c.src) || 0) + 1);
+    if (c.threat) e.threat = true;
     // Adopt lat/lon from the session with the highest (most stable) TTL → prevents flicker between polls
     if ((c.ttl || 0) > e.maxTtl) {
       e.maxTtl = c.ttl || 0;
@@ -76,6 +78,7 @@ function buildMapPoints() {
   }
   return [...orgMap.values()].map(e => ({
     ...e,
+    threat: e.threat,
     totalSessions: [...e.srcs.values()].reduce((a, b) => a + b, 0),
     // TTL ≥300s → fully active (1.0); below that, linear fade; floor at 0.15
     freshness: Math.max(0.15, Math.min(1.0, (e.maxTtl || 0) / 300)),
@@ -114,32 +117,64 @@ function renderWorldMap() {
 
   mapSvg = d3.select('#world-map').attr('viewBox', `0 0 ${w} ${h}`);
   mapSvg.selectAll('*').remove();
+
+  // ── Neon HUD defs: radial ocean gradient + glow filters ──────────────
+  // Glow is applied to whole layers (countries / arcs / dots) — one filter
+  // pass per layer rather than per element — so the bloom is cheap to render.
+  mapSvg.append('defs').html(`
+    <radialGradient id="map-ocean" cx="48%" cy="42%" r="80%">
+      <stop offset="0"   stop-color="#10254a"/>
+      <stop offset="55%" stop-color="#0a1730"/>
+      <stop offset="100%" stop-color="#050a14"/>
+    </radialGradient>
+    <filter id="map-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="1.3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="map-glow-strong" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>`);
+  // Per-arc gradients are (re)generated each update into this defs node
+  mapSvg.append('defs').attr('id', 'map-arc-grads');
+
   mapG = mapSvg.append('g');
 
-  // Ocean (sphere)
+  // Ocean (sphere) — radial gradient gives the globe depth
   mapG.append('path').datum({type:'Sphere'}).attr('class','map-sphere').attr('d', mapPath);
-  // Graticule
+  // Graticule (glowing cyan grid)
   mapG.append('path').datum(d3.geoGraticule()()).attr('class','map-graticule').attr('d', mapPath);
-  // Country borders
-  mapG.append('g').selectAll('path')
+  // Country borders — glowing cyan outlines (layer-level glow filter)
+  mapG.append('g').attr('class','map-countries').attr('filter','url(#map-glow)')
+    .selectAll('path')
     .data(worldGeo.features).join('path').attr('class','map-country').attr('d', mapPath);
-  // Ballistic-arc layer (bottom-most)
-  mapG.append('g').attr('class','map-arcs');
+  // Glowing rim around the globe edge
+  mapG.append('path').datum({type:'Sphere'}).attr('class','map-rim').attr('d', mapPath)
+    .attr('filter','url(#map-glow)');
+  // Ballistic-arc layer (bottom-most, glowing)
+  mapG.append('g').attr('class','map-arcs').attr('filter','url(#map-glow)');
+  // Threat pulse layer
+  mapG.append('g').attr('class','map-pulses');
   // Particle layer
   mapG.append('g').attr('class','map-particles');
-  // Dot layer (above arcs and particles)
-  mapG.append('g').attr('class','map-dots');
+  // Dot layer (above arcs and particles, glowing)
+  mapG.append('g').attr('class','map-dots').attr('filter','url(#map-glow)');
 
   // Home router marker (coordinates of the configured country)
   const { lat: hLat, lon: hLon } = getHomeCoord();
   const homeXY = mapProjection([hLon, hLat]);
-  const homeG = mapG.append('g').attr('class','map-home')
+  const homeG = mapG.append('g').attr('class','map-home').attr('filter','url(#map-glow)')
     .attr('transform', `translate(${homeXY[0]},${homeXY[1]})`);
-  homeG.append('circle').attr('class','home-ring').attr('data-base-r', 10)
-    .attr('r', 10).attr('fill','#f59e0b').attr('fill-opacity',0.25)
-    .attr('stroke','#f59e0b').attr('stroke-width',1.5);
+  // Radar sweep: expanding pulse ring emitted from the home node
+  const sweep = homeG.append('circle').attr('class','home-sweep')
+    .attr('r', 8).attr('fill','none').attr('stroke','#fbbf24').attr('stroke-width',1.5);
+  sweep.append('animate').attr('attributeName','r').attr('values','8;40').attr('dur','2.6s').attr('repeatCount','indefinite');
+  sweep.append('animate').attr('attributeName','stroke-opacity').attr('values','0.7;0').attr('dur','2.6s').attr('repeatCount','indefinite');
+  homeG.append('circle').attr('class','home-ring').attr('data-base-r', 11)
+    .attr('r', 11).attr('fill','#fbbf24').attr('fill-opacity',0.2)
+    .attr('stroke','#fbbf24').attr('stroke-width',1.5);
   homeG.append('circle').attr('class','home-dot').attr('data-base-r', 5)
-    .attr('r', 5).attr('fill','#f59e0b');
+    .attr('r', 5).attr('fill','#ffe9a6');
   homeG.append('text').attr('class','home-label').text('🏠')
     .attr('text-anchor','middle').attr('dy','-12px').attr('font-size','11px');
 
@@ -151,10 +186,14 @@ function renderWorldMap() {
       mapSvg.selectAll('circle.map-dot').attr('r', function() {
         return parseFloat(this.getAttribute('data-base-r') || 5) / currentMapK;
       });
-      mapSvg.selectAll('path.map-arc').attr('stroke-width', 0.5 / currentMapK);
-      mapSvg.selectAll('circle.map-particle').attr('r', 2.5 / currentMapK);
+      mapSvg.selectAll('path.map-arc').attr('stroke-width', function(d) {
+        return arcBaseWidth(d) / currentMapK;
+      });
+      mapSvg.selectAll('circle.map-particle').attr('r', 2.6 / currentMapK);
       mapSvg.selectAll('.map-home circle').attr('r', function() {
-        return parseFloat(this.getAttribute('data-base-r')) / currentMapK;
+        const base = this.getAttribute('data-base-r');
+        if (base == null) return;  // animated sweep ring — leave to SMIL
+        return parseFloat(base) / currentMapK;
       });
       mapSvg.select('.home-label').attr('dy', `${-12 / currentMapK}px`)
         .attr('font-size', `${11 / currentMapK}px`);
@@ -162,6 +201,9 @@ function renderWorldMap() {
   );
   updateMapDots();
 }
+
+// Base (zoom-independent) stroke width for an arc — threats are thicker
+function arcBaseWidth(d) { return d && d.threat ? 2.0 : 1.2; }
 
 // Build the d attribute for a ballistic Bezier curve (control point lifted upward)
 function ballisticD(x1, y1, x2, y2) {
@@ -211,6 +253,7 @@ function updateMapDots() {
   const colorScale = d3.scaleSequentialLog()
     .domain([1, Math.max(2, maxS)])
     .interpolator(d3.interpolate('#6d28d9', '#f97316'));
+  mapColorScale = colorScale;  // exposed for dotColor()
 
   const selNode = selectedMac ? nodes.find(n => n.id === selectedMac) : null;
   const selIp = selNode?.client?.ip || null;
@@ -219,20 +262,39 @@ function updateMapDots() {
   const homeXY = mapProjection([_hLon, _hLat]);
   const [hx, hy] = homeXY;
 
-  // ── Ballistic arcs (faint background arcs) ────────────────────────
+  // ── Ballistic arcs (glowing gradient: bright cyan at home → org colour) ──
+  // Rebuild per-arc gradients (cheap defs nodes; the glow lives on the layer)
+  const gradsDefs = mapSvg.select('#map-arc-grads');
+  gradsDefs.selectAll('*').remove();
+  const arcGradId = d => 'arcg-' + d.key.replace(/[^a-zA-Z0-9_-]/g, '_');
+  points.forEach(d => {
+    const xy = mapProjection([d.lon, d.lat]) || [-200, -200];
+    const endCol = d.threat ? '#ff2d55' : colorScale(d.totalSessions);
+    const g = gradsDefs.append('linearGradient')
+      .attr('id', arcGradId(d)).attr('gradientUnits', 'userSpaceOnUse')
+      .attr('x1', hx).attr('y1', hy).attr('x2', xy[0]).attr('y2', xy[1]);
+    g.append('stop').attr('offset', '0').attr('stop-color', '#bff7ff').attr('stop-opacity', 0.95);
+    g.append('stop').attr('offset', '1').attr('stop-color', endCol).attr('stop-opacity', 0.9);
+  });
+
   const arcsG = mapSvg.select('.map-arcs');
   arcsG.selectAll('path.map-arc')
     .data(points, d => d.key)
     .join('path')
-    .attr('class', 'map-arc')
+    .attr('class', d => 'map-arc' + (d.threat ? ' map-arc-threat' : ''))
     .attr('d', d => {
       const xy = mapProjection([d.lon, d.lat]) || [-200, -200];
       return ballisticD(hx, hy, xy[0], xy[1]);
     })
     .attr('fill', 'none')
-    .attr('stroke', d => colorScale(d.totalSessions))
-    .attr('stroke-width', 0.5 / currentMapK)
-    .attr('stroke-opacity', d => (!selIp || d.srcs.has(selIp) ? 0.18 : 0.03) * d.freshness);
+    .attr('stroke', d => `url(#${arcGradId(d)})`)
+    .attr('stroke-linecap', 'round')
+    .attr('stroke-width', d => arcBaseWidth(d) / currentMapK)
+    .attr('stroke-opacity', d => {
+      const dim = !selIp || d.srcs.has(selIp);
+      const base = d.threat ? 0.95 : 0.6;
+      return (dim ? base : 0.05) * (0.35 + 0.65 * d.freshness);
+    });
 
   // ── Rebuild particles ─────────────────────────────────────────────
   stopMapAnim();
@@ -255,8 +317,8 @@ function updateMapDots() {
       const t0 = i / nParts; // stagger start positions evenly
       const dotEl = particlesG.append('circle')
         .attr('class', 'map-particle')
-        .attr('r', 2.5 / currentMapK)
-        .attr('fill', '#fffde7')
+        .attr('r', 2.6 / currentMapK)
+        .attr('fill', d.threat ? '#ff9bad' : '#ffffff')
         .attr('opacity', 0)
         .node();
       mapParticles.push({ pathEl, totalLength, t: t0, speed, orgColor, dotEl, visible, freshness: fresh });
@@ -275,19 +337,40 @@ function updateMapDots() {
         .attr('data-base-r', d => rScale(d))
         // Draw at full size immediately (avoided the 0→full transition that caused invisible periods on instant switch)
         .attr('r', d => rScale(d) / currentMapK)
-        .attr('fill', d => colorScale(d.totalSessions))
-        .attr('fill-opacity', 0.8)
-        .attr('stroke', d => colorScale(d.totalSessions))
+        .attr('fill', dotColor)
+        .attr('fill-opacity', 0.85)
+        .attr('stroke', dotColor)
         .attr('stroke-width', 1).attr('stroke-opacity', 0.9)
         .on('mouseenter', showMapTooltip).on('mousemove', moveMapTooltip).on('mouseleave', hideMapTooltip),
       update => update
         .attr('cx', d => (mapProjection([d.lon, d.lat]) || [-100,-100])[0])
         .attr('cy', d => (mapProjection([d.lon, d.lat]) || [-100,-100])[1])
         .attr('data-base-r', d => rScale(d))
-        .attr('fill', d => colorScale(d.totalSessions))
-        .attr('stroke', d => colorScale(d.totalSessions))
+        .attr('fill', dotColor)
+        .attr('stroke', dotColor)
         .attr('r', d => rScale(d) / currentMapK), // immediate update, no transition
       exit => exit.transition().duration(300).attr('r', 0).remove()
     )
     .attr('opacity', d => (!selIp || d.srcs.has(selIp) ? d.freshness : 0.08));
+
+  // ── Threat pulse rings (radar ping on dangerous destinations) ─────
+  const pulsesG = mapSvg.select('.map-pulses');
+  pulsesG.selectAll('*').remove();
+  points.filter(d => d.threat && (!selIp || d.srcs.has(selIp))).forEach(d => {
+    const xy = mapProjection([d.lon, d.lat]) || [-100, -100];
+    const r0 = rScale(d) / currentMapK;
+    const ring = pulsesG.append('circle')
+      .attr('cx', xy[0]).attr('cy', xy[1])
+      .attr('r', r0).attr('fill', 'none')
+      .attr('stroke', '#ff2d55').attr('stroke-width', 2 / currentMapK);
+    ring.append('animate').attr('attributeName','r')
+      .attr('values', `${r0};${r0 + 22 / currentMapK}`).attr('dur','1.4s').attr('repeatCount','indefinite');
+    ring.append('animate').attr('attributeName','stroke-opacity')
+      .attr('values','0.9;0').attr('dur','1.4s').attr('repeatCount','indefinite');
+  });
+}
+
+// Destination dot colour — threats are red, otherwise the session-count ramp
+function dotColor(d) {
+  return d.threat ? '#ff2d55' : (mapColorScale ? mapColorScale(d.totalSessions) : '#9333ea');
 }
