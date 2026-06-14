@@ -28,7 +28,6 @@ async function applyTimeFilter() {
   if (asusActive) updateOrgGraph({ resetPositions: true });
   else            buildGraphFromConnections({ resetPositions: true });
   scheduleGraphAutoFit({ delayedData });
-  if (mapMode)    updateMapDots();
   if (statsMode)  updateStats();
   if (logMode)    updateLogView();
   const selNode = nodes.find(n => n.id === selectedMac);
