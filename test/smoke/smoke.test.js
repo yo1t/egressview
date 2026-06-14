@@ -37,7 +37,7 @@ test('js/i18n.js is served (200)', async ({ request }) => {
 // ① Phase 2 で分割した全 JS ファイルが 200 で配信されること
 const PHASE2_JS_FILES = [
   'utils.js', 'connections-panel.js', 'auth-socket.js', 'graph.js',
-  'settings.js', 'map.js', 'stats.js', 'time-filter.js',
+  'settings.js', 'map-common.js', 'stats.js', 'time-filter.js',
   'view-tabs.js', 'log.js', 'threat-popup.js', 'devices.js', 'main.js',
 ];
 for (const file of PHASE2_JS_FILES) {
@@ -47,7 +47,16 @@ for (const file of PHASE2_JS_FILES) {
   });
 }
 
-// ② index.html にインライン JS が残っていないこと（誤って巻き戻し検出）
+// ② 削除済みファイルが 404 になること（誤って復元したときの検知）
+const DELETED_JS_FILES = ['map.js', 'dashboard.js'];
+for (const file of DELETED_JS_FILES) {
+  test(`js/${file} is deleted (404)`, async ({ request }) => {
+    const res = await request.get(`${BASE}/js/${file}`);
+    expect(res.status()).toBe(404);
+  });
+}
+
+// ③ index.html にインライン JS が残っていないこと（誤って巻き戻し検出）
 test('index.html has no inline script block with JS code', async ({ request }) => {
   const res = await request.get(`${BASE}/`);
   const body = await res.text();
@@ -55,13 +64,23 @@ test('index.html has no inline script block with JS code', async ({ request }) =
   expect(body).not.toMatch(/<script>\s*\/\/ ─/);
 });
 
-// ③ index.html が期待する <script src> タグを含むこと
+// ④ index.html が期待する <script src> タグを含むこと
 test('index.html references expected script files', async ({ request }) => {
   const res = await request.get(`${BASE}/`);
   const body = await res.text();
-  for (const f of ['utils.js', 'graph.js', 'settings.js', 'devices.js', 'main.js']) {
+  for (const f of ['utils.js', 'graph.js', 'map-common.js', 'settings.js', 'devices.js', 'main.js']) {
     expect(body, `index.html should reference ${f}`).toContain(`/js/${f}`);
   }
+});
+
+// ⑤ セキュリティヘッダーが返ってくること
+test('security headers are present', async ({ request }) => {
+  const res = await request.get(`${BASE}/`);
+  const h = res.headers();
+  expect(h['x-frame-options'],          'X-Frame-Options').toBe('DENY');
+  expect(h['x-content-type-options'],   'X-Content-Type-Options').toBe('nosniff');
+  expect(h['referrer-policy'],          'Referrer-Policy').toBe('same-origin');
+  expect(h['content-security-policy'],  'Content-Security-Policy').toContain("object-src 'none'");
 });
 
 // ─── JS integrity test (no auth required) ────────────────────────────────────
@@ -84,70 +103,93 @@ test('no uncaught JS errors on page load', async ({ page }) => {
 // ─── Auth-gated UI tests ──────────────────────────────────────────────────────
 // Skipped when WIDEMAP_TOKEN is not set.
 
-test('tab bar renders after auth', async ({ page }) => {
-  if (!TOKEN) {
-    test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
-  }
+// Helper: authenticate and navigate to /
+async function authPage(page) {
   await page.addInitScript(tok => {
     localStorage.setItem('widemap_admin_token', tok);
   }, TOKEN);
-
   await page.goto('/');
   await page.waitForLoadState('networkidle');
+}
 
-  // At least one .view-tab element should be visible
+// Helper: collect non-noise console errors
+function collectErrors(page) {
+  const errors = [];
+  page.on('pageerror', err => errors.push(err.message));
+  page.on('console',   msg => { if (msg.type() === 'error') errors.push(msg.text()); });
+  return errors;
+}
+
+const NOISE = [
+  'socket.io', 'Socket', 'WebSocket',
+  'ERR_CONNECTION_REFUSED', 'io is not defined', 'Failed to load resource',
+];
+function fatalErrors(errors) {
+  return errors.filter(e => !NOISE.some(n => e.includes(n)));
+}
+
+test('tab bar renders after auth', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
+
+  await authPage(page);
+
+  // Exactly 4 tabs: グラフマップ / 統計情報 / 通信ログ / 端末一覧
   const tabs = page.locator('.view-tab');
   await expect(tabs.first()).toBeVisible();
   const count = await tabs.count();
-  expect(count).toBeGreaterThanOrEqual(4); // graph / map / stats / log / devices
+  expect(count).toBe(4);
 });
 
 test('graph canvas renders after auth (P2-4: background fetch completes)', async ({ page }) => {
-  if (!TOKEN) {
-    test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
-  }
-  await page.addInitScript(tok => {
-    localStorage.setItem('widemap_admin_token', tok);
-  }, TOKEN);
+  if (!TOKEN) test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
 
-  await page.goto('/');
-  await page.waitForLoadState('networkidle');
+  await authPage(page);
 
   // P2-4: after initial 1h emit, client fires a background 24h fetch and calls
   // buildGraphFromConnections(). The SVG/canvas element should be populated.
-  // We just verify the graph container is present and non-empty (has child nodes).
   const graphContainer = page.locator('#graph-container');
   await expect(graphContainer).toBeVisible();
-  // The graph SVG or canvas should have at least one child once data is rendered
   const childCount = await graphContainer.evaluate(el => el.children.length);
   expect(childCount, 'graph container should have rendered children after background fetch').toBeGreaterThan(0);
 });
 
 test('no console errors after auth', async ({ page }) => {
-  if (!TOKEN) {
-    test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
+  if (!TOKEN) test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+
+  expect(fatalErrors(errors), `Console errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+// ⑥ タブ切り替えがエラーなく動くこと（リファクタリング後の安全網）
+test('tab switching produces no console errors', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+
+  // 全タブを順にクリックしてエラーが出ないことを確認
+  for (const btnId of ['btn-stats', 'btn-log', 'btn-devices', 'btn-graph']) {
+    await page.click(`#${btnId}`);
+    await page.waitForTimeout(500);
   }
-  const errors = [];
-  page.on('pageerror', err => errors.push(err.message));
-  page.on('console',   msg => { if (msg.type() === 'error') errors.push(msg.text()); });
 
-  await page.addInitScript(tok => {
-    localStorage.setItem('widemap_admin_token', tok);
-  }, TOKEN);
+  expect(fatalErrors(errors), `Tab switch errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
 
-  await page.goto('/');
-  await page.waitForLoadState('networkidle');
+// ⑦ 期間フィルター変更後にエラーが出ないこと（getFilteredConnections の間接テスト）
+test('time filter change produces no console errors', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
 
-  // Ignore Socket.IO noise — when testing directly against port 3002 without a
-  // reverse proxy, socket.io.js may be served at a different path than SUBPATH
-  // expects. This is a test-infrastructure artifact, not a code defect.
-  const fatal = errors.filter(e =>
-    !e.includes('socket.io') &&
-    !e.includes('Socket') &&
-    !e.includes('WebSocket') &&
-    !e.includes('ERR_CONNECTION_REFUSED') &&
-    !e.includes('io is not defined') &&  // socket.io not loaded without proxy
-    !e.includes('Failed to load resource') // CDN / socket.io 404 in tunnel mode
-  );
-  expect(fatal, `Console errors:\n  ${fatal.join('\n  ')}`).toHaveLength(0);
+  const errors = collectErrors(page);
+  await authPage(page);
+
+  const select = page.locator('#time-filter-select');
+  for (const value of ['24h', '6h', '7d', '1h']) {
+    await select.selectOption(value);
+    await page.waitForTimeout(500);
+  }
+
+  expect(fatalErrors(errors), `Time filter errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
