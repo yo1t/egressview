@@ -1,8 +1,16 @@
 // Routes: general settings and data-source configuration
 'use strict';
+const path   = require('path');
 const logger = require('../logger');
 
 const { Router } = require('express');
+
+// Reject paths with null bytes or '..' components; require absolute path.
+function isValidLogPath(p) {
+  if (typeof p !== 'string') return false;
+  const s = p.trim();
+  return s.length > 0 && path.isAbsolute(s) && !s.includes('\x00') && !s.split('/').includes('..');
+}
 
 const ALLOWED_COUNTRIES = new Set([
   'JP','US','CA','GB','DE','FR','IT','ES','NL','SE','CH','NO',
@@ -89,7 +97,7 @@ module.exports = function configRoutes(ctx) {
 
     if (dnsmasq) {
       if (typeof dnsmasq.enabled  === 'boolean') appState.dnsmasqEnabled = dnsmasq.enabled;
-      if (typeof dnsmasq.logFile  === 'string' && dnsmasq.logFile.trim()) appState.dnsmasqLogFile = dnsmasq.logFile.trim();
+      if (isValidLogPath(dnsmasq.logFile)) appState.dnsmasqLogFile = dnsmasq.logFile.trim();
       dnsmasqLog.stop();
       dnsmasqLog.configure({
         logFile: appState.dnsmasqLogFile,
@@ -107,7 +115,7 @@ module.exports = function configRoutes(ctx) {
 
     if (inspect) {
       if (typeof inspect.enabled === 'boolean') appState.inspectEnabled = inspect.enabled;
-      if (typeof inspect.logFile === 'string' && inspect.logFile.trim()) appState.inspectLogFile = inspect.logFile.trim();
+      if (isValidLogPath(inspect.logFile)) appState.inspectLogFile = inspect.logFile.trim();
       inspectSyslog.stop();
       inspectSyslog.configure({
         logFile:   appState.inspectLogFile,
@@ -119,7 +127,7 @@ module.exports = function configRoutes(ctx) {
 
     if (dhcpd) {
       if (typeof dhcpd.enabled === 'boolean') appState.dhcpdEnabled = dhcpd.enabled;
-      if (typeof dhcpd.logFile === 'string' && dhcpd.logFile.trim()) appState.dhcpdLogFile = dhcpd.logFile.trim();
+      if (isValidLogPath(dhcpd.logFile)) appState.dhcpdLogFile = dhcpd.logFile.trim();
       dhcpdSyslog.stop();
       dhcpdSyslog.configure({ logFile: appState.dhcpdLogFile, enabled: appState.dhcpdEnabled });
       if (appState.dhcpdEnabled) dhcpdSyslog.start();

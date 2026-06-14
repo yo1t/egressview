@@ -2,10 +2,8 @@ let currentLang = 'ja';
 const I18N = {
   ja: {
     // Header / Tabs
-    'tab.graph': '📊 グラフマップ', 'tab.dashboard': '🌐 ダッシュボード', 'tab.map': '🗺 地図', 'tab.stats': '📈 統計情報', 'tab.log': '📋 通信ログ', 'tab.devices': '🖥 端末一覧',
-    'dash.globe': 'GLOBE', 'dash.flat': 'FLAT MAP', 'dash.log': '通信ログ（リアルタイム）',
-    'dash.col.src': '送信元', 'dash.col.dst': '宛先', 'dash.col.port': 'Port', 'dash.col.loc': '場所', 'dash.col.threat': '脅威',
-    'dash.log.threat': '検出', 'dash.log.clean': '清浄',
+    'tab.graph': '📊 グラフマップ', 'tab.stats': '📈 統計情報', 'tab.log': '📋 通信ログ', 'tab.devices': '🖥 端末一覧',
+    'dash.globe': 'GLOBE', 'dash.flat': 'FLAT MAP',
     'devices.title': '🖥 端末一覧', 'devices.refresh': '更新',
     'devices.col.ip': 'IP', 'devices.col.mac': 'MAC', 'devices.col.vendor': 'ベンダー', 'devices.col.name': '名前',
     'devices.col.ipv6': 'IPv6', 'devices.col.sources': 'ソース', 'devices.col.firstSeen': '初回確認', 'devices.col.lastSeen': '最終確認',
@@ -280,10 +278,8 @@ const I18N = {
     'beacon.col.firstLast':'初回 / 最終',
     'beacon.dismiss':'却下',
   },  en: {
-    'tab.graph': '📊 Graph Map', 'tab.dashboard': '🌐 Dashboard', 'tab.map': '🗺 World Map', 'tab.stats': '📈 Statistics', 'tab.log': '📋 Conn Log', 'tab.devices': '🖥 Devices',
-    'dash.globe': 'GLOBE', 'dash.flat': 'FLAT MAP', 'dash.log': 'Connection log (live)',
-    'dash.col.src': 'Source', 'dash.col.dst': 'Destination', 'dash.col.port': 'Port', 'dash.col.loc': 'Location', 'dash.col.threat': 'Threat',
-    'dash.log.threat': 'Detected', 'dash.log.clean': 'Clean',
+    'tab.graph': '📊 Graph Map', 'tab.stats': '📈 Statistics', 'tab.log': '📋 Conn Log', 'tab.devices': '🖥 Devices',
+    'dash.globe': 'GLOBE', 'dash.flat': 'FLAT MAP',
     'devices.title': '🖥 Devices', 'devices.refresh': 'Refresh',
     'devices.col.ip': 'IP', 'devices.col.mac': 'MAC', 'devices.col.vendor': 'Vendor', 'devices.col.name': 'Name',
     'devices.col.ipv6': 'IPv6', 'devices.col.sources': 'Sources', 'devices.col.firstSeen': 'First Seen', 'devices.col.lastSeen': 'Last Seen',

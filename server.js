@@ -381,6 +381,26 @@ async function pollYamahaConnections() {
 
 // ─── Express middleware ───────────────────────────────────────────────────────
 
+// Security headers — applied to every response
+app.use((req, res, next) => {
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  // Minimal CSP: block object/embed injection and restrict base URI.
+  // script-src includes 'unsafe-inline' for the BASE_URL bootstrap snippet;
+  // the real XSS guard is esc() + input validation throughout the codebase.
+  res.setHeader('Content-Security-Policy',
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline' https://d3js.org https://cdn.jsdelivr.net; " +
+    "style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data:; " +
+    "connect-src 'self' wss: https://cdn.jsdelivr.net; " +
+    "object-src 'none'; " +
+    "base-uri 'self';"
+  );
+  next();
+});
+
 app.get(['/', '/index.html'], (req, res) => {
   const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   const baseScript = `<script>window.BASE_URL = '${htmlEscape(SUBPATH)}';</script>`;
