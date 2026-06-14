@@ -382,8 +382,8 @@
   .stats-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   /* ── Stats maps (globe + flat) ──────────────────────── */
   .stats-maps {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
-    height: 220px; flex-shrink: 0;
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.618fr); gap: 8px;
+    height: 300px; flex-shrink: 0;
   }
   .stats-map-cell {
     position: relative; background: #050a14;
@@ -398,7 +398,7 @@
   /* ── Stats charts row (bar + timeline) ──────────────── */
   .stats-charts {
     flex: 1; min-height: 0; display: grid;
-    grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr); gap: 8px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.618fr); gap: 8px;
   }
   .stats-charts .stats-chart { flex: none; height: 100%; min-height: 0; }
   #world-map { width: 100%; height: 100%; }
