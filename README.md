@@ -44,7 +44,7 @@ Widemap answers the question most home users can't ask: *what is each device on 
 
 ## Demo
 
-https://github.com/user-attachments/assets/9360b145-60cb-46b1-8489-898d7ea62b60
+[Demo video](docs/widemap-redacted.mp4)
 
 > UI language: English / Japanese selectable
 
@@ -55,8 +55,9 @@ Connection Log and Devices let you drill down into suspicious destinations, nois
 ## Screenshots
 
 ![Graph Map overview](docs/widemap1.png)
-![Connection and device drill-down](docs/widemap2.png)
-![Statistics view](docs/widemap3.png)
+![Statistics view](docs/widemap2.png)
+![Connection Log drill-down](docs/widemap3.png)
+![Devices drill-down](docs/widemap4.png)
 
 ## Architecture
 

@@ -30,8 +30,8 @@ jobs:
       - name: Run unit tests
         run: npm test
 
-  audit:
-    name: Dependency audit
+  security:
+    name: Release safety checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,5 +45,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check for known vulnerabilities
-        run: npm audit --audit-level=moderate
+      - name: Check production dependencies
+        run: npm run security:audit
+
+      - name: Secret scan
+        run: npm run security:secrets

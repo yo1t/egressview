@@ -26,9 +26,10 @@ On first startup an admin token is printed to the console; enter it in the brows
 npm test                  # unit tests (no hardware required) — run these before every PR
 npm run test:integration  # opt-in tests against a real router (RUN_INTEGRATION=1)
 npm run test:smoke        # Playwright browser smoke tests
+npm run security:check    # production dependency audit + secret scan before publishing
 ```
 
-CI (GitHub Actions) runs the unit tests on Node 18 and 20, plus `npm audit`. PRs must be green.
+CI (GitHub Actions) runs the unit tests on Node 18 and 20, plus the release safety checks (`npm audit --omit=dev` and secret scan). PRs must be green.
 
 ## Guidelines
 

@@ -10,7 +10,10 @@
     "test": "node --test test/unit/*.test.js",
     "test:unit": "node --test test/unit/*.test.js",
     "test:integration": "RUN_INTEGRATION=1 node --test test/integration/*.test.js",
-    "test:smoke": "playwright test"
+    "test:smoke": "playwright test",
+    "security:audit": "npm audit --omit=dev --audit-level=moderate",
+    "security:secrets": "node scripts/secret-scan.js",
+    "security:check": "npm run security:audit && npm run security:secrets"
   },
   "dependencies": {
     "axios": "^1.7.0",
