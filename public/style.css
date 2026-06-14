@@ -401,6 +401,18 @@
     grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr); gap: 8px;
   }
   .stats-charts .stats-chart { flex: none; height: 100%; min-height: 0; }
+  /* Flat map arc flow animation */
+  @keyframes st-arc-flow { to { stroke-dashoffset: -10; } }
+  .sf-arcs path {
+    stroke-dasharray: 5 4;
+    animation: st-arc-flow 1.2s linear infinite;
+  }
+  /* Globe arc subtle flow */
+  @keyframes sg-arc-flow { to { stroke-dashoffset: -8; } }
+  .sg-arcs path {
+    stroke-dasharray: 4 5;
+    animation: sg-arc-flow 1.8s linear infinite;
+  }
   #world-map { width: 100%; height: 100%; }
   .map-country { fill: #0c2036; stroke: #38bdf8; stroke-width: 0.6px; stroke-opacity: 0.85; }
   .map-graticule { fill: none; stroke: #2dd4bf; stroke-width: 0.35px; stroke-opacity: 0.2; }

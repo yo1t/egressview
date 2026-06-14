@@ -6,6 +6,7 @@ var stGlobeSvg = null, stGlobeProj = null;
 var stFlatSvg = null, stFlatProj = null, stFlatPath = null;
 var stGlobeRotate = [-139, -20];
 var stColorScale = null;
+var stSpin = true, stSpinTimer = null, stSpinResume = null;
 
 function stColor(d) {
   return d.threat ? '#ff2d55' : (stColorScale ? stColorScale(d.totalSessions) : '#9333ea');
@@ -43,12 +44,14 @@ function stRenderGlobeBase() {
   stGlobeSvg.append('g').attr('class','sg-front').attr('filter','url(#sg-glow)');
   stGlobeSvg.append('g').attr('class','sg-pulses');
   stGlobeSvg.call(d3.drag()
+    .on('start', () => { stSpin = false; if (stSpinResume) clearTimeout(stSpinResume); })
     .on('drag', ev => {
       stGlobeRotate[0] += ev.dx * 0.4;
       stGlobeRotate[1] = Math.max(-90, Math.min(90, stGlobeRotate[1] - ev.dy * 0.4));
       stGlobeProj.rotate(stGlobeRotate);
       stRenderGlobeData();
-    }));
+    })
+    .on('end', () => { stSpinResume = setTimeout(() => { stSpin = true; }, 2500); }));
   return true;
 }
 
@@ -141,12 +144,29 @@ function stRenderFlatData() {
   });
 }
 
+function stStartSpin() {
+  if (stSpinTimer) return;
+  stSpinTimer = d3.timer(() => {
+    if (!statsMode) return;
+    if (stSpin && stGlobeProj) {
+      stGlobeRotate[0] += 0.16;
+      stGlobeProj.rotate(stGlobeRotate);
+      stRenderGlobeData();
+    }
+  });
+}
+
+function stStopSpin() {
+  if (stSpinTimer) { stSpinTimer.stop(); stSpinTimer = null; }
+}
+
 function initStatsMaps() {
   dashEnsureGeo(() => {
     if (!stRenderGlobeBase()) { requestAnimationFrame(initStatsMaps); return; }
     stRenderFlatBase();
     stRenderGlobeData();
     stRenderFlatData();
+    stStartSpin();
   });
 }
 
