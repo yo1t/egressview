@@ -273,10 +273,10 @@ function stInitFlatControls() {
   document.getElementById('sfm-reset').addEventListener('click', () => {
     stFlatZoom = 1; stFlatPanX = 0; stFlatPanY = 0; stUpdateFlatProj();
   });
-  document.getElementById('sfm-up').addEventListener('click',    () => { stFlatPanY -= SFM_PAN; stUpdateFlatProj(); });
-  document.getElementById('sfm-down').addEventListener('click',  () => { stFlatPanY += SFM_PAN; stUpdateFlatProj(); });
-  document.getElementById('sfm-left').addEventListener('click',  () => { stFlatPanX -= SFM_PAN; stUpdateFlatProj(); });
-  document.getElementById('sfm-right').addEventListener('click', () => { stFlatPanX += SFM_PAN; stUpdateFlatProj(); });
+  document.getElementById('sfm-up').addEventListener('click',    () => { stFlatPanY += SFM_PAN; stUpdateFlatProj(); });
+  document.getElementById('sfm-down').addEventListener('click',  () => { stFlatPanY -= SFM_PAN; stUpdateFlatProj(); });
+  document.getElementById('sfm-left').addEventListener('click',  () => { stFlatPanX += SFM_PAN; stUpdateFlatProj(); });
+  document.getElementById('sfm-right').addEventListener('click', () => { stFlatPanX -= SFM_PAN; stUpdateFlatProj(); });
 }
 
 function stStartSpin() {
