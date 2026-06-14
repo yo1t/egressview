@@ -67,10 +67,14 @@ document.getElementById('zoom-slider').addEventListener('input', e => {
   const cur = d3.zoomTransform(svg.node());
   svg.call(graphZoom.transform, d3.zoomIdentity.translate(cur.x, cur.y).scale(k));
 });
-document.getElementById('zoom-fit').addEventListener('click', () => {
+document.getElementById('zoom-fit').addEventListener('click', () => fitGraphToNodes());
+
+let graphAutoFitTimers = [];
+
+function fitGraphToNodes({ duration = 400, padding = 96 } = {}) {
   if (!nodes || !nodes.length) return;
-  const xs = nodes.map(n => n.x).filter(v => v != null);
-  const ys = nodes.map(n => n.y).filter(v => v != null);
+  const xs = nodes.map(n => n.x).filter(Number.isFinite);
+  const ys = nodes.map(n => n.y).filter(Number.isFinite);
   if (!xs.length) return;
   const xMin = Math.min(...xs), xMax = Math.max(...xs);
   const yMin = Math.min(...ys), yMax = Math.max(...ys);
@@ -78,15 +82,32 @@ document.getElementById('zoom-fit').addEventListener('click', () => {
   const hBox = Math.max(50, yMax - yMin);
   const sw = svg.node().clientWidth  || width;
   const sh = svg.node().clientHeight || height;
-  const padding = 80;
+  if (!sw || !sh) return;
   const k = Math.min(0.95, (sw - padding) / wBox, (sh - padding) / hBox, 3);
   const kk = Math.max(0.1, k);
   const tx = sw / 2 - (xMin + wBox / 2) * kk;
   const ty = sh / 2 - (yMin + hBox / 2) * kk;
-  svg.transition().duration(400).call(
+  svg.transition().duration(duration).ease(d3.easeCubicOut).call(
     graphZoom.transform, d3.zoomIdentity.translate(tx, ty).scale(kk)
   );
-});
+}
+
+function scheduleGraphAutoFit({ delayedData = false } = {}) {
+  graphAutoFitTimers.forEach(clearTimeout);
+  graphAutoFitTimers = [];
+  if (currentView !== 'graph') return;
+
+  // The force simulation keeps settling after the data changes, so fit a few
+  // times with soft transitions instead of snapping once to an early layout.
+  // Longer period filters can load older data late, so keep following for a
+  // few seconds after the first redraw.
+  const delays = delayedData ? [160, 520, 1200, 2400, 4200] : [120, 360, 820];
+  delays.forEach((delay, i) => {
+    graphAutoFitTimers.push(setTimeout(() => {
+      fitGraphToNodes({ duration: i === 0 ? 280 : 560, padding: 112 });
+    }, delay));
+  });
+}
 const linkGroup = g.append('g');
 const nodeGroup = g.append('g');
 

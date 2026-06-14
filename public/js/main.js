@@ -109,6 +109,7 @@ socket.on('connections-update', data => {
         allConnections = [...map.values()];
         dataRangeFrom = from24h;
         if (!asusActive) buildGraphFromConnections(); else updateOrgGraph();
+        scheduleGraphAutoFit({ delayedData: true });
         if (mapMode) updateMapDots();
         if (statsMode) updateStats();
         if (logMode) updateLogView();

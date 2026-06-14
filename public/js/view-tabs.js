@@ -26,6 +26,7 @@ function switchView(view) {
   document.body.classList.toggle('is-stats-mode', view === 'stats');
   if (view === 'map')     requestAnimationFrame(() => initWorldMap());
   else                    stopMapAnim();
+  if (view === 'graph')   requestAnimationFrame(scheduleGraphAutoFit);
   if (view === 'dashboard') requestAnimationFrame(initDashboard);
   else if (typeof dashStopSpin === 'function') dashStopSpin();
   if (view === 'stats')   requestAnimationFrame(updateStats);

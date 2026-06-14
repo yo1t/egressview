@@ -2,7 +2,7 @@
 
 **Home / SOHO Network Security Monitor — Real-time visibility into every LAN device's outbound connections**
 
-Is your smart TV phoning home to unexpected servers? Are your IP cameras, IoT appliances, or NAS boxes making connections you never authorised? Widemap answers these questions by passively monitoring every outbound connection from every device on your LAN and displaying them on an interactive world map — in real time, with automatic threat detection.
+Is your smart TV phoning home to unexpected servers? Are your IP cameras, IoT appliances, or NAS boxes making connections you never authorised? Widemap answers these questions by passively monitoring every outbound connection from every device on your LAN, then turning that data into an investigation workflow: Graph Map and Statistics for the big picture, Connection Log and Devices for drill-down analysis — with automatic threat detection.
 
 No new hardware. No inline traffic interception. Works via your existing Yamaha RTX router's NAT session table.
 
@@ -35,12 +35,12 @@ Widemap answers the question most home users can't ask: *what is each device on 
 - **Slack notifications**: sends a DM when a threat is detected (configurable cooldown, language-aware)
 - Identifies local devices using **OUI vendor lookup**, **mDNS/Bonjour**, **SSDP**, **NetBIOS**, and an **Apple model dictionary** (resolves down to "iPhone 15 Pro")
 - Enriches each destination IP with **reverse DNS**, **RDAP** (organization name), and **GeoIP** (latitude/longitude/city)
-- Plots all connections on an interactive **world map** with animated arcs
+- Uses **Graph Map** and **Statistics** for whole-network overview, then **Connection Log** and **Devices** for per-session and per-device drill-down
 - Optionally connects to an **ASUS WiFi access point** (used as AP/mesh, not as a router) to get WiFi client details (band, signal strength, traffic rates, AiMesh topology)
 - Keeps a **connection history** in **SQLite** (WAL mode, crash-safe; configurable retention up to 2 years)
 - **Connection log**: sortable/searchable table of all sessions with threat status badges
 - **📡 Data Sources tab** — configure each data source (dnsmasq / [INSPECT] / [DHCPD]) independently from the settings UI
-- Single-page dark-themed UI with graph view, map view, statistics, and connection log
+- Single-page dark-themed UI focused on Graph Map, Statistics, Connection Log, Devices, and Settings
 
 ## Demo
 
@@ -48,15 +48,15 @@ https://github.com/user-attachments/assets/9360b145-60cb-46b1-8489-898d7ea62b60
 
 > UI language: English / Japanese selectable
 
-Visualise NAT session data as a force-directed network graph, animated arcs on a world map, and time-series trend charts — all updating in real time.
+Graph Map and Statistics give you the network-wide overview: device/destination patterns, session trends, and noisy endpoints — all updating in real time.
 
-The sidebar lists every device on your LAN, enriched with hostnames, vendor names, and model info beyond just IP and MAC addresses. Select a device to filter the map and graph to show only its active connections.
+Connection Log and Devices let you drill down into suspicious destinations, noisy devices, beacon candidates, notes, and device history: see the pattern, filter the time range, inspect sessions, then pivot to the device.
 
 ## Screenshots
 
-![widemap1](docs/widemap1.png)
-![widemap2](docs/widemap2.png)
-![widemap3](docs/widemap3.png)
+![Graph Map overview](docs/widemap1.png)
+![Connection and device drill-down](docs/widemap2.png)
+![Statistics view](docs/widemap3.png)
 
 ## Architecture
 
@@ -149,7 +149,7 @@ Open the Settings panel (⚙) and enter your router details:
 
 For the Yamaha RTX, click **Connect & Auto-detect** after entering the IP, username, and password. Widemap checks SSH access, detects the NAT descriptor (usually `100`), finds the LAN IP when available, verifies that NAT sessions can be read, and fills the recommended setting before you save.
 
-Within a few seconds, devices and connections will start appearing on the map.
+Within a few seconds, devices, sessions, and statistics will start appearing in the UI.
 
 > **Note:** Credentials are generated once on first startup and saved (hashed) in `.widemap.json`. If you lose the password, remove the `auth` section from `.widemap.json` and restart — a new initial password will be printed.
 
@@ -196,7 +196,7 @@ A self-signed certificate (`.widemap-cert.pem` / `.widemap-key.pem`, 10-year val
 "https": { "enabled": true, "certPath": "/path/to/cert.pem", "keyPath": "/path/to/key.pem" }
 ```
 
-HTTPS is recommended if you use the login password from multiple devices, since it protects credentials and dashboard data from eavesdropping inside the LAN.
+HTTPS is recommended if you use the login password from multiple devices, since it protects credentials and interface data from eavesdropping inside the LAN.
 
 ## Configuration
 
@@ -242,12 +242,12 @@ The ASUS device is used as a **WiFi access point (AP mode or AiMesh)**, not as a
 - **Apple model dictionary** (200+ models: iPhone, iPad, Mac, Apple TV, HomePod, Apple Watch)
 - **Auto-investigation** mode: scans unknown devices in the background
 
-### Visualization
+### Investigation Views
 
-- **Graph view**: Force-directed network topology
-- **World map**: Destination IPs plotted with animated arcs from your location
-- **Statistics**: Time-series charts and bar charts of session counts per destination
-- **Connection log**: Full session table with threat indicators, sortable columns, and per-column search filters (text match, regex, date range)
+- **Graph Map**: Whole-network topology overview for spotting unusual device/destination clusters
+- **Statistics**: Time-series charts and destination summaries for traffic trends
+- **Connection Log**: Full session table with threat indicators, sortable columns, and per-column search filters (text match, regex, date range)
+- **Devices**: Inventory view for drilling into device identity, notes, status, and history
 - **Connection panel**: Per-device list of active internet connections with org/country info
 - **IPv4/IPv6 badges**: Protocol detection per device via NDP cache polling
 

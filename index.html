@@ -4,18 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Widemap — Home / SOHO Network Security Monitor</title>
-  <meta name="description" content="Where Is Data Exiting? Map All Paths. Passively monitor every LAN device's outbound connections on a real-time world map. Automatic C2/botnet threat detection, Slack alerts. Works with Yamaha RTX routers — no new hardware required.">
+  <meta name="description" content="Where Is Data Exiting? Map All Paths. Passively monitor every LAN device's outbound connections. Use Graph Map and Statistics for whole-network overview, then drill down in Connection Log and Devices. Automatic C2/botnet threat detection, Slack alerts. Works with Yamaha RTX routers — no new hardware required.">
   <meta name="keywords" content="network security monitor, IoT security, home network security, SOHO security, Yamaha RTX, network visualizer, C2 detection, botnet detection, threat intelligence, LAN monitor, open source">
   <meta name="author" content="Yoichi Takizawa">
   <link rel="canonical" href="https://yo1t.github.io/widemap/">
   <meta property="og:title" content="Widemap — Home / SOHO Network Security Monitor">
-  <meta property="og:description" content="Passively monitor every LAN device's outbound connections on a real-time world map. Automatic C2/botnet threat detection and Slack alerts — no new hardware required.">
+  <meta property="og:description" content="Passively monitor every LAN device's outbound connections. Graph Map and Statistics provide the overview; Connection Log and Devices provide drill-down investigation. Automatic C2/botnet threat detection and Slack alerts — no new hardware required.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://yo1t.github.io/widemap/">
   <meta property="og:image" content="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Widemap — Home / SOHO Network Security Monitor">
-  <meta name="twitter:description" content="Passively monitor every LAN device's outbound connections on a real-time world map. Automatic C2/botnet threat detection and Slack alerts — no new hardware required.">
+  <meta name="twitter:description" content="Passively monitor every LAN device's outbound connections. Graph Map and Statistics provide the overview; Connection Log and Devices provide drill-down investigation. Automatic C2/botnet threat detection and Slack alerts — no new hardware required.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png">
   <style>
     :root {
@@ -192,7 +192,7 @@
 
 <header>
   <h1><span>Widemap</span></h1>
-  <p>Where Is Data Exiting? Map All Paths. — Know what every device on your home or SOHO network is actually connecting to. Real-time world map, automatic threat detection, instant Slack alerts.</p>
+  <p>Where Is Data Exiting? Map All Paths. — Know what every device on your home or SOHO network is actually connecting to. Graph Map and Statistics for the overview; Connection Log and Devices for drill-down investigation. Automatic threat detection and Slack alerts.</p>
   <div class="badges">
     <a href="https://opensource.org/licenses/AGPL-3.0"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
     <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node.js 18+"></a>
@@ -252,8 +252,8 @@
     <h2><span class="icon">✦</span> Features</h2>
     <div class="card-grid">
       <div class="card">
-        <h3>Real-time World Map</h3>
-        <p>Every outbound connection plotted on an interactive map with animated arcs from your location to the destination.</p>
+        <h3>Overview + Drill-down Workflow</h3>
+        <p>Graph Map and Statistics show the whole network at a glance. Connection Log and Devices let you pivot into sessions, destinations, notes, and device history.</p>
       </div>
       <div class="card">
         <h3>Yamaha RTX Integration</h3>
@@ -304,17 +304,17 @@
       </video>
     </div>
     <p style="font-size:0.82rem; color:var(--muted); margin-top:8px;">UI language: English / Japanese selectable</p>
-    <p style="font-size:0.9rem; color:var(--text); margin-top:12px;">Visualise NAT session data as a force-directed network graph, animated arcs on a world map, and time-series trend charts — all updating in real time.</p>
-    <p style="font-size:0.9rem; color:var(--text); margin-top:8px;">The sidebar lists every device on your LAN, enriched with hostnames, vendor names, and model info beyond just IP and MAC addresses. Select a device to filter the map and graph to show only its active connections.</p>
+    <p style="font-size:0.9rem; color:var(--text); margin-top:12px;">Graph Map and Statistics give you the network-wide overview: device/destination patterns, session trends, and noisy endpoints — all updating in real time.</p>
+    <p style="font-size:0.9rem; color:var(--text); margin-top:8px;">Connection Log and Devices let you drill down into suspicious destinations, noisy devices, beacon candidates, notes, and device history.</p>
   </section>
 
   <!-- Screenshots -->
   <section id="screenshots">
     <h2><span class="icon">◈</span> Screenshots</h2>
     <div class="screenshot-grid">
-      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png" alt="Widemap world map view showing connections from LAN devices to global destinations" loading="lazy">
-      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap2.png" alt="Widemap graph view showing network topology" loading="lazy">
-      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap3.png" alt="Widemap statistics view with connection history charts" loading="lazy">
+      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png" alt="Widemap Graph Map overview for LAN devices and destinations" loading="lazy">
+      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap2.png" alt="Widemap Connection Log and Devices drill-down workflow" loading="lazy">
+      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap3.png" alt="Widemap Statistics view with connection history charts" loading="lazy">
     </div>
   </section>
 
@@ -379,14 +379,14 @@ cd widemap
 npm install
 npm start</code></pre>
 
-      <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:4px;">Step 3 — Open the browser and enter the admin token</p>
-      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:4px;">On first startup the token is printed to the console:</p>
+      <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:4px;">Step 3 — Open the browser and log in</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:4px;">On first startup the initial login password is printed to the console:</p>
       <pre><code><span class="comment">══════════════════════════════════════
-  Widemap admin token (initial):
-  a1b2c3d4e5f6...
-  → Enter this in the browser
+  Widemap login password (initial):
+  KFpDqntYRfcr...
+  → Log in with this password on first access
 ══════════════════════════════════════</span></code></pre>
-      <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;">Open <code>http://localhost:3000</code> and enter the token.</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;">Open <code>http://localhost:3000</code> and enter the password.</p>
 
       <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:8px;">Step 4 — Configure your router in Settings (⚙)</p>
       <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
@@ -398,16 +398,13 @@ npm start</code></pre>
           <td style="padding:6px 8px; color:var(--muted);">SSH username / password</td>
           <td style="padding:6px 8px;">Set up in the <a href="https://github.com/yo1t/widemap/blob/main/docs/setup-yamaha.md">Yamaha guide</a></td>
         </tr>
-        <tr style="border-bottom:1px solid var(--border);">
-          <td style="padding:6px 8px; color:var(--muted);">NAT descriptor number</td>
-          <td style="padding:6px 8px;">Run <code>show nat descriptor</code> on the router — typically <code>100</code></td>
-        </tr>
         <tr>
           <td style="padding:6px 8px; color:var(--muted);">ASUS AP IP / password</td>
           <td style="padding:6px 8px;">AP's LAN IP and admin password (<a href="https://github.com/yo1t/widemap/blob/main/docs/setup-asus.md">ASUS guide</a>)</td>
         </tr>
       </table>
-      <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;">Devices and connections will start appearing on the map within a few seconds.</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;">For Yamaha RTX, click <strong>Connect &amp; Auto-detect</strong> after entering the IP, username, and password. Widemap verifies SSH access, detects the NAT descriptor, checks LAN IP and NAT sessions, then fills the recommended settings before you save.</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;">Devices, sessions, and statistics will start appearing in the UI within a few seconds.</p>
     </div>
   </section>
 

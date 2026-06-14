@@ -127,6 +127,10 @@ describe('Frontend TDZ lint', () => {
     while ((m = dynamicIdRe.exec(script)) !== null) {
       dynamicIds.add(m[1]);
     }
+    const assignedIdRe = /\.id\s*=\s*['"]([^'"]+)['"]/g;
+    while ((m = assignedIdRe.exec(script)) !== null) {
+      dynamicIds.add(m[1]);
+    }
 
     const missing = idCalls.filter(id => !htmlIds.has(id) && !dynamicIds.has(id));
     // Dedupe

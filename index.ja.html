@@ -4,18 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Widemap — 家庭・SOHO向けネットワークセキュリティモニター</title>
-  <meta name="description" content="Where Is Data Exiting? Map All Paths. LAN内の全デバイスの通信先をリアルタイムに世界地図上で可視化。C2/ボットネット自動検出、Slackアラート対応。Yamaha RTXルーター専用 — 追加ハードウェア不要。">
+  <meta name="description" content="Where Is Data Exiting? Map All Paths. LAN内の全デバイスの通信先をパッシブに監視。グラフマップと統計情報で全体を把握し、通信ログと端末一覧で詳細へドリルダウン。C2/ボットネット自動検出、Slackアラート対応。Yamaha RTXルーター専用 — 追加ハードウェア不要。">
   <meta name="keywords" content="ネットワークセキュリティ, IoTセキュリティ, ホームネットワークセキュリティ, SOHO, Yamaha RTX, ネットワーク可視化, C2検出, ボットネット検出, 脅威インテリジェンス, LAN監視, オープンソース">
   <meta name="author" content="Yoichi Takizawa">
   <link rel="canonical" href="https://yo1t.github.io/widemap/index.ja.html">
   <meta property="og:title" content="Widemap — 家庭・SOHO向けネットワークセキュリティモニター">
-  <meta property="og:description" content="LAN内の全デバイスの通信先をリアルタイムに世界地図上で可視化。C2/ボットネット自動検出、Slackアラート対応。追加ハードウェア不要。">
+  <meta property="og:description" content="LAN内の全デバイスの通信先をパッシブに監視。グラフマップ/統計情報で全体を把握し、通信ログ/端末一覧で詳細へドリルダウン。C2/ボットネット自動検出、Slackアラート対応。追加ハードウェア不要。">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://yo1t.github.io/widemap/index.ja.html">
   <meta property="og:image" content="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Widemap — 家庭・SOHO向けネットワークセキュリティモニター">
-  <meta name="twitter:description" content="LAN内の全デバイスの通信先をリアルタイムに世界地図上で可視化。C2/ボットネット自動検出、Slackアラート対応。追加ハードウェア不要。">
+  <meta name="twitter:description" content="LAN内の全デバイスの通信先をパッシブに監視。グラフマップ/統計情報で全体を把握し、通信ログ/端末一覧で詳細へドリルダウン。C2/ボットネット自動検出、Slackアラート対応。追加ハードウェア不要。">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png">
   <style>
     :root {
@@ -192,7 +192,7 @@
 
 <header>
   <h1><span>Widemap</span></h1>
-  <p>Where Is Data Exiting? Map All Paths. — 家庭・SOHOのLAN内デバイスが「何と通信しているか」をリアルタイムに可視化。自動脅威検出とSlackアラート対応。追加ハードウェア不要。</p>
+  <p>Where Is Data Exiting? Map All Paths. — 家庭・SOHOのLAN内デバイスが「何と通信しているか」を把握。グラフマップ/統計情報で全体を見て、通信ログ/端末一覧で詳細調査。自動脅威検出とSlackアラート対応。</p>
   <div class="badges">
     <a href="https://opensource.org/licenses/AGPL-3.0"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
     <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node.js 18+"></a>
@@ -252,8 +252,8 @@
     <h2><span class="icon">✦</span> 機能</h2>
     <div class="card-grid">
       <div class="card">
-        <h3>リアルタイム世界地図</h3>
-        <p>全ての外向き接続をインタラクティブな地図上にプロット。設置場所から接続先へのアニメーションアーク表示。</p>
+        <h3>全体把握 + ドリルダウン</h3>
+        <p>グラフマップと統計情報でネットワーク全体を俯瞰し、通信ログと端末一覧でセッション・宛先・メモ・履歴へ掘り下げます。</p>
       </div>
       <div class="card">
         <h3>Yamaha RTX 連携</h3>
@@ -304,17 +304,17 @@
       </video>
     </div>
     <p style="font-size:0.82rem; color:var(--muted); margin-top:8px;">UI言語: 英語 / 日本語 切り替え可能</p>
-    <p style="font-size:0.9rem; color:var(--text); margin-top:12px;">収集したNATセッション情報をもとに、ネットワークグラフ・世界地図上の通信アーク・時系列トレンドチャートをリアルタイムに表示します。</p>
-    <p style="font-size:0.9rem; color:var(--text); margin-top:8px;">右側のサイドバーにはLAN内の全デバイスが一覧表示され、IPアドレスやMACアドレスに加えてホスト名・ベンダー名・機種名などを自動収集して表示します。デバイスを選択すると、そのデバイスの通信先だけにフィルタされ、地図やグラフに反映されます。</p>
+    <p style="font-size:0.9rem; color:var(--text); margin-top:12px;">グラフマップと統計情報で、デバイス/宛先の偏り、セッション推移、通信量の多い端末をリアルタイムに俯瞰できます。</p>
+    <p style="font-size:0.9rem; color:var(--text); margin-top:8px;">通信ログと端末一覧では、気になる宛先、通信の多い端末、ビーコン候補、メモ、端末履歴へドリルダウンできます。</p>
   </section>
 
   <!-- スクリーンショット -->
   <section id="screenshots">
     <h2><span class="icon">◈</span> スクリーンショット</h2>
     <div class="screenshot-grid">
-      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png" alt="Widemap 世界地図ビュー — LANデバイスからグローバル接続先への通信を表示" loading="lazy">
-      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap2.png" alt="Widemap グラフビュー — ネットワークトポロジー表示" loading="lazy">
-      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap3.png" alt="Widemap 統計ビュー — 接続履歴チャート" loading="lazy">
+      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png" alt="Widemap グラフマップ — LANデバイスと接続先の全体把握" loading="lazy">
+      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap2.png" alt="Widemap 通信ログと端末一覧 — 詳細ドリルダウン" loading="lazy">
+      <img src="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap3.png" alt="Widemap 統計情報 — 接続履歴チャート" loading="lazy">
     </div>
   </section>
 
@@ -379,14 +379,14 @@ cd widemap
 npm install
 npm start</code></pre>
 
-      <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:4px;">Step 3 — ブラウザを開いて管理トークンを入力</p>
-      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:4px;">初回起動時にコンソールにトークンが表示されます：</p>
+      <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:4px;">Step 3 — ブラウザを開いてログイン</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:4px;">初回起動時にコンソールに初期ログインパスワードが表示されます：</p>
       <pre><code><span class="comment">══════════════════════════════════════
-  Widemap admin token (initial):
-  a1b2c3d4e5f6...
-  → ブラウザ初回アクセス時に入力
+  Widemap login password (initial):
+  KFpDqntYRfcr...
+  → ブラウザ初回アクセス時にこのパスワードでログインしてください
 ══════════════════════════════════════</span></code></pre>
-      <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;"><code>http://localhost:3000</code> を開いてトークンを入力してください。</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;"><code>http://localhost:3000</code> を開いてパスワードを入力してください。</p>
 
       <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:8px;">Step 4 — 設定パネル（⚙）でルーター情報を入力</p>
       <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
@@ -398,16 +398,13 @@ npm start</code></pre>
           <td style="padding:6px 8px; color:var(--muted);">SSH ユーザー名 / パスワード</td>
           <td style="padding:6px 8px;"><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-yamaha.ja.md">Yamaha 設定ガイド</a>で設定したもの</td>
         </tr>
-        <tr style="border-bottom:1px solid var(--border);">
-          <td style="padding:6px 8px; color:var(--muted);">NAT ディスクリプタ番号</td>
-          <td style="padding:6px 8px;">ルーターで <code>show nat descriptor</code> を実行 — 通常は <code>100</code></td>
-        </tr>
         <tr>
           <td style="padding:6px 8px; color:var(--muted);">ASUS AP の IP / パスワード</td>
           <td style="padding:6px 8px;">AP の LAN 側 IP と管理者パスワード（<a href="https://github.com/yo1t/widemap/blob/main/docs/setup-asus.ja.md">ASUS 設定ガイド</a>）</td>
         </tr>
       </table>
-      <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;">数秒後にデバイスと接続先が地図に表示されはじめます。</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;">Yamaha RTX は、IP・ユーザー名・パスワードを入力後に <strong>接続して自動検出</strong> を押してください。SSH接続、NATディスクリプタ、LAN IP、NAT sessions を確認し、保存前に推奨設定を反映します。</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;">数秒後にデバイス、セッション、統計情報がUIに表示されはじめます。</p>
     </div>
   </section>
 

@@ -17,12 +17,17 @@ async function fetchConnectionRange(from, to) {
 
 async function applyTimeFilter() {
   const { from, to } = getTimeRange();
+  const now = Date.now() + serverTimeOffset;
+  const rangeMs = from == null ? Infinity : Math.max(0, (to ?? now) - from);
+  const needsFetch = from === null || from < dataRangeFrom;
+  const delayedData = needsFetch || rangeMs > 24 * 3600_000;
   // If the filter requests older data than what's loaded, fetch from API
-  if (from === null || from < dataRangeFrom) {
+  if (needsFetch) {
     await fetchConnectionRange(from, to);
   }
   if (asusActive) updateOrgGraph();
   else            buildGraphFromConnections();
+  scheduleGraphAutoFit({ delayedData });
   if (mapMode)    updateMapDots();
   if (statsMode)  updateStats();
   if (logMode)    updateLogView();
