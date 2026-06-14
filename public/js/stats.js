@@ -8,6 +8,7 @@ var stGlobeRotate = [-139, -20];
 var stColorScale = null;
 var stSpin = true, stSpinTimer = null, stSpinResume = null;
 var stFlatParticles = [], stFlatAnimId = null;
+var stSelIp = null; // active device filter (null = all)
 
 function stColor(d) {
   return d.threat ? '#ff2d55' : (stColorScale ? stColorScale(d.totalSessions) : '#9333ea');
@@ -66,7 +67,7 @@ function stRenderGlobeData() {
   const rot = stGlobeProj.rotate();
   const center = [-rot[0], -rot[1]];
   const near = ll => d3.geoDistance(ll, center) < Math.PI / 2 - 0.02;
-  const pts = buildMapPoints();
+  const pts = buildMapPoints().filter(p => !stSelIp || p.srcs.has(stSelIp));
   const maxS = Math.max(2, ...pts.map(d => d.totalSessions));
   stColorScale = d3.scaleSequentialLog().domain([1, maxS]).interpolator(d3.interpolate('#6d28d9', '#f97316'));
   const rScale = d => 2 + Math.sqrt(d.totalSessions / maxS) * 5;
@@ -148,7 +149,7 @@ function stRenderFlatData() {
   stStopFlatAnim();
   const home = getHomeCoord();
   const hxy = stFlatProj([home.lon, home.lat]);
-  const pts = buildMapPoints();
+  const pts = buildMapPoints().filter(p => !stSelIp || p.srcs.has(stSelIp));
   const maxS = Math.max(2, ...pts.map(d => d.totalSessions));
   const rScale = d => 4 + Math.sqrt(d.totalSessions / maxS) * 10;
   const ballisticD = (a, b) => {
@@ -242,7 +243,8 @@ function initStatsMaps() {
   });
 }
 
-function updateStatsMaps() {
+function updateStatsMaps(selIp) {
+  stSelIp = selIp ?? null;
   if (!stGlobeSvg) { initStatsMaps(); return; }
   stRenderGlobeData();
   stRenderFlatData();
@@ -288,7 +290,7 @@ function updateStats() {
   if (!conns.length) {
     empty.style.display = 'block';
     document.getElementById('stats-charts').style.display = 'none';
-    updateStatsMaps();
+    updateStatsMaps(selIp);
     return;
   }
   empty.style.display = 'none';
@@ -332,7 +334,7 @@ function updateStats() {
   }
 
   drawTimeline(series, fromT, toT, buckets, bw, topOrgs);
-  updateStatsMaps();
+  updateStatsMaps(selIp);
 }
 
 function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
