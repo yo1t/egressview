@@ -374,6 +374,9 @@
     border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
   }
   .stats-map-cell svg { display: block; width: 100%; height: 100%; }
+  /* Pie chart scan line */
+  .pie-scan { animation: pie-scan 6s linear infinite; }
+  @keyframes pie-scan { to { transform: rotate(360deg); } }
   .stats-map-label {
     position: absolute; top: 6px; left: 8px;
     font-size: 10px; font-weight: 600; color: #7c8aa3;

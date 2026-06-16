@@ -155,3 +155,17 @@ function guessApp(dport, proto, dstHost) {
 
   return _PORT_MAP[port] || '';
 }
+
+// Returns [[label, count], ...] sorted by count desc, with an optional "Other" tail.
+function _buildAppSlices(conns, topN, unknownLabel, otherLabel) {
+  const counts = new Map();
+  for (const c of conns) {
+    const app = guessApp(c.dport, c.proto, c.dstHost || c.dst) || unknownLabel;
+    counts.set(app, (counts.get(app) || 0) + 1);
+  }
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const top  = sorted.slice(0, topN);
+  const rest = sorted.slice(topN).reduce((s, [, v]) => s + v, 0);
+  if (rest > 0) top.push([otherLabel, rest]);
+  return top;
+}
