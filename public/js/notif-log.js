@@ -162,13 +162,13 @@ function nlShowDetail(row) {
     ${r(t('notif-log.detail.type'),  row.type === 'threat' ? t('notif-log.type.threat') : t('notif-log.type.new_device'))}
     ${r(t('notif-log.detail.time'),  timeStr)}
     ${r(t('notif-log.detail.slack'), row.slackSent ? t('notif-log.slack.sent') : t('notif-log.slack.none'))}
-    ${sec('送信元')}
+    ${sec(t('notif-log.detail.sec.src'))}
     ${r('IP',                          row.src)}
     ${r(t('notif-log.detail.srcName'), srcName !== row.src ? srcName : '')}
     ${r(t('notif-log.detail.srcVendor'), row.srcVendor)}
     ${r('MAC',                         row.srcMac)}
     ${row.dst ? `
-    ${sec('宛先')}
+    ${sec(t('notif-log.detail.sec.dst'))}
     ${r('IP',                          row.dst)}
     ${r(t('notif-log.detail.dstHost'), dstHost !== row.dst ? dstHost : '')}
     ${r(t('notif-log.detail.port'),    row.dport ? `${row.dport} / ${row.proto || ''}` : '')}
@@ -177,7 +177,7 @@ function nlShowDetail(row) {
     ${r(t('notif-log.detail.org'),     row.org)}
     ` : ''}
     ${row.threatTag || row.threatSource ? `
-    ${sec('脅威情報')}
+    ${sec(t('notif-log.detail.sec.threat'))}
     ${r(t('notif-log.detail.threatSource'), row.threatSource)}
     ${r(t('notif-log.detail.threatTag'),    row.threatTag)}
     ` : ''}

@@ -316,6 +316,10 @@ const I18N = {
     'notif-log.filter.apply':'適用',
     'notif-log.filter.clear':'クリア',
     'notif-log.filter.close':'閉じる',
+    'notif-log.refresh':'更新',
+    'notif-log.detail.sec.src':'送信元',
+    'notif-log.detail.sec.dst':'宛先',
+    'notif-log.detail.sec.threat':'脅威情報',
   },  en: {
     'tab.graph': '📊 Graph Map', 'tab.stats': '📈 Statistics', 'tab.log': '📋 Conn Log', 'tab.devices': '🖥 Devices', 'tab.notif-log': '🔔 Alerts',
     'dash.globe': 'GLOBE', 'dash.flat': 'FLAT MAP',
@@ -622,6 +626,10 @@ const I18N = {
     'notif-log.filter.apply':'Apply',
     'notif-log.filter.clear':'Clear',
     'notif-log.filter.close':'Close',
+    'notif-log.refresh':'Refresh',
+    'notif-log.detail.sec.src':'Source',
+    'notif-log.detail.sec.dst':'Destination',
+    'notif-log.detail.sec.threat':'Threat Info',
   },
 };
 function t(key) { return (I18N[currentLang] && I18N[currentLang][key]) || I18N.ja[key] || key; }
