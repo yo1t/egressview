@@ -15,6 +15,10 @@ const _cooldown = new Map();
 // injectable for tests
 let _httpPost = _defaultHttpPost;
 
+// optional callback to persist every detection/notification event
+let _logCallback = null;
+function setLogCallback(fn) { _logCallback = fn; }
+
 function _defaultHttpPost(body, token) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
@@ -98,29 +102,30 @@ function _buildMessage(entry, lang) {
 }
 
 async function notify(entry) {
-  if (!_enabled || !_token || !_userId) return false;
   if (!entry.threat) return false;
 
-  const key = `${entry.src}|${entry.dst}`;
-  const last = _cooldown.get(key);
-  if (last && Date.now() - last < _cooldownMs) return false;
+  let slackSent = false;
 
-  _cooldown.set(key, Date.now());
-
-  try {
-    const result = await _httpPost({
-      channel: _userId,
-      text: _buildMessage(entry),
-    }, _token);
-    if (!result.ok) {
-      logger.error('[notifier] Slack error:', result.error);
-      return false;
+  if (_enabled && _token && _userId) {
+    const key = `${entry.src}|${entry.dst}`;
+    const last = _cooldown.get(key);
+    if (!last || Date.now() - last >= _cooldownMs) {
+      _cooldown.set(key, Date.now());
+      try {
+        const result = await _httpPost({
+          channel: _userId,
+          text: _buildMessage(entry),
+        }, _token);
+        if (!result.ok) logger.error('[notifier] Slack error:', result.error);
+        else slackSent = true;
+      } catch (err) {
+        logger.error('[notifier] Slack post failed:', err.message);
+      }
     }
-    return true;
-  } catch (err) {
-    logger.error('[notifier] Slack post failed:', err.message);
-    return false;
   }
+
+  if (_logCallback) _logCallback(entry, 'threat', slackSent);
+  return slackSent;
 }
 
 const _TEST_MSG = {
@@ -146,24 +151,29 @@ const _NEW_DEVICE_MSG = {
 };
 
 async function notifyNewDevice(entry) {
-  if (!_enabled || !_token || !_userId) return false;
-  const L = _NEW_DEVICE_MSG[_language] || _NEW_DEVICE_MSG.ja;
-  const name = entry.srcMdnsName || entry.srcDnsName || entry.src;
-  const lines = [
-    L.title(name, entry.src),
-    L.ip(entry.src),
-    entry.srcVendor ? L.vendor(entry.srcVendor) : null,
-    entry.srcMac    ? L.mac(entry.srcMac)        : null,
-    L.time(entry.lastSeen),
-  ].filter(Boolean).join('\n');
-  try {
-    const result = await _httpPost({ channel: _userId, text: lines }, _token);
-    if (!result.ok) { logger.error('[notifier] new-device Slack error:', result.error); return false; }
-    return true;
-  } catch (err) {
-    logger.error('[notifier] notifyNewDevice failed:', err.message);
-    return false;
+  let slackSent = false;
+
+  if (_enabled && _token && _userId) {
+    const L = _NEW_DEVICE_MSG[_language] || _NEW_DEVICE_MSG.ja;
+    const name = entry.srcMdnsName || entry.srcDnsName || entry.src;
+    const lines = [
+      L.title(name, entry.src),
+      L.ip(entry.src),
+      entry.srcVendor ? L.vendor(entry.srcVendor) : null,
+      entry.srcMac    ? L.mac(entry.srcMac)        : null,
+      L.time(entry.lastSeen),
+    ].filter(Boolean).join('\n');
+    try {
+      const result = await _httpPost({ channel: _userId, text: lines }, _token);
+      if (!result.ok) logger.error('[notifier] new-device Slack error:', result.error);
+      else slackSent = true;
+    } catch (err) {
+      logger.error('[notifier] notifyNewDevice failed:', err.message);
+    }
   }
+
+  if (_logCallback) _logCallback(entry, 'new_device', slackSent);
+  return slackSent;
 }
 
 async function test() {
@@ -182,6 +192,7 @@ async function test() {
 // test seam only — not for production use
 function _setHttpPost(fn) { _httpPost = fn; }
 function _resetCooldown() { _cooldown.clear(); }
+function _resetLogCallback() { _logCallback = null; }
 
 // ─── Slack API helpers ────────────────────────────────────────────────────────
 
@@ -249,4 +260,4 @@ async function lookupUser(username, token) {
   }
 }
 
-module.exports = { configure, getConfig, notify, notifyNewDevice, test, verifyToken, lookupUser, _buildMessage, _setHttpPost, _resetCooldown };
+module.exports = { configure, getConfig, notify, notifyNewDevice, setLogCallback, test, verifyToken, lookupUser, _buildMessage, _setHttpPost, _resetCooldown, _resetLogCallback };

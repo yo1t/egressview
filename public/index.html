@@ -492,6 +492,7 @@
     <button class="view-tab" id="btn-stats" data-i18n="tab.stats">📈 統計情報</button>
     <button class="view-tab" id="btn-log" data-i18n="tab.log">📋 通信ログ</button>
     <button class="view-tab" id="btn-devices" data-i18n="tab.devices">🖥 端末一覧</button>
+    <button class="view-tab" id="btn-notif-log" data-i18n="tab.notif-log">🔔 通知ログ</button>
   </div>
   <div class="time-filter">
     <span class="time-filter-label" data-i18n="period">期間</span>
@@ -731,6 +732,59 @@
     </div>
   </div>
 
+  <!-- ── Notification Log View ─────────────────────────────────────────── -->
+  <div id="notif-log-container" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg);padding:10px;gap:8px;">
+    <div class="log-header">
+      <span class="log-title" data-i18n="notif-log.title">🔔 通知ログ</span>
+      <span id="notif-log-count" style="color:var(--muted);font-size:11px;margin-left:8px;"></span>
+      <button id="notif-log-refresh-btn" style="margin-left:auto;padding:3px 10px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text);cursor:pointer;">更新</button>
+    </div>
+    <div class="log-table-wrap">
+      <table class="log-table" id="notif-log-table">
+        <thead>
+          <tr>
+            <th data-col="type"><span data-i18n="notif-log.col.type">種別</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="type" data-table="notif">🔍</span></th>
+            <th data-col="detectedAt"><span data-i18n="notif-log.col.time">検出時刻</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="detectedAt" data-table="notif">🔍</span></th>
+            <th data-col="src"><span data-i18n="notif-log.col.src">送信元</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="src" data-table="notif">🔍</span></th>
+            <th data-col="dst"><span data-i18n="notif-log.col.dst">宛先 / ポート</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="dst" data-table="notif">🔍</span></th>
+            <th data-col="threatTag"><span data-i18n="notif-log.col.threat">脅威情報</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="threatTag" data-table="notif">🔍</span></th>
+            <th data-col="org"><span data-i18n="notif-log.col.org">組織</span> <span class="log-sort-icon">⇅</span><span class="log-search-icon" data-col="org" data-table="notif">🔍</span></th>
+            <th data-col="slackSent"><span data-i18n="notif-log.col.slack">Slack</span> <span class="log-sort-icon">⇅</span></th>
+          </tr>
+        </thead>
+        <tbody id="notif-log-tbody"></tbody>
+      </table>
+    </div>
+    <!-- Filter popup (notif-log 専用) -->
+    <div id="notif-log-search-popup" class="log-search-popup hidden">
+      <div class="log-search-popup-inner">
+        <div class="log-search-popup-title" data-i18n="notif-log.filter.title">フィルター</div>
+        <select id="notif-log-search-mode">
+          <option value="contains"   data-i18n="notif-log.filter.contains">含む</option>
+          <option value="startsWith" data-i18n="notif-log.filter.startsWith">で始まる</option>
+          <option value="endsWith"   data-i18n="notif-log.filter.endsWith">で終わる</option>
+          <option value="regex"      data-i18n="notif-log.filter.regex">正規表現</option>
+        </select>
+        <input type="text" id="notif-log-search-input" data-i18n-placeholder="notif-log.filter.placeholder" placeholder="検索条件…" autocomplete="off">
+        <div class="log-search-popup-actions">
+          <button id="notif-log-search-apply" data-i18n="notif-log.filter.apply">適用</button>
+          <button id="notif-log-search-clear" data-i18n="notif-log.filter.clear">クリア</button>
+          <button id="notif-log-search-close" data-i18n="notif-log.filter.close">閉じる</button>
+        </div>
+      </div>
+    </div>
+    <!-- Detail popup -->
+    <div id="notif-log-detail-overlay" class="threat-detail-overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+      <div class="threat-detail-card">
+        <div class="threat-detail-header">
+          <span data-i18n="notif-log.detail.title">検出詳細</span>
+          <button class="settings-close" onclick="document.getElementById('notif-log-detail-overlay').classList.add('hidden')">✕</button>
+        </div>
+        <div class="threat-detail-body" id="notif-log-detail-body"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="graph-container">
     <svg id="graph"></svg>
     <div class="graph-tooltip" id="tooltip"></div>
@@ -802,6 +856,7 @@
 <script src="__BASE__/js/beacon.js"></script>
 <script src="__BASE__/js/threat-popup.js"></script>
 <script src="__BASE__/js/devices.js"></script>
+<script src="__BASE__/js/notif-log.js"></script>
 <script src="__BASE__/js/main.js"></script>
 </body>
 </html>

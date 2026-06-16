@@ -43,8 +43,9 @@ const connectionsRoutes = require('./src/routes/connections');
 const devicesRoutes     = require('./src/routes/devices');
 const backupRoutes      = require('./src/routes/backup');
 const configRoutes      = require('./src/routes/config');
-const slackRoutes       = require('./src/routes/slack');
-const beaconsRoutes     = require('./src/routes/beacons');
+const slackRoutes           = require('./src/routes/slack');
+const beaconsRoutes         = require('./src/routes/beacons');
+const notificationLogRoutes = require('./src/routes/notification-log');
 
 // ─── Environment ──────────────────────────────────────────────────────────────
 const SUBPATH           = (process.env.SUBPATH || '').replace(/\/$/, '');
@@ -506,6 +507,7 @@ app.use('/api', devicesRoutes(routeCtx));
 app.use('/api', backupRoutes({ ...routeCtx, saveConfig }));
 app.use('/api', configRoutes(routeCtx));
 app.use('/api', slackRoutes(routeCtx));
+app.use('/api', notificationLogRoutes(routeCtx));
 app.use('/api', beaconsRoutes({
   requireAdmin, beacons, appState, saveConfig,
   onConfigChange: () => { scheduleBeaconScan(); runBeaconScan(); },
@@ -561,6 +563,12 @@ io.on('connection', socket => {
       initialLoad: true,
     });
   }
+});
+
+// ─── Wire notifier log callback ───────────────────────────────────────────────
+
+notifier.setLogCallback((entry, type, slackSent) => {
+  history.logNotification(entry, type, slackSent);
 });
 
 // ─── Wire up poller callbacks ─────────────────────────────────────────────────

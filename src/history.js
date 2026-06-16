@@ -15,6 +15,7 @@ let db = null;
 let stmtUpsert = null;
 let stmtSelectAll = null;
 let stmtDeleteOld = null;
+let stmtInsertNotifLog = null;
 
 // In-memory cache (same interface as before for Socket.IO emissions)
 const connectionHistory = new Map();
@@ -119,6 +120,42 @@ function initDb(dbPath) {
     CREATE INDEX IF NOT EXISTS idx_lastSeen ON connections(lastSeen);
     CREATE INDEX IF NOT EXISTS idx_src ON connections(src);
     CREATE INDEX IF NOT EXISTS idx_dst ON connections(dst);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notification_log (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      type            TEXT    NOT NULL,
+      slackSent       INTEGER NOT NULL DEFAULT 0,
+      src             TEXT,
+      srcMac          TEXT,
+      srcVendor       TEXT,
+      srcMdnsName     TEXT,
+      srcDnsName      TEXT,
+      dst             TEXT,
+      dstHost         TEXT,
+      dport           INTEGER,
+      proto           TEXT,
+      country         TEXT,
+      city            TEXT,
+      org             TEXT,
+      threatSource    TEXT,
+      threatTag       TEXT,
+      threatConfidence TEXT,
+      detectedAt      INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_nlog_detectedAt ON notification_log(detectedAt);
+  `);
+
+  stmtInsertNotifLog = db.prepare(`
+    INSERT INTO notification_log
+      (type, slackSent, src, srcMac, srcVendor, srcMdnsName, srcDnsName,
+       dst, dstHost, dport, proto, country, city, org,
+       threatSource, threatTag, threatConfidence, detectedAt)
+    VALUES
+      (@type, @slackSent, @src, @srcMac, @srcVendor, @srcMdnsName, @srcDnsName,
+       @dst, @dstHost, @dport, @proto, @country, @city, @org,
+       @threatSource, @threatTag, @threatConfidence, @detectedAt)
   `);
 
   stmtUpsert = db.prepare(`
@@ -282,6 +319,46 @@ function queryByTimeRange(from, to) {
   return db.prepare(`SELECT * FROM connections${where} ORDER BY lastSeen DESC`).all(...params);
 }
 
+function logNotification(entry, type, slackSent) {
+  if (!db || !stmtInsertNotifLog) return;
+  try {
+    stmtInsertNotifLog.run({
+      type,
+      slackSent: slackSent ? 1 : 0,
+      src:             entry.src             || null,
+      srcMac:          entry.srcMac          || null,
+      srcVendor:       entry.srcVendor       || null,
+      srcMdnsName:     entry.srcMdnsName     || null,
+      srcDnsName:      entry.srcDnsName      || null,
+      dst:             entry.dst             || null,
+      dstHost:         entry.dstHost         || null,
+      dport:           entry.dport           ?? null,
+      proto:           entry.proto           || null,
+      country:         entry.country         || null,
+      city:            entry.city            || null,
+      org:             entry.org             || null,
+      threatSource:    entry.threat?.source  || null,
+      threatTag:       entry.threat?.tag     || null,
+      threatConfidence:entry.threat?.confidence || null,
+      detectedAt:      Date.now(),
+    });
+  } catch (err) {
+    logger.error('[history] logNotification error:', err.message);
+  }
+}
+
+function queryNotificationLog(from, to) {
+  if (!db) return [];
+  const conditions = [];
+  const params = [];
+  if (from != null) { conditions.push('detectedAt >= ?'); params.push(from); }
+  if (to   != null) { conditions.push('detectedAt <= ?'); params.push(to); }
+  const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
+  return db.prepare(
+    `SELECT * FROM notification_log${where} ORDER BY detectedAt DESC LIMIT 2000`
+  ).all(...params);
+}
+
 function getKnownMacs() {
   if (!db) return new Set();
   return new Set(
@@ -326,6 +403,8 @@ module.exports = {
   getConnectionHistory,
   queryByTimeRange,
   getKnownMacs,
+  logNotification,
+  queryNotificationLog,
   setRetentionDays,
   closeDb,
   HISTORY_TTL_MS,

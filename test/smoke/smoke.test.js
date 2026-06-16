@@ -133,11 +133,11 @@ test('tab bar renders after auth', async ({ page }) => {
 
   await authPage(page);
 
-  // Exactly 4 tabs: グラフマップ / 統計情報 / 通信ログ / 端末一覧
+  // Exactly 5 tabs: グラフマップ / 統計情報 / 通信ログ / 端末一覧 / 通知ログ
   const tabs = page.locator('.view-tab');
   await expect(tabs.first()).toBeVisible();
   const count = await tabs.count();
-  expect(count).toBe(4);
+  expect(count).toBe(5);
 });
 
 test('graph canvas renders after auth (P2-4: background fetch completes)', async ({ page }) => {
@@ -170,7 +170,7 @@ test('tab switching produces no console errors', async ({ page }) => {
   await authPage(page);
 
   // 全タブを順にクリックしてエラーが出ないことを確認
-  for (const btnId of ['btn-stats', 'btn-log', 'btn-devices', 'btn-graph']) {
+  for (const btnId of ['btn-stats', 'btn-log', 'btn-devices', 'btn-notif-log', 'btn-graph']) {
     await page.click(`#${btnId}`);
     await page.waitForTimeout(500);
   }
