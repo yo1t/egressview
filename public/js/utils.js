@@ -45,25 +45,41 @@ function isWiredType(type) { return type === '0'; }
 
 // ─── Application / service name inference ─────────────────────────────────────
 
+// TCP/UDP 共通（プロトコル不問）
 const _PORT_MAP = {
   20: 'FTP', 21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP',
-  53: 'DNS', 67: 'DHCP', 68: 'DHCP', 69: 'TFTP',
-  80: 'HTTP', 110: 'POP3', 123: 'NTP', 137: 'NetBIOS', 138: 'NetBIOS',
-  139: 'SMB', 143: 'IMAP', 161: 'SNMP', 389: 'LDAP',
-  443: 'HTTPS', 445: 'SMB', 465: 'SMTP/TLS', 500: 'IPSec',
+  53: 'DNS', 80: 'HTTP', 110: 'POP3', 137: 'NetBIOS', 138: 'NetBIOS',
+  139: 'SMB', 143: 'IMAP', 389: 'LDAP',
+  443: 'HTTPS', 445: 'SMB', 465: 'SMTP/TLS',
   554: 'RTSP', 587: 'SMTP', 636: 'LDAP/TLS', 853: 'DNS/TLS',
   993: 'IMAP/TLS', 995: 'POP3/TLS',
   1080: 'SOCKS', 1194: 'OpenVPN', 1723: 'PPTP', 1883: 'MQTT',
   1935: 'RTMP', 2049: 'NFS', 3306: 'MySQL', 3389: 'RDP',
-  3478: 'STUN', 3544: 'Teredo', 4500: 'IPSec/NAT',
-  5004: 'RTP', 5060: 'SIP', 5061: 'SIP/TLS',
+  3478: 'STUN', 5004: 'RTP', 5060: 'SIP', 5061: 'SIP/TLS',
   5222: 'XMPP', 5223: 'APNs', 5228: 'FCM',
-  5353: 'mDNS', 5432: 'PostgreSQL', 5900: 'VNC',
+  5432: 'PostgreSQL', 5900: 'VNC',
   6379: 'Redis', 6881: 'BitTorrent',
   7000: 'AirPlay', 8080: 'HTTP-alt', 8443: 'HTTPS-alt',
   8883: 'MQTT/TLS', 9001: 'Tor', 17472: 'SESAME',
   25565: 'Minecraft', 27015: 'Steam', 27017: 'MongoDB',
-  51820: 'WireGuard', 55443: 'Alexa',
+  55443: 'Alexa',
+};
+
+// UDP 専用（TCP と意味が異なる、または UDP のみ使われるポート）
+const _UDP_MAP = {
+  53:    'DNS',
+  67:    'DHCP', 68: 'DHCP', 69: 'TFTP',
+  80:    'QUIC',            // HTTP/3
+  123:   'NTP',
+  137:   'NetBIOS', 138: 'NetBIOS',
+  161:   'SNMP', 162: 'SNMP Trap',
+  443:   'QUIC',            // HTTP/3
+  500:   'IPSec IKE',
+  3478:  'STUN',
+  3544:  'Teredo',
+  4500:  'IPSec/NAT',
+  5353:  'mDNS',
+  51820: 'WireGuard',
 };
 
 // hostname suffix → service label (longest match wins via iteration order)
@@ -121,15 +137,21 @@ const _HOST_MAP = [
 
 function guessApp(dport, proto, dstHost) {
   const port = Number(dport);
-  const portLabel = _PORT_MAP[port];
+  const isUDP = proto && proto.toUpperCase() === 'UDP';
 
-  // For generic web ports, try hostname matching first
-  if (dstHost && (port === 443 || port === 80 || port === 8443 || port === 8080)) {
+  // UDP 専用マップを優先
+  if (isUDP) {
+    const udpLabel = _UDP_MAP[port];
+    if (udpLabel) return udpLabel;
+  }
+
+  // TCP の web ポートはホスト名から判定（QUIC ではなく TCP の 443/80 のみ）
+  if (!isUDP && dstHost && (port === 443 || port === 80 || port === 8443 || port === 8080)) {
     const host = dstHost.toLowerCase().replace(/:\d+$/, '');
     for (const [suffix, label] of _HOST_MAP) {
       if (host === suffix || host.endsWith('.' + suffix)) return label;
     }
   }
 
-  return portLabel || '';
+  return _PORT_MAP[port] || '';
 }
