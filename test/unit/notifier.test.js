@@ -323,3 +323,136 @@ describe('_buildMessage — language', () => {
     assert(captured.text.includes('脅威検出'), 'Japanese title missing when language=ja');
   });
 });
+
+// ─── setLogCallback ───────────────────────────────────────────────────────────
+
+describe('setLogCallback — notify()', () => {
+  beforeEach(() => {
+    notifier._resetCooldown();
+    notifier._resetLogCallback();
+    notifier.configure({ enabled: false, token: '', userId: '', cooldownMinutes: 60 });
+  });
+
+  it('calls callback with type="threat" and slackSent=false when Slack is not configured', async () => {
+    const calls = [];
+    notifier.setLogCallback((entry, type, sent) => calls.push({ entry, type, sent }));
+    notifier.configure({ enabled: false, token: '', userId: '' });
+
+    await notifier.notify(makeEntry());
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].type, 'threat');
+    assert.equal(calls[0].sent, false);
+    assert.equal(calls[0].entry.src, '192.168.1.10');
+  });
+
+  it('calls callback with slackSent=true when Slack send succeeds', async () => {
+    const calls = [];
+    notifier.setLogCallback((entry, type, sent) => calls.push({ type, sent }));
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01' });
+    notifier._setHttpPost(async () => ({ ok: true }));
+
+    await notifier.notify(makeEntry());
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].sent, true);
+  });
+
+  it('calls callback with slackSent=false when Slack returns ok:false', async () => {
+    const calls = [];
+    notifier.setLogCallback((entry, type, sent) => calls.push({ type, sent }));
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01' });
+    notifier._setHttpPost(async () => ({ ok: false, error: 'invalid_auth' }));
+
+    await notifier.notify(makeEntry());
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].sent, false);
+  });
+
+  it('calls callback with slackSent=false when Slack throws', async () => {
+    const calls = [];
+    notifier.setLogCallback((entry, type, sent) => calls.push({ sent }));
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01' });
+    notifier._setHttpPost(async () => { throw new Error('ECONNREFUSED'); });
+
+    await notifier.notify(makeEntry());
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].sent, false);
+  });
+
+  it('does NOT call callback when threat is null', async () => {
+    const calls = [];
+    notifier.setLogCallback(() => calls.push(true));
+
+    await notifier.notify(makeEntry({ threat: null }));
+
+    assert.equal(calls.length, 0);
+  });
+
+  it('does not call callback after _resetLogCallback()', async () => {
+    const calls = [];
+    notifier.setLogCallback(() => calls.push(true));
+    notifier._resetLogCallback();
+
+    await notifier.notify(makeEntry());
+
+    assert.equal(calls.length, 0);
+  });
+
+  it('cooldown suppression still fires callback (slackSent=false)', async () => {
+    const calls = [];
+    notifier.setLogCallback((e, type, sent) => calls.push(sent));
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01', cooldownMinutes: 60 });
+    notifier._setHttpPost(async () => ({ ok: true }));
+
+    await notifier.notify(makeEntry());          // first: sent
+    await notifier.notify(makeEntry());          // second: cooldown, not sent
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0], true,  'first call should be slackSent=true');
+    assert.equal(calls[1], false, 'second call (cooldown) should be slackSent=false');
+  });
+});
+
+describe('setLogCallback — notifyNewDevice()', () => {
+  beforeEach(() => {
+    notifier._resetLogCallback();
+    notifier.configure({ enabled: false, token: '', userId: '' });
+  });
+
+  it('calls callback with type="new_device" and slackSent=false when Slack not configured', async () => {
+    const calls = [];
+    notifier.setLogCallback((entry, type, sent) => calls.push({ type, sent }));
+
+    await notifier.notifyNewDevice(makeEntry());
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].type, 'new_device');
+    assert.equal(calls[0].sent, false);
+  });
+
+  it('calls callback with slackSent=true when Slack send succeeds', async () => {
+    const calls = [];
+    notifier.setLogCallback((entry, type, sent) => calls.push({ type, sent }));
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01' });
+    notifier._setHttpPost(async () => ({ ok: true }));
+
+    await notifier.notifyNewDevice(makeEntry());
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].sent, true);
+  });
+
+  it('calls callback with slackSent=false when Slack returns ok:false', async () => {
+    const calls = [];
+    notifier.setLogCallback((e, t, sent) => calls.push(sent));
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U01' });
+    notifier._setHttpPost(async () => ({ ok: false, error: 'rate_limited' }));
+
+    await notifier.notifyNewDevice(makeEntry());
+
+    assert.equal(calls[0], false);
+  });
+});

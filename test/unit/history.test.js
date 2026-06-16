@@ -256,3 +256,124 @@ describe('corrupt DB recovery', () => {
     }
   });
 });
+
+// ─── logNotification / queryNotificationLog ───────────────────────────────────
+
+function makeNotifEntry(overrides = {}) {
+  return {
+    src:         '192.168.1.10',
+    srcMac:      'aa:bb:cc:dd:ee:ff',
+    srcVendor:   'Apple',
+    srcMdnsName: 'MacBook-Pro',
+    srcDnsName:  null,
+    dst:         '185.220.101.45',
+    dstHost:     'evil.example.com',
+    dport:       443,
+    proto:       'TCP',
+    country:     'RU',
+    city:        'Moscow',
+    org:         'Evil Corp',
+    threat:      { source: 'feodo', tag: 'Emotet C2', confidence: 'high' },
+    ...overrides,
+  };
+}
+
+describe('logNotification + queryNotificationLog', () => {
+
+  it('returns empty array when no records exist', () => {
+    const rows = history.queryNotificationLog(null, null);
+    assert.deepEqual(rows, []);
+  });
+
+  it('stores a threat record and retrieves it', () => {
+    const entry = makeNotifEntry();
+    history.logNotification(entry, 'threat', false);
+
+    const rows = history.queryNotificationLog(null, null);
+    assert.equal(rows.length, 1);
+    const row = rows[0];
+    assert.equal(row.type,          'threat');
+    assert.equal(row.slackSent,     0);
+    assert.equal(row.src,           '192.168.1.10');
+    assert.equal(row.srcVendor,     'Apple');
+    assert.equal(row.srcMac,        'aa:bb:cc:dd:ee:ff');
+    assert.equal(row.dst,           '185.220.101.45');
+    assert.equal(row.dstHost,       'evil.example.com');
+    assert.equal(row.dport,         443);
+    assert.equal(row.proto,         'TCP');
+    assert.equal(row.country,       'RU');
+    assert.equal(row.threatTag,     'Emotet C2');
+    assert.equal(row.threatSource,  'feodo');
+    assert.ok(row.detectedAt > 0, 'detectedAt should be a positive timestamp');
+  });
+
+  it('stores slackSent=true correctly', () => {
+    history.logNotification(makeNotifEntry(), 'threat', true);
+    const rows = history.queryNotificationLog(null, null);
+    assert.equal(rows[0].slackSent, 1);
+  });
+
+  it('stores a new_device record', () => {
+    const entry = makeNotifEntry({ threat: null, dst: null, dstHost: null, dport: null, proto: null });
+    history.logNotification(entry, 'new_device', false);
+
+    const rows = history.queryNotificationLog(null, null);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].type,    'new_device');
+    assert.equal(rows[0].slackSent, 0);
+    assert.equal(rows[0].src,     '192.168.1.10');
+    assert.equal(rows[0].dst,     null);
+    assert.equal(rows[0].threatTag, null);
+  });
+
+  it('returns multiple records in descending detectedAt order', () => {
+    history.logNotification(makeNotifEntry(), 'threat',     false);
+    history.logNotification(makeNotifEntry(), 'new_device', false);
+    history.logNotification(makeNotifEntry(), 'threat',     true);
+
+    const rows = history.queryNotificationLog(null, null);
+    assert.equal(rows.length, 3);
+    // verify descending order
+    for (let i = 0; i < rows.length - 1; i++) {
+      assert.ok(rows[i].detectedAt >= rows[i + 1].detectedAt,
+        'rows should be in descending detectedAt order');
+    }
+  });
+
+  it('filters by from (detectedAt >= from)', () => {
+    const before = Date.now() - 5000;
+    history.logNotification(makeNotifEntry(), 'threat', false);
+    const after = Date.now() + 5000;
+
+    const none = history.queryNotificationLog(after, null);
+    assert.equal(none.length, 0, 'should return nothing when from is in the future');
+
+    const all = history.queryNotificationLog(before, null);
+    assert.equal(all.length, 1, 'should return the record when from is in the past');
+  });
+
+  it('filters by to (detectedAt <= to)', () => {
+    history.logNotification(makeNotifEntry(), 'threat', false);
+
+    const past = Date.now() - 5000;
+    const none = history.queryNotificationLog(null, past);
+    assert.equal(none.length, 0, 'should return nothing when to is in the past');
+
+    const future = Date.now() + 5000;
+    const all = history.queryNotificationLog(null, future);
+    assert.equal(all.length, 1, 'should return the record when to is in the future');
+  });
+
+  it('filters by both from and to as a time range', () => {
+    const t0 = Date.now();
+    history.logNotification(makeNotifEntry(), 'threat',     false);
+    history.logNotification(makeNotifEntry(), 'new_device', false);
+    const t1 = Date.now();
+
+    const rows = history.queryNotificationLog(t0 - 1000, t1 + 1000);
+    assert.equal(rows.length, 2);
+
+    const none = history.queryNotificationLog(t1 + 1, t1 + 9999);
+    assert.equal(none.length, 0);
+  });
+});
