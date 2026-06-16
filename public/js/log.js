@@ -13,6 +13,7 @@ function getLogCellValue(c, col) {
     }
     case 'dst': return c.dstHost && c.dstHost !== c.dst ? c.dstHost : c.dst;
     case 'dport': return String(c.dport);
+    case 'app':   return guessApp(c.dport, c.proto, c.dstHost || c.dst);
     case 'proto': return c.proto;
     case 'country': return c.country || '';
     case 'org': return c.org || '';
@@ -159,6 +160,7 @@ function updateLogView() {
       <td title="${esc(c.dst)}">${esc(dstLabel)}</td>
       ${threatTagCell}
       <td>${c.dport}</td>
+      <td style="font-size:11px;color:var(--muted);">${esc(guessApp(c.dport, c.proto, c.dstHost || c.dst))}</td>
       <td>${esc(c.proto)}</td>
       <td>${flag} ${esc(c.country || '')}</td>
       <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(c.org || '')}">${esc(c.org || '')}</td>
