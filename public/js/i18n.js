@@ -2,7 +2,7 @@ let currentLang = 'ja';
 const I18N = {
   ja: {
     // Header / Tabs
-    'tab.graph': '📊 グラフマップ', 'tab.stats': '📈 統計情報', 'tab.log': '📋 通信ログ', 'tab.devices': '🖥 端末一覧', 'tab.notif-log': '🔔 通知ログ',
+    'tab.graph': '📊 グラフマップ', 'tab.stats': '📈 統計情報', 'tab.log': '📋 通信ログ', 'tab.devices': '🖥 端末一覧', 'tab.notif-log': '🔔 検出ログ',
     'dash.globe': 'GLOBE', 'dash.flat': 'FLAT MAP',
     'devices.title': '🖥 端末一覧', 'devices.refresh': '更新',
     'devices.col.ip': 'IP', 'devices.col.mac': 'MAC', 'devices.col.vendor': 'ベンダー', 'devices.col.name': '名前',
@@ -277,7 +277,7 @@ const I18N = {
     'beacon.col.obs':'観測数',
     'beacon.col.firstLast':'初回 / 最終',
     'beacon.dismiss':'却下',
-    'notif-log.title':'🔔 通知ログ',
+    'notif-log.title':'🔔 検出ログ',
     'notif-log.col.type':'種別',
     'notif-log.col.time':'検出時刻',
     'notif-log.col.src':'送信元',
@@ -289,7 +289,7 @@ const I18N = {
     'notif-log.type.new_device':'🆕 新規端末',
     'notif-log.slack.sent':'✅ 送信',
     'notif-log.slack.none':'—',
-    'notif-log.empty':'通知ログがありません',
+    'notif-log.empty':'検出ログがありません',
     'notif-log.count':'{n} 件',
     'notif-log.detail.title':'検出詳細',
     'notif-log.detail.type':'種別',

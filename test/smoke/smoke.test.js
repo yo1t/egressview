@@ -133,7 +133,7 @@ test('tab bar renders after auth', async ({ page }) => {
 
   await authPage(page);
 
-  // Exactly 5 tabs: グラフマップ / 統計情報 / 通信ログ / 端末一覧 / 通知ログ
+  // Exactly 5 tabs: グラフマップ / 統計情報 / 通信ログ / 端末一覧 / 検出ログ
   const tabs = page.locator('.view-tab');
   await expect(tabs.first()).toBeVisible();
   const count = await tabs.count();
