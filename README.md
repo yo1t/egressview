@@ -38,9 +38,10 @@ Widemap answers the question most home users can't ask: *what is each device on 
 - Uses **Graph Map** and **Statistics** for whole-network overview, then **Connection Log** and **Devices** for per-session and per-device drill-down
 - Optionally connects to an **ASUS WiFi access point** (used as AP/mesh, not as a router) to get WiFi client details (band, signal strength, traffic rates, AiMesh topology)
 - Keeps a **connection history** in **SQLite** (WAL mode, crash-safe; configurable retention up to 2 years)
-- **Connection log**: sortable/searchable table of all sessions with threat status badges
+- **Connection log**: sortable/searchable table of all sessions with threat status badges; **App column** infers the application or service name from port number and destination hostname (APNs, FCM, AirPlay, MQTT/TLS, QUIC, iCloud, YouTube, AWS, Slack, Zoom, Tuya Smart, Gaijin/DCS, and more)
+- **🔔 Detection Log** — persistent history of all threat detections and new-device alerts, with per-column filter, sort, and click-to-detail popup; logged regardless of Slack configuration
 - **📡 Data Sources tab** — configure each data source (dnsmasq / [INSPECT] / [DHCPD]) independently from the settings UI
-- Single-page dark-themed UI focused on Graph Map, Statistics, Connection Log, Devices, and Settings
+- Single-page dark-themed UI: Graph Map, Statistics, Connection Log, Devices, Detection Log, and Settings
 
 ## Demo
 
