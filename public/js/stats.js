@@ -439,7 +439,103 @@ function updateStats() {
   }
 
   drawTimeline(series, fromT, toT, buckets, bw, topOrgs);
+  drawAppPieChart(conns);
   updateStatsMaps(selIp);
+}
+
+// ─── App distribution pie chart ───────────────────────────────────────────────
+
+function drawAppPieChart(conns) {
+  const cell = document.getElementById('st-app-pie');
+  if (!cell) return;
+  const svg = d3.select('#st-app-pie-svg');
+  svg.selectAll('*').remove();
+
+  const w = cell.clientWidth;
+  const h = cell.clientHeight;
+  if (!w || !h) return;
+
+  // Count sessions per app name
+  const appCounts = new Map();
+  for (const c of conns) {
+    const app = guessApp(c.dport, c.proto, c.dstHost || c.dst) || t('stats.app.unknown');
+    appCounts.set(app, (appCounts.get(app) || 0) + 1);
+  }
+
+  const sorted = [...appCounts.entries()].sort((a, b) => b[1] - a[1]);
+  const topN = 8;
+  const top = sorted.slice(0, topN);
+  const otherCount = sorted.slice(topN).reduce((s, [, v]) => s + v, 0);
+  if (otherCount > 0) top.push([t('stats.legend.other'), otherCount]);
+
+  const total = top.reduce((s, [, v]) => s + v, 0);
+  if (total === 0) return;
+
+  svg.attr('viewBox', `0 0 ${w} ${h}`);
+
+  const topPad = 24;
+  const legendRows = Math.ceil(top.length / 2);
+  const legendH = legendRows * 16 + 6;
+  const pieAreaH = h - topPad - legendH;
+  const r = Math.max(8, Math.min(w / 2 - 10, pieAreaH / 2 - 8));
+
+  const colorFor = (i) =>
+    (i === top.length - 1 && otherCount > 0) ? '#6b7280' : STATS_COLORS[i % STATS_COLORS.length];
+
+  const pie  = d3.pie().value(d => d[1]).sort(null).padAngle(0.018);
+  const arc  = d3.arc().innerRadius(r * 0.42).outerRadius(r);
+  const arcH = d3.arc().innerRadius(r * 0.42).outerRadius(r + 5);
+
+  const cx = w / 2;
+  const cy = topPad + pieAreaH / 2;
+  const g = svg.append('g').attr('transform', `translate(${cx},${cy})`);
+
+  // Tooltip text
+  const tip = svg.append('text')
+    .attr('text-anchor', 'middle').attr('fill', '#e2e8f0').attr('font-size', 9.5)
+    .attr('pointer-events', 'none').style('display', 'none');
+
+  g.selectAll('path').data(pie(top)).join('path')
+    .attr('d', arc)
+    .attr('fill', (_, i) => colorFor(i))
+    .attr('stroke', 'var(--panel)').attr('stroke-width', 1.5)
+    .on('mouseenter', function(ev, d) {
+      d3.select(this).attr('d', arcH(d));
+      const pct = ((d.data[1] / total) * 100).toFixed(1);
+      tip.style('display', null)
+        .attr('x', cx).attr('y', topPad + 12)
+        .text(`${d.data[0]}: ${d.data[1]} (${pct}%)`);
+    })
+    .on('mouseleave', function(ev, d) {
+      d3.select(this).attr('d', arc(d));
+      tip.style('display', 'none');
+    });
+
+  // Center: total count + label
+  g.append('text').attr('text-anchor', 'middle').attr('dy', '-0.25em')
+    .attr('fill', '#e2e8f0').attr('font-size', Math.min(18, r * 0.32)).attr('font-weight', '600')
+    .text(total);
+  g.append('text').attr('text-anchor', 'middle').attr('dy', '1.1em')
+    .attr('fill', '#7c8aa3').attr('font-size', Math.min(9.5, r * 0.18))
+    .text(t('stats.app.sessions'));
+
+  // Legend (2 columns)
+  const legY0 = topPad + pieAreaH + 6;
+  const colW  = w / 2;
+  top.forEach(([label, count], i) => {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const x = col * colW + 8;
+    const y = legY0 + row * 16 + 10;
+    svg.append('rect').attr('x', x).attr('y', y - 7).attr('width', 8).attr('height', 8)
+      .attr('rx', 2).attr('fill', colorFor(i));
+    const maxCh = Math.floor((colW - 22) / 5.8);
+    const txt = label.length > maxCh ? label.slice(0, maxCh - 1) + '…' : label;
+    svg.append('text').attr('x', x + 12).attr('y', y)
+      .attr('fill', '#8b949e').attr('font-size', 9.5)
+      .text(txt)
+      .append('title').text(`${label}: ${count}`);
+  });
 }
 
 function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
