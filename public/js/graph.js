@@ -16,6 +16,13 @@ function resize() {
 window.addEventListener('resize', resize);
 // Redraw on screen rotation too
 window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+// Re-fit when tab becomes visible (restores display after background-tab throttling)
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    resize();
+    scheduleGraphAutoFit();
+  }
+});
 
 const defs = svg.append('defs');
 const glow = defs.append('filter').attr('id', 'glow');
