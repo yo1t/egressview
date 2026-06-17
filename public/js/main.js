@@ -18,9 +18,9 @@ socket.on('yamaha-status', s => {
   showStatus('yamaha-status', s.message, s.ready);
   connState.l3l4.enabled = yamahaConfigured;
   connState.l3l4.ready   = s.ready;
-  connState.l3l4.err     = s.ready ? '' : 'failed';
+  connState.l3l4.err     = s.ready ? '' : (s.state || 'failed');
   updateConnBadge('l3l4');
-  if (!s.ready && yamahaConfigured && !asusActive) {
+  if (!s.ready && connState.l3l4.err === 'failed' && yamahaConfigured && !asusActive) {
     const banner = document.getElementById('disconnected-banner');
     banner.style.display = 'block';
     banner.querySelector('button').textContent = t('banner.yamaha');

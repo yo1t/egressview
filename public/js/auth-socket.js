@@ -206,7 +206,7 @@ function updateConnBadge(key) {
   const badge = document.getElementById('badge-' + key);
   const ipEl  = document.getElementById('badge-' + key + '-ip');
   const prefix = (key === 'l3l4' ? 'L3/L4 Yamaha' : 'L2 ASUS');
-  badge.classList.remove('on', 'off', 'err');
+  badge.classList.remove('on', 'off', 'err', 'wait');
   if (!s.enabled) {
     badge.classList.add('off');
     ipEl.textContent = t('badge.unused');
@@ -216,10 +216,13 @@ function updateConnBadge(key) {
     ipEl.textContent = s.ip || t('badge.ready');
     badge.title = prefix + ' — ' + t('badge.ready') + ' ' + (s.ip || '');
   } else {
-    badge.classList.add('err');
+    const isWaiting = !s.err || s.err === 'connecting' || s.err === 'reconnecting';
+    badge.classList.add(isWaiting ? 'wait' : 'err');
     // s.err is an internal state string; translate for display
     const errLabel = s.err === 'session-expired' ? t('badge.timeout')
                    : s.err === 'failed'          ? t('badge.error')
+                   : s.err === 'connecting'      ? t('badge.waiting')
+                   : s.err === 'reconnecting'    ? t('badge.waiting')
                    : s.err || t('badge.waiting');
     ipEl.textContent = errLabel;
     badge.title = prefix + ' — ' + errLabel;
@@ -246,6 +249,7 @@ socket.on('config', cfg => {
     connState.l3l4.enabled = cfg.yamahaEnabled;
     connState.l3l4.ready   = !!cfg.yamahaReady;
     connState.l3l4.ip      = cfg.yamahaIp || '';
+    connState.l3l4.err     = cfg.yamahaEnabled && !cfg.yamahaReady ? 'connecting' : '';
     updateConnBadge('l3l4');
   }
   if (cfg.asusEnabled !== undefined) {

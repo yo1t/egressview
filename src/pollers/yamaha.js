@@ -320,6 +320,7 @@ async function yamahaExec(cmd) {
 function scheduleYamahaReconnect(ms) {
   if (yamahaReconnectTimer) { clearTimeout(yamahaReconnectTimer); }
   if (!yamahaEnabled) return;
+  onStatus({ ready: false, state: 'reconnecting', message: '再接続中…' });
   yamahaReconnectTimer = setTimeout(() => {
     yamahaReconnectTimer = null;
     connectYamaha();
@@ -341,6 +342,7 @@ function connectYamaha(onReady) {
   yamahaReady = false;
   yamahaShell = null;
   yamahaConnecting = true;
+  onStatus({ ready: false, state: 'connecting', message: '接続中…' });
 
   const conn = new SshClient();
   yamahaConn = conn;
