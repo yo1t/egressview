@@ -13,8 +13,15 @@ let customRangeTo   = null;
 let _fetchingCount = 0;
 function setFetching(delta) {
   _fetchingCount = Math.max(0, _fetchingCount + delta);
+  const show = _fetchingCount > 0;
+  // graph-container の絶対配置インジケーター
   const el = document.getElementById('data-fetching');
-  if (el) el.style.display = _fetchingCount > 0 ? '' : 'none';
+  if (el) el.style.display = show ? '' : 'none';
+  // stats/log/notif-log ヘッダー内インジケーター
+  ['data-fetching-stats', 'data-fetching-log'].forEach(id => {
+    const e = document.getElementById(id);
+    if (e) e.style.display = show ? 'flex' : 'none';
+  });
 }
 
 function connectionKey(c) {

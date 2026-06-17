@@ -271,20 +271,33 @@ function nlInitFilterPopup() {
 
 // ─── Load from API ────────────────────────────────────────────────────────────
 
+function nlSetLoading(loading) {
+  const el = document.getElementById('data-fetching-notif');
+  if (el) el.style.display = loading ? 'flex' : 'none';
+}
+
 async function loadNotifLog() {
   if (!nlMode) return;
+  nlSetLoading(true);
   try {
     const token = localStorage.getItem('widemap_admin_token') || '';
     const res = await fetch(`${BASE_URL}/api/notification-log`, {
       headers: { 'X-Admin-Token': token },
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const msg = res.status === 502 || res.status === 503
+        ? t('err.serverUnavailable')
+        : `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
     const data = await res.json();
     nlAllRows = data.logs || [];
     nlRender();
   } catch (err) {
     const tbody = document.getElementById('notif-log-tbody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--red);padding:24px;">${esc(String(err))}</td></tr>`;
+  } finally {
+    nlSetLoading(false);
   }
 }
 

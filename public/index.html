@@ -555,7 +555,8 @@
   <div id="stats-container" style="display:none">
     <div class="stats-header">
       <span id="stats-title" data-i18n="tab.stats">📈 統計情報</span>
-      <span id="stats-subtitle" style="color:var(--muted);font-size:11px;margin-left:8px;"></span>
+      <span id="stats-subtitle" style="color:var(--muted);font-size:11px;"></span>
+      <span class="data-fetching-hdr" id="data-fetching-stats"><span class="spinner-xs"></span><span data-i18n="data.loading">読み込み中</span></span>
     </div>
     <!-- Maps row: GLOBE + FLAT MAP side by side -->
     <div class="stats-maps">
@@ -598,9 +599,10 @@
   <div id="log-container" style="display:none">
     <div class="log-header">
       <span class="log-title" data-i18n="log.title">📋 通信ログ</span>
-      <span id="log-count" style="color:var(--muted);font-size:11px;margin-left:8px;"></span>
-      <span id="log-device-filter" style="margin-left:8px;display:none"></span>
-      <span id="log-threat-count" style="margin-left:8px;"></span>
+      <span id="log-count" style="color:var(--muted);font-size:11px;"></span>
+      <span id="log-device-filter" style="display:none"></span>
+      <span id="log-threat-count"></span>
+      <span class="data-fetching-hdr" id="data-fetching-log"><span class="spinner-xs"></span><span data-i18n="data.loading">読み込み中</span></span>
     </div>
     <div id="beacon-banner" style="display:none">
       <div id="beacon-banner-bar">
@@ -741,7 +743,8 @@
   <div id="notif-log-container" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg);padding:10px;gap:8px;">
     <div class="log-header">
       <span class="log-title" data-i18n="notif-log.title">🔔 検出ログ</span>
-      <span id="notif-log-count" style="color:var(--muted);font-size:11px;margin-left:8px;"></span>
+      <span id="notif-log-count" style="color:var(--muted);font-size:11px;"></span>
+      <span class="data-fetching-hdr" id="data-fetching-notif"><span class="spinner-xs"></span><span data-i18n="data.loading">読み込み中</span></span>
       <button id="notif-log-refresh-btn" style="margin-left:auto;padding:3px 10px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text);cursor:pointer;" data-i18n="notif-log.refresh">更新</button>
     </div>
     <div class="log-table-wrap">

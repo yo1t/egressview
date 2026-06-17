@@ -215,7 +215,8 @@
     flex: 1; display: none; flex-direction: column; overflow: hidden;
     background: var(--bg); padding: 10px; gap: 10px;
   }
-  .stats-header { font-size: 12px; font-weight: 600; color: var(--text); padding: 4px 8px; }
+  .stats-header { font-size: 12px; font-weight: 600; color: var(--text); padding: 4px 8px; display: flex; align-items: center; gap: 8px; }
+  .data-fetching-hdr { display: none; align-items: center; gap: 4px; font-size: 10px; color: var(--muted); margin-left: auto; flex-shrink: 0; }
   /* Connection Log */
   #log-container { display: none; flex-direction: column; flex: 1; overflow: hidden; background: var(--bg); padding: 10px; gap: 8px; }
   .log-header { font-size: 12px; font-weight: 600; color: var(--text); padding: 4px 8px; display: flex; align-items: center; gap: 8px; }
