@@ -61,13 +61,7 @@ socket.on('connections-update', data => {
   const incoming = data.connections || [];
   if (data.partial) {
     // Merge: update/add entries without discarding older ones loaded via API
-    const map = new Map(allConnections.map(c => [`${c.src}|${c.dst}|${c.dport}|${c.proto}`, c]));
-    for (const c of incoming) {
-      const key = `${c.src}|${c.dst}|${c.dport}|${c.proto}`;
-      const prev = map.get(key);
-      map.set(key, { ...prev, ...c, threat: c.threat || prev?.threat || null });
-    }
-    allConnections = [...map.values()];
+    allConnections = mergeConnections(allConnections, incoming);
   } else {
     allConnections = incoming;
     if (data.initialLoad) {
@@ -98,13 +92,7 @@ socket.on('connections-update', data => {
     apiFetch(`${_BASE}/api/connections?from=${from24h}`)
       .then(r => r.json())
       .then(d => {
-        const map = new Map(allConnections.map(c => [`${c.src}|${c.dst}|${c.dport}|${c.proto}`, c]));
-        for (const c of d.connections || []) {
-          const key = `${c.src}|${c.dst}|${c.dport}|${c.proto}`;
-          const prev = map.get(key);
-          map.set(key, { ...prev, ...c, threat: c.threat || prev?.threat || null });
-        }
-        allConnections = [...map.values()];
+        allConnections = mergeConnections(allConnections, d.connections || []);
         dataRangeFrom = from24h;
         if (!asusActive) buildGraphFromConnections(); else updateOrgGraph();
         scheduleGraphAutoFit({ delayedData: true });

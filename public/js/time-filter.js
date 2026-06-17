@@ -7,8 +7,13 @@ async function fetchConnectionRange(from, to) {
     const res = await apiFetch(`${_BASE}/api/connections?${params}`);
     if (!res.ok) return;
     const data = await res.json();
-    allConnections = data.connections || [];
-    dataRangeFrom = from != null ? from : 0;
+    allConnections = mergeConnections(allConnections, data.connections || []);
+    // dataRangeFrom tracks the oldest timestamp for which we have continuous
+    // coverage through "now". Bounded ranges such as "yesterday" must not move
+    // it back, otherwise switching back to live/1h would incorrectly skip fetch.
+    if (to == null) {
+      dataRangeFrom = from != null ? Math.min(dataRangeFrom, from) : 0;
+    }
     if (data.serverTime) serverTimeOffset = data.serverTime - Date.now();
   } catch (e) {
     console.error('[connections] fetch failed:', e);

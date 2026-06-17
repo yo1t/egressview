@@ -8,6 +8,21 @@ let dataRangeFrom = Date.now() - 86400_000;
 // Period filter: returns [from, to] against lastSeen (null = no limit)
 let customRangeFrom = null; // ms (for custom filter)
 let customRangeTo   = null;
+
+function connectionKey(c) {
+  return `${c.src}|${c.dst}|${c.dport}|${c.proto}`;
+}
+
+function mergeConnections(existing, incoming) {
+  const map = new Map((existing || []).map(c => [connectionKey(c), c]));
+  for (const c of incoming || []) {
+    const key = connectionKey(c);
+    const prev = map.get(key);
+    map.set(key, { ...prev, ...c, threat: c.threat || prev?.threat || null });
+  }
+  return [...map.values()];
+}
+
 function getTimeRange() {
   const now = Date.now() + serverTimeOffset; // server time basis
   switch (currentTimeFilter) {
