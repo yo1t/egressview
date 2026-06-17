@@ -104,7 +104,6 @@
   /* ── Header ─────────────────────────────────────── */
   header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
   header h1 { font-size: 15px; font-weight: 600; color: var(--accent); letter-spacing: 0.05em; }
-  .h1-abbr { display: none; }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
   .status-dot.online { background: var(--green); box-shadow: 0 0 6px var(--green); }
   .status-dot.error  { background: var(--red);   box-shadow: 0 0 6px var(--red); }
@@ -640,9 +639,8 @@
   }
   /* Even narrower screens (small phones in portrait) */
   @media (max-width: 480px) {
-    /* Show abbreviated brand on very small screens */
-    .h1-full { display: none; }
-    .h1-abbr { display: inline; }
+    /* Show full brand name even on small screens (wraps to its own line) */
+    header h1 { font-size: 11px; }
     /* Connection badges hidden to free up horizontal space */
     .conn-badges { display: none; }
     /* Even more compact tabs */
