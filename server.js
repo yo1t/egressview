@@ -388,6 +388,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
+  if (tlsOptions) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   // Minimal CSP: block object/embed injection and restrict base URI.
   // script-src includes 'unsafe-inline' for the BASE_URL bootstrap snippet;
   // the real XSS guard is esc() + input validation throughout the codebase.

@@ -47,7 +47,7 @@ module.exports = function backupRoutes(ctx) {
       devices.seedFromConnectionHistory(history.getConnectionHistory()); // backfill devices from restored history
       enrichment.reopen();                            // RDAP/Geo キャッシュも restore 後の DB から再ロード
       if (beacons)  beacons.reopen();                 // beacon events / candidates も restore 後の DB から再ロード
-      if (sessions) sessions.reopen();                // ログインセッションも restore 後の DB に切り替え
+      if (sessions) { sessions.reopen(); sessions.revokeAll(null); } // restore 後の DB に切り替え＋旧セッション破棄
       res.json({ success: true, message: `Restored from ${name}. Restart recommended.` });
     } catch (e) {
       res.status(500).json({ error: e.message });

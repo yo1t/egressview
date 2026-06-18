@@ -31,6 +31,38 @@ module.exports = function authRoutes(ctx) {
 
   const router = Router();
 
+  // ── Brute-force guard for /auth/login ─────────────────────────────────────
+  // Tracks failed attempts per IP: { count, lockedUntil }
+  const loginAttempts = new Map();
+  const LOGIN_MAX_FAILS  = 5;
+  const LOGIN_LOCK_MS    = 30_000;
+  const LOGIN_WINDOW_MS  = 10 * 60_000;
+
+  function checkLoginRateLimit(ip) {
+    const now = Date.now();
+    const entry = loginAttempts.get(ip);
+    if (!entry) return null;
+    if (entry.lockedUntil && now < entry.lockedUntil) {
+      const secsLeft = Math.ceil((entry.lockedUntil - now) / 1000);
+      return `試行回数が多すぎます。${secsLeft}秒後に再試行してください`;
+    }
+    if (now - entry.firstFail > LOGIN_WINDOW_MS) {
+      loginAttempts.delete(ip);
+      return null;
+    }
+    return null;
+  }
+
+  function recordLoginFail(ip) {
+    const now = Date.now();
+    const entry = loginAttempts.get(ip) || { count: 0, firstFail: now };
+    entry.count += 1;
+    if (entry.count >= LOGIN_MAX_FAILS) entry.lockedUntil = now + LOGIN_LOCK_MS;
+    loginAttempts.set(ip, entry);
+  }
+
+  function clearLoginFails(ip) { loginAttempts.delete(ip); }
+
   // ── Password login → per-device session (P2-23) ────────────────────────────
   router.post('/auth/login', (req, res) => {
     const { password, deviceLabel } = req.body || {};
@@ -38,11 +70,17 @@ module.exports = function authRoutes(ctx) {
     if (typeof password !== 'string' || password.length > 256) {
       return res.status(400).json({ error: 'パスワードを入力してください' });
     }
+    const clientIp = req.ip || req.socket?.remoteAddress || '';
+    const rateLimitErr = checkLoginRateLimit(clientIp);
+    if (rateLimitErr) return res.status(429).json({ error: rateLimitErr });
+
     const ok = authPassword.verifyPassword(password, appState.authPasswordSalt, appState.authPasswordHash);
     if (!ok) {
+      recordLoginFail(clientIp);
       logger.warn('[auth] Login failed');
       return setTimeout(() => res.status(401).json({ error: 'パスワードが違います' }), 500);
     }
+    clearLoginFails(clientIp);
     const session = sessions.createSession(typeof deviceLabel === 'string' ? deviceLabel : '');
     if (!session) return res.status(500).json({ error: 'セッション作成に失敗しました' });
     logger.info(`[auth] Login OK (session ${session.id}: ${deviceLabel || 'unknown device'})`);
@@ -208,6 +246,7 @@ module.exports = function authRoutes(ctx) {
     if (yIp  !== undefined && yIp  !== '' && !isAllowedRouterIp(yIp)) return res.status(400).json({ error: 'YamahaのIPがプライベート範囲外です' });
     if (typeof username === 'string' && username.length > 64)         return res.status(400).json({ error: 'ユーザー名が長すぎます' });
     if (typeof password === 'string' && password.length > 256)        return res.status(400).json({ error: 'パスワードが長すぎます' }); // pragma: allowlist secret
+    if (yNat !== undefined && yNat !== '' && !/^\d{1,6}$/.test(String(yNat))) return res.status(400).json({ error: 'yamahaNat は1〜6桁の数値で指定してください' });
 
     // ── ASUS ──
     if (doAsus === true) {
