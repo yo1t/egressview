@@ -10,8 +10,8 @@ Thank you for your interest in contributing! Issues and pull requests are welcom
 ## Development setup
 
 ```bash
-git clone https://github.com/yo1t/widemap.git
-cd widemap
+git clone https://github.com/yo1t/egressview.git
+cd egressview
 npm install
 npm start
 ```

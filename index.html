@@ -7,16 +7,16 @@
   <meta name="description" content="Where Is Data Exiting? Map All Paths. Passively monitor every LAN device's outbound connections. Use Graph Map and Statistics for whole-network overview, then drill down in Connection Log and Devices. Automatic C2/botnet threat detection, Slack alerts. Works with Yamaha RTX routers — no new hardware required.">
   <meta name="keywords" content="network security monitor, IoT security, home network security, SOHO security, Yamaha RTX, network visualizer, C2 detection, botnet detection, threat intelligence, LAN monitor, open source">
   <meta name="author" content="Yoichi Takizawa">
-  <link rel="canonical" href="https://yo1t.github.io/widemap/">
+  <link rel="canonical" href="https://yo1t.github.io/egressview/">
   <meta property="og:title" content="EgressView — Home / SOHO Network Security Monitor">
   <meta property="og:description" content="Passively monitor every LAN device's outbound connections. Graph Map and Statistics provide the overview; Connection Log and Devices provide drill-down investigation. Automatic C2/botnet threat detection and Slack alerts — no new hardware required.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://yo1t.github.io/widemap/">
-  <meta property="og:image" content="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png">
+  <meta property="og:url" content="https://yo1t.github.io/egressview/">
+  <meta property="og:image" content="https://raw.githubusercontent.com/yo1t/egressview/main/docs/egressview1.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="EgressView — Home / SOHO Network Security Monitor">
   <meta name="twitter:description" content="Passively monitor every LAN device's outbound connections. Graph Map and Statistics provide the overview; Connection Log and Devices provide drill-down investigation. Automatic C2/botnet threat detection and Slack alerts — no new hardware required.">
-  <meta name="twitter:image" content="https://raw.githubusercontent.com/yo1t/widemap/main/docs/widemap1.png">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/yo1t/egressview/main/docs/egressview1.png">
   <style>
     :root {
       --bg: #0d1117;
@@ -198,15 +198,15 @@
     <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node.js 18+"></a>
   </div>
   <div class="links">
-    <a class="btn primary" href="https://github.com/yo1t/widemap">
+    <a class="btn primary" href="https://github.com/yo1t/egressview">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       Source Code
     </a>
-    <a class="btn" href="https://github.com/yo1t/widemap/issues">
+    <a class="btn" href="https://github.com/yo1t/egressview/issues">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/><path fill-rule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z"/></svg>
       Issues
     </a>
-    <a class="btn" href="https://github.com/yo1t/widemap/blob/main/README.md">
+    <a class="btn" href="https://github.com/yo1t/egressview/blob/main/README.md">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0114.25 16H1.75A1.75 1.75 0 010 14.25V1.75zm1.75-.25a.25.25 0 00-.25.25v12.5c0 .138.112.25.25.25h12.5a.25.25 0 00.25-.25V1.75a.25.25 0 00-.25-.25H1.75zM3.5 3.75a.75.75 0 01.75-.75h7a.75.75 0 010 1.5h-7a.75.75 0 01-.75-.75zm.75 2.75a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-4.5z"/></svg>
       README
     </a>
@@ -303,7 +303,7 @@
     <h2><span class="icon">▶</span> Demo</h2>
     <div style="position:relative; border-radius:8px; overflow:hidden; border:1px solid var(--border);">
       <video autoplay muted loop playsinline style="width:100%; display:block;">
-        <source src="docs/widemap-redacted.mp4" type="video/mp4">
+        <source src="docs/egressview-redacted.mp4" type="video/mp4">
         Your browser does not support the video tag.
       </video>
     </div>
@@ -316,10 +316,10 @@
   <section id="screenshots">
     <h2><span class="icon">◈</span> Screenshots</h2>
     <div class="screenshot-grid">
-      <img src="docs/widemap1.png" alt="EgressView Graph Map overview for LAN devices and destinations" loading="lazy">
-      <img src="docs/widemap2.png" alt="EgressView Statistics view with connection history charts" loading="lazy">
-      <img src="docs/widemap3.png" alt="EgressView Connection Log drill-down workflow" loading="lazy">
-      <img src="docs/widemap4.png" alt="EgressView Devices drill-down workflow" loading="lazy">
+      <img src="docs/egressview1.png" alt="EgressView Graph Map overview for LAN devices and destinations" loading="lazy">
+      <img src="docs/egressview2.png" alt="EgressView Statistics view with connection history charts" loading="lazy">
+      <img src="docs/egressview3.png" alt="EgressView Connection Log drill-down workflow" loading="lazy">
+      <img src="docs/egressview4.png" alt="EgressView Devices drill-down workflow" loading="lazy">
     </div>
   </section>
 
@@ -369,18 +369,18 @@
         <tr style="border-bottom:1px solid var(--border);">
           <td style="padding:8px 6px;">✅</td>
           <td style="padding:8px 6px;">Yamaha RTX router — SSH access enabled</td>
-          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-yamaha.md">Setup guide →</a></td>
+          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.md">Setup guide →</a></td>
         </tr>
         <tr>
           <td style="padding:8px 6px; color:var(--muted);">☐</td>
           <td style="padding:8px 6px; color:var(--muted);">(Optional) ASUS WiFi AP — web admin enabled</td>
-          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-asus.md">Setup guide →</a></td>
+          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-asus.md">Setup guide →</a></td>
         </tr>
       </table>
 
       <p style="font-size:0.95rem; font-weight:600; margin-bottom:4px;">Step 2 — Install and launch</p>
-      <pre><code>git clone https://github.com/yo1t/widemap.git
-cd widemap
+      <pre><code>git clone https://github.com/yo1t/egressview.git
+cd egressview
 npm install
 npm start</code></pre>
 
@@ -401,11 +401,11 @@ npm start</code></pre>
         </tr>
         <tr style="border-bottom:1px solid var(--border);">
           <td style="padding:6px 8px; color:var(--muted);">SSH username / password</td>
-          <td style="padding:6px 8px;">Set up in the <a href="https://github.com/yo1t/widemap/blob/main/docs/setup-yamaha.md">Yamaha guide</a></td>
+          <td style="padding:6px 8px;">Set up in the <a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.md">Yamaha guide</a></td>
         </tr>
         <tr>
           <td style="padding:6px 8px; color:var(--muted);">ASUS AP IP / password</td>
-          <td style="padding:6px 8px;">AP's LAN IP and admin password (<a href="https://github.com/yo1t/widemap/blob/main/docs/setup-asus.md">ASUS guide</a>)</td>
+          <td style="padding:6px 8px;">AP's LAN IP and admin password (<a href="https://github.com/yo1t/egressview/blob/main/docs/setup-asus.md">ASUS guide</a>)</td>
         </tr>
       </table>
       <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;">For Yamaha RTX, click <strong>Connect &amp; Auto-detect</strong> after entering the IP, username, and password. EgressView verifies SSH access, detects the NAT descriptor, checks LAN IP and NAT sessions, then fills the recommended settings before you save.</p>
@@ -436,11 +436,11 @@ npm start</code></pre>
         Found a bug or have a feature request? Open an issue on GitHub.
       </p>
       <div style="display:flex; gap:12px; flex-wrap:wrap;">
-        <a class="btn" href="https://github.com/yo1t/widemap/issues">
+        <a class="btn" href="https://github.com/yo1t/egressview/issues">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/><path fill-rule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z"/></svg>
           View All Issues
         </a>
-        <a class="btn" href="https://github.com/yo1t/widemap/issues/new">
+        <a class="btn" href="https://github.com/yo1t/egressview/issues/new">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8 2a.75.75 0 01.75.75v4.5h4.5a.75.75 0 010 1.5h-4.5v4.5a.75.75 0 01-1.5 0v-4.5h-4.5a.75.75 0 010-1.5h4.5v-4.5A.75.75 0 018 2z"/></svg>
           New Issue
         </a>
@@ -453,27 +453,27 @@ npm start</code></pre>
     <h2><span class="icon">⬡</span> Links</h2>
     <div class="card-grid">
       <div class="card">
-        <h3><a href="https://github.com/yo1t/widemap">GitHub Repository</a></h3>
+        <h3><a href="https://github.com/yo1t/egressview">GitHub Repository</a></h3>
         <p>Source code, issues, pull requests, and contribution guidelines.</p>
       </div>
       <div class="card">
-        <h3><a href="https://github.com/yo1t/widemap/blob/main/README.md">README (EN)</a></h3>
+        <h3><a href="https://github.com/yo1t/egressview/blob/main/README.md">README (EN)</a></h3>
         <p>Full documentation: setup, configuration, features, and security details.</p>
       </div>
       <div class="card">
-        <h3><a href="https://github.com/yo1t/widemap/blob/main/README.ja.md">README (日本語)</a></h3>
+        <h3><a href="https://github.com/yo1t/egressview/blob/main/README.ja.md">README (日本語)</a></h3>
         <p>日本語版ドキュメント：セットアップ、設定、機能、セキュリティ。</p>
       </div>
       <div class="card">
-        <h3><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-yamaha.md">Yamaha RTX Setup Guide</a></h3>
+        <h3><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.md">Yamaha RTX Setup Guide</a></h3>
         <p>Step-by-step guide to enable SSH on your Yamaha RTX router.</p>
       </div>
       <div class="card">
-        <h3><a href="https://github.com/yo1t/widemap/blob/main/docs/setup-asus.md">ASUS AP Setup Guide</a></h3>
+        <h3><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-asus.md">ASUS AP Setup Guide</a></h3>
         <p>How to configure your ASUS access point for EgressView.</p>
       </div>
       <div class="card">
-        <h3><a href="https://github.com/yo1t/widemap/blob/main/LICENSE">License (AGPL-3.0)</a></h3>
+        <h3><a href="https://github.com/yo1t/egressview/blob/main/LICENSE">License (AGPL-3.0)</a></h3>
         <p>Free to use and modify. Network service deployments must share changes.</p>
       </div>
     </div>
@@ -483,8 +483,8 @@ npm start</code></pre>
 
 <footer>
   <p>
-    <a href="https://github.com/yo1t/widemap">EgressView</a> is released under the
-    <a href="https://github.com/yo1t/widemap/blob/main/LICENSE">AGPL-3.0 License</a>.
+    <a href="https://github.com/yo1t/egressview">EgressView</a> is released under the
+    <a href="https://github.com/yo1t/egressview/blob/main/LICENSE">AGPL-3.0 License</a>.
     &nbsp;·&nbsp;
     Not affiliated with or endorsed by Yamaha or ASUS.
   </p>

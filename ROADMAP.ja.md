@@ -10,7 +10,7 @@
 
 Linux の `nf_conntrack` 用共通パーサーを実装することで、OpenWrt、ASUS ルーターモード、Ubiquiti UDM 系など、Linux ベースの多くのルーターに対応できる可能性があります。
 
-**🙋 実機テスター募集中** — 実装の大半はハードウェアなしで進められますが、実機での検証だけはできません。これらのルーターをお持ちの方は [Issue を立てて](https://github.com/yo1t/widemap/issues)ください。
+**🙋 実機テスター募集中** — 実装の大半はハードウェアなしで進められますが、実機での検証だけはできません。これらのルーターをお持ちの方は [Issue を立てて](https://github.com/yo1t/egressview/issues)ください。
 
 ### 通信ブロック
 
@@ -18,4 +18,4 @@ Linux の `nf_conntrack` 用共通パーサーを実装することで、OpenWrt
 
 ---
 
-それ以外（検討中のアイデアを含む）はすべて [Issues](https://github.com/yo1t/widemap/issues) で管理しています。機能リクエスト歓迎です。
+それ以外（検討中のアイデアを含む）はすべて [Issues](https://github.com/yo1t/egressview/issues) で管理しています。機能リクエスト歓迎です。

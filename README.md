@@ -9,7 +9,7 @@ No new hardware. No inline traffic interception. Works via your existing Yamaha 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green)
 
-> 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/widemap/)
+> 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/egressview/)
 
 ---
 
@@ -55,10 +55,10 @@ Connection Log and Devices let you drill down into suspicious destinations, nois
 
 ## Screenshots
 
-![Graph Map overview](docs/widemap1.png)
-![Statistics view](docs/widemap2.png)
-![Connection Log drill-down](docs/widemap3.png)
-![Devices drill-down](docs/widemap4.png)
+![Graph Map overview](docs/egressview1.png)
+![Statistics view](docs/egressview2.png)
+![Connection Log drill-down](docs/egressview3.png)
+![Devices drill-down](docs/egressview4.png)
 
 ## Architecture
 
@@ -119,8 +119,8 @@ Start with the smallest path that matches your network, then add sources later f
 ### Step 2 — Install and launch
 
 ```bash
-git clone https://github.com/yo1t/widemap.git
-cd widemap
+git clone https://github.com/yo1t/egressview.git
+cd egressview
 npm install
 npm start
 ```
@@ -153,7 +153,7 @@ For the Yamaha RTX, click **Connect & Auto-detect** after entering the IP, usern
 
 Within a few seconds, devices, sessions, and statistics will start appearing in the UI.
 
-> **Note:** Credentials are generated once on first startup and saved (hashed) in `.widemap.json`. If you lose the password, remove the `auth` section from `.widemap.json` and restart — a new initial password will be printed.
+> **Note:** Credentials are generated once on first startup and saved (hashed) in `.egressview.json`. If you lose the password, remove the `auth` section from `.egressview.json` and restart — a new initial password will be printed.
 
 ## Authentication
 
@@ -162,7 +162,7 @@ All API endpoints and the WebSocket connection are protected. Two credentials ex
 | Credential | Purpose | Where |
 |-----------|---------|-------|
 | **Login password** | Browser login. Each device gets its own revocable session (30-day sliding expiry) | Printed on first startup; change it in Settings → General |
-| **API token** | Scripts / automation (`X-Admin-Token` header) | `.widemap.json` (`adminToken`); regenerate in Settings → General |
+| **API token** | Scripts / automation (`X-Admin-Token` header) | `.egressview.json` (`adminToken`); regenerate in Settings → General |
 
 ### Session management
 
@@ -174,7 +174,7 @@ All API endpoints and the WebSocket connection are protected. Two credentials ex
 
 ```bash
 # Remove the auth section and restart — a new initial password is printed
-node -e "const f='.widemap.json',c=require('./'+f);delete c.auth;require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
+node -e "const f='.egressview.json',c=require('./'+f);delete c.auth;require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
 npm start
 ```
 
@@ -186,7 +186,7 @@ npm start
 
 ## HTTPS (optional)
 
-By default EgressView serves plain HTTP. To enable HTTPS, add to `.widemap.json` and restart:
+By default EgressView serves plain HTTP. To enable HTTPS, add to `.egressview.json` and restart:
 
 ```json
 "https": { "enabled": true }
@@ -202,7 +202,7 @@ HTTPS is recommended if you use the login password from multiple devices, since 
 
 ## Configuration
 
-All settings are stored in `.widemap.json` (auto-generated, gitignored). You can also use environment variables:
+All settings are stored in `.egressview.json` (auto-generated, gitignored). You can also use environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -213,8 +213,8 @@ All settings are stored in `.widemap.json` (auto-generated, gitignored). You can
 | `YAMAHA_USER` | — | Yamaha SSH username |
 | `YAMAHA_PASS` | — | Yamaha SSH password |
 | `YAMAHA_NAT` | `100` | NAT descriptor number |
-| `SUBPATH` | — | Reverse proxy sub-path (e.g. `/widemap`) |
-| `EGRESSVIEW_DB` | `.widemap.db` | Path to the SQLite database file |
+| `SUBPATH` | — | Reverse proxy sub-path (e.g. `/egressview`) |
+| `EGRESSVIEW_DB` | `.egressview.db` | Path to the SQLite database file |
 | `LOG_LEVEL` | `info` | Log verbosity: `error` / `warn` / `info` / `debug` |
 
 ## Features
@@ -309,7 +309,7 @@ If you want to use EgressView in a proprietary or closed-source commercial produ
 EgressView — Real-time network connection visualizer
 Copyright (C) 2025 Yoichi Takizawa
 
-Source code: https://github.com/yo1t/widemap
+Source code: https://github.com/yo1t/egressview
 ```
 
 ## Contributing
