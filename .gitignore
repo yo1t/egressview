@@ -3,15 +3,15 @@ node_modules/
 .env.local
 .env.*.local
 # 設定・履歴ファイル（秘密情報含む）
-.widemap.json
-.widemap.connections.jsonl
-.widemap.connections.jsonl.migrated
-.widemap.db
-.widemap.db-wal
-.widemap.db-shm
-.widemap-backups/
-.widemap-upload-temp.db
-.widemap.notes.json
+.egressview.json
+.egressview.connections.jsonl
+.egressview.connections.jsonl.migrated
+.egressview.db
+.egressview.db-wal
+.egressview.db-shm
+.egressview-backups/
+.egressview-upload-temp.db
+.egressview.notes.json
 .oui_cache.txt
 server.log
 *.log
@@ -41,13 +41,13 @@ test/fixtures/baseline.json
 # Playwright 生成物
 test-results/
 playwright-report/
-.widemap.pid
+.egressview.pid
 
 # Playwright test output
 test-results/
 playwright-report/
 # TLS 証明書（自己署名・自動生成）
-.widemap-cert.pem
-.widemap-key.pem
+.egressview-cert.pem
+.egressview-key.pem
 # conntrack 検証環境（内部用・公開しない）
 dev-conntrack/
