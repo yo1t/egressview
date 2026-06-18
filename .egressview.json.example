@@ -1,0 +1,46 @@
+{
+  "yamaha": {
+    "ip": "192.168.x.x",
+    "user": "admin",
+    "pass": "",
+    "enabled": false,
+    "hostFp": "",
+    "nat": "100"
+  },
+  "asus": {
+    "ip": "192.168.x.x",
+    "user": "admin",
+    "pass": "",
+    "enabled": false
+  },
+  "general": {
+    "homeCountry": "JP",
+    "language": "ja",
+    "autoInvestigate": false,
+    "retentionDays": 730
+  },
+  "backup": {
+    "intervalHours": 24,
+    "maxGenerations": 7
+  },
+  "slack": {
+    "enabled": false,
+    "token": "",
+    "userId": "",
+    "cooldownMinutes": 60,
+    "displayName": ""
+  },
+  "adminToken": "",
+  "dnsmasq": {
+    "enabled": true,
+    "logFile": "/var/log/dnsmasq-queries.log"
+  },
+  "inspect": {
+    "enabled": true,
+    "logFile": "/var/log/yamaha-router.log"
+  },
+  "dhcpd": {
+    "enabled": true,
+    "logFile": "/var/log/yamaha-router.log"
+  }
+}
