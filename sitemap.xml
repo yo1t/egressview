@@ -4,9 +4,9 @@
 
   <!-- English landing page -->
   <url>
-    <loc>https://yo1t.github.io/widemap/</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/widemap/"/>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/widemap/index.ja.html"/>
+    <loc>https://yo1t.github.io/egressview/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/index.ja.html"/>
     <lastmod>2026-06-14</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
@@ -14,9 +14,9 @@
 
   <!-- Japanese landing page -->
   <url>
-    <loc>https://yo1t.github.io/widemap/index.ja.html</loc>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/widemap/index.ja.html"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/widemap/"/>
+    <loc>https://yo1t.github.io/egressview/index.ja.html</loc>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/index.ja.html"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/"/>
     <lastmod>2026-06-14</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
@@ -24,9 +24,9 @@
 
   <!-- Yamaha RTX setup guide (English) -->
   <url>
-    <loc>https://yo1t.github.io/widemap/docs/setup-yamaha</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/widemap/docs/setup-yamaha"/>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/widemap/docs/setup-yamaha.ja"/>
+    <loc>https://yo1t.github.io/egressview/docs/setup-yamaha</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/setup-yamaha"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/setup-yamaha.ja"/>
     <lastmod>2026-06-07</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
@@ -34,9 +34,9 @@
 
   <!-- Yamaha RTX setup guide (Japanese) -->
   <url>
-    <loc>https://yo1t.github.io/widemap/docs/setup-yamaha.ja</loc>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/widemap/docs/setup-yamaha.ja"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/widemap/docs/setup-yamaha"/>
+    <loc>https://yo1t.github.io/egressview/docs/setup-yamaha.ja</loc>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/setup-yamaha.ja"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/setup-yamaha"/>
     <lastmod>2026-06-07</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
@@ -44,9 +44,9 @@
 
   <!-- ASUS router setup guide (English) -->
   <url>
-    <loc>https://yo1t.github.io/widemap/docs/setup-asus</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/widemap/docs/setup-asus"/>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/widemap/docs/setup-asus.ja"/>
+    <loc>https://yo1t.github.io/egressview/docs/setup-asus</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/setup-asus"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/setup-asus.ja"/>
     <lastmod>2026-06-06</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
@@ -54,9 +54,9 @@
 
   <!-- ASUS router setup guide (Japanese) -->
   <url>
-    <loc>https://yo1t.github.io/widemap/docs/setup-asus.ja</loc>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/widemap/docs/setup-asus.ja"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/widemap/docs/setup-asus"/>
+    <loc>https://yo1t.github.io/egressview/docs/setup-asus.ja</loc>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/setup-asus.ja"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/setup-asus"/>
     <lastmod>2026-06-06</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
