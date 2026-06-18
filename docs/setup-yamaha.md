@@ -22,8 +22,8 @@ telnet 192.168.1.1
 ## Step 2 — Create an SSH login user
 
 ```
-# Create a dedicated user for EgressView (replace "widemap" and "yourpassword")
-login user widemap yourpassword <!-- pragma: allowlist secret -->
+# Create a dedicated user for EgressView (replace "egressview" and "yourpassword")
+login user egressview yourpassword <!-- pragma: allowlist secret -->
 ```
 
 > **Tip:** Use a dedicated user rather than the administrator account. This limits the scope of access if the credentials are ever compromised.
@@ -137,7 +137,7 @@ save
 ## Step 7 — Test SSH connectivity from your PC/Mac
 
 ```bash
-ssh widemap@192.168.1.1
+ssh egressview@192.168.1.1
 ```
 
 If you can log in successfully, the setup is complete.
@@ -151,7 +151,7 @@ Open the EgressView Settings panel (⚙) and fill in:
 | Field | Value |
 |-------|-------|
 | Yamaha RTX IP | Your router's LAN IP (e.g. `192.168.1.1`) |
-| SSH username | `widemap` (or whatever you chose) |
+| SSH username | `egressview` (or whatever you chose) |
 | SSH password | The password you set |
 | NAT descriptor | The number from `show nat descriptor` (e.g. `100`) |
 
@@ -165,7 +165,7 @@ Open the EgressView Settings panel (⚙) and fill in:
 
 **Authentication failed**
 - Verify the username and password with `show login user`
-- Re-enter the password: `login user widemap newpassword` then `save` <!-- pragma: allowlist secret -->
+- Re-enter the password: `login user egressview newpassword` then `save` <!-- pragma: allowlist secret -->
 
 **No sessions appearing in EgressView**
 - Confirm the NAT descriptor number matches what `show nat descriptor` returns

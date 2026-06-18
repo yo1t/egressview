@@ -7,10 +7,7 @@ const logger = require('./logger');
 const fs   = require('fs');
 const path = require('path');
 
-// Prefer .egressview.json; fall back to legacy .widemap.json on existing installs
-const _newCfg = path.join(__dirname, '..', '.egressview.json');
-const _oldCfg = path.join(__dirname, '..', '.widemap.json');
-const DEFAULT_CONFIG_FILE = fs.existsSync(_newCfg) || !fs.existsSync(_oldCfg) ? _newCfg : _oldCfg;
+const DEFAULT_CONFIG_FILE = path.join(__dirname, '..', '.egressview.json');
 
 // ─── Low-level file helpers ───────────────────────────────────────────────────
 

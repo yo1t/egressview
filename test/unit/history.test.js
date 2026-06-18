@@ -216,7 +216,7 @@ describe('corrupt DB recovery', () => {
   }
 
   it('restores from the latest backup when the DB file is corrupt', () => {
-    const tmpDir    = fs.mkdtempSync(path.join(os.tmpdir(), 'widemap-history-recovery-'));
+    const tmpDir    = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-history-recovery-'));
     const dbPath    = path.join(tmpDir, 'test.db');
     const backupDir = path.join(tmpDir, 'backups');
     try {
@@ -240,7 +240,7 @@ describe('corrupt DB recovery', () => {
   });
 
   it('falls back to an empty DB when no backup exists', () => {
-    const tmpDir    = fs.mkdtempSync(path.join(os.tmpdir(), 'widemap-history-recovery-'));
+    const tmpDir    = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-history-recovery-'));
     const dbPath    = path.join(tmpDir, 'test.db');
     const emptyDir  = path.join(tmpDir, 'backups-empty');
     try {

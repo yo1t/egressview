@@ -1,16 +1,7 @@
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
 // ─── Admin token auth (saved in localStorage) ─────────────────────────
 const TOKEN_KEY = 'egressview_admin_token';
-// Migrate legacy localStorage keys from previous product name
-(function migrateLocalStorage() {
-  [['widemap_admin_token', 'egressview_admin_token'],
-   ['widemap_threat_config', 'egressview_threat_config']].forEach(([oldKey, newKey]) => {
-    if (!localStorage.getItem(newKey) && localStorage.getItem(oldKey)) {
-      localStorage.setItem(newKey, localStorage.getItem(oldKey));
-      localStorage.removeItem(oldKey);
-    }
-  });
-})();
+
 let adminToken = localStorage.getItem(TOKEN_KEY) || '';
 
 // Short device label sent at login so the sessions list in settings is readable

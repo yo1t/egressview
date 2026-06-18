@@ -13,7 +13,7 @@ const enrichment = require('../../src/enrichment');
 let tmpDbPath = null;
 
 function makeTmpDb() {
-  tmpDbPath = path.join(os.tmpdir(), `widemap-test-${process.pid}-${Date.now()}.db`);
+  tmpDbPath = path.join(os.tmpdir(), `egressview-test-${process.pid}-${Date.now()}.db`);
   return tmpDbPath;
 }
 

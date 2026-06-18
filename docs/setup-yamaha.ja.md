@@ -22,8 +22,8 @@ telnet 192.168.1.1
 ## Step 2 — SSH 用ログインユーザーを作成
 
 ```
-# EgressView 専用ユーザーを作成（"widemap" とパスワードは任意の値に変更してください）
-login user widemap yourpassword <!-- pragma: allowlist secret -->
+# EgressView 専用ユーザーを作成（"egressview" とパスワードは任意の値に変更してください）
+login user egressview yourpassword <!-- pragma: allowlist secret -->
 ```
 
 > **ポイント:** 管理者アカウントではなく専用ユーザーを使うことで、万が一の認証情報漏洩時の影響範囲を限定できます。
@@ -137,7 +137,7 @@ save
 ## Step 7 — PC/Mac から SSH 接続をテスト
 
 ```bash
-ssh widemap@192.168.1.1
+ssh egressview@192.168.1.1
 ```
 
 ログインできれば設定完了です。
@@ -151,7 +151,7 @@ EgressView の設定パネル（⚙）を開き、以下を入力します：
 | 項目 | 値 |
 |------|---|
 | Yamaha RTX の IP アドレス | ルーターの LAN 側 IP（例: `192.168.1.1`） |
-| SSH ユーザー名 | `widemap`（または設定した名前） |
+| SSH ユーザー名 | `egressview`（または設定した名前） |
 | SSH パスワード | 設定したパスワード |
 | NAT ディスクリプタ番号 | `show nat descriptor` で確認した番号（例: `100`） |
 
@@ -165,7 +165,7 @@ EgressView の設定パネル（⚙）を開き、以下を入力します：
 
 **認証に失敗する**
 - `show login user` でユーザー名を確認してください
-- パスワードを再設定: `login user widemap newpassword` → `save` <!-- pragma: allowlist secret -->
+- パスワードを再設定: `login user egressview newpassword` → `save` <!-- pragma: allowlist secret -->
 
 **EgressView にセッションが表示されない**
 - NAT ディスクリプタ番号が `show nat descriptor` の結果と一致しているか確認してください

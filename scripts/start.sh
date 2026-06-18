@@ -9,7 +9,7 @@ CMD="${1:-start}"
 
 # On EC2 with systemd service, delegate
 if systemctl list-units --type=service 2>/dev/null | grep -q 'egressview.service'; then
-  exec sudo systemctl "$CMD" widemap
+  exec sudo systemctl "$CMD" egressview
 fi
 
 # Local fallback (PID file based)

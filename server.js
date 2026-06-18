@@ -54,26 +54,6 @@ const POLL_INTERVAL     = parseInt(process.env.POLL_INTERVAL_MS || '60000');
 const PORT              = parseInt(process.env.PORT || '3000');
 const CONFIG_FILE       = require('./src/config').DEFAULT_CONFIG_FILE;
 
-// ─── One-time migration: rename legacy .widemap.* files to .egressview.* ────
-(function migrateFromWidemap() {
-  const renames = [
-    ['.widemap.db',              '.egressview.db'],
-    ['.widemap.db-wal',          '.egressview.db-wal'],
-    ['.widemap.db-shm',          '.egressview.db-shm'],
-    ['.widemap.notes.json',      '.egressview.notes.json'],
-    ['.widemap.connections.jsonl', '.egressview.connections.jsonl'],
-    ['.widemap-cert.pem',        '.egressview-cert.pem'],
-    ['.widemap-key.pem',         '.egressview-key.pem'],
-    ['.widemap-backups',         '.egressview-backups'],
-  ];
-  for (const [oldName, newName] of renames) {
-    const oldPath = path.join(__dirname, oldName);
-    const newPath = path.join(__dirname, newName);
-    if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
-      try { fs.renameSync(oldPath, newPath); } catch {}
-    }
-  }
-})();
 
 // ─── Shared mutable state ─────────────────────────────────────────────────────
 // Passed by reference to route modules so they can read and mutate it.

@@ -1,5 +1,5 @@
 url: "https://yo1t.github.io"
-baseurl: "/widemap"
+baseurl: "/egressview"
 
 plugins:
   - jekyll-sitemap

@@ -13,7 +13,7 @@ const devicesModule = require('../../src/devices');
 let tmpDbPath = null;
 
 function makeTmpDb() {
-  tmpDbPath = path.join(os.tmpdir(), `widemap-devices-test-${process.pid}-${Date.now()}.db`);
+  tmpDbPath = path.join(os.tmpdir(), `egressview-devices-test-${process.pid}-${Date.now()}.db`);
   return tmpDbPath;
 }
 

@@ -4,14 +4,14 @@
 // Secondary: verify extracted static assets are served correctly.
 //
 // Usage:
-//   WIDEMAP_URL=http://YOUR_SERVER_IP:3002 WIDEMAP_TOKEN=<token> npm run test:smoke
+//   EGRESSVIEW_URL=http://YOUR_SERVER_IP:3002 EGRESSVIEW_TOKEN=<token> npm run test:smoke
 //
-// WIDEMAP_TOKEN is optional — tests that need auth are skipped when omitted.
+// EGRESSVIEW_TOKEN is optional — tests that need auth are skipped when omitted.
 
 const { test, expect } = require('@playwright/test');
 
-const BASE  = process.env.WIDEMAP_URL  || 'http://localhost:3002';
-const TOKEN = process.env.WIDEMAP_TOKEN || '';
+const BASE  = process.env.EGRESSVIEW_URL  || 'http://localhost:3002';
+const TOKEN = process.env.EGRESSVIEW_TOKEN || '';
 
 // ─── Static asset tests (no auth required) ────────────────────────────────────
 
@@ -101,7 +101,7 @@ test('no uncaught JS errors on page load', async ({ page }) => {
 });
 
 // ─── Auth-gated UI tests ──────────────────────────────────────────────────────
-// Skipped when WIDEMAP_TOKEN is not set.
+// Skipped when EGRESSVIEW_TOKEN is not set.
 
 // Helper: authenticate and navigate to /
 async function authPage(page) {
@@ -129,7 +129,7 @@ function fatalErrors(errors) {
 }
 
 test('tab bar renders after auth', async ({ page }) => {
-  if (!TOKEN) test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
   await authPage(page);
 
@@ -141,7 +141,7 @@ test('tab bar renders after auth', async ({ page }) => {
 });
 
 test('graph canvas renders after auth (P2-4: background fetch completes)', async ({ page }) => {
-  if (!TOKEN) test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
   await authPage(page);
 
@@ -154,7 +154,7 @@ test('graph canvas renders after auth (P2-4: background fetch completes)', async
 });
 
 test('no console errors after auth', async ({ page }) => {
-  if (!TOKEN) test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
   const errors = collectErrors(page);
   await authPage(page);
@@ -164,7 +164,7 @@ test('no console errors after auth', async ({ page }) => {
 
 // ⑥ タブ切り替えがエラーなく動くこと（リファクタリング後の安全網）
 test('tab switching produces no console errors', async ({ page }) => {
-  if (!TOKEN) test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
   const errors = collectErrors(page);
   await authPage(page);
@@ -180,7 +180,7 @@ test('tab switching produces no console errors', async ({ page }) => {
 
 // ⑦ 期間フィルター変更後にエラーが出ないこと（getFilteredConnections の間接テスト）
 test('time filter change produces no console errors', async ({ page }) => {
-  if (!TOKEN) test.skip(true, 'WIDEMAP_TOKEN not set — skipping auth-gated test');
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
   const errors = collectErrors(page);
   await authPage(page);

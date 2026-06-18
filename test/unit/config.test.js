@@ -12,7 +12,7 @@ const { loadFile, saveFile, persistSecret } = require('../../src/config');
 let tmpFile;
 
 before(() => {
-  tmpFile = path.join(os.tmpdir(), `widemap-config-test-${Date.now()}.json`);
+  tmpFile = path.join(os.tmpdir(), `egressview-config-test-${Date.now()}.json`);
 });
 after(() => {
   try { fs.unlinkSync(tmpFile); } catch {}

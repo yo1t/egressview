@@ -35,7 +35,7 @@ function readMark(p) {
 }
 
 function setup() {
-  tmpDir    = fs.mkdtempSync(path.join(os.tmpdir(), 'widemap-backup-test-'));
+  tmpDir    = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-backup-test-'));
   fakeDb    = path.join(tmpDir, 'test.db');
   backupDir = path.join(tmpDir, 'backups');
   makeRealDb(fakeDb, 'fake-db-content');
