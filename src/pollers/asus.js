@@ -17,6 +17,10 @@ let prevPollTime = Date.now();
 let latestAsusClients = [];
 let asusRenewFailures = 0;
 const ASUS_RENEW_MAX_FAILURES = 3;
+// Transient errors (EPIPE, ECONNRESET, etc.) are common on home routers.
+// Only surface to the UI after this many consecutive failures to avoid noise.
+let consecutivePollErrors = 0;
+const POLL_ERROR_THRESHOLD = 3;
 
 // Callbacks
 let onAuthRequired = () => {};
@@ -219,15 +223,20 @@ async function poll() {
       wanRx: netdev['WIRED_rx']?.rate ?? 0,
       wanTx: netdev['WIRED_tx']?.rate ?? 0,
     });
+    consecutivePollErrors = 0;
   } catch (err) {
     if (err.message === 'TOKEN_EXPIRED') {
       logger.info('[poll] Token expired, requiring re-login');
       authToken = null;
+      consecutivePollErrors = 0;
       onAuthRequired('セッションが切れました。再ログインしてください。');
       stopPolling();
     } else {
-      logger.error('[poll error]', err.message);
-      onPollError(err.message);
+      consecutivePollErrors++;
+      logger.warn(`[poll error] (${consecutivePollErrors}/${POLL_ERROR_THRESHOLD})`, err.message);
+      if (consecutivePollErrors >= POLL_ERROR_THRESHOLD) {
+        onPollError(err.message);
+      }
     }
   }
 }
