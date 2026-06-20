@@ -99,6 +99,21 @@ https://github.com/user-attachments/assets/8682ec5f-1632-400f-b31b-d371f6b1b237
 - **Yamaha RTX** ルーター（SSH有効化済み）— RTX1200, RTX1210, RTX1220, RTX1300 等
 - （任意）**ASUS WiFi アクセスポイント**（Web管理画面が有効、APモード/AiMeshとして使用）
 
+## ハードウェアなしで試す
+
+ルーターを用意する前にUIを触ってみたい場合は**デモモード**で起動できます。160件のサンプル接続が自動でシードされ、固定のトークンで認証できます。
+
+```bash
+git clone https://github.com/yo1t/egressview.git
+cd egressview
+npm install
+DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start
+```
+
+`http://localhost:3000` を開き、プロンプトが出たら `my-token` を入力してください。グラフマップ・統計情報・通信ログ・端末一覧のすべてのタブがサンプルデータで動作します。実環境と区別するためにヘッダーに **DEMO** バッジが表示されます。
+
+---
+
 ## クイックスタート
 
 ### セットアップパターン別の最短ルート

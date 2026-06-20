@@ -9,6 +9,23 @@ Thank you for your interest in contributing! Issues and pull requests are welcom
 
 ## Development setup
 
+### Option A — Demo mode (no router required)
+
+If you don't have a Yamaha RTX router, start in demo mode. It pre-seeds 160 realistic sample connections and uses a fixed admin token so every UI feature is immediately accessible:
+
+```bash
+git clone https://github.com/yo1t/egressview.git
+cd egressview
+npm install
+DEMO_MODE=true DEMO_ADMIN_TOKEN=my-dev-token npm start
+```
+
+Open `http://localhost:3000` and enter `my-dev-token` when the admin token prompt appears. No login password is needed in demo mode — use the token directly. All tabs, filters, graphs, and the connection log work with the seeded data.
+
+> The `DEMO_ADMIN_TOKEN` value can be any string you like; it is only used to authenticate against the local demo instance.
+
+### Option B — With a real router
+
 ```bash
 git clone https://github.com/yo1t/egressview.git
 cd egressview
@@ -18,18 +35,18 @@ npm start
 
 Requirements: Node.js 18+. No build step — the frontend is plain HTML/CSS/JS served by Express.
 
-On first startup, both an API/admin token and an initial login password are printed to the console. Open `http://localhost:3000` and log in with the initial login password; the API/admin token is for scripts and automation. Most features need a Yamaha RTX router to poll, but the server, UI, and tests all run without one.
+On first startup, both an API/admin token and an initial login password are printed to the console. Open `http://localhost:3000` and log in with the initial login password; the API/admin token is for scripts and automation.
 
 ## Tests
 
 ```bash
 npm test                  # unit tests (no hardware required) — run these before every PR
 npm run test:integration  # opt-in tests against a real router (RUN_INTEGRATION=1)
-npm run test:smoke        # Playwright browser smoke tests
+npm run test:smoke        # Playwright browser smoke tests (auto-uses demo mode in CI)
 npm run security:check    # production dependency audit + secret scan before publishing
 ```
 
-CI (GitHub Actions) runs the unit tests on Node 18 and 20, plus the release safety checks (`npm audit --omit=dev` and secret scan). PRs must be green.
+CI (GitHub Actions) runs unit tests on Node 18 and 20, Playwright smoke tests in demo mode (no hardware needed), and release safety checks (`npm audit --omit=dev` and secret scan). PRs must be green.
 
 ## Guidelines
 
