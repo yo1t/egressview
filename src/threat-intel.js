@@ -106,7 +106,7 @@ function parseSpamhausDrop(text) {
     const m = cidr.match(/^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/);
     if (!m) continue;
     const ip = m[1];
-    const prefix = parseInt(m[2]);
+    const prefix = parseInt(m[2], 10);
     const ipNum = ipToNum(ip);
     const mask = (0xFFFFFFFF << (32 - prefix)) >>> 0;
     entries.push({ network: ipNum & mask, mask, prefix, source: 'spamhaus', tag: 'Spamhaus DROP (hijacked network)' });
@@ -116,7 +116,7 @@ function parseSpamhausDrop(text) {
 
 function ipToNum(ip) {
   const parts = ip.split('.');
-  return ((parseInt(parts[0]) << 24) | (parseInt(parts[1]) << 16) | (parseInt(parts[2]) << 8) | parseInt(parts[3])) >>> 0;
+  return ((parseInt(parts[0], 10) << 24) | (parseInt(parts[1], 10) << 16) | (parseInt(parts[2], 10) << 8) | parseInt(parts[3], 10)) >>> 0;
 }
 
 // ─── Fetch all feeds ──────────────────────────────────────────────────────────

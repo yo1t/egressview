@@ -26,9 +26,14 @@ module.exports = function backupRoutes(ctx) {
   });
 
   router.post('/backup/create', requireAdmin, async (req, res) => {
-    const name = await backup.createBackup();
-    if (name) res.json({ success: true, name });
-    else res.status(500).json({ error: 'Backup failed' });
+    try {
+      const name = await backup.createBackup();
+      if (name) res.json({ success: true, name });
+      else res.status(500).json({ error: 'Backup failed' });
+    } catch (e) {
+      logger.error('[backup] create error:', e.message);
+      res.status(500).json({ error: 'Backup failed. Check server logs.' });
+    }
   });
 
   router.get('/backup/download/:name', requireAdmin, (req, res) => {
@@ -90,7 +95,7 @@ module.exports = function backupRoutes(ctx) {
         devices.seedFromConnectionHistory(history.getConnectionHistory()); // backfill devices from restored history
         enrichment.reopen();                          // RDAP/Geo キャッシュも restore 後の DB から再ロード
         if (beacons)  beacons.reopen();               // beacon events / candidates も restore 後の DB から再ロード
-        if (sessions) sessions.reopen();              // ログインセッションも restore 後の DB に切り替え
+        if (sessions) { sessions.reopen(); sessions.revokeAll(null); } // restore 後の DB に切り替え＋旧セッション破棄
         res.json({ success: true, message: 'Restored from uploaded file. Restart recommended.' });
       } catch (e) {
         logger.error('[backup] upload restore error:', e.message);

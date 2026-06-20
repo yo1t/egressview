@@ -448,6 +448,141 @@ describe('connections route: GET /connections/threat-connections', () => {
   });
 });
 
+// ─── /connections/threat-counts route handler ─────────────────────────────────
+
+describe('connections route: GET /connections/threat-counts', () => {
+  const connectionsRoutes = require('../../src/routes/connections');
+
+  function callThreatCountsRoute(groups, threatMap, query = {}) {
+    const history = {
+      queryByTimeRangePaged: () => [],
+      countByTimeRange:      () => 0,
+      summarizeByTimeRange:  () => ({ byDst: [], byDevice: [] }),
+      groupDstByTimeRange:   () => groups,
+    };
+    const threatIntel = { matchThreatIntel: (dst, host) => threatMap[dst] ?? threatMap[host] ?? null };
+    const router = connectionsRoutes({
+      requireAdmin: (_req, _res, next) => next(),
+      history,
+      threatIntel,
+    });
+    const layer = router.stack.find(l => l.route?.path === '/connections/threat-counts' && l.route?.methods?.get);
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const res = { _status: 200, _body: null };
+    res.status = (code) => { res._status = code; return res; };
+    res.json   = (body) => { res._body  = body; return res; };
+    handler({ query }, res);
+    return res;
+  }
+
+  it('counts safe, warn and danger sessions correctly', () => {
+    const groups = [
+      { dst: '1.1.1.1', dstHost: null, cnt: 10 },
+      { dst: '2.2.2.2', dstHost: null, cnt: 5  },
+      { dst: '3.3.3.3', dstHost: null, cnt: 3  },
+    ];
+    const threatMap = {
+      '2.2.2.2': { confidence: 'low'  },
+      '3.3.3.3': { confidence: 'high' },
+    };
+    const res = callThreatCountsRoute(groups, threatMap, {});
+    assert.equal(res._body.safe,   10);
+    assert.equal(res._body.warn,    5);
+    assert.equal(res._body.danger,  3);
+  });
+
+  it('returns all safe when no threats match', () => {
+    const groups = [{ dst: '8.8.8.8', dstHost: 'dns.google', cnt: 20 }];
+    const res = callThreatCountsRoute(groups, {}, {});
+    assert.equal(res._body.safe,   20);
+    assert.equal(res._body.warn,    0);
+    assert.equal(res._body.danger,  0);
+  });
+
+  it('returns zeros when no groups', () => {
+    const res = callThreatCountsRoute([], {}, {});
+    assert.equal(res._body.safe,   0);
+    assert.equal(res._body.warn,   0);
+    assert.equal(res._body.danger, 0);
+  });
+
+  it('returns 400 for invalid from timestamp', () => {
+    const res = callThreatCountsRoute([], {}, { from: 'bad' });
+    assert.equal(res._status, 400);
+  });
+
+  it('includes serverTime in response', () => {
+    const before = Date.now();
+    const res = callThreatCountsRoute([], {}, {});
+    assert.ok(typeof res._body.serverTime === 'number' && res._body.serverTime >= before);
+  });
+});
+
+// ─── /connections/new-nodes route handler ─────────────────────────────────────
+
+describe('connections route: GET /connections/new-nodes', () => {
+  const connectionsRoutes = require('../../src/routes/connections');
+
+  function callNewNodesRoute(newNodesResult, query = {}) {
+    const history = {
+      queryByTimeRangePaged: () => [],
+      countByTimeRange:      () => 0,
+      summarizeByTimeRange:  () => ({ byDst: [], byDevice: [] }),
+      groupDstByTimeRange:   () => [],
+      queryNewNodes:         () => newNodesResult,
+    };
+    const router = connectionsRoutes({
+      requireAdmin: (_req, _res, next) => next(),
+      history,
+    });
+    const layer = router.stack.find(l => l.route?.path === '/connections/new-nodes' && l.route?.methods?.get);
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const res = { _status: 200, _body: null };
+    res.status = (code) => { res._status = code; return res; };
+    res.json   = (body) => { res._body  = body; return res; };
+    handler({ query }, res);
+    return res;
+  }
+
+  it('returns deviceCount and destinationCount from history', () => {
+    const result = {
+      deviceCount:      2,
+      destinationCount: 3,
+      newDevices:       [{ src: '192.168.1.10', firstSeen: 1000 }],
+      newDestinations:  [{ dst: '1.2.3.4', firstSeen: 1000 }],
+    };
+    const res = callNewNodesRoute(result, {});
+    assert.equal(res._body.deviceCount,      2);
+    assert.equal(res._body.destinationCount, 3);
+    assert.equal(res._body.newDevices.length,      1);
+    assert.equal(res._body.newDestinations.length, 1);
+  });
+
+  it('returns zeros when history returns empty result', () => {
+    const result = { deviceCount: 0, destinationCount: 0, newDevices: [], newDestinations: [] };
+    const res = callNewNodesRoute(result, {});
+    assert.equal(res._body.deviceCount,      0);
+    assert.equal(res._body.destinationCount, 0);
+  });
+
+  it('includes serverTime in response', () => {
+    const before = Date.now();
+    const result = { deviceCount: 0, destinationCount: 0, newDevices: [], newDestinations: [] };
+    const res = callNewNodesRoute(result, {});
+    assert.ok(typeof res._body.serverTime === 'number' && res._body.serverTime >= before);
+  });
+
+  it('returns 400 for invalid from timestamp', () => {
+    const res = callNewNodesRoute({}, { from: 'not-a-ts' });
+    assert.equal(res._status, 400);
+  });
+
+  it('returns 400 for invalid to timestamp', () => {
+    const res = callNewNodesRoute({}, { to: '-999' });
+    assert.equal(res._status, 400);
+  });
+});
+
 // ─── parseTimestampParam ─────────────────────────────────────────────────────
 
 describe('connections route: parseTimestampParam', () => {

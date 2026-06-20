@@ -238,7 +238,6 @@ async function lookupUser(username, token) {
     // Use users.list (paginated, but for small workspaces one page is enough)
     let cursor = '';
     for (let page = 0; page < 5; page++) {
-      const path = `/api/users.list?limit=200${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`;
       const result = await _slackGet(`users.list?limit=200${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`, token);
       if (!result.ok) return { ok: false, error: result.error };
       const match = (result.members || []).find(m => {

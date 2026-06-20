@@ -49,11 +49,11 @@ function parseNatDetail(text) {
     if (!m) continue;
     const [, proto, srcRaw, dstRaw, ttl] = m;
     if (dstRaw.includes('*')) continue;
-    const splitAddr = s => { const p = s.lastIndexOf('.'); return [s.slice(0, p), parseInt(s.slice(p + 1))]; };
+    const splitAddr = s => { const p = s.lastIndexOf('.'); return [s.slice(0, p), parseInt(s.slice(p + 1), 10)]; };
     const [src, sport] = splitAddr(srcRaw);
     const [dst, dport] = splitAddr(dstRaw);
     if (!src.startsWith('192.168.') && !src.startsWith('10.')) continue;
-    sessions.push({ proto, src, sport, dst, dport, ttl: parseInt(ttl) });
+    sessions.push({ proto, src, sport, dst, dport, ttl: parseInt(ttl, 10) });
   }
   return sessions;
 }

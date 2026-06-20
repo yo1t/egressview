@@ -41,9 +41,13 @@ module.exports = function slackRoutes(ctx) {
   });
 
   router.post('/slack/test', requireAdmin, async (req, res) => {
-    const result = await notifier.test();
-    if (result.ok) res.json({ success: true });
-    else res.status(400).json({ success: false, error: result.error });
+    try {
+      const result = await notifier.test();
+      if (result.ok) res.json({ success: true });
+      else res.status(400).json({ success: false, error: result.error });
+    } catch (e) {
+      res.status(500).json({ success: false, error: 'Internal error' });
+    }
   });
 
   router.post('/slack/verify', requireAdmin, async (req, res) => {
@@ -51,7 +55,11 @@ module.exports = function slackRoutes(ctx) {
     if (!token) {
       try { token = JSON.parse(fs.readFileSync(configFile, 'utf8')).slack?.token || ''; } catch {}
     }
-    res.json(await notifier.verifyToken(token));
+    try {
+      res.json(await notifier.verifyToken(token));
+    } catch (e) {
+      res.status(500).json({ ok: false, error: 'Internal error' });
+    }
   });
 
   router.post('/slack/lookup-user', requireAdmin, async (req, res) => {
@@ -59,7 +67,11 @@ module.exports = function slackRoutes(ctx) {
     if (!token) {
       try { token = JSON.parse(fs.readFileSync(configFile, 'utf8')).slack?.token || ''; } catch {}
     }
-    res.json(await notifier.lookupUser(username, token));
+    try {
+      res.json(await notifier.lookupUser(username, token));
+    } catch (e) {
+      res.status(500).json({ ok: false, error: 'Internal error' });
+    }
   });
 
   return router;
