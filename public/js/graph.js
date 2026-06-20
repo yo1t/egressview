@@ -289,7 +289,13 @@ function drawNodes() {
       applyGraphFilter();
       if (statsMode) updateStats();
       updateConnPanel(selectedIp);
-      if (logMode) updateLogView();
+      if (logMode) {
+        if (selectedMac) {
+          const tb = document.getElementById('log-tbody');
+          if (tb) tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--muted)"><span class="spinner-xs"></span> ${t('data.loading') || '読み込み中'}</td></tr>`;
+        }
+        updateLogView();
+      }
       if (typeof nlMode !== 'undefined' && nlMode) nlRender();
     })
     .on('mouseenter', showTooltip).on('mousemove', moveTooltip).on('mouseleave', hideTooltip);
@@ -465,7 +471,13 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
         applyGraphFilter();
           if (statsMode) updateStats();
         updateConnPanel(selectedMac ? c.ip : null);
-        if (logMode) updateLogView();
+        if (logMode) {
+          if (selectedMac) {
+            const tb = document.getElementById('log-tbody');
+            if (tb) tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--muted)"><span class="spinner-xs"></span> ${t('data.loading') || '読み込み中'}</td></tr>`;
+          }
+          updateLogView();
+        }
         if (typeof nlMode !== 'undefined' && nlMode) nlRender();
         if (devicesMode) {
           dvSelectedIp = selectedIp;

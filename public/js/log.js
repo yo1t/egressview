@@ -153,12 +153,6 @@ async function fetchLogPage() {
     }
   }
 
-  // Full-fetch (selectedMac / client-side filter): clear stale rows immediately
-  // so the user sees a spinner rather than outdated data during a slow request.
-  if (logFetchAllMode) {
-    const tbody = document.getElementById('log-tbody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--muted)"><span class="spinner-xs"></span> ${t('data.loading') || '読み込み中'}</td></tr>`;
-  }
   setFetching(+1);
   try {
     const res = await apiFetch(`${_BASE}/api/connections?${params}`);
