@@ -55,6 +55,7 @@ test/fixtures/baseline.json
 test-results/
 playwright-report/
 .egressview.pid
+local-media/
 
 # Playwright test output
 test-results/

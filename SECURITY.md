@@ -16,13 +16,14 @@ EgressView ships from the `main` branch. Security fixes are applied to `main` on
 
 ## Deployment model & scope
 
-EgressView is designed to run **inside your LAN** and monitors it passively:
+EgressView monitors your LAN passively and can be accessed remotely when HTTPS is enabled:
 
-- All API endpoints and the WebSocket are protected by an admin token (timing-safe comparison, brute-force delay).
+- All API endpoints and the WebSocket are protected by login/session authentication or an API token (timing-safe comparison, brute-force delay, session expiry).
+- HTTPS protects credentials and dashboard data in transit when accessing EgressView from outside the LAN.
 - Router credentials and the SQLite database stay on the host machine; nothing is sent to a cloud service. Threat-intelligence feeds are downloaded and matched locally.
 - Router IP inputs are restricted to private address ranges (SSRF protection).
 
-**Do not expose EgressView directly to the internet.** If you need remote access, put it behind a VPN or an authenticating reverse proxy. Reports that assume an internet-exposed deployment without such protection are still welcome, but will be triaged as lower severity.
+For internet-facing deployments, enable HTTPS, use a strong unique login password, keep EgressView updated, and avoid sharing access with untrusted users. Security reports for internet-accessible deployments are in scope.
 
 ## Out of scope
 

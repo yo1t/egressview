@@ -18,7 +18,7 @@ npm start
 
 Requirements: Node.js 18+. No build step — the frontend is plain HTML/CSS/JS served by Express.
 
-On first startup an admin token is printed to the console; enter it in the browser at `http://localhost:3000`. Most features need a Yamaha RTX router to poll, but the server, UI, and tests all run without one.
+On first startup, both an API/admin token and an initial login password are printed to the console. Open `http://localhost:3000` and log in with the initial login password; the API/admin token is for scripts and automation. Most features need a Yamaha RTX router to poll, but the server, UI, and tests all run without one.
 
 ## Tests
 

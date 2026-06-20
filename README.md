@@ -198,7 +198,7 @@ A self-signed certificate (`.egressview-cert.pem` / `.egressview-key.pem`, 10-ye
 "https": { "enabled": true, "certPath": "/path/to/cert.pem", "keyPath": "/path/to/key.pem" }
 ```
 
-HTTPS is recommended if you use the login password from multiple devices, since it protects credentials and interface data from eavesdropping inside the LAN.
+HTTPS is recommended if you use the login password from multiple devices, and required for safe remote access over the internet. Use a strong unique login password and keep EgressView updated.
 
 ## Configuration
 
