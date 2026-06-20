@@ -1,4 +1,23 @@
 // ─── Time filter ──────────────────────────────────────────────────────────────
+const truncatedGraphRangeKeys = new Set();
+
+function timeFilterRangeKey(from, to) {
+  if (typeof currentGraphRangeKey === 'function') return currentGraphRangeKey(from, to);
+  return `${from ?? ''}:${to ?? ''}`;
+}
+
+function rememberGraphTruncation(from, to, truncated) {
+  const key = timeFilterRangeKey(from, to);
+  if (truncated) truncatedGraphRangeKeys.add(key);
+  else truncatedGraphRangeKeys.delete(key);
+}
+
+function needsGraphSummaryForRange(from, to) {
+  const key = timeFilterRangeKey(from, to);
+  return truncatedGraphRangeKeys.has(key)
+    && (!(typeof graphSummary !== 'undefined' && graphSummary) || graphSummaryKey !== key);
+}
+
 async function fetchConnectionRange(from, to) {
   const params = new URLSearchParams();
   if (from != null) params.set('from', from);
@@ -18,6 +37,7 @@ async function fetchConnectionRange(from, to) {
     if (data.serverTime) serverTimeOffset = data.serverTime - Date.now();
     const notice = document.getElementById('graph-truncated-notice');
     if (notice) notice.style.display = data.truncated ? '' : 'none';
+    rememberGraphTruncation(from, to, !!data.truncated);
     if (data.truncated && typeof fetchGraphSummary === 'function') {
       await fetchGraphSummary(from, to);
     } else if (!data.truncated && typeof clearGraphSummary === 'function') {
@@ -67,12 +87,17 @@ async function applyTimeFilter() {
     if (generation !== timeFilterGeneration) return;
     renderTimeFilteredViews({ delayedData });
   } else {
+    if (needsGraphSummaryForRange(from, to) && typeof fetchGraphSummary === 'function') {
+      await fetchGraphSummary(from, to);
+      if (generation !== timeFilterGeneration) return;
+    }
     renderTimeFilteredViews({ delayedData });
   }
 }
 
 function refreshCurrentTimeFilterView() {
-  if (timeFilterNeedsFetch()) {
+  const { from, to } = getTimeRange();
+  if (timeFilterNeedsFetch() || needsGraphSummaryForRange(from, to)) {
     return applyTimeFilter();
   } else {
     renderTimeFilteredViews();

@@ -52,6 +52,11 @@ function loadTimeFilterVm(apiConnections = [], options = {}) {
     updateStats: () => calls.push(['updateStats']),
     updateLogView: () => calls.push(['updateLogView']),
     updateConnPanel: ip => calls.push(['updateConnPanel', ip]),
+    currentGraphRangeKey: options.currentGraphRangeKey,
+    fetchGraphSummary: options.fetchGraphSummary,
+    clearGraphSummary: options.clearGraphSummary,
+    graphSummary: options.graphSummary,
+    graphSummaryKey: options.graphSummaryKey,
   };
 
   vm.runInNewContext(files, context);
@@ -216,5 +221,52 @@ describe('client time filter fetchConnectionRange', () => {
     })`, ctx);
     assert.equal(result.dataRangeFrom < now - 86_400_000, true);
     assert.equal(result.visible, true);
+  });
+
+  it('re-fetches graph summary when returning to a truncated already-loaded period', async () => {
+    const now = Date.now();
+    const calls = [];
+    const ctx = loadTimeFilterVm([], {
+      calls,
+      currentGraphRangeKey: () => '14d:open',
+      apiFetch: async url => {
+        calls.push(['apiFetch', String(url)]);
+        return {
+          ok: true,
+          json: async () => ({
+            connections: [{
+              src: '192.0.2.60', dst: '203.0.113.60', dport: 443, proto: 'TCP',
+              firstSeen: now - 10 * 86_400_000, lastSeen: now - 10 * 86_400_000,
+            }],
+            truncated: true,
+            serverTime: now,
+          }),
+        };
+      },
+      fetchGraphSummary: async () => {
+        calls.push(['fetchGraphSummary']);
+        ctx.graphSummary = { total: 100001 };
+        ctx.graphSummaryKey = '14d:open';
+      },
+      clearGraphSummary: () => {
+        calls.push(['clearGraphSummary']);
+        ctx.graphSummary = null;
+        ctx.graphSummaryKey = null;
+      },
+    });
+    vm.runInContext(`
+      currentTimeFilter = '14d';
+      dataRangeFrom = ${now - 86_400_000};
+    `, ctx);
+
+    await vm.runInContext('applyTimeFilter()', ctx);
+    vm.runInContext('dataRangeFrom = 0; graphSummary = null; graphSummaryKey = null;', ctx);
+    calls.length = 0;
+
+    await vm.runInContext('applyTimeFilter()', ctx);
+
+    assert.equal(calls.filter(c => c[0] === 'apiFetch').length, 0);
+    assert.equal(calls.filter(c => c[0] === 'fetchGraphSummary').length, 1);
+    assert.equal(calls.filter(c => c[0] === 'buildGraphFromConnections').length, 1);
   });
 });

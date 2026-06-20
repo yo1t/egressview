@@ -154,6 +154,14 @@ function normalizeGraphLinks(candidateLinks, candidateNodes) {
 }
 
 function currentGraphRangeKey(from, to) {
+  if (typeof currentTimeFilter !== 'undefined' && currentTimeFilter) {
+    if (currentTimeFilter === 'custom') return `custom:${from ?? ''}:${to ?? ''}`;
+    if (currentTimeFilter === 'today' || currentTimeFilter === 'yesterday') {
+      const day = from != null ? new Date(from).toISOString().slice(0, 10) : '';
+      return `${currentTimeFilter}:${day}:${to ?? ''}`;
+    }
+    return `${currentTimeFilter}:open`;
+  }
   return `${from ?? ''}:${to ?? ''}`;
 }
 
