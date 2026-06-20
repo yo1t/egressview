@@ -126,5 +126,11 @@ socket.on('new-device', entry => {
   showToast(`${t('device.new.toast')}\n${name}${vendor}`);
 });
 
+// Demo mode banner
+if (typeof _DEMO_MODE !== 'undefined' && _DEMO_MODE) {
+  const demoBanner = document.getElementById('demo-banner');
+  if (demoBanner) demoBanner.style.display = '';
+}
+
 // Init
 resize();

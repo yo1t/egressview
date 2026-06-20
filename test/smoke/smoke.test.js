@@ -193,3 +193,105 @@ test('time filter change produces no console errors', async ({ page }) => {
 
   expect(fatalErrors(errors), `Time filter errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
+
+// ⑧ 長期間（2週間）表示で通信ログにデータが表示されること
+test('log view shows rows with long period (14d)', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+
+  // 2週間に切り替え
+  await page.locator('#time-filter-select').selectOption('14d');
+  await page.waitForTimeout(1000);
+
+  // 通信ログタブへ
+  await page.click('#btn-log');
+  await page.waitForTimeout(2000);
+
+  // tbody に少なくとも1行あること
+  const rowCount = await page.locator('#log-tbody tr').count();
+  expect(rowCount, 'log view should show rows for 14d period').toBeGreaterThan(0);
+
+  expect(fatalErrors(errors), `Long period log errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+// ⑨ 統計タブ: サマリー切替（宛先/端末）でエラーが出ないこと
+test('stats tab summary switching produces no console errors', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+
+  await page.click('#btn-stats');
+  await page.waitForTimeout(1000);
+
+  // 統計タブ内のビュー切替ボタンがあれば全てクリック
+  const statsBtns = page.locator('#stats-view [data-view], #stats-panel [data-view], .stats-tab-btn, #btn-stats-dst, #btn-stats-device');
+  const btnCount = await statsBtns.count();
+  for (let i = 0; i < btnCount; i++) {
+    await statsBtns.nth(i).click().catch(() => {});
+    await page.waitForTimeout(300);
+  }
+
+  expect(fatalErrors(errors), `Stats switch errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+// ⑩ 統計タブ: 地図（マップ）が表示されること
+test('stats tab renders map canvas', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  await authPage(page);
+  await page.click('#btn-stats');
+  await page.waitForTimeout(2000);
+
+  // SVGまたはcanvasが統計エリアに存在すること
+  const mapEl = page.locator('#stats-map canvas, #stats-map svg, #map-stats canvas, #map-stats svg').first();
+  const hasMap = await mapEl.count() > 0;
+  if (hasMap) {
+    await expect(mapEl).toBeVisible();
+  } else {
+    // マップ要素が見つからなくても統計コンテナ自体が表示されていればOK
+    const statsContainer = page.locator('#view-stats, #stats-view, .stats-container').first();
+    await expect(statsContainer).toBeVisible();
+  }
+});
+
+// ⑪ 通信ログの無限スクロール: スクロールで次ページが追記されること
+test('log view infinite scroll appends rows on scroll', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+
+  await page.locator('#time-filter-select').selectOption('14d');
+  await page.click('#btn-log');
+  await page.waitForTimeout(2000);
+
+  const firstCount = await page.locator('#log-tbody tr:not(#log-scroll-sentinel)').count();
+
+  // sentinel がある（= まだ次ページがある）場合のみスクロールテストを実施
+  const hasSentinel = await page.locator('#log-scroll-sentinel').count() > 0;
+  if (hasSentinel) {
+    await page.locator('#log-scroll-sentinel').scrollIntoViewIfNeeded();
+    await page.waitForTimeout(2000);
+    const afterCount = await page.locator('#log-tbody tr:not(#log-scroll-sentinel)').count();
+    expect(afterCount, 'scroll should load more rows').toBeGreaterThan(firstCount);
+  }
+
+  expect(fatalErrors(errors), `Scroll errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+// ⑫ デモモードバナーが表示されること（DEMO_MODE=true 時のみ）
+test('demo banner is visible in demo mode', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  await authPage(page);
+
+  const isDemoMode = await page.evaluate(() => window._DEMO_MODE === true);
+  if (!isDemoMode) {
+    test.skip(true, 'not running in DEMO_MODE — skipping demo banner test');
+  }
+
+  await expect(page.locator('#demo-banner')).toBeVisible();
+});

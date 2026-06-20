@@ -54,6 +54,11 @@ const POLL_INTERVAL     = parseInt(process.env.POLL_INTERVAL_MS || '60000');
 const PORT              = parseInt(process.env.PORT || '3000');
 const CONFIG_FILE       = require('./src/config').DEFAULT_CONFIG_FILE;
 
+// Demo mode: pre-seeds sample data and uses a fixed token so the app can be
+// explored without real router hardware (used in CI for Playwright smoke tests).
+const DEMO_MODE       = process.env.DEMO_MODE === 'true';
+const DEMO_ADMIN_TOKEN = process.env.DEMO_ADMIN_TOKEN || 'demo-token-ci';
+
 
 // ─── Shared mutable state ─────────────────────────────────────────────────────
 // Passed by reference to route modules so they can read and mutate it.
@@ -405,7 +410,7 @@ app.use((req, res, next) => {
 
 app.get(['/', '/index.html'], (req, res) => {
   const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
-  const baseScript = `<script nonce="${res.locals.cspNonce}">window.BASE_URL = '${htmlEscape(SUBPATH)}';</script>`;
+  const baseScript = `<script nonce="${res.locals.cspNonce}">window.BASE_URL = '${htmlEscape(SUBPATH)}'; window._DEMO_MODE = ${DEMO_MODE};</script>`;
   res.type('html').send(
     html.replace('</head>', baseScript + '\n</head>')
         .replace(/__BASE__/g, htmlEscape(SUBPATH))
@@ -642,13 +647,28 @@ dhcpdSyslog.configure({
 server.listen(PORT, () => {
   console.log(`EgressView: ${tlsOptions ? 'https' : 'http'}://localhost:${PORT}`);
   loadConfig();
-  ensureAdminToken();
+
+  if (DEMO_MODE) {
+    // Override token with a known value so CI / contributors can authenticate
+    appState.adminToken = DEMO_ADMIN_TOKEN;
+    console.log(`[demo] DEMO_MODE active — admin token: ${DEMO_ADMIN_TOKEN}`);
+  } else {
+    ensureAdminToken();
+  }
   ensureLoginPassword();
+
   sessions.initDb();
   setInterval(() => sessions.pruneExpired(), 6 * 60 * 60 * 1000);
   notes.load();
   history.setRetentionDays(appState.retentionDays);
   history.loadConnectionHistory();
+
+  if (DEMO_MODE) {
+    const { seedDemoConnections } = require('./scripts/demo-seed');
+    const seeded = seedDemoConnections(history);
+    console.log(`[demo] seeded ${seeded} sample connections`);
+  }
+
   runtime.setKnownMacs(history.getKnownMacs());
   devices.initDb();
   devices.seedFromConnectionHistory(history.getConnectionHistory());
@@ -658,14 +678,19 @@ server.listen(PORT, () => {
   }
   enrichment.initDb();
   beacons.initDb();
-  console.log(`Router IP: ${asus.getRouterIp()}`);
-  deviceId.loadOuiDb();
-  yamaha.connectYamaha(() => {
-    yamaha.refreshYamahaArp().then(() => pollYamahaConnections());
-  });
-  dnsmasqLog.start();
-  inspectSyslog.start();
-  dhcpdSyslog.start();
+
+  if (!DEMO_MODE) {
+    console.log(`Router IP: ${asus.getRouterIp()}`);
+    deviceId.loadOuiDb();
+    yamaha.connectYamaha(() => {
+      yamaha.refreshYamahaArp().then(() => pollYamahaConnections());
+    });
+    dnsmasqLog.start();
+    inspectSyslog.start();
+    dhcpdSyslog.start();
+  } else {
+    deviceId.loadOuiDb();
+  }
 
   setInterval(() => history.snapshotHistory(),    10 * 60 * 1000);
   setInterval(() => history.compactHistoryLog(),  30 * 60 * 1000);
@@ -675,7 +700,7 @@ server.listen(PORT, () => {
   });
   setInterval(() => threatIntel.fetchThreatIntel().then(reMatchAndNotify), 60 * 60 * 1000);
 
-  scheduleBeaconScan();
+  if (!DEMO_MODE) scheduleBeaconScan();
 
   backup.startPeriodicBackup();
 });

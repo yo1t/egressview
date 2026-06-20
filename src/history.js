@@ -427,6 +427,16 @@ function countByTimeRange(from, to, { filters = {} } = {}) {
   return row ? row.cnt : 0;
 }
 
+// Bulk-inserts entries for demo / seed purposes. Silently skips failures.
+function seedConnections(entries) {
+  if (!db || !stmtUpsert) return 0;
+  let count = 0;
+  for (const entry of entries) {
+    try { upsertEntry(entry); count++; } catch {}
+  }
+  return count;
+}
+
 // Returns unique (dst, dstHost) pairs with connection counts for the time range.
 // Used by the threat-counts endpoint to apply JS-side threat matching without
 // fetching every row — only unique destinations need to be checked.
@@ -629,6 +639,7 @@ module.exports = {
   queryByTimeRange,
   queryByTimeRangePaged,
   countByTimeRange,
+  seedConnections,
   groupDstByTimeRange,
   summarizeByTimeRange,
   getKnownMacs,
