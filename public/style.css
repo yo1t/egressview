@@ -220,6 +220,12 @@
     background: var(--bg); padding: 10px; gap: 10px;
   }
   .stats-header { font-size: 12px; font-weight: 600; color: var(--text); padding: 4px 8px; display: flex; align-items: center; gap: 8px; }
+  .stats-map-coverage {
+    align-self: flex-start; margin: -4px 8px 0; padding: 4px 9px;
+    border: 1px solid rgba(56,189,248,0.28); border-radius: 6px;
+    background: rgba(14,165,233,0.08); color: #9ddcff;
+    font-size: 10px; line-height: 1.35;
+  }
   .data-fetching-hdr { display: none; align-items: center; gap: 4px; font-size: 10px; color: var(--muted); margin-left: auto; flex-shrink: 0; }
   /* Connection Log */
   #log-container { display: none; flex-direction: column; flex: 1; overflow: hidden; background: var(--bg); padding: 10px; gap: 8px; }

@@ -386,6 +386,7 @@ function setStatsEmpty(isEmpty, selIp) {
   const empty = document.getElementById('stats-empty');
   empty.style.display = isEmpty ? 'block' : 'none';
   document.getElementById('stats-charts').style.display = isEmpty ? 'none' : 'grid';
+  if (isEmpty) updateMapCoverageNotice(null);
   if (isEmpty) updateStatsMaps(selIp, []);
 }
 
@@ -437,6 +438,23 @@ function mapPointsFromSummary(summary) {
     }));
 }
 
+function updateMapCoverageNotice(coverage) {
+  const el = document.getElementById('stats-map-coverage');
+  if (!el) return;
+  if (!coverage || !(coverage.totalSessions > 0)) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return;
+  }
+  const percent = Number(coverage.percent || 0).toFixed(1);
+  el.textContent = tVars('stats.map.coverage', {
+    shown: Number(coverage.shownGroups || 0).toLocaleString(),
+    total: Number(coverage.totalGroups || 0).toLocaleString(),
+    percent,
+  });
+  el.style.display = '';
+}
+
 function renderStatsSummary(summary, selIp) {
   const targetRows = statsTargetRows(summary);
   if (!targetRows.length && !(summary.total > 0)) {
@@ -444,6 +462,7 @@ function renderStatsSummary(summary, selIp) {
     return;
   }
   setStatsEmpty(false, selIp);
+  updateMapCoverageNotice(summary.mapCoverage);
 
   const isMobile = window.matchMedia('(max-width: 768px)').matches;
   const sortedTargets = targetRows.map(r => [r.key, r.count]);
@@ -469,6 +488,7 @@ function renderStatsSummary(summary, selIp) {
 }
 
 function renderStatsFromLocalConnections(selIp) {
+  updateMapCoverageNotice(null);
   // Period-filtered connection data
   let conns = getFilteredConnections();
   if (selIp) conns = conns.filter(c => c.src === selIp);

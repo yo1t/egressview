@@ -552,10 +552,44 @@ describe('summarizeByTimeRange', () => {
     assert.ok(result.byTarget.some(r => r.key === 'Amazon.com, Inc.' && r.count === 1));
     assert.ok(result.byEdge.some(r => r.src === '192.168.1.10' && r.key === 'Amazon.com, Inc.' && r.count === 1));
     assert.ok(result.byLocation.some(r => r.org === 'Google LLC' && r.totalSessions === 1));
+    assert.equal(result.mapCoverage.totalGroups, 2);
+    assert.equal(result.mapCoverage.shownGroups, 2);
+    assert.equal(result.mapCoverage.totalSessions, 2);
+    assert.equal(result.mapCoverage.shownSessions, 2);
+    assert.equal(result.mapCoverage.capped, false);
     assert.equal(result.appGroups.reduce((sum, r) => sum + r.count, 0), result.total);
     assert.ok(result.appGroups.some(r => r.app === 'AWS' && r.count === 1));
     assert.ok(result.appGroups.some(r => r.app === 'Google' && r.count === 1));
     assert.equal(result.timeline.reduce((sum, r) => sum + r.count, 0), 2);
+  });
+
+  it('reports map coverage when location groups are capped', () => {
+    const t = Date.now();
+    for (let i = 0; i < 501; i++) {
+      insert({
+        src: '192.168.1.10',
+        dst: `10.0.${Math.floor(i / 255)}.${i % 255}`,
+        org: `Location ${i}`,
+        country: 'US',
+        city: `City ${i}`,
+        lat: 20 + i / 1000,
+        lon: -120 + i / 1000,
+        firstSeen: t - 1000,
+        lastSeen: t - 1000,
+      });
+    }
+
+    const result = history.summarizeByTimeRange(t - 2000, t);
+
+    assert.equal(result.byLocation.length, 500);
+    assert.equal(result.mapCoverage.limit, 500);
+    assert.equal(result.mapCoverage.totalGroups, 501);
+    assert.equal(result.mapCoverage.shownGroups, 500);
+    assert.equal(result.mapCoverage.totalSessions, 501);
+    assert.equal(result.mapCoverage.shownSessions, 500);
+    assert.equal(result.mapCoverage.capped, true);
+    assert.ok(result.mapCoverage.percent > 99);
+    assert.ok(result.mapCoverage.percent < 100);
   });
 
   it('summary can be filtered to one source IP', () => {
