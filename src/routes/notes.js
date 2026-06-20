@@ -3,6 +3,7 @@
 
 const { Router } = require('express');
 const { isAllowedRouterIp } = require('../utils');
+const logger = require('../logger');
 
 /**
  * @param {{
@@ -94,7 +95,8 @@ module.exports = function notesRoutes(ctx) {
       });
       res.json(result);
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      logger.error('[notes] investigation error:', e.message);
+      res.status(500).json({ error: 'Investigation failed. Check server logs.' });
     }
   });
 

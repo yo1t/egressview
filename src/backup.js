@@ -93,8 +93,10 @@ function listBackups() {
 }
 
 // Get the path to a specific backup file (for download)
+const BACKUP_NAME_RE = /^egressview_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.db$/;
+
 function getBackupPath(name) {
-  if (!name || name.includes('..') || name.includes('/')) return null;
+  if (!name || !BACKUP_NAME_RE.test(name)) return null;
   const p = path.join(BACKUP_DIR, name);
   if (!fs.existsSync(p)) return null;
   return p;

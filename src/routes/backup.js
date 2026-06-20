@@ -5,6 +5,7 @@ const { Router } = require('express');
 const path = require('path');
 const fs   = require('fs');
 const { parsePositiveInt } = require('../utils');
+const logger = require('../logger');
 
 const UPLOAD_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
 
@@ -50,7 +51,8 @@ module.exports = function backupRoutes(ctx) {
       if (sessions) { sessions.reopen(); sessions.revokeAll(null); } // restore 後の DB に切り替え＋旧セッション破棄
       res.json({ success: true, message: `Restored from ${name}. Restart recommended.` });
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      logger.error('[backup] restore error:', e.message);
+      res.status(500).json({ error: 'Restore failed. Check server logs.' });
     }
   });
 
@@ -91,7 +93,8 @@ module.exports = function backupRoutes(ctx) {
         if (sessions) sessions.reopen();              // ログインセッションも restore 後の DB に切り替え
         res.json({ success: true, message: 'Restored from uploaded file. Restart recommended.' });
       } catch (e) {
-        res.status(500).json({ error: e.message });
+        logger.error('[backup] upload restore error:', e.message);
+        res.status(500).json({ error: 'Restore failed. Check server logs.' });
       }
     });
   });
