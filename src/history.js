@@ -445,7 +445,7 @@ function groupDstByTimeRange(from, to, { filters = {} } = {}) {
   const fc = buildFilterConditions(filters);
   const { where, params } = buildWhereAndParams(from, to, fc);
   return db.prepare(
-    `SELECT dst, dstHost, COUNT(*) AS cnt FROM connections${where} GROUP BY dst, dstHost`
+    `SELECT dst, MAX(dstHost) AS dstHost, COUNT(*) AS cnt FROM connections${where} GROUP BY dst`
   ).all(...params);
 }
 

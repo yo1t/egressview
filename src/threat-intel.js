@@ -28,7 +28,7 @@ function parseFeodoTracker(text) {
     if (parts.length < 2) continue;
     const ip = parts[1]?.trim();
     if (!ip || !ip.match(/^\d+\.\d+\.\d+\.\d+$/)) continue;
-    const port = parseInt(parts[2]) || null;
+    const port = parseInt(parts[2], 10) || null;
     entries.push({ ip, port, source: 'feodo', tag: 'Feodo C2 (Emotet/Dridex/TrickBot)' });
   }
   return entries;
@@ -45,7 +45,7 @@ function parseThreatFox(text) {
     const iocRaw = (parts[2] || '').replace(/"/g, '').trim();
     const [ip, portStr] = iocRaw.split(':');
     if (!ip || !ip.match(/^\d+\.\d+\.\d+\.\d+$/)) continue;
-    const port = parseInt(portStr) || null;
+    const port = parseInt(portStr, 10) || null;
     const malware = (parts[6] || '').replace(/"/g, '').trim();
     entries.push({ ip, port, source: 'threatfox', tag: `ThreatFox: ${malware || 'malware IOC'}` });
   }

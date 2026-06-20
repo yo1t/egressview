@@ -6,8 +6,8 @@ function isAllowedRouterIp(ip) {
   if (typeof ip !== 'string') return false;
   const m = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!m) return false;
-  const [a, b] = [parseInt(m[1]), parseInt(m[2])];
-  if (a > 255 || b > 255 || parseInt(m[3]) > 255 || parseInt(m[4]) > 255) return false;
+  const [a, b] = [parseInt(m[1], 10), parseInt(m[2], 10)];
+  if (a > 255 || b > 255 || parseInt(m[3], 10) > 255 || parseInt(m[4], 10) > 255) return false;
   // Explicitly reject 169.254.0.0/16 (link-local, AWS metadata, etc.)
   if (a === 169 && b === 254) return false;
   // Reject 127.0.0.0/8 (loopback) to prevent attacks on this server

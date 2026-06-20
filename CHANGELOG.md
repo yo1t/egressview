@@ -2,6 +2,14 @@
 
 All notable changes to EgressView are documented here.
 
+## [1.1.0] - 2026-06-20
+
+### Added
+
+- Added Model Context Protocol (MCP) server support for AI assistants to query EgressView network data.
+- Added MCP setup documentation for local stdio mode and HTTP mode behind Apache / nginx.
+- Added MCP configuration examples for Claude Desktop, Claude Code, Cursor, Zed, and custom MCP clients.
+
 ## [1.0.1] - 2026-06-20
 
 ### Fixed

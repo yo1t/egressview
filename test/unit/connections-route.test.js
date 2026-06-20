@@ -337,6 +337,117 @@ describe('connections route: _parsePaginationOpts', () => {
   });
 });
 
+// ─── /connections/threat-connections route handler ────────────────────────────
+
+describe('connections route: GET /connections/threat-connections', () => {
+  const connectionsRoutes = require('../../src/routes/connections');
+
+  function makeThreatIntel(map) {
+    return { matchThreatIntel: (dst, host) => map[dst] ?? map[host] ?? null };
+  }
+
+  function callThreatRoute(groups, threatMap, query = {}) {
+    const history = {
+      queryByTimeRangePaged:  () => [],
+      queryByTimeRange:       () => [],
+      countByTimeRange:       () => 0,
+      summarizeByTimeRange:   () => ({ byDst: [], byDevice: [] }),
+      groupDstByTimeRange:    () => groups,
+    };
+    const router = connectionsRoutes({
+      requireAdmin: (_req, _res, next) => next(),
+      history,
+      threatIntel: makeThreatIntel(threatMap),
+    });
+    const layer = router.stack.find(l => l.route?.path === '/connections/threat-connections' && l.route?.methods?.get);
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const res = { _status: 200, _body: null };
+    res.status = (code) => { res._status = code; return res; };
+    res.json   = (body) => { res._body  = body; return res; };
+    handler({ query }, res);
+    return res;
+  }
+
+  it('returns threats sorted by sessions descending', () => {
+    const groups = [
+      { dst: '1.1.1.1', dstHost: null, cnt: 3 },
+      { dst: '2.2.2.2', dstHost: null, cnt: 10 },
+      { dst: '3.3.3.3', dstHost: null, cnt: 1 },
+    ];
+    const threatMap = {
+      '1.1.1.1': { confidence: 'low', feed: 'test', category: null },
+      '2.2.2.2': { confidence: 'high', feed: 'test', category: null },
+      '3.3.3.3': { confidence: 'low', feed: 'test', category: null },
+    };
+    const res = callThreatRoute(groups, threatMap, {});
+    assert.equal(res._body.threats[0].dst, '2.2.2.2', 'highest session count should come first');
+    assert.equal(res._body.threats[0].sessions, 10);
+    assert.equal(res._body.threats[1].sessions, 3);
+    assert.equal(res._body.threats[2].sessions, 1);
+  });
+
+  it('does not cut off high-session threats due to early break (sort-after-limit)', () => {
+    // 60 low-session threats followed by one high-session threat
+    const groups = Array.from({ length: 60 }, (_, i) => ({ dst: `10.0.0.${i + 1}`, dstHost: null, cnt: 1 }));
+    groups.push({ dst: '99.99.99.99', dstHost: null, cnt: 9999 });
+    const threatMap = {};
+    for (const g of groups) threatMap[g.dst] = { confidence: 'low', feed: 'test', category: null };
+
+    const res = callThreatRoute(groups, threatMap, { limit: '50' });
+    assert.equal(res._body.threats[0].dst, '99.99.99.99', 'highest-session threat must appear first');
+    assert.equal(res._body.count, 50);
+  });
+
+  it('filters by confidence=low (warn only)', () => {
+    const groups = [
+      { dst: '1.1.1.1', dstHost: null, cnt: 5 },
+      { dst: '2.2.2.2', dstHost: null, cnt: 5 },
+    ];
+    const threatMap = {
+      '1.1.1.1': { confidence: 'low',  feed: 'a', category: null },
+      '2.2.2.2': { confidence: 'high', feed: 'b', category: null },
+    };
+    const res = callThreatRoute(groups, threatMap, { confidence: 'low' });
+    assert.equal(res._body.count, 1);
+    assert.equal(res._body.threats[0].dst, '1.1.1.1');
+  });
+
+  it('filters by confidence=high (danger only)', () => {
+    const groups = [
+      { dst: '1.1.1.1', dstHost: null, cnt: 5 },
+      { dst: '2.2.2.2', dstHost: null, cnt: 5 },
+    ];
+    const threatMap = {
+      '1.1.1.1': { confidence: 'low',  feed: 'a', category: null },
+      '2.2.2.2': { confidence: 'high', feed: 'b', category: null },
+    };
+    const res = callThreatRoute(groups, threatMap, { confidence: 'high' });
+    assert.equal(res._body.count, 1);
+    assert.equal(res._body.threats[0].dst, '2.2.2.2');
+  });
+
+  it('clamps limit to 200', () => {
+    const groups = Array.from({ length: 300 }, (_, i) => ({ dst: `10.0.1.${i}`, dstHost: null, cnt: 1 }));
+    const threatMap = {};
+    for (const g of groups) threatMap[g.dst] = { confidence: 'low', feed: 'x', category: null };
+
+    const res = callThreatRoute(groups, threatMap, { limit: '999' });
+    assert.ok(res._body.count <= 200, `count ${res._body.count} should be ≤ 200`);
+  });
+
+  it('returns empty array when no destinations match threat intel', () => {
+    const groups = [{ dst: '8.8.8.8', dstHost: 'dns.google', cnt: 100 }];
+    const res = callThreatRoute(groups, {}, {});
+    assert.equal(res._body.count, 0);
+    assert.deepEqual(res._body.threats, []);
+  });
+
+  it('returns 400 for invalid from timestamp', () => {
+    const res = callThreatRoute([], {}, { from: 'bad' });
+    assert.equal(res._status, 400);
+  });
+});
+
 // ─── parseTimestampParam ─────────────────────────────────────────────────────
 
 describe('connections route: parseTimestampParam', () => {
