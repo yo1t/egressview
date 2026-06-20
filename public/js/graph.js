@@ -134,6 +134,21 @@ function flagEmoji(code) {
 
 function meshNodeId(mac) { return `__node_${mac}__`; }
 
+function linkEndpointId(endpoint) {
+  return typeof endpoint === 'object' ? endpoint?.id : endpoint;
+}
+
+function normalizeGraphLinks(candidateLinks, candidateNodes) {
+  const nodeIds = new Set(candidateNodes.map(n => n.id));
+  return candidateLinks
+    .map(l => ({
+      ...l,
+      source: linkEndpointId(l.source),
+      target: linkEndpointId(l.target),
+    }))
+    .filter(l => nodeIds.has(l.source) && nodeIds.has(l.target));
+}
+
 function buildGraph(data, { resetPositions = false } = {}) {
   const clients = data.clients || [];
   lastClients = clients;
@@ -180,19 +195,15 @@ function buildGraph(data, { resetPositions = false } = {}) {
   // Stash org nodes/links before rebuilding (to preserve positions)
   const savedOrgNodes = resetPositions ? [] : nodes.filter(n => n.type === 'org');
   const newNodeIds = new Set(newNodes.map(n => n.id));
-  const savedOrgLinks = links
-    .filter(l => l.ltype === 'dev-org')
-    .map(l => ({ ...l,
-      source: typeof l.source === 'object' ? l.source.id : l.source,
-      target: typeof l.target === 'object' ? l.target.id : l.target,
-    }))
-    // Drop sources missing from new nodes (e.g. IP-based IDs from Yamaha-only mode)
-    .filter(l => newNodeIds.has(l.source));
+  const savedOrgLinks = resetPositions ? [] : normalizeGraphLinks(
+    links.filter(l => l.ltype === 'dev-org'),
+    [...newNodes, ...savedOrgNodes]
+  ).filter(l => newNodeIds.has(l.source));
 
   const posMap = {};
   if (!resetPositions) nodes.forEach(n => posMap[n.id] = { x: n.x, y: n.y, vx: n.vx, vy: n.vy });
   nodes = [...newNodes.map(n => posMap[n.id] ? { ...n, ...posMap[n.id] } : n), ...savedOrgNodes];
-  links = [...newLinks, ...savedOrgLinks];
+  links = normalizeGraphLinks([...newLinks, ...savedOrgLinks], nodes);
 
   updateSimulation(satellites);
   updateSidePanel(clients, data, meshNodes, mainMac);
@@ -202,6 +213,7 @@ function buildGraph(data, { resetPositions = false } = {}) {
 
 function updateSimulation(satellites) {
   if (!width) resize();
+  links = normalizeGraphLinks(links, nodes);
   const cx = width / 2, cy = height / 2;
   const internet = nodes.find(n => n.id === '__internet__');
   const router = nodes.find(n => n.id === '__router__');
@@ -741,6 +753,7 @@ function updateOrgGraph({ resetPositions = false } = {}) {
     }
   }
 
+  links = normalizeGraphLinks(links, nodes);
   simulation.nodes(nodes);
   simulation.force('link').links(links);
   simulation.force('x-center', d3.forceX(cx).strength(0.04));
