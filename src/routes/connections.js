@@ -120,7 +120,7 @@ function connectionsRoutes(ctx) {
     const { ts: to, err: e2 } = parseTimestampParam(req.query.to, 'to', res);
     if (e2) return;
     const confidence = ['low', 'high', 'all'].includes(req.query.confidence) ? req.query.confidence : 'all';
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
     const groups = history.groupDstByTimeRange(from, to);
     const hits = [];
     for (const { dst, dstHost, cnt } of groups) {
@@ -129,10 +129,10 @@ function connectionsRoutes(ctx) {
       if (confidence === 'low'  && t.confidence !== 'low')  continue;
       if (confidence === 'high' && t.confidence !== 'high') continue;
       hits.push({ dst, host: dstHost || null, sessions: cnt, confidence: t.confidence, feed: t.feed || null, category: t.category || null });
-      if (hits.length >= limit) break;
     }
     hits.sort((a, b) => b.sessions - a.sessions);
-    res.json({ count: hits.length, threats: hits, serverTime: Date.now() });
+    const paged = hits.slice(0, limit);
+    res.json({ count: paged.length, threats: paged, serverTime: Date.now() });
   });
 
   router.get('/connections/threat-counts', requireAdmin, (req, res) => {

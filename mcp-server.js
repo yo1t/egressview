@@ -337,7 +337,9 @@ async function startHttp(port) {
   app.use('/mcp', (req, res, next) => {
     const provided = req.headers['x-admin-token']
       || (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
-    if (!provided || provided !== MCP_TOKEN) {
+    const a = Buffer.from(provided || '');
+    const b = Buffer.from(MCP_TOKEN);
+    if (a.length !== b.length || !require('crypto').timingSafeEqual(a, b)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
     next();
@@ -351,7 +353,8 @@ async function startHttp(port) {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
     } catch (err) {
-      if (!res.headersSent) res.status(500).json({ error: err.message });
+      process.stderr.write(`[egressview-mcp] ${err.message}\n`);
+      if (!res.headersSent) res.status(500).json({ error: 'internal server error' });
     } finally {
       res.on('close', () => server.close().catch(() => {}));
     }
