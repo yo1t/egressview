@@ -134,7 +134,11 @@ function makeHarness({ rows = [], apiFetch = null } = {}) {
   const settle = () => new Promise(resolve => setImmediate(resolve));
   const lastUrl = () => urls[urls.length - 1] || '';
   const lastParams = () => new URL(lastUrl(), 'http://local').searchParams;
-  return { context, getEl, headers, searchIcons, urls, lastUrl, lastParams, settle };
+  // Returns params from the most recent /connections (non-threat-counts) request
+  const lastConnectionsUrl = () =>
+    [...urls].reverse().find(u => !u.includes('/threat-counts')) || '';
+  const lastConnectionsParams = () => new URL(lastConnectionsUrl(), 'http://local').searchParams;
+  return { context, getEl, headers, searchIcons, urls, lastUrl, lastParams, lastConnectionsParams, settle };
 }
 
 describe('Connection Log view behavior', () => {
@@ -143,7 +147,7 @@ describe('Connection Log view behavior', () => {
     h.context.updateLogView();
     await h.settle();
 
-    const params = h.lastParams();
+    const params = h.lastConnectionsParams();
     assert.equal(params.get('limit'), '200');
     assert.equal(params.get('offset'), '0');
   });
@@ -156,7 +160,7 @@ describe('Connection Log view behavior', () => {
     h.getEl('log-search-apply').click();
     await h.settle();
 
-    const params = h.lastParams();
+    const params = h.lastConnectionsParams();
     assert.equal(params.get('limit'), '200');
     assert.equal(params.get('fDst'), 'google');
     assert.equal(params.get('fDstMode'), 'contains');
@@ -169,7 +173,7 @@ describe('Connection Log view behavior', () => {
     h.context.updateLogView();
     await h.settle();
 
-    const params = h.lastParams();
+    const params = h.lastConnectionsParams();
     assert.equal(params.get('limit'), '200');
     assert.equal(params.get('fSrc'), '192.168.1.10');
     assert.equal(params.get('fSrcMode'), 'exact');
@@ -188,7 +192,7 @@ describe('Connection Log view behavior', () => {
     h.context.updateLogView();
     await h.settle();
 
-    const params = h.lastParams();
+    const params = h.lastConnectionsParams();
     // MAC filter is now server-side: pagination params are sent
     assert.equal(params.get('limit'), '200');
     assert.equal(params.has('offset'), true);
@@ -209,12 +213,12 @@ describe('Connection Log view behavior', () => {
     h.context.selectedMac = null;
     h.context.updateLogView();
     await h.settle();
-    assert.equal(h.lastParams().get('fSrc'), '192.168.1.10');
+    assert.equal(h.lastConnectionsParams().get('fSrc'), '192.168.1.10');
 
     h.getEl('log-device-filter-clear').click();
     await h.settle();
 
-    const params = h.lastParams();
+    const params = h.lastConnectionsParams();
     assert.equal(params.has('fSrc'), false);
     assert.equal(params.get('limit'), '200');
   });
@@ -227,7 +231,7 @@ describe('Connection Log view behavior', () => {
     h.getEl('log-search-apply').click();
     await h.settle();
 
-    const params = h.lastParams();
+    const params = h.lastConnectionsParams();
     assert.equal(params.has('limit'), false);
     assert.equal(params.has('offset'), false);
   });
@@ -240,7 +244,7 @@ describe('Connection Log view behavior', () => {
     h.getEl('log-search-apply').click();
     await h.settle();
 
-    const params = h.lastParams();
+    const params = h.lastConnectionsParams();
     assert.equal(params.has('limit'), false);
     assert.equal(params.has('offset'), false);
   });
@@ -254,7 +258,7 @@ describe('Connection Log view behavior', () => {
     h.getEl('log-filter-safe').click();
     await h.settle();
 
-    const params = h.lastParams();
+    const params = h.lastConnectionsParams();
     assert.equal(params.has('limit'), false);
     assert.equal(params.has('offset'), false);
   });
@@ -264,7 +268,7 @@ describe('Connection Log view behavior', () => {
     h.headers.find(el => el.dataset.col === 'app').click();
     await h.settle();
 
-    const params = h.lastParams();
+    const params = h.lastConnectionsParams();
     assert.equal(params.has('limit'), false);
     assert.equal(params.has('offset'), false);
   });
@@ -310,6 +314,7 @@ describe('Connection Log view behavior', () => {
 
     assert.match(h.getEl('log-tbody').innerHTML, /new\.example/);
     assert.doesNotMatch(h.getEl('log-tbody').innerHTML, /old\.example/);
-    assert.equal(urls.length, 2);
+    // 2 updateLogView calls × (1 connections + 1 threat-counts) = 4 requests total
+    assert.equal(urls.length, 4);
   });
 });

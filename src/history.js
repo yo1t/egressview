@@ -427,6 +427,18 @@ function countByTimeRange(from, to, { filters = {} } = {}) {
   return row ? row.cnt : 0;
 }
 
+// Returns unique (dst, dstHost) pairs with connection counts for the time range.
+// Used by the threat-counts endpoint to apply JS-side threat matching without
+// fetching every row — only unique destinations need to be checked.
+function groupDstByTimeRange(from, to, { filters = {} } = {}) {
+  if (!db) return [];
+  const fc = buildFilterConditions(filters);
+  const { where, params } = buildWhereAndParams(from, to, fc);
+  return db.prepare(
+    `SELECT dst, dstHost, COUNT(*) AS cnt FROM connections${where} GROUP BY dst, dstHost`
+  ).all(...params);
+}
+
 function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
   if (!db) return { byDst: [], byDevice: [] };
   const conditions = [];
@@ -470,14 +482,26 @@ function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
      FROM connections${where}
      GROUP BY src, key ORDER BY count DESC LIMIT 3000`
   ).all(...params);
+  const LOCATION_LIMIT = 500;
   const byLocation = db.prepare(
     `SELECT ${targetExpr} as key, ${targetExpr} as org,
             country, city, lat, lon,
             COUNT(*) as totalSessions, COUNT(DISTINCT src) as srcCount,
             MAX(ttl) as maxTtl, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
      FROM connections${where}${where ? ' AND' : ' WHERE'} lat IS NOT NULL AND lon IS NOT NULL
-     GROUP BY key, lat, lon ORDER BY totalSessions DESC LIMIT 500`
-  ).all(...params);
+     GROUP BY key, lat, lon ORDER BY totalSessions DESC LIMIT ?`
+  ).all(...params, LOCATION_LIMIT);
+  const locationStats = db.prepare(
+    `SELECT COUNT(*) as totalGroups, COALESCE(SUM(totalSessions), 0) as totalSessions
+     FROM (
+       SELECT COUNT(*) as totalSessions
+       FROM connections${where}${where ? ' AND' : ' WHERE'} lat IS NOT NULL AND lon IS NOT NULL
+       GROUP BY ${targetExpr}, lat, lon
+     )`
+  ).get(...params) || {};
+  const locationTotalSessions = locationStats.totalSessions || 0;
+  const locationShownSessions = byLocation.reduce((sum, r) => sum + (r.totalSessions || 0), 0);
+  const locationTotalGroups = locationStats.totalGroups || 0;
   const appRows = db.prepare(
     `SELECT dport, proto, COALESCE(NULLIF(dstHost, ''), dst) as dstHost,
             COUNT(*) as count
@@ -502,6 +526,15 @@ function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
     byTarget,
     byEdge,
     byLocation,
+    mapCoverage: {
+      limit: LOCATION_LIMIT,
+      totalGroups: locationTotalGroups,
+      shownGroups: byLocation.length,
+      totalSessions: locationTotalSessions,
+      shownSessions: locationShownSessions,
+      percent: locationTotalSessions ? (locationShownSessions / locationTotalSessions) * 100 : 0,
+      capped: locationTotalGroups > byLocation.length,
+    },
     appGroups,
     timeline,
     total,
@@ -596,6 +629,7 @@ module.exports = {
   queryByTimeRange,
   queryByTimeRangePaged,
   countByTimeRange,
+  groupDstByTimeRange,
   summarizeByTimeRange,
   getKnownMacs,
   logNotification,

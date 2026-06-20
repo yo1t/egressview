@@ -106,6 +106,23 @@ function connectionsRoutes(ctx) {
     res.json({ ...summary, serverTime: Date.now(), cached: false });
   });
 
+  router.get('/connections/threat-counts', requireAdmin, (req, res) => {
+    const { ts: from, err: e1 } = parseTimestampParam(req.query.from, 'from', res);
+    if (e1) return;
+    const { ts: to, err: e2 } = parseTimestampParam(req.query.to, 'to', res);
+    if (e2) return;
+    const { filters } = parsePaginationOpts(req.query);
+    const groups = history.groupDstByTimeRange(from, to, { filters });
+    let safe = 0, warn = 0, danger = 0;
+    for (const { dst, dstHost, cnt } of groups) {
+      const threat = threatIntel?.matchThreatIntel(dst, dstHost || dst);
+      if (!threat)                          safe   += cnt;
+      else if (threat.confidence === 'low') warn   += cnt;
+      else                                  danger += cnt;
+    }
+    res.json({ safe, warn, danger, serverTime: Date.now() });
+  });
+
   router.get('/connections', requireAdmin, (req, res) => {
     const { ts: from, err: e1 } = parseTimestampParam(req.query.from, 'from', res);
     if (e1) return;

@@ -12,6 +12,9 @@ let logFetchGeneration = 0;
 let logFetchingPage = false; // lock: prevents duplicate scroll-triggered fetches
 let logScrollObserver = null;
 
+// ── Threat count state (server-side aggregate) ────────────────────────────────
+let logThreatCounts = null; // null = loading; { safe, warn, danger } when ready
+
 // Columns handled server-side (DB columns). Everything else is client-side only.
 const LOG_SERVER_SORT_COLS   = new Set(['lastSeen', 'src', 'dst', 'dport', 'proto', 'country', 'org']);
 const LOG_SERVER_FILTER_COLS = new Set(['src', 'dst', 'dport', 'proto', 'country', 'org']);
@@ -200,6 +203,80 @@ function updateScrollStatus() {
   el.innerHTML = `<span style="color:var(--muted);font-size:11px">${logAllData.length} / ${logTotal} ${t('log.sessions')}</span>`;
 }
 
+// ── Server-side threat counts ─────────────────────────────────────────────────
+async function fetchThreatCounts() {
+  const gen = logFetchGeneration; // captured — discard if a newer query started
+  const { from, to } = getTimeRange();
+  const params = new URLSearchParams();
+
+  // Apply the same time range and filter params as fetchLogPage (no sort/pagination)
+  let serverFrom = from;
+  let serverTo   = to;
+  const lastSeenFilter = logFilters['lastSeen'];
+  if (lastSeenFilter?.mode === 'dateRange') {
+    if (lastSeenFilter.from) {
+      const f = new Date(lastSeenFilter.from).getTime();
+      serverFrom = serverFrom != null ? Math.max(serverFrom, f) : f;
+    }
+    if (lastSeenFilter.to) {
+      const tVal = new Date(lastSeenFilter.to).getTime();
+      serverTo = serverTo != null ? Math.min(serverTo, tVal) : tVal;
+    }
+  }
+  if (serverFrom != null) params.set('from', serverFrom);
+  if (serverTo   != null) params.set('to',   serverTo);
+
+  if (selectedMac) {
+    params.set('fSrcMac', selectedMac);
+  } else if (selectedIp) {
+    params.set('fSrc',     selectedIp);
+    params.set('fSrcMode', 'exact');
+  }
+  for (const [col, filter] of Object.entries(logFilters)) {
+    if (col === 'src' && (selectedMac || selectedIp)) continue;
+    if (LOG_SERVER_FILTER_COLS.has(col) && filter?.value && filter.mode !== 'regex') {
+      params.set(LOG_FILTER_PARAM[col],      filter.value);
+      params.set(LOG_FILTER_MODE_PARAM[col], filter.mode || 'contains');
+    }
+  }
+
+  try {
+    const res = await apiFetch(`${_BASE}/api/connections/threat-counts?${params}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (gen !== logFetchGeneration) return; // stale
+    logThreatCounts = { safe: data.safe || 0, warn: data.warn || 0, danger: data.danger || 0 };
+    renderThreatBadges();
+  } catch (e) {
+    console.error('[log] threat counts fetch failed:', e);
+  }
+}
+
+function renderThreatBadges() {
+  const threatCountEl = document.getElementById('log-threat-count');
+  if (!threatCountEl) return;
+  if (!logThreatCounts) {
+    threatCountEl.style.display = 'inline';
+    threatCountEl.innerHTML = `<span style="color:var(--muted);font-size:11px">...</span>`;
+    return;
+  }
+  const { safe, warn, danger } = logThreatCounts;
+  const safeActive   = logThreatFilter === 'safe'   ? ' log-filter-active' : '';
+  const warnActive   = logThreatFilter === 'warn'   ? ' log-filter-active' : '';
+  const dangerActive = logThreatFilter === 'danger' ? ' log-filter-active' : '';
+  threatCountEl.style.display = 'inline';
+  threatCountEl.innerHTML = `<span class="log-badge-safe log-badge-clickable${safeActive}" id="log-filter-safe">${t('log.badge.safe')}: ${safe}</span> <span class="log-badge-warn log-badge-clickable${warnActive}" id="log-filter-warn">${t('log.badge.warn')}: ${warn}</span> <span class="log-badge-danger log-badge-clickable${dangerActive}" id="log-filter-danger">${t('log.badge.danger')}: ${danger}</span>`;
+  document.getElementById('log-filter-safe')?.addEventListener('click', () => {
+    logThreatFilter = logThreatFilter === 'safe' ? null : 'safe'; resetAndFetch();
+  });
+  document.getElementById('log-filter-warn')?.addEventListener('click', () => {
+    logThreatFilter = logThreatFilter === 'warn' ? null : 'warn'; resetAndFetch();
+  });
+  document.getElementById('log-filter-danger')?.addEventListener('click', () => {
+    logThreatFilter = logThreatFilter === 'danger' ? null : 'danger'; resetAndFetch();
+  });
+}
+
 // ── Render (client-side-only filters applied on top of server data) ───────────
 // appendRows: array of new rows to append (null = full re-render)
 function renderLogView(appendRows) {
@@ -268,20 +345,6 @@ function renderLogView(appendRows) {
     }
   }
 
-  // Threat counts — use whichever source covers the most rows.
-  // logAllData grows as user scrolls; getFilteredConnections() (graph cache, up to 50k)
-  // is used as a supplement until logAllData exceeds it.
-  let threatBase = logAllData;
-  if (typeof getFilteredConnections === 'function') {
-    let base = getFilteredConnections();
-    if (selectedMac)     base = base.filter(c => c.srcMac === selectedMac);
-    else if (selectedIp) base = base.filter(c => c.src === selectedIp);
-    if (base.length > logAllData.length) threatBase = base;
-  }
-  const threatCount = threatBase.filter(c => c.threat && c.threat.confidence !== 'low').length;
-  const warnCount   = threatBase.filter(c => c.threat && c.threat.confidence === 'low').length;
-  const safeCount   = threatBase.length - threatCount - warnCount;
-
   if (appendRows === null) {
     if (logThreatFilter === 'danger') {
       conns = conns.filter(c => c.threat && c.threat.confidence !== 'low');
@@ -299,20 +362,10 @@ function renderLogView(appendRows) {
     countEl.textContent = `${logTotal} ${t('log.sessions')}`;
   }
 
-  threatCountEl.style.display = 'inline';
-  const safeActive   = logThreatFilter === 'safe'   ? ' log-filter-active' : '';
-  const warnActive   = logThreatFilter === 'warn'   ? ' log-filter-active' : '';
-  const dangerActive = logThreatFilter === 'danger' ? ' log-filter-active' : '';
-  threatCountEl.innerHTML = `<span class="log-badge-safe log-badge-clickable${safeActive}" id="log-filter-safe">${t('log.badge.safe')}: ${safeCount}</span> <span class="log-badge-warn log-badge-clickable${warnActive}" id="log-filter-warn">${t('log.badge.warn')}: ${warnCount}</span> <span class="log-badge-danger log-badge-clickable${dangerActive}" id="log-filter-danger">${t('log.badge.danger')}: ${threatCount}</span>`;
-  document.getElementById('log-filter-safe')?.addEventListener('click', () => {
-    logThreatFilter = logThreatFilter === 'safe' ? null : 'safe'; resetAndFetch();
-  });
-  document.getElementById('log-filter-warn')?.addEventListener('click', () => {
-    logThreatFilter = logThreatFilter === 'warn' ? null : 'warn'; resetAndFetch();
-  });
-  document.getElementById('log-filter-danger')?.addEventListener('click', () => {
-    logThreatFilter = logThreatFilter === 'danger' ? null : 'danger'; resetAndFetch();
-  });
+  // Threat badges are rendered separately by renderThreatBadges() (called from
+  // fetchThreatCounts). On the first full render, show loading state until the
+  // server-side count arrives.
+  if (appendRows === null) renderThreatBadges();
 
   // Sort icon state (full render only)
   if (appendRows === null) {
@@ -373,9 +426,11 @@ function resetAndFetch() {
   document.getElementById('log-scroll-sentinel')?.remove();
   logPage = 0;
   logAllData = [];
+  logThreatCounts = null;
   logFetchGeneration++;
   logFetchingPage = false; // cancel any in-flight scroll fetch
-  fetchLogPage();
+  fetchLogPage();          // rows (paginated / full-fetch)
+  fetchThreatCounts();     // threat aggregate (runs in parallel)
 }
 
 function updateLogView() {
