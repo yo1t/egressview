@@ -122,6 +122,8 @@ let lastRouterIp = '';
 let lastSatellites = [];
 let lastClients = [];
 let lastMainMac = '';
+let graphSummary = null;
+let graphSummaryKey = null;
 
 // Per-AiMesh-node identity colour
 const MESH_COLORS = ['#f59e0b','#f97316','#14b8a6','#a78bfa','#fb7185'];
@@ -147,6 +149,44 @@ function normalizeGraphLinks(candidateLinks, candidateNodes) {
       target: linkEndpointId(l.target),
     }))
     .filter(l => nodeIds.has(l.source) && nodeIds.has(l.target));
+}
+
+function currentGraphRangeKey(from, to) {
+  return `${from ?? ''}:${to ?? ''}`;
+}
+
+function graphSummaryNotice(show, summary) {
+  const notice = document.getElementById('graph-summary-notice');
+  if (!notice) return;
+  notice.style.display = show ? '' : 'none';
+  if (show && summary) {
+    notice.textContent = tVars('graph.summary', {
+      total: Number(summary.total || 0).toLocaleString(),
+      devices: (summary.byDevice || []).length.toLocaleString(),
+      targets: (summary.byTarget || []).length.toLocaleString(),
+    });
+  }
+}
+
+function clearGraphSummary() {
+  graphSummary = null;
+  graphSummaryKey = null;
+  graphSummaryNotice(false);
+}
+
+async function fetchGraphSummary(from, to) {
+  const key = currentGraphRangeKey(from, to);
+  if (graphSummary && graphSummaryKey === key) return graphSummary;
+  const params = new URLSearchParams();
+  if (from != null) params.set('from', from);
+  if (to != null) params.set('to', to);
+  params.set('buckets', '60');
+  const res = await apiFetch(`${_BASE}/api/connections/summary?${params}`);
+  if (!res.ok) throw new Error(`graph summary failed: ${res.status}`);
+  graphSummary = await res.json();
+  graphSummaryKey = key;
+  graphSummaryNotice(true, graphSummary);
+  return graphSummary;
 }
 
 function buildGraph(data, { resetPositions = false } = {}) {
@@ -270,18 +310,18 @@ function drawLinks() {
     .merge(link)
     .attr('stroke-width', d => {
       if (d.ltype === 'mesh') return 2;
-      if (d.ltype === 'dev-org') return Math.max(1, Math.min(5, 1 + Math.log((d.sessionCount || 1) + 1)));
+      if (d.ltype === 'dev-org') return Math.max(1, Math.min(d.summary ? 8 : 5, 1 + Math.log((d.sessionCount || 1) + 1)));
       const r = Math.max(d.rxRate || 0, d.txRate || 0);
       return Math.max(1, Math.min(8, 1 + r / (maxRate / 7)));
     })
     .attr('stroke', d => {
       if (d.ltype === 'mesh') return '#f97316';
-      if (d.ltype === 'dev-org') return '#7c3aed';
+      if (d.ltype === 'dev-org') return d.summary ? '#c4b5fd' : '#7c3aed';
       const r = Math.max(d.rxRate || 0, d.txRate || 0);
       return r > maxRate * 0.5 ? '#ef4444' : r > maxRate * 0.1 ? '#f59e0b' : r > 0 ? '#3b82f6' : '#1f2937';
     })
-    .attr('stroke-dasharray', d => d.ltype === 'mesh' ? '6,3' : d.ltype === 'dev-org' ? '4,3' : null)
-    .attr('opacity', d => d.ltype === 'mesh' ? 0.6 : d.ltype === 'dev-org' ? 0.45 : Math.max(d.rxRate || 0, d.txRate || 0) > 0 ? 0.9 : 0.35);
+    .attr('stroke-dasharray', d => d.ltype === 'mesh' ? '6,3' : d.ltype === 'dev-org' ? (d.summary ? '2,5' : '4,3') : null)
+    .attr('opacity', d => d.ltype === 'mesh' ? 0.6 : d.ltype === 'dev-org' ? (d.summary ? 0.72 : 0.45) : Math.max(d.rxRate || 0, d.txRate || 0) > 0 ? 0.9 : 0.35);
   link.exit().remove();
 }
 
@@ -320,23 +360,23 @@ function drawNodes() {
       if (d.type === 'router') return '#f59e0b';
       if (d.type === 'internet') return '#374151';
       if (d.type === 'meshnode') return '#f97316';
-      if (d.type === 'org') return '#3b0764';
+      if (d.type === 'org') return d.summary ? '#1e1b4b' : '#3b0764';
       return nodeColor(d.client?.type || '0');
     })
     .attr('stroke', d => {
       if (d.type === 'router') return '#fbbf24';
       if (d.type === 'internet') return '#6b7280';
       if (d.type === 'meshnode') return '#fb923c';
-      if (d.type === 'org') return '#7c3aed';
+      if (d.type === 'org') return d.summary ? '#c4b5fd' : '#7c3aed';
       return nodeColor(d.client?.type || '0');
     })
-    .attr('stroke-width', 2).attr('fill-opacity', 0.85)
+    .attr('stroke-width', d => d.summary ? 3 : 2).attr('fill-opacity', d => d.summary ? 0.72 : 0.85)
     .attr('filter', d => (d.type === 'router' || d.type === 'meshnode') ? 'url(#glow)' : null);
 
   entered.append('text')
     .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
     .attr('font-size', d => d.type === 'router' || d.type === 'meshnode' ? '14px' : d.type === 'org' ? '13px' : '12px').attr('fill', '#fff')
-    .text(d => d.type === 'router' ? '⬡' : d.type === 'meshnode' ? '⬡' : d.type === 'internet' ? '🌐' : d.type === 'org' ? (d.flag || '🌐') : isWiredType(d.client?.type) ? '🖥' : '📶');
+    .text(d => d.type === 'router' ? '⬡' : d.type === 'meshnode' ? '⬡' : d.type === 'internet' ? '🌐' : d.type === 'org' ? (d.summary ? 'Σ' : (d.flag || '🌐')) : d.client?.summarySessions ? 'Σ' : isWiredType(d.client?.type) ? '🖥' : '📶');
 
   entered.append('text').attr('class', 'node-label')
     .attr('text-anchor', 'middle').attr('fill', '#e2e8f0')
@@ -376,13 +416,15 @@ function showTooltip(e, d) {
       ${c.vendor ? `<div style="font-size:10px;color:#9ca3af">${esc(c.vendor)}</div>` : ''}
       ${c.dnsName ? `<div style="font-size:10px">DNS: ${esc(c.dnsName)}</div>` : ''}
       ${c.mdnsName ? `<div style="font-size:10px">mDNS: ${esc(c.mdnsName)}</div>` : ''}
+      ${c.summarySessions ? `<div style="margin-top:4px;color:#ddd6fe">summary: ${Number(c.summarySessions).toLocaleString()} sessions</div>` : ''}
       <div>↓ ${fmtBytes(c.rxRate)} ↑ ${fmtBytes(c.txRate)}</div>
       ${c.rssi != null ? `<div>RSSI: ${c.rssi} dBm</div>` : ''}`;
   } else if (d.type === 'org') {
     tooltip.innerHTML = `
       <div style="font-weight:600;margin-bottom:4px">${esc(d.label)}</div>
       <div>${d.flag || ''} ${d.country ? esc(d.country) : ''}</div>
-      <div>${d.totalSessions} sessions</div>`;
+      <div>${Number(d.totalSessions || 0).toLocaleString()} sessions</div>
+      ${d.summary ? `<div style="color:#ddd6fe">summary destination</div>` : ''}`;
   } else {
     tooltip.innerHTML = `<div>${esc(d.label || d.id)}</div>`;
   }
@@ -673,6 +715,13 @@ function updateHeader(data) {
 
 // Yamaha-only mode: build the graph treating src IPs as clients
 function buildGraphFromConnections({ resetPositions = false } = {}) {
+  const tr = typeof getTimeRange === 'function' ? getTimeRange() : { from: null, to: null };
+  if (graphSummary && graphSummaryKey === currentGraphRangeKey(tr.from, tr.to)) {
+    buildGraphFromSummary(graphSummary, { resetPositions });
+    return;
+  } else if (graphSummary) {
+    clearGraphSummary();
+  }
   // Do not early-return: still call buildGraph with empty arrays to clear the graph
   const filtered = getFilteredConnections();
   const srcCounts    = new Map();
@@ -704,6 +753,101 @@ function buildGraphFromConnections({ resetPositions = false } = {}) {
     wanRx: 0, wanTx: 0, routerIp: null, timestamp: Date.now(),
   }, { resetPositions });
   updateOrgGraph({ resetPositions });
+}
+
+function buildGraphFromSummary(summary, { resetPositions = false } = {}) {
+  const deviceRows = (summary.byDevice || []).slice(0, 120);
+  const targetRows = (summary.byTarget || []).slice(0, 160);
+  const allowedDevices = new Set(deviceRows.map(r => r.src));
+  const allowedTargets = new Set(targetRows.map(r => r.key || r.label));
+  const syntheticClients = deviceRows.map(r => ({
+    mac: r.src,
+    ip: r.src,
+    name: `${r.src} (${Number(r.count || 0).toLocaleString()})`,
+    type: '0',
+    rxRate: 0,
+    txRate: 0,
+    rssi: null,
+    amesh_papMac: null,
+    vendor: r.srcVendor || '',
+    dnsName: null,
+    mdnsName: null,
+    deviceFirstSeen: r.firstSeen || 0,
+    summarySessions: r.count || 0,
+  }));
+
+  buildGraph({
+    clients: syntheticClients, satellites: [], meshNodes: [],
+    wanRx: 0, wanTx: 0, routerIp: null, timestamp: Date.now(),
+  }, { resetPositions });
+
+  const orgPosMap = {};
+  if (!resetPositions) {
+    nodes.forEach(n => { if (n.type === 'org') orgPosMap[n.id] = { x: n.x, y: n.y, vx: n.vx || 0, vy: n.vy || 0 }; });
+  }
+  nodes = nodes.filter(n => n.type !== 'org');
+  links = links.filter(l => l.ltype !== 'dev-org');
+
+  const cx = width / 2, cy = height / 2;
+  const r0 = Math.min(cx, cy) * 0.75;
+  const locations = new Map((summary.byLocation || []).map(l => [l.key || l.org, l]));
+  const targetNodes = targetRows.map((r, i) => {
+    const key = r.key || r.label;
+    const id = `__org__:${key}`;
+    const loc = locations.get(key) || {};
+    const pos = orgPosMap[id];
+    const angle = (2 * Math.PI * i) / Math.max(targetRows.length, 1);
+    return {
+      id,
+      type: 'org',
+      label: r.label || key,
+      country: loc.country || '',
+      flag: flagEmoji(loc.country),
+      totalSessions: r.count || 0,
+      summary: true,
+      x: pos?.x ?? cx + r0 * Math.cos(angle),
+      y: pos?.y ?? cy + r0 * Math.sin(angle),
+      vx: pos?.vx || 0,
+      vy: pos?.vy || 0,
+    };
+  });
+  nodes = [...nodes, ...targetNodes];
+
+  const clientByIp = {};
+  nodes.forEach(n => { if (n.type === 'client' && n.client?.ip) clientByIp[n.client.ip] = n.id; });
+  for (const e of summary.byEdge || []) {
+    if (!allowedDevices.has(e.src) || !allowedTargets.has(e.key)) continue;
+    const srcId = clientByIp[e.src];
+    const targetId = `__org__:${e.key}`;
+    if (srcId) links.push({
+      source: srcId,
+      target: targetId,
+      id: `dev-org:${srcId}:${targetId}`,
+      ltype: 'dev-org',
+      sessionCount: e.count || 0,
+      summary: true,
+      rxRate: 0,
+      txRate: 0,
+    });
+  }
+
+  links = normalizeGraphLinks(links, nodes);
+  simulation.nodes(nodes);
+  simulation.force('link').links(links);
+  simulation.force('x-center', d3.forceX(cx).strength(0.04));
+  simulation.force('y-split', d3.forceY(d => d.type === 'org' ? height * 0.22 : height * 0.72).strength(d => d.type === 'org' ? 0.15 : 0.06));
+  simulation.alpha(0.35).restart();
+  drawLinks();
+  drawNodes();
+  applyGraphFilter();
+  graphSummaryNotice(true, summary);
+  updateSidePanel(syntheticClients, {
+    clients: syntheticClients,
+    wanRx: 0,
+    wanTx: 0,
+    timestamp: Date.now(),
+  }, [], '');
+  document.getElementById('hdr-devices').textContent = deviceRows.length;
 }
 
 function updateOrgGraph({ resetPositions = false } = {}) {

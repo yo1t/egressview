@@ -18,6 +18,11 @@ async function fetchConnectionRange(from, to) {
     if (data.serverTime) serverTimeOffset = data.serverTime - Date.now();
     const notice = document.getElementById('graph-truncated-notice');
     if (notice) notice.style.display = data.truncated ? '' : 'none';
+    if (data.truncated && typeof fetchGraphSummary === 'function') {
+      await fetchGraphSummary(from, to);
+    } else if (!data.truncated && typeof clearGraphSummary === 'function') {
+      clearGraphSummary();
+    }
   } catch (e) {
     console.error('[connections] fetch failed:', e);
   } finally {
@@ -28,7 +33,8 @@ async function fetchConnectionRange(from, to) {
 let timeFilterGeneration = 0;
 
 function renderTimeFilteredViews({ delayedData = false } = {}) {
-  if (asusActive) updateOrgGraph({ resetPositions: true });
+  if (typeof graphSummary !== 'undefined' && graphSummary) buildGraphFromConnections({ resetPositions: true });
+  else if (asusActive) updateOrgGraph({ resetPositions: true });
   else            buildGraphFromConnections({ resetPositions: true });
   scheduleGraphAutoFit({ delayedData });
   if (statsMode)  updateStats();

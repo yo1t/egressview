@@ -96,10 +96,16 @@ socket.on('connections-update', data => {
     setFetching(+1);
     apiFetch(`${_BASE}/api/connections?from=${from24h}`)
       .then(r => r.json())
-      .then(d => {
+      .then(async d => {
         allConnections = mergeConnections(allConnections, d.connections || []);
         dataRangeFrom = from24h;
-        if (!asusActive) buildGraphFromConnections(); else updateOrgGraph();
+        if (d.truncated && typeof fetchGraphSummary === 'function') {
+          await fetchGraphSummary(from24h, null);
+        } else if (!d.truncated && typeof clearGraphSummary === 'function') {
+          clearGraphSummary();
+        }
+        if (typeof graphSummary !== 'undefined' && graphSummary) buildGraphFromConnections();
+        else if (!asusActive) buildGraphFromConnections(); else updateOrgGraph();
         scheduleGraphAutoFit({ delayedData: true });
         if (statsMode) updateStats();
         if (logMode) updateLogView();

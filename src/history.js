@@ -463,6 +463,12 @@ function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
      FROM connections${where}
      GROUP BY key ORDER BY count DESC LIMIT 1000`
   ).all(...params);
+  const byEdge = db.prepare(
+    `SELECT src, ${targetExpr} as key,
+            COUNT(*) as count, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
+     FROM connections${where}
+     GROUP BY src, key ORDER BY count DESC LIMIT 3000`
+  ).all(...params);
   const byLocation = db.prepare(
     `SELECT ${targetExpr} as key, ${targetExpr} as org,
             country, city, lat, lon,
@@ -492,6 +498,7 @@ function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
     byDst,
     byDevice,
     byTarget,
+    byEdge,
     byLocation,
     appGroups,
     timeline,
