@@ -108,6 +108,7 @@ EgressView exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol
 "Any new devices on the network this week?"
 "What is 192.168.1.50 connecting to?"
 "Are there any threat connections right now?"
+"Add a note to 192.168.1.97: Roomba, connects to GitHub for OTA updates"
 ```
 
 **Quick setup** (Claude Desktop, macOS): add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
@@ -127,7 +128,7 @@ EgressView exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol
 }
 ```
 
-9 tools available: `get_threat_summary`, `get_traffic_summary`, `get_top_destinations`, `get_device_traffic`, `get_new_nodes`, `get_threat_connections`, `get_alerts`, `get_devices`, `query_connections`.
+11 tools available: `get_threat_summary`, `get_traffic_summary`, `get_top_destinations`, `get_device_traffic`, `get_new_nodes`, `get_threat_connections`, `get_alerts`, `get_devices`, `query_connections`, `get_device_notes`, `set_device_note`.
 
 See the **[MCP setup guide →](docs/setup-mcp.md)** for full instructions including remote EgressView access and HTTP mode behind Apache / nginx.
 

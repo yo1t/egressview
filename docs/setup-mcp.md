@@ -26,6 +26,12 @@ Once connected, just ask in natural language:
 
 "Show me all alerts from the last 6 hours"
 → Detection log: threat hits, new device alerts, beacon candidates
+
+"Show me all device notes"
+→ Lists every device that has a memo attached
+
+"Add a note to 192.168.1.97: Roomba, connects to GitHub for OTA updates"
+→ Saves the memo to that device
 ```
 
 The agent selects the appropriate tool automatically and combines multiple tool calls when needed.
@@ -43,8 +49,11 @@ The agent selects the appropriate tool automatically and combines multiple tool 
 | `get_alerts` | detection log entries (threats, new devices, beacons) |
 | `get_devices` | all known LAN devices with MAC, vendor, status, last-seen |
 | `query_connections` | connection log search with src/dst filters |
+| `get_device_notes` | device memo notes; omit src for all devices with notes, pass src IP for one device |
+| `set_device_note` | set or update a device memo by src IP; pass empty string to delete |
 
 All tools accept a `period` parameter: `1h`, `6h`, `24h` (default), `7d`, or `14d`.
+`get_device_notes` and `set_device_note` do not use `period`.
 
 ---
 
@@ -220,5 +229,5 @@ Use `https://` if your reverse proxy terminates TLS (required for Claude Desktop
 
 - The MCP HTTP server listens on `127.0.0.1` only — it is not reachable without the reverse proxy.
 - Authentication uses the `X-Admin-Token` header (same mechanism as the EgressView API).
-- The MCP server only reads data; it has no write access to EgressView's database.
+- Most tools are read-only. `set_device_note` can write device memo notes (stored in `.egressview.notes.json`, not the main database).
 - Keep `.env.mcp` permissions at `chmod 600`; it contains your admin token.

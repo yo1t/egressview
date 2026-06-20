@@ -2,6 +2,28 @@
 
 All notable changes to EgressView are documented here.
 
+## [1.2.0] - 2026-06-20
+
+### Added
+
+- Added `get_device_notes` MCP tool: lists all devices with memo notes, or returns the note for a specific device by IP.
+- Added `set_device_note` MCP tool: sets, updates, or deletes a device memo note by IP address (empty string deletes).
+
+### Fixed
+
+- Increased login lockout duration from 30 s to 5 minutes.
+- Applied brute-force rate limiting to `/auth/change-password` and `/admin/regenerate-token`.
+- Added upper bound (1440 min / 24 h) to Slack notification `cooldownMinutes` to prevent silent suppression.
+- Fixed `groupDstByTimeRange` `GROUP BY dst, dstHost` duplicate-counting bug; now uses `MAX(dstHost)`.
+- Fixed sort-after-limit bug in `/connections/threat-connections` (collect all → sort → slice).
+- Fixed `queryNewNodes` returning wrong results when `from`/`to` is null.
+- Added `revokeAll` after backup upload restore to invalidate stale sessions.
+- Added try-catch to async route handlers in `backup.js` and `slack.js`.
+- Unified `parseInt` radix to base 10 across `threat-intel.js`, `utils.js`, `yamaha.js`, `asus.js`.
+- Extracted `createAuthMiddleware` in `mcp-server.js` for testability; guarded entry point with `require.main === module`.
+- Added `.env.mcp.example` to `package.json` files array.
+- Fixed stale `docs/nginx-mcp.conf` reference in `mcp-server.js` comment.
+
 ## [1.1.0] - 2026-06-20
 
 ### Added
