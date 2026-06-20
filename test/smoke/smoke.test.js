@@ -15,12 +15,11 @@ const TOKEN = process.env.EGRESSVIEW_TOKEN || '';
 
 // ─── Static asset tests (no auth required) ────────────────────────────────────
 
-test('GET / returns 200 with correct title', async ({ page }) => {
-  page.on('dialog', dialog => dialog.dismiss());
-  // 'commit' = response headers received; title is in <head> so available immediately
-  const res = await page.goto('/', { waitUntil: 'commit' });
+test('GET / returns 200 with correct title', async ({ request }) => {
+  const res = await request.get(`${BASE}/`);
   expect(res.status()).toBe(200);
-  await expect(page).toHaveTitle('EgressView');
+  const body = await res.text();
+  expect(body).toContain('<title>EgressView</title>');
 });
 
 test('style.css is served (200, text/css)', async ({ request }) => {
@@ -243,16 +242,17 @@ test('stats tab renders map canvas', async ({ page }) => {
 
   await authPage(page);
   await page.click('#btn-stats');
+  await expect(page.locator('#stats-container')).toBeVisible();
   await page.waitForTimeout(2000);
 
   // SVGまたはcanvasが統計エリアに存在すること
-  const mapEl = page.locator('#stats-map canvas, #stats-map svg, #map-stats canvas, #map-stats svg').first();
+  const mapEl = page.locator('#st-globe canvas, #st-globe svg, #st-flat canvas, #st-flat svg').first();
   const hasMap = await mapEl.count() > 0;
   if (hasMap) {
     await expect(mapEl).toBeVisible();
   } else {
     // マップ要素が見つからなくても統計コンテナ自体が表示されていればOK
-    const statsContainer = page.locator('#view-stats, #stats-view, .stats-container').first();
+    const statsContainer = page.locator('#stats-container').first();
     await expect(statsContainer).toBeVisible();
   }
 });
