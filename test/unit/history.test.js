@@ -756,3 +756,65 @@ describe('queryByTimeRangePaged / countByTimeRange: filter options', () => {
     assert.equal(results.length, 2);
   });
 });
+
+// ─── queryNewNodes ────────────────────────────────────────────────────────────
+
+describe('queryNewNodes', () => {
+  function insertWithFields(overrides = {}) {
+    const now = Date.now();
+    const entry = {
+      src: '192.168.1.1', dst: `10.0.0.${++_dstCounter % 254 + 1}`,
+      dport: 443, proto: 'TCP', firstSeen: now, lastSeen: now,
+      ...overrides,
+    };
+    history.appendHistoryLog(entry);
+    return entry;
+  }
+
+  it('returns devices and destinations first seen within the window', () => {
+    const now = Date.now();
+    // Entry first seen inside the window
+    insertWithFields({ src: '192.168.1.10', dst: '10.0.1.1', firstSeen: now - 1000, lastSeen: now });
+    // Entry first seen before the window
+    insertWithFields({ src: '192.168.1.20', dst: '10.0.1.2', firstSeen: now - 9000, lastSeen: now });
+
+    const result = history.queryNewNodes(now - 5000, now);
+
+    assert.equal(result.deviceCount, 1);
+    assert.equal(result.newDevices[0].src, '192.168.1.10');
+    assert.equal(result.destinationCount, 1);
+    assert.equal(result.newDestinations[0].dst, '10.0.1.1');
+  });
+
+  it('returns zero counts when no entries fall within the window', () => {
+    const now = Date.now();
+    insertWithFields({ firstSeen: now - 9000, lastSeen: now });
+
+    const result = history.queryNewNodes(now - 1000, now);
+    assert.equal(result.deviceCount, 0);
+    assert.equal(result.destinationCount, 0);
+    assert.deepEqual(result.newDevices, []);
+    assert.deepEqual(result.newDestinations, []);
+  });
+
+  it('returns empty result when DB has no entries', () => {
+    const now = Date.now();
+    const result = history.queryNewNodes(now - 10000, now);
+    assert.equal(result.deviceCount, 0);
+    assert.equal(result.destinationCount, 0);
+  });
+
+  it('uses MIN(firstSeen) per src — repeat entry does not affect new-node classification', () => {
+    const now = Date.now();
+    // Same src inserted twice: first seen before window, second inside window
+    history.appendHistoryLog({ src: '192.168.1.10', dst: '10.0.2.1', dport: 80, proto: 'TCP',
+      firstSeen: now - 9000, lastSeen: now - 9000 });
+    history.appendHistoryLog({ src: '192.168.1.10', dst: '10.0.2.2', dport: 443, proto: 'TCP',
+      firstSeen: now - 1000, lastSeen: now });
+
+    const result = history.queryNewNodes(now - 5000, now);
+    // src 192.168.1.10 has MIN(firstSeen) = now-9000, outside window → not new
+    const newSrcs = result.newDevices.map(d => d.src);
+    assert.ok(!newSrcs.includes('192.168.1.10'), 'device with earlier firstSeen should not be classified as new');
+  });
+});

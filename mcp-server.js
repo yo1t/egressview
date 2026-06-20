@@ -45,6 +45,11 @@ const MCP_TOKEN = process.env.MCP_TOKEN || TOKEN;
 if (!TOKEN) {
   process.stderr.write('[egressview-mcp] WARNING: EGRESSVIEW_TOKEN is not set — API calls will fail\n');
 }
+// Guard: HTTP mode with an empty token would allow unauthenticated access
+if (process.env.MCP_PORT && !MCP_TOKEN) {
+  process.stderr.write('[egressview-mcp] ERROR: EGRESSVIEW_TOKEN (or MCP_TOKEN) must be set in HTTP mode\n');
+  process.exit(1);
+}
 
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
 
@@ -57,7 +62,11 @@ async function api(path, params = {}) {
     headers: { 'X-Admin-Token': TOKEN },
   });
   if (!res.ok) throw new Error(`API ${path} returned ${res.status}`);
-  return res.json();
+  try {
+    return await res.json();
+  } catch {
+    throw new Error(`API ${path} returned non-JSON response`);
+  }
 }
 
 // ─── Period helpers ───────────────────────────────────────────────────────────
@@ -326,9 +335,9 @@ async function startHttp(port) {
 
   // Auth: accept X-Admin-Token header or Authorization: Bearer <token>
   app.use('/mcp', (req, res, next) => {
-    const fromHeader  = req.headers['x-admin-token'];
-    const fromBearer  = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
-    if ((fromHeader || fromBearer) !== MCP_TOKEN) {
+    const provided = req.headers['x-admin-token']
+      || (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+    if (!provided || provided !== MCP_TOKEN) {
       return res.status(401).json({ error: 'unauthorized' });
     }
     next();

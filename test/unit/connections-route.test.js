@@ -336,3 +336,42 @@ describe('connections route: _parsePaginationOpts', () => {
     }
   });
 });
+
+// ─── parseTimestampParam ─────────────────────────────────────────────────────
+
+describe('connections route: parseTimestampParam', () => {
+  function fakeRes() {
+    const r = { code: null, body: null };
+    r.status = (c) => { r.code = c; return r; };
+    r.json   = (b) => { r.body = b; return r; };
+    return r;
+  }
+
+  it('returns ts for a valid unix ms timestamp', () => {
+    const res = fakeRes();
+    const { ts, err } = _parseTimestampParam('1700000000000', 'from', res);
+    assert.equal(err, false);
+    assert.equal(ts, 1700000000000);
+  });
+
+  it('returns 400 for a non-numeric value', () => {
+    const res = fakeRes();
+    const { err } = _parseTimestampParam('notanumber', 'from', res);
+    assert.ok(err);
+    assert.equal(res.code, 400);
+  });
+
+  it('returns 400 for a negative value', () => {
+    const res = fakeRes();
+    const { err } = _parseTimestampParam('-1', 'from', res);
+    assert.ok(err);
+    assert.equal(res.code, 400);
+  });
+
+  it('returns ts=null and err=false for undefined (optional param omitted)', () => {
+    const res = fakeRes();
+    const { ts, err } = _parseTimestampParam(undefined, 'from', res);
+    assert.equal(ts, null);
+    assert.equal(err, false);
+  });
+});
