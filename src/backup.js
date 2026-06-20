@@ -130,8 +130,17 @@ function startPeriodicBackup() {
   const intervalMs = backupIntervalHours * 60 * 60 * 1000;
   backupIntervalTimer = setInterval(() => { createBackup().catch(() => {}); }, intervalMs);
   logger.info(`[backup] Periodic backup every ${backupIntervalHours}h, keep ${maxGenerations} generations`);
-  // Create initial backup if none exist
-  if (listBackups().length === 0) createBackup().catch(() => {});
+  // Create a backup on startup if none exist or the latest is older than the interval.
+  // This ensures a backup is taken even when the service restarts before the interval elapses.
+  const existing = listBackups();
+  if (existing.length === 0) {
+    createBackup().catch(() => {});
+  } else {
+    const latestMtime = new Date(existing[existing.length - 1].created).getTime();
+    if (Date.now() - latestMtime >= intervalMs) {
+      createBackup().catch(() => {});
+    }
+  }
 }
 
 function stopPeriodicBackup() {

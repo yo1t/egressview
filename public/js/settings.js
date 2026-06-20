@@ -2,13 +2,21 @@
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsBtn     = document.getElementById('settings-btn');
 
-function openSettings() {
+function openSettings(tab) {
   settingsOverlay.classList.remove('hidden');
   settingsBtn.classList.remove('alert');
+  if (typeof tab === 'string' && tab) {
+    document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));
+    const tabEl = document.querySelector(`.settings-tab[data-tab="${tab}"]`);
+    if (tabEl) tabEl.classList.add('active');
+    const paneEl = document.getElementById('pane-' + tab);
+    if (paneEl) paneEl.classList.add('active');
+  }
 }
 function closeSettings() { settingsOverlay.classList.add('hidden'); }
 
-settingsBtn.addEventListener('click', openSettings);
+settingsBtn.addEventListener('click', () => openSettings());
 document.getElementById('settings-close').addEventListener('click', closeSettings);
 settingsOverlay.addEventListener('click', e => { if (e.target === settingsOverlay) closeSettings(); });
 

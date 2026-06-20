@@ -546,7 +546,7 @@
 
 <div id="disconnected-banner">
   <span data-i18n="banner.disconnected">セッションが切れています。</span>
-  <button onclick="openSettings()" data-i18n="banner.button">⚙ 設定から再接続</button>
+  <button data-i18n="banner.button">⚙ 設定から再接続</button>
 </div>
 <div id="error-banner"></div>
 <div id="toast-container"></div>
@@ -611,6 +611,7 @@
       </div>
       <div id="beacon-list" style="display:none"></div>
     </div>
+    <div id="log-pagination" style="display:none;align-items:center;gap:8px;padding:4px 8px;font-size:12px;color:var(--muted)"></div>
     <div class="log-table-wrap">
       <table class="log-table" id="log-table">
         <thead>

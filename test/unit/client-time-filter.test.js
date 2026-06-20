@@ -11,12 +11,13 @@ const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
 
-function loadTimeFilterVm(apiConnections = []) {
+function loadTimeFilterVm(apiConnections = [], options = {}) {
   const files = [
     'public/js/connections-panel.js',
     'public/js/time-filter.js',
   ].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
 
+  const calls = options.calls || [];
   const elements = new Map();
   function element(id) {
     if (!elements.has(id)) {
@@ -35,10 +36,22 @@ function loadTimeFilterVm(apiConnections = []) {
     URLSearchParams,
     document: { getElementById: element },
     _BASE: '',
-    apiFetch: async () => ({
+    apiFetch: options.apiFetch || (async () => ({
       ok: true,
       json: async () => ({ connections: apiConnections, serverTime: Date.now() }),
-    }),
+    })),
+    calls,
+    asusActive: false,
+    logMode: false,
+    statsMode: false,
+    selectedMac: null,
+    nodes: [],
+    buildGraphFromConnections: opts => calls.push(['buildGraphFromConnections', opts]),
+    updateOrgGraph: opts => calls.push(['updateOrgGraph', opts]),
+    scheduleGraphAutoFit: opts => calls.push(['scheduleGraphAutoFit', opts]),
+    updateStats: () => calls.push(['updateStats']),
+    updateLogView: () => calls.push(['updateLogView']),
+    updateConnPanel: ip => calls.push(['updateConnPanel', ip]),
   };
 
   vm.runInNewContext(files, context);
@@ -99,5 +112,72 @@ describe('client time filter fetchConnectionRange', () => {
 
     assert.equal(result.count, 1);
     assert.equal(result.dataRangeFrom, from);
+  });
+
+  it('redraws immediately before fetching additional historical data', async () => {
+    const now = Date.now();
+    let resolveFetch;
+    const fetchDone = new Promise(resolve => { resolveFetch = resolve; });
+    const calls = [];
+    const ctx = loadTimeFilterVm([], {
+      calls,
+      apiFetch: async url => {
+        calls.push(['apiFetch', String(url)]);
+        await fetchDone;
+        return {
+          ok: true,
+          json: async () => ({
+            connections: [{
+              src: '192.0.2.40', dst: '203.0.113.40', dport: 443, proto: 'TCP',
+              firstSeen: now - 604_800_000, lastSeen: now - 604_800_000,
+            }],
+            serverTime: now,
+          }),
+        };
+      },
+    });
+    vm.runInContext(`
+      currentTimeFilter = '7d';
+      dataRangeFrom = ${now - 86_400_000};
+    `, ctx);
+    const pending = vm.runInContext('applyTimeFilter()', ctx);
+
+    assert.equal(calls.filter(c => c[0] === 'buildGraphFromConnections').length, 1);
+    assert.equal(calls.some(c => c[0] === 'apiFetch'), true);
+
+    resolveFetch();
+    await pending;
+
+    assert.equal(calls.filter(c => c[0] === 'buildGraphFromConnections').length, 2);
+  });
+
+  it('does not let an older period-change fetch redraw after a newer change', async () => {
+    const now = Date.now();
+    let resolveFirstFetch;
+    const firstFetchDone = new Promise(resolve => { resolveFirstFetch = resolve; });
+    const calls = [];
+    const ctx = loadTimeFilterVm([], {
+      calls,
+      apiFetch: async url => {
+        calls.push(['apiFetch', String(url)]);
+        await firstFetchDone;
+        return { ok: true, json: async () => ({ connections: [], serverTime: now }) };
+      },
+    });
+    vm.runInContext(`
+      currentTimeFilter = '14d';
+      dataRangeFrom = ${now - 86_400_000};
+    `, ctx);
+    const older = vm.runInContext('applyTimeFilter()', ctx);
+    assert.equal(calls.filter(c => c[0] === 'buildGraphFromConnections').length, 1);
+
+    vm.runInContext("currentTimeFilter = '1h';", ctx);
+    await vm.runInContext('applyTimeFilter()', ctx);
+    assert.equal(calls.filter(c => c[0] === 'buildGraphFromConnections').length, 2);
+
+    resolveFirstFetch();
+    await older;
+
+    assert.equal(calls.filter(c => c[0] === 'buildGraphFromConnections').length, 2);
   });
 });

@@ -29,7 +29,18 @@ function refreshSavedPlaceholders() {
 // Password login → per-device session token, stored under the same key so
 // apiFetch / Socket.IO need no changes.  A legacy admin token already in
 // localStorage keeps working — the server accepts both credentials.
-async function promptAdminToken(reason = '') {
+
+// In-flight dedup: if multiple concurrent requests all hit 401 simultaneously,
+// they share a single prompt session instead of stacking multiple dialogs.
+let _promptInFlight = null;
+
+function promptAdminToken(reason = '') {
+  if (_promptInFlight) return _promptInFlight;
+  _promptInFlight = _runPromptLoop(reason).finally(() => { _promptInFlight = null; });
+  return _promptInFlight;
+}
+
+async function _runPromptLoop(reason = '') {
   while (true) {
     const pw = prompt((reason ? reason + '\n\n' : '') + t('prompt.password'));
     if (pw === null) { alert(t('alert.passwordRequired')); continue; }
@@ -53,20 +64,29 @@ async function promptAdminToken(reason = '') {
 // On startup, show dialog if no saved token
 // Apply i18n once on startup (default 'ja' before config arrives) as a safeguard
 applyI18n();
+let _reloading = false;
+function reloadAfterLogin() {
+  _reloading = true;
+  try { socket.disconnect(); } catch {}
+  location.reload();
+}
+
 if (!adminToken) {
-  promptAdminToken().then(() => location.reload());
+  promptAdminToken().then(reloadAfterLogin);
 }
 
 // Wrapper that auto-adds the token header to every fetch
 async function apiFetch(url, opts = {}) {
-  const headers = { ...(opts.headers || {}), 'X-Admin-Token': adminToken };
+  const tokenUsed = adminToken; // snapshot at call time
+  const headers = { ...(opts.headers || {}), 'X-Admin-Token': tokenUsed };
   const res = await fetch(url, { ...opts, headers });
   if (res.status === 401) {
-    // Session expired or revoked → log in again
+    // If a concurrent login already refreshed adminToken, retry with the new token
+    if (adminToken !== tokenUsed) return apiFetch(url, opts);
     localStorage.removeItem(TOKEN_KEY);
     adminToken = '';
     await promptAdminToken(t('err.sessionExpired'));
-    return apiFetch(url, opts); // retry
+    return apiFetch(url, opts); // retry with new token
   }
   return res;
 }
@@ -74,10 +94,11 @@ async function apiFetch(url, opts = {}) {
 const socket = io({ path: _BASE+'/socket.io/', auth: { token: adminToken } });
 socket.on('connect_error', err => {
   if (String(err.message).toLowerCase().includes('unauth')) {
+    // Skip if reload is in progress or a login prompt is already showing
+    if (_reloading || _promptInFlight) return;
     localStorage.removeItem(TOKEN_KEY);
     adminToken = '';
-    promptAdminToken(t('err.sessionExpired'))
-      .then(() => location.reload());
+    promptAdminToken(t('err.sessionExpired')).then(reloadAfterLogin);
   }
 });
 const dot = document.getElementById('status-dot');

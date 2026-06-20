@@ -1,7 +1,10 @@
 // ─── Main socket event handlers ───────────────────────────────────────────────
 
 socket.on('auth-required', () => {
-  document.getElementById('disconnected-banner').style.display = 'block';
+  const banner = document.getElementById('disconnected-banner');
+  banner.style.display = 'block';
+  banner.querySelector('button').textContent = t('banner.button');
+  banner.querySelector('button').onclick = () => openSettings('l2');
   settingsBtn.classList.add('alert');
   connState.l2.ready = false;
   connState.l2.err   = 'session-expired';
@@ -24,6 +27,7 @@ socket.on('yamaha-status', s => {
     const banner = document.getElementById('disconnected-banner');
     banner.style.display = 'block';
     banner.querySelector('button').textContent = t('banner.yamaha');
+    banner.querySelector('button').onclick = () => openSettings('l3l4');
   }
   if (s.ready) {
     document.getElementById('disconnected-banner').style.display = 'none';

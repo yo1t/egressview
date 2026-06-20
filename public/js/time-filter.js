@@ -23,23 +23,39 @@ async function fetchConnectionRange(from, to) {
   }
 }
 
+let timeFilterGeneration = 0;
+
+function renderTimeFilteredViews({ delayedData = false } = {}) {
+  if (asusActive) updateOrgGraph({ resetPositions: true });
+  else            buildGraphFromConnections({ resetPositions: true });
+  scheduleGraphAutoFit({ delayedData });
+  if (statsMode)  updateStats();
+  const selNode = nodes.find(n => n.id === selectedMac);
+  updateConnPanel(selNode?.client?.ip || null);
+}
+
 async function applyTimeFilter() {
+  const generation = ++timeFilterGeneration;
   const { from, to } = getTimeRange();
   const now = Date.now() + serverTimeOffset;
   const rangeMs = from == null ? Infinity : Math.max(0, (to ?? now) - from);
   const needsFetch = from === null || from < dataRangeFrom;
   const delayedData = needsFetch || rangeMs > 24 * 3600_000;
-  // If the filter requests older data than what's loaded, fetch from API
+
+  // Log view fetches its own data from the API independently — start it immediately
+  // so it responds without waiting for the (potentially large) graph data fetch.
+  if (logMode) updateLogView();
+
   if (needsFetch) {
+    // Redraw immediately with locally available data, then redraw again after
+    // the historical fetch finishes.
+    renderTimeFilteredViews({ delayedData: false });
     await fetchConnectionRange(from, to);
+    if (generation !== timeFilterGeneration) return;
+    renderTimeFilteredViews({ delayedData });
+  } else {
+    renderTimeFilteredViews({ delayedData });
   }
-  if (asusActive) updateOrgGraph({ resetPositions: true });
-  else            buildGraphFromConnections({ resetPositions: true });
-  scheduleGraphAutoFit({ delayedData });
-  if (statsMode)  updateStats();
-  if (logMode)    updateLogView();
-  const selNode = nodes.find(n => n.id === selectedMac);
-  updateConnPanel(selNode?.client?.ip || null);
 }
 
 document.getElementById('time-filter-select').addEventListener('change', e => {

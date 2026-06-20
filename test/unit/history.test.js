@@ -377,3 +377,308 @@ describe('logNotification + queryNotificationLog', () => {
     assert.equal(none.length, 0);
   });
 });
+
+// ─── queryByTimeRangePaged ────────────────────────────────────────────────────
+
+describe('queryByTimeRangePaged', () => {
+  it('returns at most limit rows', () => {
+    const t = Date.now();
+    for (let i = 0; i < 5; i++) insert({ lastSeen: t - i * 1000, firstSeen: t - i * 1000 });
+
+    const results = history.queryByTimeRangePaged(null, null, 3, 0);
+    assert.equal(results.length, 3);
+  });
+
+  it('skips offset rows', () => {
+    const t = Date.now();
+    for (let i = 0; i < 4; i++) insert({ lastSeen: t - i * 1000, firstSeen: t - i * 1000 });
+
+    const page0 = history.queryByTimeRangePaged(null, null, 2, 0);
+    const page1 = history.queryByTimeRangePaged(null, null, 2, 2);
+    assert.equal(page0.length, 2);
+    assert.equal(page1.length, 2);
+    assert.notEqual(page0[0].dst, page1[0].dst, 'pages should return different rows');
+  });
+
+  it('returns empty array when offset exceeds total', () => {
+    insert({});
+    const results = history.queryByTimeRangePaged(null, null, 10, 9999);
+    assert.deepEqual(results, []);
+  });
+
+  it('returns empty array when limit is 0', () => {
+    insert({});
+    const results = history.queryByTimeRangePaged(null, null, 0, 0);
+    assert.deepEqual(results, []);
+  });
+
+  it('respects time range bounds', () => {
+    const t = Date.now();
+    insert({ dst: '10.0.0.1', dport: 80,  lastSeen: t - 5000, firstSeen: t - 5000 });
+    insert({ dst: '10.0.0.2', dport: 443, lastSeen: t - 1000, firstSeen: t - 1000 });
+
+    const results = history.queryByTimeRangePaged(t - 3000, null, 10, 0);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].dst, '10.0.0.2');
+  });
+
+  it('returns rows in descending lastSeen order', () => {
+    const t = Date.now();
+    insert({ dst: '10.0.0.1', dport: 80,  lastSeen: t - 2000, firstSeen: t - 2000 });
+    insert({ dst: '10.0.0.2', dport: 443, lastSeen: t - 1000, firstSeen: t - 1000 });
+
+    const results = history.queryByTimeRangePaged(null, null, 10, 0);
+    assert.ok(results[0].lastSeen >= results[1].lastSeen, 'should be newest first');
+  });
+});
+
+// ─── countByTimeRange ─────────────────────────────────────────────────────────
+
+describe('countByTimeRange', () => {
+  it('returns 0 for empty DB', () => {
+    assert.equal(history.countByTimeRange(null, null), 0);
+  });
+
+  it('counts all rows when no time bounds', () => {
+    insert({}); insert({}); insert({});
+    assert.equal(history.countByTimeRange(null, null), 3);
+  });
+
+  it('counts only rows within time bounds', () => {
+    const t = Date.now();
+    insert({ lastSeen: t - 5000, firstSeen: t - 5000 });
+    insert({ lastSeen: t - 1000, firstSeen: t - 1000 });
+    insert({ lastSeen: t - 500,  firstSeen: t - 500 });
+
+    assert.equal(history.countByTimeRange(t - 3000, null), 2);
+  });
+
+  it('matches queryByTimeRange result count', () => {
+    const t = Date.now();
+    for (let i = 0; i < 5; i++) insert({ lastSeen: t - i * 1000, firstSeen: t - i * 1000 });
+
+    const all = history.queryByTimeRange(null, null);
+    const cnt = history.countByTimeRange(null, null);
+    assert.equal(cnt, all.length);
+  });
+});
+
+// ─── summarizeByTimeRange ─────────────────────────────────────────────────────
+
+describe('summarizeByTimeRange', () => {
+  it('returns { byDst, byDevice } structure', () => {
+    const result = history.summarizeByTimeRange(null, null);
+    assert.ok(Array.isArray(result.byDst),    'byDst should be an array');
+    assert.ok(Array.isArray(result.byDevice), 'byDevice should be an array');
+  });
+
+  it('returns empty arrays for empty DB', () => {
+    const result = history.summarizeByTimeRange(null, null);
+    assert.equal(result.byDst.length, 0);
+    assert.equal(result.byDevice.length, 0);
+  });
+
+  it('groups multiple flows to same dst into one byDst entry with correct count', () => {
+    const t = Date.now();
+    // Two different (src, dst, dport, proto) rows with same dst
+    insert({ src: '192.168.1.1', dst: '10.0.0.1', dport: 80,  lastSeen: t - 1000, firstSeen: t - 1000 });
+    insert({ src: '192.168.1.1', dst: '10.0.0.1', dport: 443, lastSeen: t - 500,  firstSeen: t - 500 });
+    insert({ src: '192.168.1.1', dst: '10.0.0.2', dport: 80,  lastSeen: t - 2000, firstSeen: t - 2000 });
+
+    const result = history.summarizeByTimeRange(null, null);
+    const dst1 = result.byDst.find(r => r.dst === '10.0.0.1');
+    const dst2 = result.byDst.find(r => r.dst === '10.0.0.2');
+    assert.ok(dst1, '10.0.0.1 should appear in byDst');
+    assert.equal(dst1.count, 2, 'two flows to 10.0.0.1 should count as 2');
+    assert.ok(dst2, '10.0.0.2 should appear in byDst');
+    assert.equal(dst2.count, 1);
+  });
+
+  it('groups flows by src into byDevice', () => {
+    const t = Date.now();
+    insert({ src: '192.168.1.10', dst: '10.0.0.1', dport: 80,  lastSeen: t - 1000, firstSeen: t - 1000 });
+    insert({ src: '192.168.1.10', dst: '10.0.0.2', dport: 443, lastSeen: t - 500,  firstSeen: t - 500 });
+    insert({ src: '192.168.1.20', dst: '10.0.0.3', dport: 53,  lastSeen: t - 2000, firstSeen: t - 2000 });
+
+    const result = history.summarizeByTimeRange(null, null);
+    const dev10 = result.byDevice.find(r => r.src === '192.168.1.10');
+    const dev20 = result.byDevice.find(r => r.src === '192.168.1.20');
+    assert.ok(dev10, '192.168.1.10 should appear in byDevice');
+    assert.equal(dev10.count, 2);
+    assert.ok(dev20, '192.168.1.20 should appear in byDevice');
+    assert.equal(dev20.count, 1);
+  });
+
+  it('respects time range in summary', () => {
+    const t = Date.now();
+    insert({ src: '192.168.1.1', dst: '10.0.0.1', dport: 80,  lastSeen: t - 5000, firstSeen: t - 5000 });
+    insert({ src: '192.168.1.1', dst: '10.0.0.2', dport: 443, lastSeen: t - 1000, firstSeen: t - 1000 });
+
+    const result = history.summarizeByTimeRange(t - 3000, null);
+    assert.equal(result.byDst.length, 1, 'only the recent entry should be in summary');
+    assert.equal(result.byDst[0].dst, '10.0.0.2');
+  });
+
+  it('byDst includes firstSeen and lastSeen aggregates', () => {
+    const t = Date.now();
+    insert({ src: '192.168.1.1', dst: '10.0.0.1', dport: 80,  firstSeen: t - 3000, lastSeen: t - 2000 });
+    insert({ src: '192.168.1.1', dst: '10.0.0.1', dport: 443, firstSeen: t - 1500, lastSeen: t - 500 });
+
+    const result = history.summarizeByTimeRange(null, null);
+    const entry = result.byDst.find(r => r.dst === '10.0.0.1');
+    assert.ok(entry.firstSeen <= t - 2000, 'firstSeen should be the earliest');
+    assert.ok(entry.lastSeen  >= t - 1000, 'lastSeen should be the latest');
+  });
+});
+
+// ─── queryByTimeRangePaged: sort options ──────────────────────────────────────
+
+describe('queryByTimeRangePaged: sort options', () => {
+  it('sorts by lastSeen DESC by default', () => {
+    const t = Date.now();
+    insert({ dst: '10.0.0.1', dport: 80,  lastSeen: t - 2000, firstSeen: t - 2000 });
+    insert({ dst: '10.0.0.2', dport: 443, lastSeen: t - 1000, firstSeen: t - 1000 });
+
+    const results = history.queryByTimeRangePaged(null, null, 10, 0);
+    assert.ok(results[0].lastSeen >= results[1].lastSeen, 'default should be newest first');
+  });
+
+  it('sorts by lastSeen ASC when sortDir=asc', () => {
+    const t = Date.now();
+    insert({ dst: '10.0.0.1', dport: 80,  lastSeen: t - 2000, firstSeen: t - 2000 });
+    insert({ dst: '10.0.0.2', dport: 443, lastSeen: t - 1000, firstSeen: t - 1000 });
+
+    const results = history.queryByTimeRangePaged(null, null, 10, 0, { sort: 'lastSeen', sortDir: 'asc' });
+    assert.ok(results[0].lastSeen <= results[1].lastSeen, 'asc should be oldest first');
+  });
+
+  it('sorts by dport', () => {
+    const t = Date.now();
+    insert({ dst: '10.0.0.1', dport: 443, lastSeen: t - 1000, firstSeen: t - 1000 });
+    insert({ dst: '10.0.0.2', dport: 80,  lastSeen: t - 2000, firstSeen: t - 2000 });
+    insert({ dst: '10.0.0.3', dport: 53,  lastSeen: t - 3000, firstSeen: t - 3000 });
+
+    const asc  = history.queryByTimeRangePaged(null, null, 10, 0, { sort: 'dport', sortDir: 'asc'  });
+    const desc = history.queryByTimeRangePaged(null, null, 10, 0, { sort: 'dport', sortDir: 'desc' });
+    assert.ok(asc[0].dport  <= asc[1].dport,  'asc dport should be lowest first');
+    assert.ok(desc[0].dport >= desc[1].dport, 'desc dport should be highest first');
+  });
+
+  it('falls back to lastSeen for unknown sort column', () => {
+    const t = Date.now();
+    insert({ dst: '10.0.0.1', dport: 80,  lastSeen: t - 2000, firstSeen: t - 2000 });
+    insert({ dst: '10.0.0.2', dport: 443, lastSeen: t - 1000, firstSeen: t - 1000 });
+
+    // 'app' is not a DB column; should fall back to lastSeen DESC
+    const results = history.queryByTimeRangePaged(null, null, 10, 0, { sort: 'app', sortDir: 'desc' });
+    assert.ok(results[0].lastSeen >= results[1].lastSeen, 'unknown col should fall back to lastSeen DESC');
+  });
+});
+
+// ─── queryByTimeRangePaged / countByTimeRange: filter options ─────────────────
+
+describe('queryByTimeRangePaged / countByTimeRange: filter options', () => {
+  function insertWithFields(overrides) {
+    const t = Date.now();
+    return insert({ lastSeen: t, firstSeen: t, ...overrides });
+  }
+
+  it('filters by dst (contains)', () => {
+    insertWithFields({ dst: '8.8.8.8',    dstHost: 'dns.google',   dport: 53 });
+    insertWithFields({ dst: '1.1.1.1',    dstHost: 'one.one.one.one', dport: 53 });
+    insertWithFields({ dst: '93.184.216.34', dstHost: 'example.com', dport: 80 });
+
+    const results = history.queryByTimeRangePaged(null, null, 10, 0, {
+      filters: { dst: { mode: 'contains', value: 'google' } },
+    });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].dst, '8.8.8.8');
+  });
+
+  it('filters by dst (startsWith)', () => {
+    insertWithFields({ dst: '8.8.8.8', dstHost: 'dns.google', dport: 53 });
+    insertWithFields({ dst: '1.1.1.1', dstHost: 'dns.cloudflare', dport: 53 });
+
+    const results = history.queryByTimeRangePaged(null, null, 10, 0, {
+      filters: { dst: { mode: 'startsWith', value: 'dns.g' } },
+    });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].dstHost, 'dns.google');
+  });
+
+  it('filters by src (contains, matches srcDnsName)', () => {
+    insertWithFields({ src: '192.168.1.10', srcDnsName: 'myphone.local', dst: '10.0.0.1', dport: 443 });
+    insertWithFields({ src: '192.168.1.20', srcDnsName: 'laptop.local',  dst: '10.0.0.2', dport: 443 });
+
+    const results = history.queryByTimeRangePaged(null, null, 10, 0, {
+      filters: { src: { mode: 'contains', value: 'phone' } },
+    });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].src, '192.168.1.10');
+  });
+
+  it('filters by proto', () => {
+    insertWithFields({ dst: '10.0.0.1', dport: 443, proto: 'TCP' });
+    insertWithFields({ dst: '10.0.0.2', dport: 53,  proto: 'UDP' });
+
+    const results = history.queryByTimeRangePaged(null, null, 10, 0, {
+      filters: { proto: { mode: 'contains', value: 'UDP' } },
+    });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].proto, 'UDP');
+  });
+
+  it('filters by country', () => {
+    insertWithFields({ dst: '10.0.0.1', dport: 80, country: 'US' });
+    insertWithFields({ dst: '10.0.0.2', dport: 80, country: 'JP' });
+
+    const results = history.queryByTimeRangePaged(null, null, 10, 0, {
+      filters: { country: { mode: 'contains', value: 'JP' } },
+    });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].country, 'JP');
+  });
+
+  it('filters by org', () => {
+    insertWithFields({ dst: '10.0.0.1', dport: 80, org: 'Amazon Web Services' });
+    insertWithFields({ dst: '10.0.0.2', dport: 80, org: 'Google LLC' });
+
+    const results = history.queryByTimeRangePaged(null, null, 10, 0, {
+      filters: { org: { mode: 'contains', value: 'Amazon' } },
+    });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].org, 'Amazon Web Services');
+  });
+
+  it('countByTimeRange respects filters', () => {
+    insertWithFields({ dst: '10.0.0.1', dport: 443, proto: 'TCP' });
+    insertWithFields({ dst: '10.0.0.2', dport: 53,  proto: 'UDP' });
+    insertWithFields({ dst: '10.0.0.3', dport: 443, proto: 'TCP' });
+
+    const count = history.countByTimeRange(null, null, {
+      filters: { proto: { mode: 'contains', value: 'TCP' } },
+    });
+    assert.equal(count, 2);
+  });
+
+  it('combines time range and filter', () => {
+    const t = Date.now();
+    insertWithFields({ dst: '10.0.0.1', dport: 80, org: 'Amazon', lastSeen: t - 5000, firstSeen: t - 5000 });
+    insertWithFields({ dst: '10.0.0.2', dport: 80, org: 'Amazon', lastSeen: t - 500,  firstSeen: t - 500 });
+    insertWithFields({ dst: '10.0.0.3', dport: 80, org: 'Google', lastSeen: t - 500,  firstSeen: t - 500 });
+
+    const results = history.queryByTimeRangePaged(t - 2000, null, 10, 0, {
+      filters: { org: { mode: 'contains', value: 'Amazon' } },
+    });
+    assert.equal(results.length, 1, 'only the recent Amazon entry should match both constraints');
+    assert.equal(results[0].dst, '10.0.0.2');
+  });
+
+  it('empty filters object returns all rows', () => {
+    insertWithFields({ dst: '10.0.0.1', dport: 80 });
+    insertWithFields({ dst: '10.0.0.2', dport: 443 });
+
+    const results = history.queryByTimeRangePaged(null, null, 10, 0, { filters: {} });
+    assert.equal(results.length, 2);
+  });
+});

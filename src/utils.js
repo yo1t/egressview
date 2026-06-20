@@ -42,7 +42,7 @@ function parseTimestamp(val) {
   // Reject anything that isn't a plain integer string (no trailing garbage,
   // no decimal point).  parseInt('123abc') would silently return 123, which
   // could let malformed query params slip through.
-  if (!/^-?\d+$/.test(String(val))) return null;
+  if (!/^\d+$/.test(String(val))) return null;
   const n = parseInt(val, 10);
   if (!Number.isFinite(n)) return null;
   return n;

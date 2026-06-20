@@ -202,8 +202,8 @@ function upsertEntry(entry) {
     lat: entry.lat ?? null,
     lon: entry.lon ?? null,
     city: entry.city || null,
-    firstSeen: entry.firstSeen || Date.now(),
-    lastSeen: entry.lastSeen || Date.now(),
+    firstSeen: entry.firstSeen ?? Date.now(),
+    lastSeen:  entry.lastSeen  ?? Date.now(),
   });
 }
 
@@ -319,6 +319,130 @@ function queryByTimeRange(from, to) {
   return db.prepare(`SELECT * FROM connections${where} ORDER BY lastSeen DESC`).all(...params);
 }
 
+// Safe whitelist for ORDER BY column names
+const SORT_COL_SQL = {
+  lastSeen: 'lastSeen',
+  src:      'src',
+  dst:      'dstHost, dst',
+  dport:    'dport',
+  proto:    'proto',
+  country:  'country',
+  org:      'org',
+};
+
+function escapeLikeValue(value) {
+  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+function makeLikePat(mode, value) {
+  const v = escapeLikeValue(value);
+  if (mode === 'startsWith') return v + '%';
+  if (mode === 'endsWith')   return '%' + v;
+  return '%' + v + '%'; // contains (default)
+}
+
+function buildFilterConditions(filters) {
+  const conditions = [];
+  const params = [];
+  if (filters.src?.value) {
+    if (filters.src.mode === 'exact') {
+      conditions.push('src = ?');
+      params.push(filters.src.value);
+    } else {
+      const p = makeLikePat(filters.src.mode, filters.src.value);
+      conditions.push("(src LIKE ? ESCAPE '\\' OR srcDnsName LIKE ? ESCAPE '\\' OR srcMdnsName LIKE ? ESCAPE '\\')");
+      params.push(p, p, p);
+    }
+  }
+  if (filters.dst?.value) {
+    const p = makeLikePat(filters.dst.mode, filters.dst.value);
+    conditions.push("(dst LIKE ? ESCAPE '\\' OR dstHost LIKE ? ESCAPE '\\')");
+    params.push(p, p);
+  }
+  if (filters.dport?.value) {
+    const p = makeLikePat(filters.dport.mode, filters.dport.value);
+    conditions.push("CAST(dport AS TEXT) LIKE ? ESCAPE '\\'");
+    params.push(p);
+  }
+  if (filters.proto?.value) {
+    const p = makeLikePat(filters.proto.mode, filters.proto.value);
+    conditions.push("proto LIKE ? ESCAPE '\\'");
+    params.push(p);
+  }
+  if (filters.country?.value) {
+    const p = makeLikePat(filters.country.mode, filters.country.value);
+    conditions.push("country LIKE ? ESCAPE '\\'");
+    params.push(p);
+  }
+  if (filters.org?.value) {
+    const p = makeLikePat(filters.org.mode, filters.org.value);
+    conditions.push("org LIKE ? ESCAPE '\\'");
+    params.push(p);
+  }
+  return { conditions, params };
+}
+
+function buildWhereAndParams(from, to, filterConditions) {
+  const conditions = [];
+  const params = [];
+  if (from != null) { conditions.push('lastSeen >= ?'); params.push(from); }
+  if (to   != null) { conditions.push('lastSeen <= ?'); params.push(to); }
+  conditions.push(...filterConditions.conditions);
+  params.push(...filterConditions.params);
+  return {
+    where:  conditions.length ? ' WHERE ' + conditions.join(' AND ') : '',
+    params,
+  };
+}
+
+function queryByTimeRangePaged(from, to, limit, offset, { sort = 'lastSeen', sortDir = 'desc', filters = {} } = {}) {
+  if (!db) return [];
+  const sortSql = SORT_COL_SQL[sort] || 'lastSeen';
+  const dir = sortDir === 'asc' ? 'ASC' : 'DESC';
+  const fc = buildFilterConditions(filters);
+  const { where, params } = buildWhereAndParams(from, to, fc);
+  // Apply direction to each comma-separated sort column (e.g. 'dstHost, dst')
+  const orderClause = sortSql.split(',').map(c => c.trim() + ' ' + dir).join(', ');
+  if (limit == null) {
+    return db.prepare(
+      `SELECT * FROM connections${where} ORDER BY ${orderClause}`
+    ).all(...params);
+  }
+  return db.prepare(
+    `SELECT * FROM connections${where} ORDER BY ${orderClause} LIMIT ? OFFSET ?`
+  ).all(...params, limit, offset);
+}
+
+function countByTimeRange(from, to, { filters = {} } = {}) {
+  if (!db) return 0;
+  const fc = buildFilterConditions(filters);
+  const { where, params } = buildWhereAndParams(from, to, fc);
+  const row = db.prepare(`SELECT COUNT(*) as cnt FROM connections${where}`).get(...params);
+  return row ? row.cnt : 0;
+}
+
+function summarizeByTimeRange(from, to) {
+  if (!db) return { byDst: [], byDevice: [] };
+  const conditions = [];
+  const params = [];
+  if (from != null) { conditions.push('lastSeen >= ?'); params.push(from); }
+  if (to   != null) { conditions.push('lastSeen <= ?'); params.push(to); }
+  const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
+  const byDst = db.prepare(
+    `SELECT dst, dstHost, country, org,
+            COUNT(*) as count, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
+     FROM connections${where}
+     GROUP BY dst ORDER BY count DESC LIMIT 500`
+  ).all(...params);
+  const byDevice = db.prepare(
+    `SELECT src, srcMac, srcVendor,
+            COUNT(*) as count, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
+     FROM connections${where}
+     GROUP BY src ORDER BY count DESC LIMIT 200`
+  ).all(...params);
+  return { byDst, byDevice };
+}
+
 function logNotification(entry, type, slackSent) {
   if (!db || !stmtInsertNotifLog) return;
   try {
@@ -402,6 +526,9 @@ module.exports = {
   pruneHistory,
   getConnectionHistory,
   queryByTimeRange,
+  queryByTimeRangePaged,
+  countByTimeRange,
+  summarizeByTimeRange,
   getKnownMacs,
   logNotification,
   queryNotificationLog,

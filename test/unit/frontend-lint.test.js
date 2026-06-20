@@ -14,6 +14,8 @@ const path = require('node:path');
 const htmlPath = path.join(__dirname, '..', '..', 'public', 'index.html');
 const jsDir    = path.join(__dirname, '..', '..', 'public', 'js');
 const html     = fs.readFileSync(htmlPath, 'utf8');
+const logJs    = fs.readFileSync(path.join(jsDir, 'log.js'), 'utf8');
+const mainJs   = fs.readFileSync(path.join(jsDir, 'main.js'), 'utf8');
 
 // Collect JS by following every <script src="__BASE__/js/..."> tag in load order.
 // Falls back to any inline <script> block (future-proofing).
@@ -136,5 +138,87 @@ describe('Frontend TDZ lint', () => {
     // Dedupe
     const unique = [...new Set(missing)];
     assert.equal(unique.length, 0, `getElementById references missing HTML ids:\n  ${unique.join('\n  ')}`);
+  });
+});
+
+describe('Disconnect banner behavior invariants', () => {
+  function snippetBetween(start, end) {
+    const s = mainJs.indexOf(start);
+    assert.notEqual(s, -1, `start marker not found: ${start}`);
+    const e = mainJs.indexOf(end, s);
+    assert.notEqual(e, -1, `end marker not found: ${end}`);
+    return mainJs.slice(s, e);
+  }
+
+  it('auth-required resets the reconnect banner text before targeting the L2 settings tab', () => {
+    const handler = snippetBetween("socket.on('auth-required'", "socket.on('yamaha-status'");
+    assert.match(handler, /textContent\s*=\s*t\(['"]banner\.button['"]\)/,
+      'ASUS/L2 auth-required should restore the generic reconnect button label');
+    assert.match(handler, /openSettings\(['"]l2['"]\)/,
+      'ASUS/L2 auth-required should send the reconnect button to the L2 settings tab');
+  });
+});
+
+describe('Connection Log pagination/filter invariants', () => {
+  function snippetBetween(start, end) {
+    const s = logJs.indexOf(start);
+    assert.notEqual(s, -1, `start marker not found: ${start}`);
+    const e = logJs.indexOf(end, s);
+    assert.notEqual(e, -1, `end marker not found: ${end}`);
+    return logJs.slice(s, e);
+  }
+
+  it('client-side-only filters are detected as requiring full-fetch mode', () => {
+    const fn = snippetBetween('function hasClientSideOnlyFilter()', 'let logFetchAllMode');
+    assert.match(fn, /!LOG_SERVER_SORT_COLS\.has\(logSortState\.col\)/,
+      'client-only sort columns must switch the log to full-fetch mode');
+    assert.match(fn, /logThreatFilter\s*!==\s*null/,
+      'threat badge filters must switch the log to full-fetch mode');
+    assert.match(fn, /col\s*===\s*['"]app['"]/,
+      'app filters must switch the log to full-fetch mode');
+    assert.match(fn, /col\s*===\s*['"]threatTag['"]/,
+      'threatTag filters must switch the log to full-fetch mode');
+    assert.match(fn, /filter\.mode\s*===\s*['"]regex['"]/,
+      'regex filters must switch the log to full-fetch mode');
+  });
+
+  it('full-fetch mode omits limit/offset so client-side filters see all matching rows', () => {
+    const fn = snippetBetween('async function fetchLogPage()', '// ── Render');
+    assert.match(fn, /logFetchAllMode\s*=\s*hasClientSideOnlyFilter\(\)/,
+      'fetchLogPage must recompute whether a full fetch is required');
+    assert.match(fn, /if\s*\(!logFetchAllMode\)\s*{[\s\S]*params\.set\(['"]limit['"][\s\S]*params\.set\(['"]offset['"]/,
+      'limit/offset should only be added when full-fetch mode is off');
+  });
+
+  it('search apply refetches instead of filtering only the current page', () => {
+    const handler = snippetBetween(
+      "document.getElementById('log-search-apply').addEventListener",
+      "document.getElementById('log-search-clear').addEventListener"
+    );
+    assert.match(handler, /fetchLogPage\(\)/,
+      'app/threatTag/regex filters need a refetch so they can enter full-fetch mode');
+    assert.doesNotMatch(handler, /renderLogView\(\)/,
+      'search apply must not render only the current page after changing filters');
+  });
+
+  it('threat badge filters refetch instead of filtering only the current page', () => {
+    const section = snippetBetween('threatCountEl.innerHTML', '// Sort icon state');
+    for (const id of ['safe', 'warn', 'danger']) {
+      const re = new RegExp(`log-filter-${id}[\\s\\S]*?fetchLogPage\\(\\)`);
+      assert.match(section, re, `${id} threat badge should refetch before applying badge filter`);
+    }
+    assert.doesNotMatch(section, /renderLogView\(\)/,
+      'threat badge clicks must not filter only the currently loaded page');
+  });
+
+  it('client-only column sorting refetches so sort order covers the full result set', () => {
+    const handler = snippetBetween(
+      "document.querySelectorAll('#log-table th[data-col]').forEach",
+      '// ── Search popup logic'
+    );
+    assert.match(handler, /fetchLogPage\(\)/,
+      'sorting app/threatTag should refetch and use full-fetch mode before sorting');
+    assert.doesNotMatch(handler, /renderLogView\(\)/,
+      'header sort must not sort only the currently loaded page');
   });
 });
