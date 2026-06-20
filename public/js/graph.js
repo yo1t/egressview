@@ -2,16 +2,16 @@
 const svg = d3.select('#graph');
 let width = 0, height = 0;
 
-function resize() {
+function resize({ refreshStats = true } = {}) {
   const el = document.getElementById('graph-container');
   width = el.clientWidth; height = el.clientHeight;
   svg.attr('width', width).attr('height', height);
-  if (simulation) {
+  if (simulation && width && height) {
     simulation.force('x-center', d3.forceX(width/2).strength(0.04));
     simulation.force('y-split',  d3.forceY(d => d.type === 'org' ? height * 0.22 : height * 0.72).strength(d => d.type === 'org' ? 0.15 : 0.06));
     simulation.alpha(0.3).restart();
   }
-  if (statsMode) updateStats();
+  if (refreshStats && statsMode) updateStats();
 }
 window.addEventListener('resize', resize);
 // Redraw on screen rotation too
@@ -82,8 +82,9 @@ function fitGraphToNodes({ duration = 400, padding = 96, maxScale = 2.4 } = {}) 
   const hBox = Math.max(50, yMax - yMin);
   const sw = svg.node().clientWidth  || width;
   const sh = svg.node().clientHeight || height;
-  if (!sw || !sh) return;
+  if (!sw || !sh || sw <= padding || sh <= padding) return;
   const k = Math.min(maxScale, (sw - padding) / wBox, (sh - padding) / hBox);
+  if (!Number.isFinite(k)) return;
   const kk = Math.max(0.1, k);
   const tx = sw / 2 - (xMin + wBox / 2) * kk;
   const ty = sh / 2 - (yMin + hBox / 2) * kk;
@@ -124,6 +125,7 @@ let lastClients = [];
 let lastMainMac = '';
 let graphSummary = null;
 let graphSummaryKey = null;
+let graphSummaryInflight = { key: null, promise: null };
 
 // Per-AiMesh-node identity colour
 const MESH_COLORS = ['#f59e0b','#f97316','#14b8a6','#a78bfa','#fb7185'];
@@ -159,6 +161,8 @@ function graphSummaryNotice(show, summary) {
   const notice = document.getElementById('graph-summary-notice');
   if (!notice) return;
   notice.style.display = show ? '' : 'none';
+  const truncated = document.getElementById('graph-truncated-notice');
+  if (truncated && show) truncated.style.display = 'none';
   if (show && summary) {
     notice.textContent = tVars('graph.summary', {
       total: Number(summary.total || 0).toLocaleString(),
@@ -177,16 +181,27 @@ function clearGraphSummary() {
 async function fetchGraphSummary(from, to) {
   const key = currentGraphRangeKey(from, to);
   if (graphSummary && graphSummaryKey === key) return graphSummary;
+  if (graphSummaryInflight.key === key && graphSummaryInflight.promise) return graphSummaryInflight.promise;
   const params = new URLSearchParams();
   if (from != null) params.set('from', from);
   if (to != null) params.set('to', to);
   params.set('buckets', '60');
-  const res = await apiFetch(`${_BASE}/api/connections/summary?${params}`);
-  if (!res.ok) throw new Error(`graph summary failed: ${res.status}`);
-  graphSummary = await res.json();
-  graphSummaryKey = key;
-  graphSummaryNotice(true, graphSummary);
-  return graphSummary;
+  graphSummaryInflight = {
+    key,
+    promise: (async () => {
+      const res = await apiFetch(`${_BASE}/api/connections/summary?${params}`);
+      if (!res.ok) throw new Error(`graph summary failed: ${res.status}`);
+      graphSummary = await res.json();
+      graphSummaryKey = key;
+      graphSummaryNotice(true, graphSummary);
+      return graphSummary;
+    })(),
+  };
+  try {
+    return await graphSummaryInflight.promise;
+  } finally {
+    if (graphSummaryInflight.key === key) graphSummaryInflight = { key: null, promise: null };
+  }
 }
 
 function buildGraph(data, { resetPositions = false } = {}) {
@@ -252,7 +267,8 @@ function buildGraph(data, { resetPositions = false } = {}) {
 }
 
 function updateSimulation(satellites) {
-  if (!width) resize();
+  if (!width || !height) resize({ refreshStats: false });
+  if (!width || !height) return;
   links = normalizeGraphLinks(links, nodes);
   const cx = width / 2, cy = height / 2;
   const internet = nodes.find(n => n.id === '__internet__');
@@ -277,6 +293,13 @@ function updateSimulation(satellites) {
     if (d.type === 'client') return height * 0.72; // clients: bottom
     return height * 0.78;                          // mesh etc.: lower
   };
+
+  nodes.forEach((n, i) => {
+    if (!Number.isFinite(n.x)) n.x = cx + Math.cos(i) * 40;
+    if (!Number.isFinite(n.y)) n.y = cy + Math.sin(i) * 40;
+    if (!Number.isFinite(n.vx)) n.vx = 0;
+    if (!Number.isFinite(n.vy)) n.vy = 0;
+  });
   const strengthY = d => {
     if (d.type === 'org')    return 0.15;
     if (d.type === 'client') return 0.06;
@@ -396,9 +419,11 @@ function drawNodes() {
 
 function ticked() {
   linkGroup.selectAll('line')
-    .attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
-    .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
-  nodeGroup.selectAll('g.node').attr('transform',d=>`translate(${d.x},${d.y})`);
+    .attr('x1', d => Number.isFinite(d.source.x) ? d.source.x : 0)
+    .attr('y1', d => Number.isFinite(d.source.y) ? d.source.y : 0)
+    .attr('x2', d => Number.isFinite(d.target.x) ? d.target.x : 0)
+    .attr('y2', d => Number.isFinite(d.target.y) ? d.target.y : 0);
+  nodeGroup.selectAll('g.node').attr('transform', d => `translate(${Number.isFinite(d.x) ? d.x : 0},${Number.isFinite(d.y) ? d.y : 0})`);
 }
 
 // ─── Tooltip ──────────────────────────────────────────────────────────────────

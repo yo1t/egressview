@@ -374,6 +374,7 @@ document.querySelectorAll('.chart-mode-btn').forEach(btn => {
 
 let statsSummaryGeneration = 0;
 let statsSummaryCache = { key: null, at: 0, data: null };
+let statsSummaryInflight = { key: null, promise: null };
 
 function getStatsSelection() {
   const sel = selectedMac;
@@ -528,15 +529,25 @@ async function fetchStatsSummary(selIp) {
   if (statsSummaryCache.key === key && statsSummaryCache.data && now - statsSummaryCache.at < 5000) {
     return statsSummaryCache.data;
   }
+  if (statsSummaryInflight.key === key && statsSummaryInflight.promise) {
+    return statsSummaryInflight.promise;
+  }
   setFetching(+1);
-  try {
+  statsSummaryInflight = {
+    key,
+    promise: (async () => {
     const res = await apiFetch(`${_BASE}/api/connections/summary?${params}`);
     if (!res.ok) throw new Error(`summary failed: ${res.status}`);
     const data = await res.json();
     if (data.serverTime) serverTimeOffset = data.serverTime - Date.now();
     statsSummaryCache = { key, at: Date.now(), data };
     return data;
+    })(),
+  };
+  try {
+    return await statsSummaryInflight.promise;
   } finally {
+    if (statsSummaryInflight.key === key) statsSummaryInflight = { key: null, promise: null };
     setFetching(-1);
   }
 }

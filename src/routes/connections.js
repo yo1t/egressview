@@ -15,6 +15,25 @@ const ALLOWED_SORT_DIRS = new Set(['asc', 'desc']);
 const ALLOWED_FILTER_MODES = new Set(['contains', 'startsWith', 'endsWith', 'exact']);
 // Columns whose filters can be applied server-side (maps to DB columns)
 const SERVER_FILTER_COLS = ['src', 'dst', 'dport', 'proto', 'country', 'org', 'srcMac'];
+const SUMMARY_CACHE_TTL_MS = 10_000;
+const summaryCache = new Map();
+
+function getSummaryCache(key) {
+  const hit = summaryCache.get(key);
+  if (!hit || Date.now() - hit.at > SUMMARY_CACHE_TTL_MS) {
+    summaryCache.delete(key);
+    return null;
+  }
+  return hit.body;
+}
+
+function setSummaryCache(key, body) {
+  summaryCache.set(key, { at: Date.now(), body });
+  if (summaryCache.size > 20) {
+    const oldest = summaryCache.keys().next().value;
+    summaryCache.delete(oldest);
+  }
+}
 
 function attachThreats(connections, threatIntel) {
   if (!threatIntel || typeof threatIntel.matchThreatIntel !== 'function') return connections;
@@ -79,8 +98,12 @@ function connectionsRoutes(ctx) {
       buckets = Math.max(1, Math.min(240, parseInt(bucketsRaw, 10)));
     }
     const src = req.query.src || null;
+    const cacheKey = JSON.stringify({ from, to, src, buckets });
+    const cached = getSummaryCache(cacheKey);
+    if (cached) return res.json({ ...cached, serverTime: Date.now(), cached: true });
     const summary = history.summarizeByTimeRange(from, to, { src, buckets });
-    res.json({ ...summary, serverTime: Date.now() });
+    setSummaryCache(cacheKey, summary);
+    res.json({ ...summary, serverTime: Date.now(), cached: false });
   });
 
   router.get('/connections', requireAdmin, (req, res) => {
