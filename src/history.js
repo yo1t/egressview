@@ -379,6 +379,11 @@ function buildFilterConditions(filters) {
     conditions.push("org LIKE ? ESCAPE '\\'");
     params.push(p);
   }
+  if (filters.srcMac?.value) {
+    // MAC is always exact match (no LIKE — colons and case must match stored value)
+    conditions.push('srcMac = ?');
+    params.push(filters.srcMac.value);
+  }
   return { conditions, params };
 }
 

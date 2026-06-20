@@ -84,11 +84,11 @@ function renderPagination() {
 }
 
 // Returns true when active filters/sort cannot be applied server-side
-// (app, threatTag, regex, badge).
-// In this case the full result set must be fetched and filtered client-side.
+// (app, threatTag, regex mode, threat-badge).
+// selectedMac is now passed as fSrcMac to the server, so it no longer forces
+// a full client-side fetch.
 function hasClientSideOnlyFilter() {
   if (logThreatFilter !== null) return true;
-  if (selectedMac) return true;  // MAC present: src IP may change (DHCP); fetch all and filter by MAC
   if (!LOG_SERVER_SORT_COLS.has(logSortState.col)) return true;
   for (const [col, filter] of Object.entries(logFilters)) {
     if (!filter) continue;
@@ -136,17 +136,18 @@ async function fetchLogPage() {
     params.set('sortDir', logSortState.dir);
   }
 
-  // Device filter: when only IP is known, use server-side exact match.
-  // When MAC is also known (full-fetch mode), filtering is done client-side so
-  // roaming devices (same MAC, different IP) are not missed.
-  if (selectedIp && !selectedMac) {
+  // Device filter: MAC → server-side exact match on srcMac column (covers roaming/DHCP).
+  // IP-only (no MAC known) → server-side exact match on src column.
+  if (selectedMac) {
+    params.set('fSrcMac', selectedMac);
+  } else if (selectedIp) {
     params.set('fSrc',     selectedIp);
     params.set('fSrcMode', 'exact');
   }
 
-  // Server-side column filters (DB columns, non-regex; src skipped when IP-only device filter active)
+  // Server-side column filters (DB columns, non-regex; src skipped when device filter active)
   for (const [col, filter] of Object.entries(logFilters)) {
-    if (col === 'src' && selectedIp && !selectedMac) continue;
+    if (col === 'src' && (selectedMac || selectedIp)) continue;
     if (LOG_SERVER_FILTER_COLS.has(col) && filter?.value && filter.mode !== 'regex') {
       params.set(LOG_FILTER_PARAM[col],      filter.value);
       params.set(LOG_FILTER_MODE_PARAM[col], filter.mode || 'contains');
@@ -179,12 +180,13 @@ function renderLogView() {
 
   let conns = logPageData.slice();
 
-  // Device filter: MAC case uses all-fetched rows (matched by MAC); IP-only case is already server-filtered (cheap guard).
+  // Device filter badge + safety guard. Both IP and MAC filters are now applied
+  // server-side; this just ensures no stale rows slip through on page transitions.
   const deviceFilterEl = document.getElementById('log-device-filter');
   if (selectedIp || selectedMac) {
     conns = conns.filter(c =>
-      (selectedIp  && c.src    === selectedIp)  ||
-      (selectedMac && c.srcMac === selectedMac)
+      (selectedMac && c.srcMac === selectedMac) ||
+      (!selectedMac && selectedIp && c.src === selectedIp)
     );
     if (deviceFilterEl) {
       deviceFilterEl.style.display = 'inline';

@@ -170,7 +170,7 @@ describe('Connection Log view behavior', () => {
     assert.equal(params.get('fSrcMode'), 'exact');
   });
 
-  it('MAC-backed device filters fetch all rows and keep same-MAC IP changes visible', async () => {
+  it('MAC-backed device filters use server-side srcMac filtering with pagination', async () => {
     const h = makeHarness({
       rows: [
         { src: '192.168.1.10', srcMac: 'aa:bb:cc:dd:ee:ff', dst: '8.8.8.8', dport: 443, proto: 'TCP' },
@@ -184,9 +184,13 @@ describe('Connection Log view behavior', () => {
     await h.settle();
 
     const params = h.lastParams();
-    assert.equal(params.has('limit'), false);
-    assert.equal(params.has('offset'), false);
+    // MAC filter is now server-side: pagination params are sent
+    assert.equal(params.get('limit'), '200');
+    assert.equal(params.has('offset'), true);
+    // fSrcMac is sent instead of fSrc
+    assert.equal(params.get('fSrcMac'), 'aa:bb:cc:dd:ee:ff');
     assert.equal(params.has('fSrc'), false);
+    // Client-side guard still filters the mock response by srcMac
     assert.match(h.getEl('log-tbody').innerHTML, /8\.8\.8\.8/);
     assert.match(h.getEl('log-tbody').innerHTML, /1\.1\.1\.1/);
     assert.doesNotMatch(h.getEl('log-tbody').innerHTML, /9\.9\.9\.9/);

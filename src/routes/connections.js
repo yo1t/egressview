@@ -14,7 +14,7 @@ const ALLOWED_SORT_COLS = new Set(['lastSeen', 'src', 'dst', 'dport', 'proto', '
 const ALLOWED_SORT_DIRS = new Set(['asc', 'desc']);
 const ALLOWED_FILTER_MODES = new Set(['contains', 'startsWith', 'endsWith', 'exact']);
 // Columns whose filters can be applied server-side (maps to DB columns)
-const SERVER_FILTER_COLS = ['src', 'dst', 'dport', 'proto', 'country', 'org'];
+const SERVER_FILTER_COLS = ['src', 'dst', 'dport', 'proto', 'country', 'org', 'srcMac'];
 
 function attachThreats(connections, threatIntel) {
   if (!threatIntel || typeof threatIntel.matchThreatIntel !== 'function') return connections;
@@ -33,7 +33,8 @@ function parseTimestampParam(value, name, res) {
 
 // Parse sort/filter params from query string into options for history functions.
 // Filter params: fSrc, fSrcMode, fDst, fDstMode, fDport, fDportMode,
-//                fProto, fProtoMode, fCountry, fCountryMode, fOrg, fOrgMode
+//                fProto, fProtoMode, fCountry, fCountryMode, fOrg, fOrgMode,
+//                fSrcMac (always exact — no mode param)
 // Sort params:   sort (column name), sortDir (asc|desc)
 function parsePaginationOpts(query) {
   const sort    = ALLOWED_SORT_COLS.has(query.sort)    ? query.sort    : 'lastSeen';
@@ -41,6 +42,7 @@ function parsePaginationOpts(query) {
 
   const filters = {};
   for (const col of SERVER_FILTER_COLS) {
+    if (col === 'srcMac') continue; // handled separately below
     const capCol = col.charAt(0).toUpperCase() + col.slice(1);
     const value  = query[`f${capCol}`];
     if (value != null && value !== '') {
@@ -48,6 +50,10 @@ function parsePaginationOpts(query) {
       const mode = ALLOWED_FILTER_MODES.has(rawMode) ? rawMode : 'contains';
       filters[col] = { mode, value };
     }
+  }
+  // srcMac is always exact match (MAC address format: AA:BB:CC:DD:EE:FF)
+  if (query.fSrcMac != null && query.fSrcMac !== '') {
+    filters.srcMac = { mode: 'exact', value: query.fSrcMac };
   }
 
   return { sort, sortDir, filters };
