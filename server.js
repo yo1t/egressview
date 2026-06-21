@@ -385,7 +385,7 @@ async function pollYamahaConnections() {
     if (err.message.includes('timeout')) {
       console.log('[yamaha] Timeout detected, resetting connection…');
       yamaha.reconnect();
-      return;
+      // fall through so setTimeout still runs — otherwise polling stops permanently
     }
   }
   setTimeout(pollYamahaConnections, 60000);

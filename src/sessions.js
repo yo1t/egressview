@@ -6,7 +6,10 @@
 const crypto   = require('crypto');
 const Database = require('better-sqlite3');
 
-const DB_PATH = process.env.EGRESSVIEW_DB || '.egressview.db';
+// Use the same env var as history.js so DEMO_MODE / EGRESSVIEW_DB_PATH override works for both
+const DB_PATH = process.env.EGRESSVIEW_DB_PATH
+  ? require('path').resolve(process.env.EGRESSVIEW_DB_PATH)
+  : (process.env.EGRESSVIEW_DB || '.egressview.db');
 const SESSION_TTL_MS    = 30 * 24 * 3600_000;  // 30 days, sliding
 const TOUCH_THROTTLE_MS = 5 * 60 * 1000;       // refresh lastSeenAt at most every 5 min
 
