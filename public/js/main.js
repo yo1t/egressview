@@ -35,14 +35,34 @@ socket.on('yamaha-status', s => {
   }
 });
 
-socket.on('notes-update', data => {
+socket.on('notes-update', async data => {
   if (data?.notes) {
     notesMap = data.notes;
-    // Sync deviceId-keyed notes back into devicesData so re-opening the
-    // detail panel shows the latest value without requiring a full refresh.
+    // notes-update fires only when a note is saved (low frequency), so always
+    // re-fetch devices to ensure devicesData is fresh and deviceId-keyed notes
+    // can be resolved to IP/MAC for the graph sidebar and detail panel.
+    try {
+      const res = await apiFetch(_BASE + '/api/devices');
+      if (res.ok) {
+        const json = await res.json();
+        devicesData = json.devices || [];
+      }
+    } catch (_) { /* ignore — refreshAllNotes will still run */ }
+    // Sync deviceId-keyed notes into devicesData.
     for (const dev of devicesData) {
       if (dev.deviceId != null) {
         dev.note = data.notes[dev.deviceId] ?? null;
+      }
+    }
+    // If a device detail panel is currently open, refresh its note textarea.
+    if (typeof dvDetailDevice !== 'undefined' && dvDetailDevice) {
+      const ta = document.getElementById('dv-detail-note-ta');
+      if (ta) {
+        const fresh = devicesData.find(d => d.ip === dvDetailDevice.ip);
+        if (fresh) {
+          dvDetailDevice = fresh;
+          ta.value = fresh.note ?? lookupNote(fresh.ip, fresh.mac, fresh.deviceId) ?? '';
+        }
       }
     }
   }
