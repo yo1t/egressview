@@ -4,7 +4,7 @@
 
 Is your smart TV phoning home to unexpected servers? Are your IP cameras, IoT appliances, or NAS boxes making connections you never authorised? EgressView answers these questions by passively monitoring every outbound connection from every device on your LAN, then turning that data into an investigation workflow: Graph Map and Statistics for the big picture, Connection Log and Devices for drill-down analysis — with automatic threat detection.
 
-No new hardware. No inline traffic interception. Works via your existing Yamaha RTX router's NAT session table. AI assistants such as Claude and Cursor can query EgressView directly via the built-in MCP server — just ask in natural language.
+No new hardware. No inline traffic interception. Works via your existing Yamaha RTX router's NAT session table. AI assistants such as AWS Kiro, Anthropic Claude, and Anysphere Cursor can query EgressView directly via the built-in MCP server — just ask in natural language.
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-green)
@@ -45,7 +45,7 @@ EgressView answers the question most home users can't ask: *what is each device 
 - **Connection log**: sortable/searchable table of all sessions with threat status badges; **App column** infers the application or service name from port number and destination hostname (APNs, FCM, AirPlay, MQTT/TLS, QUIC, iCloud, YouTube, AWS, Slack, Zoom, Tuya Smart, Gaijin/DCS, and more)
 - **🔔 Detection Log** — persistent history of all threat detections and new-device alerts, with per-column filter, sort, and click-to-detail popup; logged regardless of Slack configuration
 - **📡 Data Sources tab** — configure each data source (dnsmasq / [INSPECT] / [DHCPD]) independently from the settings UI
-- **🤖 AI Agent access (MCP)** — built-in [Model Context Protocol](https://modelcontextprotocol.io/) server exposes 11 tools (traffic summary, threat connections, top destinations, device list, device notes, and more) to AI assistants such as Claude and Cursor; supports both stdio and HTTP transport
+- **🤖 AI Agent access (MCP)** — built-in [Model Context Protocol](https://modelcontextprotocol.io/) server exposes 11 tools (traffic summary, threat connections, top destinations, device list, device notes, and more) to AI assistants such as AWS Kiro, Anthropic Claude, and Anysphere Cursor; supports both stdio and HTTP transport
 - Single-page dark-themed UI: Graph Map, Statistics, Connection Log, Devices, Detection Log, and Settings
 
 ## Demo
@@ -74,7 +74,7 @@ Connection Log and Devices let you drill down into suspicious destinations, nois
 │  [INSPECT] log  │  syslog/UDP │   EgressView Server  │◄────────────►│ Browser          │
 │  [DHCPD] log    │────────────►│   (Node.js)          │  MCP         ├──────────────────┤
 └─────────────────┘             │                      │◄────────────►│ AI Assistant     │
-┌─────────────────┐  HTTP       │  Pollers:            │  stdio/HTTP  │ (Claude, Cursor…)│
+┌─────────────────┐  HTTP       │  Pollers:            │  stdio/HTTP  │ (Kiro, Claude…)  │
 │  ASUS WiFi AP   │◄───────────►│  • yamaha (SSH)      │              └──────────────────┘
 │  (Client list)  │             │  • asus (HTTP)       │
 └─────────────────┘             │  • inspect-syslog    │
@@ -173,7 +173,7 @@ Start with the smallest path that matches your network, then add sources later f
 | ✅ | Node.js 18+ installed on your Mac/PC/Raspberry Pi | [nodejs.org](https://nodejs.org) |
 | ✅ | Yamaha RTX router with SSH enabled | [Setup guide →](docs/setup-yamaha.md) |
 | ☐ | (Optional) ASUS WiFi AP with web admin enabled | [Setup guide →](docs/setup-asus.md) |
-| ☐ | (Optional) AI assistant access via MCP (Claude, Cursor…) | [Setup guide →](docs/setup-mcp.md) |
+| ☐ | (Optional) AI assistant access via MCP (AWS Kiro, Anthropic Claude, Anysphere Cursor…) | [Setup guide →](docs/setup-mcp.md) |
 
 ### Step 2 — Install and launch
 
@@ -370,6 +370,10 @@ Copyright (C) 2025 Yoichi Takizawa
 
 Source code: https://github.com/yo1t/egressview
 ```
+
+## Trademarks
+
+AWS Kiro, Anthropic Claude, Anysphere Cursor, Yamaha, ASUS, and other product names are trademarks or registered trademarks of their respective owners. EgressView is not affiliated with, endorsed by, or sponsored by those companies.
 
 ## Contributing
 

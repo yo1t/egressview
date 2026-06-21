@@ -192,7 +192,7 @@
 
 <header>
   <h1><span>EgressView</span></h1>
-  <p>Where Is Data Exiting? Map All Paths. — 家庭・SOHOのLAN内デバイスが「何と通信しているか」を把握。グラフマップ/統計情報で全体を見て、通信ログ/端末一覧で詳細調査。自動脅威検出とSlackアラート対応。内蔵 MCP サーバーで Claude・Cursor からネットワーク状況を自然言語で問い合わせ可能。</p>
+  <p>Where Is Data Exiting? Map All Paths. — 家庭・SOHOのLAN内デバイスが「何と通信しているか」を把握。グラフマップ/統計情報で全体を見て、通信ログ/端末一覧で詳細調査。自動脅威検出とSlackアラート対応。内蔵 MCP サーバーで AWS Kiro・Anthropic Claude・Anysphere Cursor 等の AI アシスタントからネットワーク状況を自然言語で問い合わせ可能。</p>
   <div class="badges">
     <a href="https://opensource.org/licenses/AGPL-3.0"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
     <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node.js 18+"></a>
@@ -297,7 +297,7 @@
       </div>
       <div class="card">
         <h3>🤖 AIエージェント連携（MCP）</h3>
-        <p><a href="https://modelcontextprotocol.io/">Model Context Protocol</a> サーバーを内蔵。通信サマリー・脅威接続・宛先ランキング・端末一覧・端末メモなど 11本のツールを Claude・Cursor 等の AI アシスタントに公開。stdio / HTTP 両対応。<a href="https://github.com/yo1t/egressview/blob/main/docs/setup-mcp.ja.md">設定ガイド →</a></p>
+        <p><a href="https://modelcontextprotocol.io/">Model Context Protocol</a> サーバーを内蔵。通信サマリー・脅威接続・宛先ランキング・端末一覧・端末メモなど 11本のツールを AWS Kiro・Anthropic Claude・Anysphere Cursor 等の AI アシスタントに公開。stdio / HTTP 両対応。<a href="https://github.com/yo1t/egressview/blob/main/docs/setup-mcp.ja.md">設定ガイド →</a></p>
       </div>
     </div>
   </section>
@@ -337,7 +337,7 @@
 │  [INSPECT] log  │  syslog/UDP │   EgressView Server  │◄────────────►│ ブラウザ          │
 │  [DHCPD] log    │────────────►│   (Node.js)          │  MCP         ├──────────────────┤
 └─────────────────┘             │                      │◄────────────►│ AI アシスタント   │
-┌─────────────────┐  HTTP       │  ポーラー:            │  stdio/HTTP  │(Claude, Cursor…) │
+┌─────────────────┐  HTTP       │  ポーラー:            │  stdio/HTTP  │(Kiro, Claude…)   │
 │  ASUS WiFi AP   │◄───────────►│  • yamaha (SSH)      │              └──────────────────┘
 │  (クライアント)   │             │  • asus (HTTP)       │
 └─────────────────┘             │  • inspect-syslog    │
@@ -383,7 +383,7 @@
         </tr>
         <tr>
           <td style="padding:8px 6px; color:var(--muted);">☐</td>
-          <td style="padding:8px 6px; color:var(--muted);">（任意）AI アシスタント連携（Claude・Cursor 等）</td>
+          <td style="padding:8px 6px; color:var(--muted);">（任意）AI アシスタント連携（AWS Kiro・Anthropic Claude・Anysphere Cursor 等）</td>
           <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-mcp.ja.md">設定ガイド →</a></td>
         </tr>
       </table>
@@ -484,7 +484,7 @@ npm start</code></pre>
       </div>
       <div class="card">
         <h3><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-mcp.ja.md">AIエージェント連携（MCP）</a></h3>
-        <p>Claude Desktop や Claude Code に自然言語でネットワーク状況を聞ける。脅威サマリー・上位宛先・新規端末・端末メモの追加・アラートなど11ツール搭載。</p>
+        <p>AWS Kiro・Anthropic Claude・Anysphere Cursor 等の AI アシスタントに自然言語でネットワーク状況を聞ける。脅威サマリー・上位宛先・新規端末・端末メモの追加・アラートなど11ツール搭載。</p>
       </div>
       <div class="card">
         <h3><a href="https://github.com/yo1t/egressview/blob/main/LICENSE">ライセンス (AGPL-3.0)</a></h3>
@@ -501,6 +501,8 @@ npm start</code></pre>
     <a href="https://github.com/yo1t/egressview/blob/main/LICENSE">AGPL-3.0 ライセンス</a>で公開されています。
     &nbsp;·&nbsp;
     Yamaha および ASUS とは無関係であり、推奨を受けていません。
+    &nbsp;·&nbsp;
+    製品名は各社の商標または登録商標です。
   </p>
 </footer>
 
