@@ -63,7 +63,7 @@ Run the MCP server as a local process on the same machine as Claude Desktop. It 
 
 This is the recommended approach for Claude Desktop. The `command`-based stdio transport is universally supported and avoids any URL validation restrictions.
 
-**Prerequisites:** Node.js 18+, a running EgressView instance, API/admin token.
+**Prerequisites:** Node.js 22+, a running EgressView instance, API/admin token.
 
 ```bash
 # 1. Clone (if not already):

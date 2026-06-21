@@ -2,6 +2,12 @@
 
 All notable changes to EgressView are documented here.
 
+## [1.2.1] - 2026-06-21
+
+### Changed
+
+- Raised minimum Node.js requirement from 18 to 22 (active LTS). Node 18 and 20 are past their end-of-life dates (April 2025 and April 2026 respectively). If you are running Node 18 or 20, please upgrade to Node.js 22 before updating EgressView.
+
 ## [1.2.0] - 2026-06-20
 
 ### Added

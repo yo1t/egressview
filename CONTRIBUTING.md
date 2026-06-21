@@ -33,7 +33,7 @@ npm install
 npm start
 ```
 
-Requirements: Node.js 18+. No build step — the frontend is plain HTML/CSS/JS served by Express.
+Requirements: Node.js 22+. No build step — the frontend is plain HTML/CSS/JS served by Express.
 
 On first startup, both an API/admin token and an initial login password are printed to the console. Open `http://localhost:3000` and log in with the initial login password; the API/admin token is for scripts and automation.
 
@@ -46,7 +46,7 @@ npm run test:smoke        # Playwright browser smoke tests (auto-uses demo mode 
 npm run security:check    # production dependency audit + secret scan before publishing
 ```
 
-CI (GitHub Actions) runs unit tests on Node 18 and 20, Playwright smoke tests in demo mode (no hardware needed), and release safety checks (`npm audit --omit=dev` and secret scan). PRs must be green.
+CI (GitHub Actions) runs unit tests on Node 22, Playwright smoke tests in demo mode (no hardware needed), and release safety checks (`npm audit --omit=dev` and secret scan). PRs must be green.
 
 ## Guidelines
 

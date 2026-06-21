@@ -7,7 +7,7 @@
 追加ハードウェア不要。通信の中継・傍受も不要。既存のYamaha RTXルーターのNATセッションテーブルを読み取るだけで動作します。AWS Kiro・Anthropic Claude・Anysphere Cursor 等の AI アシスタントは、内蔵 MCP サーバーを通じて EgressView に直接アクセスできます — 自然言語でネットワーク状況を問い合わせるだけ。
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
-![Node](https://img.shields.io/badge/node-%3E%3D18-green)
+![Node](https://img.shields.io/badge/node-%3E%3D22-green)
 
 > 🇬🇧 [English README](README.md) | 🌐 [プロジェクトページ](https://yo1t.github.io/egressview/index.ja.html)
 
@@ -97,7 +97,7 @@ https://github.com/user-attachments/assets/9448d75b-a7fe-4363-8d35-da17abaed0ee
 
 ## 動作要件
 
-- **Node.js** 18以上
+- **Node.js** 22以上
 - **Yamaha RTX** ルーター（SSH有効化済み）— RTX1200, RTX1210, RTX1220, RTX1300 等
 - （任意）**ASUS WiFi アクセスポイント**（Web管理画面が有効、APモード/AiMeshとして使用）
 
@@ -171,7 +171,7 @@ DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start
 
 | | 必要なもの | 設定ガイド |
 |--|-----------|-----------|
-| ✅ | Mac/PC/Raspberry Pi に Node.js 18以上をインストール | [nodejs.org](https://nodejs.org) |
+| ✅ | Mac/PC/Raspberry Pi に Node.js 22以上をインストール | [nodejs.org](https://nodejs.org) |
 | ✅ | Yamaha RTX ルーターの SSH を有効化 | [設定ガイド →](docs/setup-yamaha.ja.md) |
 | ☐ | （任意）ASUS WiFi AP の Web 管理画面を有効化 | [設定ガイド →](docs/setup-asus.ja.md) |
 | ☐ | （任意）AI アシスタント連携（AWS Kiro・Anthropic Claude・Anysphere Cursor 等） | [設定ガイド →](docs/setup-mcp.ja.md) |

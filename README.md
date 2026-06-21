@@ -7,7 +7,7 @@ Is your smart TV phoning home to unexpected servers? Are your IP cameras, IoT ap
 No new hardware. No inline traffic interception. Works via your existing Yamaha RTX router's NAT session table. AI assistants such as AWS Kiro, Anthropic Claude, and Anysphere Cursor can query EgressView directly via the built-in MCP server — just ask in natural language.
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
-![Node](https://img.shields.io/badge/node-%3E%3D18-green)
+![Node](https://img.shields.io/badge/node-%3E%3D22-green)
 
 > 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/egressview/)
 
@@ -97,7 +97,7 @@ Connection Log and Devices let you drill down into suspicious destinations, nois
 
 ## Requirements
 
-- **Node.js** 18+
+- **Node.js** 22+
 - **Yamaha RTX** router with SSH access enabled (RTX1200, RTX1210, RTX1220, RTX1300, etc.)
 - (Optional) **ASUS WiFi access point** with web admin enabled (used as AP/mesh mode, not as a router)
 
@@ -170,7 +170,7 @@ Start with the smallest path that matches your network, then add sources later f
 
 | | Requirement | Setup guide |
 |--|-------------|-------------|
-| ✅ | Node.js 18+ installed on your Mac/PC/Raspberry Pi | [nodejs.org](https://nodejs.org) |
+| ✅ | Node.js 22+ installed on your Mac/PC/Raspberry Pi | [nodejs.org](https://nodejs.org) |
 | ✅ | Yamaha RTX router with SSH enabled | [Setup guide →](docs/setup-yamaha.md) |
 | ☐ | (Optional) ASUS WiFi AP with web admin enabled | [Setup guide →](docs/setup-asus.md) |
 | ☐ | (Optional) AI assistant access via MCP (AWS Kiro, Anthropic Claude, Anysphere Cursor…) | [Setup guide →](docs/setup-mcp.md) |

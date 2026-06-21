@@ -63,7 +63,7 @@ Claude Desktop と同じマシン上でローカルプロセスとして MCP サ
 
 **Claude Desktop では stdio モードが推奨です。** `command` ベースの stdio トランスポートはすべての MCP クライアントでサポートされており、URL バリデーションの制限を受けません。
 
-**前提条件:** Node.js 18+、稼働中の EgressView、API/admin トークン
+**前提条件:** Node.js 22+、稼働中の EgressView、API/admin トークン
 
 ```bash
 # 1. クローン（まだの場合）:
