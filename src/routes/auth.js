@@ -4,6 +4,7 @@ const logger = require('../logger');
 
 const { Router } = require('express');
 const crypto = require('crypto');
+const axios  = require('axios');
 const { isAllowedRouterIp } = require('../utils');
 
 /**
@@ -199,7 +200,6 @@ module.exports = function authRoutes(ctx) {
 
   // ── ASUS nonce proxy ────────────────────────────────────────────────────────
   router.post('/nonce', requireAdmin, async (req, res) => {
-    const axios = require('axios');
     const ip = req.body.routerIp || DEFAULT_ROUTER_IP;
     if (!isAllowedRouterIp(ip)) {
       return res.status(400).json({ error: 'IPアドレスはプライベート範囲(10/8, 172.16/12, 192.168/16)のみ許可されます' });

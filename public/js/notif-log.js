@@ -328,10 +328,7 @@ async function loadNotifLog() {
   if (!nlMode) return;
   nlSetLoading(true);
   try {
-    const token = localStorage.getItem('egressview_admin_token') || '';
-    const res = await fetch(`${BASE_URL}/api/notification-log`, {
-      headers: { 'X-Admin-Token': token },
-    });
+    const res = await apiFetch(`${BASE_URL}/api/notification-log`);
     if (!res.ok) {
       const msg = res.status === 502 || res.status === 503
         ? t('err.serverUnavailable')

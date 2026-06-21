@@ -13,6 +13,7 @@ const path    = require('path');
 const fs      = require('fs');
 
 const { htmlEscape }  = require('./src/utils');
+const logger          = require('./src/logger');
 const enrichment      = require('./src/enrichment');
 const history         = require('./src/history');
 const deviceId        = require('./src/device-identify');
@@ -120,7 +121,7 @@ let tlsOptions = null;
   const early = configIo.loadFile(CONFIG_FILE);
   if (early.https?.enabled) {
     tlsOptions = tls.loadOrCreate(early.https, __dirname);
-    if (!tlsOptions) console.error('[tls] HTTPS requested but unavailable — falling back to HTTP');
+    if (!tlsOptions) logger.warn('[tls] HTTPS requested but unavailable — falling back to HTTP');
   }
   // Allow port to be set in config file; env var takes precedence
   if (!process.env.PORT && Number.isFinite(parseInt(early.port))) {
@@ -217,7 +218,7 @@ function loadConfig() {
       }
     },
   });
-  console.log('[config] Loaded:', CONFIG_FILE);
+  logger.info('[config] Loaded:', CONFIG_FILE);
 }
 
 function saveConfig() {
@@ -244,9 +245,9 @@ function saveConfig() {
   } catch {}
   try {
     configIo.saveFile(data, CONFIG_FILE);
-    console.log('[config] Saved:', CONFIG_FILE);
+    logger.info('[config] Saved:', CONFIG_FILE);
   } catch (e) {
-    console.error('[config] Save failed:', e.message);
+    logger.error('[config] Save failed:', e.message);
   }
 }
 
@@ -315,7 +316,7 @@ async function pollYamahaConnections() {
   if (!yamaha.isEnabled() || !yamaha.isReady()) return;
   try {
     const sessions = await yamaha.fetchNatSessions();
-    console.log(`[yamaha] ${sessions.length} sessions parsed`);
+    logger.debug(`[yamaha] ${sessions.length} sessions parsed`);
 
     const unique = [...new Set(sessions.map(s => s.dst))];
     await Promise.allSettled(unique.map(ip => enrichment.reverseDns(ip)));
@@ -371,9 +372,9 @@ async function pollYamahaConnections() {
         partial:     true,
         delta:       true,
       });
-      console.log(`[yamaha] emit delta: ${deltaConns.length} connections (of ${history.getConnectionHistory().size} total)`);
+      logger.debug(`[yamaha] emit delta: ${deltaConns.length} connections (of ${history.getConnectionHistory().size} total)`);
     } else {
-      console.log('[yamaha] emit delta: 0 changes, skipped');
+      logger.debug('[yamaha] emit delta: 0 changes, skipped');
     }
 
     if (appState.autoInvestigate) {
@@ -381,9 +382,9 @@ async function pollYamahaConnections() {
       for (const ip of srcIps) investigation.enqueue(ip, runtime.resolveMacByIp(ip));
     }
   } catch (err) {
-    console.error('[yamaha] poll error:', err.message);
+    logger.error('[yamaha] poll error:', err.message);
     if (err.message.includes('timeout')) {
-      console.log('[yamaha] Timeout detected, resetting connection…');
+      logger.warn('[yamaha] Timeout detected, resetting connection…');
       yamaha.reconnect();
       // fall through so setTimeout still runs — otherwise polling stops permanently
     }
@@ -445,10 +446,10 @@ function reMatchAndNotify() {
     }
   }
   if (updated.length) {
-    console.log(`[threat-intel] Re-matched ${updated.length} connections, notifying clients`);
+    logger.info(`[threat-intel] Re-matched ${updated.length} connections, notifying clients`);
     io.emit('connections-update', { connections: updated, serverTime: Date.now(), partial: true, delta: true });
   } else {
-    console.log('[threat-intel] Re-match complete, no threat changes');
+    logger.debug('[threat-intel] Re-match complete, no threat changes');
   }
 }
 
@@ -483,8 +484,8 @@ function runBeaconScan() {
     candidates.map(c => `${c.src}|${c.dst}|${c.dport}|${c.proto}`)
   );
   const pruned = beacons.pruneEvents();
-  console.log(`[beacons] scan: ${candidates.length} candidate(s) from ${events.length} events ` +
-              `(${detected.length - candidates.length} org-allowlisted, ${removed} stale removed, ${pruned} old events pruned)`);
+  logger.info(`[beacons] scan: ${candidates.length} candidate(s) from ${events.length} events ` +
+             `(${detected.length - candidates.length} org-allowlisted, ${removed} stale removed, ${pruned} old events pruned)`);
 }
 
 /** (Re)start the periodic scan using the configured interval. */
@@ -515,7 +516,7 @@ app.use('/api', authRoutes(routeCtx));
 app.use('/api', notesRoutes(routeCtx));
 app.use('/api', connectionsRoutes(routeCtx));
 app.use('/api', devicesRoutes(routeCtx));
-app.use('/api', backupRoutes({ ...routeCtx, saveConfig }));
+app.use('/api', backupRoutes(routeCtx));
 app.use('/api', configRoutes(routeCtx));
 app.use('/api', slackRoutes(routeCtx));
 app.use('/api', notificationLogRoutes(routeCtx));
@@ -534,7 +535,7 @@ io.use((socket, next) => {
 });
 
 io.on('connection', socket => {
-  console.log('[ws] Client connected:', socket.id);
+  logger.debug('[ws] Client connected:', socket.id);
   socket.emit('config', {
     routerIp:       asus.getRouterIp() || DEFAULT_ROUTER_IP,
     asusUser:       asus.getUser(),
@@ -650,7 +651,7 @@ dhcpdSyslog.configure({
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
 server.listen(PORT, () => {
-  console.log(`EgressView: ${tlsOptions ? 'https' : 'http'}://localhost:${PORT}`);
+  logger.info(`EgressView: ${tlsOptions ? 'https' : 'http'}://localhost:${PORT}`);
   loadConfig();
 
   if (DEMO_MODE) {
@@ -663,7 +664,7 @@ server.listen(PORT, () => {
     }
     // Override token with a known value so CI / contributors can authenticate
     appState.adminToken = DEMO_ADMIN_TOKEN;
-    console.log(`[demo] DEMO_MODE active — admin token: ${DEMO_ADMIN_TOKEN}`);
+    logger.info(`[demo] DEMO_MODE active — admin token: ${DEMO_ADMIN_TOKEN}`);
   } else {
     ensureAdminToken();
   }
@@ -678,7 +679,7 @@ server.listen(PORT, () => {
   if (DEMO_MODE) {
     const { seedDemoConnections } = require('./scripts/demo-seed');
     const seeded = seedDemoConnections(history);
-    console.log(`[demo] seeded ${seeded} sample connections`);
+    logger.info(`[demo] seeded ${seeded} sample connections`);
   }
 
   runtime.setKnownMacs(history.getKnownMacs());
@@ -686,13 +687,13 @@ server.listen(PORT, () => {
   devices.seedFromConnectionHistory(history.getConnectionHistory());
   const staleChecked = devices.checkStaleMergeCandidates();
   if (staleChecked > 0) {
-    console.log(`[devices] stale merge check: ${staleChecked} device(s) scanned for duplicates`);
+    logger.info(`[devices] stale merge check: ${staleChecked} device(s) scanned for duplicates`);
   }
   enrichment.initDb();
   beacons.initDb();
 
   if (!DEMO_MODE) {
-    console.log(`Router IP: ${asus.getRouterIp()}`);
+    logger.info(`Router IP: ${asus.getRouterIp()}`);
     deviceId.loadOuiDb();
     yamaha.connectYamaha(() => {
       yamaha.refreshYamahaArp().then(() => pollYamahaConnections());
@@ -720,7 +721,7 @@ server.listen(PORT, () => {
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
 
 function shutdown() {
-  console.log('[shutdown] Saving history...');
+  logger.info('[shutdown] Saving history...');
   try { history.snapshotHistory(); } catch {}
   try { history.closeDb();         } catch {}
   try { dnsmasqLog.stop();         } catch {}

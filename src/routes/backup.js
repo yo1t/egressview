@@ -21,6 +21,16 @@ module.exports = function backupRoutes(ctx) {
   const { requireAdmin, backup, history, runtime, devices, enrichment, beacons, sessions, appRoot } = ctx;
   const router = Router();
 
+  function afterRestore() {
+    history.loadConnectionHistory();
+    runtime.setKnownMacs(history.getKnownMacs());
+    devices.reopen();
+    devices.seedFromConnectionHistory(history.getConnectionHistory());
+    enrichment.reopen();
+    if (beacons)  beacons.reopen();
+    if (sessions) { sessions.reopen(); sessions.revokeAll(null); }
+  }
+
   router.get('/backup/list', requireAdmin, (req, res) => {
     res.json({ backups: backup.listBackups(), config: backup.getConfig() });
   });
@@ -47,13 +57,7 @@ module.exports = function backupRoutes(ctx) {
     if (!name) return res.status(400).json({ error: 'Backup name required' });
     try {
       await backup.restoreFromGeneration(name);
-      history.loadConnectionHistory();
-      runtime.setKnownMacs(history.getKnownMacs());
-      devices.reopen();                               // re-open DB connection to read restored data
-      devices.seedFromConnectionHistory(history.getConnectionHistory()); // backfill devices from restored history
-      enrichment.reopen();                            // RDAP/Geo キャッシュも restore 後の DB から再ロード
-      if (beacons)  beacons.reopen();                 // beacon events / candidates も restore 後の DB から再ロード
-      if (sessions) { sessions.reopen(); sessions.revokeAll(null); } // restore 後の DB に切り替え＋旧セッション破棄
+      afterRestore();
       res.json({ success: true, message: `Restored from ${name}. Restart recommended.` });
     } catch (e) {
       logger.error('[backup] restore error:', e.message);
@@ -89,13 +93,7 @@ module.exports = function backupRoutes(ctx) {
         fs.writeFileSync(tempPath, buf);
         await backup.restoreFromFile(tempPath);
         fs.unlinkSync(tempPath);
-        history.loadConnectionHistory();
-        runtime.setKnownMacs(history.getKnownMacs());
-        devices.reopen();                             // re-open DB connection to read restored data
-        devices.seedFromConnectionHistory(history.getConnectionHistory()); // backfill devices from restored history
-        enrichment.reopen();                          // RDAP/Geo キャッシュも restore 後の DB から再ロード
-        if (beacons)  beacons.reopen();               // beacon events / candidates も restore 後の DB から再ロード
-        if (sessions) { sessions.reopen(); sessions.revokeAll(null); } // restore 後の DB に切り替え＋旧セッション破棄
+        afterRestore();
         res.json({ success: true, message: 'Restored from uploaded file. Restart recommended.' });
       } catch (e) {
         logger.error('[backup] upload restore error:', e.message);
