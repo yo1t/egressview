@@ -45,6 +45,8 @@ async function _runPromptLoop(reason = '') {
     const pw = prompt((reason ? reason + '\n\n' : '') + t('prompt.password'));
     if (pw === null) { alert(t('alert.passwordRequired')); continue; }
     try {
+      // Use raw fetch here — apiFetch calls this function to obtain a token,
+      // so using apiFetch would create an infinite loop.
       const r = await fetch(_BASE+'/api/auth/login', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: pw, deviceLabel: describeThisDevice() }),

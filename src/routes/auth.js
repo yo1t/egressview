@@ -14,7 +14,8 @@ const { isAllowedRouterIp } = require('../utils');
  *   saveConfig: () => void,
  *   persistSecret: (section: string, updates: object) => void,
  *   configFile: string,
- *   fs, DEFAULT_ROUTER_IP: string, POLL_INTERVAL: number,
+ *   loadConfig: () => object,
+ *   DEFAULT_ROUTER_IP: string, POLL_INTERVAL: number,
  *   setLatestConnections: (arr: any[]) => void
  * }} ctx
  */
@@ -22,8 +23,7 @@ module.exports = function authRoutes(ctx) {
   const {
     requireAdmin, getAdminToken,
     asus, yamaha,
-    saveConfig, persistSecret,
-    configFile, fs,
+    saveConfig, persistSecret, loadConfig,
     DEFAULT_ROUTER_IP, POLL_INTERVAL,
     setLatestConnections,
     appState, io,
@@ -226,7 +226,7 @@ module.exports = function authRoutes(ctx) {
     if (typeof yPass === 'string' && yPass.length > 256) return res.status(400).json({ error: 'パスワードが長すぎます' }); // pragma: allowlist secret
 
     let stored = {};
-    try { stored = JSON.parse(fs.readFileSync(configFile, 'utf8')).yamaha || {}; } catch {}
+    try { stored = loadConfig().yamaha || {}; } catch {}
     const ip = yIp || yamaha.getIp() || stored.ip || '';
     const user = yUser || yamaha.getUser() || stored.user || '';
     const pass = yPass || stored.pass || '';
@@ -272,7 +272,7 @@ module.exports = function authRoutes(ctx) {
     // ── ASUS ──
     if (doAsus === true) {
       let storedPass = '';
-      try { storedPass = JSON.parse(fs.readFileSync(configFile, 'utf8')).asus?.pass || ''; } catch {}
+      try { storedPass = loadConfig().asus?.pass || ''; } catch {}
       const finalPass = password || storedPass;
       if (!username || !finalPass) return res.status(400).json({ error: 'ASUSルーターのユーザー名とパスワードを入力してください' });
       try {

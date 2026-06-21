@@ -2,23 +2,22 @@
 'use strict';
 
 const { Router } = require('express');
-const fs = require('fs');
 
 /**
  * @param {{
  *   requireAdmin, notifier,
  *   saveConfig, persistSecret,
- *   configFile: string
+ *   loadConfig: () => object
  * }} ctx
  */
 module.exports = function slackRoutes(ctx) {
-  const { requireAdmin, notifier, saveConfig, persistSecret, configFile } = ctx;
+  const { requireAdmin, notifier, saveConfig, persistSecret, loadConfig } = ctx;
   const router = Router();
 
   router.get('/config/slack', requireAdmin, (req, res) => {
     const cfg = notifier.getConfig();
     let displayName = '';
-    try { displayName = JSON.parse(fs.readFileSync(configFile, 'utf8')).slack?.displayName || ''; } catch {}
+    try { displayName = loadConfig().slack?.displayName || ''; } catch {}
     res.json({ config: { ...cfg, displayName } });
   });
 
@@ -36,7 +35,7 @@ module.exports = function slackRoutes(ctx) {
     if (Object.keys(slackUpdates).length) persistSecret('slack', slackUpdates);
     saveConfig();
     let savedDisplayName = '';
-    try { savedDisplayName = JSON.parse(fs.readFileSync(configFile, 'utf8')).slack?.displayName || ''; } catch {}
+    try { savedDisplayName = loadConfig().slack?.displayName || ''; } catch {}
     res.json({ success: true, config: { ...notifier.getConfig(), displayName: savedDisplayName } });
   });
 
@@ -53,7 +52,7 @@ module.exports = function slackRoutes(ctx) {
   router.post('/slack/verify', requireAdmin, async (req, res) => {
     let { token } = req.body || {};
     if (!token) {
-      try { token = JSON.parse(fs.readFileSync(configFile, 'utf8')).slack?.token || ''; } catch {}
+      try { token = loadConfig().slack?.token || ''; } catch {}
     }
     try {
       res.json(await notifier.verifyToken(token));
@@ -65,7 +64,7 @@ module.exports = function slackRoutes(ctx) {
   router.post('/slack/lookup-user', requireAdmin, async (req, res) => {
     let { username, token } = req.body || {};
     if (!token) {
-      try { token = JSON.parse(fs.readFileSync(configFile, 'utf8')).slack?.token || ''; } catch {}
+      try { token = loadConfig().slack?.token || ''; } catch {}
     }
     try {
       res.json(await notifier.lookupUser(username, token));

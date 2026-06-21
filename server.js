@@ -503,6 +503,7 @@ const routeCtx = {
   dnsmasqLog, inspectSyslog, dhcpdSyslog,
   runtime, notes, io, beacons, sessions, authPassword,
   saveConfig,
+  loadConfig:          () => configIo.loadFile(CONFIG_FILE),
   persistSecret:       (section, updates) => configIo.persistSecret(section, updates, CONFIG_FILE),
   configFile:          CONFIG_FILE,
   fs,
