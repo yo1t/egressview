@@ -180,14 +180,20 @@ module.exports = function authRoutes(ctx) {
 
   // ── Verify admin token (used by login UI) ──────────────────────────────────
   router.post('/admin/verify', (req, res) => {
+    const clientIp   = req.ip || req.socket?.remoteAddress || '';
+    const rateLimitErr = checkLoginRateLimit(clientIp);
+    if (rateLimitErr) return res.status(429).json({ ok: false, error: rateLimitErr });
+
     const provided   = (req.body && req.body.token) || '';
     const adminToken = getAdminToken();
     if (!adminToken) return res.status(503).json({ ok: false, error: '未初期化' });
     const a = Buffer.from(provided);
     const b = Buffer.from(adminToken);
     if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
+      clearLoginFails(clientIp);
       return res.json({ ok: true });
     }
+    recordLoginFail(clientIp);
     setTimeout(() => res.status(401).json({ ok: false, error: 'トークン不正' }), 500);
   });
 

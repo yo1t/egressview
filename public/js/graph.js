@@ -580,8 +580,9 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
       card.querySelector('.device-note').addEventListener('click', (e) => e.stopPropagation());
       list.appendChild(card);
     }
-    // Note display (ip+mac composite key) — edit only via 📝 icon; body is read-only (3-line scroll)
-    const noteText = lookupNote(c.ip, c.mac);
+    // Note display — prefer deviceId key (MCP-set notes) over IP/MAC composite
+    const _noteDev = devicesData.find(d => d.ip === c.ip || (c.mac && c.mac !== c.ip && d.mac === c.mac));
+    const noteText = lookupNote(c.ip, c.mac, _noteDev?.deviceId);
     const noteEl = card.querySelector('.device-note');
     if (noteEl) {
       if (noteText) {

@@ -52,8 +52,8 @@ The agent selects the appropriate tool automatically and combines multiple tool 
 | `get_device_notes` | device memo notes; omit src for all devices with notes, pass src IP for one device |
 | `set_device_note` | set or update a device memo by src IP; pass empty string to delete |
 
-All tools accept a `period` parameter: `1h`, `6h`, `24h` (default), `7d`, or `14d`.
-`get_device_notes` and `set_device_note` do not use `period`.
+Time-window tools accept a `period` parameter: `1h`, `6h`, `24h` (default), `7d`, or `14d`.
+`get_devices`, `get_device_notes`, and `set_device_note` do not use `period`.
 
 ---
 
@@ -63,7 +63,7 @@ Run the MCP server as a local process on the same machine as Claude Desktop. It 
 
 This is the recommended approach for Claude Desktop. The `command`-based stdio transport is universally supported and avoids any URL validation restrictions.
 
-**Prerequisites:** Node.js 18+, a running EgressView instance, admin token.
+**Prerequisites:** Node.js 18+, a running EgressView instance, API/admin token.
 
 ```bash
 # 1. Clone (if not already):
@@ -81,7 +81,7 @@ npm install
       "command": "node",
       "args": ["/absolute/path/to/egressview/mcp-server.js"],
       "env": {
-        "EGRESSVIEW_URL":   "http://your-server-ip:3002",
+        "EGRESSVIEW_URL":   "http://your-server-ip:3000",
         "EGRESSVIEW_TOKEN": "your-admin-token"
       }
     }
@@ -91,7 +91,7 @@ npm install
 
 - Replace `/absolute/path/to/egressview` with the actual path where you cloned the repo.
 - `EGRESSVIEW_URL` is the base URL of your EgressView server. If EgressView is behind a reverse proxy at `/egressview/`, use that path (e.g. `http://your-server-ip/egressview`).
-- `EGRESSVIEW_TOKEN` is the admin token shown in the EgressView console on first startup.
+- `EGRESSVIEW_TOKEN` is the API/admin token shown in the EgressView console on first startup, not the browser login password.
 
 Restart Claude Desktop after editing. The `egressview` server appears in the MCP tools list.
 
@@ -110,7 +110,9 @@ This option is intended for MCP clients that natively support HTTP transport (Cu
 ```bash
 # Copy and edit:
 cp .env.mcp.example .env.mcp
-# Set MCP_PORT=3010, EGRESSVIEW_URL=http://localhost:3002, EGRESSVIEW_TOKEN=...
+# Set MCP_PORT=3010, EGRESSVIEW_URL=http://localhost:3000, EGRESSVIEW_TOKEN=...
+# If your EgressView service listens on a different local port behind a proxy,
+# use that local URL instead (for example http://localhost:3002).
 chmod 600 .env.mcp
 
 # Test run:
@@ -218,8 +220,8 @@ Use `https://` if your reverse proxy terminates TLS (required for Claude Desktop
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `EGRESSVIEW_URL` | ✅ | `http://localhost:3002` | Base URL of the EgressView server |
-| `EGRESSVIEW_TOKEN` | ✅ | — | Admin token (shown on first EgressView startup) |
+| `EGRESSVIEW_URL` | ✅ | `http://localhost:3000` | Base URL of the EgressView server |
+| `EGRESSVIEW_TOKEN` | ✅ | — | API/admin token (shown on first EgressView startup; not the browser login password) |
 | `MCP_PORT` | HTTP mode | — | Local port for the MCP HTTP server (e.g. `3010`). Omit for stdio mode. |
 | `MCP_TOKEN` | — | same as `EGRESSVIEW_TOKEN` | Auth token for the MCP HTTP endpoint. Set to a different value to separate MCP and EgressView auth. |
 
@@ -230,4 +232,4 @@ Use `https://` if your reverse proxy terminates TLS (required for Claude Desktop
 - The MCP HTTP server listens on `127.0.0.1` only — it is not reachable without the reverse proxy.
 - Authentication uses the `X-Admin-Token` header (same mechanism as the EgressView API).
 - Most tools are read-only. `set_device_note` can write device memo notes (stored in `.egressview.notes.json`, not the main database).
-- Keep `.env.mcp` permissions at `chmod 600`; it contains your admin token.
+- Keep `.env.mcp` permissions at `chmod 600`; it contains your API/admin token.

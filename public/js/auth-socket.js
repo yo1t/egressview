@@ -155,7 +155,8 @@ function openNoteModal(ip, mac, displayName) {
   const idLabel = [ip, mac].filter(Boolean).join(' / ');
   document.getElementById('note-target').textContent = `${displayName || ''} (${idLabel})`;
   const ta = document.getElementById('note-textarea');
-  ta.value = lookupNote(ip, mac);
+  const _modalDev = devicesData.find(d => d.ip === ip || (mac && d.mac === mac));
+  ta.value = lookupNote(ip, mac, _modalDev?.deviceId);
   ta.placeholder = t('note.placeholder');
   noteOverlay.classList.remove('hidden');
   setTimeout(() => ta.focus(), 50);
@@ -288,7 +289,12 @@ socket.on('config', cfg => {
   }
   if (cfg.notes) {
     notesMap = cfg.notes;
-    refreshAllNotes();
+    // Pre-load devicesData so deviceId-keyed notes (set via MCP/API) are resolvable
+    // before the user visits the Devices tab.
+    apiFetch(_BASE + '/api/devices').then(r => r.ok ? r.json() : null).then(json => {
+      if (json?.devices) devicesData = json.devices;
+      refreshAllNotes();
+    }).catch(() => refreshAllNotes());
   }
   if (typeof cfg.autoInvestigate === 'boolean') {
     document.getElementById('s-auto-investigate').checked = cfg.autoInvestigate;

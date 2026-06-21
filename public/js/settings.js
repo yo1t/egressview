@@ -354,15 +354,28 @@ async function loadBackupList() {
       listEl.innerHTML = '<div style="padding:4px;">' + t('settings.backup.none') + '</div>';
       return;
     }
-    listEl.innerHTML = data.backups.reverse().map(b => {
+    listEl.innerHTML = '';
+    data.backups.reverse().forEach(b => {
       const size = (b.size / 1024 / 1024).toFixed(1) + ' MB';
       const date = new Date(b.created).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US');
-      return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid var(--border);">
-        <span style="flex:1">${date} (${size})</span>
-        <button class="connect-btn" style="font-size:9px;padding:2px 6px;" onclick="backupDownload('${b.name}')">DL</button>
-        <button class="connect-btn" style="font-size:9px;padding:2px 6px;" onclick="backupRestore('${b.name}')">${t('settings.backup.restore')}</button>
-      </div>`;
-    }).join('');
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid var(--border)';
+      const label = document.createElement('span');
+      label.style.flex = '1';
+      label.textContent = `${date} (${size})`;
+      const dlBtn = document.createElement('button');
+      dlBtn.className = 'connect-btn';
+      dlBtn.style.cssText = 'font-size:9px;padding:2px 6px';
+      dlBtn.textContent = 'DL';
+      dlBtn.addEventListener('click', () => backupDownload(b.name));
+      const restoreBtn = document.createElement('button');
+      restoreBtn.className = 'connect-btn';
+      restoreBtn.style.cssText = 'font-size:9px;padding:2px 6px';
+      restoreBtn.textContent = t('settings.backup.restore');
+      restoreBtn.addEventListener('click', () => backupRestore(b.name));
+      row.append(label, dlBtn, restoreBtn);
+      listEl.appendChild(row);
+    });
   } catch (e) {
     document.getElementById('backup-list').textContent = tVars('settings.error.withMessage', { message: e.message });
   }

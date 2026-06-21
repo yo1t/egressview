@@ -50,7 +50,7 @@ EgressView answers the question most home users can't ask: *what is each device 
 
 ## Demo
 
-https://github.com/user-attachments/assets/8682ec5f-1632-400f-b31b-d371f6b1b237
+https://github.com/user-attachments/assets/9448d75b-a7fe-4363-8d35-da17abaed0ee
 
 > UI language: English / Japanese selectable
 
@@ -122,7 +122,7 @@ EgressView exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol
       "command": "node",
       "args": ["/path/to/egressview/mcp-server.js"],
       "env": {
-        "EGRESSVIEW_URL":   "http://your-server-ip:3002",
+        "EGRESSVIEW_URL":   "http://your-server-ip:3000",
         "EGRESSVIEW_TOKEN": "your-admin-token"
       }
     }
@@ -131,6 +131,8 @@ EgressView exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol
 ```
 
 11 tools available: `get_threat_summary`, `get_traffic_summary`, `get_top_destinations`, `get_device_traffic`, `get_new_nodes`, `get_threat_connections`, `get_alerts`, `get_devices`, `query_connections`, `get_device_notes`, `set_device_note`.
+
+Use the API/admin token for `EGRESSVIEW_TOKEN`, not the browser login password.
 
 See the **[MCP setup guide →](docs/setup-mcp.md)** for full instructions including remote EgressView access and HTTP mode behind Apache / nginx.
 

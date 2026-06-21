@@ -23,6 +23,9 @@ All notable changes to EgressView are documented here.
 - Extracted `createAuthMiddleware` in `mcp-server.js` for testability; guarded entry point with `require.main === module`.
 - Added `.env.mcp.example` to `package.json` files array.
 - Fixed stale `docs/nginx-mcp.conf` reference in `mcp-server.js` comment.
+- Fixed deviceId-keyed memo display in the side panel and note modal for notes set through MCP/API.
+- Added brute-force protection to `/admin/verify`.
+- Rendered backup action buttons without inline event-handler HTML.
 
 ## [1.1.0] - 2026-06-20
 
