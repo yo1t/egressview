@@ -7,8 +7,8 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH
-  ? path.resolve(process.env.EGRESSVIEW_DB_PATH)
+const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
+  ? path.resolve(process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB)
   : path.join(__dirname, '..', '.egressview.db');
 const JSONL_PATH = path.join(__dirname, '..', '.egressview.connections.jsonl');
 const HISTORY_TTL_MS = 2 * 365 * 24 * 60 * 60 * 1000; // 2 years (default)

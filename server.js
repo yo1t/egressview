@@ -661,14 +661,16 @@ dhcpdSyslog.configure({
 server.listen(PORT, () => {
   logger.info(`EgressView: ${tlsOptions ? 'https' : 'http'}://localhost:${PORT}`);
   loadConfig();
-  const runtimeDbPath = DEMO_MODE ? (process.env.EGRESSVIEW_DB_PATH || DEMO_DB_PATH) : process.env.EGRESSVIEW_DB_PATH;
+  const configuredDbPath = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB || '';
+  const runtimeDbPath = DEMO_MODE ? (configuredDbPath || DEMO_DB_PATH) : configuredDbPath;
   if (runtimeDbPath) process.env.EGRESSVIEW_DB_PATH = runtimeDbPath;
+  backup.configure({ dbPath: runtimeDbPath });
 
   if (DEMO_MODE) {
     // Use a separate DB file for demo mode so production data is never touched.
     // If .egressview.demo.db exists (committed to git), start from that snapshot.
     // Otherwise fall back to a fresh in-memory-style DB at the demo path.
-    backup.configure({ dbPath: runtimeDbPath, backupDir: DEMO_BACKUP_DIR });
+    backup.configure({ backupDir: DEMO_BACKUP_DIR });
     // Override token with a known value so CI / contributors can authenticate
     appState.adminToken = DEMO_ADMIN_TOKEN;
     logger.info(`[demo] DEMO_MODE active — admin token: ${DEMO_ADMIN_TOKEN}`);

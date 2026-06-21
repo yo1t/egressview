@@ -235,6 +235,8 @@ describe('Server runtime invariants', () => {
   });
 
   it('demo mode passes the selected runtime DB path to every SQLite-backed store', () => {
+    assert.match(serverJs, /const\s+configuredDbPath\s*=\s*process\.env\.EGRESSVIEW_DB_PATH\s*\|\|\s*process\.env\.EGRESSVIEW_DB\s*\|\|\s*['"]{2}/,
+      'server startup should honor both EGRESSVIEW_DB_PATH and the documented EGRESSVIEW_DB');
     assert.match(serverJs, /const\s+runtimeDbPath\s*=\s*DEMO_MODE\s*\?/,
       'server startup should choose one runtime DB path before initializing stores');
     for (const call of [
@@ -251,9 +253,16 @@ describe('Server runtime invariants', () => {
       'history.loadConnectionHistory must accept and pass through an explicit DB path');
   });
 
-  it('demo mode configures backup to use the selected runtime DB path', () => {
-    assert.match(serverJs, /backup\.configure\(\{\s*dbPath:\s*runtimeDbPath,\s*backupDir:\s*DEMO_BACKUP_DIR\s*\}\)/,
-      'demo mode backups should not read or write the production DB/backup directory');
+  it('backup uses the selected runtime DB path in both normal and demo mode', () => {
+    assert.match(serverJs, /backup\.configure\(\{\s*dbPath:\s*runtimeDbPath\s*\}\)/,
+      'backups should follow the selected runtime DB path');
+    assert.match(serverJs, /backup\.configure\(\{\s*backupDir:\s*DEMO_BACKUP_DIR\s*\}\)/,
+      'demo mode backups should not use the production backup directory');
+  });
+
+  it('history default DB path honors the documented EGRESSVIEW_DB fallback', () => {
+    assert.match(historyJs, /process\.env\.EGRESSVIEW_DB_PATH\s*\|\|\s*process\.env\.EGRESSVIEW_DB/,
+      'history should use EGRESSVIEW_DB when EGRESSVIEW_DB_PATH is absent');
   });
 });
 
