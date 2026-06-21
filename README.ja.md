@@ -60,10 +60,11 @@ https://github.com/user-attachments/assets/8682ec5f-1632-400f-b31b-d371f6b1b237
 
 ## スクリーンショット
 
-![グラフマップによる全体把握](docs/egressview1.png)
-![統計情報ビュー](docs/egressview2.png)
-![通信ログのドリルダウン](docs/egressview3.png)
-![端末一覧のドリルダウン](docs/egressview4.png)
+![グラフマップによる全体把握](docs/egressview-graph-map.png)
+![統計情報ビュー](docs/egressview-statistics.png)
+![通信ログのドリルダウン](docs/egressview-connection-log.png)
+![端末一覧のドリルダウン](docs/egressview-devices.png)
+![検出ログの詳細ポップアップ](docs/egressview-detection-log.png)
 
 ## アーキテクチャ
 

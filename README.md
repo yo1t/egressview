@@ -60,10 +60,11 @@ Connection Log and Devices let you drill down into suspicious destinations, nois
 
 ## Screenshots
 
-![Graph Map overview](docs/egressview1.png)
-![Statistics view](docs/egressview2.png)
-![Connection Log drill-down](docs/egressview3.png)
-![Devices drill-down](docs/egressview4.png)
+![Graph Map overview](docs/egressview-graph-map.png)
+![Statistics view](docs/egressview-statistics.png)
+![Connection Log drill-down](docs/egressview-connection-log.png)
+![Devices drill-down](docs/egressview-devices.png)
+![Detection Log detail popup](docs/egressview-detection-log.png)
 
 ## Architecture
 
