@@ -7,7 +7,7 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
-const DB_PATH = process.env.EGRESSVIEW_DB_PATH
+const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH
   ? path.resolve(process.env.EGRESSVIEW_DB_PATH)
   : path.join(__dirname, '..', '.egressview.db');
 const JSONL_PATH = path.join(__dirname, '..', '.egressview.connections.jsonl');
@@ -19,13 +19,14 @@ let stmtUpsert = null;
 let stmtSelectAll = null;
 let stmtDeleteOld = null;
 let stmtInsertNotifLog = null;
+let currentDbPath = DEFAULT_DB_PATH;
 
 // In-memory cache (same interface as before for Socket.IO emissions)
 const connectionHistory = new Map();
 
 function _secureDbFiles() {
   for (const suffix of ['', '-shm', '-wal']) {
-    try { fs.chmodSync(DB_PATH + suffix, 0o600); } catch {}
+    try { fs.chmodSync(currentDbPath + suffix, 0o600); } catch {}
   }
 }
 
@@ -70,7 +71,8 @@ function _tryRestoreLatestBackup(targetPath) {
 }
 
 function initDb(dbPath) {
-  const actualPath = dbPath || DB_PATH;
+  const actualPath = dbPath === ':memory:' ? ':memory:' : (dbPath ? path.resolve(dbPath) : DEFAULT_DB_PATH);
+  currentDbPath = actualPath;
   // A heavily corrupted file can throw on open (SQLITE_NOTADB from the first
   // pragma), so treat open failure and integrity failure the same way.
   try { db = _openDb(actualPath); } catch { db = null; }
@@ -265,9 +267,9 @@ function loadIntoMemory() {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-function loadConnectionHistory() {
+function loadConnectionHistory(dbPath) {
   if (db) { try { db.close(); } catch {} db = null; }  // close stale connection before reopening
-  initDb();
+  initDb(dbPath);
   migrateFromJsonl();
   loadIntoMemory();
 }

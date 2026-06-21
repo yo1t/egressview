@@ -16,6 +16,8 @@ const jsDir    = path.join(__dirname, '..', '..', 'public', 'js');
 const html     = fs.readFileSync(htmlPath, 'utf8');
 const logJs    = fs.readFileSync(path.join(jsDir, 'log.js'), 'utf8');
 const mainJs   = fs.readFileSync(path.join(jsDir, 'main.js'), 'utf8');
+const serverJs = fs.readFileSync(path.join(__dirname, '..', '..', 'server.js'), 'utf8');
+const historyJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'history.js'), 'utf8');
 
 // Collect JS by following every <script src="__BASE__/js/..."> tag in load order.
 // Falls back to any inline <script> block (future-proofing).
@@ -220,5 +222,21 @@ describe('Connection Log pagination/filter invariants', () => {
       'sorting app/threatTag should refetch and use full-fetch mode before sorting');
     assert.doesNotMatch(handler, /renderLogView\(\)/,
       'header sort must not sort only the currently loaded page');
+  });
+});
+
+describe('Server runtime invariants', () => {
+  it('Yamaha polling reschedules with POLL_INTERVAL, not a hard-coded 60 seconds', () => {
+    assert.match(serverJs, /setTimeout\(pollYamahaConnections,\s*POLL_INTERVAL\)/,
+      'pollYamahaConnections should honor POLL_INTERVAL_MS');
+    assert.doesNotMatch(serverJs, /setTimeout\(pollYamahaConnections,\s*60000\)/,
+      'pollYamahaConnections must not reschedule with a hard-coded 60000 ms');
+  });
+
+  it('demo mode passes EGRESSVIEW_DB_PATH explicitly to history.loadConnectionHistory', () => {
+    assert.match(serverJs, /history\.loadConnectionHistory\(process\.env\.EGRESSVIEW_DB_PATH\)/,
+      'demo mode DB isolation depends on passing the selected DB path after env setup');
+    assert.match(historyJs, /function\s+loadConnectionHistory\(dbPath\)\s*{[\s\S]*initDb\(dbPath\)/,
+      'history.loadConnectionHistory must accept and pass through an explicit DB path');
   });
 });

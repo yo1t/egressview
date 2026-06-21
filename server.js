@@ -51,7 +51,7 @@ const notificationLogRoutes = require('./src/routes/notification-log');
 // ─── Environment ──────────────────────────────────────────────────────────────
 const SUBPATH           = (process.env.SUBPATH || '').replace(/\/$/, '');
 const DEFAULT_ROUTER_IP = process.env.ROUTER_IP   || '192.168.1.1';
-const POLL_INTERVAL     = parseInt(process.env.POLL_INTERVAL_MS || '60000');
+const POLL_INTERVAL     = parseInt(process.env.POLL_INTERVAL_MS || '60000', 10);
 // PORT is resolved after the early config read below (env > config file > 3000)
 let PORT = parseInt(process.env.PORT || '3000');
 const CONFIG_FILE       = require('./src/config').DEFAULT_CONFIG_FILE;
@@ -313,8 +313,12 @@ function requireAdmin(req, res, next) {
 let lastPollKeys = new Set();
 
 async function pollYamahaConnections() {
-  if (!yamaha.isEnabled() || !yamaha.isReady()) return;
+  if (!yamaha.isEnabled()) return;
   try {
+    if (!yamaha.isReady()) {
+      logger.debug('[yamaha] poll skipped: not ready');
+      return;
+    }
     const sessions = await yamaha.fetchNatSessions();
     logger.debug(`[yamaha] ${sessions.length} sessions parsed`);
 
@@ -388,8 +392,9 @@ async function pollYamahaConnections() {
       yamaha.reconnect();
       // fall through so setTimeout still runs — otherwise polling stops permanently
     }
+  } finally {
+    if (yamaha.isEnabled()) setTimeout(pollYamahaConnections, POLL_INTERVAL);
   }
-  setTimeout(pollYamahaConnections, 60000);
 }
 
 // ─── Express middleware ───────────────────────────────────────────────────────
@@ -659,10 +664,7 @@ server.listen(PORT, () => {
     // Use a separate DB file for demo mode so production data is never touched.
     // If .egressview.demo.db exists (committed to git), start from that snapshot.
     // Otherwise fall back to a fresh in-memory-style DB at the demo path.
-    if (!process.env.EGRESSVIEW_DB_PATH) {
-      const demoDb = path.join(__dirname, '.egressview.demo.db');
-      process.env.EGRESSVIEW_DB_PATH = demoDb;
-    }
+    if (!process.env.EGRESSVIEW_DB_PATH) process.env.EGRESSVIEW_DB_PATH = path.join(__dirname, '.egressview.demo.db');
     // Override token with a known value so CI / contributors can authenticate
     appState.adminToken = DEMO_ADMIN_TOKEN;
     logger.info(`[demo] DEMO_MODE active — admin token: ${DEMO_ADMIN_TOKEN}`);
@@ -675,7 +677,7 @@ server.listen(PORT, () => {
   setInterval(() => sessions.pruneExpired(), 6 * 60 * 60 * 1000);
   notes.load();
   history.setRetentionDays(appState.retentionDays);
-  history.loadConnectionHistory();
+  history.loadConnectionHistory(process.env.EGRESSVIEW_DB_PATH);
 
   if (DEMO_MODE) {
     const { seedDemoConnections } = require('./scripts/demo-seed');
