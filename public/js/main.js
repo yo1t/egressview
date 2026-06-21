@@ -83,18 +83,20 @@ socket.on('network-update', data => {
 socket.on('connections-update', data => {
   if (!yamahaConfigured) return; // do nothing while Yamaha is disabled
   const incoming = data.connections || [];
-  if (data.partial) {
-    // Merge: update/add entries without discarding older ones loaded via API
+  if (data.partial || !data.initialLoad) {
+    // Merge: update/add entries without discarding history or API-fetched ranges.
+    // Periodic full-replace polls (partial=false, initialLoad=false) are treated
+    // as merge too — overwriting would wipe 7d/14d data loaded by the time filter.
     allConnections = mergeConnections(allConnections, incoming);
-  } else {
-    allConnections = incoming;
-    if (data.initialLoad) {
-      const serverNow = data.serverTime || Date.now();
-      dataRangeFrom = serverNow - 3600_000;
-    } else {
-      const oldest = incoming.reduce((min, c) => Math.min(min, c.lastSeen || c.firstSeen || min), Infinity);
-      dataRangeFrom = Number.isFinite(oldest) ? oldest : Date.now() - 3600_000;
+    if (data.initialLoad === false) {
+      // Periodic poll: advance dataRangeFrom only if it would move forward, never back.
+      // (keeps timeFilterNeedsFetch() from re-fetching historical ranges unnecessarily)
     }
+  } else {
+    // True initial load (initialLoad=true, partial=false): replace and reset range.
+    allConnections = incoming;
+    const serverNow = data.serverTime || Date.now();
+    dataRangeFrom = serverNow - 3600_000;
   }
   if (data.serverTime) serverTimeOffset = data.serverTime - Date.now();
   if (!asusActive) {
