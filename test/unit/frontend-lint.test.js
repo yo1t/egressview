@@ -18,6 +18,7 @@ const logJs    = fs.readFileSync(path.join(jsDir, 'log.js'), 'utf8');
 const mainJs   = fs.readFileSync(path.join(jsDir, 'main.js'), 'utf8');
 const serverJs = fs.readFileSync(path.join(__dirname, '..', '..', 'server.js'), 'utf8');
 const historyJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'history.js'), 'utf8');
+const yamahaJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'pollers', 'yamaha.js'), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'));
 
 // Collect JS by following every <script src="__BASE__/js/..."> tag in load order.
@@ -232,6 +233,15 @@ describe('Server runtime invariants', () => {
       'pollYamahaConnections should honor POLL_INTERVAL_MS');
     assert.doesNotMatch(serverJs, /setTimeout\(pollYamahaConnections,\s*60000\)/,
       'pollYamahaConnections must not reschedule with a hard-coded 60000 ms');
+  });
+
+  it('Yamaha connection failures emit state="failed" so the UI does not stay waiting forever', () => {
+    for (const marker of ['シェル要求失敗', '初期化失敗', 'SSH接続失敗']) {
+      const re = new RegExp(`onStatus\\(\\{\\s*ready:\\s*false,\\s*state:\\s*['"]failed['"][\\s\\S]*?${marker}`);
+      assert.match(yamahaJs, re, `${marker} must include state: 'failed'`);
+    }
+    assert.match(yamahaJs, /credentials not configured[\s\S]*?onStatus\(\{\s*ready:\s*false,\s*state:\s*['"]failed['"]/,
+      'missing Yamaha credentials should notify the UI as a failed state');
   });
 
   it('demo mode passes the selected runtime DB path to every SQLite-backed store', () => {

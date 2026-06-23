@@ -295,9 +295,16 @@ module.exports = function authRoutes(ctx) {
     // ── Yamaha ──
     if (doYamaha === true) {
       try {
-        yamaha.configure({ enabled: true, ip: yIp || yamaha.getIp(), user: yUser || yamaha.getUser(), natDescriptor: yNat || undefined });
+        const finalYamahaIp = yIp || yamaha.getIp();
+        const finalYamahaUser = yUser || yamaha.getUser();
+        const hasYamahaPass = !!yPass || yamaha.hasPass();
+        if (!finalYamahaIp || !finalYamahaUser || !hasYamahaPass) {
+          return res.status(400).json({ error: 'YamahaのIP、ユーザー名、パスワードを入力してください' });
+        }
+
+        yamaha.configure({ enabled: true, ip: finalYamahaIp, user: finalYamahaUser, natDescriptor: yNat || undefined });
         if (yPass) {
-          persistSecret('yamaha', { ip: yIp || yamaha.getIp(), user: yUser || yamaha.getUser(), pass: yPass, nat: yNat || '100', enabled: true });
+          persistSecret('yamaha', { ip: finalYamahaIp, user: finalYamahaUser, pass: yPass, nat: yNat || '100', enabled: true });
           yamaha.configure({ pass: yPass });
         }
         yamaha.reconnect();

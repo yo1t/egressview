@@ -331,6 +331,7 @@ function connectYamaha(onReady) {
   if (!yamahaEnabled) return;
   if (!yamahaIp || !yamahaUser || !yamahaPass) {
     logger.info('[yamaha] credentials not configured yet — skip connect');
+    onStatus({ ready: false, state: 'failed', message: 'YamahaのIP、ユーザー名、パスワードを入力してください' });
     return;
   }
   if (yamahaConnecting) {
@@ -352,7 +353,7 @@ function connectYamaha(onReady) {
       if (err) {
         logger.error('[yamaha] shell error:', err.message);
         yamahaConnecting = false;
-        onStatus({ ready: false, message: 'シェル要求失敗: ' + err.message });
+        onStatus({ ready: false, state: 'failed', message: 'シェル要求失敗: ' + err.message });
         scheduleYamahaReconnect(5000);
         return;
       }
@@ -390,7 +391,7 @@ function connectYamaha(onReady) {
         } catch (e) {
           yamahaConnecting = false;
           logger.error('[yamaha] init error:', e.message);
-          onStatus({ ready: false, message: '初期化失敗: ' + e.message });
+          onStatus({ ready: false, state: 'failed', message: '初期化失敗: ' + e.message });
           scheduleYamahaReconnect(5000);
         }
       }, 500);
@@ -401,7 +402,7 @@ function connectYamaha(onReady) {
     logger.error('[yamaha] SSH error:', err.message);
     yamahaReady = false;
     yamahaConnecting = false;
-    onStatus({ ready: false, message: 'SSH接続失敗: ' + err.message });
+    onStatus({ ready: false, state: 'failed', message: 'SSH接続失敗: ' + err.message });
     scheduleYamahaReconnect(5000);
   });
 
