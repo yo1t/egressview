@@ -105,6 +105,14 @@ Run `mcp-server.js` as an HTTP server on the same host as EgressView. A reverse 
 
 This option is intended for MCP clients that natively support HTTP transport (Anysphere Cursor, Zed, AWS Kiro or Anthropic Claude with HTTP MCP config, custom agents).
 
+### Connecting from ChatGPT
+
+To use EgressView from ChatGPT, configure it separately in ChatGPT as a remote MCP server / app. Settings added to Codex (`~/.codex/config.toml`) or Claude Desktop (`claude_desktop_config.json`) are not shared with ChatGPT automatically.
+
+Remote MCP servers used directly from ChatGPT generally need an HTTPS URL that ChatGPT can reach. If EgressView runs inside a home LAN, SOHO network, corporate network, or private subnet, do not expose the MCP endpoint directly to the public Internet without a deliberate access-control design. Consider OpenAI's Secure MCP Tunnel or an equivalent private connectivity pattern for private / behind-firewall MCP servers.
+
+If you publish or share the integration as a ChatGPT App, also plan for per-user authentication and authorization. `X-Admin-Token` is enough for a personal proof of concept, but OAuth or another user-scoped authorization flow is more appropriate for multi-user or externally shared deployments. MCP tools can reveal network state and device notes, so only trusted clients and users should be allowed to call them.
+
 ### Step 1 — Start the MCP server on your EgressView host
 
 ```bash
