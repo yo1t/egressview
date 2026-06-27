@@ -184,3 +184,5 @@ function _buildAppSlices(conns, topN, unknownLabel, otherLabel) {
   if (rest > 0) top.push([otherLabel, rest]);
   return top;
 }
+
+export { _BASE, esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType, guessApp, _buildAppSlices };
