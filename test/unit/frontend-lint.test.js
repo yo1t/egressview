@@ -386,6 +386,25 @@ describe('Server runtime invariants', () => {
       'pending summary state should clear Globe/Flat map points rather than falling back to all loaded data');
   });
 
+  it('stats maps are only cleared when the authoritative summary key changes', () => {
+    const script = getScriptContent();
+    const start = script.indexOf('async function updateStats()');
+    assert.notEqual(start, -1, 'updateStats should exist');
+    const end = script.indexOf('// ─── App distribution pie chart', start);
+    assert.notEqual(end, -1, 'updateStats section end marker should exist');
+    const updateStatsFn = script.slice(start, end);
+    assert.match(script, /let\s+statsMapSummaryKey\s*=\s*null/,
+      'stats maps should remember which summary key they currently represent');
+    assert.match(script, /function\s+getStatsSummaryKey\(selIp\)/,
+      'stats update should have a stable key for period/device summary requests');
+    assert.match(updateStatsFn, /const\s+summaryKey\s*=\s*getStatsSummaryKey\(selIp\)/,
+      'updateStats should compute the current summary key before fetching');
+    assert.match(updateStatsFn, /if\s*\(\s*statsMapSummaryKey\s*!==\s*summaryKey\s*\)\s*clearStatsMapsForPendingSummary\(selIp\)/,
+      'resize/socket refreshes for the same period should not clear and redraw maps repeatedly');
+    assert.match(updateStatsFn, /renderStatsSummary\(summary,\s*selIp\);[\s\S]*?statsMapSummaryKey\s*=\s*summaryKey/,
+      'successful summary render should mark the maps as current for that key');
+  });
+
   it('Yamaha SSH prompt wait clears stale timers and accepts privileged prompts', () => {
     assert.match(yamahaJs, /function\s+looksLikeShellPrompt/,
       'Yamaha poller should centralize shell prompt detection');

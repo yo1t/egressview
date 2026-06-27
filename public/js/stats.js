@@ -383,6 +383,7 @@ initStats();
 let statsSummaryGeneration = 0;
 let statsSummaryCache = { key: null, at: 0, data: null };
 let statsSummaryInflight = { key: null, promise: null };
+let statsMapSummaryKey = null;
 
 function getStatsSelection() {
   const sel = selectedMac;
@@ -556,13 +557,22 @@ function clearStatsMapsForPendingSummary(selIp) {
   updateStatsMaps(selIp, []);
 }
 
-async function fetchStatsSummary(selIp) {
+function buildStatsSummaryParams(selIp) {
   const { from, to } = getTimeRange();
   const params = new URLSearchParams();
   if (from != null) params.set('from', from);
   if (to != null) params.set('to', to);
   if (selIp) params.set('src', selIp);
   params.set('buckets', '60');
+  return params;
+}
+
+function getStatsSummaryKey(selIp) {
+  return buildStatsSummaryParams(selIp).toString();
+}
+
+async function fetchStatsSummary(selIp) {
+  const params = buildStatsSummaryParams(selIp);
   const key = params.toString();
   const now = Date.now();
   if (statsSummaryCache.key === key && statsSummaryCache.data && now - statsSummaryCache.at < 5000) {
@@ -605,16 +615,19 @@ async function updateStats() {
     : `${t('stats.subtitle.all')} / ${t('stats.subtitle.period')}: ${filterLabel}`;
 
   const generation = ++statsSummaryGeneration;
+  const summaryKey = getStatsSummaryKey(selIp);
   renderStatsPiePreview(selIp);
-  clearStatsMapsForPendingSummary(selIp);
+  if (statsMapSummaryKey !== summaryKey) clearStatsMapsForPendingSummary(selIp);
   try {
     const summary = await fetchStatsSummary(selIp);
     if (generation !== statsSummaryGeneration || !statsMode) return;
     renderStatsSummary(summary, selIp);
+    statsMapSummaryKey = summaryKey;
   } catch (e) {
     console.error('[stats] summary fetch failed:', e);
     if (generation !== statsSummaryGeneration || !statsMode) return;
     renderStatsFromLocalConnections(selIp);
+    statsMapSummaryKey = summaryKey;
   }
 }
 
