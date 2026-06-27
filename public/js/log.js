@@ -392,7 +392,7 @@ function renderLogView(appendRows) {
     const srcLabel = srcShortMdns || srcShortDns || c.src;
     const dstLabel = c.dstHost && c.dstHost !== c.dst ? c.dstHost : c.dst;
     const flag = (c.country && c.country.length === 2)
-      ? String.fromCodePoint(0x1F1E0 + c.country.charCodeAt(0) - 65, 0x1F1E0 + c.country.charCodeAt(1) - 65)
+      ? String.fromCodePoint(0x1F1E6 + c.country.charCodeAt(0) - 65, 0x1F1E6 + c.country.charCodeAt(1) - 65)
       : '';
     const timeStr = c.lastSeen
       ? new Date(c.lastSeen).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })

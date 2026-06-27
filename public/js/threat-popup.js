@@ -6,7 +6,7 @@ function showThreatDetail(tr) {
   try { d = JSON.parse(raw); } catch { return; }
   const fmtTime = (ts) => ts ? new Date(ts).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' }) : '—';
   const flag = (d.country && d.country.length === 2)
-    ? String.fromCodePoint(0x1F1E0 + d.country.charCodeAt(0) - 65, 0x1F1E0 + d.country.charCodeAt(1) - 65) + ' '
+    ? String.fromCodePoint(0x1F1E6 + d.country.charCodeAt(0) - 65, 0x1F1E6 + d.country.charCodeAt(1) - 65) + ' '
     : '';
   const existingNote = lookupNote(d.src, d.srcMac) || '';
 

@@ -133,7 +133,7 @@ let meshColorMap = {};
 
 function flagEmoji(code) {
   if (!code || code.length !== 2) return '';
-  return String.fromCodePoint(0x1F1E0 + code.charCodeAt(0) - 65, 0x1F1E0 + code.charCodeAt(1) - 65);
+  return String.fromCodePoint(0x1F1E6 + code.charCodeAt(0) - 65, 0x1F1E6 + code.charCodeAt(1) - 65);
 }
 
 function meshNodeId(mac) { return `__node_${mac}__`; }

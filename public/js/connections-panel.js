@@ -108,7 +108,7 @@ function updateConnPanel(selectedIp) {
       const port    = c.dport === 443 ? 'HTTPS' : c.dport === 80 ? 'HTTP' : `:${c.dport}`;
       const cnt     = c.count > 1 ? ` ×${c.count}` : '';
       const flag    = (c.country && c.country.length === 2)
-        ? String.fromCodePoint(0x1F1E0 + c.country.charCodeAt(0) - 65, 0x1F1E0 + c.country.charCodeAt(1) - 65)
+        ? String.fromCodePoint(0x1F1E6 + c.country.charCodeAt(0) - 65, 0x1F1E6 + c.country.charCodeAt(1) - 65)
         : '';
       const rdapStr = (flag || c.org) ? `${flag} ${c.org || c.country || ''}`.trim() : '';
       const rdapLine = rdapStr ? `<span class="conn-rdap">${esc(rdapStr)}</span>` : '';
