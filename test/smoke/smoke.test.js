@@ -64,12 +64,14 @@ test('index.html has no inline script block with JS code', async ({ request }) =
   expect(body).not.toMatch(/<script>\s*\/\/ ─/);
 });
 
-// ④ index.html が期待する <script src> タグを含むこと
+// ④ index.html が期待する <script> タグを含むこと（ES module化後は main.js 1本のみ）
 test('index.html references expected script files', async ({ request }) => {
   const res = await request.get(`${BASE}/`);
   const body = await res.text();
-  for (const f of ['utils.js', 'graph.js', 'map-common.js', 'settings.js', 'devices.js', 'main.js']) {
-    expect(body, `index.html should reference ${f}`).toContain(`/js/${f}`);
+  expect(body, 'index.html should reference main.js as module entry point').toContain('/js/main.js');
+  expect(body, 'index.html should use type="module"').toContain('type="module"');
+  for (const f of ['utils.js', 'graph.js', 'map-common.js', 'settings.js', 'devices.js']) {
+    expect(body, `index.html should NOT have separate <script> for ${f}`).not.toContain(`<script src`+`="${BASE}/js/${f}"`);
   }
 });
 
