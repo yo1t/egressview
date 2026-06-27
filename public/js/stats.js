@@ -1,3 +1,4 @@
+(function() {
 // ─── Statistics view ─────────────────────────────────────────────────────────
 const STATS_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#a78bfa'];
 
@@ -513,7 +514,8 @@ function updateMapCoverageNotice(coverage) {
     return;
   }
   const percent = Number(coverage.percent || 0).toFixed(1);
-  el.textContent = tVars('stats.map.coverage', {
+  const isMobile = window.matchMedia('(max-width: 768px)').matches;
+  el.textContent = isMobile ? t('stats.map.coverage.mobile') : tVars('stats.map.coverage', {
     shown: Number(coverage.shownGroups || 0).toLocaleString(),
     total: Number(coverage.totalGroups || 0).toLocaleString(),
     percent,
@@ -1018,3 +1020,15 @@ if (typeof exposeEgressViewApi === 'function') {
   exposeEgressViewApi('initStatsMaps', initStatsMaps);
   exposeEgressViewApi('updateStatsMaps', updateStatsMaps);
 }
+
+// Expose public function API to window for classic-script callers
+window.updateStats = updateStats;
+window.initStatsMaps = initStatsMaps;
+window.initStats = initStats;
+
+// Bridge mutable map variables so auth-socket.js can null them for reset
+Object.defineProperty(window, 'stFlatSvg',     { get: () => stFlatSvg,     set: v => { stFlatSvg     = v; }, configurable: true });
+Object.defineProperty(window, 'stGlobeSvg',    { get: () => stGlobeSvg,    set: v => { stGlobeSvg    = v; }, configurable: true });
+Object.defineProperty(window, 'stGlobeRotate', { get: () => stGlobeRotate, set: v => { stGlobeRotate = v; }, configurable: true });
+
+})();

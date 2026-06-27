@@ -1,3 +1,4 @@
+(function() {
 // ─── D3 Graph Setup ───────────────────────────────────────────────────────────
 const svg = d3.select('#graph');
 let width = 0, height = 0;
@@ -986,3 +987,25 @@ if (typeof exposeEgressViewApi === 'function') {
   exposeEgressViewApi('scheduleGraphAutoFit', scheduleGraphAutoFit);
   exposeEgressViewApi('stopGraph', stopGraph);
 }
+
+// Expose public function API to window for classic-script callers
+window.buildGraph = buildGraph;
+window.buildGraphFromConnections = buildGraphFromConnections;
+window.updateOrgGraph = updateOrgGraph;
+window.stopGraph = stopGraph;
+window.showToast = showToast;
+window.scheduleGraphAutoFit = scheduleGraphAutoFit;
+window.fetchGraphSummary = fetchGraphSummary;
+window.clearGraphSummary = clearGraphSummary;
+window.currentGraphRangeKey = currentGraphRangeKey;
+window.updateSideHighlight = updateSideHighlight;
+
+// Bridge mutable closure state as window properties so classic scripts can
+// read/write them without breaking encapsulation of the IIFE closure.
+Object.defineProperty(window, 'selectedMac',     { get: () => selectedMac,     set: v => { selectedMac     = v; }, configurable: true });
+Object.defineProperty(window, 'selectedIp',      { get: () => selectedIp,      set: v => { selectedIp      = v; }, configurable: true });
+Object.defineProperty(window, 'nodes',           { get: () => nodes,                                               configurable: true });
+Object.defineProperty(window, 'graphSummary',    { get: () => graphSummary,                                        configurable: true });
+Object.defineProperty(window, 'graphSummaryKey', { get: () => graphSummaryKey,                                     configurable: true });
+
+})();

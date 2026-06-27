@@ -503,6 +503,22 @@ describe('Server runtime invariants', () => {
       'successful summary rendering should update the rendered-summary guard');
   });
 
+  it('stats map coverage stays on the stats header and uses compact mobile text', () => {
+    const script = getScriptContent();
+    const headerStart = html.indexOf('<div class="stats-header">');
+    assert.notEqual(headerStart, -1, 'stats header should exist');
+    const headerEnd = html.indexOf('</div>', headerStart);
+    const headerHtml = html.slice(headerStart, headerEnd);
+    assert.match(headerHtml, /id="stats-subtitle"[\s\S]*id="stats-map-coverage"[\s\S]*id="data-fetching-stats"/,
+      'map coverage should sit to the right of the stats subtitle and before the loading indicator');
+    assert.match(script, /window\.matchMedia\('\(max-width:\s*768px\)'\)\.matches/,
+      'stats map coverage should detect mobile layout');
+    assert.match(script, /isMobile\s*\?\s*t\('stats\.map\.coverage\.mobile'\)\s*:\s*tVars\('stats\.map\.coverage'/,
+      'mobile should use a compact one-line map coverage label');
+    assert.match(html + script, /stats\.map\.coverage\.mobile/,
+      'mobile coverage i18n key should be present');
+  });
+
   it('Yamaha SSH prompt wait clears stale timers and accepts privileged prompts', () => {
     assert.match(yamahaJs, /function\s+looksLikeShellPrompt/,
       'Yamaha poller should centralize shell prompt detection');
