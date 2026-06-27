@@ -62,6 +62,7 @@ const DEMO_MODE       = process.env.DEMO_MODE === 'true';
 const DEMO_ADMIN_TOKEN = process.env.DEMO_ADMIN_TOKEN || 'demo-token-ci';
 const DEMO_DB_PATH     = path.join(__dirname, '.egressview.demo.db');
 const DEMO_BACKUP_DIR  = path.join(__dirname, '.egressview-demo-backups');
+const ASSET_VERSION    = process.env.EGRESSVIEW_ASSET_VERSION || String(Date.now());
 
 
 // ─── Shared mutable state ─────────────────────────────────────────────────────
@@ -483,12 +484,16 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get(['/', '/index.html'], (req, res) => {
+const indexRoutes = ['/', '/index.html'];
+if (SUBPATH) indexRoutes.push(`${SUBPATH}/`, `${SUBPATH}/index.html`);
+
+app.get(indexRoutes, (req, res) => {
   const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   const baseScript = `<script nonce="${res.locals.cspNonce}">window.BASE_URL = '${htmlEscape(SUBPATH)}'; window._DEMO_MODE = ${DEMO_MODE};</script>`;
   res.type('html').send(
     html.replace('</head>', baseScript + '\n</head>')
         .replace(/__BASE__/g, htmlEscape(SUBPATH))
+        .replace(/__ASSET_VERSION__/g, htmlEscape(ASSET_VERSION))
   );
 });
 // Serve static assets at both root and SUBPATH (for deployments behind a subpath proxy)

@@ -438,7 +438,9 @@ let statsSummaryGeneration = 0;
 let statsSummaryCache = { key: null, at: 0, data: null };
 let statsSummaryInflight = { key: null, promise: null };
 let statsMapSummaryKey = null;
+let statsRenderedSummary = { key: null, data: null };
 const STATS_SUMMARY_CACHE_MS = 60_000;
+let statsSummaryRequestWindow = { key: null, from: null, to: null, at: 0 };
 
 function getStatsSelection() {
   const sel = selectedMac;
@@ -613,7 +615,7 @@ function clearStatsMapsForPendingSummary(selIp) {
 }
 
 function buildStatsSummaryParams(selIp) {
-  const { from, to } = getTimeRange();
+  const { from, to } = getStableStatsSummaryRange();
   const params = new URLSearchParams();
   if (from != null) params.set('from', from);
   if (to != null) params.set('to', to);
@@ -624,6 +626,25 @@ function buildStatsSummaryParams(selIp) {
 
 function getStatsSummaryKey(selIp) {
   return buildStatsSummaryParams(selIp).toString();
+}
+
+function statsSummaryRangeKey(from, to) {
+  if (typeof currentGraphRangeKey === 'function') return currentGraphRangeKey(from, to);
+  return `${from ?? ''}:${to ?? ''}`;
+}
+
+function getStableStatsSummaryRange() {
+  const { from, to } = getTimeRange();
+  const key = statsSummaryRangeKey(from, to);
+  const now = Date.now();
+  if (
+    statsSummaryRequestWindow.key === key &&
+    now - statsSummaryRequestWindow.at < STATS_SUMMARY_CACHE_MS
+  ) {
+    return { from: statsSummaryRequestWindow.from, to: statsSummaryRequestWindow.to };
+  }
+  statsSummaryRequestWindow = { key, from, to, at: now };
+  return { from, to };
 }
 
 async function fetchStatsSummary(selIp) {
@@ -672,13 +693,20 @@ async function updateStats() {
 
   const generation = ++statsSummaryGeneration;
   const summaryKey = getStatsSummaryKey(selIp);
-  renderStatsPiePreview(selIp);
+  if (!(statsSummaryCache.key === summaryKey && statsSummaryCache.data)) {
+    renderStatsPiePreview(selIp);
+  }
   if (statsMapSummaryKey !== summaryKey) clearStatsMapsForPendingSummary(selIp);
   try {
     const summary = await fetchStatsSummary(selIp);
     if (generation !== statsSummaryGeneration || !statsMode) return;
+    if (statsRenderedSummary.key === summaryKey && statsRenderedSummary.data === summary) {
+      statsMapSummaryKey = summaryKey;
+      return;
+    }
     renderStatsSummary(summary, selIp);
     statsMapSummaryKey = summaryKey;
+    statsRenderedSummary = { key: summaryKey, data: summary };
   } catch (e) {
     console.error('[stats] summary fetch failed:', e);
     if (generation !== statsSummaryGeneration || !statsMode) return;

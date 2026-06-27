@@ -30,7 +30,7 @@ function getScriptContent() {
   const parts = [];
 
   // External JS files referenced from index.html
-  const srcRe = /<script src="__BASE__\/js\/([^"]+)"><\/script>/g;
+  const srcRe = /<script src="__BASE__\/js\/([^"?]+)(?:\?v=__ASSET_VERSION__)?"><\/script>/g;
   let m;
   while ((m = srcRe.exec(html)) !== null) {
     const filePath = path.join(jsDir, m[1]);
@@ -52,7 +52,7 @@ function getScriptContent() {
 
 function getAppScriptFiles() {
   const files = [];
-  const srcRe = /<script src="__BASE__\/js\/([^"]+)"><\/script>/g;
+  const srcRe = /<script src="__BASE__\/js\/([^"?]+)(?:\?v=__ASSET_VERSION__)?"><\/script>/g;
   let m;
   while ((m = srcRe.exec(html)) !== null) {
     files.push(m[1]);
@@ -80,6 +80,28 @@ describe('Frontend script wiring invariants', () => {
       'notif-log.js',
       'main.js',
     ]);
+  });
+
+  it('cache-busts frontend assets after server restart or deploy', () => {
+    assert.match(html, /<link rel="stylesheet" href="__BASE__\/style\.css\?v=__ASSET_VERSION__">/,
+      'style.css should include the generated asset version');
+    assert.match(html, /<script src="__BASE__\/js\/stats\.js\?v=__ASSET_VERSION__"><\/script>/,
+      'stats.js should include the generated asset version');
+    assert.match(serverJs, /const\s+ASSET_VERSION\s*=\s*process\.env\.EGRESSVIEW_ASSET_VERSION\s*\|\|\s*String\(Date\.now\(\)\)/,
+      'server should generate an asset version for each process start unless explicitly set');
+    assert.match(serverJs, /\.replace\(/,
+      'index rendering should perform template replacement');
+    assert.match(serverJs, /__ASSET_VERSION__/,
+      'index rendering should replace the asset version placeholder');
+  });
+
+  it('renders index.html through the template path for subpath deployments', () => {
+    assert.match(serverJs, /const\s+indexRoutes\s*=\s*\['\/',\s*'\/index\.html'\]/,
+      'root index routes should be listed explicitly');
+    assert.match(serverJs, /if\s*\(\s*SUBPATH\s*\)\s*indexRoutes\.push\(`\$\{SUBPATH\}\/`,\s*`\$\{SUBPATH\}\/index\.html`\)/,
+      'subpath index routes should also use the rendered template, not raw static index.html');
+    assert.match(serverJs, /app\.get\(indexRoutes,/,
+      'index route should be registered from the combined route list');
   });
 
   it('keeps main.js as the final app script', () => {
@@ -444,6 +466,14 @@ describe('Server runtime invariants', () => {
     const script = getScriptContent();
     assert.match(script, /const\s+STATS_SUMMARY_CACHE_MS\s*=\s*60_000/,
       'stats summary cache should be long enough to avoid repeated loading banners during live updates');
+    assert.match(script, /let\s+statsSummaryRequestWindow\s*=\s*\{\s*key:\s*null,\s*from:\s*null,\s*to:\s*null,\s*at:\s*0\s*\}/,
+      'relative periods should keep a stable request window while the cache is valid');
+    assert.match(script, /function\s+statsSummaryRangeKey\(from,\s*to\)[\s\S]*?currentGraphRangeKey\(from,\s*to\)/,
+      'stats should reuse the graph range key so relative periods are keyed as 1h/open, 14d/open, etc.');
+    assert.match(script, /function\s+getStableStatsSummaryRange\(\)[\s\S]*?statsSummaryRequestWindow\.key\s*===\s*key[\s\S]*?STATS_SUMMARY_CACHE_MS[\s\S]*?return\s*\{\s*from:\s*statsSummaryRequestWindow\.from,\s*to:\s*statsSummaryRequestWindow\.to\s*\}/,
+      'stats summary API params should not drift on every Date.now tick for relative periods');
+    assert.match(script, /function\s+buildStatsSummaryParams\(selIp\)[\s\S]*?getStableStatsSummaryRange\(\)/,
+      'summary params should be built from the stable range');
     assert.doesNotMatch(script, /now\s*-\s*statsSummaryCache\.at\s*<\s*5000/,
       'a 5s summary cache causes periodic refetching and visible map redraws');
     assert.match(script, /now\s*-\s*statsSummaryCache\.at\s*<\s*STATS_SUMMARY_CACHE_MS/,
@@ -454,6 +484,23 @@ describe('Server runtime invariants', () => {
       'loading should only be shown for first fetches such as period/device changes');
     assert.match(script, /if\s*\(\s*showLoading\s*\)\s*setFetching\(-1\)/,
       'loading decrement should match the conditional increment');
+  });
+
+  it('stats view does not redraw charts for the same cached summary object', () => {
+    const script = getScriptContent();
+    const start = script.indexOf('async function updateStats()');
+    assert.notEqual(start, -1, 'updateStats should exist');
+    const end = script.indexOf('// ─── App distribution pie chart', start);
+    assert.notEqual(end, -1, 'updateStats section end marker should exist');
+    const updateStatsFn = script.slice(start, end);
+    assert.match(script, /let\s+statsRenderedSummary\s*=\s*\{\s*key:\s*null,\s*data:\s*null\s*\}/,
+      'stats should remember the last rendered summary object');
+    assert.match(updateStatsFn, /!\(\s*statsSummaryCache\.key\s*===\s*summaryKey\s*&&\s*statsSummaryCache\.data\s*\)[\s\S]*?renderStatsPiePreview\(selIp\)/,
+      'same-period socket refreshes should not clear/redraw the pie preview while cached summary exists');
+    assert.match(updateStatsFn, /statsRenderedSummary\.key\s*===\s*summaryKey\s*&&\s*statsRenderedSummary\.data\s*===\s*summary[\s\S]*?return/,
+      'cached summary objects should not redraw charts and map layers repeatedly');
+    assert.match(updateStatsFn, /statsRenderedSummary\s*=\s*\{\s*key:\s*summaryKey,\s*data:\s*summary\s*\}/,
+      'successful summary rendering should update the rendered-summary guard');
   });
 
   it('Yamaha SSH prompt wait clears stale timers and accepts privileged prompts', () => {
