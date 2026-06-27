@@ -1,5 +1,17 @@
-(function() {
 // ─── D3 Graph Setup ───────────────────────────────────────────────────────────
+import { t, tVars } from './i18n.js';
+import { _BASE, esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType } from './utils.js';
+import { allConnections, getFilteredConnections, getTimeRange, setFetching, currentTimeFilter, updateConnPanel } from './connections-panel.js';
+import { statsMode, nlMode, logMode, devicesMode } from './view-tabs.js';
+import { asusActive, lookupNote, apiFetch } from './auth-socket.js';
+// Circular imports resolved at runtime (function-body-only calls):
+import { updateStats } from './stats.js';
+import { updateLogView } from './log.js';
+import { nlRender } from './notif-log.js';
+import { devicesData, renderDevicesTable, setDvSelectedIp } from './devices.js';
+
+let _devicesDataRef = [];
+export function setGraphDevicesDataRef(v) { _devicesDataRef = v; }
 const svg = d3.select('#graph');
 let width = 0, height = 0;
 
@@ -163,7 +175,7 @@ function normalizeGraphLinks(candidateLinks, candidateNodes) {
 }
 
 function currentGraphRangeKey(from, to) {
-  if (typeof currentTimeFilter !== 'undefined' && currentTimeFilter) {
+  if (currentTimeFilter) {
     if (currentTimeFilter === 'custom') return `custom:${from ?? ''}:${to ?? ''}`;
     if (currentTimeFilter === 'today' || currentTimeFilter === 'yesterday') {
       const day = from != null ? new Date(from).toISOString().slice(0, 10) : '';
@@ -388,7 +400,7 @@ function drawNodes() {
         }
         updateLogView();
       }
-      if (typeof nlMode !== 'undefined' && nlMode) nlRender();
+      if (nlMode) nlRender();
     })
     .on('mouseenter', showTooltip).on('mousemove', moveTooltip).on('mouseleave', hideTooltip);
 
@@ -574,9 +586,9 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
           }
           updateLogView();
         }
-        if (typeof nlMode !== 'undefined' && nlMode) nlRender();
+        if (nlMode) nlRender();
         if (devicesMode) {
-          dvSelectedIp = selectedIp;
+          setDvSelectedIp(selectedIp);
           renderDevicesTable();
         }
       });
@@ -590,7 +602,7 @@ function updateSidePanel(clients, data, meshNodes, mainMac) {
       list.appendChild(card);
     }
     // Note display — prefer deviceId key (MCP-set notes) over IP/MAC composite
-    const _noteDev = devicesData.find(d => d.ip === c.ip || (c.mac && c.mac !== c.ip && d.mac === c.mac));
+    const _noteDev = _devicesDataRef.find(d => d.ip === c.ip || (c.mac && c.mac !== c.ip && d.mac === c.mac));
     const noteText = lookupNote(c.ip, c.mac, _noteDev?.deviceId);
     const noteEl = card.querySelector('.device-note');
     if (noteEl) {
@@ -979,33 +991,7 @@ function stopGraph() {
   document.getElementById('conn-panel').style.display = 'none';
 }
 
-if (typeof registerEgressViewInit === 'function') registerEgressViewInit('graph', initGraph);
-if (typeof exposeEgressViewApi === 'function') {
-  exposeEgressViewApi('buildGraphFromConnections', buildGraphFromConnections);
-  exposeEgressViewApi('buildGraph', buildGraph);
-  exposeEgressViewApi('resizeGraph', resize);
-  exposeEgressViewApi('scheduleGraphAutoFit', scheduleGraphAutoFit);
-  exposeEgressViewApi('stopGraph', stopGraph);
-}
-
-// Expose public function API to window for classic-script callers
-window.buildGraph = buildGraph;
-window.buildGraphFromConnections = buildGraphFromConnections;
-window.updateOrgGraph = updateOrgGraph;
-window.stopGraph = stopGraph;
-window.showToast = showToast;
-window.scheduleGraphAutoFit = scheduleGraphAutoFit;
-window.fetchGraphSummary = fetchGraphSummary;
-window.clearGraphSummary = clearGraphSummary;
-window.currentGraphRangeKey = currentGraphRangeKey;
-window.updateSideHighlight = updateSideHighlight;
-
-// Bridge mutable closure state as window properties so classic scripts can
-// read/write them without breaking encapsulation of the IIFE closure.
-Object.defineProperty(window, 'selectedMac',     { get: () => selectedMac,     set: v => { selectedMac     = v; }, configurable: true });
-Object.defineProperty(window, 'selectedIp',      { get: () => selectedIp,      set: v => { selectedIp      = v; }, configurable: true });
-Object.defineProperty(window, 'nodes',           { get: () => nodes,                                               configurable: true });
-Object.defineProperty(window, 'graphSummary',    { get: () => graphSummary,                                        configurable: true });
-Object.defineProperty(window, 'graphSummaryKey', { get: () => graphSummaryKey,                                     configurable: true });
-
-})();
+export { selectedMac, selectedIp, nodes, graphSummary, graphSummaryKey, buildGraph, buildGraphFromConnections, buildGraphFromSummary, updateOrgGraph, stopGraph, showToast, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, currentGraphRangeKey, updateSideHighlight, initGraph, lastMeshNodes, lastClients, lastMainMac, updateFilterTabs, applyFilter, applyGraphFilter, simulation };
+export function clearSelection() { selectedMac = null; selectedIp = null; }
+export function setSelection(mac, ip) { selectedMac = mac; selectedIp = ip; }
+export function resizeGraph(opts) { return resize(opts); }

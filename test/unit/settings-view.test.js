@@ -6,7 +6,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const settingsJs = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'settings.js'), 'utf8');
+// Strip ES module import/export lines so the file can run in a VM classic-script context.
+// export function/class/const/let/var declarations keep their body; only the 'export' keyword is removed.
+function stripEsModule(src) {
+  return src
+    .replace(/^import\s[^;]+;?\s*$/gm, '')
+    .replace(/^export\s+(default\s+)?(function|class|const|let|var)\s/gm, '$2 ')
+    .replace(/^export\s+\{[^}]*\};?\s*$/gm, '');
+}
+const settingsJs = stripEsModule(fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'settings.js'), 'utf8'));
 const modalJs = settingsJs.slice(0, settingsJs.indexOf('// Checkbox toggles'));
 
 class FakeElement {

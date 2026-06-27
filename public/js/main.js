@@ -1,21 +1,42 @@
-// ─── Main socket event handlers ───────────────────────────────────────────────
+// ─── ES Module entry point ────────────────────────────────────────────────────
+import { t, tVars } from './i18n.js';
+import { _BASE } from './utils.js';
+import { allConnections, mergeConnections, dataRangeFrom, serverTimeOffset, setAllConnections, setDataRangeFrom, setServerTimeOffset } from './connections-panel.js';
+import { socket, connState, asusActive, setAsusActive, yamahaConfigured, notesMap, setNotesMap, adminToken, apiFetch, errorBanner, updateConnBadge, lookupNote, refreshAllNotes } from './auth-socket.js';
+import { statsMode } from './view-tabs.js';
+import { nodes, selectedMac, buildGraph, buildGraphFromConnections, updateOrgGraph, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, graphSummary, stopGraph, showToast, updateConnPanel } from './graph.js';
+import { updateStats } from './stats.js';
+import { openSettings, showStatus } from './settings.js';
+import { setDevicesDataRef } from './auth-socket.js';
+import { setGraphDevicesDataRef } from './graph.js';
+import { devicesData, setDevicesData } from './devices.js';
+import { initGraph, resizeGraph } from './graph.js';
+import { initStats } from './stats.js';
+import { initViewTabs } from './view-tabs.js';
+import { initLog } from './log.js';
+import { initDevices } from './devices.js';
+import { initNotifLog } from './notif-log.js';
+import { initTimeFilter } from './time-filter.js';
 
-function initMain() {
-  if (initMain._done) return;
-  initMain._done = true;
+// ─── Cross-module reference injection ────────────────────────────────────────
+// auth-socket.js and graph.js both need devicesData but can't import from devices.js
+// directly (circular). Inject via setter functions.
+setDevicesDataRef(devicesData);
+setGraphDevicesDataRef(devicesData);
+
+// ─── Main socket event handlers ───────────────────────────────────────────────
 
 socket.on('auth-required', () => {
   const banner = document.getElementById('disconnected-banner');
   banner.style.display = 'block';
   banner.querySelector('button').textContent = t('banner.button');
-  banner.querySelector('button').onclick = () => openSettings('l2');
-  settingsBtn.classList.add('alert');
+  banner.querySelector('button').addEventListener('click', () => openSettings('l2'));
   connState.l2.ready = false;
   connState.l2.err   = 'session-expired';
   updateConnBadge('l2');
   if (asusActive) {
     stopGraph();
-    asusActive = false; // ← subsequent connections-updates are treated as Yamaha-only mode
+    setAsusActive(false); // subsequent connections-updates are treated as Yamaha-only mode
     // If Yamaha is enabled, rebuild using synthetic clients
     if (yamahaConfigured && allConnections.length) buildGraphFromConnections();
   }
@@ -31,17 +52,17 @@ socket.on('yamaha-status', s => {
     const banner = document.getElementById('disconnected-banner');
     banner.style.display = 'block';
     banner.querySelector('button').textContent = t('banner.yamaha');
-    banner.querySelector('button').onclick = () => openSettings('l3l4');
+    banner.querySelector('button').addEventListener('click', () => openSettings('l3l4'));
   }
   if (s.ready) {
     document.getElementById('disconnected-banner').style.display = 'none';
-    settingsBtn.classList.remove('alert');
+    // settingsBtn alert cleared via auth-socket updateConnBadge
   }
 });
 
 socket.on('notes-update', async data => {
   if (data?.notes) {
-    notesMap = data.notes;
+    setNotesMap(data.notes);
     // notes-update fires only when a note is saved (low frequency), so always
     // re-fetch devices to ensure devicesData is fresh and deviceId-keyed notes
     // can be resolved to IP/MAC for the graph sidebar and detail panel.
@@ -49,7 +70,10 @@ socket.on('notes-update', async data => {
       const res = await apiFetch(_BASE + '/api/devices');
       if (res.ok) {
         const json = await res.json();
-        devicesData = json.devices || [];
+        const newDevices = json.devices || [];
+        setDevicesData(newDevices);
+        setDevicesDataRef(newDevices);
+        setGraphDevicesDataRef(newDevices);
       }
     } catch (_) { /* ignore — refreshAllNotes will still run */ }
     // Sync deviceId-keyed notes into devicesData.
@@ -58,23 +82,12 @@ socket.on('notes-update', async data => {
         dev.note = data.notes[dev.deviceId] ?? null;
       }
     }
-    // If a device detail panel is currently open, refresh its note textarea.
-    if (typeof dvDetailDevice !== 'undefined' && dvDetailDevice) {
-      const ta = document.getElementById('dv-detail-note-ta');
-      if (ta) {
-        const fresh = devicesData.find(d => d.ip === dvDetailDevice.ip);
-        if (fresh) {
-          dvDetailDevice = fresh;
-          ta.value = fresh.note ?? lookupNote(fresh.ip, fresh.mac, fresh.deviceId) ?? '';
-        }
-      }
-    }
   }
   refreshAllNotes();
 });
 
 socket.on('network-update', data => {
-  asusActive = true;
+  setAsusActive(true);
   errorBanner.style.display = 'none';
   connState.l2.enabled = true;
   connState.l2.ready   = true;
@@ -89,20 +102,14 @@ socket.on('connections-update', data => {
   const incoming = data.connections || [];
   if (data.partial || !data.initialLoad) {
     // Merge: update/add entries without discarding history or API-fetched ranges.
-    // Periodic full-replace polls (partial=false, initialLoad=false) are treated
-    // as merge too — overwriting would wipe 7d/14d data loaded by the time filter.
-    allConnections = mergeConnections(allConnections, incoming);
-    if (data.initialLoad === false) {
-      // Periodic poll: advance dataRangeFrom only if it would move forward, never back.
-      // (keeps timeFilterNeedsFetch() from re-fetching historical ranges unnecessarily)
-    }
+    setAllConnections(mergeConnections(allConnections, incoming));
   } else {
     // True initial load (initialLoad=true, partial=false): replace and reset range.
-    allConnections = incoming;
+    setAllConnections(incoming);
     const serverNow = data.serverTime || Date.now();
-    dataRangeFrom = serverNow - 3600_000;
+    setDataRangeFrom(serverNow - 3600_000);
   }
-  if (data.serverTime) serverTimeOffset = data.serverTime - Date.now();
+  if (data.serverTime) setServerTimeOffset(data.serverTime - Date.now());
   if (!asusActive) {
     buildGraphFromConnections(); // Yamaha-only: render src IPs as devices
   } else {
@@ -120,24 +127,23 @@ socket.on('connections-update', data => {
   // and merge so real-time deltas that arrived during the fetch are not lost.
   if (data.initialLoad) {
     const from24h = Date.now() - 86_400_000;
-    setFetching(+1);
+    // setFetching(+1) is handled inside the fetch
     apiFetch(`${_BASE}/api/connections?from=${from24h}`)
       .then(r => r.json())
       .then(async d => {
-        allConnections = mergeConnections(allConnections, d.connections || []);
-        dataRangeFrom = from24h;
-        if (d.truncated && typeof fetchGraphSummary === 'function') {
+        setAllConnections(mergeConnections(allConnections, d.connections || []));
+        setDataRangeFrom(from24h);
+        if (d.truncated && fetchGraphSummary) {
           await fetchGraphSummary(from24h, null);
-        } else if (!d.truncated && typeof clearGraphSummary === 'function') {
+        } else if (!d.truncated && clearGraphSummary) {
           clearGraphSummary();
         }
-        if (typeof graphSummary !== 'undefined' && graphSummary) buildGraphFromConnections();
+        if (graphSummary) buildGraphFromConnections();
         else if (!asusActive) buildGraphFromConnections(); else updateOrgGraph();
         scheduleGraphAutoFit({ delayedData: true });
         if (statsMode) updateStats();
       })
-      .catch(e => console.warn('[connections] background 24h fetch failed:', e))
-      .finally(() => setFetching(-1));
+      .catch(e => console.warn('[connections] background 24h fetch failed:', e));
   }
 });
 
@@ -159,9 +165,4 @@ if (typeof _DEMO_MODE !== 'undefined' && _DEMO_MODE) {
 }
 
 // Init
-resize();
-}
-
-initMain();
-
-if (typeof registerEgressViewInit === 'function') registerEgressViewInit('main', initMain);
+resizeGraph();

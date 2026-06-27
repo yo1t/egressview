@@ -1,4 +1,12 @@
 // ─── Connection Log View ──────────────────────────────────────────────────────
+import { t, tVars, currentLang } from './i18n.js';
+import { _BASE, esc, guessApp } from './utils.js';
+import { getTimeRange, setFetching, serverTimeOffset } from './connections-panel.js';
+import { logMode } from './view-tabs.js';
+import { selectedMac, selectedIp, updateSideHighlight, clearSelection } from './graph.js';
+import { apiFetch } from './auth-socket.js';
+import { showThreatDetail } from './threat-popup.js';
+
 const logSortState = { col: 'lastSeen', dir: 'desc' };
 const logFilters = {}; // col → { mode, value }
 let logThreatFilter = null; // null | 'safe' | 'warn' | 'danger'
@@ -294,7 +302,7 @@ function renderLogView(appendRows) {
         const label = selectedIp || selectedMac;
         deviceFilterEl.innerHTML = `<span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;cursor:pointer" title="${esc(t('log.deviceFilter.clear'))}" id="log-device-filter-clear">${esc(tVars('log.deviceFilter.only', { value: label }))}</span>`;
         document.getElementById('log-device-filter-clear')?.addEventListener('click', () => {
-          selectedMac = null; selectedIp = null;
+          clearSelection();
           updateSideHighlight();
           resetAndFetch();
         });
@@ -565,5 +573,4 @@ logSearchInput.addEventListener('keydown', (e) => {
 
 initLog();
 
-if (typeof registerEgressViewInit === 'function') registerEgressViewInit('log', initLog);
-if (typeof exposeEgressViewApi === 'function') exposeEgressViewApi('updateLogView', updateLogView);
+export { updateLogView, initLog, resetAndFetch };

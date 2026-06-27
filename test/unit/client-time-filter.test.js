@@ -11,11 +11,20 @@ const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
 
+// Strip ES module import/export lines so files can run in a VM classic-script context.
+// export function/class/const/let/var declarations keep their body; only the 'export' keyword is removed.
+function stripEsModule(src) {
+  return src
+    .replace(/^import\s[^;]+;?\s*$/gm, '')
+    .replace(/^export\s+(default\s+)?(function|class|const|let|var)\s/gm, '$2 ')
+    .replace(/^export\s+\{[^}]*\};?\s*$/gm, '');
+}
+
 function loadTimeFilterVm(apiConnections = [], options = {}) {
   const files = [
     'public/js/connections-panel.js',
     'public/js/time-filter.js',
-  ].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
+  ].map(file => stripEsModule(fs.readFileSync(path.join(root, file), 'utf8'))).join('\n');
 
   const calls = options.calls || [];
   const elements = new Map();

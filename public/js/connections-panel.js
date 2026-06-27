@@ -1,4 +1,7 @@
 // ─── Connections panel ────────────────────────────────────────────────────────
+import { t } from './i18n.js';
+import { esc } from './utils.js';
+
 let allConnections = [];
 let serverTimeOffset = 0; // diff between client and server clocks (ms)
 let currentTimeFilter = '1h';
@@ -123,3 +126,12 @@ function updateConnPanel(selectedIp) {
       </div>`;
     }).join('');
 }
+
+export function setAllConnections(v) { allConnections = v; }
+export function mergeAndSet(incoming) { allConnections = mergeConnections(allConnections, incoming); return allConnections; }
+export function setServerTimeOffset(v) { serverTimeOffset = v; }
+export function setDataRangeFrom(v) { dataRangeFrom = v; }
+export function setCustomRangeFrom(v) { customRangeFrom = v; }
+export function setCustomRangeTo(v) { customRangeTo = v; }
+export function setCurrentTimeFilter(v) { currentTimeFilter = v; }
+export { allConnections, serverTimeOffset, dataRangeFrom, customRangeFrom, customRangeTo, currentTimeFilter, mergeConnections, getFilteredConnections, getTimeRange, setFetching, updateConnPanel };

@@ -1,5 +1,11 @@
-(function() {
 // ─── Statistics view ─────────────────────────────────────────────────────────
+import { t, tVars } from './i18n.js';
+import { _BASE, esc, _buildAppSlices, guessApp } from './utils.js';
+import { allConnections, getFilteredConnections, setFetching, serverTimeOffset, getTimeRange } from './connections-panel.js';
+import { statsMode } from './view-tabs.js';
+import { worldGeo, getHomeCoord, getMapRotation, buildMapPoints } from './map-common.js';
+import { selectedMac, nodes, currentGraphRangeKey } from './graph.js';
+import { apiFetch } from './auth-socket.js';
 const STATS_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#a78bfa'];
 
 // ── Stats page: Globe + Flat map ─────────────────────────────────────────────
@@ -1014,21 +1020,5 @@ function drawBarChart(orgs /* [[name, count], ...] */) {
     .text(d => d[1]);
 }
 
-if (typeof registerEgressViewInit === 'function') registerEgressViewInit('stats', initStats);
-if (typeof exposeEgressViewApi === 'function') {
-  exposeEgressViewApi('updateStats', updateStats);
-  exposeEgressViewApi('initStatsMaps', initStatsMaps);
-  exposeEgressViewApi('updateStatsMaps', updateStatsMaps);
-}
-
-// Expose public function API to window for classic-script callers
-window.updateStats = updateStats;
-window.initStatsMaps = initStatsMaps;
-window.initStats = initStats;
-
-// Bridge mutable map variables so auth-socket.js can null them for reset
-Object.defineProperty(window, 'stFlatSvg',     { get: () => stFlatSvg,     set: v => { stFlatSvg     = v; }, configurable: true });
-Object.defineProperty(window, 'stGlobeSvg',    { get: () => stGlobeSvg,    set: v => { stGlobeSvg    = v; }, configurable: true });
-Object.defineProperty(window, 'stGlobeRotate', { get: () => stGlobeRotate, set: v => { stGlobeRotate = v; }, configurable: true });
-
-})();
+export { updateStats, initStats, initStatsMaps, updateStatsMaps, scheduleStatsMapResize };
+export function resetStatsMaps() { stFlatSvg = null; stGlobeSvg = null; stGlobeRotate = null; }

@@ -1,6 +1,8 @@
 // ─── Shared geo / map utilities ──────────────────────────────────────────────
-var worldGeo = null;
-var homeCountry = 'JP'; // configurable via settings
+import { getFilteredConnections } from './connections-panel.js';
+
+let worldGeo = null;
+let homeCountry = 'JP'; // configurable via settings
 
 const COUNTRY_COORDS = {
   JP:{ lat:35.68, lon:139.69 }, US:{ lat:38.89, lon:-77.04 }, CA:{ lat:45.42, lon:-75.69 },
@@ -67,3 +69,7 @@ function ensureWorldGeo(cb) {
     .then(topo => { worldGeo = topojson.feature(topo, topo.objects.countries); cb(); })
     .catch(err => console.error('[geo] load failed', err));
 }
+
+export { worldGeo, homeCountry, getHomeCoord, getMapRotation, buildMapPoints, ensureWorldGeo, COUNTRY_COORDS };
+export function setWorldGeo(v) { worldGeo = v; }
+export function setHomeCountry(v) { homeCountry = v; }

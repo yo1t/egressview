@@ -1,14 +1,18 @@
 // ─── View tabs ────────────────────────────────────────────────────────────────
+import { t } from './i18n.js';
+
 var currentView = 'graph';
 var statsMode = false;
 var logMode = false;
 var devicesMode = false;
+var nlMode = false;
+
 function switchView(view) {
   currentView = view;
   statsMode   = (view === 'stats');
   logMode     = (view === 'log');
   devicesMode = (view === 'devices');
-  if (typeof nlMode !== 'undefined') nlMode = (view === 'notif-log');
+  nlMode = (view === 'notif-log');
   // 端末一覧・検出ログは全件表示のため期間フィルターは無関係
   document.querySelector('.time-filter')
     ?.classList.toggle('disabled', view === 'devices' || view === 'notif-log');
@@ -53,5 +57,5 @@ function initViewTabs() {
 
 initViewTabs();
 
-if (typeof registerEgressViewInit === 'function') registerEgressViewInit('viewTabs', initViewTabs);
-if (typeof exposeEgressViewApi === 'function') exposeEgressViewApi('switchView', switchView);
+export { statsMode, logMode, devicesMode, currentView, switchView, initViewTabs, nlMode };
+export function setNlMode(v) { nlMode = v; }

@@ -1,4 +1,8 @@
 // ─── Device Inventory View ───────────────────────────────────────────────────
+import { t, tVars, currentLang } from './i18n.js';
+import { _BASE, esc, fmtTs } from './utils.js';
+import { apiFetch, notesMap, lookupNote, refreshAllNotes } from './auth-socket.js';
+
 var devicesData = [];
 var devicesSortState = { col: 'lastSeen', dir: 'desc' };
 var dvFilters = {};          // col → { mode, value }
@@ -496,8 +500,7 @@ async function loadDevicesView() {
   }
 }
 
-if (typeof registerEgressViewInit === 'function') registerEgressViewInit('devices', initDevices);
-if (typeof exposeEgressViewApi === 'function') {
-  exposeEgressViewApi('loadDevicesView', loadDevicesView);
-  exposeEgressViewApi('renderDevicesTable', renderDevicesTable);
-}
+export { loadDevicesView, renderDevicesTable, initDevices, devicesData };
+export function setDevicesData(v) { devicesData = v; }
+export function getDevicesData() { return devicesData; }
+export function setDvSelectedIp(v) { dvSelectedIp = v; }

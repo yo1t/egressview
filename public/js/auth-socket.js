@@ -1,8 +1,23 @@
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
+import { t, tVars, currentLang, applyI18n, setCurrentLang } from './i18n.js';
+import { _BASE, esc, fmtTs } from './utils.js';
+import { setHomeCountry, worldGeo } from './map-common.js';
+import { statsMode, currentView } from './view-tabs.js';
+import { updateStats, initStatsMaps, resetStatsMaps } from './stats.js';
+import { updateLogView } from './log.js';
+import { renderDevicesTable } from './devices.js';
+import { renderBeaconBanner } from './beacon.js';
+import { updateFilterTabs, lastMeshNodes, lastMainMac, lastClients } from './graph.js';
+import { toggleSection, settingsBtn, showStatus } from './settings.js';
+
 // ─── Admin token auth (saved in localStorage) ─────────────────────────
 const TOKEN_KEY = 'egressview_admin_token';
 
 let adminToken = localStorage.getItem(TOKEN_KEY) || '';
+
+// devicesData reference — injected from devices.js via setDevicesDataRef()
+let _devicesDataRef = [];
+export function setDevicesDataRef(v) { _devicesDataRef = v; }
 
 // Short device label sent at login so the sessions list in settings is readable
 function describeThisDevice() {
@@ -119,7 +134,7 @@ function refreshAllNotes() {
     const mac = card.dataset.mac;
     const c = (lastClients || []).find(c => c.mac === mac);
     if (!c) return;
-    const dev = devicesData.find(d => d.mac === mac || d.ip === c.ip);
+    const dev = _devicesDataRef.find(d => d.mac === mac || d.ip === c.ip);
     const noteText = lookupNote(c.ip, c.mac, dev?.deviceId);
     const noteEl = card.querySelector('.device-note');
     if (!noteEl) return;
@@ -157,7 +172,7 @@ function openNoteModal(ip, mac, displayName) {
   const idLabel = [ip, mac].filter(Boolean).join(' / ');
   document.getElementById('note-target').textContent = `${displayName || ''} (${idLabel})`;
   const ta = document.getElementById('note-textarea');
-  const _modalDev = devicesData.find(d => d.ip === ip || (mac && d.mac === mac));
+  const _modalDev = _devicesDataRef.find(d => d.ip === ip || (mac && d.mac === mac));
   ta.value = lookupNote(ip, mac, _modalDev?.deviceId);
   ta.placeholder = t('note.placeholder');
   noteOverlay.classList.remove('hidden');
@@ -286,15 +301,15 @@ socket.on('config', cfg => {
     updateConnBadge('l2');
   }
   if (cfg.homeCountry) {
-    homeCountry = cfg.homeCountry;
-    document.getElementById('s-home-country').value = homeCountry;
+    setHomeCountry(cfg.homeCountry);
+    document.getElementById('s-home-country').value = cfg.homeCountry;
   }
   if (cfg.notes) {
     notesMap = cfg.notes;
-    // Pre-load devicesData so deviceId-keyed notes (set via MCP/API) are resolvable
+    // Pre-load _devicesDataRef so deviceId-keyed notes (set via MCP/API) are resolvable
     // before the user visits the Devices tab.
     apiFetch(_BASE + '/api/devices').then(r => r.ok ? r.json() : null).then(json => {
-      if (json?.devices) devicesData = json.devices;
+      if (json?.devices) _devicesDataRef = json.devices;
       refreshAllNotes();
     }).catch(() => refreshAllNotes());
   }
@@ -306,8 +321,8 @@ socket.on('config', cfg => {
     document.getElementById('s-retention').dataset.saved = String(cfg.retentionDays);
   }
   if (cfg.language && cfg.language !== currentLang) {
-    currentLang = cfg.language;
-    document.getElementById('s-language').value = currentLang;
+    setCurrentLang(cfg.language);
+    document.getElementById('s-language').value = cfg.language;
     applyI18n();
     refreshSavedPlaceholders();
     // Re-render dynamic UI (existing badges/statuses) too
@@ -363,23 +378,23 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
       body: JSON.stringify({ homeCountry: newCountry, language: newLang, autoInvestigate: newAuto, retentionDays: newRetention }),
     });
     if (res.ok) {
-      homeCountry = newCountry;
+      setHomeCountry(newCountry);
       if (newLang !== currentLang) {
-        currentLang = newLang;
+        setCurrentLang(newLang);
         applyI18n();
         refreshSavedPlaceholders();
         Object.keys(connState).forEach(updateConnBadge);
-        if (typeof renderBeaconBanner === 'function') renderBeaconBanner();
-        if (typeof updateLogView === 'function' && currentView === 'log') updateLogView();
-        if (typeof renderDevicesTable === 'function' && currentView === 'devices') renderDevicesTable();
-        if (typeof updateFilterTabs === 'function' && lastMeshNodes && lastClients) updateFilterTabs(lastMeshNodes, lastMainMac || '', lastClients);
+        renderBeaconBanner();
+        if (currentView === 'log') updateLogView();
+        if (currentView === 'devices') renderDevicesTable();
+        if (lastMeshNodes && lastClients) updateFilterTabs(lastMeshNodes, lastMainMac || '', lastClients);
         // Re-render stats if shown (to update legend labels)
         if (statsMode) updateStats();
       }
       showStatus('general-status', t('settings.status.saved'), true);
       document.getElementById('s-retention').dataset.saved = String(newRetention);
       // Reset stats maps so they rebuild with new rotation on next visit
-      if (typeof stFlatSvg !== 'undefined') { stFlatSvg = null; stGlobeSvg = null; stGlobeRotate = null; }
+      resetStatsMaps();
       if (statsMode && worldGeo) initStatsMaps(true);
     } else {
       showStatus('general-status', t('settings.status.saveFailed'), false);
@@ -406,8 +421,7 @@ document.getElementById('threat-save-btn').addEventListener('click', () => {
   showStatus('threat-status', t('settings.status.saved'), true);
 });
 
-if (typeof exposeEgressViewApi === 'function') {
-  exposeEgressViewApi('apiFetch', apiFetch);
-  exposeEgressViewApi('socket', socket);
-  exposeEgressViewApi('lookupNote', lookupNote);
-}
+export { socket, connState, asusActive, yamahaConfigured, notesMap, adminToken, openNoteModal, refreshAllNotes, updateConnBadge, lookupNote, apiFetch, errorBanner };
+export function setAsusActive(v) { asusActive = v; }
+export function setNotesMap(v) { notesMap = v; }
+export function setYamahaConfigured(v) { yamahaConfigured = v; }

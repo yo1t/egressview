@@ -1,4 +1,9 @@
 // ─── Notification Log View ────────────────────────────────────────────────────
+import { t, tVars, currentLang } from './i18n.js';
+import { esc } from './utils.js';
+import { selectedMac, selectedIp, updateSideHighlight, clearSelection } from './graph.js';
+import { apiFetch } from './auth-socket.js';
+
 var nlMode = false;
 var nlAllRows = [];
 var nlSortState = { col: 'detectedAt', dir: 'desc' };
@@ -78,7 +83,7 @@ function nlRender() {
       filterBadge.style.display = 'inline';
       filterBadge.innerHTML = `<span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;cursor:pointer" title="${esc(t('log.deviceFilter.clear'))}" id="nl-device-filter-clear">${esc(tVars('log.deviceFilter.only', { value: label }))}</span>`;
       document.getElementById('nl-device-filter-clear')?.addEventListener('click', () => {
-        selectedMac = null; selectedIp = null;
+        clearSelection();
         updateSideHighlight();
         nlRender();
       });
@@ -360,5 +365,5 @@ function initNotifLog() {
 
 initNotifLog();
 
-if (typeof registerEgressViewInit === 'function') registerEgressViewInit('notifLog', initNotifLog);
-if (typeof exposeEgressViewApi === 'function') exposeEgressViewApi('loadNotifLog', loadNotifLog);
+export { loadNotifLog, initNotifLog, nlMode, nlRender };
+export function setNlMode(v) { nlMode = v; }

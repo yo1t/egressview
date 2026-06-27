@@ -1,4 +1,11 @@
 // ─── Settings modal ───────────────────────────────────────────────────────────
+import { t, tVars, currentLang } from './i18n.js';
+import { _BASE, esc, fmtTs } from './utils.js';
+import { apiFetch, connState, updateConnBadge, asusActive, setAsusActive, yamahaConfigured, setYamahaConfigured } from './auth-socket.js';
+import { setAllConnections, setDataRangeFrom } from './connections-panel.js';
+import { setHomeCountry } from './map-common.js';
+import { stopGraph, updateOrgGraph, simulation } from './graph.js';
+import { loadBeacons } from './beacon.js';
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsBtn     = document.getElementById('settings-btn');
 
@@ -163,15 +170,15 @@ document.getElementById('yamaha-connect-btn').addEventListener('click', async ()
   }
   const ok = await connectRouter(body, 'yamaha-status', 'yamaha-connect-btn', 'enable-yamaha');
   if (ok) {
-    yamahaConfigured = doYamaha;
+    setYamahaConfigured(doYamaha);
     connState.l3l4.enabled = doYamaha;
     connState.l3l4.ready   = false;        // wait for yamaha-status event for connection result
     connState.l3l4.err     = '';
     if (doYamaha && body.yamahaIp) connState.l3l4.ip = body.yamahaIp;
     updateConnBadge('l3l4');
     if (!doYamaha) {
-      allConnections = [];
-      dataRangeFrom = Date.now() - 86400_000;
+      setAllConnections([]);
+      setDataRangeFrom(Date.now() - 86400_000);
       if (!asusActive) stopGraph();
       else if (simulation) updateOrgGraph();
     }
@@ -205,7 +212,7 @@ document.getElementById('asus-connect-btn').addEventListener('click', async () =
     connState.l2.err     = '';
     if (doAsus && body.routerIp) connState.l2.ip = body.routerIp;
     updateConnBadge('l2');
-    if (!doAsus) { asusActive = false; stopGraph(); }
+    if (!doAsus) { setAsusActive(false); stopGraph(); }
   }
 });
 
@@ -601,7 +608,7 @@ document.getElementById('beacon-save-btn').addEventListener('click', async () =>
     const data = await r.json();
     if (data.success) {
       showStatus('beacon-status', t('settings.beacon.savedScanning'), true);
-      if (typeof loadBeacons === 'function') setTimeout(loadBeacons, 2000); // refresh banner after rescan
+      setTimeout(loadBeacons, 2000); // refresh banner after rescan
     } else {
       showStatus('beacon-status', data.error || t('settings.error.generic'), false);
     }
@@ -683,6 +690,4 @@ if (backupUploadInput) backupUploadInput.addEventListener('change', async (e) =>
 const backupTabBtn = document.querySelector('[data-tab="backup"]');
 if (backupTabBtn) backupTabBtn.addEventListener('click', () => loadBackupList());
 
-if (typeof exposeEgressViewApi === 'function') {
-  exposeEgressViewApi('showStatus', showStatus);
-}
+export { openSettings, showStatus, loadBackupList, toggleSection, settingsBtn };

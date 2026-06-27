@@ -12,12 +12,20 @@ const fs   = require('node:fs');
 const path = require('node:path');
 const vm   = require('node:vm');
 
-const src = fs.readFileSync(
+// Strip ES module import/export lines so the file can run in a VM classic-script context.
+// export function/class/const/let/var declarations keep their body; only the 'export' keyword is removed.
+function stripEsModule(src) {
+  return src
+    .replace(/^import\s[^;]+;?\s*$/gm, '')
+    .replace(/^export\s+(default\s+)?(function|class|const|let|var)\s/gm, '$2 ')
+    .replace(/^export\s+\{[^}]*\};?\s*$/gm, '');
+}
+const src = stripEsModule(fs.readFileSync(
   path.join(__dirname, '../../public/js/utils.js'), 'utf8'
-);
+));
 
 // Provide the minimal browser globals the file uses at load time
-const ctx = vm.createContext({ window: { BASE_URL: '' } });
+const ctx = vm.createContext({ window: { BASE_URL: '' }, t: key => key });
 vm.runInContext(src, ctx);
 const { guessApp } = ctx;
 

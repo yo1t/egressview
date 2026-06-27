@@ -1,4 +1,12 @@
 // ─── Time filter ──────────────────────────────────────────────────────────────
+import { _BASE } from './utils.js';
+import { allConnections, serverTimeOffset, dataRangeFrom, setDataRangeFrom, setServerTimeOffset, customRangeFrom, customRangeTo, setCustomRangeFrom, setCustomRangeTo, currentTimeFilter, setCurrentTimeFilter, mergeConnections, getTimeRange, setFetching, setAllConnections } from './connections-panel.js';
+import { statsMode, logMode } from './view-tabs.js';
+import { graphSummary, graphSummaryKey, asusActive, nodes, selectedMac, updateOrgGraph, buildGraphFromConnections, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, updateConnPanel, currentGraphRangeKey } from './graph.js';
+import { updateStats } from './stats.js';
+import { apiFetch } from './auth-socket.js';
+import { updateLogView } from './log.js';
+
 const truncatedGraphRangeKeys = new Set();
 
 function timeFilterRangeKey(from, to) {
@@ -15,7 +23,7 @@ function rememberGraphTruncation(from, to, truncated) {
 function needsGraphSummaryForRange(from, to) {
   const key = timeFilterRangeKey(from, to);
   return truncatedGraphRangeKeys.has(key)
-    && (!(typeof graphSummary !== 'undefined' && graphSummary) || graphSummaryKey !== key);
+    && (!graphSummary || graphSummaryKey !== key);
 }
 
 async function fetchConnectionRange(from, to) {
@@ -27,20 +35,17 @@ async function fetchConnectionRange(from, to) {
     const res = await apiFetch(`${_BASE}/api/connections?${params}`);
     if (!res.ok) return;
     const data = await res.json();
-    allConnections = mergeConnections(allConnections, data.connections || []);
-    // dataRangeFrom tracks the oldest timestamp for which we have continuous
-    // coverage through "now". Bounded ranges such as "yesterday" must not move
-    // it back, otherwise switching back to live/1h would incorrectly skip fetch.
+    setAllConnections(mergeConnections(allConnections, data.connections || []));
     if (to == null) {
-      dataRangeFrom = from != null ? Math.min(dataRangeFrom, from) : 0;
+      setDataRangeFrom(from != null ? Math.min(dataRangeFrom, from) : 0);
     }
-    if (data.serverTime) serverTimeOffset = data.serverTime - Date.now();
+    if (data.serverTime) setServerTimeOffset(data.serverTime - Date.now());
     const notice = document.getElementById('graph-truncated-notice');
     if (notice) notice.style.display = data.truncated ? '' : 'none';
     rememberGraphTruncation(from, to, !!data.truncated);
-    if (data.truncated && typeof fetchGraphSummary === 'function') {
+    if (data.truncated && fetchGraphSummary) {
       await fetchGraphSummary(from, to);
-    } else if (!data.truncated && typeof clearGraphSummary === 'function') {
+    } else if (!data.truncated && clearGraphSummary) {
       clearGraphSummary();
     }
   } catch (e) {
@@ -53,7 +58,7 @@ async function fetchConnectionRange(from, to) {
 let timeFilterGeneration = 0;
 
 function renderTimeFilteredViews({ delayedData = false } = {}) {
-  if (typeof graphSummary !== 'undefined' && graphSummary) buildGraphFromConnections({ resetPositions: true });
+  if (graphSummary) buildGraphFromConnections({ resetPositions: true });
   else if (asusActive) updateOrgGraph({ resetPositions: true });
   else            buildGraphFromConnections({ resetPositions: true });
   scheduleGraphAutoFit({ delayedData });
@@ -87,7 +92,7 @@ async function applyTimeFilter() {
     if (generation !== timeFilterGeneration) return;
     renderTimeFilteredViews({ delayedData });
   } else {
-    if (needsGraphSummaryForRange(from, to) && typeof fetchGraphSummary === 'function') {
+    if (needsGraphSummaryForRange(from, to) && fetchGraphSummary) {
       await fetchGraphSummary(from, to);
       if (generation !== timeFilterGeneration) return;
     }
@@ -117,7 +122,7 @@ function initTimeFilter() {
   initTimeFilter._done = true;
 
   document.getElementById('time-filter-select').addEventListener('change', e => {
-    currentTimeFilter = e.target.value;
+    setCurrentTimeFilter(e.target.value);
     const customWrap = document.getElementById('custom-range');
     if (currentTimeFilter === 'custom') {
       customWrap.style.display = 'inline-flex';
@@ -128,8 +133,8 @@ function initTimeFilter() {
       const toEl   = document.getElementById('custom-to');
       if (!fromEl.value) fromEl.value = toLocalDatetimeStr(past);
       if (!toEl.value)   toEl.value   = toLocalDatetimeStr(now);
-      customRangeFrom = new Date(fromEl.value).getTime();
-      customRangeTo   = new Date(toEl.value).getTime();
+      setCustomRangeFrom(new Date(fromEl.value).getTime());
+      setCustomRangeTo(new Date(toEl.value).getTime());
     } else {
       customWrap.style.display = 'none';
     }
@@ -138,8 +143,8 @@ function initTimeFilter() {
 
   ['custom-from', 'custom-to'].forEach(id => {
     document.getElementById(id).addEventListener('change', () => {
-      customRangeFrom = new Date(document.getElementById('custom-from').value).getTime() || null;
-      customRangeTo   = new Date(document.getElementById('custom-to').value).getTime()   || null;
+      setCustomRangeFrom(new Date(document.getElementById('custom-from').value).getTime() || null);
+      setCustomRangeTo(new Date(document.getElementById('custom-to').value).getTime() || null);
       if (currentTimeFilter === 'custom') applyTimeFilter();
     });
   });
@@ -147,8 +152,4 @@ function initTimeFilter() {
 
 initTimeFilter();
 
-if (typeof registerEgressViewInit === 'function') registerEgressViewInit('timeFilter', initTimeFilter);
-if (typeof exposeEgressViewApi === 'function') {
-  exposeEgressViewApi('applyTimeFilter', applyTimeFilter);
-  exposeEgressViewApi('refreshCurrentTimeFilterView', refreshCurrentTimeFilterView);
-}
+export { applyTimeFilter, refreshCurrentTimeFilterView, initTimeFilter };

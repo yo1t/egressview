@@ -1,4 +1,8 @@
 // ─── Beacon detection UI ──────────────────────────────────────────────────────
+import { t, tVars } from './i18n.js';
+import { _BASE, esc, fmtTs } from './utils.js';
+import { allConnections } from './connections-panel.js';
+import { apiFetch } from './auth-socket.js';
 
 var beaconData    = [];   // current candidates from API
 var beaconListOpen = false;
@@ -125,3 +129,5 @@ document.getElementById('beacon-banner-bar').addEventListener('click', () => {
   beaconListOpen = !beaconListOpen;
   renderBeaconBanner();
 });
+
+export { loadBeacons, renderBeaconBanner };
