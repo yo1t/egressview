@@ -24,6 +24,11 @@ const yamahaJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'poller
 const asusJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'pollers', 'asus.js'), 'utf8');
 const historyJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'history.js'), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'));
+const moduleSources = Object.fromEntries(
+  fs.readdirSync(jsDir)
+    .filter(file => file.endsWith('.js'))
+    .map(file => [file, fs.readFileSync(path.join(jsDir, file), 'utf8')])
+);
 
 // The canonical list of frontend JS modules in dependency order.
 // This mirrors the import graph rooted at main.js.
@@ -64,6 +69,61 @@ function getAppScriptFiles() {
   return APP_SCRIPT_FILES;
 }
 
+function importedNames(source) {
+  const names = new Set();
+  const importRe = /import\s+\{([^}]+)\}\s+from\s+['"][^'"]+['"]/g;
+  let m;
+  while ((m = importRe.exec(source)) !== null) {
+    m[1].split(',').forEach(part => {
+      const local = part.trim().split(/\s+as\s+/).pop().trim();
+      if (local) names.add(local);
+    });
+  }
+  return names;
+}
+
+function declaredNames(source) {
+  const names = new Set();
+  const declRe = /(?:^|\n)\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(|(?:^|\n)\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g;
+  let m;
+  while ((m = declRe.exec(source)) !== null) names.add(m[1] || m[2]);
+  return names;
+}
+
+function exportedNames(source) {
+  const names = new Set();
+  const declRe = /(?:^|\n)\s*export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(|(?:^|\n)\s*export\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g;
+  let m;
+  while ((m = declRe.exec(source)) !== null) names.add(m[1] || m[2]);
+
+  const listRe = /export\s+\{([^}]+)\}/g;
+  while ((m = listRe.exec(source)) !== null) {
+    m[1].split(',').forEach(part => {
+      const exported = part.trim().split(/\s+as\s+/).pop().trim();
+      if (exported) names.add(exported);
+    });
+  }
+  return names;
+}
+
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function hasClickHandler(script, id) {
+  const qid = escapeRegExp(id);
+  if (new RegExp(`getElementById\\(['"]${qid}['"]\\)[\\s\\S]{0,120}addEventListener\\(['"]click['"]`).test(script)) {
+    return true;
+  }
+  if (new RegExp(`getElementById\\(['"]${qid}['"]\\)[\\s\\S]{0,120}\\.onclick\\s*=`).test(script)) {
+    return true;
+  }
+  const assignmentRe = new RegExp(`(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*document\\.getElementById\\(['"]${qid}['"]\\)`);
+  const assignment = script.match(assignmentRe);
+  if (!assignment) return false;
+  return new RegExp(`\\b${assignment[1]}\\b(?:\\?\\.)?\\.addEventListener\\(['"]click['"]`).test(script);
+}
+
 describe('Frontend script wiring invariants', () => {
   it('uses a single ES module entry point in index.html', () => {
     assert.match(html, /<script type="module" src="__BASE__\/js\/main\.js\?v=__ASSET_VERSION__"><\/script>/,
@@ -86,6 +146,19 @@ describe('Frontend script wiring invariants', () => {
       'index rendering should perform template replacement');
     assert.match(serverJs, /__ASSET_VERSION__/,
       'index rendering should replace the asset version placeholder');
+    assert.match(serverJs, /filePath\.endsWith\('\.js'\)/,
+      'ES module child scripts should be handled explicitly because imports do not inherit main.js cache-busting');
+    assert.match(serverJs, /Cache-Control',\s*'no-cache,\s*must-revalidate'/,
+      'ES module child scripts should require revalidation so stale modules do not survive a deploy');
+    assert.match(serverJs, /js\.replace\(\s*\/__ASSET_VERSION__\/g/,
+      'served JS modules should replace the asset version placeholder in child import URLs');
+    for (const [file, source] of Object.entries(moduleSources)) {
+      if (!source.includes("from './")) continue;
+      assert.doesNotMatch(source, /from\s+['"]\.\/[^'"]+\.js['"]/,
+        `${file} should version local ES module imports so stale child modules are not reused`);
+      assert.match(source, /from\s+['"]\.\/[^'"]+\.js\?v=__ASSET_VERSION__['"]/,
+        `${file} should include the asset version placeholder on local ES module imports`);
+    }
   });
 
   it('renders index.html through the template path for subpath deployments', () => {
@@ -117,6 +190,84 @@ describe('Frontend script wiring invariants', () => {
     for (const { file, name, re } of publicApis) {
       const source = fs.readFileSync(path.join(jsDir, file), 'utf8');
       assert.match(source, re, `${name} must remain available from ${file}`);
+    }
+  });
+
+  it('imports module-scoped helpers instead of relying on legacy globals', () => {
+    const helperOwners = {
+      t: 'i18n.js',
+      tVars: 'i18n.js',
+      _BASE: 'utils.js',
+      apiFetch: 'auth-socket.js',
+      openNoteModal: 'auth-socket.js',
+      esc: 'utils.js',
+      typeLabel: 'utils.js',
+      currentView: 'view-tabs.js',
+      ensureWorldGeo: 'map-common.js',
+    };
+    const allowedGlobals = new Set([
+      'window', 'document', 'navigator', 'localStorage', 'console',
+      'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
+      'requestAnimationFrame', 'cancelAnimationFrame', 'fetch', 'prompt',
+      'alert', 'confirm', 'URLSearchParams', 'Date', 'Math', 'Number',
+      'String', 'Array', 'Map', 'Set', 'RegExp', 'JSON', 'Promise',
+      'Error', 'encodeURIComponent', 'decodeURIComponent', 'parseInt',
+      'parseFloat', 'isNaN', 'isFinite', 'd3', 'topojson', 'io',
+      'BASE_URL',
+    ]);
+
+    for (const [file, source] of Object.entries(moduleSources)) {
+      const imported = importedNames(source);
+      const declared = declaredNames(source);
+      for (const [name, owner] of Object.entries(helperOwners)) {
+        if (file === owner) continue;
+        if (!new RegExp(`\\b${name}\\b`).test(source)) continue;
+        assert(
+          imported.has(name) || declared.has(name) || allowedGlobals.has(name),
+          `${file} references ${name} but does not import it from ${owner}`
+        );
+      }
+    }
+    for (const [file, source] of Object.entries(moduleSources)) {
+      if (file === 'utils.js') continue;
+      assert.doesNotMatch(source, /\bBASE_URL\b/,
+        `${file} should import/use _BASE instead of relying on bare BASE_URL`);
+    }
+  });
+
+  it('only imports names that are exported by the referenced local module', () => {
+    const exportCache = new Map();
+    const exportsFor = file => {
+      if (!exportCache.has(file)) {
+        assert(moduleSources[file], `missing module source for ${file}`);
+        exportCache.set(file, exportedNames(moduleSources[file]));
+      }
+      return exportCache.get(file);
+    };
+
+    for (const [file, source] of Object.entries(moduleSources)) {
+      const importRe = /import\s+\{([^}]+)\}\s+from\s+['"]\.\/([^'"?]+\.js)(?:\?[^'"]*)?['"]/g;
+      let m;
+      while ((m = importRe.exec(source)) !== null) {
+        const imported = m[1].split(',').map(part => part.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean);
+        const targetFile = m[2];
+        const targetExports = exportsFor(targetFile);
+        for (const name of imported) {
+          assert(targetExports.has(name),
+            `${file} imports ${name} from ${targetFile}, but ${targetFile} does not export it`);
+        }
+      }
+    }
+  });
+
+  it('does not assign to imported ES module bindings', () => {
+    for (const [file, source] of Object.entries(moduleSources)) {
+      const imported = importedNames(source);
+      for (const name of imported) {
+        if (name.length < 3) continue;
+        assert.doesNotMatch(source, new RegExp(`(?<!\\b(?:const|let|var)\\s)\\b${name}\\s*=(?![=>])`),
+          `${file} should not assign to imported binding ${name}; use an exported setter instead`);
+      }
     }
   });
 
@@ -214,6 +365,60 @@ describe('Frontend TDZ lint', () => {
     // Dedupe
     const unique = [...new Set(missing)];
     assert.equal(unique.length, 0, `getElementById references missing HTML ids:\n  ${unique.join('\n  ')}`);
+  });
+
+  it('wires primary dialog and settings buttons to click handlers', () => {
+    const primaryButtonIds = [
+      // Shared note modal
+      'note-save',
+      'note-cancel',
+
+      // Settings modal
+      'settings-close',
+      'yamaha-detect-btn',
+      'yamaha-connect-btn',
+      'asus-connect-btn',
+      'general-save-btn',
+      'pw-change-btn',
+      'sessions-revoke-all-btn',
+      'token-regen-btn',
+      'threat-save-btn',
+      'beacon-save-btn',
+      'slack-verify-btn',
+      'slack-lookup-btn',
+      'slack-save-btn',
+      'slack-test-btn',
+      'backup-config-save',
+      'backup-create-btn',
+      'datasource-save-btn',
+
+      // Device inventory detail and filters
+      'dv-detail-close',
+      'dv-detail-save',
+      'dv-detail-investigate',
+      'dv-detail-archive',
+      'dv-search-apply',
+      'dv-search-clear',
+      'dv-search-close',
+      'dv-clear-filters-btn',
+      'devices-refresh-btn',
+
+      // Log and notification log controls
+      'log-search-apply',
+      'log-search-clear',
+      'log-search-close',
+      'notif-log-search-apply',
+      'notif-log-search-clear',
+      'notif-log-search-close',
+      'notif-log-refresh-btn',
+      'notif-log-detail-close',
+    ];
+
+    const missing = primaryButtonIds.filter(id => !hasClickHandler(script, id));
+    assert.equal(missing.length, 0,
+      `Primary buttons should have click handlers:\n  ${missing.join('\n  ')}`);
+    assert.match(script, /settingsBtn\.addEventListener\(['"]click['"]/,
+      'settings button should open the settings modal');
   });
 });
 

@@ -1,11 +1,11 @@
 // ─── Connection Log View ──────────────────────────────────────────────────────
-import { t, tVars, currentLang } from './i18n.js';
-import { _BASE, esc, guessApp } from './utils.js';
-import { getTimeRange, setFetching, serverTimeOffset } from './connections-panel.js';
-import { logMode } from './view-tabs.js';
-import { selectedMac, selectedIp, updateSideHighlight, clearSelection } from './graph.js';
-import { apiFetch } from './auth-socket.js';
-import { showThreatDetail } from './threat-popup.js';
+import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
+import { _BASE, esc, guessApp } from './utils.js?v=__ASSET_VERSION__';
+import { getTimeRange, setFetching, serverTimeOffset, setServerTimeOffset } from './connections-panel.js?v=__ASSET_VERSION__';
+import { logMode } from './view-tabs.js?v=__ASSET_VERSION__';
+import { selectedMac, selectedIp, updateSideHighlight, clearSelection } from './graph.js?v=__ASSET_VERSION__';
+import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
+import { showThreatDetail } from './threat-popup.js?v=__ASSET_VERSION__';
 
 const logSortState = { col: 'lastSeen', dir: 'desc' };
 const logFilters = {}; // col → { mode, value }
@@ -159,7 +159,7 @@ async function fetchLogPage() {
       logAllData = logAllData.concat(incoming);
     }
     logTotal = typeof data.total === 'number' ? data.total : logAllData.length;
-    if (data.serverTime) serverTimeOffset = data.serverTime - Date.now();
+    if (data.serverTime) setServerTimeOffset(data.serverTime - Date.now());
 
     renderLogView(isAppend ? incoming : null);
     if (!logFetchAllMode) setupScrollObserver();

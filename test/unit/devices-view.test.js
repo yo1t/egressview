@@ -13,16 +13,16 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
+const devicesSource = fs.readFileSync(path.join(root, 'public/js/devices.js'), 'utf8');
 
 function loadDeviceHelpers() {
-  const source = fs.readFileSync(path.join(root, 'public/js/devices.js'), 'utf8');
-  const start = source.indexOf('function deviceName');
-  const end = source.indexOf('function renderDevicesTable');
+  const start = devicesSource.indexOf('function deviceName');
+  const end = devicesSource.indexOf('function renderDevicesTable');
   assert.notEqual(start, -1, 'function deviceName not found');
   assert.notEqual(end, -1, 'function renderDevicesTable not found');
 
   const context = {};
-  vm.runInNewContext(source.slice(start, end), context);
+  vm.runInNewContext(devicesSource.slice(start, end), context);
   return context;
 }
 
@@ -126,5 +126,29 @@ describe('dvMatchFilter', () => {
   });
   it('invalid regex is treated as match-all (no crash)', () => {
     assert.equal(dvMatchFilter('anything', { mode: 'regex', value: '([' }), true);
+  });
+});
+
+describe('device detail note wiring', () => {
+  it('looks up notes with deviceId so canonical notes remain visible', () => {
+    assert.match(devicesSource, /lookupNote\(d\.ip,\s*d\.mac,\s*d\.deviceId\)/,
+      'device table/detail note lookup should pass deviceId to lookupNote');
+  });
+
+  it('saves device detail notes with deviceId and checks HTTP errors', () => {
+    const start = devicesSource.indexOf("document.getElementById('dv-detail-save').addEventListener");
+    assert.notEqual(start, -1, 'dv-detail-save click handler not found');
+    const end = devicesSource.indexOf("document.getElementById('dv-detail-investigate').addEventListener", start);
+    assert.notEqual(end, -1, 'dv-detail-save handler end not found');
+    const handler = devicesSource.slice(start, end);
+
+    assert.match(handler, /body:\s*JSON\.stringify\(\{\s*ip,\s*mac,\s*deviceId,\s*note\s*\}\)/,
+      'save payload should include deviceId as the canonical note key');
+    assert.match(handler, /if\s*\(\s*!res\.ok\s*\)/,
+      'save handler should not treat non-OK responses as success');
+    assert.match(handler, /btn\.disabled\s*=\s*true/,
+      'save button should be disabled while the request is in flight');
+    assert.match(handler, /btn\.disabled\s*=\s*false/,
+      'save button should be re-enabled after the request finishes');
   });
 });

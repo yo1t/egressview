@@ -1,10 +1,10 @@
 // ─── Notification Log View ────────────────────────────────────────────────────
-import { t, tVars, currentLang } from './i18n.js';
-import { esc } from './utils.js';
-import { selectedMac, selectedIp, updateSideHighlight, clearSelection } from './graph.js';
-import { apiFetch } from './auth-socket.js';
+import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
+import { _BASE, esc } from './utils.js?v=__ASSET_VERSION__';
+import { selectedMac, selectedIp, updateSideHighlight, clearSelection } from './graph.js?v=__ASSET_VERSION__';
+import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
+import { nlMode } from './view-tabs.js?v=__ASSET_VERSION__';
 
-var nlMode = false;
 var nlAllRows = [];
 var nlSortState = { col: 'detectedAt', dir: 'desc' };
 var nlFilters = {}; // col → { mode, value }
@@ -333,7 +333,7 @@ async function loadNotifLog() {
   if (!nlMode) return;
   nlSetLoading(true);
   try {
-    const res = await apiFetch(`${BASE_URL}/api/notification-log`);
+    const res = await apiFetch(`${_BASE}/api/notification-log`);
     if (!res.ok) {
       const msg = res.status === 502 || res.status === 503
         ? t('err.serverUnavailable')
@@ -365,5 +365,4 @@ function initNotifLog() {
 
 initNotifLog();
 
-export { loadNotifLog, initNotifLog, nlMode, nlRender };
-export function setNlMode(v) { nlMode = v; }
+export { loadNotifLog, initNotifLog, nlRender };

@@ -1,5 +1,5 @@
 // ─── Shared geo / map utilities ──────────────────────────────────────────────
-import { getFilteredConnections } from './connections-panel.js';
+import { getFilteredConnections } from './connections-panel.js?v=__ASSET_VERSION__';
 
 let worldGeo = null;
 let homeCountry = 'JP'; // configurable via settings

@@ -1,4 +1,5 @@
 // ─── Utilities ────────────────────────────────────────────────────────────────
+import { t } from './i18n.js?v=__ASSET_VERSION__';
 
 const _BASE = window.BASE_URL || '';
 

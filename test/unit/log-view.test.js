@@ -113,6 +113,7 @@ function makeHarness({ rows = [], apiFetch = null } = {}) {
     selectedIp: null,
     selectedMac: null,
     serverTimeOffset: 0,
+    setServerTimeOffset() {},
     getTimeRange: () => ({ from: null, to: null }),
     apiFetch: apiFetch || (async url => {
       urls.push(String(url));

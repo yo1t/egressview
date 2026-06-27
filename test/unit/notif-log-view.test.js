@@ -57,9 +57,13 @@ class FakeElement {
   getBoundingClientRect() { return { bottom: 10, left: 10 }; }
   querySelector() { return this._sortIcon || null; }
   querySelectorAll() { return []; }
+  appendChild(child) {
+    this._innerHTML += child?.innerHTML || '';
+    return child;
+  }
 }
 
-function makeHarness() {
+function makeHarness({ logs = [], apiFetch = null } = {}) {
   const ids = new Map();
   const getEl = id => {
     if (!ids.has(id)) ids.set(id, new FakeElement(id));
@@ -85,12 +89,16 @@ function makeHarness() {
     RegExp,
     localStorage: { getItem: () => '' },
     BASE_URL: '',
+    _BASE: '',
     currentLang: 'en',
+    nlMode: true,
     selectedIp: null,
     selectedMac: null,
     window: { innerWidth: 1024, scrollY: 0 },
     document: {
       getElementById: getEl,
+      createElement: tag => new FakeElement(tag),
+      createDocumentFragment: () => new FakeElement('fragment'),
       addEventListener(type, fn) { documentListeners[type] = fn; },
     },
     updateSideHighlight() {},
@@ -99,7 +107,7 @@ function makeHarness() {
     esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     }[c])),
-    fetch: async () => ({ ok: true, json: async () => ({ logs: [] }) }),
+    apiFetch: apiFetch || (async () => ({ ok: true, json: async () => ({ logs }) })),
   };
 
   vm.createContext(context);
@@ -109,6 +117,28 @@ function makeHarness() {
 }
 
 describe('Notification log detail popup', () => {
+  it('loads and renders rows when the notification tab is active', async () => {
+    const h = makeHarness({
+      logs: [{
+        type: 'threat',
+        detectedAt: 1760000000000,
+        src: '192.0.2.10',
+        dst: '198.51.100.20',
+        dstHost: 'example.test',
+        dport: 443,
+        proto: 'TCP',
+        threatTag: 'sample-threat',
+        org: 'Example Org',
+      }],
+    });
+
+    await h.context.loadNotifLog();
+
+    assert.match(h.getEl('notif-log-tbody').innerHTML, /example\.test/);
+    assert.match(h.getEl('notif-log-tbody').innerHTML, /sample-threat/);
+    assert.equal(h.getEl('notif-log-count').textContent, '1');
+  });
+
   it('closes from the top-right close button after a row detail is opened', () => {
     const h = makeHarness();
 

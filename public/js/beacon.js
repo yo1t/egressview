@@ -1,8 +1,8 @@
 // ─── Beacon detection UI ──────────────────────────────────────────────────────
-import { t, tVars } from './i18n.js';
-import { _BASE, esc, fmtTs } from './utils.js';
-import { allConnections } from './connections-panel.js';
-import { apiFetch } from './auth-socket.js';
+import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
+import { _BASE, esc, fmtTs } from './utils.js?v=__ASSET_VERSION__';
+import { allConnections } from './connections-panel.js?v=__ASSET_VERSION__';
+import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 
 var beaconData    = [];   // current candidates from API
 var beaconListOpen = false;

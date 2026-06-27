@@ -1,28 +1,38 @@
 // ─── ES Module entry point ────────────────────────────────────────────────────
-import { t, tVars } from './i18n.js';
-import { _BASE } from './utils.js';
-import { allConnections, mergeConnections, dataRangeFrom, serverTimeOffset, setAllConnections, setDataRangeFrom, setServerTimeOffset } from './connections-panel.js';
-import { socket, connState, asusActive, setAsusActive, yamahaConfigured, notesMap, setNotesMap, adminToken, apiFetch, errorBanner, updateConnBadge, lookupNote, refreshAllNotes } from './auth-socket.js';
-import { statsMode } from './view-tabs.js';
-import { nodes, selectedMac, buildGraph, buildGraphFromConnections, updateOrgGraph, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, graphSummary, stopGraph, showToast, updateConnPanel } from './graph.js';
-import { updateStats } from './stats.js';
-import { openSettings, showStatus } from './settings.js';
-import { setDevicesDataRef } from './auth-socket.js';
-import { setGraphDevicesDataRef } from './graph.js';
-import { devicesData, setDevicesData } from './devices.js';
-import { initGraph, resizeGraph } from './graph.js';
-import { initStats } from './stats.js';
-import { initViewTabs } from './view-tabs.js';
-import { initLog } from './log.js';
-import { initDevices } from './devices.js';
-import { initNotifLog } from './notif-log.js';
-import { initTimeFilter } from './time-filter.js';
+import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
+import { _BASE } from './utils.js?v=__ASSET_VERSION__';
+import { allConnections, mergeConnections, dataRangeFrom, serverTimeOffset, setAllConnections, setDataRangeFrom, setServerTimeOffset, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
+import { socket, connState, asusActive, setAsusActive, yamahaConfigured, notesMap, setNotesMap, adminToken, apiFetch, errorBanner, updateConnBadge, lookupNote, refreshAllNotes } from './auth-socket.js?v=__ASSET_VERSION__';
+import { statsMode, setViewTabHandlers } from './view-tabs.js?v=__ASSET_VERSION__';
+import { nodes, selectedMac, buildGraph, buildGraphFromConnections, updateOrgGraph, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, graphSummary, stopGraph, showToast, applyFilter, applyGraphFilter, lastClients } from './graph.js?v=__ASSET_VERSION__';
+import { updateStats, stStopSpin, stStopFlatAnim } from './stats.js?v=__ASSET_VERSION__';
+import { openSettings, showStatus } from './settings.js?v=__ASSET_VERSION__';
+import { setDevicesDataRef } from './auth-socket.js?v=__ASSET_VERSION__';
+import { setGraphDevicesDataRef } from './graph.js?v=__ASSET_VERSION__';
+import { devicesData, setDevicesData } from './devices.js?v=__ASSET_VERSION__';
+import { initGraph, resizeGraph } from './graph.js?v=__ASSET_VERSION__';
+import { initStats } from './stats.js?v=__ASSET_VERSION__';
+import { initViewTabs } from './view-tabs.js?v=__ASSET_VERSION__';
+import { updateLogView, initLog } from './log.js?v=__ASSET_VERSION__';
+import { initDevices, loadDevicesView } from './devices.js?v=__ASSET_VERSION__';
+import { initNotifLog, loadNotifLog } from './notif-log.js?v=__ASSET_VERSION__';
+import { initTimeFilter, refreshCurrentTimeFilterView } from './time-filter.js?v=__ASSET_VERSION__';
+import { loadBeacons } from './beacon.js?v=__ASSET_VERSION__';
 
 // ─── Cross-module reference injection ────────────────────────────────────────
 // auth-socket.js and graph.js both need devicesData but can't import from devices.js
 // directly (circular). Inject via setter functions.
 setDevicesDataRef(devicesData);
 setGraphDevicesDataRef(devicesData);
+setViewTabHandlers({
+  onGraph: scheduleGraphAutoFit,
+  onStats: () => refreshCurrentTimeFilterView?.() || updateStats(),
+  onLeaveStats: () => { stStopSpin(); stStopFlatAnim(); },
+  onLog: () => { updateLogView(); loadBeacons(); },
+  onDevices: loadDevicesView,
+  onNotifLog: loadNotifLog,
+  onDeviceSearch: () => { applyFilter(lastClients); applyGraphFilter(); },
+});
 
 // ─── Main socket event handlers ───────────────────────────────────────────────
 

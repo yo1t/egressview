@@ -496,9 +496,34 @@ app.get(indexRoutes, (req, res) => {
         .replace(/__ASSET_VERSION__/g, htmlEscape(ASSET_VERSION))
   );
 });
+
+const jsModuleRoutes = ['/js/:file'];
+if (SUBPATH) jsModuleRoutes.push(`${SUBPATH}/js/:file`);
+app.get(jsModuleRoutes, (req, res, next) => {
+  const file = req.params.file || '';
+  if (!/^[A-Za-z0-9._-]+\.js$/.test(file)) return next();
+  const filePath = path.join(__dirname, 'public', 'js', file);
+  fs.readFile(filePath, 'utf8', (err, js) => {
+    if (err) return next();
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    res.type('application/javascript').send(
+      js.replace(/__ASSET_VERSION__/g, htmlEscape(ASSET_VERSION))
+    );
+  });
+});
+
 // Serve static assets at both root and SUBPATH (for deployments behind a subpath proxy)
-if (SUBPATH) app.use(SUBPATH, express.static(path.join(__dirname, 'public')));
-app.use(express.static(path.join(__dirname, 'public')));
+const staticOptions = {
+  setHeaders(res, filePath) {
+    // Require revalidation for fallback/static JS paths as well; /js/*.js is
+    // normally served by jsModuleRoutes above so import URLs can be versioned.
+    if (filePath.endsWith('.js')) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    }
+  },
+};
+if (SUBPATH) app.use(SUBPATH, express.static(path.join(__dirname, 'public'), staticOptions));
+app.use(express.static(path.join(__dirname, 'public'), staticOptions));
 app.use(express.json({ limit: '64kb' }));
 
 // ─── Threat intel re-match + client notification ──────────────────────────────

@@ -1,11 +1,11 @@
 // ─── Time filter ──────────────────────────────────────────────────────────────
-import { _BASE } from './utils.js';
-import { allConnections, serverTimeOffset, dataRangeFrom, setDataRangeFrom, setServerTimeOffset, customRangeFrom, customRangeTo, setCustomRangeFrom, setCustomRangeTo, currentTimeFilter, setCurrentTimeFilter, mergeConnections, getTimeRange, setFetching, setAllConnections } from './connections-panel.js';
-import { statsMode, logMode } from './view-tabs.js';
-import { graphSummary, graphSummaryKey, asusActive, nodes, selectedMac, updateOrgGraph, buildGraphFromConnections, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, updateConnPanel, currentGraphRangeKey } from './graph.js';
-import { updateStats } from './stats.js';
-import { apiFetch } from './auth-socket.js';
-import { updateLogView } from './log.js';
+import { _BASE } from './utils.js?v=__ASSET_VERSION__';
+import { allConnections, serverTimeOffset, dataRangeFrom, setDataRangeFrom, setServerTimeOffset, customRangeFrom, customRangeTo, setCustomRangeFrom, setCustomRangeTo, currentTimeFilter, setCurrentTimeFilter, mergeConnections, getTimeRange, setFetching, setAllConnections, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
+import { statsMode, logMode } from './view-tabs.js?v=__ASSET_VERSION__';
+import { graphSummary, graphSummaryKey, nodes, selectedMac, updateOrgGraph, buildGraphFromConnections, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, currentGraphRangeKey } from './graph.js?v=__ASSET_VERSION__';
+import { updateStats } from './stats.js?v=__ASSET_VERSION__';
+import { apiFetch, asusActive } from './auth-socket.js?v=__ASSET_VERSION__';
+import { updateLogView } from './log.js?v=__ASSET_VERSION__';
 
 const truncatedGraphRangeKeys = new Set();
 

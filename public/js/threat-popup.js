@@ -1,8 +1,8 @@
 // ─── Threat Detail Popup ──────────────────────────────────────────────────────
-import { t } from './i18n.js';
-import { _BASE, esc } from './utils.js';
-import { apiFetch, lookupNote } from './auth-socket.js';
-import { currentLang } from './i18n.js';
+import { t } from './i18n.js?v=__ASSET_VERSION__';
+import { _BASE, esc } from './utils.js?v=__ASSET_VERSION__';
+import { apiFetch, lookupNote } from './auth-socket.js?v=__ASSET_VERSION__';
+import { currentLang } from './i18n.js?v=__ASSET_VERSION__';
 
 function showThreatDetail(tr) {
   const raw = tr.dataset.threat;

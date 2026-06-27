@@ -1,14 +1,14 @@
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
-import { t, tVars, currentLang, applyI18n, setCurrentLang } from './i18n.js';
-import { _BASE, esc, fmtTs } from './utils.js';
-import { setHomeCountry, worldGeo } from './map-common.js';
-import { statsMode, currentView } from './view-tabs.js';
-import { updateStats, initStatsMaps, resetStatsMaps } from './stats.js';
-import { updateLogView } from './log.js';
-import { renderDevicesTable } from './devices.js';
-import { renderBeaconBanner } from './beacon.js';
-import { updateFilterTabs, lastMeshNodes, lastMainMac, lastClients } from './graph.js';
-import { toggleSection, settingsBtn, showStatus } from './settings.js';
+import { t, tVars, currentLang, applyI18n, setCurrentLang } from './i18n.js?v=__ASSET_VERSION__';
+import { _BASE, esc, fmtTs } from './utils.js?v=__ASSET_VERSION__';
+import { setHomeCountry, worldGeo } from './map-common.js?v=__ASSET_VERSION__';
+import { statsMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
+import { updateStats, initStatsMaps, resetStatsMaps } from './stats.js?v=__ASSET_VERSION__';
+import { updateLogView } from './log.js?v=__ASSET_VERSION__';
+import { renderDevicesTable } from './devices.js?v=__ASSET_VERSION__';
+import { renderBeaconBanner } from './beacon.js?v=__ASSET_VERSION__';
+import { updateFilterTabs, lastMeshNodes, lastMainMac, lastClients } from './graph.js?v=__ASSET_VERSION__';
+import { toggleSection, settingsBtn, showStatus } from './settings.js?v=__ASSET_VERSION__';
 
 // ─── Admin token auth (saved in localStorage) ─────────────────────────
 const TOKEN_KEY = 'egressview_admin_token';

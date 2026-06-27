@@ -1,11 +1,11 @@
 // ─── Settings modal ───────────────────────────────────────────────────────────
-import { t, tVars, currentLang } from './i18n.js';
-import { _BASE, esc, fmtTs } from './utils.js';
-import { apiFetch, connState, updateConnBadge, asusActive, setAsusActive, yamahaConfigured, setYamahaConfigured } from './auth-socket.js';
-import { setAllConnections, setDataRangeFrom } from './connections-panel.js';
-import { setHomeCountry } from './map-common.js';
-import { stopGraph, updateOrgGraph, simulation } from './graph.js';
-import { loadBeacons } from './beacon.js';
+import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
+import { _BASE, esc, fmtTs } from './utils.js?v=__ASSET_VERSION__';
+import { apiFetch, connState, updateConnBadge, asusActive, setAsusActive, yamahaConfigured, setYamahaConfigured } from './auth-socket.js?v=__ASSET_VERSION__';
+import { setAllConnections, setDataRangeFrom } from './connections-panel.js?v=__ASSET_VERSION__';
+import { setHomeCountry } from './map-common.js?v=__ASSET_VERSION__';
+import { stopGraph, updateOrgGraph, simulation } from './graph.js?v=__ASSET_VERSION__';
+import { loadBeacons } from './beacon.js?v=__ASSET_VERSION__';
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsBtn     = document.getElementById('settings-btn');
 

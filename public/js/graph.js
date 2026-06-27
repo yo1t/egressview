@@ -1,14 +1,14 @@
 // ─── D3 Graph Setup ───────────────────────────────────────────────────────────
-import { t, tVars } from './i18n.js';
-import { _BASE, esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType } from './utils.js';
-import { allConnections, getFilteredConnections, getTimeRange, setFetching, currentTimeFilter, updateConnPanel } from './connections-panel.js';
-import { statsMode, nlMode, logMode, devicesMode } from './view-tabs.js';
-import { asusActive, lookupNote, apiFetch } from './auth-socket.js';
+import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
+import { _BASE, esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType } from './utils.js?v=__ASSET_VERSION__';
+import { allConnections, getFilteredConnections, getTimeRange, setFetching, currentTimeFilter, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
+import { statsMode, nlMode, logMode, devicesMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
+import { asusActive, lookupNote, apiFetch, openNoteModal } from './auth-socket.js?v=__ASSET_VERSION__';
 // Circular imports resolved at runtime (function-body-only calls):
-import { updateStats } from './stats.js';
-import { updateLogView } from './log.js';
-import { nlRender } from './notif-log.js';
-import { devicesData, renderDevicesTable, setDvSelectedIp } from './devices.js';
+import { updateStats } from './stats.js?v=__ASSET_VERSION__';
+import { updateLogView } from './log.js?v=__ASSET_VERSION__';
+import { nlRender } from './notif-log.js?v=__ASSET_VERSION__';
+import { devicesData, renderDevicesTable, setDvSelectedIp } from './devices.js?v=__ASSET_VERSION__';
 
 let _devicesDataRef = [];
 export function setGraphDevicesDataRef(v) { _devicesDataRef = v; }

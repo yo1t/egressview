@@ -1,6 +1,6 @@
 // ─── Connections panel ────────────────────────────────────────────────────────
-import { t } from './i18n.js';
-import { esc } from './utils.js';
+import { t } from './i18n.js?v=__ASSET_VERSION__';
+import { esc } from './utils.js?v=__ASSET_VERSION__';
 
 let allConnections = [];
 let serverTimeOffset = 0; // diff between client and server clocks (ms)

@@ -1,7 +1,7 @@
 // ─── Device Inventory View ───────────────────────────────────────────────────
-import { t, tVars, currentLang } from './i18n.js';
-import { _BASE, esc, fmtTs } from './utils.js';
-import { apiFetch, notesMap, lookupNote, refreshAllNotes } from './auth-socket.js';
+import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
+import { _BASE, esc, fmtTs } from './utils.js?v=__ASSET_VERSION__';
+import { apiFetch, notesMap, lookupNote, refreshAllNotes } from './auth-socket.js?v=__ASSET_VERSION__';
 
 var devicesData = [];
 var devicesSortState = { col: 'lastSeen', dir: 'desc' };
@@ -128,7 +128,7 @@ function renderDevicesTable() {
     const name = deviceName(d);
     const ipv6 = deviceIpv6(d);
     const sources = (d.sources || '').split(',').filter(Boolean).join(' · ');
-    const noteText = lookupNote(d.ip, d.mac);
+    const noteText = lookupNote(d.ip, d.mac, d.deviceId);
     const isOpen = dvDetailDevice && dvDetailDevice.ip === d.ip;
     const statusCls = d.status === 'stale' ? 'row-stale' : d.status === 'archived' ? 'row-archived' : '';
     return `<tr class="${isOpen ? 'selected' : ''} ${statusCls}" style="cursor:pointer" data-ip="${esc(d.ip)}">
@@ -179,7 +179,7 @@ function openDvDetail(d) {
   const name = deviceName(d);
   const ipv6List = (d.ipv6Addrs || []).filter(Boolean);
   const sources = (d.sources || '').split(',').filter(Boolean).join(', ');
-  const noteText = d.note != null ? d.note : lookupNote(d.ip, d.mac);
+  const noteText = d.note != null ? d.note : lookupNote(d.ip, d.mac, d.deviceId);
 
   // Build merge candidates section for this device
   const myCandidates = d.deviceId
@@ -270,11 +270,19 @@ document.getElementById('dv-detail-save').addEventListener('click', async () => 
   const note = document.getElementById('dv-detail-note-ta').value;
   const ip = dvDetailDevice.ip, mac = dvDetailDevice.mac || '';
   const deviceId = dvDetailDevice.deviceId || null;
+  const btn = document.getElementById('dv-detail-save');
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = t('settings.btn.saving');
   try {
-    await apiFetch(_BASE+'/api/notes', {
+    const res = await apiFetch(_BASE+'/api/notes', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip, mac, note }),
+      body: JSON.stringify({ ip, mac, deviceId, note }),
     });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || res.statusText);
+    }
     // Remove stale IP/MAC-keyed entries from local cache
     for (const k of Object.keys(notesMap)) {
       const [kip, kmac] = k.split('|');
@@ -288,12 +296,14 @@ document.getElementById('dv-detail-save').addEventListener('click', async () => 
     const dev = devicesData.find(d => d.ip === ip);
     if (dev) dev.note = note.trim() || null;
     refreshAllNotes();
-    const btn = document.getElementById('dv-detail-save');
-    const orig = btn.textContent;
     btn.textContent = t('devices.saved');
+    renderDevicesTable();
     setTimeout(() => { btn.textContent = orig; }, 1500);
   } catch (e) {
     alert(t('err.serverGeneric') + e.message);
+    btn.textContent = orig;
+  } finally {
+    btn.disabled = false;
   }
 });
 

@@ -1,11 +1,16 @@
 // ─── View tabs ────────────────────────────────────────────────────────────────
-import { t } from './i18n.js';
+import { t } from './i18n.js?v=__ASSET_VERSION__';
 
 var currentView = 'graph';
 var statsMode = false;
 var logMode = false;
 var devicesMode = false;
 var nlMode = false;
+var viewTabHandlers = {};
+
+function setViewTabHandlers(handlers) {
+  viewTabHandlers = { ...viewTabHandlers, ...(handlers || {}) };
+}
 
 function switchView(view) {
   currentView = view;
@@ -27,15 +32,14 @@ function switchView(view) {
   document.getElementById('btn-devices').classList.toggle('active',   view === 'devices');
   document.getElementById('btn-notif-log').classList.toggle('active', view === 'notif-log');
   document.body.classList.toggle('is-stats-mode', view === 'stats');
-  if (view === 'graph')     requestAnimationFrame(scheduleGraphAutoFit);
+  if (view === 'graph')     requestAnimationFrame(() => viewTabHandlers.onGraph?.());
   if (view === 'stats')     requestAnimationFrame(() => {
-    if (typeof refreshCurrentTimeFilterView === 'function') refreshCurrentTimeFilterView();
-    else updateStats();
+    viewTabHandlers.onStats?.();
   });
-  else { if (typeof stStopSpin === 'function') stStopSpin(); if (typeof stStopFlatAnim === 'function') stStopFlatAnim(); }
-  if (view === 'log')       requestAnimationFrame(() => { updateLogView(); loadBeacons(); });
-  if (view === 'devices')   requestAnimationFrame(loadDevicesView);
-  if (view === 'notif-log') requestAnimationFrame(loadNotifLog);
+  else viewTabHandlers.onLeaveStats?.();
+  if (view === 'log')       requestAnimationFrame(() => viewTabHandlers.onLog?.());
+  if (view === 'devices')   requestAnimationFrame(() => viewTabHandlers.onDevices?.());
+  if (view === 'notif-log') requestAnimationFrame(() => viewTabHandlers.onNotifLog?.());
 }
 
 function initViewTabs() {
@@ -50,12 +54,11 @@ function initViewTabs() {
 
   // ─── Device search ──────────────────────────────────────────────────────────
   document.getElementById('device-search-input').addEventListener('input', () => {
-    applyFilter(lastClients);
-    applyGraphFilter();
+    viewTabHandlers.onDeviceSearch?.();
   });
 }
 
 initViewTabs();
 
-export { statsMode, logMode, devicesMode, currentView, switchView, initViewTabs, nlMode };
+export { statsMode, logMode, devicesMode, currentView, switchView, initViewTabs, nlMode, setViewTabHandlers };
 export function setNlMode(v) { nlMode = v; }

@@ -1,11 +1,11 @@
 // ─── Statistics view ─────────────────────────────────────────────────────────
-import { t, tVars } from './i18n.js';
-import { _BASE, esc, _buildAppSlices, guessApp } from './utils.js';
-import { allConnections, getFilteredConnections, setFetching, serverTimeOffset, getTimeRange } from './connections-panel.js';
-import { statsMode } from './view-tabs.js';
-import { worldGeo, getHomeCoord, getMapRotation, buildMapPoints } from './map-common.js';
-import { selectedMac, nodes, currentGraphRangeKey } from './graph.js';
-import { apiFetch } from './auth-socket.js';
+import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
+import { _BASE, esc, _buildAppSlices, guessApp } from './utils.js?v=__ASSET_VERSION__';
+import { allConnections, getFilteredConnections, setFetching, serverTimeOffset, setServerTimeOffset, getTimeRange } from './connections-panel.js?v=__ASSET_VERSION__';
+import { statsMode } from './view-tabs.js?v=__ASSET_VERSION__';
+import { worldGeo, getHomeCoord, getMapRotation, buildMapPoints, ensureWorldGeo } from './map-common.js?v=__ASSET_VERSION__';
+import { selectedMac, nodes, currentGraphRangeKey } from './graph.js?v=__ASSET_VERSION__';
+import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 const STATS_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#a78bfa'];
 
 // ── Stats page: Globe + Flat map ─────────────────────────────────────────────
@@ -673,7 +673,7 @@ async function fetchStatsSummary(selIp) {
     const res = await apiFetch(`${_BASE}/api/connections/summary?${params}`);
     if (!res.ok) throw new Error(`summary failed: ${res.status}`);
     const data = await res.json();
-    if (data.serverTime) serverTimeOffset = data.serverTime - Date.now();
+    if (data.serverTime) setServerTimeOffset(data.serverTime - Date.now());
     statsSummaryCache = { key, at: Date.now(), data };
     return data;
     })(),
@@ -1020,5 +1020,5 @@ function drawBarChart(orgs /* [[name, count], ...] */) {
     .text(d => d[1]);
 }
 
-export { updateStats, initStats, initStatsMaps, updateStatsMaps, scheduleStatsMapResize };
+export { updateStats, initStats, initStatsMaps, updateStatsMaps, scheduleStatsMapResize, stStopSpin, stStopFlatAnim };
 export function resetStatsMaps() { stFlatSvg = null; stGlobeSvg = null; stGlobeRotate = null; }
