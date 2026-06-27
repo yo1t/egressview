@@ -20,7 +20,7 @@ const deviceId        = require('./src/device-identify');
 const threatIntel     = require('./src/threat-intel');
 const notifier        = require('./src/notifier');
 const backup          = require('./src/backup');
-const yamaha          = require('./src/pollers/yamaha');
+const yamaha          = require('./src/pollers/yamaha-adapter');
 const asus            = require('./src/pollers/asus');
 const dnsmasqLog      = require('./src/pollers/dnsmasq-log');
 const inspectSyslog   = require('./src/pollers/inspect-syslog');
@@ -385,16 +385,16 @@ async function pollYamahaConnections() {
       logger.debug('[yamaha] poll skipped: not ready');
       return;
     }
-    const sessions = await yamaha.fetchNatSessions();
+    const sessions = await yamaha.fetchSessions();
     logger.debug(`[yamaha] ${sessions.length} sessions parsed`);
 
     const unique = [...new Set(sessions.map(s => s.dst))];
     queueConnectionEnrichment(unique);
 
     const now = Date.now();
-    if (yamaha.needsArpRefresh()) await yamaha.refreshYamahaArp();
+    if (yamaha.needsArpRefresh()) await yamaha.refreshArp();
     if (yamaha.needsNdpRefresh()) {
-      await yamaha.refreshYamahaNdp();
+      await yamaha.refreshNdp();
       for (const [ip, mac] of yamaha.getArpCache()) {
         const ipv6 = yamaha.getNdpByMac(mac);
         if (ipv6 && ipv6.length) {
@@ -766,8 +766,8 @@ server.listen(PORT, () => {
   if (!DEMO_MODE) {
     logger.info(`Router IP: ${asus.getRouterIp()}`);
     deviceId.loadOuiDb();
-    yamaha.connectYamaha(() => {
-      yamaha.refreshYamahaArp().then(() => pollYamahaConnections());
+    yamaha.connect(() => {
+      yamaha.refreshArp().then(() => pollYamahaConnections());
     });
     dnsmasqLog.start();
     inspectSyslog.start();
