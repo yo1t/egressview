@@ -399,6 +399,7 @@ let statsSummaryGeneration = 0;
 let statsSummaryCache = { key: null, at: 0, data: null };
 let statsSummaryInflight = { key: null, promise: null };
 let statsMapSummaryKey = null;
+const STATS_SUMMARY_CACHE_MS = 60_000;
 
 function getStatsSelection() {
   const sel = selectedMac;
@@ -590,13 +591,14 @@ async function fetchStatsSummary(selIp) {
   const params = buildStatsSummaryParams(selIp);
   const key = params.toString();
   const now = Date.now();
-  if (statsSummaryCache.key === key && statsSummaryCache.data && now - statsSummaryCache.at < 5000) {
+  if (statsSummaryCache.key === key && statsSummaryCache.data && now - statsSummaryCache.at < STATS_SUMMARY_CACHE_MS) {
     return statsSummaryCache.data;
   }
   if (statsSummaryInflight.key === key && statsSummaryInflight.promise) {
     return statsSummaryInflight.promise;
   }
-  setFetching(+1);
+  const showLoading = !(statsSummaryCache.key === key && statsSummaryCache.data);
+  if (showLoading) setFetching(+1);
   statsSummaryInflight = {
     key,
     promise: (async () => {
@@ -612,7 +614,7 @@ async function fetchStatsSummary(selIp) {
     return await statsSummaryInflight.promise;
   } finally {
     if (statsSummaryInflight.key === key) statsSummaryInflight = { key: null, promise: null };
-    setFetching(-1);
+    if (showLoading) setFetching(-1);
   }
 }
 

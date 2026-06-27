@@ -424,6 +424,22 @@ describe('Server runtime invariants', () => {
       'map layers should only redraw after the signature is updated');
   });
 
+  it('stats summary fetch is not retriggered every few seconds while viewing live data', () => {
+    const script = getScriptContent();
+    assert.match(script, /const\s+STATS_SUMMARY_CACHE_MS\s*=\s*60_000/,
+      'stats summary cache should be long enough to avoid repeated loading banners during live updates');
+    assert.doesNotMatch(script, /now\s*-\s*statsSummaryCache\.at\s*<\s*5000/,
+      'a 5s summary cache causes periodic refetching and visible map redraws');
+    assert.match(script, /now\s*-\s*statsSummaryCache\.at\s*<\s*STATS_SUMMARY_CACHE_MS/,
+      'fetchStatsSummary should use the named cache TTL');
+    assert.match(script, /const\s+showLoading\s*=\s*!\(\s*statsSummaryCache\.key\s*===\s*key\s*&&\s*statsSummaryCache\.data\s*\)/,
+      'same-period background summary refresh should not show the global loading banner');
+    assert.match(script, /if\s*\(\s*showLoading\s*\)\s*setFetching\(\+1\)/,
+      'loading should only be shown for first fetches such as period/device changes');
+    assert.match(script, /if\s*\(\s*showLoading\s*\)\s*setFetching\(-1\)/,
+      'loading decrement should match the conditional increment');
+  });
+
   it('Yamaha SSH prompt wait clears stale timers and accepts privileged prompts', () => {
     assert.match(yamahaJs, /function\s+looksLikeShellPrompt/,
       'Yamaha poller should centralize shell prompt detection');
