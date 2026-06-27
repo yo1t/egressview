@@ -53,6 +53,7 @@
     "ROADMAP.ja.md",
     "SECURITY.md",
     "CONTRIBUTING.md",
+    "CLA.md",
     "LICENSE"
   ],
   "scripts": {

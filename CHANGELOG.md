@@ -2,6 +2,12 @@
 
 All notable changes to EgressView are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- Added a Contributor License Agreement (`CLA.md`, copyright-assignment style) and updated `CONTRIBUTING.md` so that submitting a contribution (e.g. opening a pull request) constitutes acceptance. This secures the relicensing rights the project's dual-licensing (AGPL-3.0 + commercial) depends on; previously contributions were taken inbound under AGPL-3.0 only, which would have prevented the Maintainer from offering the promised commercial license over outside contributions. Includes a fallback license grant and moral-rights provision for jurisdictions where assignment of future works is limited, plus a license-back so contributors retain use of their own work.
+
 ## [1.2.1] - 2026-06-21
 
 ### Changed
