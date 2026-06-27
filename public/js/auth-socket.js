@@ -405,3 +405,9 @@ document.getElementById('threat-save-btn').addEventListener('click', () => {
   localStorage.setItem('egressview_threat_config', JSON.stringify(config));
   showStatus('threat-status', t('settings.status.saved'), true);
 });
+
+if (typeof exposeEgressViewApi === 'function') {
+  exposeEgressViewApi('apiFetch', apiFetch);
+  exposeEgressViewApi('socket', socket);
+  exposeEgressViewApi('lookupNote', lookupNote);
+}

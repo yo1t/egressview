@@ -106,35 +106,49 @@ function refreshCurrentTimeFilterView() {
   }
 }
 
-document.getElementById('time-filter-select').addEventListener('change', e => {
-  currentTimeFilter = e.target.value;
-  const customWrap = document.getElementById('custom-range');
-  if (currentTimeFilter === 'custom') {
-    customWrap.style.display = 'inline-flex';
-    // Initial values: past 1 hour
-    const now = new Date(Date.now() + serverTimeOffset);
-    const past = new Date(now.getTime() - 3600_000);
-    const fromEl = document.getElementById('custom-from');
-    const toEl   = document.getElementById('custom-to');
-    if (!fromEl.value) fromEl.value = toLocalDatetimeStr(past);
-    if (!toEl.value)   toEl.value   = toLocalDatetimeStr(now);
-    customRangeFrom = new Date(fromEl.value).getTime();
-    customRangeTo   = new Date(toEl.value).getTime();
-  } else {
-    customWrap.style.display = 'none';
-  }
-  applyTimeFilter();
-});
-
 // Changes to the custom-period datetime-local inputs
 function toLocalDatetimeStr(d) {
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
-['custom-from', 'custom-to'].forEach(id => {
-  document.getElementById(id).addEventListener('change', () => {
-    customRangeFrom = new Date(document.getElementById('custom-from').value).getTime() || null;
-    customRangeTo   = new Date(document.getElementById('custom-to').value).getTime()   || null;
-    if (currentTimeFilter === 'custom') applyTimeFilter();
+
+function initTimeFilter() {
+  if (initTimeFilter._done) return;
+  initTimeFilter._done = true;
+
+  document.getElementById('time-filter-select').addEventListener('change', e => {
+    currentTimeFilter = e.target.value;
+    const customWrap = document.getElementById('custom-range');
+    if (currentTimeFilter === 'custom') {
+      customWrap.style.display = 'inline-flex';
+      // Initial values: past 1 hour
+      const now = new Date(Date.now() + serverTimeOffset);
+      const past = new Date(now.getTime() - 3600_000);
+      const fromEl = document.getElementById('custom-from');
+      const toEl   = document.getElementById('custom-to');
+      if (!fromEl.value) fromEl.value = toLocalDatetimeStr(past);
+      if (!toEl.value)   toEl.value   = toLocalDatetimeStr(now);
+      customRangeFrom = new Date(fromEl.value).getTime();
+      customRangeTo   = new Date(toEl.value).getTime();
+    } else {
+      customWrap.style.display = 'none';
+    }
+    applyTimeFilter();
   });
-});
+
+  ['custom-from', 'custom-to'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      customRangeFrom = new Date(document.getElementById('custom-from').value).getTime() || null;
+      customRangeTo   = new Date(document.getElementById('custom-to').value).getTime()   || null;
+      if (currentTimeFilter === 'custom') applyTimeFilter();
+    });
+  });
+}
+
+initTimeFilter();
+
+if (typeof registerEgressViewInit === 'function') registerEgressViewInit('timeFilter', initTimeFilter);
+if (typeof exposeEgressViewApi === 'function') {
+  exposeEgressViewApi('applyTimeFilter', applyTimeFilter);
+  exposeEgressViewApi('refreshCurrentTimeFilterView', refreshCurrentTimeFilterView);
+}

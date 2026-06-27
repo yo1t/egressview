@@ -441,6 +441,10 @@ function updateLogView() {
   resetAndFetch();
 }
 
+function initLog() {
+  if (initLog._done) return;
+  initLog._done = true;
+
 // ── Sort: click on column header ──────────────────────────────────────────────
 document.querySelectorAll('#log-table th[data-col]').forEach(th => {
   th.addEventListener('click', (e) => {
@@ -557,3 +561,9 @@ logSearchInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') document.getElementById('log-search-apply').click();
   if (e.key === 'Escape') logSearchPopup.classList.add('hidden');
 });
+}
+
+initLog();
+
+if (typeof registerEgressViewInit === 'function') registerEgressViewInit('log', initLog);
+if (typeof exposeEgressViewApi === 'function') exposeEgressViewApi('updateLogView', updateLogView);

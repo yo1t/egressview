@@ -21,6 +21,8 @@ const ASUS_RENEW_MAX_FAILURES = 3;
 // Only surface to the UI after this many consecutive failures to avoid noise.
 let consecutivePollErrors = 0;
 const POLL_ERROR_THRESHOLD = 3;
+const ASUS_API_TIMEOUT_MS = 12000;
+const ASUS_API_RETRY_DELAY_MS = 350;
 
 // Callbacks
 let onAuthRequired = () => {};
@@ -99,7 +101,7 @@ async function apiGet(hook) {
       Cookie: `asus_token=${authToken}`,
       Referer: `http://${routerIp}/index.asp`,
     },
-    timeout: 8000,
+    timeout: ASUS_API_TIMEOUT_MS,
   });
   const data = typeof res.data === 'string' ? (() => {
     try { return JSON.parse(res.data); } catch { return res.data; }
@@ -109,6 +111,33 @@ async function apiGet(hook) {
     throw new Error('TOKEN_EXPIRED');
   }
   return data;
+}
+
+function isTransientAsusError(err) {
+  const code = err?.code || '';
+  const msg = err?.message || '';
+  return ['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNABORTED'].includes(code)
+    || /socket hang up|timeout/i.test(msg);
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function apiGetWithRetry(hook) {
+  try {
+    return await apiGet(hook);
+  } catch (err) {
+    if (err.message === 'TOKEN_EXPIRED' || !isTransientAsusError(err)) throw err;
+    await delay(ASUS_API_RETRY_DELAY_MS);
+    return apiGet(hook);
+  }
+}
+
+function warnOptionalPollFailure(name, err) {
+  if (err.message === 'TOKEN_EXPIRED') throw err;
+  logger.warn(`[asus] optional ${name} poll failed:`, err.message);
+  return null;
 }
 
 function parseClientList(raw) {
@@ -197,9 +226,9 @@ async function poll() {
   try {
     const now = Date.now();
     const [clientRaw, netdevRaw, meshRaw] = await Promise.all([
-      apiGet('get_clientlist()'),
-      apiGet('netdev()'),
-      apiGet('get_cfg_clientlist()'),
+      apiGetWithRetry('get_clientlist()'),
+      apiGetWithRetry('netdev()').catch(err => warnOptionalPollFailure('netdev', err)),
+      apiGetWithRetry('get_cfg_clientlist()').catch(err => warnOptionalPollFailure('mesh', err)),
     ]);
     const clients = parseClientList(clientRaw);
     const withRates = computeRates(clients);
@@ -210,8 +239,8 @@ async function poll() {
       c.dnsName  = meta.dnsName;
       c.mdnsName = meta.mdnsName;
     }
-    const netdev = parseNetdev(netdevRaw);
-    const meshNodes = parseMeshNodes(meshRaw);
+    const netdev = netdevRaw ? parseNetdev(netdevRaw) : {};
+    const meshNodes = meshRaw ? parseMeshNodes(meshRaw) : [];
     prevPollTime = now;
 
     onNetworkUpdate({
@@ -233,7 +262,7 @@ async function poll() {
       stopPolling();
     } else {
       consecutivePollErrors++;
-      logger.warn(`[poll error] (${consecutivePollErrors}/${POLL_ERROR_THRESHOLD})`, err.message);
+      logger.warn(`[asus] poll error (${consecutivePollErrors}/${POLL_ERROR_THRESHOLD}):`, err.message);
       if (consecutivePollErrors >= POLL_ERROR_THRESHOLD) {
         onPollError(err.message);
       }

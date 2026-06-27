@@ -2,6 +2,21 @@
 
 const _BASE = window.BASE_URL || '';
 
+window.EgressView = window.EgressView || {};
+window.EgressView.api = window.EgressView.api || {};
+window.EgressView.init = window.EgressView.init || {};
+
+function exposeEgressViewApi(name, value) {
+  window.EgressView.api[name] = value;
+  window.EgressView[name] = value;
+  return value;
+}
+
+function registerEgressViewInit(name, fn) {
+  window.EgressView.init[name] = fn;
+  return fn;
+}
+
 // HTML escape (XSS mitigation: ASUS/Yamaha/DNS/RDAP-derived strings are untrusted)
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({

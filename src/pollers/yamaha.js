@@ -11,7 +11,7 @@ let yamahaReady   = false;
 let shellBuf      = '';
 let yamahaReconnectTimer = null;
 let yamahaConnecting = false;
-let shellResolve  = null;
+let shellWaiter   = null;
 let execChain     = Promise.resolve();
 
 // Yamaha ARP table cache (IP -> MAC)
@@ -98,6 +98,10 @@ function commandLooksOk(text) {
 
 function looksLikePagerPrompt(text) {
   return /---|--\s*more\s*--|more\?|続け|次へ/i.test(String(text || ''));
+}
+
+function looksLikeShellPrompt(text) {
+  return /[>#]\s*$/.test(String(text || ''));
 }
 
 function createTempYamahaShell({ ip, user, pass, expectedHostFp }) {
@@ -296,20 +300,35 @@ async function detectCurrentYamaha({ natCandidates } = {}) {
   });
 }
 
+function clearShellWaiter() {
+  if (shellWaiter?.timer) clearTimeout(shellWaiter.timer);
+  shellWaiter = null;
+}
+
+function rejectShellWaiter(err) {
+  const waiter = shellWaiter;
+  clearShellWaiter();
+  if (waiter) waiter.reject(err);
+}
+
 function waitForPrompt(timeoutMs = 45000) {
   return new Promise((resolve, reject) => {
-    if (shellBuf.endsWith('> ')) { resolve(shellBuf); return; }
-    shellResolve = resolve;
-    setTimeout(() => { shellResolve = null; reject(new Error('SSH timeout')); }, timeoutMs);
+    if (looksLikeShellPrompt(shellBuf)) { resolve(shellBuf); return; }
+    clearShellWaiter();
+    const timer = setTimeout(() => {
+      shellWaiter = null;
+      reject(new Error('SSH timeout'));
+    }, timeoutMs);
+    shellWaiter = { resolve, reject, timer };
   });
 }
 
-async function yamahaExec(cmd) {
+async function yamahaExec(cmd, timeoutMs = 45000) {
   const run = async () => {
     if (!yamahaReady || !yamahaShell) throw new Error('Yamaha not connected');
     shellBuf = '';
     yamahaShell.write(cmd + '\n');
-    await waitForPrompt();
+    await waitForPrompt(timeoutMs);
     return shellBuf;
   };
   const result = execChain.then(run, run);
@@ -363,14 +382,19 @@ function connectYamaha(onReady) {
         const text = chunk.toString('utf8').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
         shellBuf += text;
         if (looksLikePagerPrompt(text)) stream.write('\n');
-        if (shellBuf.endsWith('> ') && shellResolve) {
-          const r = shellResolve;
-          shellResolve = null;
-          r(shellBuf);
+        if (looksLikeShellPrompt(shellBuf) && shellWaiter) {
+          const { resolve } = shellWaiter;
+          clearShellWaiter();
+          resolve(shellBuf);
         }
       });
 
+      stream.on('error', err => {
+        rejectShellWaiter(err);
+      });
+
       stream.on('close', () => {
+        rejectShellWaiter(new Error('SSH shell closed'));
         yamahaReady = false;
         yamahaConnecting = false;
         logger.info('[yamaha] Shell closed, reconnecting in 3s…');
@@ -459,7 +483,7 @@ async function refreshYamahaArp() {
 }
 
 async function fetchNatSessions() {
-  const raw = await yamahaExec(`show nat descriptor address ${natDescriptor} detail`);
+  const raw = await yamahaExec(`show nat descriptor address ${natDescriptor} detail`, 90000);
   return parseNatDetail(raw);
 }
 
@@ -504,6 +528,7 @@ function disconnect() {
   yamahaEnabled = false;
   yamahaReady = false;
   yamahaConnecting = false;
+  rejectShellWaiter(new Error('Yamaha disconnected'));
   if (yamahaReconnectTimer) { clearTimeout(yamahaReconnectTimer); yamahaReconnectTimer = null; }
   if (yamahaConn) { try { yamahaConn.removeAllListeners(); yamahaConn.on('error', () => {}); yamahaConn.end(); } catch {} yamahaConn = null; }
 }
@@ -511,6 +536,7 @@ function disconnect() {
 function reconnect() {
   yamahaReady = false;
   yamahaConnecting = false;
+  rejectShellWaiter(new Error('Yamaha reconnecting'));
   if (yamahaConn) { try { yamahaConn.removeAllListeners(); yamahaConn.on('error', () => {}); yamahaConn.end(); } catch {} yamahaConn = null; }
   scheduleYamahaReconnect(500);
 }

@@ -251,6 +251,10 @@ function openDvDetail(d) {
   renderDevicesTable();
 }
 
+function initDevices() {
+  if (initDevices._done) return;
+  initDevices._done = true;
+
 document.getElementById('dv-detail-close').addEventListener('click', () => {
   dvDetailDevice = null;
   document.getElementById('dv-detail-panel').classList.add('hidden');
@@ -463,6 +467,12 @@ document.getElementById('dv-clear-filters-btn').addEventListener('click', () => 
   renderDevicesTable();
 });
 
+document.getElementById('devices-search').addEventListener('input', renderDevicesTable);
+document.getElementById('devices-refresh-btn').addEventListener('click', loadDevicesView);
+}
+
+initDevices();
+
 // ── Load data ─────────────────────────────────────────────────────────────────
 async function loadDevicesView() {
   try {
@@ -486,5 +496,8 @@ async function loadDevicesView() {
   }
 }
 
-document.getElementById('devices-search').addEventListener('input', renderDevicesTable);
-document.getElementById('devices-refresh-btn').addEventListener('click', loadDevicesView);
+if (typeof registerEgressViewInit === 'function') registerEgressViewInit('devices', initDevices);
+if (typeof exposeEgressViewApi === 'function') {
+  exposeEgressViewApi('loadDevicesView', loadDevicesView);
+  exposeEgressViewApi('renderDevicesTable', renderDevicesTable);
+}

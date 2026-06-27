@@ -13,16 +13,6 @@ function resize({ refreshStats = true } = {}) {
   }
   if (refreshStats && statsMode) updateStats();
 }
-window.addEventListener('resize', resize);
-// Redraw on screen rotation too
-window.addEventListener('orientationchange', () => setTimeout(resize, 200));
-// Re-fit when tab becomes visible (restores display after background-tab throttling)
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) {
-    resize();
-    scheduleGraphAutoFit();
-  }
-});
 
 const defs = svg.append('defs');
 const glow = defs.append('filter').attr('id', 'glow');
@@ -56,18 +46,36 @@ function updateZoomUi(k) {
   if (label) label.textContent = pct + '%';
 }
 
-document.getElementById('zoom-in').addEventListener('click', () => {
-  svg.transition().duration(200).call(graphZoom.scaleBy, 1.3);
-});
-document.getElementById('zoom-out').addEventListener('click', () => {
-  svg.transition().duration(200).call(graphZoom.scaleBy, 1 / 1.3);
-});
-document.getElementById('zoom-slider').addEventListener('input', e => {
-  const k = parseFloat(e.target.value) / 100;
-  const cur = d3.zoomTransform(svg.node());
-  svg.call(graphZoom.transform, d3.zoomIdentity.translate(cur.x, cur.y).scale(k));
-});
-document.getElementById('zoom-fit').addEventListener('click', () => fitGraphToNodes());
+function initGraph() {
+  if (initGraph._done) return;
+  initGraph._done = true;
+
+  window.addEventListener('resize', resize);
+  // Redraw on screen rotation too
+  window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+  // Re-fit when tab becomes visible (restores display after background-tab throttling)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      resize();
+      scheduleGraphAutoFit();
+    }
+  });
+
+  document.getElementById('zoom-in').addEventListener('click', () => {
+    svg.transition().duration(200).call(graphZoom.scaleBy, 1.3);
+  });
+  document.getElementById('zoom-out').addEventListener('click', () => {
+    svg.transition().duration(200).call(graphZoom.scaleBy, 1 / 1.3);
+  });
+  document.getElementById('zoom-slider').addEventListener('input', e => {
+    const k = parseFloat(e.target.value) / 100;
+    const cur = d3.zoomTransform(svg.node());
+    svg.call(graphZoom.transform, d3.zoomIdentity.translate(cur.x, cur.y).scale(k));
+  });
+  document.getElementById('zoom-fit').addEventListener('click', () => fitGraphToNodes());
+}
+
+initGraph();
 
 let graphAutoFitTimers = [];
 
@@ -968,4 +976,13 @@ function stopGraph() {
   meshColorMap = {};
   document.getElementById('device-list').innerHTML = '';
   document.getElementById('conn-panel').style.display = 'none';
+}
+
+if (typeof registerEgressViewInit === 'function') registerEgressViewInit('graph', initGraph);
+if (typeof exposeEgressViewApi === 'function') {
+  exposeEgressViewApi('buildGraphFromConnections', buildGraphFromConnections);
+  exposeEgressViewApi('buildGraph', buildGraph);
+  exposeEgressViewApi('resizeGraph', resize);
+  exposeEgressViewApi('scheduleGraphAutoFit', scheduleGraphAutoFit);
+  exposeEgressViewApi('stopGraph', stopGraph);
 }

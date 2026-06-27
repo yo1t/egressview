@@ -357,20 +357,28 @@ function updateStatsMaps(selIp, mapPoints) {
   stStartSpin();
 }
 
-window.addEventListener('resize', () => {
-  if (typeof statsMode !== 'undefined' && statsMode && stGlobeSvg) {
-    stRenderGlobeBase(); stRenderFlatBase();
-    stRenderGlobeData(); stRenderFlatData();
-  }
-});
 let chartMode = 'stack'; // 'stack' | 'line'
-document.querySelectorAll('.chart-mode-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    chartMode = btn.dataset.mode;
-    document.querySelectorAll('.chart-mode-btn').forEach(b => b.classList.toggle('active', b === btn));
-    if (statsMode) updateStats();
+
+function initStats() {
+  if (initStats._done) return;
+  initStats._done = true;
+
+  window.addEventListener('resize', () => {
+    if (typeof statsMode !== 'undefined' && statsMode && stGlobeSvg) {
+      stRenderGlobeBase(); stRenderFlatBase();
+      stRenderGlobeData(); stRenderFlatData();
+    }
   });
-});
+  document.querySelectorAll('.chart-mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      chartMode = btn.dataset.mode;
+      document.querySelectorAll('.chart-mode-btn').forEach(b => b.classList.toggle('active', b === btn));
+      if (statsMode) updateStats();
+    });
+  });
+}
+
+initStats();
 
 let statsSummaryGeneration = 0;
 let statsSummaryCache = { key: null, at: 0, data: null };
@@ -537,6 +545,17 @@ function renderStatsFromLocalConnections(selIp) {
   updateStatsMaps(selIp);
 }
 
+function renderStatsPiePreview(selIp) {
+  let conns = getFilteredConnections();
+  if (selIp) conns = conns.filter(c => c.src === selIp);
+  drawAppPieChart(conns);
+}
+
+function clearStatsMapsForPendingSummary(selIp) {
+  updateMapCoverageNotice(null);
+  updateStatsMaps(selIp, []);
+}
+
 async function fetchStatsSummary(selIp) {
   const { from, to } = getTimeRange();
   const params = new URLSearchParams();
@@ -586,6 +605,8 @@ async function updateStats() {
     : `${t('stats.subtitle.all')} / ${t('stats.subtitle.period')}: ${filterLabel}`;
 
   const generation = ++statsSummaryGeneration;
+  renderStatsPiePreview(selIp);
+  clearStatsMapsForPendingSummary(selIp);
   try {
     const summary = await fetchStatsSummary(selIp);
     if (generation !== statsSummaryGeneration || !statsMode) return;
@@ -892,4 +913,11 @@ function drawBarChart(orgs /* [[name, count], ...] */) {
     .attr('font-size', '10px')
     .attr('fill', '#e2e8f0')
     .text(d => d[1]);
+}
+
+if (typeof registerEgressViewInit === 'function') registerEgressViewInit('stats', initStats);
+if (typeof exposeEgressViewApi === 'function') {
+  exposeEgressViewApi('updateStats', updateStats);
+  exposeEgressViewApi('initStatsMaps', initStatsMaps);
+  exposeEgressViewApi('updateStatsMaps', updateStatsMaps);
 }

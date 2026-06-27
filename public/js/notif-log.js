@@ -349,6 +349,8 @@ async function loadNotifLog() {
 // ─── Init (called once on page load) ─────────────────────────────────────────
 
 function initNotifLog() {
+  if (initNotifLog._done) return;
+  initNotifLog._done = true;
   nlInitSort();
   nlInitFilterPopup();
   nlInitDetailPopup();
@@ -357,3 +359,6 @@ function initNotifLog() {
 }
 
 initNotifLog();
+
+if (typeof registerEgressViewInit === 'function') registerEgressViewInit('notifLog', initNotifLog);
+if (typeof exposeEgressViewApi === 'function') exposeEgressViewApi('loadNotifLog', loadNotifLog);

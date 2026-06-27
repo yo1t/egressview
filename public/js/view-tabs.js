@@ -33,14 +33,25 @@ function switchView(view) {
   if (view === 'devices')   requestAnimationFrame(loadDevicesView);
   if (view === 'notif-log') requestAnimationFrame(loadNotifLog);
 }
-document.getElementById('btn-graph').addEventListener('click',     () => switchView('graph'));
-document.getElementById('btn-stats').addEventListener('click',     () => switchView('stats'));
-document.getElementById('btn-log').addEventListener('click',       () => switchView('log'));
-document.getElementById('btn-devices').addEventListener('click',   () => switchView('devices'));
-document.getElementById('btn-notif-log').addEventListener('click', () => switchView('notif-log'));
 
-// ─── Device search ────────────────────────────────────────────────────────────
-document.getElementById('device-search-input').addEventListener('input', () => {
-  applyFilter(lastClients);
-  applyGraphFilter();
-});
+function initViewTabs() {
+  if (initViewTabs._done) return;
+  initViewTabs._done = true;
+
+  document.getElementById('btn-graph').addEventListener('click',     () => switchView('graph'));
+  document.getElementById('btn-stats').addEventListener('click',     () => switchView('stats'));
+  document.getElementById('btn-log').addEventListener('click',       () => switchView('log'));
+  document.getElementById('btn-devices').addEventListener('click',   () => switchView('devices'));
+  document.getElementById('btn-notif-log').addEventListener('click', () => switchView('notif-log'));
+
+  // ─── Device search ──────────────────────────────────────────────────────────
+  document.getElementById('device-search-input').addEventListener('input', () => {
+    applyFilter(lastClients);
+    applyGraphFilter();
+  });
+}
+
+initViewTabs();
+
+if (typeof registerEgressViewInit === 'function') registerEgressViewInit('viewTabs', initViewTabs);
+if (typeof exposeEgressViewApi === 'function') exposeEgressViewApi('switchView', switchView);

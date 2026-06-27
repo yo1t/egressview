@@ -682,3 +682,7 @@ if (backupUploadInput) backupUploadInput.addEventListener('change', async (e) =>
 // Load backup list when backup tab is opened
 const backupTabBtn = document.querySelector('[data-tab="backup"]');
 if (backupTabBtn) backupTabBtn.addEventListener('click', () => loadBackupList());
+
+if (typeof exposeEgressViewApi === 'function') {
+  exposeEgressViewApi('showStatus', showStatus);
+}

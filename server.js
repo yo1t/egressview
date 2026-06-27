@@ -313,6 +313,70 @@ function requireAdmin(req, res, next) {
 // Track session keys seen in the previous poll to detect newly-appeared sessions
 // (used for poll-based beacon event recording when [INSPECT] is unavailable).
 let lastPollKeys = new Set();
+const enrichmentQueue = new Set();
+let enrichmentQueueRunning = false;
+
+function refreshCachedEnrichmentForDestinations(ips) {
+  const ipSet = new Set(ips);
+  const updated = [];
+  for (const entry of history.getConnectionHistory().values()) {
+    if (!ipSet.has(entry.dst)) continue;
+
+    let changed = false;
+    const setIfChanged = (field, value) => {
+      if (value == null || entry[field] === value) return;
+      entry[field] = value;
+      changed = true;
+    };
+
+    const now = Date.now();
+    const dnsCached = enrichment.getDnsCache().get(entry.dst);
+    if (dnsCached && dnsCached.expires > now) {
+      if (dnsCached.source === 'dnsmasq' || !enrichment.isPtrJunk(dnsCached.host)) {
+        setIfChanged('dstHost', dnsCached.host);
+      }
+    }
+    const rdap = enrichment.getRdapCache().get(entry.dst);
+    const geo  = enrichment.getGeoCache().get(entry.dst);
+    setIfChanged('country', rdap?.country || geo?.countryCode);
+    setIfChanged('org', rdap?.org);
+    setIfChanged('lat', geo?.lat);
+    setIfChanged('lon', geo?.lon);
+    setIfChanged('city', geo?.city);
+    if (!changed) continue;
+
+    history.appendHistoryLog(entry);
+    updated.push(entry);
+  }
+  if (updated.length) {
+    io.emit('connections-update', { connections: updated, serverTime: Date.now(), partial: true, delta: true });
+  }
+}
+
+function queueConnectionEnrichment(ips) {
+  for (const ip of ips) enrichmentQueue.add(ip);
+  if (enrichmentQueueRunning) return;
+  enrichmentQueueRunning = true;
+  setImmediate(runConnectionEnrichmentQueue);
+}
+
+async function runConnectionEnrichmentQueue() {
+  try {
+    while (enrichmentQueue.size) {
+      const batch = [...enrichmentQueue].slice(0, 250);
+      batch.forEach(ip => enrichmentQueue.delete(ip));
+      await Promise.allSettled(batch.map(ip => enrichment.reverseDns(ip)));
+      await enrichment.lookupRdapBatch(batch);
+      await enrichment.lookupGeoBatch(batch);
+      refreshCachedEnrichmentForDestinations(batch);
+    }
+  } catch (err) {
+    logger.error('[enrichment] background queue error:', err.message);
+  } finally {
+    enrichmentQueueRunning = false;
+    if (enrichmentQueue.size) queueConnectionEnrichment([]);
+  }
+}
 
 async function pollYamahaConnections() {
   if (!yamaha.isEnabled()) return;
@@ -325,9 +389,7 @@ async function pollYamahaConnections() {
     logger.debug(`[yamaha] ${sessions.length} sessions parsed`);
 
     const unique = [...new Set(sessions.map(s => s.dst))];
-    await Promise.allSettled(unique.map(ip => enrichment.reverseDns(ip)));
-    await enrichment.lookupRdapBatch(unique);   // throttled: 5並列ずつ処理
-    await enrichment.lookupGeoBatch(unique);
+    queueConnectionEnrichment(unique);
 
     const now = Date.now();
     if (yamaha.needsArpRefresh()) await yamaha.refreshYamahaArp();

@@ -13,12 +13,15 @@ const path = require('node:path');
 
 const htmlPath = path.join(__dirname, '..', '..', 'public', 'index.html');
 const jsDir    = path.join(__dirname, '..', '..', 'public', 'js');
+const frontendDepsPath = path.join(__dirname, '..', '..', 'docs', 'frontend-dependencies.md');
 const html     = fs.readFileSync(htmlPath, 'utf8');
+const frontendDeps = fs.readFileSync(frontendDepsPath, 'utf8');
 const logJs    = fs.readFileSync(path.join(jsDir, 'log.js'), 'utf8');
 const mainJs   = fs.readFileSync(path.join(jsDir, 'main.js'), 'utf8');
 const serverJs = fs.readFileSync(path.join(__dirname, '..', '..', 'server.js'), 'utf8');
-const historyJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'history.js'), 'utf8');
 const yamahaJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'pollers', 'yamaha.js'), 'utf8');
+const asusJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'pollers', 'asus.js'), 'utf8');
+const historyJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'history.js'), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'));
 
 // Collect JS by following every <script src="__BASE__/js/..."> tag in load order.
@@ -100,6 +103,43 @@ describe('Frontend script wiring invariants', () => {
       const source = fs.readFileSync(path.join(jsDir, file), 'utf8');
       assert.match(source, re, `${name} must remain available from ${file}`);
     }
+  });
+
+  it('mirrors cross-file public APIs under window.EgressView', () => {
+    const script = getScriptContent();
+    assert.match(script, /window\.EgressView\s*=\s*window\.EgressView\s*\|\|\s*\{\}/,
+      'utils.js should create the temporary EgressView namespace');
+    for (const name of [
+      'apiFetch',
+      'socket',
+      'lookupNote',
+      'buildGraphFromConnections',
+      'updateStats',
+      'loadDevicesView',
+      'updateLogView',
+      'loadNotifLog',
+      'switchView',
+    ]) {
+      assert.match(script, new RegExp(`exposeEgressViewApi\\(['"]${name}['"]`),
+        `${name} should be mirrored under window.EgressView.api`);
+    }
+  });
+
+  it('registers major top-level initializers for module migration', () => {
+    const script = getScriptContent();
+    for (const name of ['graph', 'stats', 'timeFilter', 'viewTabs', 'log', 'devices', 'notifLog', 'main']) {
+      assert.match(script, new RegExp(`registerEgressViewInit\\(['"]${name}['"]`),
+        `${name} initializer should be registered under window.EgressView.init`);
+    }
+  });
+
+  it('documents frontend load order and temporary public API', () => {
+    for (const file of getAppScriptFiles()) {
+      assert.match(frontendDeps, new RegExp(`\\b${file.replace('.', '\\.')}\\b`),
+        `docs/frontend-dependencies.md should mention ${file}`);
+    }
+    assert.match(frontendDeps, /window\.EgressView/,
+      'docs/frontend-dependencies.md should describe the temporary public namespace');
   });
 });
 
@@ -298,6 +338,87 @@ describe('Server runtime invariants', () => {
     }
     assert.match(yamahaJs, /credentials not configured[\s\S]*?onStatus\(\{\s*ready:\s*false,\s*state:\s*['"]failed['"]/,
       'missing Yamaha credentials should notify the UI as a failed state');
+  });
+
+  it('Yamaha polling queues external enrichment instead of awaiting it inline', () => {
+    const start = serverJs.indexOf('async function pollYamahaConnections()');
+    assert.notEqual(start, -1, 'pollYamahaConnections should exist');
+    const end = serverJs.indexOf('// ─── Express middleware', start);
+    assert.notEqual(end, -1, 'pollYamahaConnections section end marker should exist');
+    const pollFn = serverJs.slice(start, end);
+    assert.match(pollFn, /queueConnectionEnrichment\(unique\)/,
+      'polling should enqueue DNS/RDAP/Geo work in the background');
+    assert.doesNotMatch(pollFn, /await\s+enrichment\.lookupRdapBatch/,
+      'polling must not wait for RDAP lookups before continuing');
+    assert.doesNotMatch(pollFn, /await\s+enrichment\.lookupGeoBatch/,
+      'polling must not wait for GeoIP lookups before continuing');
+  });
+
+  it('stats view previews the app pie before waiting for server summary', () => {
+    const script = getScriptContent();
+    const start = script.indexOf('async function updateStats()');
+    assert.notEqual(start, -1, 'updateStats should exist');
+    const end = script.indexOf('// ─── App distribution pie chart', start);
+    assert.notEqual(end, -1, 'updateStats section end marker should exist');
+    const updateStatsFn = script.slice(start, end);
+    const previewAt = updateStatsFn.indexOf('renderStatsPiePreview(selIp)');
+    const fetchAt = updateStatsFn.indexOf('await fetchStatsSummary(selIp)');
+    assert.notEqual(previewAt, -1, 'updateStats should draw an immediate pie preview');
+    assert.notEqual(fetchAt, -1, 'updateStats should still fetch the authoritative summary');
+    assert.ok(previewAt < fetchAt,
+      'the app pie preview should render before the potentially slow summary request resolves');
+  });
+
+  it('stats maps do not keep the previous period while waiting for summary', () => {
+    const script = getScriptContent();
+    const start = script.indexOf('async function updateStats()');
+    assert.notEqual(start, -1, 'updateStats should exist');
+    const end = script.indexOf('// ─── App distribution pie chart', start);
+    assert.notEqual(end, -1, 'updateStats section end marker should exist');
+    const updateStatsFn = script.slice(start, end);
+    const clearAt = updateStatsFn.indexOf('clearStatsMapsForPendingSummary(selIp)');
+    const fetchAt = updateStatsFn.indexOf('await fetchStatsSummary(selIp)');
+    assert.notEqual(clearAt, -1, 'updateStats should clear stale map points before summary fetch');
+    assert.notEqual(fetchAt, -1, 'updateStats should still fetch the authoritative summary');
+    assert.ok(clearAt < fetchAt,
+      'maps should not show the previous period while the authoritative period summary is loading');
+    assert.match(script, /function\s+clearStatsMapsForPendingSummary\(selIp\)[\s\S]*?updateStatsMaps\(selIp,\s*\[\]\)/,
+      'pending summary state should clear Globe/Flat map points rather than falling back to all loaded data');
+  });
+
+  it('Yamaha SSH prompt wait clears stale timers and accepts privileged prompts', () => {
+    assert.match(yamahaJs, /function\s+looksLikeShellPrompt/,
+      'Yamaha poller should centralize shell prompt detection');
+    assert.match(yamahaJs, /\/\[>#\]\\s\*\$\/\.test/,
+      'Yamaha prompt detection should accept both > and # prompts');
+    assert.match(yamahaJs, /function\s+clearShellWaiter/,
+      'Yamaha prompt wait should clear stale timeout timers after a prompt is seen');
+    assert.match(yamahaJs, /clearTimeout\(shellWaiter\.timer\)/,
+      'prompt timeout must be cancelled when the command completes');
+    assert.doesNotMatch(yamahaJs, /let\s+shellResolve/,
+      'single resolver state without timer cleanup can corrupt later SSH command waits');
+  });
+
+  it('Yamaha NAT polling allows slow large NAT tables without timing out early', () => {
+    assert.match(yamahaJs, /async\s+function\s+yamahaExec\(cmd,\s*timeoutMs\s*=\s*45000\)/,
+      'yamahaExec should keep the normal timeout for short commands');
+    assert.match(yamahaJs, /show nat descriptor address \$\{natDescriptor\} detail`,\s*90000\)/,
+      'large NAT detail polling should have a longer timeout than short router commands');
+  });
+
+  it('ASUS polling tolerates optional API failures and labels its errors', () => {
+    assert.match(asusJs, /const\s+ASUS_API_TIMEOUT_MS\s*=\s*12000/,
+      'ASUS appGet calls should allow slow router responses beyond the previous 8s limit');
+    assert.match(asusJs, /function\s+apiGetWithRetry/,
+      'ASUS transient HTTP failures should receive a short retry');
+    assert.match(asusJs, /warnOptionalPollFailure\('netdev'/,
+      'WAN counter failures should not fail the whole ASUS poll');
+    assert.match(asusJs, /warnOptionalPollFailure\('mesh'/,
+      'mesh-list failures should not fail the whole ASUS poll');
+    assert.match(asusJs, /\[asus\] poll error/,
+      'ASUS hard poll failures should be clearly labeled in logs');
+    assert.doesNotMatch(asusJs, /\[poll error\]/,
+      'generic poll error logs make Yamaha and ASUS failures hard to distinguish');
   });
 
   it('demo mode passes the selected runtime DB path to every SQLite-backed store', () => {

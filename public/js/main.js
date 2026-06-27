@@ -1,5 +1,9 @@
 // ─── Main socket event handlers ───────────────────────────────────────────────
 
+function initMain() {
+  if (initMain._done) return;
+  initMain._done = true;
+
 socket.on('auth-required', () => {
   const banner = document.getElementById('disconnected-banner');
   banner.style.display = 'block';
@@ -156,3 +160,8 @@ if (typeof _DEMO_MODE !== 'undefined' && _DEMO_MODE) {
 
 // Init
 resize();
+}
+
+initMain();
+
+if (typeof registerEgressViewInit === 'function') registerEgressViewInit('main', initMain);
