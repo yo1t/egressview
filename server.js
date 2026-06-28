@@ -496,14 +496,15 @@ app.use((req, res, next) => {
 const indexRoutes = ['/', '/index.html'];
 if (SUBPATH) indexRoutes.push(`${SUBPATH}/`, `${SUBPATH}/index.html`);
 
+// Pre-apply static substitutions once at startup so each request only needs
+// to inject the per-request nonce script (one replace instead of three).
+const _indexHtmlBase = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
+  .replace(/__BASE__/g, htmlEscape(SUBPATH))
+  .replace(/__ASSET_VERSION__/g, htmlEscape(ASSET_VERSION));
+
 app.get(indexRoutes, (req, res) => {
-  const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   const baseScript = `<script nonce="${res.locals.cspNonce}">window.BASE_URL = '${htmlEscape(SUBPATH)}'; window._DEMO_MODE = ${DEMO_MODE};</script>`;
-  res.type('html').send(
-    html.replace('</head>', baseScript + '\n</head>')
-        .replace(/__BASE__/g, htmlEscape(SUBPATH))
-        .replace(/__ASSET_VERSION__/g, htmlEscape(ASSET_VERSION))
-  );
+  res.type('html').send(_indexHtmlBase.replace('</head>', baseScript + '\n</head>'));
 });
 
 const jsModuleRoutes = ['/js/:file'];
@@ -825,10 +826,14 @@ server.listen(PORT, () => {
   setInterval(() => history.snapshotHistory(),    10 * 60 * 1000);
   setInterval(() => history.compactHistoryLog(),  30 * 60 * 1000);
 
-  threatIntel.fetchThreatIntel().then(() => {
-    reMatchAndNotify();
-  });
-  setInterval(() => threatIntel.fetchThreatIntel().then(reMatchAndNotify), 60 * 60 * 1000);
+  threatIntel.fetchThreatIntel()
+    .then(() => reMatchAndNotify())
+    .catch(err => logger.error('[threat] initial fetch failed:', err.message));
+  setInterval(() => {
+    threatIntel.fetchThreatIntel()
+      .then(() => reMatchAndNotify())
+      .catch(err => logger.error('[threat] periodic fetch failed:', err.message));
+  }, 60 * 60 * 1000);
 
   if (!DEMO_MODE) scheduleBeaconScan();
 

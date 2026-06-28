@@ -90,9 +90,9 @@ module.exports = function backupRoutes(ctx) {
         if (!buf.slice(0, 16).equals(Buffer.from('SQLite format 3\0')))
           return res.status(400).json({ error: 'Invalid database file' });
         const tempPath = path.join(appRoot, '.egressview-upload-temp.db');
-        fs.writeFileSync(tempPath, buf);
+        await fs.promises.writeFile(tempPath, buf);
         await backup.restoreFromFile(tempPath);
-        fs.unlinkSync(tempPath);
+        await fs.promises.unlink(tempPath);
         afterRestore();
         res.json({ success: true, message: 'Restored from uploaded file. Restart recommended.' });
       } catch (e) {

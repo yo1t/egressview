@@ -37,8 +37,18 @@ module.exports = function authRoutes(ctx) {
   // Tracks failed attempts per IP: { count, lockedUntil }
   const loginAttempts = new Map();
   const LOGIN_MAX_FAILS  = 5;
-  const LOGIN_LOCK_MS    = 5 * 60_000;  // 5 minutes
+  const LOGIN_LOCK_MS    = 5 * 60_000;   // 5 minutes
   const LOGIN_WINDOW_MS  = 10 * 60_000;
+
+  // Periodically remove entries whose window has expired so the Map cannot
+  // grow without bound when many distinct IPs send failed requests.
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of loginAttempts) {
+      const expiry = entry.lockedUntil || (entry.firstFail + LOGIN_WINDOW_MS);
+      if (now > expiry) loginAttempts.delete(ip);
+    }
+  }, 60 * 60_000).unref();
 
   function checkLoginRateLimit(ip) {
     const now = Date.now();
