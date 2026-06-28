@@ -11,6 +11,7 @@ const dns = require('dns').promises;
 const fs = require('fs');
 const path = require('path');
 const { isAllowedRouterIp } = require('./utils');
+const { t, getLang } = require('./i18n-server');
 
 // bonjour-service is a heavyweight optional dep
 let Bonjour = null;
@@ -92,7 +93,7 @@ function inferVendorCategory(vendor) {
   if (!vendor) return null;
   const v = vendor.toLowerCase();
   for (const entry of VENDOR_CATEGORIES) {
-    if (v.includes(entry.match)) return { brand: entry.brand, category: entry.category };
+    if (v.includes(entry.match)) return { brand: entry.brand, category: entry.category, categoryEn: entry.categoryEn };
   }
   return null;
 }
@@ -439,14 +440,15 @@ async function investigateIp(ip, { ouiDb: ouiDbRef, yamahaExec, yamahaEnabled, y
     guesses.push(name ? `★ ${name}` : `★ Apple device (${appleModelId})`);
   }
   if (vendorInfo && !appleModelId) {
-    guesses.push(`★ ${vendorInfo.category}`);
+    const catLabel = getLang() === 'en' ? (vendorInfo.categoryEn || vendorInfo.category) : vendorInfo.category;
+    guesses.push(`★ ${catLabel}`);
   }
   if (!appleModelId && !brand) {
-    if (bonjourTypes.has('airplay') || bonjourTypes.has('raop'))             guesses.push('Apple AirPlay 機器');
-    if (bonjourTypes.has('companion-link') || bonjourTypes.has('apple-mobdev2')) guesses.push('Apple iPhone/iPad');
-    if (bonjourTypes.has('device-info') && !bonjourTypes.has('companion-link')) guesses.push('Apple Mac');
+    if (bonjourTypes.has('airplay') || bonjourTypes.has('raop'))             guesses.push(t('device.airplay'));
+    if (bonjourTypes.has('companion-link') || bonjourTypes.has('apple-mobdev2')) guesses.push(t('device.iphone'));
+    if (bonjourTypes.has('device-info') && !bonjourTypes.has('companion-link')) guesses.push(t('device.mac'));
   }
-  if (bonjourTypes.has('homekit') || bonjourTypes.has('hap'))              guesses.push('HomeKit アクセサリ');
+  if (bonjourTypes.has('homekit') || bonjourTypes.has('hap'))              guesses.push(t('device.homekit'));
 
   const types = [...bonjourTypes];
   const hasAmznService = types.some(t => t.startsWith('amzn-'));
@@ -461,49 +463,49 @@ async function investigateIp(ip, { ouiDb: ouiDbRef, yamahaExec, yamahaEnabled, y
   if (hasSamsungSvc)  guesses.push('★ Samsung Smart TV');
   if (hasSonyPsn)     guesses.push('★ Sony PlayStation');
   if (hasSonySvc)     guesses.push('★ Sharp/Sony AQUOS');
-  if (bonjourTypes.has('rsp'))             guesses.push('★ Roku ストリーミング機器');
+  if (bonjourTypes.has('rsp'))             guesses.push(t('device.roku'));
   if (bonjourTypes.has('plexmediasvr'))    guesses.push('★ Plex Media Server');
   if (hasSynology)                          guesses.push('★ Synology NAS');
-  if (bonjourTypes.has('syncthing'))       guesses.push('Syncthing 同期サーバ');
-  if (bonjourTypes.has('sonos'))           guesses.push('★ Sonos スピーカー');
-  if (bonjourTypes.has('soundtouch'))      guesses.push('★ Bose SoundTouch スピーカー');
-  if (bonjourTypes.has('heos-audio'))      guesses.push('★ Denon/Marantz HEOS (オーディオ)');
-  if (bonjourTypes.has('musiccast') || bonjourTypes.has('yxc')) guesses.push('★ Yamaha MusicCast (オーディオ)');
+  if (bonjourTypes.has('syncthing'))       guesses.push(t('device.syncthing'));
+  if (bonjourTypes.has('sonos'))           guesses.push(t('device.sonos'));
+  if (bonjourTypes.has('soundtouch'))      guesses.push(t('device.bose'));
+  if (bonjourTypes.has('heos-audio'))      guesses.push(t('device.denon'));
+  if (bonjourTypes.has('musiccast') || bonjourTypes.has('yxc')) guesses.push(t('device.yamahacast'));
   if (bonjourTypes.has('shield') || bonjourTypes.has('gamestream') || bonjourTypes.has('nvstream'))
-    guesses.push('★ NVIDIA Shield / GeForce 系');
+    guesses.push(t('device.nvidia'));
   if (bonjourTypes.has('wemo'))            guesses.push('★ Belkin WeMo IoT');
-  if (bonjourTypes.has('tasmota'))         guesses.push('★ Tasmota IoT デバイス');
+  if (bonjourTypes.has('tasmota'))         guesses.push(t('device.tasmota'));
   if (bonjourTypes.has('esphome') || bonjourTypes.has('esphomelib'))
-    guesses.push('★ ESPHome IoT デバイス');
-  if (bonjourTypes.has('shelly'))          guesses.push('★ Shelly IoT スイッチ');
+    guesses.push(t('device.esphome'));
+  if (bonjourTypes.has('shelly'))          guesses.push(t('device.shelly'));
   if (bonjourTypes.has('home-assistant'))  guesses.push('★ Home Assistant');
-  if (bonjourTypes.has('matter'))          guesses.push('★ Matter 対応スマートデバイス');
+  if (bonjourTypes.has('matter'))          guesses.push(t('device.matter'));
   if (bonjourTypes.has('dial') && !hasLgService && !hasSamsungSvc && !bonjourTypes.has('googlecast'))
-    guesses.push('DIAL 対応 Smart TV (LG/Samsung/Sony 等)');
+    guesses.push(t('device.dial'));
 
   if (bonjourTypes.has('googlecast')) {
-    guesses.push('Chromecast / Google Cast 対応機器');
+    guesses.push(t('device.chromecast'));
   } else if (openPorts.includes(8009) && (brand === 'Google' || httpMentionsGoogle)) {
-    guesses.push('Chromecast / Google Cast 対応機器');
+    guesses.push(t('device.chromecast'));
   } else if (openPorts.includes(8009) && brand !== 'Amazon' && !hasAmznService && !brand) {
-    guesses.push('Cast プロトコル対応機器（Chromecast互換ポート）');
+    guesses.push(t('device.castport'));
   }
 
   if (bonjourTypes.has('ipp') || bonjourTypes.has('ipps') || bonjourTypes.has('printer') || openPorts.includes(631) || openPorts.includes(9100))
-    guesses.push('プリンタ');
-  if (bonjourTypes.has('spotify-connect')) guesses.push('Spotify Connect 対応機器');
+    guesses.push(t('device.printer'));
+  if (bonjourTypes.has('spotify-connect')) guesses.push(t('device.spotify'));
   if (bonjourTypes.has('hue'))             guesses.push('Philips Hue Bridge');
-  if (bonjourTypes.has('matter') || bonjourTypes.has('esphomelib')) guesses.push('Matter/ESPHome IoT');
-  if (bonjourTypes.has('smb') || openPorts.includes(445))   guesses.push('SMB/NAS 対応');
+  if (bonjourTypes.has('matter') || bonjourTypes.has('esphomelib')) guesses.push(t('device.matter-esphome'));
+  if (bonjourTypes.has('smb') || openPorts.includes(445))   guesses.push(t('device.smb'));
   if (openPorts.includes(32400))                            guesses.push('Plex Media Server');
   if (openPorts.includes(1883) || openPorts.includes(8883)) guesses.push('MQTT/IoT');
   if (netbios?.workstation && !brand?.includes('Apple') && !guesses.some(g => g.includes('Apple'))) {
-    guesses.push('Windows/SMB 対応機器');
+    guesses.push(t('device.windows'));
   }
-  if (!guesses.length && openPorts.includes(22))            guesses.push('SSH 可能なホスト (Linux/サーバ)');
+  if (!guesses.length && openPorts.includes(22))            guesses.push(t('device.ssh'));
 
   if (httpMentionsAmazon && !guesses.some(g => g.includes('Amazon'))) {
-    guesses.unshift('★ HTTP応答に Amazon 関連文字列 → Amazon機器');
+    guesses.unshift(t('device.amazon-http'));
   }
 
   const uniqGuesses = [...new Set(guesses)];
@@ -511,12 +513,12 @@ async function investigateIp(ip, { ouiDb: ouiDbRef, yamahaExec, yamahaEnabled, y
     story.push('');
     const strong = uniqGuesses.filter(g => g.startsWith('★ ')).map(g => g.replace(/^★\s+/, ''));
     const weak   = uniqGuesses.filter(g => !g.startsWith('★ '));
-    if (strong.length) story.push(`🎯 推論: ${strong.join(' / ')}`);
-    if (weak.length)   story.push(`   補足: ${weak.join(' / ')}`);
+    if (strong.length) story.push(`${t('investigation.inference')}${strong.join(' / ')}`);
+    if (weak.length)   story.push(`${t('investigation.notes')}${weak.join(' / ')}`);
   }
 
   if (story.length === 1) {
-    story.push(`(調査でホスト名・サービス・ポートいずれも検出できず。mDNS/UPnPは L2 マルチキャストのため、サーバーが対象LANと別セグメントの場合は届きません)`);
+    story.push(t('investigation.no-info'));
   }
 
   return {

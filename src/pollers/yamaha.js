@@ -1,6 +1,7 @@
 // Yamaha RTX SSH poller: connect, execute commands, parse NAT sessions
 'use strict';
 const logger = require('../logger');
+const { t } = require('../i18n-server');
 
 const crypto = require('crypto');
 const { Client: SshClient } = require('ssh2');
@@ -339,7 +340,7 @@ async function yamahaExec(cmd, timeoutMs = 45000) {
 function scheduleYamahaReconnect(ms) {
   if (yamahaReconnectTimer) { clearTimeout(yamahaReconnectTimer); }
   if (!yamahaEnabled) return;
-  onStatus({ ready: false, state: 'reconnecting', message: '再接続中…' });
+  onStatus({ ready: false, state: 'reconnecting', message: t('yamaha.reconnecting') });
   yamahaReconnectTimer = setTimeout(() => {
     yamahaReconnectTimer = null;
     connectYamaha();
@@ -350,7 +351,7 @@ function connectYamaha(onReady) {
   if (!yamahaEnabled) return;
   if (!yamahaIp || !yamahaUser || !yamahaPass) {
     logger.info('[yamaha] credentials not configured yet — skip connect');
-    onStatus({ ready: false, state: 'failed', message: 'YamahaのIP、ユーザー名、パスワードを入力してください' });
+    onStatus({ ready: false, state: 'failed', message: t('yamaha.no-config') });
     return;
   }
   if (yamahaConnecting) {
@@ -362,7 +363,7 @@ function connectYamaha(onReady) {
   yamahaReady = false;
   yamahaShell = null;
   yamahaConnecting = true;
-  onStatus({ ready: false, state: 'connecting', message: '接続中…' });
+  onStatus({ ready: false, state: 'connecting', message: t('yamaha.connecting') });
 
   const conn = new SshClient();
   yamahaConn = conn;
@@ -372,7 +373,7 @@ function connectYamaha(onReady) {
       if (err) {
         logger.error('[yamaha] shell error:', err.message);
         yamahaConnecting = false;
-        onStatus({ ready: false, state: 'failed', message: 'シェル要求失敗: ' + err.message });
+        onStatus({ ready: false, state: 'failed', message: t('yamaha.shell-failed') + err.message });
         scheduleYamahaReconnect(5000);
         return;
       }
@@ -410,12 +411,12 @@ function connectYamaha(onReady) {
           yamahaReady = true;
           yamahaConnecting = false;
           logger.info('[yamaha] Connected to RTX — ready');
-          onStatus({ ready: true, message: '接続済み' });
+          onStatus({ ready: true, message: t('yamaha.connected') });
           if (onReady) onReady();
         } catch (e) {
           yamahaConnecting = false;
           logger.error('[yamaha] init error:', e.message);
-          onStatus({ ready: false, state: 'failed', message: '初期化失敗: ' + e.message });
+          onStatus({ ready: false, state: 'failed', message: t('yamaha.init-failed') + e.message });
           scheduleYamahaReconnect(5000);
         }
       }, 500);
@@ -426,7 +427,7 @@ function connectYamaha(onReady) {
     logger.error('[yamaha] SSH error:', err.message);
     yamahaReady = false;
     yamahaConnecting = false;
-    onStatus({ ready: false, state: 'failed', message: 'SSH接続失敗: ' + err.message });
+    onStatus({ ready: false, state: 'failed', message: t('yamaha.ssh-failed') + err.message });
     scheduleYamahaReconnect(5000);
   });
 

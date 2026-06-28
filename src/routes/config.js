@@ -4,6 +4,7 @@ const path   = require('path');
 const logger = require('../logger');
 
 const { Router } = require('express');
+const { t, setLanguage } = require('../i18n-server');
 
 // Reject paths with null bytes or '..' components; require absolute path.
 function isValidLogPath(p) {
@@ -54,13 +55,14 @@ module.exports = function configRoutes(ctx) {
     const { homeCountry: hc, language: lang, autoInvestigate: ai, retentionDays: rd } = req.body;
 
     if (hc) {
-      if (!ALLOWED_COUNTRIES.has(hc)) return res.status(400).json({ error: '無効な国コードです' });
+      if (!ALLOWED_COUNTRIES.has(hc)) return res.status(400).json({ error: t('config.invalid-country') });
       appState.homeCountry = hc;
     }
     if (lang) {
       if (!['ja', 'en'].includes(lang)) return res.status(400).json({ error: 'invalid language' });
       appState.uiLanguage = lang;
       notifier.configure({ language: lang });
+      setLanguage(lang);
     }
     if (typeof ai === 'boolean') {
       appState.autoInvestigate = ai;

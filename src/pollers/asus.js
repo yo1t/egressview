@@ -1,6 +1,7 @@
 // ASUS router poller: authentication, client list, netdev, mesh nodes
 'use strict';
 const logger = require('../logger');
+const { t } = require('../i18n-server');
 
 const axios = require('axios');
 const crypto = require('crypto');
@@ -55,7 +56,7 @@ async function loginToRouter(ip, username, password) {
     timeout: 8000,
   });
   const nonce = nonceRes.data?.nonce;
-  if (!nonce) throw new Error('ノンス取得失敗 — ルーターIPを確認してください');
+  if (!nonce) throw new Error(t('asus.nonce-failed'));
 
   const cnonce = crypto.randomBytes(16).toString('hex');
   const loginAuth = crypto
@@ -90,7 +91,7 @@ async function loginToRouter(ip, username, password) {
 
   const body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
   if (body.includes('index.asp')) return null;
-  throw new Error('ユーザー名またはパスワードが違います');
+  throw new Error(t('asus.wrong-credentials'));
 }
 
 async function apiGet(hook) {
@@ -214,7 +215,7 @@ async function ensureAsusAuth() {
     asusRenewFailures++;
     logger.error(`[auth] ASUS auto-renew failed (${asusRenewFailures}/${ASUS_RENEW_MAX_FAILURES}):`, e.message);
     if (asusRenewFailures >= ASUS_RENEW_MAX_FAILURES) {
-      onAuthRequired('ASUSの自動再認証に失敗しました。設定から再ログインしてください。');
+      onAuthRequired(t('asus.renew-failed'));
       stopPolling();
     }
     return false;
@@ -258,7 +259,7 @@ async function poll() {
       logger.info('[poll] Token expired, requiring re-login');
       authToken = null;
       consecutivePollErrors = 0;
-      onAuthRequired('セッションが切れました。再ログインしてください。');
+      onAuthRequired(t('asus.session-expired'));
       stopPolling();
     } else {
       consecutivePollErrors++;

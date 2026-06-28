@@ -19,6 +19,7 @@ const history         = require('./src/history');
 const deviceId        = require('./src/device-identify');
 const threatIntel     = require('./src/threat-intel');
 const notifier        = require('./src/notifier');
+const i18n            = require('./src/i18n-server');
 const backup          = require('./src/backup');
 const yamaha          = require('./src/pollers/yamaha-adapter');
 const asus            = require('./src/pollers/asus');
@@ -178,6 +179,7 @@ function loadConfig() {
     if (data.backup.maxGenerations) backup.configure({ maxGenerations: data.backup.maxGenerations });
   }
   if (data.slack)      notifier.configure({ ...data.slack, language: appState.uiLanguage });
+  i18n.setLanguage(appState.uiLanguage);
   if (data.adminToken) appState.adminToken = data.adminToken;
 
   if (data.auth && typeof data.auth === 'object') {

@@ -3,6 +3,7 @@
 
 const { Router } = require('express');
 const { isAllowedRouterIp } = require('../utils');
+const { t } = require('../i18n-server');
 const logger = require('../logger');
 
 /**
@@ -84,7 +85,7 @@ module.exports = function notesRoutes(ctx) {
   router.post('/notes/draft', requireAdmin, async (req, res) => {
     const ip = req.body?.ip;
     if (!ip || !isAllowedRouterIp(ip)) {
-      return res.status(400).json({ error: '有効なプライベートIPを指定してください' });
+      return res.status(400).json({ error: t('notes.invalid-ip') });
     }
     try {
       const result = await deviceId.investigateIp(ip, {

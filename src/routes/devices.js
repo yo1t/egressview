@@ -2,6 +2,7 @@
 'use strict';
 
 const { Router } = require('express');
+const { t } = require('../i18n-server');
 
 /**
  * @param {{
@@ -46,10 +47,10 @@ module.exports = function devicesRoutes(ctx) {
   router.post('/devices/merge', requireAdmin, (req, res) => {
     const { keepId, dropId } = req.body || {};
     if (!keepId || !dropId) {
-      return res.status(400).json({ error: 'keepId と dropId が必要です' });
+      return res.status(400).json({ error: t('device.merge-missing-id') });
     }
     if (keepId === dropId) {
-      return res.status(400).json({ error: 'keepId と dropId は異なる必要があります' });
+      return res.status(400).json({ error: t('device.merge-same-id') });
     }
 
     // Migrate note from dropId to keepId (if dropId had a note and keepId does not)
@@ -64,7 +65,7 @@ module.exports = function devicesRoutes(ctx) {
     }
 
     const ok = devices.approveMerge(keepId, dropId);
-    if (!ok) return res.status(404).json({ error: 'デバイスが見つかりません' });
+    if (!ok) return res.status(404).json({ error: t('device.not-found') });
     res.json({ success: true });
   });
 
@@ -72,7 +73,7 @@ module.exports = function devicesRoutes(ctx) {
   // Body: { id }
   router.post('/devices/reject', requireAdmin, (req, res) => {
     const { id } = req.body || {};
-    if (!id) return res.status(400).json({ error: 'id が必要です' });
+    if (!id) return res.status(400).json({ error: t('device.id-required') });
     devices.rejectCandidate(id);
     res.json({ success: true });
   });
@@ -81,9 +82,9 @@ module.exports = function devicesRoutes(ctx) {
   // Body: { deviceId }
   router.post('/devices/archive', requireAdmin, (req, res) => {
     const { deviceId } = req.body || {};
-    if (!deviceId) return res.status(400).json({ error: 'deviceId が必要です' });
+    if (!deviceId) return res.status(400).json({ error: t('device.device-id-required') });
     const ok = devices.archiveDevice(deviceId);
-    if (!ok) return res.status(404).json({ error: 'デバイスが見つからないか既にアーカイブ済みです' });
+    if (!ok) return res.status(404).json({ error: t('device.already-archived') });
     res.json({ success: true });
   });
 
@@ -91,9 +92,9 @@ module.exports = function devicesRoutes(ctx) {
   // Body: { deviceId }
   router.post('/devices/unarchive', requireAdmin, (req, res) => {
     const { deviceId } = req.body || {};
-    if (!deviceId) return res.status(400).json({ error: 'deviceId が必要です' });
+    if (!deviceId) return res.status(400).json({ error: t('device.device-id-required') });
     const ok = devices.unarchiveDevice(deviceId);
-    if (!ok) return res.status(404).json({ error: 'デバイスが見つかりません' });
+    if (!ok) return res.status(404).json({ error: t('device.not-found') });
     res.json({ success: true });
   });
 

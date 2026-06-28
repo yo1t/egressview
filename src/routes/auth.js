@@ -6,6 +6,7 @@ const { Router } = require('express');
 const crypto = require('crypto');
 const axios  = require('axios');
 const { isAllowedRouterIp } = require('../utils');
+const { t } = require('../i18n-server');
 
 /**
  * @param {{
@@ -45,7 +46,7 @@ module.exports = function authRoutes(ctx) {
     if (!entry) return null;
     if (entry.lockedUntil && now < entry.lockedUntil) {
       const secsLeft = Math.ceil((entry.lockedUntil - now) / 1000);
-      return `試行回数が多すぎます。${secsLeft}秒後に再試行してください`;
+      return t('auth.rate-limited', { n: secsLeft });
     }
     if (now - entry.firstFail > LOGIN_WINDOW_MS) {
       loginAttempts.delete(ip);
@@ -72,9 +73,9 @@ module.exports = function authRoutes(ctx) {
   // ── Password login → per-device session (P2-23) ────────────────────────────
   router.post('/auth/login', (req, res) => {
     const { password, deviceLabel } = req.body || {};
-    if (!appState.authPasswordHash) return res.status(503).json({ error: '認証未初期化' });
+    if (!appState.authPasswordHash) return res.status(503).json({ error: t('auth.not-init') });
     if (typeof password !== 'string' || password.length > 256) {
-      return res.status(400).json({ error: 'パスワードを入力してください' });
+      return res.status(400).json({ error: t('auth.enter-password') });
     }
     const clientIp = req.ip || req.socket?.remoteAddress || '';
     const rateLimitErr = checkLoginRateLimit(clientIp);
@@ -84,11 +85,11 @@ module.exports = function authRoutes(ctx) {
     if (!ok) {
       recordLoginFail(clientIp);
       logger.warn('[auth] Login failed');
-      return setTimeout(() => res.status(401).json({ error: 'パスワードが違います' }), 500);
+      return setTimeout(() => res.status(401).json({ error: t('auth.wrong-password') }), 500);
     }
     clearLoginFails(clientIp);
     const session = sessions.createSession(typeof deviceLabel === 'string' ? deviceLabel : '');
-    if (!session) return res.status(500).json({ error: 'セッション作成に失敗しました' });
+    if (!session) return res.status(500).json({ error: t('auth.session-failed') });
     logger.info(`[auth] Login OK (session ${session.id}: ${deviceLabel || 'unknown device'})`);
     res.json({ success: true, token: session.token, expiresAt: session.expiresAt });
   });
@@ -127,7 +128,7 @@ module.exports = function authRoutes(ctx) {
   router.post('/auth/change-password', requireAdmin, (req, res) => {
     const { currentPassword, newPassword, revokeOtherSessions } = req.body || {};
     if (typeof newPassword !== 'string' || newPassword.length < 8 || newPassword.length > 256) {
-      return res.status(400).json({ error: '新しいパスワードは8文字以上で指定してください' });
+      return res.status(400).json({ error: t('auth.password-too-short') });
     }
     const clientIp = req.ip || req.socket?.remoteAddress || '';
     const rateLimitErr = checkPasswordRateLimit(clientIp);
@@ -135,7 +136,7 @@ module.exports = function authRoutes(ctx) {
     const ok = authPassword.verifyPassword(currentPassword, appState.authPasswordSalt, appState.authPasswordHash);
     if (!ok) {
       recordPasswordFail(clientIp);
-      return setTimeout(() => res.status(401).json({ error: '現在のパスワードが違います' }), 500);
+      return setTimeout(() => res.status(401).json({ error: t('auth.current-wrong') }), 500);
     }
     clearPasswordFails(clientIp);
     const { salt, hash } = authPassword.hashPassword(newPassword);
@@ -167,7 +168,7 @@ module.exports = function authRoutes(ctx) {
     if (!ok) {
       recordPasswordFail(clientIp);
       logger.warn('[auth] Token regeneration rejected (password check failed)');
-      return setTimeout(() => res.status(401).json({ error: '現在のパスワードが違います' }), 500);
+      return setTimeout(() => res.status(401).json({ error: t('auth.current-wrong') }), 500);
     }
     clearPasswordFails(clientIp);
     const newToken = crypto.randomBytes(24).toString('hex');
@@ -187,7 +188,7 @@ module.exports = function authRoutes(ctx) {
 
     const provided   = (req.body && req.body.token) || '';
     const adminToken = getAdminToken();
-    if (!adminToken) return res.status(503).json({ ok: false, error: '未初期化' });
+    if (!adminToken) return res.status(503).json({ ok: false, error: t('auth.not-init-verify') });
     const a = Buffer.from(provided);
     const b = Buffer.from(adminToken);
     if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
@@ -195,14 +196,14 @@ module.exports = function authRoutes(ctx) {
       return res.json({ ok: true });
     }
     recordLoginFail(clientIp);
-    setTimeout(() => res.status(401).json({ ok: false, error: 'トークン不正' }), 500);
+    setTimeout(() => res.status(401).json({ ok: false, error: t('auth.token-invalid') }), 500);
   });
 
   // ── ASUS nonce proxy ────────────────────────────────────────────────────────
   router.post('/nonce', requireAdmin, async (req, res) => {
     const ip = req.body.routerIp || DEFAULT_ROUTER_IP;
     if (!isAllowedRouterIp(ip)) {
-      return res.status(400).json({ error: 'IPアドレスはプライベート範囲(10/8, 172.16/12, 192.168/16)のみ許可されます' });
+      return res.status(400).json({ error: t('auth.ip-not-allowed') });
     }
     try {
       const id = req.body.id || crypto.randomBytes(5).toString('hex');
@@ -212,7 +213,7 @@ module.exports = function authRoutes(ctx) {
       });
       res.json({ nonce: r.data?.nonce || '', id });
     } catch {
-      res.status(502).json({ error: 'リクエスト失敗' });
+      res.status(502).json({ error: t('auth.request-failed') });
     }
   });
 
@@ -220,10 +221,10 @@ module.exports = function authRoutes(ctx) {
   router.post('/yamaha/detect', requireAdmin, async (req, res) => {
     const { yamahaIp: yIp, yamahaUser: yUser, yamahaPass: yPass, yamahaNat: yNat } = req.body || {};
     if (yIp !== undefined && yIp !== '' && !isAllowedRouterIp(yIp)) {
-      return res.status(400).json({ code: 'routerIpPrivate', error: 'YamahaのIPがプライベート範囲外です' });
+      return res.status(400).json({ code: 'routerIpPrivate', error: t('auth.yamaha-ip-private') });
     }
-    if (typeof yUser === 'string' && yUser.length > 64) return res.status(400).json({ error: 'ユーザー名が長すぎます' });
-    if (typeof yPass === 'string' && yPass.length > 256) return res.status(400).json({ error: 'パスワードが長すぎます' }); // pragma: allowlist secret
+    if (typeof yUser === 'string' && yUser.length > 64) return res.status(400).json({ error: t('auth.username-too-long') });
+    if (typeof yPass === 'string' && yPass.length > 256) return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
 
     let stored = {};
     try { stored = loadConfig().yamaha || {}; } catch {}
@@ -232,7 +233,7 @@ module.exports = function authRoutes(ctx) {
     const pass = yPass || stored.pass || '';
     const natCandidates = [yNat, yamaha.getNat(), stored.nat].filter(Boolean);
     if (!ip || !user || !pass) {
-      return res.status(400).json({ code: 'yamahaDetectMissing', error: 'YamahaのIP、ユーザー名、パスワードを入力してください' });
+      return res.status(400).json({ code: 'yamahaDetectMissing', error: t('auth.yamaha-no-config') });
     }
 
     try {
@@ -249,7 +250,7 @@ module.exports = function authRoutes(ctx) {
       res.json({ success: true, ...result });
     } catch (err) {
       logger.error('[auth] Yamaha auto-detect failed:', err.message);
-      res.status(502).json({ success: false, code: 'yamahaDetectFailed', error: 'Yamaha自動検出に失敗しました（IP・ユーザー名・パスワード・SSH設定を確認してください）' });
+      res.status(502).json({ success: false, code: 'yamahaDetectFailed', error: t('auth.yamaha-detect-failed') });
     }
   });
 
@@ -261,20 +262,20 @@ module.exports = function authRoutes(ctx) {
             doAsus, doYamaha } = req.body || {};
 
     if (doAsus === undefined && doYamaha === undefined) {
-      return res.status(400).json({ error: '設定対象を指定してください' });
+      return res.status(400).json({ error: t('auth.no-target') });
     }
-    if (ip   !== undefined && ip   !== '' && !isAllowedRouterIp(ip))  return res.status(400).json({ error: 'ASUSのIPがプライベート範囲外です' });
-    if (yIp  !== undefined && yIp  !== '' && !isAllowedRouterIp(yIp)) return res.status(400).json({ error: 'YamahaのIPがプライベート範囲外です' });
-    if (typeof username === 'string' && username.length > 64)         return res.status(400).json({ error: 'ユーザー名が長すぎます' });
-    if (typeof password === 'string' && password.length > 256)        return res.status(400).json({ error: 'パスワードが長すぎます' }); // pragma: allowlist secret
-    if (yNat !== undefined && yNat !== '' && !/^\d{1,6}$/.test(String(yNat))) return res.status(400).json({ error: 'yamahaNat は1〜6桁の数値で指定してください' });
+    if (ip   !== undefined && ip   !== '' && !isAllowedRouterIp(ip))  return res.status(400).json({ error: t('auth.asus-ip-private') });
+    if (yIp  !== undefined && yIp  !== '' && !isAllowedRouterIp(yIp)) return res.status(400).json({ error: t('auth.yamaha-ip-private') });
+    if (typeof username === 'string' && username.length > 64)         return res.status(400).json({ error: t('auth.username-too-long') });
+    if (typeof password === 'string' && password.length > 256)        return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
+    if (yNat !== undefined && yNat !== '' && !/^\d{1,6}$/.test(String(yNat))) return res.status(400).json({ error: t('auth.yamaha-nat-invalid') });
 
     // ── ASUS ──
     if (doAsus === true) {
       let storedPass = '';
       try { storedPass = loadConfig().asus?.pass || ''; } catch {}
       const finalPass = password || storedPass;
-      if (!username || !finalPass) return res.status(400).json({ error: 'ASUSルーターのユーザー名とパスワードを入力してください' });
+      if (!username || !finalPass) return res.status(400).json({ error: t('auth.asus-no-config') });
       try {
         const targetIp = ip || DEFAULT_ROUTER_IP;
         await asus.login(targetIp, username, finalPass);
@@ -284,7 +285,7 @@ module.exports = function authRoutes(ctx) {
         logger.info(`[auth] ASUS logged in as ${username} @ ${targetIp}`);
       } catch (err) {
         logger.error('[auth] ASUS login failed:', err.message);
-        return res.status(401).json({ error: 'ASUS認証失敗（IP・ユーザー名・パスワードを確認してください）' });
+        return res.status(401).json({ error: t('auth.asus-auth-failed') });
       }
     } else if (doAsus === false) {
       asus.disable();
@@ -299,7 +300,7 @@ module.exports = function authRoutes(ctx) {
         const finalYamahaUser = yUser || yamaha.getUser();
         const hasYamahaPass = !!yPass || yamaha.hasPass();
         if (!finalYamahaIp || !finalYamahaUser || !hasYamahaPass) {
-          return res.status(400).json({ error: 'YamahaのIP、ユーザー名、パスワードを入力してください' });
+          return res.status(400).json({ error: t('auth.yamaha-no-config') });
         }
 
         yamaha.configure({ enabled: true, ip: finalYamahaIp, user: finalYamahaUser, natDescriptor: yNat || undefined });
@@ -312,7 +313,7 @@ module.exports = function authRoutes(ctx) {
         logger.info(`[auth] Yamaha config updated: ${yamaha.getIp()}`);
       } catch (err) {
         logger.error('[auth] Yamaha config failed:', err.message);
-        return res.status(502).json({ success: false, error: 'Yamaha設定の更新に失敗しました' });
+        return res.status(502).json({ success: false, error: t('auth.yamaha-update-failed') });
       }
     } else if (doYamaha === false) {
       yamaha.disconnect();
