@@ -67,6 +67,7 @@ const STRINGS = {
   },
   'auth.request-failed':     { ja: 'リクエスト失敗',                                 en: 'Request failed' },
   'auth.password-too-long':  { ja: 'パスワードが長すぎます',                           en: 'Password is too long' },
+  'auth.password-whitespace':{ ja: 'パスワードに空白文字以外を含めてください',              en: 'Password must contain non-whitespace characters' },
   'auth.yamaha-detect-failed': {
     ja: 'Yamaha自動検出に失敗しました（IP・ユーザー名・パスワード・SSH設定を確認してください）',
     en: 'Yamaha auto-detect failed (check IP, username, password, and SSH settings)',

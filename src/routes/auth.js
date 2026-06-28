@@ -130,8 +130,11 @@ module.exports = function authRoutes(ctx) {
   // ── Change password ─────────────────────────────────────────────────────────
   router.post('/auth/change-password', requireAdmin, (req, res) => {
     const { currentPassword, newPassword, revokeOtherSessions } = req.body || {};
-    if (typeof newPassword !== 'string' || !newPassword.trim() || newPassword.length < 8 || newPassword.length > 256) {
+    if (typeof newPassword !== 'string' || newPassword.length < 8 || newPassword.length > 256) {
       return res.status(400).json({ error: t('auth.password-too-short') });
+    }
+    if (!newPassword.trim()) {
+      return res.status(400).json({ error: t('auth.password-whitespace') });
     }
     const clientIp = req.ip || req.socket?.remoteAddress || '';
     const rateLimitErr = checkPasswordRateLimit(clientIp);

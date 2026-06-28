@@ -516,7 +516,7 @@ describe('Server runtime invariants', () => {
 
   it('Yamaha connection failures emit state="failed" so the UI does not stay waiting forever', () => {
     for (const key of ['yamaha.shell-failed', 'yamaha.init-failed', 'yamaha.ssh-failed']) {
-      const re = new RegExp(`onStatus\\(\\{\\s*ready:\\s*false,\\s*state:\\s*['"]failed['"][\\s\\S]*?${key.replace('.', '\\.')}`);
+      const re = new RegExp(`onStatus\\(\\{\\s*ready:\\s*false,\\s*state:\\s*['"]failed['"][\\s\\S]*?${key.replace(/\./g, '\\.')}`);
       assert.match(yamahaJs, re, `${key} must include state: 'failed'`);
     }
     assert.match(yamahaJs, /credentials not configured[\s\S]*?onStatus\(\{\s*ready:\s*false,\s*state:\s*['"]failed['"]/,

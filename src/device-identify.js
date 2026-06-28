@@ -451,12 +451,12 @@ async function investigateIp(ip, { ouiDb: ouiDbRef, yamahaExec, yamahaEnabled, y
   if (bonjourTypes.has('homekit') || bonjourTypes.has('hap'))              guesses.push(t('device.homekit'));
 
   const types = [...bonjourTypes];
-  const hasAmznService = types.some(t => t.startsWith('amzn-'));
-  const hasLgService   = types.some(t => t.startsWith('lg-') || t === 'lgsmart' || t === 'lg2nd-screen');
-  const hasSamsungSvc  = types.some(t => t.startsWith('samsung') || t === 'sectv');
+  const hasAmznService = types.some(svc => svc.startsWith('amzn-'));
+  const hasLgService   = types.some(svc => svc.startsWith('lg-') || svc === 'lgsmart' || svc === 'lg2nd-screen');
+  const hasSamsungSvc  = types.some(svc => svc.startsWith('samsung') || svc === 'sectv');
   const hasSonyPsn     = types.includes('psnpipe') || types.includes('acn-link');
   const hasSonySvc     = types.includes('aquos');
-  const hasSynology    = types.some(t => t.startsWith('synology'));
+  const hasSynology    = types.some(svc => svc.startsWith('synology'));
 
   if (hasAmznService) guesses.push('★ Amazon Alexa/Echo (Bonjour amzn-*)');
   if (hasLgService)   guesses.push('★ LG Smart TV (webOS)');
