@@ -74,8 +74,11 @@ module.exports = function authRoutes(ctx) {
   router.post('/auth/login', (req, res) => {
     const { password, deviceLabel } = req.body || {};
     if (!appState.authPasswordHash) return res.status(503).json({ error: t('auth.not-init') });
-    if (typeof password !== 'string' || password.length > 256) {
+    if (typeof password !== 'string' || password.length === 0) {
       return res.status(400).json({ error: t('auth.enter-password') });
+    }
+    if (password.length > 256) {
+      return res.status(400).json({ error: t('auth.password-too-long') });
     }
     const clientIp = req.ip || req.socket?.remoteAddress || '';
     const rateLimitErr = checkLoginRateLimit(clientIp);
@@ -127,7 +130,7 @@ module.exports = function authRoutes(ctx) {
   // ── Change password ─────────────────────────────────────────────────────────
   router.post('/auth/change-password', requireAdmin, (req, res) => {
     const { currentPassword, newPassword, revokeOtherSessions } = req.body || {};
-    if (typeof newPassword !== 'string' || newPassword.length < 8 || newPassword.length > 256) {
+    if (typeof newPassword !== 'string' || !newPassword.trim() || newPassword.length < 8 || newPassword.length > 256) {
       return res.status(400).json({ error: t('auth.password-too-short') });
     }
     const clientIp = req.ip || req.socket?.remoteAddress || '';
@@ -233,7 +236,7 @@ module.exports = function authRoutes(ctx) {
     const pass = yPass || stored.pass || '';
     const natCandidates = [yNat, yamaha.getNat(), stored.nat].filter(Boolean);
     if (!ip || !user || !pass) {
-      return res.status(400).json({ code: 'yamahaDetectMissing', error: t('auth.yamaha-no-config') });
+      return res.status(400).json({ code: 'yamahaDetectMissing', error: t('yamaha.no-config') });
     }
 
     try {
@@ -270,10 +273,12 @@ module.exports = function authRoutes(ctx) {
     if (typeof password === 'string' && password.length > 256)        return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
     if (yNat !== undefined && yNat !== '' && !/^\d{1,6}$/.test(String(yNat))) return res.status(400).json({ error: t('auth.yamaha-nat-invalid') });
 
+    let cfg = {};
+    try { cfg = loadConfig(); } catch {}
+
     // ── ASUS ──
     if (doAsus === true) {
-      let storedPass = '';
-      try { storedPass = loadConfig().asus?.pass || ''; } catch {}
+      const storedPass = cfg.asus?.pass || '';
       const finalPass = password || storedPass;
       if (!username || !finalPass) return res.status(400).json({ error: t('auth.asus-no-config') });
       try {
@@ -296,11 +301,12 @@ module.exports = function authRoutes(ctx) {
     // ── Yamaha ──
     if (doYamaha === true) {
       try {
-        const finalYamahaIp = yIp || yamaha.getIp();
-        const finalYamahaUser = yUser || yamaha.getUser();
-        const hasYamahaPass = !!yPass || yamaha.hasPass();
+        const storedYamaha = cfg.yamaha;
+        const finalYamahaIp = yIp || yamaha.getIp() || storedYamaha?.ip || '';
+        const finalYamahaUser = yUser || yamaha.getUser() || storedYamaha?.user || '';
+        const hasYamahaPass = !!yPass || yamaha.hasPass() || !!(storedYamaha?.pass);
         if (!finalYamahaIp || !finalYamahaUser || !hasYamahaPass) {
-          return res.status(400).json({ error: t('auth.yamaha-no-config') });
+          return res.status(400).json({ error: t('yamaha.no-config') });
         }
 
         yamaha.configure({ enabled: true, ip: finalYamahaIp, user: finalYamahaUser, natDescriptor: yNat || undefined });
