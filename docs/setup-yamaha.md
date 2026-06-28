@@ -157,19 +157,125 @@ Open the EgressView Settings panel (⚙) and fill in:
 
 ---
 
+## Auto-detect diagnostic display
+
+When you press **Connect & Auto-detect**, one of the following will appear:
+
+| Display | Meaning |
+|---------|---------|
+| `✓ SSH connection OK` / `✓ NAT descriptor detected` | Success — click **Save suggested settings** to finish |
+| `✓ SSH connection OK` / `✗ NAT descriptor not found` | SSH succeeded but NAT could not be detected (see below) |
+| `✗ SSH connection failed` / detail message | SSH itself failed (see below) |
+
+---
+
 ## Troubleshooting
 
-**SSH connection refused**
-- Confirm `ip ssh service on` was run and saved
-- Check that your PC/Mac is on the same LAN as the router
+### ✗ SSH connection failed — Connection refused
 
-**Authentication failed**
-- Verify the username and password with `show login user`
-- Re-enter the password: `login user egressview newpassword` then `save` <!-- pragma: allowlist secret -->
+The SSH service is not enabled, or EgressView is on a different LAN segment.
 
-**No sessions appearing in EgressView**
-- Confirm the NAT descriptor number matches what `show nat descriptor` returns
-- Run `show nat descriptor address 100 detail` on the router to verify sessions exist
+```
+ip ssh service on
+save
+```
+
+Verify on the router:
+```
+show ip ssh
+```
+`SSH service : enable` should appear. Also confirm EgressView is on the same LAN as the router.
+
+---
+
+### ✗ SSH connection failed — Connection timed out
+
+The IP address may be wrong, or the router is not responding.
+
+1. Double-check the router's IP address (e.g. `show ip route`)
+2. Test from your PC/Mac:
+   ```bash
+   ping 192.168.1.1
+   ssh egressview@192.168.1.1
+   ```
+
+---
+
+### ✗ SSH connection failed — Authentication failed
+
+The username or password does not match.
+
+Verify and reset on the router console:
+```
+show login user
+login user egressview newpassword  <!-- pragma: allowlist secret -->
+save
+```
+
+---
+
+### ✗ SSH connection failed — Host key mismatch
+
+**Cause:** The SSH host fingerprint (hostFp) recorded during a previous connection no longer matches the router's current key.
+
+**Common causes:**
+- The router was factory-reset or firmware-updated, regenerating its SSH host key
+- The router was replaced with a different unit
+
+**Fix:**
+
+Open `.egressview.json` (in the same directory as the server) and remove the `yamaha.hostFp` field:
+
+```json
+// Before
+"yamaha": {
+  "ip": "192.168.1.1",
+  "user": "egressview",
+  "hostFp": "abc123def456..."
+}
+
+// After (remove the hostFp line)
+"yamaha": {
+  "ip": "192.168.1.1",
+  "user": "egressview"
+}
+```
+
+Restart EgressView, then run **Connect & Auto-detect** again. The new host key will be recorded automatically (TOFU — Trust On First Use).
+
+> ⚠️ **Security note:** If you did not reset or replace the router and this error appears, investigate your network before removing hostFp — this error can indicate a man-in-the-middle attack.
+
+---
+
+### ✓ SSH succeeded — NAT descriptor not found
+
+SSH connected successfully, but EgressView could not read the NAT session table.
+
+**Steps:**
+
+1. Confirm NAT is configured on the router:
+   ```
+   show nat descriptor
+   ```
+   You should see `masquerade` listed.
+
+2. Enter the NAT descriptor number manually and retry:
+   Type the number from `show nat descriptor` (e.g. `100`) into the **NAT Descriptor Number** field in Settings, then run detection again.
+
+3. Verify sessions exist on the router:
+   ```
+   show nat descriptor address 100 detail
+   ```
+   If the session count is 0, wait for a LAN device to generate traffic, then retry.
+
+---
+
+### No sessions appearing in EgressView (after connecting)
+
+If the connection succeeded but the traffic log is empty:
+- Re-confirm the NAT descriptor number matches `show nat descriptor`
+- Check sessions on the router: `show nat descriptor address 100 detail`
+- Wait for the polling interval to elapse (default: 30 seconds)
 
 ---
 
