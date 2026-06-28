@@ -185,9 +185,13 @@ function connectionsRoutes(ctx) {
     // blocking the event loop with synchronous SQLite + JSON.stringify on
     // large time ranges (100k+ rows freeze heartbeats and router polling).
     const opts = parsePaginationOpts(req.query);
-    const connections = attachThreats(
+    let connections = attachThreats(
       history.queryByTimeRangePaged(from, to, MAX_FULL_FETCH, 0, opts), threatIntel
     );
+    const fThreat = req.query.fThreat;
+    if (fThreat === 'safe')        connections = connections.filter(c => !c.threat);
+    else if (fThreat === 'warn')   connections = connections.filter(c => c.threat && c.threat.confidence === 'low');
+    else if (fThreat === 'danger') connections = connections.filter(c => c.threat && c.threat.confidence !== 'low');
     const truncated = connections.length >= MAX_FULL_FETCH;
     res.json({ connections, truncated, serverTime: Date.now() });
   });

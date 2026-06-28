@@ -126,6 +126,9 @@ async function fetchLogPage() {
     params.set('sortDir', logSortState.dir);
   }
 
+  // Threat filter — handled server-side; removes the need to send all rows to the client
+  if (logThreatFilter) params.set('fThreat', logThreatFilter);
+
   // Device filter: MAC → server-side exact match on srcMac column (covers roaming/DHCP).
   // IP-only (no MAC known) → server-side exact match on src column.
   if (selectedMac) {
