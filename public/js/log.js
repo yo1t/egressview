@@ -72,11 +72,10 @@ function logMatchFilter(value, filter) {
 }
 
 // Returns true when active filters/sort cannot be applied server-side
-// (app, threatTag, regex mode, threat-badge).
+// (app, threatTag, regex mode).
 // selectedMac is passed as fSrcMac to the server, so it no longer forces
 // a full client-side fetch.
 function hasClientSideOnlyFilter() {
-  if (logThreatFilter !== null) return true;
   if (!LOG_SERVER_SORT_COLS.has(logSortState.col)) return true;
   for (const [col, filter] of Object.entries(logFilters)) {
     if (!filter) continue;

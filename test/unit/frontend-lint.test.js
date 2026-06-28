@@ -455,8 +455,8 @@ describe('Connection Log pagination/filter invariants', () => {
     const fn = snippetBetween('function hasClientSideOnlyFilter()', 'let logFetchAllMode');
     assert.match(fn, /!LOG_SERVER_SORT_COLS\.has\(logSortState\.col\)/,
       'client-only sort columns must switch the log to full-fetch mode');
-    assert.match(fn, /logThreatFilter\s*!==\s*null/,
-      'threat badge filters must switch the log to full-fetch mode');
+    assert.doesNotMatch(fn, /logThreatFilter\s*!==\s*null/,
+      'threat badge filters are server-side and must not force full-fetch mode');
     assert.match(fn, /col\s*===\s*['"]app['"]/,
       'app filters must switch the log to full-fetch mode');
     assert.match(fn, /col\s*===\s*['"]threatTag['"]/,
@@ -471,6 +471,14 @@ describe('Connection Log pagination/filter invariants', () => {
       'fetchLogPage must recompute whether a full fetch is required');
     assert.match(fn, /if\s*\(!logFetchAllMode\)\s*{[\s\S]*params\.set\(['"]limit['"][\s\S]*params\.set\(['"]offset['"]/,
       'limit/offset should only be added when full-fetch mode is off');
+  });
+
+  it('threat badge filters are sent to the server while keeping pagination', () => {
+    const fn = snippetBetween('async function fetchLogPage()', '// Device filter:');
+    assert.match(fn, /if\s*\(logThreatFilter\)\s*params\.set\(['"]fThreat['"],\s*logThreatFilter\)/,
+      'threat badge filters must be passed to /api/connections as fThreat');
+    assert.match(fn, /if\s*\(!logFetchAllMode\)\s*{[\s\S]*params\.set\(['"]limit['"][\s\S]*params\.set\(['"]offset['"]/,
+      'server-side threat filters should preserve normal pagination');
   });
 
   it('search apply refetches instead of filtering only the current page', () => {

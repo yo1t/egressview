@@ -494,6 +494,8 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(compression());
+
 const indexRoutes = ['/', '/index.html'];
 if (SUBPATH) indexRoutes.push(`${SUBPATH}/`, `${SUBPATH}/index.html`);
 
@@ -536,7 +538,6 @@ const staticOptions = {
   },
 };
 if (SUBPATH) app.use(SUBPATH, express.static(path.join(__dirname, 'public'), staticOptions));
-app.use(compression());
 app.use(express.static(path.join(__dirname, 'public'), staticOptions));
 app.use(express.json({ limit: '64kb' }));
 

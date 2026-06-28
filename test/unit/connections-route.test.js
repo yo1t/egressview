@@ -139,10 +139,11 @@ describe('connections route: GET /connections pagination', () => {
 
   const connectionsRoutes = require('../../src/routes/connections');
 
-  function callRoute(rows, query) {
+  function callRoute(rows, query, threatMap = null) {
     const router = connectionsRoutes({
       requireAdmin: (_req, _res, next) => next(),
       history: makeHistory(rows),
+      threatIntel: threatMap ? { matchThreatIntel: (dst, host) => threatMap[dst] ?? threatMap[host] ?? null } : undefined,
     });
     // Find the /connections GET handler (not /connections/summary)
     const layer = router.stack.find(l => l.route?.path === '/connections' && l.route?.methods?.get);
@@ -202,6 +203,29 @@ describe('connections route: GET /connections pagination', () => {
     const rows = Array.from({ length: 5 }, (_, i) => ({ src: '192.168.1.1', dst: `10.0.0.${i + 1}`, dport: 80, proto: 'TCP' }));
     const res = callRoute(rows, { limit: '10' });
     assert.equal(res._body.offset, 0);
+  });
+
+  it('applies fThreat before pagination and returns the filtered total', () => {
+    const rows = [
+      { src: '192.168.1.1', dst: 'safe-1.example', dport: 443, proto: 'TCP' },
+      { src: '192.168.1.1', dst: 'warn-1.example', dport: 443, proto: 'TCP' },
+      { src: '192.168.1.1', dst: 'danger-1.example', dport: 443, proto: 'TCP' },
+      { src: '192.168.1.1', dst: 'warn-2.example', dport: 443, proto: 'TCP' },
+    ];
+    const threatMap = {
+      'warn-1.example':   { confidence: 'low',  tag: 'warn' },
+      'warn-2.example':   { confidence: 'low',  tag: 'warn' },
+      'danger-1.example': { confidence: 'high', tag: 'danger' },
+    };
+
+    const res = callRoute(rows, { limit: '1', offset: '1', fThreat: 'warn' }, threatMap);
+
+    assert.equal(res._body.total, 2);
+    assert.equal(res._body.limit, 1);
+    assert.equal(res._body.offset, 1);
+    assert.equal(res._body.connections.length, 1);
+    assert.equal(res._body.connections[0].dst, 'warn-2.example');
+    assert.equal(res._body.connections[0].threat.confidence, 'low');
   });
 });
 

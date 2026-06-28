@@ -49,6 +49,7 @@ class FakeElement {
   focus() {}
   getBoundingClientRect() { return { bottom: 10, left: 10 }; }
   querySelector() { return this._sortIcon || null; }
+  querySelectorAll() { return []; }
   remove() {}
   appendChild() {}
   insertAdjacentHTML(position, html) {
@@ -259,7 +260,7 @@ describe('Connection Log view behavior', () => {
     assert.equal(params.has('offset'), false);
   });
 
-  it('threat badge filters refetch all rows', async () => {
+  it('threat badge filters keep pagination and are sent as API params', async () => {
     const h = makeHarness({
       rows: [{ src: '192.168.1.2', dst: '8.8.8.8', dport: 443, proto: 'TCP', threat: null }],
     });
@@ -269,8 +270,9 @@ describe('Connection Log view behavior', () => {
     await h.settle();
 
     const params = h.lastConnectionsParams();
-    assert.equal(params.has('limit'), false);
-    assert.equal(params.has('offset'), false);
+    assert.equal(params.get('limit'), '200');
+    assert.equal(params.get('offset'), '0');
+    assert.equal(params.get('fThreat'), 'safe');
   });
 
   it('client-only app sorting fetches all rows before sorting', async () => {

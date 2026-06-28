@@ -17,6 +17,7 @@ const ALLOWED_FILTER_MODES = new Set(['contains', 'startsWith', 'endsWith', 'exa
 const SERVER_FILTER_COLS = ['src', 'dst', 'dport', 'proto', 'country', 'org', 'srcMac'];
 const SUMMARY_CACHE_TTL_MS = 10_000;
 const summaryCache = new Map();
+const THREAT_FILTER_SCAN_CHUNK = 1000;
 
 function getSummaryCache(key) {
   const hit = summaryCache.get(key);
@@ -41,6 +42,48 @@ function attachThreats(connections, threatIntel) {
     ...c,
     threat: threatIntel.matchThreatIntel(c.dst, c.dstHost || c.dst) || null,
   }));
+}
+
+function matchesThreatFilter(row, fThreat) {
+  if (!fThreat) return true;
+  if (fThreat === 'safe')   return !row.threat;
+  if (fThreat === 'warn')   return row.threat && row.threat.confidence === 'low';
+  if (fThreat === 'danger') return row.threat && row.threat.confidence !== 'low';
+  return true;
+}
+
+function queryThreatFilteredPage(history, threatIntel, from, to, limit, offset, opts, fThreat) {
+  const requestedLimit = limit == null ? null : Math.max(0, limit);
+  const requestedOffset = Math.max(0, offset || 0);
+  const out = [];
+  let total = 0;
+  let scanned = 0;
+  let truncated = false;
+
+  while (true) {
+    const rows = attachThreats(
+      history.queryByTimeRangePaged(from, to, THREAT_FILTER_SCAN_CHUNK, scanned, opts),
+      threatIntel
+    );
+    if (!rows.length) break;
+
+    for (const row of rows) {
+      if (!matchesThreatFilter(row, fThreat)) continue;
+      if (total >= requestedOffset && (requestedLimit == null || out.length < requestedLimit)) {
+        out.push(row);
+      }
+      total++;
+      if (requestedLimit == null && out.length >= MAX_FULL_FETCH) {
+        truncated = true;
+        return { connections: out, total, truncated };
+      }
+    }
+
+    scanned += rows.length;
+    if (rows.length < THREAT_FILTER_SCAN_CHUNK) break;
+  }
+
+  return { connections: out, total, truncated };
 }
 
 function parseTimestampParam(value, name, res) {
@@ -174,6 +217,17 @@ function connectionsRoutes(ctx) {
         return res.status(400).json({ error: 'invalid "offset" parameter' });
       const clampedLimit = Math.min(limit, MAX_LIMIT);
       const opts = parsePaginationOpts(req.query);
+      const fThreat = req.query.fThreat;
+      if (['safe', 'warn', 'danger'].includes(fThreat)) {
+        const result = queryThreatFilteredPage(history, threatIntel, from, to, clampedLimit, offset, opts, fThreat);
+        return res.json({
+          connections: result.connections,
+          total: result.total,
+          limit: clampedLimit,
+          offset,
+          serverTime: Date.now(),
+        });
+      }
       const total = history.countByTimeRange(from, to, { filters: opts.filters });
       const connections = attachThreats(
         history.queryByTimeRangePaged(from, to, clampedLimit, offset, opts), threatIntel
@@ -185,13 +239,14 @@ function connectionsRoutes(ctx) {
     // blocking the event loop with synchronous SQLite + JSON.stringify on
     // large time ranges (100k+ rows freeze heartbeats and router polling).
     const opts = parsePaginationOpts(req.query);
+    const fThreat = req.query.fThreat;
+    if (['safe', 'warn', 'danger'].includes(fThreat)) {
+      const result = queryThreatFilteredPage(history, threatIntel, from, to, MAX_FULL_FETCH, 0, opts, fThreat);
+      return res.json({ connections: result.connections, truncated: result.truncated, serverTime: Date.now() });
+    }
     let connections = attachThreats(
       history.queryByTimeRangePaged(from, to, MAX_FULL_FETCH, 0, opts), threatIntel
     );
-    const fThreat = req.query.fThreat;
-    if (fThreat === 'safe')        connections = connections.filter(c => !c.threat);
-    else if (fThreat === 'warn')   connections = connections.filter(c => c.threat && c.threat.confidence === 'low');
-    else if (fThreat === 'danger') connections = connections.filter(c => c.threat && c.threat.confidence !== 'low');
     const truncated = connections.length >= MAX_FULL_FETCH;
     res.json({ connections, truncated, serverTime: Date.now() });
   });
@@ -201,6 +256,7 @@ function connectionsRoutes(ctx) {
 
 module.exports = connectionsRoutes;
 module.exports._attachThreats = attachThreats;
+module.exports._matchesThreatFilter = matchesThreatFilter;
 module.exports._parseTimestampParam = parseTimestampParam;
 module.exports._parsePaginationOpts = parsePaginationOpts;
 module.exports.MAX_LIMIT = MAX_LIMIT;
