@@ -197,6 +197,7 @@ function probeSsdp(targetIp, timeoutMs = 1500) {
 
 function probeMdns(ip, timeoutMs = 1500) {
   return new Promise(resolve => {
+    if (ip.includes(':')) { resolve(null); return; } // IPv6 mDNS requires udp6 — skip for now
     const parts = ip.split('.').reverse();
     const name  = `${parts.join('.')}.in-addr.arpa`;
     const id = crypto.randomBytes(2);

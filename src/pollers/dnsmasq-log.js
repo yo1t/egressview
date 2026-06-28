@@ -41,6 +41,10 @@ function isIpv4(value) {
   });
 }
 
+function isIpv6(value) {
+  return /^[0-9a-fA-F:]{2,39}$/.test(value) && value.includes(':');
+}
+
 function parseLine(line) {
   const query = line.match(/dnsmasq\[\d+\]: query\[(A|AAAA)\] (\S+) from (\S+)/);
   if (query) {
@@ -58,7 +62,7 @@ function parseLine(line) {
     return {
       type:       'reply',
       domain:     reply[1],
-      resolvedIp: isIpv4(reply[2]) ? reply[2] : null,
+      resolvedIp: (isIpv4(reply[2]) || isIpv6(reply[2])) ? reply[2] : null,
       rawValue:   reply[2],
     };
   }

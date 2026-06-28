@@ -8,9 +8,13 @@ const path = require('path');
 
 const NOTES_FILE = path.join(__dirname, '..', '.egressview.notes.json');
 
-// Allowed key: an IPv4 address, a MAC address, their combination separated by |,
-// OR a UUID (deviceId-based canonical key introduced in P1-5 step 8).
-const NOTE_KEY_RE = /^(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})(?:\|(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}))?$/;
+// Allowed key: an IPv4 address, an IPv6 address, a MAC address, their combination
+// separated by |, OR a UUID (deviceId-based canonical key introduced in P1-5 step 8).
+const IPV4_RE  = /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/;
+const IPV6_RE  = /[0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){1,7}/;
+const MAC_RE   = /[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}/;
+const ADDR_RE  = `(?:${IPV4_RE.source}|${IPV6_RE.source}|${MAC_RE.source})`;
+const NOTE_KEY_RE = new RegExp(`^${ADDR_RE}(?:\\|${ADDR_RE})?$`);
 const UUID_RE     = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** @type {Object.<string, string>} */

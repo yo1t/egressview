@@ -120,12 +120,25 @@ function initDb(dbPath) {
       city      TEXT,
       firstSeen INTEGER NOT NULL,
       lastSeen  INTEGER NOT NULL,
+      source    TEXT NOT NULL DEFAULT 'yamaha',
+      agentHost TEXT,
+      process   TEXT,
+      pid       INTEGER,
       PRIMARY KEY (src, dst, dport, proto)
     );
     CREATE INDEX IF NOT EXISTS idx_lastSeen ON connections(lastSeen);
     CREATE INDEX IF NOT EXISTS idx_src ON connections(src);
     CREATE INDEX IF NOT EXISTS idx_dst ON connections(dst);
   `);
+
+  // Migration: add agent columns to existing databases
+  {
+    const existing = db.prepare('PRAGMA table_info(connections)').all().map(r => r.name);
+    if (!existing.includes('source'))    db.exec(`ALTER TABLE connections ADD COLUMN source    TEXT NOT NULL DEFAULT 'yamaha'`);
+    if (!existing.includes('agentHost')) db.exec(`ALTER TABLE connections ADD COLUMN agentHost TEXT`);
+    if (!existing.includes('process'))   db.exec(`ALTER TABLE connections ADD COLUMN process   TEXT`);
+    if (!existing.includes('pid'))       db.exec(`ALTER TABLE connections ADD COLUMN pid       INTEGER`);
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS notification_log (

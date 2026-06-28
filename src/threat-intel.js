@@ -115,6 +115,7 @@ function parseSpamhausDrop(text) {
 }
 
 function ipToNum(ip) {
+  if (ip.includes(':')) return null; // IPv6 — CIDR feeds are IPv4-only
   const parts = ip.split('.');
   return ((parseInt(parts[0], 10) << 24) | (parseInt(parts[1], 10) << 16) | (parseInt(parts[2], 10) << 8) | parseInt(parts[3], 10)) >>> 0;
 }
@@ -229,11 +230,11 @@ function matchThreatIntel(dstIp, dstHost) {
     }
   }
 
-  // 3. CIDR match (Spamhaus DROP)
+  // 3. CIDR match (Spamhaus DROP — IPv4 only; IPv6 skipped)
   if (threatCidrs.length > 0) {
     const num = ipToNum(dstIp);
     for (const cidr of threatCidrs) {
-      if ((num & cidr.mask) === cidr.network) {
+      if (num !== null && (num & cidr.mask) === cidr.network) {
         return { source: cidr.source, tag: cidr.tag, matchType: 'cidr', matchValue: `${numToIp(cidr.network)}/${cidr.prefix}` };
       }
     }
