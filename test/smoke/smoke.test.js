@@ -134,6 +134,119 @@ function fatalErrors(errors) {
   return errors.filter(e => !NOISE.some(n => e.includes(n)));
 }
 
+async function mockSettingsRoutes(page) {
+  await page.route('**/api/login', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, routerIp: '192.168.1.1' }),
+  }));
+  await page.route('**/api/yamaha/detect', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      nat: { ok: true, descriptor: '100', sessionsOk: true, sessions: 42 },
+      lan: { ip: '192.168.1.1' },
+      suggested: { yamahaIp: '192.168.1.1', yamahaUser: 'admin', yamahaNat: '100' },
+    }),
+  }));
+  await page.route('**/api/config/slack', async route => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ config: { enabled: false, cooldownMinutes: 60 } }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, config: { enabled: false, cooldownMinutes: 60 } }),
+    });
+  });
+  await page.route('**/api/slack/verify', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, team: 'Demo Workspace', user: 'egressview-bot' }),
+  }));
+  await page.route('**/api/slack/lookup-user', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, userId: 'UDEMO123', name: 'demo-user', displayName: 'Demo User' }),
+  }));
+  await page.route('**/api/slack/test', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true }),
+  }));
+  await page.route('**/api/config/general', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      homeCountry: 'JP',
+      language: 'ja',
+      autoInvestigate: false,
+      retentionDays: 730,
+    }),
+  }));
+  await page.route('**/api/beacons/config', async route => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          config: {
+            enabled: true,
+            minObs: 4,
+            maxCov: 0.5,
+            minIntervalMs: 60_000,
+            maxIntervalMs: 14_400_000,
+            scanIntervalMs: 3_600_000,
+            whitelistDomains: ['example.com'],
+            orgAllowlist: ['Demo Org'],
+          },
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true }),
+    });
+  });
+  await page.route('**/api/backup/list', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      backups: [],
+      config: { intervalHours: 24, maxGenerations: 7 },
+    }),
+  }));
+  await page.route('**/api/backup/config', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, config: { intervalHours: 24, maxGenerations: 7 } }),
+  }));
+  await page.route('**/api/backup/create', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, name: 'egressview-demo.db' }),
+  }));
+  await page.route('**/api/config/datasources', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      dnsmasq: { enabled: false, logFile: '/var/log/dnsmasq-queries.log' },
+      inspect: { enabled: false, logFile: '/var/log/yamaha-router.log' },
+      dhcpd: { enabled: false, logFile: '/var/log/yamaha-router.log' },
+    }),
+  }));
+}
+
 test('tab bar renders after auth', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
@@ -371,6 +484,129 @@ test('general settings save round-trip works without console errors', async ({ p
   });
 
   expect(fatalErrors(errors), `Settings save errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+test('settings tabs save and connection buttons work without console errors', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await mockSettingsRoutes(page);
+  await authPage(page);
+
+  await page.click('#settings-btn');
+  await expect(page.locator('#settings-overlay')).toBeVisible();
+
+  await page.locator('#s-yamaha-ip').fill('192.168.1.1');
+  await page.locator('#s-yamaha-user').fill('admin');
+  await page.locator('#s-yamaha-pass').fill('demo-pass');
+  await page.locator('#s-yamaha-nat').fill('100');
+  await page.click('#yamaha-detect-btn');
+  await expect(page.locator('#yamaha-detect-status')).toBeVisible();
+  await page.click('#yamaha-connect-btn');
+  await expect(page.locator('#yamaha-status')).toBeVisible();
+  await page.waitForTimeout(1_300);
+
+  await page.click('#settings-btn');
+  await page.click('.settings-tab[data-tab="l2"]');
+  await page.locator('#s-asus-ip').fill('192.168.1.2');
+  await page.locator('#s-asus-user').fill('admin');
+  await page.locator('#s-asus-pass').fill('demo-pass');
+  await page.click('#asus-connect-btn');
+  await expect(page.locator('#asus-status')).toBeVisible();
+  await page.waitForTimeout(1_300);
+
+  await page.click('#settings-btn');
+  await page.click('.settings-tab[data-tab="general"]');
+  await expect(page.locator('#pane-general')).toHaveClass(/active/);
+  await page.locator('#s-home-country').selectOption('JP');
+  await page.click('#general-save-btn');
+  await expect(page.locator('#general-status')).toBeVisible();
+  await expect(page.locator('#general-status')).toContainText(/保存|Saved|✓/);
+
+  await page.click('.settings-tab[data-tab="threat"]');
+  await expect(page.locator('#pane-threat')).toHaveClass(/active/);
+  await page.click('#threat-save-btn');
+  await expect(page.locator('#threat-status')).toBeVisible();
+  await page.locator('#s-beacon-minobs').fill('4');
+  await page.click('#beacon-save-btn');
+  await expect(page.locator('#beacon-status')).toBeVisible();
+
+  await page.locator('#s-slack-token').fill('xoxb-demo-token');
+  await page.click('#slack-verify-btn');
+  await expect(page.locator('#slack-workspace-info')).toBeVisible();
+  await page.locator('#s-slack-username').fill('demo-user');
+  await page.click('#slack-lookup-btn');
+  await expect(page.locator('#slack-user-info')).toBeVisible();
+  await page.click('#slack-save-btn');
+  await expect(page.locator('#slack-status')).toBeVisible();
+  await page.click('#slack-test-btn');
+  await expect(page.locator('#slack-status')).toBeVisible();
+
+  await page.click('.settings-tab[data-tab="backup"]');
+  await expect(page.locator('#pane-backup')).toHaveClass(/active/);
+  await page.click('#backup-config-save');
+  await expect(page.locator('#backup-config-status')).toBeVisible();
+  await page.click('#backup-create-btn');
+  await expect(page.locator('#backup-action-status')).toBeVisible();
+
+  await page.click('.settings-tab[data-tab="datasource"]');
+  await expect(page.locator('#pane-datasource')).toHaveClass(/active/);
+  await page.locator('#s-dnsmasq-logfile').fill('/var/log/dnsmasq-queries.log');
+  await page.locator('#s-inspect-logfile').fill('/var/log/yamaha-router.log');
+  await page.locator('#s-dhcpd-logfile').fill('/var/log/yamaha-router.log');
+  await page.click('#datasource-save-btn');
+  await expect(page.locator('#datasource-status')).toBeVisible();
+
+  expect(fatalErrors(errors), `Settings tab button errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+test('device detail note save persists after reopening without console errors', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+
+  await page.click('#btn-devices');
+  await expect(page.locator('#devices-container')).toBeVisible();
+  await page.waitForTimeout(1_000);
+
+  const rows = page.locator('#devices-tbody tr[data-ip]');
+  const rowCount = await rows.count();
+  if (rowCount === 0) {
+    test.skip(true, 'no device rows');
+  }
+
+  await rows.first().click();
+  await expect(page.locator('#dv-detail-panel')).toBeVisible();
+  await expect(page.locator('#dv-detail-note-ta')).toBeVisible();
+
+  const originalNote = await page.locator('#dv-detail-note-ta').inputValue();
+  const testNote = `Playwright device note ${Date.now()}`;
+
+  try {
+    await page.locator('#dv-detail-note-ta').fill(testNote);
+    await page.click('#dv-detail-save');
+    await expect(page.locator('#dv-detail-save')).toContainText(/保存済|Saved/, { timeout: 5_000 });
+
+    await page.click('#dv-detail-close');
+    await expect(page.locator('#dv-detail-panel')).toHaveClass(/hidden/);
+
+    await rows.first().click();
+    await expect(page.locator('#dv-detail-note-ta')).toHaveValue(testNote, { timeout: 5_000 });
+  } finally {
+    const noteInput = page.locator('#dv-detail-note-ta');
+    if (!(await noteInput.isVisible().catch(() => false))) {
+      await rows.first().click().catch(() => {});
+      await noteInput.waitFor({ state: 'visible', timeout: 3_000 }).catch(() => {});
+    }
+    if (await noteInput.isVisible().catch(() => false)) {
+      await page.locator('#dv-detail-note-ta').fill(originalNote);
+      await page.click('#dv-detail-save');
+      await expect(page.locator('#dv-detail-save')).toContainText(/保存済|Saved/, { timeout: 5_000 });
+    }
+  }
+
+  expect(fatalErrors(errors), `Device detail save errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
 // ⑪ 通信ログの無限スクロール: スクロールで次ページが追記されること

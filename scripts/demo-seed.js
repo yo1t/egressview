@@ -60,7 +60,47 @@ function seedDemoConnections(history) {
       }
     }
   }
+
+  seedDemoNotifications(history, now);
   return seeded;
 }
 
-module.exports = { seedDemoConnections };
+function seedDemoNotifications(history, now = Date.now()) {
+  if (!history || typeof history.logNotification !== 'function') return 0;
+  if (typeof history.queryNotificationLog === 'function') {
+    const existing = history.queryNotificationLog(now - 15 * 24 * 60 * 60 * 1000, now);
+    if (existing.length > 0) return 0;
+  }
+
+  const threatDevice = DEVICES[0];
+  const newDevice = DEVICES[3];
+  const threatDest = {
+    dst: '203.0.113.10',
+    dport: 443,
+    proto: 'TCP',
+    dstHost: 'demo-threat.example',
+    country: 'US',
+    city: 'San Francisco',
+    org: 'Demo Threat Research',
+    threat: {
+      source: 'DemoFeed',
+      tag: 'synthetic-demo-threat',
+      confidence: 'low',
+    },
+  };
+
+  history.logNotification({ ...threatDevice, ...threatDest }, 'threat', false);
+  history.logNotification({
+    ...newDevice,
+    dst: '198.51.100.20',
+    dport: 443,
+    proto: 'TCP',
+    dstHost: 'device-cloud.example',
+    country: 'JP',
+    city: 'Tokyo',
+    org: 'Demo Device Cloud',
+  }, 'new_device', false);
+  return 2;
+}
+
+module.exports = { seedDemoConnections, seedDemoNotifications };
