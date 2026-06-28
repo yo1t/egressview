@@ -256,7 +256,7 @@ module.exports = function authRoutes(ctx) {
       res.json({ success: true, ...result });
     } catch (err) {
       logger.error('[auth] Yamaha auto-detect failed:', err.message);
-      res.status(502).json({ success: false, code: 'yamahaDetectFailed', error: t('auth.yamaha-detect-failed') });
+      res.status(502).json({ success: false, code: 'yamahaDetectFailed', error: t('auth.yamaha-detect-failed'), diag: err.diag || null });
     }
   });
 

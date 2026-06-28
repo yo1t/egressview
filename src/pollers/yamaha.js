@@ -105,6 +105,17 @@ function looksLikeShellPrompt(text) {
   return /[>#]\s*$/.test(String(text || ''));
 }
 
+function classifyConnError(err) {
+  const msg = String(err?.message || '');
+  if (/host key/i.test(msg) || /fingerprint/i.test(msg)) return 'hostKeyMismatch';
+  if (/ECONNREFUSED/.test(msg))                            return 'connRefused';
+  if (/ETIMEDOUT|ECONNRESET|EHOSTUNREACH|ENETUNREACH/.test(msg)) return 'connTimeout';
+  if (/Authentication failed|All configured/i.test(msg))  return 'authFailed';
+  if (/SSH timeout/i.test(msg))                           return 'shellTimeout';
+  if (/SSH shell closed/i.test(msg))                      return 'shellClosed';
+  return 'unknown';
+}
+
 function createTempYamahaShell({ ip, user, pass, expectedHostFp }) {
   return new Promise((resolve, reject) => {
     const conn = new SshClient();
@@ -195,7 +206,16 @@ function createTempYamahaShell({ ip, user, pass, expectedHostFp }) {
 
 async function detectYamaha({ ip, user, pass, expectedHostFp, natCandidates } = {}) {
   if (!ip || !user || !pass) throw new Error('Yamaha IP, username, and password are required');
-  const shell = await createTempYamahaShell({ ip, user, pass, expectedHostFp });
+
+  let shell;
+  try {
+    shell = await createTempYamahaShell({ ip, user, pass, expectedHostFp });
+  } catch (sshErr) {
+    const err = new Error(sshErr.message);
+    err.diag = { ssh: { ok: false, code: classifyConnError(sshErr) } };
+    throw err;
+  }
+
   try {
     const routeRaw = await shell.exec('show ip route');
     const interfaceRaw = await shell.exec('show ip interface brief');
@@ -210,10 +230,12 @@ async function detectYamaha({ ip, user, pass, expectedHostFp, natCandidates } = 
     let natDescriptorFound = '';
     let natSessions = 0;
     let natSessionsOk = false;
+    const natCandidateResults = [];
     for (const candidate of candidates) {
       const detailRaw = await shell.exec(`show nat descriptor address ${candidate} detail`);
       const sessions = parseNatDetail(detailRaw);
       const ok = commandLooksOk(detailRaw);
+      natCandidateResults.push({ candidate, ok, sessions: sessions.length });
       if (!natDescriptorFound && ok) natDescriptorFound = candidate;
       if (ok && sessions.length > 0) {
         natDescriptorFound = candidate;
@@ -224,6 +246,7 @@ async function detectYamaha({ ip, user, pass, expectedHostFp, natCandidates } = 
       if (ok) natSessionsOk = true;
     }
 
+    const lanIp = parseLanIp(interfaceRaw) || parseLanIp(lanStatusRaw) || parseLanIp(routeRaw) || '';
     return {
       ssh: { ok: true },
       nat: {
@@ -233,13 +256,19 @@ async function detectYamaha({ ip, user, pass, expectedHostFp, natCandidates } = 
         sessions: natSessions,
         candidates,
       },
-      lan: { ip: parseLanIp(interfaceRaw) || parseLanIp(lanStatusRaw) || parseLanIp(routeRaw) || '' },
+      lan: { ip: lanIp },
       suggested: {
         yamahaIp: ip,
         yamahaUser: user,
         yamahaNat: natDescriptorFound || '100',
       },
       hostFp: shell.hostFp,
+      diag: {
+        ssh: { ok: true },
+        natCandidates: natCandidateResults,
+        fromConfig: parseNatDescriptorCandidates(natRaw),
+        lanIp,
+      },
     };
   } finally {
     shell.close();
@@ -260,10 +289,12 @@ async function collectYamahaDetection(exec, { ip, user, natCandidates } = {}) {
   let natDescriptorFound = '';
   let natSessions = 0;
   let natSessionsOk = false;
+  const natCandidateResults = [];
   for (const candidate of candidates) {
     const detailRaw = await exec(`show nat descriptor address ${candidate} detail`);
     const sessions = parseNatDetail(detailRaw);
     const ok = commandLooksOk(detailRaw);
+    natCandidateResults.push({ candidate, ok, sessions: sessions.length });
     if (!natDescriptorFound && ok) natDescriptorFound = candidate;
     if (ok && sessions.length > 0) {
       natDescriptorFound = candidate;
@@ -274,6 +305,7 @@ async function collectYamahaDetection(exec, { ip, user, natCandidates } = {}) {
     if (ok) natSessionsOk = true;
   }
 
+  const lanIp = parseLanIp(interfaceRaw) || parseLanIp(lanStatusRaw) || parseLanIp(routeRaw) || '';
   return {
     ssh: { ok: true },
     nat: {
@@ -283,11 +315,17 @@ async function collectYamahaDetection(exec, { ip, user, natCandidates } = {}) {
       sessions: natSessions,
       candidates,
     },
-    lan: { ip: parseLanIp(interfaceRaw) || parseLanIp(lanStatusRaw) || parseLanIp(routeRaw) || '' },
+    lan: { ip: lanIp },
     suggested: {
       yamahaIp: ip,
       yamahaUser: user,
       yamahaNat: natDescriptorFound || '100',
+    },
+    diag: {
+      ssh: { ok: true },
+      natCandidates: natCandidateResults,
+      fromConfig: parseNatDescriptorCandidates(natRaw),
+      lanIp,
     },
   };
 }

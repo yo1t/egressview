@@ -97,17 +97,41 @@ async function connectRouter(body, statusId, btnId, checkboxId) {
 function renderYamahaDetectStatus(data, ok) {
   const el = document.getElementById('yamaha-detect-status');
   const natDescriptor = data?.nat?.descriptor || data?.suggested?.yamahaNat || '-';
-  const lanIp = data?.lan?.ip || '-';
+  const lanIp = data?.lan?.ip || data?.diag?.lanIp || '-';
   const sessionsText = data?.nat?.sessionsOk
     ? (data.nat.sessions > 0 ? `${data.nat.sessions} ${t('settings.yamaha.sessions')}` : t('settings.yamaha.sessionsOk'))
     : t('settings.yamaha.sessionsFailed');
-  const lines = ok ? [
-    `${t('settings.yamaha.sshOk')}`,
-    `${t('settings.yamaha.natDetected')}: ${natDescriptor}`,
-    `${t('settings.yamaha.lanIp')}: ${lanIp}`,
-    `${t('settings.yamaha.natSessions')}: ${sessionsText}`,
-    `${t('settings.yamaha.suggestedReady')}`,
-  ] : [data?.code ? t('err.' + data.code) : (data?.error || t('settings.yamaha.detectFailed'))];
+
+  let lines;
+  if (ok && data?.nat?.ok) {
+    lines = [
+      `✓ ${t('settings.yamaha.sshOk')}`,
+      `✓ ${t('settings.yamaha.natDetected')}: ${natDescriptor}`,
+      `  ${t('settings.yamaha.lanIp')}: ${lanIp}`,
+      `  ${t('settings.yamaha.natSessions')}: ${sessionsText}`,
+      `✓ ${t('settings.yamaha.suggestedReady')}`,
+    ];
+  } else if (ok && !data?.nat?.ok) {
+    const candidateStr = data?.diag?.natCandidates
+      ?.map(c => `${c.candidate}${c.ok ? '✓' : '✗'}`)
+      .join(' ') || '-';
+    lines = [
+      `✓ ${t('settings.yamaha.sshOk')}`,
+      `✗ ${t('settings.yamaha.natNotFound')}`,
+      `  ${t('settings.yamaha.natTriedCandidates')}: ${candidateStr}`,
+      `  ${t('settings.yamaha.lanIp')}: ${lanIp}`,
+      `  ${t('settings.yamaha.natHint')}`,
+    ];
+  } else if (data?.diag?.ssh?.ok === false) {
+    const code = data.diag.ssh.code || 'unknown';
+    lines = [
+      `✗ ${t('settings.yamaha.sshFailed')}`,
+      `  ${t('settings.yamaha.sshError.' + code)}`,
+    ];
+  } else {
+    lines = [data?.code ? t('err.' + data.code) : (data?.error || t('settings.yamaha.detectFailed'))];
+  }
+
   el.textContent = lines.join('\n');
   el.className = 'settings-status ' + (ok ? 'ok' : 'err');
   el.style.display = 'block';
