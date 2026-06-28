@@ -23,6 +23,9 @@ module.exports = function slackRoutes(ctx) {
 
   router.post('/config/slack', requireAdmin, (req, res) => {
     const { enabled, token, userId, cooldownMinutes, displayName } = req.body || {};
+    if (typeof token       === 'string' && token.length       > 512) return res.status(400).json({ error: 'token too long' });
+    if (typeof userId      === 'string' && userId.length      > 256) return res.status(400).json({ error: 'userId too long' });
+    if (typeof displayName === 'string' && displayName.length > 256) return res.status(400).json({ error: 'displayName too long' });
     notifier.configure({
       enabled:          typeof enabled         === 'boolean' ? enabled         : undefined,
       token:            typeof token           === 'string' && token ? token   : undefined,

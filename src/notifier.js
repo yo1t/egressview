@@ -202,6 +202,8 @@ function _resetLogCallback() { _logCallback = null; }
 
 // ─── Slack API helpers ────────────────────────────────────────────────────────
 
+const SLACK_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
 function _slackGet(method, token) {
   return new Promise((resolve, reject) => {
     const req = https.request({
@@ -211,7 +213,12 @@ function _slackGet(method, token) {
       headers: { 'Authorization': `Bearer ${token}` },
     }, res => {
       let data = '';
-      res.on('data', chunk => { data += chunk; });
+      let size = 0;
+      res.on('data', chunk => {
+        size += chunk.length;
+        if (size > SLACK_MAX_BYTES) { req.destroy(); return reject(new Error('Slack response too large')); }
+        data += chunk;
+      });
       res.on('end', () => {
         try { resolve(JSON.parse(data)); }
         catch { resolve({ ok: false, error: 'invalid_json' }); }

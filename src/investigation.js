@@ -17,6 +17,10 @@ const investigatedAt      = new Map();
 const investigationQueue  = [];
 const inQueueIps          = new Set();
 let   runningInvestigations = 0;
+setInterval(() => {
+  const cutoff = Date.now() - INVESTIGATE_COOLDOWN_MS;
+  for (const [ip, ts] of investigatedAt) { if (ts < cutoff) investigatedAt.delete(ip); }
+}, 6 * 60 * 60_000).unref();
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 

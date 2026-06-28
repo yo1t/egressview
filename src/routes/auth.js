@@ -98,7 +98,7 @@ module.exports = function authRoutes(ctx) {
     if (!ok) {
       recordLoginFail(clientIp);
       logger.warn('[auth] Login failed');
-      return setTimeout(() => res.status(401).json({ error: t('auth.wrong-password') }), 500);
+      return setTimeout(() => { if (!res.headersSent) res.status(401).json({ error: t('auth.wrong-password') }); }, 500);
     }
     clearLoginFails(clientIp);
     const session = sessions.createSession(typeof deviceLabel === 'string' ? deviceLabel : '');
@@ -152,7 +152,7 @@ module.exports = function authRoutes(ctx) {
     const ok = authPassword.verifyPassword(currentPassword, appState.authPasswordSalt, appState.authPasswordHash);
     if (!ok) {
       recordPasswordFail(clientIp);
-      return setTimeout(() => res.status(401).json({ error: t('auth.current-wrong') }), 500);
+      return setTimeout(() => { if (!res.headersSent) res.status(401).json({ error: t('auth.current-wrong') }); }, 500);
     }
     clearPasswordFails(clientIp);
     const { salt, hash } = authPassword.hashPassword(newPassword);
@@ -184,7 +184,7 @@ module.exports = function authRoutes(ctx) {
     if (!ok) {
       recordPasswordFail(clientIp);
       logger.warn('[auth] Token regeneration rejected (password check failed)');
-      return setTimeout(() => res.status(401).json({ error: t('auth.current-wrong') }), 500);
+      return setTimeout(() => { if (!res.headersSent) res.status(401).json({ error: t('auth.current-wrong') }); }, 500);
     }
     clearPasswordFails(clientIp);
     const newToken = crypto.randomBytes(24).toString('hex');
@@ -212,7 +212,7 @@ module.exports = function authRoutes(ctx) {
       return res.json({ ok: true });
     }
     recordLoginFail(clientIp);
-    setTimeout(() => res.status(401).json({ ok: false, error: t('auth.token-invalid') }), 500);
+    setTimeout(() => { if (!res.headersSent) res.status(401).json({ ok: false, error: t('auth.token-invalid') }); }, 500);
   });
 
   // ── ASUS nonce proxy ────────────────────────────────────────────────────────

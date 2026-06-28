@@ -60,11 +60,13 @@ function load() {
 }
 
 function save() {
+  const tmp = NOTES_FILE + '.tmp';
   try {
-    fs.writeFileSync(NOTES_FILE, JSON.stringify(notes, null, 2), { mode: 0o600 });
-    try { fs.chmodSync(NOTES_FILE, 0o600); } catch {}
+    fs.writeFileSync(tmp, JSON.stringify(notes, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, NOTES_FILE);
   } catch (e) {
     logger.error('[notes] save failed:', e.message);
+    try { fs.unlinkSync(tmp); } catch {}
   }
 }
 

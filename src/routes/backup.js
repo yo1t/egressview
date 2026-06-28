@@ -7,6 +7,8 @@ const fs   = require('fs');
 const { parsePositiveInt } = require('../utils');
 const logger = require('../logger');
 
+const crypto = require('crypto');
+
 const UPLOAD_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
 
 /**
@@ -18,7 +20,7 @@ const UPLOAD_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
  * }} ctx
  */
 module.exports = function backupRoutes(ctx) {
-  const { requireAdmin, backup, history, runtime, devices, enrichment, beacons, sessions, appRoot } = ctx;
+  const { requireAdmin, backup, history, runtime, devices, enrichment, beacons, sessions, io, appRoot } = ctx;
   const router = Router();
 
   function afterRestore() {
@@ -29,6 +31,7 @@ module.exports = function backupRoutes(ctx) {
     enrichment.reopen();
     if (beacons)  beacons.reopen();
     if (sessions) { sessions.reopen(); sessions.revokeAll(null); }
+    if (io) io.disconnectSockets(true);
   }
 
   router.get('/backup/list', requireAdmin, (req, res) => {
@@ -84,7 +87,7 @@ module.exports = function backupRoutes(ctx) {
 
     req.on('end', async () => {
       if (aborted) return;
-      const tempPath = path.join(appRoot, '.egressview-upload-temp.db');
+      const tempPath = path.join(appRoot, `.egressview-upload-temp-${crypto.randomBytes(4).toString('hex')}.db`);
       try {
         const buf = Buffer.concat(chunks);
         if (buf.length < 100) return res.status(400).json({ error: 'File too small' });

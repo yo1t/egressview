@@ -17,6 +17,10 @@ let stmtUpsertGeo  = null;
 
 const dnsCache    = new Map(); // ip → {host, expires}
 const DNS_TTL_MS  = 5 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of dnsCache) { if (now > entry.expires) dnsCache.delete(ip); }
+}, 10 * 60_000).unref();
 
 const rdapCache     = new Map(); // ip → {country, org, expires}
 const inFlightRdap  = new Map(); // ip → Promise  (in-flight dedupe)
@@ -158,6 +162,8 @@ function httpsGetJson(url, redirects = 0) {
   });
 }
 
+const GEO_MAX_BYTES = 1 * 1024 * 1024; // 1 MB
+
 // ip-api.com batch API (HTTP) — server-side only
 function httpPostJson(url, body) {
   return new Promise((resolve, reject) => {
@@ -170,7 +176,12 @@ function httpPostJson(url, body) {
     };
     const req = http.request(opts, res => {
       let buf = '';
-      res.on('data', d => { buf += d; });
+      let size = 0;
+      res.on('data', d => {
+        size += d.length;
+        if (size > GEO_MAX_BYTES) { req.destroy(); return reject(new Error('geo response too large')); }
+        buf += d;
+      });
       res.on('end', () => { try { resolve(JSON.parse(buf)); } catch(e) { reject(e); } });
     });
     req.on('error', reject);
