@@ -664,6 +664,15 @@ describe('Server runtime invariants', () => {
       'successful summary rendering should update the rendered-summary guard');
   });
 
+  it('keeps unsafe-inline out of the base style-src directive', () => {
+    assert.match(serverJs, /"style-src 'self'; "/,
+      'base style-src should not allow inline styles');
+    assert.match(serverJs, /"style-src-attr 'unsafe-inline'; "/,
+      'legacy inline style attributes should be isolated to style-src-attr until they are migrated');
+    assert.doesNotMatch(serverJs, /"style-src 'self' 'unsafe-inline'; "/,
+      'style-src must not regress to unsafe-inline');
+  });
+
   it('stats map coverage stays on the stats header and uses compact mobile text', () => {
     const script = getScriptContent();
     const headerStart = html.indexOf('<div class="stats-header">');

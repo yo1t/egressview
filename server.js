@@ -481,7 +481,9 @@ app.use((req, res, next) => {
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; " +
     `script-src 'self' 'nonce-${res.locals.cspNonce}' https://d3js.org https://cdn.jsdelivr.net; ` +
-    "style-src 'self' 'unsafe-inline'; " +
+    "style-src 'self'; " +
+    "style-src-elem 'self'; " +
+    "style-src-attr 'unsafe-inline'; " +
     "img-src 'self' data:; " +
     "connect-src 'self' wss: https://cdn.jsdelivr.net; " +
     "object-src 'none'; " +

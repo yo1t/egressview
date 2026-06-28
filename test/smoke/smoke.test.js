@@ -82,7 +82,11 @@ test('security headers are present', async ({ request }) => {
   expect(h['x-frame-options'],          'X-Frame-Options').toBe('DENY');
   expect(h['x-content-type-options'],   'X-Content-Type-Options').toBe('nosniff');
   expect(h['referrer-policy'],          'Referrer-Policy').toBe('same-origin');
-  expect(h['content-security-policy'],  'Content-Security-Policy').toContain("object-src 'none'");
+  const csp = h['content-security-policy'];
+  expect(csp,  'Content-Security-Policy').toContain("object-src 'none'");
+  expect(csp,  'Content-Security-Policy').toContain("style-src 'self'");
+  expect(csp,  'Content-Security-Policy').toContain("style-src-attr 'unsafe-inline'");
+  expect(csp,  'Content-Security-Policy').not.toContain("style-src 'self' 'unsafe-inline'");
 });
 
 // ─── JS integrity test (no auth required) ────────────────────────────────────
@@ -288,6 +292,85 @@ test('stats tab renders map canvas', async ({ page }) => {
     const statsContainer = page.locator('#stats-container').first();
     await expect(statsContainer).toBeVisible();
   }
+});
+
+test('stats tab renders map coverage label and chart svgs without console errors', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+  await page.locator('#time-filter-select').selectOption('14d');
+  await page.click('#btn-stats');
+
+  await expect(page.locator('#stats-container')).toBeVisible();
+  await page.waitForTimeout(2_000);
+
+  const coverage = page.locator('#stats-map-coverage');
+  const coverageVisible = await coverage.isVisible();
+  if (coverageVisible) {
+    await expect(coverage).toContainText(/地図表示|Map|簡略表示|Compact/);
+  } else {
+    await expect(coverage).toHaveCount(1);
+  }
+
+  await expect(page.locator('#st-globe-svg')).toBeVisible();
+  await expect(page.locator('#st-flat-svg')).toBeVisible();
+  await expect(page.locator('#chart-bar')).toBeVisible();
+  await expect(page.locator('#chart-timeline')).toBeVisible();
+
+  expect(fatalErrors(errors), `Stats render errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+test('graph map exposes summary/truncation notices without console errors', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+  await page.locator('#time-filter-select').selectOption('14d');
+  await page.click('#btn-graph');
+
+  await expect(page.locator('#graph-container')).toBeVisible();
+  await expect(page.locator('#graph-summary-notice')).toHaveCount(1);
+  await expect(page.locator('#graph-truncated-notice')).toHaveCount(1);
+  const graphChildren = await page.locator('#graph-container').evaluate(el => el.children.length);
+  expect(graphChildren, 'graph container should keep rendered child elements').toBeGreaterThan(0);
+
+  expect(fatalErrors(errors), `Graph notice errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+test('general settings save round-trip works without console errors', async ({ page, request }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+
+  const headers = { 'X-Admin-Token': TOKEN, 'Content-Type': 'application/json' };
+  const originalCountry = await page.locator('#s-home-country').inputValue();
+  const originalLanguage = await page.locator('#s-language').inputValue();
+  const targetCountry = originalCountry === 'JP' ? 'US' : 'JP';
+
+  await page.click('#settings-btn');
+  await page.click('.settings-tab[data-tab="general"]');
+  await page.locator('#s-home-country').selectOption(targetCountry);
+  await page.locator('#s-language').selectOption(originalLanguage);
+  await page.click('#general-save-btn');
+  await expect(page.locator('#general-status')).toBeVisible();
+  await expect(page.locator('#general-status')).toContainText(/保存|Saved|✓/);
+
+  const verify = await request.post(`${BASE}/api/config/general`, {
+    headers,
+    data: { homeCountry: targetCountry, language: originalLanguage },
+  });
+  expect(verify.ok()).toBeTruthy();
+  const verified = await verify.json();
+  expect(verified.homeCountry).toBe(targetCountry);
+
+  await request.post(`${BASE}/api/config/general`, {
+    headers,
+    data: { homeCountry: originalCountry, language: originalLanguage },
+  });
+
+  expect(fatalErrors(errors), `Settings save errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
 // ⑪ 通信ログの無限スクロール: スクロールで次ページが追記されること
