@@ -643,7 +643,7 @@ app.use('/api', beaconsRoutes({
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   logger.error('[express] unhandled error:', err.message);
-  if (res.headersSent) return;
+  if (res.headersSent) return next(err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
