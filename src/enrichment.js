@@ -131,16 +131,26 @@ function _persistGeo(ip, entry) {
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
+const RDAP_MAX_BYTES = 1 * 1024 * 1024; // 1 MB
+
 function httpsGetJson(url, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error('too many redirects'));
+    let parsedUrl;
+    try { parsedUrl = new URL(url); } catch { return reject(new Error('invalid redirect URL')); }
+    if (parsedUrl.protocol !== 'https:') return reject(new Error('redirect must use https'));
     const req = https.get(url, { headers: { Accept: 'application/rdap+json' } }, res => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
         return resolve(httpsGetJson(res.headers.location, redirects + 1));
       }
       let body = '';
-      res.on('data', d => { body += d; });
+      let size = 0;
+      res.on('data', d => {
+        size += d.length;
+        if (size > RDAP_MAX_BYTES) { req.destroy(); return reject(new Error('RDAP response too large')); }
+        body += d;
+      });
       res.on('end', () => { try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
     });
     req.on('error', reject);

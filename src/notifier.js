@@ -11,6 +11,12 @@ let _language = 'ja';
 
 // cooldown tracking: 'src|dst' → lastNotifiedAt (ms)
 const _cooldown = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, last] of _cooldown) {
+    if (now - last >= _cooldownMs) _cooldown.delete(key);
+  }
+}, 60 * 60_000).unref();
 
 // injectable for tests
 let _httpPost = _defaultHttpPost;

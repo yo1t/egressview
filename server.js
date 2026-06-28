@@ -637,6 +637,16 @@ app.use('/api', beaconsRoutes({
   onConfigChange: () => { scheduleBeaconScan(); runBeaconScan(); },
 }));
 
+// ─── Global error handler ─────────────────────────────────────────────────────
+// Catches synchronous throws from middleware and next(err) calls.
+// Must be registered after all routes (4-argument signature required by Express).
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  logger.error('[express] unhandled error:', err.message);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'Internal server error' });
+});
+
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
 
 io.use((socket, next) => {

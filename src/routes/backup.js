@@ -84,20 +84,21 @@ module.exports = function backupRoutes(ctx) {
 
     req.on('end', async () => {
       if (aborted) return;
+      const tempPath = path.join(appRoot, '.egressview-upload-temp.db');
       try {
         const buf = Buffer.concat(chunks);
         if (buf.length < 100) return res.status(400).json({ error: 'File too small' });
         if (!buf.slice(0, 16).equals(Buffer.from('SQLite format 3\0')))
           return res.status(400).json({ error: 'Invalid database file' });
-        const tempPath = path.join(appRoot, '.egressview-upload-temp.db');
         await fs.promises.writeFile(tempPath, buf);
         await backup.restoreFromFile(tempPath);
-        await fs.promises.unlink(tempPath);
         afterRestore();
         res.json({ success: true, message: 'Restored from uploaded file. Restart recommended.' });
       } catch (e) {
         logger.error('[backup] upload restore error:', e.message);
         res.status(500).json({ error: 'Restore failed. Check server logs.' });
+      } finally {
+        await fs.promises.unlink(tempPath).catch(() => {});
       }
     });
   });

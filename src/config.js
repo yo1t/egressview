@@ -29,8 +29,9 @@ function loadFile(file = DEFAULT_CONFIG_FILE) {
  * @param {string} [file]
  */
 function saveFile(data, file = DEFAULT_CONFIG_FILE) {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2), { mode: 0o600 });
-  try { fs.chmodSync(file, 0o600); } catch {}
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, file);
 }
 
 /**
