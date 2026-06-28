@@ -4,9 +4,28 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-06-28
+
+### Added
+
+- **Yamaha auto-detect diagnostic display**: when "Connect & Auto-detect" fails, the UI now shows the specific SSH error reason (connection refused, timeout, authentication failed, host key mismatch) with a troubleshooting hint for each case. If SSH succeeds but NAT is not found, the display lists which NAT descriptor candidates were tried and suggests entering the number manually.
+- **Yamaha SSH troubleshooting guide**: expanded `docs/setup-yamaha.md` and `docs/setup-yamaha.ja.md` with a full troubleshooting section covering each SSH failure type, the host-key TOFU mechanism, and a security warning for unexpected host-key changes.
+- **Dependabot**: automatic weekly dependency updates for npm packages and GitHub Actions.
+- **Node.js 24 CI**: CI now runs tests against both Node.js 22 and 24 in parallel.
+- **Frontend unit tests**: 53 new unit tests for frontend pure functions (graph layout, statistics, connection panel, auth socket helpers).
+
 ### Changed
 
-- Added a Contributor License Agreement (`CLA.md`, copyright-assignment style) and updated `CONTRIBUTING.md` so that submitting a contribution (e.g. opening a pull request) constitutes acceptance. This secures the relicensing rights the project's dual-licensing (AGPL-3.0 + commercial) depends on; previously contributions were taken inbound under AGPL-3.0 only, which would have prevented the Maintainer from offering the promised commercial license over outside contributions. Includes a fallback license grant and moral-rights provision for jurisdictions where assignment of future works is limited, plus a license-back so contributors retain use of their own work.
+- **Frontend migrated to ES modules**: all client-side JavaScript now uses native `import`/`export`. Eliminates implicit global-scope dependencies and makes module boundaries explicit.
+- **CSP hardened**: split `style-src` into `style-src 'self'`, `style-src-elem 'self'`, and `style-src-attr 'unsafe-inline'` to reduce the scope of the inline-style exception. `script-src` remains nonce-protected.
+- **Server error messages internationalised**: all server-side error strings are now routed through the i18n layer, ensuring Japanese/English language selection is respected consistently.
+
+### Fixed
+
+- Fixed GitHub Actions workflow using non-existent action versions.
+- Fixed two hardcoded Japanese strings in device identification that bypassed i18n.
+- Fixed password whitespace validation ordering relative to the rate-limit check.
+- Fixed Yamaha settings fallback when SSH configuration is partially missing.
 
 ## [1.2.1] - 2026-06-21
 
