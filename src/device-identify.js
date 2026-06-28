@@ -326,7 +326,7 @@ function probeNetbios(ip, timeoutMs = 1500) {
 
 // ─── Investigation ────────────────────────────────────────────────────────────
 async function investigateIp(ip, { ouiDb: ouiDbRef, yamahaExec, yamahaEnabled, yamahaReady } = {}) {
-  if (!isAllowedRouterIp(ip)) return { error: 'IP範囲外' };
+  if (!isAllowedRouterIp(ip)) return { error: t('auth.ip-not-allowed') };
   const db = ouiDbRef || ouiDb;
 
   // Look up MAC from ARP table via Yamaha (if available)
@@ -375,7 +375,7 @@ async function investigateIp(ip, { ouiDb: ouiDbRef, yamahaExec, yamahaEnabled, y
     const isLocallyAdmin = (firstByte & 0x02) !== 0;
     let macLine = `    ${mac}`;
     if (vendor) macLine += ` — ${vendor}`;
-    if (isLocallyAdmin) macLine += ' (locally administered/プライバシーMAC)';
+    if (isLocallyAdmin) macLine += ` ${t('device.privacy-mac')}`;
     story.push(`  ↓ ARP (Yamaha)\n${macLine}`);
   }
 

@@ -133,12 +133,12 @@ module.exports = function authRoutes(ctx) {
     if (typeof newPassword !== 'string' || newPassword.length < 8 || newPassword.length > 256) {
       return res.status(400).json({ error: t('auth.password-too-short') });
     }
-    if (!newPassword.trim()) {
-      return res.status(400).json({ error: t('auth.password-whitespace') });
-    }
     const clientIp = req.ip || req.socket?.remoteAddress || '';
     const rateLimitErr = checkPasswordRateLimit(clientIp);
     if (rateLimitErr) return res.status(429).json({ error: rateLimitErr });
+    if (!newPassword.trim()) {
+      return res.status(400).json({ error: t('auth.password-whitespace') });
+    }
     const ok = authPassword.verifyPassword(currentPassword, appState.authPasswordSalt, appState.authPasswordHash);
     if (!ok) {
       recordPasswordFail(clientIp);

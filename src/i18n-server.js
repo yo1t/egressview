@@ -93,6 +93,8 @@ const STRINGS = {
   // ── Config routes ────────────────────────────────────────────────────────
   'config.invalid-country':  { ja: '無効な国コードです',                              en: 'Invalid country code' },
 
+  'device.privacy-mac':        { ja: '(ローカル管理/プライバシーMAC)',              en: '(locally administered/privacy MAC)' },
+
   // ── Device routes ────────────────────────────────────────────────────────
   'device.merge-missing-id':  { ja: 'keepId と dropId が必要です',                   en: 'keepId and dropId are required' },
   'device.merge-same-id':     { ja: 'keepId と dropId は異なる必要があります',         en: 'keepId and dropId must be different' },
