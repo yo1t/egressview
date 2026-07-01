@@ -105,6 +105,21 @@ const STRINGS = {
 
   // ── Notes routes ─────────────────────────────────────────────────────────
   'notes.invalid-ip':         { ja: '有効なプライベートIPを指定してください',            en: 'Please provide a valid private IP address' },
+
+  // ── Beacon config routes ─────────────────────────────────────────────────
+  'beacon.enabled-bool':      { ja: 'enabled は boolean で指定してください',            en: 'enabled must be a boolean' },
+  'beacon.minObs-invalid':    { ja: 'minObs は 2 以上の整数で指定してください',          en: 'minObs must be an integer >= 2' },
+  'beacon.maxCov-invalid':    { ja: 'maxCov は 0 より大きく 2 以下で指定してください',    en: 'maxCov must be > 0 and <= 2' },
+  'beacon.minInterval-invalid':  { ja: 'minIntervalMs は正の整数で指定してください',     en: 'minIntervalMs must be a positive integer' },
+  'beacon.maxInterval-invalid':  { ja: 'maxIntervalMs は正の整数で指定してください',     en: 'maxIntervalMs must be a positive integer' },
+  'beacon.interval-order':       { ja: 'minIntervalMs は maxIntervalMs より小さくしてください', en: 'minIntervalMs must be less than maxIntervalMs' },
+  'beacon.scanInterval-invalid': { ja: 'scanIntervalMs は 5 分（300000）以上で指定してください', en: 'scanIntervalMs must be >= 5 minutes (300000)' },
+  'beacon.whitelist-invalid':    { ja: 'whitelistDomains はドメイン名の配列で指定してください（最大200件）', en: 'whitelistDomains must be an array of domain names (max 200)' },
+  'beacon.orglist-invalid':      { ja: 'orgAllowlist は文字列の配列で指定してください（最大100件）', en: 'orgAllowlist must be an array of strings (max 100)' },
+
+  // ── Backup config routes ─────────────────────────────────────────────────
+  'backup.intervalHours-invalid':    { ja: 'intervalHours は 1 以上の整数で指定してください',    en: 'intervalHours must be a positive integer' },
+  'backup.maxGenerations-invalid':   { ja: 'maxGenerations は 1 以上の整数で指定してください',   en: 'maxGenerations must be a positive integer' },
 };
 
 function t(key, vars) {

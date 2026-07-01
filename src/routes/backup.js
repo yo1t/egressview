@@ -6,6 +6,7 @@ const path = require('path');
 const fs   = require('fs');
 const { parsePositiveInt } = require('../utils');
 const logger = require('../logger');
+const { t } = require('../i18n-server');
 
 const crypto = require('crypto');
 
@@ -110,12 +111,12 @@ module.exports = function backupRoutes(ctx) {
     const { intervalHours, maxGenerations } = req.body || {};
     if (intervalHours != null) {
       const h = parsePositiveInt(intervalHours);
-      if (h === null) return res.status(400).json({ error: 'intervalHours は 1 以上の整数で指定してください' });
+      if (h === null) return res.status(400).json({ error: t('backup.intervalHours-invalid') });
       backup.configure({ intervalHours: h });
     }
     if (maxGenerations != null) {
       const g = parsePositiveInt(maxGenerations);
-      if (g === null) return res.status(400).json({ error: 'maxGenerations は 1 以上の整数で指定してください' });
+      if (g === null) return res.status(400).json({ error: t('backup.maxGenerations-invalid') });
       backup.configure({ maxGenerations: g });
     }
     backup.stopPeriodicBackup();
