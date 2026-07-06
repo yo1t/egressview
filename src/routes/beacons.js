@@ -3,6 +3,7 @@
 
 const { Router } = require('express');
 const { parsePositiveInt } = require('../utils');
+const { t } = require('../i18n-server');
 
 const MAX_WHITELIST_ENTRIES = 200;
 const MAX_ORG_ENTRIES       = 100;
@@ -62,45 +63,45 @@ function beaconsRoutes(ctx) {
     const cfg  = { ...appState.beaconConfig };
 
     if (body.enabled !== undefined) {
-      if (typeof body.enabled !== 'boolean') return res.status(400).json({ error: 'enabled は boolean で指定してください' });
+      if (typeof body.enabled !== 'boolean') return res.status(400).json({ error: t('beacon.enabled-bool') });
       cfg.enabled = body.enabled;
     }
     if (body.minObs !== undefined) {
       const v = parsePositiveInt(body.minObs);
-      if (v === null || v < 2) return res.status(400).json({ error: 'minObs は 2 以上の整数で指定してください' });
+      if (v === null || v < 2) return res.status(400).json({ error: t('beacon.minObs-invalid') });
       cfg.minObs = v;
     }
     if (body.maxCov !== undefined) {
       const v = Number(body.maxCov);
-      if (!Number.isFinite(v) || v <= 0 || v > 2) return res.status(400).json({ error: 'maxCov は 0 より大きく 2 以下で指定してください' });
+      if (!Number.isFinite(v) || v <= 0 || v > 2) return res.status(400).json({ error: t('beacon.maxCov-invalid') });
       cfg.maxCov = v;
     }
     if (body.minIntervalMs !== undefined) {
       const v = parsePositiveInt(body.minIntervalMs);
-      if (v === null) return res.status(400).json({ error: 'minIntervalMs は正の整数で指定してください' });
+      if (v === null) return res.status(400).json({ error: t('beacon.minInterval-invalid') });
       cfg.minIntervalMs = v;
     }
     if (body.maxIntervalMs !== undefined) {
       const v = parsePositiveInt(body.maxIntervalMs);
-      if (v === null) return res.status(400).json({ error: 'maxIntervalMs は正の整数で指定してください' });
+      if (v === null) return res.status(400).json({ error: t('beacon.maxInterval-invalid') });
       cfg.maxIntervalMs = v;
     }
     if (cfg.minIntervalMs >= cfg.maxIntervalMs) {
-      return res.status(400).json({ error: 'minIntervalMs は maxIntervalMs より小さくしてください' });
+      return res.status(400).json({ error: t('beacon.interval-order') });
     }
     if (body.scanIntervalMs !== undefined) {
       const v = parsePositiveInt(body.scanIntervalMs);
-      if (v === null || v < 5 * 60 * 1000) return res.status(400).json({ error: 'scanIntervalMs は 5 分（300000）以上で指定してください' });
+      if (v === null || v < 5 * 60 * 1000) return res.status(400).json({ error: t('beacon.scanInterval-invalid') });
       cfg.scanIntervalMs = v;
     }
     if (body.whitelistDomains !== undefined) {
       const list = sanitizeDomainList(body.whitelistDomains);
-      if (list === null) return res.status(400).json({ error: 'whitelistDomains はドメイン名の配列で指定してください（最大200件）' });
+      if (list === null) return res.status(400).json({ error: t('beacon.whitelist-invalid') });
       cfg.whitelistDomains = list;
     }
     if (body.orgAllowlist !== undefined) {
       const list = sanitizeOrgList(body.orgAllowlist);
-      if (list === null) return res.status(400).json({ error: 'orgAllowlist は文字列の配列で指定してください（最大100件）' });
+      if (list === null) return res.status(400).json({ error: t('beacon.orglist-invalid') });
       cfg.orgAllowlist = list;
     }
 
