@@ -80,7 +80,6 @@ describe('enqueue IP filtering', () => {
 
 describe('enqueue cooldown', () => {
   // Use a unique IP range that won't collide with earlier tests
-  const IP = '10.99.88.1';
 
   beforeEach(() => resetAndInit({ autoInvestigate: true }));
 

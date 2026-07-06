@@ -34,7 +34,7 @@ function parseOuiManuf(text) {
     const prefix = parts[0].trim();
     const fullName = (parts[2] || parts[1]).trim();
     if (!prefix || !fullName) continue;
-    const hex = prefix.replace(/[:\-\.]/g, '');
+    const hex = prefix.replace(/[:\-.]/g, '');
     if (hex.length !== 6) continue;
     db.set(hex.toUpperCase(), fullName);
   }
@@ -68,7 +68,7 @@ async function loadOuiDb() {
 }
 
 function lookupVendor(mac) {
-  const oui = mac.replace(/[:\-\.]/g, '').slice(0, 6).toUpperCase();
+  const oui = mac.replace(/[:\-.]/g, '').slice(0, 6).toUpperCase();
   return ouiDb.get(oui) || '';
 }
 
@@ -367,10 +367,9 @@ async function investigateIp(ip, { ouiDb: ouiDbRef, yamahaExec, yamahaEnabled, y
   story.push(`📍 ${ip}`);
 
   let mac = arpMac;
-  let vendor = null;
   let vendorInfo = null;
   if (mac) {
-    vendor = db?.get(mac.replace(/:/g, '').substring(0, 6).toUpperCase()) || null;
+    const vendor = db?.get(mac.replace(/:/g, '').substring(0, 6).toUpperCase()) || null;
     vendorInfo = inferVendorCategory(vendor);
     const firstByte = parseInt(mac.split(':')[0], 16);
     const isLocallyAdmin = (firstByte & 0x02) !== 0;

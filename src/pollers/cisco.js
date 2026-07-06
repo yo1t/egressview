@@ -30,7 +30,7 @@ let ciscoIp      = '';
 let ciscoUser    = '';
 let ciscoPass    = '';
 let ciscoEnablePass = '';
-let ciscoEnabled = true;
+let ciscoEnabled = false;
 let ciscoHostFp  = '';
 
 // Callbacks
@@ -130,6 +130,11 @@ function looksLikePagerPrompt(text) {
   return /--\s*[Mm]ore\s*--/.test(String(text || ''));
 }
 
+// "enable" 送信後に IOS が返す "Password:" はシェルプロンプトにマッチしないため専用判定
+function looksLikePasswordPrompt(text) {
+  return /[Pp]assword:\s*$/.test(String(text || ''));
+}
+
 function classifyConnError(err) {
   const msg = String(err?.message || '');
   if (/host key/i.test(msg) || /fingerprint/i.test(msg)) return 'hostKeyMismatch';
@@ -190,10 +195,10 @@ function createTempCiscoShell({ ip, user, pass, enablePass, expectedHostFp }) {
       cleanup();
       reject(err);
     };
-    const waitForPromptLocal = (ms = 15000) => new Promise((res, rej) => {
-      if (looksLikeShellPrompt(buf)) { res(buf); return; }
+    const waitForPromptLocal = (ms = 15000, matcher = looksLikeShellPrompt) => new Promise((res, rej) => {
+      if (matcher(buf)) { res(buf); return; }
       const timer = setTimeout(() => { waiter = null; rej(new Error('SSH timeout')); }, ms);
-      waiter = { res, rej, timer };
+      waiter = { res, rej, timer, matcher };
     });
     const exec = async cmd => {
       buf = '';
@@ -209,7 +214,7 @@ function createTempCiscoShell({ ip, user, pass, enablePass, expectedHostFp }) {
           const text = chunk.toString('utf8').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
           buf += text;
           if (looksLikePagerPrompt(text)) stream.write(' '); // space advances one page
-          if (looksLikeShellPrompt(buf) && waiter) {
+          if (waiter && waiter.matcher(buf)) {
             const cur = waiter; waiter = null;
             clearTimeout(cur.timer); cur.res(buf);
           }
@@ -220,10 +225,16 @@ function createTempCiscoShell({ ip, user, pass, enablePass, expectedHostFp }) {
           await waitForPromptLocal(8000);
           // Enter enable mode if landed in user mode
           if (/>\s*$/.test(buf) && enablePass) {
-            await exec('enable');
             buf = '';
-            shell.write(enablePass + '\n');
-            await waitForPromptLocal(8000);
+            shell.write('enable\n');
+            // enable にパスワードが設定されていれば "Password:"、不要なら即プロンプトが返る
+            await waitForPromptLocal(8000, t => looksLikePasswordPrompt(t) || looksLikeShellPrompt(t));
+            if (looksLikePasswordPrompt(buf)) {
+              buf = '';
+              shell.write(enablePass + '\n');
+              await waitForPromptLocal(8000);
+            }
+            if (!/#\s*$/.test(buf)) throw new Error('enable mode failed — check enable password');
           }
           await exec('terminal length 0');
           settled = true;
@@ -247,12 +258,12 @@ function rejectShellWaiter(err) {
   if (w) w.reject(err);
 }
 
-function waitForPrompt(timeoutMs = 45000) {
+function waitForPrompt(timeoutMs = 45000, matcher = looksLikeShellPrompt) {
   return new Promise((resolve, reject) => {
-    if (looksLikeShellPrompt(shellBuf)) { resolve(shellBuf); return; }
+    if (matcher(shellBuf)) { resolve(shellBuf); return; }
     clearShellWaiter();
     const timer = setTimeout(() => { shellWaiter = null; reject(new Error('SSH timeout')); }, timeoutMs);
-    shellWaiter = { resolve, reject, timer };
+    shellWaiter = { resolve, reject, timer, matcher };
   });
 }
 
@@ -309,7 +320,7 @@ function connectCisco(onReady) {
         const text = chunk.toString('utf8').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
         shellBuf += text;
         if (looksLikePagerPrompt(text)) stream.write(' ');
-        if (looksLikeShellPrompt(shellBuf) && shellWaiter) {
+        if (shellWaiter && shellWaiter.matcher(shellBuf)) {
           const { resolve } = shellWaiter; clearShellWaiter(); resolve(shellBuf);
         }
       });
@@ -328,10 +339,14 @@ function connectCisco(onReady) {
           if (/>\s*$/.test(shellBuf) && ciscoEnablePass) {
             shellBuf = '';
             ciscoShell.write('enable\n');
-            await waitForPrompt(8000);
-            shellBuf = '';
-            ciscoShell.write(ciscoEnablePass + '\n');
-            await waitForPrompt(8000);
+            // enable にパスワードが設定されていれば "Password:"、不要なら即プロンプトが返る
+            await waitForPrompt(8000, t => looksLikePasswordPrompt(t) || looksLikeShellPrompt(t));
+            if (looksLikePasswordPrompt(shellBuf)) {
+              shellBuf = '';
+              ciscoShell.write(ciscoEnablePass + '\n');
+              await waitForPrompt(8000);
+            }
+            if (!/#\s*$/.test(shellBuf)) throw new Error('enable mode failed — check enable password');
           }
           shellBuf = '';
           ciscoShell.write('terminal length 0\n');
@@ -370,6 +385,10 @@ function connectCisco(onReady) {
 
 async function fetchNatSessions() {
   const raw = await ciscoExec('show ip nat translations', 90000);
+  // ユーザーモードのままだと "% Invalid input" が返り 0 件と区別できないため明示エラーにする
+  if (/%\s*Invalid input/i.test(raw)) {
+    throw new Error('privileged EXEC required — enable mode not active');
+  }
   return parseNatTranslations(raw);
 }
 
@@ -456,6 +475,13 @@ function disconnect() {
   rejectShellWaiter(new Error('Cisco disconnected'));
   if (ciscoReconnectTimer) { clearTimeout(ciscoReconnectTimer); ciscoReconnectTimer = null; }
   if (ciscoConn) { try { ciscoConn.removeAllListeners(); ciscoConn.on('error', () => {}); ciscoConn.end(); } catch {} ciscoConn = null; }
+  ciscoShell = null;
+  shellBuf   = '';
+  // 無効化後に古い ARP/NDP を resolveMacByIp へ返さないようキャッシュも破棄
+  ciscoArpCache.clear();
+  ciscoNdpCache.clear();
+  ciscoArpLastRefresh = 0;
+  ciscoNdpLastRefresh = 0;
 }
 
 function reconnect() {

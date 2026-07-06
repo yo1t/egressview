@@ -1,7 +1,7 @@
 // Unit tests for src/logger.js
 // Run: node --test test/unit/logger.test.js
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 // ── helpers ────────────────────────────────────────────────────────────────────

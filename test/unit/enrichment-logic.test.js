@@ -4,7 +4,7 @@
 
 'use strict';
 
-const { describe, it, before, beforeEach } = require('node:test');
+const { describe, it, before, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 
 const enrichment = require('../../src/enrichment');
@@ -144,5 +144,46 @@ describe('geoCache — private IP entries', () => {
     const entry = cache.get('192.168.1.1');
     assert.equal(entry.lat, null);
     assert.ok(entry.expires > now + 365 * 24 * 3600 * 1000, 'TTL should be permanent (> 1 year)');
+  });
+});
+
+// ─── lookupGeoBatch — バッファリング統合とレート制限バックオフ ─────────────────
+
+describe('lookupGeoBatch coalescing & backoff', () => {
+  before(() => { reset(); enrichment._setGeoFlushMsForTest(10); });
+  after(() => { enrichment._setGeoFlushMsForTest(2000); enrichment._initForTest(); });
+
+  it('resolves immediately for private-only IPs (no flush cycle)', async () => {
+    await enrichment.lookupGeoBatch(['192.168.10.20']);
+    const entry = enrichment.getGeoCache().get('192.168.10.20');
+    assert.ok(entry, 'private IP should be cached');
+    assert.equal(entry.lat, null);
+  });
+
+  it('coalesces concurrent calls into a single flush cycle (same promise)', () => {
+    // バックオフ中にして実 API 呼び出しを抑止しつつ、統合動作だけ検証する
+    enrichment._setGeoBackoffUntilForTest(Date.now() + 60_000);
+    const p1 = enrichment.lookupGeoBatch(['203.0.113.10']);
+    const p2 = enrichment.lookupGeoBatch(['203.0.113.11']);
+    assert.strictEqual(p1, p2, 'calls within the flush window should share one cycle');
+    return p1;
+  });
+
+  it('fail-caches IPs during backoff without calling the API', async () => {
+    enrichment._setGeoBackoffUntilForTest(Date.now() + 60_000);
+    await enrichment.lookupGeoBatch(['198.51.100.7']);
+    const entry = enrichment.getGeoCache().get('198.51.100.7');
+    assert.ok(entry, 'IP should be fail-cached during backoff');
+    assert.equal(entry.lat, null);
+    assert.ok(entry.expires > Date.now(), 'entry should carry a retry-suppression TTL');
+  });
+
+  it('starts a new flush cycle after the previous one completes', async () => {
+    enrichment._setGeoBackoffUntilForTest(Date.now() + 60_000);
+    const p1 = enrichment.lookupGeoBatch(['198.51.100.8']);
+    await p1;
+    const p2 = enrichment.lookupGeoBatch(['198.51.100.9']);
+    assert.notStrictEqual(p1, p2, 'a completed cycle should not be reused');
+    await p2;
   });
 });

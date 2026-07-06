@@ -3,7 +3,7 @@
 // Run: node --test test/unit/runtime.test.js
 'use strict';
 
-const { describe, it, beforeEach, mock } = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const runtime = require('../../src/runtime');
 
@@ -57,7 +57,7 @@ function makeNotifier() {
 
 function makeDeviceId() {
   return {
-    getNodeMeta: (ip, mac) => ({ vendor: 'TestVendor', dnsName: null, mdnsName: null }),
+    getNodeMeta: (_ip, _mac) => ({ vendor: 'TestVendor', dnsName: null, mdnsName: null }),
   };
 }
 
@@ -79,6 +79,9 @@ function makeDhcpd(mac = null) {
 function makeYamaha(arpMac = null) {
   return { getArpMac: () => arpMac, getIp: () => '192.168.1.1' };
 }
+function makeCisco(arpMac = null) {
+  return { getArpMac: () => arpMac, getIp: () => '192.168.2.1' };
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -94,12 +97,13 @@ function initRuntime(overrides = {}) {
   const devs        = overrides.devices     || makeDevices();
   const asus_       = overrides.asus        || makeAsus();
   const yamaha_     = overrides.yamaha      || makeYamaha();
+  const cisco_      = overrides.cisco       || makeCisco();
   const dhcpd_      = overrides.dhcpdSyslog || makeDhcpd();
 
   runtime.setKnownMacs(new Set());   // reset between tests
   runtime.init({ io, history: hist, enrichment: enrich, threatIntel: threat,
                  notifier: notif, deviceId: devId, devices: devs,
-                 asus: asus_, yamaha: yamaha_, dhcpdSyslog: dhcpd_ });
+                 asus: asus_, yamaha: yamaha_, cisco: cisco_, dhcpdSyslog: dhcpd_ });
 
   return { io, history: hist, enrichment: enrich, threatIntel: threat,
            notifier: notif, deviceId: devId, devices: devs };
@@ -121,6 +125,21 @@ describe('resolveMacByIp', () => {
   it('falls back to yamaha ARP when both ASUS and dhcpd have none', () => {
     initRuntime({ asus: makeAsus(null), dhcpdSyslog: makeDhcpd(null), yamaha: makeYamaha('de:ad:be:ef:00:01') });
     assert.equal(runtime.resolveMacByIp('192.168.1.100'), 'de:ad:be:ef:00:01');
+  });
+
+  it('falls back to cisco ARP when ASUS, dhcpd, and yamaha have none', () => {
+    initRuntime({ asus: makeAsus(null), dhcpdSyslog: makeDhcpd(null),
+                  yamaha: makeYamaha(null), cisco: makeCisco('ca:fe:00:11:22:33') });
+    assert.equal(runtime.resolveMacByIp('192.168.2.100'), 'ca:fe:00:11:22:33');
+  });
+
+  it('returns null when no source has a mac and cisco is not injected', () => {
+    const io = makeIo(), hist = makeHistory();
+    runtime.setKnownMacs(new Set());
+    runtime.init({ io, history: hist, enrichment: makeEnrichment(), threatIntel: makeThreatIntel(),
+                   notifier: makeNotifier(), deviceId: makeDeviceId(), devices: makeDevices(),
+                   asus: makeAsus(null), yamaha: makeYamaha(null), dhcpdSyslog: makeDhcpd(null) });
+    assert.equal(runtime.resolveMacByIp('192.168.1.100'), null);
   });
 
   it('returns null when ip is null', () => {

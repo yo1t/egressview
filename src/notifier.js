@@ -141,14 +141,14 @@ const _TEST_MSG = {
 
 const _NEW_DEVICE_MSG = {
   ja: {
-    title:  (name, ip) => `🆕 *新規デバイス検出* — ${name}`,
+    title:  (name, _ip) => `🆕 *新規デバイス検出* — ${name}`,
     ip:     (ip)       => `*IPアドレス:* ${ip}`,
     vendor: (v)        => `*ベンダー:* ${v}`,
     mac:    (m)        => `*MAC:* ${m}`,
     time:   (ts)       => `*検出時刻:* ${new Date(ts).toLocaleString('ja-JP')}`,
   },
   en: {
-    title:  (name, ip) => `🆕 *New Device Detected* — ${name}`,
+    title:  (name, _ip) => `🆕 *New Device Detected* — ${name}`,
     ip:     (ip)       => `*IP Address:* ${ip}`,
     vendor: (v)        => `*Vendor:* ${v}`,
     mac:    (m)        => `*MAC:* ${m}`,

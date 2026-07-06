@@ -3,7 +3,6 @@
 'use strict';
 
 const Database = require('better-sqlite3');
-const logger   = require('./logger');
 
 const DB_PATH = process.env.EGRESSVIEW_DB || '.egressview.db';
 const EVENT_RETENTION_MS = 7 * 24 * 3600_000; // 7 days

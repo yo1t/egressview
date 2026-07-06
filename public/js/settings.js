@@ -1,9 +1,8 @@
 // ─── Settings modal ───────────────────────────────────────────────────────────
 import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, esc, fmtTs } from './utils.js?v=__ASSET_VERSION__';
-import { apiFetch, connState, updateConnBadge, asusActive, setAsusActive, yamahaConfigured, setYamahaConfigured } from './auth-socket.js?v=__ASSET_VERSION__';
+import { apiFetch, connState, updateConnBadge, asusActive, setAsusActive, setYamahaConfigured, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
 import { setAllConnections, setDataRangeFrom } from './connections-panel.js?v=__ASSET_VERSION__';
-import { setHomeCountry } from './map-common.js?v=__ASSET_VERSION__';
 import { stopGraph, updateOrgGraph, simulation } from './graph.js?v=__ASSET_VERSION__';
 import { loadBeacons } from './beacon.js?v=__ASSET_VERSION__';
 const settingsOverlay = document.getElementById('settings-overlay');
@@ -199,12 +198,15 @@ document.getElementById('yamaha-connect-btn').addEventListener('click', async ()
   const ok = await connectRouter(body, 'yamaha-status', 'yamaha-connect-btn', 'enable-yamaha');
   if (ok) {
     setYamahaConfigured(doYamaha);
-    connState.l3l4.enabled = doYamaha;
-    connState.l3l4.ready   = false;        // wait for yamaha-status event for connection result
+    routerState.yamaha.enabled = doYamaha;
+    routerState.yamaha.ready   = false;    // wait for yamaha-status event for connection result
+    if (doYamaha && body.yamahaIp) routerState.yamaha.ip = body.yamahaIp;
+    connState.l3l4.enabled = doYamaha || routerState.cisco.enabled;
+    connState.l3l4.ready   = routerState.cisco.ready; // Cisco 側が生きていれば ready を維持
     connState.l3l4.err     = '';
     if (doYamaha && body.yamahaIp) connState.l3l4.ip = body.yamahaIp;
     updateConnBadge('l3l4');
-    if (!doYamaha) {
+    if (!doYamaha && !routerState.cisco.enabled) {
       setAllConnections([]);
       setDataRangeFrom(Date.now() - 86400_000);
       if (!asusActive) stopGraph();
@@ -294,12 +296,15 @@ document.getElementById('cisco-connect-btn').addEventListener('click', async () 
   }
   const ok = await connectRouter(body, 'cisco-status', 'cisco-connect-btn', 'enable-cisco');
   if (ok) {
-    connState.l3l4.enabled = doCisco;
-    connState.l3l4.ready   = false;
+    routerState.cisco.enabled = doCisco;
+    routerState.cisco.ready   = false;     // wait for cisco-status event for connection result
+    if (doCisco && body.ciscoIp) routerState.cisco.ip = body.ciscoIp;
+    connState.l3l4.enabled = doCisco || routerState.yamaha.enabled;
+    connState.l3l4.ready   = routerState.yamaha.ready; // Yamaha 側が生きていれば ready を維持
     connState.l3l4.err     = '';
     if (doCisco && body.ciscoIp) connState.l3l4.ip = body.ciscoIp;
     updateConnBadge('l3l4');
-    if (!doCisco) {
+    if (!doCisco && !routerState.yamaha.enabled) {
       setAllConnections([]);
       setDataRangeFrom(Date.now() - 86400_000);
       if (!asusActive) stopGraph();

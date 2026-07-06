@@ -13,7 +13,8 @@ const crypto  = require('crypto');
 const path    = require('path');
 const fs      = require('fs');
 
-const { htmlEscape }  = require('./src/utils');
+const utils           = require('./src/utils');
+const { htmlEscape }  = utils;
 const logger          = require('./src/logger');
 const enrichment      = require('./src/enrichment');
 const history         = require('./src/history');
@@ -116,8 +117,10 @@ const appState = {
   },
 };
 
-// 差分 push 用タイムスタンプ: 前回 broadcast 以降に更新された接続だけを送信するため
-let lastPollEmitTime = Date.now();
+// 差分 push 用タイムスタンプ: ルーターごとに独立して管理し、片方のポーリングが
+// もう片方の差分ウィンドウを詰めないようにする
+let lastYamahaEmitTime = Date.now();
+let lastCiscoEmitTime  = Date.now();
 
 // ─── Express + Socket.IO setup ────────────────────────────────────────────────
 const app = express();
@@ -216,12 +219,21 @@ function loadConfig() {
     if (Array.isArray(data.beacons.orgAllowlist))         bc.orgAllowlist     = data.beacons.orgAllowlist;
   }
 
+  // ログパスは許可ディレクトリ配下のみ（tail は sudo で動くため）。
+  // 既存設定が新ルールで無効な場合は警告してデフォルトへフォールバック。
+  const safeLogPath = (label, value, fallback) => {
+    if (value === undefined) return fallback;
+    if (utils.isAllowedLogPath(value)) return value;
+    logger.warn(`[config] ${label} logFile "${value}" is not under an allowed log directory — falling back to ${fallback}. ` +
+                'Add the directory via EGRESSVIEW_LOG_PATH_PREFIXES if this path is intentional.');
+    return fallback;
+  };
   appState.dhcpdEnabled  = data.dhcpd?.enabled  !== false;
-  appState.dhcpdLogFile  = data.dhcpd?.logFile   || '/var/log/yamaha-router.log';
+  appState.dhcpdLogFile  = safeLogPath('dhcpd', data.dhcpd?.logFile, '/var/log/yamaha-router.log');
   appState.inspectEnabled = data.inspect?.enabled !== false;
-  appState.inspectLogFile = data.inspect?.logFile  || '/var/log/yamaha-router.log';
+  appState.inspectLogFile = safeLogPath('inspect', data.inspect?.logFile, '/var/log/yamaha-router.log');
   appState.dnsmasqEnabled = data.dnsmasq?.enabled !== false;
-  appState.dnsmasqLogFile = data.dnsmasq?.logFile  || '/var/log/dnsmasq-queries.log';
+  appState.dnsmasqLogFile = safeLogPath('dnsmasq', data.dnsmasq?.logFile, '/var/log/dnsmasq-queries.log');
 
   dhcpdSyslog.configure({ logFile: appState.dhcpdLogFile, enabled: appState.dhcpdEnabled });
   inspectSyslog.configure({
@@ -400,8 +412,25 @@ async function runConnectionEnrichmentQueue() {
   }
 }
 
+// ポールループの多重起動防止フラグ。ループは無効化されると自然消滅するため、
+// 実行時に再有効化されたときは startXPolling() で再起動する。
+let yamahaPollActive = false;
+let ciscoPollActive  = false;
+
+function startYamahaPolling() {
+  if (yamahaPollActive) return;
+  yamahaPollActive = true;
+  pollYamahaConnections();
+}
+
+function startCiscoPolling() {
+  if (ciscoPollActive) return;
+  ciscoPollActive = true;
+  pollCiscoConnections();
+}
+
 async function pollYamahaConnections() {
-  if (!yamaha.isEnabled()) return;
+  if (!yamaha.isEnabled()) { yamahaPollActive = false; return; }
   try {
     if (!yamaha.isReady()) {
       logger.debug('[yamaha] poll skipped: not ready');
@@ -425,7 +454,7 @@ async function pollYamahaConnections() {
       }
     }
 
-    sessions.forEach(s => runtime.recordConnection(s, now));
+    sessions.forEach(s => runtime.recordConnection(s, now, 'yamaha'));
 
     // Poll-based beacon event recording: only used as fallback when INSPECT syslog is
     // disabled.  When inspectEnabled=true, INSPECT provides precise TCP session-close
@@ -453,8 +482,8 @@ async function pollYamahaConnections() {
 
     // 差分 push: 前回 emit 以降に lastSeen が更新されたエントリのみ送信
     const deltaConns = [...history.getConnectionHistory().values()]
-      .filter(c => c.lastSeen > lastPollEmitTime);
-    lastPollEmitTime = now;
+      .filter(c => c.lastSeen > lastYamahaEmitTime);
+    lastYamahaEmitTime = now;
     if (deltaConns.length > 0) {
       io.emit('connections-update', {
         connections: deltaConns,
@@ -479,11 +508,12 @@ async function pollYamahaConnections() {
     }
   } finally {
     if (yamaha.isEnabled()) setTimeout(pollYamahaConnections, POLL_INTERVAL);
+    else yamahaPollActive = false;
   }
 }
 
 async function pollCiscoConnections() {
-  if (!cisco.isEnabled()) return;
+  if (!cisco.isEnabled()) { ciscoPollActive = false; return; }
   try {
     if (!cisco.isReady()) {
       logger.debug('[cisco] poll skipped: not ready');
@@ -507,13 +537,13 @@ async function pollCiscoConnections() {
       }
     }
 
-    sessions.forEach(s => runtime.recordConnection(s, now));
+    sessions.forEach(s => runtime.recordConnection(s, now, 'cisco'));
 
     history.pruneHistory();
 
     const deltaConns = [...history.getConnectionHistory().values()]
-      .filter(c => c.lastSeen > lastPollEmitTime);
-    lastPollEmitTime = now;
+      .filter(c => c.lastSeen > lastCiscoEmitTime);
+    lastCiscoEmitTime = now;
     if (deltaConns.length > 0) {
       io.emit('connections-update', {
         connections: deltaConns,
@@ -531,6 +561,7 @@ async function pollCiscoConnections() {
     }
   } finally {
     if (cisco.isEnabled()) setTimeout(pollCiscoConnections, POLL_INTERVAL);
+    else ciscoPollActive = false;
   }
 }
 
@@ -689,6 +720,7 @@ const routeCtx = {
   appState,
   appRoot:             __dirname,
   setLatestConnections: () => {},  // Yamaha disabled clears in-memory session list
+  startYamahaPolling, startCiscoPolling,
 };
 
 app.use('/api', authRoutes(routeCtx));
@@ -707,7 +739,6 @@ app.use('/api', beaconsRoutes({
 // ─── Global error handler ─────────────────────────────────────────────────────
 // Catches synchronous throws from middleware and next(err) calls.
 // Must be registered after all routes (4-argument signature required by Express).
-// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   logger.error('[express] unhandled error:', err.message);
   if (res.headersSent) return next(err);
@@ -758,7 +789,7 @@ io.on('connection', socket => {
     socket.emit('auth-required', { message: 'セッションが切れています' });
   }
   const connectionHistory = history.getConnectionHistory();
-  if (yamaha.isEnabled() && connectionHistory.size) {
+  if ((yamaha.isEnabled() || cisco.isEnabled()) && connectionHistory.size) {
     // Initial emit: last 1h only — fast first render. Client fetches full 24h
     // in the background via GET /api/connections after the initial paint.
     const cutoff = Date.now() - 3_600_000; // 1h
@@ -781,7 +812,7 @@ notifier.setLogCallback((entry, type, slackSent) => {
 
 runtime.init({
   io, history, enrichment, threatIntel, notifier, deviceId, devices,
-  asus, yamaha, dhcpdSyslog, beacons,
+  asus, yamaha, cisco, dhcpdSyslog, beacons,
 });
 
 investigation.init({
@@ -853,8 +884,12 @@ dhcpdSyslog.configure({
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
-server.listen(PORT, () => {
-  logger.info(`EgressView: ${tlsOptions ? 'https' : 'http'}://localhost:${PORT}`);
+// HOST 未指定なら全インターフェース（LAN 内の他端末からアクセスする通常運用）。
+// テストやサンドボックス環境では HOST=127.0.0.1 でループバックに限定できる。
+const HOST = process.env.HOST || undefined;
+
+server.listen(PORT, HOST, () => {
+  logger.info(`EgressView: ${tlsOptions ? 'https' : 'http'}://${HOST || 'localhost'}:${PORT}`);
   loadConfig();
   const configuredDbPath = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB || '';
   if (DEMO_MODE && !configuredDbPath && fs.existsSync(DEMO_DB_PATH)) {
@@ -909,11 +944,11 @@ server.listen(PORT, () => {
     logger.info(`Router IP: ${asus.getRouterIp()}`);
     deviceId.loadOuiDb();
     yamaha.connect(() => {
-      yamaha.refreshArp().then(() => pollYamahaConnections());
+      yamaha.refreshArp().then(() => startYamahaPolling());
     });
     if (cisco.isEnabled()) {
       cisco.connect(() => {
-        cisco.refreshArp().then(() => pollCiscoConnections());
+        cisco.refreshArp().then(() => startCiscoPolling());
       });
     }
     dnsmasqLog.start();
@@ -942,15 +977,28 @@ server.listen(PORT, () => {
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
 
-function shutdown() {
+function shutdown(exitCode = 0) {
   logger.info('[shutdown] Saving history...');
   try { history.snapshotHistory(); } catch {}
   try { history.closeDb();         } catch {}
   try { dnsmasqLog.stop();         } catch {}
   try { inspectSyslog.stop();      } catch {}
   try { dhcpdSyslog.stop();        } catch {}
-  process.exit(0);
+  process.exit(exitCode);
 }
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT',  shutdown);
+process.on('SIGTERM', () => shutdown(0));
+process.on('SIGINT',  () => shutdown(0));
+
+// ─── Process-level error handlers ─────────────────────────────────────────────
+// 常駐監視ツールなので、取り漏らした Promise 拒否（ネットワーク系が大半）で
+// プロセスを落とさない。uncaughtException は状態が壊れている可能性があるため、
+// 履歴をスナップショットしてから異常終了する。
+process.on('unhandledRejection', (reason) => {
+  logger.error('[process] Unhandled promise rejection:', reason?.stack || reason?.message || String(reason));
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error('[process] Uncaught exception — saving state and exiting:', err.stack || err.message);
+  shutdown(1);
+});

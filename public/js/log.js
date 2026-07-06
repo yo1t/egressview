@@ -1,7 +1,7 @@
 // ─── Connection Log View ──────────────────────────────────────────────────────
 import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, esc, guessApp } from './utils.js?v=__ASSET_VERSION__';
-import { getTimeRange, setFetching, serverTimeOffset, setServerTimeOffset } from './connections-panel.js?v=__ASSET_VERSION__';
+import { getTimeRange, setFetching, setServerTimeOffset } from './connections-panel.js?v=__ASSET_VERSION__';
 import { logMode } from './view-tabs.js?v=__ASSET_VERSION__';
 import { selectedMac, selectedIp, updateSideHighlight, clearSelection } from './graph.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
@@ -293,7 +293,6 @@ function renderLogView(appendRows) {
   if (!logMode) return;
   const tbody     = document.getElementById('log-tbody');
   const countEl   = document.getElementById('log-count');
-  const threatCountEl = document.getElementById('log-threat-count');
 
   // Device filter badge + safety guard (only update in full-render mode)
   if (appendRows === null) {

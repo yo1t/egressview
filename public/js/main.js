@@ -1,16 +1,16 @@
 // ─── ES Module entry point ────────────────────────────────────────────────────
 import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE } from './utils.js?v=__ASSET_VERSION__';
-import { allConnections, mergeConnections, dataRangeFrom, serverTimeOffset, setAllConnections, setDataRangeFrom, setServerTimeOffset, updateConnPanel, setFetching } from './connections-panel.js?v=__ASSET_VERSION__';
-import { socket, connState, asusActive, setAsusActive, yamahaConfigured, notesMap, setNotesMap, adminToken, apiFetch, errorBanner, updateConnBadge, lookupNote, refreshAllNotes, setDevicesDataRef } from './auth-socket.js?v=__ASSET_VERSION__';
-import { statsMode, setViewTabHandlers, initViewTabs } from './view-tabs.js?v=__ASSET_VERSION__';
-import { nodes, selectedMac, buildGraph, buildGraphFromConnections, updateOrgGraph, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, graphSummary, stopGraph, showToast, applyFilter, applyGraphFilter, lastClients, initGraph, resizeGraph, setGraphDevicesDataRef } from './graph.js?v=__ASSET_VERSION__';
-import { updateStats, stStopSpin, stStopFlatAnim, initStats } from './stats.js?v=__ASSET_VERSION__';
+import { allConnections, mergeConnections, setAllConnections, setDataRangeFrom, setServerTimeOffset, updateConnPanel, setFetching } from './connections-panel.js?v=__ASSET_VERSION__';
+import { socket, connState, asusActive, setAsusActive, yamahaConfigured, setNotesMap, apiFetch, errorBanner, updateConnBadge, refreshAllNotes, setDevicesDataRef, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
+import { statsMode, setViewTabHandlers } from './view-tabs.js?v=__ASSET_VERSION__';
+import { nodes, selectedMac, buildGraph, buildGraphFromConnections, updateOrgGraph, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, graphSummary, stopGraph, showToast, applyFilter, applyGraphFilter, lastClients, resizeGraph, setGraphDevicesDataRef } from './graph.js?v=__ASSET_VERSION__';
+import { updateStats, stStopSpin, stStopFlatAnim } from './stats.js?v=__ASSET_VERSION__';
 import { openSettings, showStatus } from './settings.js?v=__ASSET_VERSION__';
-import { devicesData, setDevicesData, initDevices, loadDevicesView, setOnDevicesLoaded, refreshDetailPanelNote } from './devices.js?v=__ASSET_VERSION__';
-import { updateLogView, initLog } from './log.js?v=__ASSET_VERSION__';
-import { initNotifLog, loadNotifLog } from './notif-log.js?v=__ASSET_VERSION__';
-import { initTimeFilter, refreshCurrentTimeFilterView } from './time-filter.js?v=__ASSET_VERSION__';
+import { devicesData, setDevicesData, loadDevicesView, setOnDevicesLoaded, refreshDetailPanelNote } from './devices.js?v=__ASSET_VERSION__';
+import { updateLogView } from './log.js?v=__ASSET_VERSION__';
+import { loadNotifLog } from './notif-log.js?v=__ASSET_VERSION__';
+import { refreshCurrentTimeFilterView } from './time-filter.js?v=__ASSET_VERSION__';
 import { loadBeacons } from './beacon.js?v=__ASSET_VERSION__';
 
 // ─── Cross-module reference injection ────────────────────────────────────────
@@ -41,50 +41,48 @@ socket.on('auth-required', () => {
   updateConnBadge('l2');
   if (asusActive) {
     stopGraph();
-    setAsusActive(false); // subsequent connections-updates are treated as Yamaha-only mode
-    // If Yamaha is enabled, rebuild using synthetic clients
-    if (yamahaConfigured && allConnections.length) buildGraphFromConnections();
+    setAsusActive(false); // subsequent connections-updates are treated as L3/L4-only mode
+    // If any L3/L4 router is enabled, rebuild using synthetic clients
+    if ((routerState.yamaha.enabled || routerState.cisco.enabled) && allConnections.length) buildGraphFromConnections();
   }
 });
 
+// Per-router ready state lives in routerState (initialized from the config
+// event, updated by status events) so l3l4 = OR of both stays consistent.
+function _updateL3L4State() {
+  const ready = routerState.yamaha.ready || routerState.cisco.ready;
+  connState.l3l4.ready   = ready;
+  connState.l3l4.enabled = routerState.yamaha.enabled || routerState.cisco.enabled;
+  if (ready) connState.l3l4.err = '';
+  updateConnBadge('l3l4');
+}
+
 socket.on('yamaha-status', s => {
   showStatus('yamaha-status', s.message, s.ready);
-  if (s.ready) connState.l3l4.ready = true;
-  else if (!document.getElementById('enable-cisco')?.checked) {
-    connState.l3l4.ready = false;
-    connState.l3l4.err   = s.state || 'failed';
-  }
-  connState.l3l4.enabled = yamahaConfigured || !!document.getElementById('enable-cisco')?.checked;
-  updateConnBadge('l3l4');
-  if (!s.ready && connState.l3l4.err === 'failed' && yamahaConfigured && !asusActive) {
-    const banner = document.getElementById('disconnected-banner');
+  routerState.yamaha.ready = !!s.ready;
+  if (!s.ready) connState.l3l4.err = s.state || 'failed';
+  _updateL3L4State();
+  const banner = document.getElementById('disconnected-banner');
+  if (!connState.l3l4.ready && connState.l3l4.err === 'failed' && yamahaConfigured && !asusActive) {
     banner.style.display = 'block';
     banner.querySelector('button').textContent = t('banner.yamaha');
     banner.querySelector('button').onclick = () => openSettings('l3l4');
   }
-  if (s.ready) {
-    document.getElementById('disconnected-banner').style.display = 'none';
-  }
+  if (connState.l3l4.ready) banner.style.display = 'none';
 });
 
 socket.on('cisco-status', s => {
   showStatus('cisco-status', s.message, s.ready);
-  if (s.ready) connState.l3l4.ready = true;
-  else if (!document.getElementById('enable-yamaha')?.checked) {
-    connState.l3l4.ready = false;
-    connState.l3l4.err   = s.state || 'failed';
-  }
-  connState.l3l4.enabled = !!document.getElementById('enable-cisco')?.checked || yamahaConfigured;
-  updateConnBadge('l3l4');
-  if (!s.ready && connState.l3l4.err === 'failed' && !asusActive) {
-    const banner = document.getElementById('disconnected-banner');
+  routerState.cisco.ready = !!s.ready;
+  if (!s.ready) connState.l3l4.err = s.state || 'failed';
+  _updateL3L4State();
+  const banner = document.getElementById('disconnected-banner');
+  if (!connState.l3l4.ready && connState.l3l4.err === 'failed' && !asusActive) {
     banner.style.display = 'block';
     banner.querySelector('button').textContent = t('banner.cisco');
     banner.querySelector('button').onclick = () => openSettings('l3l4');
   }
-  if (s.ready) {
-    document.getElementById('disconnected-banner').style.display = 'none';
-  }
+  if (connState.l3l4.ready) banner.style.display = 'none';
 });
 
 socket.on('notes-update', async data => {
@@ -124,7 +122,7 @@ socket.on('network-update', data => {
 });
 
 socket.on('connections-update', data => {
-  if (!yamahaConfigured) return; // do nothing while Yamaha is disabled
+  if (!routerState.yamaha.enabled && !routerState.cisco.enabled) return; // do nothing while L3/L4 is disabled
   const incoming = data.connections || [];
   if (data.partial || !data.initialLoad) {
     // Merge: update/add entries without discarding history or API-fetched ranges.

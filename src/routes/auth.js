@@ -29,6 +29,7 @@ module.exports = function authRoutes(ctx) {
     setLatestConnections,
     appState, io,
     sessions, authPassword,
+    startYamahaPolling, startCiscoPolling,
   } = ctx;
 
   const router = Router();
@@ -320,6 +321,9 @@ module.exports = function authRoutes(ctx) {
     if (cIp  !== undefined && cIp  !== '' && !isAllowedRouterIp(cIp)) return res.status(400).json({ error: t('auth.yamaha-ip-private') });
     if (typeof username === 'string' && username.length > 64)         return res.status(400).json({ error: t('auth.username-too-long') });
     if (typeof password === 'string' && password.length > 256)        return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
+    if (typeof yPass === 'string' && yPass.length > 256)              return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
+    if (typeof cPass === 'string' && cPass.length > 256)              return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
+    if (typeof cEnablePass === 'string' && cEnablePass.length > 256)  return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
     if (yNat !== undefined && yNat !== '' && !/^\d{1,6}$/.test(String(yNat))) return res.status(400).json({ error: t('auth.yamaha-nat-invalid') });
 
     let cfg = {};
@@ -364,6 +368,8 @@ module.exports = function authRoutes(ctx) {
           yamaha.configure({ pass: yPass });
         }
         yamaha.reconnect();
+        // 起動時に無効だった場合ポールループが存在しないため、ここで必ず起動する
+        startYamahaPolling?.();
         saveConfig();
         logger.info(`[auth] Yamaha config updated: ${yamaha.getIp()}`);
       } catch (err) {
@@ -388,16 +394,21 @@ module.exports = function authRoutes(ctx) {
           return res.status(400).json({ error: t('cisco.no-config') });
         }
         cisco.configure({ enabled: true, ip: finalCiscoIp, user: finalCiscoUser });
-        if (cEnablePass) cisco.configure({ enablePass: cEnablePass });
+        if (typeof cEnablePass === 'string') cisco.configure({ enablePass: cEnablePass });
         if (cPass) {
           persistSecret('cisco', {
             ip: finalCiscoIp, user: finalCiscoUser, pass: cPass,
-            enablePass: cEnablePass || storedCisco?.enablePass || '',
+            enablePass: cEnablePass ?? storedCisco?.enablePass ?? '',
             enabled: true,
           });
           cisco.configure({ pass: cPass });
+        } else if (typeof cEnablePass === 'string') {
+          // cPass が省略された場合でも enablePass だけ永続化する
+          persistSecret('cisco', { enablePass: cEnablePass });
         }
         cisco.reconnect();
+        // 起動時に無効だった場合ポールループが存在しないため、ここで必ず起動する
+        startCiscoPolling?.();
         saveConfig();
         logger.info(`[auth] Cisco config updated: ${cisco.getIp()}`);
       } catch (err) {

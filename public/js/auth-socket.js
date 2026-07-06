@@ -1,6 +1,6 @@
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
 import { t, tVars, currentLang, applyI18n, setCurrentLang } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE, esc, fmtTs } from './utils.js?v=__ASSET_VERSION__';
+import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 import { setHomeCountry, worldGeo } from './map-common.js?v=__ASSET_VERSION__';
 import { statsMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { updateStats, initStatsMaps, resetStatsMaps } from './stats.js?v=__ASSET_VERSION__';
@@ -126,6 +126,12 @@ socket.on('disconnect', () => { dot.className = 'status-dot error'; });
 
 let asusActive      = false; // becomes true upon receiving network-update
 let yamahaConfigured = true; // mirrors the server-side yamahaEnabled state
+
+// Per-router ready state — graph uses this to decide single vs multi-router topology
+export const routerState = {
+  yamaha: { enabled: false, ready: false, ip: '' },
+  cisco:  { enabled: false, ready: false, ip: '' },
+};
 let notesMap = {}; // { "ip|mac" or "ip" or "mac": "note" }
 
 // Re-render the note display of every device card (after note save / notes-update)
@@ -245,7 +251,8 @@ function updateConnBadge(key) {
   const s = connState[key];
   const badge = document.getElementById('badge-' + key);
   const ipEl  = document.getElementById('badge-' + key + '-ip');
-  const prefix = (key === 'l3l4' ? 'L3/L4 Yamaha' : 'L2 ASUS');
+  // L3/L4 はルーター機種を問わない（Yamaha / Cisco / 両方）
+  const prefix = (key === 'l3l4' ? 'L3/L4 Router' : 'L2 ASUS');
   badge.classList.remove('on', 'off', 'err', 'wait');
   if (!s.enabled) {
     badge.classList.add('off');
@@ -284,6 +291,9 @@ socket.on('config', cfg => {
   yamahaPwEl.dataset.saved = cfg.yamahaPassSet ? 'true' : 'false';
   if (cfg.yamahaEnabled !== undefined) {
     yamahaConfigured = cfg.yamahaEnabled;
+    routerState.yamaha.enabled = cfg.yamahaEnabled;
+    routerState.yamaha.ready   = !!cfg.yamahaReady;
+    routerState.yamaha.ip      = cfg.yamahaIp || '';
     document.getElementById('enable-yamaha').checked = yamahaConfigured;
     toggleSection('yamaha-inputs', 'enable-yamaha', 'yamaha-connect-btn');
     if (cfg.yamahaIp)   document.getElementById('s-yamaha-ip').value   = cfg.yamahaIp;
@@ -291,11 +301,15 @@ socket.on('config', cfg => {
     if (cfg.yamahaNat)  document.getElementById('s-yamaha-nat').value  = cfg.yamahaNat;
     connState.l3l4.enabled = cfg.yamahaEnabled || cfg.ciscoEnabled;
     connState.l3l4.ready   = !!(cfg.yamahaReady || cfg.ciscoReady);
-    connState.l3l4.ip      = cfg.yamahaIp || '';
+    // 有効なルーターの IP を表示（Cisco-only 構成で Yamaha の旧 IP を出さない）
+    connState.l3l4.ip      = (cfg.yamahaEnabled ? cfg.yamahaIp : cfg.ciscoIp) || '';
     connState.l3l4.err     = (cfg.yamahaEnabled || cfg.ciscoEnabled) && !(cfg.yamahaReady || cfg.ciscoReady) ? 'connecting' : '';
     updateConnBadge('l3l4');
   }
   if (cfg.ciscoEnabled !== undefined) {
+    routerState.cisco.enabled = cfg.ciscoEnabled;
+    routerState.cisco.ready   = !!cfg.ciscoReady;
+    routerState.cisco.ip      = cfg.ciscoIp || '';
     document.getElementById('enable-cisco').checked = cfg.ciscoEnabled;
     toggleSection('cisco-inputs', 'enable-cisco', 'cisco-connect-btn');
     if (cfg.ciscoIp)   document.getElementById('s-cisco-ip').value   = cfg.ciscoIp;

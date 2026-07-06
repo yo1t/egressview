@@ -29,7 +29,6 @@ const ASUS_API_RETRY_DELAY_MS = 350;
 let onAuthRequired = () => {};
 let onPollError = () => {};
 let onNetworkUpdate = () => {};
-let onSaveConfig = () => {};
 let lookupVendorFn = () => '';
 let getNodeMetaFn = () => ({ vendor: null, dnsName: null, mdnsName: null });
 
@@ -41,7 +40,6 @@ function configure(cfg) {
   if (cfg.onAuthRequired) onAuthRequired = cfg.onAuthRequired;
   if (cfg.onPollError) onPollError = cfg.onPollError;
   if (cfg.onNetworkUpdate) onNetworkUpdate = cfg.onNetworkUpdate;
-  if (cfg.onSaveConfig) onSaveConfig = cfg.onSaveConfig;
   if (cfg.lookupVendor) lookupVendorFn = cfg.lookupVendor;
   if (cfg.getNodeMeta) getNodeMetaFn = cfg.getNodeMeta;
 }
@@ -80,7 +78,7 @@ async function loginToRouter(ip, username, password) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     timeout: 8000,
     maxRedirects: 0,
-    validateStatus: s => true,
+    validateStatus: () => true,
   });
 
   const cookies = res.headers['set-cookie'] || [];

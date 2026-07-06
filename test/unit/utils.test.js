@@ -1,9 +1,9 @@
 // Unit tests for src/utils.js
 // Run: node --test test/unit/utils.test.js
 
-const { describe, it } = require('node:test');
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { isAllowedRouterIp, parseTimestamp, parsePositiveInt } = require('../../src/utils');
+const { isAllowedRouterIp, isAllowedLogPath, parseTimestamp, parsePositiveInt } = require('../../src/utils');
 
 // ─── isAllowedRouterIp ────────────────────────────────────────────────────────
 
@@ -21,6 +21,54 @@ describe('isAllowedRouterIp', () => {
   it('rejects non-string', () => assert.equal(isAllowedRouterIp(null), false));
   it('rejects malformed string', () => assert.equal(isAllowedRouterIp('not-an-ip'), false));
   it('rejects octet > 255', () => assert.equal(isAllowedRouterIp('192.168.1.256'), false));
+});
+
+// ─── isAllowedLogPath ─────────────────────────────────────────────────────────
+
+describe('isAllowedLogPath', () => {
+  afterEach(() => { delete process.env.EGRESSVIEW_LOG_PATH_PREFIXES; });
+
+  it('accepts /var/log/ paths', () =>
+    assert.equal(isAllowedLogPath('/var/log/dnsmasq-queries.log'), true));
+  it('accepts nested /var/log/ paths', () =>
+    assert.equal(isAllowedLogPath('/var/log/remote/router.log'), true));
+  it('accepts /private/var/log/ (macOS real path)', () =>
+    assert.equal(isAllowedLogPath('/private/var/log/yamaha-router.log'), true));
+  it('accepts /opt/homebrew/var/log/ (Homebrew Apple Silicon)', () =>
+    assert.equal(isAllowedLogPath('/opt/homebrew/var/log/dnsmasq.log'), true));
+  it('accepts /usr/local/var/log/ (Homebrew Intel)', () =>
+    assert.equal(isAllowedLogPath('/usr/local/var/log/dnsmasq.log'), true));
+
+  it('rejects /etc/shadow', () =>
+    assert.equal(isAllowedLogPath('/etc/shadow'), false));
+  it('rejects /tmp paths (symlink risk)', () =>
+    assert.equal(isAllowedLogPath('/tmp/fake.log'), false));
+  it('rejects /home paths', () =>
+    assert.equal(isAllowedLogPath('/home/user/x.log'), false));
+  it('rejects traversal out of /var/log', () =>
+    assert.equal(isAllowedLogPath('/var/log/../../etc/shadow'), false));
+  it('rejects traversal even with normalize-resistant form', () =>
+    assert.equal(isAllowedLogPath('/var/log/x/../../../etc/shadow'), false));
+  it('rejects relative paths', () =>
+    assert.equal(isAllowedLogPath('var/log/x.log'), false));
+  it('rejects null bytes', () =>
+    assert.equal(isAllowedLogPath('/var/log/x\x00.log'), false));
+  it('rejects non-string', () =>
+    assert.equal(isAllowedLogPath(null), false));
+  it('rejects prefix without separator boundary (/var/logs/)', () =>
+    assert.equal(isAllowedLogPath('/var/logs/evil.log'), false));
+
+  it('accepts extra prefixes via EGRESSVIEW_LOG_PATH_PREFIXES', () => {
+    process.env.EGRESSVIEW_LOG_PATH_PREFIXES = '/srv/log/,/data/logs';
+    assert.equal(isAllowedLogPath('/srv/log/router.log'), true);
+    assert.equal(isAllowedLogPath('/data/logs/router.log'), true); // 末尾スラッシュは自動補完
+    assert.equal(isAllowedLogPath('/data/logs-evil/x.log'), false);
+  });
+  it('ignores relative entries in EGRESSVIEW_LOG_PATH_PREFIXES', () => {
+    process.env.EGRESSVIEW_LOG_PATH_PREFIXES = 'relative/path,/ok/dir/';
+    assert.equal(isAllowedLogPath('relative/path/x.log'), false);
+    assert.equal(isAllowedLogPath('/ok/dir/x.log'), true);
+  });
 });
 
 // ─── parseTimestamp ───────────────────────────────────────────────────────────
