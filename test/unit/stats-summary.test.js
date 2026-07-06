@@ -36,7 +36,7 @@ function load({ tStub = k => k, guessAppStub = () => '' } = {}) {
   return ctx;
 }
 
-const { statsTargetRows, appSlicesFromSummary, mapPointsFromSummary } = load();
+const { statsTargetRows, mapPointsFromSummary } = load();
 
 // ─── statsTargetRows ──────────────────────────────────────────────────────────
 

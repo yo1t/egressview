@@ -4,7 +4,7 @@
 
 // ─── Injected dependencies ────────────────────────────────────────────────────
 let _io, _history, _enrichment, _threatIntel, _notifier, _deviceId, _devices;
-let _asus, _yamaha, _dhcpdSyslog;
+let _asus, _yamaha, _cisco, _dhcpdSyslog;
 let _beacons = null; // optional: injected when beacons module is available
 
 // ─── Module state ─────────────────────────────────────────────────────────────
@@ -31,6 +31,7 @@ function init(deps) {
   _devices     = deps.devices;
   _asus        = deps.asus;
   _yamaha      = deps.yamaha;
+  _cisco       = deps.cisco || null;
   _dhcpdSyslog = deps.dhcpdSyslog;
   _beacons     = deps.beacons || null;
 }
@@ -73,10 +74,22 @@ function resolveMacByIp(ip) {
   if (asusMac) return asusMac;
   const dhcpdMac = _dhcpdSyslog.getMacByIp(ip);
   if (dhcpdMac) return dhcpdMac;
-  return _yamaha.getArpMac(ip);
+  const yamahaMac = _yamaha.getArpMac(ip);
+  if (yamahaMac) return yamahaMac;
+  return _cisco?.getArpMac(ip) ?? null;
 }
 
 // ─── Core connection record helper ───────────────────────────────────────────
+
+const KNOWN_SOURCES = new Set(['yamaha', 'cisco']);
+
+// Mirror the SQL CASE logic so in-memory Map and DB stay in sync.
+function _mergeSource(existing, incoming) {
+  if (!existing) return incoming;
+  if (existing === incoming) return existing;
+  if (KNOWN_SOURCES.has(existing) && KNOWN_SOURCES.has(incoming)) return 'yamaha+cisco';
+  return existing;
+}
 
 /**
  * Enrich a session from caches, upsert into connectionHistory, notify.
@@ -124,7 +137,8 @@ function recordConnection(session, now = Date.now(), source = 'nat') {
   const key      = `${src}|${dst}|${dport}|${proto}`;
   const existing = connectionHistory.get(key);
   const isNew    = !existing;
-  const entry    = { ...enriched, firstSeen: existing?.firstSeen ?? now, lastSeen: now };
+  const mergedSource = _mergeSource(existing?.source, source);
+  const entry    = { ...enriched, source: mergedSource, firstSeen: existing?.firstSeen ?? now, lastSeen: now };
   connectionHistory.set(key, entry);
 
   if (entry.threat) _notifier.notify(entry);

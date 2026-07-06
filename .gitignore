@@ -78,3 +78,5 @@ playwright-report/
 .egressview-key.pem
 # conntrack 検証環境（内部用・公開しない）
 dev-conntrack/
+# DB マイグレーション前自動バックアップ
+*.pre-migration.*.bak

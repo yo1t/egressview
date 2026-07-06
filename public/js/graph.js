@@ -1,9 +1,9 @@
 // ─── D3 Graph Setup ───────────────────────────────────────────────────────────
 import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE, esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType } from './utils.js?v=__ASSET_VERSION__';
-import { allConnections, getFilteredConnections, getTimeRange, setFetching, currentTimeFilter, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
+import { _BASE, esc, fmtBytes, nodeColor, nodeClass, typeLabel, isWiredType } from './utils.js?v=__ASSET_VERSION__';
+import { getFilteredConnections, getTimeRange, currentTimeFilter, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
 import { statsMode, nlMode, logMode, devicesMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
-import { asusActive, lookupNote, apiFetch, openNoteModal } from './auth-socket.js?v=__ASSET_VERSION__';
+import { lookupNote, apiFetch, openNoteModal, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
 // Circular imports resolved at runtime (function-body-only calls):
 import { updateStats } from './stats.js?v=__ASSET_VERSION__';
 import { updateLogView } from './log.js?v=__ASSET_VERSION__';
@@ -141,7 +141,6 @@ let selectedIp = null;
 let currentFilter = 'all';
 let lastMeshNodes = [];
 let lastRouterIp = '';
-let lastSatellites = [];
 let lastClients = [];
 let lastMainMac = '';
 let graphSummary = null;
@@ -184,6 +183,31 @@ function currentGraphRangeKey(from, to) {
     return `${currentTimeFilter}:open`;
   }
   return `${from ?? ''}:${to ?? ''}`;
+}
+
+function activeRouterTopology() {
+  const hasYamaha = !!routerState.yamaha.enabled;
+  const hasCisco  = !!routerState.cisco.enabled;
+  const isMulti   = hasYamaha && hasCisco;
+  return {
+    hasYamaha,
+    hasCisco,
+    isMulti,
+    mainRouterLabel: !hasYamaha && hasCisco ? 'Cisco IOS' : hasYamaha ? 'Yamaha RTX' : 'Router',
+    extraRouters: isMulti ? [{ id: '__router_cisco__', label: 'Cisco IOS' }] : [],
+  };
+}
+
+function routerTargetsFromSource(source, isMulti) {
+  if (!isMulti) return undefined;
+  const raw = String(source || 'yamaha').toLowerCase();
+  const tokens = raw.split(/[,+]/).map(s => s.trim()).filter(Boolean);
+  const hasCisco = tokens.includes('cisco');
+  const hasYamaha = !hasCisco || tokens.includes('yamaha');
+  const targets = [];
+  if (hasYamaha) targets.push('__router__');
+  if (hasCisco) targets.push('__router_cisco__');
+  return targets.length ? targets : ['__router__'];
 }
 
 function graphSummaryNotice(show, summary) {
@@ -247,15 +271,17 @@ function buildGraph(data, { resetPositions = false } = {}) {
 
   // Satellite nodes (other than main router)
   const satellites = meshNodes.filter(n => n.ip !== data.routerIp);
-  lastSatellites = satellites;
 
   // Update colour mapping
   meshColorMap = {};
   meshNodes.forEach((n, i) => { meshColorMap[n.mac] = MESH_COLORS[i % MESH_COLORS.length]; });
 
+  const extraRouters = data.extraRouters || [];
+
   const newNodes = [
     { id: '__internet__', label: 'Internet', type: 'internet', fixed: true },
-    { id: '__router__', label: mainNode?.model || 'Router', type: 'router', fixed: true, meshNode: mainNode, meshMac: mainMac },
+    { id: '__router__', label: mainNode?.model || data.mainRouterLabel || 'Router', type: 'router', fixed: true, meshNode: mainNode, meshMac: mainMac },
+    ...extraRouters.map(r => ({ id: r.id, label: r.label, type: 'router', fixed: true })),
     ...satellites.map(n => ({
       id: meshNodeId(n.mac), label: n.model || 'AiMesh',
       type: 'meshnode', fixed: false, meshNode: n, meshMac: n.mac,
@@ -265,14 +291,25 @@ function buildGraph(data, { resetPositions = false } = {}) {
 
   const newLinks = [
     { source: '__internet__', target: '__router__', id: 'wan', rxRate: data.wanRx, txRate: data.wanTx, ltype: 'wan' },
+    ...extraRouters.map(r => ({
+      source: '__internet__', target: r.id, id: `wan_${r.id}`, rxRate: 0, txRate: 0, ltype: 'wan'
+    })),
     ...satellites.map(n => ({
       source: '__router__', target: meshNodeId(n.mac),
       id: `mesh_${n.mac}`, rxRate: 0, txRate: 0, ltype: 'mesh'
     })),
-    ...clients.map(c => {
+    ...clients.flatMap(c => {
+      // Multi-router: connect to each router the device was observed through
+      if (c.routerTargets && c.routerTargets.length > 0) {
+        return c.routerTargets.map((rt, i) => ({
+          source: rt, target: c.mac,
+          id: i === 0 ? c.mac : `${c.mac}_${rt}`,
+          rxRate: c.rxRate, txRate: c.txRate, client: c, ltype: 'client',
+        }));
+      }
       const sat = satellites.find(n => n.mac === c.amesh_papMac);
       const source = sat ? meshNodeId(sat.mac) : '__router__';
-      return { source, target: c.mac, id: c.mac, rxRate: c.rxRate, txRate: c.txRate, client: c, ltype: 'client' };
+      return [{ source, target: c.mac, id: c.mac, rxRate: c.rxRate, txRate: c.txRate, client: c, ltype: 'client' }];
     })
   ];
 
@@ -302,9 +339,20 @@ function updateSimulation(satellites) {
   const cx = width / 2, cy = height / 2;
   const internet = nodes.find(n => n.id === '__internet__');
   const router = nodes.find(n => n.id === '__router__');
+  const extraRouterNodes = nodes.filter(n => n.type === 'router' && n.id !== '__router__');
   // Anchor router/internet nodes to the bottom
-  if (internet) { internet.fx = cx - 160; internet.fy = height * 0.82; }
-  if (router)   { router.fx  = cx;        router.fy  = height * 0.82; }
+  if (extraRouterNodes.length > 0) {
+    // Multi-router: internet center, routers spread left/right
+    if (internet) { internet.fx = cx;        internet.fy = height * 0.82; }
+    if (router)   { router.fx  = cx - 140;   router.fy  = height * 0.82; }
+    extraRouterNodes.forEach((r, i) => {
+      r.fx = cx + 140 * (i + 1);
+      r.fy = height * 0.82;
+    });
+  } else {
+    if (internet) { internet.fx = cx - 160; internet.fy = height * 0.82; }
+    if (router)   { router.fx  = cx;        router.fy  = height * 0.82; }
+  }
 
   // Initial placement of satellites at the bottom (when not yet positioned)
   satellites.forEach((sat, i) => {
@@ -460,7 +508,6 @@ const tooltip = document.getElementById('tooltip');
 function showTooltip(e, d) {
   if (d.type === 'client' && d.client) {
     const c = d.client;
-    const flag = flagEmoji(c.country);
     const proto = c.ipv6Addrs?.length ? '<span class="proto-badge proto-v6-grey">IPv6</span>' : '';
     tooltip.innerHTML = `
       <div style="font-weight:600;margin-bottom:4px">${esc(c.name || c.ip)}</div>
@@ -539,7 +586,7 @@ function applyFilter(clients) {
   });
 }
 
-function updateSidePanel(clients, data, meshNodes, mainMac) {
+function updateSidePanel(clients, data, meshNodes, _mainMac) {
   clients.forEach(c => { const r = Math.max(c.rxRate, c.txRate); if (r > maxRate) maxRate = r * 1.2; });
   const list = document.getElementById('device-list');
   const existing = {};
@@ -691,7 +738,8 @@ function applyGraphFilter() {
 
   // Infrastructure nodes (always shown)
   const infraIds = new Set([
-    '__internet__', '__router__',
+    '__internet__',
+    ...nodes.filter(n => n.type === 'router').map(n => n.id),
     ...nodes.filter(n => n.type === 'meshnode').map(n => n.id),
   ]);
 
@@ -779,6 +827,12 @@ function buildGraphFromConnections({ resetPositions = false } = {}) {
   }
   // Do not early-return: still call buildGraph with empty arrays to clear the graph
   const filtered = getFilteredConnections();
+
+  // Determine active routers for multi-router topology
+  const topology = activeRouterTopology();
+  const { isMulti } = topology;
+  const srcRouterMap = isMulti ? new Map() : null; // ip → Set<routerNodeId>
+
   const srcCounts    = new Map();
   const srcMeta      = new Map(); // ip → {mac, vendor, dnsName, mdnsName}
   const srcFirstSeen = new Map(); // ip → min firstSeen
@@ -793,24 +847,39 @@ function buildGraphFromConnections({ resetPositions = false } = {}) {
       const cur = srcFirstSeen.get(c.src);
       if (!cur || c.firstSeen < cur) srcFirstSeen.set(c.src, c.firstSeen);
     }
+    if (isMulti) {
+      if (!srcRouterMap.has(c.src)) srcRouterMap.set(c.src, new Set());
+      for (const target of routerTargetsFromSource(c.source, isMulti)) {
+        srcRouterMap.get(c.src).add(target);
+      }
+    }
   }
+
   const syntheticClients = [...srcCounts.keys()].map(ip => {
     const m = srcMeta.get(ip) || {};
+    const routerTargets = isMulti
+      ? [...(srcRouterMap.get(ip) || ['__router__'])]
+      : undefined;
     return {
       mac: m.mac || ip, ip, name: ip, type: '0',
       rxRate: 0, txRate: 0, rssi: null, amesh_papMac: null,
       vendor: m.vendor || '', dnsName: m.dnsName || null, mdnsName: m.mdnsName || null,
       deviceFirstSeen: srcFirstSeen.get(ip) || 0,
+      ...(routerTargets ? { routerTargets } : {}),
     };
   });
+
   buildGraph({
     clients: syntheticClients, satellites: [], meshNodes: [],
     wanRx: 0, wanTx: 0, routerIp: null, timestamp: Date.now(),
+    mainRouterLabel: topology.mainRouterLabel,
+    extraRouters: topology.extraRouters,
   }, { resetPositions });
   updateOrgGraph({ resetPositions });
 }
 
 function buildGraphFromSummary(summary, { resetPositions = false } = {}) {
+  const topology = activeRouterTopology();
   const deviceRows = (summary.byDevice || []).slice(0, 120);
   const targetRows = (summary.byTarget || []).slice(0, 160);
   const allowedDevices = new Set(deviceRows.map(r => r.src));
@@ -829,11 +898,14 @@ function buildGraphFromSummary(summary, { resetPositions = false } = {}) {
     mdnsName: null,
     deviceFirstSeen: r.firstSeen || 0,
     summarySessions: r.count || 0,
+    ...(topology.isMulti ? { routerTargets: routerTargetsFromSource(r.sources || r.source, topology.isMulti) } : {}),
   }));
 
   buildGraph({
     clients: syntheticClients, satellites: [], meshNodes: [],
     wanRx: 0, wanTx: 0, routerIp: null, timestamp: Date.now(),
+    mainRouterLabel: topology.mainRouterLabel,
+    extraRouters: topology.extraRouters,
   }, { resetPositions });
 
   const orgPosMap = {};
@@ -984,7 +1056,6 @@ function stopGraph() {
   nodeGroup.selectAll('*').remove();
   // Clear ASUS-derived caches too (prevents stale mesh-badge display)
   lastMeshNodes = [];
-  lastSatellites = [];
   lastClients = [];
   meshColorMap = {};
   document.getElementById('device-list').innerHTML = '';

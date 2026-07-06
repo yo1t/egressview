@@ -1,7 +1,7 @@
 // ─── Statistics view ─────────────────────────────────────────────────────────
 import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE, esc, _buildAppSlices, guessApp } from './utils.js?v=__ASSET_VERSION__';
-import { allConnections, getFilteredConnections, setFetching, serverTimeOffset, setServerTimeOffset, getTimeRange } from './connections-panel.js?v=__ASSET_VERSION__';
+import { _BASE, _buildAppSlices, guessApp } from './utils.js?v=__ASSET_VERSION__';
+import { getFilteredConnections, setFetching, serverTimeOffset, setServerTimeOffset, getTimeRange } from './connections-panel.js?v=__ASSET_VERSION__';
 import { statsMode } from './view-tabs.js?v=__ASSET_VERSION__';
 import { worldGeo, getHomeCoord, getMapRotation, buildMapPoints, ensureWorldGeo } from './map-common.js?v=__ASSET_VERSION__';
 import { selectedMac, nodes, currentGraphRangeKey } from './graph.js?v=__ASSET_VERSION__';
@@ -445,7 +445,7 @@ let statsSummaryGeneration = 0;
 let statsSummaryCache = { key: null, at: 0, data: null };
 let statsSummaryInflight = { key: null, promise: null };
 let statsMapSummaryKey = null;
-let statsRenderedSummary = { key: null, data: null };
+let statsRenderedSummary = { key: null, data: null, mode: null };
 const STATS_SUMMARY_CACHE_MS = 60_000;
 let statsSummaryRequestWindow = { key: null, from: null, to: null, at: 0 };
 
@@ -708,13 +708,17 @@ async function updateStats() {
   try {
     const summary = await fetchStatsSummary(selIp);
     if (generation !== statsSummaryGeneration || !statsMode) return;
-    if (statsRenderedSummary.key === summaryKey && statsRenderedSummary.data === summary) {
+    if (
+      statsRenderedSummary.key === summaryKey &&
+      statsRenderedSummary.data === summary &&
+      statsRenderedSummary.mode === chartMode
+    ) {
       statsMapSummaryKey = summaryKey;
       return;
     }
     renderStatsSummary(summary, selIp);
     statsMapSummaryKey = summaryKey;
-    statsRenderedSummary = { key: summaryKey, data: summary };
+    statsRenderedSummary = { key: summaryKey, data: summary, mode: chartMode };
   } catch (e) {
     console.error('[stats] summary fetch failed:', e);
     if (generation !== statsSummaryGeneration || !statsMode) return;
@@ -936,6 +940,7 @@ function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
     for (const label of visibleLabels) {
       g.append('path').datum(series.get(label))
         .attr('class', 'stats-line')
+        .attr('fill', 'none')
         .attr('stroke', colorFor(label))
         .attr('d', line);
     }

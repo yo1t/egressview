@@ -47,6 +47,15 @@ const STRINGS = {
   'yamaha.init-failed':    { ja: '初期化失敗: ',                                     en: 'Initialization failed: ' },
   'yamaha.ssh-failed':     { ja: 'SSH接続失敗: ',                                   en: 'SSH connection failed: ' },
 
+  // ── Cisco IOS SSH poller ────────────────────────────────────────────────
+  'cisco.reconnecting':   { ja: '再接続中…',                                       en: 'Reconnecting…' },
+  'cisco.no-config':      { ja: 'CiscoのIP、ユーザー名、パスワードを入力してください', en: 'Enter Cisco IP, username, and password' },
+  'cisco.connecting':     { ja: '接続中…',                                         en: 'Connecting…' },
+  'cisco.shell-failed':   { ja: 'シェル要求失敗: ',                                 en: 'Shell request failed: ' },
+  'cisco.connected':      { ja: '接続済み',                                        en: 'Connected' },
+  'cisco.init-failed':    { ja: '初期化失敗: ',                                     en: 'Initialization failed: ' },
+  'cisco.ssh-failed':     { ja: 'SSH接続失敗: ',                                   en: 'SSH connection failed: ' },
+
   // ── ASUS router poller ───────────────────────────────────────────────────
   'asus.nonce-failed':     { ja: 'ノンス取得失敗 — ルーターIPを確認してください',           en: 'Failed to get nonce — check the router IP' },
   'asus.wrong-credentials':{ ja: 'ユーザー名またはパスワードが違います',                   en: 'Invalid username or password' },

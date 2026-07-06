@@ -127,13 +127,16 @@ describe('connections route: GET /connections pagination', () => {
   }
 
   function makeReq(query = {}) {
-    return { query };
+    return { query, headers: {} };
   }
 
   function makeRes() {
-    const r = { _status: 200, _body: null };
+    const r = { _status: 200, _body: null, _headers: {} };
     r.status = (code) => { r._status = code; return r; };
     r.json   = (body) => { r._body  = body; return r; };
+    r.set    = (k, v) => { if (typeof k === 'object') Object.assign(r._headers, k); else r._headers[k] = v; return r; };
+    // no-limit パスは sendLargeJson 経由で end(Buffer) を呼ぶため JSON に戻す
+    r.end    = (body) => { r._body = JSON.parse(body.toString('utf8')); return r; };
     return r;
   }
 
@@ -643,5 +646,48 @@ describe('connections route: parseTimestampParam', () => {
     const { ts, err } = _parseTimestampParam(undefined, 'from', res);
     assert.equal(ts, null);
     assert.equal(err, false);
+  });
+});
+
+// ─── sendLargeJson（巨大JSON一括gzip送信ヘルパー） ─────────────────────────────
+
+describe('connections route: sendLargeJson', () => {
+  const zlib = require('zlib');
+  const { _sendLargeJson } = require('../../src/routes/connections');
+
+  function makeRes() {
+    const r = { _headers: {}, _body: null };
+    r.set = (k, v) => { if (typeof k === 'object') Object.assign(r._headers, k); else r._headers[k] = v; return r; };
+    r.end = (body) => { r._body = body; return r; };
+    return r;
+  }
+
+  it('gzips large payloads when the client accepts gzip', () => {
+    const big = { connections: Array.from({ length: 5000 }, (_, i) => ({ src: `192.168.1.${i % 254}`, dst: '10.0.0.1', dport: 443 })) };
+    const res = makeRes();
+    _sendLargeJson({ headers: { 'accept-encoding': 'gzip, deflate, br' } }, res, big);
+    assert.equal(res._headers['Content-Encoding'], 'gzip');
+    const decoded = JSON.parse(zlib.gunzipSync(res._body).toString('utf8'));
+    assert.equal(decoded.connections.length, 5000);
+  });
+
+  it('sends identity when the client does not accept gzip', () => {
+    const big = { connections: Array.from({ length: 5000 }, (_, i) => ({ src: `192.168.1.${i % 254}`, dst: '10.0.0.1', dport: 443 })) };
+    const res = makeRes();
+    _sendLargeJson({ headers: {} }, res, big);
+    assert.equal(res._headers['Content-Encoding'], undefined);
+    assert.equal(JSON.parse(res._body.toString('utf8')).connections.length, 5000);
+  });
+
+  it('sends small payloads uncompressed even when gzip is accepted', () => {
+    const res = makeRes();
+    _sendLargeJson({ headers: { 'accept-encoding': 'gzip' } }, res, { connections: [] });
+    assert.equal(res._headers['Content-Encoding'], undefined);
+  });
+
+  it('does not crash when req.headers is missing', () => {
+    const res = makeRes();
+    _sendLargeJson({}, res, { connections: [] });
+    assert.equal(JSON.parse(res._body.toString('utf8')).connections.length, 0);
   });
 });

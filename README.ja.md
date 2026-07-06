@@ -32,6 +32,7 @@ EgressViewは、多くの家庭ユーザーが答えを持てていない問い�
 ## 概要
 
 - **Yamaha RTX** ルーターにSSH接続し、NATセッションテーブルを60秒ごとに取得
+- **Cisco IOS (SSH)** 経由のNATセッション取得パスをサンプル実装として搭載*1
 - **[INSPECT] syslog 補完** — Yamaha syslog をリアルタイムで監視し、60秒ポーリングの間に完了した短命 TCP セッションを補完
 - **dnsmasq DNS クエリログ** — EC2/サーバー側の dnsmasq ログを監視し、デバイスごとの DNS 解決結果（例: `example.com`）を宛先ホスト名に反映。逆引き DNS より優先
 - **[DHCPD] syslog 追跡** — Yamaha の DHCP イベント（Allocates/Extends）をリアルタイムで解析し、IP→MAC マッピングを維持
@@ -69,17 +70,21 @@ https://github.com/user-attachments/assets/9448d75b-a7fe-4363-8d35-da17abaed0ee
 ## アーキテクチャ
 
 ```
-┌─────────────────┐  SSH(NAT)   ┌──────────────────────┐
-│  Yamaha RTX     │◄───────────►│                      │  WebSocket   ┌──────────────────┐
-│  [INSPECT] log  │  syslog/UDP │   EgressView Server  │◄────────────►│ ブラウザ          │
-│  [DHCPD] log    │────────────►│   (Node.js)          │  MCP         ├──────────────────┤
-└─────────────────┘             │                      │◄────────────►│ AI アシスタント   │
-┌─────────────────┐  HTTP       │  ポーラー:            │  stdio/HTTP  │(Kiro, Claude…)   │
-│  ASUS WiFi AP   │◄───────────►│  • yamaha (SSH)      │              └──────────────────┘
-│  (クライアント)   │             │  • asus (HTTP)       │
-└─────────────────┘             │  • inspect-syslog    │
-┌─────────────────┐  tail -F    │  • dhcpd-syslog      │
-│  dnsmasq        │────────────►│  • dnsmasq-log       │
+┌─────────────────┐  SSH(NAT)   ┌──────────────────────┐  WebSocket   ┌──────────────────┐
+│  Yamaha RTX     │◄───────────►│                      │◄────────────►│ ブラウザ          │
+│  [INSPECT] log  │  syslog/UDP │   EgressView Server  │  MCP         ├──────────────────┤
+│  [DHCPD] log    │────────────►│   (Node.js)          │◄────────────►│ AI アシスタント   │
+└─────────────────┘             │                      │  stdio/HTTP  │(Kiro, Claude…)   │
+┌─────────────────┐  SSH(NAT)   │  ポーラー:            │              └──────────────────┘
+│  Cisco IOS      │◄───────────►│  • yamaha (SSH)      │
+│  (サンプル実装)  │             │  • cisco (SSH, beta) │
+└─────────────────┘             │  • asus (HTTP)       │
+┌─────────────────┐  HTTP       │  • inspect-syslog    │
+│  ASUS WiFi AP   │◄───────────►│  • dhcpd-syslog      │
+│  (クライアント)   │             │  • dnsmasq-log       │
+└─────────────────┘             │                      │
+┌─────────────────┐  tail -F    │                      │
+│  dnsmasq        │────────────►│                      │
 │  クエリログ      │             └──────────┬───────────┘
 └─────────────────┘                        │
                        ┌───────────────────┼───────────────┐
@@ -99,7 +104,10 @@ https://github.com/user-attachments/assets/9448d75b-a7fe-4363-8d35-da17abaed0ee
 
 - **Node.js** 22以上
 - **Yamaha RTX** ルーター（SSH有効化済み）— RTX1200, RTX1210, RTX1220, RTX1300 等
+- （任意 / beta）**Cisco IOS** ルータ（SSH有効化済み）*1
 - （任意）**ASUS WiFi アクセスポイント**（Web管理画面が有効、APモード/AiMeshとして使用）
+
+*1 Cisco ルータ対応は現在サンプル実装です。実機での評価はまだ完了していないため、正式リリース対象ではありません。Cisco IOS 対応を実機で試して、エラー、未対応の出力形式、機種固有の挙動を見つけた場合は、GitHub Issue で共有してください。機密情報をマスクした fixture とパーサ修正を含む Pull Request も歓迎します。
 
 ## AIエージェント連携（MCP）
 
@@ -173,6 +181,7 @@ DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start
 |--|-----------|-----------|
 | ✅ | Mac/PC/Raspberry Pi に Node.js 22以上をインストール | [nodejs.org](https://nodejs.org) |
 | ✅ | Yamaha RTX ルーターの SSH を有効化 | [設定ガイド →](docs/setup-yamaha.ja.md) |
+| ☐ | （任意 / beta）Cisco IOS ルータの SSH を有効化*1 | [設定ガイド →](docs/setup-cisco.ja.md) |
 | ☐ | （任意）ASUS WiFi AP の Web 管理画面を有効化 | [設定ガイド →](docs/setup-asus.ja.md) |
 | ☐ | （任意）AI アシスタント連携（AWS Kiro・Anthropic Claude・Anysphere Cursor 等） | [設定ガイド →](docs/setup-mcp.ja.md) |
 
@@ -207,9 +216,12 @@ npm start
 |------|---------|
 | Yamaha RTX の IP アドレス | ルーターの LAN 側 IP（例: `192.168.1.1`） |
 | SSH ユーザー名 / パスワード | [Yamaha 設定ガイド](docs/setup-yamaha.ja.md) で設定したもの |
+| Cisco IOS の IP / ユーザー名 / パスワード | [Cisco 設定ガイド](docs/setup-cisco.ja.md) で設定したもの |
 | ASUS AP の IP / パスワード | AP の LAN 側 IP と管理者パスワード（[ASUS 設定ガイド](docs/setup-asus.ja.md)） |
 
 Yamaha RTX は、IP・ユーザー名・パスワードを入力して **接続して自動検出** を押してください。SSH接続確認、NATディスクリプタ番号（通常は `100`）、LAN IP、NAT sessions の取得可否を確認し、保存前に推奨設定をフォームへ反映します。
+
+Cisco IOS も設定画面から **接続して自動検出** と保存ができますが、こちらはまだサンプル実装です。実機での評価完了までは beta 扱いとして利用してください。
 
 数秒後にデバイス、セッション、統計情報がUIに表示されはじめます。
 

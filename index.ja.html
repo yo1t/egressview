@@ -260,6 +260,10 @@
         <p>Yamaha RTXルーターにSSH接続し、NATセッションテーブルを60秒ごとに取得。[INSPECT] syslog で短命 TCP セッションを補完。RTX1200〜RTX1300、RTX810/830対応。</p>
       </div>
       <div class="card">
+        <h3>Cisco IOS（beta）<sup>*1</sup></h3>
+        <p>SSH ベースの Cisco IOS 取得パスをサンプル実装として搭載。実機での評価がまだ未完了のため、正式対応前の beta 扱いです。</p>
+      </div>
+      <div class="card">
         <h3>ASUS WiFi AP 対応</h3>
         <p>L2クライアント情報を取得 — WiFi帯域、信号強度、トラフィック量、AiMeshトポロジー。</p>
       </div>
@@ -332,17 +336,21 @@
   <section id="architecture">
     <h2><span class="icon">⬡</span> アーキテクチャ</h2>
     <div class="arch-block">
-      <pre><code>┌─────────────────┐  SSH(NAT)   ┌──────────────────────┐
-│  Yamaha RTX     │◄───────────►│                      │  WebSocket   ┌──────────────────┐
-│  [INSPECT] log  │  syslog/UDP │   EgressView Server  │◄────────────►│ ブラウザ          │
-│  [DHCPD] log    │────────────►│   (Node.js)          │  MCP         ├──────────────────┤
-└─────────────────┘             │                      │◄────────────►│ AI アシスタント   │
-┌─────────────────┐  HTTP       │  ポーラー:            │  stdio/HTTP  │(Kiro, Claude…)   │
-│  ASUS WiFi AP   │◄───────────►│  • yamaha (SSH)      │              └──────────────────┘
-│  (クライアント)   │             │  • asus (HTTP)       │
-└─────────────────┘             │  • inspect-syslog    │
-┌─────────────────┐  tail -F    │  • dhcpd-syslog      │
-│  dnsmasq        │────────────►│  • dnsmasq-log       │
+      <pre><code>┌─────────────────┐  SSH(NAT)   ┌──────────────────────┐  WebSocket   ┌──────────────────┐
+│  Yamaha RTX     │◄───────────►│                      │◄────────────►│ ブラウザ          │
+│  [INSPECT] log  │  syslog/UDP │   EgressView Server  │  MCP         ├──────────────────┤
+│  [DHCPD] log    │────────────►│   (Node.js)          │◄────────────►│ AI アシスタント   │
+└─────────────────┘             │                      │  stdio/HTTP  │(Kiro, Claude…)   │
+┌─────────────────┐  SSH(NAT)   │  ポーラー:            │              └──────────────────┘
+│  Cisco IOS      │◄───────────►│  • yamaha (SSH)      │
+│  (サンプル実装)  │             │  • cisco (SSH, beta) │
+└─────────────────┘             │  • asus (HTTP)       │
+┌─────────────────┐  HTTP       │  • inspect-syslog    │
+│  ASUS WiFi AP   │◄───────────►│  • dhcpd-syslog      │
+│  (クライアント)   │             │  • dnsmasq-log       │
+└─────────────────┘             │                      │
+┌─────────────────┐  tail -F    │                      │
+│  dnsmasq        │────────────►│                      │
 │  クエリログ      │             └──────────┬───────────┘
 └─────────────────┘                        │
                        ┌───────────────────┼───────────────┐
@@ -375,6 +383,11 @@
           <td style="padding:8px 6px;">✅</td>
           <td style="padding:8px 6px;">Yamaha RTX ルーターの SSH を有効化</td>
           <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.ja.md">設定ガイド →</a></td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:8px 6px; color:var(--muted);">☐</td>
+          <td style="padding:8px 6px; color:var(--muted);">（任意 / beta）Cisco IOS ルータの SSH を有効化</td>
+          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-cisco.ja.md">設定ガイド →</a></td>
         </tr>
         <tr style="border-bottom:1px solid var(--border);">
           <td style="padding:8px 6px; color:var(--muted);">☐</td>
@@ -414,6 +427,10 @@ npm start</code></pre>
           <td style="padding:6px 8px;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.ja.md">Yamaha 設定ガイド</a>で設定したもの</td>
         </tr>
         <tr>
+          <td style="padding:6px 8px; color:var(--muted);">Cisco IOS の IP / ユーザー名 / パスワード</td>
+          <td style="padding:6px 8px;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-cisco.ja.md">Cisco 設定ガイド</a>で設定したもの</td>
+        </tr>
+        <tr>
           <td style="padding:6px 8px; color:var(--muted);">ASUS AP の IP / パスワード</td>
           <td style="padding:6px 8px;">AP の LAN 側 IP と管理者パスワード（<a href="https://github.com/yo1t/egressview/blob/main/docs/setup-asus.ja.md">ASUS 設定ガイド</a>）</td>
         </tr>
@@ -432,10 +449,15 @@ npm start</code></pre>
         <p>RTX1200, RTX1210, RTX1220, RTX1300, RTX810, RTX830, NVR500, NVR510, NVR700W — SSH＋NATディスクリプタ対応の全モデル。</p>
       </div>
       <div class="card">
+        <h3>Cisco IOS（beta）<sup>*1</sup></h3>
+        <p>現時点ではサンプル実装です。実機での評価完了後に正式対応へ引き上げます。</p>
+      </div>
+      <div class="card">
         <h3>ASUS WiFi AP（L2）</h3>
         <p>RT-AXシリーズ、RT-ACシリーズ、ZenWiFi（AiMesh） — 標準Web管理画面を持つ全モデル（APモード/AiMesh使用）。</p>
       </div>
     </div>
+    <p style="font-size:0.78rem; color:var(--muted); margin-top:10px;">*1 Cisco ルータ対応は現在サンプル実装です。実機での評価はまだ完了していないため、実機テスト完了までは beta 扱いです。実機でのIssue報告や fixture 付き Pull Request を歓迎します。</p>
   </section>
 
   <!-- Issues -->
@@ -477,6 +499,10 @@ npm start</code></pre>
       <div class="card">
         <h3><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.ja.md">Yamaha RTX 設定ガイド</a></h3>
         <p>Yamaha RTX ルーターの SSH を有効化するステップバイステップ手順。</p>
+      </div>
+      <div class="card">
+        <h3><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-cisco.ja.md">Cisco IOS 設定ガイド</a></h3>
+        <p>SSH 経由で Cisco IOS を試すための beta / サンプル実装向けガイドです。</p>
       </div>
       <div class="card">
         <h3><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-asus.ja.md">ASUS AP 設定ガイド</a></h3>

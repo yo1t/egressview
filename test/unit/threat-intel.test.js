@@ -10,7 +10,6 @@ const {
   parseUrlhaus,
   parseSpamhausDrop,
   matchThreatIntel,
-  fetchThreatIntel,
   ipToNum,
   _applyFeedResults,
   _isFetching,

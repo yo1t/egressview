@@ -1,0 +1,537 @@
+// Cisco IOS SSH poller: connect, execute commands, parse NAT sessions
+'use strict';
+const logger = require('../logger');
+const { t } = require('../i18n-server');
+
+const crypto = require('crypto');
+const { Client: SshClient } = require('ssh2');
+
+let ciscoShell      = null;
+let ciscoConn       = null;
+let ciscoReady      = false;
+let shellBuf        = '';
+let ciscoReconnectTimer = null;
+let ciscoConnecting = false;
+let shellWaiter     = null;
+let execChain       = Promise.resolve();
+
+// ARP cache (IP → MAC in colon notation)
+const ciscoArpCache = new Map();
+let ciscoArpLastRefresh = 0;
+const CISCO_ARP_REFRESH_MS = 60 * 1000;
+
+// NDP cache (MAC → [ipv6, ...])
+const ciscoNdpCache = new Map();
+let ciscoNdpLastRefresh = 0;
+const CISCO_NDP_REFRESH_MS = 120 * 1000;
+
+// Config
+let ciscoIp      = '';
+let ciscoUser    = '';
+let ciscoPass    = '';
+let ciscoEnablePass = '';
+let ciscoEnabled = false;
+let ciscoHostFp  = '';
+
+// Callbacks
+let onStatus     = () => {};
+let onSaveConfig = () => {};
+
+function configure(cfg) {
+  if (cfg.ip         !== undefined) ciscoIp         = cfg.ip;
+  if (cfg.user       !== undefined) ciscoUser       = cfg.user;
+  if (cfg.pass       !== undefined) ciscoPass       = cfg.pass;
+  if (cfg.enablePass !== undefined) ciscoEnablePass = cfg.enablePass;
+  if (cfg.enabled    !== undefined) ciscoEnabled    = cfg.enabled;
+  if (cfg.hostFp     !== undefined) ciscoHostFp     = cfg.hostFp;
+  if (cfg.onStatus)     onStatus     = cfg.onStatus;
+  if (cfg.onSaveConfig) onSaveConfig = cfg.onSaveConfig;
+}
+
+// ── Parsers ───────────────────────────────────────────────────────────────────
+
+// Convert Cisco dot-notation MAC (aabb.cc11.0200) to colon notation (aa:bb:cc:11:02:00)
+function dotMacToColon(mac) {
+  const hex = mac.replace(/\./g, '');
+  if (hex.length !== 12) return mac;
+  return hex.match(/.{2}/g).join(':');
+}
+
+// Protocol-based default TTL (seconds) used when Cisco doesn't report remaining TTL
+const PROTO_DEFAULT_TTL = { TCP: 86400, UDP: 300, ICMP: 60 };
+
+function parseNatTranslations(text) {
+  const sessions = [];
+  for (const line of String(text || '').split('\n')) {
+    // Match: tcp/udp/icmp  WAN:port  LAN:port  ext-local:port  ext-global:port
+    const m = line.match(
+      /^\s*(tcp|udp|icmp)\s+\S+?:(\d+)\s+(\d{1,3}(?:\.\d{1,3}){3}):(\d+)\s+\S+\s+(\d{1,3}(?:\.\d{1,3}){3}):(\d+)/i
+    );
+    if (!m) continue;
+    const proto = m[1].toUpperCase();
+    const src   = m[3];
+    const sport = parseInt(m[4], 10);
+    const dst   = m[5];
+    const dport = parseInt(m[6], 10);
+    const ttl   = PROTO_DEFAULT_TTL[proto] ?? 300;
+    sessions.push({ proto, src, sport, dst, dport, ttl });
+  }
+  return sessions;
+}
+
+function parseArp(text) {
+  // Cisco format: "Internet  192.168.1.10  5  aabb.cc11.0200  ARPA  Gi0/1"
+  const re = /^Internet\s+(\d{1,3}(?:\.\d{1,3}){3})\s+[\d-]+\s+([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})/gm;
+  const result = new Map();
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    result.set(m[1], dotMacToColon(m[2]));
+  }
+  return result;
+}
+
+function parseNdpNeighbors(text) {
+  // "2001:DB8:1::10   5  aabb.cc11.0200  STALE  Gi0/1"
+  const re = /^([0-9a-fA-F:]{4,45})\s+\d+\s+([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})\s+\w+/gm;
+  const result = new Map(); // mac → [ipv6]
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const ipv6 = m[1].toLowerCase();
+    if (ipv6.startsWith('fe80:')) continue; // skip link-local
+    const mac  = dotMacToColon(m[2]);
+    if (!result.has(mac)) result.set(mac, []);
+    result.get(mac).push(ipv6);
+  }
+  return result;
+}
+
+function parseLanIp(text) {
+  const privateIp = /\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/;
+  for (const line of String(text || '').split('\n')) {
+    // "GigabitEthernet0/1  192.168.1.1  YES NVRAM up  up"
+    if (!/^\s*\w+\d[/\d.]*\s+\d/.test(line)) continue;
+    const m = line.match(privateIp);
+    if (m) return m[1];
+  }
+  return '';
+}
+
+function isCiscoIos(text) {
+  return /Cisco IOS/i.test(String(text || ''));
+}
+
+// ── SSH helpers ───────────────────────────────────────────────────────────────
+
+function looksLikeShellPrompt(text) {
+  return /[>#]\s*$/.test(String(text || ''));
+}
+
+function looksLikePagerPrompt(text) {
+  return /--\s*[Mm]ore\s*--/.test(String(text || ''));
+}
+
+// "enable" 送信後に IOS が返す "Password:" はシェルプロンプトにマッチしないため専用判定
+function looksLikePasswordPrompt(text) {
+  return /[Pp]assword:\s*$/.test(String(text || ''));
+}
+
+function classifyConnError(err) {
+  const msg = String(err?.message || '');
+  if (/host key/i.test(msg) || /fingerprint/i.test(msg)) return 'hostKeyMismatch';
+  if (/ECONNREFUSED/.test(msg))                            return 'connRefused';
+  if (/ETIMEDOUT|ECONNRESET|EHOSTUNREACH|ENETUNREACH/.test(msg)) return 'connTimeout';
+  if (/Authentication failed|All configured/i.test(msg))  return 'authFailed';
+  if (/SSH timeout/i.test(msg))                            return 'shellTimeout';
+  if (/SSH shell closed/i.test(msg))                       return 'shellClosed';
+  return 'unknown';
+}
+
+function buildSshConnectOpts(ip, user, pass, expectedHostFp, onFpSave) {
+  return {
+    host: ip, port: 22,
+    username: user, password: pass,
+    readyTimeout: 15000,
+    keepaliveInterval: 10000,
+    keepaliveCountMax: 3,
+    hostHash: 'sha256',
+    hostVerifier: hashedKey => {
+      const fp = Buffer.isBuffer(hashedKey)
+        ? hashedKey.toString('hex')
+        : crypto.createHash('sha256').update(hashedKey).digest('hex');
+      if (!expectedHostFp) {
+        if (onFpSave) onFpSave(fp);
+        return true;
+      }
+      if (fp !== expectedHostFp) {
+        logger.error('[cisco] ⚠️ HOST KEY MISMATCH! Possible MITM attack.');
+        return false;
+      }
+      return true;
+    },
+    algorithms: { kex: ['curve25519-sha256@libssh.org', 'ecdh-sha2-nistp256',
+                         'diffie-hellman-group14-sha256', 'diffie-hellman-group14-sha1'] },
+  };
+}
+
+// Temporary shell for detect() — creates, runs, closes
+function createTempCiscoShell({ ip, user, pass, enablePass, expectedHostFp }) {
+  return new Promise((resolve, reject) => {
+    const conn = new SshClient();
+    let shell = null;
+    let buf   = '';
+    let waiter = null;
+    let capturedFp = '';
+    let settled = false;
+
+    const cleanup = () => {
+      if (waiter?.timer) clearTimeout(waiter.timer);
+      waiter = null;
+      try { if (shell) shell.removeAllListeners(); } catch {}
+      try { conn.removeAllListeners(); conn.end(); } catch {}
+    };
+    const fail = err => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    };
+    const waitForPromptLocal = (ms = 15000, matcher = looksLikeShellPrompt) => new Promise((res, rej) => {
+      if (matcher(buf)) { res(buf); return; }
+      const timer = setTimeout(() => { waiter = null; rej(new Error('SSH timeout')); }, ms);
+      waiter = { res, rej, timer, matcher };
+    });
+    const exec = async cmd => {
+      buf = '';
+      shell.write(cmd + '\n');
+      return waitForPromptLocal();
+    };
+
+    conn.on('ready', () => {
+      conn.shell({ term: 'vt100', cols: 220, rows: 500 }, async (err, stream) => {
+        if (err) return fail(err);
+        shell = stream;
+        stream.on('data', chunk => {
+          const text = chunk.toString('utf8').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+          buf += text;
+          if (looksLikePagerPrompt(text)) stream.write(' '); // space advances one page
+          if (waiter && waiter.matcher(buf)) {
+            const cur = waiter; waiter = null;
+            clearTimeout(cur.timer); cur.res(buf);
+          }
+        });
+        stream.on('error', fail);
+        stream.on('close', () => { if (!settled) fail(new Error('SSH shell closed')); });
+        try {
+          await waitForPromptLocal(8000);
+          // Enter enable mode if landed in user mode
+          if (/>\s*$/.test(buf) && enablePass) {
+            buf = '';
+            shell.write('enable\n');
+            // enable にパスワードが設定されていれば "Password:"、不要なら即プロンプトが返る
+            await waitForPromptLocal(8000, t => looksLikePasswordPrompt(t) || looksLikeShellPrompt(t));
+            if (looksLikePasswordPrompt(buf)) {
+              buf = '';
+              shell.write(enablePass + '\n');
+              await waitForPromptLocal(8000);
+            }
+            if (!/#\s*$/.test(buf)) throw new Error('enable mode failed — check enable password');
+          }
+          await exec('terminal length 0');
+          settled = true;
+          resolve({ exec, close: cleanup, hostFp: capturedFp });
+        } catch (e) { fail(e); }
+      });
+    });
+    conn.on('error', fail);
+    conn.connect(buildSshConnectOpts(ip, user, pass, expectedHostFp, fp => { capturedFp = fp; }));
+  });
+}
+
+// ── Persistent connection ─────────────────────────────────────────────────────
+
+function clearShellWaiter() {
+  if (shellWaiter?.timer) clearTimeout(shellWaiter.timer);
+  shellWaiter = null;
+}
+function rejectShellWaiter(err) {
+  const w = shellWaiter; clearShellWaiter();
+  if (w) w.reject(err);
+}
+
+function waitForPrompt(timeoutMs = 45000, matcher = looksLikeShellPrompt) {
+  return new Promise((resolve, reject) => {
+    if (matcher(shellBuf)) { resolve(shellBuf); return; }
+    clearShellWaiter();
+    const timer = setTimeout(() => { shellWaiter = null; reject(new Error('SSH timeout')); }, timeoutMs);
+    shellWaiter = { resolve, reject, timer, matcher };
+  });
+}
+
+async function ciscoExec(cmd, timeoutMs = 45000) {
+  const run = async () => {
+    if (!ciscoReady || !ciscoShell) throw new Error('Cisco not connected');
+    shellBuf = '';
+    ciscoShell.write(cmd + '\n');
+    await waitForPrompt(timeoutMs);
+    return shellBuf;
+  };
+  const result = execChain.then(run, run);
+  execChain = result.catch(() => {});
+  return result;
+}
+
+function scheduleCiscoReconnect(ms) {
+  if (ciscoReconnectTimer) clearTimeout(ciscoReconnectTimer);
+  if (!ciscoEnabled) return;
+  onStatus({ ready: false, state: 'reconnecting', message: t('cisco.reconnecting') });
+  ciscoReconnectTimer = setTimeout(() => { ciscoReconnectTimer = null; connectCisco(); }, ms);
+}
+
+function connectCisco(onReady) {
+  if (!ciscoEnabled) return;
+  if (!ciscoIp || !ciscoUser || !ciscoPass) {
+    logger.info('[cisco] credentials not configured yet — skip connect');
+    onStatus({ ready: false, state: 'failed', message: t('cisco.no-config') });
+    return;
+  }
+  if (ciscoConnecting) { logger.info('[cisco] Connect already in progress, skip'); return; }
+  if (ciscoReconnectTimer) { clearTimeout(ciscoReconnectTimer); ciscoReconnectTimer = null; }
+  if (ciscoConn) { try { ciscoConn.removeAllListeners(); ciscoConn.on('error', () => {}); ciscoConn.end(); } catch {} ciscoConn = null; }
+  ciscoReady = false;
+  ciscoShell = null;
+  ciscoConnecting = true;
+  onStatus({ ready: false, state: 'connecting', message: t('cisco.connecting') });
+
+  const conn = new SshClient();
+  ciscoConn = conn;
+
+  conn.on('ready', () => {
+    conn.shell({ term: 'vt100', cols: 220, rows: 500 }, (err, stream) => {
+      if (err) {
+        logger.error('[cisco] shell error:', err.message);
+        ciscoConnecting = false;
+        onStatus({ ready: false, state: 'failed', message: t('cisco.shell-failed') + err.message });
+        scheduleCiscoReconnect(5000);
+        return;
+      }
+      ciscoShell = stream;
+
+      stream.on('data', chunk => {
+        const text = chunk.toString('utf8').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+        shellBuf += text;
+        if (looksLikePagerPrompt(text)) stream.write(' ');
+        if (shellWaiter && shellWaiter.matcher(shellBuf)) {
+          const { resolve } = shellWaiter; clearShellWaiter(); resolve(shellBuf);
+        }
+      });
+      stream.on('error', err => rejectShellWaiter(err));
+      stream.on('close', () => {
+        rejectShellWaiter(new Error('SSH shell closed'));
+        ciscoReady = false;
+        ciscoConnecting = false;
+        logger.info('[cisco] Shell closed, reconnecting in 3s…');
+        scheduleCiscoReconnect(3000);
+      });
+
+      setTimeout(async () => {
+        try {
+          await waitForPrompt(8000);
+          if (/>\s*$/.test(shellBuf) && ciscoEnablePass) {
+            shellBuf = '';
+            ciscoShell.write('enable\n');
+            // enable にパスワードが設定されていれば "Password:"、不要なら即プロンプトが返る
+            await waitForPrompt(8000, t => looksLikePasswordPrompt(t) || looksLikeShellPrompt(t));
+            if (looksLikePasswordPrompt(shellBuf)) {
+              shellBuf = '';
+              ciscoShell.write(ciscoEnablePass + '\n');
+              await waitForPrompt(8000);
+            }
+            if (!/#\s*$/.test(shellBuf)) throw new Error('enable mode failed — check enable password');
+          }
+          shellBuf = '';
+          ciscoShell.write('terminal length 0\n');
+          await waitForPrompt(5000);
+          ciscoReady = true;
+          ciscoConnecting = false;
+          logger.info('[cisco] Connected to IOS — ready');
+          onStatus({ ready: true, message: t('cisco.connected') });
+          if (onReady) onReady();
+        } catch (e) {
+          ciscoConnecting = false;
+          logger.error('[cisco] init error:', e.message);
+          onStatus({ ready: false, state: 'failed', message: t('cisco.init-failed') + e.message });
+          scheduleCiscoReconnect(5000);
+        }
+      }, 500);
+    });
+  });
+
+  conn.on('error', err => {
+    logger.error('[cisco] SSH error:', err.message);
+    ciscoReady = false;
+    ciscoConnecting = false;
+    onStatus({ ready: false, state: 'failed', message: t('cisco.ssh-failed') + err.message });
+    scheduleCiscoReconnect(5000);
+  });
+
+  conn.connect(buildSshConnectOpts(ciscoIp, ciscoUser, ciscoPass, ciscoHostFp, fp => {
+    ciscoHostFp = fp;
+    onSaveConfig();
+    logger.info('[cisco] Host key recorded (TOFU):', fp.substring(0, 16) + '...');
+  }));
+}
+
+// ── Public operations ─────────────────────────────────────────────────────────
+
+async function fetchNatSessions() {
+  const raw = await ciscoExec('show ip nat translations', 90000);
+  // ユーザーモードのままだと "% Invalid input" が返り 0 件と区別できないため明示エラーにする
+  if (/%\s*Invalid input/i.test(raw)) {
+    throw new Error('privileged EXEC required — enable mode not active');
+  }
+  return parseNatTranslations(raw);
+}
+
+async function refreshCiscoArp() {
+  if (!ciscoEnabled || !ciscoReady) return;
+  try {
+    const raw = await ciscoExec('show arp');
+    const newMap = parseArp(raw);
+    ciscoArpCache.clear();
+    for (const [k, v] of newMap) ciscoArpCache.set(k, v);
+    ciscoArpLastRefresh = Date.now();
+    logger.info(`[cisco-arp] cache refreshed: ${newMap.size} entries`);
+  } catch (e) {
+    logger.error('[cisco-arp] refresh failed:', e.message);
+  }
+}
+
+async function refreshCiscoNdp() {
+  if (!ciscoEnabled || !ciscoReady) return;
+  try {
+    const raw = await ciscoExec('show ipv6 neighbors');
+    const newMap = parseNdpNeighbors(raw);
+    ciscoNdpCache.clear();
+    for (const [k, v] of newMap) ciscoNdpCache.set(k, v);
+    ciscoNdpLastRefresh = Date.now();
+    logger.info(`[cisco-ndp] cache refreshed: ${newMap.size} entries`);
+  } catch (e) {
+    logger.error('[cisco-ndp] refresh failed:', e.message);
+  }
+}
+
+async function detectCisco({ ip, user, pass, enablePass, expectedHostFp } = {}) {
+  if (!ip || !user || !pass) throw new Error('Cisco IP, username, and password are required');
+  let shell;
+  try {
+    shell = await createTempCiscoShell({ ip, user, pass, enablePass, expectedHostFp });
+  } catch (sshErr) {
+    const err = new Error(sshErr.message);
+    err.diag = { ssh: { ok: false, code: classifyConnError(sshErr) } };
+    throw err;
+  }
+  try {
+    const versionRaw   = await shell.exec('show version');
+    const ifBriefRaw   = await shell.exec('show ip interface brief');
+    const natRaw       = await shell.exec('show ip nat translations');
+    const sessions     = parseNatTranslations(natRaw);
+    const lanIp        = parseLanIp(ifBriefRaw);
+    const isIos        = isCiscoIos(versionRaw);
+    return {
+      ssh:  { ok: true },
+      nat:  { ok: isIos, sessions: sessions.length, sessionsOk: sessions.length > 0 },
+      lan:  { ip: lanIp },
+      ios:  { ok: isIos, version: (versionRaw.match(/Version\s+([\d.()\w]+)/i) || [])[1] || '' },
+      suggested: { ciscoIp: ip, ciscoUser: user },
+      hostFp: shell.hostFp,
+      diag: { ssh: { ok: true }, isIos, lanIp, natSessions: sessions.length },
+    };
+  } finally {
+    shell.close();
+  }
+}
+
+async function detectCurrentCisco() {
+  if (!ciscoReady || !ciscoShell) throw new Error('Cisco not connected');
+  const versionRaw = await ciscoExec('show version');
+  const ifBriefRaw = await ciscoExec('show ip interface brief');
+  const natRaw     = await ciscoExec('show ip nat translations');
+  const sessions   = parseNatTranslations(natRaw);
+  const lanIp      = parseLanIp(ifBriefRaw);
+  return {
+    ssh:  { ok: true },
+    nat:  { ok: true, sessions: sessions.length, sessionsOk: sessions.length > 0 },
+    lan:  { ip: lanIp },
+    ios:  { ok: isCiscoIos(versionRaw) },
+    suggested: { ciscoIp: ciscoIp, ciscoUser: ciscoUser },
+    diag: { ssh: { ok: true }, lanIp, natSessions: sessions.length },
+  };
+}
+
+function disconnect() {
+  ciscoEnabled = false;
+  ciscoReady   = false;
+  ciscoConnecting = false;
+  rejectShellWaiter(new Error('Cisco disconnected'));
+  if (ciscoReconnectTimer) { clearTimeout(ciscoReconnectTimer); ciscoReconnectTimer = null; }
+  if (ciscoConn) { try { ciscoConn.removeAllListeners(); ciscoConn.on('error', () => {}); ciscoConn.end(); } catch {} ciscoConn = null; }
+  ciscoShell = null;
+  shellBuf   = '';
+  // 無効化後に古い ARP/NDP を resolveMacByIp へ返さないようキャッシュも破棄
+  ciscoArpCache.clear();
+  ciscoNdpCache.clear();
+  ciscoArpLastRefresh = 0;
+  ciscoNdpLastRefresh = 0;
+}
+
+function reconnect() {
+  ciscoReady = false;
+  ciscoConnecting = false;
+  rejectShellWaiter(new Error('Cisco reconnecting'));
+  if (ciscoConn) { try { ciscoConn.removeAllListeners(); ciscoConn.on('error', () => {}); ciscoConn.end(); } catch {} ciscoConn = null; }
+  scheduleCiscoReconnect(500);
+}
+
+function getArpCache()    { return ciscoArpCache; }
+function getArpMac(ip)    { return ciscoArpCache.get(ip) || null; }
+function getNdpByMac(mac) { return ciscoNdpCache.get((mac || '').toLowerCase()) || null; }
+function isReady()        { return ciscoReady; }
+function isEnabled()      { return ciscoEnabled; }
+function getIp()          { return ciscoIp; }
+function getUser()        { return ciscoUser; }
+function hasPass()        { return !!ciscoPass; }
+function getNat()         { return null; } // Cisco uses no descriptor concept
+function getHostFp()      { return ciscoHostFp; }
+function needsArpRefresh() { return Date.now() - ciscoArpLastRefresh > CISCO_ARP_REFRESH_MS; }
+function needsNdpRefresh() { return Date.now() - ciscoNdpLastRefresh > CISCO_NDP_REFRESH_MS; }
+
+module.exports = {
+  configure,
+  connectCisco,
+  disconnect,
+  reconnect,
+  ciscoExec,
+  parseNatTranslations,
+  parseArp,
+  parseNdpNeighbors,
+  parseLanIp,
+  dotMacToColon,
+  isCiscoIos,
+  detectCisco,
+  detectCurrentCisco,
+  refreshCiscoArp,
+  refreshCiscoNdp,
+  fetchNatSessions,
+  getArpCache,
+  getArpMac,
+  getNdpByMac,
+  isReady,
+  isEnabled,
+  getIp,
+  getUser,
+  hasPass,
+  getNat,
+  getHostFp,
+  needsArpRefresh,
+  needsNdpRefresh,
+};

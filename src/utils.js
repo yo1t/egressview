@@ -1,6 +1,39 @@
 // Shared utility functions
 'use strict';
 
+const path = require('path');
+
+// ── Log path allowlist ─────────────────────────────────────────────────
+// tail は sudo で動くため、admin トークン保持者が任意ファイルを root 権限で
+// 読める昇格経路にならないよう、既知のログディレクトリ配下に制限する。
+// /tmp や /home 配下は非特権ユーザーがシンボリックリンクを設置できるため許可しない。
+const DEFAULT_LOG_PATH_PREFIXES = [
+  '/var/log/',              // Linux 全般・NAS
+  '/private/var/log/',      // macOS（/var は /private/var への symlink）
+  '/opt/homebrew/var/log/', // macOS Homebrew (Apple Silicon)
+  '/usr/local/var/log/',    // macOS Homebrew (Intel)
+];
+
+// Docker マウントやカスタム syslog 出力先は環境変数で明示的に拡張する
+// （例: EGRESSVIEW_LOG_PATH_PREFIXES=/srv/log/,/data/logs/）
+function getAllowedLogPathPrefixes() {
+  const extra = (process.env.EGRESSVIEW_LOG_PATH_PREFIXES || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => s.startsWith('/'))
+    .map(s => s.endsWith('/') ? s : s + '/');
+  return [...DEFAULT_LOG_PATH_PREFIXES, ...extra];
+}
+
+function isAllowedLogPath(p) {
+  if (typeof p !== 'string') return false;
+  const s = p.trim();
+  if (!s || s.includes('\x00') || !path.isAbsolute(s)) return false;
+  const normalized = path.normalize(s);
+  if (normalized.split('/').includes('..')) return false;
+  return getAllowedLogPathPrefixes().some(prefix => normalized.startsWith(prefix));
+}
+
 // ── SSRF protection: allow only private IP ranges ─────────────────────
 function isAllowedRouterIp(ip) {
   if (typeof ip !== 'string') return false;
@@ -64,4 +97,4 @@ function parsePositiveInt(val) {
   return n;
 }
 
-module.exports = { isAllowedRouterIp, htmlEscape, parseTimestamp, parsePositiveInt };
+module.exports = { isAllowedRouterIp, isAllowedLogPath, getAllowedLogPathPrefixes, htmlEscape, parseTimestamp, parsePositiveInt };

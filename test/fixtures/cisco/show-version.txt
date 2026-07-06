@@ -1,0 +1,24 @@
+Router#show version
+Cisco IOS Software, Version 15.2(4)M1, RELEASE SOFTWARE (fc1)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2012 by Cisco Systems, Inc.
+Compiled Fri 20-Jul-12 13:55 by prod_rel_team
+
+ROM: System Bootstrap, Version 15.2(4r)M1, RELEASE SOFTWARE (fc1)
+
+Router uptime is 2 days, 3 hours, 12 minutes
+System returned to ROM by power-on
+
+System image file is "flash0:c1900-universalk9-mz.SPA.152-4.M1.bin"
+
+cisco CISCO1941/K9 (revision 1.0) with 491520K/32768K bytes of memory.
+Processor board ID FTX152400KS
+2 Gigabit Ethernet interfaces
+1 terminal line
+DRAM configuration is 64 bits wide with parity disabled.
+255K bytes of non-volatile configuration memory.
+256000K bytes of ATA System CompactFlash 0 (Read/Write)
+
+Configuration register is 0x2102
+
+Router#

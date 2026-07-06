@@ -1,17 +1,11 @@
 // Routes: general settings and data-source configuration
 'use strict';
-const path   = require('path');
 const logger = require('../logger');
 
 const { Router } = require('express');
 const { t, setLanguage } = require('../i18n-server');
-
-// Reject paths with null bytes or '..' components; require absolute path.
-function isValidLogPath(p) {
-  if (typeof p !== 'string') return false;
-  const s = p.trim();
-  return s.length > 0 && path.isAbsolute(s) && !s.includes('\x00') && !s.split('/').includes('..');
-}
+// 許可プレフィックス制限付きログパス検証（tail は sudo で動くため任意パスを許さない）
+const { isAllowedLogPath: isValidLogPath } = require('../utils');
 
 const ALLOWED_COUNTRIES = new Set([
   'JP','US','CA','GB','DE','FR','IT','ES','NL','SE','CH','NO',
@@ -100,6 +94,7 @@ module.exports = function configRoutes(ctx) {
     if (dnsmasq) {
       if (typeof dnsmasq.enabled  === 'boolean') appState.dnsmasqEnabled = dnsmasq.enabled;
       if (isValidLogPath(dnsmasq.logFile)) appState.dnsmasqLogFile = dnsmasq.logFile.trim();
+      else if (dnsmasq.logFile !== undefined) logger.warn(`[config] dnsmasq logFile rejected (not under an allowed log directory): ${dnsmasq.logFile}`);
       dnsmasqLog.stop();
       dnsmasqLog.configure({
         logFile: appState.dnsmasqLogFile,
@@ -118,6 +113,7 @@ module.exports = function configRoutes(ctx) {
     if (inspect) {
       if (typeof inspect.enabled === 'boolean') appState.inspectEnabled = inspect.enabled;
       if (isValidLogPath(inspect.logFile)) appState.inspectLogFile = inspect.logFile.trim();
+      else if (inspect.logFile !== undefined) logger.warn(`[config] inspect logFile rejected (not under an allowed log directory): ${inspect.logFile}`);
       inspectSyslog.stop();
       inspectSyslog.configure({
         logFile:   appState.inspectLogFile,
@@ -130,6 +126,7 @@ module.exports = function configRoutes(ctx) {
     if (dhcpd) {
       if (typeof dhcpd.enabled === 'boolean') appState.dhcpdEnabled = dhcpd.enabled;
       if (isValidLogPath(dhcpd.logFile)) appState.dhcpdLogFile = dhcpd.logFile.trim();
+      else if (dhcpd.logFile !== undefined) logger.warn(`[config] dhcpd logFile rejected (not under an allowed log directory): ${dhcpd.logFile}`);
       dhcpdSyslog.stop();
       dhcpdSyslog.configure({ logFile: appState.dhcpdLogFile, enabled: appState.dhcpdEnabled });
       if (appState.dhcpdEnabled) dhcpdSyslog.start();

@@ -1,5 +1,5 @@
 // ─── Device Inventory View ───────────────────────────────────────────────────
-import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
+import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, esc, fmtTs } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch, notesMap, lookupNote, refreshAllNotes } from './auth-socket.js?v=__ASSET_VERSION__';
 
@@ -128,7 +128,6 @@ function renderDevicesTable() {
     const name = deviceName(d);
     const ipv6 = deviceIpv6(d);
     const sources = (d.sources || '').split(',').filter(Boolean).join(' · ');
-    const noteText = lookupNote(d.ip, d.mac, d.deviceId);
     const isOpen = dvDetailDevice && dvDetailDevice.ip === d.ip;
     const statusCls = d.status === 'stale' ? 'row-stale' : d.status === 'archived' ? 'row-archived' : '';
     return `<tr class="${isOpen ? 'selected' : ''} ${statusCls}" style="cursor:pointer" data-ip="${esc(d.ip)}">

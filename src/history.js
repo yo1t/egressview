@@ -6,6 +6,7 @@ const { summarizeAppGroups } = require('./app-classifier');
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
+const { runMigrations } = require('./db-migrate');
 
 const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
   ? path.resolve(process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB)
@@ -100,6 +101,10 @@ function initDb(dbPath) {
     _secureDbFiles();
   }
 
+  // Run versioned migrations (takes pre-migration backup if pending changes exist)
+  runMigrations(db, actualPath);
+
+  // Create tables for fresh databases (idempotent — skipped if already exist)
   db.exec(`
     CREATE TABLE IF NOT EXISTS connections (
       src       TEXT NOT NULL,
@@ -130,15 +135,6 @@ function initDb(dbPath) {
     CREATE INDEX IF NOT EXISTS idx_src ON connections(src);
     CREATE INDEX IF NOT EXISTS idx_dst ON connections(dst);
   `);
-
-  // Migration: add agent columns to existing databases
-  {
-    const existing = db.prepare('PRAGMA table_info(connections)').all().map(r => r.name);
-    if (!existing.includes('source'))    db.exec(`ALTER TABLE connections ADD COLUMN source    TEXT NOT NULL DEFAULT 'yamaha'`);
-    if (!existing.includes('agentHost')) db.exec(`ALTER TABLE connections ADD COLUMN agentHost TEXT`);
-    if (!existing.includes('process'))   db.exec(`ALTER TABLE connections ADD COLUMN process   TEXT`);
-    if (!existing.includes('pid'))       db.exec(`ALTER TABLE connections ADD COLUMN pid       INTEGER`);
-  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS notification_log (
@@ -177,8 +173,8 @@ function initDb(dbPath) {
   `);
 
   stmtUpsert = db.prepare(`
-    INSERT INTO connections (src, dst, dport, proto, sport, ttl, srcMac, srcVendor, srcDnsName, srcMdnsName, dstHost, country, org, lat, lon, city, firstSeen, lastSeen)
-    VALUES (@src, @dst, @dport, @proto, @sport, @ttl, @srcMac, @srcVendor, @srcDnsName, @srcMdnsName, @dstHost, @country, @org, @lat, @lon, @city, @firstSeen, @lastSeen)
+    INSERT INTO connections (src, dst, dport, proto, sport, ttl, srcMac, srcVendor, srcDnsName, srcMdnsName, dstHost, country, org, lat, lon, city, firstSeen, lastSeen, source)
+    VALUES (@src, @dst, @dport, @proto, @sport, @ttl, @srcMac, @srcVendor, @srcDnsName, @srcMdnsName, @dstHost, @country, @org, @lat, @lon, @city, @firstSeen, @lastSeen, @source)
     ON CONFLICT(src, dst, dport, proto) DO UPDATE SET
       sport = COALESCE(@sport, sport),
       ttl = COALESCE(@ttl, ttl),
@@ -193,7 +189,14 @@ function initDb(dbPath) {
       lon = COALESCE(@lon, lon),
       city = COALESCE(@city, city),
       firstSeen = MIN(firstSeen, @firstSeen),
-      lastSeen = MAX(lastSeen, @lastSeen)
+      lastSeen = MAX(lastSeen, @lastSeen),
+      source = CASE
+        WHEN source = @source THEN source
+        -- メモリ側で既にマージ済みの値をスナップショットする場合（再起動を跨いでも維持）
+        WHEN @source = 'yamaha+cisco' AND source IN ('yamaha','cisco') THEN 'yamaha+cisco'
+        WHEN source IN ('yamaha','cisco') AND @source IN ('yamaha','cisco') THEN 'yamaha+cisco'
+        ELSE source
+      END
   `);
 
   stmtSelectAll = db.prepare(`SELECT * FROM connections WHERE lastSeen >= ?`);
@@ -222,6 +225,7 @@ function upsertEntry(entry) {
     city: entry.city || null,
     firstSeen: entry.firstSeen ?? Date.now(),
     lastSeen:  entry.lastSeen  ?? Date.now(),
+    source: entry.source || 'yamaha',
   });
 }
 
@@ -492,7 +496,7 @@ function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
      GROUP BY dst ORDER BY count DESC LIMIT 500`
   ).all(...params);
   const byDevice = db.prepare(
-    `SELECT src, srcMac, srcVendor,
+    `SELECT src, srcMac, srcVendor, GROUP_CONCAT(DISTINCT source) as sources,
             COUNT(*) as count, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
      FROM connections${where}
      GROUP BY src ORDER BY count DESC LIMIT 200`

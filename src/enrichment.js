@@ -182,7 +182,20 @@ function httpPostJson(url, body) {
         if (size > GEO_MAX_BYTES) { req.destroy(); return reject(new Error('geo response too large')); }
         buf += d;
       });
-      res.on('end', () => { try { resolve(JSON.parse(buf)); } catch(e) { reject(e); } });
+      res.on('end', () => {
+        // ip-api.com は 429 を空ボディで返すため、JSON.parse の前にステータスを確認する。
+        // X-Ttl ヘッダはレート制限ウィンドウ解除までの残秒数。
+        if (res.statusCode === 429) {
+          const e = new Error('geo rate limited (HTTP 429)');
+          e.statusCode = 429;
+          e.retryAfterSec = parseInt(res.headers['x-ttl'], 10) || 60;
+          return reject(e);
+        }
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(`geo HTTP ${res.statusCode}`));
+        }
+        try { resolve(JSON.parse(buf)); } catch(e) { reject(e); }
+      });
     });
     req.on('error', reject);
     req.setTimeout(8000, () => { req.destroy(); reject(new Error('geo timeout')); });
@@ -192,7 +205,16 @@ function httpPostJson(url, body) {
 
 // ─── Geo lookup ───────────────────────────────────────────────────────────────
 
-async function lookupGeoBatch(ips) {
+// ip-api.com の /batch は無料枠 15 リクエスト/分。INSPECT セッション処理は宛先1個の
+// 「バッチ」を通信のたびに発行するため、そのまま送るとすぐ枯渇する。
+// 対策: 全呼び出し元の IP を GEO_FLUSH_MS の間バッファに溜めて1リクエストに統合し、
+// 429 を受けたら X-Ttl に従ってウィンドウ解除まで送信を止める。
+let GEO_FLUSH_MS = 2000;
+const geoPendingIps = new Set();
+let geoFlushPromise = null;
+let geoBackoffUntil = 0;
+
+function lookupGeoBatch(ips) {
   const now = Date.now();
 
   // プライベート/ループバック/特殊 IP は永続 TTL でキャッシュ（API 呼び出し不要）
@@ -205,9 +227,39 @@ async function lookupGeoBatch(ips) {
   }
 
   const toFetch = ips.filter(ip => { const c = geoCache.get(ip); return !c || now >= c.expires; });
-  if (!toFetch.length) return;
-  for (let i = 0; i < toFetch.length; i += 100) {
-    const chunk = toFetch.slice(i, i + 100);
+  if (!toFetch.length) return Promise.resolve();
+  toFetch.forEach(ip => geoPendingIps.add(ip));
+
+  // バッファ待機中の呼び出しは同じフラッシュサイクルの完了を待つ
+  if (!geoFlushPromise) {
+    geoFlushPromise = new Promise(resolve => {
+      setTimeout(() => {
+        const batch = [...geoPendingIps];
+        geoPendingIps.clear();
+        geoFlushPromise = null; // 以降の呼び出しは次のサイクルへ
+        _fetchGeoBatch(batch).then(resolve, resolve);
+      }, GEO_FLUSH_MS);
+    });
+  }
+  return geoFlushPromise;
+}
+
+async function _fetchGeoBatch(ipsAll) {
+  const now = Date.now();
+
+  // レート制限バックオフ中: API を叩かず、解除後すぐ再試行できる短い TTL でキャッシュ
+  if (now < geoBackoffUntil) {
+    const remainMs = geoBackoffUntil - now;
+    const entryTtl = remainMs + 120_000;
+    ipsAll.forEach(ip => {
+      if (!geoCache.has(ip)) geoCache.set(ip, { lat: null, lon: null, expires: now + entryTtl });
+    });
+    logger.debug(`[geo] ${ipsAll.length} lookups skipped (rate-limit backoff, ${Math.ceil(remainMs / 1000)}s remaining)`);
+    return;
+  }
+
+  for (let i = 0; i < ipsAll.length; i += 100) {
+    const chunk = ipsAll.slice(i, i + 100);
     try {
       const results = await httpPostJson(
         'http://ip-api.com/batch?fields=status,lat,lon,country,city,countryCode,query',
@@ -230,8 +282,15 @@ async function lookupGeoBatch(ips) {
       recordApiOk('geo');
     } catch (err) {
       recordApiFail('geo', err);
-      logger.error('[geo] batch error:', err.message);
-      // Rate-limit 対策: エラー時はチャンク内の未キャッシュ IP を 30 分間リトライ抑制
+      if (err.statusCode === 429) {
+        // X-Ttl（ウィンドウ解除までの残秒）+ 余裕5秒だけ送信を止める
+        const backoffSec = (err.retryAfterSec || 60) + 5;
+        geoBackoffUntil = Date.now() + backoffSec * 1000;
+        logger.warn(`[geo] rate limited by ip-api.com — backing off ${backoffSec}s`);
+      } else {
+        logger.error('[geo] batch error:', err.message);
+      }
+      // エラー時はチャンク内の未キャッシュ IP を 30 分間リトライ抑制
       const rateLimitTtl = 30 * 60 * 1000;
       chunk.forEach(ip => {
         if (!geoCache.has(ip)) {
@@ -240,6 +299,15 @@ async function lookupGeoBatch(ips) {
           _persistGeo(ip, entry);
         }
       });
+      // バックオフに入ったら残りのチャンクも送らない
+      if (Date.now() < geoBackoffUntil) {
+        for (let j = i + 100; j < ipsAll.length; j += 100) {
+          ipsAll.slice(j, j + 100).forEach(ip => {
+            if (!geoCache.has(ip)) geoCache.set(ip, { lat: null, lon: null, expires: now + rateLimitTtl });
+          });
+        }
+        break;
+      }
     }
   }
 }
@@ -359,8 +427,16 @@ function _initForTest() {
   dnsCache.clear();
   inFlightRdap.clear();
   rdapGeneration = 0;
+  geoPendingIps.clear();
+  geoFlushPromise = null;
+  geoBackoffUntil = 0;
   initDb(':memory:');
 }
+
+// テスト用: フラッシュ待機時間の短縮とバックオフ状態の操作
+function _setGeoFlushMsForTest(ms) { GEO_FLUSH_MS = ms; }
+function _setGeoBackoffUntilForTest(ts) { geoBackoffUntil = ts; }
+function _getGeoBackoffUntilForTest() { return geoBackoffUntil; }
 
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
@@ -381,4 +457,7 @@ module.exports = {
   getGeoCache,
   getApiStats,
   _initForTest,
+  _setGeoFlushMsForTest,
+  _setGeoBackoffUntilForTest,
+  _getGeoBackoffUntilForTest,
 };

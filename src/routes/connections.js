@@ -1,8 +1,26 @@
 // Routes: connection history query
 'use strict';
 
+const zlib = require('zlib');
 const { Router } = require('express');
 const { parseTimestamp } = require('../utils');
+
+// 大きな JSON（グラフ全件フェッチ: 最大50k行 ≒ 20MB超）を返すための送信ヘルパー。
+// compression ミドルウェアのストリーミング圧縮は応答を多数のイベントループターンに
+// 分割するため、ポーリングや socket.io 配信で忙しい本番プロセスでは応答が数十秒に
+// 伸びる（EC2 実測: ストリーミング 15〜50s → 一括 gzipSync 0.5s）。
+// level 1 の一括圧縮（20MB ≒ 80ms）で単一書き込みにし、帯域削減は維持する。
+// Content-Encoding を先に立てるので compression ミドルウェアは二重圧縮しない。
+const GZIP_MIN_BYTES = 100_000;
+function sendLargeJson(req, res, obj) {
+  const body = Buffer.from(JSON.stringify(obj));
+  res.set('Content-Type', 'application/json; charset=utf-8');
+  if (body.length >= GZIP_MIN_BYTES && /\bgzip\b/i.test(req.headers?.['accept-encoding'] || '')) {
+    res.set('Content-Encoding', 'gzip');
+    return res.end(zlib.gzipSync(body, { level: 1 }));
+  }
+  res.end(body);
+}
 
 const MAX_LIMIT = 1000;
 // Cap for the no-limit "full graph fetch" path. A synchronous better-sqlite3
@@ -242,13 +260,13 @@ function connectionsRoutes(ctx) {
     const fThreat = req.query.fThreat;
     if (['safe', 'warn', 'danger'].includes(fThreat)) {
       const result = queryThreatFilteredPage(history, threatIntel, from, to, MAX_FULL_FETCH, 0, opts, fThreat);
-      return res.json({ connections: result.connections, truncated: result.truncated, serverTime: Date.now() });
+      return sendLargeJson(req, res, { connections: result.connections, truncated: result.truncated, serverTime: Date.now() });
     }
     let connections = attachThreats(
       history.queryByTimeRangePaged(from, to, MAX_FULL_FETCH, 0, opts), threatIntel
     );
     const truncated = connections.length >= MAX_FULL_FETCH;
-    res.json({ connections, truncated, serverTime: Date.now() });
+    sendLargeJson(req, res, { connections, truncated, serverTime: Date.now() });
   });
 
   return router;
@@ -261,3 +279,4 @@ module.exports._parseTimestampParam = parseTimestampParam;
 module.exports._parsePaginationOpts = parsePaginationOpts;
 module.exports.MAX_LIMIT = MAX_LIMIT;
 module.exports.SERVER_FILTER_COLS = SERVER_FILTER_COLS;
+module.exports._sendLargeJson = sendLargeJson;

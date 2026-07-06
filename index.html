@@ -260,6 +260,10 @@
         <p>SSH into your Yamaha RTX router and read NAT session tables every 60 seconds. [INSPECT] syslog fills in short-lived TCP sessions missed between polls. Supports RTX1200–RTX1300, RTX810/830.</p>
       </div>
       <div class="card">
+        <h3>Cisco IOS (Beta)<sup>*1</sup></h3>
+        <p>Includes a sample SSH-based Cisco IOS path for NAT session collection. Physical-device validation is still pending, so this remains a beta path rather than a formal release target.</p>
+      </div>
+      <div class="card">
         <h3>ASUS WiFi AP Support</h3>
         <p>Get L2 client details — WiFi band, signal strength, traffic rates, and AiMesh topology from your ASUS access point.</p>
       </div>
@@ -332,17 +336,21 @@
   <section id="architecture">
     <h2><span class="icon">⬡</span> Architecture</h2>
     <div class="arch-block">
-      <pre><code>┌─────────────────┐  SSH(NAT)   ┌──────────────────────┐
-│  Yamaha RTX     │◄───────────►│                      │  WebSocket   ┌──────────────────┐
-│  [INSPECT] log  │  syslog/UDP │   EgressView Server  │◄────────────►│ Browser          │
-│  [DHCPD] log    │────────────►│   (Node.js)          │  MCP         ├──────────────────┤
-└─────────────────┘             │                      │◄────────────►│ AI Assistant     │
-┌─────────────────┐  HTTP       │  Pollers:            │  stdio/HTTP  │ (Kiro, Claude…)  │
-│  ASUS WiFi AP   │◄───────────►│  • yamaha (SSH)      │              └──────────────────┘
-│  (Client list)  │             │  • asus (HTTP)       │
-└─────────────────┘             │  • inspect-syslog    │
-┌─────────────────┐  tail -F    │  • dhcpd-syslog      │
-│  dnsmasq        │────────────►│  • dnsmasq-log       │
+      <pre><code>┌─────────────────┐  SSH(NAT)   ┌──────────────────────┐  WebSocket   ┌──────────────────┐
+│  Yamaha RTX     │◄───────────►│                      │◄────────────►│ Browser          │
+│  [INSPECT] log  │  syslog/UDP │   EgressView Server  │  MCP         ├──────────────────┤
+│  [DHCPD] log    │────────────►│   (Node.js)          │◄────────────►│ AI Assistant     │
+└─────────────────┘             │                      │  stdio/HTTP  │ (Kiro, Claude…)  │
+┌─────────────────┐  SSH(NAT)   │  Pollers:            │              └──────────────────┘
+│  Cisco IOS      │◄───────────►│  • yamaha (SSH)      │
+│  (beta sample)  │             │  • cisco (SSH, beta) │
+└─────────────────┘             │  • asus (HTTP)       │
+┌─────────────────┐  HTTP       │  • inspect-syslog    │
+│  ASUS WiFi AP   │◄───────────►│  • dhcpd-syslog      │
+│  (Client list)  │             │  • dnsmasq-log       │
+└─────────────────┘             │                      │
+┌─────────────────┐  tail -F    │                      │
+│  dnsmasq        │────────────►│                      │
 │  query log      │             └──────────┬───────────┘
 └─────────────────┘                        │
                        ┌───────────────────┼───────────────┐
@@ -375,6 +383,11 @@
           <td style="padding:8px 6px;">✅</td>
           <td style="padding:8px 6px;">Yamaha RTX router — SSH access enabled</td>
           <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.md">Setup guide →</a></td>
+        </tr>
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:8px 6px; color:var(--muted);">☐</td>
+          <td style="padding:8px 6px; color:var(--muted);">(Optional / beta) Cisco IOS router — SSH access enabled</td>
+          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-cisco.md">Setup guide →</a></td>
         </tr>
         <tr style="border-bottom:1px solid var(--border);">
           <td style="padding:8px 6px; color:var(--muted);">☐</td>
@@ -414,6 +427,10 @@ npm start</code></pre>
           <td style="padding:6px 8px;">Set up in the <a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.md">Yamaha guide</a></td>
         </tr>
         <tr>
+          <td style="padding:6px 8px; color:var(--muted);">Cisco IOS IP / username / password</td>
+          <td style="padding:6px 8px;">Set up in the <a href="https://github.com/yo1t/egressview/blob/main/docs/setup-cisco.md">Cisco guide</a></td>
+        </tr>
+        <tr>
           <td style="padding:6px 8px; color:var(--muted);">ASUS AP IP / password</td>
           <td style="padding:6px 8px;">AP's LAN IP and admin password (<a href="https://github.com/yo1t/egressview/blob/main/docs/setup-asus.md">ASUS guide</a>)</td>
         </tr>
@@ -432,10 +449,15 @@ npm start</code></pre>
         <p>RTX1200, RTX1210, RTX1220, RTX1300, RTX810, RTX830, NVR500, NVR510, NVR700W — any model with SSH + NAT descriptor.</p>
       </div>
       <div class="card">
+        <h3>Cisco IOS (beta)<sup>*1</sup></h3>
+        <p>Sample implementation only for now. Physical-device validation is still pending before formal release.</p>
+      </div>
+      <div class="card">
         <h3>ASUS WiFi AP (L2)</h3>
         <p>RT-AX series, RT-AC series, ZenWiFi (AiMesh) — any model with standard web admin, used in AP/mesh mode.</p>
       </div>
     </div>
+    <p style="font-size:0.78rem; color:var(--muted); margin-top:10px;">*1 Cisco IOS support is currently a sample implementation. Physical-device validation has not been completed yet, so it should be treated as beta until real-device testing is done. Real-hardware issue reports and fixture-based pull requests are welcome.</p>
   </section>
 
   <!-- Issues -->
@@ -477,6 +499,10 @@ npm start</code></pre>
       <div class="card">
         <h3><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.md">Yamaha RTX Setup Guide</a></h3>
         <p>Step-by-step guide to enable SSH on your Yamaha RTX router.</p>
+      </div>
+      <div class="card">
+        <h3><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-cisco.md">Cisco IOS Setup Guide</a></h3>
+        <p>Beta / sample implementation guide for trying EgressView with Cisco IOS over SSH.</p>
       </div>
       <div class="card">
         <h3><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-asus.md">ASUS AP Setup Guide</a></h3>

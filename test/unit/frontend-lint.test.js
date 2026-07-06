@@ -655,21 +655,21 @@ describe('Server runtime invariants', () => {
       'loading decrement should match the conditional increment');
   });
 
-  it('stats view does not redraw charts for the same cached summary object', () => {
+  it('stats view skips redraw only when both cached summary and chart mode are unchanged', () => {
     const script = getScriptContent();
     const start = script.indexOf('async function updateStats()');
     assert.notEqual(start, -1, 'updateStats should exist');
     const end = script.indexOf('// ─── App distribution pie chart', start);
     assert.notEqual(end, -1, 'updateStats section end marker should exist');
     const updateStatsFn = script.slice(start, end);
-    assert.match(script, /let\s+statsRenderedSummary\s*=\s*\{\s*key:\s*null,\s*data:\s*null\s*\}/,
-      'stats should remember the last rendered summary object');
+    assert.match(script, /let\s+statsRenderedSummary\s*=\s*\{\s*key:\s*null,\s*data:\s*null,\s*mode:\s*null\s*\}/,
+      'stats should remember the last rendered summary object and the last chart mode');
     assert.match(updateStatsFn, /!\(\s*statsSummaryCache\.key\s*===\s*summaryKey\s*&&\s*statsSummaryCache\.data\s*\)[\s\S]*?renderStatsPiePreview\(selIp\)/,
       'same-period socket refreshes should not clear/redraw the pie preview while cached summary exists');
-    assert.match(updateStatsFn, /statsRenderedSummary\.key\s*===\s*summaryKey\s*&&\s*statsRenderedSummary\.data\s*===\s*summary[\s\S]*?return/,
-      'cached summary objects should not redraw charts and map layers repeatedly');
-    assert.match(updateStatsFn, /statsRenderedSummary\s*=\s*\{\s*key:\s*summaryKey,\s*data:\s*summary\s*\}/,
-      'successful summary rendering should update the rendered-summary guard');
+    assert.match(updateStatsFn, /statsRenderedSummary\.key\s*===\s*summaryKey[\s\S]*?statsRenderedSummary\.data\s*===\s*summary[\s\S]*?statsRenderedSummary\.mode\s*===\s*chartMode[\s\S]*?return/,
+      'cached summary objects should only skip redraw when the chart mode is also unchanged');
+    assert.match(updateStatsFn, /statsRenderedSummary\s*=\s*\{\s*key:\s*summaryKey,\s*data:\s*summary,\s*mode:\s*chartMode\s*\}/,
+      'successful summary rendering should update the rendered-summary guard with the chart mode');
   });
 
   it('keeps unsafe-inline out of the base style-src directive', () => {

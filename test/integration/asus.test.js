@@ -93,7 +93,7 @@ async function loginToRouter(ip, username, password) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     timeout: 8000,
     maxRedirects: 0,
-    validateStatus: s => true,
+    validateStatus: () => true,
   });
 
   // Extract token from Set-Cookie

@@ -32,6 +32,7 @@ EgressView answers the question most home users can't ask: *what is each device 
 ## What it does
 
 - Connects to a **Yamaha RTX** router via SSH and reads the NAT session table every 60 seconds
+- Includes a **Cisco IOS (SSH)** path as a sample implementation for NAT session collection*1
 - **[INSPECT] syslog supplement** — tails the Yamaha syslog in real time to capture short-lived TCP sessions that complete within the 60-second polling gap
 - **dnsmasq DNS query log** — tails the EC2/server-side dnsmasq log to resolve destination IPs to meaningful domain names (e.g. `example.com`) per client device; forward DNS names take priority over PTR reverse lookups
 - **[DHCPD] syslog tracking** — tails Yamaha DHCP events (Allocates/Extends) for real-time IP→MAC mapping
@@ -69,17 +70,21 @@ Connection Log and Devices let you drill down into suspicious destinations, nois
 ## Architecture
 
 ```
-┌─────────────────┐  SSH (NAT)  ┌──────────────────────┐
-│  Yamaha RTX     │◄───────────►│                      │  WebSocket   ┌──────────────────┐
-│  [INSPECT] log  │  syslog/UDP │   EgressView Server  │◄────────────►│ Browser          │
-│  [DHCPD] log    │────────────►│   (Node.js)          │  MCP         ├──────────────────┤
-└─────────────────┘             │                      │◄────────────►│ AI Assistant     │
-┌─────────────────┐  HTTP       │  Pollers:            │  stdio/HTTP  │ (Kiro, Claude…)  │
-│  ASUS WiFi AP   │◄───────────►│  • yamaha (SSH)      │              └──────────────────┘
-│  (Client list)  │             │  • asus (HTTP)       │
-└─────────────────┘             │  • inspect-syslog    │
-┌─────────────────┐  tail -F    │  • dhcpd-syslog      │
-│  dnsmasq        │────────────►│  • dnsmasq-log       │
+┌─────────────────┐  SSH (NAT)  ┌──────────────────────┐  WebSocket   ┌──────────────────┐
+│  Yamaha RTX     │◄───────────►│                      │◄────────────►│ Browser          │
+│  [INSPECT] log  │  syslog/UDP │   EgressView Server  │  MCP         ├──────────────────┤
+│  [DHCPD] log    │────────────►│   (Node.js)          │◄────────────►│ AI Assistant     │
+└─────────────────┘             │                      │  stdio/HTTP  │ (Kiro, Claude…)  │
+┌─────────────────┐  SSH (NAT)  │  Pollers:            │              └──────────────────┘
+│  Cisco IOS      │◄───────────►│  • yamaha (SSH)      │
+│  (beta sample)  │             │  • cisco (SSH, beta) │
+└─────────────────┘             │  • asus (HTTP)       │
+┌─────────────────┐  HTTP       │  • inspect-syslog    │
+│  ASUS WiFi AP   │◄───────────►│  • dhcpd-syslog      │
+│  (Client list)  │             │  • dnsmasq-log       │
+└─────────────────┘             │                      │
+┌─────────────────┐  tail -F    │                      │
+│  dnsmasq        │────────────►│                      │
 │  query log      │             └──────────┬───────────┘
 └─────────────────┘                        │
                        ┌───────────────────┼───────────────┐
@@ -99,7 +104,10 @@ Connection Log and Devices let you drill down into suspicious destinations, nois
 
 - **Node.js** 22+
 - **Yamaha RTX** router with SSH access enabled (RTX1200, RTX1210, RTX1220, RTX1300, etc.)
+- (Optional / beta) **Cisco IOS** router with SSH access enabled*1
 - (Optional) **ASUS WiFi access point** with web admin enabled (used as AP/mesh mode, not as a router)
+
+*1 Cisco router support is currently a sample implementation. It has not yet been validated on physical Cisco hardware, so it is not a formal release target yet. If you test Cisco IOS support on real hardware and find an error, unsupported output format, or device-specific behavior, please open a GitHub Issue. Pull requests with redacted fixtures and parser fixes are also welcome.
 
 ## AI Agent Access (MCP)
 
@@ -172,6 +180,7 @@ Start with the smallest path that matches your network, then add sources later f
 |--|-------------|-------------|
 | ✅ | Node.js 22+ installed on your Mac/PC/Raspberry Pi | [nodejs.org](https://nodejs.org) |
 | ✅ | Yamaha RTX router with SSH enabled | [Setup guide →](docs/setup-yamaha.md) |
+| ☐ | (Optional / beta) Cisco IOS router with SSH enabled*1 | [Setup guide →](docs/setup-cisco.md) |
 | ☐ | (Optional) ASUS WiFi AP with web admin enabled | [Setup guide →](docs/setup-asus.md) |
 | ☐ | (Optional) AI assistant access via MCP (AWS Kiro, Anthropic Claude, Anysphere Cursor…) | [Setup guide →](docs/setup-mcp.md) |
 
@@ -206,9 +215,12 @@ Open the Settings panel (⚙) and enter your router details:
 |-------|-----------------|
 | Yamaha RTX IP | Your router's LAN IP (e.g. `192.168.1.1`) |
 | SSH username / password | The login you set up in [Yamaha setup guide](docs/setup-yamaha.md) |
+| Cisco IOS IP / username / password | The login you set up in the [Cisco setup guide](docs/setup-cisco.md) |
 | ASUS AP IP / password | The AP's LAN IP and admin password ([ASUS setup guide](docs/setup-asus.md)) |
 
 For the Yamaha RTX, click **Connect & Auto-detect** after entering the IP, username, and password. EgressView checks SSH access, detects the NAT descriptor (usually `100`), finds the LAN IP when available, verifies that NAT sessions can be read, and fills the recommended setting before you save.
+
+For Cisco IOS, the Settings panel also provides **Connect & Auto-detect** and save actions, but this path is still a sample implementation. Physical-device validation is still pending, so treat it as beta until the real-device test pass is complete.
 
 Within a few seconds, devices, sessions, and statistics will start appearing in the UI.
 

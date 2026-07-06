@@ -62,7 +62,6 @@ describe('i18n completeness', () => {
   const enKeys = extractI18nKeys('en');
   const usedKeys = extractUsedKeys();
   const dataKeys = extractDataI18nKeys();
-  const allUsed = new Set([...usedKeys, ...dataKeys]);
 
   it('ja locale has keys defined', () => {
     assert(jaKeys.size > 50, `Expected >50 ja keys, got ${jaKeys.size}`);

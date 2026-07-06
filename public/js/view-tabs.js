@@ -1,5 +1,4 @@
 // ─── View tabs ────────────────────────────────────────────────────────────────
-import { t } from './i18n.js?v=__ASSET_VERSION__';
 
 var currentView = 'graph';
 var statsMode = false;

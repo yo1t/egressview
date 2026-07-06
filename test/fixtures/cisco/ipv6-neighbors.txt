@@ -1,0 +1,7 @@
+Router#show ipv6 neighbors
+IPv6 Address                            Age Link-layer Addr State Interface
+FE80::AABB:CCFF:FE00:101                  0 aabb.cc00.0101  REACH Gi0/1
+FE80::AABB:CCFF:FE11:200                  0 aabb.cc11.0200  REACH Gi0/1
+2001:DB8:1::10                            5 aabb.cc11.0200  STALE Gi0/1
+2001:DB8:1::20                           12 aabb.cc22.0300  REACH Gi0/1
+Router#

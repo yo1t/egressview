@@ -28,24 +28,6 @@ function insert(overrides = {}) {
   return entry;
 }
 
-/** Insert + sync to in-memory Map (for partial:true filter tests). */
-function insertLoaded(overrides = {}) {
-  const entry = { ...insert(overrides) };
-  // re-call with _appendAndLoad so Map is populated too
-  _dstCounter--; // undo counter increment from insert()
-  const entry2 = {
-    src:       '192.168.1.1',
-    dst:       `10.0.0.${++_dstCounter % 254 + 1}`,
-    dport:     443,
-    proto:     'TCP',
-    firstSeen: Date.now(),
-    lastSeen:  Date.now(),
-    ...overrides,
-  };
-  history._appendAndLoad(entry2);
-  return entry2;
-}
-
 // Fresh in-memory DB before each test
 beforeEach(() => {
   history._initForTest();
@@ -507,6 +489,52 @@ describe('summarizeByTimeRange', () => {
     assert.equal(dev10.count, 2);
     assert.ok(dev20, '192.168.1.20 should appear in byDevice');
     assert.equal(dev20.count, 1);
+  });
+
+  it('merges source to yamaha+cisco when both routers upsert the same connection', () => {
+    const t = Date.now();
+    const base = { src: '192.168.1.10', dst: '10.0.0.99', dport: 443, proto: 'TCP' };
+    insert({ ...base, source: 'yamaha', firstSeen: t - 1000, lastSeen: t - 1000 });
+    insert({ ...base, source: 'cisco',  firstSeen: t - 500,  lastSeen: t - 500 });
+
+    const row = history.queryByTimeRange(t - 2000, t).find(r => r.dst === '10.0.0.99');
+    assert.equal(row.source, 'yamaha+cisco');
+  });
+
+  it('keeps merged source when snapshotting an already-merged in-memory entry', () => {
+    const t = Date.now();
+    const base = { src: '192.168.1.10', dst: '10.0.0.98', dport: 443, proto: 'TCP' };
+    // 1回目の flush では単独ソース、メモリ側でマージ後の 2回目の flush で merged 値が来る
+    insert({ ...base, source: 'yamaha',       firstSeen: t - 1000, lastSeen: t - 1000 });
+    insert({ ...base, source: 'yamaha+cisco', firstSeen: t - 1000, lastSeen: t - 500 });
+
+    const row = history.queryByTimeRange(t - 2000, t).find(r => r.dst === '10.0.0.98');
+    assert.equal(row.source, 'yamaha+cisco');
+  });
+
+  it('does not downgrade a merged source when a single router upserts again', () => {
+    const t = Date.now();
+    const base = { src: '192.168.1.10', dst: '10.0.0.97', dport: 443, proto: 'TCP' };
+    insert({ ...base, source: 'yamaha+cisco', firstSeen: t - 1000, lastSeen: t - 1000 });
+    insert({ ...base, source: 'cisco',        firstSeen: t - 1000, lastSeen: t - 500 });
+
+    const row = history.queryByTimeRange(t - 2000, t).find(r => r.dst === '10.0.0.97');
+    assert.equal(row.source, 'yamaha+cisco');
+  });
+
+  it('includes router sources for each summary device', () => {
+    const t = Date.now();
+    insert({ src: '192.168.1.10', dst: '10.0.0.1', dport: 80,  source: 'yamaha', lastSeen: t - 1000, firstSeen: t - 1000 });
+    insert({ src: '192.168.1.10', dst: '10.0.0.2', dport: 443, source: 'cisco',  lastSeen: t - 500,  firstSeen: t - 500 });
+    insert({ src: '192.168.1.20', dst: '10.0.0.3', dport: 53,  source: 'cisco',  lastSeen: t - 2000, firstSeen: t - 2000 });
+
+    const result = history.summarizeByTimeRange(null, null);
+    const dev10 = result.byDevice.find(r => r.src === '192.168.1.10');
+    const dev20 = result.byDevice.find(r => r.src === '192.168.1.20');
+
+    assert.ok(dev10.sources.includes('yamaha'));
+    assert.ok(dev10.sources.includes('cisco'));
+    assert.equal(dev20.sources, 'cisco');
   });
 
   it('respects time range in summary', () => {
