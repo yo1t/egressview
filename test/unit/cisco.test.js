@@ -169,3 +169,46 @@ describe('cisco-adapter: router-interface contract', () => {
     assert.equal(typeof adapter.isCiscoIos, 'function');
   });
 });
+
+// ── isPrivilegeError（特権不足の検出） ─────────────────────────────────────────
+
+describe('cisco: isPrivilegeError', () => {
+  it('detects "% Invalid input" from user-mode NAT command', () => {
+    const raw = fix('nat-translations-privilege-error.txt');
+    assert.equal(cisco.isPrivilegeError(raw), true);
+  });
+
+  it('detects "% Access denied"', () => {
+    assert.equal(cisco.isPrivilegeError('% Access denied\nRouter>'), true);
+  });
+
+  it('returns false for a normal NAT table', () => {
+    assert.equal(cisco.isPrivilegeError(fix('nat-translations.txt')), false);
+  });
+
+  it('returns false for empty/null input', () => {
+    assert.equal(cisco.isPrivilegeError(''), false);
+    assert.equal(cisco.isPrivilegeError(null), false);
+  });
+});
+
+// ── parseNatTranslations の形式差分（privilege エラー・static エントリ） ────────
+
+describe('cisco: parseNatTranslations format variants', () => {
+  it('returns 0 sessions for privilege-error output (must be caught by isPrivilegeError, not treated as empty table)', () => {
+    const raw = fix('nat-translations-privilege-error.txt');
+    assert.equal(cisco.parseNatTranslations(raw).length, 0);
+  });
+
+  it('ignores static "---" entries without ports', () => {
+    const raw = fix('nat-translations.txt');
+    const sessions = cisco.parseNatTranslations(raw);
+    // fixture の static 行 (--- 203.0.113.1 192.168.1.100 --- ---) はセッション化されない
+    assert.ok(sessions.every(s => s.src !== '192.168.1.100'), 'static entry must not appear as a session');
+  });
+
+  it('ignores header and prompt lines', () => {
+    const raw = 'Pro  Inside global  Inside local  Outside local  Outside global\nRouter#\n';
+    assert.equal(cisco.parseNatTranslations(raw).length, 0);
+  });
+});

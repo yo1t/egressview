@@ -45,6 +45,7 @@ module.exports = {
   parseLanIp: cisco.parseLanIp,
   dotMacToColon: cisco.dotMacToColon,
   isCiscoIos: cisco.isCiscoIos,
+  isPrivilegeError: cisco.isPrivilegeError,
 
   _legacy: cisco,
 };

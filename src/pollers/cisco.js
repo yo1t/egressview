@@ -120,6 +120,12 @@ function isCiscoIos(text) {
   return /Cisco IOS/i.test(String(text || ''));
 }
 
+// privilege 不足時の IOS エラー出力を検出する。パーサーは黙って0件を返すため、
+// 「NAT テーブルが空」と「特権モードでない」を呼び出し側で区別できるようにする。
+function isPrivilegeError(text) {
+  return /%\s*(Invalid input|Access denied|Authorization failed)/i.test(String(text || ''));
+}
+
 // ── SSH helpers ───────────────────────────────────────────────────────────────
 
 function looksLikeShellPrompt(text) {
@@ -385,8 +391,8 @@ function connectCisco(onReady) {
 
 async function fetchNatSessions() {
   const raw = await ciscoExec('show ip nat translations', 90000);
-  // ユーザーモードのままだと "% Invalid input" が返り 0 件と区別できないため明示エラーにする
-  if (/%\s*Invalid input/i.test(raw)) {
+  // ユーザーモードのままだと privilege エラーが返り 0 件と区別できないため明示エラーにする
+  if (isPrivilegeError(raw)) {
     throw new Error('privileged EXEC required — enable mode not active');
   }
   return parseNatTranslations(raw);
@@ -434,17 +440,20 @@ async function detectCisco({ ip, user, pass, enablePass, expectedHostFp } = {}) 
     const versionRaw   = await shell.exec('show version');
     const ifBriefRaw   = await shell.exec('show ip interface brief');
     const natRaw       = await shell.exec('show ip nat translations');
+    // privilege 1 ユーザーで enablePass 未入力だとユーザーモードのまま到達し、
+    // NAT 出力が "% Invalid input" になる。0件成功と区別して UI に案内を出す。
+    const privilegeError = isPrivilegeError(natRaw);
     const sessions     = parseNatTranslations(natRaw);
     const lanIp        = parseLanIp(ifBriefRaw);
     const isIos        = isCiscoIos(versionRaw);
     return {
       ssh:  { ok: true },
-      nat:  { ok: isIos, sessions: sessions.length, sessionsOk: sessions.length > 0 },
+      nat:  { ok: isIos && !privilegeError, sessions: sessions.length, sessionsOk: sessions.length > 0 && !privilegeError },
       lan:  { ip: lanIp },
       ios:  { ok: isIos, version: (versionRaw.match(/Version\s+([\d.()\w]+)/i) || [])[1] || '' },
       suggested: { ciscoIp: ip, ciscoUser: user },
       hostFp: shell.hostFp,
-      diag: { ssh: { ok: true }, isIos, lanIp, natSessions: sessions.length },
+      diag: { ssh: { ok: true }, isIos, lanIp, natSessions: sessions.length, privilegeError },
     };
   } finally {
     shell.close();
@@ -456,15 +465,16 @@ async function detectCurrentCisco() {
   const versionRaw = await ciscoExec('show version');
   const ifBriefRaw = await ciscoExec('show ip interface brief');
   const natRaw     = await ciscoExec('show ip nat translations');
+  const privilegeError = isPrivilegeError(natRaw);
   const sessions   = parseNatTranslations(natRaw);
   const lanIp      = parseLanIp(ifBriefRaw);
   return {
     ssh:  { ok: true },
-    nat:  { ok: true, sessions: sessions.length, sessionsOk: sessions.length > 0 },
+    nat:  { ok: !privilegeError, sessions: sessions.length, sessionsOk: sessions.length > 0 && !privilegeError },
     lan:  { ip: lanIp },
     ios:  { ok: isCiscoIos(versionRaw) },
     suggested: { ciscoIp: ciscoIp, ciscoUser: ciscoUser },
-    diag: { ssh: { ok: true }, lanIp, natSessions: sessions.length },
+    diag: { ssh: { ok: true }, lanIp, natSessions: sessions.length, privilegeError },
   };
 }
 
@@ -517,6 +527,7 @@ module.exports = {
   parseLanIp,
   dotMacToColon,
   isCiscoIos,
+  isPrivilegeError,
   detectCisco,
   detectCurrentCisco,
   refreshCiscoArp,

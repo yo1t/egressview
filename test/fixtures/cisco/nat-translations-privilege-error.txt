@@ -1,0 +1,5 @@
+Router>show ip nat translations
+              ^
+% Invalid input detected at '^' marker.
+
+Router>
