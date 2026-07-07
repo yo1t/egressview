@@ -231,6 +231,12 @@ function renderCiscoDetectStatus(data, ok) {
       `  ${t('settings.cisco.natSessions')}: ${sessionsText}`,
       `✓ ${t('settings.cisco.suggestedReady')}`,
     ];
+  } else if (ok && data?.diag?.privilegeError) {
+    // SSH は通ったが特権モードでなく NAT テーブルを読めない（enable パスワード未入力/不足）
+    lines = [
+      `✓ ${t('settings.cisco.sshOk')}`,
+      `✗ ${t('settings.cisco.privilegeError')}`,
+    ];
   } else if (data?.diag?.ssh?.ok === false) {
     const code = data.diag.ssh.code || 'unknown';
     lines = [
@@ -241,7 +247,8 @@ function renderCiscoDetectStatus(data, ok) {
     lines = [data?.code ? t('err.' + data.code) : (data?.error || t('settings.cisco.detectFailed'))];
   }
   el.textContent = lines.join('\n');
-  el.className = 'settings-status ' + (ok ? 'ok' : 'err');
+  // NAT が読めていない場合は HTTP 200 でも成功表示にしない
+  el.className = 'settings-status ' + ((ok && data?.nat?.ok) ? 'ok' : 'err');
   el.style.display = 'block';
   el.style.whiteSpace = 'pre-line';
 }
