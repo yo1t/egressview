@@ -1,0 +1,64 @@
+project_name: egressview
+
+fail_on_findings: true
+
+global_settings:
+  severity_threshold: MEDIUM
+
+  ignore_paths:
+    - path: 'node_modules/**'
+      reason: 'Third-party dependencies'
+    - path: '.ash/**'
+      reason: 'ASH output directory'
+
+  suppressions:
+    # ── detect-secrets false positives ──────────────────────────────────────
+    # These are the literal word "password"/"secret" appearing in translation
+    # strings, npm script names, variable names and a token-alphabet constant —
+    # none are real credentials.
+    - path: 'public/js/i18n.js'
+      rule_id: 'SECRET-SECRET-KEYWORD'
+      reason: 'UI translation strings containing the word "password"; not a credential'
+    - path: 'package.json'
+      rule_id: 'SECRET-SECRET-KEYWORD'
+      reason: 'npm script name "security:secrets"; not a credential'
+    - path: 'src/routes/auth.js'
+      rule_id: 'SECRET-SECRET-KEYWORD'
+      reason: 'Local variable named "password" in login validation; not a credential'
+    - path: 'src/auth-password.js'
+      rule_id: 'SECRET-BASE64-HIGH-ENTROPY-STRING'
+      reason: 'Base32 alphabet constant used for token generation; not a secret value'
+
+    # ── dev-only container (not shipped to production) ──────────────────────
+    # dev-conntrack/ is a local test router image used only for development;
+    # it is never built or deployed to the production EC2 host.
+    - path: 'dev-conntrack/router/Dockerfile'
+      rule_id: 'CKV_DOCKER_1'
+      reason: 'Dev-only test container; SSH port needed for local router emulation'
+    - path: 'dev-conntrack/router/Dockerfile'
+      rule_id: 'CKV_DOCKER_2'
+      reason: 'Dev-only test container; HEALTHCHECK not required for local use'
+    - path: 'dev-conntrack/router/Dockerfile'
+      rule_id: 'CKV_DOCKER_3'
+      reason: 'Dev-only test container; root needed to emulate router services'
+    - path: 'dev-conntrack/router/Dockerfile'
+      rule_id: 'CKV2_DOCKER_17'
+      reason: 'Dev-only test container; chpasswd used to seed a throwaway test login'
+
+    # ── verified-safe application code ──────────────────────────────────────
+    - path: 'public/js/log.js'
+      rule_id: 'typescript.react.security.audit.react-unsanitized-method.react-unsanitized-method'
+      reason: 'rowsHtml is built entirely from esc()-escaped values (same trusted string used by the innerHTML branch); no unsanitized user input'
+    - path: 'server.js'
+      rule_id: 'javascript.express.security.audit.express-path-join-resolve-traversal.express-path-join-resolve-traversal'
+      reason: 'filename validated by ^[A-Za-z0-9._-]+\.js$ (no path separators) plus an explicit basename containment check before fs.readFile'
+
+  # Inline pragmas also used for detect-secrets:
+  # server.js: // pragma: allowlist secret
+  # docs/setup-yamaha.md: <!-- pragma: allowlist secret -->
+
+scanners:
+  semgrep:
+    enabled: true
+    options:
+      config: p/owasp-top-ten
