@@ -20,6 +20,7 @@ const frontendDeps = fs.readFileSync(frontendDepsPath, 'utf8');
 const logJs    = fs.readFileSync(path.join(jsDir, 'log.js'), 'utf8');
 const mainJs   = fs.readFileSync(path.join(jsDir, 'main.js'), 'utf8');
 const serverJs = fs.readFileSync(path.join(__dirname, '..', '..', 'server.js'), 'utf8');
+const pollSchedulerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'poll-scheduler.js'), 'utf8');
 const yamahaJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'pollers', 'yamaha.js'), 'utf8');
 const asusJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'pollers', 'asus.js'), 'utf8');
 const historyJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'history.js'), 'utf8');
@@ -516,10 +517,12 @@ describe('Connection Log pagination/filter invariants', () => {
 
 describe('Server runtime invariants', () => {
   it('Yamaha polling reschedules with POLL_INTERVAL, not a hard-coded 60 seconds', () => {
-    assert.match(serverJs, /setTimeout\(pollYamahaConnections,\s*POLL_INTERVAL\)/,
-      'pollYamahaConnections should honor POLL_INTERVAL_MS');
-    assert.doesNotMatch(serverJs, /setTimeout\(pollYamahaConnections,\s*60000\)/,
+    assert.match(pollSchedulerJs, /setTimeout\(pollYamahaConnections,\s*_pollIntervalMs\)/,
+      'pollYamahaConnections should honor the injected pollIntervalMs (POLL_INTERVAL_MS)');
+    assert.doesNotMatch(pollSchedulerJs, /setTimeout\(pollYamahaConnections,\s*60000\)/,
       'pollYamahaConnections must not reschedule with a hard-coded 60000 ms');
+    assert.match(serverJs, /pollIntervalMs:\s*POLL_INTERVAL/,
+      'server.js must inject POLL_INTERVAL into the poll scheduler');
   });
 
   it('Yamaha connection failures emit state="failed" so the UI does not stay waiting forever', () => {
@@ -532,12 +535,12 @@ describe('Server runtime invariants', () => {
   });
 
   it('Yamaha polling queues external enrichment instead of awaiting it inline', () => {
-    const start = serverJs.indexOf('async function pollYamahaConnections()');
+    const start = pollSchedulerJs.indexOf('async function pollYamahaConnections()');
     assert.notEqual(start, -1, 'pollYamahaConnections should exist');
-    const end = serverJs.indexOf('// ─── Express middleware', start);
+    const end = pollSchedulerJs.indexOf('async function pollCiscoConnections()', start);
     assert.notEqual(end, -1, 'pollYamahaConnections section end marker should exist');
-    const pollFn = serverJs.slice(start, end);
-    assert.match(pollFn, /queueConnectionEnrichment\(unique\)/,
+    const pollFn = pollSchedulerJs.slice(start, end);
+    assert.match(pollFn, /_queueConnectionEnrichment\(unique\)/,
       'polling should enqueue DNS/RDAP/Geo work in the background');
     assert.doesNotMatch(pollFn, /await\s+enrichment\.lookupRdapBatch/,
       'polling must not wait for RDAP lookups before continuing');
