@@ -567,6 +567,10 @@ async function pollCiscoConnections() {
 
 // ─── Express middleware ───────────────────────────────────────────────────────
 
+// 遅延リクエストの自己申告（P2-22）— 全ミドルウェア・ルートの手前で計測を開始する
+const { createSlowRequestLogger } = require('./src/slow-request-log');
+app.use(createSlowRequestLogger());
+
 // Security headers — applied to every response
 app.use((req, res, next) => {
   // Nonce for the BASE_URL bootstrap <script> tag — eliminates 'unsafe-inline' from script-src
