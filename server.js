@@ -35,6 +35,7 @@ const devices         = require('./src/devices');
 const notes          = require('./src/notes');
 const configIo       = require('./src/config');       // file I/O only
 const runtime        = require('./src/runtime');
+const pollScheduler  = require('./src/poll-scheduler');
 const investigation  = require('./src/investigation');
 const beacons        = require('./src/beacons');
 const beaconDetector = require('./src/beacon-detector');
@@ -116,11 +117,6 @@ const appState = {
     ],
   },
 };
-
-// 差分 push 用タイムスタンプ: ルーターごとに独立して管理し、片方のポーリングが
-// もう片方の差分ウィンドウを詰めないようにする
-let lastYamahaEmitTime = Date.now();
-let lastCiscoEmitTime  = Date.now();
 
 // ─── Express + Socket.IO setup ────────────────────────────────────────────────
 const app = express();
@@ -342,11 +338,10 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// ─── Yamaha polling loop ──────────────────────────────────────────────────────
+// ─── Connection enrichment queue ──────────────────────────────────────────────
+// ポーリングループ本体は src/poll-scheduler.js（P2-23 で分離）。
+// enrichment キューは INSPECT 等からも使うため server.js に残す。
 
-// Track session keys seen in the previous poll to detect newly-appeared sessions
-// (used for poll-based beacon event recording when [INSPECT] is unavailable).
-let lastPollKeys = new Set();
 const enrichmentQueue = new Set();
 let enrichmentQueueRunning = false;
 
@@ -412,159 +407,6 @@ async function runConnectionEnrichmentQueue() {
   }
 }
 
-// ポールループの多重起動防止フラグ。ループは無効化されると自然消滅するため、
-// 実行時に再有効化されたときは startXPolling() で再起動する。
-let yamahaPollActive = false;
-let ciscoPollActive  = false;
-
-function startYamahaPolling() {
-  if (yamahaPollActive) return;
-  yamahaPollActive = true;
-  pollYamahaConnections();
-}
-
-function startCiscoPolling() {
-  if (ciscoPollActive) return;
-  ciscoPollActive = true;
-  pollCiscoConnections();
-}
-
-async function pollYamahaConnections() {
-  if (!yamaha.isEnabled()) { yamahaPollActive = false; return; }
-  try {
-    if (!yamaha.isReady()) {
-      logger.debug('[yamaha] poll skipped: not ready');
-      return;
-    }
-    const sessions = await yamaha.fetchSessions();
-    logger.debug(`[yamaha] ${sessions.length} sessions parsed`);
-
-    const unique = [...new Set(sessions.map(s => s.dst))];
-    queueConnectionEnrichment(unique);
-
-    const now = Date.now();
-    if (yamaha.needsArpRefresh()) await yamaha.refreshArp();
-    if (yamaha.needsNdpRefresh()) {
-      await yamaha.refreshNdp();
-      for (const [ip, mac] of yamaha.getArpCache()) {
-        const ipv6 = yamaha.getNdpByMac(mac);
-        if (ipv6 && ipv6.length) {
-          devices.observeDevice({ ip, mac, ipv6Addr: ipv6[0], lastSeen: Date.now(), source: 'ndp' });
-        }
-      }
-    }
-
-    sessions.forEach(s => runtime.recordConnection(s, now, 'yamaha'));
-
-    // Poll-based beacon event recording: only used as fallback when INSPECT syslog is
-    // disabled.  When inspectEnabled=true, INSPECT provides precise TCP session-close
-    // timestamps; writing poll events on top would duplicate observations with ±60 s
-    // precision and skew the CoV calculation.
-    // lastPollKeys is updated unconditionally so the delta is accurate when the setting toggles.
-    const currentPollKeys = new Set(sessions.map(s => `${s.src}|${s.dst}|${s.dport}|${s.proto}`));
-    if (!appState.inspectEnabled) {
-      for (const s of sessions) {
-        const key = `${s.src}|${s.dst}|${s.dport}|${s.proto}`;
-        if (!lastPollKeys.has(key)) {
-          const entry = history.getConnectionHistory().get(key);
-          beacons.appendEvent({
-            src: s.src, dst: s.dst,
-            dstHost: entry?.dstHost || s.dst,
-            dport: s.dport, proto: s.proto,
-            seenAt: now, source: 'poll',
-          });
-        }
-      }
-    }
-    lastPollKeys = currentPollKeys;
-
-    history.pruneHistory();
-
-    // 差分 push: 前回 emit 以降に lastSeen が更新されたエントリのみ送信
-    const deltaConns = [...history.getConnectionHistory().values()]
-      .filter(c => c.lastSeen > lastYamahaEmitTime);
-    lastYamahaEmitTime = now;
-    if (deltaConns.length > 0) {
-      io.emit('connections-update', {
-        connections: deltaConns,
-        serverTime:  now,
-        partial:     true,
-        delta:       true,
-      });
-      logger.debug(`[yamaha] emit delta: ${deltaConns.length} connections (of ${history.getConnectionHistory().size} total)`);
-    } else {
-      logger.debug('[yamaha] emit delta: 0 changes, skipped');
-    }
-
-    if (appState.autoInvestigate) {
-      const srcIps = [...new Set(sessions.map(s => s.src))];
-      for (const ip of srcIps) investigation.enqueue(ip, runtime.resolveMacByIp(ip));
-    }
-  } catch (err) {
-    logger.error('[yamaha] poll error:', err.message);
-    if (err.message.includes('timeout')) {
-      logger.warn('[yamaha] Timeout detected, resetting connection…');
-      yamaha.reconnect();
-    }
-  } finally {
-    if (yamaha.isEnabled()) setTimeout(pollYamahaConnections, POLL_INTERVAL);
-    else yamahaPollActive = false;
-  }
-}
-
-async function pollCiscoConnections() {
-  if (!cisco.isEnabled()) { ciscoPollActive = false; return; }
-  try {
-    if (!cisco.isReady()) {
-      logger.debug('[cisco] poll skipped: not ready');
-      return;
-    }
-    const sessions = await cisco.fetchSessions();
-    logger.debug(`[cisco] ${sessions.length} sessions parsed`);
-
-    const unique = [...new Set(sessions.map(s => s.dst))];
-    queueConnectionEnrichment(unique);
-
-    const now = Date.now();
-    if (cisco.needsArpRefresh()) await cisco.refreshArp();
-    if (cisco.needsNdpRefresh()) {
-      await cisco.refreshNdp();
-      for (const [ip, mac] of cisco.getArpCache()) {
-        const ipv6 = cisco.getNdpByMac(mac);
-        if (ipv6 && ipv6.length) {
-          devices.observeDevice({ ip, mac, ipv6Addr: ipv6[0], lastSeen: Date.now(), source: 'ndp' });
-        }
-      }
-    }
-
-    sessions.forEach(s => runtime.recordConnection(s, now, 'cisco'));
-
-    history.pruneHistory();
-
-    const deltaConns = [...history.getConnectionHistory().values()]
-      .filter(c => c.lastSeen > lastCiscoEmitTime);
-    lastCiscoEmitTime = now;
-    if (deltaConns.length > 0) {
-      io.emit('connections-update', {
-        connections: deltaConns,
-        serverTime:  now,
-        partial:     true,
-        delta:       true,
-      });
-      logger.debug(`[cisco] emit delta: ${deltaConns.length} connections`);
-    }
-  } catch (err) {
-    logger.error('[cisco] poll error:', err.message);
-    if (err.message.includes('timeout')) {
-      logger.warn('[cisco] Timeout detected, resetting connection…');
-      cisco.reconnect();
-    }
-  } finally {
-    if (cisco.isEnabled()) setTimeout(pollCiscoConnections, POLL_INTERVAL);
-    else ciscoPollActive = false;
-  }
-}
-
 // ─── Express middleware ───────────────────────────────────────────────────────
 
 // 遅延リクエストの自己申告（P2-22）— 全ミドルウェア・ルートの手前で計測を開始する
@@ -614,7 +456,11 @@ if (SUBPATH) jsModuleRoutes.push(`${SUBPATH}/js/:file`);
 app.get(jsModuleRoutes, (req, res, next) => {
   const file = req.params.file || '';
   if (!/^[A-Za-z0-9._-]+\.js$/.test(file)) return next();
-  const filePath = path.join(__dirname, 'public', 'js', file);
+  const jsDir = path.join(__dirname, 'public', 'js');
+  const filePath = path.join(jsDir, file);
+  // Defense in depth: the regex above already forbids path separators, but
+  // verify the resolved path stays inside the js directory before reading.
+  if (path.resolve(filePath) !== path.join(jsDir, path.basename(file))) return next();
   fs.readFile(filePath, 'utf8', (err, js) => {
     if (err) return next();
     const replaced = js.replace(/__ASSET_VERSION__/g, htmlEscape(ASSET_VERSION));
@@ -724,7 +570,8 @@ const routeCtx = {
   appState,
   appRoot:             __dirname,
   setLatestConnections: () => {},  // Yamaha disabled clears in-memory session list
-  startYamahaPolling, startCiscoPolling,
+  startYamahaPolling: pollScheduler.startYamahaPolling,
+  startCiscoPolling:  pollScheduler.startCiscoPolling,
 };
 
 app.use('/api', authRoutes(routeCtx));
@@ -817,6 +664,12 @@ notifier.setLogCallback((entry, type, slackSent) => {
 runtime.init({
   io, history, enrichment, threatIntel, notifier, deviceId, devices,
   asus, yamaha, cisco, dhcpdSyslog, beacons,
+});
+
+pollScheduler.init({
+  io, yamaha, cisco, runtime, history, devices, beacons, investigation,
+  appState, queueConnectionEnrichment,
+  pollIntervalMs: POLL_INTERVAL,
 });
 
 investigation.init({
@@ -948,11 +801,11 @@ server.listen(PORT, HOST, () => {
     logger.info(`Router IP: ${asus.getRouterIp()}`);
     deviceId.loadOuiDb();
     yamaha.connect(() => {
-      yamaha.refreshArp().then(() => startYamahaPolling());
+      yamaha.refreshArp().then(() => pollScheduler.startYamahaPolling());
     });
     if (cisco.isEnabled()) {
       cisco.connect(() => {
-        cisco.refreshArp().then(() => startCiscoPolling());
+        cisco.refreshArp().then(() => pollScheduler.startCiscoPolling());
       });
     }
     dnsmasqLog.start();

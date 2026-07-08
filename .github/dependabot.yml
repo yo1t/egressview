@@ -7,6 +7,10 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    # Wait 7 days before proposing updates to newly published versions so that
+    # a compromised/unstable release has time to be caught and yanked.
+    cooldown:
+      default-days: 7
     groups:
       # Batch all non-major updates into one PR to reduce noise.
       # Security updates still get their own PR from GitHub automatically.
@@ -21,6 +25,8 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns:
