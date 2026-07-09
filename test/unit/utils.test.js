@@ -61,7 +61,7 @@ describe('isAllowedLogPath', () => {
   it('accepts extra prefixes via EGRESSVIEW_LOG_PATH_PREFIXES', () => {
     process.env.EGRESSVIEW_LOG_PATH_PREFIXES = '/srv/log/,/data/logs';
     assert.equal(isAllowedLogPath('/srv/log/router.log'), true);
-    assert.equal(isAllowedLogPath('/data/logs/router.log'), true); // 末尾スラッシュは自動補完
+    assert.equal(isAllowedLogPath('/data/logs/router.log'), true); // trailing slash is added automatically
     assert.equal(isAllowedLogPath('/data/logs-evil/x.log'), false);
   });
   it('ignores relative entries in EGRESSVIEW_LOG_PATH_PREFIXES', () => {

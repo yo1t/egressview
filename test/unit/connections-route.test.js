@@ -135,7 +135,7 @@ describe('connections route: GET /connections pagination', () => {
     r.status = (code) => { r._status = code; return r; };
     r.json   = (body) => { r._body  = body; return r; };
     r.set    = (k, v) => { if (typeof k === 'object') Object.assign(r._headers, k); else r._headers[k] = v; return r; };
-    // no-limit パスは sendLargeJson 経由で end(Buffer) を呼ぶため JSON に戻す
+    // The no-limit path calls end(Buffer) via sendLargeJson, so parse it back to JSON
     r.end    = (body) => { r._body = JSON.parse(body.toString('utf8')); return r; };
     return r;
   }
@@ -649,7 +649,7 @@ describe('connections route: parseTimestampParam', () => {
   });
 });
 
-// ─── sendLargeJson（巨大JSON一括gzip送信ヘルパー） ─────────────────────────────
+// ─── sendLargeJson (helper that gzips large JSON in one shot) ────────────────
 
 describe('connections route: sendLargeJson', () => {
   const zlib = require('zlib');

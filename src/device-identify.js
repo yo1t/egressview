@@ -159,7 +159,7 @@ async function probeHttpBanner(ip, port, https_ = false) {
     const url = `${https_ ? 'https' : 'http'}://${ip}${port === (https_ ? 443 : 80) ? '' : ':' + port}/`;
     const r = await axios.get(url, {
       timeout: 2500, maxRedirects: 0, validateStatus: () => true,
-      httpsAgent: new https.Agent({ rejectUnauthorized: false }), // nosemgrep: bypass-tls-verification — LAN デバイス調査用。自己署名証明書が多いLAN機器専用。呼び出し元で isAllowedRouterIp() によりプライベートIPのみに制限
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }), // nosemgrep: bypass-tls-verification — for LAN device probing, which is dominated by self-signed-cert devices; the caller restricts this to private IPs via isAllowedRouterIp()
     });
     const server = r.headers['server'] || '';
     const realm  = (r.headers['www-authenticate'] || '').match(/realm="([^"]+)"/i)?.[1] || '';

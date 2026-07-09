@@ -192,7 +192,7 @@ function initDb(dbPath) {
       lastSeen = MAX(lastSeen, @lastSeen),
       source = CASE
         WHEN source = @source THEN source
-        -- メモリ側で既にマージ済みの値をスナップショットする場合（再起動を跨いでも維持）
+        -- snapshotting an in-memory value that's already merged (persists across restarts)
         WHEN @source = 'yamaha+cisco' AND source IN ('yamaha','cisco') THEN 'yamaha+cisco'
         WHEN source IN ('yamaha','cisco') AND @source IN ('yamaha','cisco') THEN 'yamaha+cisco'
         ELSE source

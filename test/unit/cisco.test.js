@@ -170,7 +170,7 @@ describe('cisco-adapter: router-interface contract', () => {
   });
 });
 
-// ── isPrivilegeError（特権不足の検出） ─────────────────────────────────────────
+// ── isPrivilegeError (detecting insufficient privilege) ───────────────────────
 
 describe('cisco: isPrivilegeError', () => {
   it('detects "% Invalid input" from user-mode NAT command', () => {
@@ -192,7 +192,7 @@ describe('cisco: isPrivilegeError', () => {
   });
 });
 
-// ── parseNatTranslations の形式差分（privilege エラー・static エントリ） ────────
+// ── parseNatTranslations format variants (privilege error, static entries) ────
 
 describe('cisco: parseNatTranslations format variants', () => {
   it('returns 0 sessions for privilege-error output (must be caught by isPrivilegeError, not treated as empty table)', () => {
@@ -203,7 +203,7 @@ describe('cisco: parseNatTranslations format variants', () => {
   it('ignores static "---" entries without ports', () => {
     const raw = fix('nat-translations.txt');
     const sessions = cisco.parseNatTranslations(raw);
-    // fixture の static 行 (--- 203.0.113.1 192.168.1.100 --- ---) はセッション化されない
+    // the fixture's static line (--- 203.0.113.1 192.168.1.100 --- ---) must not become a session
     assert.ok(sessions.every(s => s.src !== '192.168.1.100'), 'static entry must not appear as a session');
   });
 

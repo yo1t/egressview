@@ -120,8 +120,9 @@ function isCiscoIos(text) {
   return /Cisco IOS/i.test(String(text || ''));
 }
 
-// privilege 不足時の IOS エラー出力を検出する。パーサーは黙って0件を返すため、
-// 「NAT テーブルが空」と「特権モードでない」を呼び出し側で区別できるようにする。
+// Detects the IOS error output produced when privilege is insufficient. The
+// parser would otherwise silently return zero sessions, so this lets callers
+// distinguish "NAT table is empty" from "not in privileged mode".
 function isPrivilegeError(text) {
   return /%\s*(Invalid input|Access denied|Authorization failed)/i.test(String(text || ''));
 }
@@ -136,7 +137,8 @@ function looksLikePagerPrompt(text) {
   return /--\s*[Mm]ore\s*--/.test(String(text || ''));
 }
 
-// "enable" 送信後に IOS が返す "Password:" はシェルプロンプトにマッチしないため専用判定
+// The "Password:" prompt IOS returns after sending "enable" doesn't match the
+// shell-prompt regex, so it needs its own detector
 function looksLikePasswordPrompt(text) {
   return /[Pp]assword:\s*$/.test(String(text || ''));
 }
@@ -233,7 +235,8 @@ function createTempCiscoShell({ ip, user, pass, enablePass, expectedHostFp }) {
           if (/>\s*$/.test(buf) && enablePass) {
             buf = '';
             shell.write('enable\n');
-            // enable にパスワードが設定されていれば "Password:"、不要なら即プロンプトが返る
+            // If an enable password is configured, IOS returns "Password:";
+            // otherwise the prompt returns immediately
             await waitForPromptLocal(8000, t => looksLikePasswordPrompt(t) || looksLikeShellPrompt(t));
             if (looksLikePasswordPrompt(buf)) {
               buf = '';
@@ -345,7 +348,8 @@ function connectCisco(onReady) {
           if (/>\s*$/.test(shellBuf) && ciscoEnablePass) {
             shellBuf = '';
             ciscoShell.write('enable\n');
-            // enable にパスワードが設定されていれば "Password:"、不要なら即プロンプトが返る
+            // If an enable password is configured, IOS returns "Password:";
+            // otherwise the prompt returns immediately
             await waitForPrompt(8000, t => looksLikePasswordPrompt(t) || looksLikeShellPrompt(t));
             if (looksLikePasswordPrompt(shellBuf)) {
               shellBuf = '';
@@ -391,7 +395,8 @@ function connectCisco(onReady) {
 
 async function fetchNatSessions() {
   const raw = await ciscoExec('show ip nat translations', 90000);
-  // ユーザーモードのままだと privilege エラーが返り 0 件と区別できないため明示エラーにする
+  // Staying in user mode returns a privilege error indistinguishable from zero
+  // sessions, so raise an explicit error instead
   if (isPrivilegeError(raw)) {
     throw new Error('privileged EXEC required — enable mode not active');
   }
@@ -440,8 +445,9 @@ async function detectCisco({ ip, user, pass, enablePass, expectedHostFp } = {}) 
     const versionRaw   = await shell.exec('show version');
     const ifBriefRaw   = await shell.exec('show ip interface brief');
     const natRaw       = await shell.exec('show ip nat translations');
-    // privilege 1 ユーザーで enablePass 未入力だとユーザーモードのまま到達し、
-    // NAT 出力が "% Invalid input" になる。0件成功と区別して UI に案内を出す。
+    // A privilege-1 user with no enablePass configured stays in user mode,
+    // producing "% Invalid input" for the NAT command. Distinguish this from
+    // a genuine zero-session success so the UI can guide the user.
     const privilegeError = isPrivilegeError(natRaw);
     const sessions     = parseNatTranslations(natRaw);
     const lanIp        = parseLanIp(ifBriefRaw);
@@ -487,7 +493,8 @@ function disconnect() {
   if (ciscoConn) { try { ciscoConn.removeAllListeners(); ciscoConn.on('error', () => {}); ciscoConn.end(); } catch {} ciscoConn = null; }
   ciscoShell = null;
   shellBuf   = '';
-  // 無効化後に古い ARP/NDP を resolveMacByIp へ返さないようキャッシュも破棄
+  // Also clear the caches so resolveMacByIp doesn't keep returning stale
+  // ARP/NDP data after being disabled
   ciscoArpCache.clear();
   ciscoNdpCache.clear();
   ciscoArpLastRefresh = 0;

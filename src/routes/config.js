@@ -4,7 +4,8 @@ const logger = require('../logger');
 
 const { Router } = require('express');
 const { t, setLanguage } = require('../i18n-server');
-// 許可プレフィックス制限付きログパス検証（tail は sudo で動くため任意パスを許さない）
+// Log path validation restricted to an allowlist of prefixes (tail runs via
+// sudo, so arbitrary paths must not be permitted)
 const { isAllowedLogPath: isValidLogPath } = require('../utils');
 
 const ALLOWED_COUNTRIES = new Set([

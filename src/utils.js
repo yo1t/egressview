@@ -4,18 +4,18 @@
 const path = require('path');
 
 // ── Log path allowlist ─────────────────────────────────────────────────
-// tail は sudo で動くため、admin トークン保持者が任意ファイルを root 権限で
-// 読める昇格経路にならないよう、既知のログディレクトリ配下に制限する。
-// /tmp や /home 配下は非特権ユーザーがシンボリックリンクを設置できるため許可しない。
+// tail runs via sudo, so restrict it to known log directories to prevent an
+// admin-token holder from turning it into a root-level arbitrary file read.
+// /tmp and /home are excluded because unprivileged users can plant symlinks there.
 const DEFAULT_LOG_PATH_PREFIXES = [
-  '/var/log/',              // Linux 全般・NAS
-  '/private/var/log/',      // macOS（/var は /private/var への symlink）
+  '/var/log/',              // Linux in general / NAS
+  '/private/var/log/',      // macOS (/var is a symlink to /private/var)
   '/opt/homebrew/var/log/', // macOS Homebrew (Apple Silicon)
   '/usr/local/var/log/',    // macOS Homebrew (Intel)
 ];
 
-// Docker マウントやカスタム syslog 出力先は環境変数で明示的に拡張する
-// （例: EGRESSVIEW_LOG_PATH_PREFIXES=/srv/log/,/data/logs/）
+// Docker mounts or custom syslog destinations can be added explicitly via env var
+// (e.g. EGRESSVIEW_LOG_PATH_PREFIXES=/srv/log/,/data/logs/)
 function getAllowedLogPathPrefixes() {
   const extra = (process.env.EGRESSVIEW_LOG_PATH_PREFIXES || '')
     .split(',')

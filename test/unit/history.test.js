@@ -504,7 +504,7 @@ describe('summarizeByTimeRange', () => {
   it('keeps merged source when snapshotting an already-merged in-memory entry', () => {
     const t = Date.now();
     const base = { src: '192.168.1.10', dst: '10.0.0.98', dport: 443, proto: 'TCP' };
-    // 1回目の flush では単独ソース、メモリ側でマージ後の 2回目の flush で merged 値が来る
+    // First flush is a single source; the second flush carries the already-merged value from memory
     insert({ ...base, source: 'yamaha',       firstSeen: t - 1000, lastSeen: t - 1000 });
     insert({ ...base, source: 'yamaha+cisco', firstSeen: t - 1000, lastSeen: t - 500 });
 

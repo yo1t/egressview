@@ -1,4 +1,4 @@
-// Unit tests for src/poll-scheduler.js (P2-23 で server.js から分離)
+// Unit tests for src/poll-scheduler.js (extracted from server.js in P2-23)
 // Run: node --test test/unit/poll-scheduler.test.js
 'use strict';
 
@@ -71,7 +71,7 @@ describe('poll-scheduler: lifecycle', () => {
     scheduler.startYamahaPolling();
     await tick();
     assert.equal(deps.yamaha._calls.fetch, 0, 'disabled router must not be polled');
-    // 無効時にループが消滅していれば、再スタートで再びエントリできる（ガードが解除されている）
+    // If the loop died while disabled, restarting should be able to enter again (the guard was released)
     scheduler.startYamahaPolling();
     await tick();
     assert.equal(deps.yamaha._calls.fetch, 0);
@@ -82,12 +82,12 @@ describe('poll-scheduler: lifecycle', () => {
     const { deps } = makeDeps({ yamaha });
     scheduler.init(deps);
     scheduler.startYamahaPolling();
-    scheduler.startYamahaPolling(); // 二重起動は無視される
-    await tick(12); // pollIntervalMs=5 で 2〜3 周期分
+    scheduler.startYamahaPolling(); // the second start should be ignored
+    await tick(12); // ~2-3 cycles at pollIntervalMs=5
     const fetches = yamaha._calls.fetch;
-    yamaha._disable(); // ループを止める
+    yamaha._disable(); // stop the loop
     await tick();
-    // 二重ループなら fetch 回数が倍増する。1ループ分（経過時間/間隔 + 1 程度）に収まること
+    // A double loop would double the fetch count; it should stay within one loop's worth (elapsed/interval + 1 or so)
     assert.ok(fetches <= 5, `expected single loop, got ${fetches} fetches`);
     assert.ok(fetches >= 1, 'loop must have run at least once');
   });
@@ -184,7 +184,7 @@ describe('poll-scheduler: beacon fallback', () => {
     });
     scheduler.init(deps);
     scheduler.startYamahaPolling();
-    await tick(15); // 複数周期 — 2周期目以降は lastPollKeys 済みなので追加されない
+    await tick(15); // multiple cycles — from the 2nd cycle on, lastPollKeys already has it so nothing new is added
     yamaha._disable();
     await tick();
 

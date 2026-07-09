@@ -66,7 +66,7 @@ function makeDevices() {
   return {
     upsert:        (d) => observed.push(d),
     observeDevice: (d) => observed.push(d),
-    _upserted: observed,   // alias: 既存テストとの後方互換
+    _upserted: observed,   // alias: kept for backward compatibility with existing tests
   };
 }
 
@@ -242,9 +242,9 @@ describe('scheduleInspectEmit: delta push', () => {
     initRuntime({ io, history: hist });
 
     const base = 1_000_000;
-    // 古いエントリ (base - 1): emit 対象外
+    // Old entry (base - 1): excluded from the emit
     hist.getConnectionHistory().set('old', { src: '192.168.1.1', dst: '1.1.1.1', dport: 53, proto: 'UDP', lastSeen: base - 1 });
-    // 新しいエントリ (base + 1): emit 対象
+    // New entry (base + 1): included in the emit
     hist.getConnectionHistory().set('new', { src: '192.168.1.2', dst: '8.8.8.8', dport: 53, proto: 'UDP', lastSeen: base + 1 });
 
     runtime._resetInspectEmitTime(base);
@@ -264,7 +264,7 @@ describe('scheduleInspectEmit: delta push', () => {
     initRuntime({ io, history: hist });
 
     const base = 1_000_000;
-    // 古いエントリのみ
+    // Only an old entry
     hist.getConnectionHistory().set('old', { src: '192.168.1.1', dst: '1.1.1.1', dport: 53, proto: 'UDP', lastSeen: base - 1 });
 
     runtime._resetInspectEmitTime(base);
@@ -304,8 +304,8 @@ describe('scheduleInspectEmit: delta push', () => {
 
     runtime._resetInspectEmitTime(base);
     runtime.scheduleInspectEmit();
-    runtime.scheduleInspectEmit(); // 2回目は無視される
-    runtime.scheduleInspectEmit(); // 3回目も無視
+    runtime.scheduleInspectEmit(); // the 2nd call is ignored
+    runtime.scheduleInspectEmit(); // as is the 3rd
     t.mock.timers.tick(1000);
 
     const emits = io._emitted.filter(e => e[0] === 'connections-update');
@@ -321,7 +321,7 @@ describe('scheduleInspectEmit: delta push', () => {
     hist.getConnectionHistory().set('a', { src: '192.168.1.1', dst: '1.1.1.1', dport: 80,  proto: 'TCP', lastSeen: 1000 });
     hist.getConnectionHistory().set('b', { src: '192.168.1.2', dst: '2.2.2.2', dport: 443, proto: 'TCP', lastSeen: 2000 });
 
-    runtime._resetInspectEmitTime(0); // 全エントリが対象になる
+    runtime._resetInspectEmitTime(0); // makes every entry eligible
     runtime.scheduleInspectEmit();
     t.mock.timers.tick(1000);
 

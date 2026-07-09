@@ -33,7 +33,7 @@ test('js/i18n.js is served (200)', async ({ request }) => {
   expect(res.status()).toBe(200);
 });
 
-// ① Phase 2 で分割した全 JS ファイルが 200 で配信されること
+// (1) All JS files split out in Phase 2 must be served with 200
 const PHASE2_JS_FILES = [
   'utils.js', 'connections-panel.js', 'auth-socket.js', 'graph.js',
   'settings.js', 'map-common.js', 'stats.js', 'time-filter.js',
@@ -47,7 +47,7 @@ for (const file of PHASE2_JS_FILES) {
   });
 }
 
-// ② 削除済みファイルが 404 になること（誤って復元したときの検知）
+// (2) Deleted files must 404 (catches accidental restoration)
 const DELETED_JS_FILES = ['map.js', 'dashboard.js'];
 for (const file of DELETED_JS_FILES) {
   test(`js/${file} is deleted (404)`, async ({ request }) => {
@@ -56,7 +56,7 @@ for (const file of DELETED_JS_FILES) {
   });
 }
 
-// ③ index.html にインライン JS が残っていないこと（誤って巻き戻し検出）
+// (3) index.html must not have leftover inline JS (catches accidental reverts)
 test('index.html has no inline script block with JS code', async ({ request }) => {
   const res = await request.get(`${BASE}/`);
   const body = await res.text();
@@ -64,7 +64,7 @@ test('index.html has no inline script block with JS code', async ({ request }) =
   expect(body).not.toMatch(/<script>\s*\/\/ ─/);
 });
 
-// ④ index.html が期待する <script> タグを含むこと（ES module化後は main.js 1本のみ）
+// (4) index.html must contain the expected <script> tag (after ES module migration, only main.js)
 test('index.html references expected script files', async ({ request }) => {
   const res = await request.get(`${BASE}/`);
   const body = await res.text();
@@ -75,7 +75,7 @@ test('index.html references expected script files', async ({ request }) => {
   }
 });
 
-// ⑤ セキュリティヘッダーが返ってくること
+// (5) Security headers must be returned
 test('security headers are present', async ({ request }) => {
   const res = await request.get(`${BASE}/`);
   const h = res.headers();
@@ -252,7 +252,7 @@ test('tab bar renders after auth', async ({ page }) => {
 
   await authPage(page);
 
-  // Exactly 5 tabs: グラフマップ / 統計情報 / 通信ログ / 端末一覧 / 検出ログ
+  // Exactly 5 tabs: graph map / stats / connection log / devices / notification log
   const tabs = page.locator('.view-tab');
   await expect(tabs.first()).toBeVisible();
   const count = await tabs.count();
@@ -281,14 +281,14 @@ test('no console errors after auth', async ({ page }) => {
   expect(fatalErrors(errors), `Console errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
-// ⑥ タブ切り替えがエラーなく動くこと（リファクタリング後の安全網）
+// (6) Tab switching must work without errors (safety net after refactoring)
 test('tab switching produces no console errors', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
   const errors = collectErrors(page);
   await authPage(page);
 
-  // 全タブを順にクリックしてエラーが出ないことを確認
+  // Click through every tab in turn and confirm no errors are raised
   for (const btnId of ['btn-stats', 'btn-log', 'btn-devices', 'btn-notif-log', 'btn-graph']) {
     await page.click(`#${btnId}`);
     await page.waitForTimeout(500);
@@ -297,7 +297,7 @@ test('tab switching produces no console errors', async ({ page }) => {
   expect(fatalErrors(errors), `Tab switch errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
-// ⑦ 検出ログ詳細: 行クリックで開き、右上のバツで閉じること
+// (7) Notification log detail: clicking a row opens it, the top-right X closes it
 test('notification log detail popup opens and closes', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
@@ -327,7 +327,7 @@ test('notification log detail popup opens and closes', async ({ page }) => {
   expect(fatalErrors(errors), `Notification detail errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
-// ⑦ 期間フィルター変更後にエラーが出ないこと（getFilteredConnections の間接テスト）
+// (8) Changing the time filter must not raise errors (indirect test of getFilteredConnections)
 test('time filter change produces no console errors', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
@@ -343,29 +343,29 @@ test('time filter change produces no console errors', async ({ page }) => {
   expect(fatalErrors(errors), `Time filter errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
-// ⑧ 長期間（2週間）表示で通信ログにデータが表示されること
+// (9) The connection log must show data over a long period (2 weeks)
 test('log view shows rows with long period (14d)', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
   const errors = collectErrors(page);
   await authPage(page);
 
-  // 2週間に切り替え
+  // Switch to 2 weeks
   await page.locator('#time-filter-select').selectOption('14d');
   await page.waitForTimeout(1000);
 
-  // 通信ログタブへ
+  // Go to the connection log tab
   await page.click('#btn-log');
   await page.waitForTimeout(2000);
 
-  // tbody に少なくとも1行あること
+  // The tbody must have at least one row
   const rowCount = await page.locator('#log-tbody tr').count();
   expect(rowCount, 'log view should show rows for 14d period').toBeGreaterThan(0);
 
   expect(fatalErrors(errors), `Long period log errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
-// ⑨ 統計タブ: サマリー切替（宛先/端末）でエラーが出ないこと
+// (10) Stats tab: switching the summary (destination/device) must not raise errors
 test('stats tab summary switching produces no console errors', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
@@ -375,7 +375,7 @@ test('stats tab summary switching produces no console errors', async ({ page }) 
   await page.click('#btn-stats');
   await page.waitForTimeout(1000);
 
-  // 統計タブ内のビュー切替ボタンがあれば全てクリック
+  // Click every view-switch button in the stats tab, if any exist
   const statsBtns = page.locator('#stats-view [data-view], #stats-panel [data-view], .stats-tab-btn, #btn-stats-dst, #btn-stats-device');
   const btnCount = await statsBtns.count();
   for (let i = 0; i < btnCount; i++) {
@@ -386,7 +386,7 @@ test('stats tab summary switching produces no console errors', async ({ page }) 
   expect(fatalErrors(errors), `Stats switch errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
-// ⑩ 統計タブ: 地図（マップ）が表示されること
+// (11) Stats tab: the map must render
 test('stats tab renders map canvas', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
@@ -395,13 +395,13 @@ test('stats tab renders map canvas', async ({ page }) => {
   await expect(page.locator('#stats-container')).toBeVisible();
   await page.waitForTimeout(2000);
 
-  // SVGまたはcanvasが統計エリアに存在すること
+  // An SVG or canvas must exist in the stats area
   const mapEl = page.locator('#st-globe canvas, #st-globe svg, #st-flat canvas, #st-flat svg').first();
   const hasMap = await mapEl.count() > 0;
   if (hasMap) {
     await expect(mapEl).toBeVisible();
   } else {
-    // マップ要素が見つからなくても統計コンテナ自体が表示されていればOK
+    // If no map element is found, it's still OK as long as the stats container itself is visible
     const statsContainer = page.locator('#stats-container').first();
     await expect(statsContainer).toBeVisible();
   }
@@ -609,7 +609,7 @@ test('device detail note save persists after reopening without console errors', 
   expect(fatalErrors(errors), `Device detail save errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
-// ⑪ 通信ログの無限スクロール: スクロールで次ページが追記されること
+// (12) Connection log infinite scroll: scrolling must append the next page
 test('log view infinite scroll appends rows on scroll', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
@@ -622,7 +622,7 @@ test('log view infinite scroll appends rows on scroll', async ({ page }) => {
 
   const firstCount = await page.locator('#log-tbody tr:not(#log-scroll-sentinel)').count();
 
-  // sentinel がある（= まだ次ページがある）場合のみスクロールテストを実施
+  // Only run the scroll test if the sentinel exists (i.e. there's another page to load)
   const hasSentinel = await page.locator('#log-scroll-sentinel').count() > 0;
   if (hasSentinel) {
     await page.locator('#log-scroll-sentinel').scrollIntoViewIfNeeded();
@@ -634,7 +634,7 @@ test('log view infinite scroll appends rows on scroll', async ({ page }) => {
   expect(fatalErrors(errors), `Scroll errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
-// ⑫ デモモードバナーが表示されること（DEMO_MODE=true 時のみ）
+// (13) The demo-mode banner must be visible (only when DEMO_MODE=true)
 test('demo banner is visible in demo mode', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 

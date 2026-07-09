@@ -10,7 +10,7 @@ let _beacons = null; // optional: injected when beacons module is available
 // ─── Module state ─────────────────────────────────────────────────────────────
 let knownMacs = new Set();
 let inspectEmitTimer = null;
-let lastInspectEmitTime = Date.now(); // 差分 push 用: 前回 emit 以降の更新分のみ送信
+let lastInspectEmitTime = Date.now(); // for delta push: only entries updated since the previous emit
 
 /**
  * Inject all external dependencies.
@@ -43,7 +43,7 @@ function scheduleInspectEmit() {
   inspectEmitTimer = setTimeout(() => {
     inspectEmitTimer = null;
     const now = Date.now();
-    // 差分 push: 前回 emit 以降に lastSeen が更新されたエントリのみ送信
+    // Delta push: send only entries whose lastSeen was updated since the previous emit
     const deltaConns = [..._history.getConnectionHistory().values()]
       .filter(c => c.lastSeen > lastInspectEmitTime);
     lastInspectEmitTime = now;
@@ -57,7 +57,7 @@ function scheduleInspectEmit() {
   }, 1000);
 }
 
-// テスト用: lastInspectEmitTime をリセット
+// Test helper: reset lastInspectEmitTime
 function _resetInspectEmitTime(t) { lastInspectEmitTime = t ?? Date.now(); }
 
 // ─── MAC resolution ───────────────────────────────────────────────────────────

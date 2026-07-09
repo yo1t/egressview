@@ -251,7 +251,7 @@ function updateConnBadge(key) {
   const s = connState[key];
   const badge = document.getElementById('badge-' + key);
   const ipEl  = document.getElementById('badge-' + key + '-ip');
-  // L3/L4 はルーター機種を問わない（Yamaha / Cisco / 両方）
+  // L3/L4 is router-agnostic (Yamaha / Cisco / both)
   const prefix = (key === 'l3l4' ? 'L3/L4 Router' : 'L2 ASUS');
   badge.classList.remove('on', 'off', 'err', 'wait');
   if (!s.enabled) {
@@ -301,7 +301,7 @@ socket.on('config', cfg => {
     if (cfg.yamahaNat)  document.getElementById('s-yamaha-nat').value  = cfg.yamahaNat;
     connState.l3l4.enabled = cfg.yamahaEnabled || cfg.ciscoEnabled;
     connState.l3l4.ready   = !!(cfg.yamahaReady || cfg.ciscoReady);
-    // 有効なルーターの IP を表示（Cisco-only 構成で Yamaha の旧 IP を出さない）
+    // Show the IP of whichever router is enabled (don't show a stale Yamaha IP in a Cisco-only setup)
     connState.l3l4.ip      = (cfg.yamahaEnabled ? cfg.yamahaIp : cfg.ciscoIp) || '';
     connState.l3l4.err     = (cfg.yamahaEnabled || cfg.ciscoEnabled) && !(cfg.yamahaReady || cfg.ciscoReady) ? 'connecting' : '';
     updateConnBadge('l3l4');

@@ -371,7 +371,7 @@ module.exports = function authRoutes(ctx) {
           yamaha.configure({ pass: yPass });
         }
         yamaha.reconnect();
-        // 起動時に無効だった場合ポールループが存在しないため、ここで必ず起動する
+        // No poll loop exists if it was disabled at startup, so always start it here
         startYamahaPolling?.();
         saveConfig();
         logger.info(`[auth] Yamaha config updated: ${yamaha.getIp()}`);
@@ -406,11 +406,11 @@ module.exports = function authRoutes(ctx) {
           });
           cisco.configure({ pass: cPass });
         } else if (typeof cEnablePass === 'string') {
-          // cPass が省略された場合でも enablePass だけ永続化する
+          // Persist enablePass on its own even when cPass was omitted
           persistSecret('cisco', { enablePass: cEnablePass });
         }
         cisco.reconnect();
-        // 起動時に無効だった場合ポールループが存在しないため、ここで必ず起動する
+        // No poll loop exists if it was disabled at startup, so always start it here
         startCiscoPolling?.();
         saveConfig();
         logger.info(`[auth] Cisco config updated: ${cisco.getIp()}`);
