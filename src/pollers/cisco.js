@@ -6,6 +6,15 @@ const { t } = require('../i18n-server');
 const crypto = require('crypto');
 const { Client: SshClient } = require('ssh2');
 
+// Prompt classifiers and the enable-mode handshake state machine live in a
+// separate, pure module so they can be unit-tested without a real device (P2-24).
+const {
+  looksLikeShellPrompt,
+  looksLikePagerPrompt,
+  isPrivilegeError,
+  runEnableHandshake,
+} = require('./cisco-session');
+
 let ciscoShell      = null;
 let ciscoConn       = null;
 let ciscoReady      = false;
@@ -120,28 +129,9 @@ function isCiscoIos(text) {
   return /Cisco IOS/i.test(String(text || ''));
 }
 
-// Detects the IOS error output produced when privilege is insufficient. The
-// parser would otherwise silently return zero sessions, so this lets callers
-// distinguish "NAT table is empty" from "not in privileged mode".
-function isPrivilegeError(text) {
-  return /%\s*(Invalid input|Access denied|Authorization failed)/i.test(String(text || ''));
-}
-
 // ── SSH helpers ───────────────────────────────────────────────────────────────
-
-function looksLikeShellPrompt(text) {
-  return /[>#]\s*$/.test(String(text || ''));
-}
-
-function looksLikePagerPrompt(text) {
-  return /--\s*[Mm]ore\s*--/.test(String(text || ''));
-}
-
-// The "Password:" prompt IOS returns after sending "enable" doesn't match the
-// shell-prompt regex, so it needs its own detector
-function looksLikePasswordPrompt(text) {
-  return /[Pp]assword:\s*$/.test(String(text || ''));
-}
+// Prompt classifiers (looksLike*) and isPrivilegeError are imported from
+// ./cisco-session at the top of this file.
 
 function classifyConnError(err) {
   const msg = String(err?.message || '');
@@ -231,20 +221,13 @@ function createTempCiscoShell({ ip, user, pass, enablePass, expectedHostFp }) {
         stream.on('close', () => { if (!settled) fail(new Error('SSH shell closed')); });
         try {
           await waitForPromptLocal(8000);
-          // Enter enable mode if landed in user mode
-          if (/>\s*$/.test(buf) && enablePass) {
-            buf = '';
-            shell.write('enable\n');
-            // If an enable password is configured, IOS returns "Password:";
-            // otherwise the prompt returns immediately
-            await waitForPromptLocal(8000, t => looksLikePasswordPrompt(t) || looksLikeShellPrompt(t));
-            if (looksLikePasswordPrompt(buf)) {
-              buf = '';
-              shell.write(enablePass + '\n');
-              await waitForPromptLocal(8000);
-            }
-            if (!/#\s*$/.test(buf)) throw new Error('enable mode failed — check enable password');
-          }
+          // Enter privileged (enable) mode via the shared handshake state machine.
+          await runEnableHandshake({
+            initialBuf: buf,
+            enablePass,
+            write: (text) => { buf = ''; shell.write(text); },
+            waitForPrompt: (matcher, ms) => waitForPromptLocal(ms, matcher),
+          });
           await exec('terminal length 0');
           settled = true;
           resolve({ exec, close: cleanup, hostFp: capturedFp });
@@ -345,19 +328,13 @@ function connectCisco(onReady) {
       setTimeout(async () => {
         try {
           await waitForPrompt(8000);
-          if (/>\s*$/.test(shellBuf) && ciscoEnablePass) {
-            shellBuf = '';
-            ciscoShell.write('enable\n');
-            // If an enable password is configured, IOS returns "Password:";
-            // otherwise the prompt returns immediately
-            await waitForPrompt(8000, t => looksLikePasswordPrompt(t) || looksLikeShellPrompt(t));
-            if (looksLikePasswordPrompt(shellBuf)) {
-              shellBuf = '';
-              ciscoShell.write(ciscoEnablePass + '\n');
-              await waitForPrompt(8000);
-            }
-            if (!/#\s*$/.test(shellBuf)) throw new Error('enable mode failed — check enable password');
-          }
+          // Enter privileged (enable) mode via the shared handshake state machine.
+          await runEnableHandshake({
+            initialBuf: shellBuf,
+            enablePass: ciscoEnablePass,
+            write: (text) => { shellBuf = ''; ciscoShell.write(text); },
+            waitForPrompt: (matcher, ms) => waitForPrompt(ms, matcher),
+          });
           shellBuf = '';
           ciscoShell.write('terminal length 0\n');
           await waitForPrompt(5000);
