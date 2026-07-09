@@ -86,3 +86,5 @@ dev-conntrack/
 # GitHub traffic analysis artifacts (local only)
 docs/github-traffic-last-month.svg
 scripts/render-traffic-report.js
+# Local-only Claude Code guidance (not shared with other contributors)
+CLAUDE.local.md
