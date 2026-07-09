@@ -202,7 +202,7 @@ document.getElementById('yamaha-connect-btn').addEventListener('click', async ()
     routerState.yamaha.ready   = false;    // wait for yamaha-status event for connection result
     if (doYamaha && body.yamahaIp) routerState.yamaha.ip = body.yamahaIp;
     connState.l3l4.enabled = doYamaha || routerState.cisco.enabled;
-    connState.l3l4.ready   = routerState.cisco.ready; // Cisco 側が生きていれば ready を維持
+    connState.l3l4.ready   = routerState.cisco.ready; // keep ready if Cisco is still alive
     connState.l3l4.err     = '';
     if (doYamaha && body.yamahaIp) connState.l3l4.ip = body.yamahaIp;
     updateConnBadge('l3l4');
@@ -232,7 +232,7 @@ function renderCiscoDetectStatus(data, ok) {
       `✓ ${t('settings.cisco.suggestedReady')}`,
     ];
   } else if (ok && data?.diag?.privilegeError) {
-    // SSH は通ったが特権モードでなく NAT テーブルを読めない（enable パスワード未入力/不足）
+    // SSH succeeded but not in privileged mode, so the NAT table can't be read (enable password missing/incorrect)
     lines = [
       `✓ ${t('settings.cisco.sshOk')}`,
       `✗ ${t('settings.cisco.privilegeError')}`,
@@ -247,7 +247,7 @@ function renderCiscoDetectStatus(data, ok) {
     lines = [data?.code ? t('err.' + data.code) : (data?.error || t('settings.cisco.detectFailed'))];
   }
   el.textContent = lines.join('\n');
-  // NAT が読めていない場合は HTTP 200 でも成功表示にしない
+  // Don't show a success style if the NAT table couldn't be read, even on HTTP 200
   el.className = 'settings-status ' + ((ok && data?.nat?.ok) ? 'ok' : 'err');
   el.style.display = 'block';
   el.style.whiteSpace = 'pre-line';
@@ -307,7 +307,7 @@ document.getElementById('cisco-connect-btn').addEventListener('click', async () 
     routerState.cisco.ready   = false;     // wait for cisco-status event for connection result
     if (doCisco && body.ciscoIp) routerState.cisco.ip = body.ciscoIp;
     connState.l3l4.enabled = doCisco || routerState.yamaha.enabled;
-    connState.l3l4.ready   = routerState.yamaha.ready; // Yamaha 側が生きていれば ready を維持
+    connState.l3l4.ready   = routerState.yamaha.ready; // keep ready if Yamaha is still alive
     connState.l3l4.err     = '';
     if (doCisco && body.ciscoIp) connState.l3l4.ip = body.ciscoIp;
     updateConnBadge('l3l4');

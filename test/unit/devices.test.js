@@ -8,7 +8,7 @@ const os      = require('os');
 const path    = require('path');
 const devicesModule = require('../../src/devices');
 
-// ─── tmp DB ヘルパー ──────────────────────────────────────────────────────────
+// ─── tmp DB helpers ────────────────────────────────────────────────────────────
 
 let tmpDbPath = null;
 
@@ -24,13 +24,13 @@ function cleanupTmpDb() {
   tmpDbPath = null;
 }
 
-// ─── 各テスト前にリセット ────────────────────────────────────────────────────
+// ─── Reset before each test ─────────────────────────────────────────────────
 
 beforeEach(() => devicesModule._initForTest());
 
 after(() => devicesModule._initForTest());
 
-// ─── 既存テスト（後方互換） ───────────────────────────────────────────────────
+// ─── Existing tests (backward compatibility) ──────────────────────────────────
 
 describe('devices.upsert / getAll', () => {
   it('inserts a new device', () => {
@@ -137,7 +137,7 @@ describe('devices.reopen', () => {
   });
 });
 
-// ─── Step 1a: deviceId カラム ────────────────────────────────────────────────
+// ─── Step 1a: deviceId column ──────────────────────────────────────────────────
 
 describe('devices: step 1a — deviceId column', () => {
   it('新規デバイスに deviceId が自動付与される', () => {
@@ -163,7 +163,7 @@ describe('devices: step 1a — deviceId column', () => {
   it('backfill: deviceId がない既存 row に自動付与される', () => {
     const dbPath = makeTmpDb();
     try {
-      // レガシースキーマ（deviceId 列なし）を直接作成
+      // Create the legacy schema directly (no deviceId column)
       const Database = require('better-sqlite3');
       const legacyDb = new Database(dbPath);
       legacyDb.exec(`
@@ -179,7 +179,7 @@ describe('devices: step 1a — deviceId column', () => {
       ).run();
       legacyDb.close();
 
-      // 新しい initDb → migration + backfill が走る
+      // A fresh initDb() triggers migration + backfill
       devicesModule.initDb(dbPath);
       const row = devicesModule.getByIp('10.99.0.1');
       assert.ok(row.deviceId, 'deviceId が backfill された');
@@ -228,11 +228,11 @@ describe('devices: step 1b — getByDeviceId', () => {
 
   it('upsert は既存の deviceId を上書きしない', () => {
     const first  = devicesModule.upsert({ ip: '10.2.0.3', source: 'nat' });
-    // deviceId を指定しないで再 upsert
+    // Re-upsert without specifying deviceId
     const second = devicesModule.upsert({ ip: '10.2.0.3', vendor: 'Sony', source: 'dhcp' });
     assert.equal(first, second, 'deviceId は保持される');
     const row = devicesModule.getByIp('10.2.0.3');
-    assert.equal(row.vendor, 'Sony');   // 属性は更新されている
+    assert.equal(row.vendor, 'Sony');   // the attribute was updated
   });
 
   it('明示的に deviceId を渡した場合それを使う（新規行）', () => {
@@ -243,26 +243,27 @@ describe('devices: step 1b — getByDeviceId', () => {
   });
 });
 
-// ─── Step 2: device_observations ─────────────────────────────────────────────
+// ─── Step 2: device_observations ────────────────────────────────────────────────
 
 describe('devices: step 2 — device_observations write-on-change', () => {
   it('属性が変化したときのみ observation が追記される', () => {
     const Database = require('better-sqlite3');
 
-    // 最初の observeDevice → observation 書き込みあり
+    // First observeDevice → an observation is written
     devicesModule.observeDevice({ ip: '10.3.0.1', mac: 'aa:00:00:00:00:01', source: 'nat' });
-    // 同じ属性で再呼び出し → 書き込みなし
+    // Same attributes again → no write
     devicesModule.observeDevice({ ip: '10.3.0.1', mac: 'aa:00:00:00:00:01', source: 'nat' });
-    // 同じ属性で再呼び出し → 書き込みなし
+    // Same attributes again → no write
     devicesModule.observeDevice({ ip: '10.3.0.1', mac: 'aa:00:00:00:00:01', source: 'nat' });
 
-    // DB を直接確認
-    const db2 = new Database(':memory:'); // ← in-memory なので直接参照できない、別途 getAll ベース
-    // observeDevice は _initForTest() の in-memory DB を使う。
-    // device_observations にアクセスするため一旦 getByIp → deviceId 経由で確認する。
-    // 実際の observation 件数は getObservationCount (非公開) が必要なため
-    // ここでは「同一 deviceId + 同一 MAC だと 2回目以降は devices.lastSeen だけ更新」という
-    // 側面を、devices テーブルの mac が変わらないことで間接確認する。
+    // Check the DB directly
+    const db2 = new Database(':memory:'); // in-memory, so can't reference it directly; use getAll-based checks instead
+    // observeDevice uses the in-memory DB from _initForTest(). To reach
+    // device_observations, go through getByIp → deviceId instead.
+    // Getting the actual observation count would need getObservationCount
+    // (private), so instead we confirm indirectly, via the devices table's
+    // mac staying unchanged, that "same deviceId + same MAC only updates
+    // devices.lastSeen on subsequent calls".
     db2.close();
     const row = devicesModule.getByIp('10.3.0.1');
     assert.equal(row.mac, 'aa:00:00:00:00:01', 'devices テーブルは正常');
@@ -270,7 +271,7 @@ describe('devices: step 2 — device_observations write-on-change', () => {
 
   it('属性が変わると observation が追記される', () => {
     const id = devicesModule.observeDevice({ ip: '10.3.0.2', vendor: 'Apple', source: 'nat' });
-    // vendor が変わる → observation 追記されるべき
+    // vendor changes → an observation should be appended
     devicesModule.observeDevice({ ip: '10.3.0.2', vendor: 'Sony', source: 'nat' });
     const row = devicesModule.getByIp('10.3.0.2');
     assert.equal(row.vendor, 'Sony', 'vendor が更新されている');
@@ -286,14 +287,14 @@ describe('devices: step 2 — device_observations write-on-change', () => {
   it('同一 deviceId に複数 source からの観測が保持される', () => {
     devicesModule.observeDevice({ ip: '10.3.0.4', mac: 'bb:00:00:00:00:01', vendor: 'Dell', source: 'nat' });
     devicesModule.observeDevice({ ip: '10.3.0.4', mac: 'bb:00:00:00:00:01', vendor: 'Dell', source: 'dhcp' });
-    // nat と dhcp、それぞれ別 source だが同一 deviceId
+    // nat and dhcp are different sources but share the same deviceId
     const row = devicesModule.getByIp('10.3.0.4');
     assert.ok(row.sources.includes('nat'),  'nat source が記録');
     assert.ok(row.sources.includes('dhcp'), 'dhcp source が記録');
   });
 });
 
-// ─── Step 3: observeDevice 後方互換 ──────────────────────────────────────────
+// ─── Step 3: observeDevice backward compatibility ─────────────────────────────
 
 describe('devices: step 3 — observeDevice compatibility', () => {
   it('既知 IP に対して既存 deviceId を返す', () => {
@@ -309,7 +310,7 @@ describe('devices: step 3 — observeDevice compatibility', () => {
   });
 
   it('既存 upsert() 呼び出しが後方互換で動く', () => {
-    // upsert に deviceId を渡さなくても動作する
+    // upsert() works even without passing a deviceId
     devicesModule.upsert({ ip: '10.4.0.3', mac: 'cc:00:00:00:00:01', source: 'nat' });
     const row = devicesModule.getByIp('10.4.0.3');
     assert.ok(row);
@@ -356,24 +357,24 @@ describe('devices: step 4 — isStableMac', () => {
   });
 });
 
-// ─── Step 4: stable MAC 自動リンク ───────────────────────────────────────────
+// ─── Step 4: stable MAC auto-linking ──────────────────────────────────────────
 
 describe('devices: step 4 — stable MAC auto-linking', () => {
   it('同じ stable MAC + IP 変更 → 同一 deviceId に紐付く', () => {
     // b8 = 0b10111000, bit1=0 → globally unique
     const stableMac = 'b8:27:eb:00:00:01';
-    // 最初は .10 にいる
+    // Starts at .10
     const id1 = devicesModule.observeDevice({
       ip: '192.168.1.10', mac: stableMac, source: 'nat',
     });
 
-    // IP が .11 に変わった（同じ MAC）
+    // IP changed to .11 (same MAC)
     const id2 = devicesModule.observeDevice({
       ip: '192.168.1.11', mac: stableMac, source: 'nat',
     });
 
     assert.equal(id1, id2, 'IP 変更後も同一 deviceId');
-    // 新しい IP で参照できる
+    // Can be looked up by the new IP
     const row = devicesModule.getByIp('192.168.1.11');
     assert.ok(row, '新 IP でデバイスが見つかる');
     assert.equal(row.deviceId, id1);
@@ -392,11 +393,11 @@ describe('devices: step 4 — stable MAC auto-linking', () => {
 
   it('stable MAC で複数 IP が存在する場合は自動リンクしない（曖昧）', () => {
     const mac = 'aa:bb:cc:dd:ee:02';
-    // 2 つの異なる IP に同じ stable MAC が登録されている
+    // The same stable MAC is registered under two different IPs
     devicesModule.upsert({ ip: '192.168.1.30', mac, source: 'nat' });
     devicesModule.upsert({ ip: '192.168.1.31', mac, source: 'nat' });
 
-    // 3 つ目の IP で observeDevice → 複数候補があるため自動リンク不可 → 新規 deviceId
+    // observeDevice with a 3rd IP → multiple candidates exist, so auto-linking is skipped → a new deviceId is issued
     const id3 = devicesModule.observeDevice({ ip: '192.168.1.32', mac, source: 'nat' });
     const row1 = devicesModule.getByIp('192.168.1.30');
     const row2 = devicesModule.getByIp('192.168.1.31');
@@ -409,11 +410,11 @@ describe('devices: step 4 — stable MAC auto-linking', () => {
     const mac = 'b8:27:eb:00:00:03';  // b8 = globally unique
     const id1 = devicesModule.observeDevice({ ip: '10.0.0.50', mac, source: 'nat' });
 
-    // IP 変更後も同じ deviceId で observation が記録される
+    // After the IP change, the observation is still recorded under the same deviceId
     const id2 = devicesModule.observeDevice({ ip: '10.0.0.51', mac, source: 'nat' });
     assert.equal(id1, id2);
 
-    // devices テーブルは新 IP を指す
+    // The devices table now points at the new IP
     assert.ok(devicesModule.getByIp('10.0.0.51'), '新 IP の row がある');
     assert.equal(devicesModule.getByDeviceId(id1)?.ip, '10.0.0.51', 'deviceId が新 IP を指す');
   });
@@ -492,16 +493,16 @@ describe('devices: step 6 — merge candidates', () => {
     const ok = devicesModule.approveMerge(idA, idB);
     assert.ok(ok);
 
-    // B はソフトデリート（archivedAt 設定、mergedInto = idA）
+    // B is soft-deleted (archivedAt is set, mergedInto = idA)
     const dropped = devicesModule.getByDeviceId(idB);
     assert.ok(dropped != null,               'dropId の row は残る（soft delete）');
     assert.ok(dropped.archivedAt != null,    'dropId は archivedAt が設定される');
     assert.equal(dropped.mergedInto, idA,    'dropId.mergedInto === keepId');
-    // getAll() や getByIp() にはアーカイブ済みが含まれない
+    // Archived devices are excluded from getAll() and getByIp()
     assert.ok(!devicesModule.getAll().some(d => d.deviceId === idB), 'getAll には含まれない');
-    // A が残っている
+    // A remains
     assert.ok(devicesModule.getByDeviceId(idA), 'keepId の row が残る');
-    // 候補が approved になっている
+    // The candidate is now approved
     const approved = devicesModule.getMergeCandidates('approved');
     assert.ok(approved.some(c =>
       (c.deviceIdA === idA || c.deviceIdB === idA) &&
@@ -601,7 +602,7 @@ describe('devices: P2-12 — checkStaleMergeCandidates', () => {
 
   it('stale デバイスの merge 候補が checkStaleMergeCandidates で生成される', () => {
     const STALE = Date.now() - 8 * 24 * 60 * 60 * 1000; // 8日前
-    // upsert() で直接挿入（observeDevice の checkMergeCandidates をバイパス）
+    // Insert directly via upsert() (bypasses observeDevice's checkMergeCandidates)
     devicesModule.upsert({ ip: '10.10.0.1', mdnsName: 'stale-host.local', lastSeen: STALE, firstSeen: STALE, source: 'nat' });
     devicesModule.upsert({ ip: '10.10.0.2', mdnsName: 'stale-host.local', lastSeen: STALE, firstSeen: STALE, source: 'nat' });
 
@@ -615,7 +616,7 @@ describe('devices: P2-12 — checkStaleMergeCandidates', () => {
   });
 
   it('active/recent デバイスは対象外', () => {
-    // active デバイス（lastSeen = 1時間前）
+    // An active device (lastSeen = 1 hour ago)
     devicesModule.upsert({ ip: '10.10.1.1', mdnsName: 'active-host.local', lastSeen: Date.now() - 3600_000, firstSeen: Date.now(), source: 'nat' });
     devicesModule.upsert({ ip: '10.10.1.2', mdnsName: 'active-host.local', lastSeen: Date.now() - 3600_000, firstSeen: Date.now(), source: 'nat' });
 
@@ -628,7 +629,7 @@ describe('devices: P2-12 — checkStaleMergeCandidates', () => {
   });
 });
 
-// ─── P2-11: archived IP の mergedInto redirect ────────────────────────────────
+// ─── P2-11: mergedInto redirect for archived IPs ──────────────────────────────
 
 describe('devices: P2-11 — observeDevice redirect via mergedInto', () => {
   beforeEach(() => devicesModule._initForTest());
@@ -638,7 +639,7 @@ describe('devices: P2-11 — observeDevice redirect via mergedInto', () => {
     const dropId = devicesModule.observeDevice({ ip: '10.9.0.2', mdnsName: 'drop.local', source: 'nat' });
     devicesModule.approveMerge(keepId, dropId);
 
-    // drop の IP への再観測 → keep にリダイレクト
+    // Re-observing the dropped IP → redirected to keep
     const result = devicesModule.observeDevice({ ip: '10.9.0.2', source: 'nat' });
     assert.equal(result, keepId, 'keepDevice.deviceId が返る');
   });
@@ -667,7 +668,7 @@ describe('devices: P2-11 — observeDevice redirect via mergedInto', () => {
     const keepId = devicesModule.observeDevice({ ip: '10.9.3.1', source: 'nat' });
     const dropId = devicesModule.observeDevice({ ip: '10.9.3.2', source: 'nat' });
     devicesModule.approveMerge(keepId, dropId);
-    devicesModule.archiveDevice(keepId); // keep も手動アーカイブ
+    devicesModule.archiveDevice(keepId); // manually archive keep too
 
     const result = devicesModule.observeDevice({ ip: '10.9.3.2', source: 'nat' });
     assert.equal(result, null, 'keep もアーカイブ済みなら null');

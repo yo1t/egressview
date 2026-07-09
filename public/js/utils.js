@@ -46,7 +46,7 @@ function isWiredType(type) { return type === '0'; }
 
 // ─── Application / service name inference ─────────────────────────────────────
 
-// TCP/UDP 共通（プロトコル不問）
+// Shared between TCP/UDP (protocol-agnostic)
 const _PORT_MAP = {
   20: 'FTP', 21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP',
   53: 'DNS', 80: 'HTTP', 110: 'POP3', 137: 'NetBIOS', 138: 'NetBIOS',
@@ -66,7 +66,7 @@ const _PORT_MAP = {
   55443: 'Alexa',
 };
 
-// UDP 専用（TCP と意味が異なる、または UDP のみ使われるポート）
+// UDP-only (ports whose meaning differs from TCP, or that are only used over UDP)
 const _UDP_MAP = {
   53:    'DNS',
   67:    'DHCP', 68: 'DHCP', 69: 'TFTP',
@@ -140,13 +140,13 @@ function guessApp(dport, proto, dstHost) {
   const port = Number(dport);
   const isUDP = proto && proto.toUpperCase() === 'UDP';
 
-  // UDP 専用マップを優先
+  // Prefer the UDP-specific map
   if (isUDP) {
     const udpLabel = _UDP_MAP[port];
     if (udpLabel) return udpLabel;
   }
 
-  // TCP の web ポートはホスト名から判定（QUIC ではなく TCP の 443/80 のみ）
+  // Infer TCP web ports from the hostname (TCP 443/80 only, not QUIC)
   if (!isUDP && dstHost && (port === 443 || port === 80 || port === 8443 || port === 8080)) {
     const host = dstHost.toLowerCase().replace(/:\d+$/, '');
     for (const [suffix, label] of _HOST_MAP) {

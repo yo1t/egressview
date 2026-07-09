@@ -8,7 +8,7 @@ const os     = require('os');
 const path   = require('path');
 const enrichment = require('../../src/enrichment');
 
-// ─── tmp DB ヘルパー ──────────────────────────────────────────────────────────
+// ─── tmp DB helpers ────────────────────────────────────────────────────────────
 
 let tmpDbPath = null;
 
@@ -24,15 +24,15 @@ function cleanupTmpDb() {
   tmpDbPath = null;
 }
 
-// ─── 各テスト前にリセット ────────────────────────────────────────────────────
+// ─── Reset before each test ─────────────────────────────────────────────────
 
 beforeEach(() => enrichment._initForTest());
 
 after(() => {
-  enrichment._initForTest(); // 最後にクリーンアップ
+  enrichment._initForTest(); // final cleanup
 });
 
-// ─── RDAP キャッシュ永続化 ───────────────────────────────────────────────────
+// ─── RDAP cache persistence ─────────────────────────────────────────────────
 
 describe('enrichment: RDAP cache persistence', () => {
   it('initDb 後に rdapCache は空', () => {
@@ -44,15 +44,15 @@ describe('enrichment: RDAP cache persistence', () => {
     try {
       enrichment.initDb(dbPath);
 
-      // 内部 DB に直接テストデータを INSERT
+      // Insert test data directly into the underlying DB
       const Database = require('better-sqlite3');
       const db = new Database(dbPath);
-      const expires = Date.now() + 24 * 60 * 60 * 1000; // 24h 後
+      const expires = Date.now() + 24 * 60 * 60 * 1000; // 24h from now
       db.prepare(`INSERT INTO rdap_cache (ip, country, org, expires)
                   VALUES (?, ?, ?, ?)`).run('1.2.3.4', 'US', 'Test Org', expires);
       db.close();
 
-      // reopen() でメモリキャッシュをリフレッシュ
+      // reopen() refreshes the in-memory cache
       enrichment.reopen();
 
       const cache = enrichment.getRdapCache();
@@ -62,7 +62,7 @@ describe('enrichment: RDAP cache persistence', () => {
       assert.equal(entry.country, 'US');
       assert.equal(entry.org, 'Test Org');
     } finally {
-      enrichment._initForTest(); // in-memory に戻す
+      enrichment._initForTest(); // revert to in-memory
       cleanupTmpDb();
     }
   });
@@ -74,7 +74,7 @@ describe('enrichment: RDAP cache persistence', () => {
 
       const Database = require('better-sqlite3');
       const db = new Database(dbPath);
-      const expiredAt = Date.now() - 1000; // 過去（期限切れ）
+      const expiredAt = Date.now() - 1000; // in the past (expired)
       db.prepare(`INSERT INTO rdap_cache (ip, country, org, expires)
                   VALUES (?, ?, ?, ?)`).run('9.9.9.9', 'JP', 'Old Org', expiredAt);
       db.close();
@@ -89,7 +89,7 @@ describe('enrichment: RDAP cache persistence', () => {
   });
 });
 
-// ─── Geo キャッシュ永続化 ────────────────────────────────────────────────────
+// ─── Geo cache persistence ───────────────────────────────────────────────────
 
 describe('enrichment: Geo cache persistence', () => {
   it('initDb 後に geoCache は空', () => {
@@ -145,7 +145,7 @@ describe('enrichment: Geo cache persistence', () => {
   });
 });
 
-// ─── DNS キャッシュ ──────────────────────────────────────────────────────────
+// ─── DNS cache ───────────────────────────────────────────────────────────────
 
 describe('enrichment: DNS cache', () => {
   it('initDb 後に dnsCache は空', () => {
@@ -153,7 +153,7 @@ describe('enrichment: DNS cache', () => {
   });
 });
 
-// ─── API 統計 ────────────────────────────────────────────────────────────────
+// ─── API stats ───────────────────────────────────────────────────────────────
 
 describe('enrichment: getApiStats', () => {
   it('初期値はすべてゼロ', () => {
@@ -167,7 +167,7 @@ describe('enrichment: getApiStats', () => {
   });
 });
 
-// ─── inFlightRdap クリア ─────────────────────────────────────────────────────
+// ─── inFlightRdap clearing ────────────────────────────────────────────────────
 
 describe('enrichment: _initForTest clears inFlightRdap', () => {
   it('_initForTest() 後に rdapCache・geoCache・dnsCache がすべて空', () => {

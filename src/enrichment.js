@@ -24,16 +24,16 @@ setInterval(() => {
 
 const rdapCache     = new Map(); // ip → {country, org, expires}
 const inFlightRdap  = new Map(); // ip → Promise  (in-flight dedupe)
-let rdapGeneration  = 0;         // reopen() のたびにインクリメント: 旧 Promise の書き込みを無効化
+let rdapGeneration  = 0;         // incremented on each reopen() to invalidate stale in-flight Promise writes
 const RDAP_TTL_MS   = 24 * 60 * 60 * 1000; // 24h
 const RDAP_FAIL_TTL = 60 * 60 * 1000;       // 60min retry on failure
 
 const geoCache    = new Map(); // ip → {lat, lon, city, countryCode, expires}
 const GEO_TTL_MS       = 24 * 60 * 60 * 1000;
 const GEO_FAIL_TTL     = 60 * 60 * 1000;
-const GEO_PERMANENT_TTL = 100 * 365 * 24 * 60 * 60 * 1000; // ~100年: プライベートIP用
+const GEO_PERMANENT_TTL = 100 * 365 * 24 * 60 * 60 * 1000; // ~100 years, for private IPs
 
-// プライベート / ループバック / 特殊 IP は geo 解決不能なので永続キャッシュ対象
+// Private / loopback / special-use IPs can't be geo-resolved, so cache them permanently
 const PRIVATE_IP_RE = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1([01]\d|2[0-7]))\.|0\.0\.0\.0$|::1$|[Ff][CcDd])/;
 function isPrivateIp(ip) { return PRIVATE_IP_RE.test(ip); }
 
@@ -99,7 +99,7 @@ function initDb(dbPath) {
   }
   logger.info(`[enrichment] Cache loaded: ${rdapRows.length} RDAP, ${geoRows.length} geo entries`);
 
-  // 既存のプライベート IP エントリ（失敗 null）を永続 TTL にアップグレード
+  // Upgrade existing private-IP entries (stored as failed/null) to a permanent TTL
   const privUpgradeNow = Date.now();
   const nullGeoRows = db.prepare('SELECT ip FROM geo_cache WHERE lat IS NULL').all();
   let upgraded = 0;
@@ -115,8 +115,8 @@ function initDb(dbPath) {
 }
 
 function reopen() {
-  rdapGeneration++;          // 進行中の _doLookupRdap が書き込みをスキップするようにする
-  inFlightRdap.clear();      // 古い Promise への参照を解放
+  rdapGeneration++;          // makes any in-flight _doLookupRdap() skip its write
+  inFlightRdap.clear();      // release references to stale Promises
   if (db) { try { db.close(); } catch {} db = null; }
   rdapCache.clear();
   geoCache.clear();
@@ -183,8 +183,9 @@ function httpPostJson(url, body) {
         buf += d;
       });
       res.on('end', () => {
-        // ip-api.com は 429 を空ボディで返すため、JSON.parse の前にステータスを確認する。
-        // X-Ttl ヘッダはレート制限ウィンドウ解除までの残秒数。
+        // ip-api.com returns 429 with an empty body, so check the status code
+        // before JSON.parse. The X-Ttl header is seconds remaining until the
+        // rate-limit window resets.
         if (res.statusCode === 429) {
           const e = new Error('geo rate limited (HTTP 429)');
           e.statusCode = 429;
@@ -205,10 +206,12 @@ function httpPostJson(url, body) {
 
 // ─── Geo lookup ───────────────────────────────────────────────────────────────
 
-// ip-api.com の /batch は無料枠 15 リクエスト/分。INSPECT セッション処理は宛先1個の
-// 「バッチ」を通信のたびに発行するため、そのまま送るとすぐ枯渇する。
-// 対策: 全呼び出し元の IP を GEO_FLUSH_MS の間バッファに溜めて1リクエストに統合し、
-// 429 を受けたら X-Ttl に従ってウィンドウ解除まで送信を止める。
+// ip-api.com's /batch endpoint allows 15 requests/minute on the free tier. The
+// INSPECT session handler issues a single-IP "batch" call per connection, which
+// exhausts the quota almost immediately if sent as-is.
+// Mitigation: buffer IPs from every caller for GEO_FLUSH_MS and coalesce them
+// into one request, and back off sending entirely until the X-Ttl window
+// resets after a 429.
 let GEO_FLUSH_MS = 2000;
 const geoPendingIps = new Set();
 let geoFlushPromise = null;
@@ -217,7 +220,7 @@ let geoBackoffUntil = 0;
 function lookupGeoBatch(ips) {
   const now = Date.now();
 
-  // プライベート/ループバック/特殊 IP は永続 TTL でキャッシュ（API 呼び出し不要）
+  // Private/loopback/special-use IPs are cached with a permanent TTL (no API call needed)
   for (const ip of ips) {
     if (isPrivateIp(ip)) {
       const entry = { lat: null, lon: null, city: null, countryCode: null, expires: now + GEO_PERMANENT_TTL };
@@ -230,13 +233,13 @@ function lookupGeoBatch(ips) {
   if (!toFetch.length) return Promise.resolve();
   toFetch.forEach(ip => geoPendingIps.add(ip));
 
-  // バッファ待機中の呼び出しは同じフラッシュサイクルの完了を待つ
+  // Calls arriving while a buffer is pending share the same flush cycle
   if (!geoFlushPromise) {
     geoFlushPromise = new Promise(resolve => {
       setTimeout(() => {
         const batch = [...geoPendingIps];
         geoPendingIps.clear();
-        geoFlushPromise = null; // 以降の呼び出しは次のサイクルへ
+        geoFlushPromise = null; // subsequent calls start the next cycle
         _fetchGeoBatch(batch).then(resolve, resolve);
       }, GEO_FLUSH_MS);
     });
@@ -247,7 +250,8 @@ function lookupGeoBatch(ips) {
 async function _fetchGeoBatch(ipsAll) {
   const now = Date.now();
 
-  // レート制限バックオフ中: API を叩かず、解除後すぐ再試行できる短い TTL でキャッシュ
+  // Currently backed off from rate limiting: skip the API call and cache with a
+  // short TTL so it can be retried again soon after the window resets
   if (now < geoBackoffUntil) {
     const remainMs = geoBackoffUntil - now;
     const entryTtl = remainMs + 120_000;
@@ -283,14 +287,14 @@ async function _fetchGeoBatch(ipsAll) {
     } catch (err) {
       recordApiFail('geo', err);
       if (err.statusCode === 429) {
-        // X-Ttl（ウィンドウ解除までの残秒）+ 余裕5秒だけ送信を止める
+        // Back off for X-Ttl (seconds until the window resets) plus a 5s margin
         const backoffSec = (err.retryAfterSec || 60) + 5;
         geoBackoffUntil = Date.now() + backoffSec * 1000;
         logger.warn(`[geo] rate limited by ip-api.com — backing off ${backoffSec}s`);
       } else {
         logger.error('[geo] batch error:', err.message);
       }
-      // エラー時はチャンク内の未キャッシュ IP を 30 分間リトライ抑制
+      // On error, suppress retries for any not-yet-cached IPs in the chunk for 30 minutes
       const rateLimitTtl = 30 * 60 * 1000;
       chunk.forEach(ip => {
         if (!geoCache.has(ip)) {
@@ -299,7 +303,7 @@ async function _fetchGeoBatch(ipsAll) {
           _persistGeo(ip, entry);
         }
       });
-      // バックオフに入ったら残りのチャンクも送らない
+      // If we just entered backoff, don't send the remaining chunks either
       if (Date.now() < geoBackoffUntil) {
         for (let j = i + 100; j < ipsAll.length; j += 100) {
           ipsAll.slice(j, j + 100).forEach(ip => {
@@ -321,10 +325,10 @@ function isNicHandle(s) {
   return /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(s);
 }
 
-// 実際の HTTP フェッチと結果キャッシュ（lookupRdap から呼ばれる）
+// Actual HTTP fetch and result caching (called from lookupRdap)
 async function _doLookupRdap(ip, generation = rdapGeneration) {
   const now = Date.now();
-  // 二重チェック: 並行呼び出しが先にキャッシュへ書いていた場合の早期リターン
+  // Double-check: bail out early if a concurrent call already wrote the cache
   const cached = rdapCache.get(ip);
   if (cached && now < cached.expires) return cached;
   try {
@@ -343,7 +347,7 @@ async function _doLookupRdap(ip, generation = rdapGeneration) {
     if (!org && data.name) org = data.name;
 
     const result = { country, org, expires: now + RDAP_TTL_MS };
-    // reopen() が挟まった場合はキャッシュ/DB への書き込みをスキップ
+    // Skip the cache/DB write if reopen() happened in the meantime
     if (generation === rdapGeneration) {
       rdapCache.set(ip, result);
       _persistRdap(ip, result);
@@ -354,23 +358,24 @@ async function _doLookupRdap(ip, generation = rdapGeneration) {
   } catch (err) {
     recordApiFail('rdap', err);
     const result = { country: null, org: null, expires: now + RDAP_FAIL_TTL };
-    // 失敗キャッシュも世代が合う場合のみ書き込む
+    // Only write the failure cache if the generation still matches
     if (generation === rdapGeneration) rdapCache.set(ip, result);
     return result;
   }
 }
 
-// キャッシュチェック → in-flight dedupe → _doLookupRdap
-// どの呼び出し元（Yamaha poll / INSPECT / 調査）からでも同一 IP の並行 fetch を1本に絞る
+// Cache check → in-flight dedupe → _doLookupRdap
+// Collapses concurrent fetches for the same IP into one, regardless of which
+// caller (Yamaha poll / INSPECT / investigation) triggered it
 async function lookupRdap(ip) {
   const now = Date.now();
   const cached = rdapCache.get(ip);
-  if (cached && now < cached.expires) return cached;  // キャッシュヒット: Map を触らず即返す
+  if (cached && now < cached.expires) return cached;  // cache hit: return immediately, no Map write
 
-  if (inFlightRdap.has(ip)) return inFlightRdap.get(ip);  // 進行中のリクエストに相乗り
+  if (inFlightRdap.has(ip)) return inFlightRdap.get(ip);  // piggyback on the in-flight request
 
   const p = _doLookupRdap(ip, rdapGeneration).finally(() => {
-    if (inFlightRdap.get(ip) === p) inFlightRdap.delete(ip); // 自分自身のときだけ削除
+    if (inFlightRdap.get(ip) === p) inFlightRdap.delete(ip); // only delete if it's still our own entry
   });
   inFlightRdap.set(ip, p);
   return p;
@@ -433,7 +438,7 @@ function _initForTest() {
   initDb(':memory:');
 }
 
-// テスト用: フラッシュ待機時間の短縮とバックオフ状態の操作
+// Test helpers: shorten the flush wait and manipulate backoff state
 function _setGeoFlushMsForTest(ms) { GEO_FLUSH_MS = ms; }
 function _setGeoBackoffUntilForTest(ts) { geoBackoffUntil = ts; }
 function _getGeoBackoffUntilForTest() { return geoBackoffUntil; }

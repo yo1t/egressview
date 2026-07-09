@@ -147,7 +147,7 @@ describe('geoCache — private IP entries', () => {
   });
 });
 
-// ─── lookupGeoBatch — バッファリング統合とレート制限バックオフ ─────────────────
+// ─── lookupGeoBatch — buffer coalescing and rate-limit backoff ───────────────
 
 describe('lookupGeoBatch coalescing & backoff', () => {
   before(() => { reset(); enrichment._setGeoFlushMsForTest(10); });
@@ -161,7 +161,7 @@ describe('lookupGeoBatch coalescing & backoff', () => {
   });
 
   it('coalesces concurrent calls into a single flush cycle (same promise)', () => {
-    // バックオフ中にして実 API 呼び出しを抑止しつつ、統合動作だけ検証する
+    // Force backoff to suppress the real API call while verifying only the coalescing behavior
     enrichment._setGeoBackoffUntilForTest(Date.now() + 60_000);
     const p1 = enrichment.lookupGeoBatch(['203.0.113.10']);
     const p2 = enrichment.lookupGeoBatch(['203.0.113.11']);

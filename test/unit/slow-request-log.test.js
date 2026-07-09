@@ -1,4 +1,4 @@
-// Unit tests for src/slow-request-log.js (P2-22 遅延リクエストログ)
+// Unit tests for src/slow-request-log.js (P2-22 slow-request log)
 // Run: node --test test/unit/slow-request-log.test.js
 'use strict';
 
@@ -28,7 +28,7 @@ function run({ thresholdMs, req, res }) {
 describe('slow-request-log', () => {
   it('logs method, path, status, duration, size when over threshold', () => {
     const logged = run({
-      thresholdMs: 0, // 0ms 閾値 = すべて記録
+      thresholdMs: 0, // 0ms threshold = log everything
       req: { method: 'GET', originalUrl: '/api/connections?from=123&to=456' },
       res: makeRes({ statusCode: 200, contentLength: '2311153' }),
     });
@@ -48,7 +48,7 @@ describe('slow-request-log', () => {
 
   it('does not log requests under the threshold', () => {
     const logged = run({
-      thresholdMs: 60_000, // 60秒閾値 = テスト実行時間では到達しない
+      thresholdMs: 60_000, // 60s threshold = unreachable within the test's runtime
       req: { method: 'GET', originalUrl: '/api/devices' },
       res: makeRes(),
     });

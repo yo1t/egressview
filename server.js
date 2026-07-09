@@ -215,8 +215,8 @@ function loadConfig() {
     if (Array.isArray(data.beacons.orgAllowlist))         bc.orgAllowlist     = data.beacons.orgAllowlist;
   }
 
-  // ログパスは許可ディレクトリ配下のみ（tail は sudo で動くため）。
-  // 既存設定が新ルールで無効な場合は警告してデフォルトへフォールバック。
+  // Log paths must live under an allowed directory (tail runs via sudo).
+  // If an existing setting is invalid under the new rule, warn and fall back to the default.
   const safeLogPath = (label, value, fallback) => {
     if (value === undefined) return fallback;
     if (utils.isAllowedLogPath(value)) return value;
@@ -339,8 +339,8 @@ function requireAdmin(req, res, next) {
 }
 
 // ─── Connection enrichment queue ──────────────────────────────────────────────
-// ポーリングループ本体は src/poll-scheduler.js（P2-23 で分離）。
-// enrichment キューは INSPECT 等からも使うため server.js に残す。
+// The poll loops themselves live in src/poll-scheduler.js (extracted in P2-23).
+// The enrichment queue stays in server.js since INSPECT and others use it too.
 
 const enrichmentQueue = new Set();
 let enrichmentQueueRunning = false;
@@ -409,7 +409,7 @@ async function runConnectionEnrichmentQueue() {
 
 // ─── Express middleware ───────────────────────────────────────────────────────
 
-// 遅延リクエストの自己申告（P2-22）— 全ミドルウェア・ルートの手前で計測を開始する
+// Self-reporting for slow requests (P2-22) — start timing before all other middleware/routes
 const { createSlowRequestLogger } = require('./src/slow-request-log');
 app.use(createSlowRequestLogger());
 
@@ -741,8 +741,9 @@ dhcpdSyslog.configure({
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
 
-// HOST 未指定なら全インターフェース（LAN 内の他端末からアクセスする通常運用）。
-// テストやサンドボックス環境では HOST=127.0.0.1 でループバックに限定できる。
+// Binds to all interfaces if HOST is unset (normal usage: reachable from other
+// LAN devices). Tests and sandboxed environments can restrict it to loopback
+// via HOST=127.0.0.1.
 const HOST = process.env.HOST || undefined;
 
 server.listen(PORT, HOST, () => {
@@ -854,9 +855,9 @@ process.on('SIGTERM', () => shutdown(0));
 process.on('SIGINT',  () => shutdown(0));
 
 // ─── Process-level error handlers ─────────────────────────────────────────────
-// 常駐監視ツールなので、取り漏らした Promise 拒否（ネットワーク系が大半）で
-// プロセスを落とさない。uncaughtException は状態が壊れている可能性があるため、
-// 履歴をスナップショットしてから異常終了する。
+// As a long-running monitoring tool, an unhandled promise rejection (mostly
+// network-related) should not take the process down. uncaughtException may
+// mean state is corrupted, so snapshot history before exiting.
 process.on('unhandledRejection', (reason) => {
   logger.error('[process] Unhandled promise rejection:', reason?.stack || reason?.message || String(reason));
 });

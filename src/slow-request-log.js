@@ -1,14 +1,14 @@
-// P2-22: 遅延リクエストログ — 本番負荷下でしか顕在化しない遅延
-// （gzip ストリーミング問題など）を、手動計測なしで自己申告させる。
-// 閾値は EGRESSVIEW_SLOW_REQUEST_MS で調整可能（デフォルト 3000ms）。
+// P2-22: slow-request log — self-reports delays that only surface under
+// production load (e.g. the gzip streaming issue) without manual profiling.
+// The threshold is configurable via EGRESSVIEW_SLOW_REQUEST_MS (default 3000ms).
 'use strict';
 
 const logger = require('./logger');
 
 /**
- * 遅延リクエストを WARN ログに出す Express ミドルウェアを生成する。
- * 'finish' はレスポンスが OS へ書き切られた時点で発火するため、
- * ストリーミング送信（圧縮・大きなボディ）の遅延も計測に含まれる。
+ * Creates an Express middleware that WARN-logs slow requests.
+ * 'finish' fires once the response has been fully written to the OS, so
+ * streaming-send delays (compression, large bodies) are included in the timing.
  *
  * @param {{ thresholdMs?: number, log?: (msg: string) => void }} [opts]
  */
@@ -21,7 +21,7 @@ function createSlowRequestLogger({
     res.on('finish', () => {
       const ms = Number(process.hrtime.bigint() - start) / 1e6;
       if (ms < thresholdMs) return;
-      // クエリ文字列は記録しない（ログ肥大と将来のパラメータ追加への防御）
+      // Don't log the query string (avoids log bloat and guards against future params)
       const path = String(req.originalUrl || req.url || '').split('?')[0];
       const size = res.getHeader && res.getHeader('content-length') || '-';
       log(`[slow-request] ${req.method} ${path} ${res.statusCode} ${ms.toFixed(0)}ms size=${size}`);

@@ -1,8 +1,10 @@
-// Poll scheduler: ルーターの NAT セッションポーリングループと差分 push（P2-23 で
-// server.js から分離）。依存は init() で注入し、単体テストを可能にする。
+// Poll scheduler: router NAT-session polling loops and delta push (extracted
+// from server.js in P2-23). Dependencies are injected via init() so the
+// loops are unit-testable.
 //
-// ループのライフサイクル: 無効化されると finally で自然消滅するため、実行時に
-// 再有効化されたときは startXPolling() で再起動する（多重起動はフラグで防止）。
+// Loop lifecycle: a loop dies naturally in its finally block once disabled,
+// so it must be restarted with startXPolling() if re-enabled at runtime
+// (a flag guards against double-starting it).
 'use strict';
 
 const logger = require('./logger');
@@ -14,8 +16,8 @@ let _queueConnectionEnrichment = () => {};
 let _pollIntervalMs = 60_000;
 
 // ─── Module state ─────────────────────────────────────────────────────────────
-// 差分 push 用タイムスタンプ: ルーターごとに独立して管理し、片方のポーリングが
-// もう片方の差分ウィンドウを詰めないようにする
+// Delta-push timestamps: tracked independently per router so one router's
+// poll cycle can't shrink the other's delta window
 let lastYamahaEmitTime = Date.now();
 let lastCiscoEmitTime  = Date.now();
 
@@ -23,7 +25,7 @@ let lastCiscoEmitTime  = Date.now();
 // (used for poll-based beacon event recording when [INSPECT] is unavailable).
 let lastPollKeys = new Set();
 
-// 多重起動防止フラグ
+// Guards against double-starting a loop
 let yamahaPollActive = false;
 let ciscoPollActive  = false;
 
@@ -113,7 +115,7 @@ async function pollYamahaConnections() {
 
     _history.pruneHistory();
 
-    // 差分 push: 前回 emit 以降に lastSeen が更新されたエントリのみ送信
+    // Delta push: send only entries whose lastSeen was updated since the previous emit
     const deltaConns = [..._history.getConnectionHistory().values()]
       .filter(c => c.lastSeen > lastYamahaEmitTime);
     lastYamahaEmitTime = now;
@@ -198,7 +200,7 @@ async function pollCiscoConnections() {
   }
 }
 
-// テスト用: モジュール状態をリセット
+// Test helper: reset module state
 function _resetForTest() {
   lastYamahaEmitTime = Date.now();
   lastCiscoEmitTime  = Date.now();

@@ -5,12 +5,14 @@ const zlib = require('zlib');
 const { Router } = require('express');
 const { parseTimestamp } = require('../utils');
 
-// 大きな JSON（グラフ全件フェッチ: 最大50k行 ≒ 20MB超）を返すための送信ヘルパー。
-// compression ミドルウェアのストリーミング圧縮は応答を多数のイベントループターンに
-// 分割するため、ポーリングや socket.io 配信で忙しい本番プロセスでは応答が数十秒に
-// 伸びる（EC2 実測: ストリーミング 15〜50s → 一括 gzipSync 0.5s）。
-// level 1 の一括圧縮（20MB ≒ 80ms）で単一書き込みにし、帯域削減は維持する。
-// Content-Encoding を先に立てるので compression ミドルウェアは二重圧縮しない。
+// Send helper for large JSON payloads (full graph fetch: up to 50k rows, 20MB+).
+// The compression middleware's streaming gzip splits the response across many
+// event-loop turns, which stretches into tens of seconds on a production
+// process that's busy with polling and socket.io broadcasts (measured on EC2:
+// streaming 15-50s vs. a single gzipSync call at 0.5s).
+// Compressing once up front at level 1 (~80ms for 20MB) keeps it a single
+// write while still cutting bandwidth. Setting Content-Encoding here means
+// the compression middleware won't compress it again.
 const GZIP_MIN_BYTES = 100_000;
 function sendLargeJson(req, res, obj) {
   const body = Buffer.from(JSON.stringify(obj));

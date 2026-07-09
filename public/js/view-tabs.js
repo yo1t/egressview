@@ -17,7 +17,7 @@ function switchView(view) {
   logMode     = (view === 'log');
   devicesMode = (view === 'devices');
   nlMode = (view === 'notif-log');
-  // 端末一覧・検出ログは全件表示のため期間フィルターは無関係
+  // Devices and notification-log views always show everything, so the time filter does not apply
   document.querySelector('.time-filter')
     ?.classList.toggle('disabled', view === 'devices' || view === 'notif-log');
   document.getElementById('graph-container').style.display        = view === 'graph'     ? 'flex' : 'none';
