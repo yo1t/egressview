@@ -18,7 +18,36 @@ const DEFAULT_CONFIG_FILE = path.join(__dirname, '..', '.egressview.json');
 function loadFile(file = DEFAULT_CONFIG_FILE) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return {};
+    return {};
+  }
+}
+
+/**
+ * Strict config loader: missing file is allowed, but malformed/unreadable
+ * files throw so callers do not treat corruption as a fresh install.
+ * @param {string} [file]
+ */
+function loadFileOrThrow(file = DEFAULT_CONFIG_FILE) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return {};
+    logger.error('[config] load failed:', err.message);
+    throw err;
+  }
+}
+
+/**
+ * Best-effort config loader for request paths that can degrade gracefully.
+ * Returns {} on any error and logs non-missing-file failures.
+ * @param {string} [file]
+ */
+function loadFileSafe(file = DEFAULT_CONFIG_FILE) {
+  try {
+    return loadFileOrThrow(file);
+  } catch (err) {
     return {};
   }
 }
@@ -44,7 +73,7 @@ function saveFile(data, file = DEFAULT_CONFIG_FILE) {
  */
 function persistSecret(section, updates, file = DEFAULT_CONFIG_FILE) {
   try {
-    const cfg = loadFile(file);
+    const cfg = loadFileOrThrow(file);
     cfg[section] = { ...(cfg[section] || {}), ...updates };
     saveFile(cfg, file);
   } catch (e) {
@@ -52,4 +81,4 @@ function persistSecret(section, updates, file = DEFAULT_CONFIG_FILE) {
   }
 }
 
-module.exports = { loadFile, saveFile, persistSecret, DEFAULT_CONFIG_FILE };
+module.exports = { loadFile, loadFileOrThrow, loadFileSafe, saveFile, persistSecret, DEFAULT_CONFIG_FILE };

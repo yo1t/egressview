@@ -4,7 +4,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { Readable, Writable } = require('node:stream');
+const { PassThrough, Readable, Writable } = require('node:stream');
 const express = require('express');
 
 const authRoutes = require('../../src/routes/auth');
@@ -70,6 +70,10 @@ function request(app, method, path, body = null) {
     req.method = method;
     req.url = path;
     req.headers = {};
+    const reqSocket = new PassThrough();
+    reqSocket.remoteAddress = '127.0.0.1';
+    req.socket = reqSocket;
+    req.connection = reqSocket;
     if (payload) {
       req.headers['content-type'] = 'application/json';
       req.headers['content-length'] = String(payload.length);
@@ -126,5 +130,15 @@ describe('auth route: POST /api/login Yamaha setup', () => {
     assert.equal(status, 200);
     assert.equal(body.success, true);
     assert.equal(reconnected, true);
+  });
+});
+
+describe('auth route: POST /api/admin/verify', () => {
+  it('rejects a non-string token with 400 instead of throwing', async () => {
+    const app = makeApp();
+    const { status, body } = await request(app, 'POST', '/api/admin/verify', { token: 123 });
+    assert.equal(status, 400);
+    assert.equal(body.ok, false);
+    assert.match(body.error, /token|トークン|invalid/i);
   });
 });
