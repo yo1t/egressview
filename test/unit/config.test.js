@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs     = require('node:fs');
 const os     = require('node:os');
 const path   = require('node:path');
-const { loadFile, saveFile, persistSecret } = require('../../src/config');
+const { loadFile, loadFileOrThrow, saveFile, persistSecret } = require('../../src/config');
 
 let tmpFile;
 
@@ -27,6 +27,18 @@ describe('loadFile', () => {
   it('parses a valid JSON file', () => {
     fs.writeFileSync(tmpFile, JSON.stringify({ foo: 'bar' }));
     assert.deepEqual(loadFile(tmpFile), { foo: 'bar' });
+  });
+});
+
+describe('loadFileOrThrow', () => {
+  it('returns {} when file does not exist', () => {
+    const result = loadFileOrThrow('/nonexistent/path/config.json');
+    assert.deepEqual(result, {});
+  });
+
+  it('throws when JSON is malformed', () => {
+    fs.writeFileSync(tmpFile, '{"foo":');
+    assert.throws(() => loadFileOrThrow(tmpFile), SyntaxError);
   });
 });
 
@@ -63,5 +75,12 @@ describe('persistSecret', () => {
     persistSecret('yamaha', { pass: 'yamaha-secret' }, tmpFile);
     const result = loadFile(tmpFile);
     assert.equal(result.asus.pass, 'asus-secret');   // untouched
+  });
+
+  it('does not overwrite a malformed config file', () => {
+    fs.writeFileSync(tmpFile, '{"yamaha":');
+    persistSecret('yamaha', { pass: 'yamaha-secret' }, tmpFile);
+    const raw = fs.readFileSync(tmpFile, 'utf8');
+    assert.equal(raw, '{"yamaha":');
   });
 });

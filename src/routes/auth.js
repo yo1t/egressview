@@ -204,6 +204,9 @@ module.exports = function authRoutes(ctx) {
     if (rateLimitErr) return res.status(429).json({ ok: false, error: rateLimitErr });
 
     const provided   = (req.body && req.body.token) || '';
+    if (typeof provided !== 'string') {
+      return res.status(400).json({ ok: false, error: t('auth.token-invalid') });
+    }
     const adminToken = getAdminToken();
     if (!adminToken) return res.status(503).json({ ok: false, error: t('auth.not-init-verify') });
     const a = Buffer.from(provided);

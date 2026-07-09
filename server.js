@@ -128,7 +128,7 @@ const app = express();
 const tls = require('./src/tls');
 let tlsOptions = null;
 {
-  const early = configIo.loadFile(CONFIG_FILE);
+  const early = configIo.loadFileOrThrow(CONFIG_FILE);
   if (early.https?.enabled) {
     tlsOptions = tls.loadOrCreate(early.https, __dirname);
     if (!tlsOptions) logger.warn('[tls] HTTPS requested but unavailable — falling back to HTTP');
@@ -153,7 +153,7 @@ const io     = new Server(server, {
 // ─── Config: load from / save to config file ─────────────────────────────────
 
 function loadConfig() {
-  const data = configIo.loadFile(CONFIG_FILE);
+  const data = configIo.loadFileOrThrow(CONFIG_FILE);
   if (data.yamaha) {
     yamaha.configure({
       ip:            data.yamaha.ip      || '',
@@ -269,7 +269,7 @@ function saveConfig() {
   };
   // Re-read to preserve passwords (not held in module state getters)
   try {
-    const existing = configIo.loadFile(CONFIG_FILE);
+    const existing = configIo.loadFileOrThrow(CONFIG_FILE);
     if (existing.yamaha?.pass) data.yamaha.pass = existing.yamaha.pass;
     if (existing.cisco?.pass)  { data.cisco.pass = existing.cisco.pass; data.cisco.enablePass = existing.cisco.enablePass || ''; }
     if (existing.asus?.pass)   data.asus.pass   = existing.asus.pass;
@@ -562,7 +562,7 @@ const routeCtx = {
   dnsmasqLog, inspectSyslog, dhcpdSyslog,
   runtime, notes, io, beacons, sessions, authPassword,
   saveConfig,
-  loadConfig:          () => configIo.loadFile(CONFIG_FILE),
+  loadConfig:          () => configIo.loadFileSafe(CONFIG_FILE),
   persistSecret:       (section, updates) => configIo.persistSecret(section, updates, CONFIG_FILE),
   configFile:          CONFIG_FILE,
   fs,
@@ -747,7 +747,13 @@ const HOST = process.env.HOST || undefined;
 
 server.listen(PORT, HOST, () => {
   logger.info(`EgressView: ${tlsOptions ? 'https' : 'http'}://${HOST || 'localhost'}:${PORT}`);
-  loadConfig();
+  try {
+    loadConfig();
+  } catch (err) {
+    logger.error('[startup] Failed to load config; refusing to continue:', err.message);
+    server.close(() => process.exit(1));
+    return;
+  }
   const configuredDbPath = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB || '';
   if (DEMO_MODE && !configuredDbPath && fs.existsSync(DEMO_DB_PATH)) {
     // Copy the committed snapshot to a separate runtime file so the tracked
