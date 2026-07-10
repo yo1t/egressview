@@ -41,6 +41,7 @@ const beacons        = require('./src/beacons');
 const beaconDetector = require('./src/beacon-detector');
 const sessions       = require('./src/sessions');
 const authPassword   = require('./src/auth-password');
+const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
 
 // ─── Route factories ──────────────────────────────────────────────────────────
 const authRoutes        = require('./src/routes/auth');
@@ -77,46 +78,7 @@ const ASSET_VERSION    = /^[A-Za-z0-9._-]+$/.test(_rawAssetVersion) ? _rawAssetV
 
 // ─── Shared mutable state ─────────────────────────────────────────────────────
 // Passed by reference to route modules so they can read and mutate it.
-const appState = {
-  adminToken:     '',
-  homeCountry:    'JP',
-  uiLanguage:     'ja',
-  autoInvestigate: false,
-  retentionDays:  730,
-  dnsmasqEnabled: true,  dnsmasqLogFile: '/var/log/dnsmasq-queries.log',
-  inspectEnabled: true,  inspectLogFile: '/var/log/yamaha-router.log',
-  dhcpdEnabled:   true,  dhcpdLogFile:   '/var/log/yamaha-router.log',
-  httpsEnabled:  false,
-  httpsCertPath: '',
-  httpsKeyPath:  '',
-  authPasswordHash: '',
-  authPasswordSalt: '',
-  beaconConfig: {
-    enabled:        true,
-    minObs:         4,
-    maxCov:         0.5,
-    minIntervalMs:  60_000,
-    maxIntervalMs:  4 * 3600_000,
-    scanIntervalMs: 60 * 60 * 1000,
-    // Known-benign vendor telemetry — defaults measured against production
-    // false positives on 2026-06-12 (296 candidates, all vendor heartbeats)
-    whitelistDomains: [
-      'amazonaws.com', 'amazon.com', 'amazon.co.jp', 'aws.dev',
-      'amazonalexa.com', 'cloudfront.net',
-      'firetvcaptiveportal.com', 'mmechocaptiveportal.com',
-      'netflix.com', 'nflxvideo.net',
-      'daikinsmartdb.jp',
-      'time.apple.com', 'push.apple.com',
-      'windows.com', 'windowsupdate.com',
-    ],
-    // RDAP org substrings — candidates resolving to these orgs are excluded
-    // unless the destination also hits a threat-intel feed
-    orgAllowlist: [
-      'Amazon', 'Google', 'Microsoft', 'Apple', 'Akamai',
-      'Netflix', 'Fastly', 'Cloudflare', 'GitHub', 'New Relic',
-    ],
-  },
-};
+const appState = createDefaultAppState();
 
 // ─── Express + Socket.IO setup ────────────────────────────────────────────────
 const app = express();
@@ -182,54 +144,13 @@ function loadConfig() {
       enabled:  data.asus.enabled ?? false,
     });
   }
-  if (data.general?.homeCountry) appState.homeCountry = data.general.homeCountry;
-  if (data.general?.language && ['ja', 'en'].includes(data.general.language)) appState.uiLanguage = data.general.language;
-  if (typeof data.general?.autoInvestigate === 'boolean') appState.autoInvestigate = data.general.autoInvestigate;
-  if (data.general?.retentionDays) appState.retentionDays = data.general.retentionDays;
   if (data.backup) {
     if (data.backup.intervalHours)  backup.configure({ intervalHours:  data.backup.intervalHours  });
     if (data.backup.maxGenerations) backup.configure({ maxGenerations: data.backup.maxGenerations });
   }
-  if (data.slack)      notifier.configure({ ...data.slack, language: appState.uiLanguage });
+  applyConfigToAppState(appState, data, { isAllowedLogPath: utils.isAllowedLogPath, logger });
+  if (data.slack) notifier.configure({ ...data.slack, language: appState.uiLanguage });
   i18n.setLanguage(appState.uiLanguage);
-  if (data.adminToken) appState.adminToken = data.adminToken;
-
-  if (data.auth && typeof data.auth === 'object') {
-    appState.authPasswordHash = data.auth.passwordHash || '';
-    appState.authPasswordSalt = data.auth.salt || '';
-  }
-  if (data.https && typeof data.https === 'object') {
-    appState.httpsEnabled  = data.https.enabled === true;
-    appState.httpsCertPath = data.https.certPath || '';
-    appState.httpsKeyPath  = data.https.keyPath  || '';
-  }
-  if (data.beacons && typeof data.beacons === 'object') {
-    const bc = appState.beaconConfig;
-    if (typeof data.beacons.enabled === 'boolean')        bc.enabled        = data.beacons.enabled;
-    if (Number.isFinite(data.beacons.minObs))             bc.minObs         = data.beacons.minObs;
-    if (Number.isFinite(data.beacons.maxCov))             bc.maxCov         = data.beacons.maxCov;
-    if (Number.isFinite(data.beacons.minIntervalMs))      bc.minIntervalMs  = data.beacons.minIntervalMs;
-    if (Number.isFinite(data.beacons.maxIntervalMs))      bc.maxIntervalMs  = data.beacons.maxIntervalMs;
-    if (Number.isFinite(data.beacons.scanIntervalMs))     bc.scanIntervalMs = data.beacons.scanIntervalMs;
-    if (Array.isArray(data.beacons.whitelistDomains))     bc.whitelistDomains = data.beacons.whitelistDomains;
-    if (Array.isArray(data.beacons.orgAllowlist))         bc.orgAllowlist     = data.beacons.orgAllowlist;
-  }
-
-  // Log paths must live under an allowed directory (tail runs via sudo).
-  // If an existing setting is invalid under the new rule, warn and fall back to the default.
-  const safeLogPath = (label, value, fallback) => {
-    if (value === undefined) return fallback;
-    if (utils.isAllowedLogPath(value)) return value;
-    logger.warn(`[config] ${label} logFile "${value}" is not under an allowed log directory — falling back to ${fallback}. ` +
-                'Add the directory via EGRESSVIEW_LOG_PATH_PREFIXES if this path is intentional.');
-    return fallback;
-  };
-  appState.dhcpdEnabled  = data.dhcpd?.enabled  !== false;
-  appState.dhcpdLogFile  = safeLogPath('dhcpd', data.dhcpd?.logFile, '/var/log/yamaha-router.log');
-  appState.inspectEnabled = data.inspect?.enabled !== false;
-  appState.inspectLogFile = safeLogPath('inspect', data.inspect?.logFile, '/var/log/yamaha-router.log');
-  appState.dnsmasqEnabled = data.dnsmasq?.enabled !== false;
-  appState.dnsmasqLogFile = safeLogPath('dnsmasq', data.dnsmasq?.logFile, '/var/log/dnsmasq-queries.log');
 
   dhcpdSyslog.configure({ logFile: appState.dhcpdLogFile, enabled: appState.dhcpdEnabled });
   inspectSyslog.configure({
