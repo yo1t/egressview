@@ -413,6 +413,28 @@ describe('connections route: GET /connections/threat-connections', () => {
     assert.equal(res._body.threats[2].sessions, 1);
   });
 
+  it('exposes source/tag fields and keeps legacy aliases populated', () => {
+    const groups = [{ dst: '1.1.1.1', dstHost: 'one.example', cnt: 2 }];
+    const res = callThreatRoute(groups, {
+      '1.1.1.1': {
+        confidence: 'low',
+        source: 'urlhaus',
+        tag: 'URLhaus: malware distribution',
+        matchType: 'ip',
+        matchValue: '1.1.1.1',
+        url: 'https://urlhaus.example/1',
+      },
+    });
+
+    assert.equal(res._body.threats[0].source, 'urlhaus');
+    assert.equal(res._body.threats[0].tag, 'URLhaus: malware distribution');
+    assert.equal(res._body.threats[0].feed, 'urlhaus');
+    assert.equal(res._body.threats[0].category, 'URLhaus: malware distribution');
+    assert.equal(res._body.threats[0].matchType, 'ip');
+    assert.equal(res._body.threats[0].matchValue, '1.1.1.1');
+    assert.equal(res._body.threats[0].url, 'https://urlhaus.example/1');
+  });
+
   it('does not cut off high-session threats due to early break (sort-after-limit)', () => {
     // 60 low-session threats followed by one high-session threat
     const groups = Array.from({ length: 60 }, (_, i) => ({ dst: `10.0.0.${i + 1}`, dstHost: null, cnt: 1 }));

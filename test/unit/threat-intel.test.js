@@ -5,6 +5,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  parseCsvLine,
   parseFeodoTracker,
   parseThreatFox,
   parseUrlhaus,
@@ -15,6 +16,18 @@ const {
   _isFetching,
   _resetForTest,
 } = require('../../src/threat-intel');
+
+describe('parseCsvLine', () => {
+  it('keeps commas inside quoted fields', () => {
+    const fields = parseCsvLine('"a,b",c,"d,e,f"');
+    assert.deepEqual(fields, ['a,b', 'c', 'd,e,f']);
+  });
+
+  it('unescapes doubled quotes inside a quoted field', () => {
+    const fields = parseCsvLine('"say ""hello""",world');
+    assert.deepEqual(fields, ['say "hello"', 'world']);
+  });
+});
 
 describe('parseFeodoTracker', () => {
   const sample = `# Feodo Tracker Blocklist
@@ -61,6 +74,16 @@ describe('parseThreatFox', () => {
   it('returns empty for empty input', () => {
     assert.deepEqual(parseThreatFox(''), []);
   });
+
+  it('parses malware names containing commas', () => {
+    const csv = [
+      '"first_seen_utc","ioc_id","ioc_value","ioc_type","threat_type","fk_malware","malware_alias","malware_malpedia","confidence_level","reference","reporter","tags"',
+      '"2024-01-15 10:00:00","12345","103.140.207.95:9443","ip:port","botnet_cc","win.cobalt_strike","CobaltStrike, Variant A","","90","","reporter1",""',
+    ].join('\n');
+    const entries = parseThreatFox(csv);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].tag, 'ThreatFox: CobaltStrike, Variant A');
+  });
 });
 
 describe('parseUrlhaus', () => {
@@ -86,6 +109,17 @@ describe('parseUrlhaus', () => {
 
   it('returns empty for empty input', () => {
     assert.deepEqual(parseUrlhaus(''), []);
+  });
+
+  it('parses URLs containing commas in the query string', () => {
+    const csv = [
+      '"id","dateadded","url","url_status","last_online","threat","tags","urlhaus_link","reporter"',
+      '"12345","2024-01-15","https://evil.example/payload?x=1,2","online","2024-01-15","malware_download","","","reporter1"',
+    ].join('\n');
+    const entries = parseUrlhaus(csv);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].value, 'evil.example');
+    assert.equal(entries[0].url, 'https://evil.example/payload?x=1,2');
   });
 });
 
