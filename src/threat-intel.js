@@ -19,12 +19,37 @@ const FETCH_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
 // ─── Feed parsers ─────────────────────────────────────────────────────────────
 
+function parseCsvLine(line) {
+  const fields = [];
+  let cur = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      fields.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  fields.push(cur);
+  return fields;
+}
+
 function parseFeodoTracker(text) {
   // CSV: skip comments (#), fields: first_seen_utc,dst_ip,dst_port,last_online,c2_status
   const entries = [];
   for (const line of text.split('\n')) {
     if (!line || line.startsWith('#')) continue;
-    const parts = line.split(',');
+    const parts = parseCsvLine(line);
     if (parts.length < 2) continue;
     const ip = parts[1]?.trim();
     if (!ip || !ip.match(/^\d+\.\d+\.\d+\.\d+$/)) continue;
@@ -39,14 +64,14 @@ function parseThreatFox(text) {
   const entries = [];
   for (const line of text.split('\n')) {
     if (!line || line.startsWith('#') || line.startsWith('"first_seen')) continue;
-    const parts = line.split(',');
+    const parts = parseCsvLine(line);
     if (parts.length < 7) continue;
     // ioc_value is quoted: "ip:port"
-    const iocRaw = (parts[2] || '').replace(/"/g, '').trim();
+    const iocRaw = (parts[2] || '').trim();
     const [ip, portStr] = iocRaw.split(':');
     if (!ip || !ip.match(/^\d+\.\d+\.\d+\.\d+$/)) continue;
     const port = parseInt(portStr, 10) || null;
-    const malware = (parts[6] || '').replace(/"/g, '').trim();
+    const malware = (parts[6] || '').trim();
     entries.push({ ip, port, source: 'threatfox', tag: `ThreatFox: ${malware || 'malware IOC'}` });
   }
   return entries;
@@ -73,9 +98,9 @@ function parseUrlhaus(text) {
   const entries = [];
   for (const line of text.split('\n')) {
     if (!line || line.startsWith('#') || line.startsWith('"id"')) continue;
-    const parts = line.split(',');
+    const parts = parseCsvLine(line);
     if (parts.length < 3) continue;
-    const url = (parts[2] || '').replace(/"/g, '').trim();
+    const url = (parts[2] || '').trim();
     try {
       const u = new URL(url);
       const host = u.hostname;
@@ -263,6 +288,7 @@ module.exports = {
   needsRefresh,
   getStats,
   // Exposed for testing
+  parseCsvLine,
   parseFeodoTracker,
   parseThreatFox,
   parseUrlhaus,

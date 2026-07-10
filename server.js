@@ -782,11 +782,11 @@ server.listen(PORT, HOST, () => {
   }
   ensureLoginPassword();
 
-  sessions.initDb(runtimeDbPath);
-  setInterval(() => sessions.pruneExpired(), 6 * 60 * 60 * 1000);
   notes.load();
   history.setRetentionDays(appState.retentionDays);
   history.loadConnectionHistory(runtimeDbPath);
+  sessions.initDb(runtimeDbPath);
+  setInterval(() => sessions.pruneExpired(), 6 * 60 * 60 * 1000);
 
   if (DEMO_MODE) {
     const { seedDemoConnections } = require('./scripts/demo-seed');
@@ -808,11 +808,15 @@ server.listen(PORT, HOST, () => {
     logger.info(`Router IP: ${asus.getRouterIp()}`);
     deviceId.loadOuiDb();
     yamaha.connect(() => {
-      yamaha.refreshArp().then(() => pollScheduler.startYamahaPolling());
+      yamaha.refreshArp()
+        .catch(err => logger.warn('[yamaha] initial ARP refresh failed:', err.message))
+        .finally(() => pollScheduler.startYamahaPolling());
     });
     if (cisco.isEnabled()) {
       cisco.connect(() => {
-        cisco.refreshArp().then(() => pollScheduler.startCiscoPolling());
+        cisco.refreshArp()
+          .catch(err => logger.warn('[cisco] initial ARP refresh failed:', err.message))
+          .finally(() => pollScheduler.startCiscoPolling());
       });
     }
     dnsmasqLog.start();

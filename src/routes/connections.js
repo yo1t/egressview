@@ -191,7 +191,19 @@ function connectionsRoutes(ctx) {
       if (!t) continue;
       if (confidence === 'low'  && t.confidence !== 'low')  continue;
       if (confidence === 'high' && t.confidence !== 'high') continue;
-      hits.push({ dst, host: dstHost || null, sessions: cnt, confidence: t.confidence, feed: t.feed || null, category: t.category || null });
+      hits.push({
+        dst,
+        host: dstHost || null,
+        sessions: cnt,
+        confidence: t.confidence,
+        source: t.source || null,
+        tag: t.tag || null,
+        matchType: t.matchType || null,
+        matchValue: t.matchValue || null,
+        url: t.url || null,
+        feed: t.feed || t.source || null,
+        category: t.category || t.tag || null,
+      });
     }
     hits.sort((a, b) => b.sessions - a.sessions);
     const paged = hits.slice(0, limit);
