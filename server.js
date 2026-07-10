@@ -5,7 +5,6 @@ require('dotenv').config();
 try { require('dns').setDefaultResultOrder('ipv4first'); } catch {}
 
 const express     = require('express');
-const compression = require('compression');
 const http        = require('http');
 const https   = require('https');
 const { Server } = require('socket.io');
@@ -41,17 +40,11 @@ const beacons        = require('./src/beacons');
 const beaconDetector = require('./src/beacon-detector');
 const sessions       = require('./src/sessions');
 const authPassword   = require('./src/auth-password');
-
-// ─── Route factories ──────────────────────────────────────────────────────────
-const authRoutes        = require('./src/routes/auth');
-const notesRoutes       = require('./src/routes/notes');
-const connectionsRoutes = require('./src/routes/connections');
-const devicesRoutes     = require('./src/routes/devices');
-const backupRoutes      = require('./src/routes/backup');
-const configRoutes      = require('./src/routes/config');
-const slackRoutes           = require('./src/routes/slack');
-const beaconsRoutes         = require('./src/routes/beacons');
-const notificationLogRoutes = require('./src/routes/notification-log');
+const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
+const enrichmentQueue = require('./src/enrichment-queue');
+const beaconScanRunner = require('./src/beacon-scan-runner');
+const { configureHttpApp } = require('./src/http-app');
+const { registerSocketHandlers } = require('./src/socket-handlers');
 
 // ─── Environment ──────────────────────────────────────────────────────────────
 const SUBPATH           = (process.env.SUBPATH || '').replace(/\/$/, '');
@@ -77,46 +70,7 @@ const ASSET_VERSION    = /^[A-Za-z0-9._-]+$/.test(_rawAssetVersion) ? _rawAssetV
 
 // ─── Shared mutable state ─────────────────────────────────────────────────────
 // Passed by reference to route modules so they can read and mutate it.
-const appState = {
-  adminToken:     '',
-  homeCountry:    'JP',
-  uiLanguage:     'ja',
-  autoInvestigate: false,
-  retentionDays:  730,
-  dnsmasqEnabled: true,  dnsmasqLogFile: '/var/log/dnsmasq-queries.log',
-  inspectEnabled: true,  inspectLogFile: '/var/log/yamaha-router.log',
-  dhcpdEnabled:   true,  dhcpdLogFile:   '/var/log/yamaha-router.log',
-  httpsEnabled:  false,
-  httpsCertPath: '',
-  httpsKeyPath:  '',
-  authPasswordHash: '',
-  authPasswordSalt: '',
-  beaconConfig: {
-    enabled:        true,
-    minObs:         4,
-    maxCov:         0.5,
-    minIntervalMs:  60_000,
-    maxIntervalMs:  4 * 3600_000,
-    scanIntervalMs: 60 * 60 * 1000,
-    // Known-benign vendor telemetry — defaults measured against production
-    // false positives on 2026-06-12 (296 candidates, all vendor heartbeats)
-    whitelistDomains: [
-      'amazonaws.com', 'amazon.com', 'amazon.co.jp', 'aws.dev',
-      'amazonalexa.com', 'cloudfront.net',
-      'firetvcaptiveportal.com', 'mmechocaptiveportal.com',
-      'netflix.com', 'nflxvideo.net',
-      'daikinsmartdb.jp',
-      'time.apple.com', 'push.apple.com',
-      'windows.com', 'windowsupdate.com',
-    ],
-    // RDAP org substrings — candidates resolving to these orgs are excluded
-    // unless the destination also hits a threat-intel feed
-    orgAllowlist: [
-      'Amazon', 'Google', 'Microsoft', 'Apple', 'Akamai',
-      'Netflix', 'Fastly', 'Cloudflare', 'GitHub', 'New Relic',
-    ],
-  },
-};
+const appState = createDefaultAppState();
 
 // ─── Express + Socket.IO setup ────────────────────────────────────────────────
 const app = express();
@@ -182,54 +136,13 @@ function loadConfig() {
       enabled:  data.asus.enabled ?? false,
     });
   }
-  if (data.general?.homeCountry) appState.homeCountry = data.general.homeCountry;
-  if (data.general?.language && ['ja', 'en'].includes(data.general.language)) appState.uiLanguage = data.general.language;
-  if (typeof data.general?.autoInvestigate === 'boolean') appState.autoInvestigate = data.general.autoInvestigate;
-  if (data.general?.retentionDays) appState.retentionDays = data.general.retentionDays;
   if (data.backup) {
     if (data.backup.intervalHours)  backup.configure({ intervalHours:  data.backup.intervalHours  });
     if (data.backup.maxGenerations) backup.configure({ maxGenerations: data.backup.maxGenerations });
   }
-  if (data.slack)      notifier.configure({ ...data.slack, language: appState.uiLanguage });
+  applyConfigToAppState(appState, data, { isAllowedLogPath: utils.isAllowedLogPath, logger });
+  if (data.slack) notifier.configure({ ...data.slack, language: appState.uiLanguage });
   i18n.setLanguage(appState.uiLanguage);
-  if (data.adminToken) appState.adminToken = data.adminToken;
-
-  if (data.auth && typeof data.auth === 'object') {
-    appState.authPasswordHash = data.auth.passwordHash || '';
-    appState.authPasswordSalt = data.auth.salt || '';
-  }
-  if (data.https && typeof data.https === 'object') {
-    appState.httpsEnabled  = data.https.enabled === true;
-    appState.httpsCertPath = data.https.certPath || '';
-    appState.httpsKeyPath  = data.https.keyPath  || '';
-  }
-  if (data.beacons && typeof data.beacons === 'object') {
-    const bc = appState.beaconConfig;
-    if (typeof data.beacons.enabled === 'boolean')        bc.enabled        = data.beacons.enabled;
-    if (Number.isFinite(data.beacons.minObs))             bc.minObs         = data.beacons.minObs;
-    if (Number.isFinite(data.beacons.maxCov))             bc.maxCov         = data.beacons.maxCov;
-    if (Number.isFinite(data.beacons.minIntervalMs))      bc.minIntervalMs  = data.beacons.minIntervalMs;
-    if (Number.isFinite(data.beacons.maxIntervalMs))      bc.maxIntervalMs  = data.beacons.maxIntervalMs;
-    if (Number.isFinite(data.beacons.scanIntervalMs))     bc.scanIntervalMs = data.beacons.scanIntervalMs;
-    if (Array.isArray(data.beacons.whitelistDomains))     bc.whitelistDomains = data.beacons.whitelistDomains;
-    if (Array.isArray(data.beacons.orgAllowlist))         bc.orgAllowlist     = data.beacons.orgAllowlist;
-  }
-
-  // Log paths must live under an allowed directory (tail runs via sudo).
-  // If an existing setting is invalid under the new rule, warn and fall back to the default.
-  const safeLogPath = (label, value, fallback) => {
-    if (value === undefined) return fallback;
-    if (utils.isAllowedLogPath(value)) return value;
-    logger.warn(`[config] ${label} logFile "${value}" is not under an allowed log directory — falling back to ${fallback}. ` +
-                'Add the directory via EGRESSVIEW_LOG_PATH_PREFIXES if this path is intentional.');
-    return fallback;
-  };
-  appState.dhcpdEnabled  = data.dhcpd?.enabled  !== false;
-  appState.dhcpdLogFile  = safeLogPath('dhcpd', data.dhcpd?.logFile, '/var/log/yamaha-router.log');
-  appState.inspectEnabled = data.inspect?.enabled !== false;
-  appState.inspectLogFile = safeLogPath('inspect', data.inspect?.logFile, '/var/log/yamaha-router.log');
-  appState.dnsmasqEnabled = data.dnsmasq?.enabled !== false;
-  appState.dnsmasqLogFile = safeLogPath('dnsmasq', data.dnsmasq?.logFile, '/var/log/dnsmasq-queries.log');
 
   dhcpdSyslog.configure({ logFile: appState.dhcpdLogFile, enabled: appState.dhcpdEnabled });
   inspectSyslog.configure({
@@ -340,151 +253,8 @@ function requireAdmin(req, res, next) {
 
 // ─── Connection enrichment queue ──────────────────────────────────────────────
 // The poll loops themselves live in src/poll-scheduler.js (extracted in P2-23).
-// The enrichment queue stays in server.js since INSPECT and others use it too.
-
-const enrichmentQueue = new Set();
-let enrichmentQueueRunning = false;
-
-function refreshCachedEnrichmentForDestinations(ips) {
-  const ipSet = new Set(ips);
-  const updated = [];
-  for (const entry of history.getConnectionHistory().values()) {
-    if (!ipSet.has(entry.dst)) continue;
-
-    let changed = false;
-    const setIfChanged = (field, value) => {
-      if (value == null || entry[field] === value) return;
-      entry[field] = value;
-      changed = true;
-    };
-
-    const now = Date.now();
-    const dnsCached = enrichment.getDnsCache().get(entry.dst);
-    if (dnsCached && dnsCached.expires > now) {
-      if (dnsCached.source === 'dnsmasq' || !enrichment.isPtrJunk(dnsCached.host)) {
-        setIfChanged('dstHost', dnsCached.host);
-      }
-    }
-    const rdap = enrichment.getRdapCache().get(entry.dst);
-    const geo  = enrichment.getGeoCache().get(entry.dst);
-    setIfChanged('country', rdap?.country || geo?.countryCode);
-    setIfChanged('org', rdap?.org);
-    setIfChanged('lat', geo?.lat);
-    setIfChanged('lon', geo?.lon);
-    setIfChanged('city', geo?.city);
-    if (!changed) continue;
-
-    history.appendHistoryLog(entry);
-    updated.push(entry);
-  }
-  if (updated.length) {
-    io.emit('connections-update', { connections: updated, serverTime: Date.now(), partial: true, delta: true });
-  }
-}
-
-function queueConnectionEnrichment(ips) {
-  for (const ip of ips) enrichmentQueue.add(ip);
-  if (enrichmentQueueRunning) return;
-  enrichmentQueueRunning = true;
-  setImmediate(runConnectionEnrichmentQueue);
-}
-
-async function runConnectionEnrichmentQueue() {
-  try {
-    while (enrichmentQueue.size) {
-      const batch = [...enrichmentQueue].slice(0, 250);
-      batch.forEach(ip => enrichmentQueue.delete(ip));
-      await Promise.allSettled(batch.map(ip => enrichment.reverseDns(ip)));
-      await enrichment.lookupRdapBatch(batch);
-      await enrichment.lookupGeoBatch(batch);
-      refreshCachedEnrichmentForDestinations(batch);
-    }
-  } catch (err) {
-    logger.error('[enrichment] background queue error:', err.message);
-  } finally {
-    enrichmentQueueRunning = false;
-    if (enrichmentQueue.size) queueConnectionEnrichment([]);
-  }
-}
-
-// ─── Express middleware ───────────────────────────────────────────────────────
-
-// Self-reporting for slow requests (P2-22) — start timing before all other middleware/routes
-const { createSlowRequestLogger } = require('./src/slow-request-log');
-app.use(createSlowRequestLogger());
-
-// Security headers — applied to every response
-app.use((req, res, next) => {
-  // Nonce for the BASE_URL bootstrap <script> tag — eliminates 'unsafe-inline' from script-src
-  res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'same-origin');
-  if (tlsOptions) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Content-Security-Policy',
-    "default-src 'self'; " +
-    `script-src 'self' 'nonce-${res.locals.cspNonce}' https://d3js.org https://cdn.jsdelivr.net; ` +
-    "style-src 'self'; " +
-    "style-src-elem 'self'; " +
-    "style-src-attr 'unsafe-inline'; " +
-    "img-src 'self' data:; " +
-    "connect-src 'self' wss: https://cdn.jsdelivr.net; " +
-    "object-src 'none'; " +
-    "base-uri 'self';"
-  );
-  next();
-});
-
-app.use(compression());
-
-const indexRoutes = ['/', '/index.html'];
-if (SUBPATH) indexRoutes.push(`${SUBPATH}/`, `${SUBPATH}/index.html`);
-
-// Pre-apply static substitutions once at startup so each request only needs
-// to inject the per-request nonce script (one replace instead of three).
-const _indexHtmlBase = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
-  .replace(/__BASE__/g, htmlEscape(SUBPATH))
-  .replace(/__ASSET_VERSION__/g, htmlEscape(ASSET_VERSION));
-
-app.get(indexRoutes, (req, res) => {
-  const baseScript = `<script nonce="${res.locals.cspNonce}">window.BASE_URL = '${htmlEscape(SUBPATH)}'; window._DEMO_MODE = ${DEMO_MODE};</script>`;
-  res.type('html').send(_indexHtmlBase.replace('</head>', baseScript + '\n</head>'));
-});
-
-const jsModuleRoutes = ['/js/:file'];
-if (SUBPATH) jsModuleRoutes.push(`${SUBPATH}/js/:file`);
-app.get(jsModuleRoutes, (req, res, next) => {
-  const file = req.params.file || '';
-  if (!/^[A-Za-z0-9._-]+\.js$/.test(file)) return next();
-  const jsDir = path.join(__dirname, 'public', 'js');
-  const filePath = path.join(jsDir, file);
-  // Defense in depth: the regex above already forbids path separators, but
-  // verify the resolved path stays inside the js directory before reading.
-  if (path.resolve(filePath) !== path.join(jsDir, path.basename(file))) return next();
-  fs.readFile(filePath, 'utf8', (err, js) => {
-    if (err) return next();
-    const replaced = js.replace(/__ASSET_VERSION__/g, htmlEscape(ASSET_VERSION));
-    const etag = `"${ASSET_VERSION}-${file}"`;
-    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    res.setHeader('ETag', etag);
-    if (req.headers['if-none-match'] === etag) return res.status(304).end();
-    res.type('application/javascript').send(replaced);
-  });
-});
-
-// Serve static assets at both root and SUBPATH (for deployments behind a subpath proxy)
-const staticOptions = {
-  setHeaders(res, filePath) {
-    // Require revalidation for fallback/static JS paths as well; /js/*.js is
-    // normally served by jsModuleRoutes above so import URLs can be versioned.
-    if (filePath.endsWith('.js')) {
-      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    }
-  },
-};
-if (SUBPATH) app.use(SUBPATH, express.static(path.join(__dirname, 'public'), staticOptions));
-app.use(express.static(path.join(__dirname, 'public'), staticOptions));
-app.use(express.json({ limit: '64kb' }));
+// The queue itself now lives in src/enrichment-queue.js as the second step of
+// P2-26, keeping server.js focused on bootstrap and dependency wiring.
 
 // ─── Threat intel re-match + client notification ──────────────────────────────
 // Called after fetchThreatIntel() completes (startup + hourly refresh).
@@ -514,47 +284,6 @@ function reMatchAndNotify() {
 
 // ─── Beacon detection scan ────────────────────────────────────────────────────
 
-let beaconScanTimer = null;
-
-function runBeaconScan() {
-  const cfg = appState.beaconConfig;
-  if (!cfg.enabled) return;
-
-  const events = beacons.getEvents();
-  const detected = beaconDetector.detectBeacons(events, {
-    minObs:           cfg.minObs,
-    maxCov:           cfg.maxCov,
-    minIntervalMs:    cfg.minIntervalMs,
-    maxIntervalMs:    cfg.maxIntervalMs,
-    whitelistDomains: cfg.whitelistDomains,
-  });
-
-  // RDAP org allowlist: drop candidates resolving to known-benign vendors.
-  // A threat-intel hit overrides the allowlist — never hide a flagged dst.
-  const allow = cfg.orgAllowlist.map(o => o.toLowerCase());
-  const candidates = detected.filter(c => {
-    if (threatIntel.matchThreatIntel(c.dst, c.dstHost || c.dst)) return true;
-    const org = (enrichment.getRdapCache().get(c.dst)?.org || '').toLowerCase();
-    return !org || !allow.some(a => org.includes(a));
-  });
-
-  for (const c of candidates) beacons.upsertBeacon(c);
-  const removed = beacons.pruneCandidatesNotIn(
-    candidates.map(c => `${c.src}|${c.dst}|${c.dport}|${c.proto}`)
-  );
-  const pruned = beacons.pruneEvents();
-  logger.info(`[beacons] scan: ${candidates.length} candidate(s) from ${events.length} events ` +
-             `(${detected.length - candidates.length} org-allowlisted, ${removed} stale removed, ${pruned} old events pruned)`);
-}
-
-/** (Re)start the periodic scan using the configured interval. */
-function scheduleBeaconScan() {
-  if (beaconScanTimer) clearInterval(beaconScanTimer);
-  beaconScanTimer = setInterval(runBeaconScan, appState.beaconConfig.scanIntervalMs);
-}
-
-// ─── Mount routes ─────────────────────────────────────────────────────────────
-
 const routeCtx = {
   requireAdmin,
   getAdminToken:       () => appState.adminToken,
@@ -574,83 +303,35 @@ const routeCtx = {
   startCiscoPolling:  pollScheduler.startCiscoPolling,
 };
 
-app.use('/api', authRoutes(routeCtx));
-app.use('/api', notesRoutes(routeCtx));
-app.use('/api', connectionsRoutes(routeCtx));
-app.use('/api', devicesRoutes(routeCtx));
-app.use('/api', backupRoutes(routeCtx));
-app.use('/api', configRoutes(routeCtx));
-app.use('/api', slackRoutes(routeCtx));
-app.use('/api', notificationLogRoutes(routeCtx));
-app.use('/api', beaconsRoutes({
-  requireAdmin, beacons, appState, saveConfig,
-  onConfigChange: () => { scheduleBeaconScan(); runBeaconScan(); },
-}));
-
-// ─── Global error handler ─────────────────────────────────────────────────────
-// Catches synchronous throws from middleware and next(err) calls.
-// Must be registered after all routes (4-argument signature required by Express).
-app.use((err, req, res, next) => {
-  logger.error('[express] unhandled error:', err.message);
-  if (res.headersSent) return next(err);
-  res.status(500).json({ error: 'Internal server error' });
+configureHttpApp(app, {
+  subpath: SUBPATH,
+  assetVersion: ASSET_VERSION,
+  demoMode: DEMO_MODE,
+  appRoot: __dirname,
+  htmlEscape,
+  tlsEnabled: Boolean(tlsOptions),
+  routeCtx,
+  requireAdmin,
+  beacons,
+  appState,
+  saveConfig,
+  beaconScanRunner,
+  logger,
 });
 
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
 
-io.use((socket, next) => {
-  const provided = String(socket.handshake.auth?.token || '');
-  if (!appState.adminToken) return next(new Error('認証未初期化'));
-  if (!authenticate(provided)) return next(new Error('Unauthorized'));
-  next();
-});
-
-io.on('connection', socket => {
-  logger.debug('[ws] Client connected:', socket.id);
-  socket.emit('config', {
-    routerIp:       asus.getRouterIp() || DEFAULT_ROUTER_IP,
-    asusUser:       asus.getUser(),
-    asusPassSet:    asus.hasPass(),
-    authenticated:  asus.isAuthenticated(),
-    asusEnabled:    asus.isEnabled(),
-    yamahaEnabled:  yamaha.isEnabled(),
-    yamahaIp:       yamaha.getIp(),
-    yamahaUser:     yamaha.getUser(),
-    yamahaNat:      yamaha.getNat(),
-    yamahaPassSet:  yamaha.hasPass(),
-    yamahaReady:    yamaha.isReady(),
-    ciscoEnabled:   cisco.isEnabled(),
-    ciscoIp:        cisco.getIp(),
-    ciscoUser:      cisco.getUser(),
-    ciscoPassSet:   cisco.hasPass(),
-    ciscoReady:     cisco.isReady(),
-    homeCountry:    appState.homeCountry,
-    language:       appState.uiLanguage,
-    autoInvestigate: appState.autoInvestigate,
-    retentionDays:  appState.retentionDays,
-    notes:          notes.getAll(),
-    dnsmasqEnabled: appState.dnsmasqEnabled,
-    dnsmasqLogFile: appState.dnsmasqLogFile,
-    inspectEnabled: appState.inspectEnabled,
-    inspectLogFile: appState.inspectLogFile,
-    dhcpdEnabled:   appState.dhcpdEnabled,
-    dhcpdLogFile:   appState.dhcpdLogFile,
-  });
-  if (asus.isEnabled() && !asus.isAuthenticated()) {
-    socket.emit('auth-required', { message: 'セッションが切れています' });
-  }
-  const connectionHistory = history.getConnectionHistory();
-  if ((yamaha.isEnabled() || cisco.isEnabled()) && connectionHistory.size) {
-    // Initial emit: last 1h only — fast first render. Client fetches full 24h
-    // in the background via GET /api/connections after the initial paint.
-    const cutoff = Date.now() - 3_600_000; // 1h
-    socket.emit('connections-update', {
-      connections: [...connectionHistory.values()].filter(c => c.lastSeen >= cutoff),
-      serverTime:  Date.now(),
-      partial:     true,
-      initialLoad: true,
-    });
-  }
+registerSocketHandlers({
+  io,
+  appState,
+  authenticate,
+  asus,
+  yamaha,
+  cisco,
+  notes,
+  history,
+  defaultRouterIp: DEFAULT_ROUTER_IP,
+  logger,
 });
 
 // ─── Wire notifier log callback ───────────────────────────────────────────────
@@ -668,7 +349,7 @@ runtime.init({
 
 pollScheduler.init({
   io, yamaha, cisco, runtime, history, devices, beacons, investigation,
-  appState, queueConnectionEnrichment,
+  appState, queueConnectionEnrichment: enrichmentQueue.queueConnectionEnrichment,
   pollIntervalMs: POLL_INTERVAL,
 });
 
@@ -802,6 +483,8 @@ server.listen(PORT, HOST, () => {
     logger.info(`[devices] stale merge check: ${staleChecked} device(s) scanned for duplicates`);
   }
   enrichment.initDb(runtimeDbPath);
+  enrichmentQueue.init({ history, enrichment, io, logger });
+  beaconScanRunner.init({ appState, beacons, beaconDetector, threatIntel, enrichment, logger });
   beacons.initDb(runtimeDbPath);
 
   if (!DEMO_MODE) {
@@ -838,7 +521,7 @@ server.listen(PORT, HOST, () => {
       .catch(err => logger.error('[threat] periodic fetch failed:', err.message));
   }, 60 * 60 * 1000);
 
-  if (!DEMO_MODE) scheduleBeaconScan();
+  if (!DEMO_MODE) beaconScanRunner.scheduleBeaconScan();
 
   backup.startPeriodicBackup();
 });

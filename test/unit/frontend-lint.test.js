@@ -20,6 +20,8 @@ const frontendDeps = fs.readFileSync(frontendDepsPath, 'utf8');
 const logJs    = fs.readFileSync(path.join(jsDir, 'log.js'), 'utf8');
 const mainJs   = fs.readFileSync(path.join(jsDir, 'main.js'), 'utf8');
 const serverJs = fs.readFileSync(path.join(__dirname, '..', '..', 'server.js'), 'utf8');
+const httpAppJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'http-app.js'), 'utf8');
+const serverAndHttpAppJs = `${serverJs}\n${httpAppJs}`;
 const pollSchedulerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'poll-scheduler.js'), 'utf8');
 const yamahaJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'pollers', 'yamaha.js'), 'utf8');
 const asusJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'pollers', 'asus.js'), 'utf8');
@@ -145,15 +147,15 @@ describe('Frontend script wiring invariants', () => {
       'server should read the asset version from the environment variable');
     assert.match(serverJs, /String\(Date\.now\(\)\)/,
       'server should generate an asset version for each process start unless explicitly set');
-    assert.match(serverJs, /\.replace\(/,
+    assert.match(serverAndHttpAppJs, /\.replace\(/,
       'index rendering should perform template replacement');
-    assert.match(serverJs, /__ASSET_VERSION__/,
+    assert.match(serverAndHttpAppJs, /__ASSET_VERSION__/,
       'index rendering should replace the asset version placeholder');
-    assert.match(serverJs, /filePath\.endsWith\('\.js'\)/,
+    assert.match(serverAndHttpAppJs, /filePath\.endsWith\('\.js'\)/,
       'ES module child scripts should be handled explicitly because imports do not inherit main.js cache-busting');
-    assert.match(serverJs, /Cache-Control',\s*'no-cache,\s*must-revalidate'/,
+    assert.match(serverAndHttpAppJs, /Cache-Control',\s*'no-cache,\s*must-revalidate'/,
       'ES module child scripts should require revalidation so stale modules do not survive a deploy');
-    assert.match(serverJs, /js\.replace\(\s*\/__ASSET_VERSION__\/g/,
+    assert.match(serverAndHttpAppJs, /js\.replace\(\s*\/__ASSET_VERSION__\/g/,
       'served JS modules should replace the asset version placeholder in child import URLs');
     for (const [file, source] of Object.entries(moduleSources)) {
       if (!source.includes("from './")) continue;
@@ -165,11 +167,11 @@ describe('Frontend script wiring invariants', () => {
   });
 
   it('renders index.html through the template path for subpath deployments', () => {
-    assert.match(serverJs, /const\s+indexRoutes\s*=\s*\['\/',\s*'\/index\.html'\]/,
+    assert.match(serverAndHttpAppJs, /const\s+indexRoutes\s*=\s*\['\/',\s*'\/index\.html'\]/,
       'root index routes should be listed explicitly');
-    assert.match(serverJs, /if\s*\(\s*SUBPATH\s*\)\s*indexRoutes\.push\(`\$\{SUBPATH\}\/`,\s*`\$\{SUBPATH\}\/index\.html`\)/,
+    assert.match(serverAndHttpAppJs, /if\s*\(\s*subpath\s*\)\s*indexRoutes\.push\(`\$\{subpath\}\/`,\s*`\$\{subpath\}\/index\.html`\)/i,
       'subpath index routes should also use the rendered template, not raw static index.html');
-    assert.match(serverJs, /app\.get\(indexRoutes,/,
+    assert.match(serverAndHttpAppJs, /app\.get\(indexRoutes,/,
       'index route should be registered from the combined route list');
   });
 
@@ -676,11 +678,11 @@ describe('Server runtime invariants', () => {
   });
 
   it('keeps unsafe-inline out of the base style-src directive', () => {
-    assert.match(serverJs, /"style-src 'self'; "/,
+    assert.match(serverAndHttpAppJs, /style-src 'self'/,
       'base style-src should not allow inline styles');
-    assert.match(serverJs, /"style-src-attr 'unsafe-inline'; "/,
+    assert.match(serverAndHttpAppJs, /style-src-attr 'unsafe-inline'/,
       'legacy inline style attributes should be isolated to style-src-attr until they are migrated');
-    assert.doesNotMatch(serverJs, /"style-src 'self' 'unsafe-inline'; "/,
+    assert.doesNotMatch(serverAndHttpAppJs, /style-src 'self' 'unsafe-inline'/,
       'style-src must not regress to unsafe-inline');
   });
 
