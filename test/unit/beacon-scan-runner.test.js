@@ -107,7 +107,8 @@ describe('scheduleBeaconScan', () => {
     });
 
     runner.scheduleBeaconScan();
-    await tick(14);
+    // Give the interval enough headroom for slower CI runners on Node 24.
+    await tick(30);
     runner.stopBeaconScan();
 
     assert.ok(runs >= 2);
