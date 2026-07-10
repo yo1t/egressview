@@ -5,7 +5,6 @@ require('dotenv').config();
 try { require('dns').setDefaultResultOrder('ipv4first'); } catch {}
 
 const express     = require('express');
-const compression = require('compression');
 const http        = require('http');
 const https   = require('https');
 const { Server } = require('socket.io');
@@ -44,18 +43,8 @@ const authPassword   = require('./src/auth-password');
 const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
 const enrichmentQueue = require('./src/enrichment-queue');
 const beaconScanRunner = require('./src/beacon-scan-runner');
+const { configureHttpApp } = require('./src/http-app');
 const { registerSocketHandlers } = require('./src/socket-handlers');
-
-// ─── Route factories ──────────────────────────────────────────────────────────
-const authRoutes        = require('./src/routes/auth');
-const notesRoutes       = require('./src/routes/notes');
-const connectionsRoutes = require('./src/routes/connections');
-const devicesRoutes     = require('./src/routes/devices');
-const backupRoutes      = require('./src/routes/backup');
-const configRoutes      = require('./src/routes/config');
-const slackRoutes           = require('./src/routes/slack');
-const beaconsRoutes         = require('./src/routes/beacons');
-const notificationLogRoutes = require('./src/routes/notification-log');
 
 // ─── Environment ──────────────────────────────────────────────────────────────
 const SUBPATH           = (process.env.SUBPATH || '').replace(/\/$/, '');
@@ -267,85 +256,6 @@ function requireAdmin(req, res, next) {
 // The queue itself now lives in src/enrichment-queue.js as the second step of
 // P2-26, keeping server.js focused on bootstrap and dependency wiring.
 
-// ─── Express middleware ───────────────────────────────────────────────────────
-
-// Self-reporting for slow requests (P2-22) — start timing before all other middleware/routes
-const { createSlowRequestLogger } = require('./src/slow-request-log');
-app.use(createSlowRequestLogger());
-
-// Security headers — applied to every response
-app.use((req, res, next) => {
-  // Nonce for the BASE_URL bootstrap <script> tag — eliminates 'unsafe-inline' from script-src
-  res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'same-origin');
-  if (tlsOptions) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Content-Security-Policy',
-    "default-src 'self'; " +
-    `script-src 'self' 'nonce-${res.locals.cspNonce}' https://d3js.org https://cdn.jsdelivr.net; ` +
-    "style-src 'self'; " +
-    "style-src-elem 'self'; " +
-    "style-src-attr 'unsafe-inline'; " +
-    "img-src 'self' data:; " +
-    "connect-src 'self' wss: https://cdn.jsdelivr.net; " +
-    "object-src 'none'; " +
-    "base-uri 'self';"
-  );
-  next();
-});
-
-app.use(compression());
-
-const indexRoutes = ['/', '/index.html'];
-if (SUBPATH) indexRoutes.push(`${SUBPATH}/`, `${SUBPATH}/index.html`);
-
-// Pre-apply static substitutions once at startup so each request only needs
-// to inject the per-request nonce script (one replace instead of three).
-const _indexHtmlBase = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8')
-  .replace(/__BASE__/g, htmlEscape(SUBPATH))
-  .replace(/__ASSET_VERSION__/g, htmlEscape(ASSET_VERSION));
-
-app.get(indexRoutes, (req, res) => {
-  const baseScript = `<script nonce="${res.locals.cspNonce}">window.BASE_URL = '${htmlEscape(SUBPATH)}'; window._DEMO_MODE = ${DEMO_MODE};</script>`;
-  res.type('html').send(_indexHtmlBase.replace('</head>', baseScript + '\n</head>'));
-});
-
-const jsModuleRoutes = ['/js/:file'];
-if (SUBPATH) jsModuleRoutes.push(`${SUBPATH}/js/:file`);
-app.get(jsModuleRoutes, (req, res, next) => {
-  const file = req.params.file || '';
-  if (!/^[A-Za-z0-9._-]+\.js$/.test(file)) return next();
-  const jsDir = path.join(__dirname, 'public', 'js');
-  const filePath = path.join(jsDir, file);
-  // Defense in depth: the regex above already forbids path separators, but
-  // verify the resolved path stays inside the js directory before reading.
-  if (path.resolve(filePath) !== path.join(jsDir, path.basename(file))) return next();
-  fs.readFile(filePath, 'utf8', (err, js) => {
-    if (err) return next();
-    const replaced = js.replace(/__ASSET_VERSION__/g, htmlEscape(ASSET_VERSION));
-    const etag = `"${ASSET_VERSION}-${file}"`;
-    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    res.setHeader('ETag', etag);
-    if (req.headers['if-none-match'] === etag) return res.status(304).end();
-    res.type('application/javascript').send(replaced);
-  });
-});
-
-// Serve static assets at both root and SUBPATH (for deployments behind a subpath proxy)
-const staticOptions = {
-  setHeaders(res, filePath) {
-    // Require revalidation for fallback/static JS paths as well; /js/*.js is
-    // normally served by jsModuleRoutes above so import URLs can be versioned.
-    if (filePath.endsWith('.js')) {
-      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-    }
-  },
-};
-if (SUBPATH) app.use(SUBPATH, express.static(path.join(__dirname, 'public'), staticOptions));
-app.use(express.static(path.join(__dirname, 'public'), staticOptions));
-app.use(express.json({ limit: '64kb' }));
-
 // ─── Threat intel re-match + client notification ──────────────────────────────
 // Called after fetchThreatIntel() completes (startup + hourly refresh).
 // Re-evaluates threat field for all in-memory connections, then pushes a
@@ -374,8 +284,6 @@ function reMatchAndNotify() {
 
 // ─── Beacon detection scan ────────────────────────────────────────────────────
 
-// ─── Mount routes ─────────────────────────────────────────────────────────────
-
 const routeCtx = {
   requireAdmin,
   getAdminToken:       () => appState.adminToken,
@@ -395,29 +303,20 @@ const routeCtx = {
   startCiscoPolling:  pollScheduler.startCiscoPolling,
 };
 
-app.use('/api', authRoutes(routeCtx));
-app.use('/api', notesRoutes(routeCtx));
-app.use('/api', connectionsRoutes(routeCtx));
-app.use('/api', devicesRoutes(routeCtx));
-app.use('/api', backupRoutes(routeCtx));
-app.use('/api', configRoutes(routeCtx));
-app.use('/api', slackRoutes(routeCtx));
-app.use('/api', notificationLogRoutes(routeCtx));
-app.use('/api', beaconsRoutes({
-  requireAdmin, beacons, appState, saveConfig,
-  onConfigChange: () => {
-    beaconScanRunner.scheduleBeaconScan();
-    beaconScanRunner.runBeaconScan();
-  },
-}));
-
-// ─── Global error handler ─────────────────────────────────────────────────────
-// Catches synchronous throws from middleware and next(err) calls.
-// Must be registered after all routes (4-argument signature required by Express).
-app.use((err, req, res, next) => {
-  logger.error('[express] unhandled error:', err.message);
-  if (res.headersSent) return next(err);
-  res.status(500).json({ error: 'Internal server error' });
+configureHttpApp(app, {
+  subpath: SUBPATH,
+  assetVersion: ASSET_VERSION,
+  demoMode: DEMO_MODE,
+  appRoot: __dirname,
+  htmlEscape,
+  tlsEnabled: Boolean(tlsOptions),
+  routeCtx,
+  requireAdmin,
+  beacons,
+  appState,
+  saveConfig,
+  beaconScanRunner,
+  logger,
 });
 
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
