@@ -44,6 +44,7 @@ const authPassword   = require('./src/auth-password');
 const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
 const enrichmentQueue = require('./src/enrichment-queue');
 const beaconScanRunner = require('./src/beacon-scan-runner');
+const { registerSocketHandlers } = require('./src/socket-handlers');
 
 // ─── Route factories ──────────────────────────────────────────────────────────
 const authRoutes        = require('./src/routes/auth');
@@ -421,59 +422,17 @@ app.use((err, req, res, next) => {
 
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
 
-io.use((socket, next) => {
-  const provided = String(socket.handshake.auth?.token || '');
-  if (!appState.adminToken) return next(new Error('認証未初期化'));
-  if (!authenticate(provided)) return next(new Error('Unauthorized'));
-  next();
-});
-
-io.on('connection', socket => {
-  logger.debug('[ws] Client connected:', socket.id);
-  socket.emit('config', {
-    routerIp:       asus.getRouterIp() || DEFAULT_ROUTER_IP,
-    asusUser:       asus.getUser(),
-    asusPassSet:    asus.hasPass(),
-    authenticated:  asus.isAuthenticated(),
-    asusEnabled:    asus.isEnabled(),
-    yamahaEnabled:  yamaha.isEnabled(),
-    yamahaIp:       yamaha.getIp(),
-    yamahaUser:     yamaha.getUser(),
-    yamahaNat:      yamaha.getNat(),
-    yamahaPassSet:  yamaha.hasPass(),
-    yamahaReady:    yamaha.isReady(),
-    ciscoEnabled:   cisco.isEnabled(),
-    ciscoIp:        cisco.getIp(),
-    ciscoUser:      cisco.getUser(),
-    ciscoPassSet:   cisco.hasPass(),
-    ciscoReady:     cisco.isReady(),
-    homeCountry:    appState.homeCountry,
-    language:       appState.uiLanguage,
-    autoInvestigate: appState.autoInvestigate,
-    retentionDays:  appState.retentionDays,
-    notes:          notes.getAll(),
-    dnsmasqEnabled: appState.dnsmasqEnabled,
-    dnsmasqLogFile: appState.dnsmasqLogFile,
-    inspectEnabled: appState.inspectEnabled,
-    inspectLogFile: appState.inspectLogFile,
-    dhcpdEnabled:   appState.dhcpdEnabled,
-    dhcpdLogFile:   appState.dhcpdLogFile,
-  });
-  if (asus.isEnabled() && !asus.isAuthenticated()) {
-    socket.emit('auth-required', { message: 'セッションが切れています' });
-  }
-  const connectionHistory = history.getConnectionHistory();
-  if ((yamaha.isEnabled() || cisco.isEnabled()) && connectionHistory.size) {
-    // Initial emit: last 1h only — fast first render. Client fetches full 24h
-    // in the background via GET /api/connections after the initial paint.
-    const cutoff = Date.now() - 3_600_000; // 1h
-    socket.emit('connections-update', {
-      connections: [...connectionHistory.values()].filter(c => c.lastSeen >= cutoff),
-      serverTime:  Date.now(),
-      partial:     true,
-      initialLoad: true,
-    });
-  }
+registerSocketHandlers({
+  io,
+  appState,
+  authenticate,
+  asus,
+  yamaha,
+  cisco,
+  notes,
+  history,
+  defaultRouterIp: DEFAULT_ROUTER_IP,
+  logger,
 });
 
 // ─── Wire notifier log callback ───────────────────────────────────────────────
