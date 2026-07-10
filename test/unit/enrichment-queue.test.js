@@ -1,0 +1,132 @@
+'use strict';
+
+const { describe, it, beforeEach } = require('node:test');
+const assert = require('node:assert/strict');
+
+const queue = require('../../src/enrichment-queue');
+
+const tick = (ms = 15) => new Promise(r => setTimeout(r, ms));
+
+beforeEach(() => queue._resetForTest());
+
+describe('refreshCachedEnrichmentForDestinations', () => {
+  it('updates changed entries and emits a delta update', () => {
+    const historyMap = new Map([
+      ['a', { src: '1.1.1.1', dst: '8.8.8.8', dstHost: '8.8.8.8', country: null, org: null, lat: null, lon: null, city: null }],
+    ]);
+    const appended = [];
+    const emitted = [];
+
+    queue.init({
+      history: {
+        getConnectionHistory: () => historyMap,
+        appendHistoryLog: (entry) => appended.push({ ...entry }),
+      },
+      enrichment: {
+        getDnsCache: () => new Map([['8.8.8.8', { host: 'dns.google', expires: Date.now() + 1000, source: 'dnsmasq' }]]),
+        getRdapCache: () => new Map([['8.8.8.8', { country: 'US', org: 'Google' }]]),
+        getGeoCache: () => new Map([['8.8.8.8', { lat: 1, lon: 2, city: 'Mountain View', countryCode: 'US' }]]),
+        isPtrJunk: () => false,
+      },
+      io: { emit: (...args) => emitted.push(args) },
+      logger: { error: () => {} },
+    });
+
+    queue.refreshCachedEnrichmentForDestinations(['8.8.8.8']);
+
+    assert.equal(historyMap.get('a').dstHost, 'dns.google');
+    assert.equal(historyMap.get('a').org, 'Google');
+    assert.equal(appended.length, 1);
+    assert.equal(emitted.length, 1);
+    assert.equal(emitted[0][0], 'connections-update');
+    assert.equal(emitted[0][1].partial, true);
+  });
+
+  it('does not emit when no fields change', () => {
+    const historyMap = new Map([
+      ['a', { src: '1.1.1.1', dst: '8.8.8.8', dstHost: 'dns.google', country: 'US', org: 'Google', lat: 1, lon: 2, city: 'Mountain View' }],
+    ]);
+    const emitted = [];
+
+    queue.init({
+      history: {
+        getConnectionHistory: () => historyMap,
+        appendHistoryLog: () => { throw new Error('should not append'); },
+      },
+      enrichment: {
+        getDnsCache: () => new Map([['8.8.8.8', { host: 'dns.google', expires: Date.now() + 1000, source: 'dnsmasq' }]]),
+        getRdapCache: () => new Map([['8.8.8.8', { country: 'US', org: 'Google' }]]),
+        getGeoCache: () => new Map([['8.8.8.8', { lat: 1, lon: 2, city: 'Mountain View', countryCode: 'US' }]]),
+        isPtrJunk: () => false,
+      },
+      io: { emit: (...args) => emitted.push(args) },
+      logger: { error: () => {} },
+    });
+
+    queue.refreshCachedEnrichmentForDestinations(['8.8.8.8']);
+    assert.equal(emitted.length, 0);
+  });
+});
+
+describe('queueConnectionEnrichment', () => {
+  it('batches unique IPs and refreshes caches once', async () => {
+    const historyMap = new Map([
+      ['a', { src: '1.1.1.1', dst: '8.8.8.8', dstHost: '8.8.8.8' }],
+    ]);
+    const calls = { reverseDns: [], rdap: [], geo: [] };
+
+    queue.init({
+      history: {
+        getConnectionHistory: () => historyMap,
+        appendHistoryLog: () => {},
+      },
+      enrichment: {
+        reverseDns: async (ip) => { calls.reverseDns.push(ip); },
+        lookupRdapBatch: async (ips) => { calls.rdap.push([...ips]); },
+        lookupGeoBatch: async (ips) => { calls.geo.push([...ips]); },
+        getDnsCache: () => new Map(),
+        getRdapCache: () => new Map(),
+        getGeoCache: () => new Map(),
+        isPtrJunk: () => false,
+      },
+      io: { emit: () => {} },
+      logger: { error: () => {} },
+    });
+
+    queue.queueConnectionEnrichment(['8.8.8.8', '8.8.8.8', '1.1.1.1']);
+    await tick();
+
+    assert.deepEqual(calls.reverseDns.sort(), ['1.1.1.1', '8.8.8.8']);
+    assert.equal(calls.rdap.length, 1);
+    assert.deepEqual(calls.rdap[0].sort(), ['1.1.1.1', '8.8.8.8']);
+    assert.equal(calls.geo.length, 1);
+  });
+
+  it('logs and recovers from background errors', async () => {
+    const errors = [];
+
+    queue.init({
+      history: {
+        getConnectionHistory: () => new Map(),
+        appendHistoryLog: () => {},
+      },
+      enrichment: {
+        reverseDns: async () => {},
+        lookupRdapBatch: async () => { throw new Error('boom'); },
+        lookupGeoBatch: async () => {},
+        getDnsCache: () => new Map(),
+        getRdapCache: () => new Map(),
+        getGeoCache: () => new Map(),
+        isPtrJunk: () => false,
+      },
+      io: { emit: () => {} },
+      logger: { error: (...args) => errors.push(args.join(' ')) },
+    });
+
+    queue.queueConnectionEnrichment(['8.8.8.8']);
+    await tick();
+
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /background queue error/);
+  });
+});

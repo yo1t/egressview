@@ -42,6 +42,8 @@ const beaconDetector = require('./src/beacon-detector');
 const sessions       = require('./src/sessions');
 const authPassword   = require('./src/auth-password');
 const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
+const enrichmentQueue = require('./src/enrichment-queue');
+const beaconScanRunner = require('./src/beacon-scan-runner');
 
 // ─── Route factories ──────────────────────────────────────────────────────────
 const authRoutes        = require('./src/routes/auth');
@@ -261,72 +263,8 @@ function requireAdmin(req, res, next) {
 
 // ─── Connection enrichment queue ──────────────────────────────────────────────
 // The poll loops themselves live in src/poll-scheduler.js (extracted in P2-23).
-// The enrichment queue stays in server.js since INSPECT and others use it too.
-
-const enrichmentQueue = new Set();
-let enrichmentQueueRunning = false;
-
-function refreshCachedEnrichmentForDestinations(ips) {
-  const ipSet = new Set(ips);
-  const updated = [];
-  for (const entry of history.getConnectionHistory().values()) {
-    if (!ipSet.has(entry.dst)) continue;
-
-    let changed = false;
-    const setIfChanged = (field, value) => {
-      if (value == null || entry[field] === value) return;
-      entry[field] = value;
-      changed = true;
-    };
-
-    const now = Date.now();
-    const dnsCached = enrichment.getDnsCache().get(entry.dst);
-    if (dnsCached && dnsCached.expires > now) {
-      if (dnsCached.source === 'dnsmasq' || !enrichment.isPtrJunk(dnsCached.host)) {
-        setIfChanged('dstHost', dnsCached.host);
-      }
-    }
-    const rdap = enrichment.getRdapCache().get(entry.dst);
-    const geo  = enrichment.getGeoCache().get(entry.dst);
-    setIfChanged('country', rdap?.country || geo?.countryCode);
-    setIfChanged('org', rdap?.org);
-    setIfChanged('lat', geo?.lat);
-    setIfChanged('lon', geo?.lon);
-    setIfChanged('city', geo?.city);
-    if (!changed) continue;
-
-    history.appendHistoryLog(entry);
-    updated.push(entry);
-  }
-  if (updated.length) {
-    io.emit('connections-update', { connections: updated, serverTime: Date.now(), partial: true, delta: true });
-  }
-}
-
-function queueConnectionEnrichment(ips) {
-  for (const ip of ips) enrichmentQueue.add(ip);
-  if (enrichmentQueueRunning) return;
-  enrichmentQueueRunning = true;
-  setImmediate(runConnectionEnrichmentQueue);
-}
-
-async function runConnectionEnrichmentQueue() {
-  try {
-    while (enrichmentQueue.size) {
-      const batch = [...enrichmentQueue].slice(0, 250);
-      batch.forEach(ip => enrichmentQueue.delete(ip));
-      await Promise.allSettled(batch.map(ip => enrichment.reverseDns(ip)));
-      await enrichment.lookupRdapBatch(batch);
-      await enrichment.lookupGeoBatch(batch);
-      refreshCachedEnrichmentForDestinations(batch);
-    }
-  } catch (err) {
-    logger.error('[enrichment] background queue error:', err.message);
-  } finally {
-    enrichmentQueueRunning = false;
-    if (enrichmentQueue.size) queueConnectionEnrichment([]);
-  }
-}
+// The queue itself now lives in src/enrichment-queue.js as the second step of
+// P2-26, keeping server.js focused on bootstrap and dependency wiring.
 
 // ─── Express middleware ───────────────────────────────────────────────────────
 
@@ -435,45 +373,6 @@ function reMatchAndNotify() {
 
 // ─── Beacon detection scan ────────────────────────────────────────────────────
 
-let beaconScanTimer = null;
-
-function runBeaconScan() {
-  const cfg = appState.beaconConfig;
-  if (!cfg.enabled) return;
-
-  const events = beacons.getEvents();
-  const detected = beaconDetector.detectBeacons(events, {
-    minObs:           cfg.minObs,
-    maxCov:           cfg.maxCov,
-    minIntervalMs:    cfg.minIntervalMs,
-    maxIntervalMs:    cfg.maxIntervalMs,
-    whitelistDomains: cfg.whitelistDomains,
-  });
-
-  // RDAP org allowlist: drop candidates resolving to known-benign vendors.
-  // A threat-intel hit overrides the allowlist — never hide a flagged dst.
-  const allow = cfg.orgAllowlist.map(o => o.toLowerCase());
-  const candidates = detected.filter(c => {
-    if (threatIntel.matchThreatIntel(c.dst, c.dstHost || c.dst)) return true;
-    const org = (enrichment.getRdapCache().get(c.dst)?.org || '').toLowerCase();
-    return !org || !allow.some(a => org.includes(a));
-  });
-
-  for (const c of candidates) beacons.upsertBeacon(c);
-  const removed = beacons.pruneCandidatesNotIn(
-    candidates.map(c => `${c.src}|${c.dst}|${c.dport}|${c.proto}`)
-  );
-  const pruned = beacons.pruneEvents();
-  logger.info(`[beacons] scan: ${candidates.length} candidate(s) from ${events.length} events ` +
-             `(${detected.length - candidates.length} org-allowlisted, ${removed} stale removed, ${pruned} old events pruned)`);
-}
-
-/** (Re)start the periodic scan using the configured interval. */
-function scheduleBeaconScan() {
-  if (beaconScanTimer) clearInterval(beaconScanTimer);
-  beaconScanTimer = setInterval(runBeaconScan, appState.beaconConfig.scanIntervalMs);
-}
-
 // ─── Mount routes ─────────────────────────────────────────────────────────────
 
 const routeCtx = {
@@ -505,7 +404,10 @@ app.use('/api', slackRoutes(routeCtx));
 app.use('/api', notificationLogRoutes(routeCtx));
 app.use('/api', beaconsRoutes({
   requireAdmin, beacons, appState, saveConfig,
-  onConfigChange: () => { scheduleBeaconScan(); runBeaconScan(); },
+  onConfigChange: () => {
+    beaconScanRunner.scheduleBeaconScan();
+    beaconScanRunner.runBeaconScan();
+  },
 }));
 
 // ─── Global error handler ─────────────────────────────────────────────────────
@@ -589,7 +491,7 @@ runtime.init({
 
 pollScheduler.init({
   io, yamaha, cisco, runtime, history, devices, beacons, investigation,
-  appState, queueConnectionEnrichment,
+  appState, queueConnectionEnrichment: enrichmentQueue.queueConnectionEnrichment,
   pollIntervalMs: POLL_INTERVAL,
 });
 
@@ -723,6 +625,8 @@ server.listen(PORT, HOST, () => {
     logger.info(`[devices] stale merge check: ${staleChecked} device(s) scanned for duplicates`);
   }
   enrichment.initDb(runtimeDbPath);
+  enrichmentQueue.init({ history, enrichment, io, logger });
+  beaconScanRunner.init({ appState, beacons, beaconDetector, threatIntel, enrichment, logger });
   beacons.initDb(runtimeDbPath);
 
   if (!DEMO_MODE) {
@@ -759,7 +663,7 @@ server.listen(PORT, HOST, () => {
       .catch(err => logger.error('[threat] periodic fetch failed:', err.message));
   }, 60 * 60 * 1000);
 
-  if (!DEMO_MODE) scheduleBeaconScan();
+  if (!DEMO_MODE) beaconScanRunner.scheduleBeaconScan();
 
   backup.startPeriodicBackup();
 });
