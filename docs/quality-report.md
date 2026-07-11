@@ -14,8 +14,6 @@
 
 EgressView demonstrates **production-grade quality** across all evaluated frameworks. Security design exceeds typical OSS standards with OWASP ASVS L1 compliance, multi-layer authentication, and CI-integrated security scanning. The testing culture (74.9% test-to-source ratio) and minimal dependency footprint (10 production packages) further distinguish it.
 
-The remaining gaps (coverage tooling, Docker, OpenAPI) are typical for a home-lab/SOHO network monitoring tool and can be addressed incrementally without architectural changes.
-
 | # | Framework | Score | Verdict |
 |---|---|---|---|
 | 1 | OWASP ASVS Level 1 | 12/14 sections pass | Compliant |
@@ -23,6 +21,25 @@ The remaining gaps (coverage tooling, Docker, OpenAPI) are typical for a home-la
 | 3 | ISO/IEC 25010 | Average 8.3/10 | High Quality |
 | 4 | Node.js Best Practices (goldbergyoni) | 42/50 (84%) | Excellent |
 | 5 | SonarQube Quality Gate (estimated) | All A (except Coverage B) | PASSED |
+
+### Key Strengths
+
+- **Security by design** — scrypt password hashing, timing-safe token comparison, CSP with per-request nonces, CI-integrated ASH + secret scan + npm audit, SHA-pinned GitHub Actions
+- **Testing culture** — 54 unit + 3 integration + Playwright E2E; 74.9% test-to-source ratio; isolated `_initForTest()` pattern across all domain modules
+- **Code discipline** — 0 `var`, 0 `eval`, 0 TODO/FIXME, consistent naming, ESLint v10
+- **Minimal dependencies** — 10 production packages only; Dependabot with 7-day cooldown
+
+### Key Gaps and Next Steps
+
+| Priority | Gap | Effort |
+|---|---|---|
+| High | Code coverage measurement (c8) | 2 h |
+| High | zod validation on HTTP routes | 8 h |
+| Medium | Health-check endpoint | 0.5 h |
+| Medium | Request IDs (X-Request-Id) | 1 h |
+| Low | OpenAPI schema / Dockerfile | 6 h |
+
+The remaining gaps are typical for a home-lab/SOHO network monitoring tool and can be addressed incrementally without architectural changes.
 
 ---
 
@@ -165,23 +182,6 @@ The remaining gaps (coverage tooling, Docker, OpenAPI) are typical for a home-la
 | MAJOR | 3 | `investigateIp` 218L, `initDb(devices)` 161L, `initDb(history)` 134L |
 | MINOR | 5 | `configureHttpApp` 111L, `summarizeByTimeRange` 105L, `observeDevice` 89L |
 | INFO | 7 | Magic number `8000` ms x5, DB init boilerplate duplication |
-
----
-
-## Improvement Opportunities
-
-| Priority | Item | Effort | Frameworks |
-|---|---|---|---|
-| High | Add coverage measurement (c8) | 2 h | SonarQube, Node.js BP |
-| High | Apply zod validation to HTTP routes | 8 h | OWASP V5, SonarQube |
-| Medium | Add health-check endpoint | 0.5 h | ISO 25010, Node.js BP |
-| Medium | Add request IDs (X-Request-Id) | 1 h | Node.js BP |
-| Medium | Refactor long functions (investigateIp, initDb) | 3 h | SonarQube |
-| Low | OpenAPI schema definition | 4 h | OWASP, ISO 25010 |
-| Low | Add Dockerfile | 2 h | ISO 25010, Node.js BP |
-| Low | Extract magic number 8000 ms to constant | 0.5 h | SonarQube |
-
----
 
 ---
 

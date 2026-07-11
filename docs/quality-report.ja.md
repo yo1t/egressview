@@ -14,8 +14,6 @@
 
 EgressView は評価した全フレームワークにおいて**プロダクショングレードの品質**を示しています。セキュリティ設計は一般的な OSS 標準を上回り、OWASP ASVS L1 に適合するレベルの多層認証と CI 統合セキュリティスキャンを備えています。テスト文化 (74.9% テスト対ソース比率) と最小限の依存フットプリント (本番 10 パッケージ) もプロジェクトの品質を際立たせています。
 
-残りのギャップ (カバレッジ計測, Docker, OpenAPI) は家庭内/SOHO ネットワーク監視ツールとしては典型的であり、アーキテクチャ変更なしに段階的に対応可能です。
-
 | # | フレームワーク | スコア | 判定 |
 |---|---|---|---|
 | 1 | OWASP ASVS Level 1 | 12/14 セクション適合 | ✅ 適合 |
@@ -23,6 +21,25 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | 3 | ISO/IEC 25010 | 平均 8.3/10 | 高品質 |
 | 4 | Node.js Best Practices (goldbergyoni) | 42/50 (84%) | 優秀 |
 | 5 | SonarQube Quality Gate (推定) | 全項目 A (Coverage 除く) | ✅ PASSED |
+
+### 主な強み
+
+- **セキュリティ設計** — scrypt パスワードハッシュ, タイミングセーフなトークン比較, リクエスト毎 CSP nonce, CI 統合 ASH + secret scan + npm audit, SHA ピン留め GitHub Actions
+- **テスト文化** — 54 unit + 3 integration + Playwright E2E; テスト対ソース比率 74.9%; 全ドメインモジュールで `_initForTest()` パターン
+- **コード規律** — `var` ゼロ, `eval` ゼロ, TODO/FIXME ゼロ, 命名規約一貫, ESLint v10
+- **最小依存** — 本番パッケージ 10 個のみ; Dependabot (cooldown 7日)
+
+### 主なギャップと次のステップ
+
+| 優先度 | ギャップ | 推定工数 |
+|---|---|---|
+| 高 | コードカバレッジ計測 (c8) | 2h |
+| 高 | HTTP ルートに zod バリデーション適用 | 8h |
+| 中 | Health-check エンドポイント | 0.5h |
+| 中 | リクエスト ID (X-Request-Id) | 1h |
+| 低 | OpenAPI スキーマ / Dockerfile | 6h |
+
+残りのギャップは家庭内/SOHO ネットワーク監視ツールとしては典型的であり、アーキテクチャ変更なしに段階的に対応可能です。
 
 ---
 
@@ -165,23 +182,6 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | MAJOR | 3 | `investigateIp` 218行, `initDb(devices)` 161行, `initDb(history)` 134行 |
 | MINOR | 5 | `configureHttpApp` 111行, `summarizeByTimeRange` 105行, `observeDevice` 89行 |
 | INFO | 7 | マジックナンバー `8000`ms x5箇所, DB init ボイラープレート重複 |
-
----
-
-## 改善機会
-
-| 優先度 | 項目 | 推定工数 | 対象基準 |
-|---|---|---|---|
-| 高 | カバレッジ計測 (c8) 導入 | 2h | SonarQube, Node.js BP |
-| 高 | HTTP ルートに zod バリデーション適用 | 8h | OWASP V5, SonarQube |
-| 中 | Health-check エンドポイント追加 | 0.5h | ISO 25010, Node.js BP |
-| 中 | リクエスト ID (X-Request-Id) 追加 | 1h | Node.js BP |
-| 中 | 長関数リファクタリング (investigateIp, initDb) | 3h | SonarQube |
-| 低 | OpenAPI スキーマ定義 | 4h | OWASP, ISO 25010 |
-| 低 | Dockerfile 追加 | 2h | ISO 25010, Node.js BP |
-| 低 | マジックナンバー `8000`ms の定数化 | 0.5h | SonarQube |
-
----
 
 ---
 
