@@ -8,7 +8,7 @@ const path     = require('path');
 const Database = require('better-sqlite3');
 const os       = require('os');
 
-const { runMigrations, SCHEMA_VERSION } = require('../../src/db-migrate');
+const { runMigrations, SCHEMA_VERSION, _assertDiskSpace, _verifyDbCopy, _MIGRATIONS } = require('../../src/db-migrate');
 
 const TMP = path.join(os.tmpdir(), 'egressview-migrate-test');
 
@@ -146,5 +146,116 @@ describe('db-migrate: in-memory database', () => {
     runMigrations(db, ':memory:');
     assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     db.close();
+  });
+});
+
+// ─── P2-33: fail-closed backup ────────────────────────────────────────────────
+
+describe('db-migrate: fail-closed backup (P2-33)', () => {
+  it('aborts migration and leaves the DB unmodified when the backup cannot be written', () => {
+    const dir = path.join(TMP, 'readonly-dir');
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, 'locked.db');
+    const db = openDb(p);
+    db.exec('CREATE TABLE connections (src TEXT, dst TEXT, dport INTEGER, proto TEXT, firstSeen INTEGER NOT NULL, lastSeen INTEGER NOT NULL, PRIMARY KEY (src, dst, dport, proto))');
+    db.exec(`INSERT INTO connections VALUES ('192.168.1.1','8.8.8.8',443,'TCP',1,2)`);
+    db.close();
+
+    const db2 = openDb(p);
+    fs.chmodSync(dir, 0o500);  // deny writes: copyFileSync must fail
+    try {
+      assert.throws(() => runMigrations(db2, p));
+      // fail-closed: version not advanced, data intact
+      assert.equal(db2.pragma('user_version', { simple: true }), 0);
+      assert.equal(db2.prepare('SELECT COUNT(*) AS n FROM connections').get().n, 1);
+    } finally {
+      fs.chmodSync(dir, 0o700);
+      db2.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('_verifyDbCopy rejects a file that is not a healthy SQLite DB', () => {
+    const p = path.join(TMP, 'garbage.bak');
+    fs.writeFileSync(p, 'this is not a sqlite database at all');
+    try {
+      assert.throws(() => _verifyDbCopy(p));
+    } finally {
+      try { fs.unlinkSync(p); } catch {}
+    }
+  });
+
+  it('_verifyDbCopy accepts a healthy SQLite DB copy', () => {
+    const p = tmpDb('healthy-copy');
+    const db = openDb(p);
+    db.exec('CREATE TABLE t (x INTEGER)');
+    db.close();
+    try {
+      _verifyDbCopy(p);  // must not throw
+    } finally {
+      try { fs.unlinkSync(p); } catch {}
+    }
+  });
+
+  it('_assertDiskSpace throws when required bytes exceed free space', () => {
+    const p = tmpDb('space');
+    fs.writeFileSync(p, 'x');
+    try {
+      assert.throws(() => _assertDiskSpace(p, Number.MAX_SAFE_INTEGER));
+      _assertDiskSpace(p, 1);  // must not throw for a trivial requirement
+    } finally {
+      try { fs.unlinkSync(p); } catch {}
+    }
+  });
+
+  it('a failing migration rolls back its own transaction and propagates', () => {
+    const p = tmpDb('failing-migration');
+    const db = openDb(p);
+    db.exec('CREATE TABLE connections (src TEXT, dst TEXT, dport INTEGER, proto TEXT, firstSeen INTEGER NOT NULL, lastSeen INTEGER NOT NULL, PRIMARY KEY (src, dst, dport, proto))');
+
+    _MIGRATIONS.push({
+      version: SCHEMA_VERSION + 1,
+      description: 'test-only failing migration',
+      up(d) {
+        d.exec('CREATE TABLE half_done (x INTEGER)');
+        throw new Error('boom');
+      },
+    });
+    try {
+      assert.throws(() => runMigrations(db, p), /boom/);
+      // Earlier migrations committed, the failing one rolled back
+      assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
+      const half = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='half_done'`).get();
+      assert.equal(half, undefined, 'partial table from the failed migration must be rolled back');
+    } finally {
+      _MIGRATIONS.pop();
+      db.close();
+      const backups = fs.readdirSync(TMP).filter(f => f.includes('pre-migration'));
+      for (const f of backups) try { fs.unlinkSync(path.join(TMP, f)); } catch {}
+      try { fs.unlinkSync(p); } catch {}
+    }
+  });
+
+  it('backup file passes integrity verification on the success path', () => {
+    const p = tmpDb('verified-backup');
+    const db = openDb(p);
+    db.exec('CREATE TABLE connections (src TEXT, dst TEXT, dport INTEGER, proto TEXT, firstSeen INTEGER NOT NULL, lastSeen INTEGER NOT NULL, PRIMARY KEY (src, dst, dport, proto))');
+    db.exec(`INSERT INTO connections VALUES ('192.168.1.1','8.8.8.8',443,'TCP',1,2)`);
+    db.close();
+
+    const db2 = openDb(p);
+    runMigrations(db2, p);
+    db2.close();
+
+    const backups = fs.readdirSync(TMP).filter(f => f.startsWith('verified-backup.db.pre-migration'));
+    assert.equal(backups.length, 1, 'exactly one backup expected');
+    const bak = path.join(TMP, backups[0]);
+    _verifyDbCopy(bak);  // the backup itself must be a healthy DB
+    // The backup preserves pre-migration data
+    const bdb = new Database(bak, { readonly: true });
+    assert.equal(bdb.prepare('SELECT COUNT(*) AS n FROM connections').get().n, 1);
+    bdb.close();
+    try { fs.unlinkSync(bak); } catch {}
+    try { fs.unlinkSync(p); } catch {}
   });
 });
