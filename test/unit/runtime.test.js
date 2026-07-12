@@ -168,6 +168,32 @@ describe('recordConnection', () => {
     assert.ok(!isNew);
   });
 
+  it('backdates firstSeen from firstSeenHint for a new entry', () => {
+    initRuntime();
+    const now  = Date.now();
+    const hint = now - 90_000;
+    const { entry } = runtime.recordConnection({ ...SESSION, firstSeenHint: hint }, now);
+    assert.equal(entry.firstSeen, hint);
+    assert.equal(entry.lastSeen, now);
+  });
+
+  it('keeps the existing firstSeen even when a later hint arrives', () => {
+    initRuntime();
+    const now = Date.now();
+    const { entry: first } = runtime.recordConnection(SESSION, now - 60_000);
+    const { entry } = runtime.recordConnection({ ...SESSION, firstSeenHint: now - 5_000 }, now);
+    assert.equal(entry.firstSeen, first.firstSeen);
+  });
+
+  it('ignores an invalid or future firstSeenHint', () => {
+    initRuntime();
+    const now = Date.now();
+    const { entry: future } = runtime.recordConnection({ ...SESSION, firstSeenHint: now + 60_000 }, now);
+    assert.equal(future.firstSeen, now);
+    const { entry: nan } = runtime.recordConnection({ ...SESSION, dst: '9.9.9.9', firstSeenHint: 'abc' }, now);
+    assert.equal(nan.firstSeen, now);
+  });
+
   it('calls notifier.notify when threat is found', () => {
     const threat  = makeThreatIntel({ tag: 'Feodo', type: 'C2' });
     const notif   = makeNotifier();

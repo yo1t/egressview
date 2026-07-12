@@ -41,12 +41,16 @@ let ciscoPass    = '';
 let ciscoEnablePass = '';
 let ciscoEnabled = false;
 let ciscoHostFp  = '';
+// Whether "show ip nat translations verbose" works on this device; assumed
+// true until a poll proves otherwise, re-assumed when the target changes.
+let ciscoVerboseSupported = true;
 
 // Callbacks
 let onStatus     = () => {};
 let onSaveConfig = () => {};
 
 function configure(cfg) {
+  if (cfg.ip !== undefined && cfg.ip !== ciscoIp) ciscoVerboseSupported = true;
   if (cfg.ip         !== undefined) ciscoIp         = cfg.ip;
   if (cfg.user       !== undefined) ciscoUser       = cfg.user;
   if (cfg.pass       !== undefined) ciscoPass       = cfg.pass;
@@ -69,21 +73,54 @@ function dotMacToColon(mac) {
 // Protocol-based default TTL (seconds) used when Cisco doesn't report remaining TTL
 const PROTO_DEFAULT_TTL = { TCP: 86400, UDP: 300, ICMP: 60 };
 
-function parseNatTranslations(text) {
+// Parse a Cisco uptime-style age ("00:01:13", "1d02h", "2w3d", "1y23w") into
+// seconds. Returns null for unknown formats and "never".
+function parseCiscoAge(str) {
+  const s = String(str || '').trim();
+  let m;
+  if ((m = s.match(/^(\d+):(\d{2}):(\d{2})$/)))
+    return (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]);
+  if ((m = s.match(/^(\d+)d(\d+)h$/)))
+    return (+m[1]) * 86400 + (+m[2]) * 3600;
+  if ((m = s.match(/^(\d+)w(\d+)d$/)))
+    return (+m[1]) * 604800 + (+m[2]) * 86400;
+  if ((m = s.match(/^(\d+)y(\d+)w$/)))
+    return (+m[1]) * 31536000 + (+m[2]) * 604800;
+  return null;
+}
+
+function parseNatTranslations(text, now = Date.now()) {
   const sessions = [];
   for (const line of String(text || '').split('\n')) {
     // Match: tcp/udp/icmp  WAN:port  LAN:port  ext-local:port  ext-global:port
     const m = line.match(
       /^\s*(tcp|udp|icmp)\s+\S+?:(\d+)\s+(\d{1,3}(?:\.\d{1,3}){3}):(\d+)\s+\S+\s+(\d{1,3}(?:\.\d{1,3}){3}):(\d+)/i
     );
-    if (!m) continue;
-    const proto = m[1].toUpperCase();
-    const src   = m[3];
-    const sport = parseInt(m[4], 10);
-    const dst   = m[5];
-    const dport = parseInt(m[6], 10);
-    const ttl   = PROTO_DEFAULT_TTL[proto] ?? 300;
-    sessions.push({ proto, src, sport, dst, dport, ttl });
+    if (m) {
+      const proto = m[1].toUpperCase();
+      const src   = m[3];
+      const sport = parseInt(m[4], 10);
+      const dst   = m[5];
+      const dport = parseInt(m[6], 10);
+      const ttl   = PROTO_DEFAULT_TTL[proto] ?? 300;
+      sessions.push({ proto, src, sport, dst, dport, ttl });
+      continue;
+    }
+    // Verbose mode detail line for the entry above, e.g.:
+    //   "create 00:01:13, use 00:00:50 timeout:86400000, left 23:59:09, ..."
+    // "create" backdates firstSeen; "left" replaces the protocol-default TTL.
+    const last = sessions[sessions.length - 1];
+    if (!last) continue;
+    const createM = line.match(/\bcreate[:\s]+([\w:]+)/i);
+    if (createM) {
+      const age = parseCiscoAge(createM[1]);
+      if (age !== null) last.firstSeenHint = now - age * 1000;
+    }
+    const leftM = line.match(/\bleft[:\s]+([\w:]+)/i);
+    if (leftM) {
+      const left = parseCiscoAge(leftM[1]);
+      if (left !== null) last.ttl = left;
+    }
   }
   return sessions;
 }
@@ -371,6 +408,16 @@ function connectCisco(onReady) {
 // ── Public operations ─────────────────────────────────────────────────────────
 
 async function fetchNatSessions() {
+  // Prefer verbose output: its per-entry "create"/"left" ages give an accurate
+  // firstSeen and remaining TTL instead of protocol-default guesses. Older IOS
+  // that rejects the verbose keyword answers "% Invalid input", which is the
+  // same marker as a privilege error — retry plain to tell the two apart.
+  if (ciscoVerboseSupported) {
+    const raw = await ciscoExec('show ip nat translations verbose', 90000);
+    if (!isPrivilegeError(raw)) return parseNatTranslations(raw);
+    ciscoVerboseSupported = false;
+    logger.info('[cisco] verbose NAT output unavailable — falling back to plain output');
+  }
   const raw = await ciscoExec('show ip nat translations', 90000);
   // Staying in user mode returns a privilege error indistinguishable from zero
   // sessions, so raise an explicit error instead
@@ -506,6 +553,7 @@ module.exports = {
   reconnect,
   ciscoExec,
   parseNatTranslations,
+  parseCiscoAge,
   parseArp,
   parseNdpNeighbors,
   parseLanIp,

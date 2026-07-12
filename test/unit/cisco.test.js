@@ -70,6 +70,91 @@ describe('cisco: parseNatTranslations', () => {
     assert.deepEqual(cisco.parseNatTranslations(''), []);
     assert.deepEqual(cisco.parseNatTranslations(null), []);
   });
+
+  it('plain output leaves firstSeenHint unset and keeps default TTL', () => {
+    const raw = fix('nat-translations.txt');
+    const sessions = cisco.parseNatTranslations(raw);
+    assert.ok(sessions.every(s => s.firstSeenHint === undefined));
+    assert.equal(sessions[0].ttl, 86400);
+  });
+});
+
+// ── parseCiscoAge ────────────────────────────────────────────────────────────
+
+describe('cisco: parseCiscoAge', () => {
+  it('parses hh:mm:ss format', () => {
+    assert.equal(cisco.parseCiscoAge('00:00:05'), 5);
+    assert.equal(cisco.parseCiscoAge('00:01:13'), 73);
+    assert.equal(cisco.parseCiscoAge('23:58:47'), 86327);
+  });
+
+  it('parses uptime-style long formats', () => {
+    assert.equal(cisco.parseCiscoAge('1d02h'), 86400 + 7200);
+    assert.equal(cisco.parseCiscoAge('2w3d'), 2 * 604800 + 3 * 86400);
+    assert.equal(cisco.parseCiscoAge('1y23w'), 31536000 + 23 * 604800);
+  });
+
+  it('returns null for unknown formats and never', () => {
+    assert.equal(cisco.parseCiscoAge('never'), null);
+    assert.equal(cisco.parseCiscoAge(''), null);
+    assert.equal(cisco.parseCiscoAge('abc'), null);
+    assert.equal(cisco.parseCiscoAge(null), null);
+  });
+});
+
+// ── parseNatTranslations (verbose) ───────────────────────────────────────────
+
+describe('cisco: parseNatTranslations verbose', () => {
+  const NOW = 1_700_000_000_000;
+
+  it('backdates firstSeenHint from the create age', () => {
+    const raw = fix('nat-translations-verbose.txt');
+    const sessions = cisco.parseNatTranslations(raw, NOW);
+    assert.equal(sessions.length, 4);
+    // First entry: create 00:01:13 → 73s ago
+    assert.equal(sessions[0].firstSeenHint, NOW - 73 * 1000);
+    // Second entry: create 1d02h
+    assert.equal(sessions[1].firstSeenHint, NOW - (86400 + 7200) * 1000);
+  });
+
+  it('replaces the protocol-default TTL with the left value', () => {
+    const raw = fix('nat-translations-verbose.txt');
+    const sessions = cisco.parseNatTranslations(raw, NOW);
+    // tcp: left 23:58:47 (not the 86400 default)
+    assert.equal(sessions[0].ttl, 86327);
+    // udp: left 00:04:30
+    const udp = sessions.find(s => s.proto === 'UDP');
+    assert.equal(udp.ttl, 270);
+    // icmp: left 00:00:55
+    const icmp = sessions.find(s => s.proto === 'ICMP');
+    assert.equal(icmp.ttl, 55);
+  });
+
+  it('still parses the entry lines identically to plain output', () => {
+    const raw = fix('nat-translations-verbose.txt');
+    const sessions = cisco.parseNatTranslations(raw, NOW);
+    assert.equal(sessions[0].src, '192.168.1.10');
+    assert.equal(sessions[0].sport, 12345);
+    assert.equal(sessions[0].dst, '8.8.8.8');
+    assert.equal(sessions[0].dport, 80);
+    assert.equal(sessions.filter(s => s.src === '---' || s.dst === '---').length, 0);
+  });
+
+  it('ignores a detail line with no preceding entry', () => {
+    const sessions = cisco.parseNatTranslations('    create 00:01:13, use 00:00:50, left 23:58:47,\n', NOW);
+    assert.deepEqual(sessions, []);
+  });
+
+  it('keeps defaults when create/left ages are unparseable', () => {
+    const raw = [
+      'tcp  203.0.113.1:1000   192.168.1.10:1000  8.8.8.8:80  8.8.8.8:80',
+      '    create never, use never, left garbage,',
+    ].join('\n');
+    const sessions = cisco.parseNatTranslations(raw, NOW);
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].firstSeenHint, undefined);
+    assert.equal(sessions[0].ttl, 86400);
+  });
 });
 
 // ── parseArp ─────────────────────────────────────────────────────────────────

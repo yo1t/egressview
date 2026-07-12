@@ -63,6 +63,12 @@ show ip nat translations
 
 このコマンドが使えない、権限不足になる、通信があるのに空になる、といった場合は、EgressView で L3/L4 セッションを安定取得できません。
 
+対応機器では、EgressView は `show ip nat translations verbose` を優先して使います。エントリごとの `create` / `left` の経過時間から、各セッションの正確な開始時刻と残存 TTL を取得できるためです。verbose キーワードが拒否される機器では、自動的に通常のコマンドへフォールバックします。
+
+```text
+show ip nat translations verbose
+```
+
 ---
 
 ## Step 3 — ARP 情報が見えることを確認

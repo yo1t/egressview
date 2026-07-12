@@ -1,0 +1,20 @@
+Router#show ip nat translations verbose
+Pro  Inside global       Inside local        Outside local       Outside global
+tcp  203.0.113.1:12345   192.168.1.10:12345  8.8.8.8:80          8.8.8.8:80
+    create 00:01:13, use 00:00:50 timeout:86400000, left 23:58:47, Map-Id(In): 1,
+    flags:
+extended, use_count: 0, entry-id: 7, lc_entries: 0
+tcp  203.0.113.1:12346   192.168.1.10:12346  142.250.185.78:443  142.250.185.78:443
+    create 1d02h, use 00:10:00 timeout:86400000, left 23:50:00, Map-Id(In): 1,
+    flags:
+extended, use_count: 0, entry-id: 8, lc_entries: 0
+udp  203.0.113.1:53001   192.168.1.10:53001  8.8.4.4:53          8.8.4.4:53
+    create 00:00:30, use 00:00:30 timeout:300000, left 00:04:30, Map-Id(In): 1,
+    flags:
+extended, use_count: 0, entry-id: 9, lc_entries: 0
+icmp 203.0.113.1:1       192.168.1.10:1      1.1.1.1:1           1.1.1.1:1
+    create 00:00:05, use 00:00:05 timeout:60000, left 00:00:55, Map-Id(In): 1,
+    flags:
+extended, use_count: 0, entry-id: 10, lc_entries: 0
+---  203.0.113.1         192.168.1.100       ---                 ---
+Router#
