@@ -1,9 +1,6 @@
 'use strict';
 
-// Unit tests for normalizeGraphLinks and linkEndpointId in public/js/graph.js.
-// Both functions are pure (no DOM/D3), so we slice them out of the source and
-// evaluate in a vm context.  The slice runs from linkEndpointId up to but not
-// including currentGraphRangeKey.
+// Unit tests for normalizeGraphLinks and linkEndpointId (now in graph-helpers.js).
 // Run: node --test test/unit/graph-filter.test.js
 
 const { describe, it } = require('node:test');
@@ -13,24 +10,21 @@ const path = require('node:path');
 const vm   = require('node:vm');
 
 const root   = path.join(__dirname, '..', '..');
-const source = fs.readFileSync(path.join(root, 'public/js/graph.js'), 'utf8');
-
-const start = source.indexOf('function linkEndpointId');
-const end   = source.indexOf('function currentGraphRangeKey');
-assert.notEqual(start, -1, 'function linkEndpointId not found');
-assert.notEqual(end,   -1, 'function currentGraphRangeKey not found');
-
-const fnSrc = source.slice(start, end);
+const source = fs.readFileSync(path.join(root, 'public/js/graph-helpers.js'), 'utf8');
 
 function load() {
-  const ctx = {};
-  vm.runInNewContext(fnSrc, ctx);
-  return ctx;
+  const exports = {};
+  const wrapped = source.replace(/^export function /gm, 'function ')
+    .replace(/^export /gm, '');
+  const fnNames = [...wrapped.matchAll(/^function (\w+)/gm)].map(m => m[1]);
+  const tail = fnNames.map(n => `exports.${n} = ${n};`).join('\n');
+  const ctx = { exports };
+  vm.runInNewContext(wrapped + '\n' + tail, ctx);
+  return ctx.exports;
 }
 
 const { normalizeGraphLinks } = load();
 
-// helper: build minimal node and link objects
 const node  = id => ({ id });
 const link  = (source, target, extra = {}) => ({ source, target, ...extra });
 
@@ -80,7 +74,6 @@ describe('normalizeGraphLinks', () => {
 
   it('resolves object endpoints to their id property', () => {
     const nodes = [node('a'), node('b')];
-    // D3 replaces link.source/target strings with the actual node objects after simulation init
     const links = [link({ id: 'a', x: 1 }, { id: 'b', y: 2 })];
     const result = normalizeGraphLinks(links, nodes);
     assert.equal(result.length, 1);

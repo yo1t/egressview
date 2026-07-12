@@ -4,6 +4,7 @@ import { _BASE, esc, fmtBytes, nodeColor, nodeClass, typeLabel, isWiredType } fr
 import { getFilteredConnections, getTimeRange, currentTimeFilter, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
 import { statsMode, nlMode, logMode, devicesMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { lookupNote, apiFetch, openNoteModal, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
+import { flagEmoji, meshNodeId, linkEndpointId, normalizeGraphLinks, currentGraphRangeKey as _rangeKey, routerTargetsFromSource } from './graph-helpers.js?v=__ASSET_VERSION__';
 // Circular imports resolved at runtime (function-body-only calls):
 import { updateStats } from './stats.js?v=__ASSET_VERSION__';
 import { updateLogView } from './log.js?v=__ASSET_VERSION__';
@@ -151,38 +152,8 @@ let graphSummaryInflight = { key: null, promise: null };
 const MESH_COLORS = ['#f59e0b','#f97316','#14b8a6','#a78bfa','#fb7185'];
 let meshColorMap = {};
 
-function flagEmoji(code) {
-  if (!code || code.length !== 2) return '';
-  return String.fromCodePoint(0x1F1E6 + code.charCodeAt(0) - 65, 0x1F1E6 + code.charCodeAt(1) - 65);
-}
-
-function meshNodeId(mac) { return `__node_${mac}__`; }
-
-function linkEndpointId(endpoint) {
-  return typeof endpoint === 'object' ? endpoint?.id : endpoint;
-}
-
-function normalizeGraphLinks(candidateLinks, candidateNodes) {
-  const nodeIds = new Set(candidateNodes.map(n => n.id));
-  return candidateLinks
-    .map(l => ({
-      ...l,
-      source: linkEndpointId(l.source),
-      target: linkEndpointId(l.target),
-    }))
-    .filter(l => nodeIds.has(l.source) && nodeIds.has(l.target));
-}
-
 function currentGraphRangeKey(from, to) {
-  if (currentTimeFilter) {
-    if (currentTimeFilter === 'custom') return `custom:${from ?? ''}:${to ?? ''}`;
-    if (currentTimeFilter === 'today' || currentTimeFilter === 'yesterday') {
-      const day = from != null ? new Date(from).toISOString().slice(0, 10) : '';
-      return `${currentTimeFilter}:${day}:${to ?? ''}`;
-    }
-    return `${currentTimeFilter}:open`;
-  }
-  return `${from ?? ''}:${to ?? ''}`;
+  return _rangeKey(from, to, currentTimeFilter);
 }
 
 function activeRouterTopology() {
@@ -196,18 +167,6 @@ function activeRouterTopology() {
     mainRouterLabel: !hasYamaha && hasCisco ? 'Cisco IOS' : hasYamaha ? 'Yamaha RTX' : 'Router',
     extraRouters: isMulti ? [{ id: '__router_cisco__', label: 'Cisco IOS' }] : [],
   };
-}
-
-function routerTargetsFromSource(source, isMulti) {
-  if (!isMulti) return undefined;
-  const raw = String(source || 'yamaha').toLowerCase();
-  const tokens = raw.split(/[,+]/).map(s => s.trim()).filter(Boolean);
-  const hasCisco = tokens.includes('cisco');
-  const hasYamaha = !hasCisco || tokens.includes('yamaha');
-  const targets = [];
-  if (hasYamaha) targets.push('__router__');
-  if (hasCisco) targets.push('__router_cisco__');
-  return targets.length ? targets : ['__router__'];
 }
 
 function graphSummaryNotice(show, summary) {
