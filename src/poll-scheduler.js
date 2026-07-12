@@ -14,6 +14,7 @@ let _io, _yamaha, _cisco, _runtime, _history, _devices, _beacons, _investigation
 let _appState = null;
 let _queueConnectionEnrichment = () => {};
 let _pollIntervalMs = 60_000;
+let _schedulePoll = setTimeout;
 
 // ─── Module state ─────────────────────────────────────────────────────────────
 // Delta-push timestamps: tracked independently per router so one router's
@@ -35,7 +36,8 @@ let ciscoPollActive  = false;
  * @param {{
  *   io, yamaha, cisco, runtime, history, devices, beacons, investigation,
  *   appState, queueConnectionEnrichment: (ips: string[]) => void,
- *   pollIntervalMs: number
+ *   pollIntervalMs: number,
+ *   schedulePoll?: (callback: () => void, delayMs: number) => unknown
  * }} deps
  */
 function init(deps) {
@@ -50,6 +52,7 @@ function init(deps) {
   _appState      = deps.appState;
   _queueConnectionEnrichment = deps.queueConnectionEnrichment;
   _pollIntervalMs = deps.pollIntervalMs;
+  _schedulePoll = deps.schedulePoll || setTimeout;
 }
 
 function startYamahaPolling() {
@@ -142,7 +145,7 @@ async function pollYamahaConnections() {
       _yamaha.reconnect();
     }
   } finally {
-    if (_yamaha.isEnabled()) setTimeout(pollYamahaConnections, _pollIntervalMs);
+    if (_yamaha.isEnabled()) _schedulePoll(pollYamahaConnections, _pollIntervalMs);
     else yamahaPollActive = false;
   }
 }
@@ -195,7 +198,7 @@ async function pollCiscoConnections() {
       _cisco.reconnect();
     }
   } finally {
-    if (_cisco.isEnabled()) setTimeout(pollCiscoConnections, _pollIntervalMs);
+    if (_cisco.isEnabled()) _schedulePoll(pollCiscoConnections, _pollIntervalMs);
     else ciscoPollActive = false;
   }
 }
@@ -207,6 +210,7 @@ function _resetForTest() {
   lastPollKeys = new Set();
   yamahaPollActive = false;
   ciscoPollActive  = false;
+  _schedulePoll = setTimeout;
 }
 
 module.exports = {

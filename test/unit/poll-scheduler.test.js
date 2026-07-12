@@ -142,17 +142,23 @@ describe('poll-scheduler: error handling', () => {
   it('reconnects the router on timeout errors and keeps the loop alive', async () => {
     const yamaha = makeRouter();
     let calls = 0;
+    let scheduleNext;
+    const nextScheduled = new Promise(resolve => { scheduleNext = resolve; });
     yamaha.fetchSessions = async () => {
       calls++;
       if (calls === 1) throw new Error('SSH timeout');
+      yamaha._disable();
       return [];
     };
-    const { deps } = makeDeps({ yamaha });
+    const { deps } = makeDeps({
+      yamaha,
+      schedulePoll: callback => scheduleNext(callback),
+    });
     scheduler.init(deps);
     scheduler.startYamahaPolling();
-    await tick(15);
-    yamaha._disable();
-    await tick();
+
+    const runNextPoll = await nextScheduled;
+    await runNextPoll();
 
     assert.equal(yamaha._calls.reconnect, 1, 'timeout must trigger reconnect');
     assert.ok(calls >= 2, 'loop must survive the error and poll again');
