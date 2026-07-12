@@ -519,8 +519,10 @@ describe('Connection Log pagination/filter invariants', () => {
 
 describe('Server runtime invariants', () => {
   it('Yamaha polling reschedules with POLL_INTERVAL, not a hard-coded 60 seconds', () => {
-    assert.match(pollSchedulerJs, /setTimeout\(pollYamahaConnections,\s*_pollIntervalMs\)/,
-      'pollYamahaConnections should honor the injected pollIntervalMs (POLL_INTERVAL_MS)');
+    assert.match(pollSchedulerJs, /_schedulePoll\(pollYamahaConnections,\s*_pollIntervalMs\)/,
+      'pollYamahaConnections should honor the injected scheduler and pollIntervalMs');
+    assert.match(pollSchedulerJs, /_schedulePoll\(pollCiscoConnections,\s*_pollIntervalMs\)/,
+      'pollCiscoConnections should honor the injected scheduler and pollIntervalMs');
     assert.doesNotMatch(pollSchedulerJs, /setTimeout\(pollYamahaConnections,\s*60000\)/,
       'pollYamahaConnections must not reschedule with a hard-coded 60000 ms');
     assert.match(serverJs, /pollIntervalMs:\s*POLL_INTERVAL/,
