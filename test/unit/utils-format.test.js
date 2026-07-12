@@ -24,7 +24,7 @@ const src = stripEsModule(fs.readFileSync(path.join(__dirname, '../../public/js/
 // t() is only invoked at call time (inside typeLabel), so an identity stub is enough.
 const ctx = vm.createContext({ window: { BASE_URL: '' }, t: key => key });
 vm.runInContext(src, ctx);
-const { esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType } = ctx;
+const { esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType, aggregateRouterHealth } = ctx;
 
 describe('esc', () => {
   it('escapes all five HTML metacharacters', () => {
@@ -118,5 +118,49 @@ describe('isWiredType', () => {
     assert.equal(isWiredType('0'), true);
     assert.equal(isWiredType('1'), false);
     assert.equal(isWiredType(undefined), false);
+  });
+});
+
+describe('aggregateRouterHealth', () => {
+  it('returns off when no routers are enabled', () => {
+    assert.deepEqual(
+      { ...aggregateRouterHealth({ yamaha: { enabled: false }, cisco: { enabled: false } }) },
+      { state: 'off', enabledCount: 0, readyCount: 0 }
+    );
+  });
+
+  it('returns on when every enabled router is ready', () => {
+    assert.deepEqual(
+      { ...aggregateRouterHealth({ yamaha: { enabled: true, ready: true }, cisco: { enabled: true, ready: true } }) },
+      { state: 'on', enabledCount: 2, readyCount: 2 }
+    );
+  });
+
+  it('returns on for a ready Cisco router when Yamaha is disabled', () => {
+    assert.deepEqual(
+      { ...aggregateRouterHealth({ yamaha: { enabled: false, ready: false }, cisco: { enabled: true, ready: true } }) },
+      { state: 'on', enabledCount: 1, readyCount: 1 }
+    );
+  });
+
+  it('returns err for an unavailable Cisco router when Yamaha is disabled', () => {
+    assert.deepEqual(
+      { ...aggregateRouterHealth({ yamaha: { enabled: false, ready: false }, cisco: { enabled: true, ready: false } }) },
+      { state: 'err', enabledCount: 1, readyCount: 0 }
+    );
+  });
+
+  it('returns wait when only some enabled routers are ready', () => {
+    assert.deepEqual(
+      { ...aggregateRouterHealth({ yamaha: { enabled: true, ready: false }, cisco: { enabled: true, ready: true } }) },
+      { state: 'wait', enabledCount: 2, readyCount: 1 }
+    );
+  });
+
+  it('returns err when no enabled router is ready', () => {
+    assert.deepEqual(
+      { ...aggregateRouterHealth({ yamaha: { enabled: true, ready: false }, cisco: { enabled: true, ready: false } }) },
+      { state: 'err', enabledCount: 2, readyCount: 0 }
+    );
   });
 });

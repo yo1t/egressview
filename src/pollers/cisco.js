@@ -151,15 +151,41 @@ function parseNdpNeighbors(text) {
   return result;
 }
 
-function parseLanIp(text) {
+function parseNatInsideInterfaces(text) {
+  const interfaces = [];
+  let readingInside = false;
+  for (const line of String(text || '').split('\n')) {
+    if (/^Inside interfaces\s*:/i.test(line.trim())) {
+      readingInside = true;
+      const inline = line.split(':').slice(1).join(':');
+      interfaces.push(...inline.split(',').map(v => v.trim()).filter(Boolean));
+      continue;
+    }
+    if (!readingInside) continue;
+    if (/^\s+\S/.test(line)) {
+      interfaces.push(...line.split(',').map(v => v.trim()).filter(Boolean));
+      continue;
+    }
+    break;
+  }
+  return [...new Set(interfaces)];
+}
+
+function parseLanIp(text, preferredInterfaces = []) {
   const privateIp = /\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/;
+  const candidates = [];
   for (const line of String(text || '').split('\n')) {
     // "GigabitEthernet0/1  192.168.1.1  YES NVRAM up  up"
     if (!/^\s*\w+\d[/\d.]*\s+\d/.test(line)) continue;
     const m = line.match(privateIp);
-    if (m) return m[1];
+    if (!m) continue;
+    const interfaceName = line.trim().split(/\s+/)[0];
+    candidates.push({ interfaceName, ip: m[1] });
   }
-  return '';
+  const preferred = new Set(preferredInterfaces);
+  return candidates.find(candidate => preferred.has(candidate.interfaceName))?.ip
+    || candidates[0]?.ip
+    || '';
 }
 
 function isCiscoIos(text) {
@@ -469,12 +495,13 @@ async function detectCisco({ ip, user, pass, enablePass, expectedHostFp } = {}) 
     const versionRaw   = await shell.exec('show version');
     const ifBriefRaw   = await shell.exec('show ip interface brief');
     const natRaw       = await shell.exec('show ip nat translations');
+    const natStatsRaw  = await shell.exec('show ip nat statistics');
     // A privilege-1 user with no enablePass configured stays in user mode,
     // producing "% Invalid input" for the NAT command. Distinguish this from
     // a genuine zero-session success so the UI can guide the user.
     const privilegeError = isPrivilegeError(natRaw);
     const sessions     = parseNatTranslations(natRaw);
-    const lanIp        = parseLanIp(ifBriefRaw);
+    const lanIp        = parseLanIp(ifBriefRaw, parseNatInsideInterfaces(natStatsRaw));
     const isIos        = isCiscoIos(versionRaw);
     return {
       ssh:  { ok: true },
@@ -495,9 +522,10 @@ async function detectCurrentCisco() {
   const versionRaw = await ciscoExec('show version');
   const ifBriefRaw = await ciscoExec('show ip interface brief');
   const natRaw     = await ciscoExec('show ip nat translations');
+  const natStatsRaw = await ciscoExec('show ip nat statistics');
   const privilegeError = isPrivilegeError(natRaw);
   const sessions   = parseNatTranslations(natRaw);
-  const lanIp      = parseLanIp(ifBriefRaw);
+  const lanIp      = parseLanIp(ifBriefRaw, parseNatInsideInterfaces(natStatsRaw));
   return {
     ssh:  { ok: true },
     nat:  { ok: !privilegeError, sessions: sessions.length, sessionsOk: sessions.length > 0 && !privilegeError },
@@ -557,6 +585,7 @@ module.exports = {
   parseArp,
   parseNdpNeighbors,
   parseLanIp,
+  parseNatInsideInterfaces,
   dotMacToColon,
   isCiscoIos,
   isPrivilegeError,

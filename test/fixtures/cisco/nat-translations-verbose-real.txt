@@ -1,0 +1,19 @@
+Router#show ip nat translations verbose
+Pro Inside global         Inside local          Outside local         Outside global
+--- 192.168.50.247        10.0.0.40             ---                   ---
+    create 01:21:12, use 01:03:35 timeout:0,
+    flags:
+static, use_count: 0, entry-id: 1, lc_entries: 0
+udp 192.168.1.254:55636   192.168.50.97:55636   192.0.2.44:443        192.0.2.44:443
+    create 00:00:12, use 00:00:12 timeout:300000, left 00:04:47, Map-Id(In): 2,
+    flags:
+extended, use_count: 0, entry-id: 5857, lc_entries: 0
+tcp 192.168.1.254:59032   192.168.50.97:59032   198.51.100.64:443     198.51.100.64:443
+    create 00:19:10, use 00:18:16 timeout:86400000, left 23:41:43, Map-Id(In): 2,
+    flags:
+extended, use_count: 0, entry-id: 4906, lc_entries: 0
+tcp 192.168.1.254:60903   192.168.50.97:60903   203.0.113.243:443     203.0.113.243:443
+    create 00:00:28, use 00:00:28 timeout:86400000, left 00:00:31, Map-Id(In): 2,
+    flags:
+extended, timing-out, use_count: 0, entry-id: 5848, lc_entries: 0
+Router#

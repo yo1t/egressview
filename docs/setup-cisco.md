@@ -1,8 +1,8 @@
 # Cisco IOS — SSH Setup Guide
 
-This guide explains how to prepare a Cisco IOS router for EgressView.
+This guide explains how to prepare a formally supported Cisco IOS router for EgressView.
 
-> **Status:** Cisco router support in EgressView is currently a **sample implementation**. It has **not** yet been validated on physical Cisco hardware. Use it as a beta path until real-device testing is completed and the feature is promoted to a formal release.
+> **Formal support:** Validated on a C841M-4X-JSEC/K9 running IOS 15.5(3)M9, including SSH, enable, NAT/ARP/NDP, verbose output, TOFU, and automatic reconnect.
 
 ---
 
@@ -91,6 +91,8 @@ From the machine running EgressView:
 ssh egressview@192.168.1.1
 ```
 
+If an older IOS release reports a key-exchange error, first enable only `diffie-hellman-group14-sha1`. EgressView supports this compatibility method but intentionally does not enable the weaker `group1-sha1`.
+
 Then confirm:
 
 ```text
@@ -124,9 +126,9 @@ Use **Connect & Auto-detect** first, then save the settings if the checks succee
 
 ## Current limitations
 
-- Real-device validation is still pending
-- Behavior may vary by IOS version and platform
+- Physical validation currently covers C841M-4X-JSEC/K9 / IOS 15.5(3)M9; other IOS platforms depend on CLI compatibility
 - `enable` password flows may differ by prompt style and privilege model
 - NAT command output formats can vary between models
+- The current release supports one Yamaha and one Cisco router; arbitrary same-vendor multi-router registration is planned separately
 
-If you try this on a real Cisco router and it works or fails in a specific way, that feedback is especially useful for moving the feature from sample implementation to formal release.
+Reports from other models and redacted output fixtures are welcome.

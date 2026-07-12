@@ -155,6 +155,17 @@ describe('cisco: parseNatTranslations verbose', () => {
     assert.equal(sessions[0].firstSeenHint, undefined);
     assert.equal(sessions[0].ttl, 86400);
   });
+
+  it('parses sanitized real IOS verbose output with multiline flags', () => {
+    const sessions = cisco.parseNatTranslations(fix('nat-translations-verbose-real.txt'), NOW);
+    assert.equal(sessions.length, 3);
+    assert.equal(sessions.some(s => s.src === '10.0.0.40'), false, 'static NAT must be ignored');
+    assert.deepEqual(sessions.map(s => s.proto), ['UDP', 'TCP', 'TCP']);
+    assert.equal(sessions[0].src, '192.168.50.97');
+    assert.equal(sessions[0].ttl, 287);
+    assert.equal(sessions[1].firstSeenHint, NOW - 1150 * 1000);
+    assert.equal(sessions[2].ttl, 31);
+  });
 });
 
 // ── parseArp ─────────────────────────────────────────────────────────────────
@@ -171,6 +182,13 @@ describe('cisco: parseArp', () => {
 
   it('returns empty map for blank input', () => {
     assert.equal(cisco.parseArp('').size, 0);
+  });
+
+  it('parses sanitized real IOS output including permanent entries', () => {
+    const map = cisco.parseArp(fix('arp-real.txt'));
+    assert.equal(map.size, 5);
+    assert.equal(map.get('192.168.50.97'), 'aa:bb:cc:32:01:61');
+    assert.equal(map.get('192.168.50.254'), 'aa:bb:cc:32:01:fe');
   });
 });
 
@@ -200,6 +218,10 @@ describe('cisco: parseNdpNeighbors', () => {
   it('returns empty map for blank input', () => {
     assert.equal(cisco.parseNdpNeighbors('').size, 0);
   });
+
+  it('accepts real IOS output with no IPv6 neighbors', () => {
+    assert.equal(cisco.parseNdpNeighbors(fix('ipv6-neighbors-real-empty.txt')).size, 0);
+  });
 });
 
 // ── parseLanIp ────────────────────────────────────────────────────────────────
@@ -212,6 +234,31 @@ describe('cisco: parseLanIp', () => {
 
   it('returns empty string when no private IP present', () => {
     assert.equal(cisco.parseLanIp('Interface  IP-Address  Status\nGi0/0  203.0.113.1  up  up'), '');
+  });
+
+  it('prefers the IP assigned to a NAT inside interface', () => {
+    const interfaces = [
+      'Interface                  IP-Address      OK? Method Status  Protocol',
+      'GigabitEthernet0/4         192.168.1.254   YES NVRAM up      up',
+      'GigabitEthernet0/5         192.168.50.254  YES NVRAM up      up',
+    ].join('\n');
+    const inside = cisco.parseNatInsideInterfaces(fix('nat-statistics.txt'));
+    assert.deepEqual(inside, ['GigabitEthernet0/5', 'Tunnel1', 'Tunnel2']);
+    assert.equal(cisco.parseLanIp(interfaces, inside), '192.168.50.254');
+  });
+
+  it('selects the NAT inside IP from sanitized real interface output', () => {
+    const inside = cisco.parseNatInsideInterfaces(fix('nat-statistics.txt'));
+    assert.equal(cisco.parseLanIp(fix('ip-interface-brief-real.txt'), inside), '192.168.50.254');
+  });
+
+  it('falls back to the first private IP when NAT statistics are unavailable', () => {
+    const interfaces = [
+      'Interface                  IP-Address      OK? Method Status  Protocol',
+      'GigabitEthernet0/4         192.168.1.254   YES NVRAM up      up',
+      'GigabitEthernet0/5         192.168.50.254  YES NVRAM up      up',
+    ].join('\n');
+    assert.equal(cisco.parseLanIp(interfaces, []), '192.168.1.254');
   });
 });
 
@@ -250,6 +297,7 @@ describe('cisco-adapter: router-interface contract', () => {
     assert.equal(typeof adapter.parseArp, 'function');
     assert.equal(typeof adapter.parseNdpNeighbors, 'function');
     assert.equal(typeof adapter.parseLanIp, 'function');
+    assert.equal(typeof adapter.parseNatInsideInterfaces, 'function');
     assert.equal(typeof adapter.dotMacToColon, 'function');
     assert.equal(typeof adapter.isCiscoIos, 'function');
   });
