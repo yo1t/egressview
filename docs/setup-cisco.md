@@ -63,6 +63,12 @@ If the command returns active translations, the basic data path is present.
 
 If the command is unavailable, empty under load when you expect traffic, or blocked by privilege level, EgressView will not be able to collect L3/L4 session data reliably.
 
+EgressView prefers `show ip nat translations verbose` when the device supports it: the per-entry `create` and `left` ages give each session an accurate start time and remaining TTL. If the verbose keyword is rejected, EgressView falls back to the plain command automatically.
+
+```text
+show ip nat translations verbose
+```
+
 ---
 
 ## Step 3 — Verify ARP visibility

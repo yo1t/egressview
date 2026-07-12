@@ -138,7 +138,12 @@ function recordConnection(session, now = Date.now(), source = 'nat') {
   const existing = connectionHistory.get(key);
   const isNew    = !existing;
   const mergedSource = _mergeSource(existing?.source, source);
-  const entry    = { ...enriched, source: mergedSource, firstSeen: existing?.firstSeen ?? now, lastSeen: now };
+  // Pollers that know the session's real creation time (Cisco verbose NAT
+  // output) pass firstSeenHint so firstSeen predates the first observation.
+  const hint = session.firstSeenHint;
+  const firstSeen = existing?.firstSeen
+    ?? (Number.isFinite(hint) && hint > 0 && hint <= now ? hint : now);
+  const entry    = { ...enriched, source: mergedSource, firstSeen, lastSeen: now };
   connectionHistory.set(key, entry);
 
   if (entry.threat) _notifier.notify(entry);

@@ -1,11 +1,8 @@
 'use strict';
 
-// Unit tests for pure graph helpers in public/js/graph.js that are NOT covered by
-// graph-link-normalization.test.js: flagEmoji, meshNodeId, currentGraphRangeKey.
-// graph.js has heavy top-level DOM/D3 setup, so we slice out just the helper block
-// (function flagEmoji … up to function graphSummaryNotice) and evaluate it in an
-// isolated context. currentGraphRangeKey reads the optional global currentTimeFilter,
-// which we inject per-case (it is guarded by `typeof … !== 'undefined'`).
+// Unit tests for public/js/graph-helpers.js (pure data-transformation helpers).
+// These functions are now a standalone ES module; we load them via vm with
+// module-level exports shimmed to a plain object.
 // Run: node --test test/unit/graph-helpers.test.js
 
 const { describe, it } = require('node:test');
@@ -15,20 +12,20 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
-const source = fs.readFileSync(path.join(root, 'public/js/graph.js'), 'utf8');
-const start = source.indexOf('function flagEmoji');
-const end = source.indexOf('function graphSummaryNotice');
-assert.notEqual(start, -1, 'function flagEmoji not found');
-assert.notEqual(end, -1, 'function graphSummaryNotice not found');
-const helperSrc = source.slice(start, end);
+const source = fs.readFileSync(path.join(root, 'public/js/graph-helpers.js'), 'utf8');
 
-function loadHelpers(currentTimeFilter) {
-  const context = { currentTimeFilter };
-  vm.runInNewContext(helperSrc, context);
-  return context;
+function load() {
+  const exports = {};
+  const wrapped = source.replace(/^export function /gm, 'function ')
+    .replace(/^export /gm, '');
+  const fnNames = [...wrapped.matchAll(/^function (\w+)/gm)].map(m => m[1]);
+  const tail = fnNames.map(n => `exports.${n} = ${n};`).join('\n');
+  const ctx = { exports };
+  vm.runInNewContext(wrapped + '\n' + tail, ctx);
+  return ctx.exports;
 }
 
-const { flagEmoji, meshNodeId, currentGraphRangeKey } = loadHelpers(undefined);
+const { flagEmoji, meshNodeId, linkEndpointId, normalizeGraphLinks, currentGraphRangeKey, routerTargetsFromSource } = load();
 
 describe('flagEmoji', () => {
   it('converts a 2-letter country code to a flag emoji', () => {
@@ -49,25 +46,77 @@ describe('meshNodeId', () => {
   });
 });
 
+describe('linkEndpointId', () => {
+  it('returns id from object endpoint', () => {
+    assert.equal(linkEndpointId({ id: 'foo', x: 1 }), 'foo');
+  });
+  it('returns string endpoint as-is', () => {
+    assert.equal(linkEndpointId('bar'), 'bar');
+  });
+  it('returns undefined for null endpoint object', () => {
+    assert.equal(linkEndpointId(null), undefined);
+  });
+});
+
+describe('normalizeGraphLinks', () => {
+  const node = id => ({ id });
+  const link = (source, target, extra = {}) => ({ source, target, ...extra });
+
+  it('returns empty array when both inputs are empty', () => {
+    assert.deepEqual(normalizeGraphLinks([], []), []);
+  });
+  it('keeps links whose source and target are in the node set', () => {
+    const result = normalizeGraphLinks([link('a', 'b')], [node('a'), node('b')]);
+    assert.equal(result.length, 1);
+  });
+  it('drops links whose target is not in the node set', () => {
+    const result = normalizeGraphLinks([link('a', 'z')], [node('a')]);
+    assert.equal(result.length, 0);
+  });
+  it('resolves object endpoints to their id property', () => {
+    const result = normalizeGraphLinks(
+      [link({ id: 'a' }, { id: 'b' })],
+      [node('a'), node('b')]
+    );
+    assert.equal(result[0].source, 'a');
+    assert.equal(result[0].target, 'b');
+  });
+});
+
 describe('currentGraphRangeKey', () => {
   it('uses raw from:to when no time filter is active', () => {
-    assert.equal(currentGraphRangeKey(100, 200), '100:200');
-    assert.equal(currentGraphRangeKey(null, null), ':');
+    assert.equal(currentGraphRangeKey(100, 200, undefined), '100:200');
+    assert.equal(currentGraphRangeKey(null, null, undefined), ':');
   });
   it('custom filter embeds both bounds', () => {
-    const { currentGraphRangeKey: fn } = loadHelpers('custom');
-    assert.equal(fn(100, 200), 'custom:100:200');
-    assert.equal(fn(null, null), 'custom::');
+    assert.equal(currentGraphRangeKey(100, 200, 'custom'), 'custom:100:200');
   });
   it('today/yesterday embed the ISO day of "from"', () => {
     const ts = Date.UTC(2026, 0, 2, 3, 4);
-    const today = loadHelpers('today').currentGraphRangeKey;
-    assert.equal(today(ts, 0), 'today:2026-01-02:0');
-    const yesterday = loadHelpers('yesterday').currentGraphRangeKey;
-    assert.match(yesterday(ts, ''), /^yesterday:2026-01-02:/);
+    assert.equal(currentGraphRangeKey(ts, 0, 'today'), 'today:2026-01-02:0');
+    assert.match(currentGraphRangeKey(ts, '', 'yesterday'), /^yesterday:2026-01-02:/);
   });
   it('other named filters are treated as open-ended', () => {
-    const { currentGraphRangeKey: fn } = loadHelpers('7d');
-    assert.equal(fn(100, 200), '7d:open');
+    assert.equal(currentGraphRangeKey(100, 200, '7d'), '7d:open');
+  });
+});
+
+describe('routerTargetsFromSource', () => {
+  it('returns undefined when isMulti is false', () => {
+    assert.equal(routerTargetsFromSource('cisco', false), undefined);
+  });
+  it('returns __router__ for yamaha source', () => {
+    assert.deepEqual(JSON.parse(JSON.stringify(routerTargetsFromSource('yamaha', true))), ['__router__']);
+  });
+  it('returns __router_cisco__ for cisco source', () => {
+    assert.deepEqual(JSON.parse(JSON.stringify(routerTargetsFromSource('cisco', true))), ['__router_cisco__']);
+  });
+  it('returns both for combined source', () => {
+    const result = routerTargetsFromSource('yamaha+cisco', true);
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), ['__router__', '__router_cisco__']);
+  });
+  it('defaults to yamaha when source is empty', () => {
+    assert.deepEqual(JSON.parse(JSON.stringify(routerTargetsFromSource('', true))), ['__router__']);
+    assert.deepEqual(JSON.parse(JSON.stringify(routerTargetsFromSource(null, true))), ['__router__']);
   });
 });
