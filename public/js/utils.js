@@ -44,6 +44,17 @@ function typeLabel(type) {
 }
 function isWiredType(type) { return type === '0'; }
 
+function aggregateRouterHealth(routers) {
+  const enabled = Object.values(routers || {}).filter(router => router?.enabled);
+  const readyCount = enabled.filter(router => router.ready).length;
+  const enabledCount = enabled.length;
+  const state = enabledCount === 0 ? 'off'
+              : readyCount === enabledCount ? 'on'
+              : readyCount > 0 ? 'wait'
+              : 'err';
+  return { state, enabledCount, readyCount };
+}
+
 // ─── Application / service name inference ─────────────────────────────────────
 
 // Shared between TCP/UDP (protocol-agnostic)
@@ -171,4 +182,4 @@ function _buildAppSlices(conns, topN, unknownLabel, otherLabel) {
   return top;
 }
 
-export { _BASE, esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType, guessApp, _buildAppSlices };
+export { _BASE, esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType, aggregateRouterHealth, guessApp, _buildAppSlices };

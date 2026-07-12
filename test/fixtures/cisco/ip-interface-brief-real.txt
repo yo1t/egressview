@@ -1,0 +1,8 @@
+Router#show ip interface brief
+Interface                  IP-Address      OK? Method Status                Protocol
+GigabitEthernet0/0         unassigned      YES unset  down                  down
+GigabitEthernet0/4         192.168.1.254   YES NVRAM  up                    up
+GigabitEthernet0/5         192.168.50.254  YES NVRAM  up                    up
+Virtual-Template1          192.168.1.254   YES unset  up                    down
+Tunnel1                    169.254.27.238  YES NVRAM  administratively down down
+Router#

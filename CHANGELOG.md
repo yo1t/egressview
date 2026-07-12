@@ -4,6 +4,25 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-12
+
+### Added
+
+- Formal Cisco IOS support, physically validated on C841M-4X-JSEC/K9 with IOS 15.5(3)M9.
+- Cisco verbose NAT creation-age and measured-TTL ingestion, with automatic plain-output fallback.
+- Redacted physical-device fixtures for ARP, empty NDP, interface discovery, NAT statistics, and multiline verbose NAT output.
+
+### Changed
+
+- Cisco LAN IP auto-detection now prefers the interface reported as NAT inside.
+- L3/L4 header status aggregates enabled routers: green when all are ready, yellow when partially ready, and red when none are ready.
+- L3/L4 and L2 header indicators no longer display a misleading single IP address.
+
+### Security
+
+- Physically verified SSH host-key TOFU persistence and mismatch rejection.
+- Physically verified automatic reconnect and continued NAT collection.
+
 ## [1.2.2] - 2026-06-28
 
 ### Added

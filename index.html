@@ -260,8 +260,8 @@
         <p>SSH into your Yamaha RTX router and read NAT session tables every 60 seconds. [INSPECT] syslog fills in short-lived TCP sessions missed between polls. Supports RTX1200–RTX1300, RTX810/830.</p>
       </div>
       <div class="card">
-        <h3>Cisco IOS (Beta)<sup>*1</sup></h3>
-        <p>Includes a sample SSH-based Cisco IOS path for NAT session collection. Physical-device validation is still pending, so this remains a beta path rather than a formal release target.</p>
+        <h3>Formal Cisco IOS Support</h3>
+        <p>Collects NAT sessions over SSH. Verbose-capable devices add creation age and measured TTL; older IOS, enable, TOFU, and reconnect paths are physically validated.</p>
       </div>
       <div class="card">
         <h3>ASUS WiFi AP Support</h3>
@@ -343,7 +343,7 @@
 └─────────────────┘             │                      │  stdio/HTTP  │ (Kiro, Claude…)  │
 ┌─────────────────┐  SSH(NAT)   │  Pollers:            │              └──────────────────┘
 │  Cisco IOS      │◄───────────►│  • yamaha (SSH)      │
-│  (beta sample)  │             │  • cisco (SSH, beta) │
+│  (supported)    │             │  • cisco (SSH)       │
 └─────────────────┘             │  • asus (HTTP)       │
 ┌─────────────────┐  HTTP       │  • inspect-syslog    │
 │  ASUS WiFi AP   │◄───────────►│  • dhcpd-syslog      │
@@ -386,7 +386,7 @@
         </tr>
         <tr style="border-bottom:1px solid var(--border);">
           <td style="padding:8px 6px; color:var(--muted);">☐</td>
-          <td style="padding:8px 6px; color:var(--muted);">(Optional / beta) Cisco IOS router — SSH access enabled</td>
+          <td style="padding:8px 6px; color:var(--muted);">(Optional) Cisco IOS router — SSH access enabled</td>
           <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-cisco.md">Setup guide →</a></td>
         </tr>
         <tr style="border-bottom:1px solid var(--border);">
@@ -449,15 +449,14 @@ npm start</code></pre>
         <p>RTX1200, RTX1210, RTX1220, RTX1300, RTX810, RTX830, NVR500, NVR510, NVR700W — any model with SSH + NAT descriptor.</p>
       </div>
       <div class="card">
-        <h3>Cisco IOS (beta)<sup>*1</sup></h3>
-        <p>Sample implementation only for now. Physical-device validation is still pending before formal release.</p>
+        <h3>Cisco IOS (L3/L4)</h3>
+        <p>Physically validated on C841M-4X-JSEC/K9 with IOS 15.5(3)M9. Reports from compatible IOS platforms are welcome.</p>
       </div>
       <div class="card">
         <h3>ASUS WiFi AP (L2)</h3>
         <p>RT-AX series, RT-AC series, ZenWiFi (AiMesh) — any model with standard web admin, used in AP/mesh mode.</p>
       </div>
     </div>
-    <p style="font-size:0.78rem; color:var(--muted); margin-top:10px;">*1 Cisco IOS support is currently a sample implementation. Physical-device validation has not been completed yet, so it should be treated as beta until real-device testing is done. Real-hardware issue reports and fixture-based pull requests are welcome.</p>
   </section>
 
   <!-- Issues -->
@@ -502,7 +501,7 @@ npm start</code></pre>
       </div>
       <div class="card">
         <h3><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-cisco.md">Cisco IOS Setup Guide</a></h3>
-        <p>Beta / sample implementation guide for trying EgressView with Cisco IOS over SSH.</p>
+        <p>Production setup guide for collecting Cisco IOS NAT sessions securely over SSH.</p>
       </div>
       <div class="card">
         <h3><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-asus.md">ASUS AP Setup Guide</a></h3>

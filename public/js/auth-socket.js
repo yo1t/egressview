@@ -1,6 +1,6 @@
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
 import { t, tVars, currentLang, applyI18n, setCurrentLang } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE } from './utils.js?v=__ASSET_VERSION__';
+import { _BASE, aggregateRouterHealth } from './utils.js?v=__ASSET_VERSION__';
 import { setHomeCountry, worldGeo } from './map-common.js?v=__ASSET_VERSION__';
 import { statsMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { updateStats, initStatsMaps, resetStatsMaps } from './stats.js?v=__ASSET_VERSION__';
@@ -250,17 +250,26 @@ const connState = {
 function updateConnBadge(key) {
   const s = connState[key];
   const badge = document.getElementById('badge-' + key);
+  if (!badge) return;
   const ipEl  = document.getElementById('badge-' + key + '-ip');
   // L3/L4 is router-agnostic (Yamaha / Cisco / both)
   const prefix = (key === 'l3l4' ? 'L3/L4 Router' : 'L2 ASUS');
   badge.classList.remove('on', 'off', 'err', 'wait');
+  if (key === 'l3l4') {
+    const health = aggregateRouterHealth(routerState);
+    badge.classList.add(health.state);
+    badge.title = health.enabledCount === 0
+      ? prefix + ' — ' + t('badge.unused')
+      : `${prefix} — ${health.readyCount}/${health.enabledCount} ready`;
+    return;
+  }
   if (!s.enabled) {
     badge.classList.add('off');
-    ipEl.textContent = t('badge.unused');
+    if (ipEl) ipEl.textContent = t('badge.unused');
     badge.title = prefix + ' — ' + t('badge.unused');
   } else if (s.ready) {
     badge.classList.add('on');
-    ipEl.textContent = s.ip || t('badge.ready');
+    if (ipEl) ipEl.textContent = s.ip || t('badge.ready');
     badge.title = prefix + ' — ' + t('badge.ready') + ' ' + (s.ip || '');
   } else {
     const isWaiting = !s.err || s.err === 'connecting' || s.err === 'reconnecting';
@@ -271,7 +280,7 @@ function updateConnBadge(key) {
                    : s.err === 'connecting'      ? t('badge.waiting')
                    : s.err === 'reconnecting'    ? t('badge.waiting')
                    : s.err || t('badge.waiting');
-    ipEl.textContent = errLabel;
+    if (ipEl) ipEl.textContent = errLabel;
     badge.title = prefix + ' — ' + errLabel;
   }
 }
@@ -301,8 +310,6 @@ socket.on('config', cfg => {
     if (cfg.yamahaNat)  document.getElementById('s-yamaha-nat').value  = cfg.yamahaNat;
     connState.l3l4.enabled = cfg.yamahaEnabled || cfg.ciscoEnabled;
     connState.l3l4.ready   = !!(cfg.yamahaReady || cfg.ciscoReady);
-    // Show the IP of whichever router is enabled (don't show a stale Yamaha IP in a Cisco-only setup)
-    connState.l3l4.ip      = (cfg.yamahaEnabled ? cfg.yamahaIp : cfg.ciscoIp) || '';
     connState.l3l4.err     = (cfg.yamahaEnabled || cfg.ciscoEnabled) && !(cfg.yamahaReady || cfg.ciscoReady) ? 'connecting' : '';
     updateConnBadge('l3l4');
   }
@@ -317,6 +324,9 @@ socket.on('config', cfg => {
     const ciscoPwEl = document.getElementById('s-cisco-pass');
     ciscoPwEl.placeholder = cfg.ciscoPassSet ? t('settings.pass.saved') : t('settings.pass.empty');
     ciscoPwEl.dataset.saved = cfg.ciscoPassSet ? 'true' : 'false';
+    connState.l3l4.enabled = routerState.yamaha.enabled || routerState.cisco.enabled;
+    connState.l3l4.ready = routerState.yamaha.ready || routerState.cisco.ready;
+    updateConnBadge('l3l4');
   }
   if (cfg.asusEnabled !== undefined) {
     document.getElementById('enable-asus').checked = cfg.asusEnabled;

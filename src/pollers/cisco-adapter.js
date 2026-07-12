@@ -43,6 +43,7 @@ module.exports = {
   parseArp: cisco.parseArp,
   parseNdpNeighbors: cisco.parseNdpNeighbors,
   parseLanIp: cisco.parseLanIp,
+  parseNatInsideInterfaces: cisco.parseNatInsideInterfaces,
   dotMacToColon: cisco.dotMacToColon,
   isCiscoIos: cisco.isCiscoIos,
   isPrivilegeError: cisco.isPrivilegeError,

@@ -1,0 +1,2 @@
+Router#show ipv6 neighbors
+Router#

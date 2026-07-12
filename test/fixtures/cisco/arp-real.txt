@@ -1,0 +1,8 @@
+Router#show arp
+Protocol  Address          Age (min)  Hardware Addr   Type   Interface
+Internet  192.168.1.1             0   aabb.cc00.0101  ARPA   GigabitEthernet0/4
+Internet  192.168.1.254           -   aabb.cc00.01fe  ARPA   GigabitEthernet0/4
+Internet  192.168.50.1            0   aabb.cc32.0101  ARPA   GigabitEthernet0/5
+Internet  192.168.50.97           0   aabb.cc32.0161  ARPA   GigabitEthernet0/5
+Internet  192.168.50.254          -   aabb.cc32.01fe  ARPA   GigabitEthernet0/5
+Router#

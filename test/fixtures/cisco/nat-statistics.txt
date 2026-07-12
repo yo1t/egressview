@@ -1,0 +1,11 @@
+Router#show ip nat statistics
+Total active translations: 43 (7 static, 36 dynamic; 36 extended)
+Outside interfaces:
+  GigabitEthernet0/4
+Inside interfaces:
+  GigabitEthernet0/5, Tunnel1, Tunnel2
+Hits: 5812  Misses: 0
+Dynamic mappings:
+-- Inside Source
+[Id: 2] access-list 1 interface GigabitEthernet0/4 refcount 36
+Router#
