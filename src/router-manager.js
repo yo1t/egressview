@@ -10,7 +10,7 @@ const { isAllowedRouterIp } = require('./utils');
 function createRouterManager({
   records = [], tombstones = [], persist = () => {}, pollIntervalMs = 60_000,
   runtime, history, devices, beacons, enrichmentQueue, investigation, appState, io,
-  createAdapter,
+  createAdapter, schedulerOptions = {},
 } = {}) {
   const registry = createRouterRegistry({ tombstones });
   const configs = new Map();
@@ -70,6 +70,7 @@ function createRouterManager({
   }
 
   const scheduler = createRouterPollScheduler({
+    ...schedulerOptions,
     runCycle,
     pollIntervalMs,
     onTimeout: entry => entry.adapter.reconnect(),
