@@ -1,4 +1,9 @@
 // Cisco IOS SSH poller: connect, execute commands, parse NAT sessions
+//
+// P2-30 PR 1: all mutable state (SSH connection, shell buffer, caches,
+// config, timers) lives inside createCiscoPoller() so multiple router
+// instances can coexist. The module still exports a default instance plus
+// the pure parsers, so existing require('./cisco') callers are unchanged.
 'use strict';
 const logger = require('../logger');
 const { t } = require('../i18n-server');
@@ -15,53 +20,7 @@ const {
   runEnableHandshake,
 } = require('./cisco-session');
 
-let ciscoShell      = null;
-let ciscoConn       = null;
-let ciscoReady      = false;
-let shellBuf        = '';
-let ciscoReconnectTimer = null;
-let ciscoConnecting = false;
-let shellWaiter     = null;
-let execChain       = Promise.resolve();
-
-// ARP cache (IP → MAC in colon notation)
-const ciscoArpCache = new Map();
-let ciscoArpLastRefresh = 0;
-const CISCO_ARP_REFRESH_MS = 60 * 1000;
-
-// NDP cache (MAC → [ipv6, ...])
-const ciscoNdpCache = new Map();
-let ciscoNdpLastRefresh = 0;
-const CISCO_NDP_REFRESH_MS = 120 * 1000;
-
-// Config
-let ciscoIp      = '';
-let ciscoUser    = '';
-let ciscoPass    = '';
-let ciscoEnablePass = '';
-let ciscoEnabled = false;
-let ciscoHostFp  = '';
-// Whether "show ip nat translations verbose" works on this device; assumed
-// true until a poll proves otherwise, re-assumed when the target changes.
-let ciscoVerboseSupported = true;
-
-// Callbacks
-let onStatus     = () => {};
-let onSaveConfig = () => {};
-
-function configure(cfg) {
-  if (cfg.ip !== undefined && cfg.ip !== ciscoIp) ciscoVerboseSupported = true;
-  if (cfg.ip         !== undefined) ciscoIp         = cfg.ip;
-  if (cfg.user       !== undefined) ciscoUser       = cfg.user;
-  if (cfg.pass       !== undefined) ciscoPass       = cfg.pass;
-  if (cfg.enablePass !== undefined) ciscoEnablePass = cfg.enablePass;
-  if (cfg.enabled    !== undefined) ciscoEnabled    = cfg.enabled;
-  if (cfg.hostFp     !== undefined) ciscoHostFp     = cfg.hostFp;
-  if (cfg.onStatus)     onStatus     = cfg.onStatus;
-  if (cfg.onSaveConfig) onSaveConfig = cfg.onSaveConfig;
-}
-
-// ── Parsers ───────────────────────────────────────────────────────────────────
+// ── Parsers (pure, shared by all instances) ───────────────────────────────────
 
 // Convert Cisco dot-notation MAC (aabb.cc11.0200) to colon notation (aa:bb:cc:11:02:00)
 function dotMacToColon(mac) {
@@ -192,7 +151,7 @@ function isCiscoIos(text) {
   return /Cisco IOS/i.test(String(text || ''));
 }
 
-// ── SSH helpers ───────────────────────────────────────────────────────────────
+// ── Connection helpers (stateless) ────────────────────────────────────────────
 // Prompt classifiers (looksLike*) and isPrivilegeError are imported from
 // ./cisco-session at the top of this file.
 
@@ -207,7 +166,7 @@ function classifyConnError(err) {
   return 'unknown';
 }
 
-function buildSshConnectOpts(ip, user, pass, expectedHostFp, onFpSave) {
+function buildSshConnectOpts(ip, user, pass, expectedHostFp, onFpSave, logTag) {
   return {
     host: ip, port: 22,
     username: user, password: pass,
@@ -224,7 +183,7 @@ function buildSshConnectOpts(ip, user, pass, expectedHostFp, onFpSave) {
         return true;
       }
       if (fp !== expectedHostFp) {
-        logger.error('[cisco] ⚠️ HOST KEY MISMATCH! Possible MITM attack.');
+        logger.error(`${logTag || '[cisco]'} ⚠️ HOST KEY MISMATCH! Possible MITM attack.`);
         return false;
       }
       return true;
@@ -302,185 +261,7 @@ function createTempCiscoShell({ ip, user, pass, enablePass, expectedHostFp }) {
   });
 }
 
-// ── Persistent connection ─────────────────────────────────────────────────────
-
-function clearShellWaiter() {
-  if (shellWaiter?.timer) clearTimeout(shellWaiter.timer);
-  shellWaiter = null;
-}
-function rejectShellWaiter(err) {
-  const w = shellWaiter; clearShellWaiter();
-  if (w) w.reject(err);
-}
-
-function waitForPrompt(timeoutMs = 45000, matcher = looksLikeShellPrompt) {
-  return new Promise((resolve, reject) => {
-    if (matcher(shellBuf)) { resolve(shellBuf); return; }
-    clearShellWaiter();
-    const timer = setTimeout(() => { shellWaiter = null; reject(new Error('SSH timeout')); }, timeoutMs);
-    shellWaiter = { resolve, reject, timer, matcher };
-  });
-}
-
-async function ciscoExec(cmd, timeoutMs = 45000) {
-  const run = async () => {
-    if (!ciscoReady || !ciscoShell) throw new Error('Cisco not connected');
-    shellBuf = '';
-    ciscoShell.write(cmd + '\n');
-    await waitForPrompt(timeoutMs);
-    return shellBuf;
-  };
-  const result = execChain.then(run, run);
-  execChain = result.catch(() => {});
-  return result;
-}
-
-function scheduleCiscoReconnect(ms) {
-  if (ciscoReconnectTimer) clearTimeout(ciscoReconnectTimer);
-  if (!ciscoEnabled) return;
-  onStatus({ ready: false, state: 'reconnecting', message: t('cisco.reconnecting') });
-  ciscoReconnectTimer = setTimeout(() => { ciscoReconnectTimer = null; connectCisco(); }, ms);
-}
-
-function connectCisco(onReady) {
-  if (!ciscoEnabled) return;
-  if (!ciscoIp || !ciscoUser || !ciscoPass) {
-    logger.info('[cisco] credentials not configured yet — skip connect');
-    onStatus({ ready: false, state: 'failed', message: t('cisco.no-config') });
-    return;
-  }
-  if (ciscoConnecting) { logger.info('[cisco] Connect already in progress, skip'); return; }
-  if (ciscoReconnectTimer) { clearTimeout(ciscoReconnectTimer); ciscoReconnectTimer = null; }
-  if (ciscoConn) { try { ciscoConn.removeAllListeners(); ciscoConn.on('error', () => {}); ciscoConn.end(); } catch {} ciscoConn = null; }
-  ciscoReady = false;
-  ciscoShell = null;
-  ciscoConnecting = true;
-  onStatus({ ready: false, state: 'connecting', message: t('cisco.connecting') });
-
-  const conn = new SshClient();
-  ciscoConn = conn;
-
-  conn.on('ready', () => {
-    conn.shell({ term: 'vt100', cols: 220, rows: 500 }, (err, stream) => {
-      if (err) {
-        logger.error('[cisco] shell error:', err.message);
-        ciscoConnecting = false;
-        onStatus({ ready: false, state: 'failed', message: t('cisco.shell-failed') + err.message });
-        scheduleCiscoReconnect(5000);
-        return;
-      }
-      ciscoShell = stream;
-
-      stream.on('data', chunk => {
-        const text = chunk.toString('utf8').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
-        shellBuf += text;
-        if (looksLikePagerPrompt(text)) stream.write(' ');
-        if (shellWaiter && shellWaiter.matcher(shellBuf)) {
-          const { resolve } = shellWaiter; clearShellWaiter(); resolve(shellBuf);
-        }
-      });
-      stream.on('error', err => rejectShellWaiter(err));
-      stream.on('close', () => {
-        rejectShellWaiter(new Error('SSH shell closed'));
-        ciscoReady = false;
-        ciscoConnecting = false;
-        logger.info('[cisco] Shell closed, reconnecting in 3s…');
-        scheduleCiscoReconnect(3000);
-      });
-
-      setTimeout(async () => {
-        try {
-          await waitForPrompt(8000);
-          // Enter privileged (enable) mode via the shared handshake state machine.
-          await runEnableHandshake({
-            initialBuf: shellBuf,
-            enablePass: ciscoEnablePass,
-            write: (text) => { shellBuf = ''; ciscoShell.write(text); },
-            waitForPrompt: (matcher, ms) => waitForPrompt(ms, matcher),
-          });
-          shellBuf = '';
-          ciscoShell.write('terminal length 0\n');
-          await waitForPrompt(5000);
-          ciscoReady = true;
-          ciscoConnecting = false;
-          logger.info('[cisco] Connected to IOS — ready');
-          onStatus({ ready: true, message: t('cisco.connected') });
-          if (onReady) onReady();
-        } catch (e) {
-          ciscoConnecting = false;
-          logger.error('[cisco] init error:', e.message);
-          onStatus({ ready: false, state: 'failed', message: t('cisco.init-failed') + e.message });
-          scheduleCiscoReconnect(5000);
-        }
-      }, 500);
-    });
-  });
-
-  conn.on('error', err => {
-    logger.error('[cisco] SSH error:', err.message);
-    ciscoReady = false;
-    ciscoConnecting = false;
-    onStatus({ ready: false, state: 'failed', message: t('cisco.ssh-failed') + err.message });
-    scheduleCiscoReconnect(5000);
-  });
-
-  conn.connect(buildSshConnectOpts(ciscoIp, ciscoUser, ciscoPass, ciscoHostFp, fp => {
-    ciscoHostFp = fp;
-    onSaveConfig();
-    logger.info('[cisco] Host key recorded (TOFU):', fp.substring(0, 16) + '...');
-  }));
-}
-
-// ── Public operations ─────────────────────────────────────────────────────────
-
-async function fetchNatSessions() {
-  // Prefer verbose output: its per-entry "create"/"left" ages give an accurate
-  // firstSeen and remaining TTL instead of protocol-default guesses. Older IOS
-  // that rejects the verbose keyword answers "% Invalid input", which is the
-  // same marker as a privilege error — retry plain to tell the two apart.
-  if (ciscoVerboseSupported) {
-    const raw = await ciscoExec('show ip nat translations verbose', 90000);
-    if (!isPrivilegeError(raw)) return parseNatTranslations(raw);
-    ciscoVerboseSupported = false;
-    logger.info('[cisco] verbose NAT output unavailable — falling back to plain output');
-  }
-  const raw = await ciscoExec('show ip nat translations', 90000);
-  // Staying in user mode returns a privilege error indistinguishable from zero
-  // sessions, so raise an explicit error instead
-  if (isPrivilegeError(raw)) {
-    throw new Error('privileged EXEC required — enable mode not active');
-  }
-  return parseNatTranslations(raw);
-}
-
-async function refreshCiscoArp() {
-  if (!ciscoEnabled || !ciscoReady) return;
-  try {
-    const raw = await ciscoExec('show arp');
-    const newMap = parseArp(raw);
-    ciscoArpCache.clear();
-    for (const [k, v] of newMap) ciscoArpCache.set(k, v);
-    ciscoArpLastRefresh = Date.now();
-    logger.info(`[cisco-arp] cache refreshed: ${newMap.size} entries`);
-  } catch (e) {
-    logger.error('[cisco-arp] refresh failed:', e.message);
-  }
-}
-
-async function refreshCiscoNdp() {
-  if (!ciscoEnabled || !ciscoReady) return;
-  try {
-    const raw = await ciscoExec('show ipv6 neighbors');
-    const newMap = parseNdpNeighbors(raw);
-    ciscoNdpCache.clear();
-    for (const [k, v] of newMap) ciscoNdpCache.set(k, v);
-    ciscoNdpLastRefresh = Date.now();
-    logger.info(`[cisco-ndp] cache refreshed: ${newMap.size} entries`);
-  } catch (e) {
-    logger.error('[cisco-ndp] refresh failed:', e.message);
-  }
-}
-
+// Detection against explicit credentials needs no instance state.
 async function detectCisco({ ip, user, pass, enablePass, expectedHostFp } = {}) {
   if (!ip || !user || !pass) throw new Error('Cisco IP, username, and password are required');
   let shell;
@@ -517,69 +298,324 @@ async function detectCisco({ ip, user, pass, enablePass, expectedHostFp } = {}) 
   }
 }
 
-async function detectCurrentCisco() {
-  if (!ciscoReady || !ciscoShell) throw new Error('Cisco not connected');
-  const versionRaw = await ciscoExec('show version');
-  const ifBriefRaw = await ciscoExec('show ip interface brief');
-  const natRaw     = await ciscoExec('show ip nat translations');
-  const natStatsRaw = await ciscoExec('show ip nat statistics');
-  const privilegeError = isPrivilegeError(natRaw);
-  const sessions   = parseNatTranslations(natRaw);
-  const lanIp      = parseLanIp(ifBriefRaw, parseNatInsideInterfaces(natStatsRaw));
+// ── Poller factory ────────────────────────────────────────────────────────────
+
+const CISCO_ARP_REFRESH_MS = 60 * 1000;
+const CISCO_NDP_REFRESH_MS = 120 * 1000;
+
+/**
+ * Create an isolated Cisco IOS poller instance. Every piece of mutable
+ * state (SSH connection, shell buffer, caches, config, timers) belongs to
+ * the instance, so several routers can be polled from one process.
+ *
+ * @param {{ id?: string }} [opts]  routerId for log prefixes ('' → '[cisco]')
+ */
+function createCiscoPoller({ id = '' } = {}) {
+  const TAG     = id ? `[cisco:${id}]`     : '[cisco]';
+  const TAG_ARP = id ? `[cisco-arp:${id}]` : '[cisco-arp]';
+  const TAG_NDP = id ? `[cisco-ndp:${id}]` : '[cisco-ndp]';
+
+  let ciscoShell      = null;
+  let ciscoConn       = null;
+  let ciscoReady      = false;
+  let shellBuf        = '';
+  let ciscoReconnectTimer = null;
+  let ciscoConnecting = false;
+  let shellWaiter     = null;
+  let execChain       = Promise.resolve();
+
+  // ARP cache (IP → MAC in colon notation)
+  const ciscoArpCache = new Map();
+  let ciscoArpLastRefresh = 0;
+
+  // NDP cache (MAC → [ipv6, ...])
+  const ciscoNdpCache = new Map();
+  let ciscoNdpLastRefresh = 0;
+
+  // Config
+  let ciscoIp      = '';
+  let ciscoUser    = '';
+  let ciscoPass    = '';
+  let ciscoEnablePass = '';
+  let ciscoEnabled = false;
+  let ciscoHostFp  = '';
+  // Whether "show ip nat translations verbose" works on this device; assumed
+  // true until a poll proves otherwise, re-assumed when the target changes.
+  let ciscoVerboseSupported = true;
+
+  // Callbacks
+  let onStatus     = () => {};
+  let onSaveConfig = () => {};
+
+  function configure(cfg) {
+    if (cfg.ip !== undefined && cfg.ip !== ciscoIp) ciscoVerboseSupported = true;
+    if (cfg.ip         !== undefined) ciscoIp         = cfg.ip;
+    if (cfg.user       !== undefined) ciscoUser       = cfg.user;
+    if (cfg.pass       !== undefined) ciscoPass       = cfg.pass;
+    if (cfg.enablePass !== undefined) ciscoEnablePass = cfg.enablePass;
+    if (cfg.enabled    !== undefined) ciscoEnabled    = cfg.enabled;
+    if (cfg.hostFp     !== undefined) ciscoHostFp     = cfg.hostFp;
+    if (cfg.onStatus)     onStatus     = cfg.onStatus;
+    if (cfg.onSaveConfig) onSaveConfig = cfg.onSaveConfig;
+  }
+
+  // ── Persistent connection ───────────────────────────────────────────────────
+
+  function clearShellWaiter() {
+    if (shellWaiter?.timer) clearTimeout(shellWaiter.timer);
+    shellWaiter = null;
+  }
+  function rejectShellWaiter(err) {
+    const w = shellWaiter; clearShellWaiter();
+    if (w) w.reject(err);
+  }
+
+  function waitForPrompt(timeoutMs = 45000, matcher = looksLikeShellPrompt) {
+    return new Promise((resolve, reject) => {
+      if (matcher(shellBuf)) { resolve(shellBuf); return; }
+      clearShellWaiter();
+      const timer = setTimeout(() => { shellWaiter = null; reject(new Error('SSH timeout')); }, timeoutMs);
+      shellWaiter = { resolve, reject, timer, matcher };
+    });
+  }
+
+  async function ciscoExec(cmd, timeoutMs = 45000) {
+    const run = async () => {
+      if (!ciscoReady || !ciscoShell) throw new Error('Cisco not connected');
+      shellBuf = '';
+      ciscoShell.write(cmd + '\n');
+      await waitForPrompt(timeoutMs);
+      return shellBuf;
+    };
+    const result = execChain.then(run, run);
+    execChain = result.catch(() => {});
+    return result;
+  }
+
+  function scheduleCiscoReconnect(ms) {
+    if (ciscoReconnectTimer) clearTimeout(ciscoReconnectTimer);
+    if (!ciscoEnabled) return;
+    onStatus({ ready: false, state: 'reconnecting', message: t('cisco.reconnecting') });
+    ciscoReconnectTimer = setTimeout(() => { ciscoReconnectTimer = null; connectCisco(); }, ms);
+  }
+
+  function connectCisco(onReady) {
+    if (!ciscoEnabled) return;
+    if (!ciscoIp || !ciscoUser || !ciscoPass) {
+      logger.info(`${TAG} credentials not configured yet — skip connect`);
+      onStatus({ ready: false, state: 'failed', message: t('cisco.no-config') });
+      return;
+    }
+    if (ciscoConnecting) { logger.info(`${TAG} Connect already in progress, skip`); return; }
+    if (ciscoReconnectTimer) { clearTimeout(ciscoReconnectTimer); ciscoReconnectTimer = null; }
+    if (ciscoConn) { try { ciscoConn.removeAllListeners(); ciscoConn.on('error', () => {}); ciscoConn.end(); } catch {} ciscoConn = null; }
+    ciscoReady = false;
+    ciscoShell = null;
+    ciscoConnecting = true;
+    onStatus({ ready: false, state: 'connecting', message: t('cisco.connecting') });
+
+    const conn = new SshClient();
+    ciscoConn = conn;
+
+    conn.on('ready', () => {
+      conn.shell({ term: 'vt100', cols: 220, rows: 500 }, (err, stream) => {
+        if (err) {
+          logger.error(`${TAG} shell error:`, err.message);
+          ciscoConnecting = false;
+          onStatus({ ready: false, state: 'failed', message: t('cisco.shell-failed') + err.message });
+          scheduleCiscoReconnect(5000);
+          return;
+        }
+        ciscoShell = stream;
+
+        stream.on('data', chunk => {
+          const text = chunk.toString('utf8').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+          shellBuf += text;
+          if (looksLikePagerPrompt(text)) stream.write(' ');
+          if (shellWaiter && shellWaiter.matcher(shellBuf)) {
+            const { resolve } = shellWaiter; clearShellWaiter(); resolve(shellBuf);
+          }
+        });
+        stream.on('error', err => rejectShellWaiter(err));
+        stream.on('close', () => {
+          rejectShellWaiter(new Error('SSH shell closed'));
+          ciscoReady = false;
+          ciscoConnecting = false;
+          logger.info(`${TAG} Shell closed, reconnecting in 3s…`);
+          scheduleCiscoReconnect(3000);
+        });
+
+        setTimeout(async () => {
+          try {
+            await waitForPrompt(8000);
+            // Enter privileged (enable) mode via the shared handshake state machine.
+            await runEnableHandshake({
+              initialBuf: shellBuf,
+              enablePass: ciscoEnablePass,
+              write: (text) => { shellBuf = ''; ciscoShell.write(text); },
+              waitForPrompt: (matcher, ms) => waitForPrompt(ms, matcher),
+            });
+            shellBuf = '';
+            ciscoShell.write('terminal length 0\n');
+            await waitForPrompt(5000);
+            ciscoReady = true;
+            ciscoConnecting = false;
+            logger.info(`${TAG} Connected to IOS — ready`);
+            onStatus({ ready: true, message: t('cisco.connected') });
+            if (onReady) onReady();
+          } catch (e) {
+            ciscoConnecting = false;
+            logger.error(`${TAG} init error:`, e.message);
+            onStatus({ ready: false, state: 'failed', message: t('cisco.init-failed') + e.message });
+            scheduleCiscoReconnect(5000);
+          }
+        }, 500);
+      });
+    });
+
+    conn.on('error', err => {
+      logger.error(`${TAG} SSH error:`, err.message);
+      ciscoReady = false;
+      ciscoConnecting = false;
+      onStatus({ ready: false, state: 'failed', message: t('cisco.ssh-failed') + err.message });
+      scheduleCiscoReconnect(5000);
+    });
+
+    conn.connect(buildSshConnectOpts(ciscoIp, ciscoUser, ciscoPass, ciscoHostFp, fp => {
+      ciscoHostFp = fp;
+      onSaveConfig();
+      logger.info(`${TAG} Host key recorded (TOFU):`, fp.substring(0, 16) + '...');
+    }, TAG));
+  }
+
+  // ── Public operations ───────────────────────────────────────────────────────
+
+  async function fetchNatSessions() {
+    // Prefer verbose output: its per-entry "create"/"left" ages give an accurate
+    // firstSeen and remaining TTL instead of protocol-default guesses. Older IOS
+    // that rejects the verbose keyword answers "% Invalid input", which is the
+    // same marker as a privilege error — retry plain to tell the two apart.
+    if (ciscoVerboseSupported) {
+      const raw = await ciscoExec('show ip nat translations verbose', 90000);
+      if (!isPrivilegeError(raw)) return parseNatTranslations(raw);
+      ciscoVerboseSupported = false;
+      logger.info(`${TAG} verbose NAT output unavailable — falling back to plain output`);
+    }
+    const raw = await ciscoExec('show ip nat translations', 90000);
+    // Staying in user mode returns a privilege error indistinguishable from zero
+    // sessions, so raise an explicit error instead
+    if (isPrivilegeError(raw)) {
+      throw new Error('privileged EXEC required — enable mode not active');
+    }
+    return parseNatTranslations(raw);
+  }
+
+  async function refreshCiscoArp() {
+    if (!ciscoEnabled || !ciscoReady) return;
+    try {
+      const raw = await ciscoExec('show arp');
+      const newMap = parseArp(raw);
+      ciscoArpCache.clear();
+      for (const [k, v] of newMap) ciscoArpCache.set(k, v);
+      ciscoArpLastRefresh = Date.now();
+      logger.info(`${TAG_ARP} cache refreshed: ${newMap.size} entries`);
+    } catch (e) {
+      logger.error(`${TAG_ARP} refresh failed:`, e.message);
+    }
+  }
+
+  async function refreshCiscoNdp() {
+    if (!ciscoEnabled || !ciscoReady) return;
+    try {
+      const raw = await ciscoExec('show ipv6 neighbors');
+      const newMap = parseNdpNeighbors(raw);
+      ciscoNdpCache.clear();
+      for (const [k, v] of newMap) ciscoNdpCache.set(k, v);
+      ciscoNdpLastRefresh = Date.now();
+      logger.info(`${TAG_NDP} cache refreshed: ${newMap.size} entries`);
+    } catch (e) {
+      logger.error(`${TAG_NDP} refresh failed:`, e.message);
+    }
+  }
+
+  async function detectCurrentCisco() {
+    if (!ciscoReady || !ciscoShell) throw new Error('Cisco not connected');
+    const versionRaw = await ciscoExec('show version');
+    const ifBriefRaw = await ciscoExec('show ip interface brief');
+    const natRaw     = await ciscoExec('show ip nat translations');
+    const natStatsRaw = await ciscoExec('show ip nat statistics');
+    const privilegeError = isPrivilegeError(natRaw);
+    const sessions   = parseNatTranslations(natRaw);
+    const lanIp      = parseLanIp(ifBriefRaw, parseNatInsideInterfaces(natStatsRaw));
+    return {
+      ssh:  { ok: true },
+      nat:  { ok: !privilegeError, sessions: sessions.length, sessionsOk: sessions.length > 0 && !privilegeError },
+      lan:  { ip: lanIp },
+      ios:  { ok: isCiscoIos(versionRaw) },
+      suggested: { ciscoIp: ciscoIp, ciscoUser: ciscoUser },
+      diag: { ssh: { ok: true }, lanIp, natSessions: sessions.length, privilegeError },
+    };
+  }
+
+  function disconnect() {
+    ciscoEnabled = false;
+    ciscoReady   = false;
+    ciscoConnecting = false;
+    rejectShellWaiter(new Error('Cisco disconnected'));
+    if (ciscoReconnectTimer) { clearTimeout(ciscoReconnectTimer); ciscoReconnectTimer = null; }
+    if (ciscoConn) { try { ciscoConn.removeAllListeners(); ciscoConn.on('error', () => {}); ciscoConn.end(); } catch {} ciscoConn = null; }
+    ciscoShell = null;
+    shellBuf   = '';
+    // Also clear the caches so resolveMacByIp doesn't keep returning stale
+    // ARP/NDP data after being disabled
+    ciscoArpCache.clear();
+    ciscoNdpCache.clear();
+    ciscoArpLastRefresh = 0;
+    ciscoNdpLastRefresh = 0;
+  }
+
+  function reconnect() {
+    ciscoReady = false;
+    ciscoConnecting = false;
+    rejectShellWaiter(new Error('Cisco reconnecting'));
+    if (ciscoConn) { try { ciscoConn.removeAllListeners(); ciscoConn.on('error', () => {}); ciscoConn.end(); } catch {} ciscoConn = null; }
+    scheduleCiscoReconnect(500);
+  }
+
   return {
-    ssh:  { ok: true },
-    nat:  { ok: !privilegeError, sessions: sessions.length, sessionsOk: sessions.length > 0 && !privilegeError },
-    lan:  { ip: lanIp },
-    ios:  { ok: isCiscoIos(versionRaw) },
-    suggested: { ciscoIp: ciscoIp, ciscoUser: ciscoUser },
-    diag: { ssh: { ok: true }, lanIp, natSessions: sessions.length, privilegeError },
+    getId: () => id,
+    configure,
+    connectCisco,
+    disconnect,
+    reconnect,
+    ciscoExec,
+    detectCisco,          // stateless, exposed on the instance for API parity
+    detectCurrentCisco,
+    refreshCiscoArp,
+    refreshCiscoNdp,
+    fetchNatSessions,
+    getArpCache:    () => ciscoArpCache,
+    getArpMac:      ip => ciscoArpCache.get(ip) || null,
+    getNdpByMac:    mac => ciscoNdpCache.get((mac || '').toLowerCase()) || null,
+    isReady:        () => ciscoReady,
+    isEnabled:      () => ciscoEnabled,
+    getIp:          () => ciscoIp,
+    getUser:        () => ciscoUser,
+    hasPass:        () => !!ciscoPass,
+    getNat:         () => null, // Cisco uses no descriptor concept
+    getHostFp:      () => ciscoHostFp,
+    needsArpRefresh: () => Date.now() - ciscoArpLastRefresh > CISCO_ARP_REFRESH_MS,
+    needsNdpRefresh: () => Date.now() - ciscoNdpLastRefresh > CISCO_NDP_REFRESH_MS,
   };
 }
 
-function disconnect() {
-  ciscoEnabled = false;
-  ciscoReady   = false;
-  ciscoConnecting = false;
-  rejectShellWaiter(new Error('Cisco disconnected'));
-  if (ciscoReconnectTimer) { clearTimeout(ciscoReconnectTimer); ciscoReconnectTimer = null; }
-  if (ciscoConn) { try { ciscoConn.removeAllListeners(); ciscoConn.on('error', () => {}); ciscoConn.end(); } catch {} ciscoConn = null; }
-  ciscoShell = null;
-  shellBuf   = '';
-  // Also clear the caches so resolveMacByIp doesn't keep returning stale
-  // ARP/NDP data after being disabled
-  ciscoArpCache.clear();
-  ciscoNdpCache.clear();
-  ciscoArpLastRefresh = 0;
-  ciscoNdpLastRefresh = 0;
-}
-
-function reconnect() {
-  ciscoReady = false;
-  ciscoConnecting = false;
-  rejectShellWaiter(new Error('Cisco reconnecting'));
-  if (ciscoConn) { try { ciscoConn.removeAllListeners(); ciscoConn.on('error', () => {}); ciscoConn.end(); } catch {} ciscoConn = null; }
-  scheduleCiscoReconnect(500);
-}
-
-function getArpCache()    { return ciscoArpCache; }
-function getArpMac(ip)    { return ciscoArpCache.get(ip) || null; }
-function getNdpByMac(mac) { return ciscoNdpCache.get((mac || '').toLowerCase()) || null; }
-function isReady()        { return ciscoReady; }
-function isEnabled()      { return ciscoEnabled; }
-function getIp()          { return ciscoIp; }
-function getUser()        { return ciscoUser; }
-function hasPass()        { return !!ciscoPass; }
-function getNat()         { return null; } // Cisco uses no descriptor concept
-function getHostFp()      { return ciscoHostFp; }
-function needsArpRefresh() { return Date.now() - ciscoArpLastRefresh > CISCO_ARP_REFRESH_MS; }
-function needsNdpRefresh() { return Date.now() - ciscoNdpLastRefresh > CISCO_NDP_REFRESH_MS; }
+// Default instance: preserves the single-router API used across the codebase.
+const defaultPoller = createCiscoPoller();
 
 module.exports = {
-  configure,
-  connectCisco,
-  disconnect,
-  reconnect,
-  ciscoExec,
+  ...defaultPoller,
+  createCiscoPoller,
+  // Pure parsers (shared, stateless)
   parseNatTranslations,
   parseCiscoAge,
   parseArp,
@@ -589,21 +625,4 @@ module.exports = {
   dotMacToColon,
   isCiscoIos,
   isPrivilegeError,
-  detectCisco,
-  detectCurrentCisco,
-  refreshCiscoArp,
-  refreshCiscoNdp,
-  fetchNatSessions,
-  getArpCache,
-  getArpMac,
-  getNdpByMac,
-  isReady,
-  isEnabled,
-  getIp,
-  getUser,
-  hasPass,
-  getNat,
-  getHostFp,
-  needsArpRefresh,
-  needsNdpRefresh,
 };

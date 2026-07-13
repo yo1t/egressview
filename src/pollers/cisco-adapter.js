@@ -4,39 +4,50 @@
 const { createRouterPoller } = require('./router-interface');
 const cisco = require('./cisco');
 
-const adapter = createRouterPoller({
-  kind: 'cisco',
-  label: 'Cisco IOS',
+/**
+ * Wrap a Cisco poller instance in the router poller contract.
+ * @param {{ id?: string }} [opts]  routerId; omit for the legacy singleton
+ */
+function createCiscoAdapter({ id = '' } = {}) {
+  const poller = id ? cisco.createCiscoPoller({ id }) : cisco;
+  return createRouterPoller({
+    kind: 'cisco',
+    label: 'Cisco IOS',
+    id,
 
-  configure: cisco.configure,
-  connect: cisco.connectCisco,
-  disconnect: cisco.disconnect,
-  reconnect: cisco.reconnect,
-  isEnabled: cisco.isEnabled,
-  isReady: cisco.isReady,
+    configure: poller.configure,
+    connect: poller.connectCisco,
+    disconnect: poller.disconnect,
+    reconnect: poller.reconnect,
+    isEnabled: poller.isEnabled,
+    isReady: poller.isReady,
 
-  fetchSessions: cisco.fetchNatSessions,
-  refreshArp: cisco.refreshCiscoArp,
-  refreshNdp: cisco.refreshCiscoNdp,
-  needsArpRefresh: cisco.needsArpRefresh,
-  needsNdpRefresh: cisco.needsNdpRefresh,
-  getArpCache: cisco.getArpCache,
-  getArpMac: cisco.getArpMac,
-  getNdpByMac: cisco.getNdpByMac,
+    fetchSessions: poller.fetchNatSessions,
+    refreshArp: poller.refreshCiscoArp,
+    refreshNdp: poller.refreshCiscoNdp,
+    needsArpRefresh: poller.needsArpRefresh,
+    needsNdpRefresh: poller.needsNdpRefresh,
+    getArpCache: poller.getArpCache,
+    getArpMac: poller.getArpMac,
+    getNdpByMac: poller.getNdpByMac,
 
-  getIp: cisco.getIp,
-  getUser: cisco.getUser,
-  hasPass: cisco.hasPass,
-  getNat: cisco.getNat,
-  getHostFp: cisco.getHostFp,
+    getIp: poller.getIp,
+    getUser: poller.getUser,
+    hasPass: poller.hasPass,
+    getNat: poller.getNat,
+    getHostFp: poller.getHostFp,
 
-  exec: cisco.ciscoExec,
-  detect: cisco.detectCisco,
-  detectCurrent: cisco.detectCurrentCisco,
-});
+    exec: poller.ciscoExec,
+    detect: poller.detectCisco,
+    detectCurrent: poller.detectCurrentCisco,
+  });
+}
+
+const adapter = createCiscoAdapter();
 
 module.exports = {
   ...adapter,
+  createCiscoAdapter,
 
   // Parser helpers exposed for tests.
   parseNatTranslations: cisco.parseNatTranslations,
