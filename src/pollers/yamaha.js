@@ -1,4 +1,9 @@
 // Yamaha RTX SSH poller: connect, execute commands, parse NAT sessions
+//
+// P2-30 PR 1: all mutable state (SSH connection, shell buffer, caches,
+// config, timers) lives inside createYamahaPoller() so multiple router
+// instances can coexist. The module still exports a default instance plus
+// the pure parsers, so existing require('./yamaha') callers are unchanged.
 'use strict';
 const logger = require('../logger');
 const { t } = require('../i18n-server');
@@ -6,42 +11,7 @@ const { t } = require('../i18n-server');
 const crypto = require('crypto');
 const { Client: SshClient } = require('ssh2');
 
-let yamahaShell   = null;
-let yamahaConn    = null;
-let yamahaReady   = false;
-let shellBuf      = '';
-let yamahaReconnectTimer = null;
-let yamahaConnecting = false;
-let shellWaiter   = null;
-let execChain     = Promise.resolve();
-
-// Yamaha ARP table cache (IP -> MAC)
-const yamahaArpCache = new Map();
-let yamahaArpLastRefresh = 0;
-const YAMAHA_ARP_REFRESH_MS = 60 * 1000;
-
-// Config (set externally via configure())
-let yamahaIp = '';
-let yamahaUser = '';
-let yamahaPass = '';
-let yamahaEnabled = true;
-let yamahaHostFp = '';
-let natDescriptor = '100';
-
-// Callbacks (set externally)
-let onStatus = () => {};
-let onSaveConfig = () => {};
-
-function configure(cfg) {
-  if (cfg.ip !== undefined) yamahaIp = cfg.ip;
-  if (cfg.user !== undefined) yamahaUser = cfg.user;
-  if (cfg.pass !== undefined) yamahaPass = cfg.pass;
-  if (cfg.enabled !== undefined) yamahaEnabled = cfg.enabled;
-  if (cfg.hostFp !== undefined) yamahaHostFp = cfg.hostFp;
-  if (cfg.natDescriptor !== undefined) natDescriptor = cfg.natDescriptor;
-  if (cfg.onStatus) onStatus = cfg.onStatus;
-  if (cfg.onSaveConfig) onSaveConfig = cfg.onSaveConfig;
-}
+// ── Parsers (pure, shared by all instances) ───────────────────────────────────
 
 function parseNatDetail(text) {
   const sessions = [];
@@ -115,6 +85,8 @@ function classifyConnError(err) {
   if (/SSH shell closed/i.test(msg))                      return 'shellClosed';
   return 'unknown';
 }
+
+// ── Detection helpers (stateless) ─────────────────────────────────────────────
 
 function createTempYamahaShell({ ip, user, pass, expectedHostFp }) {
   return new Promise((resolve, reject) => {
@@ -204,77 +176,6 @@ function createTempYamahaShell({ ip, user, pass, expectedHostFp }) {
   });
 }
 
-async function detectYamaha({ ip, user, pass, expectedHostFp, natCandidates } = {}) {
-  if (!ip || !user || !pass) throw new Error('Yamaha IP, username, and password are required');
-
-  let shell;
-  try {
-    shell = await createTempYamahaShell({ ip, user, pass, expectedHostFp });
-  } catch (sshErr) {
-    const err = new Error(sshErr.message);
-    err.diag = { ssh: { ok: false, code: classifyConnError(sshErr) } };
-    throw err;
-  }
-
-  try {
-    const routeRaw = await shell.exec('show ip route');
-    const interfaceRaw = await shell.exec('show ip interface brief');
-    const lanStatusRaw = await shell.exec('show status lan1');
-    const natRaw = await shell.exec('show nat descriptor');
-    const candidates = [
-      ...parseNatDescriptorCandidates(natRaw),
-      ...((natCandidates || []).map(String)),
-      '100', '1', '200', '1000',
-    ].filter((v, idx, arr) => /^\d{1,6}$/.test(v) && arr.indexOf(v) === idx);
-
-    let natDescriptorFound = '';
-    let natSessions = 0;
-    let natSessionsOk = false;
-    const natCandidateResults = [];
-    for (const candidate of candidates) {
-      const detailRaw = await shell.exec(`show nat descriptor address ${candidate} detail`);
-      const sessions = parseNatDetail(detailRaw);
-      const ok = commandLooksOk(detailRaw);
-      natCandidateResults.push({ candidate, ok, sessions: sessions.length });
-      if (!natDescriptorFound && ok) natDescriptorFound = candidate;
-      if (ok && sessions.length > 0) {
-        natDescriptorFound = candidate;
-        natSessions = sessions.length;
-        natSessionsOk = true;
-        break;
-      }
-      if (ok) natSessionsOk = true;
-    }
-
-    const lanIp = parseLanIp(interfaceRaw) || parseLanIp(lanStatusRaw) || parseLanIp(routeRaw) || '';
-    return {
-      ssh: { ok: true },
-      nat: {
-        ok: !!natDescriptorFound,
-        descriptor: natDescriptorFound,
-        sessionsOk: natSessionsOk,
-        sessions: natSessions,
-        candidates,
-      },
-      lan: { ip: lanIp },
-      suggested: {
-        yamahaIp: ip,
-        yamahaUser: user,
-        yamahaNat: natDescriptorFound || '100',
-      },
-      hostFp: shell.hostFp,
-      diag: {
-        ssh: { ok: true },
-        natCandidates: natCandidateResults,
-        fromConfig: parseNatDescriptorCandidates(natRaw),
-        lanIp,
-      },
-    };
-  } finally {
-    shell.close();
-  }
-}
-
 async function collectYamahaDetection(exec, { ip, user, natCandidates } = {}) {
   const routeRaw = await exec('show ip route');
   const interfaceRaw = await exec('show ip interface brief');
@@ -330,291 +231,357 @@ async function collectYamahaDetection(exec, { ip, user, natCandidates } = {}) {
   };
 }
 
-async function detectCurrentYamaha({ natCandidates } = {}) {
-  if (!yamahaReady || !yamahaShell) throw new Error('Yamaha not connected');
-  return collectYamahaDetection(yamahaExec, {
-    ip: yamahaIp,
-    user: yamahaUser,
-    natCandidates: [natDescriptor, ...(natCandidates || [])],
-  });
-}
+// Detection against explicit credentials needs no instance state.
+async function detectYamaha({ ip, user, pass, expectedHostFp, natCandidates } = {}) {
+  if (!ip || !user || !pass) throw new Error('Yamaha IP, username, and password are required');
 
-function clearShellWaiter() {
-  if (shellWaiter?.timer) clearTimeout(shellWaiter.timer);
-  shellWaiter = null;
-}
-
-function rejectShellWaiter(err) {
-  const waiter = shellWaiter;
-  clearShellWaiter();
-  if (waiter) waiter.reject(err);
-}
-
-function waitForPrompt(timeoutMs = 45000) {
-  return new Promise((resolve, reject) => {
-    if (looksLikeShellPrompt(shellBuf)) { resolve(shellBuf); return; }
-    clearShellWaiter();
-    const timer = setTimeout(() => {
-      shellWaiter = null;
-      reject(new Error('SSH timeout'));
-    }, timeoutMs);
-    shellWaiter = { resolve, reject, timer };
-  });
-}
-
-async function yamahaExec(cmd, timeoutMs = 45000) {
-  const run = async () => {
-    if (!yamahaReady || !yamahaShell) throw new Error('Yamaha not connected');
-    shellBuf = '';
-    yamahaShell.write(cmd + '\n');
-    await waitForPrompt(timeoutMs);
-    return shellBuf;
-  };
-  const result = execChain.then(run, run);
-  execChain = result.catch(() => {});
-  return result;
-}
-
-function scheduleYamahaReconnect(ms) {
-  if (yamahaReconnectTimer) { clearTimeout(yamahaReconnectTimer); }
-  if (!yamahaEnabled) return;
-  onStatus({ ready: false, state: 'reconnecting', message: t('yamaha.reconnecting') });
-  yamahaReconnectTimer = setTimeout(() => {
-    yamahaReconnectTimer = null;
-    connectYamaha();
-  }, ms);
-}
-
-function connectYamaha(onReady) {
-  if (!yamahaEnabled) return;
-  if (!yamahaIp || !yamahaUser || !yamahaPass) {
-    logger.info('[yamaha] credentials not configured yet — skip connect');
-    onStatus({ ready: false, state: 'failed', message: t('yamaha.no-config') });
-    return;
-  }
-  if (yamahaConnecting) {
-    logger.info('[yamaha] Connect already in progress, skip');
-    return;
-  }
-  if (yamahaReconnectTimer) { clearTimeout(yamahaReconnectTimer); yamahaReconnectTimer = null; }
-  if (yamahaConn) { try { yamahaConn.removeAllListeners(); yamahaConn.on('error', () => {}); yamahaConn.end(); } catch {} yamahaConn = null; }
-  yamahaReady = false;
-  yamahaShell = null;
-  yamahaConnecting = true;
-  onStatus({ ready: false, state: 'connecting', message: t('yamaha.connecting') });
-
-  const conn = new SshClient();
-  yamahaConn = conn;
-
-  conn.on('ready', () => {
-    conn.shell({ term: 'vt100', cols: 220, rows: 500 }, (err, stream) => {
-      if (err) {
-        logger.error('[yamaha] shell error:', err.message);
-        yamahaConnecting = false;
-        onStatus({ ready: false, state: 'failed', message: t('yamaha.shell-failed') + err.message });
-        scheduleYamahaReconnect(5000);
-        return;
-      }
-      yamahaShell = stream;
-
-      stream.on('data', chunk => {
-        const text = chunk.toString('utf8').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
-        shellBuf += text;
-        if (looksLikePagerPrompt(text)) stream.write('\n');
-        if (looksLikeShellPrompt(shellBuf) && shellWaiter) {
-          const { resolve } = shellWaiter;
-          clearShellWaiter();
-          resolve(shellBuf);
-        }
-      });
-
-      stream.on('error', err => {
-        rejectShellWaiter(err);
-      });
-
-      stream.on('close', () => {
-        rejectShellWaiter(new Error('SSH shell closed'));
-        yamahaReady = false;
-        yamahaConnecting = false;
-        logger.info('[yamaha] Shell closed, reconnecting in 3s…');
-        scheduleYamahaReconnect(3000);
-      });
-
-      setTimeout(async () => {
-        try {
-          await waitForPrompt(8000);
-          shellBuf = '';
-          stream.write('console lines 0\n');
-          await waitForPrompt(5000);
-          yamahaReady = true;
-          yamahaConnecting = false;
-          logger.info('[yamaha] Connected to RTX — ready');
-          onStatus({ ready: true, message: t('yamaha.connected') });
-          if (onReady) onReady();
-        } catch (e) {
-          yamahaConnecting = false;
-          logger.error('[yamaha] init error:', e.message);
-          onStatus({ ready: false, state: 'failed', message: t('yamaha.init-failed') + e.message });
-          scheduleYamahaReconnect(5000);
-        }
-      }, 500);
-    });
-  });
-
-  conn.on('error', err => {
-    logger.error('[yamaha] SSH error:', err.message);
-    yamahaReady = false;
-    yamahaConnecting = false;
-    onStatus({ ready: false, state: 'failed', message: t('yamaha.ssh-failed') + err.message });
-    scheduleYamahaReconnect(5000);
-  });
-
-  const hostVerifier = (hashedKey) => {
-    const fp = Buffer.isBuffer(hashedKey)
-      ? hashedKey.toString('hex')
-      : crypto.createHash('sha256').update(hashedKey).digest('hex');
-    if (!yamahaHostFp) {
-      yamahaHostFp = fp;
-      onSaveConfig();
-      logger.info('[yamaha] Host key recorded (TOFU):', fp.substring(0, 16) + '...');
-      return true;
-    }
-    if (fp !== yamahaHostFp) {
-      logger.error('[yamaha] ⚠️ HOST KEY MISMATCH! Possible MITM attack.');
-      logger.error(`  Expected: ${yamahaHostFp.substring(0, 16)}...`);
-      logger.error(`  Got:      ${fp.substring(0, 16)}...`);
-      logger.error('  鍵を更新する場合は .egressview.json の yamaha.hostFp を削除してください');
-      return false;
-    }
-    return true;
-  };
-
-  conn.connect({
-    host: yamahaIp, port: 22,
-    username: yamahaUser, password: yamahaPass,
-    readyTimeout: 15000,
-    keepaliveInterval: 10000,
-    keepaliveCountMax: 3,
-    hostHash: 'sha256',
-    hostVerifier,
-    algorithms: { kex: ['curve25519-sha256@libssh.org','ecdh-sha2-nistp256',
-                         'diffie-hellman-group14-sha256','diffie-hellman-group14-sha1'] },
-  });
-}
-
-async function refreshYamahaArp() {
-  if (!yamahaEnabled || !yamahaReady) return;
+  let shell;
   try {
-    const raw = await yamahaExec('show arp');
-    const re = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})/g;
-    const newMap = new Map();
-    let m;
-    while ((m = re.exec(raw)) !== null) {
-      newMap.set(m[1], m[2].toLowerCase());
-    }
-    yamahaArpCache.clear();
-    for (const [k, v] of newMap) yamahaArpCache.set(k, v);
-    yamahaArpLastRefresh = Date.now();
-    logger.info(`[yamaha-arp] cache refreshed: ${newMap.size} entries`);
-  } catch (e) {
-    logger.error('[yamaha-arp] refresh failed:', e.message);
+    shell = await createTempYamahaShell({ ip, user, pass, expectedHostFp });
+  } catch (sshErr) {
+    const err = new Error(sshErr.message);
+    err.diag = { ssh: { ok: false, code: classifyConnError(sshErr) } };
+    throw err;
+  }
+
+  try {
+    const result = await collectYamahaDetection(shell.exec, { ip, user, natCandidates });
+    return { ...result, hostFp: shell.hostFp };
+  } finally {
+    shell.close();
   }
 }
 
-async function fetchNatSessions() {
-  const raw = await yamahaExec(`show nat descriptor address ${natDescriptor} detail`, 90000);
-  return parseNatDetail(raw);
-}
+// ── Poller factory ────────────────────────────────────────────────────────────
 
-// IPv6 NDP cache: MAC → IPv6 address(es)
-const yamahaNdpCache = new Map(); // mac → [ipv6, ...]
-let yamahaNdpLastRefresh = 0;
+const YAMAHA_ARP_REFRESH_MS = 60 * 1000;
 const YAMAHA_NDP_REFRESH_MS = 120 * 1000; // every 2 min
 
-async function refreshYamahaNdp() {
-  if (!yamahaEnabled || !yamahaReady) return;
-  try {
-    const raw = await yamahaExec('show ipv6 neighbor cache');
-    const newMap = new Map();
-    // Parse lines like: "2001:db8:0:ed00:5de6:a5c8:44fb:a1e5    aa:bb:cc:dd:ee:ff LAN1  REACHABLE"
-    const re = /([0-9a-fA-F:]{6,45})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\s+LAN1\s+\w+/g;
-    let m;
-    while ((m = re.exec(raw)) !== null) {
-      const ipv6 = m[1];
-      const mac = m[2].toLowerCase();
-      // Skip link-local (fe80::)
-      if (ipv6.startsWith('fe80:')) continue;
-      if (!newMap.has(mac)) newMap.set(mac, []);
-      newMap.get(mac).push(ipv6);
-    }
-    yamahaNdpCache.clear();
-    for (const [k, v] of newMap) yamahaNdpCache.set(k, v);
-    yamahaNdpLastRefresh = Date.now();
-    logger.info(`[yamaha-ndp] cache refreshed: ${newMap.size} entries`);
-  } catch (e) {
-    logger.error('[yamaha-ndp] refresh failed:', e.message);
+/**
+ * Create an isolated Yamaha RTX poller instance. Every piece of mutable
+ * state (SSH connection, shell buffer, caches, config, timers) belongs to
+ * the instance, so several routers can be polled from one process.
+ *
+ * @param {{ id?: string }} [opts]  routerId for log prefixes ('' → '[yamaha]')
+ */
+function createYamahaPoller({ id = '' } = {}) {
+  const TAG     = id ? `[yamaha:${id}]`     : '[yamaha]';
+  const TAG_ARP = id ? `[yamaha-arp:${id}]` : '[yamaha-arp]';
+  const TAG_NDP = id ? `[yamaha-ndp:${id}]` : '[yamaha-ndp]';
+
+  let yamahaShell   = null;
+  let yamahaConn    = null;
+  let yamahaReady   = false;
+  let shellBuf      = '';
+  let yamahaReconnectTimer = null;
+  let yamahaConnecting = false;
+  let shellWaiter   = null;
+  let execChain     = Promise.resolve();
+
+  // Yamaha ARP table cache (IP -> MAC)
+  const yamahaArpCache = new Map();
+  let yamahaArpLastRefresh = 0;
+
+  // IPv6 NDP cache: MAC → IPv6 address(es)
+  const yamahaNdpCache = new Map(); // mac → [ipv6, ...]
+  let yamahaNdpLastRefresh = 0;
+
+  // Config (set externally via configure())
+  let yamahaIp = '';
+  let yamahaUser = '';
+  let yamahaPass = '';
+  let yamahaEnabled = true;
+  let yamahaHostFp = '';
+  let natDescriptor = '100';
+
+  // Callbacks (set externally)
+  let onStatus = () => {};
+  let onSaveConfig = () => {};
+
+  function configure(cfg) {
+    if (cfg.ip !== undefined) yamahaIp = cfg.ip;
+    if (cfg.user !== undefined) yamahaUser = cfg.user;
+    if (cfg.pass !== undefined) yamahaPass = cfg.pass;
+    if (cfg.enabled !== undefined) yamahaEnabled = cfg.enabled;
+    if (cfg.hostFp !== undefined) yamahaHostFp = cfg.hostFp;
+    if (cfg.natDescriptor !== undefined) natDescriptor = cfg.natDescriptor;
+    if (cfg.onStatus) onStatus = cfg.onStatus;
+    if (cfg.onSaveConfig) onSaveConfig = cfg.onSaveConfig;
   }
+
+  async function detectCurrentYamaha({ natCandidates } = {}) {
+    if (!yamahaReady || !yamahaShell) throw new Error('Yamaha not connected');
+    return collectYamahaDetection(yamahaExec, {
+      ip: yamahaIp,
+      user: yamahaUser,
+      natCandidates: [natDescriptor, ...(natCandidates || [])],
+    });
+  }
+
+  function clearShellWaiter() {
+    if (shellWaiter?.timer) clearTimeout(shellWaiter.timer);
+    shellWaiter = null;
+  }
+
+  function rejectShellWaiter(err) {
+    const waiter = shellWaiter;
+    clearShellWaiter();
+    if (waiter) waiter.reject(err);
+  }
+
+  function waitForPrompt(timeoutMs = 45000) {
+    return new Promise((resolve, reject) => {
+      if (looksLikeShellPrompt(shellBuf)) { resolve(shellBuf); return; }
+      clearShellWaiter();
+      const timer = setTimeout(() => {
+        shellWaiter = null;
+        reject(new Error('SSH timeout'));
+      }, timeoutMs);
+      shellWaiter = { resolve, reject, timer };
+    });
+  }
+
+  async function yamahaExec(cmd, timeoutMs = 45000) {
+    const run = async () => {
+      if (!yamahaReady || !yamahaShell) throw new Error('Yamaha not connected');
+      shellBuf = '';
+      yamahaShell.write(cmd + '\n');
+      await waitForPrompt(timeoutMs);
+      return shellBuf;
+    };
+    const result = execChain.then(run, run);
+    execChain = result.catch(() => {});
+    return result;
+  }
+
+  function scheduleYamahaReconnect(ms) {
+    if (yamahaReconnectTimer) { clearTimeout(yamahaReconnectTimer); }
+    if (!yamahaEnabled) return;
+    onStatus({ ready: false, state: 'reconnecting', message: t('yamaha.reconnecting') });
+    yamahaReconnectTimer = setTimeout(() => {
+      yamahaReconnectTimer = null;
+      connectYamaha();
+    }, ms);
+  }
+
+  function connectYamaha(onReady) {
+    if (!yamahaEnabled) return;
+    if (!yamahaIp || !yamahaUser || !yamahaPass) {
+      logger.info(`${TAG} credentials not configured yet — skip connect`);
+      onStatus({ ready: false, state: 'failed', message: t('yamaha.no-config') });
+      return;
+    }
+    if (yamahaConnecting) {
+      logger.info(`${TAG} Connect already in progress, skip`);
+      return;
+    }
+    if (yamahaReconnectTimer) { clearTimeout(yamahaReconnectTimer); yamahaReconnectTimer = null; }
+    if (yamahaConn) { try { yamahaConn.removeAllListeners(); yamahaConn.on('error', () => {}); yamahaConn.end(); } catch {} yamahaConn = null; }
+    yamahaReady = false;
+    yamahaShell = null;
+    yamahaConnecting = true;
+    onStatus({ ready: false, state: 'connecting', message: t('yamaha.connecting') });
+
+    const conn = new SshClient();
+    yamahaConn = conn;
+
+    conn.on('ready', () => {
+      conn.shell({ term: 'vt100', cols: 220, rows: 500 }, (err, stream) => {
+        if (err) {
+          logger.error(`${TAG} shell error:`, err.message);
+          yamahaConnecting = false;
+          onStatus({ ready: false, state: 'failed', message: t('yamaha.shell-failed') + err.message });
+          scheduleYamahaReconnect(5000);
+          return;
+        }
+        yamahaShell = stream;
+
+        stream.on('data', chunk => {
+          const text = chunk.toString('utf8').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+          shellBuf += text;
+          if (looksLikePagerPrompt(text)) stream.write('\n');
+          if (looksLikeShellPrompt(shellBuf) && shellWaiter) {
+            const { resolve } = shellWaiter;
+            clearShellWaiter();
+            resolve(shellBuf);
+          }
+        });
+
+        stream.on('error', err => {
+          rejectShellWaiter(err);
+        });
+
+        stream.on('close', () => {
+          rejectShellWaiter(new Error('SSH shell closed'));
+          yamahaReady = false;
+          yamahaConnecting = false;
+          logger.info(`${TAG} Shell closed, reconnecting in 3s…`);
+          scheduleYamahaReconnect(3000);
+        });
+
+        setTimeout(async () => {
+          try {
+            await waitForPrompt(8000);
+            shellBuf = '';
+            stream.write('console lines 0\n');
+            await waitForPrompt(5000);
+            yamahaReady = true;
+            yamahaConnecting = false;
+            logger.info(`${TAG} Connected to RTX — ready`);
+            onStatus({ ready: true, message: t('yamaha.connected') });
+            if (onReady) onReady();
+          } catch (e) {
+            yamahaConnecting = false;
+            logger.error(`${TAG} init error:`, e.message);
+            onStatus({ ready: false, state: 'failed', message: t('yamaha.init-failed') + e.message });
+            scheduleYamahaReconnect(5000);
+          }
+        }, 500);
+      });
+    });
+
+    conn.on('error', err => {
+      logger.error(`${TAG} SSH error:`, err.message);
+      yamahaReady = false;
+      yamahaConnecting = false;
+      onStatus({ ready: false, state: 'failed', message: t('yamaha.ssh-failed') + err.message });
+      scheduleYamahaReconnect(5000);
+    });
+
+    const hostVerifier = (hashedKey) => {
+      const fp = Buffer.isBuffer(hashedKey)
+        ? hashedKey.toString('hex')
+        : crypto.createHash('sha256').update(hashedKey).digest('hex');
+      if (!yamahaHostFp) {
+        yamahaHostFp = fp;
+        onSaveConfig();
+        logger.info(`${TAG} Host key recorded (TOFU):`, fp.substring(0, 16) + '...');
+        return true;
+      }
+      if (fp !== yamahaHostFp) {
+        logger.error(`${TAG} ⚠️ HOST KEY MISMATCH! Possible MITM attack.`);
+        logger.error(`  Expected: ${yamahaHostFp.substring(0, 16)}...`);
+        logger.error(`  Got:      ${fp.substring(0, 16)}...`);
+        logger.error('  鍵を更新する場合は .egressview.json の yamaha.hostFp を削除してください');
+        return false;
+      }
+      return true;
+    };
+
+    conn.connect({
+      host: yamahaIp, port: 22,
+      username: yamahaUser, password: yamahaPass,
+      readyTimeout: 15000,
+      keepaliveInterval: 10000,
+      keepaliveCountMax: 3,
+      hostHash: 'sha256',
+      hostVerifier,
+      algorithms: { kex: ['curve25519-sha256@libssh.org','ecdh-sha2-nistp256',
+                           'diffie-hellman-group14-sha256','diffie-hellman-group14-sha1'] },
+    });
+  }
+
+  async function refreshYamahaArp() {
+    if (!yamahaEnabled || !yamahaReady) return;
+    try {
+      const raw = await yamahaExec('show arp');
+      const re = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})/g;
+      const newMap = new Map();
+      let m;
+      while ((m = re.exec(raw)) !== null) {
+        newMap.set(m[1], m[2].toLowerCase());
+      }
+      yamahaArpCache.clear();
+      for (const [k, v] of newMap) yamahaArpCache.set(k, v);
+      yamahaArpLastRefresh = Date.now();
+      logger.info(`${TAG_ARP} cache refreshed: ${newMap.size} entries`);
+    } catch (e) {
+      logger.error(`${TAG_ARP} refresh failed:`, e.message);
+    }
+  }
+
+  async function fetchNatSessions() {
+    const raw = await yamahaExec(`show nat descriptor address ${natDescriptor} detail`, 90000);
+    return parseNatDetail(raw);
+  }
+
+  async function refreshYamahaNdp() {
+    if (!yamahaEnabled || !yamahaReady) return;
+    try {
+      const raw = await yamahaExec('show ipv6 neighbor cache');
+      const newMap = new Map();
+      // Parse lines like: "2001:db8:0:ed00:5de6:a5c8:44fb:a1e5    aa:bb:cc:dd:ee:ff LAN1  REACHABLE"
+      const re = /([0-9a-fA-F:]{6,45})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\s+LAN1\s+\w+/g;
+      let m;
+      while ((m = re.exec(raw)) !== null) {
+        const ipv6 = m[1];
+        const mac = m[2].toLowerCase();
+        // Skip link-local (fe80::)
+        if (ipv6.startsWith('fe80:')) continue;
+        if (!newMap.has(mac)) newMap.set(mac, []);
+        newMap.get(mac).push(ipv6);
+      }
+      yamahaNdpCache.clear();
+      for (const [k, v] of newMap) yamahaNdpCache.set(k, v);
+      yamahaNdpLastRefresh = Date.now();
+      logger.info(`${TAG_NDP} cache refreshed: ${newMap.size} entries`);
+    } catch (e) {
+      logger.error(`${TAG_NDP} refresh failed:`, e.message);
+    }
+  }
+
+  function disconnect() {
+    yamahaEnabled = false;
+    yamahaReady = false;
+    yamahaConnecting = false;
+    rejectShellWaiter(new Error('Yamaha disconnected'));
+    if (yamahaReconnectTimer) { clearTimeout(yamahaReconnectTimer); yamahaReconnectTimer = null; }
+    if (yamahaConn) { try { yamahaConn.removeAllListeners(); yamahaConn.on('error', () => {}); yamahaConn.end(); } catch {} yamahaConn = null; }
+  }
+
+  function reconnect() {
+    yamahaReady = false;
+    yamahaConnecting = false;
+    rejectShellWaiter(new Error('Yamaha reconnecting'));
+    if (yamahaConn) { try { yamahaConn.removeAllListeners(); yamahaConn.on('error', () => {}); yamahaConn.end(); } catch {} yamahaConn = null; }
+    scheduleYamahaReconnect(500);
+  }
+
+  return {
+    getId: () => id,
+    configure,
+    connectYamaha,
+    disconnect,
+    reconnect,
+    yamahaExec,
+    detectYamaha,          // stateless, exposed on the instance for API parity
+    detectCurrentYamaha,
+    refreshYamahaArp,
+    refreshYamahaNdp,
+    fetchNatSessions,
+    getArpCache:    () => yamahaArpCache,
+    getArpMac:      ip => yamahaArpCache.get(ip) || null,
+    getNdpByMac:    mac => mac ? (yamahaNdpCache.get(mac.toLowerCase()) || null) : null,
+    isReady:        () => yamahaReady,
+    isEnabled:      () => yamahaEnabled,
+    getIp:          () => yamahaIp,
+    getUser:        () => yamahaUser,
+    hasPass:        () => !!yamahaPass,
+    getNat:         () => natDescriptor,
+    getHostFp:      () => yamahaHostFp,
+    needsArpRefresh: () => Date.now() - yamahaArpLastRefresh > YAMAHA_ARP_REFRESH_MS,
+    needsNdpRefresh: () => Date.now() - yamahaNdpLastRefresh > YAMAHA_NDP_REFRESH_MS,
+  };
 }
 
-function getNdpByMac(mac) {
-  if (!mac) return null;
-  return yamahaNdpCache.get(mac.toLowerCase()) || null;
-}
-
-function needsNdpRefresh() { return Date.now() - yamahaNdpLastRefresh > YAMAHA_NDP_REFRESH_MS; }
-
-function disconnect() {
-  yamahaEnabled = false;
-  yamahaReady = false;
-  yamahaConnecting = false;
-  rejectShellWaiter(new Error('Yamaha disconnected'));
-  if (yamahaReconnectTimer) { clearTimeout(yamahaReconnectTimer); yamahaReconnectTimer = null; }
-  if (yamahaConn) { try { yamahaConn.removeAllListeners(); yamahaConn.on('error', () => {}); yamahaConn.end(); } catch {} yamahaConn = null; }
-}
-
-function reconnect() {
-  yamahaReady = false;
-  yamahaConnecting = false;
-  rejectShellWaiter(new Error('Yamaha reconnecting'));
-  if (yamahaConn) { try { yamahaConn.removeAllListeners(); yamahaConn.on('error', () => {}); yamahaConn.end(); } catch {} yamahaConn = null; }
-  scheduleYamahaReconnect(500);
-}
-
-function getArpCache() { return yamahaArpCache; }
-function getArpMac(ip) { return yamahaArpCache.get(ip) || null; }
-function isReady() { return yamahaReady; }
-function isEnabled() { return yamahaEnabled; }
-function getIp() { return yamahaIp; }
-function getUser() { return yamahaUser; }
-function hasPass() { return !!yamahaPass; }
-function getNat() { return natDescriptor; }
-function getHostFp() { return yamahaHostFp; }
-function needsArpRefresh() { return Date.now() - yamahaArpLastRefresh > YAMAHA_ARP_REFRESH_MS; }
+// Default instance: preserves the single-router API used across the codebase.
+const defaultPoller = createYamahaPoller();
 
 module.exports = {
-  configure,
-  connectYamaha,
-  disconnect,
-  reconnect,
-  yamahaExec,
+  ...defaultPoller,
+  createYamahaPoller,
+  // Pure parsers (shared, stateless)
   parseNatDetail,
   parseNatDescriptorCandidates,
   parseLanIp,
-  detectYamaha,
-  detectCurrentYamaha,
-  refreshYamahaArp,
-  refreshYamahaNdp,
-  fetchNatSessions,
-  getArpCache,
-  getArpMac,
-  getNdpByMac,
-  isReady,
-  isEnabled,
-  getIp,
-  getUser,
-  hasPass,
-  getNat,
-  getHostFp,
-  needsArpRefresh,
-  needsNdpRefresh,
 };

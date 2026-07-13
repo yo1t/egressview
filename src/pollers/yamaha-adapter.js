@@ -4,39 +4,50 @@
 const { createRouterPoller } = require('./router-interface');
 const yamaha = require('./yamaha');
 
-const adapter = createRouterPoller({
-  kind: 'yamaha',
-  label: 'Yamaha RTX',
+/**
+ * Wrap a Yamaha poller instance in the router poller contract.
+ * @param {{ id?: string }} [opts]  routerId; omit for the legacy singleton
+ */
+function createYamahaAdapter({ id = '' } = {}) {
+  const poller = id ? yamaha.createYamahaPoller({ id }) : yamaha;
+  return createRouterPoller({
+    kind: 'yamaha',
+    label: 'Yamaha RTX',
+    id,
 
-  configure: yamaha.configure,
-  connect: yamaha.connectYamaha,
-  disconnect: yamaha.disconnect,
-  reconnect: yamaha.reconnect,
-  isEnabled: yamaha.isEnabled,
-  isReady: yamaha.isReady,
+    configure: poller.configure,
+    connect: poller.connectYamaha,
+    disconnect: poller.disconnect,
+    reconnect: poller.reconnect,
+    isEnabled: poller.isEnabled,
+    isReady: poller.isReady,
 
-  fetchSessions: yamaha.fetchNatSessions,
-  refreshArp: yamaha.refreshYamahaArp,
-  refreshNdp: yamaha.refreshYamahaNdp,
-  needsArpRefresh: yamaha.needsArpRefresh,
-  needsNdpRefresh: yamaha.needsNdpRefresh,
-  getArpCache: yamaha.getArpCache,
-  getArpMac: yamaha.getArpMac,
-  getNdpByMac: yamaha.getNdpByMac,
+    fetchSessions: poller.fetchNatSessions,
+    refreshArp: poller.refreshYamahaArp,
+    refreshNdp: poller.refreshYamahaNdp,
+    needsArpRefresh: poller.needsArpRefresh,
+    needsNdpRefresh: poller.needsNdpRefresh,
+    getArpCache: poller.getArpCache,
+    getArpMac: poller.getArpMac,
+    getNdpByMac: poller.getNdpByMac,
 
-  getIp: yamaha.getIp,
-  getUser: yamaha.getUser,
-  hasPass: yamaha.hasPass,
-  getNat: yamaha.getNat,
-  getHostFp: yamaha.getHostFp,
+    getIp: poller.getIp,
+    getUser: poller.getUser,
+    hasPass: poller.hasPass,
+    getNat: poller.getNat,
+    getHostFp: poller.getHostFp,
 
-  exec: yamaha.yamahaExec,
-  detect: yamaha.detectYamaha,
-  detectCurrent: yamaha.detectCurrentYamaha,
-});
+    exec: poller.yamahaExec,
+    detect: poller.detectYamaha,
+    detectCurrent: poller.detectCurrentYamaha,
+  });
+}
+
+const adapter = createYamahaAdapter();
 
 module.exports = {
   ...adapter,
+  createYamahaAdapter,
 
   // Backward-compatible Yamaha names used by current routes and helpers.
   connectYamaha: adapter.connect,
