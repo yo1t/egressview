@@ -149,6 +149,90 @@ describe('db-migrate: in-memory database', () => {
   });
 });
 
+// ─── P2-30 v4: routers + connection_observations backfill ─────────────────────
+
+describe('db-migrate: v4 observation backfill', () => {
+  function legacyV3Db(p) {
+    const db = openDb(p);
+    db.exec(`CREATE TABLE connections (
+      src TEXT, dst TEXT, dport INTEGER, proto TEXT,
+      firstSeen INTEGER NOT NULL, lastSeen INTEGER NOT NULL,
+      source TEXT NOT NULL DEFAULT 'yamaha',
+      agentHost TEXT, process TEXT, pid INTEGER,
+      PRIMARY KEY (src, dst, dport, proto)
+    )`);
+    db.pragma('user_version = 3');
+    const ins = db.prepare('INSERT INTO connections (src,dst,dport,proto,firstSeen,lastSeen,source) VALUES (?,?,?,?,?,?,?)');
+    ins.run('192.168.1.10', '8.8.8.8', 443, 'TCP', 100, 200, 'yamaha');
+    ins.run('192.168.1.10', '9.9.9.9', 53,  'UDP', 110, 210, 'cisco');
+    ins.run('192.168.1.11', '8.8.4.4', 443, 'TCP', 120, 220, 'yamaha+cisco');
+    ins.run('192.168.1.12', '1.1.1.1', 80,  'TCP', 130, 230, 'inspect');
+    ins.run('192.168.1.13', '2.2.2.2', 22,  'TCP', 140, 240, 'weird source!');
+    return db;
+  }
+
+  it('expands every source into observation rows with the migrated ids', () => {
+    const p = tmpDb('v4-backfill');
+    const db = legacyV3Db(p);
+    runMigrations(db, p, { sourceRouterMap: { yamaha: 'yamaha1', cisco: 'cisco1' } });
+
+    assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
+    const obs = db.prepare('SELECT * FROM connection_observations ORDER BY src, routerId').all();
+    // yamaha:1 + cisco:1 + yamaha+cisco:2 + inspect:1 + unknown:1 = 6 rows
+    assert.equal(obs.length, 6);
+
+    const byConn = key => obs.filter(o => `${o.src}|${o.dst}` === key).map(o => o.routerId).sort();
+    assert.deepEqual(byConn('192.168.1.10|8.8.8.8'), ['yamaha1']);
+    assert.deepEqual(byConn('192.168.1.10|9.9.9.9'), ['cisco1']);
+    assert.deepEqual(byConn('192.168.1.11|8.8.4.4'), ['cisco1', 'yamaha1']);
+    assert.deepEqual(byConn('192.168.1.12|1.1.1.1'), ['yamaha1'], 'inspect maps to yamaha');
+    assert.deepEqual(byConn('192.168.1.13|2.2.2.2'), ['legacy-weird-source']);
+
+    // observation timestamps copy firstSeen/lastSeen
+    const first = obs.find(o => o.dst === '8.8.8.8');
+    assert.equal(first.firstObservedAt, 100);
+    assert.equal(first.lastObservedAt, 200);
+
+    // routers table: migrated ids active, placeholder tombstoned
+    const routers = Object.fromEntries(db.prepare('SELECT * FROM routers').all().map(r => [r.id, r]));
+    assert.equal(routers['yamaha1'].deletedAt, null);
+    assert.equal(routers['cisco1'].deletedAt, null);
+    assert.ok(routers['legacy-weird-source'].deletedAt, 'unknown source placeholder is tombstoned');
+
+    db.close();
+    const backups = fs.readdirSync(TMP).filter(f => f.includes('pre-migration'));
+    for (const f of backups) try { fs.unlinkSync(path.join(TMP, f)); } catch {}
+    try { fs.unlinkSync(p); } catch {}
+  });
+
+  it('maps sources to legacy placeholders when the config section is gone', () => {
+    const p = tmpDb('v4-legacy-map');
+    const db = legacyV3Db(p);
+    runMigrations(db, p, { sourceRouterMap: { yamaha: 'yamaha1', cisco: 'legacy-cisco' } });
+
+    const ciscoObs = db.prepare(`SELECT routerId FROM connection_observations WHERE dst = '9.9.9.9'`).all();
+    assert.deepEqual(ciscoObs.map(o => o.routerId), ['legacy-cisco']);
+    const row = db.prepare(`SELECT * FROM routers WHERE id = 'legacy-cisco'`).get();
+    assert.equal(row.kind, 'cisco');
+    assert.ok(row.deletedAt, 'legacy placeholder is tombstoned');
+
+    db.close();
+    const backups = fs.readdirSync(TMP).filter(f => f.includes('pre-migration'));
+    for (const f of backups) try { fs.unlinkSync(path.join(TMP, f)); } catch {}
+    try { fs.unlinkSync(p); } catch {}
+  });
+
+  it('creates empty v4 tables on a fresh database', () => {
+    const db = openDb(':memory:');
+    runMigrations(db, ':memory:');
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all().map(r => r.name);
+    assert.ok(tables.includes('routers'));
+    assert.ok(tables.includes('connection_observations'));
+    assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
+    db.close();
+  });
+});
+
 // ─── P2-33: fail-closed backup ────────────────────────────────────────────────
 
 describe('db-migrate: fail-closed backup (P2-33)', () => {

@@ -40,6 +40,8 @@ const beacons        = require('./src/beacons');
 const beaconDetector = require('./src/beacon-detector');
 const sessions       = require('./src/sessions');
 const authPassword   = require('./src/auth-password');
+const { runDbBootstrap }    = require('./src/db-bootstrap');
+const { sourceRouterIdMap } = require('./src/router-id');
 const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
 const enrichmentQueue = require('./src/enrichment-queue');
 const beaconScanRunner = require('./src/beacon-scan-runner');
@@ -465,8 +467,17 @@ server.listen(PORT, HOST, () => {
 
   notes.load();
   history.setRetentionDays(appState.retentionDays);
-  history.loadConnectionHistory(runtimeDbPath);
-  sessions.initDb(runtimeDbPath);
+
+  // DB bootstrap: history (owning schema migrations) must attach first; a
+  // migration failure throws here before any other module opens the file.
+  // The source→routerId map keeps the v4 expansion deterministic: a legacy
+  // source maps to yamaha1/cisco1 while its config section exists.
+  const rawCfg = configIo.loadFileSafe(CONFIG_FILE);
+  const sourceRouterMap = sourceRouterIdMap({
+    hasYamahaConfig: !!(rawCfg.yamaha && (rawCfg.yamaha.ip || rawCfg.yamaha.user)),
+    hasCiscoConfig:  !!(rawCfg.cisco  && (rawCfg.cisco.ip  || rawCfg.cisco.user)),
+  });
+  runDbBootstrap({ dbPath: runtimeDbPath, sourceRouterMap, history, sessions, devices, enrichment, beacons });
   setInterval(() => sessions.pruneExpired(), 6 * 60 * 60 * 1000);
 
   if (DEMO_MODE) {
@@ -476,16 +487,13 @@ server.listen(PORT, HOST, () => {
   }
 
   runtime.setKnownMacs(history.getKnownMacs());
-  devices.initDb(runtimeDbPath);
   devices.seedFromConnectionHistory(history.getConnectionHistory());
   const staleChecked = devices.checkStaleMergeCandidates();
   if (staleChecked > 0) {
     logger.info(`[devices] stale merge check: ${staleChecked} device(s) scanned for duplicates`);
   }
-  enrichment.initDb(runtimeDbPath);
   enrichmentQueue.init({ history, enrichment, io, logger });
   beaconScanRunner.init({ appState, beacons, beaconDetector, threatIntel, enrichment, logger });
-  beacons.initDb(runtimeDbPath);
 
   if (!DEMO_MODE) {
     logger.info(`Router IP: ${asus.getRouterIp()}`);
