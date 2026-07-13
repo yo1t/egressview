@@ -14,11 +14,14 @@ const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW
   : path.join(__dirname, '..', '.egressview.db');
 const JSONL_PATH = path.join(__dirname, '..', '.egressview.connections.jsonl');
 const HISTORY_TTL_MS = 2 * 365 * 24 * 60 * 60 * 1000; // 2 years (default)
+const DEFAULT_HOT_MAX_ENTRIES = 100_000;
 let historyTtlMs = HISTORY_TTL_MS;
+let hotMaxEntries = parseHotMaxEntries(process.env.EGRESSVIEW_HISTORY_HOT_MAX);
 
 let db = null;
 let stmtUpsert = null;
 let stmtSelectAll = null;
+let stmtSelectByKey = null;
 let stmtDeleteOld = null;
 let stmtInsertNotifLog = null;
 let stmtObsUpsert = null;
@@ -36,6 +39,11 @@ let routerKinds = new Map();
 
 // In-memory cache (same interface as before for Socket.IO emissions)
 const connectionHistory = new Map();
+
+function parseHotMaxEntries(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_HOT_MAX_ENTRIES;
+}
 
 const CONNECTION_READ_COLUMNS = [
   'src', 'dst', 'dport', 'proto', 'sport', 'ttl', 'srcMac', 'srcVendor',
@@ -77,6 +85,18 @@ function hydrateConnectionRow(row) {
 
 function hydrateConnectionRows(rows) {
   return rows.map(hydrateConnectionRow);
+}
+
+function enforceHotLimit() {
+  if (connectionHistory.size <= hotMaxEntries) return 0;
+  const reserve = hotMaxEntries >= 1_000 ? Math.max(100, Math.floor(hotMaxEntries * 0.01)) : 0;
+  const targetSize = Math.max(1, hotMaxEntries - reserve);
+  const evictCount = connectionHistory.size - targetSize;
+  const oldest = [...connectionHistory.entries()]
+    .sort((a, b) => (a[1].lastSeen || 0) - (b[1].lastSeen || 0))
+    .slice(0, evictCount);
+  for (const [key] of oldest) connectionHistory.delete(key);
+  return oldest.length;
 }
 
 function _secureDbFiles() {
@@ -280,7 +300,14 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
       END
   `);
 
-  stmtSelectAll = db.prepare(`SELECT ${connectionReadColumns('c')} FROM connections c WHERE c.lastSeen >= ?`);
+  stmtSelectAll = db.prepare(`
+    SELECT ${connectionReadColumns('c')} FROM connections c
+    WHERE c.lastSeen >= ? ORDER BY c.lastSeen DESC LIMIT ?
+  `);
+  stmtSelectByKey = db.prepare(`
+    SELECT ${connectionReadColumns('c')} FROM connections c
+    WHERE c.src = ? AND c.dst = ? AND c.dport = ? AND c.proto = ?
+  `);
   stmtDeleteOld = db.prepare(`DELETE FROM connections WHERE lastSeen < ?`);
 
   stmtObsUpsert = db.prepare(`
@@ -403,14 +430,14 @@ function migrateFromJsonl() {
 // Load all active entries into memory cache
 function loadIntoMemory() {
   const cutoff = Date.now() - historyTtlMs;
-  const rows = stmtSelectAll.all(cutoff);
+  const rows = stmtSelectAll.all(cutoff, hotMaxEntries);
   connectionHistory.clear();
   for (const row of rows) {
     const hydrated = hydrateConnectionRow(row);
     const key = `${hydrated.src}|${hydrated.dst}|${hydrated.dport}|${hydrated.proto}`;
     connectionHistory.set(key, hydrated);
   }
-  logger.info(`[history] Loaded ${connectionHistory.size} sessions from SQLite`);
+  logger.info(`[history] Loaded ${connectionHistory.size} hot sessions from SQLite (max ${hotMaxEntries})`);
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -507,12 +534,58 @@ function checkObservationConsistency() {
 // Prune memory cache
 function pruneHistory() {
   const cutoff = Date.now() - historyTtlMs;
+  let expired = 0;
   for (const [k, v] of connectionHistory) {
-    if (v.lastSeen < cutoff) connectionHistory.delete(k);
+    if (v.lastSeen < cutoff) {
+      connectionHistory.delete(k);
+      expired++;
+    }
   }
+  const evicted = enforceHotLimit();
+  if (evicted) logger.info(`[history] Evicted ${evicted} cold entries from memory (${connectionHistory.size}/${hotMaxEntries} hot)`);
+  return { expired, evicted };
 }
 
 function getConnectionHistory() { return connectionHistory; }
+
+function cacheConnection(key, entry) {
+  connectionHistory.set(key, entry);
+  return enforceHotLimit();
+}
+
+function getConnection(key) {
+  const cached = connectionHistory.get(key);
+  if (cached) return cached;
+  if (!db || typeof key !== 'string') return null;
+  const [src, dst, dport, proto] = key.split('|');
+  if (!src || !dst || dport === undefined || !proto) return null;
+  const row = stmtSelectByKey.get(src, dst, Number(dport), proto);
+  if (!row) return null;
+  const hydrated = hydrateConnectionRow(row);
+  if (hydrated.lastSeen >= Date.now() - historyTtlMs) {
+    cacheConnection(key, hydrated);
+  }
+  return hydrated;
+}
+
+function setHotMaxEntries(value) {
+  hotMaxEntries = parseHotMaxEntries(value);
+  const evicted = enforceHotLimit();
+  logger.info(`[history] Hot cache limit set to ${hotMaxEntries} entries`);
+  return { hotMaxEntries, evicted };
+}
+
+function getMemoryStats() {
+  const memory = process.memoryUsage();
+  return {
+    rssBytes: memory.rss,
+    heapUsedBytes: memory.heapUsed,
+    heapTotalBytes: memory.heapTotal,
+    hotEntries: connectionHistory.size,
+    hotMaxEntries,
+    persistedEntries: db ? db.prepare('SELECT COUNT(*) AS n FROM connections').get().n : 0,
+  };
+}
 
 function queryByTimeRange(from, to) {
   if (!db) return [];
@@ -879,6 +952,7 @@ function closeDb() {
 function _initForTest(dbPath, opts = {}) {
   if (db) { try { db.close(); } catch {} db = null; }
   connectionHistory.clear();
+  hotMaxEntries = parseHotMaxEntries(opts.hotMaxEntries);
   initDb(dbPath || ':memory:', opts);
 }
 
@@ -905,6 +979,10 @@ module.exports = {
   compactHistoryLog,
   pruneHistory,
   getConnectionHistory,
+  cacheConnection,
+  getConnection,
+  setHotMaxEntries,
+  getMemoryStats,
   queryByTimeRange,
   queryByTimeRangePaged,
   countByTimeRange,
@@ -922,6 +1000,7 @@ module.exports = {
   checkObservationConsistency,
   observationIdsForSource: source => expandSourceToRouterIds(source, sourceRouterMap),
   HISTORY_TTL_MS,
+  DEFAULT_HOT_MAX_ENTRIES,
   _initForTest,
   _appendAndLoad,
 };

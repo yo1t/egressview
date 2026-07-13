@@ -153,4 +153,39 @@ describe('registerSocketHandlers', () => {
     middleware({ handshake: { auth: { token: 'bad-token' } } }, (err) => { error = err; });
     assert.equal(error?.message, '認証未初期化');
   });
+
+  it('loads the initial one-hour window from SQLite instead of the bounded hot map', () => {
+    let onConnection;
+    const io = { use() {}, on(_event, fn) { onConnection = fn; } };
+    const { asus, yamaha, cisco } = createRouters();
+    const queried = [];
+    registerSocketHandlers({
+      io,
+      appState: createAppState(),
+      authenticate: () => true,
+      asus,
+      yamaha,
+      cisco,
+      notes: { getAll: () => ({}) },
+      history: {
+        getConnectionHistory: () => new Map([['hot', { id: 'hot', lastSeen: 4_000_000 }]]),
+        queryByTimeRange(from, to) {
+          queried.push({ from, to });
+          return [{ id: 'sqlite-recent', lastSeen: to }];
+        },
+      },
+      threatIntel: { matchThreatIntel: () => ({ confidence: 'high' }) },
+      getRouters: () => [{ enabled: true }],
+      defaultRouterIp: '192.168.1.1',
+      logger: { debug() {} },
+      now: () => 4_000_000,
+    });
+    const emitted = [];
+    onConnection({ id: 'socket-1', emit: (event, payload) => emitted.push({ event, payload }) });
+
+    assert.deepEqual(queried, [{ from: 400_000, to: 4_000_000 }]);
+    const update = emitted.find(item => item.event === 'connections-update');
+    assert.equal(update.payload.connections[0].id, 'sqlite-recent');
+    assert.equal(update.payload.connections[0].threat.confidence, 'high');
+  });
 });

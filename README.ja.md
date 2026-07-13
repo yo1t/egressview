@@ -287,7 +287,10 @@ npm start
 | `YAMAHA_NAT` | `100` | NATディスクリプタ番号 |
 | `SUBPATH` | — | リバースプロキシのサブパス（例: `/egressview`） |
 | `EGRESSVIEW_DB` | `.egressview.db` | SQLite データベースファイルのパス |
+| `EGRESSVIEW_HISTORY_HOT_MAX` | `100000` | メモリに保持する直近通信の上限。保持期間内の全履歴はSQLiteに残る |
 | `LOG_LEVEL` | `info` | ログ詳細度: `error` / `warn` / `info` / `debug` |
+
+認証済み管理者は `GET /api/connections/memory` で、現在のRSS、ヒープ使用量、ホットキャッシュ件数・上限、SQLite永続件数を確認できます。通信内容は返さず、件数とメモリ値だけを返します。
 
 ## 機能詳細
 

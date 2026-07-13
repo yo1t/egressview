@@ -360,6 +360,7 @@ registerSocketHandlers({
   cisco,
   notes,
   history,
+  threatIntel,
   defaultRouterIp: DEFAULT_ROUTER_IP,
   logger,
   getRouters: () => routerManagerApi.list(),

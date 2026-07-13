@@ -286,7 +286,10 @@ All settings are stored in `.egressview.json` (auto-generated, gitignored). You 
 | `YAMAHA_NAT` | `100` | NAT descriptor number |
 | `SUBPATH` | — | Reverse proxy sub-path (e.g. `/egressview`) |
 | `EGRESSVIEW_DB` | `.egressview.db` | Path to the SQLite database file |
+| `EGRESSVIEW_HISTORY_HOT_MAX` | `100000` | Maximum recent connections kept in memory; full retained history remains in SQLite |
 | `LOG_LEVEL` | `info` | Log verbosity: `error` / `warn` / `info` / `debug` |
+
+Authenticated administrators can inspect the current RSS, heap usage, hot-cache size, limit, and persisted row count at `GET /api/connections/memory`. The response contains counts only, not traffic details.
 
 ## Features
 
