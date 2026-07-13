@@ -204,6 +204,25 @@ describe('recordConnection', () => {
     assert.equal(entry.firstSeen, first.firstSeen);
   });
 
+  it('restores a cold SQLite entry before merging a new observation', () => {
+    const hist = makeHistory();
+    const firstSeen = Date.now() - 60_000;
+    hist.getConnection = () => ({
+      ...SESSION,
+      firstSeen,
+      lastSeen: firstSeen,
+      source: 'cisco',
+      observedBy: ['cisco1'],
+    });
+    initRuntime({ history: hist });
+
+    const { entry, isNew } = runtime.recordConnection(SESSION, Date.now(), 'yamaha', 'yamaha1');
+
+    assert.equal(isNew, false);
+    assert.equal(entry.firstSeen, firstSeen);
+    assert.deepEqual(entry.observedBy, ['cisco1', 'yamaha1']);
+  });
+
   it('ignores an invalid or future firstSeenHint', () => {
     initRuntime();
     const now = Date.now();

@@ -846,3 +846,100 @@ describe('queryNewNodes', () => {
     assert.ok(!newSrcs.includes('192.168.1.10'), 'device with earlier firstSeen should not be classified as new');
   });
 });
+
+describe('bounded hot history cache', () => {
+  it('loads only the newest entries into memory after restart', () => {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-hot-cache-'));
+    const dbPath = path.join(dir, 'history.db');
+    const now = Date.now();
+    try {
+      history._initForTest(dbPath, { hotMaxEntries: 2 });
+      for (let index = 1; index <= 3; index++) {
+        history.appendHistoryLog({
+          src: '192.168.1.10', dst: `10.0.0.${index}`, dport: 443, proto: 'TCP',
+          firstSeen: now + index, lastSeen: now + index, observedBy: ['cisco1'],
+        });
+      }
+      history.closeDb();
+      history.setHotMaxEntries(2);
+      history.loadConnectionHistory(dbPath);
+
+      assert.deepEqual(
+        [...history.getConnectionHistory().values()].map(entry => entry.dst),
+        ['10.0.0.3', '10.0.0.2'],
+      );
+      assert.equal(history.countByTimeRange(null, null), 3);
+    } finally {
+      history.closeDb();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('evicts the oldest in-memory entry without deleting it from SQLite', () => {
+    history._initForTest(null, { hotMaxEntries: 2 });
+    const now = Date.now();
+    history._appendAndLoad({
+      src: '192.168.1.10', dst: '10.0.0.1', dport: 443, proto: 'TCP',
+      firstSeen: now - 3_000, lastSeen: now - 3_000, observedBy: ['cisco1'],
+    });
+    history._appendAndLoad({
+      src: '192.168.1.10', dst: '10.0.0.2', dport: 443, proto: 'TCP',
+      firstSeen: now - 2_000, lastSeen: now - 2_000, observedBy: ['cisco1'],
+    });
+    history._appendAndLoad({
+      src: '192.168.1.10', dst: '10.0.0.3', dport: 443, proto: 'TCP',
+      firstSeen: now - 1_000, lastSeen: now - 1_000, observedBy: ['cisco1'],
+    });
+
+    const result = history.pruneHistory();
+    assert.equal(result.evicted, 1);
+    assert.equal(history.getConnectionHistory().size, 2);
+    assert.equal(history.countByTimeRange(null, null), 3);
+  });
+
+  it('hydrates firstSeen and observedBy when a cold entry is requested', () => {
+    history._initForTest(null, { hotMaxEntries: 1 });
+    const firstSeen = Date.now() - 60_000;
+    const key = '192.168.1.10|10.0.0.1|443|TCP';
+    history._appendAndLoad({
+      src: '192.168.1.10', dst: '10.0.0.1', dport: 443, proto: 'TCP',
+      firstSeen, lastSeen: firstSeen, observedBy: ['cisco1', 'yamaha1'],
+    });
+    history._appendAndLoad({
+      src: '192.168.1.10', dst: '10.0.0.2', dport: 443, proto: 'TCP',
+      firstSeen: firstSeen + 1, lastSeen: firstSeen + 1, observedBy: ['cisco1'],
+    });
+    history.pruneHistory();
+
+    assert.equal(history.getConnectionHistory().has(key), false);
+    const restored = history.getConnection(key);
+    assert.equal(restored.firstSeen, firstSeen);
+    assert.deepEqual(restored.observedBy, ['cisco1', 'yamaha1']);
+  });
+
+  it('reports process and cache metrics without traffic details', () => {
+    history._initForTest(null, { hotMaxEntries: 25 });
+    const stats = history.getMemoryStats();
+    assert.equal(stats.hotEntries, 0);
+    assert.equal(stats.hotMaxEntries, 25);
+    assert.equal(stats.persistedEntries, 0);
+    assert.ok(stats.rssBytes > 0);
+    assert.ok(stats.heapUsedBytes > 0);
+    assert.deepEqual(Object.keys(stats).sort(), [
+      'heapTotalBytes', 'heapUsedBytes', 'hotEntries', 'hotMaxEntries', 'persistedEntries', 'rssBytes',
+    ]);
+  });
+
+  it('enforces the limit immediately for non-poller writes', () => {
+    history._initForTest(null, { hotMaxEntries: 2 });
+    history.cacheConnection('one', { lastSeen: 1 });
+    history.cacheConnection('two', { lastSeen: 2 });
+    const evicted = history.cacheConnection('three', { lastSeen: 3 });
+
+    assert.equal(evicted, 1);
+    assert.deepEqual([...history.getConnectionHistory().keys()].sort(), ['three', 'two']);
+  });
+});

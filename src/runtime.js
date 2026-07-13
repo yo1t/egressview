@@ -145,7 +145,7 @@ function recordConnection(session, now = Date.now(), source = 'nat', routerId = 
 
   const connectionHistory = _history.getConnectionHistory();
   const key      = `${src}|${dst}|${dport}|${proto}`;
-  const existing = connectionHistory.get(key);
+  const existing = connectionHistory.get(key) || _history.getConnection?.(key) || null;
   const isNew    = !existing;
   const mergedSource = _mergeSource(existing?.source, source);
   const incomingObservedBy = routerId ? [routerId] : (_history.observationIdsForSource?.(source) || []);
@@ -157,7 +157,8 @@ function recordConnection(session, now = Date.now(), source = 'nat', routerId = 
   const firstSeen = existing?.firstSeen
     ?? (Number.isFinite(hint) && hint > 0 && hint <= now ? hint : now);
   const entry    = { ...enriched, source: mergedSource, observedBy, firstSeen, lastSeen: now };
-  connectionHistory.set(key, entry);
+  if (_history.cacheConnection) _history.cacheConnection(key, entry);
+  else connectionHistory.set(key, entry);
 
   if (entry.threat) _notifier.notify(entry);
   if (entry.srcMac && !knownMacs.has(entry.srcMac)) {

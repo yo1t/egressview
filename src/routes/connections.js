@@ -148,6 +148,10 @@ function connectionsRoutes(ctx) {
   const { requireAdmin, history, threatIntel } = ctx;
   const router = Router();
 
+  router.get('/connections/memory', requireAdmin, (req, res) => {
+    res.json({ ...history.getMemoryStats(), serverTime: Date.now() });
+  });
+
   router.get('/connections/summary', requireAdmin, (req, res) => {
     const { ts: from, err: e1 } = parseTimestampParam(req.query.from, 'from', res);
     if (e1) return;

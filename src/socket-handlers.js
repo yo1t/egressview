@@ -50,6 +50,7 @@ function registerSocketHandlers({
   cisco,
   notes,
   history,
+  threatIntel,
   defaultRouterIp,
   logger = console,
   now = () => Date.now(),
@@ -82,8 +83,17 @@ function registerSocketHandlers({
     if ((getRouters().some(router => router.enabled) || yamaha.isEnabled() || cisco.isEnabled()) && connectionHistory.size) {
       const serverTime = now();
       const cutoff = serverTime - 3_600_000;
+      let recentConnections = typeof history.queryByTimeRange === 'function'
+        ? history.queryByTimeRange(cutoff, serverTime)
+        : [...connectionHistory.values()].filter(c => c.lastSeen >= cutoff);
+      if (threatIntel?.matchThreatIntel) {
+        recentConnections = recentConnections.map(entry => ({
+          ...entry,
+          threat: threatIntel.matchThreatIntel(entry.dst, entry.dstHost || entry.dst) || null,
+        }));
+      }
       socket.emit('connections-update', {
-        connections: [...connectionHistory.values()].filter(c => c.lastSeen >= cutoff),
+        connections: recentConnections,
         serverTime,
         partial: true,
         initialLoad: true,

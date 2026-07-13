@@ -713,3 +713,30 @@ describe('connections route: sendLargeJson', () => {
     assert.equal(JSON.parse(res._body.toString('utf8')).connections.length, 0);
   });
 });
+
+describe('connections route: GET /connections/memory', () => {
+  it('returns authenticated process and hot-cache metrics', () => {
+    const connectionsRoutes = require('../../src/routes/connections');
+    const expected = {
+      rssBytes: 100,
+      heapUsedBytes: 50,
+      heapTotalBytes: 75,
+      hotEntries: 10,
+      hotMaxEntries: 100_000,
+      persistedEntries: 20,
+    };
+    const router = connectionsRoutes({
+      requireAdmin: (_req, _res, next) => next(),
+      history: { getMemoryStats: () => expected },
+    });
+    const layer = router.stack.find(item => item.route?.path === '/connections/memory');
+    const handler = layer.route.stack.at(-1).handle;
+    const res = { json(body) { this.body = body; } };
+
+    handler({}, res);
+
+    const { serverTime, ...metrics } = res.body;
+    assert.deepEqual(metrics, expected);
+    assert.ok(Number.isFinite(serverTime));
+  });
+});
