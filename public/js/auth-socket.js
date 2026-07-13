@@ -131,7 +131,16 @@ let yamahaConfigured = true; // mirrors the server-side yamahaEnabled state
 export const routerState = {
   yamaha: { enabled: false, ready: false, ip: '' },
   cisco:  { enabled: false, ready: false, ip: '' },
+  routers: [],
 };
+export function setRouterList(routers) {
+  routerState.routers = Array.isArray(routers) ? routers : [];
+  const health = aggregateRouterHealth(routerState);
+  connState.l3l4.enabled = health.enabledCount > 0;
+  connState.l3l4.ready = health.readyCount > 0;
+  connState.l3l4.err = health.enabledCount && !health.readyCount ? 'failed' : '';
+  updateConnBadge('l3l4');
+}
 let notesMap = {}; // { "ip|mac" or "ip" or "mac": "note" }
 
 // Re-render the note display of every device card (after note save / notes-update)
@@ -286,6 +295,7 @@ function updateConnBadge(key) {
 }
 
 socket.on('config', cfg => {
+  if (Array.isArray(cfg.routers)) setRouterList(cfg.routers);
   if (cfg.routerIp)   document.getElementById('s-asus-ip').value       = cfg.routerIp;
   if (cfg.asusUser)   document.getElementById('s-asus-user').value     = cfg.asusUser;
   if (cfg.yamahaIp)   document.getElementById('s-yamaha-ip').value     = cfg.yamahaIp;
@@ -393,6 +403,8 @@ socket.on('config', cfg => {
     toggleSection('dhcpd-inputs', 'enable-dhcpd', null);
   }
 });
+
+socket.on('routers-status', routers => setRouterList(routers));
 
 // Save general settings
 document.getElementById('general-save-btn').addEventListener('click', async () => {

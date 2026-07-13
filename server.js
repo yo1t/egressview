@@ -47,6 +47,8 @@ const enrichmentQueue = require('./src/enrichment-queue');
 const beaconScanRunner = require('./src/beacon-scan-runner');
 const { configureHttpApp } = require('./src/http-app');
 const { registerSocketHandlers } = require('./src/socket-handlers');
+const { migrateRouterConfigFile, loadRouterConfig, publicRouter } = require('./src/router-config');
+const { createRouterManager } = require('./src/router-manager');
 
 // ─── Environment ──────────────────────────────────────────────────────────────
 const SUBPATH           = (process.env.SUBPATH || '').replace(/\/$/, '');
@@ -54,7 +56,9 @@ const DEFAULT_ROUTER_IP = process.env.ROUTER_IP   || '192.168.1.1';
 const POLL_INTERVAL     = parseInt(process.env.POLL_INTERVAL_MS || '60000', 10);
 // PORT is resolved after the early config read below (env > config file > 3000)
 let PORT = parseInt(process.env.PORT || '3000');
-const CONFIG_FILE       = require('./src/config').DEFAULT_CONFIG_FILE;
+const CONFIG_FILE       = process.env.EGRESSVIEW_CONFIG_PATH
+  ? path.resolve(process.env.EGRESSVIEW_CONFIG_PATH)
+  : require('./src/config').DEFAULT_CONFIG_FILE;
 
 // Demo mode: pre-seeds sample data and uses a fixed token so the app can be
 // explored without real router hardware (used in CI for Playwright smoke tests).
@@ -73,6 +77,20 @@ const ASSET_VERSION    = /^[A-Za-z0-9._-]+$/.test(_rawAssetVersion) ? _rawAssetV
 // ─── Shared mutable state ─────────────────────────────────────────────────────
 // Passed by reference to route modules so they can read and mutate it.
 const appState = createDefaultAppState();
+let routerConfigState = { routers: [], tombstones: [], migrated: false };
+let routerManager = null;
+const routerManagerApi = {
+  list: () => routerManager?.list() || routerConfigState.routers.map(router => publicRouter(router)),
+  detect: input => {
+    if (!routerManager) throw new Error('router manager is not ready');
+    return routerManager.detect(input);
+  },
+  upsert: input => {
+    if (!routerManager) throw new Error('router manager is not ready');
+    return routerManager.upsert(input);
+  },
+  remove: id => routerManager?.remove(id) || false,
+};
 
 // ─── Express + Socket.IO setup ────────────────────────────────────────────────
 const app = express();
@@ -109,6 +127,7 @@ const io     = new Server(server, {
 // ─── Config: load from / save to config file ─────────────────────────────────
 
 function loadConfig() {
+  routerConfigState = migrateRouterConfigFile(CONFIG_FILE);
   const data = configIo.loadFileOrThrow(CONFIG_FILE);
   if (data.yamaha) {
     yamaha.configure({
@@ -167,7 +186,10 @@ function loadConfig() {
 }
 
 function saveConfig() {
+  let existing = {};
+  try { existing = configIo.loadFileOrThrow(CONFIG_FILE); } catch {}
   const data = {
+    ...existing,
     yamaha:  { ip: yamaha.getIp(), user: yamaha.getUser(), pass: '', enabled: yamaha.isEnabled(), hostFp: yamaha.getHostFp(), nat: yamaha.getNat() },
     cisco:   { ip: cisco.getIp(), user: cisco.getUser(), pass: '', enablePass: '', enabled: cisco.isEnabled(), hostFp: cisco.getHostFp() },
     asus:    { ip: asus.getRouterIp(), user: asus.getUser(), pass: '', enabled: asus.isEnabled() },
@@ -184,7 +206,6 @@ function saveConfig() {
   };
   // Re-read to preserve passwords (not held in module state getters)
   try {
-    const existing = configIo.loadFileOrThrow(CONFIG_FILE);
     if (existing.yamaha?.pass) data.yamaha.pass = existing.yamaha.pass;
     if (existing.cisco?.pass)  { data.cisco.pass = existing.cisco.pass; data.cisco.enablePass = existing.cisco.enablePass || ''; }
     if (existing.asus?.pass)   data.asus.pass   = existing.asus.pass;
@@ -196,6 +217,12 @@ function saveConfig() {
   } catch (e) {
     logger.error('[config] Save failed:', e.message);
   }
+}
+
+function persistRouterConfigs(routers, tombstones) {
+  const data = configIo.loadFileOrThrow(CONFIG_FILE);
+  configIo.saveFile({ ...data, routers, routerTombstones: tombstones }, CONFIG_FILE);
+  routerConfigState = loadRouterConfig({ ...data, routers, routerTombstones: tombstones });
 }
 
 function ensureAdminToken() {
@@ -303,6 +330,7 @@ const routeCtx = {
   setLatestConnections: () => {},  // Yamaha disabled clears in-memory session list
   startYamahaPolling: pollScheduler.startYamahaPolling,
   startCiscoPolling:  pollScheduler.startCiscoPolling,
+  routerManager:      routerManagerApi,
 };
 
 configureHttpApp(app, {
@@ -334,6 +362,7 @@ registerSocketHandlers({
   history,
   defaultRouterIp: DEFAULT_ROUTER_IP,
   logger,
+  getRouters: () => routerManagerApi.list(),
 });
 
 // ─── Wire notifier log callback ───────────────────────────────────────────────
@@ -361,19 +390,19 @@ investigation.init({
 });
 
 yamaha.configure({
-  ip:            process.env.YAMAHA_IP   || '',
-  user:          process.env.YAMAHA_USER || '',
-  pass:          process.env.YAMAHA_PASS || '',
+  ip:            DEMO_MODE ? '' : (process.env.YAMAHA_IP   || ''),
+  user:          DEMO_MODE ? '' : (process.env.YAMAHA_USER || ''),
+  pass:          DEMO_MODE ? '' : (process.env.YAMAHA_PASS || ''),
   natDescriptor: process.env.YAMAHA_NAT  || '100',
   onStatus:      (status) => io.emit('yamaha-status', status),
   onSaveConfig:  saveConfig,
 });
 
 cisco.configure({
-  ip:         process.env.CISCO_IP          || '',
-  user:       process.env.CISCO_USER        || '',
-  pass:       process.env.CISCO_PASS        || '',
-  enablePass: process.env.CISCO_ENABLE_PASS || '',
+  ip:         DEMO_MODE ? '' : (process.env.CISCO_IP          || ''),
+  user:       DEMO_MODE ? '' : (process.env.CISCO_USER        || ''),
+  pass:       DEMO_MODE ? '' : (process.env.CISCO_PASS        || ''),
+  enablePass: DEMO_MODE ? '' : (process.env.CISCO_ENABLE_PASS || ''),
   onStatus:   (status) => io.emit('cisco-status', status),
   onSaveConfig: saveConfig,
 });
@@ -441,7 +470,13 @@ server.listen(PORT, HOST, () => {
   const configuredDbPath = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB || '';
   if (DEMO_MODE && !configuredDbPath && fs.existsSync(DEMO_DB_PATH)) {
     // Copy the committed snapshot to a separate runtime file so the tracked
-    // snapshot is never modified at runtime (prevents dirty working tree).
+    // snapshot is never modified at runtime. Remove sidecars from a previous
+    // run first; pairing stale WAL data with a fresh snapshot corrupts it.
+    for (const suffix of ['-wal', '-shm']) {
+      try { fs.unlinkSync(DEMO_RUNTIME_DB_PATH + suffix); } catch (err) {
+        if (err.code !== 'ENOENT') throw err;
+      }
+    }
     fs.copyFileSync(DEMO_DB_PATH, DEMO_RUNTIME_DB_PATH);
   }
   const runtimeDbPath = DEMO_MODE ? (configuredDbPath || DEMO_RUNTIME_DB_PATH) : configuredDbPath;
@@ -495,21 +530,18 @@ server.listen(PORT, HOST, () => {
   enrichmentQueue.init({ history, enrichment, io, logger });
   beaconScanRunner.init({ appState, beacons, beaconDetector, threatIntel, enrichment, logger });
 
+  routerManager = createRouterManager({
+    records: routerConfigState.routers,
+    tombstones: routerConfigState.tombstones,
+    persist: persistRouterConfigs,
+    pollIntervalMs: POLL_INTERVAL,
+    runtime, history, devices, beacons, enrichmentQueue, investigation, appState, io,
+  });
+  runtime.setRouterRegistry(routerManager.registry);
+
   if (!DEMO_MODE) {
     logger.info(`Router IP: ${asus.getRouterIp()}`);
     deviceId.loadOuiDb();
-    yamaha.connect(() => {
-      yamaha.refreshArp()
-        .catch(err => logger.warn('[yamaha] initial ARP refresh failed:', err.message))
-        .finally(() => pollScheduler.startYamahaPolling());
-    });
-    if (cisco.isEnabled()) {
-      cisco.connect(() => {
-        cisco.refreshArp()
-          .catch(err => logger.warn('[cisco] initial ARP refresh failed:', err.message))
-          .finally(() => pollScheduler.startCiscoPolling());
-      });
-    }
     dnsmasqLog.start();
     inspectSyslog.start();
     dhcpdSyslog.start();
@@ -538,6 +570,7 @@ server.listen(PORT, HOST, () => {
 
 function shutdown(exitCode = 0) {
   logger.info('[shutdown] Saving history...');
+  try { routerManager?.stopAll();   } catch {}
   try { history.snapshotHistory(); } catch {}
   try { history.closeDb();         } catch {}
   try { dnsmasqLog.stop();         } catch {}

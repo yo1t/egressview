@@ -59,70 +59,69 @@
       </nav>
       <!-- Right: content -->
       <div class="settings-panes">
-        <!-- L3/L4: Yamaha -->
+        <!-- L3/L4 routers -->
         <div class="settings-pane active" id="pane-l3l4">
-          <label class="pane-title">
-            <input type="checkbox" id="enable-yamaha" checked>
-            <span data-i18n="settings.section.l3l4">Yamaha RTX (SSH)</span>
-          </label>
-          <div class="section-inputs" id="yamaha-inputs">
+          <div class="router-pane-head">
+            <div>
+              <div class="pane-title router-pane-title" data-i18n="settings.routers.title">L3/L4 ルーター</div>
+              <div class="router-pane-copy" data-i18n="settings.routers.desc">YamahaとCiscoを合計10台まで登録できます。</div>
+            </div>
+            <span id="router-count" class="router-count">0 / 10</span>
+          </div>
+          <div id="router-list" class="router-list"></div>
+          <button class="connect-btn router-add-btn" id="router-add-btn" data-i18n="settings.routers.add">ルーターを追加</button>
+
+          <section id="router-editor" class="router-editor hidden" aria-label="Router editor">
+            <input id="router-edit-id" type="hidden">
+            <div class="router-editor-head">
+              <strong id="router-editor-title" data-i18n="settings.routers.addTitle">ルーターを追加</strong>
+              <button id="router-cancel-btn" class="router-icon-btn" type="button" aria-label="Close">×</button>
+            </div>
+            <div class="settings-row">
+              <div class="form-group">
+                <label class="form-label" data-i18n="settings.routers.type">種類</label>
+                <select id="router-kind" class="form-input"><option value="yamaha">Yamaha RTX</option><option value="cisco">Cisco IOS</option></select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" data-i18n="settings.routers.name">表示名</label>
+                <input id="router-display-name" class="form-input" type="text" maxlength="80" autocomplete="off">
+              </div>
+            </div>
             <div class="form-group">
               <label class="form-label" data-i18n="settings.field.ip">IP アドレス</label>
-              <input id="s-yamaha-ip" class="form-input" type="text" placeholder="192.168.1.1" autocomplete="off">
+              <input id="router-ip" class="form-input" type="text" placeholder="192.168.1.1" autocomplete="off">
             </div>
             <div class="settings-row">
               <div class="form-group">
                 <label class="form-label" data-i18n="settings.field.user">ユーザー名</label>
-                <input id="s-yamaha-user" class="form-input" type="text" autocomplete="off">
+                <input id="router-user" class="form-input" type="text" autocomplete="off">
               </div>
               <div class="form-group">
                 <label class="form-label" data-i18n="settings.field.pass">パスワード</label>
-                <input id="s-yamaha-pass" class="form-input" type="password" autocomplete="off">
+                <input id="router-pass" class="form-input" type="password" autocomplete="new-password">
               </div>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="router-nat-group">
               <label class="form-label" data-i18n="settings.field.nat">NAT ディスクリプタ番号</label>
-              <input id="s-yamaha-nat" class="form-input" type="text" placeholder="100" value="100" autocomplete="off" style="width:80px;">
+              <input id="router-nat" class="form-input" type="text" placeholder="100" value="100" autocomplete="off">
             </div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="connect-btn" id="yamaha-detect-btn" data-i18n="settings.yamaha.detect">接続して自動検出</button>
-            <button class="connect-btn" id="yamaha-connect-btn" data-i18n="settings.yamaha.saveSuggested">この設定を保存</button>
-          </div>
-          <div class="settings-status" id="yamaha-detect-status"></div>
-          <div class="settings-status" id="yamaha-status"></div>
-          <hr style="border:none;border-top:1px solid var(--border);margin:14px 0">
-          <!-- Cisco IOS -->
-          <label class="pane-title">
-            <input type="checkbox" id="enable-cisco">
-            <span data-i18n="settings.section.cisco">Cisco IOS (SSH)</span>
-          </label>
-          <div class="section-inputs" id="cisco-inputs">
-            <div class="form-group">
-              <label class="form-label" data-i18n="settings.field.ip">IP アドレス</label>
-              <input id="s-cisco-ip" class="form-input" type="text" placeholder="192.168.1.1" autocomplete="off">
-            </div>
-            <div class="settings-row">
-              <div class="form-group">
-                <label class="form-label" data-i18n="settings.field.user">ユーザー名</label>
-                <input id="s-cisco-user" class="form-input" type="text" autocomplete="off">
-              </div>
-              <div class="form-group">
-                <label class="form-label" data-i18n="settings.field.pass">パスワード</label>
-                <input id="s-cisco-pass" class="form-input" type="password" autocomplete="off">
-              </div>
-            </div>
-            <div class="form-group">
+            <div class="form-group hidden" id="router-enable-group">
               <label class="form-label" data-i18n="settings.field.enable-pass">Enable パスワード（任意）</label>
-              <input id="s-cisco-enable-pass" class="form-input" type="password" autocomplete="off">
+              <input id="router-enable-pass" class="form-input" type="password" autocomplete="new-password">
             </div>
+            <label class="router-enabled"><input id="router-enabled" type="checkbox" checked> <span data-i18n="settings.routers.enabled">収集を有効にする</span></label>
+            <div class="router-editor-actions">
+              <button class="connect-btn router-secondary-btn" id="router-detect-btn" type="button" data-i18n="settings.routers.detect">接続して自動検出</button>
+              <button class="connect-btn" id="router-save-btn" type="button" data-i18n="settings.btn.save">保存</button>
+            </div>
+            <div class="settings-status" id="router-editor-status"></div>
+          </section>
+
+          <!-- Legacy controls remain hidden while old endpoints are supported. -->
+          <div class="legacy-router-controls" aria-hidden="true">
+            <input type="checkbox" id="enable-yamaha"><div id="yamaha-inputs"></div><input id="s-yamaha-ip"><input id="s-yamaha-user"><input id="s-yamaha-pass"><input id="s-yamaha-nat"><button id="yamaha-detect-btn"></button><button id="yamaha-connect-btn"></button><div id="yamaha-detect-status"></div><div id="yamaha-status"></div>
+            <input type="checkbox" id="enable-cisco"><div id="cisco-inputs"></div><input id="s-cisco-ip"><input id="s-cisco-user"><input id="s-cisco-pass"><input id="s-cisco-enable-pass"><button id="cisco-detect-btn"></button><button id="cisco-connect-btn"></button><div id="cisco-detect-status"></div><div id="cisco-status"></div>
           </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="connect-btn" id="cisco-detect-btn" data-i18n="settings.cisco.detect">接続して自動検出</button>
-            <button class="connect-btn" id="cisco-connect-btn" data-i18n="settings.cisco.saveSuggested">この設定を保存</button>
-          </div>
-          <div class="settings-status" id="cisco-detect-status"></div>
-          <div class="settings-status" id="cisco-status"></div>
         </div>
         <!-- L2: ASUS -->
         <div class="settings-pane" id="pane-l2">

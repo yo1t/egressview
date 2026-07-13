@@ -6,6 +6,7 @@
 let _io, _history, _enrichment, _threatIntel, _notifier, _deviceId, _devices;
 let _asus, _yamaha, _cisco, _dhcpdSyslog;
 let _beacons = null; // optional: injected when beacons module is available
+let _routerRegistry = null;
 
 // ─── Module state ─────────────────────────────────────────────────────────────
 let knownMacs = new Set();
@@ -34,7 +35,10 @@ function init(deps) {
   _cisco       = deps.cisco || null;
   _dhcpdSyslog = deps.dhcpdSyslog;
   _beacons     = deps.beacons || null;
+  _routerRegistry = deps.routerRegistry || null;
 }
+
+function setRouterRegistry(registry) { _routerRegistry = registry || null; }
 
 // ─── Debounced emit for [INSPECT] sessions ────────────────────────────────────
 
@@ -76,7 +80,13 @@ function resolveMacByIp(ip) {
   if (dhcpdMac) return dhcpdMac;
   const yamahaMac = _yamaha.getArpMac(ip);
   if (yamahaMac) return yamahaMac;
-  return _cisco?.getArpMac(ip) ?? null;
+  const ciscoMac = _cisco?.getArpMac(ip);
+  if (ciscoMac) return ciscoMac;
+  for (const entry of _routerRegistry?.list?.() || []) {
+    const mac = entry.adapter.getArpMac(ip);
+    if (mac) return mac;
+  }
+  return null;
 }
 
 // ─── Core connection record helper ───────────────────────────────────────────
@@ -99,7 +109,7 @@ function _mergeSource(existing, incoming) {
  * @param {string} [source] - inventory source tag ('nat' | 'inspect')
  * @returns {{ entry, key, isNew }}
  */
-function recordConnection(session, now = Date.now(), source = 'nat') {
+function recordConnection(session, now = Date.now(), source = 'nat', routerId = '') {
   const { src, sport, dst, dport, proto } = session;
 
   const srcMac  = resolveMacByIp(src);
@@ -138,7 +148,8 @@ function recordConnection(session, now = Date.now(), source = 'nat') {
   const existing = connectionHistory.get(key);
   const isNew    = !existing;
   const mergedSource = _mergeSource(existing?.source, source);
-  const incomingObservedBy = _history.observationIdsForSource?.(source) || [];
+  const incomingObservedBy = routerId ? [routerId] : (_history.observationIdsForSource?.(source) || []);
+  const observerAdded = incomingObservedBy.some(id => !existing?.observedBy?.includes(id));
   const observedBy = [...new Set([...(existing?.observedBy || []), ...incomingObservedBy])].sort();
   // Pollers that know the session's real creation time (Cisco verbose NAT
   // output) pass firstSeenHint so firstSeen predates the first observation.
@@ -154,7 +165,7 @@ function recordConnection(session, now = Date.now(), source = 'nat') {
     _notifier.notifyNewDevice(entry);
     _io.emit('new-device', entry);
   }
-  if (isNew) _history.appendHistoryLog(entry);
+  if (isNew || observerAdded) _history.appendHistoryLog(entry);
 
   _devices.observeDevice({
     ip:        entry.src,
@@ -233,5 +244,6 @@ module.exports = {
   handleInspectSession,
   getKnownMacs,
   setKnownMacs,
+  setRouterRegistry,
   _resetInspectEmitTime,
 };

@@ -47,9 +47,16 @@ export function routerTargetsFromSource(source, isMulti) {
   return targets.length ? targets : ['__router__'];
 }
 
-export function routerTargetsFromObservedBy(observedBy, source, isMulti) {
+export function routerTargetsFromObservedBy(observedBy, source, isMulti, topology = null) {
   if (!isMulti) return undefined;
   const ids = Array.isArray(observedBy) ? observedBy.map(id => String(id).toLowerCase()) : [];
+  if (topology?.idToNode) {
+    const exact = ids.map(id => topology.idToNode.get(id)).filter(Boolean);
+    if (exact.length) return [...new Set(exact)];
+    const sourceKinds = String(source || '').toLowerCase().split(/[,+]/).map(value => value.trim());
+    const fallback = sourceKinds.map(kind => topology.kindToNode?.get(kind)).filter(Boolean);
+    return fallback.length ? [...new Set(fallback)] : [topology.mainNodeId || '__router__'];
+  }
   if (!ids.length) return routerTargetsFromSource(source, isMulti);
   const hasCisco = ids.some(id => id === 'cisco1' || id.startsWith('cisco-') || id.startsWith('legacy-cisco'));
   const hasYamaha = ids.some(id => id === 'yamaha1' || id.startsWith('yamaha-') || id.startsWith('legacy-yamaha'));

@@ -28,7 +28,10 @@ module.exports = defineConfig({
     command: 'node server.js',
     url: 'http://localhost:3002',
     // 127.0.0.1 バインドで 0.0.0.0 listen が禁止されたサンドボックス環境でも動くようにする
-    env: { DEMO_MODE: 'true', PORT: '3002', HOST: '127.0.0.1' },
+    env: {
+      DEMO_MODE: 'true', PORT: '3002', HOST: '127.0.0.1',
+      EGRESSVIEW_CONFIG_PATH: '.egressview.demo.test.config.json',
+    },
     reuseExistingServer: true,
     timeout: 30_000,
   },
