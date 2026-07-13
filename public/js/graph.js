@@ -4,7 +4,7 @@ import { _BASE, esc, fmtBytes, nodeColor, nodeClass, typeLabel, isWiredType } fr
 import { getFilteredConnections, getTimeRange, currentTimeFilter, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
 import { statsMode, nlMode, logMode, devicesMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { lookupNote, apiFetch, openNoteModal, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
-import { flagEmoji, meshNodeId, normalizeGraphLinks, currentGraphRangeKey as _rangeKey, routerTargetsFromSource } from './graph-helpers.js?v=__ASSET_VERSION__';
+import { flagEmoji, meshNodeId, normalizeGraphLinks, currentGraphRangeKey as _rangeKey, routerTargetsFromObservedBy } from './graph-helpers.js?v=__ASSET_VERSION__';
 // Circular imports resolved at runtime (function-body-only calls):
 import { updateStats } from './stats.js?v=__ASSET_VERSION__';
 import { updateLogView } from './log.js?v=__ASSET_VERSION__';
@@ -808,7 +808,7 @@ function buildGraphFromConnections({ resetPositions = false } = {}) {
     }
     if (isMulti) {
       if (!srcRouterMap.has(c.src)) srcRouterMap.set(c.src, new Set());
-      for (const target of routerTargetsFromSource(c.source, isMulti)) {
+      for (const target of routerTargetsFromObservedBy(c.observedBy, c.source, isMulti)) {
         srcRouterMap.get(c.src).add(target);
       }
     }
@@ -857,7 +857,9 @@ function buildGraphFromSummary(summary, { resetPositions = false } = {}) {
     mdnsName: null,
     deviceFirstSeen: r.firstSeen || 0,
     summarySessions: r.count || 0,
-    ...(topology.isMulti ? { routerTargets: routerTargetsFromSource(r.sources || r.source, topology.isMulti) } : {}),
+    ...(topology.isMulti ? {
+      routerTargets: routerTargetsFromObservedBy(r.observedBy, r.sources || r.source, topology.isMulti),
+    } : {}),
   }));
 
   buildGraph({

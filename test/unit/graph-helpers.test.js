@@ -25,7 +25,15 @@ function load() {
   return ctx.exports;
 }
 
-const { flagEmoji, meshNodeId, linkEndpointId, normalizeGraphLinks, currentGraphRangeKey, routerTargetsFromSource } = load();
+const {
+  flagEmoji,
+  meshNodeId,
+  linkEndpointId,
+  normalizeGraphLinks,
+  currentGraphRangeKey,
+  routerTargetsFromSource,
+  routerTargetsFromObservedBy,
+} = load();
 
 describe('flagEmoji', () => {
   it('converts a 2-letter country code to a flag emoji', () => {
@@ -118,5 +126,28 @@ describe('routerTargetsFromSource', () => {
   it('defaults to yamaha when source is empty', () => {
     assert.deepEqual(JSON.parse(JSON.stringify(routerTargetsFromSource('', true))), ['__router__']);
     assert.deepEqual(JSON.parse(JSON.stringify(routerTargetsFromSource(null, true))), ['__router__']);
+  });
+});
+
+describe('routerTargetsFromObservedBy', () => {
+  it('uses router ids instead of the compatibility source', () => {
+    const result = routerTargetsFromObservedBy(['yamaha1', 'cisco-ab12cd34'], 'yamaha', true);
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), ['__router__', '__router_cisco__']);
+  });
+
+  it('supports legacy placeholders', () => {
+    const result = routerTargetsFromObservedBy(['legacy-cisco'], 'yamaha', true);
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), ['__router_cisco__']);
+  });
+
+  it('falls back to the compatibility source for unknown or absent ids', () => {
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(routerTargetsFromObservedBy(['legacy-mystery'], 'cisco', true))),
+      ['__router_cisco__']
+    );
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(routerTargetsFromObservedBy([], 'yamaha', true))),
+      ['__router__']
+    );
   });
 });

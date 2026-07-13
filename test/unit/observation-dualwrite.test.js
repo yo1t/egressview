@@ -139,3 +139,48 @@ describe('checkObservationConsistency', () => {
     assert.equal(c.missingObservations, 1);
   });
 });
+
+describe('junction-backed reads', () => {
+  it('returns observedBy and derives compatibility source without reading connections.source', () => {
+    history.appendHistoryLog({ ...ENTRY, source: 'yamaha+cisco' });
+    const d = new Database(dbPath);
+    d.prepare("UPDATE connections SET source = 'yamaha'").run();
+    d.close();
+
+    const [row] = history.queryByTimeRange(null, null);
+    assert.deepEqual(row.observedBy, ['cisco1', 'yamaha1']);
+    assert.equal(row.source, 'yamaha+cisco');
+  });
+
+  it('uses junction observations in paged results and device summaries', () => {
+    history.appendHistoryLog({ ...ENTRY, source: 'yamaha' });
+    history.appendHistoryLog({ ...ENTRY, dst: '9.9.9.9', source: 'cisco' });
+
+    const rows = history.queryByTimeRangePaged(null, null, 10, 0);
+    assert.deepEqual(rows.find(row => row.dst === ENTRY.dst).observedBy, ['yamaha1']);
+    assert.deepEqual(rows.find(row => row.dst === '9.9.9.9').observedBy, ['cisco1']);
+
+    const [device] = history.summarizeByTimeRange(null, null).byDevice;
+    assert.deepEqual(device.observedBy, ['cisco1', 'yamaha1']);
+    assert.equal(device.sources, 'yamaha+cisco');
+  });
+
+  it('restores the in-memory WebSocket view from junction observations', () => {
+    const now = Date.now();
+    history.appendHistoryLog({ ...ENTRY, source: 'yamaha+cisco', firstSeen: now, lastSeen: now });
+    history.closeDb();
+    history.loadConnectionHistory(dbPath, { sourceRouterMap: { yamaha: 'yamaha1', cisco: 'cisco1' } });
+
+    const [row] = history.getConnectionHistory().values();
+    assert.deepEqual(row.observedBy, ['cisco1', 'yamaha1']);
+    assert.equal(row.source, 'yamaha+cisco');
+  });
+
+  it('preserves exact router ids when a junction-backed entry is snapshotted', () => {
+    history._appendAndLoad({ ...ENTRY, source: 'cisco', observedBy: ['cisco-deadbeef'] });
+    history.snapshotHistory();
+
+    const { rows } = readObs();
+    assert.deepEqual(rows.map(row => row.routerId), ['cisco-deadbeef']);
+  });
+});

@@ -32,9 +32,52 @@ let currentDbPath = DEFAULT_DB_PATH;
 let sourceRouterMap = { yamaha: MIGRATED_IDS.yamaha, cisco: MIGRATED_IDS.cisco };
 // routerIds already ensured in the routers table this session (write-through cache)
 let ensuredRouterIds = new Set();
+let routerKinds = new Map();
 
 // In-memory cache (same interface as before for Socket.IO emissions)
 const connectionHistory = new Map();
+
+const CONNECTION_READ_COLUMNS = [
+  'src', 'dst', 'dport', 'proto', 'sport', 'ttl', 'srcMac', 'srcVendor',
+  'srcDnsName', 'srcMdnsName', 'dstHost', 'country', 'org', 'lat', 'lon',
+  'city', 'firstSeen', 'lastSeen', 'agentHost', 'process', 'pid',
+];
+
+function connectionReadColumns(alias = 'c') {
+  const columns = CONNECTION_READ_COLUMNS.map(column => `${alias}.${column}`).join(', ');
+  return `${columns}, (
+    SELECT GROUP_CONCAT(o.routerId)
+    FROM connection_observations o
+    WHERE o.src = ${alias}.src AND o.dst = ${alias}.dst
+      AND o.dport = ${alias}.dport AND o.proto = ${alias}.proto
+  ) AS observedByCsv`;
+}
+
+function normalizeObservedBy(value) {
+  const values = Array.isArray(value) ? value : String(value || '').split(',');
+  return [...new Set(values.map(id => String(id).trim()).filter(Boolean))].sort();
+}
+
+function compatibilitySource(observedBy) {
+  const kinds = new Set(normalizeObservedBy(observedBy).map(id =>
+    routerKinds.get(id) || routerKindForId(id, sourceRouterMap)
+  ));
+  if (kinds.has('yamaha') && kinds.has('cisco')) return 'yamaha+cisco';
+  if (kinds.has('cisco')) return 'cisco';
+  if (kinds.has('yamaha')) return 'yamaha';
+  return 'unknown';
+}
+
+function hydrateConnectionRow(row) {
+  const observedBy = normalizeObservedBy(row.observedByCsv ?? row.observedBy);
+  const hydrated = { ...row, observedBy, source: compatibilitySource(observedBy) };
+  delete hydrated.observedByCsv;
+  return hydrated;
+}
+
+function hydrateConnectionRows(rows) {
+  return rows.map(hydrateConnectionRow);
+}
 
 function _secureDbFiles() {
   for (const suffix of ['', '-shm', '-wal']) {
@@ -172,6 +215,7 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
     CREATE INDEX IF NOT EXISTS idx_obs_router   ON connection_observations(routerId);
     CREATE INDEX IF NOT EXISTS idx_obs_lastSeen ON connection_observations(lastObservedAt);
   `);
+  routerKinds = new Map(db.prepare('SELECT id, kind FROM routers').all().map(row => [row.id, row.kind]));
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS notification_log (
@@ -236,7 +280,7 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
       END
   `);
 
-  stmtSelectAll = db.prepare(`SELECT * FROM connections WHERE lastSeen >= ?`);
+  stmtSelectAll = db.prepare(`SELECT ${connectionReadColumns('c')} FROM connections c WHERE c.lastSeen >= ?`);
   stmtDeleteOld = db.prepare(`DELETE FROM connections WHERE lastSeen < ?`);
 
   stmtObsUpsert = db.prepare(`
@@ -257,7 +301,11 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
   // so the two representations can never diverge on a write.
   upsertTxn = db.transaction(entry => {
     stmtUpsert.run(entry);
-    for (const routerId of expandSourceToRouterIds(entry.source, sourceRouterMap)) {
+    const observedBy = normalizeObservedBy(entry.observedBy);
+    const routerIds = observedBy.length
+      ? observedBy
+      : expandSourceToRouterIds(entry.source, sourceRouterMap);
+    for (const routerId of routerIds) {
       _ensureRouterRow(routerId);
       stmtObsUpsert.run({
         src: entry.src, dst: entry.dst, dport: entry.dport, proto: entry.proto,
@@ -282,9 +330,11 @@ function _ensureRouterRow(routerId) {
     isLegacy ? Date.now() : null,
   );
   ensuredRouterIds.add(routerId);
+  routerKinds.set(routerId, routerKindForId(routerId, sourceRouterMap));
 }
 
 function upsertEntry(entry) {
+  const observedBy = normalizeObservedBy(entry.observedBy);
   upsertTxn({
     src: entry.src,
     dst: entry.dst,
@@ -304,7 +354,8 @@ function upsertEntry(entry) {
     city: entry.city || null,
     firstSeen: entry.firstSeen ?? Date.now(),
     lastSeen:  entry.lastSeen  ?? Date.now(),
-    source: entry.source || 'yamaha',
+    source: observedBy.length ? compatibilitySource(observedBy) : (entry.source || 'yamaha'),
+    observedBy,
   });
 }
 
@@ -355,8 +406,9 @@ function loadIntoMemory() {
   const rows = stmtSelectAll.all(cutoff);
   connectionHistory.clear();
   for (const row of rows) {
-    const key = `${row.src}|${row.dst}|${row.dport}|${row.proto}`;
-    connectionHistory.set(key, row);
+    const hydrated = hydrateConnectionRow(row);
+    const key = `${hydrated.src}|${hydrated.dst}|${hydrated.dport}|${hydrated.proto}`;
+    connectionHistory.set(key, hydrated);
   }
   logger.info(`[history] Loaded ${connectionHistory.size} sessions from SQLite`);
 }
@@ -469,7 +521,9 @@ function queryByTimeRange(from, to) {
   if (from != null) { conditions.push('lastSeen >= ?'); params.push(from); }
   if (to   != null) { conditions.push('lastSeen <= ?'); params.push(to); }
   const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
-  return db.prepare(`SELECT * FROM connections${where} ORDER BY lastSeen DESC`).all(...params);
+  return hydrateConnectionRows(db.prepare(
+    `SELECT ${connectionReadColumns('c')} FROM connections c${where} ORDER BY c.lastSeen DESC`
+  ).all(...params));
 }
 
 // Safe whitelist for ORDER BY column names
@@ -562,13 +616,13 @@ function queryByTimeRangePaged(from, to, limit, offset, { sort = 'lastSeen', sor
   // Apply direction to each comma-separated sort column (e.g. 'dstHost, dst')
   const orderClause = sortSql.split(',').map(c => c.trim() + ' ' + dir).join(', ');
   if (limit == null) {
-    return db.prepare(
-      `SELECT * FROM connections${where} ORDER BY ${orderClause}`
-    ).all(...params);
+    return hydrateConnectionRows(db.prepare(
+      `SELECT ${connectionReadColumns('c')} FROM connections c${where} ORDER BY ${orderClause}`
+    ).all(...params));
   }
-  return db.prepare(
-    `SELECT * FROM connections${where} ORDER BY ${orderClause} LIMIT ? OFFSET ?`
-  ).all(...params, limit, offset);
+  return hydrateConnectionRows(db.prepare(
+    `SELECT ${connectionReadColumns('c')} FROM connections c${where} ORDER BY ${orderClause} LIMIT ? OFFSET ?`
+  ).all(...params, limit, offset));
 }
 
 function countByTimeRange(from, to, { filters = {} } = {}) {
@@ -627,11 +681,24 @@ function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
      GROUP BY dst ORDER BY count DESC LIMIT 500`
   ).all(...params);
   const byDevice = db.prepare(
-    `SELECT src, srcMac, srcVendor, GROUP_CONCAT(DISTINCT source) as sources,
+    `SELECT src, srcMac, srcVendor,
             COUNT(*) as count, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
      FROM connections${where}
      GROUP BY src ORDER BY count DESC LIMIT 200`
   ).all(...params);
+  const deviceObservations = db.prepare(`
+    WITH filtered_connections AS (SELECT * FROM connections${where})
+    SELECT c.src, GROUP_CONCAT(DISTINCT o.routerId) AS observedByCsv
+    FROM filtered_connections c
+    JOIN connection_observations o
+      ON o.src = c.src AND o.dst = c.dst AND o.dport = c.dport AND o.proto = c.proto
+    GROUP BY c.src
+  `).all(...params);
+  const observationsByDevice = new Map(deviceObservations.map(row => [row.src, normalizeObservedBy(row.observedByCsv)]));
+  for (const row of byDevice) {
+    row.observedBy = observationsByDevice.get(row.src) || [];
+    row.sources = compatibilitySource(row.observedBy);
+  }
   const byTarget = db.prepare(
     `SELECT ${targetExpr} as key, ${targetExpr} as label,
             COUNT(*) as count, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
@@ -804,7 +871,16 @@ function _initForTest(dbPath, opts = {}) {
 function _appendAndLoad(entry) {
   appendHistoryLog(entry);
   const key = `${entry.src}|${entry.dst}|${entry.dport ?? 0}|${entry.proto || 'TCP'}`;
-  connectionHistory.set(key, { ...entry, dport: entry.dport ?? 0, proto: entry.proto || 'TCP' });
+  const observedBy = normalizeObservedBy(entry.observedBy).length
+    ? normalizeObservedBy(entry.observedBy)
+    : expandSourceToRouterIds(entry.source || 'yamaha', sourceRouterMap);
+  connectionHistory.set(key, {
+    ...entry,
+    dport: entry.dport ?? 0,
+    proto: entry.proto || 'TCP',
+    observedBy,
+    source: compatibilitySource(observedBy),
+  });
 }
 
 module.exports = {
@@ -827,6 +903,7 @@ module.exports = {
   setRetentionDays,
   closeDb,
   checkObservationConsistency,
+  observationIdsForSource: source => expandSourceToRouterIds(source, sourceRouterMap),
   HISTORY_TTL_MS,
   _initForTest,
   _appendAndLoad,

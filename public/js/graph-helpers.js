@@ -46,3 +46,15 @@ export function routerTargetsFromSource(source, isMulti) {
   if (hasCisco) targets.push('__router_cisco__');
   return targets.length ? targets : ['__router__'];
 }
+
+export function routerTargetsFromObservedBy(observedBy, source, isMulti) {
+  if (!isMulti) return undefined;
+  const ids = Array.isArray(observedBy) ? observedBy.map(id => String(id).toLowerCase()) : [];
+  if (!ids.length) return routerTargetsFromSource(source, isMulti);
+  const hasCisco = ids.some(id => id === 'cisco1' || id.startsWith('cisco-') || id.startsWith('legacy-cisco'));
+  const hasYamaha = ids.some(id => id === 'yamaha1' || id.startsWith('yamaha-') || id.startsWith('legacy-yamaha'));
+  const targets = [];
+  if (hasYamaha) targets.push('__router__');
+  if (hasCisco) targets.push('__router_cisco__');
+  return targets.length ? targets : routerTargetsFromSource(source, isMulti);
+}
