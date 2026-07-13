@@ -23,8 +23,13 @@ const logger   = require('./logger');
 const fs       = require('fs');
 const path     = require('path');
 const Database = require('better-sqlite3');
+const {
+  MIGRATED_IDS,
+  expandSourceToRouterIds,
+  routerKindForId,
+} = require('./router-id');
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -65,6 +70,93 @@ const MIGRATIONS = [
       if (!cols.includes('process'))   db.exec('ALTER TABLE connections ADD COLUMN process   TEXT');
       if (!cols.includes('pid'))       db.exec('ALTER TABLE connections ADD COLUMN pid       INTEGER');
       logger.info('[migrate] v3: added connections.agentHost/process/pid');
+    },
+  },
+  {
+    version: 4,
+    description: 'routers table + connection_observations junction (P2-30, expand phase)',
+    // Deliberately no FOREIGN KEY constraint: SQLite enforces PRAGMA
+    // foreign_keys per connection and this file is opened by five modules.
+    // history.js deletes junction rows in the same transaction as the
+    // connections rows, and checkObservationConsistency() detects orphans.
+    up(db, ctx = {}) {
+      const map = ctx.sourceRouterMap || { yamaha: MIGRATED_IDS.yamaha, cisco: MIGRATED_IDS.cisco };
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS routers (
+          id          TEXT PRIMARY KEY,
+          kind        TEXT NOT NULL,
+          displayName TEXT NOT NULL,
+          createdAt   INTEGER NOT NULL,
+          deletedAt   INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS connection_observations (
+          src             TEXT    NOT NULL,
+          dst             TEXT    NOT NULL,
+          dport           INTEGER NOT NULL,
+          proto           TEXT    NOT NULL,
+          routerId        TEXT    NOT NULL,
+          firstObservedAt INTEGER NOT NULL,
+          lastObservedAt  INTEGER NOT NULL,
+          PRIMARY KEY (src, dst, dport, proto, routerId)
+        );
+        CREATE INDEX IF NOT EXISTS idx_obs_router   ON connection_observations(routerId);
+        CREATE INDEX IF NOT EXISTS idx_obs_lastSeen ON connection_observations(lastObservedAt);
+      `);
+
+      const hasTbl = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='connections'`).get();
+      if (!hasTbl) return; // fresh DB: nothing to backfill
+
+      const now = Date.now();
+      const ensureRouter = db.prepare(`
+        INSERT INTO routers (id, kind, displayName, createdAt, deletedAt)
+        VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
+      `);
+      const insObs = db.prepare(`
+        INSERT OR IGNORE INTO connection_observations
+          (src, dst, dport, proto, routerId, firstObservedAt, lastObservedAt)
+        SELECT src, dst, dport, proto, ?, firstSeen, lastSeen
+        FROM connections WHERE source = ?
+      `);
+
+      // Routers whose config still exists get their deterministic migrated id
+      // registered up front, even when they have no rows yet.
+      for (const kind of ['yamaha', 'cisco']) {
+        if (map[kind] === MIGRATED_IDS[kind]) {
+          ensureRouter.run(map[kind], kind, map[kind], now, null);
+        }
+      }
+
+      // Expand every legacy source value into observation rows.
+      const sources = db.prepare(`SELECT source, COUNT(*) AS n FROM connections GROUP BY source`).all();
+      const report = [];
+      for (const { source, n } of sources) {
+        const ids = expandSourceToRouterIds(source, map);
+        for (const rid of ids) {
+          const kind = routerKindForId(rid, map);
+          // Legacy placeholders represent routers that no longer exist as
+          // active config — mark them deleted so nothing tries to poll them.
+          ensureRouter.run(rid, kind, rid, now, rid.startsWith('legacy-') ? now : null);
+          insObs.run(rid, source);
+        }
+        report.push(`${source}→[${ids.join(',')}] (${n} rows)`);
+      }
+      logger.info(`[migrate] v4: source expansion: ${report.join('; ') || 'no rows'}`);
+
+      // In-migration consistency gate: every connections row must now have at
+      // least its expected number of observations. A mismatch rolls back the
+      // whole migration (fail-closed, P2-33).
+      const missing = db.prepare(`
+        SELECT COUNT(*) AS n FROM connections c
+        LEFT JOIN (
+          SELECT src, dst, dport, proto, COUNT(*) AS obs
+          FROM connection_observations GROUP BY src, dst, dport, proto
+        ) o ON o.src = c.src AND o.dst = c.dst AND o.dport = c.dport AND o.proto = c.proto
+        WHERE COALESCE(o.obs, 0) < CASE WHEN c.source = 'yamaha+cisco' THEN 2 ELSE 1 END
+      `).get().n;
+      if (missing > 0) {
+        throw new Error(`v4 backfill left ${missing} connections without observations`);
+      }
+      logger.info('[migrate] v4: backfill consistency verified (0 missing observations)');
     },
   },
 ];
@@ -156,8 +248,10 @@ function _createVerifiedBackup(db, dbPath, fromVersion, toVersion) {
  *
  * @param {import('better-sqlite3').Database} db
  * @param {string} dbPath  Absolute path to the DB file, or ':memory:'
+ * @param {{ sourceRouterMap?: { yamaha: string, cisco: string } }} [ctx]
+ *        migration context; sourceRouterMap comes from sourceRouterIdMap()
  */
-function runMigrations(db, dbPath) {
+function runMigrations(db, dbPath, ctx = {}) {
   const currentVersion = db.pragma('user_version', { simple: true }) || 0;
   const pending = MIGRATIONS.filter(m => m.version > currentVersion);
 
@@ -185,7 +279,7 @@ function runMigrations(db, dbPath) {
     logger.info(`[migrate] Applying v${mig.version}: ${mig.description}`);
     try {
       db.transaction(() => {
-        mig.up(db);
+        mig.up(db, ctx);
         db.pragma(`user_version = ${mig.version}`);
       })();
       logger.info(`[migrate] v${mig.version} OK`);

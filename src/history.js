@@ -7,6 +7,7 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 const { runMigrations } = require('./db-migrate');
+const { MIGRATED_IDS, expandSourceToRouterIds, routerKindForId } = require('./router-id');
 
 const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
   ? path.resolve(process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB)
@@ -20,7 +21,17 @@ let stmtUpsert = null;
 let stmtSelectAll = null;
 let stmtDeleteOld = null;
 let stmtInsertNotifLog = null;
+let stmtObsUpsert = null;
+let stmtEnsureRouter = null;
+let upsertTxn = null;
 let currentDbPath = DEFAULT_DB_PATH;
+
+// source → routerId mapping for the dual-write expansion (v4 expand phase).
+// server.js overrides this at bootstrap via loadConnectionHistory() options;
+// the default matches a config where both router sections exist.
+let sourceRouterMap = { yamaha: MIGRATED_IDS.yamaha, cisco: MIGRATED_IDS.cisco };
+// routerIds already ensured in the routers table this session (write-through cache)
+let ensuredRouterIds = new Set();
 
 // In-memory cache (same interface as before for Socket.IO emissions)
 const connectionHistory = new Map();
@@ -71,7 +82,9 @@ function _tryRestoreLatestBackup(targetPath) {
   }
 }
 
-function initDb(dbPath) {
+function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
+  if (mapOverride) sourceRouterMap = mapOverride;
+  ensuredRouterIds = new Set();
   const actualPath = dbPath === ':memory:' ? ':memory:' : (dbPath ? path.resolve(dbPath) : DEFAULT_DB_PATH);
   currentDbPath = actualPath;
   // A heavily corrupted file can throw on open (SQLITE_NOTADB from the first
@@ -102,7 +115,7 @@ function initDb(dbPath) {
   }
 
   // Run versioned migrations (takes pre-migration backup if pending changes exist)
-  runMigrations(db, actualPath);
+  runMigrations(db, actualPath, { sourceRouterMap });
 
   // Create tables for fresh databases (idempotent — skipped if already exist)
   db.exec(`
@@ -134,6 +147,30 @@ function initDb(dbPath) {
     CREATE INDEX IF NOT EXISTS idx_lastSeen ON connections(lastSeen);
     CREATE INDEX IF NOT EXISTS idx_src ON connections(src);
     CREATE INDEX IF NOT EXISTS idx_dst ON connections(dst);
+  `);
+
+  // Multi-router observation tables (P2-30 expand phase). Normally created by
+  // the v4 migration; repeated here so a fresh DB gets them too.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS routers (
+      id          TEXT PRIMARY KEY,
+      kind        TEXT NOT NULL,
+      displayName TEXT NOT NULL,
+      createdAt   INTEGER NOT NULL,
+      deletedAt   INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS connection_observations (
+      src             TEXT    NOT NULL,
+      dst             TEXT    NOT NULL,
+      dport           INTEGER NOT NULL,
+      proto           TEXT    NOT NULL,
+      routerId        TEXT    NOT NULL,
+      firstObservedAt INTEGER NOT NULL,
+      lastObservedAt  INTEGER NOT NULL,
+      PRIMARY KEY (src, dst, dport, proto, routerId)
+    );
+    CREATE INDEX IF NOT EXISTS idx_obs_router   ON connection_observations(routerId);
+    CREATE INDEX IF NOT EXISTS idx_obs_lastSeen ON connection_observations(lastObservedAt);
   `);
 
   db.exec(`
@@ -202,11 +239,53 @@ function initDb(dbPath) {
   stmtSelectAll = db.prepare(`SELECT * FROM connections WHERE lastSeen >= ?`);
   stmtDeleteOld = db.prepare(`DELETE FROM connections WHERE lastSeen < ?`);
 
+  stmtObsUpsert = db.prepare(`
+    INSERT INTO connection_observations
+      (src, dst, dport, proto, routerId, firstObservedAt, lastObservedAt)
+    VALUES (@src, @dst, @dport, @proto, @routerId, @firstObservedAt, @lastObservedAt)
+    ON CONFLICT(src, dst, dport, proto, routerId) DO UPDATE SET
+      firstObservedAt = MIN(firstObservedAt, @firstObservedAt),
+      lastObservedAt  = MAX(lastObservedAt,  @lastObservedAt)
+  `);
+  stmtEnsureRouter = db.prepare(`
+    INSERT INTO routers (id, kind, displayName, createdAt, deletedAt)
+    VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
+  `);
+
+  // Dual-write (v4 compatibility window): the connections upsert with its
+  // legacy source-merge CASE and the junction upsert run in one transaction,
+  // so the two representations can never diverge on a write.
+  upsertTxn = db.transaction(entry => {
+    stmtUpsert.run(entry);
+    for (const routerId of expandSourceToRouterIds(entry.source, sourceRouterMap)) {
+      _ensureRouterRow(routerId);
+      stmtObsUpsert.run({
+        src: entry.src, dst: entry.dst, dport: entry.dport, proto: entry.proto,
+        routerId,
+        firstObservedAt: entry.firstSeen,
+        lastObservedAt:  entry.lastSeen,
+      });
+    }
+  });
+
   logger.info('[history] SQLite database initialized (WAL mode)');
 }
 
+function _ensureRouterRow(routerId) {
+  if (ensuredRouterIds.has(routerId)) return;
+  const isLegacy = routerId.startsWith('legacy-');
+  stmtEnsureRouter.run(
+    routerId,
+    routerKindForId(routerId, sourceRouterMap),
+    routerId,
+    Date.now(),
+    isLegacy ? Date.now() : null,
+  );
+  ensuredRouterIds.add(routerId);
+}
+
 function upsertEntry(entry) {
-  stmtUpsert.run({
+  upsertTxn({
     src: entry.src,
     dst: entry.dst,
     dport: entry.dport ?? 0,
@@ -284,11 +363,22 @@ function loadIntoMemory() {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-function loadConnectionHistory(dbPath) {
+function loadConnectionHistory(dbPath, opts = {}) {
   if (db) { try { db.close(); } catch {} db = null; }  // close stale connection before reopening
-  initDb(dbPath);
+  initDb(dbPath, opts);
   migrateFromJsonl();
   loadIntoMemory();
+
+  // Startup diagnostic for the v4 dual-write window: counts only, no traffic data.
+  const consistency = checkObservationConsistency();
+  if (consistency) {
+    const { missingObservations, orphanObservations, underMerged } = consistency;
+    if (missingObservations || orphanObservations || underMerged) {
+      logger.error(`[history] observation consistency MISMATCH: missing=${missingObservations} orphans=${orphanObservations} underMerged=${underMerged}`);
+    } else {
+      logger.info('[history] observation consistency OK (source and junction agree)');
+    }
+  }
 }
 
 function appendHistoryLog(entry) {
@@ -311,14 +401,55 @@ function snapshotHistory() {
   logger.info(`[history] Snapshot ${connectionHistory.size} entries to SQLite`);
 }
 
-// Delete old entries from SQLite
+// Delete old entries from SQLite (junction rows go in the same transaction
+// so the two representations can never diverge on a delete)
 function compactHistoryLog() {
   if (!db) return;
   const cutoff = Date.now() - historyTtlMs;
-  const info = stmtDeleteOld.run(cutoff);
+  const deleteTxn = db.transaction(cut => {
+    db.prepare(`
+      DELETE FROM connection_observations
+      WHERE (src, dst, dport, proto) IN
+        (SELECT src, dst, dport, proto FROM connections WHERE lastSeen < ?)
+    `).run(cut);
+    return stmtDeleteOld.run(cut);
+  });
+  const info = deleteTxn(cutoff);
   if (info.changes > 0) {
     logger.info(`[history] Pruned ${info.changes} old entries from SQLite`);
   }
+}
+
+/**
+ * Diagnostic comparison of the legacy source column and the junction table
+ * (v4 compatibility window). All three counters must stay 0; v5 may drop the
+ * source column only after production runs show sustained zeroes.
+ * No IP/MAC values are included — counts only.
+ */
+function checkObservationConsistency() {
+  if (!db) return null;
+  const missingObservations = db.prepare(`
+    SELECT COUNT(*) AS n FROM connections c
+    LEFT JOIN (
+      SELECT src, dst, dport, proto, COUNT(*) AS obs
+      FROM connection_observations GROUP BY src, dst, dport, proto
+    ) o ON o.src = c.src AND o.dst = c.dst AND o.dport = c.dport AND o.proto = c.proto
+    WHERE COALESCE(o.obs, 0) < CASE WHEN c.source = 'yamaha+cisco' THEN 2 ELSE 1 END
+  `).get().n;
+  const orphanObservations = db.prepare(`
+    SELECT COUNT(*) AS n FROM connection_observations o
+    LEFT JOIN connections c
+      ON c.src = o.src AND c.dst = o.dst AND c.dport = o.dport AND c.proto = o.proto
+    WHERE c.src IS NULL
+  `).get().n;
+  const underMerged = db.prepare(`
+    SELECT COUNT(*) AS n FROM connections c
+    WHERE c.source = 'yamaha+cisco' AND (
+      SELECT COUNT(*) FROM connection_observations o
+      WHERE o.src = c.src AND o.dst = c.dst AND o.dport = c.dport AND o.proto = c.proto
+    ) < 2
+  `).get().n;
+  return { missingObservations, orphanObservations, underMerged, checkedAt: Date.now() };
 }
 
 // Prune memory cache
@@ -663,10 +794,10 @@ function closeDb() {
 // ─── Test helper ─────────────────────────────────────────────────────────────
 
 /** Re-initialize with an in-memory SQLite DB (or a given path) for unit tests. */
-function _initForTest(dbPath) {
+function _initForTest(dbPath, opts = {}) {
   if (db) { try { db.close(); } catch {} db = null; }
   connectionHistory.clear();
-  initDb(dbPath || ':memory:');
+  initDb(dbPath || ':memory:', opts);
 }
 
 /** Insert into DB AND sync to in-memory Map (for WebSocket filter tests). */
@@ -695,6 +826,7 @@ module.exports = {
   queryNewNodes,
   setRetentionDays,
   closeDb,
+  checkObservationConsistency,
   HISTORY_TTL_MS,
   _initForTest,
   _appendAndLoad,

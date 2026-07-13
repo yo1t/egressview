@@ -92,6 +92,45 @@ function generateRouterId(kind, existingIds = []) {
   throw new Error('could not generate a unique routerId');
 }
 
+/**
+ * The source→routerId mapping used by both the config migration and the DB
+ * migration (single helper so they can never disagree). A legacy source maps
+ * to its deterministic migrated id when the config section still exists, and
+ * to a legacy placeholder when it was deleted.
+ */
+function sourceRouterIdMap({ hasYamahaConfig = false, hasCiscoConfig = false } = {}) {
+  return {
+    yamaha: hasYamahaConfig ? MIGRATED_IDS.yamaha : legacyPlaceholderId('yamaha'),
+    cisco:  hasCiscoConfig  ? MIGRATED_IDS.cisco  : legacyPlaceholderId('cisco'),
+  };
+}
+
+/**
+ * Expand a legacy connections.source value into the routerIds that observed
+ * the connection. Deterministic rules only — never guesses a live router:
+ *  - 'yamaha' / 'cisco'  → the mapped id (migrated or legacy placeholder)
+ *  - 'yamaha+cisco'      → both mapped ids
+ *  - 'inspect'           → the yamaha id (INSPECT syslog is a Yamaha RTX
+ *                          feature, so those sessions were observed by the
+ *                          configured Yamaha router)
+ *  - anything else       → a legacy placeholder preserving the source value
+ */
+function expandSourceToRouterIds(source, map) {
+  const s = String(source || '');
+  if (s === 'yamaha')       return [map.yamaha];
+  if (s === 'cisco')        return [map.cisco];
+  if (s === 'yamaha+cisco') return [map.yamaha, map.cisco];
+  if (s === 'inspect')      return [map.yamaha];
+  return [legacyPlaceholderId(s)];
+}
+
+/** The adapter kind a routerId belongs to, for routers-table rows. */
+function routerKindForId(id, map) {
+  if (id === map.yamaha || id === legacyPlaceholderId('yamaha')) return 'yamaha';
+  if (id === map.cisco  || id === legacyPlaceholderId('cisco'))  return 'cisco';
+  return 'unknown';
+}
+
 module.exports = {
   ROUTER_ID_RE,
   MIGRATED_IDS,
@@ -102,4 +141,7 @@ module.exports = {
   migratedRouterId,
   legacyPlaceholderId,
   generateRouterId,
+  sourceRouterIdMap,
+  expandSourceToRouterIds,
+  routerKindForId,
 };

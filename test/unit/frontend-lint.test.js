@@ -744,17 +744,22 @@ describe('Server runtime invariants', () => {
       'server startup should honor both EGRESSVIEW_DB_PATH and the documented EGRESSVIEW_DB');
     assert.match(serverJs, /const\s+runtimeDbPath\s*=\s*DEMO_MODE\s*\?/,
       'server startup should choose one runtime DB path before initializing stores');
+    // All long-lived DB connections open through the bootstrap boundary on the
+    // selected runtime path (P2-30: history/migrations first, everything after).
+    assert.match(serverJs, /runDbBootstrap\(\{\s*dbPath:\s*runtimeDbPath,[\s\S]*?history,\s*sessions,\s*devices,\s*enrichment,\s*beacons\s*\}\)/,
+      'server startup should open every SQLite-backed store via runDbBootstrap on the runtime DB path');
+    const bootstrapJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'db-bootstrap.js'), 'utf8');
     for (const call of [
-      'sessions.initDb(runtimeDbPath)',
-      'history.loadConnectionHistory(runtimeDbPath)',
-      'devices.initDb(runtimeDbPath)',
-      'enrichment.initDb(runtimeDbPath)',
-      'beacons.initDb(runtimeDbPath)',
+      'history.loadConnectionHistory(dbPath',
+      'sessions.initDb(dbPath)',
+      'devices.initDb(dbPath)',
+      'enrichment.initDb(dbPath)',
+      'beacons.initDb(dbPath)',
     ]) {
-      assert.match(serverJs, new RegExp(call.replace(/[().]/g, '\\$&')),
-        `${call} should use the selected runtime DB path`);
+      assert.match(bootstrapJs, new RegExp(call.replace(/[().]/g, '\\$&')),
+        `db-bootstrap must pass the DB path to ${call.split('.')[0]}`);
     }
-    assert.match(historyJs, /function\s+loadConnectionHistory\(dbPath\)\s*{[\s\S]*initDb\(dbPath\)/,
+    assert.match(historyJs, /function\s+loadConnectionHistory\(dbPath[^)]*\)\s*{[\s\S]*initDb\(dbPath/,
       'history.loadConnectionHistory must accept and pass through an explicit DB path');
   });
 

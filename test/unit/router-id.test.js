@@ -10,6 +10,9 @@ const {
   migratedRouterId,
   legacyPlaceholderId,
   generateRouterId,
+  sourceRouterIdMap,
+  expandSourceToRouterIds,
+  routerKindForId,
   MIGRATED_IDS,
 } = require('../../src/router-id');
 
@@ -79,6 +82,51 @@ describe('generateRouterId', () => {
   });
   it('throws for unknown kinds', () => {
     assert.throws(() => generateRouterId('juniper'));
+  });
+});
+
+describe('sourceRouterIdMap', () => {
+  it('maps to migrated ids while the config section exists', () => {
+    assert.deepEqual(sourceRouterIdMap({ hasYamahaConfig: true, hasCiscoConfig: true }),
+      { yamaha: 'yamaha1', cisco: 'cisco1' });
+  });
+  it('maps to legacy placeholders when the config was deleted', () => {
+    assert.deepEqual(sourceRouterIdMap({ hasYamahaConfig: false, hasCiscoConfig: false }),
+      { yamaha: 'legacy-yamaha', cisco: 'legacy-cisco' });
+  });
+  it('handles mixed presence', () => {
+    assert.deepEqual(sourceRouterIdMap({ hasYamahaConfig: true, hasCiscoConfig: false }),
+      { yamaha: 'yamaha1', cisco: 'legacy-cisco' });
+  });
+});
+
+describe('expandSourceToRouterIds', () => {
+  const map = { yamaha: 'yamaha1', cisco: 'cisco1' };
+  it('expands single sources', () => {
+    assert.deepEqual(expandSourceToRouterIds('yamaha', map), ['yamaha1']);
+    assert.deepEqual(expandSourceToRouterIds('cisco', map), ['cisco1']);
+  });
+  it('expands the merged source into both routers', () => {
+    assert.deepEqual(expandSourceToRouterIds('yamaha+cisco', map), ['yamaha1', 'cisco1']);
+  });
+  it('maps inspect to the yamaha router (INSPECT is a Yamaha RTX feature)', () => {
+    assert.deepEqual(expandSourceToRouterIds('inspect', map), ['yamaha1']);
+  });
+  it('maps unknown sources to legacy placeholders without guessing', () => {
+    assert.deepEqual(expandSourceToRouterIds('nat', map), ['legacy-nat']);
+    assert.deepEqual(expandSourceToRouterIds('', map), ['legacy-unknown']);
+  });
+});
+
+describe('routerKindForId', () => {
+  const map = { yamaha: 'yamaha1', cisco: 'legacy-cisco' };
+  it('recognizes mapped and legacy ids of both kinds', () => {
+    assert.equal(routerKindForId('yamaha1', map), 'yamaha');
+    assert.equal(routerKindForId('legacy-yamaha', map), 'yamaha');
+    assert.equal(routerKindForId('legacy-cisco', map), 'cisco');
+  });
+  it('returns unknown for anything else', () => {
+    assert.equal(routerKindForId('legacy-mystery', map), 'unknown');
   });
 });
 
