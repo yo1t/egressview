@@ -20,6 +20,9 @@ function makeHistory() {
   return {
     getConnectionHistory: () => map,
     appendHistoryLog:     (e) => log.push(e),
+    observationIdsForSource: source => source === 'yamaha'
+      ? ['yamaha1']
+      : source === 'cisco' ? ['cisco1'] : [`legacy-${source}`],
     _log: log,
   };
 }
@@ -166,6 +169,13 @@ describe('recordConnection', () => {
     runtime.recordConnection(SESSION);
     const { isNew } = runtime.recordConnection(SESSION);
     assert.ok(!isNew);
+  });
+
+  it('merges exact observer ids for real-time WebSocket entries', () => {
+    initRuntime();
+    runtime.recordConnection(SESSION, Date.now(), 'yamaha');
+    const { entry } = runtime.recordConnection(SESSION, Date.now(), 'cisco');
+    assert.deepEqual(entry.observedBy, ['cisco1', 'yamaha1']);
   });
 
   it('backdates firstSeen from firstSeenHint for a new entry', () => {
