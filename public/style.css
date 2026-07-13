@@ -83,6 +83,32 @@
   }
   .settings-status.ok  { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); color: var(--green); }
   .settings-status.err { background: rgba(239,68,68,0.12);  border: 1px solid rgba(239,68,68,0.35); color: var(--red); }
+  .legacy-router-controls { display: none !important; }
+  .router-pane-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
+  .router-pane-title { margin: 0 0 5px; padding: 0; border: 0; cursor: default; }
+  .router-pane-copy { color: var(--muted); font-size: 10px; line-height: 1.5; }
+  .router-count { border: 1px solid var(--border); border-radius: 999px; padding: 3px 8px; color: var(--cyan); font-size: 10px; white-space: nowrap; }
+  .router-list { display: grid; gap: 8px; }
+  .router-empty { border: 1px dashed var(--border); border-radius: 10px; padding: 20px 12px; color: var(--muted); text-align: center; font-size: 11px; }
+  .router-card { background: rgba(255,255,255,0.025); border: 1px solid var(--border); border-radius: 10px; padding: 11px; display: grid; grid-template-columns: auto 1fr auto; gap: 9px; align-items: center; }
+  .router-card-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px rgba(107,114,128,.12); }
+  .router-card-dot.ready { background: var(--green); box-shadow: 0 0 0 3px rgba(16,185,129,.12); }
+  .router-card-dot.wait { background: var(--yellow); box-shadow: 0 0 0 3px rgba(245,158,11,.12); }
+  .router-card-dot.error { background: var(--red); box-shadow: 0 0 0 3px rgba(239,68,68,.12); }
+  .router-card-name { font-size: 12px; font-weight: 700; }
+  .router-card-meta { color: var(--muted); font-size: 10px; margin-top: 3px; }
+  .router-card-actions { display: flex; gap: 5px; }
+  .router-icon-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; cursor: pointer; font-family: inherit; }
+  .router-icon-btn:hover { border-color: var(--accent); color: var(--text); }
+  .router-add-btn { margin-top: 10px; background: transparent; border: 1px dashed var(--accent); color: var(--accent); }
+  .router-add-btn:hover { background: rgba(59,130,246,.1); }
+  .router-editor { margin-top: 14px; border: 1px solid var(--accent); border-radius: 12px; padding: 13px; background: rgba(59,130,246,.045); }
+  .router-editor.hidden, .router-enable-group.hidden { display: none; }
+  .router-editor-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; color: var(--cyan); }
+  .router-enabled { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text); margin-bottom: 4px; }
+  .router-editor-actions { display: grid; grid-template-columns: 1.2fr .8fr; gap: 8px; }
+  .router-secondary-btn { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .router-secondary-btn:hover { background: rgba(255,255,255,.06); }
   .spinner {
     display: inline-block; width: 12px; height: 12px;
     border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;

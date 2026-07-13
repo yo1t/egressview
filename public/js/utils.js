@@ -45,7 +45,10 @@ function typeLabel(type) {
 function isWiredType(type) { return type === '0'; }
 
 function aggregateRouterHealth(routers) {
-  const enabled = Object.values(routers || {}).filter(router => router?.enabled);
+  const candidates = Array.isArray(routers?.routers) && routers.routers.length
+    ? routers.routers
+    : Object.values(routers || {}).filter(router => !Array.isArray(router));
+  const enabled = candidates.filter(router => router?.enabled);
   const readyCount = enabled.filter(router => router.ready).length;
   const enabledCount = enabled.length;
   const state = enabledCount === 0 ? 'off'

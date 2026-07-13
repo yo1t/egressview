@@ -150,4 +150,16 @@ describe('routerTargetsFromObservedBy', () => {
       ['__router__']
     );
   });
+
+  it('maps multiple routers of the same kind by exact router id', () => {
+    const topology = {
+      mainNodeId: '__router__',
+      idToNode: new Map([['cisco1', '__router__'], ['cisco-22222222', '__router_cisco-22222222__']]),
+      kindToNode: new Map([['cisco', '__router__']]),
+    };
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(routerTargetsFromObservedBy(['cisco-22222222'], 'cisco', true, topology))),
+      ['__router_cisco-22222222__']
+    );
+  });
 });

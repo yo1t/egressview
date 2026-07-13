@@ -65,12 +65,14 @@ describe('buildClientConfig', () => {
       cisco,
       notes: { getAll: () => ({ '1.1.1.1': 'Printer' }) },
       defaultRouterIp: '192.168.1.1',
+      routers: [{ id: 'cisco1', kind: 'cisco', enabled: true, ready: true }],
     });
 
     assert.equal(config.routerIp, '192.168.1.1');
     assert.equal(config.language, 'en');
     assert.deepEqual(config.notes, { '1.1.1.1': 'Printer' });
     assert.equal(config.ciscoReady, true);
+    assert.equal(config.routers[0].id, 'cisco1');
   });
 });
 

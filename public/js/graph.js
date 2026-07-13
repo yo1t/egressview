@@ -157,6 +157,21 @@ function currentGraphRangeKey(from, to) {
 }
 
 function activeRouterTopology() {
+  const active = (routerState.routers || []).filter(router => router.enabled);
+  if (active.length) {
+    const nodesForRouters = active.map((router, index) => ({
+      router,
+      nodeId: index === 0 ? '__router__' : `__router_${router.id}__`,
+    }));
+    return {
+      isMulti: active.length > 1,
+      mainRouterLabel: active[0].displayName || (active[0].kind === 'cisco' ? 'Cisco IOS' : 'Yamaha RTX'),
+      mainNodeId: '__router__',
+      extraRouters: nodesForRouters.slice(1).map(item => ({ id: item.nodeId, label: item.router.displayName || item.router.id })),
+      idToNode: new Map(nodesForRouters.map(item => [item.router.id.toLowerCase(), item.nodeId])),
+      kindToNode: new Map(nodesForRouters.map(item => [item.router.kind, item.nodeId])),
+    };
+  }
   const hasYamaha = !!routerState.yamaha.enabled;
   const hasCisco  = !!routerState.cisco.enabled;
   const isMulti   = hasYamaha && hasCisco;
@@ -166,6 +181,7 @@ function activeRouterTopology() {
     isMulti,
     mainRouterLabel: !hasYamaha && hasCisco ? 'Cisco IOS' : hasYamaha ? 'Yamaha RTX' : 'Router',
     extraRouters: isMulti ? [{ id: '__router_cisco__', label: 'Cisco IOS' }] : [],
+    mainNodeId: '__router__',
   };
 }
 
@@ -808,7 +824,7 @@ function buildGraphFromConnections({ resetPositions = false } = {}) {
     }
     if (isMulti) {
       if (!srcRouterMap.has(c.src)) srcRouterMap.set(c.src, new Set());
-      for (const target of routerTargetsFromObservedBy(c.observedBy, c.source, isMulti)) {
+      for (const target of routerTargetsFromObservedBy(c.observedBy, c.source, isMulti, topology)) {
         srcRouterMap.get(c.src).add(target);
       }
     }
@@ -858,7 +874,7 @@ function buildGraphFromSummary(summary, { resetPositions = false } = {}) {
     deviceFirstSeen: r.firstSeen || 0,
     summarySessions: r.count || 0,
     ...(topology.isMulti ? {
-      routerTargets: routerTargetsFromObservedBy(r.observedBy, r.sources || r.source, topology.isMulti),
+      routerTargets: routerTargetsFromObservedBy(r.observedBy, r.sources || r.source, topology.isMulti, topology),
     } : {}),
   }));
 

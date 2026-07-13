@@ -12,6 +12,7 @@ import { updateLogView } from './log.js?v=__ASSET_VERSION__';
 import { loadNotifLog } from './notif-log.js?v=__ASSET_VERSION__';
 import { refreshCurrentTimeFilterView } from './time-filter.js?v=__ASSET_VERSION__';
 import { loadBeacons } from './beacon.js?v=__ASSET_VERSION__';
+import './router-settings.js?v=__ASSET_VERSION__';
 
 // ─── Cross-module reference injection ────────────────────────────────────────
 // auth-socket.js and graph.js both need devicesData but can't import from devices.js
@@ -50,9 +51,11 @@ socket.on('auth-required', () => {
 // Per-router ready state lives in routerState (initialized from the config
 // event, updated by status events) so l3l4 = OR of both stays consistent.
 function _updateL3L4State() {
-  const ready = routerState.yamaha.ready || routerState.cisco.ready;
+  const configured = routerState.routers.length ? routerState.routers : [routerState.yamaha, routerState.cisco];
+  const enabled = configured.filter(router => router.enabled);
+  const ready = enabled.some(router => router.ready);
   connState.l3l4.ready   = ready;
-  connState.l3l4.enabled = routerState.yamaha.enabled || routerState.cisco.enabled;
+  connState.l3l4.enabled = enabled.length > 0;
   if (ready) connState.l3l4.err = '';
   updateConnBadge('l3l4');
 }
@@ -122,7 +125,10 @@ socket.on('network-update', data => {
 });
 
 socket.on('connections-update', data => {
-  if (!routerState.yamaha.enabled && !routerState.cisco.enabled) return; // do nothing while L3/L4 is disabled
+  const enabledRouters = routerState.routers.length
+    ? routerState.routers.some(router => router.enabled)
+    : routerState.yamaha.enabled || routerState.cisco.enabled;
+  if (!enabledRouters) return;
   const incoming = data.connections || [];
   if (data.partial || !data.initialLoad) {
     // Merge: update/add entries without discarding history or API-fetched ranges.

@@ -15,6 +15,7 @@ const configRoutes = require('./routes/config');
 const slackRoutes = require('./routes/slack');
 const notificationLogRoutes = require('./routes/notification-log');
 const beaconsRoutes = require('./routes/beacons');
+const routerRoutes = require('./routes/routers');
 const { createSlowRequestLogger } = require('./slow-request-log');
 
 function createIndexHtmlBase(indexHtml, subpath, assetVersion, htmlEscape) {
@@ -124,6 +125,7 @@ function configureHttpApp(app, {
   app.use(express.json({ limit: '64kb' }));
 
   app.use('/api', authRoutes(routeCtx));
+  if (routeCtx.routerManager) app.use('/api', routerRoutes(routeCtx));
   app.use('/api', notesRoutes(routeCtx));
   app.use('/api', connectionsRoutes(routeCtx));
   app.use('/api', devicesRoutes(routeCtx));

@@ -135,6 +135,31 @@ function fatalErrors(errors) {
 }
 
 async function mockSettingsRoutes(page) {
+  let mockRouters = [];
+  await page.route('**/api/routers**', async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname.endsWith('/detect')) {
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ success: true, ssh: { ok: true }, lan: { ip: '192.168.1.1' }, nat: { ok: true, descriptor: '100', sessionsOk: true, sessions: 42 } }),
+      });
+      return;
+    }
+    if (request.method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ routers: mockRouters, maxRouters: 10 }) });
+      return;
+    }
+    if (request.method() === 'POST') {
+      const input = request.postDataJSON();
+      const created = { ...input, id: 'yamaha-test0001', passSet: true, ready: false, state: 'connecting', sessionCount: 0 };
+      delete created.pass;
+      mockRouters = [created];
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ success: true, router: created }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+  });
   await page.route('**/api/login', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -496,17 +521,17 @@ test('settings tabs save and connection buttons work without console errors', as
   await page.click('#settings-btn');
   await expect(page.locator('#settings-overlay')).toBeVisible();
 
-  await page.locator('#s-yamaha-ip').fill('192.168.1.1');
-  await page.locator('#s-yamaha-user').fill('admin');
-  await page.locator('#s-yamaha-pass').fill('demo-pass');
-  await page.locator('#s-yamaha-nat').fill('100');
-  await page.click('#yamaha-detect-btn');
-  await expect(page.locator('#yamaha-detect-status')).toBeVisible();
-  await page.click('#yamaha-connect-btn');
-  await expect(page.locator('#yamaha-status')).toBeVisible();
-  await page.waitForSelector('#settings-overlay', { state: 'hidden' });
+  await page.click('#router-add-btn');
+  await page.locator('#router-ip').fill('192.168.1.1');
+  await page.locator('#router-user').fill('admin');
+  await page.locator('#router-pass').fill('demo-pass');
+  await page.locator('#router-nat').fill('100');
+  await page.click('#router-detect-btn');
+  await expect(page.locator('#router-editor-status')).toBeVisible();
+  await expect(page.locator('#router-editor-status')).toContainText('SSH');
+  await page.click('#router-save-btn');
+  await expect(page.locator('.router-card')).toContainText('Yamaha RTX');
 
-  await page.click('#settings-btn');
   await page.click('.settings-tab[data-tab="l2"]');
   await page.locator('#s-asus-ip').fill('192.168.1.2');
   await page.locator('#s-asus-user').fill('admin');

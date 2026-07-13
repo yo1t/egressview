@@ -106,7 +106,8 @@ function initRuntime(overrides = {}) {
   runtime.setKnownMacs(new Set());   // reset between tests
   runtime.init({ io, history: hist, enrichment: enrich, threatIntel: threat,
                  notifier: notif, deviceId: devId, devices: devs,
-                 asus: asus_, yamaha: yamaha_, cisco: cisco_, dhcpdSyslog: dhcpd_ });
+                 asus: asus_, yamaha: yamaha_, cisco: cisco_, dhcpdSyslog: dhcpd_,
+                 routerRegistry: overrides.routerRegistry });
 
   return { io, history: hist, enrichment: enrich, threatIntel: threat,
            notifier: notif, deviceId: devId, devices: devs };
@@ -148,6 +149,14 @@ describe('resolveMacByIp', () => {
   it('returns null when ip is null', () => {
     initRuntime();
     assert.equal(runtime.resolveMacByIp(null), null);
+  });
+
+  it('falls back to every registered router ARP cache', () => {
+    initRuntime({
+      asus: makeAsus(null), dhcpdSyslog: makeDhcpd(null), yamaha: makeYamaha(null), cisco: makeCisco(null),
+      routerRegistry: { list: () => [{ adapter: { getArpMac: () => 'aa:00:00:00:00:01' } }] },
+    });
+    assert.equal(runtime.resolveMacByIp('192.168.9.10'), 'aa:00:00:00:00:01');
   });
 });
 

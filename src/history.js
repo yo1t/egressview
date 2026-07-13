@@ -846,6 +846,21 @@ function getKnownMacs() {
   );
 }
 
+function upsertRouterMetadata(record) {
+  if (!db || !record?.id) return;
+  db.prepare(`
+    INSERT INTO routers (id, kind, displayName, createdAt, deletedAt)
+    VALUES (?, ?, ?, ?, NULL)
+    ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, displayName=excluded.displayName, deletedAt=NULL
+  `).run(record.id, record.kind, record.displayName || record.id, record.createdAt || Date.now());
+  routerKinds.set(record.id, record.kind);
+}
+
+function tombstoneRouterMetadata(id) {
+  if (!db || !id) return;
+  db.prepare('UPDATE routers SET deletedAt = ? WHERE id = ?').run(Date.now(), id);
+}
+
 function setRetentionDays(days) {
   historyTtlMs = days * 24 * 60 * 60 * 1000;
   logger.info(`[history] Retention set to ${days} days (${historyTtlMs}ms)`);
@@ -897,6 +912,8 @@ module.exports = {
   groupDstByTimeRange,
   summarizeByTimeRange,
   getKnownMacs,
+  upsertRouterMetadata,
+  tombstoneRouterMetadata,
   logNotification,
   queryNotificationLog,
   queryNewNodes,

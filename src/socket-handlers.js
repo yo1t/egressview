@@ -7,6 +7,7 @@ function buildClientConfig({
   cisco,
   notes,
   defaultRouterIp,
+  routers = [],
 }) {
   return {
     routerIp:        asus.getRouterIp() || defaultRouterIp,
@@ -36,6 +37,7 @@ function buildClientConfig({
     inspectLogFile:  appState.inspectLogFile,
     dhcpdEnabled:    appState.dhcpdEnabled,
     dhcpdLogFile:    appState.dhcpdLogFile,
+    routers,
   };
 }
 
@@ -51,6 +53,7 @@ function registerSocketHandlers({
   defaultRouterIp,
   logger = console,
   now = () => Date.now(),
+  getRouters = () => [],
 }) {
   io.use((socket, next) => {
     const provided = String(socket.handshake.auth?.token || '');
@@ -68,6 +71,7 @@ function registerSocketHandlers({
       cisco,
       notes,
       defaultRouterIp,
+      routers: getRouters(),
     }));
 
     if (asus.isEnabled() && !asus.isAuthenticated()) {
@@ -75,7 +79,7 @@ function registerSocketHandlers({
     }
 
     const connectionHistory = history.getConnectionHistory();
-    if ((yamaha.isEnabled() || cisco.isEnabled()) && connectionHistory.size) {
+    if ((getRouters().some(router => router.enabled) || yamaha.isEnabled() || cisco.isEnabled()) && connectionHistory.size) {
       const serverTime = now();
       const cutoff = serverTime - 3_600_000;
       socket.emit('connections-update', {

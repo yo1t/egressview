@@ -9,9 +9,9 @@
 const { isValidRouterId } = require('./router-id');
 const { validateRouterPoller } = require('./pollers/router-interface');
 
-function createRouterRegistry() {
+function createRouterRegistry({ tombstones: initialTombstones = [] } = {}) {
   const routers    = new Map(); // id → frozen entry
-  const tombstones = new Set(); // deleted ids, never reusable
+  const tombstones = new Set(initialTombstones); // deleted ids, never reusable
 
   return {
     /**
@@ -50,6 +50,14 @@ function createRouterRegistry() {
       return true;
     },
 
+    replace({ id, adapter, displayName } = {}) {
+      if (!routers.has(id)) throw new Error(`routerId is not registered: ${id}`);
+      validateRouterPoller(adapter);
+      const entry = Object.freeze({ id, kind: adapter.kind, displayName: displayName || id, adapter });
+      routers.set(id, entry);
+      return entry;
+    },
+
     get(id)  { return routers.get(id) || null; },
     has(id)  { return routers.has(id); },
     list()   { return [...routers.values()]; },
@@ -57,6 +65,7 @@ function createRouterRegistry() {
 
     /** Active ids plus tombstones — the collision set for generateRouterId(). */
     allKnownIds() { return new Set([...routers.keys(), ...tombstones]); },
+    tombstones() { return [...tombstones]; },
   };
 }
 
