@@ -4,7 +4,7 @@
 
 Is your smart TV phoning home to unexpected servers? Are your IP cameras, IoT appliances, or NAS boxes making connections you never authorised? EgressView answers these questions by passively monitoring every outbound connection from every device on your LAN, then turning that data into an investigation workflow: Graph Map and Statistics for the big picture, Connection Log and Devices for drill-down analysis — with automatic threat detection.
 
-No new hardware. No inline traffic interception. Works via your existing Yamaha RTX router's NAT session table. AI assistants such as AWS Kiro, Anthropic Claude, and Anysphere Cursor can query EgressView directly via the built-in MCP server — just ask in natural language.
+No new hardware. No inline traffic interception. Works via the NAT session tables of your existing Yamaha RTX and/or Cisco IOS routers. AI assistants such as AWS Kiro, Anthropic Claude, and Anysphere Cursor can query EgressView directly via the built-in MCP server — just ask in natural language.
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
@@ -27,12 +27,12 @@ EgressView answers the question most home users can't ask: *what is each device 
 - **Per-device visibility** — every connection tagged to the source device (vendor, model, hostname) via OUI, mDNS, SSDP, and NetBIOS
 - **Automatic threat detection** — every connection checked in real time against Feodo Tracker, ThreatFox, URLhaus, and Spamhaus DROP
 - **Instant Slack alerts** — DM the moment any device connects to a known C2 server or malware distribution host
-- **No hardware changes** — runs on any Mac, PC, or Raspberry Pi alongside your existing Yamaha RTX router
+- **No hardware changes** — runs on any Mac, PC, or Raspberry Pi alongside your existing Yamaha RTX or Cisco IOS routers
 
 ## What it does
 
-- Connects to a **Yamaha RTX** router via SSH and reads the NAT session table every 60 seconds
-- Formal **Cisco IOS (SSH)** NAT session support, validated on physical hardware
+- Connects to **Yamaha RTX and Cisco IOS** routers via SSH and reads their NAT session tables every 60 seconds
+- Registers up to **10 routers in any Yamaha/Cisco mix**, isolates polling failures per router, and deduplicates the same connection while retaining every observing router
 - **[INSPECT] syslog supplement** — tails the Yamaha syslog in real time to capture short-lived TCP sessions that complete within the 60-second polling gap
 - **dnsmasq DNS query log** — tails the EC2/server-side dnsmasq log to resolve destination IPs to meaningful domain names (e.g. `example.com`) per client device; forward DNS names take priority over PTR reverse lookups
 - **[DHCPD] syslog tracking** — tails Yamaha DHCP events (Allocates/Extends) for real-time IP→MAC mapping
@@ -103,11 +103,10 @@ Connection Log and Devices let you drill down into suspicious destinations, nois
 ## Requirements
 
 - **Node.js** 22+
-- **Yamaha RTX** router with SSH access enabled (RTX1200, RTX1210, RTX1220, RTX1300, etc.)
-- (Optional) **Cisco IOS** router with SSH access enabled
+- At least one supported NAT router: **Yamaha RTX** and/or **Cisco IOS**, with SSH access enabled
 - (Optional) **ASUS WiFi access point** with web admin enabled (used as AP/mesh mode, not as a router)
 
-Cisco IOS support is validated on a C841M-4X-JSEC/K9 running IOS 15.5(3)M9, including SSH, enable, NAT/ARP/NDP, verbose output, TOFU, and automatic reconnect. Please report device-specific output differences through GitHub Issues.
+Cisco IOS support is validated on a C841M-4X-JSEC/K9 running IOS 15.5(3)M9, including SSH, enable, NAT/ARP/NDP, verbose output, TOFU, and automatic reconnect. Multi-router behavior is automatically tested with 10 mixed fake routers and was supplementally tested by registering one physical Cisco and one physical Yamaha twice under distinct router IDs. This validates parallel collection and deduplication, not physical HA, state synchronization, or failover. Please report device-specific output differences through GitHub Issues.
 
 ## AI Agent Access (MCP)
 
@@ -169,8 +168,9 @@ Start with the smallest path that matches your network, then add sources later f
 
 | Pattern | Use this when | What to configure first |
 |---------|---------------|-------------------------|
-| Minimal: Yamaha RTX only | You want the fastest first run with no extra hardware | Yamaha IP, SSH username, SSH password, then **Connect & Auto-detect** |
-| Recommended: Yamaha RTX + ASUS AP | You also want WiFi client names, vendors, and MAC visibility | Minimal setup, then ASUS AP IP and admin login |
+| Minimal: one Yamaha RTX or Cisco IOS | You want the fastest first run with no extra hardware | Router type, IP, SSH credentials, then **Connect & Auto-detect** |
+| Multiple routers: up to 10 | You have redundant routers or multiple uplinks | Add each Yamaha/Cisco router as a separate named row |
+| Optional: + ASUS AP | You also want WiFi client names, vendors, and MAC visibility | Router setup, then ASUS AP IP and admin login |
 | Detailed: + dnsmasq / INSPECT / DHCPD | You want richer hostnames, short-lived TCP sessions, and live IP-to-MAC mapping | Recommended setup, then enable Data Sources |
 | Notifications: + Slack | You want threat detections delivered by DM | Any setup above, then Slack notifications |
 
@@ -179,8 +179,7 @@ Start with the smallest path that matches your network, then add sources later f
 | | Requirement | Setup guide |
 |--|-------------|-------------|
 | ✅ | Node.js 22+ installed on your Mac/PC/Raspberry Pi | [nodejs.org](https://nodejs.org) |
-| ✅ | Yamaha RTX router with SSH enabled | [Setup guide →](docs/setup-yamaha.md) |
-| ☐ | (Optional) Cisco IOS router with SSH enabled | [Setup guide →](docs/setup-cisco.md) |
+| ✅ | At least one Yamaha RTX or Cisco IOS router with SSH enabled | [Yamaha guide →](docs/setup-yamaha.md) / [Cisco guide →](docs/setup-cisco.md) |
 | ☐ | (Optional) ASUS WiFi AP with web admin enabled | [Setup guide →](docs/setup-asus.md) |
 | ☐ | (Optional) AI assistant access via MCP (AWS Kiro, Anthropic Claude, Anysphere Cursor…) | [Setup guide →](docs/setup-mcp.md) |
 
@@ -209,7 +208,7 @@ Open `http://localhost:3000` and enter the password. Each browser/device gets it
 
 ### Step 4 — Configure your router
 
-Open the Settings panel (⚙) and enter your router details:
+Open Settings → **L3/L4** and add each router as a separate row. Up to 10 enabled Yamaha RTX and Cisco IOS routers can be mixed freely.
 
 | Field | Where to find it |
 |-------|-----------------|
@@ -218,9 +217,9 @@ Open the Settings panel (⚙) and enter your router details:
 | Cisco IOS IP / username / password | The login you set up in the [Cisco setup guide](docs/setup-cisco.md) |
 | ASUS AP IP / password | The AP's LAN IP and admin password ([ASUS setup guide](docs/setup-asus.md)) |
 
-For the Yamaha RTX, click **Connect & Auto-detect** after entering the IP, username, and password. EgressView checks SSH access, detects the NAT descriptor (usually `100`), finds the LAN IP when available, verifies that NAT sessions can be read, and fills the recommended setting before you save.
+For each Yamaha RTX, click **Connect & Auto-detect** after entering the IP, username, and password. EgressView checks SSH access, detects the NAT descriptor (usually `100`), finds the LAN IP when available, verifies that NAT sessions can be read, and fills the recommended setting before you save.
 
-For Cisco IOS, the Settings panel provides **Connect & Auto-detect** and save actions. The LAN address is selected from the NAT inside interface.
+For each Cisco IOS router, **Connect & Auto-detect** verifies SSH and NAT access. The LAN address is selected from the NAT inside interface. Each router is polled independently, with at most three router polls running at once, so one unavailable router does not stop the others.
 
 Within a few seconds, devices, sessions, and statistics will start appearing in the UI.
 
@@ -356,6 +355,8 @@ The ASUS device is used as a **WiFi access point (AP mode or AiMesh)**, not as a
 
 ## Supported Routers
 
+EgressView supports up to 10 enabled L3/L4 routers in any Yamaha/Cisco combination. A connection observed by multiple routers is stored once with all observing router IDs.
+
 ### Cisco IOS (L3/L4)
 - Physically validated: C841M-4X-JSEC/K9, IOS 15.5(3)M9
 - Uses verbose NAT creation age and remaining TTL when available, with automatic plain-output fallback
@@ -365,6 +366,11 @@ Any model with SSH access and NAT descriptor support:
 - RTX1200, RTX1210, RTX1220, RTX1300
 - RTX810, RTX830
 - NVR500, NVR510, NVR700W
+
+### Multi-router validation boundary
+- Automated gate: 10 mixed fake routers, 1,000 sessions each, concurrency capped at 3, failure isolation, and deterministic deduplication
+- Physical supplementary smoke: one Cisco and one Yamaha each registered twice under different router IDs
+- Not yet physically validated: multiple distinct units of the same vendor, HSRP/VRRP, NAT state synchronization, or real failover
 
 ### ASUS WiFi AP (L2, Mesh-capable)
 Any model with the standard web admin interface, used in AP mode or AiMesh:
@@ -392,7 +398,7 @@ Source code: https://github.com/yo1t/egressview
 
 ## Trademarks
 
-AWS Kiro, Anthropic Claude, Anysphere Cursor, Yamaha, ASUS, and other product names are trademarks or registered trademarks of their respective owners. EgressView is not affiliated with, endorsed by, or sponsored by those companies.
+AWS Kiro, Anthropic Claude, Anysphere Cursor, Cisco, Cisco IOS, Yamaha, ASUS, and other product names are trademarks or registered trademarks of their respective owners. EgressView is not affiliated with, endorsed by, or sponsored by those companies.
 
 ## Contributing
 

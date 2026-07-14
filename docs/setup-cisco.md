@@ -111,7 +111,7 @@ enable
 
 ## Step 5 — Enter the settings in EgressView
 
-Open Settings → `L3/L4` and fill in:
+Open Settings → `L3/L4`, add a router row, and fill in:
 
 | Field | Value |
 |-------|-------|
@@ -122,6 +122,8 @@ Open Settings → `L3/L4` and fill in:
 
 Use **Connect & Auto-detect** first, then save the settings if the checks succeed.
 
+You can enable up to 10 Yamaha RTX and Cisco IOS routers in any combination. Give every physical or logical router a unique name; EgressView assigns and persists a stable router ID, polls each router independently, and retains all observing router IDs when multiple routers report the same connection.
+
 ---
 
 ## Current limitations
@@ -129,6 +131,8 @@ Use **Connect & Auto-detect** first, then save the settings if the checks succee
 - Physical validation currently covers C841M-4X-JSEC/K9 / IOS 15.5(3)M9; other IOS platforms depend on CLI compatibility
 - `enable` password flows may differ by prompt style and privilege model
 - NAT command output formats can vary between models
-- The current release supports one Yamaha and one Cisco router; arbitrary same-vendor multi-router registration is planned separately
+- Multi-router automation covers 10 mixed fake routers, concurrency capped at 3, one-router failure isolation, and deduplication
+- Physical supplementary testing used one Cisco and one Yamaha, each registered twice under distinct router IDs; this does not validate multiple distinct same-vendor units
+- EgressView observes router state but does not configure or control HSRP/VRRP, synchronize NAT state, or perform failover
 
 Reports from other models and redacted output fixtures are welcome.

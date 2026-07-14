@@ -4,7 +4,7 @@
 
 スマートTVが見知らぬサーバーと通信していないか？IPカメラやIoT機器、NASが許可していない接続をしていないか？EgressViewは、LAN内の全デバイスが外部と行う通信を**パッシブに監視**し、グラフマップ/統計情報で全体像を把握し、通信ログ/端末一覧で詳細へドリルダウンできます。脅威フィードとの自動照合、Slack通知に対応。
 
-追加ハードウェア不要。通信の中継・傍受も不要。既存のYamaha RTXルーターのNATセッションテーブルを読み取るだけで動作します。AWS Kiro・Anthropic Claude・Anysphere Cursor 等の AI アシスタントは、内蔵 MCP サーバーを通じて EgressView に直接アクセスできます — 自然言語でネットワーク状況を問い合わせるだけ。
+追加ハードウェア不要。通信の中継・傍受も不要。既存のYamaha RTXとCisco IOSルーターのNATセッションテーブルを読み取るだけで動作します。AWS Kiro・Anthropic Claude・Anysphere Cursor 等の AI アシスタントは、内蔵 MCP サーバーを通じて EgressView に直接アクセスできます — 自然言語でネットワーク状況を問い合わせるだけ。
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
@@ -27,12 +27,12 @@ EgressViewは、多くの家庭ユーザーが答えを持てていない問い�
 - **デバイス単位の可視性** — OUI・mDNS・SSDP・NetBIOSによるデバイス識別で、どの機器が何と通信しているかを把握
 - **自動脅威検出** — Feodo Tracker・ThreatFox・URLhaus・Spamhaus DROPとリアルタイムに全接続を照合
 - **即時Slackアラート** — 任意のデバイスが既知のC2サーバーやマルウェア配布元に接続した瞬間にDM通知
-- **ハードウェア変更不要** — Mac・PC・Raspberry Piにインストールするだけ。既存のYamaha RTXルーターと共存
+- **ハードウェア変更不要** — Mac・PC・Raspberry Piにインストールするだけ。既存のYamaha RTX / Cisco IOSルーターと共存
 
 ## 概要
 
-- **Yamaha RTX** ルーターにSSH接続し、NATセッションテーブルを60秒ごとに取得
-- **Cisco IOS (SSH)** のNATセッション取得に正式対応（実機検証済み）
+- **Yamaha RTX / Cisco IOS** ルーターにSSH接続し、NATセッションテーブルを60秒ごとに取得
+- Yamaha/Ciscoを任意に組み合わせて**最大10台**登録。障害をルーター単位で分離し、同じ通信は観測ルーターを保持したまま重複排除
 - **[INSPECT] syslog 補完** — Yamaha syslog をリアルタイムで監視し、60秒ポーリングの間に完了した短命 TCP セッションを補完
 - **dnsmasq DNS クエリログ** — EC2/サーバー側の dnsmasq ログを監視し、デバイスごとの DNS 解決結果（例: `example.com`）を宛先ホスト名に反映。逆引き DNS より優先
 - **[DHCPD] syslog 追跡** — Yamaha の DHCP イベント（Allocates/Extends）をリアルタイムで解析し、IP→MAC マッピングを維持
@@ -103,11 +103,10 @@ https://github.com/user-attachments/assets/9448d75b-a7fe-4363-8d35-da17abaed0ee
 ## 動作要件
 
 - **Node.js** 22以上
-- **Yamaha RTX** ルーター（SSH有効化済み）— RTX1200, RTX1210, RTX1220, RTX1300 等
-- （任意）**Cisco IOS** ルータ（SSH有効化済み）
+- SSHを有効にした対応NATルーターが1台以上: **Yamaha RTX** または **Cisco IOS**
 - （任意）**ASUS WiFi アクセスポイント**（Web管理画面が有効、APモード/AiMeshとして使用）
 
-Cisco IOS対応はC841M-4X-JSEC/K9（IOS 15.5(3)M9）でSSH、enable、NAT/ARP/NDP、verbose、TOFU、自動再接続を実機検証しています。機種固有の出力差を見つけた場合はIssueで共有してください。
+Cisco IOS対応はC841M-4X-JSEC/K9（IOS 15.5(3)M9）でSSH、enable、NAT/ARP/NDP、verbose、TOFU、自動再接続を実機検証しています。複数ルーター動作はYamaha/Cisco混在のfake router 10台で自動検証し、Cisco実機1台とYamaha実機1台を別routerIdで各2重登録する補足試験も行いました。これは並列収集と重複排除の確認であり、物理冗長化、状態同期、実フェイルオーバーの検証ではありません。機種固有の出力差を見つけた場合はIssueで共有してください。
 
 ## AIエージェント連携（MCP）
 
@@ -170,8 +169,9 @@ DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start
 
 | パターン | 向いている場合 | 最初に設定するもの |
 |---------|---------------|-------------------|
-| 最小構成: Yamaha RTX のみ | 追加機器なしで最短起動したい | Yamaha IP、SSHユーザー名、SSHパスワードを入力して **接続して自動検出** |
-| 推奨構成: Yamaha RTX + ASUS AP | WiFi端末名、ベンダー、MACも見たい | 最小構成のあと、ASUS AP の IP と管理ログイン |
+| 最小構成: Yamaha RTX または Cisco IOS 1台 | 追加機器なしで最短起動したい | 種類、IP、SSH認証情報を入力して **接続して自動検出** |
+| 複数ルーター: 最大10台 | 冗長ルーターや複数回線がある | Yamaha/Ciscoを名前付きの別行として追加 |
+| 任意: + ASUS AP | WiFi端末名、ベンダー、MACも見たい | ルーター設定のあと、ASUS AP の IP と管理ログイン |
 | 詳細構成: + dnsmasq / INSPECT / DHCPD | ホスト名、短命TCPセッション、IP→MACのリアルタイム追跡を強化したい | 推奨構成のあと、データソースを有効化 |
 | 通知構成: + Slack | 脅威検出をDMで受け取りたい | 上記いずれかの構成のあと、Slack通知を有効化 |
 
@@ -180,8 +180,7 @@ DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start
 | | 必要なもの | 設定ガイド |
 |--|-----------|-----------|
 | ✅ | Mac/PC/Raspberry Pi に Node.js 22以上をインストール | [nodejs.org](https://nodejs.org) |
-| ✅ | Yamaha RTX ルーターの SSH を有効化 | [設定ガイド →](docs/setup-yamaha.ja.md) |
-| ☐ | （任意）Cisco IOS ルータの SSH を有効化 | [設定ガイド →](docs/setup-cisco.ja.md) |
+| ✅ | Yamaha RTX または Cisco IOS ルーターを1台以上SSH有効化 | [Yamaha設定 →](docs/setup-yamaha.ja.md) / [Cisco設定 →](docs/setup-cisco.ja.md) |
 | ☐ | （任意）ASUS WiFi AP の Web 管理画面を有効化 | [設定ガイド →](docs/setup-asus.ja.md) |
 | ☐ | （任意）AI アシスタント連携（AWS Kiro・Anthropic Claude・Anysphere Cursor 等） | [設定ガイド →](docs/setup-mcp.ja.md) |
 
@@ -210,7 +209,7 @@ npm start
 
 ### Step 4 — ルーターの接続情報を設定
 
-設定パネル（⚙）を開いてルーター情報を入力します：
+設定 → **L3/L4** を開き、ルーターごとに別の行として追加します。Yamaha RTXとCisco IOSを任意に組み合わせ、最大10台まで有効化できます。
 
 | 項目 | 確認場所 |
 |------|---------|
@@ -219,9 +218,9 @@ npm start
 | Cisco IOS の IP / ユーザー名 / パスワード | [Cisco 設定ガイド](docs/setup-cisco.ja.md) で設定したもの |
 | ASUS AP の IP / パスワード | AP の LAN 側 IP と管理者パスワード（[ASUS 設定ガイド](docs/setup-asus.ja.md)） |
 
-Yamaha RTX は、IP・ユーザー名・パスワードを入力して **接続して自動検出** を押してください。SSH接続確認、NATディスクリプタ番号（通常は `100`）、LAN IP、NAT sessions の取得可否を確認し、保存前に推奨設定をフォームへ反映します。
+各Yamaha RTXは、IP・ユーザー名・パスワードを入力して **接続して自動検出** を押してください。SSH接続確認、NATディスクリプタ番号（通常は `100`）、LAN IP、NAT sessions の取得可否を確認し、保存前に推奨設定をフォームへ反映します。
 
-Cisco IOSも設定画面から **接続して自動検出** と保存ができます。NAT insideインターフェースを使ってLAN側IPを判定します。
+各Cisco IOSも **接続して自動検出** でSSHとNAT取得を確認できます。NAT insideインターフェースを使ってLAN側IPを判定します。全体の同時ポーリングを最大3台に制限しながら各ルーターを独立して扱うため、1台の停止が他の収集を止めません。
 
 数秒後にデバイス、セッション、統計情報がUIに表示されはじめます。
 
@@ -357,6 +356,8 @@ ASUSデバイスは**WiFiアクセスポイント（APモードまたはAiMesh�
 
 ## 対応ルーター
 
+L3/L4ルーターはYamaha/Ciscoを任意に組み合わせて最大10台まで有効化できます。複数ルーターが同じ通信を観測した場合は、すべての観測元routerIdを保持して1通信に重複排除します。
+
 ### Cisco IOS（L3/L4）
 - 実機検証済み: C841M-4X-JSEC/K9、IOS 15.5(3)M9
 - `show ip nat translations verbose`対応機では生成時刻と実測TTLを取得。未対応機は通常出力へ自動フォールバック
@@ -366,6 +367,11 @@ SSH接続とNATディスクリプタに対応した全モデル：
 - RTX1200, RTX1210, RTX1220, RTX1300
 - RTX810, RTX830
 - NVR500, NVR510, NVR700W
+
+### 複数ルーター検証の範囲
+- 自動試験: Yamaha/Cisco混在fake router 10台、各1,000セッション、同時接続最大3、障害分離、決定的な重複排除
+- 実機補足試験: Cisco実機1台とYamaha実機1台を、それぞれ異なるrouterIdで2重登録
+- 未実機検証: 同一メーカーの異なる実機複数台、HSRP/VRRP、NAT状態同期、実フェイルオーバー
 
 ### ASUS WiFi アクセスポイント（L2、Mesh対応）
 標準Web管理インターフェースを持つ全モデル（APモードまたはAiMeshで使用）：
@@ -393,7 +399,7 @@ Copyright (C) 2025 Yoichi Takizawa
 
 ## 商標について
 
-AWS Kiro、Anthropic Claude、Anysphere Cursor、Yamaha、ASUS などの製品名は、各社の商標または登録商標です。EgressView はこれらの企業と提携・承認・後援関係にありません。
+AWS Kiro、Anthropic Claude、Anysphere Cursor、Cisco、Cisco IOS、Yamaha、ASUS などの製品名は、各社の商標または登録商標です。EgressView はこれらの企業と提携・承認・後援関係にありません。
 
 ## コントリビュート
 

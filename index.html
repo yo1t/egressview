@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EgressView — Home / SOHO Network Security Monitor</title>
-  <meta name="description" content="Where Is Data Exiting? Map All Paths. Passively monitor every LAN device's outbound connections. Use Graph Map and Statistics for whole-network overview, then drill down in Connection Log and Devices. Automatic C2/botnet threat detection, Slack alerts. Works with Yamaha RTX routers — no new hardware required.">
-  <meta name="keywords" content="network security monitor, IoT security, home network security, SOHO security, Yamaha RTX, network visualizer, C2 detection, botnet detection, threat intelligence, LAN monitor, open source">
+  <meta name="description" content="Where Is Data Exiting? Map All Paths. Passively monitor outbound connections through up to 10 Yamaha RTX and Cisco IOS routers. Graph Map, statistics, C2/botnet detection, and Slack alerts — no new hardware required.">
+  <meta name="keywords" content="network security monitor, IoT security, home network security, SOHO security, Yamaha RTX, Cisco IOS, network visualizer, C2 detection, botnet detection, threat intelligence, LAN monitor, open source">
   <meta name="author" content="Yoichi Takizawa">
   <link rel="canonical" href="https://yo1t.github.io/egressview/">
   <meta property="og:title" content="EgressView — Home / SOHO Network Security Monitor">
@@ -238,7 +238,7 @@
       </div>
       <div class="card">
         <h3>No Hardware Changes</h3>
-        <p>Works with your existing Yamaha RTX router. Install on any Mac, PC, or Raspberry Pi on your LAN — nothing inline, nothing between your router and the internet.</p>
+        <p>Works with your existing Yamaha RTX and Cisco IOS routers. Install on any Mac, PC, or Raspberry Pi on your LAN — nothing inline, nothing between your router and the internet.</p>
       </div>
       <div class="card">
         <h3>Fully Local &amp; Private</h3>
@@ -261,7 +261,7 @@
       </div>
       <div class="card">
         <h3>Formal Cisco IOS Support</h3>
-        <p>Collects NAT sessions over SSH. Verbose-capable devices add creation age and measured TTL; older IOS, enable, TOFU, and reconnect paths are physically validated.</p>
+        <p>Collects NAT sessions over SSH. Use Cisco alone or mix up to 10 Yamaha/Cisco routers; polling failures are isolated and duplicate observations are merged.</p>
       </div>
       <div class="card">
         <h3>ASUS WiFi AP Support</h3>
@@ -381,13 +381,8 @@
         </tr>
         <tr style="border-bottom:1px solid var(--border);">
           <td style="padding:8px 6px;">✅</td>
-          <td style="padding:8px 6px;">Yamaha RTX router — SSH access enabled</td>
-          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.md">Setup guide →</a></td>
-        </tr>
-        <tr style="border-bottom:1px solid var(--border);">
-          <td style="padding:8px 6px; color:var(--muted);">☐</td>
-          <td style="padding:8px 6px; color:var(--muted);">(Optional) Cisco IOS router — SSH access enabled</td>
-          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-cisco.md">Setup guide →</a></td>
+          <td style="padding:8px 6px;">At least one Yamaha RTX or Cisco IOS router — SSH enabled</td>
+          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.md">Yamaha</a> / <a href="https://github.com/yo1t/egressview/blob/main/docs/setup-cisco.md">Cisco →</a></td>
         </tr>
         <tr style="border-bottom:1px solid var(--border);">
           <td style="padding:8px 6px; color:var(--muted);">☐</td>
@@ -416,7 +411,7 @@ npm start</code></pre>
 ══════════════════════════════════════</span></code></pre>
       <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;">Open <code>http://localhost:3000</code> and enter the password.</p>
 
-      <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:8px;">Step 4 — Configure your router in Settings (⚙)</p>
+      <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:8px;">Step 4 — Add up to 10 routers in Settings → L3/L4</p>
       <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
         <tr style="border-bottom:1px solid var(--border);">
           <td style="padding:6px 8px; color:var(--muted);">Yamaha RTX IP</td>
@@ -435,7 +430,7 @@ npm start</code></pre>
           <td style="padding:6px 8px;">AP's LAN IP and admin password (<a href="https://github.com/yo1t/egressview/blob/main/docs/setup-asus.md">ASUS guide</a>)</td>
         </tr>
       </table>
-      <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;">For Yamaha RTX, click <strong>Connect &amp; Auto-detect</strong> after entering the IP, username, and password. EgressView verifies SSH access, detects the NAT descriptor, checks LAN IP and NAT sessions, then fills the recommended settings before you save.</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;">Add each Yamaha/Cisco router as a named row and click <strong>Connect &amp; Auto-detect</strong>. Routers are polled independently, and the same connection observed by several routers is stored once with every observer retained.</p>
       <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;">Devices, sessions, and statistics will start appearing in the UI within a few seconds.</p>
     </div>
   </section>
@@ -450,7 +445,7 @@ npm start</code></pre>
       </div>
       <div class="card">
         <h3>Cisco IOS (L3/L4)</h3>
-        <p>Physically validated on C841M-4X-JSEC/K9 with IOS 15.5(3)M9. Reports from compatible IOS platforms are welcome.</p>
+        <p>Physically validated on C841M-4X-JSEC/K9 with IOS 15.5(3)M9. Up to 10 mixed routers are automated-tested; physical HA and failover are not yet validated.</p>
       </div>
       <div class="card">
         <h3>ASUS WiFi AP (L2)</h3>
@@ -525,7 +520,7 @@ npm start</code></pre>
     <a href="https://github.com/yo1t/egressview">EgressView</a> is released under the
     <a href="https://github.com/yo1t/egressview/blob/main/LICENSE">AGPL-3.0 License</a>.
     &nbsp;·&nbsp;
-    Not affiliated with or endorsed by Yamaha or ASUS.
+    Not affiliated with or endorsed by Cisco, Yamaha, or ASUS.
     &nbsp;·&nbsp;
     Product names are trademarks of their respective owners.
   </p>
