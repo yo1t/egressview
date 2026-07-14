@@ -295,6 +295,15 @@ test('graph canvas renders after auth (P2-4: background fetch completes)', async
   await expect(graphContainer).toBeVisible();
   const childCount = await graphContainer.evaluate(el => el.children.length);
   expect(childCount, 'graph container should have rendered children after background fetch').toBeGreaterThan(0);
+
+  // P2-25: the renderer (graph-render.js) must actually draw node and link
+  // elements — container children alone would pass even if drawNodes broke.
+  await expect
+    .poll(() => page.locator('#graph g.node').count(), { timeout: 15_000 })
+    .toBeGreaterThan(0);
+  await expect
+    .poll(() => page.locator('#graph line').count(), { timeout: 15_000 })
+    .toBeGreaterThan(0);
 });
 
 test('no console errors after auth', async ({ page }) => {
