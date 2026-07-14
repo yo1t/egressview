@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EgressView — 家庭・SOHO向けネットワークセキュリティモニター</title>
-  <meta name="description" content="Where Is Data Exiting? Map All Paths. LAN内の全デバイスの通信先をパッシブに監視。グラフマップと統計情報で全体を把握し、通信ログと端末一覧で詳細へドリルダウン。C2/ボットネット自動検出、Slackアラート対応。Yamaha RTXルーター専用 — 追加ハードウェア不要。">
-  <meta name="keywords" content="ネットワークセキュリティ, IoTセキュリティ, ホームネットワークセキュリティ, SOHO, Yamaha RTX, ネットワーク可視化, C2検出, ボットネット検出, 脅威インテリジェンス, LAN監視, オープンソース">
+  <meta name="description" content="Where Is Data Exiting? Map All Paths. Yamaha RTX / Cisco IOSルーターを最大10台まで組み合わせ、LAN内の外向き通信をパッシブに可視化。C2/ボットネット自動検出、Slackアラート対応。">
+  <meta name="keywords" content="ネットワークセキュリティ, IoTセキュリティ, ホームネットワークセキュリティ, SOHO, Yamaha RTX, Cisco IOS, ネットワーク可視化, C2検出, ボットネット検出, 脅威インテリジェンス, LAN監視, オープンソース">
   <meta name="author" content="Yoichi Takizawa">
   <link rel="canonical" href="https://yo1t.github.io/egressview/index.ja.html">
   <meta property="og:title" content="EgressView — 家庭・SOHO向けネットワークセキュリティモニター">
@@ -238,7 +238,7 @@
       </div>
       <div class="card">
         <h3>ハードウェア変更不要</h3>
-        <p>既存のYamaha RTXルーターと共存。Mac・PC・Raspberry Piにインストールするだけ。通信経路の変更なし。</p>
+        <p>既存のYamaha RTX / Cisco IOSルーターと共存。Mac・PC・Raspberry Piにインストールするだけ。通信経路の変更なし。</p>
       </div>
       <div class="card">
         <h3>完全ローカル・プライバシー重視</h3>
@@ -261,7 +261,7 @@
       </div>
       <div class="card">
         <h3>Cisco IOS 正式対応</h3>
-        <p>SSHでNATセッションを取得。verbose対応機では生成時刻と実測TTLも反映し、旧IOS、enable、TOFU、自動再接続を実機検証済みです。</p>
+        <p>SSHでNATセッションを取得。Cisco単体またはYamaha/Cisco混在で最大10台に対応し、障害を分離して重複観測を統合します。</p>
       </div>
       <div class="card">
         <h3>ASUS WiFi AP 対応</h3>
@@ -381,13 +381,8 @@
         </tr>
         <tr style="border-bottom:1px solid var(--border);">
           <td style="padding:8px 6px;">✅</td>
-          <td style="padding:8px 6px;">Yamaha RTX ルーターの SSH を有効化</td>
-          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.ja.md">設定ガイド →</a></td>
-        </tr>
-        <tr style="border-bottom:1px solid var(--border);">
-          <td style="padding:8px 6px; color:var(--muted);">☐</td>
-          <td style="padding:8px 6px; color:var(--muted);">（任意）Cisco IOS ルータの SSH を有効化</td>
-          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-cisco.ja.md">設定ガイド →</a></td>
+          <td style="padding:8px 6px;">Yamaha RTXまたはCisco IOSルーターを1台以上SSH有効化</td>
+          <td style="padding:8px 6px; text-align:right;"><a href="https://github.com/yo1t/egressview/blob/main/docs/setup-yamaha.ja.md">Yamaha</a> / <a href="https://github.com/yo1t/egressview/blob/main/docs/setup-cisco.ja.md">Cisco →</a></td>
         </tr>
         <tr style="border-bottom:1px solid var(--border);">
           <td style="padding:8px 6px; color:var(--muted);">☐</td>
@@ -416,7 +411,7 @@ npm start</code></pre>
 ══════════════════════════════════════</span></code></pre>
       <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;"><code>http://localhost:3000</code> を開いてパスワードを入力してください。</p>
 
-      <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:8px;">Step 4 — 設定パネル（⚙）でルーター情報を入力</p>
+      <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:8px;">Step 4 — 設定 → L3/L4で最大10台のルーターを追加</p>
       <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
         <tr style="border-bottom:1px solid var(--border);">
           <td style="padding:6px 8px; color:var(--muted);">Yamaha RTX の IP</td>
@@ -435,7 +430,7 @@ npm start</code></pre>
           <td style="padding:6px 8px;">AP の LAN 側 IP と管理者パスワード（<a href="https://github.com/yo1t/egressview/blob/main/docs/setup-asus.ja.md">ASUS 設定ガイド</a>）</td>
         </tr>
       </table>
-      <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;">Yamaha RTX は、IP・ユーザー名・パスワードを入力後に <strong>接続して自動検出</strong> を押してください。SSH接続、NATディスクリプタ、LAN IP、NAT sessions を確認し、保存前に推奨設定を反映します。</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;">Yamaha/Ciscoをルーターごとの名前付き行として追加し、<strong>接続して自動検出</strong> を押してください。各ルーターを独立して収集し、同じ通信はすべての観測元を保持して1件に統合します。</p>
       <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;">数秒後にデバイス、セッション、統計情報がUIに表示されはじめます。</p>
     </div>
   </section>
@@ -450,7 +445,7 @@ npm start</code></pre>
       </div>
       <div class="card">
         <h3>Cisco IOS（L3/L4）</h3>
-        <p>C841M-4X-JSEC/K9（IOS 15.5(3)M9）で実機検証済み。互換CLIを持つIOS機器の動作報告も歓迎します。</p>
+        <p>C841M-4X-JSEC/K9（IOS 15.5(3)M9）で実機検証済み。混在10台は自動試験済みですが、物理HAと実フェイルオーバーは未検証です。</p>
       </div>
       <div class="card">
         <h3>ASUS WiFi AP（L2）</h3>
@@ -525,7 +520,7 @@ npm start</code></pre>
     <a href="https://github.com/yo1t/egressview">EgressView</a> は
     <a href="https://github.com/yo1t/egressview/blob/main/LICENSE">AGPL-3.0 ライセンス</a>で公開されています。
     &nbsp;·&nbsp;
-    Yamaha および ASUS とは無関係であり、推奨を受けていません。
+    Cisco、Yamaha および ASUS とは無関係であり、推奨を受けていません。
     &nbsp;·&nbsp;
     製品名は各社の商標または登録商標です。
   </p>
