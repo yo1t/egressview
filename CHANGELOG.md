@@ -4,6 +4,35 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-07-14
+
+### Added
+
+- Multi-router monitoring for up to 10 Yamaha RTX and Cisco IOS routers in any combination, with per-router settings, status, and graph identity.
+- Generic router registry and scheduler with staggered polling, a three-poll concurrency limit, timeout/backoff handling, and per-router failure isolation.
+- SQLite schema v4 observation junction table, retaining every observing router while storing duplicate connections only once.
+- Authenticated memory diagnostics endpoint and `EGRESSVIEW_HISTORY_HOT_MAX` configuration for bounded in-memory history.
+
+### Changed
+
+- Router pollers are now multi-instance factories, separating router type from persistent router identity.
+- Existing single Yamaha/Cisco settings migrate automatically to deterministic `yamaha1` / `cisco1` router records with a verified configuration backup.
+- Full connection history remains in SQLite while memory keeps the newest 100,000 entries by default; cold entries are hydrated on re-observation without losing `firstSeen` or observer data.
+- Database initialization now has an explicit bootstrap boundary so schema migration completes before sessions, devices, enrichment, and beacon connections open the database.
+- Documentation and GitHub Pages now describe formal Cisco-only, Yamaha-only, and mixed multi-router support and its physical-validation boundary.
+
+### Reliability
+
+- Pre-migration backups now fail closed: migrations stop on insufficient disk space, busy WAL checkpoints, copy failures, or failed backup integrity checks.
+- Migration completion verifies database integrity and schema version, with a clear backup-and-old-binary rollback path on failure.
+- Added a deterministic 10-router load gate covering 10,000 observations, concurrency limiting, deduplication, and continued collection when one router fails.
+- Replaced timing-dependent scheduler tests with injected timers.
+
+### Validation
+
+- Supplementally tested one physical Cisco and one physical Yamaha registered under two router IDs each, confirming parallel collection and duplicate-observer tracking. This does not claim physical HA or failover validation.
+- On the production-sized EC2 database, bounded history reduced RSS from approximately 995 MB to 604 MB while retaining all 216,000+ persisted connections.
+
 ## [1.3.0] - 2026-07-12
 
 ### Added
