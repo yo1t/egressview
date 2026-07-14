@@ -1,6 +1,6 @@
 // ─── D3 Graph Setup ───────────────────────────────────────────────────────────
 import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE, fmtBytes, nodeColor, isWiredType } from './utils.js?v=__ASSET_VERSION__';
+import { _BASE, fmtBytes } from './utils.js?v=__ASSET_VERSION__';
 import { getFilteredConnections, getTimeRange, currentTimeFilter, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
 import { statsMode, nlMode, logMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { apiFetch, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
@@ -9,10 +9,12 @@ import { flagEmoji, meshNodeId, normalizeGraphLinks, currentGraphRangeKey as _ra
 import { updateStats } from './stats.js?v=__ASSET_VERSION__';
 import { updateLogView } from './log.js?v=__ASSET_VERSION__';
 import { nlRender } from './notif-log.js?v=__ASSET_VERSION__';
-// Tooltip and side panel rendering (P2-25 stage 2). Re-exported below so
-// existing importers keep using './graph.js' as the entry point.
-import { showTooltip, moveTooltip, hideTooltip, updateFilterTabs, updateSidePanel, updateSideHighlight, applyFilter } from './graph-panels.js?v=__ASSET_VERSION__';
+// Tooltip / side panel (P2-25 stage 2) and D3 renderer (stage 3).
+// Re-exported below so existing importers keep using './graph.js'.
+import { updateFilterTabs, updateSidePanel, updateSideHighlight, applyFilter } from './graph-panels.js?v=__ASSET_VERSION__';
 export { showTooltip, moveTooltip, hideTooltip, setGraphDevicesDataRef } from './graph-panels.js?v=__ASSET_VERSION__';
+import { initGraphRenderer, syncSimulation, drawLinks, drawNodes, applyGraphFilter, resetRenderer, simulation } from './graph-render.js?v=__ASSET_VERSION__';
+export { simulation, applyGraphFilter } from './graph-render.js?v=__ASSET_VERSION__';
 
 const svg = d3.select('#graph');
 let width = 0, height = 0;
@@ -132,10 +134,10 @@ function scheduleGraphAutoFit({ delayedData = false } = {}) {
     }, delay));
   });
 }
-const linkGroup = g.append('g');
-const nodeGroup = g.append('g');
+// The renderer owns the link/node SVG groups and the force simulation;
+// node clicks come back through handleNodeClick (hoisted, defined below).
+initGraphRenderer({ container: g, onNodeClick: (e, d) => handleNodeClick(e, d) });
 
-let simulation = null;
 let nodes = [], links = [];
 let maxRate = 1024 * 512;
 let selectedMac = null;
@@ -318,261 +320,29 @@ function updateSimulation(satellites) {
   if (!width || !height) resize({ refreshStats: false });
   if (!width || !height) return;
   links = normalizeGraphLinks(links, nodes);
-  const cx = width / 2, cy = height / 2;
-  const internet = nodes.find(n => n.id === '__internet__');
-  const router = nodes.find(n => n.id === '__router__');
-  const extraRouterNodes = nodes.filter(n => n.type === 'router' && n.id !== '__router__');
-  // Anchor router/internet nodes to the bottom
-  if (extraRouterNodes.length > 0) {
-    // Multi-router: internet center, routers spread left/right
-    if (internet) { internet.fx = cx;        internet.fy = height * 0.82; }
-    if (router)   { router.fx  = cx - 140;   router.fy  = height * 0.82; }
-    extraRouterNodes.forEach((r, i) => {
-      r.fx = cx + 140 * (i + 1);
-      r.fy = height * 0.82;
-    });
-  } else {
-    if (internet) { internet.fx = cx - 160; internet.fy = height * 0.82; }
-    if (router)   { router.fx  = cx;        router.fy  = height * 0.82; }
-  }
+  syncSimulation({ satellites, satelliteNodeId: sat => meshNodeId(sat.mac), width, height });
+}
 
-  // Initial placement of satellites at the bottom (when not yet positioned)
-  satellites.forEach((sat, i) => {
-    const sn = nodes.find(n => n.id === meshNodeId(sat.mac));
-    if (sn && !sn.x) {
-      const angle = Math.PI + (i - (satellites.length-1)/2) * 0.4;
-      sn.x = cx + 160 * Math.cos(angle);
-      sn.y = height * 0.82 + 80 * Math.sin(angle);
+// Node click handler injected into graph-render.js: selection state and the
+// cross-view refreshes live here, the D3 event wiring lives in the renderer.
+function handleNodeClick(e, d) {
+  selectedMac = d.id === selectedMac ? null : d.id;
+  const selNode = nodes.find(n => n.id === selectedMac);
+  selectedIp = selectedMac ? (selNode?.client?.ip || null) : null;
+  updateSideHighlight();
+  applyGraphFilter();
+  if (statsMode) updateStats();
+  updateConnPanel(selectedIp);
+  if (logMode) {
+    if (selectedMac) {
+      const tb = document.getElementById('log-tbody');
+      if (tb) tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--muted)"><span class="spinner-xs"></span> ${t('data.loading') || '読み込み中'}</td></tr>`;
     }
-  });
-
-  // Target Y per node type
-  const targetY = d => {
-    if (d.type === 'org')    return height * 0.22; // destinations: top
-    if (d.type === 'client') return height * 0.72; // clients: bottom
-    return height * 0.78;                          // mesh etc.: lower
-  };
-
-  nodes.forEach((n, i) => {
-    if (!Number.isFinite(n.x)) n.x = cx + Math.cos(i) * 40;
-    if (!Number.isFinite(n.y)) n.y = cy + Math.sin(i) * 40;
-    if (!Number.isFinite(n.vx)) n.vx = 0;
-    if (!Number.isFinite(n.vy)) n.vy = 0;
-  });
-  const strengthY = d => {
-    if (d.type === 'org')    return 0.15;
-    if (d.type === 'client') return 0.06;
-    return 0;
-  };
-
-  if (!simulation) {
-    simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).id(d => d.id)
-        .distance(d => d.ltype === 'mesh' ? 180 : d.ltype === 'dev-org' ? 260 : 110)
-        .strength(d => d.ltype === 'dev-org' ? 0.04 : 0.5))
-      .force('charge', d3.forceManyBody().strength(-250))
-      .force('collide', d3.forceCollide(38))
-      .force('x-center', d3.forceX(cx).strength(0.04))
-      .force('y-split',  d3.forceY(targetY).strength(strengthY))
-      .on('tick', ticked);
-  } else {
-    simulation.nodes(nodes);
-    simulation.force('link').links(links);
-    simulation.force('x-center', d3.forceX(cx).strength(0.04));
-    simulation.force('y-split',  d3.forceY(targetY).strength(strengthY));
-    simulation.alpha(0.4).restart();
+    updateLogView();
   }
-  drawLinks(); drawNodes(); applyGraphFilter();
+  if (nlMode) nlRender();
 }
 
-function drawLinks() {
-  const link = linkGroup.selectAll('line').data(links, d => d.id);
-  link.enter().append('line')
-    .attr('marker-end', d => d.ltype === 'wan' ? 'url(#marker-router)' : d.ltype === 'mesh' ? 'url(#marker-meshnode)' : d.ltype === 'dev-org' ? 'url(#marker-org)' : 'url(#marker-client)')
-    .merge(link)
-    .attr('stroke-width', d => {
-      if (d.ltype === 'mesh') return 2;
-      if (d.ltype === 'dev-org') return Math.max(1, Math.min(d.summary ? 8 : 5, 1 + Math.log((d.sessionCount || 1) + 1)));
-      const r = Math.max(d.rxRate || 0, d.txRate || 0);
-      return Math.max(1, Math.min(8, 1 + r / (maxRate / 7)));
-    })
-    .attr('stroke', d => {
-      if (d.ltype === 'mesh') return '#f97316';
-      if (d.ltype === 'dev-org') return d.summary ? '#c4b5fd' : '#7c3aed';
-      const r = Math.max(d.rxRate || 0, d.txRate || 0);
-      return r > maxRate * 0.5 ? '#ef4444' : r > maxRate * 0.1 ? '#f59e0b' : r > 0 ? '#3b82f6' : '#1f2937';
-    })
-    .attr('stroke-dasharray', d => d.ltype === 'mesh' ? '6,3' : d.ltype === 'dev-org' ? (d.summary ? '2,5' : '4,3') : null)
-    .attr('opacity', d => d.ltype === 'mesh' ? 0.6 : d.ltype === 'dev-org' ? (d.summary ? 0.72 : 0.45) : Math.max(d.rxRate || 0, d.txRate || 0) > 0 ? 0.9 : 0.35);
-  link.exit().remove();
-}
-
-function drawNodes() {
-  const node = nodeGroup.selectAll('g.node').data(nodes, d => d.id);
-  const entered = node.enter().append('g').attr('class', 'node')
-    .call(d3.drag()
-      .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-      .on('drag',  (e, d) => { if (!d.fixed) { d.fx = e.x; d.fy = e.y; } })
-      .on('end',   (e, d) => { if (!e.active) simulation.alphaTarget(0); if (!d.fixed) { d.fx = null; d.fy = null; } })
-    )
-    .on('click', (e, d) => {
-      selectedMac = d.id === selectedMac ? null : d.id;
-      const selNode = nodes.find(n => n.id === selectedMac);
-      selectedIp = selectedMac ? (selNode?.client?.ip || null) : null;
-      updateSideHighlight();
-      applyGraphFilter();
-      if (statsMode) updateStats();
-      updateConnPanel(selectedIp);
-      if (logMode) {
-        if (selectedMac) {
-          const tb = document.getElementById('log-tbody');
-          if (tb) tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--muted)"><span class="spinner-xs"></span> ${t('data.loading') || '読み込み中'}</td></tr>`;
-        }
-        updateLogView();
-      }
-      if (nlMode) nlRender();
-    })
-    .on('mouseenter', showTooltip).on('mousemove', moveTooltip).on('mouseleave', hideTooltip);
-
-  const orgR = d => 13 + Math.min(9, Math.log((d.totalSessions || 1) + 1) * 2.5);
-
-  entered.append('circle')
-    .attr('r', d => d.type === 'router' ? 22 : d.type === 'internet' ? 18 : d.type === 'meshnode' ? 20 : d.type === 'org' ? orgR(d) : 16)
-    .attr('fill', d => {
-      if (d.type === 'router') return '#f59e0b';
-      if (d.type === 'internet') return '#374151';
-      if (d.type === 'meshnode') return '#f97316';
-      if (d.type === 'org') return d.summary ? '#1e1b4b' : '#3b0764';
-      return nodeColor(d.client?.type || '0');
-    })
-    .attr('stroke', d => {
-      if (d.type === 'router') return '#fbbf24';
-      if (d.type === 'internet') return '#6b7280';
-      if (d.type === 'meshnode') return '#fb923c';
-      if (d.type === 'org') return d.summary ? '#c4b5fd' : '#7c3aed';
-      return nodeColor(d.client?.type || '0');
-    })
-    .attr('stroke-width', d => d.summary ? 3 : 2).attr('fill-opacity', d => d.summary ? 0.72 : 0.85)
-    .attr('filter', d => (d.type === 'router' || d.type === 'meshnode') ? 'url(#glow)' : null);
-
-  entered.append('text')
-    .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
-    .attr('font-size', d => d.type === 'router' || d.type === 'meshnode' ? '14px' : d.type === 'org' ? '13px' : '12px').attr('fill', '#fff')
-    .text(d => d.type === 'router' ? '⬡' : d.type === 'meshnode' ? '⬡' : d.type === 'internet' ? '🌐' : d.type === 'org' ? (d.summary ? 'Σ' : (d.flag || '🌐')) : d.client?.summarySessions ? 'Σ' : isWiredType(d.client?.type) ? '🖥' : '📶');
-
-  entered.append('text').attr('class', 'node-label')
-    .attr('text-anchor', 'middle').attr('fill', '#e2e8f0')
-    .attr('font-size', '10px').attr('font-family', 'SF Mono,Fira Code,monospace');
-
-  nodeGroup.selectAll('g.node text.node-label').data(nodes, d => d.id)
-    .attr('dy', d => (d.type === 'router' || d.type === 'meshnode') ? 32 : d.type === 'org' ? orgR(d) + 12 : 28)
-    .text(d => {
-      if (d.type === 'router') return d.label || 'Router';
-      if (d.type === 'meshnode') return d.label || 'AiMesh';
-      if (d.type === 'internet') return 'Internet';
-      if (d.type === 'org') return d.label.length > 13 ? d.label.slice(0, 12) + '…' : d.label;
-      return d.label.length > 16 ? d.label.slice(0, 15) + '…' : d.label;
-    });
-  node.exit().remove();
-}
-
-function ticked() {
-  linkGroup.selectAll('line')
-    .attr('x1', d => Number.isFinite(d.source.x) ? d.source.x : 0)
-    .attr('y1', d => Number.isFinite(d.source.y) ? d.source.y : 0)
-    .attr('x2', d => Number.isFinite(d.target.x) ? d.target.x : 0)
-    .attr('y2', d => Number.isFinite(d.target.y) ? d.target.y : 0);
-  nodeGroup.selectAll('g.node').attr('transform', d => `translate(${Number.isFinite(d.x) ? d.x : 0},${Number.isFinite(d.y) ? d.y : 0})`);
-}
-
-// ─── Tooltip ──────────────────────────────────────────────────────────────────
-function applyGraphFilter() {
-  if (!simulation) return;
-
-  const sel = selectedMac;
-  const selNode = sel ? nodes.find(n => n.id === sel) : null;
-  const searchRaw = (document.getElementById('device-search-input')?.value || '').trim().toLowerCase();
-
-  // ── No filter ──────────────────────────────────────────────
-  if (!sel && !searchRaw) {
-    nodeGroup.selectAll('g.node').style('opacity', null).style('pointer-events', null);
-    linkGroup.selectAll('line').style('opacity', null);
-    return;
-  }
-
-  // Infrastructure nodes (always shown)
-  const infraIds = new Set([
-    '__internet__',
-    ...nodes.filter(n => n.type === 'router').map(n => n.id),
-    ...nodes.filter(n => n.type === 'meshnode').map(n => n.id),
-  ]);
-
-  // ── Client selected → selection filter has priority ────────
-  if (sel && selNode && selNode.type === 'client') {
-    const orgIds = orgIdsOf(new Set([sel]));
-    const visibleIds = new Set([...infraIds, sel, ...orgIds]);
-
-    nodeGroup.selectAll('g.node')
-      .style('opacity', d => visibleIds.has(d.id) ? 1 : 0.07)
-      .style('pointer-events', d => visibleIds.has(d.id) ? 'all' : 'none');
-
-    linkGroup.selectAll('line').style('opacity', d => {
-      const src = typeof d.source === 'object' ? d.source.id : d.source;
-      const tgt = typeof d.target === 'object' ? d.target.id : d.target;
-      if (d.ltype === 'wan')  return 0.4;
-      if (d.ltype === 'mesh') return 0.3;
-      if (src === sel || tgt === sel) return 0.9;
-      return 0.04;
-    });
-    return;
-  }
-
-  // ── Search text present → search filter ──────────────────
-  if (searchRaw) {
-    const matchedIds = new Set(
-      nodes
-        .filter(n => {
-          if (n.type !== 'client') return false;
-          return (n.client?.name || '').toLowerCase().includes(searchRaw)
-            || (n.client?.ip   || '').toLowerCase().includes(searchRaw)
-            || (n.id           || '').toLowerCase().includes(searchRaw);
-        })
-        .map(n => n.id)
-    );
-    const orgIds = orgIdsOf(matchedIds);
-    const visibleIds = new Set([...infraIds, ...matchedIds, ...orgIds]);
-
-    nodeGroup.selectAll('g.node')
-      .style('opacity', d => visibleIds.has(d.id) ? 1 : 0.07)
-      .style('pointer-events', d => visibleIds.has(d.id) ? 'all' : 'none');
-
-    linkGroup.selectAll('line').style('opacity', d => {
-      const src = typeof d.source === 'object' ? d.source.id : d.source;
-      const tgt = typeof d.target === 'object' ? d.target.id : d.target;
-      if (d.ltype === 'wan')  return 0.4;
-      if (d.ltype === 'mesh') return 0.3;
-      if (matchedIds.has(src) || matchedIds.has(tgt)) return 0.8;
-      return 0.04;
-    });
-    return;
-  }
-
-  // sel is set but not a client (router etc.) → no filter
-  nodeGroup.selectAll('g.node').style('opacity', null).style('pointer-events', null);
-  linkGroup.selectAll('line').style('opacity', null);
-}
-
-// Return org node IDs that the given set of client IDs connects to
-function orgIdsOf(clientIdSet) {
-  return new Set(
-    links
-      .filter(l => {
-        const src = typeof l.source === 'object' ? l.source.id : l.source;
-        return l.ltype === 'dev-org' && clientIdSet.has(src);
-      })
-      .map(l => typeof l.target === 'object' ? l.target.id : l.target)
-  );
-}
 function updateHeader(data) {
   document.getElementById('hdr-devices').textContent = (data.clients||[]).length;
   document.getElementById('hdr-wan-rx').textContent = fmtBytes(data.wanRx);
@@ -816,10 +586,8 @@ function showToast(message, durationMs = 5000) {
 }
 
 function stopGraph() {
-  if (simulation) { simulation.stop(); simulation = null; }
+  resetRenderer();
   nodes = []; links = [];
-  linkGroup.selectAll('*').remove();
-  nodeGroup.selectAll('*').remove();
   // Clear ASUS-derived caches too (prevents stale mesh-badge display)
   lastMeshNodes = [];
   lastClients = [];
@@ -828,7 +596,7 @@ function stopGraph() {
   document.getElementById('conn-panel').style.display = 'none';
 }
 
-export { selectedMac, selectedIp, nodes, graphSummary, graphSummaryKey, buildGraph, buildGraphFromConnections, buildGraphFromSummary, updateOrgGraph, stopGraph, showToast, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, currentGraphRangeKey, updateSideHighlight, initGraph, lastMeshNodes, lastRouterIp, lastClients, lastMainMac, updateFilterTabs, applyFilter, applyGraphFilter, simulation };
+export { selectedMac, selectedIp, nodes, links, graphSummary, graphSummaryKey, buildGraph, buildGraphFromConnections, buildGraphFromSummary, updateOrgGraph, stopGraph, showToast, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, currentGraphRangeKey, updateSideHighlight, initGraph, lastMeshNodes, lastRouterIp, lastClients, lastMainMac, updateFilterTabs, applyFilter };
 export function clearSelection() { selectedMac = null; selectedIp = null; }
 export function setSelection(mac, ip) { selectedMac = mac; selectedIp = ip; }
 export function resizeGraph(opts) { return resize(opts); }
