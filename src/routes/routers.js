@@ -1,12 +1,18 @@
 'use strict';
 
 const { Router } = require('express');
+const PROCESS_STARTED_AT = Date.now();
 
 module.exports = function routerRoutes({ requireAdmin, routerManager }) {
   const router = Router();
 
   router.get('/routers', requireAdmin, (_req, res) => {
-    res.json({ routers: routerManager.list(), maxRouters: 10, serverTime: Date.now() });
+    res.json({
+      routers: routerManager.list(),
+      maxRouters: 10,
+      serverTime: Date.now(),
+      processStartedAt: PROCESS_STARTED_AT,
+    });
   });
 
   router.post('/routers/detect', requireAdmin, async (req, res) => {
