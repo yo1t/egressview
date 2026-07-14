@@ -21,7 +21,7 @@ describe('soak observation record', () => {
         { id: 'cisco1', kind: 'cisco', enabled: true, lastSuccessAt: NOW - 2000 },
       ],
       version: '1.3.5',
-      commit: 'abcdef1234567',
+      commit: 'abc1234',
       durationMs: 12.4,
       now: NOW,
       processStartedAt: NOW - 60_000,
@@ -56,7 +56,7 @@ describe('soak observation record', () => {
     const records = Array.from({ length: 8 }, (_, index) => ({
       checkedAt: new Date(NOW + index * 24 * 60 * 60 * 1000).toISOString(),
       version: '1.3.5',
-      commit: 'abcdef1234567',
+      commit: 'abc1234',
       processStartedAt: new Date(NOW - 60_000 + (index >= 4 ? 30_000 : 0)).toISOString(),
       passed: true,
     }));
