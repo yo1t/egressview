@@ -40,6 +40,11 @@ node_modules/
 .oui_cache.txt
 server.log
 *.log
+# EC2 soak monitoring: runtime evidence and credentials stay local.
+.egressview-soak.jsonl
+*.soak.jsonl
+*.soak.log
+soak.env
 # デプロイ用スクリプト（環境固有）
 scripts/deploy-ec2.sh
 scripts/start.sh

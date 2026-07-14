@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const { runMigrations } = require('./db-migrate');
 const { MIGRATED_IDS, expandSourceToRouterIds, routerKindForId } = require('./router-id');
+const { checkObservationConsistency: checkConsistency } = require('./observation-consistency');
 
 const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
   ? path.resolve(process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB)
@@ -451,9 +452,9 @@ function loadConnectionHistory(dbPath, opts = {}) {
   // Startup diagnostic for the v4 dual-write window: counts only, no traffic data.
   const consistency = checkObservationConsistency();
   if (consistency) {
-    const { missingObservations, orphanObservations, underMerged } = consistency;
-    if (missingObservations || orphanObservations || underMerged) {
-      logger.error(`[history] observation consistency MISMATCH: missing=${missingObservations} orphans=${orphanObservations} underMerged=${underMerged}`);
+    const { missingObservations, orphanObservations, underMerged, kindMismatches } = consistency;
+    if (missingObservations || orphanObservations || underMerged || kindMismatches) {
+      logger.error(`[history] observation consistency MISMATCH: missing=${missingObservations} orphans=${orphanObservations} underMerged=${underMerged} kindMismatches=${kindMismatches}`);
     } else {
       logger.info('[history] observation consistency OK (source and junction agree)');
     }
@@ -501,34 +502,12 @@ function compactHistoryLog() {
 
 /**
  * Diagnostic comparison of the legacy source column and the junction table
- * (v4 compatibility window). All three counters must stay 0; v5 may drop the
+ * (v4 compatibility window). All counters must stay 0; v5 may drop the
  * source column only after production runs show sustained zeroes.
  * No IP/MAC values are included — counts only.
  */
 function checkObservationConsistency() {
-  if (!db) return null;
-  const missingObservations = db.prepare(`
-    SELECT COUNT(*) AS n FROM connections c
-    LEFT JOIN (
-      SELECT src, dst, dport, proto, COUNT(*) AS obs
-      FROM connection_observations GROUP BY src, dst, dport, proto
-    ) o ON o.src = c.src AND o.dst = c.dst AND o.dport = c.dport AND o.proto = c.proto
-    WHERE COALESCE(o.obs, 0) < CASE WHEN c.source = 'yamaha+cisco' THEN 2 ELSE 1 END
-  `).get().n;
-  const orphanObservations = db.prepare(`
-    SELECT COUNT(*) AS n FROM connection_observations o
-    LEFT JOIN connections c
-      ON c.src = o.src AND c.dst = o.dst AND c.dport = o.dport AND c.proto = o.proto
-    WHERE c.src IS NULL
-  `).get().n;
-  const underMerged = db.prepare(`
-    SELECT COUNT(*) AS n FROM connections c
-    WHERE c.source = 'yamaha+cisco' AND (
-      SELECT COUNT(*) FROM connection_observations o
-      WHERE o.src = c.src AND o.dst = c.dst AND o.dport = c.dport AND o.proto = c.proto
-    ) < 2
-  `).get().n;
-  return { missingObservations, orphanObservations, underMerged, checkedAt: Date.now() };
+  return checkConsistency(db);
 }
 
 // Prune memory cache
