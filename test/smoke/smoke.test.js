@@ -537,6 +537,55 @@ test('threat detail renders external values as DOM text and keeps actions wired'
   expect(fatalErrors(errors), `Threat detail errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
+test('beacon list renders candidate values as text and keeps dismiss wired', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  let dismissedId = null;
+  await page.route('**/api/beacons**', async route => {
+    const url = new URL(route.request().url());
+    if (route.request().method() === 'POST') {
+      dismissedId = Number(url.pathname.split('/').at(-2));
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        beacons: [{
+          id: 42,
+          status: 'active',
+          src: '192.0.2.10',
+          dst: '198.51.100.20',
+          dstHost: '<img src=x onerror=alert(1)>',
+          intervalMs: 120_000,
+          intervalCov: 0.08,
+          obsCount: 12,
+          firstSeen: 100,
+          lastSeen: 200,
+        }],
+      }),
+    });
+  });
+
+  const errors = collectErrors(page);
+  await authPage(page);
+  await page.locator('#btn-log').click();
+
+  await expect(page.locator('#beacon-banner')).toBeVisible();
+  await page.locator('#beacon-banner-bar').click();
+  const list = page.locator('#beacon-list');
+  await expect(list).toBeVisible();
+  await expect(list.locator('tbody tr')).toHaveCount(1);
+  await expect(list).toContainText('<img src=x onerror=alert(1)>');
+  await expect(list).toContainText('198.51.100.20');
+  await expect(list.locator('script, img, svg')).toHaveCount(0);
+  await list.locator('.beacon-dismiss-btn').click();
+  await expect(page.locator('#beacon-banner')).toBeHidden();
+  expect(dismissedId).toBe(42);
+  expect(fatalErrors(errors), `Beacon list errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
 test('connection side panel groups destinations and renders external values as text', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
