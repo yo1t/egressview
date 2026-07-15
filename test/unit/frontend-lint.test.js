@@ -502,11 +502,11 @@ describe('Connection Log pagination/filter invariants', () => {
   });
 
   it('threat badge filters refetch instead of filtering only the current page', () => {
-    const section = snippetBetween('threatCountEl.innerHTML', '// Sort icon state');
-    for (const id of ['safe', 'warn', 'danger']) {
-      const re = new RegExp(`log-filter-${id}[\\s\\S]*?resetAndFetch\\(\\)`);
-      assert.match(section, re, `${id} threat badge should refetch before applying badge filter`);
-    }
+    const section = snippetBetween('function renderThreatBadges()', 'function createThreatCell(');
+    assert.match(section, /id:\s*`log-filter-\$\{kind\}`/,
+      'each generated threat badge should have a stable filter id');
+    assert.match(section, /badge\.addEventListener\(['"]click['"][\s\S]*?logThreatFilter\s*=\s*logThreatFilter\s*===\s*kind\s*\?\s*null\s*:\s*kind[\s\S]*?resetAndFetch\(\)/,
+      'generated threat badges should toggle their server filter and refetch');
     assert.doesNotMatch(section, /renderLogView\(\)/,
       'threat badge clicks must not filter only the currently loaded page');
   });
