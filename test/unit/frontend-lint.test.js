@@ -791,7 +791,13 @@ describe('npm package invariants', () => {
   });
 
   it('still publishes scripts required by package scripts and demo tooling', () => {
-    for (const file of ['scripts/secret-scan.js', 'scripts/gen-demo-db.js', 'scripts/demo-seed.js']) {
+    for (const file of [
+      'scripts/secret-scan.js',
+      'scripts/check-frontend-innerhtml.js',
+      'scripts/frontend-innerhtml-allowlist.json',
+      'scripts/gen-demo-db.js',
+      'scripts/demo-seed.js',
+    ]) {
       assert(pkg.files.includes(file), `${file} should remain in the npm package`);
     }
   });

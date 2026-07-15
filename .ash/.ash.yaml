@@ -31,6 +31,9 @@ global_settings:
     - path: 'src/auth-password.js'
       rule_id: 'SECRET-BASE64-HIGH-ENTROPY-STRING'
       reason: 'Base32 alphabet constant used for token generation; not a secret value'
+    - path: 'scripts/frontend-innerhtml-allowlist.json'
+      rule_id: 'SECRET-HEX-HIGH-ENTROPY-STRING'
+      reason: 'SHA-256 fingerprints of reviewed frontend source expressions; deterministic code hashes, not credentials'
 
     # ── dev-only container (not shipped to production) ──────────────────────
     # dev-conntrack/ is a local test router image used only for development;
