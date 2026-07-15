@@ -362,6 +362,23 @@ describe('Frontend TDZ lint', () => {
     }
   });
 
+  it('login session settings use DOM APIs and CSS classes', () => {
+    const source = moduleSources['settings.js'];
+    const start = source.indexOf('// ── Login sessions list');
+    const end = source.indexOf('// ── Beacon detection settings', start);
+    assert.notEqual(start, -1);
+    assert.notEqual(end, -1);
+    const section = source.slice(start, end);
+    assert.doesNotMatch(section, /\.innerHTML\s*=/);
+    assert.doesNotMatch(section, /\.style\./);
+
+    for (const className of [
+      'settings-session-section-title', 'settings-session-list', 'settings-session-revoke-all',
+    ]) {
+      assert.match(html, new RegExp(`class="[^"]*${className}`));
+    }
+  });
+
   it('getElementById targets exist in HTML', () => {
     // After Phase 2, getElementById calls live in public/js/*.js (not inline in index.html).
     // Scan the concatenated JS content (not html) for all getElementById calls.

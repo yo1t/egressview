@@ -1,6 +1,6 @@
 // ─── Settings modal ───────────────────────────────────────────────────────────
 import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE, esc, fmtTs } from './utils.js?v=__ASSET_VERSION__';
+import { _BASE, fmtTs } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch, connState, updateConnBadge, asusActive, setAsusActive, setYamahaConfigured, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
 import { setAllConnections, setDataRangeFrom } from './connections-panel.js?v=__ASSET_VERSION__';
 import { stopGraph, updateOrgGraph, simulation } from './graph.js?v=__ASSET_VERSION__';
@@ -659,29 +659,56 @@ document.getElementById('pw-change-btn').addEventListener('click', async () => {
 
 // ── Login sessions list (P2-23) ───────────────────────────────────────────────
 
+function sessionTextElement(tagName, text, className = '') {
+  const element = document.createElement(tagName);
+  if (className) element.className = className;
+  element.textContent = text == null ? '' : String(text);
+  return element;
+}
+
+function createSessionRow(session) {
+  const row = document.createElement('div');
+  row.className = 'settings-session-row';
+
+  const label = sessionTextElement('span', session.deviceLabel || 'Unknown device', 'settings-session-label');
+  if (session.current) {
+    label.appendChild(sessionTextElement(
+      'span', `● ${t('settings.sessions.current')}`, 'settings-session-current'
+    ));
+  }
+  row.appendChild(label);
+  row.appendChild(sessionTextElement('span', fmtTs(session.lastSeenAt), 'settings-session-seen'));
+
+  if (!session.current) {
+    const button = sessionTextElement(
+      'button', t('settings.sessions.revoke'), 'beacon-dismiss-btn settings-session-revoke'
+    );
+    button.type = 'button';
+    button.dataset.sessionId = String(session.id ?? '');
+    button.addEventListener('click', async () => {
+      await apiFetch(
+        `${_BASE}/api/auth/sessions/${encodeURIComponent(button.dataset.sessionId)}/revoke`,
+        { method: 'POST' }
+      );
+      loadSessionsList();
+    });
+    row.appendChild(button);
+  }
+  return row;
+}
+
 async function loadSessionsList() {
   const box = document.getElementById('sessions-list');
   try {
     const r = await apiFetch(_BASE+'/api/auth/sessions');
     const { sessions } = await r.json();
     if (!sessions || !sessions.length) {
-      box.innerHTML = `<span style="color:var(--muted)">${esc(t('settings.sessions.none'))}</span>`;
+      box.replaceChildren(sessionTextElement('span', t('settings.sessions.none'), 'settings-session-muted'));
       return;
     }
-    box.innerHTML = sessions.map(s => `
-      <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
-        <span style="flex:1">${esc(s.deviceLabel || 'Unknown device')}${s.current ? ` <span style="color:var(--green);font-size:9px">● ${esc(t('settings.sessions.current'))}</span>` : ''}</span>
-        <span style="color:var(--muted);font-size:10px">${fmtTs(s.lastSeenAt)}</span>
-        ${s.current ? '' : `<button class="beacon-dismiss-btn" data-session-id="${s.id}">${esc(t('settings.sessions.revoke'))}</button>`}
-      </div>`).join('');
-    box.querySelectorAll('[data-session-id]').forEach(b => {
-      b.addEventListener('click', async () => {
-        await apiFetch(_BASE+`/api/auth/sessions/${b.dataset.sessionId}/revoke`, { method: 'POST' });
-        loadSessionsList();
-      });
-    });
+    box.replaceChildren(...sessions.map(createSessionRow));
   } catch (e) {
-    box.innerHTML = `<span style="color:var(--muted)">Error: ${esc(e.message)}</span>`;
+    box.replaceChildren(sessionTextElement('span', `Error: ${e.message}`, 'settings-session-muted'));
   }
 }
 

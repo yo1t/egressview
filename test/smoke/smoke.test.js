@@ -169,6 +169,10 @@ function fatalErrors(errors) {
 
 async function mockSettingsRoutes(page) {
   let mockRouters = [];
+  let mockSessions = [
+    { id: 'current', deviceLabel: '<script>Current device</script>', current: true, lastSeenAt: 100 },
+    { id: '../other?id=1', deviceLabel: '<img src=x onerror=alert(1)>', current: false, lastSeenAt: 200 },
+  ];
   await page.route('**/api/routers**', async route => {
     const request = route.request();
     const url = new URL(request.url());
@@ -249,6 +253,30 @@ async function mockSettingsRoutes(page) {
       retentionDays: 730,
     }),
   }));
+  await page.route('**/api/auth/sessions**', async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'POST' && url.pathname.endsWith('/revoke-all')) {
+      mockSessions = mockSessions.filter(session => session.current);
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ success: true, revoked: 1 }),
+      });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname.endsWith('/revoke')) {
+      const encodedId = url.pathname.split('/').at(-2);
+      const id = decodeURIComponent(encodedId);
+      mockSessions = mockSessions.filter(session => session.id !== id);
+      await route.fulfill({
+        status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify({ sessions: mockSessions }),
+    });
+  });
   await page.route('**/api/beacons/config', async route => {
     if (route.request().method() === 'GET') {
       await route.fulfill({
@@ -845,6 +873,14 @@ test('settings tabs save and connection buttons work without console errors', as
   await page.click('#settings-btn');
   await page.click('.settings-tab[data-tab="general"]');
   await expect(page.locator('#pane-general')).toHaveClass(/active/);
+  const sessionRows = page.locator('#sessions-list .settings-session-row');
+  await expect(sessionRows).toHaveCount(2);
+  await expect(page.locator('#sessions-list')).toContainText('<script>Current device</script>');
+  await expect(page.locator('#sessions-list')).toContainText('<img src=x onerror=alert(1)>');
+  await expect(page.locator('#sessions-list script, #sessions-list img')).toHaveCount(0);
+  await expect(page.locator('#sessions-list .settings-session-revoke')).toHaveCount(1);
+  await page.locator('#sessions-list .settings-session-revoke').click();
+  await expect(sessionRows).toHaveCount(1);
   await page.locator('#s-home-country').selectOption('JP');
   await page.click('#general-save-btn');
   await expect(page.locator('#general-status')).toBeVisible();

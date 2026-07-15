@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssignments": 21,
+  "totalAssignments": 18,
   "files": {
     "auth-socket.js": {
       "count": 1,
@@ -27,10 +27,10 @@
       "reason": "Only elements explicitly marked data-i18n-html receive HTML from the bundled, reviewed translation catalog; runtime or user-provided translation sources are not supported."
     },
     "settings.js": {
-      "count": 8,
-      "fingerprint": "70275834021a698babeb6b6ee7fc4ed307cd2a1408c3ed87ca2534f1112b7416",
+      "count": 5,
+      "fingerprint": "50b6b578e2faf1636895aea6f4e2693189d4147997341fc126ddc33f4f341b63",
       "categories": ["escaped-data-renderer", "static-status-markup", "dom-clear", "trusted-translation"],
-      "reason": "Spinner and empty states are controlled markup, clears use an empty string, and session/error values are escaped. Session list rendering should migrate when its UI is next changed."
+      "reason": "Spinner and empty states are controlled markup, clears use an empty string, and detection values are escaped. Migrate each remaining settings flow separately when it is next changed."
     },
     "stats-map.js": {
       "count": 2,
