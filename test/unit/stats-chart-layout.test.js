@@ -9,15 +9,13 @@ const vm = require('node:vm');
 const root = path.join(__dirname, '..', '..');
 
 function loadStatsLayoutHelpers() {
-  const source = fs.readFileSync(path.join(root, 'public/js/stats.js'), 'utf8');
-  const start = source.indexOf('function chartInnerWidth');
-  const end = source.indexOf('function drawBarChart');
-  assert.notEqual(start, -1);
-  assert.notEqual(end, -1);
-
-  const context = {};
-  vm.runInNewContext(source.slice(start, end), context);
-  return context;
+  const source = fs.readFileSync(path.join(root, 'public/js/stats-helpers.js'), 'utf8');
+  const wrapped = source.replace(/^export function /gm, 'function ');
+  const fnNames = [...wrapped.matchAll(/^function (\w+)/gm)].map(m => m[1]);
+  const tail = fnNames.map(n => `exports.${n} = ${n};`).join('\n');
+  const context = { exports: {}, Map, Number, Math };
+  vm.runInNewContext(wrapped + '\n' + tail, context);
+  return context.exports;
 }
 
 describe('stats chart layout', () => {

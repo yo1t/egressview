@@ -26,6 +26,22 @@ and top-level side effects matter. The temporary public surface is
 
 `socket.io`, D3, and topojson are loaded before the app scripts.
 
+## Extracted submodules (P2-25 / P2-28)
+
+`graph.js` and `stats.js` delegate to focused submodules; each is imported by
+its parent (and re-exported there for legacy importers), so load order is
+resolved by the ES module graph rather than script tags:
+
+- `graph-helpers.js` — pure graph data transforms (no DOM/D3)
+- `graph-panels.js` — tooltip and side-panel rendering; owns filter-tab state
+- `graph-render.js` — D3 force simulation and node/link drawing; owns the
+  simulation and SVG groups
+- `stats-helpers.js` — pure stats aggregation/layout helpers (no DOM/i18n)
+- `stats-charts.js` — pie / timeline / bar chart rendering; owns the
+  stack/line chart-mode toggle
+- `stats-map.js` — globe and flat-map rendering; owns all map state
+  (projection, rotation, spin, particles, zoom/pan, resize bookkeeping)
+
 ## Temporary public API
 
 The following APIs are intentionally mirrored under `window.EgressView.api`

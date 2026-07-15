@@ -36,7 +36,9 @@ test('js/i18n.js is served (200)', async ({ request }) => {
 // (1) All JS files split out in Phase 2 must be served with 200
 const PHASE2_JS_FILES = [
   'utils.js', 'connections-panel.js', 'auth-socket.js', 'graph.js',
+  'graph-helpers.js', 'graph-panels.js', 'graph-render.js',
   'settings.js', 'map-common.js', 'stats.js', 'time-filter.js',
+  'stats-helpers.js', 'stats-charts.js', 'stats-map.js',
   'view-tabs.js', 'log.js', 'beacon.js', 'threat-popup.js',
   'devices.js', 'notif-log.js', 'main.js',
 ];
@@ -464,6 +466,21 @@ test('stats tab renders map coverage label and chart svgs without console errors
   await expect(page.locator('#st-flat-svg')).toBeVisible();
   await expect(page.locator('#chart-bar')).toBeVisible();
   await expect(page.locator('#chart-timeline')).toBeVisible();
+
+  // P2-28: the extracted chart/map modules must actually draw elements —
+  // container visibility alone would pass even if the renderers broke.
+  await expect
+    .poll(() => page.locator('#chart-bar rect').count(), { timeout: 15_000 })
+    .toBeGreaterThan(0);
+  await expect
+    .poll(() => page.locator('#chart-timeline path').count(), { timeout: 15_000 })
+    .toBeGreaterThan(0);
+  await expect
+    .poll(() => page.locator('#st-app-pie-svg *').count(), { timeout: 15_000 })
+    .toBeGreaterThan(0);
+  await expect
+    .poll(() => page.locator('#st-globe-svg path').count(), { timeout: 15_000 })
+    .toBeGreaterThan(0);
 
   expect(fatalErrors(errors), `Stats render errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
