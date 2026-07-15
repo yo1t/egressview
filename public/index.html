@@ -627,22 +627,22 @@
     </div>
   </div>
   <!-- Connection Log View -->
-  <div id="log-container" style="display:none">
+  <div id="log-container" class="activity-view">
     <div class="log-header">
       <span class="log-title" data-i18n="log.title">📋 通信ログ</span>
-      <span id="log-count" style="color:var(--muted);font-size:11px;"></span>
-      <span id="log-device-filter" style="display:none"></span>
+      <span id="log-count" class="activity-count"></span>
+      <span id="log-device-filter" class="activity-filter"></span>
       <span id="log-threat-count"></span>
       <span class="data-fetching-hdr" id="data-fetching-log"><span class="spinner-xs"></span><span data-i18n="data.loading">読み込み中</span></span>
     </div>
-    <div id="beacon-banner" style="display:none">
+    <div id="beacon-banner">
       <div id="beacon-banner-bar">
         <span id="beacon-banner-label">⏱ ビーコン候補 0件</span>
         <span id="beacon-banner-chevron" class="beacon-chevron">▼</span>
       </div>
-      <div id="beacon-list" style="display:none"></div>
+      <div id="beacon-list"></div>
     </div>
-    <div id="log-pagination" style="display:none;align-items:center;gap:8px;padding:4px 8px;font-size:12px;color:var(--muted)"></div>
+    <div id="log-pagination" class="log-pagination"></div>
     <div class="log-table-wrap">
       <table class="log-table" id="log-table">
         <thead>
@@ -672,10 +672,10 @@
           <option value="regex" data-i18n="log.filter.regex">正規表現</option>
         </select>
         <input type="text" id="log-search-input" data-i18n-placeholder="log.filter.placeholder" placeholder="検索条件..." autocomplete="off">
-        <div id="log-search-date-range" style="display:none">
-          <label style="font-size:10px;color:var(--muted);" data-i18n="log.filter.from">開始</label>
+        <div id="log-search-date-range" class="log-date-range">
+          <label class="log-date-label" data-i18n="log.filter.from">開始</label>
           <input type="datetime-local" id="log-search-from" class="log-date-input">
-          <label style="font-size:10px;color:var(--muted);margin-top:4px;" data-i18n="log.filter.to">終了</label>
+          <label class="log-date-label log-date-label-spaced" data-i18n="log.filter.to">終了</label>
           <input type="datetime-local" id="log-search-to" class="log-date-input">
         </div>
         <div class="log-search-popup-actions">
@@ -697,20 +697,20 @@
     </div>
   </div>
   <!-- ── Device Inventory View ─────────────────────────────────────────── -->
-  <div id="devices-container" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg);padding:10px;gap:8px;">
+  <div id="devices-container" class="activity-view">
     <div class="log-header">
       <span class="log-title" data-i18n="devices.title">🖥 端末一覧</span>
-      <span id="devices-count" style="color:var(--muted);font-size:11px;margin-left:8px;"></span>
-      <span id="dv-device-filter" style="margin-left:8px;display:none"></span>
-      <button id="dv-clear-filters-btn" style="display:none;margin-left:6px;padding:2px 8px;font-size:10px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;" data-i18n="devices.clearFilters">フィルタ解除</button>
-      <button id="devices-refresh-btn" style="margin-left:auto;padding:3px 10px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text);cursor:pointer;" data-i18n="devices.refresh">更新</button>
+      <span id="devices-count" class="activity-count activity-count-spaced"></span>
+      <span id="dv-device-filter" class="activity-filter activity-filter-spaced"></span>
+      <button id="dv-clear-filters-btn" class="dv-clear-filters" data-i18n="devices.clearFilters">フィルタ解除</button>
+      <button id="devices-refresh-btn" class="activity-refresh" data-i18n="devices.refresh">更新</button>
     </div>
     <!-- main area: table + detail panel side by side -->
-    <div style="display:flex;flex:1;overflow:hidden;gap:0;min-height:0;">
-      <div style="display:flex;flex-direction:column;flex:1;overflow:hidden;min-width:0;gap:8px;">
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+    <div class="dv-main-area">
+      <div class="dv-table-column">
+        <div class="dv-search-row">
           <input id="devices-search" type="text" data-i18n-placeholder="devices.search.placeholder" placeholder="IP / MAC / 名前 / ベンダー…" autocomplete="off"
-            style="flex:1;min-width:180px;max-width:320px;padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--text);">
+            class="dv-search-input">
         </div>
         <!-- P1-8: status filter bar -->
         <div class="dv-status-bar" id="dv-status-bar">
@@ -719,7 +719,7 @@
           <button class="dv-status-btn"     data-status="stale">🟡 Stale  <span class="dv-status-count" id="cnt-stale"></span></button>
           <button class="dv-status-btn"     data-status="archived">⬜ Archived <span class="dv-status-count" id="cnt-archived"></span></button>
         </div>
-        <div class="log-table-wrap" style="position:relative;">
+        <div class="log-table-wrap dv-table-wrap">
           <table class="log-table" id="devices-table">
             <thead>
               <tr>
@@ -759,7 +759,7 @@
       <div id="dv-detail-panel" class="hidden">
         <div class="dv-detail-header">
           <span class="dv-detail-title" id="dv-detail-title">—</span>
-          <button id="dv-detail-close" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:2px 4px;">✕</button>
+          <button id="dv-detail-close" class="dv-detail-close">✕</button>
         </div>
         <div class="dv-detail-body" id="dv-detail-body"></div>
         <div class="dv-detail-actions">
@@ -772,13 +772,13 @@
   </div>
 
   <!-- ── Notification Log View ─────────────────────────────────────────── -->
-  <div id="notif-log-container" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg);padding:10px;gap:8px;">
+  <div id="notif-log-container" class="activity-view">
     <div class="log-header">
       <span class="log-title" data-i18n="notif-log.title">🔔 検出ログ</span>
-      <span id="notif-log-count" style="color:var(--muted);font-size:11px;"></span>
-      <span id="notif-log-device-filter" style="display:none"></span>
+      <span id="notif-log-count" class="activity-count"></span>
+      <span id="notif-log-device-filter" class="activity-filter"></span>
       <span class="data-fetching-hdr" id="data-fetching-notif"><span class="spinner-xs"></span><span data-i18n="data.loading">読み込み中</span></span>
-      <button id="notif-log-refresh-btn" style="margin-left:auto;padding:3px 10px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--text);cursor:pointer;" data-i18n="notif-log.refresh">更新</button>
+      <button id="notif-log-refresh-btn" class="activity-refresh" data-i18n="notif-log.refresh">更新</button>
     </div>
     <div class="log-table-wrap">
       <table class="log-table" id="notif-log-table">

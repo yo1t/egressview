@@ -101,7 +101,7 @@ function nlRender() {
   if (filterBadge) {
     if (selectedMac || selectedIp) {
       const label = selectedIp || selectedMac;
-      filterBadge.style.display = 'inline';
+      filterBadge.classList.add('is-visible');
       const clearFilter = nlTextElement('span', tVars('log.deviceFilter.only', { value: label }), {
         className: 'log-device-filter-chip',
         id: 'nl-device-filter-clear',
@@ -114,7 +114,7 @@ function nlRender() {
       });
       filterBadge.replaceChildren(clearFilter);
     } else {
-      filterBadge.style.display = 'none';
+      filterBadge.classList.remove('is-visible');
     }
   }
 
@@ -182,16 +182,16 @@ function nlUpdateSortIcons() {
     if (!icon) return;
     if (th.dataset.col === nlSortState.col) {
       icon.textContent = nlSortState.dir === 'asc' ? '↑' : '↓';
-      icon.style.color = 'var(--accent)';
+      icon.classList.add('active');
     } else {
       icon.textContent = '⇅';
-      icon.style.color = '';
+      icon.classList.remove('active');
     }
   });
   // highlight active filter icons
   table.querySelectorAll('.log-search-icon[data-table="notif"]').forEach(ic => {
     const col = ic.dataset.col;
-    ic.style.color = (nlFilters[col] && nlFilters[col].value) ? 'var(--accent)' : '';
+    ic.classList.toggle('active', Boolean(nlFilters[col]?.value));
   });
 }
 
@@ -281,7 +281,6 @@ function nlInitSort() {
   const table = document.getElementById('notif-log-table');
   if (!table) return;
   table.querySelectorAll('th[data-col]').forEach(th => {
-    th.style.cursor = 'pointer';
     th.addEventListener('click', e => {
       if (e.target.classList.contains('log-search-icon')) return;
       const col = th.dataset.col;
@@ -306,7 +305,6 @@ function nlInitFilterPopup() {
   if (!table || !popup) return;
 
   table.querySelectorAll('.log-search-icon[data-table="notif"]').forEach(icon => {
-    icon.style.cursor = 'pointer';
     icon.addEventListener('click', e => {
       e.stopPropagation();
       const col = icon.dataset.col;
@@ -362,7 +360,7 @@ function nlInitFilterPopup() {
 
 function nlSetLoading(loading) {
   const el = document.getElementById('data-fetching-notif');
-  if (el) el.style.display = loading ? 'flex' : 'none';
+  if (el) el.classList.toggle('is-visible', loading);
 }
 
 async function loadNotifLog() {

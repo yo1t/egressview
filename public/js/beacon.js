@@ -72,22 +72,22 @@ function renderBeaconBanner() {
   if (!banner) return;
 
   if (beaconData.length === 0) {
-    banner.style.display = 'none';
+    banner.classList.remove('is-visible');
     beaconListOpen = false;
     return;
   }
 
-  banner.style.display = 'block';
+  banner.classList.add('is-visible');
   label.textContent = tVars('beacon.banner', { count: beaconData.length });
   chevron.classList.toggle('open', beaconListOpen);
-  list.style.display = beaconListOpen ? 'block' : 'none';
+  list.classList.toggle('is-visible', beaconListOpen);
   if (beaconListOpen) renderBeaconList(list);
 }
 
 function renderBeaconList(container) {
   const rows = beaconData.map(b => {
     const dst     = b.dstHost && b.dstHost !== b.dst
-                    ? `${esc(b.dstHost)}<br><span style="color:var(--muted);font-size:10px">${esc(b.dst)}</span>`
+                    ? `${esc(b.dstHost)}<br><span class="beacon-destination-ip">${esc(b.dst)}</span>`
                     : esc(b.dst);
     const covCls  = beaconCovClass(b.intervalCov);
     const covPct  = Math.round(b.intervalCov * 100);
@@ -96,10 +96,10 @@ function renderBeaconList(container) {
     return `<tr>
       <td>${beaconSrcLabel(b.src)}</td>
       <td>${dst}</td>
-      <td style="white-space:nowrap">${esc(fmtBeaconInterval(b.intervalMs))}</td>
+      <td class="beacon-nowrap">${esc(fmtBeaconInterval(b.intervalMs))}</td>
       <td><span class="${covCls}">${covPct}%</span></td>
-      <td style="color:var(--muted)">${b.obsCount}</td>
-      <td style="color:var(--muted);font-size:10px;white-space:nowrap">${first}<br>${last}</td>
+      <td class="beacon-muted">${b.obsCount}</td>
+      <td class="beacon-time-cell">${first}<br>${last}</td>
       <td><button class="beacon-dismiss-btn" data-id="${b.id}">${esc(t('beacon.dismiss'))}</button></td>
     </tr>`;
   }).join('');
