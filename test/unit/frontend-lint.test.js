@@ -352,7 +352,7 @@ describe('Frontend TDZ lint', () => {
   });
 
   it('activity modules keep only runtime popup coordinates as style assignments', () => {
-    for (const file of ['log.js', 'notif-log.js', 'devices.js', 'beacon.js']) {
+    for (const file of ['log.js', 'notif-log.js', 'devices.js', 'beacon.js', 'threat-popup.js']) {
       const source = moduleSources[file];
       const nonPositionStyles = source
         .split('\n')
@@ -379,9 +379,7 @@ describe('Frontend TDZ lint', () => {
       htmlIds.add(m[1]);
     }
 
-    // Collect IDs that are dynamically injected via innerHTML template literals / strings.
-    // e.g. `innerHTML = \`...<div id="foo">...\`` — these are created at runtime and
-    // are legitimately referenced with getElementById immediately after.
+    // Collect IDs created at runtime by legacy templates or DOM render helpers.
     const dynamicIdRe = /\bid=["'`]([^"'`\s\\]+)["'`]/g;
     const dynamicIds = new Set();
     while ((m = dynamicIdRe.exec(script)) !== null) {
@@ -389,6 +387,10 @@ describe('Frontend TDZ lint', () => {
     }
     const assignedIdRe = /\.id\s*=\s*['"]([^'"]+)['"]/g;
     while ((m = assignedIdRe.exec(script)) !== null) {
+      dynamicIds.add(m[1]);
+    }
+    const helperIdRe = /\bid\s*:\s*['"]([^'"]+)['"]/g;
+    while ((m = helperIdRe.exec(script)) !== null) {
       dynamicIds.add(m[1]);
     }
 

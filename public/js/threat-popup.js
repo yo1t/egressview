@@ -1,7 +1,27 @@
 // ─── Threat Detail Popup ──────────────────────────────────────────────────────
 import { t, currentLang } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE, esc } from './utils.js?v=__ASSET_VERSION__';
+import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch, lookupNote } from './auth-socket.js?v=__ASSET_VERSION__';
+
+function threatTextElement(tagName, text, { className = '', id = '' } = {}) {
+  const element = document.createElement(tagName);
+  if (className) element.className = className;
+  if (id) element.id = id;
+  element.textContent = text == null ? '' : String(text);
+  return element;
+}
+
+function appendThreatSection(parent, title, rows) {
+  parent.appendChild(threatTextElement('div', title, { className: 'section-title' }));
+  const table = document.createElement('table');
+  rows.forEach(({ label, value, className = '' }) => {
+    const row = document.createElement('tr');
+    row.appendChild(threatTextElement('th', label));
+    row.appendChild(threatTextElement('td', value, { className }));
+    table.appendChild(row);
+  });
+  parent.appendChild(table);
+}
 
 function showThreatDetail(tr) {
   const raw = tr.dataset.threat;
@@ -13,57 +33,95 @@ function showThreatDetail(tr) {
     ? String.fromCodePoint(0x1F1E6 + d.country.charCodeAt(0) - 65, 0x1F1E6 + d.country.charCodeAt(1) - 65) + ' '
     : '';
   const existingNote = lookupNote(d.src, d.srcMac) || '';
+  const isLowConfidence = d.threat.confidence === 'low';
 
   const body = document.getElementById('threat-detail-body');
-  body.innerHTML = `
-    <div class="section-title">${t('threat.detail.title')}</div>
-    <div style="margin:8px 0;">
-      ${d.threat.confidence === 'low'
-        ? '<span class="log-badge-warn" style="font-size:11px;padding:3px 8px;">' + esc(t('log.badge.warn')) + '</span>'
-        : '<span class="log-badge-danger" style="font-size:11px;padding:3px 8px;">' + esc(t('log.badge.danger')) + '</span>'}
-    </div>
-    <div style="font-size:11px;line-height:1.6;color:var(--text);white-space:pre-wrap;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:12px;">${esc(d.threat.confidence === 'low' ? t('threat.guidance.low') : t('threat.guidance.high'))}</div>
-    <div class="section-title">📋 ${t('threat.section.feed')}</div>
-    <table>
-      <tr><th>${t('threat.label.feed')}</th><td>${esc(d.threat.source)}</td></tr>
-      <tr><th>${t('threat.label.tag')}</th><td>${esc(d.threat.confidence === 'low' ? t('threat.tag.low').replace('{domain}', d.threat.matchValue) : d.threat.tag)}</td></tr>
-      <tr><th>${t('threat.label.confidence')}</th><td>${d.threat.confidence === 'low' ? '⚠️ ' + t('threat.confidence.low') : '🚨 ' + t('threat.confidence.high')}</td></tr>
-      <tr><th>${t('threat.label.matchType')}</th><td>${esc(d.threat.matchType)}</td></tr>
-      <tr><th>${t('threat.label.matchValue')}</th><td>${esc(d.threat.matchValue)}</td></tr>
-      ${d.threat.url ? `<tr><th>${t('threat.label.url')}</th><td style="word-break:break-all;font-size:10px;">${esc(d.threat.url)}</td></tr>` : ''}
-    </table>
-    <div class="section-title">📡 ${t('threat.section.conn')}</div>
-    <table>
-      <tr><th>${t('threat.label.srcIp')}</th><td>${esc(d.src)}</td></tr>
-      <tr><th>${t('threat.label.srcName')}</th><td>${esc(d.srcLabel || d.src)}</td></tr>
-      <tr><th>${t('threat.label.srcMac')}</th><td>${esc(d.srcMac || '—')}</td></tr>
-      <tr><th>${t('threat.label.srcVendor')}</th><td>${esc(d.srcVendor || '—')}</td></tr>
-      <tr><th>${t('threat.label.dstIp')}</th><td>${esc(d.dst)}</td></tr>
-      <tr><th>${t('threat.label.dstHost')}</th><td>${esc(d.dstHost || d.dst)}</td></tr>
-      <tr><th>${t('threat.label.dstPort')}</th><td>${d.dport} / ${esc(d.proto)}</td></tr>
-      <tr><th>TTL</th><td>${d.ttl || '—'}</td></tr>
-    </table>
-    <div class="section-title">🌍 ${t('threat.section.geo')}</div>
-    <table>
-      <tr><th>${t('threat.label.country')}</th><td>${flag}${esc(d.country || '—')}</td></tr>
-      <tr><th>${t('threat.label.city')}</th><td>${esc(d.city || '—')}</td></tr>
-      <tr><th>${t('threat.label.org')}</th><td>${esc(d.org || '—')}</td></tr>
-    </table>
-    <div class="section-title">⏱ ${t('threat.section.time')}</div>
-    <table>
-      <tr><th>${t('threat.label.firstSeen')}</th><td>${fmtTime(d.firstSeen)}</td></tr>
-      <tr><th>${t('threat.label.lastSeen')}</th><td>${fmtTime(d.lastSeen)}</td></tr>
-    </table>
-    <div class="section-title">📝 ${t('threat.section.note')}</div>
-    <div style="margin-bottom:8px;">
-      <textarea id="threat-detail-note" style="width:100%;min-height:60px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:11px;padding:8px;resize:vertical;" placeholder="${esc(t('note.placeholder'))}">${esc(existingNote)}</textarea>
-    </div>
-    <div style="display:flex;gap:6px;">
-      <button id="threat-detail-investigate-btn" class="connect-btn" style="flex:1;font-size:11px;padding:5px 10px;">${t('note.investigate')}</button>
-      <button id="threat-detail-save-btn" class="connect-btn" style="flex:1;font-size:11px;padding:5px 10px;">${t('note.save')}</button>
-    </div>
-    <div id="threat-detail-status" style="font-size:10px;color:var(--muted);margin-top:6px;"></div>
-  `;
+  const detail = document.createDocumentFragment();
+  detail.appendChild(threatTextElement('div', t('threat.detail.title'), { className: 'section-title' }));
+
+  const confidence = document.createElement('div');
+  confidence.className = 'threat-confidence-wrap';
+  confidence.appendChild(threatTextElement(
+    'span',
+    t(isLowConfidence ? 'log.badge.warn' : 'log.badge.danger'),
+    { className: `${isLowConfidence ? 'log-badge-warn' : 'log-badge-danger'} threat-confidence-badge` }
+  ));
+  detail.appendChild(confidence);
+  detail.appendChild(threatTextElement(
+    'div',
+    t(isLowConfidence ? 'threat.guidance.low' : 'threat.guidance.high'),
+    { className: 'threat-guidance' }
+  ));
+
+  const feedRows = [
+    { label: t('threat.label.feed'), value: d.threat.source },
+    {
+      label: t('threat.label.tag'),
+      value: isLowConfidence ? t('threat.tag.low').replace('{domain}', d.threat.matchValue) : d.threat.tag,
+    },
+    {
+      label: t('threat.label.confidence'),
+      value: `${isLowConfidence ? '⚠️' : '🚨'} ${t(isLowConfidence ? 'threat.confidence.low' : 'threat.confidence.high')}`,
+    },
+    { label: t('threat.label.matchType'), value: d.threat.matchType },
+    { label: t('threat.label.matchValue'), value: d.threat.matchValue },
+  ];
+  if (d.threat.url) {
+    feedRows.push({ label: t('threat.label.url'), value: d.threat.url, className: 'threat-url-value' });
+  }
+  appendThreatSection(detail, `📋 ${t('threat.section.feed')}`, feedRows);
+
+  appendThreatSection(detail, `📡 ${t('threat.section.conn')}`, [
+    { label: t('threat.label.srcIp'), value: d.src },
+    { label: t('threat.label.srcName'), value: d.srcLabel || d.src },
+    { label: t('threat.label.srcMac'), value: d.srcMac || '—' },
+    { label: t('threat.label.srcVendor'), value: d.srcVendor || '—' },
+    { label: t('threat.label.dstIp'), value: d.dst },
+    { label: t('threat.label.dstHost'), value: d.dstHost || d.dst },
+    { label: t('threat.label.dstPort'), value: `${d.dport} / ${d.proto || ''}` },
+    { label: 'TTL', value: d.ttl || '—' },
+  ]);
+
+  appendThreatSection(detail, `🌍 ${t('threat.section.geo')}`, [
+    { label: t('threat.label.country'), value: `${flag}${d.country || '—'}` },
+    { label: t('threat.label.city'), value: d.city || '—' },
+    { label: t('threat.label.org'), value: d.org || '—' },
+  ]);
+
+  appendThreatSection(detail, `⏱ ${t('threat.section.time')}`, [
+    { label: t('threat.label.firstSeen'), value: fmtTime(d.firstSeen) },
+    { label: t('threat.label.lastSeen'), value: fmtTime(d.lastSeen) },
+  ]);
+
+  detail.appendChild(threatTextElement('div', `📝 ${t('threat.section.note')}`, { className: 'section-title' }));
+  const noteWrap = document.createElement('div');
+  noteWrap.className = 'threat-note-wrap';
+  const note = document.createElement('textarea');
+  note.id = 'threat-detail-note';
+  note.className = 'threat-detail-note';
+  note.placeholder = t('note.placeholder');
+  note.value = existingNote;
+  noteWrap.appendChild(note);
+  detail.appendChild(noteWrap);
+
+  const actions = document.createElement('div');
+  actions.className = 'threat-detail-actions';
+  const investigateButton = threatTextElement('button', t('note.investigate'), {
+    className: 'connect-btn threat-detail-action',
+    id: 'threat-detail-investigate-btn',
+  });
+  const saveButton = threatTextElement('button', t('note.save'), {
+    className: 'connect-btn threat-detail-action',
+    id: 'threat-detail-save-btn',
+  });
+  actions.append(investigateButton, saveButton);
+  detail.appendChild(actions);
+  detail.appendChild(threatTextElement('div', '', {
+    className: 'threat-detail-status',
+    id: 'threat-detail-status',
+  }));
+
+  body.replaceChildren(detail);
   document.getElementById('threat-detail-investigate-btn').addEventListener('click', () => threatDetailInvestigate(d.src));
   document.getElementById('threat-detail-save-btn').addEventListener('click', () => threatDetailSaveNote(d.src, d.srcMac || ''));
   document.getElementById('threat-detail-overlay').classList.remove('hidden');

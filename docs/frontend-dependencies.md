@@ -63,14 +63,15 @@ New rendering code should use `textContent`, `createElement`, and explicit DOM
 attributes. If `innerHTML` is unavoidable, review every interpolated value,
 document why the sink is safe in the allowlist, and run
 `npm run lint:innerhtml`. Do not regenerate fingerprints merely to make the
-gate pass. `log.js`, `notif-log.js`, and `devices.js` have completed their DOM
-API migrations. Remaining reviewed sinks continue to be migrated in small,
-screen-focused batches.
+gate pass. `log.js`, `notif-log.js`, `devices.js`, and `threat-popup.js` have
+completed their DOM API migrations. Remaining reviewed sinks continue to be
+migrated in small, screen-focused batches.
 
-The connection log, notification log, and device inventory markup must not use
-inline `style` attributes. Their modules use CSS state classes for visibility,
-sorting, and filtering; only runtime `top` and `left` popup coordinates may use
-the style API. `test/unit/frontend-lint.test.js` enforces this boundary.
+The connection log, notification log, device inventory, and threat detail
+markup must not use inline `style` attributes. Their modules use CSS state
+classes for visibility, sorting, and filtering; only runtime `top` and `left`
+popup coordinates may use the style API. `test/unit/frontend-lint.test.js`
+enforces this boundary.
 
 ## Temporary public API
 

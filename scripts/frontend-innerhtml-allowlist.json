@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssignments": 27,
+  "totalAssignments": 26,
   "files": {
     "auth-socket.js": {
       "count": 1,
@@ -55,12 +55,6 @@
       "fingerprint": "cd3d9f210f2f8f408eef30e4e5fac6273a875a5439bbbb08f9651959a8695950",
       "categories": ["static-controls"],
       "reason": "Map and globe controls are fixed local markup with no interpolated values; handlers are attached after creation."
-    },
-    "threat-popup.js": {
-      "count": 1,
-      "fingerprint": "82e723d22aef52d058c3cd42e13852bb64397014a96e6bb1c372006605ccba81",
-      "categories": ["escaped-data-renderer", "high-priority-migration"],
-      "reason": "Threat, connection and note strings are escaped, numeric fields are produced by normalized connection records, and labels come from the bundled catalog. Keep as a high-priority DOM API migration because it renders security-feed data."
     }
   }
 }

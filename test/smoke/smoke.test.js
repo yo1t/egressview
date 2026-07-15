@@ -466,6 +466,77 @@ test('device list and detail render external values as DOM text', async ({ page 
   expect(fatalErrors(errors), `Device DOM rendering errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
+test('threat detail renders external values as DOM text and keeps actions wired', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  let savedNote = null;
+  await page.route(/\/api\/connections\?/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      connections: [{
+        src: '<img src=x onerror=alert(1)>',
+        srcDnsName: '<script>source-name</script>',
+        srcMac: 'aa:bb:cc:dd:ee:ff',
+        srcVendor: '<b>Smoke Vendor</b>',
+        dst: '198.51.100.20',
+        dstHost: '<svg onload=alert(1)>',
+        dport: 443,
+        proto: 'TCP',
+        country: 'JP',
+        city: '<i>Tokyo</i>',
+        org: '<a href=x>Smoke Org</a>',
+        firstSeen: Date.now() - 60_000,
+        lastSeen: Date.now(),
+        threat: {
+          confidence: 'high',
+          source: '<script>smoke-feed</script>',
+          tag: '<img src=x>',
+          matchType: 'ip',
+          matchValue: '<b>198.51.100.20</b>',
+          url: 'https://example.test/<script>alert(1)</script>',
+        },
+      }],
+      total: 1,
+      serverTime: Date.now(),
+    }),
+  }));
+  await page.route(/\/api\/connections\/threat-counts(?:\?|$)/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ safe: 0, warn: 0, danger: 1 }),
+  }));
+  await page.route(/\/api\/notes\/draft$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ draft: '<img src=x onerror=alert(1)>' }),
+  }));
+  await page.route(/\/api\/notes$/, async route => {
+    savedNote = route.request().postDataJSON().note;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true }) });
+  });
+
+  await authPage(page);
+  await page.click('#btn-log');
+  const threatRow = page.locator('#log-tbody tr.threat-row');
+  await expect(threatRow).toHaveCount(1);
+  await threatRow.click();
+
+  const overlay = page.locator('#threat-detail-overlay');
+  const body = page.locator('#threat-detail-body');
+  await expect(overlay).toBeVisible();
+  await expect(body.locator('table')).toHaveCount(4);
+  await expect(body).toContainText('<script>smoke-feed</script>');
+  await expect(body).toContainText('<svg onload=alert(1)>');
+  await expect(body.locator('script, img, svg')).toHaveCount(0);
+
+  await page.click('#threat-detail-investigate-btn');
+  await expect(page.locator('#threat-detail-note')).toHaveValue('<img src=x onerror=alert(1)>');
+  await page.locator('#threat-detail-note').fill('<b>saved literally</b>');
+  await page.click('#threat-detail-save-btn');
+  await expect(page.locator('#threat-detail-status')).toContainText(/保存|Saved/);
+  expect(savedNote).toBe('<b>saved literally</b>');
+  expect(fatalErrors(errors), `Threat detail errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
 // (8) Changing the time filter must not raise errors (indirect test of getFilteredConnections)
 test('time filter change produces no console errors', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
