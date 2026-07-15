@@ -425,9 +425,12 @@ test('log view shows rows with long period (14d)', async ({ page }) => {
   await page.click('#btn-log');
   await page.waitForTimeout(2000);
 
-  // The tbody must have at least one row
-  const rowCount = await page.locator('#log-tbody tr').count();
+  // A real connection row must retain the nine-column table structure.
+  const rows = page.locator('#log-tbody tr:not(#log-scroll-sentinel)');
+  const rowCount = await rows.count();
   expect(rowCount, 'log view should show rows for 14d period').toBeGreaterThan(0);
+  await expect(rows.first().locator('td')).toHaveCount(9);
+  await expect(rows.first().locator('td').first()).not.toHaveText('');
 
   expect(fatalErrors(errors), `Long period log errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
@@ -699,19 +702,40 @@ test('log view infinite scroll appends rows on scroll', async ({ page }) => {
   await authPage(page);
 
   await page.locator('#time-filter-select').selectOption('14d');
+  const connections = Array.from({ length: 201 }, (_, index) => ({
+    src: `192.168.1.${(index % 200) + 1}`,
+    dst: `203.0.113.${(index % 200) + 1}`,
+    dport: 443,
+    proto: 'TCP',
+    country: 'JP',
+    org: `Smoke Org ${index}`,
+    firstSeen: Date.now() - index * 1000,
+    lastSeen: Date.now() - index * 1000,
+    threat: null,
+  }));
+  await page.route(/\/api\/connections\?/, async route => {
+    const url = new URL(route.request().url());
+    const offset = Number(url.searchParams.get('offset') || 0);
+    const limit = Number(url.searchParams.get('limit') || connections.length);
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        connections: connections.slice(offset, offset + limit),
+        total: connections.length,
+        serverTime: Date.now(),
+      }),
+    });
+  });
   await page.click('#btn-log');
-  await page.waitForTimeout(2000);
+  const renderedRows = page.locator('#log-tbody tr:not(#log-scroll-sentinel)');
+  await expect(renderedRows).toHaveCount(200);
 
-  const firstCount = await page.locator('#log-tbody tr:not(#log-scroll-sentinel)').count();
-
-  // Only run the scroll test if the sentinel exists (i.e. there's another page to load)
-  const hasSentinel = await page.locator('#log-scroll-sentinel').count() > 0;
-  if (hasSentinel) {
-    await page.locator('#log-scroll-sentinel').scrollIntoViewIfNeeded();
-    await page.waitForTimeout(2000);
-    const afterCount = await page.locator('#log-tbody tr:not(#log-scroll-sentinel)').count();
-    expect(afterCount, 'scroll should load more rows').toBeGreaterThan(firstCount);
-  }
+  const firstRowText = await renderedRows.first().textContent();
+  await expect(page.locator('#log-scroll-sentinel')).toHaveCount(1);
+  await page.locator('#log-scroll-sentinel').scrollIntoViewIfNeeded();
+  await expect(renderedRows).toHaveCount(201);
+  expect(await renderedRows.first().textContent(), 'append should preserve existing DOM rows').toBe(firstRowText);
+  await expect(renderedRows.last().locator('td')).toHaveCount(9);
 
   expect(fatalErrors(errors), `Scroll errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });

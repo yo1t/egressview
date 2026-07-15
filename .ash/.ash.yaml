@@ -52,9 +52,6 @@ global_settings:
       reason: 'Dev-only test container; chpasswd used to seed a throwaway test login'
 
     # ── verified-safe application code ──────────────────────────────────────
-    - path: 'public/js/log.js'
-      rule_id: 'typescript.react.security.audit.react-unsanitized-method.react-unsanitized-method'
-      reason: 'rowsHtml is built entirely from esc()-escaped values (same trusted string used by the innerHTML branch); no unsanitized user input'
     - path: 'server.js'
       rule_id: 'javascript.express.security.audit.express-path-join-resolve-traversal.express-path-join-resolve-traversal'
       reason: 'filename validated by ^[A-Za-z0-9._-]+\.js$ (no path separators) plus an explicit basename containment check before fs.readFile'

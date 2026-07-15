@@ -278,6 +278,12 @@
   .log-badge-safe { display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 600; background: #22c55e22; color: #4ade80; border: 1px solid #22c55e44; }
   .log-badge-clickable { cursor: pointer; transition: box-shadow 0.15s, transform 0.1s; }
   .log-badge-clickable:hover { box-shadow: 0 0 0 2px rgba(255,255,255,0.15); transform: scale(1.05); }
+  #log-threat-count .log-badge-clickable { margin-right: 4px; }
+  .log-status-text { color: var(--muted); font-size: 11px; }
+  .log-device-filter-chip { background: var(--accent); color: #fff; border-radius: 4px; padding: 1px 7px; font-size: 11px; cursor: pointer; }
+  .log-table td.log-scroll-sentinel-cell { height: 1px; padding: 0; border: none; }
+  .log-app-cell { font-size: 11px; color: var(--muted); }
+  .log-org-cell { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
   .log-filter-active { box-shadow: 0 0 0 2px var(--accent); transform: scale(1.08); }
 
   /* ── Beacon banner ────────────────────────────────────────────── */

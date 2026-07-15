@@ -17,13 +17,16 @@ function stripEsModule(src) {
 const logJs = stripEsModule(fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'log.js'), 'utf8'));
 
 class FakeElement {
-  constructor(id = '', dataset = {}) {
-    this.id = id;
+  constructor(id = '', dataset = {}, tagName = 'div', register = null) {
+    this._id = '';
+    this._register = register;
+    this.tagName = tagName.toUpperCase();
     this.dataset = dataset;
     this.style = {};
     this.value = '';
-    this.textContent = '';
-    this._innerHTML = '';
+    this._textContent = '';
+    this.children = [];
+    this.parentNode = null;
     this.listeners = {};
     this._classes = new Set();
     this.classList = {
@@ -37,10 +40,30 @@ class FakeElement {
         return on;
       },
     };
+    this.id = id;
   }
 
-  set innerHTML(value) { this._innerHTML = String(value); }
-  get innerHTML() { return this._innerHTML; }
+  set id(value) {
+    this._id = String(value || '');
+    if (this._id) this._register?.(this._id, this);
+  }
+  get id() { return this._id; }
+
+  set className(value) {
+    this._classes = new Set(String(value || '').split(/\s+/).filter(Boolean));
+  }
+  get className() { return [...this._classes].join(' '); }
+
+  set textContent(value) {
+    this._textContent = String(value ?? '');
+    this.children.forEach(child => { child.parentNode = null; });
+    this.children = [];
+  }
+  get textContent() {
+    return this._textContent + this.children.map(child => child.textContent).join('');
+  }
+
+  get innerHTML() { return this.textContent; }
 
   addEventListener(type, fn) { this.listeners[type] = fn; }
   click() { this.listeners.click?.({ target: this, stopPropagation() {} }); }
@@ -50,38 +73,56 @@ class FakeElement {
   getBoundingClientRect() { return { bottom: 10, left: 10 }; }
   querySelector() { return this._sortIcon || null; }
   querySelectorAll() { return []; }
-  remove() {}
-  appendChild() {}
-  insertAdjacentHTML(position, html) {
-    if (position === 'beforeend') this._innerHTML += String(html);
+  remove() {
+    if (!this.parentNode) return;
+    this.parentNode.children = this.parentNode.children.filter(child => child !== this);
+    this.parentNode = null;
+  }
+  appendChild(child) {
+    if (child.tagName === '#FRAGMENT') {
+      [...child.children].forEach(node => this.appendChild(node));
+      child.children = [];
+      return child;
+    }
+    child.remove();
+    child.parentNode = this;
+    this.children.push(child);
+    return child;
+  }
+  replaceChildren(...children) {
+    this.children.forEach(child => { child.parentNode = null; });
+    this.children = [];
+    this._textContent = '';
+    children.forEach(child => this.appendChild(child));
   }
 }
 
 function makeHarness({ rows = [], apiFetch = null } = {}) {
   const ids = new Map();
-  const getEl = id => {
-    if (!ids.has(id)) ids.set(id, new FakeElement(id));
+  const register = (id, el) => ids.set(id, el);
+  const ensureEl = id => {
+    if (!ids.has(id)) ids.set(id, new FakeElement(id, {}, 'div', register));
     return ids.get(id);
   };
+  const getEl = id => ids.get(id) || null;
 
   [
     'log-pagination', 'log-tbody', 'log-count', 'log-threat-count',
     'log-device-filter', 'log-search-popup', 'log-search-input',
     'log-search-mode', 'log-search-date-range', 'log-search-popup-title',
     'log-search-from', 'log-search-to', 'log-search-apply',
-    'log-search-clear', 'log-search-close', 'log-filter-safe',
-    'log-filter-warn', 'log-filter-danger',
-  ].forEach(getEl);
+    'log-search-clear', 'log-search-close',
+  ].forEach(ensureEl);
 
-  getEl('log-search-mode').value = 'contains';
+  ensureEl('log-search-mode').value = 'contains';
 
   const headers = ['lastSeen', 'dst', 'app', 'threatTag'].map(col => {
-    const th = new FakeElement(`th-${col}`, { col });
+    const th = new FakeElement(`th-${col}`, { col }, 'th', register);
     th._sortIcon = new FakeElement(`sort-${col}`);
     return th;
   });
   const searchIcons = ['dst', 'app', 'threatTag'].map(col => {
-    const el = new FakeElement(`search-${col}`, { col });
+    const el = new FakeElement(`search-${col}`, { col }, 'span', register);
     el.classList.add('log-search-icon');
     return el;
   });
@@ -95,6 +136,8 @@ function makeHarness({ rows = [], apiFetch = null } = {}) {
     window: { innerWidth: 1024 },
     document: {
       getElementById: getEl,
+      createElement: tagName => new FakeElement('', {}, tagName, register),
+      createDocumentFragment: () => new FakeElement('', {}, '#fragment', register),
       querySelectorAll(selector) {
         if (selector === '#log-table th[data-col]') return headers;
         if (selector === '#log-table th') return headers;
@@ -128,9 +171,6 @@ function makeHarness({ rows = [], apiFetch = null } = {}) {
     clearSelection() { context.selectedMac = null; context.selectedIp = null; },
     t: key => key,
     tVars: (_key, vars) => vars.value || '',
-    esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[c])),
     guessApp: (dport, proto, host) => {
       if (Number(dport) === 443 && String(proto).toUpperCase() === 'TCP') return 'HTTPS';
       if (Number(dport) === 53) return 'DNS';
@@ -161,6 +201,29 @@ describe('Connection Log view behavior', () => {
     const params = h.lastConnectionsParams();
     assert.equal(params.get('limit'), '200');
     assert.equal(params.get('offset'), '0');
+  });
+
+  it('renders connection values as text in a nine-cell DOM row', async () => {
+    const h = makeHarness({
+      rows: [{
+        src: '<b>source</b>',
+        dst: '<img src=x onerror=alert(1)>',
+        dport: 443,
+        proto: 'TCP',
+        country: 'JP',
+        org: '<script>unsafe()</script>',
+      }],
+    });
+    h.context.updateLogView();
+    await h.settle();
+
+    const tbody = h.getEl('log-tbody');
+    assert.equal(tbody.children.length, 1);
+    assert.equal(tbody.children[0].tagName, 'TR');
+    assert.equal(tbody.children[0].children.length, 9);
+    assert.match(tbody.textContent, /<img src=x onerror=alert\(1\)>/);
+    assert.match(tbody.textContent, /<script>unsafe\(\)<\/script>/);
+    assert.deepEqual(tbody.children[0].children.map(cell => cell.tagName), Array(9).fill('TD'));
   });
 
   it('server-side filters keep pagination and are sent as API params', async () => {
@@ -211,9 +274,9 @@ describe('Connection Log view behavior', () => {
     assert.equal(params.get('fSrcMac'), 'aa:bb:cc:dd:ee:ff');
     assert.equal(params.has('fSrc'), false);
     // Client-side guard still filters the mock response by srcMac
-    assert.match(h.getEl('log-tbody').innerHTML, /8\.8\.8\.8/);
-    assert.match(h.getEl('log-tbody').innerHTML, /1\.1\.1\.1/);
-    assert.doesNotMatch(h.getEl('log-tbody').innerHTML, /9\.9\.9\.9/);
+    assert.match(h.getEl('log-tbody').textContent, /8\.8\.8\.8/);
+    assert.match(h.getEl('log-tbody').textContent, /1\.1\.1\.1/);
+    assert.doesNotMatch(h.getEl('log-tbody').textContent, /9\.9\.9\.9/);
   });
 
   it('clearing the device filter refetches without the src filter', async () => {
@@ -319,13 +382,13 @@ describe('Connection Log view behavior', () => {
     h.context.updateLogView();
     h.context.updateLogView();
     await h.settle();
-    assert.match(h.getEl('log-tbody').innerHTML, /new\.example/);
+    assert.match(h.getEl('log-tbody').textContent, /new\.example/);
 
     resolveFirst();
     await h.settle();
 
-    assert.match(h.getEl('log-tbody').innerHTML, /new\.example/);
-    assert.doesNotMatch(h.getEl('log-tbody').innerHTML, /old\.example/);
+    assert.match(h.getEl('log-tbody').textContent, /new\.example/);
+    assert.doesNotMatch(h.getEl('log-tbody').textContent, /old\.example/);
     // 2 updateLogView calls × (1 connections + 1 threat-counts) = 4 requests total
     assert.equal(urls.length, 4);
   });

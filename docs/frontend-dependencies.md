@@ -63,8 +63,9 @@ New rendering code should use `textContent`, `createElement`, and explicit DOM
 attributes. If `innerHTML` is unavoidable, review every interpolated value,
 document why the sink is safe in the allowlist, and run
 `npm run lint:innerhtml`. Do not regenerate fingerprints merely to make the
-gate pass. Existing dynamic sinks are migrated in small batches, beginning
-with `log.js`, `notif-log.js`, and `devices.js`.
+gate pass. `log.js` has completed its DOM API migration. The remaining dynamic
+sinks are migrated in small batches, beginning with `notif-log.js`, followed
+by `devices.js`.
 
 ## Temporary public API
 

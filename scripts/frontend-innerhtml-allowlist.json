@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssignments": 42,
+  "totalAssignments": 36,
   "files": {
     "auth-socket.js": {
       "count": 1,
@@ -44,17 +44,11 @@
       "categories": ["trusted-translation-html"],
       "reason": "Only elements explicitly marked data-i18n-html receive HTML from the bundled, reviewed translation catalog; runtime or user-provided translation sources are not supported."
     },
-    "log.js": {
-      "count": 6,
-      "fingerprint": "db7f0fb38b286ae02f21355d0cca62a944f9ffa73dfc3c8e448ca101f110baf7",
-      "categories": ["escaped-data-renderer", "static-markup", "high-priority-migration"],
-      "reason": "Connection rows and filter labels escape external and DB values; counters are numeric and remaining markup is controlled. This high-volume DB renderer is first in the stage 2 DOM API migration order."
-    },
     "notif-log.js": {
       "count": 6,
       "fingerprint": "b7f2f6eb2855529cfc297c78b08e86a72226fce7708241ea3bfe39eaa85b9070",
       "categories": ["escaped-data-renderer", "dom-clear", "high-priority-migration"],
-      "reason": "Notification rows, details, errors and filter labels escape external and DB values before interpolation; empty assignment clears rows. Migrate after log.js in P2-27 stage 2."
+      "reason": "Notification rows, details, errors and filter labels escape external and DB values before interpolation; empty assignment clears rows. This is the next stage 2 DOM API migration target after log.js."
     },
     "router-settings.js": {
       "count": 2,

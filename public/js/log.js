@@ -1,6 +1,6 @@
 // ─── Connection Log View ──────────────────────────────────────────────────────
 import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE, esc, guessApp } from './utils.js?v=__ASSET_VERSION__';
+import { _BASE, guessApp } from './utils.js?v=__ASSET_VERSION__';
 import { getTimeRange, setFetching, setServerTimeOffset } from './connections-panel.js?v=__ASSET_VERSION__';
 import { logMode } from './view-tabs.js?v=__ASSET_VERSION__';
 import { selectedMac, selectedIp, updateSideHighlight, clearSelection } from './graph.js?v=__ASSET_VERSION__';
@@ -29,6 +29,21 @@ const LOG_SERVER_FILTER_COLS = new Set(['src', 'dst', 'dport', 'proto', 'country
 // Mapping: log column name → URL param names for value and mode
 const LOG_FILTER_PARAM = { src: 'fSrc', dst: 'fDst', dport: 'fDport', proto: 'fProto', country: 'fCountry', org: 'fOrg' };
 const LOG_FILTER_MODE_PARAM = { src: 'fSrcMode', dst: 'fDstMode', dport: 'fDportMode', proto: 'fProtoMode', country: 'fCountryMode', org: 'fOrgMode' };
+
+function createTextElement(tagName, text, { className = '', id = '', title = '' } = {}) {
+  const el = document.createElement(tagName);
+  if (className) el.className = className;
+  if (id) el.id = id;
+  if (title) el.title = title;
+  el.textContent = text == null ? '' : String(text);
+  return el;
+}
+
+function appendLogCell(row, text, options = {}) {
+  const cell = createTextElement('td', text, options);
+  row.appendChild(cell);
+  return cell;
+}
 
 function getLogCellValue(c, col) {
   switch (col) {
@@ -189,7 +204,10 @@ function setupScrollObserver() {
   if (!tbody) return;
   const sentinel = document.createElement('tr');
   sentinel.id = 'log-scroll-sentinel';
-  sentinel.innerHTML = '<td colspan="9" style="height:1px;padding:0;border:none"></td>';
+  const sentinelCell = document.createElement('td');
+  sentinelCell.colSpan = 9;
+  sentinelCell.className = 'log-scroll-sentinel-cell';
+  sentinel.appendChild(sentinelCell);
   tbody.appendChild(sentinel);
 
   logScrollObserver = new IntersectionObserver(entries => {
@@ -210,7 +228,11 @@ function updateScrollStatus() {
     return;
   }
   el.style.display = 'flex';
-  el.innerHTML = `<span style="color:var(--muted);font-size:11px">${logAllData.length} / ${logTotal} ${t('log.sessions')}</span>`;
+  el.replaceChildren(createTextElement(
+    'span',
+    `${logAllData.length} / ${logTotal} ${t('log.sessions')}`,
+    { className: 'log-status-text' }
+  ));
 }
 
 // ── Server-side threat counts ─────────────────────────────────────────────────
@@ -267,24 +289,111 @@ function renderThreatBadges() {
   if (!threatCountEl) return;
   if (!logThreatCounts) {
     threatCountEl.style.display = 'inline';
-    threatCountEl.innerHTML = `<span style="color:var(--muted);font-size:11px">...</span>`;
+    threatCountEl.replaceChildren(createTextElement('span', '...', { className: 'log-status-text' }));
     return;
   }
   const { safe, warn, danger } = logThreatCounts;
-  const safeActive   = logThreatFilter === 'safe'   ? ' log-filter-active' : '';
-  const warnActive   = logThreatFilter === 'warn'   ? ' log-filter-active' : '';
-  const dangerActive = logThreatFilter === 'danger' ? ' log-filter-active' : '';
   threatCountEl.style.display = 'inline';
-  threatCountEl.innerHTML = `<span class="log-badge-safe log-badge-clickable${safeActive}" id="log-filter-safe">${t('log.badge.safe')}: ${safe}</span> <span class="log-badge-warn log-badge-clickable${warnActive}" id="log-filter-warn">${t('log.badge.warn')}: ${warn}</span> <span class="log-badge-danger log-badge-clickable${dangerActive}" id="log-filter-danger">${t('log.badge.danger')}: ${danger}</span>`;
-  document.getElementById('log-filter-safe')?.addEventListener('click', () => {
-    logThreatFilter = logThreatFilter === 'safe' ? null : 'safe'; resetAndFetch();
+  const badges = [
+    { kind: 'safe', count: safe, className: 'log-badge-safe' },
+    { kind: 'warn', count: warn, className: 'log-badge-warn' },
+    { kind: 'danger', count: danger, className: 'log-badge-danger' },
+  ].map(({ kind, count, className }) => {
+    const badge = createTextElement(
+      'span',
+      `${t(`log.badge.${kind}`)}: ${count}`,
+      { className: `${className} log-badge-clickable`, id: `log-filter-${kind}` }
+    );
+    if (logThreatFilter === kind) badge.classList.add('log-filter-active');
+    badge.addEventListener('click', () => {
+      logThreatFilter = logThreatFilter === kind ? null : kind;
+      resetAndFetch();
+    });
+    return badge;
   });
-  document.getElementById('log-filter-warn')?.addEventListener('click', () => {
-    logThreatFilter = logThreatFilter === 'warn' ? null : 'warn'; resetAndFetch();
+  threatCountEl.replaceChildren(...badges);
+}
+
+function createThreatCell(connection, isLowConfidence) {
+  const cell = document.createElement('td');
+  if (!connection.threat) {
+    cell.appendChild(createTextElement('span', t('log.badge.safe'), { className: 'log-badge-safe' }));
+    return cell;
+  }
+
+  const threat = connection.threat;
+  const badgeClass = isLowConfidence ? 'log-badge-warn' : 'log-badge-danger';
+  const badgeKey = isLowConfidence ? 'warn' : 'danger';
+  cell.appendChild(createTextElement('span', t(`log.badge.${badgeKey}`), { className: badgeClass }));
+
+  const title = isLowConfidence
+    ? threat.tag + (threat.url ? `\nURL: ${threat.url}` : '')
+    : `${threat.tag} [${threat.matchType}: ${threat.matchValue}]${threat.url ? `\nURL: ${threat.url}` : ''}`;
+  cell.appendChild(createTextElement('span', threat.tag, {
+    className: `log-threat-tag${isLowConfidence ? ' log-threat-low' : ''}`,
+    title,
+  }));
+  return cell;
+}
+
+function createLogRow(connection) {
+  const isThreat = !!connection.threat;
+  const isLowConfidence = isThreat && connection.threat.confidence === 'low';
+  const srcShortDns = connection.srcDnsName ? connection.srcDnsName.split('.')[0] : null;
+  const srcShortMdns = connection.srcMdnsName ? connection.srcMdnsName.replace(/\.local$/, '') : null;
+  const srcLabel = srcShortMdns || srcShortDns || connection.src;
+  const dstLabel = connection.dstHost && connection.dstHost !== connection.dst
+    ? connection.dstHost
+    : connection.dst;
+  const flag = (connection.country && connection.country.length === 2)
+    ? String.fromCodePoint(
+      0x1F1E6 + connection.country.charCodeAt(0) - 65,
+      0x1F1E6 + connection.country.charCodeAt(1) - 65
+    )
+    : '';
+  const timeText = connection.lastSeen
+    ? new Date(connection.lastSeen).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US', {
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    })
+    : '';
+
+  const row = document.createElement('tr');
+  if (isThreat) {
+    row.classList.add(isLowConfidence ? 'warn-row' : 'threat-row', 'threat-clickable');
+    row.dataset.threat = JSON.stringify({
+      src: connection.src,
+      srcLabel,
+      dst: connection.dst,
+      dstLabel,
+      dport: connection.dport,
+      proto: connection.proto,
+      country: connection.country || '',
+      org: connection.org || '',
+      city: connection.city || '',
+      dstHost: connection.dstHost || '',
+      srcMac: connection.srcMac || '',
+      srcVendor: connection.srcVendor || '',
+      firstSeen: connection.firstSeen || 0,
+      lastSeen: connection.lastSeen || 0,
+      ttl: connection.ttl || 0,
+      threat: connection.threat,
+    });
+    row.dataset.lset = '1';
+    row.addEventListener('click', () => showThreatDetail(row));
+  }
+
+  appendLogCell(row, srcLabel, { title: connection.src });
+  appendLogCell(row, dstLabel, { title: connection.dst });
+  row.appendChild(createThreatCell(connection, isLowConfidence));
+  appendLogCell(row, connection.dport);
+  appendLogCell(row, guessApp(connection.dport, connection.proto, connection.dstHost || connection.dst), {
+    className: 'log-app-cell',
   });
-  document.getElementById('log-filter-danger')?.addEventListener('click', () => {
-    logThreatFilter = logThreatFilter === 'danger' ? null : 'danger'; resetAndFetch();
-  });
+  appendLogCell(row, connection.proto);
+  appendLogCell(row, `${flag} ${connection.country || ''}`);
+  appendLogCell(row, connection.org || '', { className: 'log-org-cell', title: connection.org || '' });
+  appendLogCell(row, timeText);
+  return row;
 }
 
 // ── Render (client-side-only filters applied on top of server data) ───────────
@@ -301,12 +410,21 @@ function renderLogView(appendRows) {
       if (deviceFilterEl) {
         deviceFilterEl.style.display = 'inline';
         const label = selectedIp || selectedMac;
-        deviceFilterEl.innerHTML = `<span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;cursor:pointer" title="${esc(t('log.deviceFilter.clear'))}" id="log-device-filter-clear">${esc(tVars('log.deviceFilter.only', { value: label }))}</span>`;
-        document.getElementById('log-device-filter-clear')?.addEventListener('click', () => {
+        const clearFilter = createTextElement(
+          'span',
+          tVars('log.deviceFilter.only', { value: label }),
+          {
+            className: 'log-device-filter-chip',
+            id: 'log-device-filter-clear',
+            title: t('log.deviceFilter.clear'),
+          }
+        );
+        clearFilter.addEventListener('click', () => {
           clearSelection();
           updateSideHighlight();
           resetAndFetch();
         });
+        deviceFilterEl.replaceChildren(clearFilter);
       }
     } else {
       if (deviceFilterEl) deviceFilterEl.style.display = 'none';
@@ -385,51 +503,16 @@ function renderLogView(appendRows) {
     });
   }
 
-  const rowsHtml = conns.map(c => {
-    const isThreat  = !!c.threat;
-    const isLowConf = isThreat && c.threat.confidence === 'low';
-    let threatTagCell;
-    if (isThreat && isLowConf) {
-      threatTagCell = `<td><span class="log-badge-warn">${esc(t('log.badge.warn'))}</span> <span class="log-threat-tag log-threat-low" title="${esc(c.threat.tag + (c.threat.url ? '\nURL: ' + c.threat.url : ''))}">${esc(c.threat.tag)}</span></td>`;
-    } else if (isThreat) {
-      threatTagCell = `<td><span class="log-badge-danger">${esc(t('log.badge.danger'))}</span> <span class="log-threat-tag" title="${esc(c.threat.tag + ' [' + c.threat.matchType + ': ' + c.threat.matchValue + ']' + (c.threat.url ? '\nURL: ' + c.threat.url : ''))}">${esc(c.threat.tag)}</span></td>`;
-    } else {
-      threatTagCell = `<td><span class="log-badge-safe">${esc(t('log.badge.safe'))}</span></td>`;
-    }
-    const srcShortDns  = c.srcDnsName  ? c.srcDnsName.split('.')[0]             : null;
-    const srcShortMdns = c.srcMdnsName ? c.srcMdnsName.replace(/\.local$/, '') : null;
-    const srcLabel = srcShortMdns || srcShortDns || c.src;
-    const dstLabel = c.dstHost && c.dstHost !== c.dst ? c.dstHost : c.dst;
-    const flag = (c.country && c.country.length === 2)
-      ? String.fromCodePoint(0x1F1E6 + c.country.charCodeAt(0) - 65, 0x1F1E6 + c.country.charCodeAt(1) - 65)
-      : '';
-    const timeStr = c.lastSeen
-      ? new Date(c.lastSeen).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-      : '';
-    return `<tr class="${isThreat ? (isLowConf ? 'warn-row threat-clickable' : 'threat-row threat-clickable') : ''}" ${isThreat ? `data-threat='${esc(JSON.stringify({src:c.src,srcLabel,dst:c.dst,dstLabel,dport:c.dport,proto:c.proto,country:c.country||'',org:c.org||'',city:c.city||'',dstHost:c.dstHost||'',srcMac:c.srcMac||'',srcVendor:c.srcVendor||'',firstSeen:c.firstSeen||0,lastSeen:c.lastSeen||0,ttl:c.ttl||0,threat:c.threat}))}'` : ''}>
-      <td title="${esc(c.src)}">${esc(srcLabel)}</td>
-      <td title="${esc(c.dst)}">${esc(dstLabel)}</td>
-      ${threatTagCell}
-      <td>${c.dport}</td>
-      <td style="font-size:11px;color:var(--muted);">${esc(guessApp(c.dport, c.proto, c.dstHost || c.dst))}</td>
-      <td>${esc(c.proto)}</td>
-      <td>${flag} ${esc(c.country || '')}</td>
-      <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(c.org || '')}">${esc(c.org || '')}</td>
-      <td>${timeStr}</td>
-    </tr>`;
-  }).join('');
+  const rows = document.createDocumentFragment();
+  conns.forEach(connection => rows.appendChild(createLogRow(connection)));
 
   if (appendRows !== null) {
     // Append: remove old sentinel (if any), add new rows, observer will re-add sentinel
     document.getElementById('log-scroll-sentinel')?.remove();
-    tbody.insertAdjacentHTML('beforeend', rowsHtml);
+    tbody.appendChild(rows);
   } else {
-    tbody.innerHTML = rowsHtml;
+    tbody.replaceChildren(rows);
   }
-  tbody.querySelectorAll('.threat-clickable:not([data-lset])').forEach(tr => {
-    tr.dataset.lset = '1';
-    tr.addEventListener('click', () => showThreatDetail(tr));
-  });
 }
 
 // ── Public entry point: reset to page 0 and re-fetch ─────────────────────────
