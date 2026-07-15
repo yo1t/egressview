@@ -85,6 +85,13 @@
   .settings-status.is-visible { display: block; }
   .settings-status.ok  { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); color: var(--green); }
   .settings-status.err { background: rgba(239,68,68,0.12);  border: 1px solid rgba(239,68,68,0.35); color: var(--red); }
+  .settings-session-section-title { cursor: default; font-size: 12px; margin-bottom: 8px; }
+  .settings-session-list { font-size: 11px; }
+  .settings-session-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .settings-session-label { flex: 1; }
+  .settings-session-current { color: var(--green); font-size: 9px; margin-left: 4px; }
+  .settings-session-seen, .settings-session-muted { color: var(--muted); font-size: 10px; }
+  .settings-session-revoke-all { width: auto; padding: 5px 14px; margin-top: 8px; font-size: 10px; background: transparent; border: 1px solid var(--border); color: var(--muted); }
   .legacy-router-controls { display: none !important; }
   .router-pane-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
   .router-pane-title { margin: 0 0 5px; padding: 0; border: 0; cursor: default; }
