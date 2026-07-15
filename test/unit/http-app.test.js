@@ -7,7 +7,19 @@ const {
   buildCspHeader,
   createIndexHtmlBase,
   injectIndexBootstrap,
+  serializeI18nModule,
 } = require('../../src/http-app');
+
+describe('serializeI18nModule', () => {
+  it('returns an ES module and escapes script-breaking characters', () => {
+    const moduleSource = serializeI18nModule({ ja: { x: '</script>\u2028' }, en: { x: 'ok' } });
+    assert.match(moduleSource, /^export default /);
+    assert.doesNotMatch(moduleSource, /<\/script>/);
+    assert.doesNotMatch(moduleSource, /\u2028/);
+    assert.match(moduleSource, /\\u003c\/script>/);
+    assert.match(moduleSource, /\\u2028/);
+  });
+});
 
 describe('createIndexHtmlBase', () => {
   it('replaces subpath and asset version placeholders once at startup', () => {

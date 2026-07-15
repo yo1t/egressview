@@ -17,6 +17,15 @@ const notificationLogRoutes = require('./routes/notification-log');
 const beaconsRoutes = require('./routes/beacons');
 const routerRoutes = require('./routes/routers');
 const { createSlowRequestLogger } = require('./slow-request-log');
+const i18nCatalog = require('./data/i18n.json');
+
+function serializeI18nModule(catalog) {
+  const json = JSON.stringify(catalog)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+  return `export default ${json};\n`;
+}
 
 function createIndexHtmlBase(indexHtml, subpath, assetVersion, htmlEscape) {
   return indexHtml
@@ -83,6 +92,7 @@ function configureHttpApp(app, {
     assetVersion,
     htmlEscape
   );
+  const i18nModule = serializeI18nModule(i18nCatalog);
 
   app.get(indexRoutes, (req, res) => {
     res.type('html').send(injectIndexBootstrap(
@@ -92,6 +102,16 @@ function configureHttpApp(app, {
       res.locals.cspNonce,
       htmlEscape
     ));
+  });
+
+  const i18nModuleRoutes = ['/js/i18n-data.js'];
+  if (subpath) i18nModuleRoutes.push(`${subpath}/js/i18n-data.js`);
+  app.get(i18nModuleRoutes, (req, res) => {
+    const etag = `"${assetVersion}-i18n-data.js"`;
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    res.setHeader('ETag', etag);
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+    res.type('application/javascript').send(i18nModule);
   });
 
   const jsModuleRoutes = ['/js/:file'];
@@ -156,4 +176,5 @@ module.exports = {
   configureHttpApp,
   createIndexHtmlBase,
   injectIndexBootstrap,
+  serializeI18nModule,
 };

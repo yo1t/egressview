@@ -26,6 +26,15 @@ and top-level side effects matter. The temporary public surface is
 
 `socket.io`, D3, and topojson are loaded before the app scripts.
 
+## Shared translation catalog (P2-29)
+
+Client and server translations have a single source of truth in
+`src/data/i18n.json`. The server reads the JSON directly. For the browser,
+`http-app.js` safely serializes the same catalog as the virtual ES module
+`/js/i18n-data.js`; `i18n.js` imports that module with the application asset
+version. This keeps the no-build deployment model while preventing client and
+server translation dictionaries from drifting apart.
+
 ## Extracted submodules (P2-25 / P2-28)
 
 `graph.js` and `stats.js` delegate to focused submodules; each is imported by
