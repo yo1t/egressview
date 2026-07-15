@@ -1,13 +1,12 @@
 'use strict';
 
-// Unit tests for three pure transformation functions in public/js/stats.js:
+// Unit tests for three pure transformation functions in public/js/stats-helpers.js:
 //   statsTargetRows      — normalises summary.byTarget / byDst into a uniform row shape
 //   appSlicesFromSummary — aggregates app groups into [label, count] slices
 //   mapPointsFromSummary — converts byLocation entries into map-point objects
 //
-// stats.js has heavy DOM/D3/SVG setup at the top level.  We slice only the three
-// target functions (from statsTargetRows up to updateMapCoverageNotice) and run
-// them in a vm context with lightweight stubs for t() and guessApp().
+// stats-helpers.js is a pure ES module; labels and the app classifier are
+// injected as arguments so no i18n/DOM stubs are needed.
 // Run: node --test test/unit/stats-summary.test.js
 
 const { describe, it } = require('node:test');
@@ -17,26 +16,27 @@ const path = require('node:path');
 const vm   = require('node:vm');
 
 const root   = path.join(__dirname, '..', '..');
-const source = fs.readFileSync(path.join(root, 'public/js/stats.js'), 'utf8');
+const source = fs.readFileSync(path.join(root, 'public/js/stats-helpers.js'), 'utf8');
 
-const start = source.indexOf('function statsTargetRows');
-const end   = source.indexOf('function updateMapCoverageNotice');
-assert.notEqual(start, -1, 'function statsTargetRows not found');
-assert.notEqual(end,   -1, 'function updateMapCoverageNotice not found');
-
-const fnSrc = source.slice(start, end);
-
-function load({ tStub = k => k, guessAppStub = () => '' } = {}) {
-  const ctx = vm.createContext({
-    Map, Number, Math,
-    t: tStub,
-    guessApp: guessAppStub,
-  });
-  vm.runInContext(fnSrc, ctx);
-  return ctx;
+function loadHelpers() {
+  const wrapped = source.replace(/^export function /gm, 'function ');
+  const fnNames = [...wrapped.matchAll(/^function (\w+)/gm)].map(m => m[1]);
+  const tail = fnNames.map(n => `exports.${n} = ${n};`).join('\n');
+  const ctx = { exports: {}, Map, Number, Math };  // host globals so instanceof checks work
+  vm.runInNewContext(wrapped + '\n' + tail, ctx);
+  return ctx.exports;
 }
 
-const { statsTargetRows, mapPointsFromSummary } = load();
+const { statsTargetRows, mapPointsFromSummary, appSlicesFromSummary } = loadHelpers();
+
+// Call with injected labels/classifier (mirrors the stats.js call site)
+function slices(groups, topN, { tStub = k => k, guessAppStub = () => '' } = {}) {
+  return appSlicesFromSummary(groups, topN, {
+    unknownLabel: tStub('stats.app.unknown'),
+    otherLabel:   tStub('stats.legend.other'),
+    guessApp:     guessAppStub,
+  });
+}
 
 // ─── statsTargetRows ──────────────────────────────────────────────────────────
 
@@ -95,45 +95,41 @@ describe('statsTargetRows', () => {
 
 describe('appSlicesFromSummary', () => {
   it('returns [] for empty groups', () => {
-    const ctx = load();
-    const result = JSON.parse(JSON.stringify(ctx.appSlicesFromSummary([], 8)));
+    const result = JSON.parse(JSON.stringify(slices([], 8)));
     assert.deepEqual(result, []);
   });
 
   it('aggregates groups with the same app label', () => {
-    const ctx = load();
     const groups = [
       { app: 'HTTPS', count: 3 },
       { app: 'HTTPS', count: 2 },
       { app: 'DNS',   count: 1 },
     ];
-    const result = JSON.parse(JSON.stringify(ctx.appSlicesFromSummary(groups, 8)));
+    const result = JSON.parse(JSON.stringify(slices(groups, 8)));
     const https = result.find(([l]) => l === 'HTTPS');
     assert.ok(https, 'HTTPS slice missing');
     assert.equal(https[1], 5);
   });
 
   it('sorts slices by count descending', () => {
-    const ctx = load();
     const groups = [
       { app: 'SSH',   count: 1 },
       { app: 'HTTPS', count: 5 },
       { app: 'DNS',   count: 3 },
     ];
-    const result = JSON.parse(JSON.stringify(ctx.appSlicesFromSummary(groups, 8)));
+    const result = JSON.parse(JSON.stringify(slices(groups, 8)));
     assert.equal(result[0][0], 'HTTPS');
     assert.equal(result[1][0], 'DNS');
     assert.equal(result[2][0], 'SSH');
   });
 
   it('groups beyond topN are collapsed into an Other slice', () => {
-    const ctx = load({ tStub: k => k === 'stats.legend.other' ? 'Other' : k });
     const groups = [
       { app: 'A', count: 5 },
       { app: 'B', count: 4 },
       { app: 'C', count: 3 },
     ];
-    const result = JSON.parse(JSON.stringify(ctx.appSlicesFromSummary(groups, 2)));
+    const result = JSON.parse(JSON.stringify(slices(groups, 2, { tStub: k => k === 'stats.legend.other' ? 'Other' : k })));
     assert.equal(result.length, 3); // A, B, Other
     const other = result.find(([l]) => l === 'Other');
     assert.ok(other, 'Other slice missing');
@@ -141,9 +137,8 @@ describe('appSlicesFromSummary', () => {
   });
 
   it('falls back to guessApp when g.app is absent', () => {
-    const ctx = load({ guessAppStub: () => 'HTTPS' });
     const groups = [{ dport: 443, proto: 'TCP', count: 2 }];
-    const result = JSON.parse(JSON.stringify(ctx.appSlicesFromSummary(groups, 8)));
+    const result = JSON.parse(JSON.stringify(slices(groups, 8, { guessAppStub: () => 'HTTPS' })));
     const https = result.find(([l]) => l === 'HTTPS');
     assert.ok(https, 'expected guessApp fallback to HTTPS');
     assert.equal(https[1], 2);

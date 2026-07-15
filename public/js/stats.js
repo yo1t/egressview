@@ -6,6 +6,7 @@ import { statsMode } from './view-tabs.js?v=__ASSET_VERSION__';
 import { worldGeo, getHomeCoord, getMapRotation, buildMapPoints, ensureWorldGeo } from './map-common.js?v=__ASSET_VERSION__';
 import { selectedMac, nodes, currentGraphRangeKey } from './graph.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
+import { statsTargetRows, appSlicesFromSummary, mapPointsFromSummary, truncateLabel, chartInnerWidth } from './stats-helpers.js?v=__ASSET_VERSION__';
 const STATS_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#a78bfa'];
 
 // ── Stats page: Globe + Flat map ─────────────────────────────────────────────
@@ -463,54 +464,6 @@ function setStatsEmpty(isEmpty, selIp) {
   if (isEmpty) updateStatsMaps(selIp, []);
 }
 
-function statsTargetRows(summary) {
-  const rows = summary.byTarget && summary.byTarget.length
-    ? summary.byTarget
-    : (summary.byDst || []).map(r => ({
-      key: r.org || r.dstHost || r.dst,
-      label: r.org || r.dstHost || r.dst,
-      count: r.count,
-    }));
-  return rows.map(r => ({
-    key: r.key || r.label,
-    label: r.label || r.key,
-    count: r.count || 0,
-  })).filter(r => r.key && r.count > 0);
-}
-
-function appSlicesFromSummary(groups, topN) {
-  const unknownLabel = t('stats.app.unknown');
-  const otherLabel = t('stats.legend.other');
-  const counts = new Map();
-  for (const g of groups || []) {
-    const app = g.app || guessApp(g.dport, g.proto, g.dstHost) || unknownLabel;
-    counts.set(app, (counts.get(app) || 0) + (g.count || 0));
-  }
-  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  const top = sorted.slice(0, topN);
-  const rest = sorted.slice(topN).reduce((sum, [, count]) => sum + count, 0);
-  if (rest > 0) top.push([otherLabel, rest]);
-  return top;
-}
-
-function mapPointsFromSummary(summary) {
-  return (summary.byLocation || [])
-    .filter(r => r.lat != null && r.lon != null)
-    .map(r => ({
-      key: r.key || r.org,
-      org: r.org || r.key,
-      lat: Number(r.lat),
-      lon: Number(r.lon),
-      city: r.city || '',
-      country: r.country || '',
-      srcs: new Map(),
-      maxTtl: r.maxTtl || 0,
-      threat: false,
-      totalSessions: r.totalSessions || 0,
-      freshness: Math.max(0.15, Math.min(1.0, (r.maxTtl || 0) / 300)),
-    }));
-}
-
 function updateMapCoverageNotice(coverage) {
   const el = document.getElementById('stats-map-coverage');
   if (!el) return;
@@ -557,7 +510,11 @@ function renderStatsSummary(summary, selIp) {
     arr[bucket] += row.count || 0;
   }
   drawTimeline(series, fromT, toT, buckets, bw, topTargets);
-  drawAppPieChart(null, appSlicesFromSummary(summary.appGroups, 8));
+  drawAppPieChart(null, appSlicesFromSummary(summary.appGroups, 8, {
+    unknownLabel: t('stats.app.unknown'),
+    otherLabel: t('stats.legend.other'),
+    guessApp,
+  }));
   updateStatsMaps(selIp, mapPointsFromSummary(summary));
 }
 
@@ -965,15 +922,6 @@ function drawTimeline(series, fromT, toT, buckets, bw, topOrgs) {
     legend.appendChild(item);
   }
   document.getElementById('stats-timeline').appendChild(legend);
-}
-
-function truncateLabel(s, maxLen) {
-  s = String(s);
-  return s.length > maxLen ? s.substring(0, maxLen - 1) + '…' : s;
-}
-
-function chartInnerWidth(width, margin) {
-  return Math.max(1, width - margin.left - margin.right);
 }
 
 function drawBarChart(orgs /* [[name, count], ...] */) {
