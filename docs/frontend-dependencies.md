@@ -51,6 +51,21 @@ resolved by the ES module graph rather than script tags:
 - `stats-map.js` — globe and flat-map rendering; owns all map state
   (projection, rotation, spin, particles, zoom/pan, resize bookkeeping)
 
+## Reviewed HTML sinks (P2-27)
+
+`npm run lint:innerhtml` audits every `innerHTML` assignment under
+`public/js/`. The allowlist in `scripts/frontend-innerhtml-allowlist.json`
+records the reviewed file, use categories, reason, count, and content
+fingerprint for each existing group of assignments. The check fails when an
+assignment is added, removed, moved to an unreviewed file, or changed.
+
+New rendering code should use `textContent`, `createElement`, and explicit DOM
+attributes. If `innerHTML` is unavoidable, review every interpolated value,
+document why the sink is safe in the allowlist, and run
+`npm run lint:innerhtml`. Do not regenerate fingerprints merely to make the
+gate pass. Existing dynamic sinks are migrated in small batches, beginning
+with `log.js`, `notif-log.js`, and `devices.js`.
+
 ## Temporary public API
 
 The following APIs are intentionally mirrored under `window.EgressView.api`

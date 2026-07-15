@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "totalAssignments": 42,
+  "files": {
+    "auth-socket.js": {
+      "count": 1,
+      "fingerprint": "c3e79eb65ebe7d26585461a63d7a8c28fe6b14a89895341e5950c2f6e2af06d8",
+      "categories": ["static-status-markup", "trusted-translation"],
+      "reason": "The save-button spinner is static markup and its label comes from the bundled translation catalog. Replace with DOM nodes when this flow is next edited."
+    },
+    "beacon.js": {
+      "count": 1,
+      "fingerprint": "1e7bdc62b1a55862cdf4df8034cabe9f0f62cef7b50288da021e41c1acb95362",
+      "categories": ["escaped-data-renderer"],
+      "reason": "Beacon table values and translations are escaped before interpolation; numeric fields are normalized by the detector. Keep under review until the table renderer moves to DOM APIs."
+    },
+    "connections-panel.js": {
+      "count": 2,
+      "fingerprint": "d353ce4dd3124b2c5e9eaff229f6b348c14f0188ec0735e0d06825a6cf0dfdb7",
+      "categories": ["escaped-data-renderer", "trusted-translation"],
+      "reason": "Connection labels, hosts, threat tags, protocols and ports pass through esc(); structural classes and the bundled empty-state translation are controlled locally."
+    },
+    "devices.js": {
+      "count": 3,
+      "fingerprint": "d5156ce5ee42484002d95a5a881e0228b04881802434829f7d09606d34da9f30",
+      "categories": ["escaped-data-renderer", "high-priority-migration"],
+      "reason": "Device, note and filter values are escaped before interpolation. This DB- and user-data renderer remains a priority DOM API migration target in P2-27 stage 2."
+    },
+    "graph-panels.js": {
+      "count": 7,
+      "fingerprint": "2cc46a418c23cf5d4c1031f801da542b93542e29bb5d19d998ab8ee5347b15d5",
+      "categories": ["escaped-data-renderer", "static-markup", "dom-clear"],
+      "reason": "Tooltip data is escaped or numeric, card/loading skeletons are controlled markup, and empty strings clear existing children. Dynamic card text is populated through textContent after creation."
+    },
+    "graph.js": {
+      "count": 2,
+      "fingerprint": "0f950b8dc4b94a26682cfb4f1884c0d1a3c186701a3eec85f7a05b25b9bf9043",
+      "categories": ["static-status-markup", "dom-clear", "trusted-translation"],
+      "reason": "One assignment renders a controlled loading row with a bundled translation; the other clears the device list. No external value is interpolated."
+    },
+    "i18n.js": {
+      "count": 1,
+      "fingerprint": "6362b82333946cc1f0513f1e7009bf54d30722d77f806549b83509f66e907bca",
+      "categories": ["trusted-translation-html"],
+      "reason": "Only elements explicitly marked data-i18n-html receive HTML from the bundled, reviewed translation catalog; runtime or user-provided translation sources are not supported."
+    },
+    "log.js": {
+      "count": 6,
+      "fingerprint": "db7f0fb38b286ae02f21355d0cca62a944f9ffa73dfc3c8e448ca101f110baf7",
+      "categories": ["escaped-data-renderer", "static-markup", "high-priority-migration"],
+      "reason": "Connection rows and filter labels escape external and DB values; counters are numeric and remaining markup is controlled. This high-volume DB renderer is first in the stage 2 DOM API migration order."
+    },
+    "notif-log.js": {
+      "count": 6,
+      "fingerprint": "b7f2f6eb2855529cfc297c78b08e86a72226fce7708241ea3bfe39eaa85b9070",
+      "categories": ["escaped-data-renderer", "dom-clear", "high-priority-migration"],
+      "reason": "Notification rows, details, errors and filter labels escape external and DB values before interpolation; empty assignment clears rows. Migrate after log.js in P2-27 stage 2."
+    },
+    "router-settings.js": {
+      "count": 2,
+      "fingerprint": "65dd165844b2cc85c17fbb2d30da537973076772d64ab2e4239eb09404d57792",
+      "categories": ["escaped-data-renderer"],
+      "reason": "Router IDs, names, kinds, state text and error messages are escaped before interpolation; state classes are selected from local constants."
+    },
+    "settings.js": {
+      "count": 8,
+      "fingerprint": "70275834021a698babeb6b6ee7fc4ed307cd2a1408c3ed87ca2534f1112b7416",
+      "categories": ["escaped-data-renderer", "static-status-markup", "dom-clear", "trusted-translation"],
+      "reason": "Spinner and empty states are controlled markup, clears use an empty string, and session/error values are escaped. Session list rendering should migrate when its UI is next changed."
+    },
+    "stats-map.js": {
+      "count": 2,
+      "fingerprint": "cd3d9f210f2f8f408eef30e4e5fac6273a875a5439bbbb08f9651959a8695950",
+      "categories": ["static-controls"],
+      "reason": "Map and globe controls are fixed local markup with no interpolated values; handlers are attached after creation."
+    },
+    "threat-popup.js": {
+      "count": 1,
+      "fingerprint": "82e723d22aef52d058c3cd42e13852bb64397014a96e6bb1c372006605ccba81",
+      "categories": ["escaped-data-renderer", "high-priority-migration"],
+      "reason": "Threat, connection and note strings are escaped, numeric fields are produced by normalized connection records, and labels come from the bundled catalog. Keep as a high-priority DOM API migration because it renders security-feed data."
+    }
+  }
+}
