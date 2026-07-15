@@ -43,7 +43,13 @@ const APP_SCRIPT_FILES = [
   'view-tabs.js',
   'auth-socket.js',
   'graph.js',
+  'graph-helpers.js',
+  'graph-panels.js',
+  'graph-render.js',
   'stats.js',
+  'stats-helpers.js',
+  'stats-charts.js',
+  'stats-map.js',
   'threat-popup.js',
   'beacon.js',
   'devices.js',
@@ -556,7 +562,7 @@ describe('Server runtime invariants', () => {
     const script = getScriptContent();
     const start = script.indexOf('async function updateStats()');
     assert.notEqual(start, -1, 'updateStats should exist');
-    const end = script.indexOf('// ─── App distribution pie chart', start);
+    const end = script.indexOf('\n// === ', start);  // next concatenated file
     assert.notEqual(end, -1, 'updateStats section end marker should exist');
     const updateStatsFn = script.slice(start, end);
     const previewAt = updateStatsFn.indexOf('renderStatsPiePreview(selIp)');
@@ -571,7 +577,7 @@ describe('Server runtime invariants', () => {
     const script = getScriptContent();
     const start = script.indexOf('async function updateStats()');
     assert.notEqual(start, -1, 'updateStats should exist');
-    const end = script.indexOf('// ─── App distribution pie chart', start);
+    const end = script.indexOf('\n// === ', start);  // next concatenated file
     assert.notEqual(end, -1, 'updateStats section end marker should exist');
     const updateStatsFn = script.slice(start, end);
     const clearAt = updateStatsFn.indexOf('clearStatsMapsForPendingSummary(selIp)');
@@ -588,7 +594,7 @@ describe('Server runtime invariants', () => {
     const script = getScriptContent();
     const start = script.indexOf('async function updateStats()');
     assert.notEqual(start, -1, 'updateStats should exist');
-    const end = script.indexOf('// ─── App distribution pie chart', start);
+    const end = script.indexOf('\n// === ', start);  // next concatenated file
     assert.notEqual(end, -1, 'updateStats section end marker should exist');
     const updateStatsFn = script.slice(start, end);
     assert.match(script, /let\s+statsMapSummaryKey\s*=\s*null/,
@@ -607,7 +613,7 @@ describe('Server runtime invariants', () => {
     const script = getScriptContent();
     const start = script.indexOf('function updateStatsMaps(selIp, mapPoints)');
     assert.notEqual(start, -1, 'updateStatsMaps should exist');
-    const end = script.indexOf('let chartMode', start);
+    const end = script.indexOf('\n// === ', start);  // next concatenated file
     assert.notEqual(end, -1, 'updateStatsMaps section end marker should exist');
     const updateStatsMapsFn = script.slice(start, end);
     assert.match(script, /var\s+stMapRenderSignature\s*=\s*null/,
@@ -666,16 +672,16 @@ describe('Server runtime invariants', () => {
     const script = getScriptContent();
     const start = script.indexOf('async function updateStats()');
     assert.notEqual(start, -1, 'updateStats should exist');
-    const end = script.indexOf('// ─── App distribution pie chart', start);
+    const end = script.indexOf('\n// === ', start);  // next concatenated file
     assert.notEqual(end, -1, 'updateStats section end marker should exist');
     const updateStatsFn = script.slice(start, end);
     assert.match(script, /let\s+statsRenderedSummary\s*=\s*\{\s*key:\s*null,\s*data:\s*null,\s*mode:\s*null\s*\}/,
       'stats should remember the last rendered summary object and the last chart mode');
     assert.match(updateStatsFn, /!\(\s*statsSummaryCache\.key\s*===\s*summaryKey\s*&&\s*statsSummaryCache\.data\s*\)[\s\S]*?renderStatsPiePreview\(selIp\)/,
       'same-period socket refreshes should not clear/redraw the pie preview while cached summary exists');
-    assert.match(updateStatsFn, /statsRenderedSummary\.key\s*===\s*summaryKey[\s\S]*?statsRenderedSummary\.data\s*===\s*summary[\s\S]*?statsRenderedSummary\.mode\s*===\s*chartMode[\s\S]*?return/,
+    assert.match(updateStatsFn, /statsRenderedSummary\.key\s*===\s*summaryKey[\s\S]*?statsRenderedSummary\.data\s*===\s*summary[\s\S]*?statsRenderedSummary\.mode\s*===\s*getChartMode\(\)[\s\S]*?return/,
       'cached summary objects should only skip redraw when the chart mode is also unchanged');
-    assert.match(updateStatsFn, /statsRenderedSummary\s*=\s*\{\s*key:\s*summaryKey,\s*data:\s*summary,\s*mode:\s*chartMode\s*\}/,
+    assert.match(updateStatsFn, /statsRenderedSummary\s*=\s*\{\s*key:\s*summaryKey,\s*data:\s*summary,\s*mode:\s*getChartMode\(\)\s*\}/,
       'successful summary rendering should update the rendered-summary guard with the chart mode');
   });
 
