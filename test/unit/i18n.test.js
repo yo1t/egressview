@@ -1,137 +1,113 @@
-// Unit tests for i18n completeness
-// Verifies all translation keys exist in both ja and en locales
-// Run: node --test test/unit/i18n.test.js
+'use strict';
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const html    = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'index.html'), 'utf8');
-const i18nJs  = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'i18n.js'), 'utf8');
+const root = path.join(__dirname, '..', '..');
+const html = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
+const clientRuntime = fs.readFileSync(path.join(root, 'public', 'js', 'i18n.js'), 'utf8');
+const serverRuntime = fs.readFileSync(path.join(root, 'src', 'i18n-server.js'), 'utf8');
+const catalog = require('../../src/data/i18n.json');
 
-// Extract I18N object from i18n.js (extracted from index.html in P2-1 Phase 1)
-function extractI18nKeys(locale) {
+function listJsFiles(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) return listJsFiles(file);
+    return entry.isFile() && entry.name.endsWith('.js') ? [file] : [];
+  });
+}
+
+function extractStaticCallKeys() {
+  const files = [path.join(root, 'server.js'), ...listJsFiles(path.join(root, 'src')), ...listJsFiles(path.join(root, 'public', 'js'))];
   const keys = new Set();
-  const localeStart = i18nJs.indexOf(`  ${locale}: {`);
-  if (localeStart === -1) return keys;
-  const localeEnd = i18nJs.indexOf('\n  },', localeStart);
-  const block = i18nJs.substring(localeStart, localeEnd);
-  const keyRe = /'([a-z][a-z0-9._]+)'\s*:/g;
-  let m;
-  while ((m = keyRe.exec(block)) !== null) {
-    keys.add(m[1]);
+  const re = /\b(?:t|tVars)\(\s*['"]([a-z][a-z0-9._-]+)['"]\s*(?=[,)])/g;
+  for (const file of files) {
+    const source = fs.readFileSync(file, 'utf8');
+    let match;
+    while ((match = re.exec(source)) !== null) keys.add(match[1]);
   }
   return keys;
 }
 
-// Extract all keys used in t('key') calls
-function extractUsedKeys() {
+function extractDataAttributeKeys() {
   const keys = new Set();
-  const re = /\bt\('([a-z][a-z0-9._]+)'\)/g;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    keys.add(m[1]);
-  }
+  const re = /data-i18n(?:-html|-placeholder|-title)?="([a-z][a-z0-9._-]+)"/g;
+  let match;
+  while ((match = re.exec(html)) !== null) keys.add(match[1]);
   return keys;
 }
 
-// Extract all data-i18n="key" attributes
-function extractDataI18nKeys() {
-  const keys = new Set();
-  const re = /data-i18n="([a-z][a-z0-9._]+)"/g;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    keys.add(m[1]);
-  }
-  // data-i18n-html
-  const re2 = /data-i18n-html="([a-z][a-z0-9._]+)"/g;
-  while ((m = re2.exec(html)) !== null) {
-    keys.add(m[1]);
-  }
-  // data-i18n-placeholder
-  const re3 = /data-i18n-placeholder="([a-z][a-z0-9._]+)"/g;
-  while ((m = re3.exec(html)) !== null) {
-    keys.add(m[1]);
-  }
-  return keys;
-}
+describe('shared i18n catalog', () => {
+  const jaKeys = new Set(Object.keys(catalog.ja));
+  const enKeys = new Set(Object.keys(catalog.en));
 
-describe('i18n completeness', () => {
-  const jaKeys = extractI18nKeys('ja');
-  const enKeys = extractI18nKeys('en');
-  const usedKeys = extractUsedKeys();
-  const dataKeys = extractDataI18nKeys();
-
-  it('ja locale has keys defined', () => {
-    assert(jaKeys.size > 50, `Expected >50 ja keys, got ${jaKeys.size}`);
+  it('is the single source used by both runtimes', () => {
+    assert.match(serverRuntime, /require\('\.\/data\/i18n\.json'\)/);
+    assert.match(clientRuntime, /import I18N from '\.\/i18n-data\.js\?v=__ASSET_VERSION__'/);
+    assert.doesNotMatch(serverRuntime, /const\s+STRINGS\s*=\s*\{/);
+    assert.doesNotMatch(clientRuntime, /const\s+I18N\s*=\s*\{/);
   });
 
-  it('en locale has keys defined', () => {
-    assert(enKeys.size > 50, `Expected >50 en keys, got ${enKeys.size}`);
+  it('contains the complete migrated catalog in both languages', () => {
+    assert.equal(jaKeys.size, 595);
+    assert.equal(enKeys.size, 595);
+    assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 
-  it('all ja keys exist in en', () => {
-    const missing = [...jaKeys].filter(k => !enKeys.has(k));
-    assert.equal(missing.length, 0, `Keys in ja but not en:\n  ${missing.join('\n  ')}`);
+  it('contains only non-empty string values', () => {
+    for (const lang of ['ja', 'en']) {
+      const invalid = Object.entries(catalog[lang]).filter(([, value]) => typeof value !== 'string' || value.length === 0);
+      assert.deepEqual(invalid, [], `${lang} has invalid translation values`);
+    }
   });
 
-  it('all en keys exist in ja', () => {
-    const missing = [...enKeys].filter(k => !jaKeys.has(k));
-    assert.equal(missing.length, 0, `Keys in en but not ja:\n  ${missing.join('\n  ')}`);
+  it('defines every statically referenced t() and tVars() key', () => {
+    const used = extractStaticCallKeys();
+    const missing = [...used].filter(key => !jaKeys.has(key) || !enKeys.has(key));
+    assert.deepEqual(missing, [], `Missing static translation keys:\n${missing.join('\n')}`);
   });
 
-  it('all t() calls have corresponding ja key', () => {
-    const missing = [...usedKeys].filter(k => !jaKeys.has(k));
-    assert.equal(missing.length, 0, `t() keys not in ja:\n  ${missing.join('\n  ')}`);
+  it('defines every data-i18n attribute key', () => {
+    const used = extractDataAttributeKeys();
+    const missing = [...used].filter(key => !jaKeys.has(key) || !enKeys.has(key));
+    assert.deepEqual(missing, [], `Missing data-i18n keys:\n${missing.join('\n')}`);
   });
 
-  it('all t() calls have corresponding en key', () => {
-    const missing = [...usedKeys].filter(k => !enKeys.has(k));
-    assert.equal(missing.length, 0, `t() keys not in en:\n  ${missing.join('\n  ')}`);
+  it('server lookup switches languages, interpolates variables, and falls back safely', () => {
+    const i18n = require('../../src/i18n-server');
+    i18n.setLanguage('en');
+    assert.equal(i18n.t('auth.rate-limited', { n: 12 }), 'Too many attempts. Retry in 12 seconds.');
+    assert.equal(i18n.t('missing.test.key'), 'missing.test.key');
+    i18n.setLanguage('ja');
+    assert.equal(i18n.getLang(), 'ja');
   });
+});
 
-  it('all data-i18n attributes have corresponding ja key', () => {
-    const missing = [...dataKeys].filter(k => !jaKeys.has(k));
-    assert.equal(missing.length, 0, `data-i18n keys not in ja:\n  ${missing.join('\n  ')}`);
-  });
-
-  it('all data-i18n attributes have corresponding en key', () => {
-    const missing = [...dataKeys].filter(k => !enKeys.has(k));
-    assert.equal(missing.length, 0, `data-i18n keys not in en:\n  ${missing.join('\n  ')}`);
-  });
-
-  it('all option elements with Japanese text have data-i18n attribute', () => {
+describe('i18n markup coverage', () => {
+  it('all option elements with Japanese text have data-i18n', () => {
     const optionRe = /<option[^>]*>([^<]+)<\/option>/g;
     const problems = [];
-    let m;
-    while ((m = optionRe.exec(html)) !== null) {
-      const fullTag = m[0];
-      const text = m[1].trim();
-      // Skip country selector and language selector (intentionally bilingual with flags)
+    let match;
+    while ((match = optionRe.exec(html)) !== null) {
+      const fullTag = match[0];
+      const text = match[1].trim();
       if (fullTag.includes('s-home-country') || fullTag.includes('s-language')) continue;
-      if (/^[\u{1F1E0}-\u{1F1FF}]/u.test(text)) continue; // starts with flag emoji
-      if (/[\u3000-\u9FFF\uF900-\uFAFF]/.test(text) && !fullTag.includes('data-i18n')) {
-        problems.push(text.substring(0, 40));
-      }
+      if (/^[\u{1F1E0}-\u{1F1FF}]/u.test(text)) continue;
+      if (/[\u3000-\u9FFF\uF900-\uFAFF]/.test(text) && !fullTag.includes('data-i18n')) problems.push(text.slice(0, 40));
     }
-    const unique = [...new Set(problems)];
-    assert.equal(unique.length, 0, `Options with Japanese but no data-i18n:\n  ${unique.join('\n  ')}`);
+    assert.deepEqual([...new Set(problems)], []);
   });
 
-  it('all visible text elements with Japanese have data-i18n (labels, buttons, spans)', () => {
-    // Check <label>, <button>, <span>, <div> with class form-label/pane-title that contain Japanese but no data-i18n
+  it('visible labeled elements with Japanese text have data-i18n', () => {
     const tagRe = /<(?:label|button|span|div)[^>]*class="[^"]*(?:form-label|pane-title|log-title)[^"]*"[^>]*>([^<]+)</g;
     const problems = [];
-    let m;
-    while ((m = tagRe.exec(html)) !== null) {
-      const fullTag = m[0];
-      const text = m[1].trim();
-      if (/[\u3000-\u9FFF\uF900-\uFAFF]/.test(text) && !fullTag.includes('data-i18n')) {
-        problems.push(text.substring(0, 40));
-      }
+    let match;
+    while ((match = tagRe.exec(html)) !== null) {
+      const text = match[1].trim();
+      if (/[\u3000-\u9FFF\uF900-\uFAFF]/.test(text) && !match[0].includes('data-i18n')) problems.push(text.slice(0, 40));
     }
-    const unique = [...new Set(problems)];
-    assert.equal(unique.length, 0, `UI elements with Japanese but no data-i18n:\n  ${unique.join('\n  ')}`);
+    assert.deepEqual([...new Set(problems)], []);
   });
 });

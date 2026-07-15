@@ -33,6 +33,16 @@ test('js/i18n.js is served (200)', async ({ request }) => {
   expect(res.status()).toBe(200);
 });
 
+test('generated i18n data module is served safely', async ({ request }) => {
+  const res = await request.get(`${BASE}/js/i18n-data.js`);
+  expect(res.status()).toBe(200);
+  expect(res.headers()['content-type']).toMatch(/javascript/);
+  const body = await res.text();
+  expect(body).toMatch(/^export default \{"ja":/);
+  expect(body).toContain('"en":');
+  expect(body).not.toContain('</script>');
+});
+
 // (1) All JS files split out in Phase 2 must be served with 200
 const PHASE2_JS_FILES = [
   'utils.js', 'connections-panel.js', 'auth-socket.js', 'graph.js',
@@ -119,6 +129,27 @@ async function authPage(page) {
   await page.goto('/');
   await page.waitForLoadState('networkidle');
 }
+
+test('shared browser catalog renders Japanese and English', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  await authPage(page);
+  const graphTab = page.locator('#btn-graph');
+
+  await page.evaluate(async () => {
+    const i18n = await import('/js/i18n.js?v=p2-29-smoke');
+    i18n.setCurrentLang('ja');
+    i18n.applyI18n();
+  });
+  await expect(graphTab).toHaveText('📊 グラフマップ');
+
+  await page.evaluate(async () => {
+    const i18n = await import('/js/i18n.js?v=p2-29-smoke');
+    i18n.setCurrentLang('en');
+    i18n.applyI18n();
+  });
+  await expect(graphTab).toHaveText('📊 Graph Map');
+});
 
 // Helper: collect non-noise console errors
 function collectErrors(page) {

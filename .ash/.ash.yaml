@@ -16,7 +16,7 @@ global_settings:
     # These are the literal word "password"/"secret" appearing in translation
     # strings, npm script names, variable names and a token-alphabet constant —
     # none are real credentials.
-    - path: 'public/js/i18n.js'
+    - path: 'src/data/i18n.json'
       rule_id: 'SECRET-SECRET-KEYWORD'
       reason: 'UI translation strings containing the word "password"; not a credential'
     - path: 'package.json'
