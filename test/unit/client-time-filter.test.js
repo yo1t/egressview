@@ -30,10 +30,17 @@ function loadTimeFilterVm(apiConnections = [], options = {}) {
   const elements = new Map();
   function element(id) {
     if (!elements.has(id)) {
+      const classes = new Set();
       elements.set(id, {
         id,
         value: '',
         style: {},
+        classList: {
+          add: (...names) => names.forEach(name => classes.add(name)),
+          remove: (...names) => names.forEach(name => classes.delete(name)),
+          toggle: (name, force) => force ? classes.add(name) : classes.delete(name),
+          contains: name => classes.has(name),
+        },
         addEventListener() {},
       });
     }

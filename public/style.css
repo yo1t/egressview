@@ -645,8 +645,10 @@
   .traffic-bar-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
   .traffic-bar-fill.rx { background: var(--green); }
   .traffic-bar-fill.tx { background: var(--red); }
-  .conn-panel { border-top: 1px solid var(--border); flex-shrink: 0; max-height: 240px; display: flex; flex-direction: column; }
+  .conn-panel { display: none; border-top: 1px solid var(--border); flex-shrink: 0; max-height: 240px; flex-direction: column; }
+  .conn-panel.is-visible { display: flex; }
   .conn-panel-header { padding: 8px 16px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .conn-count { color: var(--accent); }
   .conn-list { overflow-y: auto; flex: 1; }
   .conn-list::-webkit-scrollbar { width: 4px; }
   .conn-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
@@ -664,7 +666,8 @@
   .legend-item { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
   .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .last-update { position: absolute; top: 10px; right: 10px; font-size: 10px; color: var(--muted); }
-  .data-fetching { position: absolute; top: 26px; right: 10px; font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+  .data-fetching { display: none; position: absolute; top: 26px; right: 10px; font-size: 10px; color: var(--muted); align-items: center; gap: 4px; }
+  .data-fetching.is-visible { display: flex; }
   .spinner-xs { display: inline-block; width: 8px; height: 8px; border: 1.5px solid rgba(255,255,255,0.2); border-top-color: var(--muted); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
   #error-banner { display: none; background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.4); color: var(--red); padding: 8px 16px; font-size: 12px; text-align: center; flex-shrink: 0; }
   #toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }

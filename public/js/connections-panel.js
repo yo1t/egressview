@@ -1,6 +1,5 @@
 // ─── Connections panel ────────────────────────────────────────────────────────
 import { t } from './i18n.js?v=__ASSET_VERSION__';
-import { esc } from './utils.js?v=__ASSET_VERSION__';
 
 let allConnections = [];
 let serverTimeOffset = 0; // diff between client and server clocks (ms)
@@ -19,11 +18,11 @@ function setFetching(delta) {
   const show = _fetchingCount > 0;
   // Absolutely-positioned indicator inside graph-container
   const el = document.getElementById('data-fetching');
-  if (el) el.style.display = show ? '' : 'none';
+  if (el) el.classList.toggle('is-visible', show);
   // Indicators inside the stats/log/notif-log headers
   ['data-fetching-stats', 'data-fetching-log'].forEach(id => {
     const e = document.getElementById(id);
-    if (e) e.style.display = show ? 'flex' : 'none';
+    if (e) e.classList.toggle('is-visible', show);
   });
 }
 
@@ -78,53 +77,80 @@ function getFilteredConnections() {
   });
 }
 
+function connTextElement(tagName, text, { className = '', title = '' } = {}) {
+  const element = document.createElement(tagName);
+  if (className) element.className = className;
+  if (title) element.title = title;
+  element.textContent = text == null ? '' : String(text);
+  return element;
+}
+
+function createConnectionPanelRow(connection) {
+  const label = connection.dstHost && connection.dstHost !== connection.dst
+    ? connection.dstHost
+    : connection.dst;
+  const port = connection.dport === 443 ? 'HTTPS' : connection.dport === 80 ? 'HTTP' : `:${connection.dport}`;
+  const count = connection.count > 1 ? ` ×${connection.count}` : '';
+  const flag = (connection.country && connection.country.length === 2)
+    ? String.fromCodePoint(
+      0x1F1E6 + connection.country.charCodeAt(0) - 65,
+      0x1F1E6 + connection.country.charCodeAt(1) - 65
+    )
+    : '';
+  const rdapText = (flag || connection.org)
+    ? `${flag} ${connection.org || connection.country || ''}`.trim()
+    : '';
+
+  const row = document.createElement('div');
+  row.className = `conn-row${connection.threat ? ' threat-row' : ''}`;
+  row.appendChild(connTextElement('span', connection.proto, { className: 'conn-proto' }));
+  if (connection.threat) {
+    row.appendChild(connTextElement('span', '🚨', {
+      className: 'conn-threat',
+      title: connection.threat.tag,
+    }));
+  }
+  const host = document.createElement('span');
+  host.className = 'conn-host';
+  host.title = `${connection.dst || ''}:${connection.dport ?? ''}`;
+  host.appendChild(connTextElement('span', label, { className: 'conn-hostname' }));
+  if (rdapText) host.appendChild(connTextElement('span', rdapText, { className: 'conn-rdap' }));
+  row.appendChild(host);
+  row.appendChild(connTextElement('span', `${port}${count}`, { className: 'conn-port' }));
+  return row;
+}
+
 function updateConnPanel(selectedIp) {
   const panel = document.getElementById('conn-panel');
   const list  = document.getElementById('conn-list');
   const title = document.getElementById('conn-panel-title');
   const count = document.getElementById('conn-count');
 
-  if (!selectedIp) { panel.style.display = 'none'; return; }
+  if (!selectedIp) { panel.classList.remove('is-visible'); return; }
 
   const conns = getFilteredConnections().filter(c => c.src === selectedIp);
-  panel.style.display = 'flex';
+  panel.classList.add('is-visible');
   title.textContent = `${t('panel.conn')} — ${selectedIp}`;
   count.textContent = conns.length ? `${conns.length} ${t('panel.conn.session')}` : '';
 
   if (!conns.length) {
-    list.innerHTML = `<div class="conn-empty">${esc(t('panel.conn.empty'))}</div>`;
+    list.replaceChildren(connTextElement('div', t('panel.conn.empty'), { className: 'conn-empty' }));
     return;
   }
 
   // Group by destination host
   const byHost = new Map();
   for (const c of conns) {
-    const key = `${c.dstHost}:${c.dport}`;
+    const key = `${c.dstHost || c.dst}:${c.dport}`;
     if (!byHost.has(key)) byHost.set(key, { ...c, count: 0 });
     byHost.get(key).count++;
   }
 
-  list.innerHTML = [...byHost.values()]
+  const rows = document.createDocumentFragment();
+  [...byHost.values()]
     .sort((a, b) => b.count - a.count)
-    .map(c => {
-      const label   = c.dstHost !== c.dst ? c.dstHost : c.dst;
-      const port    = c.dport === 443 ? 'HTTPS' : c.dport === 80 ? 'HTTP' : `:${c.dport}`;
-      const cnt     = c.count > 1 ? ` ×${c.count}` : '';
-      const flag    = (c.country && c.country.length === 2)
-        ? String.fromCodePoint(0x1F1E6 + c.country.charCodeAt(0) - 65, 0x1F1E6 + c.country.charCodeAt(1) - 65)
-        : '';
-      const rdapStr = (flag || c.org) ? `${flag} ${c.org || c.country || ''}`.trim() : '';
-      const rdapLine = rdapStr ? `<span class="conn-rdap">${esc(rdapStr)}</span>` : '';
-      const threatIcon = c.threat ? `<span class="conn-threat" title="${esc(c.threat.tag)}">🚨</span>` : '';
-      return `<div class="conn-row${c.threat ? ' threat-row' : ''}">
-        <span class="conn-proto">${esc(c.proto)}</span>
-        ${threatIcon}
-        <span class="conn-host" title="${esc(c.dst)}:${esc(c.dport)}">
-          <span class="conn-hostname">${esc(label)}</span>${rdapLine}
-        </span>
-        <span class="conn-port">${esc(port)}${esc(cnt)}</span>
-      </div>`;
-    }).join('');
+    .forEach(connection => rows.appendChild(createConnectionPanelRow(connection)));
+  list.replaceChildren(rows);
 }
 
 export function setAllConnections(v) { allConnections = v; }
