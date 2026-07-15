@@ -593,7 +593,7 @@ function stopGraph() {
   lastClients = [];
   meshColorMap = {};
   document.getElementById('device-list').innerHTML = '';
-  document.getElementById('conn-panel').style.display = 'none';
+  document.getElementById('conn-panel').classList.remove('is-visible');
 }
 
 export { selectedMac, selectedIp, nodes, links, graphSummary, graphSummaryKey, buildGraph, buildGraphFromConnections, buildGraphFromSummary, updateOrgGraph, stopGraph, showToast, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, currentGraphRangeKey, updateSideHighlight, initGraph, lastMeshNodes, lastRouterIp, lastClients, lastMainMac, updateFilterTabs, applyFilter };

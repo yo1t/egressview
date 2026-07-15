@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssignments": 26,
+  "totalAssignments": 24,
   "files": {
     "auth-socket.js": {
       "count": 1,
@@ -13,12 +13,6 @@
       "fingerprint": "1e7bdc62b1a55862cdf4df8034cabe9f0f62cef7b50288da021e41c1acb95362",
       "categories": ["escaped-data-renderer"],
       "reason": "Beacon table values and translations are escaped before interpolation; numeric fields are normalized by the detector. Keep under review until the table renderer moves to DOM APIs."
-    },
-    "connections-panel.js": {
-      "count": 2,
-      "fingerprint": "d353ce4dd3124b2c5e9eaff229f6b348c14f0188ec0735e0d06825a6cf0dfdb7",
-      "categories": ["escaped-data-renderer", "trusted-translation"],
-      "reason": "Connection labels, hosts, threat tags, protocols and ports pass through esc(); structural classes and the bundled empty-state translation are controlled locally."
     },
     "graph-panels.js": {
       "count": 7,

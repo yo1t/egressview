@@ -848,7 +848,7 @@
       <div class="legend-item"><div class="legend-dot" style="background:#6b7280"></div><span data-i18n="legend.internet">インターネット</span></div>
     </div>
     <div class="last-update" id="last-update"></div>
-    <div class="data-fetching" id="data-fetching" style="display:none"><span class="spinner-xs"></span><span data-i18n="data.loading">読み込み中</span></div>
+    <div class="data-fetching" id="data-fetching"><span class="spinner-xs"></span><span data-i18n="data.loading">読み込み中</span></div>
     <div id="graph-summary-notice" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(124,58,237,0.18);border:1px solid rgba(167,139,250,0.65);border-radius:6px;padding:5px 12px;font-size:11px;color:#ddd6fe;pointer-events:none;box-shadow:0 0 18px rgba(124,58,237,0.18)"></div>
     <div id="graph-truncated-notice" style="display:none;position:absolute;bottom:8px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:4px 12px;font-size:11px;color:var(--muted);pointer-events:none" data-i18n="graph.truncated">表示件数の上限に達しました。グラフは最新50,000件を表示しています。</div>
   </div>
@@ -866,10 +866,10 @@
       <button class="tab-btn active" data-filter="all" data-i18n="panel.tab.all">全て</button>
     </div>
     <div class="device-list" id="device-list"></div>
-    <div class="conn-panel" id="conn-panel" style="display:none">
+    <div class="conn-panel" id="conn-panel">
       <div class="conn-panel-header">
         <span id="conn-panel-title" data-i18n="panel.conn">インターネット通信先</span>
-        <span id="conn-count" style="color:var(--accent)"></span>
+        <span id="conn-count" class="conn-count"></span>
       </div>
       <div class="conn-list" id="conn-list"></div>
     </div>

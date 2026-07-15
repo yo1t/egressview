@@ -537,6 +537,50 @@ test('threat detail renders external values as DOM text and keeps actions wired'
   expect(fatalErrors(errors), `Threat detail errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
+test('connection side panel groups destinations and renders external values as text', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+  await page.evaluate(async () => {
+    const panel = await import('/js/connections-panel.js?v=p2-27-panel-smoke');
+    panel.setCurrentTimeFilter('custom');
+    panel.setCustomRangeFrom(null);
+    panel.setCustomRangeTo(null);
+    panel.setAllConnections([
+      {
+        src: '192.0.2.10', dst: '198.51.100.20', dstHost: '<img src=x onerror=alert(1)>',
+        dport: 443, proto: '<script>TCP</script>', country: 'JP',
+        org: '<svg onload=alert(1)>', threat: { tag: '<b>threat title</b>' },
+      },
+      {
+        src: '192.0.2.10', dst: '198.51.100.20', dstHost: '<img src=x onerror=alert(1)>',
+        dport: 443, proto: '<script>TCP</script>', country: 'JP',
+        org: '<svg onload=alert(1)>', threat: { tag: '<b>threat title</b>' },
+      },
+      { src: '192.0.2.10', dst: '203.0.113.30', dport: 80, proto: 'TCP' },
+    ]);
+    panel.updateConnPanel('192.0.2.10');
+  });
+
+  const panel = page.locator('#conn-panel');
+  const rows = page.locator('#conn-list .conn-row');
+  await expect(panel).toBeVisible();
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText('HTTPS ×2');
+  await expect(panel).toContainText('<img src=x onerror=alert(1)>');
+  await expect(panel).toContainText('203.0.113.30');
+  await expect(panel.locator('script, img, svg')).toHaveCount(0);
+  await expect(page.locator('#conn-count')).toContainText('3');
+
+  await page.evaluate(async () => {
+    const panelModule = await import('/js/connections-panel.js?v=p2-27-panel-smoke');
+    panelModule.updateConnPanel(null);
+  });
+  await expect(panel).toBeHidden();
+  expect(fatalErrors(errors), `Connection panel errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
 // (8) Changing the time filter must not raise errors (indirect test of getFilteredConnections)
 test('time filter change produces no console errors', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');

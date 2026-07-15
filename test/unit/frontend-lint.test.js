@@ -352,7 +352,7 @@ describe('Frontend TDZ lint', () => {
   });
 
   it('activity modules keep only runtime popup coordinates as style assignments', () => {
-    for (const file of ['log.js', 'notif-log.js', 'devices.js', 'beacon.js', 'threat-popup.js']) {
+    for (const file of ['log.js', 'notif-log.js', 'devices.js', 'beacon.js', 'threat-popup.js', 'connections-panel.js']) {
       const source = moduleSources[file];
       const nonPositionStyles = source
         .split('\n')
