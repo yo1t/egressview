@@ -1,6 +1,6 @@
 // ─── Device Inventory View ───────────────────────────────────────────────────
 import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE, esc, fmtTs } from './utils.js?v=__ASSET_VERSION__';
+import { _BASE, fmtTs } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch, notesMap, lookupNote, refreshAllNotes } from './auth-socket.js?v=__ASSET_VERSION__';
 
 var devicesData = [];
@@ -12,6 +12,50 @@ var dvDetailDevice = null;   // currently open device
 var mergeCandidatesCache = [];  // pending merge candidates from API
 // P1-8: status filter — active/recent/stale/archived
 var dvStatusFilter = new Set(['active', 'recent']);
+
+function dvTextElement(tagName, text, { className = '', id = '' } = {}) {
+  const el = document.createElement(tagName);
+  if (className) el.className = className;
+  if (id) el.id = id;
+  el.textContent = text == null ? '' : String(text);
+  return el;
+}
+
+function dvAppendCell(row, value, { className = '', placeholder = false } = {}) {
+  const cell = document.createElement('td');
+  if (className) cell.className = className;
+  if (placeholder) {
+    cell.appendChild(dvTextElement('span', '—', { className: 'dv-placeholder' }));
+  } else {
+    cell.textContent = value == null ? '' : String(value);
+  }
+  row.appendChild(cell);
+  return cell;
+}
+
+function createDeviceTableRow(device) {
+  const name = deviceName(device);
+  const ipv6 = deviceIpv6(device);
+  const sources = (device.sources || '').split(',').filter(Boolean).join(' · ');
+  const isOpen = dvDetailDevice && dvDetailDevice.ip === device.ip;
+  const row = document.createElement('tr');
+  row.classList.add('dv-table-row');
+  if (isOpen) row.classList.add('selected');
+  if (device.status === 'stale') row.classList.add('row-stale');
+  if (device.status === 'archived') row.classList.add('row-archived');
+  row.dataset.ip = device.ip || '';
+  row.addEventListener('click', () => openDvDetail(device));
+
+  dvAppendCell(row, device.ip, { className: 'dv-cell-mono' });
+  dvAppendCell(row, device.mac, { className: 'dv-cell-mono dv-cell-muted', placeholder: !device.mac });
+  dvAppendCell(row, device.vendor, { placeholder: !device.vendor });
+  dvAppendCell(row, name, { placeholder: name === '—' });
+  dvAppendCell(row, ipv6, { className: 'dv-cell-mono-small', placeholder: ipv6 === '—' });
+  dvAppendCell(row, sources, { className: 'dv-cell-small-muted', placeholder: !sources });
+  dvAppendCell(row, fmtTs(device.firstSeen), { className: 'dv-cell-small-muted' });
+  dvAppendCell(row, fmtTs(device.lastSeen), { className: 'dv-cell-small-muted' });
+  return row;
+}
 
 function deviceName(d) {
   return d.mdnsName || d.dnsName || d.netbiosName || '—';
@@ -61,8 +105,12 @@ function renderDevicesTable() {
   // Sidebar device filter
   if (dvSelectedIp) {
     filterBadgeEl.style.display = 'inline';
-    filterBadgeEl.innerHTML = `<span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;cursor:pointer" id="dv-filter-clear">${esc(tVars('devices.filter.only', { value: dvSelectedIp }))}</span>`;
-    document.getElementById('dv-filter-clear').onclick = () => { dvSelectedIp = null; renderDevicesTable(); };
+    const clearFilter = dvTextElement('span', tVars('devices.filter.only', { value: dvSelectedIp }), {
+      className: 'log-device-filter-chip',
+      id: 'dv-filter-clear',
+    });
+    clearFilter.addEventListener('click', () => { dvSelectedIp = null; renderDevicesTable(); });
+    filterBadgeEl.replaceChildren(clearFilter);
   } else {
     filterBadgeEl.style.display = 'none';
   }
@@ -124,31 +172,9 @@ function renderDevicesTable() {
   });
 
   const tbody = document.getElementById('devices-tbody');
-  tbody.innerHTML = rows.map(d => {
-    const name = deviceName(d);
-    const ipv6 = deviceIpv6(d);
-    const sources = (d.sources || '').split(',').filter(Boolean).join(' · ');
-    const isOpen = dvDetailDevice && dvDetailDevice.ip === d.ip;
-    const statusCls = d.status === 'stale' ? 'row-stale' : d.status === 'archived' ? 'row-archived' : '';
-    return `<tr class="${isOpen ? 'selected' : ''} ${statusCls}" style="cursor:pointer" data-ip="${esc(d.ip)}">
-      <td style="font-family:monospace">${esc(d.ip)}</td>
-      <td style="font-family:monospace;color:var(--muted)">${d.mac ? esc(d.mac) : '<span style="opacity:.4">—</span>'}</td>
-      <td>${d.vendor ? esc(d.vendor) : '<span style="color:var(--muted)">—</span>'}</td>
-      <td>${name !== '—' ? esc(name) : '<span style="color:var(--muted)">—</span>'}</td>
-      <td style="font-family:monospace;font-size:10px;color:var(--muted)">${ipv6 !== '—' ? esc(ipv6) : '—'}</td>
-      <td style="color:var(--muted);font-size:10px">${esc(sources) || '—'}</td>
-      <td style="color:var(--muted);font-size:10px">${fmtTs(d.firstSeen)}</td>
-      <td style="color:var(--muted);font-size:10px">${fmtTs(d.lastSeen)}</td>
-    </tr>`;
-  }).join('');
-
-  // Row click → detail panel
-  tbody.querySelectorAll('tr[data-ip]').forEach(tr => {
-    tr.addEventListener('click', () => {
-      const d = devicesData.find(x => x.ip === tr.dataset.ip);
-      if (d) openDvDetail(d);
-    });
-  });
+  const tableRows = document.createDocumentFragment();
+  rows.forEach(device => tableRows.appendChild(createDeviceTableRow(device)));
+  tbody.replaceChildren(tableRows);
 
   const countEl = document.getElementById('devices-count');
   if (countEl) {
@@ -157,6 +183,57 @@ function renderDevicesTable() {
       ? t('devices.count.filtered') : '';
     countEl.textContent = tVars('devices.count', { visible: rows.length, filtered: extra, total });
   }
+}
+
+function createDvDetailRow(label, value, valueClass = '') {
+  const row = document.createElement('div');
+  row.className = 'dv-detail-row';
+  row.appendChild(dvTextElement('span', label, { className: 'dv-detail-label' }));
+  row.appendChild(dvTextElement('span', value, {
+    className: `dv-detail-value${valueClass ? ` ${valueClass}` : ''}`,
+  }));
+  return row;
+}
+
+function createMergeSection(candidates, device) {
+  if (!candidates.length) return null;
+  const section = document.createElement('div');
+  section.className = 'dv-merge-section';
+  section.appendChild(dvTextElement('div', t('devices.merge.title'), { className: 'dv-merge-title' }));
+
+  candidates.forEach(candidate => {
+    const isA = candidate.deviceIdA === device.deviceId;
+    const otherId = isA ? candidate.deviceIdB : candidate.deviceIdA;
+    const otherIp = isA ? candidate.ipB : candidate.ipA;
+    const otherMac = isA ? candidate.macB : candidate.macA;
+    const otherName = isA
+      ? (candidate.mdnsNameB || candidate.dnsNameB)
+      : (candidate.mdnsNameA || candidate.dnsNameA);
+    const scoreText = `${(candidate.score * 100).toFixed(0)}%`;
+    const reasons = Array.isArray(candidate.reasons) ? candidate.reasons.join(', ') : (candidate.reasons || '');
+    const label = [otherIp, otherMac, otherName].filter(Boolean).join(' / ') || otherId || '—';
+
+    const card = document.createElement('div');
+    card.className = 'dv-merge-card';
+    card.dataset.candidateId = String(candidate.id);
+    card.dataset.otherId = otherId || '';
+    card.appendChild(dvTextElement('div', label, { className: 'dv-merge-card-info' }));
+    card.appendChild(dvTextElement(
+      'div',
+      `${tVars('devices.merge.score', { score: scoreText })}${reasons ? ` ${reasons}` : ''}`,
+      { className: 'dv-merge-card-score' }
+    ));
+    const buttons = document.createElement('div');
+    buttons.className = 'dv-merge-card-btns';
+    const mergeButton = dvTextElement('button', t('devices.merge.into'), { className: 'btn-merge' });
+    mergeButton.dataset.action = 'merge';
+    const rejectButton = dvTextElement('button', t('devices.merge.reject'), { className: 'btn-reject' });
+    rejectButton.dataset.action = 'reject';
+    buttons.append(mergeButton, rejectButton);
+    card.appendChild(buttons);
+    section.appendChild(card);
+  });
+  return section;
 }
 
 // ── Merge candidates ─────────────────────────────────────────────────────────
@@ -180,37 +257,9 @@ function openDvDetail(d) {
   const sources = (d.sources || '').split(',').filter(Boolean).join(', ');
   const noteText = d.note != null ? d.note : lookupNote(d.ip, d.mac, d.deviceId);
 
-  // Build merge candidates section for this device
   const myCandidates = d.deviceId
     ? mergeCandidatesCache.filter(c => c.deviceIdA === d.deviceId || c.deviceIdB === d.deviceId)
     : [];
-  let mergeSectionHtml = '';
-  if (myCandidates.length > 0) {
-    const cards = myCandidates.map(c => {
-      const isA      = c.deviceIdA === d.deviceId;
-      const otherId  = isA ? c.deviceIdB : c.deviceIdA;
-      const otherIp  = isA ? c.ipB       : c.ipA;
-      const otherMac = isA ? c.macB      : c.macA;
-      const otherName= isA ? (c.mdnsNameB || c.dnsNameB) : (c.mdnsNameA || c.dnsNameA);
-      const scoreStr = (c.score * 100).toFixed(0) + '%';
-      const reasons  = Array.isArray(c.reasons) ? c.reasons.join(', ') : (c.reasons || '');
-      const label    = [otherIp, otherMac, otherName].filter(Boolean).join(' / ');
-      return `
-        <div class="dv-merge-card" data-candidate-id="${esc(String(c.id))}" data-other-id="${esc(otherId || '')}">
-          <div class="dv-merge-card-info">${esc(label || otherId || '—')}</div>
-          <div class="dv-merge-card-score">${esc(tVars('devices.merge.score', { score: scoreStr }))}${reasons ? ' ' + esc(reasons) : ''}</div>
-          <div class="dv-merge-card-btns">
-            <button class="btn-merge" data-action="merge">${esc(t('devices.merge.into'))}</button>
-            <button class="btn-reject" data-action="reject">${esc(t('devices.merge.reject'))}</button>
-          </div>
-        </div>`;
-    }).join('');
-    mergeSectionHtml = `
-      <div class="dv-merge-section">
-        <div class="dv-merge-title">${esc(t('devices.merge.title'))}</div>
-        ${cards}
-      </div>`;
-  }
 
   // P1-8: archive button label
   const archiveBtn = document.getElementById('dv-detail-archive');
@@ -234,22 +283,39 @@ function openDvDetail(d) {
   const statusCls    = { active: 's-active', recent: 's-recent', stale: 's-stale', archived: 's-archived' };
   const statusStr    = d.status || 'stale';
 
-  document.getElementById('dv-detail-body').innerHTML = `
-    <div class="dv-detail-row"><span class="dv-detail-label">${esc(t('devices.detail.status'))}</span><span class="dv-detail-value ${statusCls[statusStr]}">${esc(statusLabels[statusStr] || statusStr)}</span></div>
-    ${d.vendor ? `<div class="dv-detail-row"><span class="dv-detail-label">${esc(t('devices.detail.vendor'))}</span><span class="dv-detail-value">${esc(d.vendor)}</span></div>` : ''}
-    ${name !== '—' ? `<div class="dv-detail-row"><span class="dv-detail-label">${esc(t('devices.detail.name'))}</span><span class="dv-detail-value">${esc(name)}</span></div>` : ''}
-    ${d.dnsName  ? `<div class="dv-detail-row"><span class="dv-detail-label">DNS</span><span class="dv-detail-value" style="font-size:10px">${esc(d.dnsName)}</span></div>` : ''}
-    ${d.mdnsName ? `<div class="dv-detail-row"><span class="dv-detail-label">mDNS</span><span class="dv-detail-value">${esc(d.mdnsName)}</span></div>` : ''}
-    ${d.netbiosName ? `<div class="dv-detail-row"><span class="dv-detail-label">NetBIOS</span><span class="dv-detail-value">${esc(d.netbiosName)}</span></div>` : ''}
-    ${ipv6List.length ? `<div class="dv-detail-row"><span class="dv-detail-label">IPv6</span><span class="dv-detail-value" style="font-family:monospace;font-size:10px">${ipv6List.map(esc).join('<br>')}</span></div>` : ''}
-    <div class="dv-detail-row"><span class="dv-detail-label">${esc(t('devices.detail.sources'))}</span><span class="dv-detail-value">${esc(sources) || '—'}</span></div>
-    <div class="dv-detail-row"><span class="dv-detail-label">${esc(t('devices.detail.firstSeen'))}</span><span class="dv-detail-value">${fmtTs(d.firstSeen)}</span></div>
-    <div class="dv-detail-row"><span class="dv-detail-label">${esc(t('devices.detail.lastSeen'))}</span><span class="dv-detail-value">${fmtTs(d.lastSeen)}</span></div>
-    ${mergeSectionHtml}
-    <div style="margin-top:4px;font-size:11px;color:var(--muted);margin-bottom:2px">${esc(t('devices.detail.note'))}</div>
-    <textarea class="dv-detail-note-ta" id="dv-detail-note-ta" placeholder="${esc(t('note.placeholder'))}">${esc(noteText)}</textarea>
-    <div id="dv-investigate-result" style="font-size:10px;color:var(--muted);margin-top:4px;white-space:pre-wrap;"></div>
-  `;
+  const detail = document.createDocumentFragment();
+  detail.appendChild(createDvDetailRow(t('devices.detail.status'), statusLabels[statusStr] || statusStr, statusCls[statusStr]));
+  if (d.vendor) detail.appendChild(createDvDetailRow(t('devices.detail.vendor'), d.vendor));
+  if (name !== '—') detail.appendChild(createDvDetailRow(t('devices.detail.name'), name));
+  if (d.dnsName) detail.appendChild(createDvDetailRow('DNS', d.dnsName, 'dv-detail-small'));
+  if (d.mdnsName) detail.appendChild(createDvDetailRow('mDNS', d.mdnsName));
+  if (d.netbiosName) detail.appendChild(createDvDetailRow('NetBIOS', d.netbiosName));
+  if (ipv6List.length) {
+    const ipv6Row = document.createElement('div');
+    ipv6Row.className = 'dv-detail-row';
+    ipv6Row.appendChild(dvTextElement('span', 'IPv6', { className: 'dv-detail-label' }));
+    const ipv6Values = document.createElement('span');
+    ipv6Values.className = 'dv-detail-value dv-detail-ipv6';
+    ipv6List.forEach(address => ipv6Values.appendChild(dvTextElement('span', address, { className: 'dv-detail-ipv6-line' })));
+    ipv6Row.appendChild(ipv6Values);
+    detail.appendChild(ipv6Row);
+  }
+  detail.appendChild(createDvDetailRow(t('devices.detail.sources'), sources || '—'));
+  detail.appendChild(createDvDetailRow(t('devices.detail.firstSeen'), fmtTs(d.firstSeen)));
+  detail.appendChild(createDvDetailRow(t('devices.detail.lastSeen'), fmtTs(d.lastSeen)));
+  const mergeSection = createMergeSection(myCandidates, d);
+  if (mergeSection) detail.appendChild(mergeSection);
+  detail.appendChild(dvTextElement('div', t('devices.detail.note'), { className: 'dv-detail-note-label' }));
+  const noteInput = document.createElement('textarea');
+  noteInput.className = 'dv-detail-note-ta';
+  noteInput.id = 'dv-detail-note-ta';
+  noteInput.placeholder = t('note.placeholder');
+  noteInput.value = noteText || '';
+  detail.appendChild(noteInput);
+  const investigateResult = dvTextElement('div', '', { className: 'dv-investigate-result' });
+  investigateResult.id = 'dv-investigate-result';
+  detail.appendChild(investigateResult);
+  document.getElementById('dv-detail-body').replaceChildren(detail);
   // Re-render table to highlight selected row
   renderDevicesTable();
 }

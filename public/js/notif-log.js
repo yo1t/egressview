@@ -1,6 +1,6 @@
 // ─── Notification Log View ────────────────────────────────────────────────────
 import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE, esc } from './utils.js?v=__ASSET_VERSION__';
+import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 import { selectedMac, selectedIp, updateSideHighlight, clearSelection } from './graph.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 import { nlMode } from './view-tabs.js?v=__ASSET_VERSION__';
@@ -9,6 +9,27 @@ var nlAllRows = [];
 var nlSortState = { col: 'detectedAt', dir: 'desc' };
 var nlFilters = {}; // col → { mode, value }
 var nlActiveFilterCol = null;
+
+function nlTextElement(tagName, text, { className = '', id = '' } = {}) {
+  const el = document.createElement(tagName);
+  if (className) el.className = className;
+  if (id) el.id = id;
+  el.textContent = text == null ? '' : String(text);
+  return el;
+}
+
+function nlAppendCell(row, text, className = '') {
+  const cell = nlTextElement('td', text, { className });
+  row.appendChild(cell);
+  return cell;
+}
+
+function nlMessageRow(message, className) {
+  const row = document.createElement('tr');
+  const cell = nlAppendCell(row, message, className);
+  cell.colSpan = 7;
+  return row;
+}
 
 // ─── Data helpers ─────────────────────────────────────────────────────────────
 
@@ -81,12 +102,17 @@ function nlRender() {
     if (selectedMac || selectedIp) {
       const label = selectedIp || selectedMac;
       filterBadge.style.display = 'inline';
-      filterBadge.innerHTML = `<span style="background:var(--accent);color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;cursor:pointer" title="${esc(t('log.deviceFilter.clear'))}" id="nl-device-filter-clear">${esc(tVars('log.deviceFilter.only', { value: label }))}</span>`;
-      document.getElementById('nl-device-filter-clear')?.addEventListener('click', () => {
+      const clearFilter = nlTextElement('span', tVars('log.deviceFilter.only', { value: label }), {
+        className: 'log-device-filter-chip',
+        id: 'nl-device-filter-clear',
+      });
+      clearFilter.title = t('log.deviceFilter.clear');
+      clearFilter.addEventListener('click', () => {
         clearSelection();
         updateSideHighlight();
         nlRender();
       });
+      filterBadge.replaceChildren(clearFilter);
     } else {
       filterBadge.style.display = 'none';
     }
@@ -96,7 +122,7 @@ function nlRender() {
   countEl.textContent = tVars('notif-log.count', { n: rows.length });
 
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px;">${esc(t('notif-log.empty'))}</td></tr>`;
+    tbody.replaceChildren(nlMessageRow(t('notif-log.empty'), 'notif-log-empty-cell'));
     nlUpdateSortIcons();
     return;
   }
@@ -104,44 +130,47 @@ function nlRender() {
   const frag = document.createDocumentFragment();
   for (const row of rows) {
     const tr = document.createElement('tr');
-    tr.style.cursor = 'pointer';
+    tr.className = 'notif-log-clickable-row';
     tr.addEventListener('click', () => nlShowDetail(row));
 
-    const typeLabel = row.type === 'threat'
-      ? `<span style="color:var(--red);font-weight:bold;">${esc(t('notif-log.type.threat'))}</span>`
-      : `<span style="color:var(--green);">${esc(t('notif-log.type.new_device'))}</span>`;
+    const typeCell = document.createElement('td');
+    typeCell.appendChild(nlTextElement(
+      'span',
+      row.type === 'threat' ? t('notif-log.type.threat') : t('notif-log.type.new_device'),
+      { className: row.type === 'threat' ? 'notif-log-type-threat' : 'notif-log-type-device' }
+    ));
+    tr.appendChild(typeCell);
 
     const timeStr = row.detectedAt
       ? new Date(row.detectedAt).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US')
       : '—';
 
     const srcName = (row.srcMdnsName || row.srcDnsName || row.src || '—').replace(/\.local$/, '');
-    const srcVendor = row.srcVendor ? `<br><span style="color:var(--muted);font-size:10px;">${esc(row.srcVendor)}</span>` : '';
 
     const dstHost = row.dstHost && row.dstHost !== row.dst ? row.dstHost : (row.dst || '—');
-    const portStr = row.dport ? `<br><span style="color:var(--muted);font-size:10px;">${esc(String(row.dport))}/${esc(row.proto || '')}</span>` : '';
 
-    const threatCell = row.threatTag
-      ? `<span style="color:var(--red);font-size:11px;">${esc(row.threatTag)}</span>`
-      : (row.threatSource ? `<span style="color:var(--muted);font-size:11px;">${esc(row.threatSource)}</span>` : '—');
-
-    const slackCell = row.slackSent
-      ? `<span style="color:var(--green);">${esc(t('notif-log.slack.sent'))}</span>`
-      : t('notif-log.slack.none');
-
-    tr.innerHTML = `
-      <td>${typeLabel}</td>
-      <td style="white-space:nowrap;font-size:11px;">${esc(timeStr)}</td>
-      <td>${esc(srcName)}${srcVendor}</td>
-      <td>${esc(dstHost)}${portStr}</td>
-      <td>${threatCell}</td>
-      <td style="font-size:11px;color:var(--muted);">${esc(row.org || '—')}</td>
-      <td style="text-align:center;">${slackCell}</td>
-    `;
+    nlAppendCell(tr, timeStr, 'notif-log-time-cell');
+    const srcCell = nlAppendCell(tr, srcName);
+    if (row.srcVendor) {
+      srcCell.appendChild(document.createElement('br'));
+      srcCell.appendChild(nlTextElement('span', row.srcVendor, { className: 'notif-log-subtext' }));
+    }
+    const dstCell = nlAppendCell(tr, dstHost);
+    if (row.dport) {
+      dstCell.appendChild(document.createElement('br'));
+      dstCell.appendChild(nlTextElement('span', `${row.dport}/${row.proto || ''}`, { className: 'notif-log-subtext' }));
+    }
+    const threatText = row.threatTag || row.threatSource || '—';
+    nlAppendCell(tr, threatText, row.threatTag ? 'notif-log-threat-text' : 'notif-log-subtle-text');
+    nlAppendCell(tr, row.org || '—', 'notif-log-org-cell');
+    nlAppendCell(
+      tr,
+      row.slackSent ? t('notif-log.slack.sent') : t('notif-log.slack.none'),
+      row.slackSent ? 'notif-log-slack-sent' : 'notif-log-slack-cell'
+    );
     frag.appendChild(tr);
   }
-  tbody.innerHTML = '';
-  tbody.appendChild(frag);
+  tbody.replaceChildren(frag);
   nlUpdateSortIcons();
 }
 
@@ -179,38 +208,45 @@ function nlShowDetail(row) {
   const srcName = (row.srcMdnsName || row.srcDnsName || row.src || '—').replace(/\.local$/, '');
   const dstHost = row.dstHost && row.dstHost !== row.dst ? row.dstHost : (row.dst || '—');
 
-  function r(label, value) {
-    if (!value) return '';
-    return `<tr><th>${esc(label)}</th><td>${esc(value)}</td></tr>`;
+  function appendDetailRow(table, label, value) {
+    if (!value) return;
+    const detailRow = document.createElement('tr');
+    detailRow.appendChild(nlTextElement('th', label));
+    detailRow.appendChild(nlTextElement('td', value));
+    table.appendChild(detailRow);
   }
-  function sec(title) {
-    return `<tr><td colspan="2" class="section-title">${esc(title)}</td></tr>`;
+  function appendDetailSection(table, title) {
+    const sectionRow = document.createElement('tr');
+    const sectionCell = nlTextElement('td', title, { className: 'section-title' });
+    sectionCell.colSpan = 2;
+    sectionRow.appendChild(sectionCell);
+    table.appendChild(sectionRow);
   }
 
-  body.innerHTML = `<table>
-    ${r(t('notif-log.detail.type'),  row.type === 'threat' ? t('notif-log.type.threat') : t('notif-log.type.new_device'))}
-    ${r(t('notif-log.detail.time'),  timeStr)}
-    ${r(t('notif-log.detail.slack'), row.slackSent ? t('notif-log.slack.sent') : t('notif-log.slack.none'))}
-    ${sec(t('notif-log.detail.sec.src'))}
-    ${r('IP',                          row.src)}
-    ${r(t('notif-log.detail.srcName'), srcName !== row.src ? srcName : '')}
-    ${r(t('notif-log.detail.srcVendor'), row.srcVendor)}
-    ${r('MAC',                         row.srcMac)}
-    ${row.dst ? `
-    ${sec(t('notif-log.detail.sec.dst'))}
-    ${r('IP',                          row.dst)}
-    ${r(t('notif-log.detail.dstHost'), dstHost !== row.dst ? dstHost : '')}
-    ${r(t('notif-log.detail.port'),    row.dport ? `${row.dport} / ${row.proto || ''}` : '')}
-    ${r(t('notif-log.detail.country'), row.country)}
-    ${r(t('notif-log.detail.city'),    row.city)}
-    ${r(t('notif-log.detail.org'),     row.org)}
-    ` : ''}
-    ${row.threatTag || row.threatSource ? `
-    ${sec(t('notif-log.detail.sec.threat'))}
-    ${r(t('notif-log.detail.threatSource'), row.threatSource)}
-    ${r(t('notif-log.detail.threatTag'),    row.threatTag)}
-    ` : ''}
-  </table>`;
+  const table = document.createElement('table');
+  appendDetailRow(table, t('notif-log.detail.type'), row.type === 'threat' ? t('notif-log.type.threat') : t('notif-log.type.new_device'));
+  appendDetailRow(table, t('notif-log.detail.time'), timeStr);
+  appendDetailRow(table, t('notif-log.detail.slack'), row.slackSent ? t('notif-log.slack.sent') : t('notif-log.slack.none'));
+  appendDetailSection(table, t('notif-log.detail.sec.src'));
+  appendDetailRow(table, 'IP', row.src);
+  appendDetailRow(table, t('notif-log.detail.srcName'), srcName !== row.src ? srcName : '');
+  appendDetailRow(table, t('notif-log.detail.srcVendor'), row.srcVendor);
+  appendDetailRow(table, 'MAC', row.srcMac);
+  if (row.dst) {
+    appendDetailSection(table, t('notif-log.detail.sec.dst'));
+    appendDetailRow(table, 'IP', row.dst);
+    appendDetailRow(table, t('notif-log.detail.dstHost'), dstHost !== row.dst ? dstHost : '');
+    appendDetailRow(table, t('notif-log.detail.port'), row.dport ? `${row.dport} / ${row.proto || ''}` : '');
+    appendDetailRow(table, t('notif-log.detail.country'), row.country);
+    appendDetailRow(table, t('notif-log.detail.city'), row.city);
+    appendDetailRow(table, t('notif-log.detail.org'), row.org);
+  }
+  if (row.threatTag || row.threatSource) {
+    appendDetailSection(table, t('notif-log.detail.sec.threat'));
+    appendDetailRow(table, t('notif-log.detail.threatSource'), row.threatSource);
+    appendDetailRow(table, t('notif-log.detail.threatTag'), row.threatTag);
+  }
+  body.replaceChildren(table);
 
   overlay.classList.remove('hidden');
 }
@@ -345,7 +381,7 @@ async function loadNotifLog() {
     nlRender();
   } catch (err) {
     const tbody = document.getElementById('notif-log-tbody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--red);padding:24px;">${esc(String(err))}</td></tr>`;
+    if (tbody) tbody.replaceChildren(nlMessageRow(String(err), 'notif-log-error-cell'));
   } finally {
     nlSetLoading(false);
   }

@@ -17,13 +17,16 @@ function stripEsModule(src) {
 const notifLogJs = stripEsModule(fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'notif-log.js'), 'utf8'));
 
 class FakeElement {
-  constructor(id = '', dataset = {}) {
-    this.id = id;
+  constructor(id = '', dataset = {}, tagName = 'div', register = null) {
+    this._id = '';
+    this._register = register;
+    this.tagName = tagName.toUpperCase();
     this.dataset = dataset;
     this.style = {};
     this.value = '';
-    this.textContent = '';
-    this._innerHTML = '';
+    this._textContent = '';
+    this.children = [];
+    this.parentNode = null;
     this.listeners = {};
     this._classes = new Set();
     this.classList = {
@@ -37,10 +40,23 @@ class FakeElement {
         return on;
       },
     };
+    this.id = id;
   }
 
-  set innerHTML(value) { this._innerHTML = String(value); }
-  get innerHTML() { return this._innerHTML; }
+  set id(value) {
+    this._id = String(value || '');
+    if (this._id) this._register?.(this._id, this);
+  }
+  get id() { return this._id; }
+  set className(value) { this._classes = new Set(String(value || '').split(/\s+/).filter(Boolean)); }
+  get className() { return [...this._classes].join(' '); }
+  set textContent(value) {
+    this._textContent = String(value ?? '');
+    this.children.forEach(child => { child.parentNode = null; });
+    this.children = [];
+  }
+  get textContent() { return this._textContent + this.children.map(child => child.textContent).join(''); }
+  get innerHTML() { return this.textContent; }
 
   addEventListener(type, fn) { this.listeners[type] = fn; }
   dispatch(type, event = {}) {
@@ -57,18 +73,38 @@ class FakeElement {
   getBoundingClientRect() { return { bottom: 10, left: 10 }; }
   querySelector() { return this._sortIcon || null; }
   querySelectorAll() { return []; }
+  remove() {
+    if (!this.parentNode) return;
+    this.parentNode.children = this.parentNode.children.filter(child => child !== this);
+    this.parentNode = null;
+  }
   appendChild(child) {
-    this._innerHTML += child?.innerHTML || '';
+    if (child.tagName === '#FRAGMENT') {
+      [...child.children].forEach(node => this.appendChild(node));
+      child.children = [];
+      return child;
+    }
+    child.remove();
+    child.parentNode = this;
+    this.children.push(child);
     return child;
+  }
+  replaceChildren(...children) {
+    this.children.forEach(child => { child.parentNode = null; });
+    this.children = [];
+    this._textContent = '';
+    children.forEach(child => this.appendChild(child));
   }
 }
 
 function makeHarness({ logs = [], apiFetch = null } = {}) {
   const ids = new Map();
-  const getEl = id => {
-    if (!ids.has(id)) ids.set(id, new FakeElement(id));
+  const register = (id, el) => ids.set(id, el);
+  const ensureEl = id => {
+    if (!ids.has(id)) ids.set(id, new FakeElement(id, {}, 'div', register));
     return ids.get(id);
   };
+  const getEl = id => ids.get(id) || null;
 
   [
     'notif-log-tbody', 'notif-log-count', 'notif-log-device-filter',
@@ -78,7 +114,7 @@ function makeHarness({ logs = [], apiFetch = null } = {}) {
     'notif-log-refresh-btn', 'notif-log-detail-overlay',
     'notif-log-detail-close', 'notif-log-detail-body',
     'data-fetching-notif',
-  ].forEach(getEl);
+  ].forEach(ensureEl);
 
   getEl('notif-log-detail-overlay').classList.add('hidden');
 
@@ -97,16 +133,13 @@ function makeHarness({ logs = [], apiFetch = null } = {}) {
     window: { innerWidth: 1024, scrollY: 0 },
     document: {
       getElementById: getEl,
-      createElement: tag => new FakeElement(tag),
-      createDocumentFragment: () => new FakeElement('fragment'),
+      createElement: tag => new FakeElement('', {}, tag, register),
+      createDocumentFragment: () => new FakeElement('', {}, '#fragment', register),
       addEventListener(type, fn) { documentListeners[type] = fn; },
     },
     updateSideHighlight() {},
     t: key => key,
     tVars: (_key, vars) => String(vars.n ?? vars.value ?? ''),
-    esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[c])),
     apiFetch: apiFetch || (async () => ({ ok: true, json: async () => ({ logs }) })),
   };
 
@@ -134,9 +167,31 @@ describe('Notification log detail popup', () => {
 
     await h.context.loadNotifLog();
 
-    assert.match(h.getEl('notif-log-tbody').innerHTML, /example\.test/);
-    assert.match(h.getEl('notif-log-tbody').innerHTML, /sample-threat/);
+    const tbody = h.getEl('notif-log-tbody');
+    assert.match(tbody.textContent, /example\.test/);
+    assert.match(tbody.textContent, /sample-threat/);
+    assert.equal(tbody.children.length, 1);
+    assert.equal(tbody.children[0].children.length, 7);
     assert.equal(h.getEl('notif-log-count').textContent, '1');
+  });
+
+  it('keeps HTML-like notification values as text nodes', async () => {
+    const h = makeHarness({
+      logs: [{
+        type: 'threat',
+        src: '<img src=x onerror=alert(1)>',
+        dst: '198.51.100.20',
+        threatTag: '<script>unsafe()</script>',
+      }],
+    });
+
+    await h.context.loadNotifLog();
+
+    const row = h.getEl('notif-log-tbody').children[0];
+    assert.equal(row.children.length, 7);
+    assert.match(row.textContent, /<img src=x onerror=alert\(1\)>/);
+    assert.match(row.textContent, /<script>unsafe\(\)<\/script>/);
+    assert.deepEqual(row.children.map(cell => cell.tagName), Array(7).fill('TD'));
   });
 
   it('closes from the top-right close button after a row detail is opened', () => {
@@ -150,6 +205,7 @@ describe('Notification log detail popup', () => {
       threatTag: 'sample',
     });
     assert.equal(h.getEl('notif-log-detail-overlay').classList.contains('hidden'), false);
+    assert.equal(h.getEl('notif-log-detail-body').children[0].tagName, 'TABLE');
 
     h.getEl('notif-log-detail-close').click();
     assert.equal(h.getEl('notif-log-detail-overlay').classList.contains('hidden'), true);

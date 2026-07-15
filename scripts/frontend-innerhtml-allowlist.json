@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssignments": 36,
+  "totalAssignments": 27,
   "files": {
     "auth-socket.js": {
       "count": 1,
@@ -20,12 +20,6 @@
       "categories": ["escaped-data-renderer", "trusted-translation"],
       "reason": "Connection labels, hosts, threat tags, protocols and ports pass through esc(); structural classes and the bundled empty-state translation are controlled locally."
     },
-    "devices.js": {
-      "count": 3,
-      "fingerprint": "d5156ce5ee42484002d95a5a881e0228b04881802434829f7d09606d34da9f30",
-      "categories": ["escaped-data-renderer", "high-priority-migration"],
-      "reason": "Device, note and filter values are escaped before interpolation. This DB- and user-data renderer remains a priority DOM API migration target in P2-27 stage 2."
-    },
     "graph-panels.js": {
       "count": 7,
       "fingerprint": "2cc46a418c23cf5d4c1031f801da542b93542e29bb5d19d998ab8ee5347b15d5",
@@ -43,12 +37,6 @@
       "fingerprint": "6362b82333946cc1f0513f1e7009bf54d30722d77f806549b83509f66e907bca",
       "categories": ["trusted-translation-html"],
       "reason": "Only elements explicitly marked data-i18n-html receive HTML from the bundled, reviewed translation catalog; runtime or user-provided translation sources are not supported."
-    },
-    "notif-log.js": {
-      "count": 6,
-      "fingerprint": "b7f2f6eb2855529cfc297c78b08e86a72226fce7708241ea3bfe39eaa85b9070",
-      "categories": ["escaped-data-renderer", "dom-clear", "high-priority-migration"],
-      "reason": "Notification rows, details, errors and filter labels escape external and DB values before interpolation; empty assignment clears rows. This is the next stage 2 DOM API migration target after log.js."
     },
     "router-settings.js": {
       "count": 2,

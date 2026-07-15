@@ -371,27 +371,99 @@ test('notification log detail popup opens and closes', async ({ page }) => {
   const errors = collectErrors(page);
   await authPage(page);
 
+  await page.route(/\/api\/notification-log(?:\?|$)/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      logs: [{
+        type: 'threat',
+        detectedAt: Date.now(),
+        src: '<img src=x onerror=alert(1)>',
+        dst: '198.51.100.20',
+        dstHost: 'notification.example',
+        dport: 443,
+        proto: 'TCP',
+        threatTag: '<script>smoke-threat</script>',
+        org: 'Smoke Org',
+        slackSent: true,
+      }],
+    }),
+  }));
+
   await page.click('#btn-notif-log');
-  await page.waitForTimeout(1500);
-
   const rows = page.locator('#notif-log-tbody tr');
-  const rowCount = await rows.count();
-  if (rowCount === 0) {
-    test.skip(true, 'no notification log rows');
-  }
-
-  const firstRowText = await rows.first().innerText().catch(() => '');
-  if (/検出ログがありません|No notification logs|HTTP \d+|serverUnavailable/.test(firstRowText)) {
-    test.skip(true, 'no usable notification log row');
-  }
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first().locator('td')).toHaveCount(7);
+  await expect(rows.first()).toContainText('<script>smoke-threat</script>');
+  await expect(rows.first().locator('script, img')).toHaveCount(0);
 
   await rows.first().click();
   const overlay = page.locator('#notif-log-detail-overlay');
   await expect(overlay).toBeVisible();
+  await expect(page.locator('#notif-log-detail-body table')).toHaveCount(1);
+  await expect(page.locator('#notif-log-detail-body')).toContainText('<img src=x onerror=alert(1)>');
+  await expect(page.locator('#notif-log-detail-body script, #notif-log-detail-body img')).toHaveCount(0);
   await page.click('#notif-log-detail-close');
   await expect(overlay).toHaveClass(/hidden/);
 
   expect(fatalErrors(errors), `Notification detail errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+test('device list and detail render external values as DOM text', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+  await page.route(/\/api\/devices\/merge-candidates\?/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      candidates: [{
+        id: 501,
+        deviceIdA: 1001,
+        deviceIdB: 1002,
+        ipB: '192.0.2.51',
+        macB: '11:22:33:44:55:66',
+        dnsNameB: '<b>merge candidate</b>',
+        score: 0.9,
+        reasons: ['same vendor'],
+      }],
+    }),
+  }));
+  await page.route(/\/api\/devices\?/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      devices: [{
+        deviceId: 1001,
+        ip: '192.0.2.50',
+        mac: 'aa:bb:cc:dd:ee:ff',
+        vendor: '<script>device-vendor</script>',
+        dnsName: '<img src=x onerror=alert(1)>',
+        ipv6Addrs: ['2001:db8::50'],
+        sources: 'yamaha,cisco',
+        status: 'active',
+        firstSeen: Date.now() - 60_000,
+        lastSeen: Date.now(),
+        note: '<b>device note</b>',
+      }],
+    }),
+  }));
+
+  await page.click('#btn-devices');
+  const row = page.locator('#devices-tbody tr[data-ip]');
+  await expect(row).toHaveCount(1);
+  await expect(row.locator('td')).toHaveCount(8);
+  await expect(row).toContainText('<script>device-vendor</script>');
+  await expect(row.locator('script, img')).toHaveCount(0);
+
+  await row.click();
+  await expect(page.locator('#dv-detail-panel')).toBeVisible();
+  await expect(page.locator('#dv-detail-note-ta')).toHaveValue('<b>device note</b>');
+  await expect(page.locator('#dv-detail-body')).toContainText('<img src=x onerror=alert(1)>');
+  await expect(page.locator('#dv-detail-body script, #dv-detail-body img')).toHaveCount(0);
+  const mergeCard = page.locator('.dv-merge-card[data-candidate-id="501"]');
+  await expect(mergeCard).toHaveCount(1);
+  await expect(mergeCard.locator('[data-action="merge"], [data-action="reject"]')).toHaveCount(2);
+  await expect(mergeCard).toContainText('<b>merge candidate</b>');
+  expect(fatalErrors(errors), `Device DOM rendering errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
 // (8) Changing the time filter must not raise errors (indirect test of getFilteredConnections)

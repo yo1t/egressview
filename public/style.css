@@ -284,6 +284,16 @@
   .log-table td.log-scroll-sentinel-cell { height: 1px; padding: 0; border: none; }
   .log-app-cell { font-size: 11px; color: var(--muted); }
   .log-org-cell { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+  .notif-log-clickable-row { cursor: pointer; }
+  .notif-log-empty-cell { text-align: center; color: var(--muted); padding: 32px; }
+  .notif-log-error-cell { text-align: center; color: var(--red); padding: 24px; }
+  .notif-log-type-threat { color: var(--red); font-weight: 700; }
+  .notif-log-type-device, .notif-log-slack-sent { color: var(--green); }
+  .notif-log-time-cell { white-space: nowrap; font-size: 11px; }
+  .notif-log-subtext { color: var(--muted); font-size: 10px; }
+  .notif-log-threat-text { color: var(--red); font-size: 11px; }
+  .notif-log-subtle-text, .notif-log-org-cell { color: var(--muted); font-size: 11px; }
+  .notif-log-slack-cell, .notif-log-slack-sent { text-align: center; }
   .log-filter-active { box-shadow: 0 0 0 2px var(--accent); transform: scale(1.08); }
 
   /* ── Beacon banner ────────────────────────────────────────────── */
@@ -355,6 +365,17 @@
   .dv-detail-actions .btn-save { background: var(--accent); color: #fff; border-color: var(--accent); }
   .dv-detail-actions .btn-save:hover { opacity: 0.85; }
   #dv-detail-filter-badge { margin-left: 8px; }
+  .dv-table-row { cursor: pointer; }
+  .dv-cell-mono { font-family: monospace; }
+  .dv-cell-muted { color: var(--muted); }
+  .dv-cell-mono-small { font-family: monospace; font-size: 10px; color: var(--muted); }
+  .dv-cell-small-muted { color: var(--muted); font-size: 10px; }
+  .dv-placeholder { color: var(--muted); opacity: .4; }
+  .dv-detail-small { font-size: 10px; }
+  .dv-detail-ipv6 { font-family: monospace; font-size: 10px; }
+  .dv-detail-ipv6-line { display: block; }
+  .dv-detail-note-label { margin-top: 4px; margin-bottom: 2px; font-size: 11px; color: var(--muted); }
+  .dv-investigate-result { margin-top: 4px; color: var(--muted); font-size: 10px; white-space: pre-wrap; }
   /* ── P1-8: status filter bar ── */
   .dv-status-bar { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
   .dv-status-btn { padding: 2px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: 12px; background: transparent; color: var(--muted); cursor: pointer; white-space: nowrap; transition: border-color .15s, color .15s; }
