@@ -818,6 +818,7 @@ test('settings tabs save and connection buttons work without console errors', as
   await expect(page.locator('#settings-overlay')).toBeVisible();
 
   await page.click('#router-add-btn');
+  await page.locator('#router-display-name').fill('<img src=x onerror=alert(1)>');
   await page.locator('#router-ip').fill('192.168.1.1');
   await page.locator('#router-user').fill('admin');
   await page.locator('#router-pass').fill('demo-pass');
@@ -827,6 +828,11 @@ test('settings tabs save and connection buttons work without console errors', as
   await expect(page.locator('#router-editor-status')).toContainText('SSH');
   await page.click('#router-save-btn');
   await expect(page.locator('.router-card')).toContainText('Yamaha RTX');
+  await expect(page.locator('.router-card')).toContainText('<img src=x onerror=alert(1)>');
+  await expect(page.locator('.router-card img')).toHaveCount(0);
+  await page.locator('.router-edit').click();
+  await expect(page.locator('#router-display-name')).toHaveValue('<img src=x onerror=alert(1)>');
+  await page.locator('#router-cancel-btn').click();
 
   await page.click('.settings-tab[data-tab="l2"]');
   await page.locator('#s-asus-ip').fill('192.168.1.2');

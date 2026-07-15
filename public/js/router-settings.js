@@ -1,5 +1,5 @@
 import { t } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE, esc, fmtTs } from './utils.js?v=__ASSET_VERSION__';
+import { _BASE, fmtTs } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch, socket, setRouterList } from './auth-socket.js?v=__ASSET_VERSION__';
 
 let routers = [];
@@ -21,24 +21,63 @@ function stateLabel(router) {
   return router.lastError || router.message || t('settings.routers.error');
 }
 
+function routerTextElement(tagName, text, { className = '', title = '' } = {}) {
+  const element = document.createElement(tagName);
+  if (className) element.className = className;
+  if (title) element.title = title;
+  element.textContent = text == null ? '' : String(text);
+  return element;
+}
+
+function createRouterAction(router, action, label, title, handler) {
+  const button = routerTextElement('button', label, {
+    className: `router-icon-btn router-${action}`,
+    title,
+  });
+  button.type = 'button';
+  button.dataset.id = String(router.id ?? '');
+  button.addEventListener('click', handler);
+  return button;
+}
+
+function createRouterCard(router) {
+  const card = document.createElement('article');
+  card.className = 'router-card';
+  card.dataset.routerId = String(router.id ?? '');
+  const status = stateClass(router);
+  card.appendChild(routerTextElement('span', '', {
+    className: `router-card-dot${status ? ` ${status}` : ''}`,
+  }));
+
+  const details = document.createElement('div');
+  details.appendChild(routerTextElement('div', router.displayName, { className: 'router-card-name' }));
+  const meta = [
+    router.kind === 'yamaha' ? 'Yamaha RTX' : 'Cisco IOS',
+    router.ip,
+    stateLabel(router),
+  ];
+  if (router.lastSuccessAt) meta.push(fmtTs(router.lastSuccessAt));
+  details.appendChild(routerTextElement('div', meta.join(' · '), { className: 'router-card-meta' }));
+  card.appendChild(details);
+
+  const actions = document.createElement('div');
+  actions.className = 'router-card-actions';
+  actions.appendChild(createRouterAction(
+    router, 'edit', 'Edit', t('settings.routers.edit'), () => openEditor(router)
+  ));
+  actions.appendChild(createRouterAction(
+    router, 'delete', '×', t('settings.routers.delete'), () => removeRouter(router.id)
+  ));
+  card.appendChild(actions);
+  return card;
+}
+
 function render() {
   byId('router-count').textContent = `${routers.length} / ${maxRouters}`;
   byId('router-add-btn').disabled = routers.length >= maxRouters;
-  byId('router-list').innerHTML = routers.length ? routers.map(router => `
-    <article class="router-card" data-router-id="${esc(router.id)}">
-      <span class="router-card-dot ${stateClass(router)}"></span>
-      <div>
-        <div class="router-card-name">${esc(router.displayName)}</div>
-        <div class="router-card-meta">${router.kind === 'yamaha' ? 'Yamaha RTX' : 'Cisco IOS'} · ${esc(router.ip)} · ${esc(stateLabel(router))}${router.lastSuccessAt ? ` · ${esc(fmtTs(router.lastSuccessAt))}` : ''}</div>
-      </div>
-      <div class="router-card-actions">
-        <button class="router-icon-btn router-edit" type="button" data-id="${esc(router.id)}" title="${esc(t('settings.routers.edit'))}">Edit</button>
-        <button class="router-icon-btn router-delete" type="button" data-id="${esc(router.id)}" title="${esc(t('settings.routers.delete'))}">×</button>
-      </div>
-    </article>`).join('') : `<div class="router-empty">${esc(t('settings.routers.empty'))}</div>`;
-
-  document.querySelectorAll('.router-edit').forEach(button => button.addEventListener('click', () => openEditor(routers.find(r => r.id === button.dataset.id))));
-  document.querySelectorAll('.router-delete').forEach(button => button.addEventListener('click', () => removeRouter(button.dataset.id)));
+  const list = byId('router-list');
+  if (routers.length) list.replaceChildren(...routers.map(createRouterCard));
+  else list.replaceChildren(routerTextElement('div', t('settings.routers.empty'), { className: 'router-empty' }));
   setRouterList(routers);
 }
 
@@ -63,7 +102,7 @@ function openEditor(router = null) {
   byId('router-nat').value = router?.nat || '100';
   byId('router-enabled').checked = router?.enabled ?? true;
   byId('router-editor-title').textContent = router ? t('settings.routers.editTitle') : t('settings.routers.addTitle');
-  byId('router-editor-status').style.display = 'none';
+  byId('router-editor-status').classList.remove('is-visible');
   updateKindFields();
   editor.classList.remove('hidden');
   byId('router-ip').focus();
@@ -87,8 +126,7 @@ function formData() {
 function showEditorStatus(message, ok) {
   const status = byId('router-editor-status');
   status.textContent = message;
-  status.className = `settings-status ${ok ? 'ok' : 'err'}`;
-  status.style.display = 'block';
+  status.className = `settings-status ${ok ? 'ok' : 'err'} is-visible`;
 }
 
 async function loadRouters() {
@@ -100,7 +138,9 @@ async function loadRouters() {
     maxRouters = data.maxRouters || 10;
     render();
   } catch (error) {
-    byId('router-list').innerHTML = `<div class="router-empty">${esc(error.message)}</div>`;
+    byId('router-list').replaceChildren(
+      routerTextElement('div', error.message, { className: 'router-empty' })
+    );
   }
 }
 

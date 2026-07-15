@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssignments": 23,
+  "totalAssignments": 21,
   "files": {
     "auth-socket.js": {
       "count": 1,
@@ -25,12 +25,6 @@
       "fingerprint": "6362b82333946cc1f0513f1e7009bf54d30722d77f806549b83509f66e907bca",
       "categories": ["trusted-translation-html"],
       "reason": "Only elements explicitly marked data-i18n-html receive HTML from the bundled, reviewed translation catalog; runtime or user-provided translation sources are not supported."
-    },
-    "router-settings.js": {
-      "count": 2,
-      "fingerprint": "65dd165844b2cc85c17fbb2d30da537973076772d64ab2e4239eb09404d57792",
-      "categories": ["escaped-data-renderer"],
-      "reason": "Router IDs, names, kinds, state text and error messages are escaped before interpolation; state classes are selected from local constants."
     },
     "settings.js": {
       "count": 8,
