@@ -64,8 +64,9 @@ attributes. If `innerHTML` is unavoidable, review every interpolated value,
 document why the sink is safe in the allowlist, and run
 `npm run lint:innerhtml`. Do not regenerate fingerprints merely to make the
 gate pass. `log.js`, `notif-log.js`, `devices.js`, `threat-popup.js`,
-`connections-panel.js`, and `beacon.js` have completed their DOM API migrations.
-Remaining reviewed sinks continue to be migrated in small, screen-focused batches.
+`connections-panel.js`, `beacon.js`, and `router-settings.js` have completed their
+DOM API migrations. Remaining reviewed sinks continue to be migrated in small,
+screen-focused batches.
 
 The connection log, notification log, device inventory, and threat detail
 markup must not use inline `style` attributes. Their modules use CSS state
