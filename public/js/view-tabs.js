@@ -22,9 +22,9 @@ function switchView(view) {
     ?.classList.toggle('disabled', view === 'devices' || view === 'notif-log');
   document.getElementById('graph-container').style.display        = view === 'graph'     ? 'flex' : 'none';
   document.getElementById('stats-container').style.display        = view === 'stats'     ? 'flex' : 'none';
-  document.getElementById('log-container').style.display          = view === 'log'       ? 'flex' : 'none';
-  document.getElementById('devices-container').style.display      = view === 'devices'   ? 'flex' : 'none';
-  document.getElementById('notif-log-container').style.display    = view === 'notif-log' ? 'flex' : 'none';
+  document.getElementById('log-container').classList.toggle('view-active', view === 'log');
+  document.getElementById('devices-container').classList.toggle('view-active', view === 'devices');
+  document.getElementById('notif-log-container').classList.toggle('view-active', view === 'notif-log');
   document.getElementById('btn-graph').classList.toggle('active',     view === 'graph');
   document.getElementById('btn-stats').classList.toggle('active',     view === 'stats');
   document.getElementById('btn-log').classList.toggle('active',       view === 'log');

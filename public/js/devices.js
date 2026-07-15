@@ -104,7 +104,7 @@ function renderDevicesTable() {
 
   // Sidebar device filter
   if (dvSelectedIp) {
-    filterBadgeEl.style.display = 'inline';
+    filterBadgeEl.classList.add('is-visible');
     const clearFilter = dvTextElement('span', tVars('devices.filter.only', { value: dvSelectedIp }), {
       className: 'log-device-filter-chip',
       id: 'dv-filter-clear',
@@ -112,12 +112,12 @@ function renderDevicesTable() {
     clearFilter.addEventListener('click', () => { dvSelectedIp = null; renderDevicesTable(); });
     filterBadgeEl.replaceChildren(clearFilter);
   } else {
-    filterBadgeEl.style.display = 'none';
+    filterBadgeEl.classList.remove('is-visible');
   }
 
   // Show "clear filters" button if any column filter is active
   const hasColFilter = Object.values(dvFilters).some(f => f && f.value);
-  clearFiltersBtn.style.display = (hasColFilter || dvSelectedIp) ? '' : 'none';
+  clearFiltersBtn.classList.toggle('is-visible', Boolean(hasColFilter || dvSelectedIp));
 
   // P1-8: update status counts and filter buttons
   const statusCounts = { active: 0, recent: 0, stale: 0, archived: 0 };
@@ -474,7 +474,6 @@ document.getElementById('dv-status-bar').addEventListener('click', e => {
 
 // ── Column sort ───────────────────────────────────────────────────────────────
 document.querySelectorAll('#devices-table th[data-col]').forEach(th => {
-  th.style.cursor = 'pointer';
   th.addEventListener('click', e => {
     if (e.target.classList.contains('dv-search-icon')) return;
     const col = th.dataset.col;

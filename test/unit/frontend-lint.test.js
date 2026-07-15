@@ -325,8 +325,8 @@ describe('Frontend TDZ lint', () => {
   });
 
   it('all view containers toggled in switchView exist in HTML', () => {
-    // Extract container IDs from switchView display toggles (from JS files)
-    const toggleRe = /getElementById\(['"]([^'"]+)['"]\)\.style\.display\s*=\s*view\s*===\s*['"][^'"]+['"]\s*\?/g;
+    // Extract container IDs from both legacy display toggles and migrated class toggles.
+    const toggleRe = /getElementById\(['"]([^'"]+)['"]\)\.(?:style\.display\s*=\s*view\s*===\s*['"][^'"]+['"]\s*\?|classList\.toggle\(['"]view-active['"],\s*view\s*===\s*['"][^'"]+['"]\))/g;
     const toggled = [];
     let m;
     while ((m = toggleRe.exec(script)) !== null) {
@@ -340,6 +340,26 @@ describe('Frontend TDZ lint', () => {
     const missing = toggled.filter(id => !htmlIds.has(id));
     assert.equal(missing.length, 0,
       `switchView toggles missing HTML ids:\n  ${[...new Set(missing)].join('\n  ')}`);
+  });
+
+  it('activity views do not use inline style attributes', () => {
+    const start = html.indexOf('<!-- Connection Log View -->');
+    const end = html.indexOf('<div id="graph-container">', start);
+    assert.notEqual(start, -1, 'connection log view marker should exist');
+    assert.notEqual(end, -1, 'graph container should follow activity views');
+    assert.doesNotMatch(html.slice(start, end), /\sstyle\s*=/,
+      'connection, device, and notification views should use CSS classes instead of inline styles');
+  });
+
+  it('activity modules keep only runtime popup coordinates as style assignments', () => {
+    for (const file of ['log.js', 'notif-log.js', 'devices.js', 'beacon.js']) {
+      const source = moduleSources[file];
+      const nonPositionStyles = source
+        .split('\n')
+        .filter(line => /\.style\./.test(line) && !/\.style\.(top|left)\s*=/.test(line));
+      assert.deepEqual(nonPositionStyles, [],
+        `${file} should use state classes except for runtime popup coordinates`);
+    }
   });
 
   it('getElementById targets exist in HTML', () => {

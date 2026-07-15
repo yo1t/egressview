@@ -224,10 +224,10 @@ function updateScrollStatus() {
   const el = document.getElementById('log-pagination');
   if (!el) return;
   if (logFetchAllMode || logAllData.length >= logTotal) {
-    el.style.display = 'none';
+    el.classList.remove('is-visible');
     return;
   }
-  el.style.display = 'flex';
+  el.classList.add('is-visible');
   el.replaceChildren(createTextElement(
     'span',
     `${logAllData.length} / ${logTotal} ${t('log.sessions')}`,
@@ -288,12 +288,10 @@ function renderThreatBadges() {
   const threatCountEl = document.getElementById('log-threat-count');
   if (!threatCountEl) return;
   if (!logThreatCounts) {
-    threatCountEl.style.display = 'inline';
     threatCountEl.replaceChildren(createTextElement('span', '...', { className: 'log-status-text' }));
     return;
   }
   const { safe, warn, danger } = logThreatCounts;
-  threatCountEl.style.display = 'inline';
   const badges = [
     { kind: 'safe', count: safe, className: 'log-badge-safe' },
     { kind: 'warn', count: warn, className: 'log-badge-warn' },
@@ -408,7 +406,7 @@ function renderLogView(appendRows) {
     const deviceFilterEl = document.getElementById('log-device-filter');
     if (selectedIp || selectedMac) {
       if (deviceFilterEl) {
-        deviceFilterEl.style.display = 'inline';
+        deviceFilterEl.classList.add('is-visible');
         const label = selectedIp || selectedMac;
         const clearFilter = createTextElement(
           'span',
@@ -427,7 +425,7 @@ function renderLogView(appendRows) {
         deviceFilterEl.replaceChildren(clearFilter);
       }
     } else {
-      if (deviceFilterEl) deviceFilterEl.style.display = 'none';
+      if (deviceFilterEl) deviceFilterEl.classList.remove('is-visible');
     }
   }
 
@@ -573,16 +571,16 @@ document.querySelectorAll('.log-search-icon').forEach(icon => {
     const dateRange = document.getElementById('log-search-date-range');
 
     if (isDateCol) {
-      textMode.style.display = 'none';
-      textInput.style.display = 'none';
-      dateRange.style.display = 'flex';
+      textMode.classList.add('is-hidden');
+      textInput.classList.add('is-hidden');
+      dateRange.classList.add('is-visible');
       const existing = logFilters[col];
       document.getElementById('log-search-from').value = existing?.from || '';
       document.getElementById('log-search-to').value   = existing?.to   || '';
     } else {
-      textMode.style.display = '';
-      textInput.style.display = '';
-      dateRange.style.display = 'none';
+      textMode.classList.remove('is-hidden');
+      textInput.classList.remove('is-hidden');
+      dateRange.classList.remove('is-visible');
       const existing = logFilters[col];
       logSearchMode.value  = existing?.mode  || 'contains';
       logSearchInput.value = existing?.value || '';
