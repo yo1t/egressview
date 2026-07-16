@@ -462,6 +462,32 @@ describe('Frontend TDZ lint', () => {
     }
   });
 
+  it('limits runtime style values to measured positions and bounded rendering values', () => {
+    const filesWithRuntimeStyles = Object.entries(moduleSources)
+      .filter(([, source]) => /\.style(?:\.|\s*=)/.test(source))
+      .map(([file]) => file)
+      .sort();
+    assert.deepEqual(filesWithRuntimeStyles, [
+      'devices.js', 'graph-panels.js', 'log.js', 'notif-log.js', 'stats-charts.js',
+    ]);
+
+    const panelStyles = moduleSources['graph-panels.js']
+      .split('\n')
+      .filter(line => /\.style(?:\.|\s*=)/.test(line));
+    assert.equal(panelStyles.length, 6);
+    assert.match(panelStyles[0], /tooltip\.style\.left = x \+ 'px'; tooltip\.style\.top = y \+ 'px'/);
+    assert.match(panelStyles[1], /nodeBadge\.style\.setProperty\('--node-color', nodeColor\)/);
+    assert.match(panelStyles[2], /\.style\.width = rxPct \+ '%'/);
+    assert.match(panelStyles[3], /\.style\.width = txPct \+ '%'/);
+    assert.match(panelStyles[4], /\.style\.width = Math\.min\(100, \(data\.wanRx \/ wMax\) \* 100\) \+ '%'/);
+    assert.match(panelStyles[5], /\.style\.width = Math\.min\(100, \(data\.wanTx \/ wMax\) \* 100\) \+ '%'/);
+
+    const chartStyles = moduleSources['stats-charts.js']
+      .split('\n')
+      .filter(line => /\.style(?:\.|\s*=)/.test(line));
+    assert.deepEqual(chartStyles.map(line => line.trim()), ['dot.style.background = colorFor(label);']);
+  });
+
   it('getElementById targets exist in HTML', () => {
     // After Phase 2, getElementById calls live in public/js/*.js (not inline in index.html).
     // Scan the concatenated JS content (not html) for all getElementById calls.
@@ -811,13 +837,13 @@ describe('Server runtime invariants', () => {
       'successful summary rendering should update the rendered-summary guard with the chart mode');
   });
 
-  it('keeps unsafe-inline out of the base style-src directive', () => {
+  it('does not allow inline styles in the CSP', () => {
     assert.match(serverAndHttpAppJs, /style-src 'self'/,
       'base style-src should not allow inline styles');
-    assert.match(serverAndHttpAppJs, /style-src-attr 'unsafe-inline'/,
-      'legacy inline style attributes should be isolated to style-src-attr until they are migrated');
-    assert.doesNotMatch(serverAndHttpAppJs, /style-src 'self' 'unsafe-inline'/,
-      'style-src must not regress to unsafe-inline');
+    assert.doesNotMatch(serverAndHttpAppJs, /style-src-attr/,
+      'style attributes should inherit the strict style-src policy');
+    assert.doesNotMatch(serverAndHttpAppJs, /unsafe-inline/,
+      'the CSP should not contain an inline style exception');
   });
 
   it('stats map coverage stays on the stats header and uses compact mobile text', () => {

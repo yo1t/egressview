@@ -43,7 +43,8 @@ describe('buildCspHeader', () => {
   it('builds the CSP and enables HSTS only for TLS', () => {
     const csp = buildCspHeader('abc', true);
     assert.match(csp.value, /script-src 'self' 'nonce-abc'/);
-    assert.match(csp.value, /style-src-attr 'unsafe-inline'/);
+    assert.doesNotMatch(csp.value, /style-src-attr/);
+    assert.doesNotMatch(csp.value, /unsafe-inline/);
     assert.equal(csp.hsts, 'max-age=31536000; includeSubDomains');
   });
 
