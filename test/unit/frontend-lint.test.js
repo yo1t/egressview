@@ -13,9 +13,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const htmlPath = path.join(__dirname, '..', '..', 'public', 'index.html');
+const stylePath = path.join(__dirname, '..', '..', 'public', 'style.css');
 const jsDir    = path.join(__dirname, '..', '..', 'public', 'js');
 const frontendDepsPath = path.join(__dirname, '..', '..', 'docs', 'frontend-dependencies.md');
 const html     = fs.readFileSync(htmlPath, 'utf8');
+const css      = fs.readFileSync(stylePath, 'utf8');
 const frontendDeps = fs.readFileSync(frontendDepsPath, 'utf8');
 const logJs    = fs.readFileSync(path.join(jsDir, 'log.js'), 'utf8');
 const mainJs   = fs.readFileSync(path.join(jsDir, 'main.js'), 'utf8');
@@ -377,6 +379,23 @@ describe('Frontend TDZ lint', () => {
     ]) {
       assert.match(html, new RegExp(`class="[^"]*${className}`));
     }
+  });
+
+  it('graph tooltips use DOM APIs and only runtime position styles', () => {
+    const source = moduleSources['graph-panels.js'];
+    const start = source.indexOf('// ─── Tooltip');
+    const end = source.indexOf('// ─── Side Panel', start);
+    assert.notEqual(start, -1);
+    assert.notEqual(end, -1);
+    const section = source.slice(start, end);
+    assert.doesNotMatch(section, /\.innerHTML\s*=/);
+    const styleOperations = section
+      .split('\n')
+      .filter(line => /\.style\./.test(line));
+    assert.equal(styleOperations.length, 1);
+    assert.match(styleOperations[0], /\.style\.left.+\.style\.top/);
+    assert.match(html, /class="graph-tooltip" id="tooltip"/);
+    assert.match(css, /\.graph-tooltip\.is-visible\s*\{\s*display:\s*block/);
   });
 
   it('getElementById targets exist in HTML', () => {

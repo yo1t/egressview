@@ -66,7 +66,8 @@ document why the sink is safe in the allowlist, and run
 gate pass. `log.js`, `notif-log.js`, `devices.js`, `threat-popup.js`,
 `connections-panel.js`, `beacon.js`, and `router-settings.js` have completed their
 DOM API migrations. The login-session flow in `settings.js` is also migrated.
-Remaining reviewed sinks continue to be migrated in small, screen-focused batches.
+The tooltip flow in `graph-panels.js` is migrated as well. Remaining reviewed
+sinks continue to be migrated in small, screen-focused batches.
 
 The connection log, notification log, device inventory, and threat detail
 markup must not use inline `style` attributes. Their modules use CSS state

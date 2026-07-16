@@ -23,31 +23,56 @@ let currentFilter = 'all';
 // ─── Tooltip ──────────────────────────────────────────────────────────────────
 const tooltip = document.getElementById('tooltip');
 
+function tooltipTextElement(tagName, text, className = '') {
+  const element = document.createElement(tagName);
+  if (className) element.className = className;
+  element.textContent = text == null ? '' : String(text);
+  return element;
+}
+
+function renderClientTooltip(client) {
+  const lines = [
+    tooltipTextElement('div', client.name || client.ip, 'graph-tooltip-heading'),
+  ];
+  if (client.ipv6Addrs?.length) {
+    lines.push(tooltipTextElement('span', 'IPv6', 'proto-badge proto-v6-grey'));
+  }
+  lines.push(tooltipTextElement('div', client.ip));
+  if (client.mac) lines.push(tooltipTextElement('div', client.mac, 'graph-tooltip-muted'));
+  if (client.vendor) lines.push(tooltipTextElement('div', client.vendor, 'graph-tooltip-muted'));
+  if (client.dnsName) lines.push(tooltipTextElement('div', `DNS: ${client.dnsName}`, 'graph-tooltip-detail'));
+  if (client.mdnsName) lines.push(tooltipTextElement('div', `mDNS: ${client.mdnsName}`, 'graph-tooltip-detail'));
+  if (client.summarySessions) {
+    lines.push(tooltipTextElement(
+      'div', `summary: ${Number(client.summarySessions).toLocaleString()} sessions`, 'graph-tooltip-summary'
+    ));
+  }
+  lines.push(tooltipTextElement('div', `↓ ${fmtBytes(client.rxRate)} ↑ ${fmtBytes(client.txRate)}`));
+  if (client.rssi != null) lines.push(tooltipTextElement('div', `RSSI: ${client.rssi} dBm`));
+  tooltip.replaceChildren(...lines);
+}
+
+function renderOrgTooltip(node) {
+  const lines = [
+    tooltipTextElement('div', node.label, 'graph-tooltip-heading'),
+    tooltipTextElement('div', `${node.flag || ''} ${node.country || ''}`),
+    tooltipTextElement('div', `${Number(node.totalSessions || 0).toLocaleString()} sessions`),
+  ];
+  if (node.summary) {
+    lines.push(tooltipTextElement('div', 'summary destination', 'graph-tooltip-summary-destination'));
+  }
+  tooltip.replaceChildren(...lines);
+}
+
 export function showTooltip(e, d) {
   if (d.type === 'client' && d.client) {
-    const c = d.client;
-    const proto = c.ipv6Addrs?.length ? '<span class="proto-badge proto-v6-grey">IPv6</span>' : '';
-    tooltip.innerHTML = `
-      <div style="font-weight:600;margin-bottom:4px">${esc(c.name || c.ip)}</div>
-      ${proto}
-      <div>${esc(c.ip)}</div>
-      ${c.mac ? `<div style="font-size:10px;color:#9ca3af">${esc(c.mac)}</div>` : ''}
-      ${c.vendor ? `<div style="font-size:10px;color:#9ca3af">${esc(c.vendor)}</div>` : ''}
-      ${c.dnsName ? `<div style="font-size:10px">DNS: ${esc(c.dnsName)}</div>` : ''}
-      ${c.mdnsName ? `<div style="font-size:10px">mDNS: ${esc(c.mdnsName)}</div>` : ''}
-      ${c.summarySessions ? `<div style="margin-top:4px;color:#ddd6fe">summary: ${Number(c.summarySessions).toLocaleString()} sessions</div>` : ''}
-      <div>↓ ${fmtBytes(c.rxRate)} ↑ ${fmtBytes(c.txRate)}</div>
-      ${c.rssi != null ? `<div>RSSI: ${c.rssi} dBm</div>` : ''}`;
+    renderClientTooltip(d.client);
   } else if (d.type === 'org') {
-    tooltip.innerHTML = `
-      <div style="font-weight:600;margin-bottom:4px">${esc(d.label)}</div>
-      <div>${d.flag || ''} ${d.country ? esc(d.country) : ''}</div>
-      <div>${Number(d.totalSessions || 0).toLocaleString()} sessions</div>
-      ${d.summary ? `<div style="color:#ddd6fe">summary destination</div>` : ''}`;
+    renderOrgTooltip(d);
   } else {
-    tooltip.innerHTML = `<div>${esc(d.label || d.id)}</div>`;
+    tooltip.replaceChildren(tooltipTextElement('div', d.label || d.id));
   }
-  tooltip.style.display = 'block';
+  tooltip.classList.add('is-visible');
   moveTooltip(e);
 }
 
@@ -58,7 +83,7 @@ export function moveTooltip(e) {
   tooltip.style.left = x + 'px'; tooltip.style.top = y + 'px';
 }
 
-export function hideTooltip() { tooltip.style.display = 'none'; }
+export function hideTooltip() { tooltip.classList.remove('is-visible'); }
 
 // ─── Side Panel ───────────────────────────────────────────────────────────────
 
