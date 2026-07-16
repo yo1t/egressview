@@ -9,7 +9,7 @@
 <body>
 
 <!-- ── Note modal ───────────────────────────────────────────────────────────── -->
-<div id="note-overlay" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:1001;">
+<div id="note-overlay" class="hidden">
   <div class="note-modal-card">
     <div class="note-modal-header">📝 <span data-i18n="note.title">メモ</span> — <span id="note-target"></span></div>
     <div class="note-modal-sub" data-i18n="note.hint">このノードが何かを記録できます。「自動調査」で IP からドラフトを生成します。</div>
@@ -515,7 +515,7 @@
 <header>
   <div class="status-dot" id="status-dot"></div>
   <h1>EgressView</h1>
-  <div id="demo-banner" style="display:none;background:#f59e0b;color:#000;font-size:11px;font-weight:bold;padding:2px 8px;border-radius:4px;letter-spacing:.04em">DEMO</div>
+  <div id="demo-banner" class="demo-banner">DEMO</div>
   <div class="view-tabs">
     <button class="view-tab active" id="btn-graph" data-i18n="tab.graph">📊 グラフマップ</button>
     <button class="view-tab" id="btn-stats" data-i18n="tab.stats">📈 統計情報</button>
@@ -538,9 +538,9 @@
       <option value="14d"       data-i18n="period.14d">2週間以内</option>
       <option value="custom"    data-i18n="period.custom">期間指定…</option>
     </select>
-    <span id="custom-range" style="display:none; margin-left:6px; align-items:center; gap:4px;">
+    <span id="custom-range" class="custom-range">
       <input id="custom-from" type="datetime-local" class="time-custom-input">
-      <span style="color:var(--muted);font-size:10px;">〜</span>
+      <span class="custom-range-separator">〜</span>
       <input id="custom-to"   type="datetime-local" class="time-custom-input">
     </span>
   </div>
@@ -561,11 +561,11 @@
     </div>
     <div class="stat">
       <span class="stat-label" data-i18n="wan.rx">WAN ↓</span>
-      <span class="stat-value" style="color:var(--green)" id="hdr-wan-rx">—</span>
+      <span class="stat-value value-rx" id="hdr-wan-rx">—</span>
     </div>
     <div class="stat">
       <span class="stat-label" data-i18n="wan.tx">WAN ↑</span>
-      <span class="stat-value" style="color:var(--red)" id="hdr-wan-tx">—</span>
+      <span class="stat-value value-tx" id="hdr-wan-tx">—</span>
     </div>
   </div>
   <button class="settings-btn" id="settings-btn" data-i18n-title="settings.title" title="設定">⚙</button>
@@ -579,26 +579,26 @@
 <div id="toast-container"></div>
 
 <div class="main">
-  <div id="stats-container" style="display:none">
+  <div id="stats-container">
     <div class="stats-header">
       <span id="stats-title" data-i18n="tab.stats">📈 統計情報</span>
-      <span id="stats-subtitle" style="color:var(--muted);font-size:11px;"></span>
-      <span id="stats-map-coverage" class="stats-map-coverage" style="display:none"></span>
+      <span id="stats-subtitle" class="stats-subtitle"></span>
+      <span id="stats-map-coverage" class="stats-map-coverage"></span>
       <span class="data-fetching-hdr" id="data-fetching-stats"><span class="spinner-xs"></span><span data-i18n="data.loading">読み込み中</span></span>
     </div>
     <!-- Maps row: GLOBE + FLAT MAP side by side -->
     <div class="stats-maps">
       <div class="stats-map-cell" id="st-globe">
         <div class="stats-map-label" data-i18n="dash.globe">GLOBE</div>
-        <svg id="st-globe-svg" style="width:100%;height:100%"></svg>
+        <svg id="st-globe-svg"></svg>
       </div>
       <div class="stats-map-cell" id="st-flat">
         <div class="stats-map-label" data-i18n="dash.flat">FLAT MAP</div>
-        <svg id="st-flat-svg" style="width:100%;height:100%"></svg>
+        <svg id="st-flat-svg"></svg>
       </div>
-      <div class="stats-map-cell" id="st-app-pie" style="background:var(--panel);">
+      <div class="stats-map-cell stats-app-pie" id="st-app-pie">
         <div class="stats-map-label" data-i18n="stats.app.title">アプリ別</div>
-        <svg id="st-app-pie-svg" style="width:100%;height:100%"></svg>
+        <svg id="st-app-pie-svg"></svg>
       </div>
     </div>
     <!-- Charts row: bar + timeline side by side -->
@@ -618,9 +618,9 @@
         <svg id="chart-timeline"></svg>
       </div>
     </div>
-    <div id="stats-empty" style="display:none; padding:40px; text-align:center; color:var(--muted);">
+    <div id="stats-empty" class="stats-empty">
       <span data-i18n="stats.empty.line1">表示するデータがありません</span><br>
-      <small style="font-size:10px" data-i18n="stats.empty.line2">期間や選択デバイスを変更してみてください</small>
+      <small class="stats-empty-hint" data-i18n="stats.empty.line2">期間や選択デバイスを変更してみてください</small>
     </div>
   </div>
   <!-- Connection Log View -->
@@ -836,18 +836,18 @@
       <button class="zoom-btn" id="zoom-fit"  title="全体表示">⊡</button>
     </div>
     <div class="legend">
-      <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div><span data-i18n="legend.wired">有線 (LAN)</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div><span data-i18n="legend.wifi24">Wi-Fi 2.4GHz</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div><span data-i18n="legend.wifi5">Wi-Fi 5GHz</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#eab308"></div><span data-i18n="legend.wifi6">Wi-Fi 6GHz</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div><span data-i18n="legend.mainrouter">メインルーター</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div><span data-i18n="legend.aimesh">AiMesh ノード</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#6b7280"></div><span data-i18n="legend.internet">インターネット</span></div>
+      <div class="legend-item"><div class="legend-dot legend-wired"></div><span data-i18n="legend.wired">有線 (LAN)</span></div>
+      <div class="legend-item"><div class="legend-dot legend-wifi-2g"></div><span data-i18n="legend.wifi24">Wi-Fi 2.4GHz</span></div>
+      <div class="legend-item"><div class="legend-dot legend-wifi-5g"></div><span data-i18n="legend.wifi5">Wi-Fi 5GHz</span></div>
+      <div class="legend-item"><div class="legend-dot legend-wifi-6g"></div><span data-i18n="legend.wifi6">Wi-Fi 6GHz</span></div>
+      <div class="legend-item"><div class="legend-dot legend-main-router"></div><span data-i18n="legend.mainrouter">メインルーター</span></div>
+      <div class="legend-item"><div class="legend-dot legend-aimesh"></div><span data-i18n="legend.aimesh">AiMesh ノード</span></div>
+      <div class="legend-item"><div class="legend-dot legend-internet"></div><span data-i18n="legend.internet">インターネット</span></div>
     </div>
     <div class="last-update" id="last-update"></div>
     <div class="data-fetching" id="data-fetching"><span class="spinner-xs"></span><span data-i18n="data.loading">読み込み中</span></div>
-    <div id="graph-summary-notice" style="display:none;position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(124,58,237,0.18);border:1px solid rgba(167,139,250,0.65);border-radius:6px;padding:5px 12px;font-size:11px;color:#ddd6fe;pointer-events:none;box-shadow:0 0 18px rgba(124,58,237,0.18)"></div>
-    <div id="graph-truncated-notice" style="display:none;position:absolute;bottom:8px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:4px 12px;font-size:11px;color:var(--muted);pointer-events:none" data-i18n="graph.truncated">表示件数の上限に達しました。グラフは最新50,000件を表示しています。</div>
+    <div id="graph-summary-notice" class="graph-notice graph-summary-notice"></div>
+    <div id="graph-truncated-notice" class="graph-notice graph-truncated-notice" data-i18n="graph.truncated">表示件数の上限に達しました。グラフは最新50,000件を表示しています。</div>
   </div>
   <div class="side-panel">
     <div class="panel-header">
@@ -872,10 +872,10 @@
     </div>
     <div class="wan-panel">
       <div class="wan-title" data-i18n="wan.title">WAN トラフィック</div>
-      <div class="wan-bar-label"><span>↓ ダウンロード</span><span id="wan-rx-label" style="color:var(--green)">—</span></div>
-      <div class="traffic-bar" style="margin-bottom:6px"><div class="traffic-bar-fill rx" id="wan-rx-bar" style="width:0%"></div></div>
-      <div class="wan-bar-label"><span>↑ アップロード</span><span id="wan-tx-label" style="color:var(--red)">—</span></div>
-      <div class="traffic-bar"><div class="traffic-bar-fill tx" id="wan-tx-bar" style="width:0%"></div></div>
+      <div class="wan-bar-label"><span>↓ ダウンロード</span><span id="wan-rx-label" class="value-rx">—</span></div>
+      <div class="traffic-bar wan-traffic-bar"><div class="traffic-bar-fill rx" id="wan-rx-bar"></div></div>
+      <div class="wan-bar-label"><span>↑ アップロード</span><span id="wan-tx-label" class="value-tx">—</span></div>
+      <div class="traffic-bar"><div class="traffic-bar-fill tx" id="wan-tx-bar"></div></div>
     </div>
   </div>
 </div>

@@ -380,6 +380,11 @@ describe('Frontend TDZ lint', () => {
       'backup and data source settings should use CSS classes');
   });
 
+  it('index.html does not use inline style attributes', () => {
+    assert.doesNotMatch(html, /\sstyle\s*=/,
+      'fixed presentation should live in style.css so style-src-attr can be tightened');
+  });
+
   it('frontend modules do not use HTML string insertion APIs', () => {
     for (const [file, source] of Object.entries(moduleSources)) {
       assert.doesNotMatch(source, /\.innerHTML\s*=/, `${file} must use DOM APIs`);
