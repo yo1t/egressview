@@ -197,9 +197,9 @@ function activeRouterTopology() {
 function graphSummaryNotice(show, summary) {
   const notice = document.getElementById('graph-summary-notice');
   if (!notice) return;
-  notice.style.display = show ? '' : 'none';
+  notice.classList.toggle('is-visible', show);
   const truncated = document.getElementById('graph-truncated-notice');
-  if (truncated && show) truncated.style.display = 'none';
+  if (truncated && show) truncated.classList.remove('is-visible');
   if (show && summary) {
     notice.textContent = tVars('graph.summary', {
       total: Number(summary.total || 0).toLocaleString(),
@@ -574,8 +574,7 @@ function updateOrgGraph({ resetPositions = false } = {}) {
 function showToast(message, durationMs = 5000) {
   const container = document.getElementById('toast-container');
   const el = document.createElement('div');
-  el.className = 'toast';
-  el.style.whiteSpace = 'pre-line';
+  el.className = 'toast multiline';
   el.textContent = message;
   container.appendChild(el);
   requestAnimationFrame(() => { requestAnimationFrame(() => { el.classList.add('show'); }); });

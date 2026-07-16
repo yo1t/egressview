@@ -34,7 +34,7 @@ setViewTabHandlers({
 
 socket.on('auth-required', () => {
   const banner = document.getElementById('disconnected-banner');
-  banner.style.display = 'block';
+  banner.classList.add('is-visible');
   banner.querySelector('button').textContent = t('banner.button');
   banner.querySelector('button').onclick = () => openSettings('l2');
   connState.l2.ready = false;
@@ -67,11 +67,11 @@ socket.on('yamaha-status', s => {
   _updateL3L4State();
   const banner = document.getElementById('disconnected-banner');
   if (!connState.l3l4.ready && connState.l3l4.err === 'failed' && yamahaConfigured && !asusActive) {
-    banner.style.display = 'block';
+    banner.classList.add('is-visible');
     banner.querySelector('button').textContent = t('banner.yamaha');
     banner.querySelector('button').onclick = () => openSettings('l3l4');
   }
-  if (connState.l3l4.ready) banner.style.display = 'none';
+  if (connState.l3l4.ready) banner.classList.remove('is-visible');
 });
 
 socket.on('cisco-status', s => {
@@ -81,11 +81,11 @@ socket.on('cisco-status', s => {
   _updateL3L4State();
   const banner = document.getElementById('disconnected-banner');
   if (!connState.l3l4.ready && connState.l3l4.err === 'failed' && !asusActive) {
-    banner.style.display = 'block';
+    banner.classList.add('is-visible');
     banner.querySelector('button').textContent = t('banner.cisco');
     banner.querySelector('button').onclick = () => openSettings('l3l4');
   }
-  if (connState.l3l4.ready) banner.style.display = 'none';
+  if (connState.l3l4.ready) banner.classList.remove('is-visible');
 });
 
 socket.on('notes-update', async data => {
@@ -115,7 +115,7 @@ socket.on('notes-update', async data => {
 
 socket.on('network-update', data => {
   setAsusActive(true);
-  errorBanner.style.display = 'none';
+  errorBanner.classList.remove('is-visible');
   connState.l2.enabled = true;
   connState.l2.ready   = true;
   connState.l2.err     = '';
@@ -180,7 +180,7 @@ socket.on('connections-update', data => {
 
 socket.on('poll-error', err => {
   errorBanner.textContent = tVars('err.poll', { message: err.message });
-  errorBanner.style.display = 'block';
+  errorBanner.classList.add('is-visible');
 });
 
 socket.on('new-device', entry => {

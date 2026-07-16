@@ -62,8 +62,7 @@ document.getElementById('enable-asus').addEventListener('change',
 function showStatus(elId, msg, ok) {
   const el = document.getElementById(elId);
   el.textContent = msg;
-  el.className = 'settings-status ' + (ok ? 'ok' : 'err');
-  el.style.display = 'block';
+  el.className = 'settings-status is-visible ' + (ok ? 'ok' : 'err');
 }
 
 async function connectRouter(body, statusId, btnId, checkboxId) {
@@ -71,7 +70,7 @@ async function connectRouter(body, statusId, btnId, checkboxId) {
   const enabled = checkboxId ? document.getElementById(checkboxId).checked : true;
   btn.disabled = true;
   setButtonLoading(btn, enabled ? t('settings.btn.connecting') : t('settings.btn.disabling'));
-  document.getElementById(statusId).style.display = 'none';
+  document.getElementById(statusId).classList.remove('is-visible');
   try {
     const res = await apiFetch(_BASE+'/api/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -80,7 +79,7 @@ async function connectRouter(body, statusId, btnId, checkboxId) {
     const data = await res.json();
     if (res.ok) {
       if (data.routerIp) { connState.l2.ip = data.routerIp; updateConnBadge('l2'); }
-      document.getElementById('disconnected-banner').style.display = 'none';
+      document.getElementById('disconnected-banner').classList.remove('is-visible');
       showStatus(statusId, enabled ? t('settings.status.ok') : t('settings.status.disabled'), true);
       setTimeout(closeSettings, 1200);
       return true;
@@ -136,9 +135,7 @@ function renderYamahaDetectStatus(data, ok) {
   }
 
   el.textContent = lines.join('\n');
-  el.className = 'settings-status ' + (ok ? 'ok' : 'err');
-  el.style.display = 'block';
-  el.style.whiteSpace = 'pre-line';
+  el.className = 'settings-status multiline is-visible ' + (ok ? 'ok' : 'err');
 }
 
 document.getElementById('yamaha-detect-btn').addEventListener('click', async () => {
@@ -154,7 +151,7 @@ document.getElementById('yamaha-detect-btn').addEventListener('click', async () 
 
   btn.disabled = true;
   setButtonLoading(btn, t('settings.yamaha.detecting'));
-  document.getElementById('yamaha-status').style.display = 'none';
+  document.getElementById('yamaha-status').classList.remove('is-visible');
   try {
     const body = {
       yamahaIp: ip,
@@ -248,9 +245,7 @@ function renderCiscoDetectStatus(data, ok) {
   }
   el.textContent = lines.join('\n');
   // Don't show a success style if the NAT table couldn't be read, even on HTTP 200
-  el.className = 'settings-status ' + ((ok && data?.nat?.ok) ? 'ok' : 'err');
-  el.style.display = 'block';
-  el.style.whiteSpace = 'pre-line';
+  el.className = 'settings-status multiline is-visible ' + ((ok && data?.nat?.ok) ? 'ok' : 'err');
 }
 
 document.getElementById('cisco-detect-btn').addEventListener('click', async () => {
@@ -266,7 +261,7 @@ document.getElementById('cisco-detect-btn').addEventListener('click', async () =
 
   btn.disabled = true;
   setButtonLoading(btn, t('settings.cisco.detecting'));
-  document.getElementById('cisco-status').style.display = 'none';
+  document.getElementById('cisco-status').classList.remove('is-visible');
   try {
     const body = { ciscoIp: ip, ciscoUser: user };
     if (pass) body.ciscoPass = pass;
@@ -365,12 +360,10 @@ document.getElementById('slack-verify-btn').addEventListener('click', async () =
     const data = await r.json();
     const info = document.getElementById('slack-workspace-info');
     if (data.ok) {
-      info.style.display = 'block';
-      info.style.color = 'var(--green)';
+      info.className = 'slack-info is-visible ok';
       info.textContent = `✓ ${data.team} (${data.user})`;
     } else {
-      info.style.display = 'block';
-      info.style.color = '#ef4444';
+      info.className = 'slack-info is-visible err';
       info.textContent = '✗ ' + (data.error || 'Failed');
     }
   } catch (e) {
@@ -394,14 +387,12 @@ document.getElementById('slack-lookup-btn').addEventListener('click', async () =
     const info = document.getElementById('slack-user-info');
     if (data.ok) {
       const displayName = data.realName || data.displayName || data.name;
-      info.style.display = 'block';
-      info.style.color = 'var(--green)';
+      info.className = 'slack-info is-visible ok';
       info.textContent = `✓ ${displayName} (${data.userId})`;
       document.getElementById('s-slack-userid').value = data.userId;
       document.getElementById('s-slack-username').value = displayName;
     } else {
-      info.style.display = 'block';
-      info.style.color = '#ef4444';
+      info.className = 'slack-info is-visible err';
       info.textContent = '✗ ' + (data.error === 'user_not_found' ? t('settings.slack.userNotFound') : data.error);
     }
   } catch (e) {
@@ -504,18 +495,16 @@ async function loadBackupList() {
       const size = (b.size / 1024 / 1024).toFixed(1) + ' MB';
       const date = new Date(b.created).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US');
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid var(--border)';
+      row.className = 'backup-list-row';
       const label = document.createElement('span');
-      label.style.flex = '1';
+      label.className = 'backup-list-label';
       label.textContent = `${date} (${size})`;
       const dlBtn = document.createElement('button');
-      dlBtn.className = 'connect-btn';
-      dlBtn.style.cssText = 'font-size:9px;padding:2px 6px';
+      dlBtn.className = 'connect-btn backup-list-button';
       dlBtn.textContent = 'DL';
       dlBtn.addEventListener('click', () => backupDownload(b.name));
       const restoreBtn = document.createElement('button');
-      restoreBtn.className = 'connect-btn';
-      restoreBtn.style.cssText = 'font-size:9px;padding:2px 6px';
+      restoreBtn.className = 'connect-btn backup-list-button';
       restoreBtn.textContent = t('settings.backup.restore');
       restoreBtn.addEventListener('click', () => backupRestore(b.name));
       row.append(label, dlBtn, restoreBtn);

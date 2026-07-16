@@ -41,7 +41,7 @@ async function fetchConnectionRange(from, to) {
     }
     if (data.serverTime) setServerTimeOffset(data.serverTime - Date.now());
     const notice = document.getElementById('graph-truncated-notice');
-    if (notice) notice.style.display = data.truncated ? '' : 'none';
+    if (notice) notice.classList.toggle('is-visible', !!data.truncated);
     rememberGraphTruncation(from, to, !!data.truncated);
     if (data.truncated && fetchGraphSummary) {
       await fetchGraphSummary(from, to);
@@ -125,7 +125,7 @@ function initTimeFilter() {
     setCurrentTimeFilter(e.target.value);
     const customWrap = document.getElementById('custom-range');
     if (currentTimeFilter === 'custom') {
-      customWrap.style.display = 'inline-flex';
+      customWrap.classList.add('is-visible');
       // Initial values: past 1 hour
       const now = new Date(Date.now() + serverTimeOffset);
       const past = new Date(now.getTime() - 3600_000);
@@ -136,7 +136,7 @@ function initTimeFilter() {
       setCustomRangeFrom(new Date(fromEl.value).getTime());
       setCustomRangeTo(new Date(toEl.value).getTime());
     } else {
-      customWrap.style.display = 'none';
+      customWrap.classList.remove('is-visible');
     }
     applyTimeFilter();
   });

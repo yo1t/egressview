@@ -36,8 +36,8 @@ function getStatsSelection() {
 
 function setStatsEmpty(isEmpty, selIp) {
   const empty = document.getElementById('stats-empty');
-  empty.style.display = isEmpty ? 'block' : 'none';
-  document.getElementById('stats-charts').style.display = isEmpty ? 'none' : 'grid';
+  empty.classList.toggle('is-visible', isEmpty);
+  document.getElementById('stats-charts').classList.toggle('is-hidden', isEmpty);
   if (isEmpty) updateMapCoverageNotice(null);
   if (isEmpty) updateStatsMaps(selIp, []);
 }
@@ -46,7 +46,7 @@ function updateMapCoverageNotice(coverage) {
   const el = document.getElementById('stats-map-coverage');
   if (!el) return;
   if (!coverage || !(coverage.totalSessions > 0)) {
-    el.style.display = 'none';
+    el.classList.remove('is-visible');
     el.textContent = '';
     return;
   }
@@ -57,7 +57,7 @@ function updateMapCoverageNotice(coverage) {
     total: Number(coverage.totalGroups || 0).toLocaleString(),
     percent,
   });
-  el.style.display = '';
+  el.classList.add('is-visible');
 }
 
 function renderStatsSummary(summary, selIp) {

@@ -20,8 +20,8 @@ function switchView(view) {
   // Devices and notification-log views always show everything, so the time filter does not apply
   document.querySelector('.time-filter')
     ?.classList.toggle('disabled', view === 'devices' || view === 'notif-log');
-  document.getElementById('graph-container').style.display        = view === 'graph'     ? 'flex' : 'none';
-  document.getElementById('stats-container').style.display        = view === 'stats'     ? 'flex' : 'none';
+  document.getElementById('graph-container').classList.toggle('view-active', view === 'graph');
+  document.getElementById('stats-container').classList.toggle('view-active', view === 'stats');
   document.getElementById('log-container').classList.toggle('view-active', view === 'log');
   document.getElementById('devices-container').classList.toggle('view-active', view === 'devices');
   document.getElementById('notif-log-container').classList.toggle('view-active', view === 'notif-log');
