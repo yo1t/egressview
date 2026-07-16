@@ -4,7 +4,7 @@
 // Graph-owned state (selection, mesh colors, rate scale) is read through the
 // accessors graph.js exports; the circular imports are function-body-only.
 import { t } from './i18n.js?v=__ASSET_VERSION__';
-import { esc, fmtBytes, nodeClass, typeLabel } from './utils.js?v=__ASSET_VERSION__';
+import { fmtBytes, nodeClass, typeLabel } from './utils.js?v=__ASSET_VERSION__';
 import { updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
 import { statsMode, nlMode, logMode, devicesMode } from './view-tabs.js?v=__ASSET_VERSION__';
 import { lookupNote, openNoteModal } from './auth-socket.js?v=__ASSET_VERSION__';
@@ -23,7 +23,7 @@ let currentFilter = 'all';
 // ─── Tooltip ──────────────────────────────────────────────────────────────────
 const tooltip = document.getElementById('tooltip');
 
-function tooltipTextElement(tagName, text, className = '') {
+function textElement(tagName, text, className = '') {
   const element = document.createElement(tagName);
   if (className) element.className = className;
   element.textContent = text == null ? '' : String(text);
@@ -32,34 +32,34 @@ function tooltipTextElement(tagName, text, className = '') {
 
 function renderClientTooltip(client) {
   const lines = [
-    tooltipTextElement('div', client.name || client.ip, 'graph-tooltip-heading'),
+    textElement('div', client.name || client.ip, 'graph-tooltip-heading'),
   ];
   if (client.ipv6Addrs?.length) {
-    lines.push(tooltipTextElement('span', 'IPv6', 'proto-badge proto-v6-grey'));
+    lines.push(textElement('span', 'IPv6', 'proto-badge proto-v6-grey'));
   }
-  lines.push(tooltipTextElement('div', client.ip));
-  if (client.mac) lines.push(tooltipTextElement('div', client.mac, 'graph-tooltip-muted'));
-  if (client.vendor) lines.push(tooltipTextElement('div', client.vendor, 'graph-tooltip-muted'));
-  if (client.dnsName) lines.push(tooltipTextElement('div', `DNS: ${client.dnsName}`, 'graph-tooltip-detail'));
-  if (client.mdnsName) lines.push(tooltipTextElement('div', `mDNS: ${client.mdnsName}`, 'graph-tooltip-detail'));
+  lines.push(textElement('div', client.ip));
+  if (client.mac) lines.push(textElement('div', client.mac, 'graph-tooltip-muted'));
+  if (client.vendor) lines.push(textElement('div', client.vendor, 'graph-tooltip-muted'));
+  if (client.dnsName) lines.push(textElement('div', `DNS: ${client.dnsName}`, 'graph-tooltip-detail'));
+  if (client.mdnsName) lines.push(textElement('div', `mDNS: ${client.mdnsName}`, 'graph-tooltip-detail'));
   if (client.summarySessions) {
-    lines.push(tooltipTextElement(
+    lines.push(textElement(
       'div', `summary: ${Number(client.summarySessions).toLocaleString()} sessions`, 'graph-tooltip-summary'
     ));
   }
-  lines.push(tooltipTextElement('div', `↓ ${fmtBytes(client.rxRate)} ↑ ${fmtBytes(client.txRate)}`));
-  if (client.rssi != null) lines.push(tooltipTextElement('div', `RSSI: ${client.rssi} dBm`));
+  lines.push(textElement('div', `↓ ${fmtBytes(client.rxRate)} ↑ ${fmtBytes(client.txRate)}`));
+  if (client.rssi != null) lines.push(textElement('div', `RSSI: ${client.rssi} dBm`));
   tooltip.replaceChildren(...lines);
 }
 
 function renderOrgTooltip(node) {
   const lines = [
-    tooltipTextElement('div', node.label, 'graph-tooltip-heading'),
-    tooltipTextElement('div', `${node.flag || ''} ${node.country || ''}`),
-    tooltipTextElement('div', `${Number(node.totalSessions || 0).toLocaleString()} sessions`),
+    textElement('div', node.label, 'graph-tooltip-heading'),
+    textElement('div', `${node.flag || ''} ${node.country || ''}`),
+    textElement('div', `${Number(node.totalSessions || 0).toLocaleString()} sessions`),
   ];
   if (node.summary) {
-    lines.push(tooltipTextElement('div', 'summary destination', 'graph-tooltip-summary-destination'));
+    lines.push(textElement('div', 'summary destination', 'graph-tooltip-summary-destination'));
   }
   tooltip.replaceChildren(...lines);
 }
@@ -70,7 +70,7 @@ export function showTooltip(e, d) {
   } else if (d.type === 'org') {
     renderOrgTooltip(d);
   } else {
-    tooltip.replaceChildren(tooltipTextElement('div', d.label || d.id));
+    tooltip.replaceChildren(textElement('div', d.label || d.id));
   }
   tooltip.classList.add('is-visible');
   moveTooltip(e);
@@ -87,6 +87,83 @@ export function hideTooltip() { tooltip.classList.remove('is-visible'); }
 
 // ─── Side Panel ───────────────────────────────────────────────────────────────
 
+function createDeviceCard(client) {
+  const card = document.createElement('div');
+  card.className = `device-card ${nodeClass(client.type)}`;
+  card.dataset.mac = client.mac;
+
+  const header = document.createElement('div');
+  header.className = 'device-card-header';
+  header.append(
+    textElement('div', '', 'device-title'),
+    textElement('span', '📝', 'device-note-edit'),
+  );
+  header.querySelector('.device-note-edit').title = t('note.edit.tip');
+
+  const traffic = document.createElement('div');
+  traffic.className = 'device-traffic';
+  for (const [direction, arrow] of [['rx', '↓ '], ['tx', '↑ ']]) {
+    const pill = textElement('span', arrow, `traffic-pill ${direction}`);
+    pill.appendChild(textElement('span', '', `${direction}-val`));
+    traffic.appendChild(pill);
+  }
+
+  const bars = document.createElement('div');
+  bars.className = 'device-traffic-bars';
+  for (const direction of ['rx', 'tx']) {
+    const bar = document.createElement('div');
+    bar.className = `traffic-bar${direction === 'tx' ? ' traffic-bar-spaced' : ''}`;
+    bar.appendChild(textElement('div', '', `traffic-bar-fill ${direction}`));
+    bars.appendChild(bar);
+  }
+
+  card.append(
+    header,
+    textElement('div', '', 'device-name empty'),
+    textElement('div', '', 'device-meta empty'),
+    textElement('div', '', 'device-resolved empty'),
+    textElement('div', '', 'device-note empty'),
+    traffic,
+    bars,
+  );
+  return card;
+}
+
+function renderLogLoading(tbody) {
+  const row = document.createElement('tr');
+  const cell = document.createElement('td');
+  cell.colSpan = 9;
+  cell.className = 'log-loading-cell';
+  cell.append(
+    textElement('span', '', 'spinner-xs'),
+    document.createTextNode(` ${t('data.loading') || '読み込み中'}`),
+  );
+  row.appendChild(cell);
+  tbody.replaceChildren(row);
+}
+
+function renderDeviceMeta(metaEl, client, papNode, nodeColor) {
+  const badges = [textElement('span', 'IPv4', 'proto-badge proto-v4')];
+  if (client.ipv6Addrs?.length) {
+    badges.push(textElement('span', 'IPv6', 'proto-badge proto-v6-grey'));
+  }
+
+  const nodeBadge = textElement(
+    'span', papNode?.model?.replace(/RT-BE/, '') || 'Main', 'node-badge'
+  );
+  nodeBadge.style.setProperty('--node-color', nodeColor);
+  badges.push(nodeBadge);
+
+  if (client.deviceFirstSeen && Date.now() - client.deviceFirstSeen < 24 * 60 * 60 * 1000) {
+    badges.push(textElement('span', t('device.new'), 'new-badge'));
+  }
+
+  const metaParts = [client.vendor, typeLabel(client.type)].filter(Boolean);
+  if (metaParts.length) badges.push(document.createTextNode(` ${metaParts.join(' · ')}`));
+  metaEl.replaceChildren(...badges);
+  metaEl.className = 'device-meta';
+}
+
 export function updateFilterTabs(meshNodes, mainMac, clients) {
   const tabs = document.getElementById('filter-tabs');
   const counts = { all: clients.length };
@@ -95,7 +172,7 @@ export function updateFilterTabs(meshNodes, mainMac, clients) {
   });
 
   // Rebuild tabs
-  tabs.innerHTML = '';
+  tabs.replaceChildren();
   const addTab = (filter, label) => {
     const btn = document.createElement('button');
     btn.className = 'tab-btn' + (currentFilter === filter ? ' active' : '');
@@ -146,26 +223,7 @@ export function updateSidePanel(clients, data, meshNodes, _mainMac) {
     const nodeColor = meshColorMap[c.amesh_papMac] || '#6b7280';
     let card = existing[c.mac];
     if (!card) {
-      card = document.createElement('div');
-      card.className = `device-card ${nodeClass(c.type)}`;
-      card.dataset.mac = c.mac;
-      card.innerHTML = `
-        <div style="display:flex;align-items:center;gap:4px">
-          <div class="device-title" style="flex:1"></div>
-          <span class="device-note-edit" title="${esc(t('note.edit.tip'))}">📝</span>
-        </div>
-        <div class="device-name empty"></div>
-        <div class="device-meta empty"></div>
-        <div class="device-resolved empty"></div>
-        <div class="device-note empty"></div>
-        <div class="device-traffic">
-          <span class="traffic-pill rx">↓ <span class="rx-val"></span></span>
-          <span class="traffic-pill tx">↑ <span class="tx-val"></span></span>
-        </div>
-        <div style="margin-top:6px">
-          <div class="traffic-bar"><div class="traffic-bar-fill rx" style="width:0%"></div></div>
-          <div class="traffic-bar" style="margin-top:3px"><div class="traffic-bar-fill tx" style="width:0%"></div></div>
-        </div>`;
+      card = createDeviceCard(c);
       card.addEventListener('click', () => {
         const nextMac = c.mac === selectedMac ? null : c.mac;
         setSelection(nextMac, nextMac ? c.ip : null);
@@ -176,7 +234,7 @@ export function updateSidePanel(clients, data, meshNodes, _mainMac) {
         if (logMode) {
           if (nextMac) {
             const tb = document.getElementById('log-tbody');
-            if (tb) tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--muted)"><span class="spinner-xs"></span> ${t('data.loading') || '読み込み中'}</td></tr>`;
+            if (tb) renderLogLoading(tb);
           }
           updateLogView();
         }
@@ -222,19 +280,7 @@ export function updateSidePanel(clients, data, meshNodes, _mainMac) {
     }
     // Meta: protocol badges + node badge + NEW badge + OUI vendor · connection type
     const metaEl = card.querySelector('.device-meta');
-    const metaParts = [c.vendor, typeLabel(c.type)].filter(Boolean);
-    let badgeHtml = '<span class="proto-badge proto-v4">IPv4</span>';
-    if (c.ipv6Addrs && c.ipv6Addrs.length > 0) {
-      badgeHtml += '<span class="proto-badge proto-v6-grey">IPv6</span>';
-    }
-    const nodeBadgeText = esc(papNode?.model?.replace(/RT-BE/,'') || 'Main');
-    badgeHtml += `<span class="node-badge" style="background:${nodeColor}22;color:${nodeColor};border:1px solid ${nodeColor}44">${nodeBadgeText}</span>`;
-    if (c.deviceFirstSeen && Date.now() - c.deviceFirstSeen < 24 * 60 * 60 * 1000) {
-      badgeHtml += `<span class="new-badge">${t('device.new')}</span>`;
-    }
-    const metaText = metaParts.length ? ' ' + metaParts.map(esc).join(' · ') : '';
-    metaEl.innerHTML = badgeHtml + metaText;
-    metaEl.className = 'device-meta';
+    renderDeviceMeta(metaEl, c, papNode, nodeColor);
     // Name resolution: DNS / mDNS (omit if same as already-known name)
     const resolvedEl = card.querySelector('.device-resolved');
     const known = new Set([c.name, c.ip].filter(Boolean));

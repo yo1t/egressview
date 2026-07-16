@@ -398,6 +398,24 @@ describe('Frontend TDZ lint', () => {
     assert.match(css, /\.graph-tooltip\.is-visible\s*\{\s*display:\s*block/);
   });
 
+  it('graph side panel uses DOM APIs for cards, loading, and metadata', () => {
+    const source = moduleSources['graph-panels.js'];
+    const start = source.indexOf('// ─── Side Panel');
+    assert.notEqual(start, -1);
+    const section = source.slice(start);
+    assert.doesNotMatch(section, /\.innerHTML\s*=/);
+    assert.match(section, /function createDeviceCard\(/);
+    assert.match(section, /function renderLogLoading\(/);
+    assert.match(section, /function renderDeviceMeta\(/);
+    assert.match(section, /metaEl\.replaceChildren\(\.\.\.badges\)/);
+    assert.match(section, /tabs\.replaceChildren\(\)/);
+    for (const className of [
+      'device-card-header', 'device-traffic-bars', 'traffic-bar-spaced', 'log-loading-cell',
+    ]) {
+      assert.match(css, new RegExp(`\\.${className}\\b`));
+    }
+  });
+
   it('getElementById targets exist in HTML', () => {
     // After Phase 2, getElementById calls live in public/js/*.js (not inline in index.html).
     // Scan the concatenated JS content (not html) for all getElementById calls.

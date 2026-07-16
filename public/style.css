@@ -565,6 +565,8 @@
   .device-list::-webkit-scrollbar { width: 4px; }
   .device-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
   .device-card { padding: 10px 12px; border-radius: 8px; margin-bottom: 6px; border: 1px solid var(--border); cursor: pointer; transition: border-color 0.15s, background 0.15s; position: relative; }
+  .device-card-header { display: flex; align-items: center; gap: 4px; }
+  .device-card-header .device-title { flex: 1; }
   /* Note body: scroll up to 3 lines, read-only (display only) */
   .device-note {
     display: block; font-size: 11px; margin-top: 4px;
@@ -614,7 +616,14 @@
   .device-card.wifi-2g { border-left: 3px solid var(--green); }
   .device-card.wifi-5g { border-left: 3px solid var(--purple); }
   .device-card.wifi-6g { border-left: 3px solid #eab308; }
-  .node-badge { display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 3px; margin-left: 6px; vertical-align: middle; font-weight: 600; }
+  .node-badge {
+    --node-color: #6b7280;
+    display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    margin-left: 6px; vertical-align: middle; font-weight: 600;
+    color: var(--node-color);
+    background: color-mix(in srgb, var(--node-color) 13%, transparent);
+    border: 1px solid color-mix(in srgb, var(--node-color) 27%, transparent);
+  }
   .new-badge { display: inline-block; font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: #0d4f2a; color: #3fb950; border: 1px solid #3fb95044; text-transform: uppercase; letter-spacing: 0.05em; margin-left: 4px; vertical-align: middle; }
   .proto-badges { display: none; }
   .proto-badge { display: inline-block; font-size: 8px; padding: 1px 4px; border-radius: 3px; font-weight: 700; letter-spacing: 0.3px; vertical-align: middle; margin-right: 2px; }
@@ -652,13 +661,16 @@
   }
   .device-resolved.empty { display: none; }
   .device-traffic { display: flex; gap: 8px; margin-top: 6px; }
+  .device-traffic-bars { margin-top: 6px; }
   .traffic-pill { display: flex; align-items: center; gap: 4px; font-size: 10px; padding: 1px 6px; border-radius: 4px; }
   .traffic-pill.rx { background: rgba(16,185,129,0.15); color: var(--green); }
   .traffic-pill.tx { background: rgba(239,68,68,0.15); color: var(--red); }
   .traffic-bar { height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; margin-top: 2px; }
+  .traffic-bar-spaced { margin-top: 3px; }
   .traffic-bar-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
   .traffic-bar-fill.rx { background: var(--green); }
   .traffic-bar-fill.tx { background: var(--red); }
+  .log-loading-cell { text-align: center; padding: 32px; color: var(--muted); }
   .conn-panel { display: none; border-top: 1px solid var(--border); flex-shrink: 0; max-height: 240px; flex-direction: column; }
   .conn-panel.is-visible { display: flex; }
   .conn-panel-header { padding: 8px 16px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }

@@ -1,18 +1,12 @@
 {
   "version": 1,
-  "totalAssignments": 15,
+  "totalAssignments": 11,
   "files": {
     "auth-socket.js": {
       "count": 1,
       "fingerprint": "c3e79eb65ebe7d26585461a63d7a8c28fe6b14a89895341e5950c2f6e2af06d8",
       "categories": ["static-status-markup", "trusted-translation"],
       "reason": "The save-button spinner is static markup and its label comes from the bundled translation catalog. Replace with DOM nodes when this flow is next edited."
-    },
-    "graph-panels.js": {
-      "count": 4,
-      "fingerprint": "9f91407aa8ce383663d81f7bc542263112f5420edc9ff42afe22a68f993a8de8",
-      "categories": ["static-markup", "dom-clear"],
-      "reason": "Card and loading skeletons are controlled markup, and empty strings clear existing children. Dynamic card text is populated through textContent after creation."
     },
     "graph.js": {
       "count": 2,
