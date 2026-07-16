@@ -1,8 +1,8 @@
 # EgressView コード品質レポート
 
-- **評価日**: 2026-07-10
-- **コミット**: `2da2f2ed33d54b089a90b6f1c9cb417d7a5b8ebc` (main)
-- **バージョン**: 1.2.2
+- **評価日**: 2026-07-16
+- **コミット**: `7b83c4fd0d537f1c66383bf8335f5522f35f38c5` (main)
+- **バージョン**: 1.3.5
 - **Node.js**: >=22 (テスト: 22, 24)
 - **評価者**: 自動静的解析 + 手動コードレビュー (Kiro AI)
 
@@ -12,31 +12,45 @@
 
 **総合グレード: A**
 
-EgressView は評価した全フレームワークにおいて**プロダクショングレードの品質**を示しています。セキュリティ設計は一般的な OSS 標準を上回り、OWASP ASVS L1 に適合するレベルの多層認証と CI 統合セキュリティスキャンを備えています。テスト文化 (74.9% テスト対ソース比率) と最小限の依存フットプリント (本番 10 パッケージ) もプロジェクトの品質を際立たせています。
+EgressView は評価した全フレームワークにおいて**プロダクショングレードの品質**を示しています。v1.2.2 からの改善として、本番依存への zod 追加によるスキーマ検証基盤の整備、テスト文化の大幅な強化 (90.2% テスト対ソース比率、v1.2.2 比 +15.3pp)、CSP の `style-src-attr` 除去によるセキュリティ強化が確認されました。セキュリティ設計は OWASP ASVS L1 に適合し、最小限の依存フットプリント (本番 11 パッケージ) もプロジェクトの品質を際立たせています。
 
 | # | フレームワーク | スコア | 判定 |
 |---|---|---|---|
 | 1 | OWASP ASVS Level 1 | 12/14 セクション適合 | ✅ 適合 |
-| 2 | OpenSSF Scorecard | ~7.8/10 | 上位 20% |
-| 3 | ISO/IEC 25010 | 平均 8.3/10 | 高品質 |
-| 4 | Node.js Best Practices (goldbergyoni) | 42/50 (84%) | 優秀 |
+| 2 | OpenSSF Scorecard | ~8.0/10 | 上位 15% |
+| 3 | ISO/IEC 25010 | 平均 8.4/10 | 高品質 |
+| 4 | Node.js Best Practices (goldbergyoni) | 43/50 (86%) | 優秀 |
 | 5 | SonarQube Quality Gate (推定) | 全項目 A (Coverage 除く) | ✅ PASSED |
 
 ### 主な強み
 
-- **セキュリティ設計** — scrypt パスワードハッシュ, タイミングセーフなトークン比較, リクエスト毎 CSP nonce, CI 統合 ASH + secret scan + npm audit, SHA ピン留め GitHub Actions
-- **テスト文化** — 54 unit + 3 integration + Playwright E2E; テスト対ソース比率 74.9%; 全ドメインモジュールで `_initForTest()` パターン
-- **コード規律** — `var` ゼロ, `eval` ゼロ, TODO/FIXME ゼロ, 命名規約一貫, ESLint v10
-- **最小依存** — 本番パッケージ 10 個のみ; Dependabot (cooldown 7日)
+- **セキュリティ設計** — scrypt パスワードハッシュ, タイミングセーフなトークン比較, リクエスト毎 CSP nonce, `style-src 'self'` (style-src-attr 除去済), CI 統合 ASH + secret scan + npm audit, SHA ピン留め GitHub Actions
+- **テスト文化** — 72 unit + 3 integration + Playwright smoke (1,138行); テスト対ソース比率 90.2%; 全ドメインモジュールで `_resetForTest()` パターン (21箇所)
+- **コード規律** — `var` ゼロ, `eval` ゼロ, TODO/FIXME ゼロ, 命名規約一貫, ESLint v10 + innerHTML 監査
+- **最小依存** — 本番パッケージ 11 個のみ; Dependabot (cooldown 7日)
+
+### v1.2.2 からの主な変更点
+
+| 項目 | v1.2.2 | v1.3.5 | 変化 |
+|---|---|---|---|
+| ソースコード行数 | 16,791 | 18,476 | +10.0% |
+| テストコード行数 | 12,577 | 16,662 | +32.5% |
+| テスト対ソース比率 | 74.9% | 90.2% | +15.3pp |
+| ユニットテストファイル | 54 | 72 | +18 |
+| ソースモジュール (src/) | 48 | 57 | +9 |
+| API エンドポイント | 46 | 52 | +6 |
+| 本番依存パッケージ | 10 | 11 | +1 (zod) |
+| requireAdmin 適用ルート | 62 | 74 | +12 |
 
 ### 主なギャップと次のステップ
 
 | 優先度 | ギャップ | 推定工数 |
 |---|---|---|
 | 高 | コードカバレッジ計測 (c8) | 2h |
-| 高 | HTTP ルートに zod バリデーション適用 | 8h |
+| 高 | HTTP ルートに zod バリデーション適用 (MCP のみ適用済) | 6h |
 | 中 | Health-check エンドポイント | 0.5h |
 | 中 | リクエスト ID (X-Request-Id) | 1h |
+| 中 | マジックナンバー 8000ms を定数化 (10箇所) | 1h |
 | 低 | OpenAPI スキーマ / Dockerfile | 6h |
 
 残りのギャップは家庭内/SOHO ネットワーク監視ツールとしては典型的であり、アーキテクチャ変更なしに段階的に対応可能です。
@@ -47,21 +61,24 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | メトリクス | 値 |
 |---|---|
-| ソースコード行数 (server + src + public/js + mcp) | 16,791 |
-| テストコード行数 (unit + integration + smoke) | 12,577 |
-| テスト対ソース比率 | 74.9% |
-| ユニットテストファイル数 | 54 |
+| ソースコード行数 (server + src + public/js + mcp) | 18,476 |
+| テストコード行数 (unit + integration + smoke) | 16,662 |
+| テスト対ソース比率 | 90.2% |
+| ユニットテストファイル数 | 72 |
 | インテグレーションテストファイル数 | 3 |
-| E2E (Playwright) テストファイル数 | 1 |
-| ソースモジュール数 (src/) | 48 |
-| API エンドポイント数 | 46 |
-| 本番依存パッケージ数 | 10 |
-| 関数あたり平均行数 | ~14.5 |
-| 深いネスト行数 (>5レベル) | 4 |
+| Smoke テスト (Playwright) ファイル数 | 1 |
+| ソースモジュール数 (src/) | 57 |
+| ポーラー数 (src/pollers/) | 11 |
+| ルートファイル数 (src/routes/) | 10 |
+| API エンドポイント数 | 52 |
+| 本番依存パッケージ数 | 11 |
+| 関数あたり平均行数 | ~15.6 |
+| 深いネスト行数 (>5レベル) | 7 |
 | `var` 使用箇所 | 0 |
 | `eval` / `new Function` 使用箇所 | 0 |
 | TODO/FIXME/HACK コメント | 0 |
-| パラメータ化 SQL 文 | 77 |
+| パラメータ化 SQL 文 | 95 |
+| requireAdmin 適用ルート | 74 |
 
 ---
 
@@ -71,25 +88,25 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | カテゴリ | 状況 | 根拠 |
 |---|---|---|
-| V2 認証 | ✅ | scrypt (N=16384, r=8, p=1), timingSafeEqual, 256bit セッショントークン, ブルートフォース防御 (5回/5分ロック), パスワード最小 8文字 |
-| V3 セッション管理 | ✅ | トークン SHA-256 ハッシュ保存, 30日スライディング失効, パスワード変更時に全セッション無効化, 定期 prune |
-| V4 アクセス制御 | ✅ | 62 ルートに `requireAdmin` 適用、未認証は login/verify の 2 エンドポイントのみ |
+| V2 認証 | ✅ | scrypt (N=16384, r=8, p=1), timingSafeEqual, 256bit セッショントークン, ブルートフォース防御 (5回/5分ロック), パスワード最小 8文字, 最大 256文字 |
+| V3 セッション管理 | ✅ | トークン SHA-256 ハッシュ保存, 30日スライディング失効, パスワード変更時に全セッション無効化, 定期 prune, タッチスロットル (5分) |
+| V4 アクセス制御 | ✅ | 74 ルートに `requireAdmin` 適用、未認証は login/verify の 2 エンドポイントのみ |
 | V5 入力検証 | ✅ | Body 64KB 制限, 型・長さチェック, プライベート IP のみルーターアクセス許可 (SSRF 防止), パストラバーサル防止, null バイト拒否 |
 | V6 暗号化 | ✅ | scrypt (パスワード), randomBytes (トークン/nonce/salt), SHA-256 (TOFU ホスト鍵), timingSafeEqual |
 | V7 エラー処理 | ✅ | 汎用 500 レスポンス, スタックトレース非露出, タイミング攻撃対策 (500ms 遅延) |
-| V8 データ保護 | ✅ | 設定ファイル mode 0o600, ログにパスワード非出力, バックアップファイル 0o600 |
-| V9 通信セキュリティ | ✅ | HTTPS opt-in + HSTS (max-age 1年), CSP (リクエスト毎 nonce) |
-| V10 悪意コード | ✅ | eval/new Function ゼロ, execFileSync は git/openssl のみ |
-| V13 API セキュリティ | ✅ | JSON 専用, express.json 制限付き, メソッド別ルート |
+| V8 データ保護 | ✅ | 設定ファイル mode 0o600, バックアップ 0o600, TLS 秘密鍵 0o600, ログにパスワード非出力 |
+| V9 通信セキュリティ | ✅ | HTTPS opt-in + HSTS (max-age 1年), CSP (リクエスト毎 nonce, style-src-attr 除去) |
+| V10 悪意コード | ✅ | eval/new Function ゼロ, innerHTML 使用を CI で監査 (allowlist 方式) |
+| V13 API セキュリティ | ✅ | JSON 専用, express.json 64KB 制限, メソッド別ルート |
 | V14 設定 | ✅ | ハードコード秘密情報なし, env/config file 経由 |
 | V11 ビジネスロジック | ⚠️ | CSRF 明示的対策なし (same-origin CSP + token 認証で緩和) |
-| V12 ファイル操作 | ⚠️ | アップロードサイズ制限あり、zod スキーマ検証は HTTP ルートに未適用 (MCP サーバーのみ) |
+| V12 ファイル操作 | ⚠️ | アップロードサイズ制限あり、zod スキーマ検証は MCP サーバーのみ (HTTP ルートは型チェックのみ) |
 
 ---
 
 ## 2. OpenSSF Scorecard (推定)
 
-**推定スコア: 7.8/10**
+**推定スコア: 8.0/10**
 
 | チェック項目 | スコア | 根拠 |
 |---|---|---|
@@ -99,11 +116,11 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | Binary-Artifacts | 10/10 | バイナリなし |
 | Security-Policy | 10/10 | SECURITY.md + GitHub private reporting |
 | License | 10/10 | AGPL-3.0-only |
-| SAST | 10/10 | ASH スキャナー + カスタム secret scan (CI) |
+| SAST | 10/10 | ASH スキャナー + カスタム secret scan + innerHTML 監査 (CI) |
 | Vulnerabilities | 10/10 | `npm audit --omit=dev` (CI) |
 | Dependency-Update-Tool | 10/10 | Dependabot (npm + Actions, weekly, cooldown 7日) |
-| CI-Tests | 10/10 | Unit + Integration + Playwright, Node 22/24 マトリクス |
-| Maintained | 8/10 | 活発なリリース (v1.0.0→v1.2.2), PR テンプレート, CONTRIBUTING.md |
+| CI-Tests | 10/10 | Unit + Integration + Playwright smoke, Node 22/24 マトリクス |
+| Maintained | 9/10 | 活発なリリース (v1.0.0→v1.3.5), PR テンプレート, CONTRIBUTING.md |
 | Code-Review | 7/10 | PR テンプレート + CI 必須 (branch protection は確認不可) |
 | Fuzzing | 0/10 | なし (ネットワーク監視ツールでは一般的) |
 | Signed-Releases | 0/10 | GPG 署名なし (git clone 配布) |
@@ -114,29 +131,29 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | 品質特性 | スコア | 主な強み | 主なギャップ |
 |---|---|---|---|
-| 機能適合性 | 8/10 | 46 API, 11 ポーラー, 完全な監視ライフサイクル | OpenAPI 定義なし |
+| 機能適合性 | 8/10 | 52 API, 11 ポーラー, MCP サーバー, 完全な監視ライフサイクル | OpenAPI 定義なし |
 | 性能効率性 | 9/10 | 多層キャッシュ, WAL, 圧縮, バッチ化, 重複排除 | 負荷テストなし |
 | 互換性 | 8/10 | Node 22/24, JA/EN i18n, OS 非依存 | Docker なし |
-| 使用性 | 8/10 | Demo モード, .env.example, 自動パスワード生成 | ワンクリックデプロイなし |
-| 信頼性 | 9/10 | Graceful shutdown, 自動バックアップ, WAL checkpoint, reopen() | Health-check なし |
-| セキュリティ | 9/10 | OWASP ASVS L1 適合レベル | CSRF 明示なし |
-| 保守性 | 8/10 | 48 モジュール, テスト比率 74.9%, _initForTest パターン | TypeScript なし |
+| 使用性 | 8/10 | Demo モード, .env.example, 自動パスワード生成, MCP 統合 | ワンクリックデプロイなし |
+| 信頼性 | 9/10 | Graceful shutdown, 自動バックアップ, WAL checkpoint, reopen(), DB マイグレーション整合性チェック | Health-check なし |
+| セキュリティ | 9/10 | OWASP ASVS L1 適合レベル, innerHTML 監査 | CSRF 明示なし |
+| 保守性 | 8/10 | 57 モジュール, テスト比率 90.2%, _resetForTest パターン | TypeScript なし |
 | 移植性 | 7/10 | Pure Node.js, ENV 設定, OS 非依存 | Docker/systemd なし |
 
 ---
 
 ## 4. Node.js Best Practices (goldbergyoni)
 
-**準拠率: 42/50 主要プラクティス (84%)**
+**準拠率: 43/50 主要プラクティス (86%)**
 
 | セクション | スコア | ハイライト |
 |---|---|---|
-| 1. プロジェクト構造 | 8/10 | ドメイン分割 (routes/pollers/core), レイヤー分離 |
-| 2. エラー処理 | 9/10 | async/await 統一, 中央エラーハンドラ, graceful exit |
-| 3. コードスタイル | 10/10 | ESLint v10, const 優先 (var ゼロ), 命名規約一貫 |
-| 4. テスト | 8/10 | 54 unit + 3 integration + E2E, AAA パターン, 分離初期化 |
+| 1. プロジェクト構造 | 8/10 | ドメイン分割 (routes/pollers/core), レイヤー分離, 10 ルートファイル |
+| 2. エラー処理 | 9/10 | async/await 統一, 中央エラーハンドラ, graceful exit (SIGTERM/SIGINT) |
+| 3. コードスタイル | 10/10 | ESLint v10, const 優先 (var ゼロ), innerHTML 監査, 命名規約一貫 |
+| 4. テスト | 9/10 | 72 unit + 3 integration + Playwright smoke, AAA パターン, 分離初期化, 90.2% テスト比率 |
 | 5. プロダクション | 7/10 | 構造化ログ, 脆弱性自動検出, LTS Node |
-| 6. セキュリティ | 9/10 | ASH, security headers, eval ゼロ, auth rate limit |
+| 6. セキュリティ | 9/10 | ASH, security headers, eval ゼロ, auth rate limit, zod (MCP) |
 
 **未対応の主要プラクティス:**
 - コードカバレッジ計測ツール (c8/nyc) なし
@@ -144,7 +161,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 - リクエスト/トランザクション ID なし
 - Docker / プロセスマネージャなし
 - OpenAPI ドキュメントなし
-- グローバル HTTP レート制限なし
+- グローバル HTTP レート制限なし (認証レート制限のみ)
 
 ---
 
@@ -152,16 +169,16 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | メトリクス | 値 | レーティング |
 |---|---|---|
-| コード行数 | 16,791 | - |
-| テスト対ソース比率 | 74.9% | Good (>60%) |
+| コード行数 | 18,476 | - |
+| テスト対ソース比率 | 90.2% | Excellent (>80%) |
 | 重複率 | < 2% | **A** (閾値: <=3%) |
-| 認知的複雑度 | 非常に低い | **A** (深いネスト: 4行のみ) |
-| 技術的負債比率 | 4.0% (~22.5h) | **A** (閾値: <=5%) |
+| 認知的複雑度 | 非常に低い | **A** (深いネスト: 7行のみ) |
+| 技術的負債比率 | 3.8% (~21h) | **A** (閾値: <=5%) |
 | 信頼性 | 既知バグ 0 | **A** |
 | セキュリティホットスポット | 0 | **A** |
 | セキュリティレーティング | - | **A** |
-| 保守性 | 負債比率 4% | **A** |
-| カバレッジ (推定) | ~60-70% | **B** (計測ツールなし) |
+| 保守性 | 負債比率 3.8% | **A** |
+| カバレッジ (推定) | ~65-75% | **B** (計測ツールなし) |
 
 **Quality Gate: ✅ PASSED**
 
@@ -169,19 +186,31 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | ファイル | 行数 | 判断密度/100行 |
 |---|---|---|
-| device-identify.js | 547 | 23.6 |
-| routes/connections.js | 296 | 18.2 |
-| routes/auth.js | 431 | 17.9 |
-| threat-intel.js | 300 | 15.7 |
-| backup.js | 182 | 15.9 |
+| routes/auth.js | 431 | 27.6 |
+| device-identify.js | 547 | 25.2 |
+| routes/connections.js | 300 | 24.3 |
+| threat-intel.js | 300 | 20.0 |
+| history.js | 985 | 16.1 |
 
-### コードスメル (合計 15 件)
+### コードスメル (合計 14 件)
 
 | 重要度 | 件数 | 例 |
 |---|---|---|
-| MAJOR | 3 | `investigateIp` 218行, `initDb(devices)` 161行, `initDb(history)` 134行 |
-| MINOR | 5 | `configureHttpApp` 111行, `summarizeByTimeRange` 105行, `observeDevice` 89行 |
-| INFO | 7 | マジックナンバー `8000`ms x5箇所, DB init ボイラープレート重複 |
+| MAJOR | 3 | `history.js` 985行 (複数責務), `device-identify.js` 547行, `routes/auth.js` 431行 |
+| MINOR | 4 | `pollers/cisco.js` 628行, `pollers/yamaha.js` 587行, `devices.js` 651行, `server.js` 597行 |
+| INFO | 7 | マジックナンバー `8000`ms x10箇所, DB initDb() ボイラープレート重複 (5ファイル) |
+
+---
+
+## 6. v1.2.2 → v1.3.5 改善サマリー
+
+| 領域 | 改善内容 |
+|---|---|
+| テスト | ユニットテスト +18 ファイル, テスト比率 74.9%→90.2% |
+| セキュリティ | CSP `style-src-attr` 除去, requireAdmin 適用ルート +12 |
+| 機能 | MCP サーバー (zod 検証付き), Cisco ポーラー, ルーター管理 |
+| 依存管理 | zod 追加 (スキーマ検証基盤), express v5 移行 |
+| コード品質 | innerHTML 監査 CI 統合, パラメータ化 SQL +18 |
 
 ---
 
