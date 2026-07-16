@@ -121,7 +121,7 @@ socket.on('connect_error', err => {
 const dot = document.getElementById('status-dot');
 const errorBanner = document.getElementById('error-banner');
 
-socket.on('connect', () => { dot.className = 'status-dot online'; errorBanner.style.display = 'none'; });
+socket.on('connect', () => { dot.className = 'status-dot online'; errorBanner.classList.remove('is-visible'); });
 socket.on('disconnect', () => { dot.className = 'status-dot error'; });
 
 let asusActive      = false; // becomes true upon receiving network-update
@@ -377,7 +377,7 @@ socket.on('config', cfg => {
     document.getElementById('s-language').value = cfg.language;
   }
   if (cfg.asusEnabled && !cfg.authenticated) {
-    document.getElementById('disconnected-banner').style.display = 'block';
+    document.getElementById('disconnected-banner').classList.add('is-visible');
     settingsBtn.classList.add('alert');
   }
   // Data sources

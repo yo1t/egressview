@@ -85,6 +85,7 @@
     font-size: 12px; display: none;
   }
   .settings-status.is-visible { display: block; }
+  .settings-status.multiline { white-space: pre-line; }
   .settings-status.ok  { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); color: var(--green); }
   .settings-status.err { background: rgba(239,68,68,0.12);  border: 1px solid rgba(239,68,68,0.35); color: var(--red); }
   .settings-session-section-title { cursor: default; font-size: 12px; margin-bottom: 8px; }
@@ -128,7 +129,10 @@
   .slack-small-button { padding: 5px 12px; width: auto; }
   .slack-verify-button { margin-top: 6px; font-size: 10px; }
   .slack-lookup-button { white-space: nowrap; font-size: 9px; flex-shrink: 0; }
-  .slack-info { display: none; font-size: 10px; color: var(--green); margin-top: 4px; }
+  .slack-info { display: none; font-size: 10px; margin-top: 4px; }
+  .slack-info.is-visible { display: block; }
+  .slack-info.ok { color: var(--green); }
+  .slack-info.err { color: var(--red); }
   .slack-user-row { display: flex; gap: 6px; align-items: center; }
   .slack-user-input { flex: 1; min-width: 0; }
   .slack-create-wrap { margin-top: 12px; }
@@ -139,6 +143,9 @@
   .backup-list { font-size: 11px; color: var(--muted); margin: 8px 0; max-height: 150px; overflow-y: auto; }
   .backup-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .backup-upload-label { cursor: pointer; }
+  .backup-list-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+  .backup-list-label { flex: 1; }
+  .backup-list-button { font-size: 9px; padding: 2px 6px; }
   .datasource-copy { margin-bottom: 16px; }
   .settings-divider-compact { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
   .legacy-router-controls { display: none !important; }
@@ -185,6 +192,7 @@
     cursor: pointer; margin-left: 8px; transition: background 0.15s;
   }
   #disconnected-banner button:hover { background: rgba(239,68,68,0.2); }
+  #disconnected-banner.is-visible { display: block; }
 
   /* ── Header ─────────────────────────────────────── */
   header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
@@ -239,6 +247,7 @@
   .value-rx { color: var(--green); }
   .value-tx { color: var(--red); }
   .custom-range { display: none; margin-left: 6px; align-items: center; gap: 4px; }
+  .custom-range.is-visible { display: inline-flex; }
   .custom-range-separator { color: var(--muted); font-size: 10px; }
   /* ── View tabs ───────────────────────────────────── */
   .view-tabs { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 2px; }
@@ -262,6 +271,8 @@
   /* ── Main layout ─────────────────────────────────── */
   .main { display: flex; flex: 1; overflow: hidden; }
   #graph-container { flex: 1; position: relative; overflow: hidden; }
+  #graph-container:not(.view-active) { display: none; }
+  #graph-container.view-active { display: flex; }
 
   .dash-pill.ok { background: rgba(34,197,94,0.15); color: #4ade80; }
   .dash-pill.bad { background: rgba(239,68,68,0.18); color: #f87171; }
@@ -308,6 +319,7 @@
     flex: 1; display: none; flex-direction: column; overflow: hidden;
     background: var(--bg); padding: 10px; gap: 10px;
   }
+  #stats-container.view-active { display: flex; }
   .stats-header { font-size: 12px; font-weight: 600; color: var(--text); padding: 4px 8px; display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
   #stats-title, #stats-subtitle { flex-shrink: 0; }
   .stats-subtitle { color: var(--muted); font-size: 11px; }
@@ -319,6 +331,7 @@
     background: rgba(14,165,233,0.08); color: #9ddcff;
     font-size: 10px; line-height: 1.2;
   }
+  .stats-map-coverage.is-visible { display: inline; }
   .data-fetching-hdr { display: none; align-items: center; gap: 4px; font-size: 10px; color: var(--muted); margin-left: auto; flex-shrink: 0; }
   .data-fetching-hdr.is-visible { display: flex; }
   /* Connection Log */
@@ -542,6 +555,7 @@
   .stats-map-cell svg { display: block; width: 100%; height: 100%; }
   .stats-app-pie { background: var(--panel); }
   .stats-empty { display: none; padding: 40px; text-align: center; color: var(--muted); }
+  .stats-empty.is-visible { display: block; }
   .stats-empty-hint { font-size: 10px; }
   /* Pie chart scan line */
   .pie-scan { animation: pie-scan 6s linear infinite; }
@@ -592,6 +606,7 @@
     flex: 1; min-height: 0; display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.618fr); gap: 8px;
   }
+  .stats-charts.is-hidden { display: none; }
   .stats-charts .stats-chart { flex: none; height: 100%; min-height: 0; }
 
   .graph-tooltip {
@@ -671,6 +686,7 @@
   .note-modal-header { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
   .note-modal-sub { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
   .device-card:hover, .device-card.selected { border-color: var(--accent); background: rgba(59,130,246,0.08); }
+  .device-card.is-filtered { display: none; }
   .device-card.wired   { border-left: 3px solid #ef4444; }
   .device-card.wifi-2g { border-left: 3px solid var(--green); }
   .device-card.wifi-5g { border-left: 3px solid var(--purple); }
@@ -769,6 +785,9 @@
   #toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
   .toast { background: #161b22; border: 1px solid #3fb95066; color: #e6edf3; padding: 10px 16px; border-radius: 8px; font-size: 0.85rem; box-shadow: 0 4px 16px rgba(0,0,0,0.4); opacity: 0; transform: translateY(8px); transition: opacity 0.2s, transform 0.2s; pointer-events: none; max-width: 320px; }
   .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.multiline { white-space: pre-line; }
+  #error-banner.is-visible { display: block; }
+  .graph-notice.is-visible { display: block; }
 
   /* ── Mobile layout (≤768px) ─────────────────────── */
   @media (max-width: 768px) {

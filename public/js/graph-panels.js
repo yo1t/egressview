@@ -205,7 +205,7 @@ export function applyFilter(clients) {
       || (c.name || '').toLowerCase().includes(searchRaw)
       || (c.ip   || '').toLowerCase().includes(searchRaw)
       || (c.mac  || '').toLowerCase().includes(searchRaw);
-    el.style.display = (tabMatch && searchMatch) ? '' : 'none';
+    el.classList.toggle('is-filtered', !(tabMatch && searchMatch));
   });
 }
 

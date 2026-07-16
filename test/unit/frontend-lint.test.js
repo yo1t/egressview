@@ -346,7 +346,7 @@ describe('Frontend TDZ lint', () => {
 
   it('activity views do not use inline style attributes', () => {
     const start = html.indexOf('<!-- Connection Log View -->');
-    const end = html.indexOf('<div id="graph-container">', start);
+    const end = html.indexOf('<div id="graph-container"', start);
     assert.notEqual(start, -1, 'connection log view marker should exist');
     assert.notEqual(end, -1, 'graph container should follow activity views');
     assert.doesNotMatch(html.slice(start, end), /\sstyle\s*=/,
@@ -400,6 +400,13 @@ describe('Frontend TDZ lint', () => {
         .filter(line => /\.style\./.test(line) && !/\.style\.(top|left)\s*=/.test(line));
       assert.deepEqual(nonPositionStyles, [],
         `${file} should use state classes except for runtime popup coordinates`);
+    }
+  });
+
+  it('view and settings state modules use CSS classes instead of style assignments', () => {
+    for (const file of ['main.js', 'view-tabs.js', 'stats.js', 'time-filter.js', 'graph.js', 'settings.js', 'auth-socket.js']) {
+      assert.doesNotMatch(moduleSources[file], /\.style(?:\.|\s*=)/,
+        `${file} should represent display and status state with CSS classes`);
     }
   });
 
