@@ -192,7 +192,7 @@ socket.on('new-device', entry => {
 // Demo mode banner
 if (typeof _DEMO_MODE !== 'undefined' && _DEMO_MODE) {
   const demoBanner = document.getElementById('demo-banner');
-  if (demoBanner) demoBanner.style.display = '';
+  if (demoBanner) demoBanner.classList.add('is-visible');
 }
 
 // Init
