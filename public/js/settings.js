@@ -1,6 +1,6 @@
 // ─── Settings modal ───────────────────────────────────────────────────────────
 import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE, fmtTs } from './utils.js?v=__ASSET_VERSION__';
+import { _BASE, fmtTs, setButtonLoading } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch, connState, updateConnBadge, asusActive, setAsusActive, setYamahaConfigured, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
 import { setAllConnections, setDataRangeFrom } from './connections-panel.js?v=__ASSET_VERSION__';
 import { stopGraph, updateOrgGraph, simulation } from './graph.js?v=__ASSET_VERSION__';
@@ -70,7 +70,7 @@ async function connectRouter(body, statusId, btnId, checkboxId) {
   const btn = document.getElementById(btnId);
   const enabled = checkboxId ? document.getElementById(checkboxId).checked : true;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>' + (enabled ? t('settings.btn.connecting') : t('settings.btn.disabling'));
+  setButtonLoading(btn, enabled ? t('settings.btn.connecting') : t('settings.btn.disabling'));
   document.getElementById(statusId).style.display = 'none';
   try {
     const res = await apiFetch(_BASE+'/api/login', {
@@ -153,7 +153,7 @@ document.getElementById('yamaha-detect-btn').addEventListener('click', async () 
   if (!pass && !hasSavedPass) { showStatus('yamaha-detect-status', t('err.passRequired'), false); return; }
 
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>' + t('settings.yamaha.detecting');
+  setButtonLoading(btn, t('settings.yamaha.detecting'));
   document.getElementById('yamaha-status').style.display = 'none';
   try {
     const body = {
@@ -265,7 +265,7 @@ document.getElementById('cisco-detect-btn').addEventListener('click', async () =
   if (!pass && !hasSavedPass) { showStatus('cisco-detect-status', t('err.passRequired'), false); return; }
 
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>' + t('settings.cisco.detecting');
+  setButtonLoading(btn, t('settings.cisco.detecting'));
   document.getElementById('cisco-status').style.display = 'none';
   try {
     const body = { ciscoIp: ip, ciscoUser: user };
@@ -493,10 +493,13 @@ async function loadBackupList() {
       document.getElementById('s-backup-generations').value = String(data.config.maxGenerations);
     }
     if (!data.backups || data.backups.length === 0) {
-      listEl.innerHTML = '<div style="padding:4px;">' + t('settings.backup.none') + '</div>';
+      const empty = document.createElement('div');
+      empty.className = 'backup-list-empty';
+      empty.textContent = t('settings.backup.none');
+      listEl.replaceChildren(empty);
       return;
     }
-    listEl.innerHTML = '';
+    listEl.replaceChildren();
     [...data.backups].reverse().forEach(b => {
       const size = (b.size / 1024 / 1024).toFixed(1) + ' MB';
       const date = new Date(b.created).toLocaleString(currentLang === 'ja' ? 'ja-JP' : 'en-US');

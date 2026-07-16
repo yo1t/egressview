@@ -54,21 +54,14 @@ resolved by the ES module graph rather than script tags:
 ## Reviewed HTML sinks (P2-27)
 
 `npm run lint:innerhtml` audits every `innerHTML` assignment under
-`public/js/`. The allowlist in `scripts/frontend-innerhtml-allowlist.json`
-records the reviewed file, use categories, reason, count, and content
-fingerprint for each existing group of assignments. The check fails when an
-assignment is added, removed, moved to an unreviewed file, or changed.
+`public/js/`. P2-27 reduced the inventory to zero, and the empty allowlist in
+`scripts/frontend-innerhtml-allowlist.json` makes any reintroduction fail CI.
 
 New rendering code should use `textContent`, `createElement`, and explicit DOM
-attributes. If `innerHTML` is unavoidable, review every interpolated value,
-document why the sink is safe in the allowlist, and run
-`npm run lint:innerhtml`. Do not regenerate fingerprints merely to make the
-gate pass. `log.js`, `notif-log.js`, `devices.js`, `threat-popup.js`,
-`connections-panel.js`, `beacon.js`, and `router-settings.js` have completed their
-DOM API migrations. The login-session flow in `settings.js` is also migrated.
-All tooltip and side-panel rendering in `graph-panels.js` is migrated as well.
-Remaining reviewed sinks continue to be migrated in small, screen-focused
-batches.
+attributes. Translation strings must also remain plain text; line breaks and
+emphasis belong in fixed HTML structure and CSS classes. If an HTML insertion
+API ever becomes unavoidable, it requires an explicit security review and a
+documented exception rather than silently widening the empty allowlist.
 
 The connection log, notification log, device inventory, and threat detail
 markup must not use inline `style` attributes. Their modules use CSS state

@@ -129,7 +129,7 @@ function createDeviceCard(client) {
   return card;
 }
 
-function renderLogLoading(tbody) {
+export function renderLogLoading(tbody) {
   const row = document.createElement('tr');
   const cell = document.createElement('td');
   cell.colSpan = 9;

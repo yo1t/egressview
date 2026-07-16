@@ -1,6 +1,6 @@
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
 import { t, tVars, currentLang, applyI18n, setCurrentLang } from './i18n.js?v=__ASSET_VERSION__';
-import { _BASE, aggregateRouterHealth } from './utils.js?v=__ASSET_VERSION__';
+import { _BASE, aggregateRouterHealth, setButtonLoading } from './utils.js?v=__ASSET_VERSION__';
 import { setHomeCountry, worldGeo } from './map-common.js?v=__ASSET_VERSION__';
 import { statsMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { updateStats, initStatsMaps, resetStatsMaps } from './stats.js?v=__ASSET_VERSION__';
@@ -419,7 +419,7 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
     const msg = tVars('settings.confirm.retention', { current: currentRetention, next: newRetention });
     if (!confirm(msg)) { btn.disabled = false; btn.textContent = t('settings.btn.save'); return; }
   }
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' + t('settings.btn.saving');
+  btn.disabled = true; setButtonLoading(btn, t('settings.btn.saving'));
   try {
     const res = await apiFetch(_BASE+'/api/config/general', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

@@ -22,9 +22,24 @@ function stripEsModule(src) {
 }
 const src = stripEsModule(fs.readFileSync(path.join(__dirname, '../../public/js/utils.js'), 'utf8'));
 // t() is only invoked at call time (inside typeLabel), so an identity stub is enough.
-const ctx = vm.createContext({ window: { BASE_URL: '' }, t: key => key });
+const document = {
+  createElement: tagName => ({ tagName: tagName.toUpperCase(), className: '' }),
+  createTextNode: text => ({ nodeType: 3, textContent: String(text) }),
+};
+const ctx = vm.createContext({ window: { BASE_URL: '' }, document, t: key => key });
 vm.runInContext(src, ctx);
-const { esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType, aggregateRouterHealth } = ctx;
+const { esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType, aggregateRouterHealth, setButtonLoading } = ctx;
+
+describe('setButtonLoading', () => {
+  it('renders the label as a text node beside a spinner', () => {
+    const button = { replaceChildren: (...children) => { button.children = children; } };
+    setButtonLoading(button, '<img src=x onerror=alert(1)>');
+    assert.equal(button.children[0].tagName, 'SPAN');
+    assert.equal(button.children[0].className, 'spinner');
+    assert.equal(button.children[1].nodeType, 3);
+    assert.equal(button.children[1].textContent, '<img src=x onerror=alert(1)>');
+  });
+});
 
 describe('esc', () => {
   it('escapes all five HTML metacharacters', () => {

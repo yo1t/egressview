@@ -249,28 +249,38 @@ function stUpdateFlatProj() {
 
 const SFM_PAN = 40, SFM_ZOOM_FACTOR = 1.3, SFM_MAX_ZOOM = 8, SFM_MIN_ZOOM = 0.4;
 
+function mapControlButton(id, title, label, className = 'fmc-btn') {
+  const button = document.createElement('button');
+  button.id = id;
+  button.className = className;
+  button.title = title;
+  button.textContent = label;
+  return button;
+}
+
 function stInitFlatControls() {
   const cell = document.getElementById('st-flat');
   if (!cell || document.getElementById('st-flat-controls')) return;
   const ctrl = document.createElement('div');
   ctrl.id = 'st-flat-controls';
   ctrl.className = 'flatmap-controls';
-  ctrl.innerHTML =
-    '<div class="fmc-zoom-row">' +
-      '<button class="fmc-btn" id="sfm-zoom-in" title="拡大">＋</button>' +
-      '<button class="fmc-btn" id="sfm-zoom-out" title="縮小">－</button>' +
-    '</div>' +
-    '<div class="fmc-dpad">' +
-      '<span></span>' +
-      '<button class="fmc-btn" id="sfm-up" title="上へ移動">↑</button>' +
-      '<span></span>' +
-      '<button class="fmc-btn" id="sfm-left" title="左へ移動">←</button>' +
-      '<button class="fmc-btn fmc-btn-reset" id="sfm-reset" title="リセット">⊙</button>' +
-      '<button class="fmc-btn" id="sfm-right" title="右へ移動">→</button>' +
-      '<span></span>' +
-      '<button class="fmc-btn" id="sfm-down" title="下へ移動">↓</button>' +
-      '<span></span>' +
-    '</div>';
+  const zoomRow = document.createElement('div');
+  zoomRow.className = 'fmc-zoom-row';
+  zoomRow.append(
+    mapControlButton('sfm-zoom-in', '拡大', '＋'),
+    mapControlButton('sfm-zoom-out', '縮小', '－'),
+  );
+  const dpad = document.createElement('div');
+  dpad.className = 'fmc-dpad';
+  const spacer = () => document.createElement('span');
+  dpad.append(
+    spacer(), mapControlButton('sfm-up', '上へ移動', '↑'), spacer(),
+    mapControlButton('sfm-left', '左へ移動', '←'),
+    mapControlButton('sfm-reset', 'リセット', '⊙', 'fmc-btn fmc-btn-reset'),
+    mapControlButton('sfm-right', '右へ移動', '→'),
+    spacer(), mapControlButton('sfm-down', '下へ移動', '↓'), spacer(),
+  );
+  ctrl.append(zoomRow, dpad);
   cell.appendChild(ctrl);
   document.getElementById('sfm-zoom-in').addEventListener('click', () => {
     stFlatZoom = Math.min(SFM_MAX_ZOOM, stFlatZoom * SFM_ZOOM_FACTOR); stUpdateFlatProj();
@@ -320,10 +330,11 @@ function stInitControls() {
     ctrl = document.createElement('div');
     ctrl.id = 'st-globe-controls';
     ctrl.className = 'globe-controls';
-    ctrl.innerHTML =
-      '<button class="globe-ctrl-btn" id="st-spin-slower" title="遅く">−</button>' +
-      '<button class="globe-ctrl-btn" id="st-spin-toggle" title="停止 / 再生">⏸</button>' +
-      '<button class="globe-ctrl-btn" id="st-spin-faster" title="速く">＋</button>';
+    ctrl.append(
+      mapControlButton('st-spin-slower', '遅く', '−', 'globe-ctrl-btn'),
+      mapControlButton('st-spin-toggle', '停止 / 再生', '⏸', 'globe-ctrl-btn'),
+      mapControlButton('st-spin-faster', '速く', '＋', 'globe-ctrl-btn'),
+    );
     cell.appendChild(ctrl);
     document.getElementById('st-spin-toggle').addEventListener('click', () => {
       stSpin = !stSpin;

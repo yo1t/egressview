@@ -353,6 +353,13 @@ describe('Frontend TDZ lint', () => {
       'connection, device, and notification views should use CSS classes instead of inline styles');
   });
 
+  it('frontend modules do not use HTML string insertion APIs', () => {
+    for (const [file, source] of Object.entries(moduleSources)) {
+      assert.doesNotMatch(source, /\.innerHTML\s*=/, `${file} must use DOM APIs`);
+      assert.doesNotMatch(source, /\.insertAdjacentHTML\s*\(/, `${file} must use DOM APIs`);
+    }
+  });
+
   it('activity modules keep only runtime popup coordinates as style assignments', () => {
     for (const file of ['log.js', 'notif-log.js', 'devices.js', 'beacon.js', 'threat-popup.js', 'connections-panel.js', 'router-settings.js']) {
       const source = moduleSources[file];
@@ -445,6 +452,10 @@ describe('Frontend TDZ lint', () => {
     }
     const helperIdRe = /\bid\s*:\s*['"]([^'"]+)['"]/g;
     while ((m = helperIdRe.exec(script)) !== null) {
+      dynamicIds.add(m[1]);
+    }
+    const domIdHelperRe = /\bmapControlButton\(\s*['"]([^'"]+)['"]/g;
+    while ((m = domIdHelperRe.exec(script)) !== null) {
       dynamicIds.add(m[1]);
     }
 

@@ -92,6 +92,9 @@
   .settings-session-current { color: var(--green); font-size: 9px; margin-left: 4px; }
   .settings-session-seen, .settings-session-muted { color: var(--muted); font-size: 10px; }
   .settings-session-revoke-all { width: auto; padding: 5px 14px; margin-top: 8px; font-size: 10px; background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .backup-list-empty { padding: 4px; }
+  .settings-description-example, .settings-description-highlight { color: var(--cyan); }
+  .settings-description-example { font-size: 10px; }
   .legacy-router-controls { display: none !important; }
   .router-pane-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
   .router-pane-title { margin: 0 0 5px; padding: 0; border: 0; cursor: default; }

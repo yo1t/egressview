@@ -59,8 +59,8 @@ describe('frontend innerHTML audit', () => {
 
   it('matches the reviewed production inventory', () => {
     const result = runAudit();
-    assert.equal(result.total, 11);
-    assert.equal(result.fileCount, 5);
+    assert.equal(result.total, 0);
+    assert.equal(result.fileCount, 0);
     assert.deepEqual(result.errors, []);
   });
 });

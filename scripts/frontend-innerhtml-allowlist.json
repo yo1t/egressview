@@ -1,36 +1,5 @@
 {
   "version": 1,
-  "totalAssignments": 11,
-  "files": {
-    "auth-socket.js": {
-      "count": 1,
-      "fingerprint": "c3e79eb65ebe7d26585461a63d7a8c28fe6b14a89895341e5950c2f6e2af06d8",
-      "categories": ["static-status-markup", "trusted-translation"],
-      "reason": "The save-button spinner is static markup and its label comes from the bundled translation catalog. Replace with DOM nodes when this flow is next edited."
-    },
-    "graph.js": {
-      "count": 2,
-      "fingerprint": "0f950b8dc4b94a26682cfb4f1884c0d1a3c186701a3eec85f7a05b25b9bf9043",
-      "categories": ["static-status-markup", "dom-clear", "trusted-translation"],
-      "reason": "One assignment renders a controlled loading row with a bundled translation; the other clears the device list. No external value is interpolated."
-    },
-    "i18n.js": {
-      "count": 1,
-      "fingerprint": "6362b82333946cc1f0513f1e7009bf54d30722d77f806549b83509f66e907bca",
-      "categories": ["trusted-translation-html"],
-      "reason": "Only elements explicitly marked data-i18n-html receive HTML from the bundled, reviewed translation catalog; runtime or user-provided translation sources are not supported."
-    },
-    "settings.js": {
-      "count": 5,
-      "fingerprint": "50b6b578e2faf1636895aea6f4e2693189d4147997341fc126ddc33f4f341b63",
-      "categories": ["escaped-data-renderer", "static-status-markup", "dom-clear", "trusted-translation"],
-      "reason": "Spinner and empty states are controlled markup, clears use an empty string, and detection values are escaped. Migrate each remaining settings flow separately when it is next changed."
-    },
-    "stats-map.js": {
-      "count": 2,
-      "fingerprint": "cd3d9f210f2f8f408eef30e4e5fac6273a875a5439bbbb08f9651959a8695950",
-      "categories": ["static-controls"],
-      "reason": "Map and globe controls are fixed local markup with no interpolated values; handlers are attached after creation."
-    }
-  }
+  "totalAssignments": 0,
+  "files": {}
 }
