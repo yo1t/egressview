@@ -367,6 +367,59 @@ test('graph canvas renders after auth (P2-4: background fetch completes)', async
     .toBeGreaterThan(0);
 });
 
+test('graph tooltips render external values as text', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+  await page.evaluate(async () => {
+    const panels = await import('/js/graph-panels.js?v=p2-27-tooltip-smoke');
+    panels.showTooltip({ clientX: 100, clientY: 100 }, {
+      type: 'client',
+      client: {
+        name: '<script>Client</script>',
+        ip: '<img src=x onerror=alert(1)>',
+        mac: '<svg onload=alert(1)>',
+        vendor: '<b>Vendor</b>',
+        dnsName: '<i>dns</i>',
+        mdnsName: '<u>mdns</u>',
+        ipv6Addrs: ['2001:db8::1'],
+        summarySessions: 1234,
+        rxRate: 10,
+        txRate: 20,
+        rssi: -42,
+      },
+    });
+  });
+
+  const tooltip = page.locator('#tooltip');
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText('<script>Client</script>');
+  await expect(tooltip).toContainText('<img src=x onerror=alert(1)>');
+  await expect(tooltip).toContainText('IPv6');
+  await expect(tooltip).toContainText('summary: 1,234 sessions');
+  await expect(tooltip).toContainText('RSSI: -42 dBm');
+  await expect(tooltip.locator('script, img, svg')).toHaveCount(0);
+
+  await page.evaluate(async () => {
+    const panels = await import('/js/graph-panels.js?v=p2-27-tooltip-smoke');
+    panels.showTooltip({ clientX: 100, clientY: 100 }, {
+      type: 'org', label: '<img src=x>', flag: '<script>flag</script>',
+      country: '<svg>JP</svg>', totalSessions: 20, summary: true,
+    });
+  });
+  await expect(tooltip).toContainText('<script>flag</script>');
+  await expect(tooltip).toContainText('summary destination');
+  await expect(tooltip.locator('script, img, svg')).toHaveCount(0);
+
+  await page.evaluate(async () => {
+    const panels = await import('/js/graph-panels.js?v=p2-27-tooltip-smoke');
+    panels.hideTooltip();
+  });
+  await expect(tooltip).toBeHidden();
+  expect(fatalErrors(errors), `Graph tooltip errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
 test('no console errors after auth', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 

@@ -542,6 +542,12 @@
     font-size: 12px; line-height: 1.6; max-width: 240px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 100; display: none;
   }
+  .graph-tooltip.is-visible { display: block; }
+  .graph-tooltip-heading { font-weight: 600; margin-bottom: 4px; }
+  .graph-tooltip-muted { font-size: 10px; color: #9ca3af; }
+  .graph-tooltip-detail { font-size: 10px; }
+  .graph-tooltip-summary { margin-top: 4px; color: #ddd6fe; }
+  .graph-tooltip-summary-destination { color: #ddd6fe; }
   .tooltip-name { font-weight: 700; font-size: 13px; color: var(--accent); margin-bottom: 4px; }
   .tooltip-row { display: flex; justify-content: space-between; gap: 12px; }
   .tooltip-key { color: var(--muted); } .tooltip-val { color: var(--text); font-weight: 600; }
