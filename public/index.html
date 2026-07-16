@@ -258,30 +258,30 @@
         </div>
         <!-- Threat Intel settings -->
         <div class="settings-pane" id="pane-threat">
-          <div class="pane-title" style="cursor:default" data-i18n="settings.section.threat">🛡️ 脅威検出設定</div>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.5" data-i18n="settings.threat.desc">
+          <div class="pane-title pane-title-static" data-i18n="settings.section.threat">🛡️ 脅威検出設定</div>
+          <p class="settings-copy settings-copy-section" data-i18n="settings.threat.desc">
             外部の脅威インテリジェンスフィードからマルウェアC2/配布元IPリストをダウンロードし、NAT セッションと突合します。
           </p>
           <div class="form-group">
             <label class="form-label" data-i18n="settings.threat.feeds">取得するフィード</label>
-            <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0;cursor:pointer;">
-              <input type="checkbox" id="s-feed-feodo" checked style="accent-color:var(--accent)">
+            <label class="settings-check-label settings-feed-label">
+              <input type="checkbox" id="s-feed-feodo" class="settings-checkbox-accent" checked>
               <span data-i18n="settings.threat.feed.feodo">Feodo Tracker — Emotet/Dridex/TrickBot C2</span>
             </label>
-            <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0;cursor:pointer;">
-              <input type="checkbox" id="s-feed-threatfox" checked style="accent-color:var(--accent)">
+            <label class="settings-check-label settings-feed-label">
+              <input type="checkbox" id="s-feed-threatfox" class="settings-checkbox-accent" checked>
               <span data-i18n="settings.threat.feed.threatfox">ThreatFox — Malware IOC (IP:port)</span>
             </label>
-            <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0;cursor:pointer;">
-              <input type="checkbox" id="s-feed-urlhaus" checked style="accent-color:var(--accent)">
+            <label class="settings-check-label settings-feed-label">
+              <input type="checkbox" id="s-feed-urlhaus" class="settings-checkbox-accent" checked>
               <span data-i18n="settings.threat.feed.urlhaus">URLhaus — Malware distribution URLs</span>
             </label>
-            <label style="display:flex;align-items:center;gap:8px;font-size:11px;margin:4px 0;cursor:pointer;">
-              <input type="checkbox" id="s-feed-spamhaus" checked style="accent-color:var(--accent)">
+            <label class="settings-check-label settings-feed-label">
+              <input type="checkbox" id="s-feed-spamhaus" class="settings-checkbox-accent" checked>
               <span data-i18n="settings.threat.feed.spamhaus">Spamhaus DROP — Hijacked IP ranges</span>
             </label>
           </div>
-          <div class="form-group" style="margin-top:12px">
+          <div class="form-group settings-form-top-12">
             <label class="form-label" data-i18n="settings.threat.interval">更新頻度</label>
             <select id="s-threat-interval" class="form-input">
               <option value="30" data-i18n="settings.threat.30m">30分ごと</option>
@@ -292,18 +292,18 @@
               <option value="1440" data-i18n="settings.threat.24h">24時間ごと</option>
             </select>
           </div>
-          <div style="margin-top:12px;font-size:10px;color:var(--muted);line-height:1.5" id="threat-feed-status"></div>
-          <button class="connect-btn" id="threat-save-btn" style="margin-top:16px" data-i18n="settings.btn.save">保存</button>
+          <div class="threat-feed-status" id="threat-feed-status"></div>
+          <button class="connect-btn settings-save-spaced" id="threat-save-btn" data-i18n="settings.btn.save">保存</button>
           <div class="settings-status" id="threat-status"></div>
 
-          <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
+          <hr class="settings-divider">
 
           <!-- Beacon detection (P2-20) -->
-          <label class="pane-title" style="margin-bottom:8px;font-size:12px">
-            <input type="checkbox" id="s-beacon-enabled" checked style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
+          <label class="pane-title settings-pane-toggle">
+            <input type="checkbox" id="s-beacon-enabled" checked>
             <span data-i18n="settings.beacon.section">⏱ ビーコン検出（C2ハートビート）</span>
           </label>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.5;padding-left:22px" data-i18n="settings.beacon.desc">
+          <p class="settings-copy settings-copy-section settings-copy-left" data-i18n="settings.beacon.desc">
             同一宛先への一定間隔の通信（C2ハートビートの典型パターン）を自動検出します。候補は通信ログタブのバナーに表示されます。
           </p>
           <div class="section-inputs" id="beacon-inputs">
@@ -339,19 +339,17 @@
             </div>
             <div class="form-group">
               <label class="form-label" data-i18n="settings.beacon.whitelist">除外ドメイン（1行に1件、サブドメイン含む）</label>
-              <textarea id="s-beacon-whitelist" class="form-input" rows="6"
-                        style="resize:vertical;font-family:monospace;font-size:10px;line-height:1.6"
+              <textarea id="s-beacon-whitelist" class="form-input settings-list-textarea" rows="6"
                         placeholder="amazonaws.com&#10;netflix.com" spellcheck="false"></textarea>
-              <p style="font-size:9px;color:var(--muted);margin-top:3px;line-height:1.5" data-i18n="settings.beacon.whitelistHint">
+              <p class="settings-field-hint" data-i18n="settings.beacon.whitelistHint">
                 既知の良性 telemetry（IoT ベンダーのクラウド等）を候補から除外します。
               </p>
             </div>
             <div class="form-group">
               <label class="form-label" data-i18n="settings.beacon.orgs">除外組織（RDAP org 部分一致、1行に1件）</label>
-              <textarea id="s-beacon-orgs" class="form-input" rows="4"
-                        style="resize:vertical;font-family:monospace;font-size:10px;line-height:1.6"
+              <textarea id="s-beacon-orgs" class="form-input settings-list-textarea" rows="4"
                         placeholder="Amazon&#10;Google" spellcheck="false"></textarea>
-              <p style="font-size:9px;color:var(--muted);margin-top:3px;line-height:1.5" data-i18n="settings.beacon.orgsHint">
+              <p class="settings-field-hint" data-i18n="settings.beacon.orgsHint">
                 ホスト名が解決できない宛先にも効きます。脅威フィードに該当する宛先は除外されず候補に残ります。
               </p>
             </div>
@@ -359,31 +357,31 @@
             <div class="settings-status" id="beacon-status"></div>
           </div>
 
-          <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
+          <hr class="settings-divider">
 
-          <div class="pane-title" style="cursor:default;font-size:12px;margin-bottom:12px" data-i18n="settings.slack.section">🔔 Slack通知</div>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:12px;line-height:1.5" data-i18n="settings.slack.desc">
+          <div class="pane-title settings-subsection-title settings-subsection-title-wide" data-i18n="settings.slack.section">🔔 Slack通知</div>
+          <p class="settings-copy settings-copy-section" data-i18n="settings.slack.desc">
             脅威検出時に Slack DM で通知します。
           </p>
           <div class="form-group">
-            <label style="display:flex;align-items:center;gap:8px;font-size:11px;cursor:pointer;">
-              <input type="checkbox" id="s-slack-enabled" style="accent-color:var(--accent)">
+            <label class="settings-check-label">
+              <input type="checkbox" id="s-slack-enabled" class="settings-checkbox-accent">
               <span data-i18n="settings.slack.enable">Slack通知を有効化</span>
             </label>
           </div>
-          <div class="form-group" style="margin-top:10px">
+          <div class="form-group settings-form-top-10">
             <label class="form-label" data-i18n="settings.slack.token">Bot Token</label>
             <input type="password" id="s-slack-token" class="form-input" placeholder="xoxb-..." autocomplete="off">
-            <button class="connect-btn" id="slack-verify-btn" style="margin-top:6px;font-size:10px;padding:5px 12px;width:auto;" data-i18n="settings.slack.verify">接続確認</button>
-            <div id="slack-workspace-info" style="font-size:10px;color:var(--green);margin-top:4px;display:none"></div>
+            <button class="connect-btn slack-small-button slack-verify-button" id="slack-verify-btn" data-i18n="settings.slack.verify">接続確認</button>
+            <div id="slack-workspace-info" class="slack-info"></div>
           </div>
           <div class="form-group">
             <label class="form-label" data-i18n="settings.slack.username">通知先ユーザー名</label>
-            <div style="display:flex;gap:6px;align-items:center;">
-              <input type="text" id="s-slack-username" class="form-input" placeholder="@username" autocomplete="off" style="flex:1;min-width:0;">
-              <button class="connect-btn" id="slack-lookup-btn" style="white-space:nowrap;font-size:9px;padding:5px 12px;flex-shrink:0;width:auto;" data-i18n="settings.slack.lookup">検索</button>
+            <div class="slack-user-row">
+              <input type="text" id="s-slack-username" class="form-input slack-user-input" placeholder="@username" autocomplete="off">
+              <button class="connect-btn slack-small-button slack-lookup-button" id="slack-lookup-btn" data-i18n="settings.slack.lookup">検索</button>
             </div>
-            <div id="slack-user-info" style="font-size:10px;color:var(--green);margin-top:4px;display:none"></div>
+            <div id="slack-user-info" class="slack-info"></div>
             <input type="hidden" id="s-slack-userid">
           </div>
           <div class="form-group">
@@ -396,13 +394,13 @@
               <option value="360" data-i18n="settings.slack.cooldown.6h">6時間</option>
             </select>
           </div>
-          <div style="margin-top:12px">
+          <div class="slack-create-wrap">
             <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener noreferrer"
-               style="font-size:10px;color:var(--accent);text-decoration:none" data-i18n="settings.slack.create">🔗 Slack Appを作成する（chat:write, users:read スコープ必要）</a>
+               class="slack-create-link" data-i18n="settings.slack.create">🔗 Slack Appを作成する（chat:write, users:read スコープ必要）</a>
           </div>
-          <div style="display:flex;gap:8px;margin-top:12px">
+          <div class="slack-actions">
             <button class="connect-btn" id="slack-save-btn" data-i18n="settings.btn.save">保存</button>
-            <button class="connect-btn" id="slack-test-btn" style="background:transparent;border-color:var(--accent);color:var(--accent)" data-i18n="settings.slack.test">テスト送信</button>
+            <button class="connect-btn slack-test-button" id="slack-test-btn" data-i18n="settings.slack.test">テスト送信</button>
           </div>
           <div class="settings-status" id="slack-status"></div>
         </div>
