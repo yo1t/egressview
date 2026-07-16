@@ -44,7 +44,6 @@ function buildCspHeader(cspNonce, tlsEnabled) {
     `script-src 'self' 'nonce-${cspNonce}' https://d3js.org https://cdn.jsdelivr.net`,
     "style-src 'self'",
     "style-src-elem 'self'",
-    "style-src-attr 'unsafe-inline'",
     "img-src 'self' data:",
     "connect-src 'self' wss: https://cdn.jsdelivr.net",
     "object-src 'none'",

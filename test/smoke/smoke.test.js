@@ -97,7 +97,8 @@ test('security headers are present', async ({ request }) => {
   const csp = h['content-security-policy'];
   expect(csp,  'Content-Security-Policy').toContain("object-src 'none'");
   expect(csp,  'Content-Security-Policy').toContain("style-src 'self'");
-  expect(csp,  'Content-Security-Policy').toContain("style-src-attr 'unsafe-inline'");
+  expect(csp,  'Content-Security-Policy').not.toContain('style-src-attr');
+  expect(csp,  'Content-Security-Policy').not.toContain("'unsafe-inline'");
   expect(csp,  'Content-Security-Policy').not.toContain("style-src 'self' 'unsafe-inline'");
 });
 
