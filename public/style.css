@@ -112,6 +112,26 @@
   .settings-subsection-title { cursor: default; font-size: 12px; margin-bottom: 8px; }
   .settings-inline-button { width: auto; padding: 6px 16px; }
   .token-regenerate-btn { background: transparent; border: 1px solid var(--red, #f87171); color: var(--red, #f87171); }
+  .settings-copy-section { margin-bottom: 12px; }
+  .settings-copy-left { padding-left: 22px; }
+  .settings-feed-label { margin: 4px 0; }
+  .settings-form-top-10 { margin-top: 10px; }
+  .settings-form-top-12 { margin-top: 12px; }
+  .threat-feed-status { margin-top: 12px; font-size: 10px; color: var(--muted); line-height: 1.5; }
+  .settings-pane-toggle { margin-bottom: 8px; font-size: 12px; }
+  .settings-list-textarea { resize: vertical; font-family: monospace; font-size: 10px; line-height: 1.6; }
+  .settings-field-hint { font-size: 9px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+  .settings-subsection-title-wide { margin-bottom: 12px; }
+  .slack-small-button { padding: 5px 12px; width: auto; }
+  .slack-verify-button { margin-top: 6px; font-size: 10px; }
+  .slack-lookup-button { white-space: nowrap; font-size: 9px; flex-shrink: 0; }
+  .slack-info { display: none; font-size: 10px; color: var(--green); margin-top: 4px; }
+  .slack-user-row { display: flex; gap: 6px; align-items: center; }
+  .slack-user-input { flex: 1; min-width: 0; }
+  .slack-create-wrap { margin-top: 12px; }
+  .slack-create-link { font-size: 10px; color: var(--accent); text-decoration: none; }
+  .slack-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .slack-test-button { background: transparent; border-color: var(--accent); color: var(--accent); }
   .legacy-router-controls { display: none !important; }
   .router-pane-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
   .router-pane-title { margin: 0 0 5px; padding: 0; border: 0; cursor: default; }
