@@ -95,6 +95,23 @@
   .backup-list-empty { padding: 4px; }
   .settings-description-example, .settings-description-highlight { color: var(--cyan); }
   .settings-description-example { font-size: 10px; }
+  .pane-title-static { cursor: default; }
+  .settings-copy { font-size: 10px; color: var(--muted); line-height: 1.5; }
+  .settings-copy-general { margin-top: 6px; line-height: 1.6; }
+  .settings-copy-indented { margin-top: 4px; padding-left: 22px; }
+  .settings-copy-block { margin-bottom: 10px; }
+  .settings-form-spaced { margin-top: 18px; }
+  .settings-form-narrow { max-width: 260px; }
+  .settings-check-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 11px; }
+  .settings-check-label-large { font-size: 12px; }
+  .settings-checkbox { width: 14px; height: 14px; cursor: pointer; accent-color: var(--accent); }
+  .settings-checkbox-accent { accent-color: var(--accent); }
+  .settings-revoke-label { margin-bottom: 8px; }
+  .settings-save-spaced { margin-top: 16px; }
+  .settings-divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+  .settings-subsection-title { cursor: default; font-size: 12px; margin-bottom: 8px; }
+  .settings-inline-button { width: auto; padding: 6px 16px; }
+  .token-regenerate-btn { background: transparent; border: 1px solid var(--red, #f87171); color: var(--red, #f87171); }
   .legacy-router-controls { display: none !important; }
   .router-pane-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
   .router-pane-title { margin: 0 0 5px; padding: 0; border: 0; cursor: default; }

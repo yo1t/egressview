@@ -150,7 +150,7 @@
         </div>
         <!-- General settings -->
         <div class="settings-pane" id="pane-general">
-          <div class="pane-title" style="cursor:default" data-i18n="settings.section.general">一般設定</div>
+          <div class="pane-title pane-title-static" data-i18n="settings.section.general">一般設定</div>
           <div class="form-group">
             <label class="form-label" data-i18n="settings.general.lang">言語 (Language)</label>
             <select id="s-language" class="form-input">
@@ -185,21 +185,21 @@
               <option value="RU" data-i18n="settings.country.RU">🇷🇺 ロシア</option>
             </select>
           </div>
-          <p style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.6">
+          <p class="settings-copy settings-copy-general">
             <span data-i18n="settings.general.note.line1">世界地図上でアークの起点となる場所です。</span><br>
             <span data-i18n="settings.general.note.line2">日本以外を選択した場合、グリニッジを中心とした標準的な世界地図になります。</span>
           </p>
-          <div class="form-group" style="margin-top:18px">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;">
-              <input type="checkbox" id="s-auto-investigate" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent)">
+          <div class="form-group settings-form-spaced">
+            <label class="settings-check-label settings-check-label-large">
+              <input type="checkbox" id="s-auto-investigate" class="settings-checkbox">
               <span data-i18n="settings.general.auto">不明ノードを自動調査</span>
             </label>
-            <p style="font-size:10px;color:var(--muted);margin-top:4px;line-height:1.5;padding-left:22px"
+            <p class="settings-copy settings-copy-indented"
                data-i18n="settings.general.auto.note">
               メモが未記入のノードに対してバックグラウンドで ARP / mDNS / ポート調査を行い、メモを自動生成します（既存メモは上書きしません）。
             </p>
           </div>
-          <div class="form-group" style="margin-top:18px">
+          <div class="form-group settings-form-spaced">
             <label class="form-label" data-i18n="settings.general.retention">ログ保存期間</label>
             <select id="s-retention" class="form-input">
               <option value="7" data-i18n="settings.retention.7d">7日</option>
@@ -210,13 +210,13 @@
               <option value="730" selected data-i18n="settings.retention.2y">2年</option>
             </select>
           </div>
-          <button class="connect-btn" id="general-save-btn" style="margin-top:16px" data-i18n="settings.btn.save">保存</button>
+          <button class="connect-btn settings-save-spaced" id="general-save-btn" data-i18n="settings.btn.save">保存</button>
           <div class="settings-status" id="general-status"></div>
 
-          <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
+          <hr class="settings-divider">
 
           <!-- Login password (P2-23) -->
-          <div class="pane-title" style="cursor:default;font-size:12px;margin-bottom:8px" data-i18n="settings.password.section">🔐 ログインパスワード</div>
+          <div class="pane-title settings-subsection-title" data-i18n="settings.password.section">🔐 ログインパスワード</div>
           <div class="settings-row">
             <div class="form-group">
               <label class="form-label" data-i18n="settings.password.current">現在のパスワード</label>
@@ -227,14 +227,14 @@
               <input id="s-pw-new" class="form-input" type="password" autocomplete="new-password">
             </div>
           </div>
-          <label style="display:flex;align-items:center;gap:8px;font-size:11px;cursor:pointer;margin-bottom:8px">
-            <input type="checkbox" id="s-pw-revoke-others" checked style="accent-color:var(--accent)">
+          <label class="settings-check-label settings-revoke-label">
+            <input type="checkbox" id="s-pw-revoke-others" class="settings-checkbox-accent" checked>
             <span data-i18n="settings.password.revokeOthers">変更時に他の端末のセッションを全て失効する</span>
           </label>
-          <button class="connect-btn" id="pw-change-btn" style="width:auto;padding:6px 16px" data-i18n="settings.password.change">パスワードを変更</button>
+          <button class="connect-btn settings-inline-button" id="pw-change-btn" data-i18n="settings.password.change">パスワードを変更</button>
           <div class="settings-status" id="pw-status"></div>
 
-          <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
+          <hr class="settings-divider">
 
           <!-- Login sessions (P2-23) -->
           <div class="pane-title settings-session-section-title" data-i18n="settings.sessions.section">📱 ログイン中の端末</div>
@@ -242,18 +242,18 @@
           <button class="connect-btn settings-session-revoke-all" id="sessions-revoke-all-btn" data-i18n="settings.sessions.revokeAll">他の端末を全てログアウト</button>
           <div class="settings-status" id="sessions-status"></div>
 
-          <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
+          <hr class="settings-divider">
 
           <!-- API token regeneration (P2-22) -->
-          <div class="pane-title" style="cursor:default;font-size:12px;margin-bottom:8px" data-i18n="settings.token.section">🔑 API トークン</div>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5" data-i18n="settings.token.desc">
+          <div class="pane-title settings-subsection-title" data-i18n="settings.token.section">🔑 API トークン</div>
+          <p class="settings-copy settings-copy-block" data-i18n="settings.token.desc">
             スクリプトや自動化からの API アクセスに使う固定トークンです。再生成すると古いトークンは即座に無効になります（ブラウザのログインセッションには影響しません）。
           </p>
-          <div class="form-group" style="max-width:260px">
+          <div class="form-group settings-form-narrow">
             <label class="form-label" data-i18n="settings.token.password">現在のパスワード（再生成に必要）</label>
             <input id="s-token-pw" class="form-input" type="password" autocomplete="current-password">
           </div>
-          <button class="connect-btn" id="token-regen-btn" style="width:auto;padding:6px 16px;background:transparent;border:1px solid var(--red,#f87171);color:var(--red,#f87171)" data-i18n="settings.token.regen">トークンを再生成</button>
+          <button class="connect-btn settings-inline-button token-regenerate-btn" id="token-regen-btn" data-i18n="settings.token.regen">トークンを再生成</button>
           <div class="settings-status" id="token-status"></div>
         </div>
         <!-- Threat Intel settings -->

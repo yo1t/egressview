@@ -353,6 +353,15 @@ describe('Frontend TDZ lint', () => {
       'connection, device, and notification views should use CSS classes instead of inline styles');
   });
 
+  it('general settings pane does not use inline style attributes', () => {
+    const start = html.indexOf('<div class="settings-pane" id="pane-general">');
+    const end = html.indexOf('<!-- Threat Intel settings -->', start);
+    assert.notEqual(start, -1);
+    assert.notEqual(end, -1);
+    assert.doesNotMatch(html.slice(start, end), /\sstyle\s*=/,
+      'general, password, session, and token settings should use CSS classes');
+  });
+
   it('frontend modules do not use HTML string insertion APIs', () => {
     for (const [file, source] of Object.entries(moduleSources)) {
       assert.doesNotMatch(source, /\.innerHTML\s*=/, `${file} must use DOM APIs`);
