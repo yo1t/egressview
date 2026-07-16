@@ -420,6 +420,50 @@ test('graph tooltips render external values as text', async ({ page }) => {
   expect(fatalErrors(errors), `Graph tooltip errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
+test('graph side panel renders external values as text', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+  await page.evaluate(async () => {
+    const panels = await import('/js/graph-panels.js?v=p2-27-side-panel-smoke');
+    const client = {
+      mac: '<svg onload=alert(1)>',
+      ip: '<img src=x onerror=alert(1)>',
+      name: '<script>Client</script>',
+      vendor: '<b>Vendor</b>',
+      dnsName: '<i>dns</i>',
+      mdnsName: '<u>mdns</u>',
+      type: 'wired',
+      amesh_papMac: 'mesh-1',
+      ipv6Addrs: ['2001:db8::1'],
+      deviceFirstSeen: Date.now(),
+      rxRate: 1024,
+      txRate: 2048,
+    };
+    const meshNodes = [{ mac: 'mesh-1', model: '<svg>RT-BE92U</svg>' }];
+    panels.setGraphDevicesDataRef([]);
+    panels.updateFilterTabs(meshNodes, 'mesh-1', [client]);
+    panels.updateSidePanel([client], { wanRx: 4096, wanTx: 8192 }, meshNodes, 'mesh-1');
+  });
+
+  const tabs = page.locator('#filter-tabs');
+  const card = page.locator('#device-list .device-card');
+  await expect(tabs).toContainText('<svg>RT-BE92U</svg>');
+  await expect(tabs.locator('script, img, svg')).toHaveCount(0);
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText('<script>Client</script>');
+  await expect(card).toContainText('<img src=x onerror=alert(1)>');
+  await expect(card).toContainText('<svg onload=alert(1)>');
+  await expect(card).toContainText('<b>Vendor</b>');
+  await expect(card).toContainText('<svg>92U</svg>');
+  await expect(card).toContainText('IPv4');
+  await expect(card).toContainText('IPv6');
+  await expect(card.locator('script, img, svg, b, i, u')).toHaveCount(0);
+  await expect(card.locator('.traffic-bar-fill.rx')).toHaveAttribute('style', /width:/);
+  expect(fatalErrors(errors), `Graph side-panel errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
 test('no console errors after auth', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
