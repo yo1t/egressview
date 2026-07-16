@@ -117,6 +117,7 @@
   .settings-feed-label { margin: 4px 0; }
   .settings-form-top-10 { margin-top: 10px; }
   .settings-form-top-12 { margin-top: 12px; }
+  .settings-form-top-8 { margin-top: 8px; }
   .threat-feed-status { margin-top: 12px; font-size: 10px; color: var(--muted); line-height: 1.5; }
   .settings-pane-toggle { margin-bottom: 8px; font-size: 12px; }
   .settings-list-textarea { resize: vertical; font-family: monospace; font-size: 10px; line-height: 1.6; }
@@ -132,6 +133,12 @@
   .slack-create-link { font-size: 10px; color: var(--accent); text-decoration: none; }
   .slack-actions { display: flex; gap: 8px; margin-top: 12px; }
   .slack-test-button { background: transparent; border-color: var(--accent); color: var(--accent); }
+  .backup-list-section { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; }
+  .backup-list { font-size: 11px; color: var(--muted); margin: 8px 0; max-height: 150px; overflow-y: auto; }
+  .backup-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .backup-upload-label { cursor: pointer; }
+  .datasource-copy { margin-bottom: 16px; }
+  .settings-divider-compact { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
   .legacy-router-controls { display: none !important; }
   .router-pane-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
   .router-pane-title { margin: 0 0 5px; padding: 0; border: 0; cursor: default; }

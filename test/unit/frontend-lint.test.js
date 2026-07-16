@@ -371,6 +371,15 @@ describe('Frontend TDZ lint', () => {
       'threat, beacon, and Slack settings should use CSS classes');
   });
 
+  it('backup and data source settings do not use inline style attributes', () => {
+    const start = html.indexOf('<div class="settings-pane" id="pane-backup">');
+    const end = html.indexOf('<!-- ── Main app', start);
+    assert.notEqual(start, -1);
+    assert.notEqual(end, -1);
+    assert.doesNotMatch(html.slice(start, end), /\sstyle\s*=/,
+      'backup and data source settings should use CSS classes');
+  });
+
   it('frontend modules do not use HTML string insertion APIs', () => {
     for (const [file, source] of Object.entries(moduleSources)) {
       assert.doesNotMatch(source, /\.innerHTML\s*=/, `${file} must use DOM APIs`);

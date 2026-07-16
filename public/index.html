@@ -406,7 +406,7 @@
         </div>
         <!-- Backup / Restore -->
         <div class="settings-pane" id="pane-backup">
-          <div class="pane-title" style="cursor:default" data-i18n="settings.section.backup">💾 バックアップ・リストア</div>
+          <div class="pane-title pane-title-static" data-i18n="settings.section.backup">💾 バックアップ・リストア</div>
           <div class="form-group">
             <label class="form-label" data-i18n="settings.backup.interval">バックアップ頻度</label>
             <select id="s-backup-interval" class="form-input">
@@ -416,7 +416,7 @@
               <option value="168" data-i18n="settings.backup.1w">1週間ごと</option>
             </select>
           </div>
-          <div class="form-group" style="margin-top:8px">
+          <div class="form-group settings-form-top-8">
             <label class="form-label" data-i18n="settings.backup.generations">保持世代数</label>
             <select id="s-backup-generations" class="form-input">
               <option value="3" data-i18n="settings.backup.gen3">3世代</option>
@@ -426,15 +426,15 @@
               <option value="14" data-i18n="settings.backup.gen14">14世代</option>
             </select>
           </div>
-          <button class="connect-btn" id="backup-config-save" style="margin-top:12px" data-i18n="settings.btn.save">保存</button>
+          <button class="connect-btn settings-form-top-12" id="backup-config-save" data-i18n="settings.btn.save">保存</button>
           <div class="settings-status" id="backup-config-status"></div>
-          <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px;">
+          <div class="backup-list-section">
             <label class="form-label" data-i18n="settings.backup.list">バックアップ一覧</label>
-            <div id="backup-list" style="font-size:11px;color:var(--muted);margin:8px 0;max-height:150px;overflow-y:auto;"></div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+            <div id="backup-list" class="backup-list"></div>
+            <div class="backup-actions">
               <button class="connect-btn" id="backup-create-btn" data-i18n="settings.backup.create">今すぐバックアップ</button>
-              <label class="connect-btn" style="cursor:pointer;" data-i18n="settings.backup.upload">ファイルからリストア
-                <input type="file" id="backup-upload-input" accept=".db" style="display:none">
+              <label class="connect-btn backup-upload-label" data-i18n="settings.backup.upload">ファイルからリストア
+                <input type="file" id="backup-upload-input" class="is-hidden" accept=".db">
               </label>
             </div>
             <div class="settings-status" id="backup-action-status"></div>
@@ -442,18 +442,18 @@
         </div>
         <!-- Data Sources -->
         <div class="settings-pane" id="pane-datasource">
-          <div class="pane-title" style="cursor:default" data-i18n="settings.section.datasource">📡 Data Sources</div>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:16px;line-height:1.5">
+          <div class="pane-title pane-title-static" data-i18n="settings.section.datasource">📡 Data Sources</div>
+          <p class="settings-copy datasource-copy">
             <span data-i18n="settings.datasource.desc.line1">Configure the data sources used to resolve destination hostnames.</span><br>
             <span data-i18n="settings.datasource.desc.line2">Domain names from enabled sources appear in the connection log and related views.</span>
           </p>
 
           <!-- dnsmasq DNS query log -->
-          <label class="pane-title" style="margin-bottom:8px">
-            <input type="checkbox" id="enable-dnsmasq" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
+          <label class="pane-title settings-pane-toggle">
+            <input type="checkbox" id="enable-dnsmasq">
             <span data-i18n="settings.datasource.dnsmasq">DNS query log (dnsmasq)</span>
           </label>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px">
+          <p class="settings-copy settings-copy-block settings-copy-left">
             <span data-i18n="settings.datasource.dnsmasq.desc.line1">Tail the dnsmasq query log on the server and attach per-device DNS resolution results to destination hostnames.</span><br>
             <span data-i18n="settings.datasource.dnsmasq.desc.line2.before">These names take priority over PTR reverse lookups, so meaningful names such as </span><code class="settings-description-example">example.com</code><span data-i18n="settings.datasource.dnsmasq.desc.line2.after"> are shown.</span>
           </p>
@@ -465,14 +465,14 @@
             </div>
           </div>
 
-          <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+          <hr class="settings-divider-compact">
 
           <!-- [INSPECT] syslog -->
-          <label class="pane-title" style="margin-bottom:8px">
-            <input type="checkbox" id="enable-inspect" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
+          <label class="pane-title settings-pane-toggle">
+            <input type="checkbox" id="enable-inspect">
             <span data-i18n="settings.datasource.inspect">[INSPECT] TCP session supplement</span>
           </label>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px">
+          <p class="settings-copy settings-copy-block settings-copy-left">
             <span data-i18n="settings.datasource.inspect.desc.line1">Parse Yamaha syslog [INSPECT] entries in real time to supplement short-lived TCP sessions missed by 60-second polling.</span><br>
             <span class="settings-description-highlight" data-i18n="settings.datasource.inspect.desc.line2">Specify the Yamaha syslog file path received by the server.</span>
           </p>
@@ -484,14 +484,14 @@
             </div>
           </div>
 
-          <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+          <hr class="settings-divider-compact">
 
           <!-- [DHCPD] syslog -->
-          <label class="pane-title" style="margin-bottom:8px">
-            <input type="checkbox" id="enable-dhcpd" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
+          <label class="pane-title settings-pane-toggle">
+            <input type="checkbox" id="enable-dhcpd">
             <span data-i18n="settings.datasource.dhcpd">[DHCPD] Real-time IP-to-MAC tracking</span>
           </label>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px">
+          <p class="settings-copy settings-copy-block settings-copy-left">
             <span data-i18n="settings.datasource.dhcpd.desc.line1">Parse Yamaha syslog [DHCPD] entries (Allocates/Extends) in real time and maintain IP-to-MAC mappings.</span><br>
             <span data-i18n="settings.datasource.dhcpd.desc.line2">This improves source-device identification. Usually this uses the same path as [INSPECT].</span>
           </p>
@@ -503,7 +503,7 @@
             </div>
           </div>
 
-          <button class="connect-btn" id="datasource-save-btn" style="margin-top:8px" data-i18n="settings.btn.save">Save</button>
+          <button class="connect-btn" id="datasource-save-btn" data-i18n="settings.btn.save">Save</button>
           <div class="settings-status" id="datasource-status"></div>
         </div>
       </div>
