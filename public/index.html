@@ -185,10 +185,9 @@
               <option value="RU" data-i18n="settings.country.RU">🇷🇺 ロシア</option>
             </select>
           </div>
-          <p style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.6"
-             data-i18n-html="settings.general.note">
-            世界地図上でアークの起点となる場所です。<br>
-            日本以外を選択した場合、グリニッジを中心とした標準的な世界地図になります。
+          <p style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.6">
+            <span data-i18n="settings.general.note.line1">世界地図上でアークの起点となる場所です。</span><br>
+            <span data-i18n="settings.general.note.line2">日本以外を選択した場合、グリニッジを中心とした標準的な世界地図になります。</span>
           </p>
           <div class="form-group" style="margin-top:18px">
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;">
@@ -446,9 +445,9 @@
         <!-- Data Sources -->
         <div class="settings-pane" id="pane-datasource">
           <div class="pane-title" style="cursor:default" data-i18n="settings.section.datasource">📡 Data Sources</div>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:16px;line-height:1.5" data-i18n-html="settings.datasource.desc">
-            Configure the data sources used to resolve destination hostnames.<br>
-            Domain names from enabled sources appear in the connection log and related views.
+          <p style="font-size:10px;color:var(--muted);margin-bottom:16px;line-height:1.5">
+            <span data-i18n="settings.datasource.desc.line1">Configure the data sources used to resolve destination hostnames.</span><br>
+            <span data-i18n="settings.datasource.desc.line2">Domain names from enabled sources appear in the connection log and related views.</span>
           </p>
 
           <!-- dnsmasq DNS query log -->
@@ -456,9 +455,9 @@
             <input type="checkbox" id="enable-dnsmasq" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
             <span data-i18n="settings.datasource.dnsmasq">DNS query log (dnsmasq)</span>
           </label>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px" data-i18n-html="settings.datasource.dnsmasq.desc">
-            Tail the dnsmasq query log on the server and attach per-device DNS resolution results to destination hostnames.<br>
-            These names take priority over PTR reverse lookups, so meaningful names such as <code style="font-size:10px;color:var(--cyan)">example.com</code> are shown.
+          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px">
+            <span data-i18n="settings.datasource.dnsmasq.desc.line1">Tail the dnsmasq query log on the server and attach per-device DNS resolution results to destination hostnames.</span><br>
+            <span data-i18n="settings.datasource.dnsmasq.desc.line2.before">These names take priority over PTR reverse lookups, so meaningful names such as </span><code class="settings-description-example">example.com</code><span data-i18n="settings.datasource.dnsmasq.desc.line2.after"> are shown.</span>
           </p>
           <div class="section-inputs" id="dnsmasq-inputs">
             <div class="form-group">
@@ -475,9 +474,9 @@
             <input type="checkbox" id="enable-inspect" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
             <span data-i18n="settings.datasource.inspect">[INSPECT] TCP session supplement</span>
           </label>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px" data-i18n-html="settings.datasource.inspect.desc">
-            Parse Yamaha syslog [INSPECT] entries in real time to supplement short-lived TCP sessions missed by 60-second polling.<br>
-            <span style="color:var(--cyan)">Specify the Yamaha syslog file path received by the server.</span>
+          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px">
+            <span data-i18n="settings.datasource.inspect.desc.line1">Parse Yamaha syslog [INSPECT] entries in real time to supplement short-lived TCP sessions missed by 60-second polling.</span><br>
+            <span class="settings-description-highlight" data-i18n="settings.datasource.inspect.desc.line2">Specify the Yamaha syslog file path received by the server.</span>
           </p>
           <div class="section-inputs" id="inspect-inputs">
             <div class="form-group">
@@ -494,9 +493,9 @@
             <input type="checkbox" id="enable-dhcpd" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent);flex-shrink:0">
             <span data-i18n="settings.datasource.dhcpd">[DHCPD] Real-time IP-to-MAC tracking</span>
           </label>
-          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px" data-i18n-html="settings.datasource.dhcpd.desc">
-            Parse Yamaha syslog [DHCPD] entries (Allocates/Extends) in real time and maintain IP-to-MAC mappings.<br>
-            This improves source-device identification. Usually this uses the same path as [INSPECT].
+          <p style="font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.5;padding-left:22px">
+            <span data-i18n="settings.datasource.dhcpd.desc.line1">Parse Yamaha syslog [DHCPD] entries (Allocates/Extends) in real time and maintain IP-to-MAC mappings.</span><br>
+            <span data-i18n="settings.datasource.dhcpd.desc.line2">This improves source-device identification. Usually this uses the same path as [INSPECT].</span>
           </p>
           <div class="section-inputs" id="dhcpd-inputs">
             <div class="form-group">

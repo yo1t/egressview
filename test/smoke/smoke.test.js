@@ -142,6 +142,7 @@ test('shared browser catalog renders Japanese and English', async ({ page }) => 
     i18n.applyI18n();
   });
   await expect(graphTab).toHaveText('📊 グラフマップ');
+  await expect(page.locator('[data-i18n="settings.general.note.line1"]')).toHaveText('世界地図上でアークの起点となる場所です。');
 
   await page.evaluate(async () => {
     const i18n = await import('/js/i18n.js?v=p2-29-smoke');
@@ -149,6 +150,9 @@ test('shared browser catalog renders Japanese and English', async ({ page }) => 
     i18n.applyI18n();
   });
   await expect(graphTab).toHaveText('📊 Graph Map');
+  await expect(page.locator('[data-i18n="settings.general.note.line1"]')).toHaveText('Sets the arc origin on the world map.');
+  await expect(page.locator('[data-i18n="settings.datasource.dnsmasq.desc.line2.before"]')).toContainText('PTR reverse lookups');
+  await expect(page.locator('.settings-description-example')).toHaveText('example.com');
 });
 
 // Helper: collect non-noise console errors
@@ -836,6 +840,8 @@ test('stats tab renders map canvas', async ({ page }) => {
     const statsContainer = page.locator('#stats-container').first();
     await expect(statsContainer).toBeVisible();
   }
+  await expect(page.locator('#st-globe-controls .globe-ctrl-btn')).toHaveCount(3);
+  await expect(page.locator('#st-flat-controls .fmc-btn')).toHaveCount(7);
 });
 
 test('stats tab renders map coverage label and chart svgs without console errors', async ({ page }) => {
@@ -1004,6 +1010,7 @@ test('settings tabs save and connection buttons work without console errors', as
 
   await page.click('.settings-tab[data-tab="backup"]');
   await expect(page.locator('#pane-backup')).toHaveClass(/active/);
+  await expect(page.locator('#backup-list .backup-list-empty')).toHaveCount(1);
   await page.click('#backup-config-save');
   await expect(page.locator('#backup-config-status')).toBeVisible();
   await page.click('#backup-create-btn');

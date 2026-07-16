@@ -185,4 +185,10 @@ function _buildAppSlices(conns, topN, unknownLabel, otherLabel) {
   return top;
 }
 
-export { _BASE, esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType, aggregateRouterHealth, guessApp, _buildAppSlices };
+function setButtonLoading(button, label, spinnerClass = 'spinner') {
+  const spinner = document.createElement('span');
+  spinner.className = spinnerClass;
+  button.replaceChildren(spinner, document.createTextNode(String(label ?? '')));
+}
+
+export { _BASE, esc, fmtBytes, fmtTs, nodeColor, nodeClass, typeLabel, isWiredType, aggregateRouterHealth, guessApp, _buildAppSlices, setButtonLoading };

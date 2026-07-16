@@ -51,8 +51,8 @@ describe('shared i18n catalog', () => {
   });
 
   it('contains the complete migrated catalog in both languages', () => {
-    assert.equal(jaKeys.size, 595);
-    assert.equal(enKeys.size, 595);
+    assert.equal(jaKeys.size, 601);
+    assert.equal(enKeys.size, 601);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 
@@ -61,6 +61,17 @@ describe('shared i18n catalog', () => {
       const invalid = Object.entries(catalog[lang]).filter(([, value]) => typeof value !== 'string' || value.length === 0);
       assert.deepEqual(invalid, [], `${lang} has invalid translation values`);
     }
+  });
+
+  it('contains no HTML markup and uses no HTML translation targets', () => {
+    for (const lang of ['ja', 'en']) {
+      const markupValues = Object.entries(catalog[lang])
+        .filter(([, value]) => /<\/?[a-z][^>]*>/i.test(value))
+        .map(([key]) => key);
+      assert.deepEqual(markupValues, [], `${lang} contains HTML translations`);
+    }
+    assert.doesNotMatch(html, /data-i18n-html=/);
+    assert.doesNotMatch(clientRuntime, /\.innerHTML\s*=/);
   });
 
   it('defines every statically referenced t() and tVars() key', () => {

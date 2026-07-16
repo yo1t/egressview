@@ -11,7 +11,7 @@ import { updateLogView } from './log.js?v=__ASSET_VERSION__';
 import { nlRender } from './notif-log.js?v=__ASSET_VERSION__';
 // Tooltip / side panel (P2-25 stage 2) and D3 renderer (stage 3).
 // Re-exported below so existing importers keep using './graph.js'.
-import { updateFilterTabs, updateSidePanel, updateSideHighlight, applyFilter } from './graph-panels.js?v=__ASSET_VERSION__';
+import { updateFilterTabs, updateSidePanel, updateSideHighlight, applyFilter, renderLogLoading } from './graph-panels.js?v=__ASSET_VERSION__';
 export { showTooltip, moveTooltip, hideTooltip, setGraphDevicesDataRef } from './graph-panels.js?v=__ASSET_VERSION__';
 import { initGraphRenderer, syncSimulation, drawLinks, drawNodes, applyGraphFilter, resetRenderer, simulation } from './graph-render.js?v=__ASSET_VERSION__';
 export { simulation, applyGraphFilter } from './graph-render.js?v=__ASSET_VERSION__';
@@ -336,7 +336,7 @@ function handleNodeClick(e, d) {
   if (logMode) {
     if (selectedMac) {
       const tb = document.getElementById('log-tbody');
-      if (tb) tb.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--muted)"><span class="spinner-xs"></span> ${t('data.loading') || '読み込み中'}</td></tr>`;
+      if (tb) renderLogLoading(tb);
     }
     updateLogView();
   }
@@ -592,7 +592,7 @@ function stopGraph() {
   lastMeshNodes = [];
   lastClients = [];
   meshColorMap = {};
-  document.getElementById('device-list').innerHTML = '';
+  document.getElementById('device-list').replaceChildren();
   document.getElementById('conn-panel').classList.remove('is-visible');
 }
 
