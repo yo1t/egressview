@@ -41,7 +41,7 @@
     "scripts/frontend-innerhtml-allowlist.json",
     "scripts/check-observation-consistency.js",
     "docs/*.md",
-    "docs/*.png",
+    "docs/assets/*.png",
     "index.html",
     "index.ja.html",
     "sitemap.xml",
