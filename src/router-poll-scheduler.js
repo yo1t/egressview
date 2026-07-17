@@ -19,7 +19,7 @@ const DEFAULT_MAX_BACKOFF     = 10 * 60_000;
 
 /**
  * @param {{
- *   runCycle: (entry: { id: string, adapter: object }) => Promise<void>,
+   *   runCycle: (entry: { id: string, adapter: object }, options: { signal: AbortSignal }) => Promise<void>,
  *   pollIntervalMs?: number,
  *   maxConcurrent?: number,
  *   cycleTimeoutMs?: number,
@@ -80,14 +80,16 @@ function createRouterPollScheduler({
     return Math.min(pollIntervalMs * 2 ** failures, maxBackoffMs);
   }
 
-  function withTimeout(promise, ms, st) {
+  function withTimeout(promise, ms, st, controller) {
     return new Promise((resolve, reject) => {
       let done = false;
       const timer = schedulePoll(() => {
         if (done) return;
         done = true;
         st.timedOut = true;
-        reject(new Error(`poll cycle timeout after ${ms}ms`));
+        const error = new Error(`poll cycle timeout after ${ms}ms`);
+        controller.abort(error);
+        reject(error);
       }, ms);
       promise.then(
         v => { if (!done) { done = true; cancelPoll(timer); resolve(v); } },
@@ -104,8 +106,11 @@ function createRouterPollScheduler({
 
     st.timedOut = false;
     let failed = false;
+    const controller = new AbortController();
+    st.controller = controller;
+    const cyclePromise = Promise.resolve().then(() => runCycle(st.entry, { signal: controller.signal }));
     try {
-      await withTimeout(Promise.resolve(runCycle(st.entry)), cycleTimeoutMs, st);
+      await withTimeout(cyclePromise, cycleTimeoutMs, st, controller);
       st.consecutiveFailures = 0;
       st.lastSuccessAt = now();
       st.lastError = null;
@@ -116,8 +121,13 @@ function createRouterPollScheduler({
       logger.error(`[poll:${st.entry.id}] cycle failed (${st.consecutiveFailures} in a row): ${st.lastError}`);
       if (st.timedOut) {
         try { onTimeout(st.entry); } catch {}
+        // Reconnect/abort should settle the adapter operation promptly. Keep
+        // the slot until it really settles so timed-out work cannot overlap a
+        // later cycle or escape the global concurrency cap.
+        await cyclePromise.catch(() => {});
       }
     } finally {
+      st.controller = null;
       releaseSlot();
       st.running = false;
       if (!st.stopped) {
@@ -145,6 +155,7 @@ function createRouterPollScheduler({
         lastError: null,
         nextRunAt: null,
         timer: null,
+        controller: null,
       };
       states.set(entry.id, st);
       scheduleNext(st, (startedCount++ * stepMs) % pollIntervalMs);
@@ -156,6 +167,7 @@ function createRouterPollScheduler({
       const st = states.get(id);
       if (!st) return false;
       st.stopped = true;
+      st.controller?.abort(new Error('poll cycle stopped'));
       if (st.timer) { cancelPoll(st.timer); st.timer = null; }
       states.delete(id);
       return true;

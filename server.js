@@ -185,9 +185,8 @@ function loadConfig() {
   logger.info('[config] Loaded:', CONFIG_FILE);
 }
 
-function saveConfig() {
-  let existing = {};
-  try { existing = configIo.loadFileOrThrow(CONFIG_FILE); } catch {}
+function saveConfig(sectionOverrides = {}) {
+  const existing = configIo.loadFileOrThrow(CONFIG_FILE);
   const data = {
     ...existing,
     yamaha:  { ip: yamaha.getIp(), user: yamaha.getUser(), pass: '', enabled: yamaha.isEnabled(), hostFp: yamaha.getHostFp(), nat: yamaha.getNat() },
@@ -204,19 +203,20 @@ function saveConfig() {
     https:   { enabled: appState.httpsEnabled, certPath: appState.httpsCertPath, keyPath: appState.httpsKeyPath },
     auth:    { passwordHash: appState.authPasswordHash, salt: appState.authPasswordSalt },
   };
-  // Re-read to preserve passwords (not held in module state getters)
+  // Preserve passwords from the strict read above (not held in module getters).
   try {
     if (existing.yamaha?.pass) data.yamaha.pass = existing.yamaha.pass;
     if (existing.cisco?.pass)  { data.cisco.pass = existing.cisco.pass; data.cisco.enablePass = existing.cisco.enablePass || ''; }
     if (existing.asus?.pass)   data.asus.pass   = existing.asus.pass;
     if (existing.slack?.token) data.slack.token = existing.slack.token;
   } catch {}
-  try {
-    configIo.saveFile(data, CONFIG_FILE);
-    logger.info('[config] Saved:', CONFIG_FILE);
-  } catch (e) {
-    logger.error('[config] Save failed:', e.message);
+  for (const section of ['yamaha', 'cisco', 'asus', 'slack']) {
+    if (sectionOverrides[section]) {
+      data[section] = { ...data[section], ...sectionOverrides[section] };
+    }
   }
+  configIo.saveFile(data, CONFIG_FILE);
+  logger.info('[config] Saved:', CONFIG_FILE);
 }
 
 function persistRouterConfigs(routers, tombstones) {
@@ -321,7 +321,6 @@ const routeCtx = {
   runtime, notes, io, beacons, sessions, authPassword,
   saveConfig,
   loadConfig:          () => configIo.loadFileSafe(CONFIG_FILE),
-  persistSecret:       (section, updates) => configIo.persistSecret(section, updates, CONFIG_FILE),
   configFile:          CONFIG_FILE,
   fs,
   DEFAULT_ROUTER_IP, POLL_INTERVAL,

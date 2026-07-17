@@ -142,3 +142,100 @@ describe('auth route: POST /api/admin/verify', () => {
     assert.match(body.error, /token|トークン|invalid/i);
   });
 });
+
+describe('auth route: persistence failures', () => {
+  it('restores Yamaha runtime state when router settings cannot be saved', async () => {
+    const configured = [];
+    let disconnects = 0;
+    let reconnects = 0;
+    const app = makeApp({
+      yamaha: makeYamaha({
+        getIp: () => '192.168.1.1',
+        getUser: () => 'old-user',
+        getHostFp: () => 'old-fingerprint',
+        getNat: () => '100',
+        hasPass: () => true,
+        isEnabled: () => true,
+        configure: value => { configured.push(value); },
+        reconnect: () => { reconnects += 1; },
+        disconnect: () => { disconnects += 1; },
+      }),
+      loadConfig: () => ({ yamaha: { pass: 'old-password' } }),
+      saveConfig: () => { throw new Error('disk full'); },
+    });
+
+    const { status, body } = await request(app, 'POST', '/api/login', {
+      doYamaha: true,
+      yamahaIp: '192.168.1.2',
+      yamahaUser: 'new-user',
+      yamahaPass: 'new-password',
+    });
+
+    assert.equal(status, 500);
+    assert.match(body.error, /not saved/i);
+    assert.equal(disconnects, 1);
+    assert.equal(reconnects, 2);
+    assert.deepEqual(configured.at(-1), {
+      enabled: true,
+      ip: '192.168.1.1',
+      user: 'old-user',
+      pass: 'old-password',
+      hostFp: 'old-fingerprint',
+      natDescriptor: '100',
+    });
+  });
+
+  it('does not disable Yamaha when persisting the disabled state fails', async () => {
+    let disconnects = 0;
+    const app = makeApp({
+      yamaha: makeYamaha({ disconnect: () => { disconnects += 1; } }),
+      saveConfig: () => { throw new Error('read only'); },
+    });
+
+    const { status, body } = await request(app, 'POST', '/api/login', { doYamaha: false });
+
+    assert.equal(status, 500);
+    assert.match(body.error, /not saved/i);
+    assert.equal(disconnects, 0);
+  });
+
+  it('rolls back password state and returns 500 when saving fails', async () => {
+    const appState = { authPasswordSalt: 'old-salt', authPasswordHash: 'old-hash' };
+    const app = makeApp({
+      appState,
+      authPassword: {
+        verifyPassword: () => true,
+        hashPassword: () => ({ salt: 'new-salt', hash: 'new-hash' }),
+      },
+      saveConfig: () => { throw new Error('disk full'); },
+      sessions: { revokeAll: () => 0 },
+    });
+
+    const { status, body } = await request(app, 'POST', '/api/auth/change-password', {
+      currentPassword: 'old-password',
+      newPassword: 'new-password',
+    });
+
+    assert.equal(status, 500);
+    assert.match(body.error, /not saved/i);
+    assert.equal(appState.authPasswordSalt, 'old-salt');
+    assert.equal(appState.authPasswordHash, 'old-hash');
+  });
+
+  it('rolls back the admin token and returns 500 when saving fails', async () => {
+    const appState = { adminToken: 'old-token', authPasswordSalt: 'salt', authPasswordHash: 'hash' };
+    const app = makeApp({
+      appState,
+      authPassword: { verifyPassword: () => true },
+      saveConfig: () => { throw new Error('read only'); },
+    });
+
+    const { status, body } = await request(app, 'POST', '/api/admin/regenerate-token', {
+      currentPassword: 'password',
+    });
+
+    assert.equal(status, 500);
+    assert.match(body.error, /not saved/i);
+    assert.equal(appState.adminToken, 'old-token');
+  });
+});

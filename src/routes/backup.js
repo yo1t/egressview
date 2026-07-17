@@ -24,6 +24,14 @@ module.exports = function backupRoutes(ctx) {
   const { requireAdmin, backup, history, runtime, devices, enrichment, beacons, sessions, io, appRoot } = ctx;
   const router = Router();
 
+  function closeDbConnections() {
+    history.closeDb();
+    sessions?.closeDb();
+    devices.closeDb();
+    enrichment.closeDb();
+    beacons?.closeDb();
+  }
+
   function afterRestore() {
     history.loadConnectionHistory();
     runtime.setKnownMacs(history.getKnownMacs());
@@ -60,8 +68,12 @@ module.exports = function backupRoutes(ctx) {
     const { name } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Backup name required' });
     try {
-      await backup.restoreFromGeneration(name);
-      afterRestore();
+      await backup.restoreFromGeneration(name, {
+        beforeReplace: closeDbConnections,
+        afterReplace: afterRestore,
+        beforeRollback: closeDbConnections,
+        afterRollback: afterRestore,
+      });
       res.json({ success: true, message: `Restored from ${name}. Restart recommended.` });
     } catch (e) {
       logger.error('[backup] restore error:', e.message);
@@ -95,8 +107,12 @@ module.exports = function backupRoutes(ctx) {
         if (!buf.slice(0, 16).equals(Buffer.from('SQLite format 3\0')))
           return res.status(400).json({ error: 'Invalid database file' });
         await fs.promises.writeFile(tempPath, buf);
-        await backup.restoreFromFile(tempPath);
-        afterRestore();
+        await backup.restoreFromFile(tempPath, {
+          beforeReplace: closeDbConnections,
+          afterReplace: afterRestore,
+          beforeRollback: closeDbConnections,
+          afterRollback: afterRestore,
+        });
         res.json({ success: true, message: 'Restored from uploaded file. Restart recommended.' });
       } catch (e) {
         logger.error('[backup] upload restore error:', e.message);
@@ -109,19 +125,30 @@ module.exports = function backupRoutes(ctx) {
 
   router.post('/backup/config', requireAdmin, (req, res) => {
     const { intervalHours, maxGenerations } = req.body || {};
+    const previous = backup.getConfig();
+    const updates = {};
     if (intervalHours != null) {
       const h = parsePositiveInt(intervalHours);
       if (h === null) return res.status(400).json({ error: t('backup.intervalHours-invalid') });
-      backup.configure({ intervalHours: h });
+      updates.intervalHours = h;
     }
     if (maxGenerations != null) {
       const g = parsePositiveInt(maxGenerations);
       if (g === null) return res.status(400).json({ error: t('backup.maxGenerations-invalid') });
-      backup.configure({ maxGenerations: g });
+      updates.maxGenerations = g;
     }
+    backup.configure(updates);
     backup.stopPeriodicBackup();
     backup.startPeriodicBackup();
-    ctx.saveConfig();
+    try {
+      ctx.saveConfig();
+    } catch (err) {
+      backup.configure(previous);
+      backup.stopPeriodicBackup();
+      backup.startPeriodicBackup();
+      logger.error('[backup] config save failed:', err.message);
+      return res.status(500).json({ error: 'Backup settings were not saved. Check server logs.' });
+    }
     res.json({ success: true, config: backup.getConfig() });
   });
 

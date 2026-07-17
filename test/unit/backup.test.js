@@ -110,6 +110,13 @@ describe('getBackupPath', () => {
     assert.ok(p.endsWith(name));
     assert.ok(fs.existsSync(p));
   });
+
+  it('accepts the collision-resistant backup filename format', () => {
+    fs.mkdirSync(backupDir, { recursive: true });
+    const name = 'egressview_2025-01-01_00-00-00-123-deadbeef.db';
+    fs.writeFileSync(path.join(backupDir, name), 'data');
+    assert.equal(backup.getBackupPath(name), path.join(backupDir, name));
+  });
 });
 
 // ─── listBackups ─────────────────────────────────────────────────────────────
@@ -170,6 +177,13 @@ describe('createBackup', () => {
     assert.ok(name.endsWith('.db'));
     const p = path.join(backupDir, name);
     assert.ok(fs.existsSync(p));
+  });
+
+  it('creates distinct generations when backups run in the same millisecond', async () => {
+    const [first, second] = await Promise.all([backup.createBackup(), backup.createBackup()]);
+    assert.notEqual(first, second);
+    assert.ok(fs.existsSync(path.join(backupDir, first)));
+    assert.ok(fs.existsSync(path.join(backupDir, second)));
   });
 
   it('backup is a valid SQLite DB with the same content as the source', async () => {
@@ -252,6 +266,125 @@ describe('restoreFromFile', () => {
     assert.ok(!fs.existsSync(fakeDb + '-shm'), 'stale -shm removed');
     assert.equal(readMark(fakeDb), 'restored-content');
   });
+
+  it('rejects a corrupt restore source before replacing the current DB', async () => {
+    const currentMark = readMark(fakeDb);
+    const src = path.join(tmpDir, 'corrupt-restore.db');
+    fs.writeFileSync(src, Buffer.concat([
+      Buffer.from('SQLite format 3\0'),
+      Buffer.alloc(256, 0x41),
+    ]));
+
+    await assert.rejects(() => backup.restoreFromFile(src), /integrity check failed/i);
+    assert.equal(readMark(fakeDb), currentMark);
+  });
+
+  it('aborts without replacing the current DB when the safety backup fails', async () => {
+    const src = path.join(tmpDir, 'restore-valid.db');
+    makeRealDb(src, 'replacement');
+    const originalBytes = Buffer.from('not a valid sqlite database');
+    fs.writeFileSync(fakeDb, originalBytes);
+
+    await assert.rejects(() => backup.restoreFromFile(src), /safety backup failed/i);
+    assert.deepEqual(fs.readFileSync(fakeDb), originalBytes);
+  });
+
+  it('keeps the current DB when the pre-replacement close hook fails', async () => {
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { fs.unlinkSync(fakeDb + suffix); } catch {}
+    }
+    makeRealDb(fakeDb, 'before-hook-original');
+    const src = path.join(tmpDir, 'hook-restore.db');
+    makeRealDb(src, 'hook-replacement');
+
+    await assert.rejects(
+      () => backup.restoreFromFile(src, { beforeReplace: () => { throw new Error('close failed'); } }),
+      /close failed/
+    );
+    assert.equal(readMark(fakeDb), 'before-hook-original');
+  });
+
+  it('restores the original DB and runtime when post-restore initialization fails', async () => {
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { fs.unlinkSync(fakeDb + suffix); } catch {}
+    }
+    makeRealDb(fakeDb, 'runtime-original');
+    const src = path.join(tmpDir, 'runtime-replacement.db');
+    makeRealDb(src, 'runtime-replacement');
+    const calls = [];
+
+    await assert.rejects(
+      () => backup.restoreFromFile(src, {
+        beforeReplace: () => calls.push('close-original'),
+        afterReplace: () => { calls.push(`open-${readMark(fakeDb)}`); throw new Error('reopen failed'); },
+        beforeRollback: () => calls.push('close-partial'),
+        afterRollback: () => calls.push(`open-${readMark(fakeDb)}`),
+      }),
+      /reopen failed/
+    );
+
+    assert.equal(readMark(fakeDb), 'runtime-original');
+    assert.deepEqual(calls, [
+      'close-original',
+      'open-runtime-replacement',
+      'close-partial',
+      'open-runtime-original',
+    ]);
+  });
+
+  it('recovers the original DB when an error occurs after replacement starts', async () => {
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { fs.unlinkSync(fakeDb + suffix); } catch {}
+    }
+    makeRealDb(fakeDb, 'rollback-original');
+    const src = path.join(tmpDir, 'rollback-replacement.db');
+    makeRealDb(src, 'rollback-replacement');
+    let replacements = 0;
+
+    await assert.rejects(
+      () => backup.restoreFromFile(src, {
+        replaceDb(sourcePath) {
+          replacements++;
+          fs.copyFileSync(sourcePath, fakeDb);
+          if (replacements === 1) throw new Error('failure after replacement');
+        },
+      }),
+      /failure after replacement/
+    );
+
+    assert.equal(replacements, 2, 'replacement followed by safety rollback');
+    assert.equal(readMark(fakeDb), 'rollback-original');
+  });
+
+  it('reports both errors when replacement and safety rollback fail', async () => {
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { fs.unlinkSync(fakeDb + suffix); } catch {}
+    }
+    makeRealDb(fakeDb, 'double-failure-original');
+    const src = path.join(tmpDir, 'double-failure-replacement.db');
+    makeRealDb(src, 'double-failure-replacement');
+    let replacements = 0;
+
+    await assert.rejects(
+      () => backup.restoreFromFile(src, {
+        replaceDb(sourcePath) {
+          replacements++;
+          if (replacements === 1) {
+            fs.copyFileSync(sourcePath, fakeDb);
+            throw new Error('primary replacement failed');
+          }
+          throw new Error('safety rollback failed');
+        },
+      }),
+      err => {
+        assert.match(err.message, /primary replacement failed/);
+        assert.match(err.message, /safety rollback also failed/);
+        assert.match(err.cause.message, /safety rollback failed/);
+        return true;
+      }
+    );
+    assert.equal(replacements, 2);
+  });
 });
 
 // ─── restoreFromGeneration ────────────────────────────────────────────────────
@@ -268,9 +401,6 @@ describe('restoreFromGeneration', () => {
   });
 
   it('restores successfully from an existing generation', async () => {
-    // Use a fixed past timestamp so the safety backup (created inside
-    // restoreFromFile) gets a different name and does not overwrite
-    // the source backup we want to restore from.
     const name = 'egressview_2025-01-01_12-00-00.db';
     fs.mkdirSync(backupDir, { recursive: true });
     makeRealDb(path.join(backupDir, name), 'fake-db-content');

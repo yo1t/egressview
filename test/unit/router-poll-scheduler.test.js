@@ -236,11 +236,16 @@ describe('router-poll-scheduler: failure isolation and backoff', () => {
 });
 
 describe('router-poll-scheduler: cycle timeout', () => {
-  it('treats a hung cycle as a failure and notifies onTimeout', async () => {
+  it('aborts a hung cycle and holds its slot until the operation settles', async () => {
     const timer = makeManualTimer();
     const timedOut = [];
+    let cycleSignal;
+    let settleCycle;
     const sched = createRouterPollScheduler({
-      runCycle: () => new Promise(() => {}),  // never settles
+      runCycle: (_entry, { signal }) => {
+        cycleSignal = signal;
+        return new Promise(resolve => { settleCycle = resolve; });
+      },
       pollIntervalMs: 60_000,
       cycleTimeoutMs: 120_000,
       onTimeout: e => timedOut.push(e.id),
@@ -256,11 +261,45 @@ describe('router-poll-scheduler: cycle timeout', () => {
     await settle();
 
     assert.deepEqual(timedOut, ['cisco-11111111']);
+    assert.equal(cycleSignal.aborted, true);
     const st = sched.status()[0];
     assert.equal(st.consecutiveFailures, 1);
     assert.match(st.lastError, /timeout/);
-    // rescheduled with backoff despite the cycle promise never settling
+    assert.equal(sched._runningCount(), 1, 'timed-out work still occupies its slot');
+    assert.equal(timer.pending().length, 0, 'must not reschedule while old work is still running');
+
+    settleCycle();
+    await settle();
+    assert.equal(sched._runningCount(), 0);
     assert.equal(timer.pending()[0].delay, 120_000);
+  });
+
+  it('does not admit queued work when a timed-out operation is still running', async () => {
+    const timer = makeManualTimer();
+    const cycle = makeDeferredCycle();
+    const sched = createRouterPollScheduler({
+      runCycle: cycle.runCycle,
+      maxConcurrent: 1,
+      staggerStepMs: 1000,
+      cycleTimeoutMs: 120_000,
+      schedulePoll: timer.schedulePoll,
+      cancelPoll: timer.cancelPoll,
+    });
+    sched.start(entryOf('cisco-11111111'));
+    sched.start(entryOf('cisco-22222222'));
+    await timer.fireAllPending();
+    assert.equal(cycle.calls.length, 1);
+
+    const timeoutTask = timer.pending().find(t => t.delay === 120_000);
+    timer.fire(timeoutTask);
+    await settle();
+    assert.equal(cycle.calls.length, 1, 'queued router must still wait for the real operation');
+
+    cycle.calls[0].resolve();
+    await settle();
+    assert.equal(cycle.calls.length, 2, 'queued router starts only after the timed-out operation settles');
+    cycle.calls[1].resolve();
+    await settle();
   });
 });
 

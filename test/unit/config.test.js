@@ -49,6 +49,17 @@ describe('saveFile + loadFile round-trip', () => {
     const loaded = loadFile(tmpFile);
     assert.deepEqual(loaded, data);
   });
+
+  it('writes the final config with owner-only permissions', () => {
+    saveFile({ ok: true }, tmpFile);
+    assert.equal(fs.statSync(tmpFile).mode & 0o777, 0o600);
+  });
+
+  it('propagates write failures without leaving a temporary file', () => {
+    const target = path.join(os.tmpdir(), `missing-egressview-dir-${Date.now()}`, 'config.json');
+    assert.throws(() => saveFile({ ok: true }, target));
+    assert.equal(fs.existsSync(target + '.tmp'), false);
+  });
 });
 
 describe('persistSecret', () => {
@@ -79,7 +90,7 @@ describe('persistSecret', () => {
 
   it('does not overwrite a malformed config file', () => {
     fs.writeFileSync(tmpFile, '{"yamaha":');
-    persistSecret('yamaha', { pass: 'yamaha-secret' }, tmpFile);
+    assert.throws(() => persistSecret('yamaha', { pass: 'yamaha-secret' }, tmpFile), SyntaxError);
     const raw = fs.readFileSync(tmpFile, 'utf8');
     assert.equal(raw, '{"yamaha":');
   });

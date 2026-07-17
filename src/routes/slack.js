@@ -2,16 +2,17 @@
 'use strict';
 
 const { Router } = require('express');
+const logger = require('../logger');
 
 /**
  * @param {{
  *   requireAdmin, notifier,
- *   saveConfig, persistSecret,
+ *   saveConfig,
  *   loadConfig: () => object
  * }} ctx
  */
 module.exports = function slackRoutes(ctx) {
-  const { requireAdmin, notifier, saveConfig, persistSecret, loadConfig } = ctx;
+  const { requireAdmin, notifier, saveConfig, loadConfig } = ctx;
   const router = Router();
 
   router.get('/config/slack', requireAdmin, (req, res) => {
@@ -26,6 +27,9 @@ module.exports = function slackRoutes(ctx) {
     if (typeof token       === 'string' && token.length       > 512) return res.status(400).json({ error: 'token too long' });
     if (typeof userId      === 'string' && userId.length      > 256) return res.status(400).json({ error: 'userId too long' });
     if (typeof displayName === 'string' && displayName.length > 256) return res.status(400).json({ error: 'displayName too long' });
+    const previous = notifier.getConfig();
+    let previousStored = {};
+    try { previousStored = loadConfig().slack || {}; } catch {}
     notifier.configure({
       enabled:          typeof enabled         === 'boolean' ? enabled         : undefined,
       token:            typeof token           === 'string' && token ? token   : undefined,
@@ -35,8 +39,13 @@ module.exports = function slackRoutes(ctx) {
     const slackUpdates = {};
     if (typeof token       === 'string' && token)       slackUpdates.token       = token;
     if (typeof displayName === 'string')                slackUpdates.displayName = displayName;
-    if (Object.keys(slackUpdates).length) persistSecret('slack', slackUpdates);
-    saveConfig();
+    try {
+      saveConfig(Object.keys(slackUpdates).length ? { slack: slackUpdates } : {});
+    } catch (err) {
+      notifier.configure({ ...previous, token: previousStored.token || '' });
+      logger.error('[slack] Config save failed:', err.message);
+      return res.status(500).json({ error: 'Slack settings were not saved. Check server logs.' });
+    }
     let savedDisplayName = '';
     try { savedDisplayName = loadConfig().slack?.displayName || ''; } catch {}
     res.json({ success: true, config: { ...notifier.getConfig(), displayName: savedDisplayName } });

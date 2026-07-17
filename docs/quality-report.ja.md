@@ -20,12 +20,12 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | 2 | OpenSSF Scorecard | ~8.0/10 | 上位 15% |
 | 3 | ISO/IEC 25010 | 平均 8.4/10 | 高品質 |
 | 4 | Node.js Best Practices (goldbergyoni) | 43/50 (86%) | 優秀 |
-| 5 | SonarQube Quality Gate (推定) | 全項目 A (Coverage 除く) | ✅ PASSED |
+| 5 | SonarQube Quality Gate (推定) | 全項目 A/B、CoverageをCIで実測 | ✅ PASSED |
 
 ### 主な強み
 
 - **セキュリティ設計** — scrypt パスワードハッシュ, タイミングセーフなトークン比較, リクエスト毎 CSP nonce, `style-src 'self'` (style-src-attr 除去済), CI 統合 ASH + secret scan + npm audit, SHA ピン留め GitHub Actions
-- **テスト文化** — 72 unit + 3 integration + Playwright smoke (1,138行); テスト対ソース比率 90.2%; 全ドメインモジュールで `_resetForTest()` パターン (21箇所)
+- **テスト文化** — unit 1,205件 + 実機integration 3本 + Playwright smoke 54件; V8 coverageをNode 22 CIで計測し、下限未達を拒否
 - **コード規律** — `var` ゼロ, `eval` ゼロ, TODO/FIXME ゼロ, 命名規約一貫, ESLint v10 + innerHTML 監査
 - **最小依存** — 本番パッケージ 11 個のみ; Dependabot (cooldown 7日)
 
@@ -33,11 +33,11 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | 項目 | v1.2.2 | v1.3.5 | 変化 |
 |---|---|---|---|
-| ソースコード行数 | 16,791 | 18,476 | +10.0% |
-| テストコード行数 | 12,577 | 16,662 | +32.5% |
-| テスト対ソース比率 | 74.9% | 90.2% | +15.3pp |
-| ユニットテストファイル | 54 | 72 | +18 |
-| ソースモジュール (src/) | 48 | 57 | +9 |
+| ソースコード行数 | 16,791 | 18,832 | +12.2% |
+| テストコード行数 | 12,577 | 17,397 | +38.3% |
+| テスト対ソース比率 | 74.9% | 92.4% | +17.5pp |
+| ユニットテストファイル | 54 | 74 | +20 |
+| ソースモジュール (src/) | 48 | 58 | +10 |
 | API エンドポイント | 46 | 52 | +6 |
 | 本番依存パッケージ | 10 | 11 | +1 (zod) |
 | requireAdmin 適用ルート | 62 | 74 | +12 |
@@ -46,8 +46,8 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | 優先度 | ギャップ | 推定工数 |
 |---|---|---|
-| 高 | コードカバレッジ計測 (c8) | 2h |
 | 高 | HTTP ルートに zod バリデーション適用 (MCP のみ適用済) | 6h |
+| 中 | 重要HTTPルートのbranch coverageを段階的に引き上げる | 継続 |
 | 中 | Health-check エンドポイント | 0.5h |
 | 中 | リクエスト ID (X-Request-Id) | 1h |
 | 中 | マジックナンバー 8000ms を定数化 (10箇所) | 1h |
@@ -61,13 +61,13 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | メトリクス | 値 |
 |---|---|
-| ソースコード行数 (server + src + public/js + mcp) | 18,476 |
-| テストコード行数 (unit + integration + smoke) | 16,662 |
-| テスト対ソース比率 | 90.2% |
-| ユニットテストファイル数 | 72 |
+| ソースコード行数 (server + src + public/js + mcp) | 18,832 |
+| テストコード行数 (unit + integration + smoke) | 17,397 |
+| テスト対ソース比率 | 92.4% |
+| ユニットテストファイル数 | 74 |
 | インテグレーションテストファイル数 | 3 |
 | Smoke テスト (Playwright) ファイル数 | 1 |
-| ソースモジュール数 (src/) | 57 |
+| ソースモジュール数 (src/) | 58 |
 | ポーラー数 (src/pollers/) | 11 |
 | ルートファイル数 (src/routes/) | 10 |
 | API エンドポイント数 | 52 |
@@ -151,12 +151,12 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | 1. プロジェクト構造 | 8/10 | ドメイン分割 (routes/pollers/core), レイヤー分離, 10 ルートファイル |
 | 2. エラー処理 | 9/10 | async/await 統一, 中央エラーハンドラ, graceful exit (SIGTERM/SIGINT) |
 | 3. コードスタイル | 10/10 | ESLint v10, const 優先 (var ゼロ), innerHTML 監査, 命名規約一貫 |
-| 4. テスト | 9/10 | 72 unit + 3 integration + Playwright smoke, AAA パターン, 分離初期化, 90.2% テスト比率 |
+| 4. テスト | 9/10 | unit 1,205件 + 3 integration + Playwright smoke 54件, V8 coverage CIゲート, AAA パターン |
 | 5. プロダクション | 7/10 | 構造化ログ, 脆弱性自動検出, LTS Node |
 | 6. セキュリティ | 9/10 | ASH, security headers, eval ゼロ, auth rate limit, zod (MCP) |
 
 **未対応の主要プラクティス:**
-- コードカバレッジ計測ツール (c8/nyc) なし
+- 実機integration 3本は機器と認証情報が必要なため公開CIでは未実行
 - Health-check エンドポイントなし
 - リクエスト/トランザクション ID なし
 - Docker / プロセスマネージャなし
@@ -169,8 +169,8 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | メトリクス | 値 | レーティング |
 |---|---|---|
-| コード行数 | 18,476 | - |
-| テスト対ソース比率 | 90.2% | Excellent (>80%) |
+| コード行数 | 18,832 | - |
+| テスト対ソース比率 | 92.4% | Excellent (>80%) |
 | 重複率 | < 2% | **A** (閾値: <=3%) |
 | 認知的複雑度 | 非常に低い | **A** (深いネスト: 7行のみ) |
 | 技術的負債比率 | 3.8% (~21h) | **A** (閾値: <=5%) |
@@ -178,7 +178,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | セキュリティホットスポット | 0 | **A** |
 | セキュリティレーティング | - | **A** |
 | 保守性 | 負債比率 3.8% | **A** |
-| カバレッジ (推定) | ~65-75% | **B** (計測ツールなし) |
+| カバレッジ (V8実測) | line 72.33%, branch 79.05%, function 69.01% | **B** (CI下限 70% / 75% / 65%) |
 
 **Quality Gate: ✅ PASSED**
 
@@ -186,7 +186,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | ファイル | 行数 | 判断密度/100行 |
 |---|---|---|
-| routes/auth.js | 431 | 27.6 |
+| routes/auth.js | 538 | 27.6 |
 | device-identify.js | 547 | 25.2 |
 | routes/connections.js | 300 | 24.3 |
 | threat-intel.js | 300 | 20.0 |
@@ -196,8 +196,8 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | 重要度 | 件数 | 例 |
 |---|---|---|
-| MAJOR | 3 | `history.js` 985行 (複数責務), `device-identify.js` 547行, `routes/auth.js` 431行 |
-| MINOR | 4 | `pollers/cisco.js` 628行, `pollers/yamaha.js` 587行, `devices.js` 651行, `server.js` 597行 |
+| MAJOR | 3 | `history.js` 985行 (複数責務), `device-identify.js` 547行, `routes/auth.js` 538行 |
+| MINOR | 4 | `pollers/cisco.js` 643行, `pollers/yamaha.js` 598行, `devices.js` 656行, `server.js` 596行 |
 | INFO | 7 | マジックナンバー `8000`ms x10箇所, DB initDb() ボイラープレート重複 (5ファイル) |
 
 ---
@@ -206,7 +206,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | 領域 | 改善内容 |
 |---|---|
-| テスト | ユニットテスト +18 ファイル, テスト比率 74.9%→90.2% |
+| テスト | ユニットテスト +20 ファイル, テスト比率 74.9%→92.4% |
 | セキュリティ | CSP `style-src-attr` 除去, requireAdmin 適用ルート +12 |
 | 機能 | MCP サーバー (zod 検証付き), Cisco ポーラー, ルーター管理 |
 | 依存管理 | zod 追加 (スキーマ検証基盤), express v5 移行 |

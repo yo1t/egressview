@@ -36,6 +36,34 @@ module.exports = function configRoutes(ctx) {
 
   const router = Router();
 
+  function restartDataSources() {
+    dnsmasqLog.stop();
+    dnsmasqLog.configure({
+      logFile: appState.dnsmasqLogFile,
+      enabled: appState.dnsmasqEnabled,
+      onDnsQuery: ({ domain, resolvedIp }) => {
+        if (resolvedIp) {
+          enrichment.getDnsCache().set(resolvedIp, {
+            host: domain, expires: Date.now() + 5 * 60 * 1000, source: 'dnsmasq',
+          });
+        }
+      },
+    });
+    if (appState.dnsmasqEnabled) dnsmasqLog.start();
+
+    inspectSyslog.stop();
+    inspectSyslog.configure({
+      logFile: appState.inspectLogFile,
+      enabled: appState.inspectEnabled,
+      onSession: runtime.handleInspectSession,
+    });
+    if (appState.inspectEnabled) inspectSyslog.start();
+
+    dhcpdSyslog.stop();
+    dhcpdSyslog.configure({ logFile: appState.dhcpdLogFile, enabled: appState.dhcpdEnabled });
+    if (appState.dhcpdEnabled) dhcpdSyslog.start();
+  }
+
   // ── GET /api/status ────────────────────────────────────────────────────────
   router.get('/status', requireAdmin, (req, res) => {
     res.json({
@@ -47,7 +75,13 @@ module.exports = function configRoutes(ctx) {
 
   // ── POST /api/config/general ───────────────────────────────────────────────
   router.post('/config/general', requireAdmin, (req, res) => {
-    const { homeCountry: hc, language: lang, autoInvestigate: ai, retentionDays: rd } = req.body;
+    const { homeCountry: hc, language: lang, autoInvestigate: ai, retentionDays: rd } = req.body || {};
+    const previous = {
+      homeCountry: appState.homeCountry,
+      uiLanguage: appState.uiLanguage,
+      autoInvestigate: appState.autoInvestigate,
+      retentionDays: appState.retentionDays,
+    };
 
     if (hc) {
       if (!ALLOWED_COUNTRIES.has(hc)) return res.status(400).json({ error: t('config.invalid-country') });
@@ -69,7 +103,16 @@ module.exports = function configRoutes(ctx) {
       logger.info(`[config] Retention set to ${appState.retentionDays} days`);
     }
 
-    saveConfig();
+    try {
+      saveConfig();
+    } catch (err) {
+      Object.assign(appState, previous);
+      notifier.configure({ language: previous.uiLanguage });
+      setLanguage(previous.uiLanguage);
+      history.setRetentionDays(previous.retentionDays);
+      logger.error('[config] General settings save failed:', err.message);
+      return res.status(500).json({ error: 'Settings were not saved. Check server logs.' });
+    }
     res.json({
       success: true,
       homeCountry:     appState.homeCountry,
@@ -91,49 +134,44 @@ module.exports = function configRoutes(ctx) {
   // ── POST /api/config/datasources ───────────────────────────────────────────
   router.post('/config/datasources', requireAdmin, (req, res) => {
     const { dnsmasq, inspect, dhcpd } = req.body || {};
+    const previous = {
+      dnsmasqEnabled: appState.dnsmasqEnabled,
+      dnsmasqLogFile: appState.dnsmasqLogFile,
+      inspectEnabled: appState.inspectEnabled,
+      inspectLogFile: appState.inspectLogFile,
+      dhcpdEnabled: appState.dhcpdEnabled,
+      dhcpdLogFile: appState.dhcpdLogFile,
+    };
 
     if (dnsmasq) {
       if (typeof dnsmasq.enabled  === 'boolean') appState.dnsmasqEnabled = dnsmasq.enabled;
       if (isValidLogPath(dnsmasq.logFile)) appState.dnsmasqLogFile = dnsmasq.logFile.trim();
       else if (dnsmasq.logFile !== undefined) logger.warn(`[config] dnsmasq logFile rejected (not under an allowed log directory): ${dnsmasq.logFile}`);
-      dnsmasqLog.stop();
-      dnsmasqLog.configure({
-        logFile: appState.dnsmasqLogFile,
-        enabled: appState.dnsmasqEnabled,
-        onDnsQuery: ({ domain, resolvedIp }) => {
-          if (resolvedIp) {
-            enrichment.getDnsCache().set(resolvedIp, {
-              host: domain, expires: Date.now() + 5 * 60 * 1000, source: 'dnsmasq',
-            });
-          }
-        },
-      });
-      if (appState.dnsmasqEnabled) dnsmasqLog.start();
     }
 
     if (inspect) {
       if (typeof inspect.enabled === 'boolean') appState.inspectEnabled = inspect.enabled;
       if (isValidLogPath(inspect.logFile)) appState.inspectLogFile = inspect.logFile.trim();
       else if (inspect.logFile !== undefined) logger.warn(`[config] inspect logFile rejected (not under an allowed log directory): ${inspect.logFile}`);
-      inspectSyslog.stop();
-      inspectSyslog.configure({
-        logFile:   appState.inspectLogFile,
-        enabled:   appState.inspectEnabled,
-        onSession: runtime.handleInspectSession,
-      });
-      if (appState.inspectEnabled) inspectSyslog.start();
     }
 
     if (dhcpd) {
       if (typeof dhcpd.enabled === 'boolean') appState.dhcpdEnabled = dhcpd.enabled;
       if (isValidLogPath(dhcpd.logFile)) appState.dhcpdLogFile = dhcpd.logFile.trim();
       else if (dhcpd.logFile !== undefined) logger.warn(`[config] dhcpd logFile rejected (not under an allowed log directory): ${dhcpd.logFile}`);
-      dhcpdSyslog.stop();
-      dhcpdSyslog.configure({ logFile: appState.dhcpdLogFile, enabled: appState.dhcpdEnabled });
-      if (appState.dhcpdEnabled) dhcpdSyslog.start();
     }
 
-    saveConfig();
+    try {
+      restartDataSources();
+      saveConfig();
+    } catch (err) {
+      Object.assign(appState, previous);
+      try { restartDataSources(); } catch (rollbackErr) {
+        logger.error('[config] Data source rollback failed:', rollbackErr.message);
+      }
+      logger.error('[config] Data source settings save failed:', err.message);
+      return res.status(500).json({ error: 'Settings were not saved. Check server logs.' });
+    }
     res.json({
       success: true,
       dnsmasq: { enabled: appState.dnsmasqEnabled, logFile: appState.dnsmasqLogFile },

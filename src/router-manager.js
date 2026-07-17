@@ -21,15 +21,21 @@ function createRouterManager({
     io?.emit('routers-status', list());
   }
 
-  async function runCycle(entry) {
+  async function runCycle(entry, { signal } = {}) {
+    signal?.throwIfAborted();
     const { adapter, id, kind } = entry;
     if (!adapter.isEnabled() || !adapter.isReady()) throw new Error('router not connected');
-    const sessions = await adapter.fetchSessions();
+    const sessions = await adapter.fetchSessions({ signal });
+    signal?.throwIfAborted();
     enrichmentQueue?.queueConnectionEnrichment([...new Set(sessions.map(s => s.dst))]);
     const now = Date.now();
-    if (adapter.needsArpRefresh()) await adapter.refreshArp();
+    if (adapter.needsArpRefresh()) {
+      await adapter.refreshArp({ signal });
+      signal?.throwIfAborted();
+    }
     if (adapter.needsNdpRefresh()) {
-      await adapter.refreshNdp();
+      await adapter.refreshNdp({ signal });
+      signal?.throwIfAborted();
       for (const [ip, mac] of adapter.getArpCache()) {
         const ipv6 = adapter.getNdpByMac(mac);
         if (ipv6?.length) devices?.observeDevice({ ip, mac, ipv6Addr: ipv6[0], lastSeen: now, source: `ndp:${id}` });
@@ -38,6 +44,7 @@ function createRouterManager({
 
     const updated = new Map();
     for (const session of sessions) {
+      signal?.throwIfAborted();
       const result = runtime.recordConnection(session, now, kind, id);
       updated.set(result.key, result.entry);
     }
@@ -56,6 +63,7 @@ function createRouterManager({
         }
       }
     }
+    signal?.throwIfAborted();
     previousKeys.set(id, currentKeys);
     history.pruneHistory();
     if (updated.size) io?.emit('connections-update', {
@@ -114,6 +122,7 @@ function createRouterManager({
         catch (err) {
           current.hostFp = previousHostFp;
           statuses.set(record.id, { ...statuses.get(record.id), lastError: err.message });
+          throw err;
         }
       },
     });

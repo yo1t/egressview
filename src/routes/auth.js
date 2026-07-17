@@ -13,7 +13,6 @@ const { t } = require('../i18n-server');
  *   requireAdmin, getAdminToken: () => string,
  *   asus, yamaha,
  *   saveConfig: () => void,
- *   persistSecret: (section: string, updates: object) => void,
  *   configFile: string,
  *   loadConfig: () => object,
  *   DEFAULT_ROUTER_IP: string, POLL_INTERVAL: number,
@@ -24,7 +23,7 @@ module.exports = function authRoutes(ctx) {
   const {
     requireAdmin, getAdminToken,
     asus, yamaha, cisco,
-    saveConfig, persistSecret, loadConfig,
+    saveConfig, loadConfig,
     DEFAULT_ROUTER_IP, POLL_INTERVAL,
     setLatestConnections,
     appState, io,
@@ -33,6 +32,38 @@ module.exports = function authRoutes(ctx) {
   } = ctx;
 
   const router = Router();
+
+  function restoreYamaha(previous) {
+    yamaha.disconnect();
+    yamaha.configure(previous);
+    if (previous.enabled) {
+      yamaha.reconnect();
+      startYamahaPolling?.();
+    }
+  }
+
+  function restoreCisco(previous) {
+    cisco.disconnect();
+    cisco.configure(previous);
+    if (previous.enabled) {
+      cisco.reconnect();
+      startCiscoPolling?.();
+    }
+  }
+
+  async function restoreAsus(previous) {
+    asus.disable();
+    asus.configure?.({
+      routerIp: previous.ip,
+      user: previous.user,
+      pass: previous.pass,
+      enabled: previous.enabled,
+    });
+    if (previous.enabled && previous.user && previous.pass) {
+      await asus.login(previous.ip, previous.user, previous.pass);
+      asus.startPolling(POLL_INTERVAL);
+    }
+  }
 
   // ── Brute-force guard for /auth/login ─────────────────────────────────────
   // Tracks failed attempts per IP: { count, lockedUntil }
@@ -156,10 +187,21 @@ module.exports = function authRoutes(ctx) {
       return setTimeout(() => { if (!res.headersSent) res.status(401).json({ error: t('auth.current-wrong') }); }, 500);
     }
     clearPasswordFails(clientIp);
+    const previousAuth = {
+      salt: appState.authPasswordSalt,
+      hash: appState.authPasswordHash,
+    };
     const { salt, hash } = authPassword.hashPassword(newPassword);
     appState.authPasswordSalt = salt;
     appState.authPasswordHash = hash;
-    saveConfig();
+    try {
+      saveConfig();
+    } catch (err) {
+      appState.authPasswordSalt = previousAuth.salt;
+      appState.authPasswordHash = previousAuth.hash;
+      logger.error('[auth] Password save failed:', err.message);
+      return res.status(500).json({ error: 'Password was not saved. Check server logs.' });
+    }
     let revoked = 0;
     if (revokeOtherSessions === true) {
       revoked = sessions.revokeAll(req.session ? req.session.id : null);
@@ -189,8 +231,15 @@ module.exports = function authRoutes(ctx) {
     }
     clearPasswordFails(clientIp);
     const newToken = crypto.randomBytes(24).toString('hex');
+    const previousToken = appState.adminToken;
     appState.adminToken = newToken;
-    saveConfig();
+    try {
+      saveConfig();
+    } catch (err) {
+      appState.adminToken = previousToken;
+      logger.error('[auth] Admin token save failed:', err.message);
+      return res.status(500).json({ error: 'Admin token was not saved. Check server logs.' });
+    }
     logger.warn('[auth] Admin token regenerated; all clients must re-authenticate');
     res.json({ success: true, token: newToken });
     // After the response: drop every socket so stale legacy tokens stop working now
@@ -337,27 +386,53 @@ module.exports = function authRoutes(ctx) {
       const storedPass = cfg.asus?.pass || '';
       const finalPass = password || storedPass;
       if (!username || !finalPass) return res.status(400).json({ error: t('auth.asus-no-config') });
+      const previous = {
+        enabled: asus.isEnabled?.() ?? false,
+        ip: asus.getRouterIp(),
+        user: asus.getUser(),
+        pass: storedPass,
+      };
       try {
         const targetIp = ip || DEFAULT_ROUTER_IP;
         await asus.login(targetIp, username, finalPass);
         asus.startPolling(POLL_INTERVAL);
-        saveConfig();
-        persistSecret('asus', { ip: targetIp, user: username, pass: finalPass });
+        try {
+          saveConfig({ asus: { ip: targetIp, user: username, pass: finalPass } });
+        } catch (saveErr) {
+          try { await restoreAsus(previous); } catch (rollbackErr) {
+            logger.error('[auth] ASUS runtime rollback failed:', rollbackErr.message);
+          }
+          logger.error('[auth] ASUS config save failed:', saveErr.message);
+          return res.status(500).json({ success: false, error: 'Settings were not saved. Check server logs.' });
+        }
         logger.info(`[auth] ASUS logged in as ${username} @ ${targetIp}`);
       } catch (err) {
         logger.error('[auth] ASUS login failed:', err.message);
         return res.status(401).json({ error: t('auth.asus-auth-failed') });
       }
     } else if (doAsus === false) {
+      try {
+        saveConfig({ asus: { enabled: false } });
+      } catch (err) {
+        logger.error('[auth] ASUS disable save failed:', err.message);
+        return res.status(500).json({ success: false, error: 'Settings were not saved. Check server logs.' });
+      }
       asus.disable();
-      saveConfig();
       logger.info('[auth] ASUS disabled');
     }
 
     // ── Yamaha ──
     if (doYamaha === true) {
+      const storedYamaha = cfg.yamaha || {};
+      const previous = {
+        enabled: yamaha.isEnabled?.() ?? false,
+        ip: yamaha.getIp(),
+        user: yamaha.getUser(),
+        pass: storedYamaha.pass || '',
+        hostFp: yamaha.getHostFp(),
+        natDescriptor: yamaha.getNat(),
+      };
       try {
-        const storedYamaha = cfg.yamaha;
         const finalYamahaIp = yIp || yamaha.getIp() || storedYamaha?.ip || '';
         const finalYamahaUser = yUser || yamaha.getUser() || storedYamaha?.user || '';
         const hasYamahaPass = !!yPass || yamaha.hasPass() || !!(storedYamaha?.pass);
@@ -367,29 +442,49 @@ module.exports = function authRoutes(ctx) {
 
         yamaha.configure({ enabled: true, ip: finalYamahaIp, user: finalYamahaUser, natDescriptor: yNat || undefined });
         if (yPass) {
-          persistSecret('yamaha', { ip: finalYamahaIp, user: finalYamahaUser, pass: yPass, nat: yNat || '100', enabled: true });
           yamaha.configure({ pass: yPass });
         }
         yamaha.reconnect();
         // No poll loop exists if it was disabled at startup, so always start it here
         startYamahaPolling?.();
-        saveConfig();
+        try {
+          saveConfig(yPass ? {
+            yamaha: { ip: finalYamahaIp, user: finalYamahaUser, pass: yPass, nat: yNat || '100', enabled: true },
+          } : {});
+        } catch (saveErr) {
+          restoreYamaha(previous);
+          logger.error('[auth] Yamaha config save failed:', saveErr.message);
+          return res.status(500).json({ success: false, error: 'Settings were not saved. Check server logs.' });
+        }
         logger.info(`[auth] Yamaha config updated: ${yamaha.getIp()}`);
       } catch (err) {
         logger.error('[auth] Yamaha config failed:', err.message);
         return res.status(502).json({ success: false, error: t('auth.yamaha-update-failed') });
       }
     } else if (doYamaha === false) {
+      try {
+        saveConfig({ yamaha: { enabled: false } });
+      } catch (err) {
+        logger.error('[auth] Yamaha disable save failed:', err.message);
+        return res.status(500).json({ success: false, error: 'Settings were not saved. Check server logs.' });
+      }
       yamaha.disconnect();
       setLatestConnections([]);
-      saveConfig();
       logger.info('[auth] Yamaha disabled');
     }
 
     // ── Cisco ──
     if (doCisco === true) {
+      const storedCisco = cfg.cisco || {};
+      const previous = {
+        enabled: cisco.isEnabled?.() ?? false,
+        ip: cisco.getIp(),
+        user: cisco.getUser(),
+        pass: storedCisco.pass || '',
+        enablePass: storedCisco.enablePass || '',
+        hostFp: cisco.getHostFp(),
+      };
       try {
-        const storedCisco = cfg.cisco;
         const finalCiscoIp   = cIp   || cisco.getIp()   || storedCisco?.ip   || '';
         const finalCiscoUser = cUser || cisco.getUser() || storedCisco?.user || '';
         const hasCiscoPass   = !!cPass || cisco.hasPass() || !!(storedCisco?.pass);
@@ -399,28 +494,40 @@ module.exports = function authRoutes(ctx) {
         cisco.configure({ enabled: true, ip: finalCiscoIp, user: finalCiscoUser });
         if (typeof cEnablePass === 'string') cisco.configure({ enablePass: cEnablePass });
         if (cPass) {
-          persistSecret('cisco', {
-            ip: finalCiscoIp, user: finalCiscoUser, pass: cPass,
-            enablePass: cEnablePass ?? storedCisco?.enablePass ?? '',
-            enabled: true,
-          });
           cisco.configure({ pass: cPass });
-        } else if (typeof cEnablePass === 'string') {
-          // Persist enablePass on its own even when cPass was omitted
-          persistSecret('cisco', { enablePass: cEnablePass });
         }
         cisco.reconnect();
         // No poll loop exists if it was disabled at startup, so always start it here
         startCiscoPolling?.();
-        saveConfig();
+        const ciscoOverrides = {};
+        if (cPass) {
+          Object.assign(ciscoOverrides, {
+            ip: finalCiscoIp, user: finalCiscoUser, pass: cPass,
+            enablePass: cEnablePass ?? storedCisco?.enablePass ?? '', enabled: true,
+          });
+        } else if (typeof cEnablePass === 'string') {
+          ciscoOverrides.enablePass = cEnablePass;
+        }
+        try {
+          saveConfig(Object.keys(ciscoOverrides).length ? { cisco: ciscoOverrides } : {});
+        } catch (saveErr) {
+          restoreCisco(previous);
+          logger.error('[auth] Cisco config save failed:', saveErr.message);
+          return res.status(500).json({ success: false, error: 'Settings were not saved. Check server logs.' });
+        }
         logger.info(`[auth] Cisco config updated: ${cisco.getIp()}`);
       } catch (err) {
         logger.error('[auth] Cisco config failed:', err.message);
         return res.status(502).json({ success: false, error: t('cisco.init-failed') + err.message });
       }
     } else if (doCisco === false) {
+      try {
+        saveConfig({ cisco: { enabled: false } });
+      } catch (err) {
+        logger.error('[auth] Cisco disable save failed:', err.message);
+        return res.status(500).json({ success: false, error: 'Settings were not saved. Check server logs.' });
+      }
       cisco.disconnect();
-      saveConfig();
       logger.info('[auth] Cisco disabled');
     }
 

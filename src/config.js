@@ -59,8 +59,14 @@ function loadFileSafe(file = DEFAULT_CONFIG_FILE) {
  */
 function saveFile(data, file = DEFAULT_CONFIG_FILE) {
   const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, file);
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+    fs.chmodSync(tmp, 0o600);
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch {}
+    throw err;
+  }
 }
 
 /**
@@ -78,6 +84,7 @@ function persistSecret(section, updates, file = DEFAULT_CONFIG_FILE) {
     saveFile(cfg, file);
   } catch (e) {
     logger.error('[config] persistSecret failed:', e.message);
+    throw e;
   }
 }
 

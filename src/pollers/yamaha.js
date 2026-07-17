@@ -10,6 +10,7 @@ const { t } = require('../i18n-server');
 
 const crypto = require('crypto');
 const { Client: SshClient } = require('ssh2');
+const { abortError, attachAbortHandler } = require('./abort-signal');
 
 // ── Parsers (pure, shared by all instances) ───────────────────────────────────
 
@@ -320,6 +321,7 @@ function createYamahaPoller({ id = '' } = {}) {
 
   function clearShellWaiter() {
     if (shellWaiter?.timer) clearTimeout(shellWaiter.timer);
+    shellWaiter?.removeAbort?.();
     shellWaiter = null;
   }
 
@@ -329,24 +331,25 @@ function createYamahaPoller({ id = '' } = {}) {
     if (waiter) waiter.reject(err);
   }
 
-  function waitForPrompt(timeoutMs = 45000) {
+  function waitForPrompt(timeoutMs = 45000, { signal } = {}) {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) { reject(abortError(signal, 'Yamaha command aborted')); return; }
       if (looksLikeShellPrompt(shellBuf)) { resolve(shellBuf); return; }
       clearShellWaiter();
-      const timer = setTimeout(() => {
-        shellWaiter = null;
-        reject(new Error('SSH timeout'));
-      }, timeoutMs);
-      shellWaiter = { resolve, reject, timer };
+      const timer = setTimeout(() => rejectShellWaiter(new Error('SSH timeout')), timeoutMs);
+      shellWaiter = { resolve, reject, timer, removeAbort: () => {} };
+      const removeAbort = attachAbortHandler(signal, rejectShellWaiter, 'Yamaha command aborted');
+      if (shellWaiter) shellWaiter.removeAbort = removeAbort;
     });
   }
 
-  async function yamahaExec(cmd, timeoutMs = 45000) {
+  async function yamahaExec(cmd, timeoutMs = 45000, { signal } = {}) {
     const run = async () => {
+      if (signal?.aborted) throw abortError(signal, 'Yamaha command aborted');
       if (!yamahaReady || !yamahaShell) throw new Error('Yamaha not connected');
       shellBuf = '';
       yamahaShell.write(cmd + '\n');
-      await waitForPrompt(timeoutMs);
+      await waitForPrompt(timeoutMs, { signal });
       return shellBuf;
     };
     const result = execChain.then(run, run);
@@ -453,8 +456,14 @@ function createYamahaPoller({ id = '' } = {}) {
         ? hashedKey.toString('hex')
         : crypto.createHash('sha256').update(hashedKey).digest('hex');
       if (!yamahaHostFp) {
+        const previousFp = yamahaHostFp;
         yamahaHostFp = fp;
-        onSaveConfig();
+        try { onSaveConfig(); }
+        catch (err) {
+          yamahaHostFp = previousFp;
+          logger.error(`${TAG} Host key persistence failed:`, err.message);
+          return false;
+        }
         logger.info(`${TAG} Host key recorded (TOFU):`, fp.substring(0, 16) + '...');
         return true;
       }
@@ -481,10 +490,10 @@ function createYamahaPoller({ id = '' } = {}) {
     });
   }
 
-  async function refreshYamahaArp() {
+  async function refreshYamahaArp({ signal } = {}) {
     if (!yamahaEnabled || !yamahaReady) return;
     try {
-      const raw = await yamahaExec('show arp');
+      const raw = await yamahaExec('show arp', 45000, { signal });
       const re = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})/g;
       const newMap = new Map();
       let m;
@@ -497,18 +506,19 @@ function createYamahaPoller({ id = '' } = {}) {
       logger.info(`${TAG_ARP} cache refreshed: ${newMap.size} entries`);
     } catch (e) {
       logger.error(`${TAG_ARP} refresh failed:`, e.message);
+      if (signal?.aborted) throw e;
     }
   }
 
-  async function fetchNatSessions() {
-    const raw = await yamahaExec(`show nat descriptor address ${natDescriptor} detail`, 90000);
+  async function fetchNatSessions({ signal } = {}) {
+    const raw = await yamahaExec(`show nat descriptor address ${natDescriptor} detail`, 90000, { signal });
     return parseNatDetail(raw);
   }
 
-  async function refreshYamahaNdp() {
+  async function refreshYamahaNdp({ signal } = {}) {
     if (!yamahaEnabled || !yamahaReady) return;
     try {
-      const raw = await yamahaExec('show ipv6 neighbor cache');
+      const raw = await yamahaExec('show ipv6 neighbor cache', 45000, { signal });
       const newMap = new Map();
       // Parse lines like: "2001:db8:0:ed00:5de6:a5c8:44fb:a1e5    aa:bb:cc:dd:ee:ff LAN1  REACHABLE"
       const re = /([0-9a-fA-F:]{6,45})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\s+LAN1\s+\w+/g;
@@ -527,6 +537,7 @@ function createYamahaPoller({ id = '' } = {}) {
       logger.info(`${TAG_NDP} cache refreshed: ${newMap.size} entries`);
     } catch (e) {
       logger.error(`${TAG_NDP} refresh failed:`, e.message);
+      if (signal?.aborted) throw e;
     }
   }
 
