@@ -4,6 +4,8 @@
 const zlib = require('zlib');
 const { Router } = require('express');
 const { parseTimestamp } = require('../utils');
+const { streamConnectionExport } = require('../connection-export');
+const logger = require('../logger');
 
 // Send helper for large JSON payloads (full graph fetch: up to 50k rows, 20MB+).
 // The compression middleware's streaming gzip splits the response across many
@@ -229,6 +231,32 @@ function connectionsRoutes(ctx) {
       else                                  danger += cnt;
     }
     res.json({ safe, warn, danger, serverTime: Date.now() });
+  });
+
+  router.get('/connections/export', requireAdmin, async (req, res) => {
+    const format = String(req.query.format || '').toLowerCase();
+    if (!['csv', 'json'].includes(format)) {
+      return res.status(400).json({ error: 'format must be "csv" or "json"' });
+    }
+    const { ts: from, err: fromError } = parseTimestampParam(req.query.from, 'from', res);
+    if (fromError) return;
+    if (from == null) return res.status(400).json({ error: '"from" timestamp is required' });
+    const { ts: requestedTo, err: toError } = parseTimestampParam(req.query.to, 'to', res);
+    if (toError) return;
+    const to = requestedTo ?? Date.now();
+    if (to < from) return res.status(400).json({ error: '"to" timestamp must not precede "from"' });
+
+    let exportReader;
+    try {
+      exportReader = history.createConnectionExportReader?.(from, to) || history;
+      await streamConnectionExport({ res, history: exportReader, threatIntel, from, to, format });
+    } catch (err) {
+      logger.error('[connections] Export failed:', err.message);
+      if (!res.headersSent) return res.status(500).json({ error: 'Connection export failed' });
+      if (!res.destroyed) res.destroy(err);
+    } finally {
+      exportReader?.close?.();
+    }
   });
 
   router.get('/connections', requireAdmin, (req, res) => {

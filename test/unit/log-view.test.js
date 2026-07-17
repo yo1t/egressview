@@ -97,7 +97,7 @@ class FakeElement {
   }
 }
 
-function makeHarness({ rows = [], apiFetch = null } = {}) {
+function makeHarness({ rows = [], apiFetch = null, timeRange = { from: null, to: null } } = {}) {
   const ids = new Map();
   const register = (id, el) => ids.set(id, el);
   const ensureEl = id => {
@@ -111,10 +111,11 @@ function makeHarness({ rows = [], apiFetch = null } = {}) {
     'log-device-filter', 'log-search-popup', 'log-search-input',
     'log-search-mode', 'log-search-date-range', 'log-search-popup-title',
     'log-search-from', 'log-search-to', 'log-search-apply',
-    'log-search-clear', 'log-search-close',
+    'log-search-clear', 'log-search-close', 'log-export-btn', 'log-export-format',
   ].forEach(ensureEl);
 
   ensureEl('log-search-mode').value = 'contains';
+  ensureEl('log-export-format').value = 'csv';
 
   const headers = ['lastSeen', 'dst', 'app', 'threatTag'].map(col => {
     const th = new FakeElement(`th-${col}`, { col }, 'th', register);
@@ -158,7 +159,7 @@ function makeHarness({ rows = [], apiFetch = null } = {}) {
     selectedMac: null,
     serverTimeOffset: 0,
     setServerTimeOffset() {},
-    getTimeRange: () => ({ from: null, to: null }),
+    getTimeRange: () => timeRange,
     apiFetch: apiFetch || (async url => {
       urls.push(String(url));
       return {
@@ -169,6 +170,7 @@ function makeHarness({ rows = [], apiFetch = null } = {}) {
     setFetching() {},
     updateSideHighlight() {},
     clearSelection() { context.selectedMac = null; context.selectedIp = null; },
+    showToast() {},
     t: key => key,
     tVars: (_key, vars) => vars.value || '',
     guessApp: (dport, proto, host) => {
@@ -193,6 +195,22 @@ function makeHarness({ rows = [], apiFetch = null } = {}) {
 }
 
 describe('Connection Log view behavior', () => {
+  it('builds an authenticated export URL from the selected period without credentials', () => {
+    const h = makeHarness({ timeRange: { from: 1000, to: 2000 } });
+    const url = h.context.buildConnectionExportUrl('json');
+    const parsed = new URL(url, 'http://local');
+    assert.equal(parsed.pathname, '/api/connections/export');
+    assert.equal(parsed.searchParams.get('format'), 'json');
+    assert.equal(parsed.searchParams.get('from'), '1000');
+    assert.equal(parsed.searchParams.get('to'), '2000');
+    assert.equal(parsed.searchParams.has('token'), false);
+  });
+
+  it('rejects export when the selected period has no lower bound', () => {
+    const h = makeHarness();
+    assert.throws(() => h.context.buildConnectionExportUrl('csv'), /log\.export\.period-required/);
+  });
+
   it('uses paged API calls by default', async () => {
     const h = makeHarness();
     h.context.updateLogView();

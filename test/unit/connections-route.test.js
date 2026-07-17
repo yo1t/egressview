@@ -232,6 +232,43 @@ describe('connections route: GET /connections pagination', () => {
   });
 });
 
+describe('connections route: GET /connections/export validation', () => {
+  async function callExport(query) {
+    const connectionsRoutes = require('../../src/routes/connections');
+    const router = connectionsRoutes({
+      requireAdmin: (_req, _res, next) => next(),
+      history: {},
+    });
+    const layer = router.stack.find(item => item.route?.path === '/connections/export');
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const res = { _status: 200, _body: null };
+    res.status = code => { res._status = code; return res; };
+    res.json = body => { res._body = body; return res; };
+    await handler({ query }, res);
+    return res;
+  }
+
+  it('requires an explicitly supported format', async () => {
+    const missing = await callExport({ from: '1' });
+    const unsupported = await callExport({ format: 'xml', from: '1' });
+    assert.equal(missing._status, 400);
+    assert.equal(unsupported._status, 400);
+  });
+
+  it('requires a valid lower time bound', async () => {
+    const missing = await callExport({ format: 'csv' });
+    const invalid = await callExport({ format: 'json', from: 'yesterday' });
+    assert.equal(missing._status, 400);
+    assert.equal(invalid._status, 400);
+  });
+
+  it('rejects a time range whose end precedes its start', async () => {
+    const res = await callExport({ format: 'csv', from: '200', to: '100' });
+    assert.equal(res._status, 400);
+    assert.match(res._body.error, /must not precede/);
+  });
+});
+
 // ─── Summary route handler ────────────────────────────────────────────────────
 
 describe('connections route: GET /connections/summary', () => {
