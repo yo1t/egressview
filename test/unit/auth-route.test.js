@@ -200,7 +200,7 @@ describe('auth route: persistence failures', () => {
   });
 
   it('rolls back password state and returns 500 when saving fails', async () => {
-    const appState = { authPasswordSalt: 'old-salt', authPasswordHash: 'old-hash' };
+    const appState = { authPasswordSalt: 'old-salt', authPasswordHash: 'old-hash' }; // pragma: allowlist secret
     const app = makeApp({
       appState,
       authPassword: {
@@ -212,8 +212,8 @@ describe('auth route: persistence failures', () => {
     });
 
     const { status, body } = await request(app, 'POST', '/api/auth/change-password', {
-      currentPassword: 'old-password',
-      newPassword: 'new-password',
+      currentPassword: 'old-password', // pragma: allowlist secret
+      newPassword: 'new-password', // pragma: allowlist secret
     });
 
     assert.equal(status, 500);
@@ -223,7 +223,7 @@ describe('auth route: persistence failures', () => {
   });
 
   it('rolls back the admin token and returns 500 when saving fails', async () => {
-    const appState = { adminToken: 'old-token', authPasswordSalt: 'salt', authPasswordHash: 'hash' };
+    const appState = { adminToken: 'old-token', authPasswordSalt: 'salt', authPasswordHash: 'hash' }; // pragma: allowlist secret
     const app = makeApp({
       appState,
       authPassword: { verifyPassword: () => true },
@@ -231,7 +231,7 @@ describe('auth route: persistence failures', () => {
     });
 
     const { status, body } = await request(app, 'POST', '/api/admin/regenerate-token', {
-      currentPassword: 'password',
+      currentPassword: 'password', // pragma: allowlist secret
     });
 
     assert.equal(status, 500);
