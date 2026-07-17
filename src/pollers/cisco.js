@@ -19,6 +19,7 @@ const {
   isPrivilegeError,
   runEnableHandshake,
 } = require('./cisco-session');
+const { abortError, attachAbortHandler } = require('./abort-signal');
 
 // ── Parsers (pure, shared by all instances) ───────────────────────────────────
 
@@ -179,7 +180,12 @@ function buildSshConnectOpts(ip, user, pass, expectedHostFp, onFpSave, logTag) {
         ? hashedKey.toString('hex')
         : crypto.createHash('sha256').update(hashedKey).digest('hex');
       if (!expectedHostFp) {
-        if (onFpSave) onFpSave(fp);
+        try {
+          if (onFpSave) onFpSave(fp);
+        } catch (err) {
+          logger.error(`${logTag} Host key persistence failed:`, err.message);
+          return false;
+        }
         return true;
       }
       if (fp !== expectedHostFp) {
@@ -363,6 +369,7 @@ function createCiscoPoller({ id = '' } = {}) {
 
   function clearShellWaiter() {
     if (shellWaiter?.timer) clearTimeout(shellWaiter.timer);
+    shellWaiter?.removeAbort?.();
     shellWaiter = null;
   }
   function rejectShellWaiter(err) {
@@ -370,21 +377,25 @@ function createCiscoPoller({ id = '' } = {}) {
     if (w) w.reject(err);
   }
 
-  function waitForPrompt(timeoutMs = 45000, matcher = looksLikeShellPrompt) {
+  function waitForPrompt(timeoutMs = 45000, matcher = looksLikeShellPrompt, { signal } = {}) {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) { reject(abortError(signal, 'Cisco command aborted')); return; }
       if (matcher(shellBuf)) { resolve(shellBuf); return; }
       clearShellWaiter();
-      const timer = setTimeout(() => { shellWaiter = null; reject(new Error('SSH timeout')); }, timeoutMs);
-      shellWaiter = { resolve, reject, timer, matcher };
+      const timer = setTimeout(() => rejectShellWaiter(new Error('SSH timeout')), timeoutMs);
+      shellWaiter = { resolve, reject, timer, matcher, removeAbort: () => {} };
+      const removeAbort = attachAbortHandler(signal, rejectShellWaiter, 'Cisco command aborted');
+      if (shellWaiter) shellWaiter.removeAbort = removeAbort;
     });
   }
 
-  async function ciscoExec(cmd, timeoutMs = 45000) {
+  async function ciscoExec(cmd, timeoutMs = 45000, { signal } = {}) {
     const run = async () => {
+      if (signal?.aborted) throw abortError(signal, 'Cisco command aborted');
       if (!ciscoReady || !ciscoShell) throw new Error('Cisco not connected');
       shellBuf = '';
       ciscoShell.write(cmd + '\n');
-      await waitForPrompt(timeoutMs);
+      await waitForPrompt(timeoutMs, looksLikeShellPrompt, { signal });
       return shellBuf;
     };
     const result = execChain.then(run, run);
@@ -482,26 +493,28 @@ function createCiscoPoller({ id = '' } = {}) {
     });
 
     conn.connect(buildSshConnectOpts(ciscoIp, ciscoUser, ciscoPass, ciscoHostFp, fp => {
+      const previousFp = ciscoHostFp;
       ciscoHostFp = fp;
-      onSaveConfig();
+      try { onSaveConfig(); }
+      catch (err) { ciscoHostFp = previousFp; throw err; }
       logger.info(`${TAG} Host key recorded (TOFU):`, fp.substring(0, 16) + '...');
     }, TAG));
   }
 
   // ── Public operations ───────────────────────────────────────────────────────
 
-  async function fetchNatSessions() {
+  async function fetchNatSessions({ signal } = {}) {
     // Prefer verbose output: its per-entry "create"/"left" ages give an accurate
     // firstSeen and remaining TTL instead of protocol-default guesses. Older IOS
     // that rejects the verbose keyword answers "% Invalid input", which is the
     // same marker as a privilege error — retry plain to tell the two apart.
     if (ciscoVerboseSupported) {
-      const raw = await ciscoExec('show ip nat translations verbose', 90000);
+      const raw = await ciscoExec('show ip nat translations verbose', 90000, { signal });
       if (!isPrivilegeError(raw)) return parseNatTranslations(raw);
       ciscoVerboseSupported = false;
       logger.info(`${TAG} verbose NAT output unavailable — falling back to plain output`);
     }
-    const raw = await ciscoExec('show ip nat translations', 90000);
+    const raw = await ciscoExec('show ip nat translations', 90000, { signal });
     // Staying in user mode returns a privilege error indistinguishable from zero
     // sessions, so raise an explicit error instead
     if (isPrivilegeError(raw)) {
@@ -510,10 +523,10 @@ function createCiscoPoller({ id = '' } = {}) {
     return parseNatTranslations(raw);
   }
 
-  async function refreshCiscoArp() {
+  async function refreshCiscoArp({ signal } = {}) {
     if (!ciscoEnabled || !ciscoReady) return;
     try {
-      const raw = await ciscoExec('show arp');
+      const raw = await ciscoExec('show arp', 45000, { signal });
       const newMap = parseArp(raw);
       ciscoArpCache.clear();
       for (const [k, v] of newMap) ciscoArpCache.set(k, v);
@@ -521,13 +534,14 @@ function createCiscoPoller({ id = '' } = {}) {
       logger.info(`${TAG_ARP} cache refreshed: ${newMap.size} entries`);
     } catch (e) {
       logger.error(`${TAG_ARP} refresh failed:`, e.message);
+      if (signal?.aborted) throw e;
     }
   }
 
-  async function refreshCiscoNdp() {
+  async function refreshCiscoNdp({ signal } = {}) {
     if (!ciscoEnabled || !ciscoReady) return;
     try {
-      const raw = await ciscoExec('show ipv6 neighbors');
+      const raw = await ciscoExec('show ipv6 neighbors', 45000, { signal });
       const newMap = parseNdpNeighbors(raw);
       ciscoNdpCache.clear();
       for (const [k, v] of newMap) ciscoNdpCache.set(k, v);
@@ -535,6 +549,7 @@ function createCiscoPoller({ id = '' } = {}) {
       logger.info(`${TAG_NDP} cache refreshed: ${newMap.size} entries`);
     } catch (e) {
       logger.error(`${TAG_NDP} refresh failed:`, e.message);
+      if (signal?.aborted) throw e;
     }
   }
 

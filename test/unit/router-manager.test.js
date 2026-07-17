@@ -19,6 +19,7 @@ function fakeAdapter(record) {
     getArpCache: () => new Map(), getArpMac: () => null, getNdpByMac: () => [],
     getIp: () => config.ip || '', getUser: () => config.user || '', hasPass: () => !!config.pass,
     getNat: () => config.natDescriptor || '', getHostFp: () => config.hostFp || '',
+    _persistHostFp(fp) { config.hostFp = fp; return config.onSaveConfig(); },
     exec: async () => '', detect: async input => ({ ssh: { ok: true }, input }), detectCurrent: async () => ({}),
   };
 }
@@ -97,5 +98,82 @@ describe('router manager CRUD', () => {
     }), /disk full/);
     assert.equal(manager.list().length, 0);
     assert.equal(manager.registry.size(), 0);
+  });
+
+  it('propagates TOFU persistence failures so the poller rejects the host key', () => {
+    const record = {
+      id: 'cisco-12345678', kind: 'cisco', displayName: 'Edge', ip: '192.168.1.2', user: 'admin',
+      pass: 'secret', enablePass: '', enabled: false, hostFp: '', createdAt: 1,
+    };
+    const manager = createRouterManager({
+      records: [record],
+      createAdapter: fakeAdapter,
+      persist: () => { throw new Error('config is read only'); },
+      history: { upsertRouterMetadata() {} },
+      io: { emit() {} },
+    });
+    const adapter = manager.registry.get(record.id).adapter;
+
+    assert.throws(() => adapter._persistHostFp('new-fingerprint'), /read only/);
+    assert.equal(manager.getRecord(record.id).hostFp, '');
+    assert.match(manager.list()[0].lastError, /read only/);
+  });
+});
+
+describe('router manager poll cancellation', () => {
+  it('does not record sessions that arrive after the cycle timeout', async () => {
+    const tasks = [];
+    let resolveFetch;
+    let recordCalls = 0;
+    let reconnects = 0;
+    const record = {
+      id: 'cisco-12345678', kind: 'cisco', displayName: 'Edge', ip: '192.168.1.2', user: 'admin',
+      pass: 'secret', enablePass: '', enabled: true, hostFp: 'known', createdAt: 1,
+    };
+    const adapter = {
+      ...fakeAdapter(record),
+      connect(onReady) { onReady(); },
+      reconnect() { reconnects++; },
+      isReady: () => true,
+      fetchSessions: () => new Promise(resolve => { resolveFetch = resolve; }),
+    };
+    createRouterManager({
+      records: [record],
+      createAdapter: () => adapter,
+      persist() {},
+      runtime: {
+        recordConnection() {
+          recordCalls++;
+          return { key: 'key', entry: {} };
+        },
+      },
+      history: {
+        getConnectionHistory: () => new Map(),
+        pruneHistory() {},
+        upsertRouterMetadata() {},
+      },
+      io: { emit() {} },
+      schedulerOptions: {
+        cycleTimeoutMs: 100,
+        staggerStepMs: 0,
+        schedulePoll(fn, delay) {
+          const task = { fn, delay, canceled: false };
+          tasks.push(task);
+          return task;
+        },
+        cancelPoll(task) { task.canceled = true; },
+      },
+    });
+    await new Promise(resolve => setImmediate(resolve));
+
+    tasks.find(task => task.delay === 0).fn();
+    await new Promise(resolve => setImmediate(resolve));
+    tasks.find(task => task.delay === 100 && !task.canceled).fn();
+    await new Promise(resolve => setImmediate(resolve));
+    resolveFetch([{ src: '192.168.1.10', dst: '203.0.113.1', dport: 443, proto: 'tcp' }]);
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(reconnects, 1);
+    assert.equal(recordCalls, 0);
   });
 });

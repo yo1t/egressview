@@ -44,6 +44,10 @@ function reopen(dbPath) {
   initDb(dbPath || _lastDbPath);
 }
 
+function closeDb() {
+  if (db) { try { db.close(); } catch {} db = null; }
+}
+
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 
 /**
@@ -131,6 +135,7 @@ function _closeForTest() {
 module.exports = {
   initDb,
   reopen,
+  closeDb,
   createSession,
   verifySession,
   listSessions,

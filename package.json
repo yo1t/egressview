@@ -64,6 +64,7 @@
     "dev": "node --watch server.js",
     "test": "node --test test/unit/*.test.js",
     "test:unit": "node --test test/unit/*.test.js",
+    "test:coverage": "node --experimental-test-coverage --test --test-coverage-lines=70 --test-coverage-branches=75 --test-coverage-functions=65 test/unit/*.test.js",
     "lint": "eslint . && npm run lint:innerhtml",
     "lint:innerhtml": "node scripts/check-frontend-innerhtml.js",
     "test:integration": "RUN_INTEGRATION=1 node --test test/integration/*.test.js",

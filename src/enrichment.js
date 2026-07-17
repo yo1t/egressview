@@ -123,6 +123,10 @@ function reopen() {
   initDb(_dbPath);
 }
 
+function closeDb() {
+  if (db) { try { db.close(); } catch {} db = null; }
+}
+
 function _persistRdap(ip, entry) {
   if (!stmtUpsertRdap) return;
   try { stmtUpsertRdap.run({ ip, country: entry.country, org: entry.org, expires: entry.expires }); } catch {}
@@ -452,6 +456,7 @@ function getGeoCache() { return geoCache; }
 module.exports = {
   initDb,
   reopen,
+  closeDb,
   reverseDns,
   isPtrJunk,
   lookupRdap,

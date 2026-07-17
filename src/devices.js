@@ -618,6 +618,10 @@ function reopen() {
   initDb(_dbPath);
 }
 
+function closeDb() {
+  if (db) { try { db.close(); } catch {} db = null; }
+}
+
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
 function _initForTest() {
@@ -631,6 +635,7 @@ function _initForTest() {
 module.exports = {
   initDb,
   reopen,
+  closeDb,
   upsert,
   observeDevice,
   deviceStatus,

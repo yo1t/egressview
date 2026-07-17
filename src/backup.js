@@ -4,6 +4,7 @@ const logger = require('./logger');
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
 const DEFAULT_DB_PATH    = path.join(__dirname, '..', '.egressview.db');
@@ -29,6 +30,42 @@ function ensureBackupDir() {
   }
 }
 
+function verifyDbFile(filePath) {
+  let candidate = null;
+  try {
+    candidate = new Database(filePath, { readonly: true, fileMustExist: true });
+    const result = candidate.pragma('integrity_check')[0]?.integrity_check;
+    if (result !== 'ok') throw new Error(`integrity_check returned '${result}'`);
+  } catch (err) {
+    throw new Error(`Database integrity check failed for ${path.basename(filePath)}: ${err.message}`, { cause: err });
+  } finally {
+    if (candidate) { try { candidate.close(); } catch {} }
+  }
+}
+
+function removeSidecars(dbPath) {
+  for (const suffix of ['-wal', '-shm']) {
+    try { fs.unlinkSync(dbPath + suffix); } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+  }
+}
+
+function replaceDbAtomically(sourcePath) {
+  const tempPath = `${DB_PATH}.restore-${crypto.randomBytes(6).toString('hex')}.tmp`;
+  try {
+    fs.copyFileSync(sourcePath, tempPath);
+    fs.chmodSync(tempPath, 0o600);
+    verifyDbFile(tempPath);
+    fs.renameSync(tempPath, DB_PATH);
+    removeSidecars(DB_PATH);
+    verifyDbFile(DB_PATH);
+    removeSidecars(DB_PATH);
+  } finally {
+    try { fs.unlinkSync(tempPath); } catch {}
+  }
+}
+
 // Create a backup of the DB using SQLite's online backup API.
 // db.backup() takes a consistent snapshot including WAL contents, unlike a
 // plain file copy which would miss transactions not yet checkpointed into
@@ -39,23 +76,21 @@ async function createBackup() {
     return null;
   }
   ensureBackupDir();
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
-  const backupName = `egressview_${timestamp}.db`;
+  const timestamp = new Date().toISOString().replace('T', '_').replace(/[:.]/g, '-').replace('Z', '');
+  const uniqueId = crypto.randomBytes(4).toString('hex');
+  const backupName = `egressview_${timestamp}-${uniqueId}.db`;
   const backupPath = path.join(BACKUP_DIR, backupName);
-  // Only clean up the target file on failure if WE created it — a backup
-  // taken in the same second as a previous one shares the timestamped name,
-  // and we must not delete that earlier (good) backup.
-  const existedBefore = fs.existsSync(backupPath);
   let src = null;
   try {
     src = new Database(DB_PATH, { fileMustExist: true });
     await src.backup(backupPath);
+    verifyDbFile(backupPath);
     logger.info(`[backup] Created: ${backupName}`);
     pruneOldBackups();
     return backupName;
   } catch (err) {
     logger.error('[backup] Failed:', err.message);
-    if (!existedBefore) { try { fs.unlinkSync(backupPath); } catch {} }  // remove partial backup
+    try { fs.unlinkSync(backupPath); } catch {}  // remove partial backup
     return null;
   } finally {
     if (src) { try { src.close(); } catch {} }
@@ -95,7 +130,7 @@ function listBackups() {
 }
 
 // Get the path to a specific backup file (for download)
-const BACKUP_NAME_RE = /^egressview_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.db$/;
+const BACKUP_NAME_RE = /^egressview_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:-\d{3}-[0-9a-f]{8})?\.db$/;
 
 function getBackupPath(name) {
   if (!name || !BACKUP_NAME_RE.test(name)) return null;
@@ -105,27 +140,67 @@ function getBackupPath(name) {
 }
 
 // Restore from a backup file (replaces current DB)
-async function restoreFromFile(sourcePath) {
+async function restoreFromFile(sourcePath, {
+  beforeReplace,
+  afterReplace,
+  beforeRollback,
+  afterRollback,
+  replaceDb = replaceDbAtomically,
+} = {}) {
   if (!fs.existsSync(sourcePath)) {
     throw new Error('Backup file not found');
   }
-  // Create a safety backup of current DB before restoring
-  await createBackup();
-  // Replace current DB. Backup files are closed snapshots (no live WAL),
-  // so a plain copy is safe here. Remove stale WAL/SHM of the old DB so
-  // they are not replayed against the restored file.
-  fs.copyFileSync(sourcePath, DB_PATH);
-  for (const suffix of ['-wal', '-shm']) {
-    try { fs.unlinkSync(DB_PATH + suffix); } catch {}
+  verifyDbFile(sourcePath);
+
+  // A restore is destructive, so an existing DB is never replaced unless a
+  // verified safety backup has been created successfully first.
+  let safetyPath = null;
+  if (fs.existsSync(DB_PATH)) {
+    const safetyName = await createBackup();
+    if (!safetyName) throw new Error('Safety backup failed; restore aborted');
+    safetyPath = getBackupPath(safetyName);
+    if (!safetyPath) throw new Error('Safety backup verification failed; restore aborted');
+  }
+
+  let prepareStarted = false;
+  let replacementStarted = false;
+  try {
+    if (beforeReplace) {
+      prepareStarted = true;
+      await beforeReplace();
+    }
+    replacementStarted = true;
+    replaceDb(sourcePath);
+    if (afterReplace) await afterReplace();
+  } catch (restoreErr) {
+    try {
+      if (!replacementStarted) {
+        if (prepareStarted && afterRollback) await afterRollback();
+        throw restoreErr;
+      }
+      if (beforeRollback) await beforeRollback();
+      if (safetyPath) {
+        replaceDb(safetyPath);
+        logger.warn('[backup] Restore failed; original database recovered from safety backup');
+      } else {
+        try { fs.unlinkSync(DB_PATH); } catch {}
+        removeSidecars(DB_PATH);
+      }
+      if (afterRollback) await afterRollback();
+    } catch (rollbackErr) {
+      if (rollbackErr === restoreErr) throw restoreErr;
+      throw new Error(`Restore failed (${restoreErr.message}); safety rollback also failed (${rollbackErr.message})`, { cause: rollbackErr });
+    }
+    throw restoreErr;
   }
   logger.info(`[backup] Restored from: ${path.basename(sourcePath)}`);
 }
 
 // Restore from a named backup generation
-async function restoreFromGeneration(name) {
+async function restoreFromGeneration(name, options) {
   const p = getBackupPath(name);
   if (!p) throw new Error('Backup not found: ' + name);
-  await restoreFromFile(p);
+  await restoreFromFile(p, options);
 }
 
 // Start periodic backup
@@ -179,4 +254,5 @@ module.exports = {
   stopPeriodicBackup,
   getConfig,
   _setPathsForTest,
+  _verifyDbFile: verifyDbFile,
 };

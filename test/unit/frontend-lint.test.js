@@ -876,9 +876,9 @@ describe('Server runtime invariants', () => {
   });
 
   it('Yamaha NAT polling allows slow large NAT tables without timing out early', () => {
-    assert.match(yamahaJs, /async\s+function\s+yamahaExec\(cmd,\s*timeoutMs\s*=\s*45000\)/,
+    assert.match(yamahaJs, /async\s+function\s+yamahaExec\(cmd,\s*timeoutMs\s*=\s*45000,\s*\{\s*signal\s*\}\s*=\s*\{\}\)/,
       'yamahaExec should keep the normal timeout for short commands');
-    assert.match(yamahaJs, /show nat descriptor address \$\{natDescriptor\} detail`,\s*90000\)/,
+    assert.match(yamahaJs, /show nat descriptor address \$\{natDescriptor\} detail`,\s*90000,\s*\{\s*signal\s*\}\)/,
       'large NAT detail polling should have a longer timeout than short router commands');
   });
 

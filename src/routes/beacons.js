@@ -4,6 +4,7 @@
 const { Router } = require('express');
 const { parsePositiveInt } = require('../utils');
 const { t } = require('../i18n-server');
+const logger = require('../logger');
 
 const MAX_WHITELIST_ENTRIES = 200;
 const MAX_ORG_ENTRIES       = 100;
@@ -105,8 +106,15 @@ function beaconsRoutes(ctx) {
       cfg.orgAllowlist = list;
     }
 
+    const previous = appState.beaconConfig;
     appState.beaconConfig = cfg;
-    saveConfig();
+    try {
+      saveConfig();
+    } catch (err) {
+      appState.beaconConfig = previous;
+      logger.error('[beacon] Config save failed:', err.message);
+      return res.status(500).json({ error: 'Settings were not saved. Check server logs.' });
+    }
     if (onConfigChange) onConfigChange();  // reschedule timer + immediate rescan
     res.json({ success: true, config: cfg });
   });

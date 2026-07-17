@@ -23,7 +23,6 @@ function makeApp(overrides = {}) {
   const ctx = {
     notifier:      defaultNotifier,
     saveConfig:    () => {},
-    persistSecret: () => {},
     loadConfig:    () => ({}),
     ...overrides,
   };
@@ -106,26 +105,32 @@ describe('slack route: POST /api/config/slack', () => {
     assert.equal(saved, true);
   });
 
-  it('calls persistSecret with token when token is provided', async () => {
+  it('passes token to the atomic config save when provided', async () => {
     let captured;
-    const app = makeApp({ persistSecret: (section, updates) => { captured = { section, updates }; } });
+    const app = makeApp({ saveConfig: overrides => { captured = overrides; } });
     await req(app, 'POST', '/api/config/slack', { token: 'xoxb-test-token' });
-    assert.equal(captured.section, 'slack');
-    assert.equal(captured.updates.token, 'xoxb-test-token');
+    assert.equal(captured.slack.token, 'xoxb-test-token');
   });
 
-  it('calls persistSecret with displayName when displayName is provided', async () => {
+  it('passes displayName to the atomic config save when provided', async () => {
     let captured;
-    const app = makeApp({ persistSecret: (section, updates) => { captured = { section, updates }; } });
+    const app = makeApp({ saveConfig: overrides => { captured = overrides; } });
     await req(app, 'POST', '/api/config/slack', { displayName: 'AlertBot' });
-    assert.equal(captured.updates.displayName, 'AlertBot');
+    assert.equal(captured.slack.displayName, 'AlertBot');
   });
 
-  it('does not call persistSecret when neither token nor displayName is provided', async () => {
-    let called = false;
-    const app = makeApp({ persistSecret: () => { called = true; } });
+  it('uses an empty override when no secret or display name is provided', async () => {
+    let captured;
+    const app = makeApp({ saveConfig: overrides => { captured = overrides; } });
     await req(app, 'POST', '/api/config/slack', { enabled: true, cooldownMinutes: 10 });
-    assert.equal(called, false);
+    assert.deepEqual(captured, {});
+  });
+
+  it('returns 500 when config persistence fails', async () => {
+    const app = makeApp({ saveConfig: () => { throw new Error('disk full'); } });
+    const { status, body } = await req(app, 'POST', '/api/config/slack', { enabled: true });
+    assert.equal(status, 500);
+    assert.match(body.error, /not saved/i);
   });
 
   it('returns displayName from loadConfig in response', async () => {

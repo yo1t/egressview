@@ -10,15 +10,19 @@ const os       = require('os');
 
 const { runMigrations, SCHEMA_VERSION, _assertDiskSpace, _verifyDbCopy, _MIGRATIONS } = require('../../src/db-migrate');
 
-const TMP = path.join(os.tmpdir(), 'egressview-migrate-test');
+let TMP;
 
 function tmpDb(name) {
   return path.join(TMP, name + '.db');
 }
 
-before(() => { fs.mkdirSync(TMP, { recursive: true }); });
+before(() => {
+  TMP = fs.mkdtempSync(path.join(os.tmpdir(), `egressview-migrate-test-${process.pid}-`));
+});
 after(() => {
-  try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
+  if (TMP) {
+    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
+  }
 });
 
 function openDb(p) {
