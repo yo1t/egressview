@@ -445,6 +445,32 @@ describe('countByTimeRange', () => {
   });
 });
 
+describe('createConnectionExportReader', () => {
+  it('holds a stable read snapshot while live history continues accepting writes', () => {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-export-snapshot-'));
+    const dbPath = path.join(dir, 'history.db');
+    let reader;
+    try {
+      history._initForTest(dbPath);
+      insert({ dst: '10.0.0.1' });
+      reader = history.createConnectionExportReader(null, null);
+
+      insert({ dst: '10.0.0.2' });
+
+      assert.equal(reader.countByTimeRange(), 1);
+      assert.deepEqual(reader.queryByTimeRangePaged(null, null, 10, 0).map(row => row.dst), ['10.0.0.1']);
+      assert.equal(history.countByTimeRange(null, null), 2);
+    } finally {
+      reader?.close();
+      history.closeDb();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ─── summarizeByTimeRange ─────────────────────────────────────────────────────
 
 describe('summarizeByTimeRange', () => {

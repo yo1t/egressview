@@ -3,13 +3,64 @@ import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, guessApp } from './utils.js?v=__ASSET_VERSION__';
 import { getTimeRange, setFetching, setServerTimeOffset } from './connections-panel.js?v=__ASSET_VERSION__';
 import { logMode } from './view-tabs.js?v=__ASSET_VERSION__';
-import { selectedMac, selectedIp, updateSideHighlight, clearSelection } from './graph.js?v=__ASSET_VERSION__';
+import { selectedMac, selectedIp, updateSideHighlight, clearSelection, showToast } from './graph.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 import { showThreatDetail } from './threat-popup.js?v=__ASSET_VERSION__';
 
 const logSortState = { col: 'lastSeen', dir: 'desc' };
 const logFilters = {}; // col → { mode, value }
 let logThreatFilter = null; // null | 'safe' | 'warn' | 'danger'
+
+function buildConnectionExportUrl(format) {
+  const { from, to } = getTimeRange();
+  if (from == null) throw new Error(t('log.export.period-required'));
+  const params = new URLSearchParams({ format });
+  params.set('from', from);
+  if (to != null) params.set('to', to);
+  return `${_BASE}/api/connections/export?${params}`;
+}
+
+function exportFilename(response, format) {
+  const disposition = response.headers?.get?.('content-disposition') || '';
+  const match = disposition.match(/filename="([A-Za-z0-9._-]+)"/);
+  return match?.[1] || `egressview-connections.${format}`;
+}
+
+async function downloadConnectionExport() {
+  const button = document.getElementById('log-export-btn');
+  const format = document.getElementById('log-export-format').value;
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = t('log.export.preparing');
+  setFetching(+1);
+  try {
+    const response = await apiFetch(buildConnectionExportUrl(format));
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.error || t('log.export.failed'));
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = exportFilename(response, format);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+
+    const count = response.headers?.get?.('x-export-count') || '0';
+    const truncated = response.headers?.get?.('x-export-truncated') === 'true';
+    showToast(tVars(truncated ? 'log.export.truncated' : 'log.export.complete', { count }));
+  } catch (err) {
+    console.error('[log] export failed:', err);
+    showToast(err.message || t('log.export.failed'));
+  } finally {
+    setFetching(-1);
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
+}
 
 // ── Infinite-scroll state ─────────────────────────────────────────────────────
 let logPage = 0;
@@ -534,6 +585,7 @@ function updateLogView() {
 function initLog() {
   if (initLog._done) return;
   initLog._done = true;
+  document.getElementById('log-export-btn').addEventListener('click', downloadConnectionExport);
 
 // ── Sort: click on column header ──────────────────────────────────────────────
 document.querySelectorAll('#log-table th[data-col]').forEach(th => {
@@ -655,4 +707,4 @@ logSearchInput.addEventListener('keydown', (e) => {
 
 initLog();
 
-export { updateLogView, initLog, resetAndFetch };
+export { buildConnectionExportUrl, downloadConnectionExport, updateLogView, initLog, resetAndFetch };

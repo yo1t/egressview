@@ -344,6 +344,15 @@
   .activity-filter { display: none; }
   .activity-filter.is-visible { display: inline; }
   .activity-refresh { margin-left: auto; padding: 3px 10px; font-size: 11px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; }
+  .log-export-controls { margin-left: auto; display: flex; align-items: center; gap: 5px; }
+  .log-export-controls select, .log-export-controls button {
+    border: 1px solid var(--border); border-radius: 5px; background: var(--panel);
+    color: var(--text); font-family: inherit; font-size: 10px; padding: 3px 7px;
+  }
+  .log-export-controls button { cursor: pointer; }
+  .log-export-controls button:hover { border-color: var(--accent); color: var(--accent); }
+  .log-export-controls button:disabled { opacity: 0.55; cursor: wait; }
+  .log-header .data-fetching-hdr { margin-left: 0; }
   .log-pagination { display: none; align-items: center; gap: 8px; padding: 4px 8px; font-size: 12px; color: var(--muted); }
   .log-pagination.is-visible { display: flex; }
   .log-threat-badge { background: #ef4444; color: #fff; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; }

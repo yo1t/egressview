@@ -630,6 +630,13 @@
       <span id="log-count" class="activity-count"></span>
       <span id="log-device-filter" class="activity-filter"></span>
       <span id="log-threat-count"></span>
+      <div class="log-export-controls">
+        <select id="log-export-format" data-i18n-title="log.export.format" title="出力形式">
+          <option value="csv">CSV</option>
+          <option value="json">JSON</option>
+        </select>
+        <button id="log-export-btn" data-i18n="log.export.button">エクスポート</button>
+      </div>
       <span class="data-fetching-hdr" id="data-fetching-log"><span class="spinner-xs"></span><span data-i18n="data.loading">読み込み中</span></span>
     </div>
     <div id="beacon-banner">

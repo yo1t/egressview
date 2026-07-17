@@ -685,6 +685,46 @@ function countByTimeRange(from, to, { filters = {} } = {}) {
   return row ? row.cnt : 0;
 }
 
+function createConnectionExportReader(from, to) {
+  if (!db || currentDbPath === ':memory:') {
+    return {
+      countByTimeRange: () => countByTimeRange(from, to),
+      queryByTimeRangePaged: (_from, _to, limit, offset, opts) =>
+        queryByTimeRangePaged(from, to, limit, offset, opts),
+      close() {},
+    };
+  }
+
+  const snapshotDb = new Database(currentDbPath, { readonly: true, fileMustExist: true });
+  try {
+    snapshotDb.pragma('query_only = ON');
+    snapshotDb.exec('BEGIN');
+    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] });
+    const count = snapshotDb.prepare(`SELECT COUNT(*) as cnt FROM connections${where}`).get(...params)?.cnt || 0;
+    const pageStatement = snapshotDb.prepare(
+      `SELECT ${connectionReadColumns('c')} FROM connections c${where}
+       ORDER BY c.lastSeen DESC LIMIT ? OFFSET ?`
+    );
+    let closed = false;
+
+    return {
+      countByTimeRange: () => count,
+      queryByTimeRangePaged: (_from, _to, limit, offset) =>
+        hydrateConnectionRows(pageStatement.all(...params, limit, offset)),
+      close() {
+        if (closed) return;
+        closed = true;
+        try { snapshotDb.exec('ROLLBACK'); } catch {}
+        try { snapshotDb.close(); } catch {}
+      },
+    };
+  } catch (error) {
+    try { snapshotDb.exec('ROLLBACK'); } catch {}
+    try { snapshotDb.close(); } catch {}
+    throw error;
+  }
+}
+
 // Bulk-inserts entries for demo / seed purposes. Silently skips failures.
 function seedConnections(entries) {
   if (!db || !stmtUpsert) return 0;
@@ -965,6 +1005,7 @@ module.exports = {
   queryByTimeRange,
   queryByTimeRangePaged,
   countByTimeRange,
+  createConnectionExportReader,
   seedConnections,
   groupDstByTimeRange,
   summarizeByTimeRange,

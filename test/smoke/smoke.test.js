@@ -801,6 +801,26 @@ test('log view shows rows with long period (14d)', async ({ page }) => {
   expect(fatalErrors(errors), `Long period log errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
+test('connection export streams authenticated CSV and JSON for a selected period', async ({ request }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const from = Date.now() - 14 * 86400_000;
+  const headers = { 'X-Admin-Token': TOKEN };
+  const csv = await request.get(`${BASE}/api/connections/export?format=csv&from=${from}`, { headers });
+  expect(csv.ok()).toBeTruthy();
+  expect(csv.headers()['content-type']).toContain('text/csv');
+  expect(csv.headers()['content-disposition']).toMatch(/egressview-connections-.*\.csv/);
+  expect(csv.headers()['x-export-count']).toMatch(/^\d+$/);
+  expect((await csv.text()).replace(/^\uFEFF/, '')).toMatch(/^src,srcMac,srcVendor/);
+
+  const json = await request.get(`${BASE}/api/connections/export?format=json&from=${from}`, { headers });
+  expect(json.ok()).toBeTruthy();
+  const body = await json.json();
+  expect(body.meta.exported).toBe(body.connections.length);
+  expect(body.meta.limit).toBe(50000);
+  expect(Array.isArray(body.connections)).toBeTruthy();
+});
+
 // (10) Stats tab: switching the summary (destination/device) must not raise errors
 test('stats tab summary switching produces no console errors', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
