@@ -14,6 +14,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 
 class FakeElement {
   constructor() {
     this.textContent = '';
+    this.disabled = false;
     this.children = [];
     this._classes = new Set();
     this.classList = {
@@ -76,5 +77,15 @@ describe('AI insights view', () => {
     assert.equal(get('ai-router-list').children[0].textContent, '<b>Router</b> · 7');
     assert.equal(cards.get('[data-ai-metric="danger"]').classList.contains('has-findings'), true);
     assert.equal(cards.get('[data-ai-metric="warn"]').classList.contains('has-findings'), false);
+  });
+
+  it('shows only the explicit cancel control while analysis is running', () => {
+    const { context, get } = harness();
+    context.setAnalysisRunning(true);
+    assert.equal(get('ai-analyze-btn').disabled, true);
+    assert.equal(get('ai-cancel-btn').classList.contains('is-hidden'), false);
+    context.setAnalysisRunning(false);
+    assert.equal(get('ai-analyze-btn').disabled, false);
+    assert.equal(get('ai-cancel-btn').classList.contains('is-hidden'), true);
   });
 });

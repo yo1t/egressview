@@ -100,3 +100,34 @@ describe('AI provider model discovery', () => {
     await assert.rejects(limited.listModels(), /rate limit/);
   });
 });
+
+describe('Ollama insight generation', () => {
+  it('sends a bounded non-streaming request and returns display metadata', async () => {
+    let request;
+    const provider = createAiProvider({ fetchImpl: async (url, options) => {
+      request = { url, options };
+      return jsonResponse({ response: '概要\n異常なし' });
+    } });
+    provider.configure({ provider: 'ollama', models: { ollama: 'qwen3:8b' }, ollamaEndpoint: 'http://ollama:11434' });
+    const result = await provider.generateInsight({ current: { connections: 4 } });
+    assert.equal(request.url, 'http://ollama:11434/api/generate');
+    assert.equal(JSON.parse(request.options.body).stream, false);
+    assert.equal(result.provider, 'ollama');
+    assert.equal(result.model, 'qwen3:8b');
+    assert.match(result.text, /異常なし/);
+  });
+
+  it('rejects cloud generation and concurrent work in the Ollama-only phase', async () => {
+    const cloud = createAiProvider();
+    cloud.configure({ provider: 'openai', models: { openai: 'gpt-test' }, keys: { openai: 'key' } });
+    await assert.rejects(cloud.generateInsight({}), /Ollama/);
+
+    let release;
+    const provider = createAiProvider({ fetchImpl: () => new Promise(resolve => { release = resolve; }) });
+    provider.configure({ provider: 'ollama', models: { ollama: 'model' } });
+    const first = provider.generateInsight({});
+    await assert.rejects(provider.generateInsight({}), error => error.code === 'AI_BUSY');
+    release(jsonResponse({ response: 'ok' }));
+    await first;
+  });
+});
