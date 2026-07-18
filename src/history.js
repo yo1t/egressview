@@ -30,7 +30,7 @@ let stmtEnsureRouter = null;
 let upsertTxn = null;
 let currentDbPath = DEFAULT_DB_PATH;
 
-// source → routerId mapping for the dual-write expansion (v4 expand phase).
+// Legacy source values from pollers are normalized into persistent routerIds.
 // server.js overrides this at bootstrap via loadConnectionHistory() options;
 // the default matches a config where both router sections exist.
 let sourceRouterMap = { yamaha: MIGRATED_IDS.yamaha, cisco: MIGRATED_IDS.cisco };
@@ -202,7 +202,6 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
       city      TEXT,
       firstSeen INTEGER NOT NULL,
       lastSeen  INTEGER NOT NULL,
-      source    TEXT NOT NULL DEFAULT 'yamaha',
       agentHost TEXT,
       process   TEXT,
       pid       INTEGER,
@@ -213,7 +212,7 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
     CREATE INDEX IF NOT EXISTS idx_dst ON connections(dst);
   `);
 
-  // Multi-router observation tables (P2-30 expand phase). Normally created by
+  // Multi-router observation tables. Normally created by
   // the v4 migration; repeated here so a fresh DB gets them too.
   db.exec(`
     CREATE TABLE IF NOT EXISTS routers (
@@ -275,8 +274,8 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
   `);
 
   stmtUpsert = db.prepare(`
-    INSERT INTO connections (src, dst, dport, proto, sport, ttl, srcMac, srcVendor, srcDnsName, srcMdnsName, dstHost, country, org, lat, lon, city, firstSeen, lastSeen, source)
-    VALUES (@src, @dst, @dport, @proto, @sport, @ttl, @srcMac, @srcVendor, @srcDnsName, @srcMdnsName, @dstHost, @country, @org, @lat, @lon, @city, @firstSeen, @lastSeen, @source)
+    INSERT INTO connections (src, dst, dport, proto, sport, ttl, srcMac, srcVendor, srcDnsName, srcMdnsName, dstHost, country, org, lat, lon, city, firstSeen, lastSeen)
+    VALUES (@src, @dst, @dport, @proto, @sport, @ttl, @srcMac, @srcVendor, @srcDnsName, @srcMdnsName, @dstHost, @country, @org, @lat, @lon, @city, @firstSeen, @lastSeen)
     ON CONFLICT(src, dst, dport, proto) DO UPDATE SET
       sport = COALESCE(@sport, sport),
       ttl = COALESCE(@ttl, ttl),
@@ -291,14 +290,7 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
       lon = COALESCE(@lon, lon),
       city = COALESCE(@city, city),
       firstSeen = MIN(firstSeen, @firstSeen),
-      lastSeen = MAX(lastSeen, @lastSeen),
-      source = CASE
-        WHEN source = @source THEN source
-        -- snapshotting an in-memory value that's already merged (persists across restarts)
-        WHEN @source = 'yamaha+cisco' AND source IN ('yamaha','cisco') THEN 'yamaha+cisco'
-        WHEN source IN ('yamaha','cisco') AND @source IN ('yamaha','cisco') THEN 'yamaha+cisco'
-        ELSE source
-      END
+      lastSeen = MAX(lastSeen, @lastSeen)
   `);
 
   stmtSelectAll = db.prepare(`
@@ -324,9 +316,8 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
     VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
   `);
 
-  // Dual-write (v4 compatibility window): the connections upsert with its
-  // legacy source-merge CASE and the junction upsert run in one transaction,
-  // so the two representations can never diverge on a write.
+  // Keep the connection and all router observations atomic. Pollers may still
+  // submit a compatibility source value, but only routerIds are persisted.
   upsertTxn = db.transaction(entry => {
     stmtUpsert.run(entry);
     const observedBy = normalizeObservedBy(entry.observedBy);
@@ -449,14 +440,14 @@ function loadConnectionHistory(dbPath, opts = {}) {
   migrateFromJsonl();
   loadIntoMemory();
 
-  // Startup diagnostic for the v4 dual-write window: counts only, no traffic data.
+  // Startup junction diagnostic: counts only, no traffic data.
   const consistency = checkObservationConsistency();
   if (consistency) {
     const { missingObservations, orphanObservations, underMerged, kindMismatches } = consistency;
     if (missingObservations || orphanObservations || underMerged || kindMismatches) {
       logger.error(`[history] observation consistency MISMATCH: missing=${missingObservations} orphans=${orphanObservations} underMerged=${underMerged} kindMismatches=${kindMismatches}`);
     } else {
-      logger.info('[history] observation consistency OK (source and junction agree)');
+      logger.info('[history] observation consistency OK');
     }
   }
 }
@@ -501,9 +492,7 @@ function compactHistoryLog() {
 }
 
 /**
- * Diagnostic comparison of the legacy source column and the junction table
- * (v4 compatibility window). All counters must stay 0; v5 may drop the
- * source column only after production runs show sustained zeroes.
+ * Diagnostic validation of the observation junction table.
  * No IP/MAC values are included — counts only.
  */
 function checkObservationConsistency() {

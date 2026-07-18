@@ -66,7 +66,7 @@ curl --fail-with-body \
   "$EGRESSVIEW_URL/api/connections?from=1784217600000&limit=100&sort=lastSeen&sortDir=desc"
 ```
 
-The response contains `connections`, `total`, `limit`, `offset`, and `serverTime`. Each connection can include source-device metadata, destination enrichment, `firstSeen`, `lastSeen`, legacy `source`, `observedBy` router IDs, and an optional `threat` object.
+The response contains `connections`, `total`, `limit`, `offset`, and `serverTime`. Each connection can include source-device metadata, destination enrichment, `firstSeen`, `lastSeen`, `observedBy` router IDs, a compatibility `source` value derived from those routers, and an optional `threat` object.
 
 ### Summary and security views
 

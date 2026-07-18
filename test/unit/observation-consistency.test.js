@@ -5,11 +5,11 @@ const { describe, it } = require('node:test');
 const Database = require('better-sqlite3');
 const { checkObservationConsistency } = require('../../src/observation-consistency');
 
-function makeDb() {
+function makeDb({ source = true } = {}) {
   const db = new Database(':memory:');
   db.exec(`
     CREATE TABLE connections (
-      src TEXT, dst TEXT, dport INTEGER, proto TEXT, source TEXT,
+      src TEXT, dst TEXT, dport INTEGER, proto TEXT${source ? ', source TEXT' : ''},
       PRIMARY KEY (src, dst, dport, proto)
     );
     CREATE TABLE routers (id TEXT PRIMARY KEY, kind TEXT);
@@ -53,6 +53,39 @@ describe('observation consistency diagnostics', () => {
     `);
     const result = checkObservationConsistency(db);
     assert.equal(result.missingObservations, 0);
+    assert.equal(result.underMerged, 0);
+    assert.equal(result.kindMismatches, 1);
+    db.close();
+  });
+
+  it('validates v5 junction invariants without a source column', () => {
+    const db = makeDb({ source: false });
+    db.exec(`
+      INSERT INTO routers VALUES ('yamaha1', 'yamaha');
+      INSERT INTO connections VALUES ('10.0.0.1', '1.1.1.1', 443, 'TCP');
+      INSERT INTO connection_observations VALUES
+        ('10.0.0.1', '1.1.1.1', 443, 'TCP', 'yamaha1', 1, 1);
+    `);
+    assert.deepEqual(checkObservationConsistency(db, 456), {
+      missingObservations: 0,
+      orphanObservations: 0,
+      underMerged: 0,
+      kindMismatches: 0,
+      checkedAt: 456,
+    });
+    db.close();
+  });
+
+  it('detects v5 missing, orphaned, and unregistered-router observations', () => {
+    const db = makeDb({ source: false });
+    db.exec(`
+      INSERT INTO connections VALUES ('10.0.0.1', '1.1.1.1', 443, 'TCP');
+      INSERT INTO connection_observations VALUES
+        ('10.0.0.2', '9.9.9.9', 53, 'UDP', 'missing-router', 1, 1);
+    `);
+    const result = checkObservationConsistency(db);
+    assert.equal(result.missingObservations, 1);
+    assert.equal(result.orphanObservations, 1);
     assert.equal(result.underMerged, 0);
     assert.equal(result.kindMismatches, 1);
     db.close();

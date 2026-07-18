@@ -1,9 +1,10 @@
 # Observation consistency soak check
 
-Run the v4 source/junction consistency check once per day before removing the
-legacy `connections.source` column in v5. The tracked script contains no
-credentials or host-specific paths. Runtime configuration and results must
-remain outside Git.
+This check originally gated the v5 removal of the legacy
+`connections.source` column. Keep running it after migration to validate the
+observation junction's structural integrity and router collection health. The
+tracked script contains no credentials or host-specific paths. Runtime
+configuration and results must remain outside Git.
 
 ## EC2 configuration
 
@@ -52,11 +53,12 @@ checks. `readyForV5` becomes true only after the check gates below and two
 distinct process start times prove that a normal service restart occurred
 during the window.
 
-## v5 gate
+## Historical v5 gate
 
 Proceed only after at least three successful checks on three different UTC
 dates. Every successful record must have zero `missing`, `orphans`,
 `underMerged`, and `kindMismatches`, with recent successful collection from
 both Yamaha and Cisco. Include at least one normal service restart. A validation
 failure, version or commit change, or a gap longer than 36 hours between
-successful checks restarts the soak window.
+successful checks restarts the soak window. After v5 migration, retain these
+records as deployment evidence and continue monitoring the structural counters.
