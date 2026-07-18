@@ -7,6 +7,7 @@
 'use strict';
 const logger = require('../logger');
 const { t } = require('../i18n-server');
+const runtimeProfiler = require('../runtime-profiler');
 
 const crypto = require('crypto');
 const { Client: SshClient } = require('ssh2');
@@ -265,7 +266,7 @@ const YAMAHA_NDP_REFRESH_MS = 120 * 1000; // every 2 min
  *
  * @param {{ id?: string }} [opts]  routerId for log prefixes ('' → '[yamaha]')
  */
-function createYamahaPoller({ id = '' } = {}) {
+function createYamahaPoller({ id = '', profiler = runtimeProfiler } = {}) {
   const TAG     = id ? `[yamaha:${id}]`     : '[yamaha]';
   const TAG_ARP = id ? `[yamaha-arp:${id}]` : '[yamaha-arp]';
   const TAG_NDP = id ? `[yamaha-ndp:${id}]` : '[yamaha-ndp]';
@@ -400,10 +401,13 @@ function createYamahaPoller({ id = '' } = {}) {
         yamahaShell = stream;
 
         stream.on('data', chunk => {
-          const text = chunk.toString('utf8').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
-          shellBuf += text;
+          const text = profiler.measureSync('router.yamaha.ssh.decode', () =>
+            chunk.toString('utf8').replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''));
+          profiler.measureSync('router.yamaha.ssh.bufferAppend', () => { shellBuf += text; });
           if (looksLikePagerPrompt(text)) stream.write('\n');
-          if (looksLikeShellPrompt(shellBuf) && shellWaiter) {
+          const promptReady = profiler.measureSync('router.yamaha.ssh.promptCheck', () =>
+            looksLikeShellPrompt(shellBuf));
+          if (promptReady && shellWaiter) {
             const { resolve } = shellWaiter;
             clearShellWaiter();
             resolve(shellBuf);
@@ -493,15 +497,19 @@ function createYamahaPoller({ id = '' } = {}) {
   async function refreshYamahaArp({ signal } = {}) {
     if (!yamahaEnabled || !yamahaReady) return;
     try {
-      const raw = await yamahaExec('show arp', 45000, { signal });
-      const re = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})/g;
-      const newMap = new Map();
-      let m;
-      while ((m = re.exec(raw)) !== null) {
-        newMap.set(m[1], m[2].toLowerCase());
-      }
-      yamahaArpCache.clear();
-      for (const [k, v] of newMap) yamahaArpCache.set(k, v);
+      const raw = await profiler.measureAsync('router.yamaha.arp.ssh', () =>
+        yamahaExec('show arp', 45000, { signal }));
+      const newMap = profiler.measureSync('router.yamaha.arp.parse', () => {
+        const parsed = new Map();
+        const re = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})/g;
+        let m;
+        while ((m = re.exec(raw)) !== null) parsed.set(m[1], m[2].toLowerCase());
+        return parsed;
+      });
+      profiler.measureSync('router.yamaha.arp.cache', () => {
+        yamahaArpCache.clear();
+        for (const [k, v] of newMap) yamahaArpCache.set(k, v);
+      });
       yamahaArpLastRefresh = Date.now();
       logger.info(`${TAG_ARP} cache refreshed: ${newMap.size} entries`);
     } catch (e) {
@@ -511,28 +519,34 @@ function createYamahaPoller({ id = '' } = {}) {
   }
 
   async function fetchNatSessions({ signal } = {}) {
-    const raw = await yamahaExec(`show nat descriptor address ${natDescriptor} detail`, 90000, { signal });
-    return parseNatDetail(raw);
+    const raw = await profiler.measureAsync('router.yamaha.nat.ssh', () =>
+      yamahaExec(`show nat descriptor address ${natDescriptor} detail`, 90000, { signal }));
+    return profiler.measureSync('router.yamaha.nat.parse', () => parseNatDetail(raw));
   }
 
   async function refreshYamahaNdp({ signal } = {}) {
     if (!yamahaEnabled || !yamahaReady) return;
     try {
-      const raw = await yamahaExec('show ipv6 neighbor cache', 45000, { signal });
-      const newMap = new Map();
-      // Parse lines like: "2001:db8:0:ed00:5de6:a5c8:44fb:a1e5    aa:bb:cc:dd:ee:ff LAN1  REACHABLE"
-      const re = /([0-9a-fA-F:]{6,45})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\s+LAN1\s+\w+/g;
-      let m;
-      while ((m = re.exec(raw)) !== null) {
-        const ipv6 = m[1];
-        const mac = m[2].toLowerCase();
-        // Skip link-local (fe80::)
-        if (ipv6.startsWith('fe80:')) continue;
-        if (!newMap.has(mac)) newMap.set(mac, []);
-        newMap.get(mac).push(ipv6);
-      }
-      yamahaNdpCache.clear();
-      for (const [k, v] of newMap) yamahaNdpCache.set(k, v);
+      const raw = await profiler.measureAsync('router.yamaha.ndp.ssh', () =>
+        yamahaExec('show ipv6 neighbor cache', 45000, { signal }));
+      const newMap = profiler.measureSync('router.yamaha.ndp.parse', () => {
+        const parsed = new Map();
+        // Parse lines like: "2001:db8:0:ed00:5de6:a5c8:44fb:a1e5    aa:bb:cc:dd:ee:ff LAN1  REACHABLE"
+        const re = /([0-9a-fA-F:]{6,45})\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\s+LAN1\s+\w+/g;
+        let m;
+        while ((m = re.exec(raw)) !== null) {
+          const ipv6 = m[1];
+          const mac = m[2].toLowerCase();
+          if (ipv6.startsWith('fe80:')) continue;
+          if (!parsed.has(mac)) parsed.set(mac, []);
+          parsed.get(mac).push(ipv6);
+        }
+        return parsed;
+      });
+      profiler.measureSync('router.yamaha.ndp.cache', () => {
+        yamahaNdpCache.clear();
+        for (const [k, v] of newMap) yamahaNdpCache.set(k, v);
+      });
       yamahaNdpLastRefresh = Date.now();
       logger.info(`${TAG_NDP} cache refreshed: ${newMap.size} entries`);
     } catch (e) {

@@ -94,8 +94,10 @@ async function pollYamahaConnections() {
       }
     }
 
-    runtimeProfiler.measureSync('poll.yamaha.recordConnections', () =>
-      sessions.forEach(s => _runtime.recordConnection(s, now, 'yamaha')));
+    runtimeProfiler.measureSync('poll.yamaha.recordConnections', () => {
+      if (_runtime.recordConnections) _runtime.recordConnections(sessions, now, 'yamaha');
+      else sessions.forEach(s => _runtime.recordConnection(s, now, 'yamaha'));
+    });
 
     // Poll-based beacon event recording: only used as fallback when INSPECT syslog is
     // disabled.  When inspectEnabled=true, INSPECT provides precise TCP session-close
@@ -181,8 +183,10 @@ async function pollCiscoConnections() {
       }
     }
 
-    runtimeProfiler.measureSync('poll.cisco.recordConnections', () =>
-      sessions.forEach(s => _runtime.recordConnection(s, now, 'cisco')));
+    runtimeProfiler.measureSync('poll.cisco.recordConnections', () => {
+      if (_runtime.recordConnections) _runtime.recordConnections(sessions, now, 'cisco');
+      else sessions.forEach(s => _runtime.recordConnection(s, now, 'cisco'));
+    });
 
     _history.pruneHistory();
 

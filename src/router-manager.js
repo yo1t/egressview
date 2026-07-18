@@ -27,16 +27,25 @@ function createRouterManager({
     signal?.throwIfAborted();
     const { adapter, id, kind } = entry;
     if (!adapter.isEnabled() || !adapter.isReady()) throw new Error('router not connected');
-    const sessions = await adapter.fetchSessions({ signal });
+    const sessions = await runtimeProfiler.measureAsync(
+      `router.${kind}.poll.fetchSessions`,
+      () => adapter.fetchSessions({ signal }),
+    );
     signal?.throwIfAborted();
     enrichmentQueue?.queueConnectionEnrichment([...new Set(sessions.map(s => s.dst))]);
     const now = Date.now();
     if (adapter.needsArpRefresh()) {
-      await adapter.refreshArp({ signal });
+      await runtimeProfiler.measureAsync(
+        `router.${kind}.poll.refreshArp`,
+        () => adapter.refreshArp({ signal }),
+      );
       signal?.throwIfAborted();
     }
     if (adapter.needsNdpRefresh()) {
-      await adapter.refreshNdp({ signal });
+      await runtimeProfiler.measureAsync(
+        `router.${kind}.poll.refreshNdp`,
+        () => adapter.refreshNdp({ signal }),
+      );
       signal?.throwIfAborted();
       for (const [ip, mac] of adapter.getArpCache()) {
         const ipv6 = adapter.getNdpByMac(mac);
@@ -46,9 +55,11 @@ function createRouterManager({
 
     const updated = runtimeProfiler.measureSync(`router.${kind}.poll.recordConnections`, () => {
       const result = new Map();
-      for (const session of sessions) {
-        signal?.throwIfAborted();
-        const recorded = runtime.recordConnection(session, now, kind, id);
+      signal?.throwIfAborted();
+      const recordedSessions = runtime.recordConnections
+        ? runtime.recordConnections(sessions, now, kind, id)
+        : sessions.map(session => runtime.recordConnection(session, now, kind, id));
+      for (const recorded of recordedSessions) {
         result.set(recorded.key, recorded.entry);
       }
       return result;

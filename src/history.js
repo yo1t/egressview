@@ -28,6 +28,7 @@ let stmtInsertNotifLog = null;
 let stmtObsUpsert = null;
 let stmtEnsureRouter = null;
 let upsertTxn = null;
+let upsertManyTxn = null;
 let currentDbPath = DEFAULT_DB_PATH;
 
 // Legacy source values from pollers are normalized into persistent routerIds.
@@ -323,7 +324,7 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
 
   // Keep the connection and all router observations atomic. Pollers may still
   // submit a compatibility source value, but only routerIds are persisted.
-  upsertTxn = db.transaction(entry => {
+  const writeEntry = entry => {
     stmtUpsert.run(entry);
     const observedBy = normalizeObservedBy(entry.observedBy);
     const routerIds = observedBy.length
@@ -338,6 +339,10 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
         lastObservedAt:  entry.lastSeen,
       });
     }
+  };
+  upsertTxn = db.transaction(writeEntry);
+  upsertManyTxn = db.transaction(entries => {
+    for (const entry of entries) writeEntry(entry);
   });
 
   logger.info('[history] SQLite database initialized (WAL mode)');
@@ -360,7 +365,11 @@ function _ensureRouterRow(routerId) {
 
 function upsertEntry(entry) {
   const observedBy = normalizeObservedBy(entry.observedBy);
-  upsertTxn({
+  upsertTxn(normalizeEntryForWrite(entry, observedBy));
+}
+
+function normalizeEntryForWrite(entry, observedBy = normalizeObservedBy(entry.observedBy)) {
+  return {
     src: entry.src,
     dst: entry.dst,
     dport: entry.dport ?? 0,
@@ -381,7 +390,7 @@ function upsertEntry(entry) {
     lastSeen:  entry.lastSeen  ?? Date.now(),
     source: observedBy.length ? compatibilitySource(observedBy) : (entry.source || 'yamaha'),
     observedBy,
-  });
+  };
 }
 
 // Migrate from JSONL to SQLite (one-time)
@@ -461,15 +470,35 @@ function appendHistoryLog(entry) {
   }
 }
 
+/**
+ * Persist one poll's connection and observation changes atomically.
+ * Unlike appendHistoryLog(), errors propagate so callers cannot publish a
+ * partially persisted poll as successful.
+ */
+function appendHistoryLogs(entries) {
+  if (!entries?.length) return 0;
+  if (!db || !upsertManyTxn) throw new Error('history database is not initialized');
+  const normalized = entries.map(entry => normalizeEntryForWrite(entry));
+  try {
+    upsertManyTxn(normalized);
+    return normalized.length;
+  } catch (err) {
+    // _ensureRouterRow uses a write-through cache. Rebuild it after rollback
+    // so a failed batch cannot leave the cache ahead of SQLite.
+    try {
+      ensuredRouterIds = new Set(db.prepare('SELECT id FROM routers').all().map(row => row.id));
+      routerKinds = new Map(db.prepare('SELECT id, kind FROM routers').all().map(row => [row.id, row.kind]));
+    } catch {
+      ensuredRouterIds.clear();
+    }
+    throw err;
+  }
+}
+
 // Batch sync: write all current in-memory entries to SQLite
 function snapshotHistory() {
   if (!db || connectionHistory.size === 0) return;
-  const upsertMany = db.transaction(() => {
-    for (const entry of connectionHistory.values()) {
-      upsertEntry(entry);
-    }
-  });
-  upsertMany();
+  appendHistoryLogs([...connectionHistory.values()]);
   logger.info(`[history] Snapshot ${connectionHistory.size} entries to SQLite`);
 }
 
@@ -686,6 +715,7 @@ function _appendAndLoad(entry) {
 module.exports = {
   loadConnectionHistory,
   appendHistoryLog,
+  appendHistoryLogs,
   snapshotHistory,
   compactHistoryLog,
   pruneHistory,
