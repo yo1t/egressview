@@ -294,9 +294,11 @@ function requireAdmin(req, res, next) {
 // partial connections-update so connected clients see updated threat badges
 // without needing to manually trigger an API fetch.
 
-function reMatchAndNotify() {
+async function reMatchAndNotify() {
   const connectionHistory = history.getConnectionHistory();
   const updated = [];
+  const CHUNK = 5000;
+  let processed = 0;
   for (const [, entry] of connectionHistory) {
     const host     = entry.dstHost || entry.dst;
     const threat   = threatIntel.matchThreatIntel(entry.dst, host);
@@ -304,6 +306,9 @@ function reMatchAndNotify() {
     if (JSON.stringify(entry.threat) !== JSON.stringify(newThreat)) {
       entry.threat = newThreat;
       updated.push(entry);
+    }
+    if (++processed % CHUNK === 0) {
+      await new Promise(r => setImmediate(r));
     }
   }
   if (updated.length) {
@@ -516,7 +521,7 @@ server.listen(PORT, HOST, () => {
     hasYamahaConfig: !!(rawCfg.yamaha && (rawCfg.yamaha.ip || rawCfg.yamaha.user)),
     hasCiscoConfig:  !!(rawCfg.cisco  && (rawCfg.cisco.ip  || rawCfg.cisco.user)),
   });
-  runDbBootstrap({ dbPath: runtimeDbPath, sourceRouterMap, history, sessions, devices, enrichment, beacons });
+  const { staleEnrichmentIps } = runDbBootstrap({ dbPath: runtimeDbPath, sourceRouterMap, history, sessions, devices, enrichment, beacons });
   setInterval(() => sessions.pruneExpired(), 6 * 60 * 60 * 1000);
 
   if (DEMO_MODE) {
@@ -532,6 +537,10 @@ server.listen(PORT, HOST, () => {
     logger.info(`[devices] stale merge check: ${staleChecked} device(s) scanned for duplicates`);
   }
   enrichmentQueue.init({ history, enrichment, io, logger });
+  if (staleEnrichmentIps.length) {
+    logger.info(`[enrichment] Queuing ${staleEnrichmentIps.length} stale IPs for background refresh`);
+    enrichmentQueue.queueConnectionEnrichment(staleEnrichmentIps);
+  }
   beaconScanRunner.init({ appState, beacons, beaconDetector, threatIntel, enrichment, logger });
 
   routerManager = createRouterManager({

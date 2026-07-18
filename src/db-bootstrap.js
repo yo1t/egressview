@@ -26,8 +26,9 @@ function runDbBootstrap({ dbPath, sourceRouterMap, history, sessions, devices, e
   // 2. The remaining modules attach only after the schema is final.
   sessions.initDb(dbPath);
   devices.initDb(dbPath);
-  enrichment.initDb(dbPath);
+  const enrichResult = enrichment.initDb(dbPath);
   beacons.initDb(dbPath);
+  return { staleEnrichmentIps: enrichResult?.staleIps || [] };
 }
 
 module.exports = { runDbBootstrap };

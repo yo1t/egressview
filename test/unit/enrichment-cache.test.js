@@ -67,7 +67,7 @@ describe('enrichment: RDAP cache persistence', () => {
     }
   });
 
-  it('期限切れの RDAP エントリは復元されない', () => {
+  it('期限切れの RDAP エントリも復元され、staleIpsに含まれる', () => {
     const dbPath = makeTmpDb();
     try {
       enrichment.initDb(dbPath);
@@ -79,9 +79,11 @@ describe('enrichment: RDAP cache persistence', () => {
                   VALUES (?, ?, ?, ?)`).run('9.9.9.9', 'JP', 'Old Org', expiredAt);
       db.close();
 
-      enrichment.reopen();
+      const { staleIps } = enrichment.reopen();
 
-      assert.equal(enrichment.getRdapCache().size, 0, '期限切れエントリは復元されないこと');
+      assert.equal(enrichment.getRdapCache().size, 1, '期限切れエントリも復元されること');
+      assert.equal(enrichment.getRdapCache().get('9.9.9.9').org, 'Old Org');
+      assert.ok(staleIps.includes('9.9.9.9'), 'staleIpsに含まれること');
     } finally {
       enrichment._initForTest();
       cleanupTmpDb();
@@ -123,7 +125,7 @@ describe('enrichment: Geo cache persistence', () => {
     }
   });
 
-  it('期限切れの Geo エントリは復元されない', () => {
+  it('期限切れの Geo エントリも復元され、staleIpsに含まれる', () => {
     const dbPath = makeTmpDb();
     try {
       enrichment.initDb(dbPath);
@@ -135,9 +137,10 @@ describe('enrichment: Geo cache persistence', () => {
                   VALUES (?, ?, ?, ?, ?, ?)`).run('1.1.1.1', null, null, null, null, expiredAt);
       db.close();
 
-      enrichment.reopen();
+      const { staleIps } = enrichment.reopen();
 
-      assert.equal(enrichment.getGeoCache().size, 0, '期限切れエントリは復元されないこと');
+      assert.equal(enrichment.getGeoCache().size, 1, '期限切れエントリも復元されること');
+      assert.ok(staleIps.includes('1.1.1.1'), 'staleIpsに含まれること');
     } finally {
       enrichment._initForTest();
       cleanupTmpDb();
