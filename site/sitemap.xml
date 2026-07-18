@@ -62,4 +62,44 @@
     <priority>0.7</priority>
   </url>
 
+  <!-- REST API reference (English) -->
+  <url>
+    <loc>https://yo1t.github.io/egressview/docs/api-reference</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/api-reference"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/api-reference.ja"/>
+    <lastmod>2026-07-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+
+  <!-- REST API reference (Japanese) -->
+  <url>
+    <loc>https://yo1t.github.io/egressview/docs/api-reference.ja</loc>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/api-reference.ja"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/api-reference"/>
+    <lastmod>2026-07-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+
+  <!-- Architecture guide (English) -->
+  <url>
+    <loc>https://yo1t.github.io/egressview/docs/architecture</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/architecture"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/architecture.ja"/>
+    <lastmod>2026-07-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+
+  <!-- Architecture guide (Japanese) -->
+  <url>
+    <loc>https://yo1t.github.io/egressview/docs/architecture.ja</loc>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/architecture.ja"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/architecture"/>
+    <lastmod>2026-07-18</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+
 </urlset>

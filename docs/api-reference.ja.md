@@ -1,0 +1,182 @@
+# EgressView REST API リファレンス
+
+> [English](api-reference.md)
+
+EgressViewは、Web UIとローカル自動化向けに管理APIを提供します。現時点ではバージョン固定された公開互換APIではないため、外部連携を更新する前にリリースノートを確認してください。
+
+## ベースURLと認証
+
+Web UIをサブパスで公開している場合も、APIは常に`/api`配下です。後述する2つの公開認証APIを除き、すべてのリクエストで`X-Admin-Token`ヘッダーにadmin tokenまたはブラウザのsession tokenを指定します。
+
+```bash
+export EGRESSVIEW_URL='https://egressview.example.net'
+export EGRESSVIEW_TOKEN='replace-with-your-admin-token'
+
+curl --fail-with-body \
+  -H "X-Admin-Token: $EGRESSVIEW_TOKEN" \
+  "$EGRESSVIEW_URL/api/status"
+```
+
+ネットワーク境界を越える場合はHTTPSまたは信頼できるVPNを使用してください。tokenをURL、ログ、ソースコードへ書かないでください。JSON request bodyの上限は64 KBです。
+
+### パスワードログイン
+
+`POST /api/auth/login`は公開APIで、UIパスワードを失効可能なsession tokenへ交換します。パスワードは最大256文字です。同じクライアントから10分間に5回失敗すると、5分間ロックされます。
+
+```bash
+curl --fail-with-body \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"replace-with-your-password"}' \
+  "$EGRESSVIEW_URL/api/auth/login"
+```
+
+```json
+{"success":true,"token":"session-token","expiresAt":1784304000000}
+```
+
+`POST /api/admin/verify`も公開APIで、request body内のtokenを検証します。それ以外はすべて認証必須です。
+
+## 共通仕様
+
+- 時刻はUnix epoch millisecondです。個別の指定がない限り、空の`from`/`to`は期間の始端/終端を制限しません。
+- 成功時のJSONは`application/json`、エラーは原則として`{ "error": "message" }`です。
+- 主なstatus codeは、入力不正`400`、認証失敗`401`、対象なし`404`、upload過大`413`、内部処理・永続化失敗`500`、router検出失敗`502`、認証初期化前`503`です。
+- Router一覧APIは、パスワード、enable password、host fingerprint、admin tokenを返しません。
+- MCPは別プロトコルです。MCP clientからREST APIを直接使わず、[MCP設定ガイド](setup-mcp.ja.md)を参照してください。
+
+## 通信履歴
+
+### 通信履歴一覧
+
+`GET /api/connections`
+
+| Query | 内容 |
+|---|---|
+| `from`, `to` | 任意のepoch millisecond期間。 |
+| `limit`, `offset` | ページング。`limit`は最大1,000。互換用の未ページング形式は最大50,000行で`truncated`を返し、グラフは`/api/connections/summary`を使用します。 |
+| `sort` | `lastSeen`, `src`, `dst`, `dport`, `proto`, `country`, `org`。既定値は`lastSeen`。 |
+| `sortDir` | `asc`または`desc`。既定値は`desc`。 |
+| `fSrc`, `fDst`, `fDport`, `fProto`, `fCountry`, `fOrg` | Server-side filter。末尾に`Mode`を付け、`contains`, `startsWith`, `endsWith`, `exact`を指定できます。 |
+| `fSrcMac` | 送信元MACの完全一致。 |
+| `fThreat` | `safe`, `warn`, `danger`。 |
+
+```bash
+curl --fail-with-body \
+  -H "X-Admin-Token: $EGRESSVIEW_TOKEN" \
+  "$EGRESSVIEW_URL/api/connections?from=1784217600000&limit=100&sort=lastSeen&sortDir=desc"
+```
+
+Responseには`connections`, `total`, `limit`, `offset`, `serverTime`が含まれます。各connectionには端末情報、接続先の付加情報、`firstSeen`, `lastSeen`, 互換用`source`, 観測したrouter IDの`observedBy`、任意の`threat`が含まれます。
+
+### 集計・セキュリティ表示
+
+- `GET /api/connections/summary`は`from`, `to`, 任意の`src`、1から240の`buckets`（既定60）を受け取ります。
+- `GET /api/connections/new-nodes`は期間内に新しく観測した送信元・接続先を返します。
+- `GET /api/connections/threat-connections`は`confidence=low|high|all`と最大200の`limit`を受け取ります。
+- `GET /api/connections/threat-counts`は`safe`, `warn`, `danger`の件数を返し、標準filterを使用できます。
+- `GET /api/connections/memory`はmemory上のworking set統計を返します。
+
+### CSV / JSON export
+
+`GET /api/connections/export`では`format=csv|json`と`from`が必須で、`to`省略時は現在時刻です。
+
+```bash
+curl --fail-with-body \
+  -H "X-Admin-Token: $EGRESSVIEW_TOKEN" \
+  "$EGRESSVIEW_URL/api/connections/export?format=csv&from=1784217600000" \
+  -o connections.csv
+```
+
+1,000行単位でstreamし、最大50,000行、timeoutは60秒です。`X-Export-Total`, `X-Export-Count`, `X-Export-Truncated`を確認してください。CSVはUTF-8 BOM付きでspreadsheet formula injectionを防ぎます。JSONは`meta`と`connections`を返します。
+
+## Router
+
+EgressViewには、Yamaha/Ciscoを混在して最大10台登録できます。
+
+- `GET /api/routers`は機密情報を除く設定と実行状態を返します。
+- `POST /api/routers/detect`は保存前の定義で接続し、LAN/NAT情報または`502`の診断情報を返します。
+- `POST /api/routers`はrouterを作成し、`201`を返します。
+- `PUT /api/routers/:id`はrouterを更新します。`kind`と安定したrouter IDは変更できません。
+- `DELETE /api/routers/:id`は有効設定から削除しますが、過去の観測はtombstone化したIDへ帰属したままです。
+
+作成・検出bodyでは`kind`（`yamaha`または`cisco`）、`displayName`, `ip`, `user`, `pass`, `enabled`を使います。Yamahaは`nat`、Ciscoは任意の`enablePass`も使用します。更新時にpasswordを省略すると保存済みの値を維持します。
+
+## 端末とメモ
+
+- `GET /api/devices`は`includeArchived=1`を受け取り、識別情報、状態、IPv6 address、メモを返します。
+- `GET /api/devices/merge-candidates`は`status=pending|approved|rejected|all`を受け取ります。
+- `POST /api/devices/merge`は`{ "keepId": "...", "dropId": "..." }`を使います。
+- `POST /api/devices/reject`は`{ "id": "..." }`を使います。
+- `POST /api/devices/archive`と`POST /api/devices/unarchive`は`{ "deviceId": "..." }`を使います。
+- `GET /api/notes`はメモを取得します。`POST /api/notes`は最大500文字のメモを保存し、`POST /api/notes/draft`は設定済みのassistant連携で下書きを作成します。
+
+## Backupとrestore
+
+- `GET /api/backup/list`はgenerationと保持設定を返します。
+- `POST /api/backup/create`は整合性のあるSQLite snapshotを作成・検証します。
+- `GET /api/backup/download/:name`は指定generationをdownloadします。
+- `POST /api/backup/restore`は`{ "name": "..." }`を使います。
+- `POST /api/backup/upload`はmultipartではなく、最大100 MBのSQLite fileをraw bodyで受け取ります。
+- `POST /api/backup/config`は正の`intervalHours`と`maxGenerations`を受け取ります。
+
+Restoreはfail-closedです。復元元の検査、安全backup成功の確認、restore、全DB利用者の再接続、復元後検査を行い、失敗時はrollbackします。成功後は既存のbrowser sessionを失効します。
+
+## Endpoint一覧
+
+実装済みREST API 53本の全一覧です。**公開**以外はすべて`X-Admin-Token`が必要です。
+
+| 分類 | Methodとpath | Access |
+|---|---|---|
+| 認証 | `POST /api/auth/login` | 公開 |
+| 認証 | `POST /api/admin/verify` | 公開 |
+| 認証 | `POST /api/auth/logout` | 認証必須 |
+| 認証 | `GET /api/auth/sessions` | 認証必須 |
+| 認証 | `POST /api/auth/sessions/:id/revoke` | 認証必須 |
+| 認証 | `POST /api/auth/sessions/revoke-all` | 認証必須 |
+| 認証 | `POST /api/auth/change-password` | 認証必須 |
+| 認証 | `POST /api/admin/regenerate-token` | 認証必須 |
+| Router初期設定 | `POST /api/nonce` | 認証必須 |
+| Router初期設定 | `POST /api/yamaha/detect` | 認証必須 |
+| Router初期設定 | `POST /api/cisco/detect` | 認証必須 |
+| Router初期設定 | `POST /api/login` | 認証必須、旧setup flow |
+| Router | `GET /api/routers` | 認証必須 |
+| Router | `POST /api/routers/detect` | 認証必須 |
+| Router | `POST /api/routers` | 認証必須 |
+| Router | `PUT /api/routers/:id` | 認証必須 |
+| Router | `DELETE /api/routers/:id` | 認証必須 |
+| 通信 | `GET /api/connections` | 認証必須 |
+| 通信 | `GET /api/connections/memory` | 認証必須 |
+| 通信 | `GET /api/connections/summary` | 認証必須 |
+| 通信 | `GET /api/connections/new-nodes` | 認証必須 |
+| 通信 | `GET /api/connections/threat-connections` | 認証必須 |
+| 通信 | `GET /api/connections/threat-counts` | 認証必須 |
+| 通信 | `GET /api/connections/export` | 認証必須 |
+| 端末 | `GET /api/devices` | 認証必須 |
+| 端末 | `GET /api/devices/merge-candidates` | 認証必須 |
+| 端末 | `POST /api/devices/merge` | 認証必須 |
+| 端末 | `POST /api/devices/reject` | 認証必須 |
+| 端末 | `POST /api/devices/archive` | 認証必須 |
+| 端末 | `POST /api/devices/unarchive` | 認証必須 |
+| メモ | `GET /api/notes` | 認証必須 |
+| メモ | `POST /api/notes` | 認証必須 |
+| メモ | `POST /api/notes/draft` | 認証必須 |
+| Backup | `GET /api/backup/list` | 認証必須 |
+| Backup | `POST /api/backup/create` | 認証必須 |
+| Backup | `GET /api/backup/download/:name` | 認証必須 |
+| Backup | `POST /api/backup/restore` | 認証必須 |
+| Backup | `POST /api/backup/upload` | 認証必須 |
+| Backup | `POST /api/backup/config` | 認証必須 |
+| 全般設定 | `GET /api/status` | 認証必須 |
+| 全般設定 | `POST /api/config/general` | 認証必須 |
+| Data source | `GET /api/config/datasources` | 認証必須 |
+| Data source | `POST /api/config/datasources` | 認証必須 |
+| Slack | `GET /api/config/slack` | 認証必須 |
+| Slack | `POST /api/config/slack` | 認証必須 |
+| Slack | `POST /api/slack/test` | 認証必須 |
+| Slack | `POST /api/slack/verify` | 認証必須 |
+| Slack | `POST /api/slack/lookup-user` | 認証必須 |
+| 検出ログ | `GET /api/notification-log` | 認証必須 |
+| Beacon | `GET /api/beacons` | 認証必須 |
+| Beacon | `GET /api/beacons/config` | 認証必須 |
+| Beacon | `POST /api/beacons/config` | 認証必須 |
+| Beacon | `POST /api/beacons/:id/dismiss` | 認証必須 |
