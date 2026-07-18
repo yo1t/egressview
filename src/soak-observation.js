@@ -56,16 +56,29 @@ function createSoakRecord({
     kindMismatches: Number(consistency?.kindMismatches) || 0,
   };
   const failures = [];
+  const validationFailures = [];
   for (const [name, count] of Object.entries(counters)) {
-    if (count !== 0) failures.push(`${name}=${count}`);
+    if (count !== 0) {
+      const failure = `${name}=${count}`;
+      failures.push(failure);
+      validationFailures.push(failure);
+    }
   }
   if (!consistency) failures.push('consistency-check-unavailable');
   if (safeVersion === 'unknown') failures.push('version-unknown');
   if (safeCommit === 'unknown') failures.push('commit-unknown');
   const processStartedMs = Number(processStartedAt) || 0;
   if (!processStartedMs) failures.push('process-start-unknown');
-  if (coverage.missingKinds.length) failures.push(`router-kinds-missing=${coverage.missingKinds.join(',')}`);
-  if (coverage.staleKinds.length) failures.push(`router-kinds-stale=${coverage.staleKinds.join(',')}`);
+  if (coverage.missingKinds.length) {
+    const failure = `router-kinds-missing=${coverage.missingKinds.join(',')}`;
+    failures.push(failure);
+    validationFailures.push(failure);
+  }
+  if (coverage.staleKinds.length) {
+    const failure = `router-kinds-stale=${coverage.staleKinds.join(',')}`;
+    failures.push(failure);
+    validationFailures.push(failure);
+  }
 
   return {
     checkedAt: new Date(now).toISOString(),
@@ -76,13 +89,29 @@ function createSoakRecord({
     ...counters,
     routers: coverage.routers,
     passed: failures.length === 0,
+    failureType: failures.length === 0
+      ? null
+      : validationFailures.length > 0 ? 'validation' : 'operational',
     failures,
   };
 }
 
+function isOperationalFailure(record) {
+  if (!record || record.passed) return false;
+  if (record.failureType === 'operational') return true;
+  if (record.failureType === 'validation') return false;
+
+  // Legacy monitor errors were written without counters or a failure type.
+  const failures = Array.isArray(record.failures) ? record.failures : [];
+  const validationFailure = failures.some(failure =>
+    /^(missing|orphans|underMerged|kindMismatches)=/.test(String(failure))
+    || /^router-kinds-(missing|stale)=/.test(String(failure))
+  );
+  return !validationFailure;
+}
+
 function summarizeSoakHistory(records, {
   minChecks = 7,
-  minElapsedDays = 7,
   maxGapHours = 36,
 } = {}) {
   const sorted = (Array.isArray(records) ? records : [])
@@ -93,16 +122,34 @@ function summarizeSoakHistory(records, {
 
   const maxGapMs = maxGapHours * 60 * 60 * 1000;
   let streak = [];
+  let lastSuccess = null;
+  let operationalFailures = 0;
   for (const record of sorted) {
     const sameBuild = record.version === latest.version && record.commit === latest.commit;
-    const previous = streak.at(-1);
-    const gapTooLarge = previous
-      && Date.parse(record.checkedAt) - Date.parse(previous.checkedAt) > maxGapMs;
-    if (!record.passed || !sameBuild || gapTooLarge) {
-      streak = record.passed && sameBuild ? [record] : [];
-    } else {
-      streak.push(record);
+    if (!sameBuild) {
+      streak = [];
+      lastSuccess = null;
+      operationalFailures = 0;
+      continue;
     }
+    if (record.passed) {
+      const gapTooLarge = lastSuccess
+        && Date.parse(record.checkedAt) - Date.parse(lastSuccess.checkedAt) > maxGapMs;
+      if (gapTooLarge) {
+        streak = [];
+        operationalFailures = 0;
+      }
+      streak.push(record);
+      lastSuccess = record;
+      continue;
+    }
+    if (isOperationalFailure(record)) {
+      operationalFailures += 1;
+      continue;
+    }
+    streak = [];
+    lastSuccess = null;
+    operationalFailures = 0;
   }
 
   const dates = new Set(streak.map(record => record.checkedAt.slice(0, 10)));
@@ -112,9 +159,10 @@ function summarizeSoakHistory(records, {
     : 0;
   const elapsedDays = Math.floor(elapsedMs / DAY_MS);
   const restartObserved = processStarts.size >= 2;
-  const readyForV5 = streak.length >= minChecks
+  const pendingOperationalFailure = !latest.passed && isOperationalFailure(latest);
+  const readyForV5 = latest.passed
+    && streak.length >= minChecks
     && dates.size >= minChecks
-    && elapsedMs >= minElapsedDays * DAY_MS
     && restartObserved;
 
   return {
@@ -123,6 +171,8 @@ function summarizeSoakHistory(records, {
     distinctDates: dates.size,
     elapsedDays,
     restartObserved,
+    operationalFailures,
+    pendingOperationalFailure,
     version: latest.version,
     commit: latest.commit,
   };
@@ -134,5 +184,6 @@ module.exports = {
   routerCoverage,
   sanitizeCommit,
   sanitizeVersion,
+  isOperationalFailure,
   summarizeSoakHistory,
 };

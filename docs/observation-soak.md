@@ -39,20 +39,24 @@ runs; choose a minute that does not coincide with backups:
 The process exits with status `1` for a mismatch, stale/missing Yamaha or Cisco
 collection, unknown commit, API error, DB error, or output error. Monitor cron
 failures separately; a missing daily record must not count as success.
+An operational failure such as an API timeout remains in the audit log but does
+not reset the consistency streak when a successful check on the same build
+recovers within 36 hours. Readiness remains blocked while it is unrecovered.
 The router-status API timeout defaults to 30 seconds and may be configured from
 1 to 300 seconds. Keep enough headroom for a large, busy database without
 hiding a sustained application outage.
 
-Each run also prints a `summary`. Its streak resets after a failed check, a
-version/commit change, or a gap longer than 36 hours. `readyForV5` becomes true
-only after the time/check gates below and two distinct process start times prove
-that a normal service restart occurred during the window.
+Each run also prints a `summary`. Its streak resets after a validation failure,
+a version/commit change, or a gap longer than 36 hours between successful
+checks. `readyForV5` becomes true only after the check gates below and two
+distinct process start times prove that a normal service restart occurred
+during the window.
 
 ## v5 gate
 
-Proceed only after 7-14 elapsed days and at least seven successful checks on
-different dates. Every record must have zero `missing`, `orphans`,
+Proceed only after at least seven successful checks on seven different UTC
+dates. Every successful record must have zero `missing`, `orphans`,
 `underMerged`, and `kindMismatches`, with recent successful collection from
-both Yamaha and Cisco. Include at least one normal service restart. If the
-version or commit changes, or any check fails or is missing, restart the soak
-window after resolving the cause.
+both Yamaha and Cisco. Include at least one normal service restart. A validation
+failure, version or commit change, or a gap longer than 36 hours between
+successful checks restarts the soak window.
