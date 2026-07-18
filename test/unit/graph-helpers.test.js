@@ -31,9 +31,30 @@ const {
   linkEndpointId,
   normalizeGraphLinks,
   currentGraphRangeKey,
+  shouldUseDetailedGraph,
   routerTargetsFromSource,
   routerTargetsFromObservedBy,
 } = load();
+
+describe('shouldUseDetailedGraph', () => {
+  const summary = (total, targets, edges) => ({
+    total,
+    byTarget: Array.from({ length: targets }, () => ({})),
+    byEdge: Array.from({ length: edges }, () => ({})),
+  });
+
+  it('uses details only for a bounded live range', () => {
+    assert.equal(shouldUseDetailedGraph(summary(1000, 400, 500), 'live'), true);
+    assert.equal(shouldUseDetailedGraph(summary(1000, 400, 500), '15m'), false);
+    assert.equal(shouldUseDetailedGraph(summary(1000, 400, 500), '1h'), false);
+  });
+
+  it('falls back to summary when any safety threshold is exceeded', () => {
+    assert.equal(shouldUseDetailedGraph(summary(1001, 1, 1), 'live'), false);
+    assert.equal(shouldUseDetailedGraph(summary(1, 401, 1), 'live'), false);
+    assert.equal(shouldUseDetailedGraph(summary(1, 1, 501), 'live'), false);
+  });
+});
 
 describe('flagEmoji', () => {
   it('converts a 2-letter country code to a flag emoji', () => {

@@ -72,6 +72,24 @@ function loadTimeFilterVm(options = {}) {
 }
 
 describe('summary-backed client time filter', () => {
+  it('uses a five-minute range for the detailed live view', () => {
+    const context = loadTimeFilterVm();
+    vm.runInContext("currentTimeFilter = 'live';", context);
+    const range = vm.runInContext('getTimeRange()', context);
+    const duration = Date.now() - range.from;
+    assert.ok(duration >= 299_000 && duration <= 301_000);
+    assert.equal(range.to, null);
+  });
+
+  it('keeps a separate fifteen-minute summary range', () => {
+    const context = loadTimeFilterVm();
+    vm.runInContext("currentTimeFilter = '15m';", context);
+    const range = vm.runInContext('getTimeRange()', context);
+    const duration = Date.now() - range.from;
+    assert.ok(duration >= 899_000 && duration <= 901_000);
+    assert.equal(range.to, null);
+  });
+
   it('fetches the graph summary before rendering a selected period', async () => {
     const calls = [];
     const context = loadTimeFilterVm({ calls });

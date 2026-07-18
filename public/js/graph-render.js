@@ -133,7 +133,12 @@ export function drawNodes() {
 
   const orgR = d => 13 + Math.min(9, Math.log((d.totalSessions || 1) + 1) * 2.5);
 
-  entered.append('circle')
+  entered.append('circle');
+
+  entered.append('text').attr('class', 'node-icon');
+
+  const merged = entered.merge(node);
+  merged.select('circle')
     .attr('r', d => d.type === 'router' ? 22 : d.type === 'internet' ? 18 : d.type === 'meshnode' ? 20 : d.type === 'org' ? orgR(d) : 16)
     .attr('fill', d => {
       if (d.type === 'router') return '#f59e0b';
@@ -152,7 +157,7 @@ export function drawNodes() {
     .attr('stroke-width', d => d.summary ? 3 : 2).attr('fill-opacity', d => d.summary ? 0.72 : 0.85)
     .attr('filter', d => (d.type === 'router' || d.type === 'meshnode') ? 'url(#glow)' : null);
 
-  entered.append('text')
+  merged.select('text.node-icon')
     .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
     .attr('font-size', d => d.type === 'router' || d.type === 'meshnode' ? '14px' : d.type === 'org' ? '13px' : '12px').attr('fill', '#fff')
     .text(d => d.type === 'router' ? '⬡' : d.type === 'meshnode' ? '⬡' : d.type === 'internet' ? '🌐' : d.type === 'org' ? (d.summary ? 'Σ' : (d.flag || '🌐')) : d.client?.summarySessions ? 'Σ' : isWiredType(d.client?.type) ? '🖥' : '📶');

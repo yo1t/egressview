@@ -1,10 +1,10 @@
 // ─── D3 Graph Setup ───────────────────────────────────────────────────────────
 import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, fmtBytes } from './utils.js?v=__ASSET_VERSION__';
-import { getTimeRange, currentTimeFilter, setFetching, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
+import { getFilteredConnections, getTimeRange, currentTimeFilter, setFetching, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
 import { statsMode, nlMode, logMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { apiFetch, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
-import { flagEmoji, meshNodeId, normalizeGraphLinks, currentGraphRangeKey as _rangeKey, routerTargetsFromObservedBy } from './graph-helpers.js?v=__ASSET_VERSION__';
+import { flagEmoji, meshNodeId, normalizeGraphLinks, currentGraphRangeKey as _rangeKey, routerTargetsFromObservedBy, shouldUseDetailedGraph } from './graph-helpers.js?v=__ASSET_VERSION__';
 // Circular imports resolved at runtime (function-body-only calls):
 import { updateStats } from './stats.js?v=__ASSET_VERSION__';
 import { updateLogView } from './log.js?v=__ASSET_VERSION__';
@@ -355,12 +355,164 @@ function updateHeader(data) {
   document.getElementById('last-update').textContent = t('last-update.prefix') + new Date(data.timestamp).toLocaleTimeString();
 }
 
-// Graph history is always rendered from the bounded server-side summary.
+// The summary is also the safety gate for the bounded detailed live view.
 function buildGraphFromConnections({ resetPositions = false } = {}) {
   const tr = typeof getTimeRange === 'function' ? getTimeRange() : { from: null, to: null };
   if (graphSummary && graphSummaryKey === currentGraphRangeKey(tr.from, tr.to)) {
-    buildGraphFromSummary(graphSummary, { resetPositions });
+    if (shouldUseDetailedGraph(graphSummary, currentTimeFilter)) {
+      buildDetailedGraph(getFilteredConnections(), { resetPositions });
+    } else {
+      buildGraphFromSummary(graphSummary, { resetPositions });
+    }
   }
+}
+
+function buildDetailedGraph(filtered, { resetPositions = false } = {}) {
+  const topology = activeRouterTopology();
+  const networkClientsByIp = new Map((lastNetworkData?.clients || []).map(client => [client.ip, client]));
+  const srcRouterMap = topology.isMulti ? new Map() : null;
+  const srcCounts = new Map();
+  const srcMeta = new Map();
+  const srcFirstSeen = new Map();
+
+  for (const connection of filtered) {
+    srcCounts.set(connection.src, (srcCounts.get(connection.src) || 0) + 1);
+    if (!srcMeta.has(connection.src)) {
+      srcMeta.set(connection.src, {
+        mac: connection.srcMac,
+        vendor: connection.srcVendor,
+        dnsName: connection.srcDnsName,
+        mdnsName: connection.srcMdnsName,
+      });
+    }
+    if (connection.firstSeen) {
+      const current = srcFirstSeen.get(connection.src);
+      if (!current || connection.firstSeen < current) srcFirstSeen.set(connection.src, connection.firstSeen);
+    }
+    if (topology.isMulti) {
+      if (!srcRouterMap.has(connection.src)) srcRouterMap.set(connection.src, new Set());
+      for (const target of routerTargetsFromObservedBy(
+        connection.observedBy, connection.source, true, topology
+      )) srcRouterMap.get(connection.src).add(target);
+    }
+  }
+
+  const clients = [...srcCounts.keys()].map(ip => {
+    const metadata = srcMeta.get(ip) || {};
+    const networkClient = networkClientsByIp.get(ip) || {};
+    return {
+      ...networkClient,
+      mac: networkClient.mac || metadata.mac || ip,
+      ip,
+      name: networkClient.name || metadata.mdnsName || metadata.dnsName || ip,
+      type: networkClient.type || '0',
+      rxRate: networkClient.rxRate || 0,
+      txRate: networkClient.txRate || 0,
+      rssi: networkClient.rssi ?? null,
+      amesh_papMac: networkClient.amesh_papMac || null,
+      vendor: metadata.vendor || networkClient.vendor || '',
+      dnsName: metadata.dnsName || networkClient.dnsName || null,
+      mdnsName: metadata.mdnsName || networkClient.mdnsName || null,
+      deviceFirstSeen: srcFirstSeen.get(ip) || 0,
+      ...(topology.isMulti ? {
+        routerTargets: [...(srcRouterMap.get(ip) || [topology.mainNodeId])],
+      } : {}),
+    };
+  });
+
+  buildGraph({
+    clients,
+    satellites: [],
+    meshNodes: lastNetworkData?.meshNodes || [],
+    wanRx: lastNetworkData?.wanRx || 0,
+    wanTx: lastNetworkData?.wanTx || 0,
+    routerIp: lastNetworkData?.routerIp || null,
+    timestamp: lastNetworkData?.timestamp || Date.now(),
+    mainRouterLabel: topology.mainRouterLabel,
+    extraRouters: topology.extraRouters,
+  }, { resetPositions, cacheNetworkData: false });
+  buildDetailedTargets(filtered, { resetPositions });
+  graphSummaryNotice(false);
+}
+
+function buildDetailedTargets(filtered, { resetPositions = false } = {}) {
+  if (!simulation) return;
+  const positions = {};
+  if (!resetPositions) {
+    nodes.forEach(node => {
+      if (node.type === 'org') positions[node.id] = {
+        x: node.x, y: node.y, vx: node.vx || 0, vy: node.vy || 0,
+      };
+    });
+  }
+  nodes = nodes.filter(node => node.type !== 'org');
+  links = links.filter(link => link.ltype !== 'dev-org');
+
+  const targets = new Map();
+  for (const connection of filtered) {
+    if (connection.lat == null || connection.lon == null) continue;
+    const key = connection.org || connection.dst;
+    const label = connection.org || (connection.dstHost !== connection.dst ? connection.dstHost : connection.dst);
+    if (!targets.has(key)) {
+      targets.set(key, {
+        id: `__org__:${key}`,
+        type: 'org',
+        label,
+        flag: flagEmoji(connection.country),
+        country: connection.country,
+        srcs: new Map(),
+      });
+    }
+    const target = targets.get(key);
+    target.srcs.set(connection.src, (target.srcs.get(connection.src) || 0) + 1);
+  }
+
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = Math.min(cx, cy) * 0.75;
+  const targetNodes = [...targets.values()]
+    .map(target => ({
+      ...target,
+      totalSessions: [...target.srcs.values()].reduce((sum, count) => sum + count, 0),
+    }))
+    .sort((a, b) => b.totalSessions - a.totalSessions)
+    .map((target, index, list) => {
+      const position = positions[target.id];
+      if (position) return { ...target, ...position };
+      const angle = (2 * Math.PI * index) / Math.max(list.length, 1);
+      return { ...target, x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) };
+    });
+  nodes = [...nodes, ...targetNodes];
+
+  const clientByIp = new Map();
+  nodes.forEach(node => {
+    if (node.type === 'client' && node.client?.ip) clientByIp.set(node.client.ip, node.id);
+  });
+  for (const target of targetNodes) {
+    for (const [srcIp, count] of target.srcs) {
+      const source = clientByIp.get(srcIp);
+      if (source) links.push({
+        source,
+        target: target.id,
+        id: `dev-org:${source}:${target.id}`,
+        ltype: 'dev-org',
+        sessionCount: count,
+        rxRate: 0,
+        txRate: 0,
+      });
+    }
+  }
+
+  links = normalizeGraphLinks(links, nodes);
+  simulation.nodes(nodes);
+  simulation.force('link').links(links);
+  simulation.force('x-center', d3.forceX(cx).strength(0.04));
+  simulation.force('y-split', d3.forceY(node => node.type === 'org' ? height * 0.22 : height * 0.72)
+    .strength(node => node.type === 'org' ? 0.15 : 0.06));
+  simulation.alpha(0.3).restart();
+  drawLinks();
+  drawNodes();
+  applyGraphFilter();
 }
 
 function buildGraphFromSummary(summary, { resetPositions = false } = {}) {

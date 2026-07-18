@@ -727,7 +727,7 @@ describe('Server runtime invariants', () => {
       'the app pie preview should render before the potentially slow summary request resolves');
   });
 
-  it('graph history always uses the bounded summary API', () => {
+  it('graph history uses a bounded summary as the detailed-live safety gate', () => {
     const graphJs = moduleSources['graph.js'];
     const timeFilterJs = moduleSources['time-filter.js'];
     const buildStart = graphJs.indexOf('function buildGraphFromConnections(');
@@ -738,12 +738,10 @@ describe('Server runtime invariants', () => {
     assert.notEqual(buildEnd, -1);
     assert.notEqual(orgStart, -1);
     assert.notEqual(orgEnd, -1);
-    assert.match(graphJs.slice(buildStart, buildEnd), /buildGraphFromSummary\(graphSummary/,
-      'connection graph rendering should delegate to the server summary');
-    assert.doesNotMatch(graphJs.slice(buildStart, buildEnd), /getFilteredConnections/,
-      'connection graph rendering must not aggregate the in-browser history');
-    assert.doesNotMatch(graphJs.slice(orgStart, orgEnd), /getFilteredConnections/,
-      'organization graph rendering must not aggregate the in-browser history');
+    assert.match(graphJs.slice(buildStart, buildEnd), /shouldUseDetailedGraph\(graphSummary/,
+      'the summary should gate whether live detail rendering is safe');
+    assert.match(graphJs.slice(buildStart, buildEnd), /getFilteredConnections/,
+      'bounded live rendering should use the already-loaded browser history');
     assert.doesNotMatch(timeFilterJs, /\/api\/connections\?(?!summary)/,
       'period changes must not issue unpaged connection-history requests for the graph');
     assert.doesNotMatch(mainJs, /background 24h fetch|\/api\/connections\?from=/,
