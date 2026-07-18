@@ -1,6 +1,5 @@
-// Unit tests for the v4 dual-write path and consistency diagnostics (P2-30 PR 3a).
-// history.js must write connection_observations in the same transaction as
-// the legacy connections.source column, and both must stay in agreement.
+// Unit tests for junction-backed observation writes and diagnostics (P2-30).
+// history.js writes connections and connection_observations atomically.
 'use strict';
 
 const { describe, it, beforeEach } = require('node:test');
@@ -34,7 +33,7 @@ function readObs() {
   return { rows, routers };
 }
 
-describe('dual-write: source → junction expansion', () => {
+describe('observation write: source → junction expansion', () => {
   it('a yamaha write produces one yamaha1 observation', () => {
     history.appendHistoryLog({ ...ENTRY, source: 'yamaha' });
     const { rows, routers } = readObs();
@@ -87,7 +86,7 @@ describe('dual-write: source → junction expansion', () => {
   });
 });
 
-describe('prune keeps source and junction in step', () => {
+describe('prune keeps connections and junction in step', () => {
   it('compactHistoryLog deletes the junction rows of pruned connections', () => {
     history.setRetentionDays(1);
     const old = Date.now() - 10 * 24 * 3600_000;
@@ -102,7 +101,7 @@ describe('prune keeps source and junction in step', () => {
 });
 
 describe('checkObservationConsistency', () => {
-  it('reports zeros when source and junction agree', () => {
+  it('reports zeros when the junction is structurally consistent', () => {
     history.appendHistoryLog({ ...ENTRY, source: 'yamaha' });
     history.appendHistoryLog({ ...ENTRY, dst: '9.9.9.9', source: 'yamaha+cisco' });
     const c = history.checkObservationConsistency();
@@ -129,23 +128,24 @@ describe('checkObservationConsistency', () => {
     assert.equal(c.orphanObservations, 1);
   });
 
-  it('detects an under-merged yamaha+cisco row', () => {
+  it('reports a missing observation after one router observation is removed', () => {
     history.appendHistoryLog({ ...ENTRY, source: 'yamaha+cisco' });
     const d = new Database(dbPath);
     d.prepare(`DELETE FROM connection_observations WHERE routerId = 'cisco1'`).run();
     d.close();
     const c = history.checkObservationConsistency();
-    assert.equal(c.underMerged, 1);
-    assert.equal(c.missingObservations, 1);
+    assert.equal(c.underMerged, 0, 'v5 no longer infers cardinality from a source column');
+    assert.equal(c.missingObservations, 0, 'the connection still has one observation');
   });
 });
 
 describe('junction-backed reads', () => {
-  it('returns observedBy and derives compatibility source without reading connections.source', () => {
+  it('returns observedBy and derives compatibility source without a connections.source column', () => {
     history.appendHistoryLog({ ...ENTRY, source: 'yamaha+cisco' });
     const d = new Database(dbPath);
-    d.prepare("UPDATE connections SET source = 'yamaha'").run();
+    const columns = d.prepare('PRAGMA table_info(connections)').all().map(row => row.name);
     d.close();
+    assert.ok(!columns.includes('source'));
 
     const [row] = history.queryByTimeRange(null, null);
     assert.deepEqual(row.observedBy, ['cisco1', 'yamaha1']);

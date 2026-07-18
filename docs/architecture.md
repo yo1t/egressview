@@ -51,7 +51,7 @@ The runtime natural key is `(src, dst, dport, proto)`. When multiple routers see
 1. Router adapters collect NAT sessions and address-neighbor information over SSH, normally every 60 seconds.
 2. Optional INSPECT, DHCPD, dnsmasq, and ASUS sources add short-lived sessions, IP/MAC identity, hostnames, and Wi-Fi metadata.
 3. The runtime merges repeated observations and queues reverse DNS, RDAP, GeoIP, OUI/device discovery, and threat-intelligence enrichment.
-4. Connection history and its router observations are dual-written in one SQLite transaction. The browser receives deltas through Socket.IO and can query durable history through REST.
+4. Connection history and its router observations are written atomically in one SQLite transaction. The browser receives deltas through Socket.IO and can query durable history through REST.
 5. Detection, beacon, device, and notification modules derive higher-level findings from the same durable data.
 
 ## Persistence and startup
@@ -60,7 +60,7 @@ EgressView uses one SQLite database in WAL mode with separate module connections
 
 Migrations are append-only and fail-closed. Before a data-changing migration, EgressView checks free space, creates and validates a consistent backup, runs the migration transaction, and verifies the resulting database. Backup restore follows the same principle: validate source, require a safety backup, replace, reopen all consumers, validate the result, and roll back if any stage fails.
 
-The compatibility `source` column currently coexists with `connection_observations`. The observation-consistency diagnostic checks for missing, orphaned, under-merged, or kind-mismatched rows before the legacy representation can be removed.
+Schema v5 stores router ownership only in `connection_observations`; the legacy `connections.source` column has been removed. API responses still expose a compatibility `source` value derived from the observer router kinds. The observation-consistency diagnostic checks for missing or orphaned observations and missing router metadata.
 
 ## Interfaces
 

@@ -51,7 +51,7 @@ Runtime上の自然keyは`(src, dst, dport, proto)`です。同じ通信を複�
 1. Router adapterが通常60秒ごとにSSHでNAT sessionとaddress-neighbor情報を取得します。
 2. 任意のINSPECT、DHCPD、dnsmasq、ASUS sourceが短命session、IP/MAC対応、hostname、Wi-Fi metadataを補います。
 3. Runtimeが反復観測を統合し、reverse DNS、RDAP、GeoIP、OUI/端末識別、threat intelligenceの付加処理を開始します。
-4. Connection履歴とrouter観測を同じSQLite transactionでdual-writeします。BrowserはSocket.IOで差分を受け取り、RESTで永続履歴を検索します。
+4. Connection履歴とrouter観測を同じSQLite transactionで一括保存します。BrowserはSocket.IOで差分を受け取り、RESTで永続履歴を検索します。
 5. 検出、beacon、端末、通知moduleが同じ永続データから上位の情報を生成します。
 
 ## 永続化と起動
@@ -60,7 +60,7 @@ EgressViewは1つのSQLite databaseをWAL modeで使用し、history、sessions�
 
 Migrationは末尾追加方式でfail-closedです。データ変更を伴うmigrationの前に空き容量を検査し、整合性を検証したbackupを作成してからtransactionを実行し、完了後のdatabaseも検証します。Restoreも同じ原則で、復元元検査、安全backup必須、置換、全利用者の再接続、復元後検査を行い、どこかで失敗すればrollbackします。
 
-互換用`source` columnと`connection_observations`は現在併存しています。旧表現を削除する前に、observation consistency診断でmissing、orphan、under-merged、kind mismatchがないことを確認します。
+Schema v5ではrouterの観測情報を`connection_observations`だけに保存し、旧`connections.source` columnは削除済みです。APIの互換用`source`値は、観測したrouterのkindから導出します。Observation consistency診断では観測漏れ、孤立した観測、router metadataの欠落を検査します。
 
 ## Interface
 

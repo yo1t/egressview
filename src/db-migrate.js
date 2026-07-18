@@ -28,8 +28,9 @@ const {
   expandSourceToRouterIds,
   routerKindForId,
 } = require('./router-id');
+const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -157,6 +158,43 @@ const MIGRATIONS = [
         throw new Error(`v4 backfill left ${missing} connections without observations`);
       }
       logger.info('[migrate] v4: backfill consistency verified (0 missing observations)');
+    },
+  },
+  {
+    version: 5,
+    description: 'remove legacy connections.source column (P2-30 contract phase)',
+    up(db) {
+      const hasTbl = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='connections'`).get();
+      if (!hasTbl) return; // fresh DB: history.js creates the v5 schema after migrations
+
+      const columns = db.prepare('PRAGMA table_info(connections)').all().map(row => row.name);
+      if (!columns.includes('source')) return; // already contracted by an equivalent build
+
+      const before = checkObservationConsistency(db);
+      const mismatches = before.missingObservations + before.orphanObservations +
+        before.underMerged + before.kindMismatches;
+      if (mismatches > 0) {
+        throw new Error(
+          `v5 consistency gate failed (missing=${before.missingObservations}, ` +
+          `orphans=${before.orphanObservations}, underMerged=${before.underMerged}, ` +
+          `kindMismatches=${before.kindMismatches})`
+        );
+      }
+
+      db.exec('ALTER TABLE connections DROP COLUMN source');
+
+      const afterColumns = db.prepare('PRAGMA table_info(connections)').all().map(row => row.name);
+      if (afterColumns.includes('source')) {
+        throw new Error('v5 failed to remove connections.source');
+      }
+      const after = checkObservationConsistency(db);
+      if (after.missingObservations || after.orphanObservations || after.kindMismatches) {
+        throw new Error(
+          `v5 post-contract consistency failed (missing=${after.missingObservations}, ` +
+          `orphans=${after.orphanObservations}, kindMismatches=${after.kindMismatches})`
+        );
+      }
+      logger.info('[migrate] v5: removed connections.source; junction consistency verified');
     },
   },
 ];

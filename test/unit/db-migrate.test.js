@@ -84,7 +84,7 @@ describe('db-migrate: legacy database (user_version=0, has tables)', () => {
     try { fs.unlinkSync(p); } catch {}
   });
 
-  it('adds source column to existing connections table', () => {
+  it('adds current metadata columns and removes the legacy source column', () => {
     const p = tmpDb('legacy-source');
     const db = openDb(p);
     db.exec(`CREATE TABLE connections (
@@ -97,7 +97,7 @@ describe('db-migrate: legacy database (user_version=0, has tables)', () => {
     const db2 = openDb(p);
     runMigrations(db2, p);
     const cols = db2.prepare('PRAGMA table_info(connections)').all().map(r => r.name);
-    assert.ok(cols.includes('source'),    'source column must exist');
+    assert.ok(!cols.includes('source'),   'source column must be removed by v5');
     assert.ok(cols.includes('agentHost'), 'agentHost column must exist');
     assert.ok(cols.includes('process'),   'process column must exist');
     assert.ok(cols.includes('pid'),       'pid column must exist');
@@ -129,7 +129,7 @@ describe('db-migrate: up-to-date database', () => {
   it('is a no-op when user_version == SCHEMA_VERSION', () => {
     const p = tmpDb('current');
     const db = openDb(p);
-    db.exec('CREATE TABLE connections (src TEXT, dst TEXT, dport INTEGER, proto TEXT, firstSeen INTEGER NOT NULL, lastSeen INTEGER NOT NULL, source TEXT NOT NULL DEFAULT \'yamaha\', agentHost TEXT, process TEXT, pid INTEGER, PRIMARY KEY (src, dst, dport, proto))');
+    db.exec('CREATE TABLE connections (src TEXT, dst TEXT, dport INTEGER, proto TEXT, firstSeen INTEGER NOT NULL, lastSeen INTEGER NOT NULL, agentHost TEXT, process TEXT, pid INTEGER, PRIMARY KEY (src, dst, dport, proto))');
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
     db.close();
 
@@ -153,7 +153,7 @@ describe('db-migrate: in-memory database', () => {
   });
 });
 
-// ─── P2-30 v4: routers + connection_observations backfill ─────────────────────
+// ─── P2-30 v4/v5: expand observations, then remove source ─────────────────────
 
 describe('db-migrate: v4 observation backfill', () => {
   function legacyV3Db(p) {
@@ -181,6 +181,8 @@ describe('db-migrate: v4 observation backfill', () => {
     runMigrations(db, p, { sourceRouterMap: { yamaha: 'yamaha1', cisco: 'cisco1' } });
 
     assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
+    const columns = db.prepare('PRAGMA table_info(connections)').all().map(row => row.name);
+    assert.ok(!columns.includes('source'));
     const obs = db.prepare('SELECT * FROM connection_observations ORDER BY src, routerId').all();
     // yamaha:1 + cisco:1 + yamaha+cisco:2 + inspect:1 + unknown:1 = 6 rows
     assert.equal(obs.length, 6);
@@ -233,6 +235,65 @@ describe('db-migrate: v4 observation backfill', () => {
     assert.ok(tables.includes('routers'));
     assert.ok(tables.includes('connection_observations'));
     assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
+    db.close();
+  });
+});
+
+describe('db-migrate: v5 source contract', () => {
+  function v4Db(p, { withObservation = true } = {}) {
+    const db = openDb(p);
+    db.exec(`
+      CREATE TABLE connections (
+        src TEXT, dst TEXT, dport INTEGER, proto TEXT,
+        firstSeen INTEGER NOT NULL, lastSeen INTEGER NOT NULL,
+        source TEXT NOT NULL DEFAULT 'yamaha',
+        agentHost TEXT, process TEXT, pid INTEGER,
+        PRIMARY KEY (src, dst, dport, proto)
+      );
+      CREATE TABLE routers (
+        id TEXT PRIMARY KEY, kind TEXT NOT NULL, displayName TEXT NOT NULL,
+        createdAt INTEGER NOT NULL, deletedAt INTEGER
+      );
+      CREATE TABLE connection_observations (
+        src TEXT, dst TEXT, dport INTEGER, proto TEXT, routerId TEXT,
+        firstObservedAt INTEGER NOT NULL, lastObservedAt INTEGER NOT NULL,
+        PRIMARY KEY (src, dst, dport, proto, routerId)
+      );
+      INSERT INTO connections VALUES
+        ('192.168.1.10', '8.8.8.8', 443, 'TCP', 100, 200, 'yamaha', NULL, NULL, NULL);
+      INSERT INTO routers VALUES ('yamaha1', 'yamaha', 'Yamaha', 1, NULL);
+    `);
+    if (withObservation) {
+      db.exec(`INSERT INTO connection_observations VALUES
+        ('192.168.1.10', '8.8.8.8', 443, 'TCP', 'yamaha1', 100, 200)`);
+    }
+    db.pragma('user_version = 4');
+    return db;
+  }
+
+  it('removes source only after preserving connection and observation data', () => {
+    const p = tmpDb('v5-contract');
+    const db = v4Db(p);
+    runMigrations(db, p);
+
+    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    const columns = db.prepare('PRAGMA table_info(connections)').all().map(row => row.name);
+    assert.ok(!columns.includes('source'));
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM connections').get().n, 1);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM connection_observations').get().n, 1);
+    assert.equal(db.prepare('SELECT lastSeen FROM connections').get().lastSeen, 200);
+    db.close();
+  });
+
+  it('fails closed and retains v4 when an observation is missing', () => {
+    const p = tmpDb('v5-inconsistent');
+    const db = v4Db(p, { withObservation: false });
+
+    assert.throws(() => runMigrations(db, p), /v5 consistency gate failed/);
+    assert.equal(db.pragma('user_version', { simple: true }), 4);
+    const columns = db.prepare('PRAGMA table_info(connections)').all().map(row => row.name);
+    assert.ok(columns.includes('source'));
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM connections').get().n, 1);
     db.close();
   });
 });
