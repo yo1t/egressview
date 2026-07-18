@@ -350,6 +350,56 @@ test('tab bar renders after auth', async ({ page }) => {
   expect(count).toBe(5);
 });
 
+test('mobile viewer keeps navigation, logs, and device details inside the viewport', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route(/\/api\/devices\/merge-candidates\?/, route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ candidates: [] }),
+  }));
+  await page.route(/\/api\/devices\?/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ devices: [{
+      deviceId: 8001, ip: '192.0.2.80', mac: 'aa:bb:cc:dd:ee:80',
+      vendor: 'Mobile fixture', dnsName: 'phone.example', ipv6Addrs: [],
+      sources: 'yamaha,cisco', status: 'active', firstSeen: Date.now() - 60_000,
+      lastSeen: Date.now(), note: 'Visible on a narrow screen',
+    }] }),
+  }));
+  await authPage(page);
+
+  const errors = collectErrors(page);
+  const tabs = page.locator('.view-tab');
+  await expect(tabs).toHaveCount(5);
+  for (let index = 0; index < 5; index += 1) {
+    const box = await tabs.nth(index).boundingBox();
+    expect(box, `mobile tab ${index} should have a layout box`).not.toBeNull();
+    expect(box.x, `mobile tab ${index} should not overflow left`).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, `mobile tab ${index} should not overflow right`).toBeLessThanOrEqual(390);
+    expect(box.height, `mobile tab ${index} should be touchable`).toBeGreaterThanOrEqual(38);
+  }
+
+  await page.click('#btn-log');
+  await expect(page.locator('#log-container')).toBeVisible();
+  await expect(page.locator('#log-table')).toBeVisible();
+  expect(await page.locator('#log-table th').first().evaluate(el => getComputedStyle(el).position)).toBe('sticky');
+
+  await page.click('#btn-devices');
+  const row = page.locator('#devices-tbody tr[data-ip]');
+  await expect(row).toHaveCount(1);
+  await row.click();
+  const detail = page.locator('#dv-detail-panel');
+  await expect(detail).toBeVisible();
+  const detailBox = await detail.boundingBox();
+  expect(detailBox.x).toBeGreaterThanOrEqual(0);
+  expect(detailBox.x + detailBox.width).toBeLessThanOrEqual(390);
+  await page.click('#dv-detail-close');
+  await expect(detail).toBeHidden();
+
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(fatalErrors(errors), `Mobile viewer errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
 test('graph canvas renders after auth from the summary API', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
