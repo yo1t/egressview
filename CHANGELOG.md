@@ -4,6 +4,37 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-07-18
+
+### Added
+
+- Added CSV and JSON export for filtered connection history.
+- Added explicit, rate-limited threat investigation through AbuseIPDB, VirusTotal, and AlienVault OTX, with server-side caching and no automatic external submission.
+- Added a Linux conntrack router preview over SSH, including command/procfs parsers and Docker integration coverage. Physical router validation remains pending.
+- Added a responsive mobile monitoring view for router health, Graph Map, Statistics, Connection Log, Devices, and Detection Log.
+- Added English and Japanese REST API and architecture references, plus a dedicated GitHub Pages deployment workflow.
+- Added an operational observation-consistency monitor for validating multi-router data before schema contraction.
+
+### Changed
+
+- Completed the schema v5 expand-contract migration by removing the legacy `connections.source` column after a consistency gate; router observations now use `connection_observations` exclusively.
+- Unified browser and server translations in one catalog and split large graph, statistics, settings, history, and authentication modules into focused components.
+- Replaced frontend HTML-string rendering with DOM APIs and removed the remaining inline-style CSP exception.
+- Added schema-based validation to HTTP routes and made graph summaries available independently of the Statistics view.
+- Reduced summary-query work through bounded aggregation and caching while preserving complete SQLite history.
+
+### Security and Reliability
+
+- Database restore now fails closed: the upload, safety backup, restored database, and post-restore state are integrity-checked before the service accepts the restore.
+- Configuration writes now report failures to callers and roll back in-memory state instead of reporting a false success.
+- Schema v5 migration requires a verified pre-migration backup and aborts on observation inconsistency; existing v1-v4 migrations remain available for older databases.
+- Expanded failure-path, browser smoke, route validation, migration, export, and responsive-layout coverage.
+
+### Upgrade Notes
+
+- Upgrading an existing database is automatic. Startup creates and verifies a backup before schema v5 is applied; if backup or consistency verification fails, startup stops without modifying the database.
+- Linux conntrack support is a preview validated in Docker, not yet a claim of physical-router compatibility. Yamaha RTX and Cisco IOS remain the physically validated router integrations.
+
 ## [1.3.5] - 2026-07-14
 
 ### Added
