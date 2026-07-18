@@ -45,6 +45,17 @@ describe('db-migrate: fresh database', () => {
     }
   });
 
+  it('creates append-only AI conversation tables at v6', () => {
+    const db = openDb(':memory:');
+    runMigrations(db, ':memory:');
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all().map(row => row.name);
+    assert.ok(tables.includes('ai_conversations'));
+    assert.ok(tables.includes('ai_messages'));
+    const indexes = db.prepare(`SELECT name FROM sqlite_master WHERE type='index'`).all().map(row => row.name);
+    assert.ok(indexes.includes('idx_ai_messages_conversation'));
+    db.close();
+  });
+
   it('does NOT create a backup for a fresh (empty) database', () => {
     const p = tmpDb('fresh-no-backup');
     const db = openDb(p);
@@ -276,7 +287,7 @@ describe('db-migrate: v5 source contract', () => {
     const db = v4Db(p);
     runMigrations(db, p);
 
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     const columns = db.prepare('PRAGMA table_info(connections)').all().map(row => row.name);
     assert.ok(!columns.includes('source'));
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM connections').get().n, 1);

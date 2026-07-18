@@ -157,7 +157,12 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
     return { provider, models: modelIds(await readJsonResponse(response), provider) };
   }
 
-  async function generateInsight(context, { signal, cloudConsentConfirmed = false } = {}) {
+  async function generateInsight(context, {
+    signal,
+    cloudConsentConfirmed = false,
+    question = '',
+    conversation = [],
+  } = {}) {
     if (provider === 'disabled') throw new Error('AI provider is disabled');
     if (!models[provider]) throw new Error(`${provider} model is not configured`);
     if (CLOUD_PROVIDERS.includes(provider)) {
@@ -179,10 +184,17 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
     const timeoutSignal = AbortSignal.timeout(GENERATE_TIMEOUT_MS);
     const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
     try {
+      const task = question
+        ? [
+          'Answer the user question using only the anonymized facts and prior displayed conversation.',
+          `Prior conversation: ${JSON.stringify(conversation.slice(-20))}`,
+          `User question: ${question}`,
+        ].join('\n')
+        : 'Reply in concise Japanese with sections: 概要, 注目すべき変化, リスク, 推奨確認事項.';
       const prompt = [
         'You are a read-only network security analyst.',
         'Use only the anonymized JSON facts below. Do not invent hosts, IP addresses, or events.',
-        'Reply in concise Japanese with sections: 概要, 注目すべき変化, リスク, 推奨確認事項.',
+        task,
         contextText,
       ].join('\n\n');
       let url;

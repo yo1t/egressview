@@ -11,6 +11,7 @@ const { MIGRATED_IDS, expandSourceToRouterIds, routerKindForId } = require('./ro
 const { checkObservationConsistency: checkConsistency } = require('./observation-consistency');
 const { createHistoryCache, DEFAULT_HOT_MAX_ENTRIES } = require('./history-cache');
 const { createHistoryQueries } = require('./history-queries');
+const { createAiConversationStore } = require('./ai-conversation-store');
 
 const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
   ? path.resolve(process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB)
@@ -92,6 +93,7 @@ const {
   countFactsByTimeRange,
   createConnectionExportReader,
   groupDstByTimeRange,
+  groupServiceByTimeRange,
   summarizeByTimeRange,
 } = createHistoryQueries({
   getDb: () => db,
@@ -106,6 +108,8 @@ const {
     ? timings => logger.info(`[history] summary timing ${JSON.stringify(timings)}`)
     : null,
 });
+
+const aiConversationStore = createAiConversationStore({ getDb: () => db });
 
 function _secureDbFiles() {
   for (const suffix of ['', '-shm', '-wal']) {
@@ -732,7 +736,9 @@ module.exports = {
   createConnectionExportReader,
   seedConnections,
   groupDstByTimeRange,
+  groupServiceByTimeRange,
   summarizeByTimeRange,
+  ...aiConversationStore,
   getKnownMacs,
   upsertRouterMetadata,
   tombstoneRouterMetadata,

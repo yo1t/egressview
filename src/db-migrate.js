@@ -30,7 +30,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -195,6 +195,40 @@ const MIGRATIONS = [
         );
       }
       logger.info('[migrate] v5: removed connections.source; junction consistency verified');
+    },
+  },
+  {
+    version: 6,
+    description: 'append-only AI conversations and messages (P2-14)',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS ai_conversations (
+          conversationId TEXT PRIMARY KEY,
+          createdAt      INTEGER NOT NULL,
+          provider       TEXT NOT NULL,
+          model          TEXT NOT NULL,
+          rangeFrom      INTEGER NOT NULL,
+          rangeTo        INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS ai_messages (
+          messageId      TEXT PRIMARY KEY,
+          conversationId TEXT NOT NULL,
+          requestId      TEXT NOT NULL,
+          role           TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+          body           TEXT,
+          createdAt      INTEGER NOT NULL,
+          provider       TEXT NOT NULL,
+          model          TEXT NOT NULL,
+          rangeFrom      INTEGER NOT NULL,
+          rangeTo        INTEGER NOT NULL,
+          status         TEXT NOT NULL CHECK(status IN ('complete', 'failed')),
+          errorCode      TEXT,
+          UNIQUE(requestId, role),
+          FOREIGN KEY(conversationId) REFERENCES ai_conversations(conversationId) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation
+          ON ai_messages(conversationId, createdAt, messageId);
+      `);
     },
   },
 ];

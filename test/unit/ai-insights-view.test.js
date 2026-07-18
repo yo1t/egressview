@@ -15,6 +15,8 @@ class FakeElement {
   constructor() {
     this.textContent = '';
     this.disabled = false;
+    this.scrollTop = 0;
+    this.scrollHeight = 100;
     this.children = [];
     this._classes = new Set();
     this.classList = {
@@ -87,5 +89,17 @@ describe('AI insights view', () => {
     context.setAnalysisRunning(false);
     assert.equal(get('ai-analyze-btn').disabled, false);
     assert.equal(get('ai-cancel-btn').classList.contains('is-hidden'), true);
+  });
+
+  it('renders persisted conversation messages as untrusted text', () => {
+    const { context, get } = harness();
+    context.renderChatMessages([
+      { role: 'user', status: 'complete', body: '<img src=x onerror=alert(1)>' },
+      { role: 'assistant', status: 'failed', body: null },
+    ]);
+    const children = get('ai-chat-messages').children;
+    assert.equal(children[0].textContent, '<img src=x onerror=alert(1)>');
+    assert.equal(children[1].textContent, 'ai.chat.failed');
+    assert.equal(children[1].classList.contains('is-failed'), true);
   });
 });

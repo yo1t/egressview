@@ -128,6 +128,8 @@ AI洞察はローカル集計を常時表示し、利用者が明示的に実行
 - `POST /api/ai/test`は空のJSON objectを受け付けます。保存済み設定で最大200件のモデルIDだけを取得し、timeoutは10秒、応答上限は1MBです。
 - `GET /api/ai/facts`はepoch millisecondsの`from`が必須で、`to`は任意です。接続、端末、宛先、脅威レベルについて、選択期間と直前の同一期間の件数、およびcredentialを含まないrouter収集状態を返します。期間上限は14日で、AI providerへは送信しません。
 - `POST /api/ai/analyze`は`from`と任意の`to`を受け付け、内部IP、MAC、端末名、router管理情報、raw logを除いた集計を選択providerへ送信します。Anthropic/OpenAIでは保存済み同意に加えて要求ごとの`cloudConsentConfirmed: true`が必須です。期間上限は14日、timeoutは30秒、サーバー全体の同時分析は1件です。
+- `POST /api/ai/chat`は最大4,000文字の`message`、期間、任意の`conversationId`と`requestId`を受け付けます。user行をAI呼び出し前にv6 SQLiteへ追記し、完了後にassistant行、失敗時は本文を含まない失敗行を追記します。同じ`requestId + role`は重複しません。
+- `GET /api/ai/conversations`は最大100会話と保存件数・本文bytesを返します。`GET /api/ai/conversations/:id`は最大500メッセージを追記順に返し、`DELETE /api/ai/conversations/:id`だけが会話を明示削除します。再起動や設定変更で既存行を更新・truncateしません。
 
 providerは初期状態で無効です。Anthropic/OpenAIは固定の公式API endpointを使い、任意HTTP(S) endpointを設定できるのはOllamaだけです。
 
@@ -192,6 +194,10 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | AI設定 | `POST /api/ai/test` | 認証必須。通信データを送らずモデルIDを取得 |
 | AI洞察 | `GET /api/ai/facts` | 認証必須。local factsと直前期間比較のみ |
 | AI洞察 | `POST /api/ai/analyze` | 認証必須。匿名化した集計を選択providerで手動分析。cloudは二重同意必須 |
+| AI対話 | `POST /api/ai/chat` | 認証必須。質問を先に追記し、回答または失敗行をappend-only保存 |
+| AI対話 | `GET /api/ai/conversations` | 認証必須。会話一覧と保存量 |
+| AI対話 | `GET /api/ai/conversations/:id` | 認証必須。再起動後も残るメッセージ履歴 |
+| AI対話 | `DELETE /api/ai/conversations/:id` | 認証必須。会話単位の明示削除 |
 | Slack | `POST /api/slack/test` | 認証必須 |
 | Slack | `POST /api/slack/verify` | 認証必須 |
 | Slack | `POST /api/slack/lookup-user` | 認証必須 |

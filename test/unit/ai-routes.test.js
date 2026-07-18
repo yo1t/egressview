@@ -7,6 +7,7 @@ const { describe, it } = require('node:test');
 const express = require('express');
 const aiRoutes = require('../../src/routes/ai');
 const { createAiProvider } = require('../../src/ai-provider');
+const historyStore = require('../../src/history');
 
 const requireAdmin = (_req, _res, next) => next();
 
@@ -189,5 +190,35 @@ describe('AI configuration routes', () => {
     assert.equal(result.body.text, '確認結果');
     assert.equal(JSON.stringify(context).includes('secret-name'), false);
     assert.deepEqual(context.topServices, [{ port: 443, protocol: 'tcp', connections: 1 }]);
+  });
+
+  it('persists chat messages, restores them through the API, and deduplicates retries', async () => {
+    historyStore._initForTest();
+    const provider = createAiProvider({ fetchImpl: async () =>
+      new Response(JSON.stringify({ response: 'persisted answer' }), { status: 200 }) });
+    provider.configure({ provider: 'ollama', models: { ollama: 'local-model' } });
+    const app = appFor(provider, undefined, {
+      history: historyStore,
+      threatIntel: null,
+      routerManager: { list: () => [] },
+    });
+    const requestId = '11111111-1111-4111-8111-111111111111';
+    const sent = await request(app, 'POST', '/api/ai/chat', {
+      requestId, message: 'What changed?', from: 1000, to: 2000,
+    });
+    assert.equal(sent.status, 200);
+    const conversationId = sent.body.conversationId;
+    const loaded = await request(app, 'GET', `/api/ai/conversations/${conversationId}`);
+    assert.deepEqual(loaded.body.messages.map(message => message.body), ['What changed?', 'persisted answer']);
+
+    const retried = await request(app, 'POST', '/api/ai/chat', {
+      conversationId, requestId, message: 'replacement', from: 1000, to: 2000,
+    });
+    assert.equal(retried.status, 200);
+    const afterRetry = await request(app, 'GET', `/api/ai/conversations/${conversationId}`);
+    assert.equal(afterRetry.body.messages.length, 2);
+    assert.equal(afterRetry.body.messages[0].body, 'What changed?');
+    assert.equal((await request(app, 'DELETE', `/api/ai/conversations/${conversationId}`)).status, 200);
+    assert.equal((await request(app, 'GET', `/api/ai/conversations/${conversationId}`)).status, 404);
   });
 });

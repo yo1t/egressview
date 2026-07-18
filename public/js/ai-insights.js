@@ -10,6 +10,8 @@ const METRICS = ['connections', 'devices', 'destinations', 'warn', 'danger'];
 let refreshTimer = null;
 let generation = 0;
 let analysisController = null;
+let activeConversationId = null;
+let chatController = null;
 
 function formatNumber(value) {
   return new Intl.NumberFormat().format(Number(value) || 0);
@@ -92,6 +94,99 @@ function setAnalysisRunning(running) {
   document.getElementById('ai-cancel-btn').classList.toggle('is-hidden', !running);
 }
 
+function renderChatMessages(messages) {
+  const container = document.getElementById('ai-chat-messages');
+  container.replaceChildren(...messages.map(message => {
+    const item = document.createElement('div');
+    item.className = `ai-chat-message is-${message.role}${message.status === 'failed' ? ' is-failed' : ''}`;
+    item.textContent = message.status === 'failed' ? t('ai.chat.failed') : (message.body || '');
+    return item;
+  }));
+  container.scrollTop = container.scrollHeight;
+}
+
+async function loadConversation(conversationId) {
+  activeConversationId = conversationId || null;
+  if (!activeConversationId) {
+    renderChatMessages([]);
+    return;
+  }
+  const response = await apiFetch(`${_BASE}/api/ai/conversations/${encodeURIComponent(activeConversationId)}`);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || t('ai.chat.loadFailed'));
+  renderChatMessages(body.messages || []);
+}
+
+async function loadConversations() {
+  const response = await apiFetch(`${_BASE}/api/ai/conversations`);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || t('ai.chat.loadFailed'));
+  const select = document.getElementById('ai-conversation-select');
+  const options = (body.conversations || []).map(conversation => {
+    const option = document.createElement('option');
+    option.value = conversation.conversationId;
+    option.textContent = `${new Date(conversation.createdAt).toLocaleString()} · ${conversation.messageCount}`;
+    return option;
+  });
+  select.replaceChildren(...options);
+  document.getElementById('ai-chat-storage').textContent = tVars('ai.chat.storage', {
+    conversations: body.storage?.conversations || 0,
+    messages: body.storage?.messages || 0,
+    bytes: body.storage?.bodyBytes || 0,
+  });
+  const nextId = activeConversationId && options.some(option => option.value === activeConversationId)
+    ? activeConversationId : options[0]?.value || null;
+  if (nextId) select.value = nextId;
+  await loadConversation(nextId);
+}
+
+async function sendChatMessage() {
+  if (chatController) return;
+  const input = document.getElementById('ai-chat-input');
+  const message = input.value.trim();
+  if (!message) return;
+  const now = Date.now();
+  const range = getTimeRange();
+  const from = range.from ?? now - 3600_000;
+  const to = range.to ?? now;
+  chatController = new AbortController();
+  const button = document.getElementById('ai-chat-send-btn');
+  button.disabled = true;
+  try {
+    const configResponse = await apiFetch(`${_BASE}/api/config/ai`, { signal: chatController.signal });
+    const config = await configResponse.json().catch(() => ({}));
+    if (!configResponse.ok) throw new Error(config.error || t('ai.chat.failed'));
+    const cloud = config.provider === 'anthropic' || config.provider === 'openai';
+    if (cloud && !globalThis.confirm(tVars('ai.analysis.cloudConfirm', { provider: config.provider }))) return;
+    const response = await apiFetch(`${_BASE}/api/ai/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: activeConversationId || undefined,
+        requestId: globalThis.crypto.randomUUID(),
+        message,
+        from,
+        to,
+        cloudConsentConfirmed: cloud,
+      }),
+      signal: chatController.signal,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || t('ai.chat.failed'));
+    activeConversationId = body.conversationId;
+    input.value = '';
+    await loadConversations();
+  } catch (error) {
+    const display = document.getElementById('ai-error');
+    display.textContent = error.message || t('ai.chat.failed');
+    display.classList.add('is-visible');
+    if (activeConversationId) await loadConversation(activeConversationId).catch(() => {});
+  } finally {
+    chatController = null;
+    button.disabled = false;
+  }
+}
+
 async function analyzeCurrentRange() {
   if (analysisController) return;
   const now = Date.now();
@@ -144,6 +239,7 @@ async function analyzeCurrentRange() {
 
 function startAiInsights() {
   refreshAiInsights();
+  loadConversations().catch(() => {});
   if (!refreshTimer) refreshTimer = setInterval(refreshAiInsights, REFRESH_MS);
 }
 
@@ -157,6 +253,21 @@ function initAiInsights() {
   document.getElementById('ai-refresh-btn').addEventListener('click', refreshAiInsights);
   document.getElementById('ai-analyze-btn').addEventListener('click', analyzeCurrentRange);
   document.getElementById('ai-cancel-btn').addEventListener('click', () => analysisController?.abort());
+  document.getElementById('ai-chat-send-btn').addEventListener('click', sendChatMessage);
+  document.getElementById('ai-new-chat-btn').addEventListener('click', () => {
+    activeConversationId = null;
+    document.getElementById('ai-conversation-select').value = '';
+    renderChatMessages([]);
+  });
+  document.getElementById('ai-conversation-select').addEventListener('change', event => {
+    loadConversation(event.target.value).catch(() => {});
+  });
+  document.getElementById('ai-delete-chat-btn').addEventListener('click', async () => {
+    if (!activeConversationId || !globalThis.confirm(t('ai.chat.deleteConfirm'))) return;
+    await apiFetch(`${_BASE}/api/ai/conversations/${encodeURIComponent(activeConversationId)}`, { method: 'DELETE' });
+    activeConversationId = null;
+    await loadConversations();
+  });
   document.querySelectorAll('[data-ai-metric]').forEach(card => {
     card.addEventListener('click', () => {
       const metric = card.dataset.aiMetric;
@@ -168,4 +279,4 @@ function initAiInsights() {
 
 initAiInsights();
 
-export { analyzeCurrentRange, deltaSummary, renderFacts, refreshAiInsights, setAnalysisRunning, startAiInsights, stopAiInsights };
+export { analyzeCurrentRange, deltaSummary, loadConversations, renderChatMessages, renderFacts, refreshAiInsights, sendChatMessage, setAnalysisRunning, startAiInsights, stopAiInsights };
