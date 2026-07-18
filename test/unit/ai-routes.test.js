@@ -141,4 +141,26 @@ describe('AI configuration routes', () => {
     assert.equal((await request(app, 'GET', '/api/ai/facts')).status, 400);
     assert.equal(calls, 0);
   });
+
+  it('generates an Ollama insight from anonymized aggregates', async () => {
+    let context;
+    const provider = createAiProvider({ fetchImpl: async (_url, options) => {
+      context = JSON.parse(JSON.parse(options.body).prompt.split('\n\n').at(-1));
+      return new Response(JSON.stringify({ response: '確認結果' }), { status: 200 });
+    } });
+    provider.configure({ provider: 'ollama', models: { ollama: 'local-model' } });
+    const result = await request(appFor(provider, undefined, {
+      history: {
+        countFactsByTimeRange: () => ({ connections: 1, devices: 1, destinations: 1 }),
+        groupDstByTimeRange: () => [],
+        groupServiceByTimeRange: () => [{ dport: 443, proto: 'tcp', count: 1 }],
+      },
+      threatIntel: null,
+      routerManager: { list: () => [{ id: 'secret-id', displayName: 'secret-name', kind: 'cisco', enabled: true, ready: true }] },
+    }), 'POST', '/api/ai/analyze', { from: 1000, to: 2000 });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.text, '確認結果');
+    assert.equal(JSON.stringify(context).includes('secret-name'), false);
+    assert.deepEqual(context.topServices, [{ port: 443, protocol: 'tcp', connections: 1 }]);
+  });
 });

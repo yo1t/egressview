@@ -727,7 +727,7 @@
       <div>
         <div class="ai-eyebrow" data-i18n="ai.eyebrow">LIVE NETWORK POSTURE</div>
         <h2 data-i18n="ai.title">ネットワークの現在地</h2>
-        <p data-i18n="ai.subtitle">選択期間と直前の同一期間を比較します。外部AIにはまだ送信されません。</p>
+        <p data-i18n="ai.subtitle">選択期間と直前の同一期間を比較します。分析はボタンを押した時だけ実行します。</p>
       </div>
       <button id="ai-refresh-btn" class="ai-refresh" type="button" data-i18n="ai.refresh">更新</button>
     </div>
@@ -765,11 +765,17 @@
       </button>
     </div>
     <div id="ai-error" class="ai-error"></div>
-    <section class="ai-placeholder">
+    <section class="ai-analysis">
       <div class="ai-placeholder-mark">✦</div>
-      <div>
+      <div class="ai-analysis-body">
         <h3 data-i18n="ai.analysis.title">生成AIによる洞察</h3>
-        <p data-i18n="ai.analysis.pending">次の段階で、確認可能な根拠付きの要約と対話機能をここに追加します。</p>
+        <p id="ai-analysis-privacy" data-i18n="ai.analysis.privacy">内部IP・MAC・端末名を除いた集計だけを、設定済みのOllamaへ送ります。</p>
+        <div class="ai-analysis-actions">
+          <button id="ai-analyze-btn" class="ai-refresh" type="button" data-i18n="ai.analysis.run">現在の期間を分析</button>
+          <button id="ai-cancel-btn" class="ai-analysis-cancel is-hidden" type="button" data-i18n="ai.analysis.cancel">中断</button>
+          <span id="ai-analysis-meta" class="ai-analysis-meta"></span>
+        </div>
+        <pre id="ai-analysis-result" class="ai-analysis-result" data-i18n="ai.analysis.empty">まだ分析していません。</pre>
       </div>
     </section>
   </div>

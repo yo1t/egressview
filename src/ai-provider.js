@@ -5,6 +5,8 @@ const CLOUD_PROVIDERS = Object.freeze(['anthropic', 'openai']);
 const DEFAULT_OLLAMA_ENDPOINT = 'http://127.0.0.1:11434';
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
+const GENERATE_TIMEOUT_MS = 30_000;
+const MAX_PROMPT_BYTES = 64 * 1024;
 
 function normalizeEndpoint(value) {
   const raw = String(value || DEFAULT_OLLAMA_ENDPOINT).trim();
@@ -79,6 +81,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
   let models = { ollama: '', anthropic: '', openai: '' };
   let keys = { anthropic: '', openai: '' };
   let ollamaEndpoint = DEFAULT_OLLAMA_ENDPOINT;
+  let generationInFlight = false;
 
   function configure(input = {}) {
     if (input.provider !== undefined) {
@@ -147,7 +150,49 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
     return { provider, models: modelIds(await readJsonResponse(response), provider) };
   }
 
-  return { configure, exportConfig, getPublicConfig, listModels };
+  async function generateInsight(context, { signal } = {}) {
+    if (provider !== 'ollama') throw new Error('Ollama must be selected for local analysis');
+    if (!models.ollama) throw new Error('Ollama model is not configured');
+    if (generationInFlight) {
+      const error = new Error('Another AI analysis is already running');
+      error.code = 'AI_BUSY';
+      throw error;
+    }
+    const contextText = JSON.stringify(context);
+    if (Buffer.byteLength(contextText) > MAX_PROMPT_BYTES) throw new Error('AI context was too large');
+    generationInFlight = true;
+    const timeoutSignal = AbortSignal.timeout(GENERATE_TIMEOUT_MS);
+    const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    try {
+      const response = await fetchImpl(`${ollamaEndpoint}/api/generate`, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: models.ollama,
+          stream: false,
+          prompt: [
+            'You are a read-only network security analyst.',
+            'Use only the anonymized JSON facts below. Do not invent hosts, IP addresses, or events.',
+            'Reply in concise Japanese with sections: 概要, 注目すべき変化, リスク, 推奨確認事項.',
+            contextText,
+          ].join('\n\n'),
+        }),
+        signal: requestSignal,
+      });
+      const body = await readJsonResponse(response);
+      const text = String(body?.response || '').trim();
+      if (!text) throw new Error('Provider returned an empty analysis');
+      return { provider, model: models.ollama, text, generatedAt: Date.now() };
+    } catch (error) {
+      if (error?.name === 'TimeoutError') throw new Error('AI analysis timed out', { cause: error });
+      if (error?.name === 'AbortError') throw new Error('AI analysis was cancelled', { cause: error });
+      throw error;
+    } finally {
+      generationInFlight = false;
+    }
+  }
+
+  return { configure, exportConfig, generateInsight, getPublicConfig, listModels };
 }
 
 const aiProvider = createAiProvider();
@@ -155,6 +200,7 @@ const aiProvider = createAiProvider();
 module.exports = {
   CLOUD_PROVIDERS,
   DEFAULT_OLLAMA_ENDPOINT,
+  GENERATE_TIMEOUT_MS,
   PROVIDERS,
   aiProvider,
   createAiProvider,

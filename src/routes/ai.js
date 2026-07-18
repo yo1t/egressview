@@ -4,6 +4,7 @@ const { Router } = require('express');
 const { z } = require('zod');
 const { parseRequest } = require('../http-validation');
 const { buildAiFacts } = require('../ai-facts');
+const { buildAnonymousAiContext } = require('../ai-context');
 
 const providerSchema = z.enum(['disabled', 'ollama', 'anthropic', 'openai']);
 const cloudProviderSchema = z.enum(['anthropic', 'openai']);
@@ -29,6 +30,7 @@ const factsQuerySchema = z.object({
   to: timestampSchema.optional(),
 }).strict();
 const MAX_FACTS_RANGE_MS = 14 * 24 * 60 * 60 * 1000;
+const analysisSchema = factsQuerySchema;
 
 module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, history, threatIntel, routerManager }) {
   const router = Router();
@@ -93,6 +95,30 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
       }));
     } catch (error) {
       res.status(500).json({ error: 'AI facts could not be calculated' });
+    }
+  });
+
+  router.post('/ai/analyze', requireAdmin, async (req, res) => {
+    const parsed = parseRequest(analysisSchema, req.body, res);
+    if (!parsed.ok) return;
+    const to = parsed.data.to ?? Date.now();
+    const { from } = parsed.data;
+    if (to <= from) return res.status(400).json({ error: '"to" must be later than "from"' });
+    if (to - from > MAX_FACTS_RANGE_MS) {
+      return res.status(400).json({ error: 'AI facts range must not exceed 14 days' });
+    }
+    const controller = new AbortController();
+    req.once('aborted', () => controller.abort());
+    try {
+      const routers = routerManager.list();
+      const facts = buildAiFacts({ history, threatIntel, routers, from, to });
+      const context = buildAnonymousAiContext({ facts, history, routers, from, to });
+      res.json({ success: true, range: { from, to }, ...await aiProvider.generateInsight(context, {
+        signal: controller.signal,
+      }) });
+    } catch (error) {
+      const status = error.code === 'AI_BUSY' ? 409 : 400;
+      res.status(status).json({ success: false, error: error.message });
     }
   });
 
