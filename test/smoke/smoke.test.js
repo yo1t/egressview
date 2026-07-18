@@ -51,6 +51,7 @@ const PHASE2_JS_FILES = [
   'stats-helpers.js', 'stats-charts.js', 'stats-map.js',
   'view-tabs.js', 'log.js', 'beacon.js', 'threat-popup.js',
   'devices.js', 'notif-log.js', 'main.js',
+  'settings-ai.js',
 ];
 for (const file of PHASE2_JS_FILES) {
   test(`js/${file} is served (200)`, async ({ request }) => {
@@ -178,6 +179,12 @@ async function mockSettingsRoutes(page) {
     { id: 'current', deviceLabel: '<script>Current device</script>', current: true, lastSeenAt: 100 },
     { id: '../other?id=1', deviceLabel: '<img src=x onerror=alert(1)>', current: false, lastSeenAt: 200 },
   ];
+  let aiConfig = {
+    provider: 'disabled',
+    models: { ollama: '', anthropic: '', openai: '' },
+    ollamaEndpoint: 'http://127.0.0.1:11434',
+    providers: { ollama: { keySet: false }, anthropic: { keySet: false }, openai: { keySet: false } },
+  };
   await page.route('**/api/routers**', async route => {
     const request = route.request();
     const url = new URL(request.url());
@@ -232,6 +239,34 @@ async function mockSettingsRoutes(page) {
       body: JSON.stringify({ success: true, config: { enabled: false, cooldownMinutes: 60 } }),
     });
   });
+  await page.route('**/api/config/ai', async route => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(aiConfig) });
+      return;
+    }
+    const input = route.request().postDataJSON();
+    aiConfig = {
+      ...aiConfig,
+      provider: input.provider,
+      models: input.models,
+      ollamaEndpoint: input.ollamaEndpoint,
+      providers: {
+        ...aiConfig.providers,
+        ...(input.keys?.anthropic ? { anthropic: { keySet: true } } : {}),
+        ...(input.keys?.openai ? { openai: { keySet: true } } : {}),
+      },
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, ...aiConfig }),
+    });
+  });
+  await page.route('**/api/ai/test', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, provider: 'anthropic', models: ['claude-test', '<img src=x onerror=alert(1)>'] }),
+  }));
   await page.route('**/api/slack/verify', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -1113,6 +1148,17 @@ test('settings tabs save and connection buttons work without console errors', as
   await expect(page.locator('#slack-status')).toBeVisible();
   await page.click('#slack-test-btn');
   await expect(page.locator('#slack-status')).toBeVisible();
+
+  await page.click('.settings-tab[data-tab="ai"]');
+  await expect(page.locator('#pane-ai')).toHaveClass(/active/);
+  await page.locator('#s-ai-provider').selectOption('anthropic');
+  await page.locator('#s-ai-key').fill('demo-anthropic-key');
+  await page.locator('#s-ai-model').fill('claude-test');
+  await page.click('#ai-test-btn');
+  await expect(page.locator('#ai-status')).toContainText(/接続確認OK|Connection OK/);
+  await expect(page.locator('#ai-model-options option')).toHaveCount(2);
+  await expect(page.locator('#ai-model-options img')).toHaveCount(0);
+  await expect(page.locator('#s-ai-key')).toHaveValue('');
 
   await page.click('.settings-tab[data-tab="backup"]');
   await expect(page.locator('#pane-backup')).toHaveClass(/active/);

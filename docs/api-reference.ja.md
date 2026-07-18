@@ -119,6 +119,16 @@ EgressViewには、Yamaha/Ciscoを混在して最大10台登録できます。
 - `POST /api/backup/upload`はmultipartではなく、最大100 MBのSQLite fileをraw bodyで受け取ります。
 - `POST /api/backup/config`は正の`intervalHours`と`maxGenerations`を受け取ります。
 
+## AIプロバイダー設定
+
+AI洞察の第一段階ではprovider設定と接続確認だけを提供します。通信、端末、脅威、ルーターのデータはAIサービスへ送信しません。
+
+- `GET /api/config/ai`は選択中provider、モデルID、Ollama endpoint、キー設定済みフラグを返します。APIキー値は返しません。
+- `POST /api/config/ai`は`provider`（`disabled`、`ollama`、`anthropic`、`openai`）、provider別`models`、`ollamaEndpoint`、任意のcloud `keys`と`clearKeys`を受け付けます。
+- `POST /api/ai/test`は空のJSON objectを受け付けます。保存済み設定で最大200件のモデルIDだけを取得し、timeoutは10秒、応答上限は1MBです。
+
+providerは初期状態で無効です。Anthropic/OpenAIは固定の公式API endpointを使い、任意HTTP(S) endpointを設定できるのはOllamaだけです。
+
 Restoreはfail-closedです。復元元の検査、安全backup成功の確認、restore、全DB利用者の再接続、復元後検査を行い、失敗時はrollbackします。成功後は既存のbrowser sessionを失効します。
 
 ## Endpoint一覧
@@ -175,6 +185,9 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | 手動脅威調査 | `GET /api/config/manual-threat` | 認証必須。APIキー値は返さず設定済みかだけ返す |
 | 手動脅威調査 | `POST /api/config/manual-threat` | 認証必須。APIキー、cache、provider別cooldownを保存 |
 | 手動脅威調査 | `POST /api/threat/manual-lookup` | 認証必須。明示操作で公開IP 1件を選択providerへ送信 |
+| AI設定 | `GET /api/config/ai` | 認証必須。APIキー値は返さず設定済みかだけ返す |
+| AI設定 | `POST /api/config/ai` | 認証必須。provider、model、endpoint、cloud APIキーを保存 |
+| AI設定 | `POST /api/ai/test` | 認証必須。通信データを送らずモデルIDを取得 |
 | Slack | `POST /api/slack/test` | 認証必須 |
 | Slack | `POST /api/slack/verify` | 認証必須 |
 | Slack | `POST /api/slack/lookup-user` | 認証必須 |
