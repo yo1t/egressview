@@ -16,7 +16,7 @@ let stmtUpsertRdap = null;
 let stmtUpsertGeo  = null;
 
 const dnsCache    = new Map(); // ip → {host, expires}
-const DNS_TTL_MS  = 5 * 60 * 1000;
+const DNS_TTL_MS  = 60 * 60 * 1000;
 setInterval(() => {
   const now = Date.now();
   for (const [ip, entry] of dnsCache) { if (now > entry.expires) dnsCache.delete(ip); }
@@ -25,11 +25,11 @@ setInterval(() => {
 const rdapCache     = new Map(); // ip → {country, org, expires}
 const inFlightRdap  = new Map(); // ip → Promise  (in-flight dedupe)
 let rdapGeneration  = 0;         // incremented on each reopen() to invalidate stale in-flight Promise writes
-const RDAP_TTL_MS   = 24 * 60 * 60 * 1000; // 24h
+const RDAP_TTL_MS   = 30 * 24 * 60 * 60 * 1000; // 30 days
 const RDAP_FAIL_TTL = 60 * 60 * 1000;       // 60min retry on failure
 
 const geoCache    = new Map(); // ip → {lat, lon, city, countryCode, expires}
-const GEO_TTL_MS       = 24 * 60 * 60 * 1000;
+const GEO_TTL_MS       = 30 * 24 * 60 * 60 * 1000; // 30 days
 const GEO_FAIL_TTL     = 60 * 60 * 1000;
 const GEO_PERMANENT_TTL = 100 * 365 * 24 * 60 * 60 * 1000; // ~100 years, for private IPs
 
@@ -87,17 +87,22 @@ function initDb(dbPath) {
     ON CONFLICT(ip) DO UPDATE SET lat=@lat, lon=@lon, city=@city, countryCode=@countryCode, expires=@expires
   `);
 
-  // Load non-expired entries into memory Maps
+  // Load ALL cached entries (including stale) to avoid re-fetching on startup
   const now = Date.now();
-  const rdapRows = db.prepare('SELECT * FROM rdap_cache WHERE expires > ?').all(now);
+  const rdapRows = db.prepare('SELECT * FROM rdap_cache').all();
+  const staleRdapIps = [];
   for (const row of rdapRows) {
     rdapCache.set(row.ip, { country: row.country, org: row.org, expires: row.expires });
+    if (row.expires <= now) staleRdapIps.push(row.ip);
   }
-  const geoRows = db.prepare('SELECT * FROM geo_cache WHERE expires > ?').all(now);
+  const geoRows = db.prepare('SELECT * FROM geo_cache').all();
+  const staleGeoIps = [];
   for (const row of geoRows) {
     geoCache.set(row.ip, { lat: row.lat, lon: row.lon, city: row.city, countryCode: row.countryCode, expires: row.expires });
+    if (row.expires <= now) staleGeoIps.push(row.ip);
   }
-  logger.info(`[enrichment] Cache loaded: ${rdapRows.length} RDAP, ${geoRows.length} geo entries`);
+  const staleIps = [...new Set([...staleRdapIps, ...staleGeoIps])];
+  logger.info(`[enrichment] Cache loaded: ${rdapRows.length} RDAP, ${geoRows.length} geo entries (${staleIps.length} stale, will background-refresh)`);
 
   // Upgrade existing private-IP entries (stored as failed/null) to a permanent TTL
   const privUpgradeNow = Date.now();
@@ -112,6 +117,7 @@ function initDb(dbPath) {
     }
   }
   if (upgraded > 0) logger.info(`[enrichment] ${upgraded} private IP geo entries upgraded to permanent TTL`);
+  return { staleIps };
 }
 
 function reopen() {
@@ -120,7 +126,7 @@ function reopen() {
   if (db) { try { db.close(); } catch {} db = null; }
   rdapCache.clear();
   geoCache.clear();
-  initDb(_dbPath);
+  return initDb(_dbPath);
 }
 
 function closeDb() {

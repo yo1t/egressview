@@ -68,6 +68,7 @@ async function runConnectionEnrichmentQueue() {
       await _enrichment.lookupRdapBatch(batch);
       await _enrichment.lookupGeoBatch(batch);
       refreshCachedEnrichmentForDestinations(batch);
+      if (enrichmentQueue.size) await new Promise(r => setTimeout(r, 50));
     }
   } catch (err) {
     _logger.error('[enrichment] background queue error:', err.message);
