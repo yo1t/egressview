@@ -27,7 +27,8 @@ entry point; imports determine evaluation order and cache-busted asset URLs.
 13. `threat-popup.js`
 14. `devices.js`
 15. `notif-log.js`
-16. `main.js`
+16. `ai-insights.js`
+17. `main.js`
 
 `socket.io`, D3, and topojson are loaded before the app scripts.
 

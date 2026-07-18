@@ -126,6 +126,7 @@ AI洞察の第一段階ではprovider設定と接続確認だけを提供しま�
 - `GET /api/config/ai`は選択中provider、モデルID、Ollama endpoint、キー設定済みフラグを返します。APIキー値は返しません。
 - `POST /api/config/ai`は`provider`（`disabled`、`ollama`、`anthropic`、`openai`）、provider別`models`、`ollamaEndpoint`、任意のcloud `keys`と`clearKeys`を受け付けます。
 - `POST /api/ai/test`は空のJSON objectを受け付けます。保存済み設定で最大200件のモデルIDだけを取得し、timeoutは10秒、応答上限は1MBです。
+- `GET /api/ai/facts`はepoch millisecondsの`from`が必須で、`to`は任意です。接続、端末、宛先、脅威レベルについて、選択期間と直前の同一期間の件数、およびcredentialを含まないrouter収集状態を返します。期間上限は14日で、AI providerへは送信しません。
 
 providerは初期状態で無効です。Anthropic/OpenAIは固定の公式API endpointを使い、任意HTTP(S) endpointを設定できるのはOllamaだけです。
 
@@ -133,7 +134,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 
 ## Endpoint一覧
 
-実装済みREST API 53本の全一覧です。**公開**以外はすべて`X-Admin-Token`が必要です。
+実装済みREST API 60本の全一覧です。**公開**以外はすべて`X-Admin-Token`が必要です。
 
 | 分類 | Methodとpath | Access |
 |---|---|---|
@@ -188,6 +189,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | AI設定 | `GET /api/config/ai` | 認証必須。APIキー値は返さず設定済みかだけ返す |
 | AI設定 | `POST /api/config/ai` | 認証必須。provider、model、endpoint、cloud APIキーを保存 |
 | AI設定 | `POST /api/ai/test` | 認証必須。通信データを送らずモデルIDを取得 |
+| AI洞察 | `GET /api/ai/facts` | 認証必須。local factsと直前期間比較のみ |
 | Slack | `POST /api/slack/test` | 認証必須 |
 | Slack | `POST /api/slack/verify` | 認証必須 |
 | Slack | `POST /api/slack/lookup-user` | 認証必須 |

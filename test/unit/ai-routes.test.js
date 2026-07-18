@@ -34,10 +34,10 @@ function request(app, method, url, body = null) {
   });
 }
 
-function appFor(aiProvider, saveConfig = () => {}) {
+function appFor(aiProvider, saveConfig = () => {}, overrides = {}) {
   const app = express();
   app.use(express.json());
-  app.use('/api', aiRoutes({ requireAdmin, aiProvider, saveConfig }));
+  app.use('/api', aiRoutes({ requireAdmin, aiProvider, saveConfig, ...overrides }));
   return app;
 }
 
@@ -111,6 +111,34 @@ describe('AI configuration routes', () => {
     const disabled = await request(app, 'POST', '/api/ai/test', {});
     assert.equal(fields.status, 400);
     assert.equal(disabled.status, 400);
+    assert.equal(calls, 0);
+  });
+
+  it('returns a bounded facts snapshot for the requested period', async () => {
+    const ranges = [];
+    const history = {
+      countFactsByTimeRange(from, to) { ranges.push([from, to]); return { connections: 1, devices: 1, destinations: 1 }; },
+      groupDstByTimeRange: () => [],
+    };
+    const routerManager = { list: () => [{ id: 'r1', kind: 'yamaha', enabled: true, ready: true }] };
+    const result = await request(appFor(createAiProvider(), undefined, {
+      history, threatIntel: null, routerManager,
+    }), 'GET', '/api/ai/facts?from=1000&to=2000');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.collection.health, 'ok');
+    assert.deepEqual(ranges, [[1000, 2000], [0, 1000]]);
+  });
+
+  it('rejects invalid or excessive facts ranges before querying history', async () => {
+    let calls = 0;
+    const context = {
+      history: { countFactsByTimeRange: () => { calls++; return {}; }, groupDstByTimeRange: () => [] },
+      routerManager: { list: () => [] },
+    };
+    const app = appFor(createAiProvider(), undefined, context);
+    assert.equal((await request(app, 'GET', '/api/ai/facts?from=2000&to=1000')).status, 400);
+    assert.equal((await request(app, 'GET', '/api/ai/facts?from=0&to=9999999999999')).status, 400);
+    assert.equal((await request(app, 'GET', '/api/ai/facts')).status, 400);
     assert.equal(calls, 0);
   });
 });

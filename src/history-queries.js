@@ -103,6 +103,23 @@ function createHistoryQueries({
     return db.prepare(`SELECT COUNT(*) AS cnt FROM connections${where}`).get(...params)?.cnt || 0;
   }
 
+  function countFactsByTimeRange(from, to) {
+    const db = getDb();
+    if (!db) return { connections: 0, devices: 0, destinations: 0 };
+    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] });
+    const row = db.prepare(`
+      SELECT COUNT(*) AS connections,
+             COUNT(DISTINCT COALESCE(NULLIF(srcMac, ''), src)) AS devices,
+             COUNT(DISTINCT dst) AS destinations
+      FROM connections${where}
+    `).get(...params) || {};
+    return {
+      connections: row.connections || 0,
+      devices: row.devices || 0,
+      destinations: row.destinations || 0,
+    };
+  }
+
   function createConnectionExportReader(from, to) {
     const db = getDb();
     const dbPath = getDbPath();
@@ -285,6 +302,7 @@ function createHistoryQueries({
     queryByTimeRange,
     queryByTimeRangePaged,
     countByTimeRange,
+    countFactsByTimeRange,
     createConnectionExportReader,
     groupDstByTimeRange,
     summarizeByTimeRange,

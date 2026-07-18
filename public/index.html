@@ -618,6 +618,7 @@
     <button class="view-tab" id="btn-log" data-i18n="tab.log">📋 通信ログ</button>
     <button class="view-tab" id="btn-devices" data-i18n="tab.devices">🖥 端末一覧</button>
     <button class="view-tab" id="btn-notif-log" data-i18n="tab.notif-log">🔔 検出ログ</button>
+    <button class="view-tab" id="btn-ai" data-i18n="tab.ai">✦ AI洞察</button>
   </div>
   <div class="time-filter">
     <span class="time-filter-label" data-i18n="period">期間</span>
@@ -719,6 +720,58 @@
       <span data-i18n="stats.empty.line1">表示するデータがありません</span><br>
       <small class="stats-empty-hint" data-i18n="stats.empty.line2">期間や選択デバイスを変更してみてください</small>
     </div>
+  </div>
+  <!-- AI Insights View -->
+  <div id="ai-container" class="activity-view ai-view">
+    <div class="ai-hero">
+      <div>
+        <div class="ai-eyebrow" data-i18n="ai.eyebrow">LIVE NETWORK POSTURE</div>
+        <h2 data-i18n="ai.title">ネットワークの現在地</h2>
+        <p data-i18n="ai.subtitle">選択期間と直前の同一期間を比較します。外部AIにはまだ送信されません。</p>
+      </div>
+      <button id="ai-refresh-btn" class="ai-refresh" type="button" data-i18n="ai.refresh">更新</button>
+    </div>
+    <div id="ai-collection" class="ai-collection is-loading">
+      <span class="ai-pulse"></span>
+      <span id="ai-collection-label" data-i18n="ai.loading">収集状態を確認中</span>
+      <span id="ai-router-list" class="ai-router-list"></span>
+      <span id="ai-updated" class="ai-updated"></span>
+    </div>
+    <div class="ai-metrics" id="ai-metrics">
+      <button class="ai-metric" type="button" data-ai-metric="connections">
+        <span class="ai-metric-label" data-i18n="ai.metric.connections">接続</span>
+        <strong id="ai-value-connections">—</strong>
+        <span class="ai-delta" id="ai-delta-connections">—</span>
+      </button>
+      <button class="ai-metric" type="button" data-ai-metric="devices">
+        <span class="ai-metric-label" data-i18n="ai.metric.devices">端末</span>
+        <strong id="ai-value-devices">—</strong>
+        <span class="ai-delta" id="ai-delta-devices">—</span>
+      </button>
+      <button class="ai-metric" type="button" data-ai-metric="destinations">
+        <span class="ai-metric-label" data-i18n="ai.metric.destinations">宛先</span>
+        <strong id="ai-value-destinations">—</strong>
+        <span class="ai-delta" id="ai-delta-destinations">—</span>
+      </button>
+      <button class="ai-metric ai-metric-warn" type="button" data-ai-metric="warn">
+        <span class="ai-metric-label" data-i18n="ai.metric.warn">要確認</span>
+        <strong id="ai-value-warn">—</strong>
+        <span class="ai-delta" id="ai-delta-warn">—</span>
+      </button>
+      <button class="ai-metric ai-metric-danger" type="button" data-ai-metric="danger">
+        <span class="ai-metric-label" data-i18n="ai.metric.danger">脅威</span>
+        <strong id="ai-value-danger">—</strong>
+        <span class="ai-delta" id="ai-delta-danger">—</span>
+      </button>
+    </div>
+    <div id="ai-error" class="ai-error"></div>
+    <section class="ai-placeholder">
+      <div class="ai-placeholder-mark">✦</div>
+      <div>
+        <h3 data-i18n="ai.analysis.title">生成AIによる洞察</h3>
+        <p data-i18n="ai.analysis.pending">次の段階で、確認可能な根拠付きの要約と対話機能をここに追加します。</p>
+      </div>
+    </section>
   </div>
   <!-- Connection Log View -->
   <div id="log-container" class="activity-view">

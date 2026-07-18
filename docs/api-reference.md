@@ -126,6 +126,7 @@ This first AI-insights foundation release only configures and tests a provider. 
 - `GET /api/config/ai` returns the selected provider, model IDs, Ollama endpoint, and key-set flags. API key values are never returned.
 - `POST /api/config/ai` accepts `provider` (`disabled`, `ollama`, `anthropic`, or `openai`), provider-keyed `models`, `ollamaEndpoint`, optional cloud `keys`, and `clearKeys`.
 - `POST /api/ai/test` accepts an empty JSON object. It uses the saved configuration to retrieve at most 200 model IDs, with a 10-second timeout and a 1 MB response limit.
+- `GET /api/ai/facts` requires `from` and accepts `to` as epoch milliseconds. It returns current and immediately preceding equal-period counts for connections, devices, destinations, and threat levels, plus credential-free router collection status. The range is capped at 14 days and no data is sent to an AI provider.
 
 Provider configuration is disabled by default. Anthropic and OpenAI use their fixed official API endpoints; only Ollama accepts a custom HTTP(S) endpoint.
 
@@ -133,7 +134,7 @@ Restore is fail-closed: EgressView validates the source, confirms a safety backu
 
 ## Endpoint catalog
 
-All 53 implemented REST endpoints are listed below. **Public** means no token is required; every other row requires `X-Admin-Token`.
+All 60 implemented REST endpoints are listed below. **Public** means no token is required; every other row requires `X-Admin-Token`.
 
 | Area | Method and path | Access |
 |---|---|---|
@@ -188,6 +189,7 @@ All 53 implemented REST endpoints are listed below. **Public** means no token is
 | AI configuration | `GET /api/config/ai` | Protected; returns key-set flags, never key values |
 | AI configuration | `POST /api/config/ai` | Protected; saves provider, models, endpoint, and cloud keys |
 | AI configuration | `POST /api/ai/test` | Protected; retrieves model IDs without sending network data |
+| AI insights | `GET /api/ai/facts` | Protected; local facts and prior-period comparison only |
 | Slack | `POST /api/slack/test` | Protected |
 | Slack | `POST /api/slack/verify` | Protected |
 | Slack | `POST /api/slack/lookup-user` | Protected |

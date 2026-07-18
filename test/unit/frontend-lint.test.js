@@ -57,6 +57,7 @@ const APP_SCRIPT_FILES = [
   'devices.js',
   'notif-log.js',
   'log.js',
+  'ai-insights.js',
   'settings-backup.js',
   'settings-sessions.js',
   'settings-beacons.js',

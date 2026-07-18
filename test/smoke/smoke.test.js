@@ -49,7 +49,7 @@ const PHASE2_JS_FILES = [
   'graph-helpers.js', 'graph-panels.js', 'graph-render.js',
   'settings.js', 'map-common.js', 'stats.js', 'time-filter.js',
   'stats-helpers.js', 'stats-charts.js', 'stats-map.js',
-  'view-tabs.js', 'log.js', 'beacon.js', 'threat-popup.js',
+  'view-tabs.js', 'log.js', 'ai-insights.js', 'beacon.js', 'threat-popup.js',
   'devices.js', 'notif-log.js', 'main.js',
   'settings-ai.js',
 ];
@@ -382,7 +382,7 @@ test('tab bar renders after auth', async ({ page }) => {
   const tabs = page.locator('.view-tab');
   await expect(tabs.first()).toBeVisible();
   const count = await tabs.count();
-  expect(count).toBe(5);
+  expect(count).toBe(6);
 });
 
 test('mobile viewer keeps navigation, logs, and device details inside the viewport', async ({ page }) => {
@@ -405,8 +405,8 @@ test('mobile viewer keeps navigation, logs, and device details inside the viewpo
 
   const errors = collectErrors(page);
   const tabs = page.locator('.view-tab');
-  await expect(tabs).toHaveCount(5);
-  for (let index = 0; index < 5; index += 1) {
+  await expect(tabs).toHaveCount(6);
+  for (let index = 0; index < 6; index += 1) {
     const box = await tabs.nth(index).boundingBox();
     expect(box, `mobile tab ${index} should have a layout box`).not.toBeNull();
     expect(box.x, `mobile tab ${index} should not overflow left`).toBeGreaterThanOrEqual(0);
@@ -570,12 +570,44 @@ test('tab switching produces no console errors', async ({ page }) => {
   await authPage(page);
 
   // Click through every tab in turn and confirm no errors are raised
-  for (const btnId of ['btn-stats', 'btn-log', 'btn-devices', 'btn-notif-log', 'btn-graph']) {
+  for (const btnId of ['btn-stats', 'btn-log', 'btn-devices', 'btn-notif-log', 'btn-ai', 'btn-graph']) {
     await page.click(`#${btnId}`);
     await page.waitForTimeout(500);
   }
 
   expect(fatalErrors(errors), `Tab switch errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+test('AI insights renders local facts and links threats to the filtered log', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  await authPage(page);
+  await page.route(/\/api\/ai\/facts(?:\?|$)/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      serverTime: Date.now(),
+      range: { from: 1000, to: 2000, durationMs: 1000 },
+      previousRange: { from: 0, to: 1000, durationMs: 1000 },
+      collection: {
+        health: 'partial', enabledCount: 2, readyCount: 1, reportedSessions: 12,
+        lastUpdatedAt: Date.now(),
+        routers: [
+          { id: 'r1', kind: 'yamaha', displayName: 'Primary', enabled: true, ready: true, sessionCount: 12 },
+          { id: 'r2', kind: 'cisco', displayName: 'Backup', enabled: true, ready: false, sessionCount: 0 },
+        ],
+      },
+      current: { connections: 25, devices: 4, destinations: 9, safe: 23, warn: 1, danger: 1 },
+      previous: { connections: 20, devices: 3, destinations: 8, safe: 20, warn: 0, danger: 0 },
+    }),
+  }));
+
+  await page.click('#btn-ai');
+  await expect(page.locator('#ai-container')).toHaveClass(/view-active/);
+  await expect(page.locator('#ai-value-connections')).toHaveText('25');
+  await expect(page.locator('#ai-collection-label')).toContainText(/1\/2/);
+  await expect(page.locator('[data-ai-metric="danger"]')).toHaveClass(/has-findings/);
+  await page.locator('[data-ai-metric="danger"]').click();
+  await expect(page.locator('#log-container')).toHaveClass(/view-active/);
 });
 
 // (7) Notification log detail: clicking a row opens it, the top-right X closes it
