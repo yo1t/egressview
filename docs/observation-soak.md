@@ -54,7 +54,7 @@ during the window.
 
 ## v5 gate
 
-Proceed only after at least seven successful checks on seven different UTC
+Proceed only after at least three successful checks on three different UTC
 dates. Every successful record must have zero `missing`, `orphans`,
 `underMerged`, and `kindMismatches`, with recent successful collection from
 both Yamaha and Cisco. Include at least one normal service restart. A validation

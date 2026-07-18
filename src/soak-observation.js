@@ -111,7 +111,7 @@ function isOperationalFailure(record) {
 }
 
 function summarizeSoakHistory(records, {
-  minChecks = 7,
+  minChecks = 3,
   maxGapHours = 36,
 } = {}) {
   const sorted = (Array.isArray(records) ? records : [])

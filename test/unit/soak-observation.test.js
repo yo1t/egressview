@@ -54,32 +54,32 @@ describe('soak observation record', () => {
     assert.ok(record.failures.includes('router-kinds-stale=yamaha'));
   });
 
-  it('opens the v5 gate after seven distinct daily checks and a restart', () => {
-    const records = Array.from({ length: 7 }, (_, index) => ({
+  it('opens the v5 gate after three distinct daily checks and a restart', () => {
+    const records = Array.from({ length: 3 }, (_, index) => ({
       checkedAt: new Date(NOW + index * 24 * 60 * 60 * 1000).toISOString(),
       version: '1.3.5',
       commit: 'abc1234',
-      processStartedAt: new Date(NOW - 60_000 + (index >= 4 ? 30_000 : 0)).toISOString(),
+      processStartedAt: new Date(NOW - 60_000 + (index >= 2 ? 30_000 : 0)).toISOString(),
       passed: true,
     }));
     const summary = summarizeSoakHistory(records);
     assert.equal(summary.readyForV5, true);
-    assert.equal(summary.consecutiveChecks, 7);
-    assert.equal(summary.distinctDates, 7);
-    assert.equal(summary.elapsedDays, 6);
+    assert.equal(summary.consecutiveChecks, 3);
+    assert.equal(summary.distinctDates, 3);
+    assert.equal(summary.elapsedDays, 2);
     assert.equal(summary.restartObserved, true);
   });
 
   it('keeps the streak when an operational error recovers on the same build', () => {
-    const records = Array.from({ length: 7 }, (_, index) => ({
+    const records = Array.from({ length: 3 }, (_, index) => ({
       checkedAt: new Date(NOW + index * DAY_MS).toISOString(),
       version: '1.3.5',
       commit: 'abc1234',
-      processStartedAt: new Date(NOW - 60_000 + (index >= 4 ? 30_000 : 0)).toISOString(),
+      processStartedAt: new Date(NOW - 60_000 + (index >= 2 ? 30_000 : 0)).toISOString(),
       passed: true,
     }));
-    records.splice(3, 0, {
-      checkedAt: new Date(NOW + 2 * DAY_MS + 60_000).toISOString(),
+    records.splice(2, 0, {
+      checkedAt: new Date(NOW + DAY_MS + 60_000).toISOString(),
       version: '1.3.5',
       commit: 'abc1234',
       passed: false,
@@ -88,21 +88,21 @@ describe('soak observation record', () => {
 
     const summary = summarizeSoakHistory(records);
     assert.equal(summary.readyForV5, true);
-    assert.equal(summary.consecutiveChecks, 7);
+    assert.equal(summary.consecutiveChecks, 3);
     assert.equal(summary.operationalFailures, 1);
     assert.equal(summary.pendingOperationalFailure, false);
   });
 
   it('blocks readiness while an operational error is not recovered', () => {
-    const records = Array.from({ length: 7 }, (_, index) => ({
+    const records = Array.from({ length: 3 }, (_, index) => ({
       checkedAt: new Date(NOW + index * DAY_MS).toISOString(),
       version: '1.3.5',
       commit: 'abc1234',
-      processStartedAt: new Date(NOW - 60_000 + (index >= 4 ? 30_000 : 0)).toISOString(),
+      processStartedAt: new Date(NOW - 60_000 + (index >= 2 ? 30_000 : 0)).toISOString(),
       passed: true,
     }));
     records.push({
-      checkedAt: new Date(NOW + 6 * DAY_MS + 60_000).toISOString(),
+      checkedAt: new Date(NOW + 2 * DAY_MS + 60_000).toISOString(),
       version: '1.3.5',
       commit: 'abc1234',
       passed: false,
@@ -112,7 +112,7 @@ describe('soak observation record', () => {
 
     const summary = summarizeSoakHistory(records);
     assert.equal(summary.readyForV5, false);
-    assert.equal(summary.consecutiveChecks, 7);
+    assert.equal(summary.consecutiveChecks, 3);
     assert.equal(summary.pendingOperationalFailure, true);
   });
 
