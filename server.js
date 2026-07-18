@@ -15,6 +15,8 @@ const fs      = require('fs');
 const utils           = require('./src/utils');
 const { htmlEscape }  = utils;
 const logger          = require('./src/logger');
+const runtimeProfiler = require('./src/runtime-profiler');
+const { resolvePollInterval } = require('./src/runtime-settings');
 const enrichment      = require('./src/enrichment');
 const history         = require('./src/history');
 const deviceId        = require('./src/device-identify');
@@ -54,7 +56,7 @@ const { createRouterManager } = require('./src/router-manager');
 // ─── Environment ──────────────────────────────────────────────────────────────
 const SUBPATH           = (process.env.SUBPATH || '').replace(/\/$/, '');
 const DEFAULT_ROUTER_IP = process.env.ROUTER_IP   || '192.168.1.1';
-const POLL_INTERVAL     = parseInt(process.env.POLL_INTERVAL_MS || '60000', 10);
+const POLL_INTERVAL     = resolvePollInterval(process.env.POLL_INTERVAL_MS, logger);
 // PORT is resolved after the early config read below (env > config file > 3000)
 let PORT = parseInt(process.env.PORT || '3000');
 const CONFIG_FILE       = process.env.EGRESSVIEW_CONFIG_PATH
@@ -295,6 +297,7 @@ function requireAdmin(req, res, next) {
 // without needing to manually trigger an API fetch.
 
 async function reMatchAndNotify() {
+  const startedAt = Date.now();
   const connectionHistory = history.getConnectionHistory();
   const updated = [];
   const CHUNK = 5000;
@@ -317,6 +320,7 @@ async function reMatchAndNotify() {
   } else {
     logger.debug('[threat-intel] Re-match complete, no threat changes');
   }
+  runtimeProfiler.recordWall('threatIntel.reMatch', Date.now() - startedAt);
 }
 
 // ─── Beacon detection scan ────────────────────────────────────────────────────
@@ -468,6 +472,7 @@ dhcpdSyslog.configure({
 const HOST = process.env.HOST || undefined;
 
 server.listen(PORT, HOST, () => {
+  runtimeProfiler.start({ logger });
   logger.info(`EgressView: ${tlsOptions ? 'https' : 'http'}://${HOST || 'localhost'}:${PORT}`);
   try {
     loadConfig();
@@ -562,8 +567,10 @@ server.listen(PORT, HOST, () => {
     deviceId.loadOuiDb();
   }
 
-  setInterval(() => history.snapshotHistory(),    10 * 60 * 1000);
-  setInterval(() => history.compactHistoryLog(),  30 * 60 * 1000);
+  setInterval(() => runtimeProfiler.measureSync('history.snapshot', () => history.snapshotHistory()),
+    10 * 60 * 1000);
+  setInterval(() => runtimeProfiler.measureSync('history.compact', () => history.compactHistoryLog()),
+    30 * 60 * 1000);
 
   threatIntel.fetchThreatIntel()
     .then(() => reMatchAndNotify())
@@ -584,7 +591,8 @@ server.listen(PORT, HOST, () => {
 function shutdown(exitCode = 0) {
   logger.info('[shutdown] Saving history...');
   try { routerManager?.stopAll();   } catch {}
-  try { history.snapshotHistory(); } catch {}
+  try { runtimeProfiler.measureSync('history.shutdownSnapshot', () => history.snapshotHistory()); } catch {}
+  runtimeProfiler.stop();
   try { history.closeDb();         } catch {}
   try { dnsmasqLog.stop();         } catch {}
   try { inspectSyslog.stop();      } catch {}

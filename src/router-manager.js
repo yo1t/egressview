@@ -1,5 +1,6 @@
 'use strict';
 
+const runtimeProfiler = require('./runtime-profiler');
 const { createRouterRegistry } = require('./router-registry');
 const { createRouterPollScheduler } = require('./router-poll-scheduler');
 const { createYamahaAdapter } = require('./pollers/yamaha-adapter');
@@ -43,12 +44,15 @@ function createRouterManager({
       }
     }
 
-    const updated = new Map();
-    for (const session of sessions) {
-      signal?.throwIfAborted();
-      const result = runtime.recordConnection(session, now, kind, id);
-      updated.set(result.key, result.entry);
-    }
+    const updated = runtimeProfiler.measureSync(`router.${kind}.poll.recordConnections`, () => {
+      const result = new Map();
+      for (const session of sessions) {
+        signal?.throwIfAborted();
+        const recorded = runtime.recordConnection(session, now, kind, id);
+        result.set(recorded.key, recorded.entry);
+      }
+      return result;
+    });
 
     const currentKeys = new Set(sessions.map(s => `${s.src}|${s.dst}|${s.dport}|${s.proto}`));
     const prior = previousKeys.get(id) || new Set();

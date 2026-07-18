@@ -8,6 +8,7 @@
 'use strict';
 
 const logger = require('./logger');
+const runtimeProfiler = require('./runtime-profiler');
 
 // ─── Injected dependencies ────────────────────────────────────────────────────
 let _io, _yamaha, _cisco, _runtime, _history, _devices, _beacons, _investigation;
@@ -68,6 +69,7 @@ function startCiscoPolling() {
 }
 
 async function pollYamahaConnections() {
+  const pollStartedAt = Date.now();
   if (!_yamaha.isEnabled()) { yamahaPollActive = false; return; }
   try {
     if (!_yamaha.isReady()) {
@@ -92,7 +94,8 @@ async function pollYamahaConnections() {
       }
     }
 
-    sessions.forEach(s => _runtime.recordConnection(s, now, 'yamaha'));
+    runtimeProfiler.measureSync('poll.yamaha.recordConnections', () =>
+      sessions.forEach(s => _runtime.recordConnection(s, now, 'yamaha')));
 
     // Poll-based beacon event recording: only used as fallback when INSPECT syslog is
     // disabled.  When inspectEnabled=true, INSPECT provides precise TCP session-close
@@ -119,8 +122,9 @@ async function pollYamahaConnections() {
     _history.pruneHistory();
 
     // Delta push: send only entries whose lastSeen was updated since the previous emit
-    const deltaConns = [..._history.getConnectionHistory().values()]
-      .filter(c => c.lastSeen > lastYamahaEmitTime);
+    const deltaConns = runtimeProfiler.measureSync('poll.yamaha.deltaScan', () =>
+      [..._history.getConnectionHistory().values()]
+        .filter(c => c.lastSeen > lastYamahaEmitTime));
     lastYamahaEmitTime = now;
     if (deltaConns.length > 0) {
       _io.emit('connections-update', {
@@ -145,12 +149,14 @@ async function pollYamahaConnections() {
       _yamaha.reconnect();
     }
   } finally {
+    runtimeProfiler.recordWall('poll.yamaha.total', Date.now() - pollStartedAt);
     if (_yamaha.isEnabled()) _schedulePoll(pollYamahaConnections, _pollIntervalMs);
     else yamahaPollActive = false;
   }
 }
 
 async function pollCiscoConnections() {
+  const pollStartedAt = Date.now();
   if (!_cisco.isEnabled()) { ciscoPollActive = false; return; }
   try {
     if (!_cisco.isReady()) {
@@ -175,12 +181,14 @@ async function pollCiscoConnections() {
       }
     }
 
-    sessions.forEach(s => _runtime.recordConnection(s, now, 'cisco'));
+    runtimeProfiler.measureSync('poll.cisco.recordConnections', () =>
+      sessions.forEach(s => _runtime.recordConnection(s, now, 'cisco')));
 
     _history.pruneHistory();
 
-    const deltaConns = [..._history.getConnectionHistory().values()]
-      .filter(c => c.lastSeen > lastCiscoEmitTime);
+    const deltaConns = runtimeProfiler.measureSync('poll.cisco.deltaScan', () =>
+      [..._history.getConnectionHistory().values()]
+        .filter(c => c.lastSeen > lastCiscoEmitTime));
     lastCiscoEmitTime = now;
     if (deltaConns.length > 0) {
       _io.emit('connections-update', {
@@ -198,6 +206,7 @@ async function pollCiscoConnections() {
       _cisco.reconnect();
     }
   } finally {
+    runtimeProfiler.recordWall('poll.cisco.total', Date.now() - pollStartedAt);
     if (_cisco.isEnabled()) _schedulePoll(pollCiscoConnections, _pollIntervalMs);
     else ciscoPollActive = false;
   }
