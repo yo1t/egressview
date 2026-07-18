@@ -1,10 +1,10 @@
 // ─── ES Module entry point ────────────────────────────────────────────────────
 import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE } from './utils.js?v=__ASSET_VERSION__';
-import { allConnections, mergeConnections, setAllConnections, setDataRangeFrom, setServerTimeOffset, updateConnPanel, setFetching } from './connections-panel.js?v=__ASSET_VERSION__';
+import { allConnections, mergeConnections, setAllConnections, setDataRangeFrom, setServerTimeOffset, getTimeRange, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
 import { socket, connState, asusActive, setAsusActive, yamahaConfigured, setNotesMap, apiFetch, errorBanner, updateConnBadge, refreshAllNotes, setDevicesDataRef, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
 import { statsMode, setViewTabHandlers } from './view-tabs.js?v=__ASSET_VERSION__';
-import { nodes, selectedMac, buildGraph, buildGraphFromConnections, updateOrgGraph, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, graphSummary, stopGraph, showToast, applyFilter, applyGraphFilter, lastClients, resizeGraph, setGraphDevicesDataRef } from './graph.js?v=__ASSET_VERSION__';
+import { nodes, selectedMac, buildGraph, buildGraphFromConnections, updateOrgGraph, scheduleGraphAutoFit, fetchGraphSummary, stopGraph, showToast, applyFilter, applyGraphFilter, lastClients, resizeGraph, setGraphDevicesDataRef } from './graph.js?v=__ASSET_VERSION__';
 import { updateStats, stStopSpin, stStopFlatAnim } from './stats.js?v=__ASSET_VERSION__';
 import { openSettings, showStatus } from './settings.js?v=__ASSET_VERSION__';
 import { devicesData, setDevicesData, loadDevicesView, setOnDevicesLoaded, refreshDetailPanelNote } from './devices.js?v=__ASSET_VERSION__';
@@ -122,7 +122,18 @@ socket.on('network-update', data => {
   if (data.routerIp) connState.l2.ip = data.routerIp;
   updateConnBadge('l2');
   buildGraph(data);
+  updateOrgGraph();
 });
+
+function refreshGraphSummary({ delayedData = false } = {}) {
+  const { from, to } = getTimeRange();
+  return fetchGraphSummary(from, to)
+    .then(() => {
+      buildGraphFromConnections();
+      scheduleGraphAutoFit({ delayedData });
+    })
+    .catch(e => console.warn('[graph] summary refresh failed:', e));
+}
 
 socket.on('connections-update', data => {
   const enabledRouters = routerState.routers.length
@@ -131,7 +142,7 @@ socket.on('connections-update', data => {
   if (!enabledRouters) return;
   const incoming = data.connections || [];
   if (data.partial || !data.initialLoad) {
-    // Merge: update/add entries without discarding history or API-fetched ranges.
+    // Merge without discarding the initial and previously received live observations.
     setAllConnections(mergeConnections(allConnections, incoming));
   } else {
     // True initial load (initialLoad=true, partial=false): replace and reset range.
@@ -140,11 +151,7 @@ socket.on('connections-update', data => {
     setDataRangeFrom(serverNow - 3600_000);
   }
   if (data.serverTime) setServerTimeOffset(data.serverTime - Date.now());
-  if (!asusActive) {
-    buildGraphFromConnections(); // Yamaha-only: render src IPs as devices
-  } else {
-    updateOrgGraph();
-  }
+  refreshGraphSummary({ delayedData: !!data.initialLoad });
   if (statsMode) updateStats();
   // Log view fetches independently from the API on tab-switch and filter changes;
   // calling updateLogView() here would reset pagination every 2 s and break scroll.
@@ -153,29 +160,6 @@ socket.on('connections-update', data => {
   const selIp   = selNode?.client?.ip || null;
   updateConnPanel(selIp);
 
-  // Initial load sent only 1h. Fetch the remaining 24h in the background
-  // and merge so real-time deltas that arrived during the fetch are not lost.
-  if (data.initialLoad) {
-    const from24h = Date.now() - 86_400_000;
-    setFetching(+1);
-    apiFetch(`${_BASE}/api/connections?from=${from24h}`)
-      .then(r => r.json())
-      .then(async d => {
-        setAllConnections(mergeConnections(allConnections, d.connections || []));
-        setDataRangeFrom(from24h);
-        if (d.truncated && fetchGraphSummary) {
-          await fetchGraphSummary(from24h, null);
-        } else if (!d.truncated && clearGraphSummary) {
-          clearGraphSummary();
-        }
-        if (graphSummary) buildGraphFromConnections();
-        else if (!asusActive) buildGraphFromConnections(); else updateOrgGraph();
-        scheduleGraphAutoFit({ delayedData: true });
-        if (statsMode) updateStats();
-      })
-      .catch(e => console.warn('[connections] background 24h fetch failed:', e))
-      .finally(() => setFetching(-1));
-  }
 });
 
 socket.on('poll-error', err => {

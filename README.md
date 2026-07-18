@@ -69,6 +69,8 @@ Connection Log and Devices let you drill down into suspicious destinations, nois
 
 ## Architecture
 
+For component boundaries, multi-router data flow, persistence safety, and security boundaries, see the **[Architecture Guide](docs/architecture.md)**. For automation and integration, see the **[REST API Reference](docs/api-reference.md)**.
+
 ```
 ┌─────────────────┐  SSH (NAT)  ┌──────────────────────┐  WebSocket   ┌──────────────────┐
 │  Yamaha RTX     │◄───────────►│                      │◄────────────►│ Browser          │

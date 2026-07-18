@@ -350,17 +350,16 @@ test('tab bar renders after auth', async ({ page }) => {
   expect(count).toBe(5);
 });
 
-test('graph canvas renders after auth (P2-4: background fetch completes)', async ({ page }) => {
+test('graph canvas renders after auth from the summary API', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
   await authPage(page);
 
-  // P2-4: after initial 1h emit, client fires a background 24h fetch and calls
-  // buildGraphFromConnections(). The SVG/canvas element should be populated.
+  // The initial Socket.IO payload triggers a bounded summary fetch and render.
   const graphContainer = page.locator('#graph-container');
   await expect(graphContainer).toBeVisible();
   const childCount = await graphContainer.evaluate(el => el.children.length);
-  expect(childCount, 'graph container should have rendered children after background fetch').toBeGreaterThan(0);
+  expect(childCount, 'graph container should have rendered children after summary fetch').toBeGreaterThan(0);
 
   // P2-25: the renderer (graph-render.js) must actually draw node and link
   // elements — container children alone would pass even if drawNodes broke.
@@ -907,19 +906,25 @@ test('stats tab renders map coverage label and chart svgs without console errors
   expect(fatalErrors(errors), `Stats render errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
-test('graph map exposes summary/truncation notices without console errors', async ({ page }) => {
+test('graph map uses summary without full-history requests or console errors', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
   const errors = collectErrors(page);
   await authPage(page);
+  const historyRequests = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith('/api/connections')) historyRequests.push(url.toString());
+  });
   await page.locator('#time-filter-select').selectOption('14d');
   await page.click('#btn-graph');
 
   await expect(page.locator('#graph-container')).toBeVisible();
   await expect(page.locator('#graph-summary-notice')).toHaveCount(1);
-  await expect(page.locator('#graph-truncated-notice')).toHaveCount(1);
+  await expect(page.locator('#graph-summary-notice')).toBeVisible();
   const graphChildren = await page.locator('#graph-container').evaluate(el => el.children.length);
   expect(graphChildren, 'graph container should keep rendered child elements').toBeGreaterThan(0);
+  expect(historyRequests, 'graph period changes must use summary instead of full history').toHaveLength(0);
 
   expect(fatalErrors(errors), `Graph notice errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });

@@ -69,6 +69,8 @@ https://github.com/user-attachments/assets/9448d75b-a7fe-4363-8d35-da17abaed0ee
 
 ## アーキテクチャ
 
+Component境界、複数routerのdata flow、永続化の安全性、security boundaryは**[アーキテクチャガイド](docs/architecture.ja.md)**、自動化・外部連携は**[REST APIリファレンス](docs/api-reference.ja.md)**を参照してください。
+
 ```
 ┌─────────────────┐  SSH(NAT)   ┌──────────────────────┐  WebSocket   ┌──────────────────┐
 │  Yamaha RTX     │◄───────────►│                      │◄────────────►│ ブラウザ          │

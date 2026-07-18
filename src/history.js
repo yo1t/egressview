@@ -773,7 +773,8 @@ function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
      GROUP BY dst ORDER BY count DESC LIMIT 500`
   ).all(...params);
   const byDevice = db.prepare(
-    `SELECT src, srcMac, srcVendor,
+    `SELECT src, MAX(srcMac) AS srcMac, MAX(srcVendor) AS srcVendor,
+            MAX(srcDnsName) AS srcDnsName, MAX(srcMdnsName) AS srcMdnsName,
             COUNT(*) as count, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
      FROM connections${where}
      GROUP BY src ORDER BY count DESC LIMIT 200`

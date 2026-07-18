@@ -725,6 +725,29 @@ describe('Server runtime invariants', () => {
       'the app pie preview should render before the potentially slow summary request resolves');
   });
 
+  it('graph history always uses the bounded summary API', () => {
+    const graphJs = moduleSources['graph.js'];
+    const timeFilterJs = moduleSources['time-filter.js'];
+    const buildStart = graphJs.indexOf('function buildGraphFromConnections(');
+    const buildEnd = graphJs.indexOf('function buildGraphFromSummary(', buildStart);
+    const orgStart = graphJs.indexOf('function updateOrgGraph(');
+    const orgEnd = graphJs.indexOf('function showToast(', orgStart);
+    assert.notEqual(buildStart, -1);
+    assert.notEqual(buildEnd, -1);
+    assert.notEqual(orgStart, -1);
+    assert.notEqual(orgEnd, -1);
+    assert.match(graphJs.slice(buildStart, buildEnd), /buildGraphFromSummary\(graphSummary/,
+      'connection graph rendering should delegate to the server summary');
+    assert.doesNotMatch(graphJs.slice(buildStart, buildEnd), /getFilteredConnections/,
+      'connection graph rendering must not aggregate the in-browser history');
+    assert.doesNotMatch(graphJs.slice(orgStart, orgEnd), /getFilteredConnections/,
+      'organization graph rendering must not aggregate the in-browser history');
+    assert.doesNotMatch(timeFilterJs, /\/api\/connections\?(?!summary)/,
+      'period changes must not issue unpaged connection-history requests for the graph');
+    assert.doesNotMatch(mainJs, /background 24h fetch|\/api\/connections\?from=/,
+      'initial socket load must not trigger the former 24-hour full-history fetch');
+  });
+
   it('stats maps do not keep the previous period while waiting for summary', () => {
     const script = getScriptContent();
     const start = script.indexOf('async function updateStats()');

@@ -86,6 +86,10 @@ describe('repository public assets', () => {
         'sitemap.xml',
         '_config.yml',
         'docs/setup-yamaha.md',
+        'docs/api-reference.md',
+        'docs/api-reference.ja.md',
+        'docs/architecture.md',
+        'docs/architecture.ja.md',
         'docs/assets/egressview-graph-map.png',
       ]) {
         assert(fs.existsSync(path.join(output, file)), `Pages source is missing ${file}`);
