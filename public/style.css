@@ -134,6 +134,11 @@
   .manual-threat-result dl { display: grid; grid-template-columns: minmax(110px, auto) 1fr; gap: 3px 10px; margin: 7px 0 0; }
   .manual-threat-result dt { color: var(--muted); }
   .manual-threat-result dd { margin: 0; overflow-wrap: anywhere; }
+  .ai-settings-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .ai-test-button { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+  .ai-test-button:hover { background: rgba(59,130,246,.12); }
+  .ai-key-clear { margin-top: 7px; font-size: 9px; color: var(--muted); }
+  .ai-privacy-note { margin-top: 14px; line-height: 1.55; }
   .settings-pane-toggle { margin-bottom: 8px; font-size: 12px; }
   .settings-list-textarea { resize: vertical; font-family: monospace; font-size: 10px; line-height: 1.6; }
   .settings-field-hint { font-size: 9px; color: var(--muted); margin-top: 3px; line-height: 1.5; }

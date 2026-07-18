@@ -48,6 +48,10 @@
           <span class="tab-badge">🛡️</span>
           <span class="tab-name" data-i18n="settings.tab.threat">脅威検出</span>
         </button>
+        <button class="settings-tab" data-tab="ai">
+          <span class="tab-badge">AI</span>
+          <span class="tab-name" data-i18n="settings.tab.ai">AI洞察</span>
+        </button>
         <button class="settings-tab" data-tab="backup">
           <span class="tab-badge">💾</span>
           <span class="tab-name" data-i18n="settings.tab.backup">バックアップ</span>
@@ -454,6 +458,47 @@
             <button class="connect-btn slack-test-button" id="slack-test-btn" data-i18n="settings.slack.test">テスト送信</button>
           </div>
           <div class="settings-status" id="slack-status"></div>
+        </div>
+        <!-- AI provider settings -->
+        <div class="settings-pane" id="pane-ai">
+          <div class="pane-title pane-title-static" data-i18n="settings.ai.section">AI洞察</div>
+          <p class="settings-copy settings-copy-section" data-i18n="settings.ai.desc">
+            AI機能は初期状態で無効です。接続確認ではモデル一覧だけを取得し、通信データは送信しません。
+          </p>
+          <div class="form-group">
+            <label class="form-label" for="s-ai-provider" data-i18n="settings.ai.provider">プロバイダー</label>
+            <select id="s-ai-provider" class="form-input">
+              <option value="disabled" data-i18n="settings.ai.disabled">無効</option>
+              <option value="ollama">Ollama</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+            </select>
+          </div>
+          <div id="ai-provider-fields" class="section-inputs disabled">
+            <div id="ai-endpoint-group" class="form-group is-hidden">
+              <label class="form-label" for="s-ai-endpoint" data-i18n="settings.ai.endpoint">Ollamaエンドポイント</label>
+              <input id="s-ai-endpoint" class="form-input" type="url" value="http://127.0.0.1:11434" autocomplete="off" spellcheck="false">
+            </div>
+            <div id="ai-key-group" class="form-group is-hidden">
+              <label class="form-label" for="s-ai-key" data-i18n="settings.ai.apiKey">APIキー</label>
+              <input id="s-ai-key" class="form-input" type="password" autocomplete="new-password">
+              <label class="settings-check-label ai-key-clear"><input id="s-ai-key-clear" type="checkbox"> <span data-i18n="settings.ai.clearKey">保存済みキーを削除</span></label>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="s-ai-model" data-i18n="settings.ai.model">モデル</label>
+              <input id="s-ai-model" class="form-input" type="text" list="ai-model-options" maxlength="200" autocomplete="off" spellcheck="false">
+              <datalist id="ai-model-options"></datalist>
+              <p class="settings-field-hint" data-i18n="settings.ai.modelHint">候補から選択するか、モデルIDを直接入力できます。</p>
+            </div>
+          </div>
+          <div class="ai-settings-actions">
+            <button class="connect-btn" id="ai-save-btn" type="button" data-i18n="settings.btn.save">保存</button>
+            <button class="connect-btn ai-test-button" id="ai-test-btn" type="button" data-i18n="settings.ai.test">接続確認・モデル取得</button>
+          </div>
+          <div class="settings-status" id="ai-status"></div>
+          <p class="settings-field-hint ai-privacy-note" data-i18n="settings.ai.privacy">
+            APIキーは保存後に再表示されません。AI分析と外部への通信データ送信は、この段階では実装されていません。
+          </p>
         </div>
         <!-- Backup / Restore -->
         <div class="settings-pane" id="pane-backup">

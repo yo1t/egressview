@@ -17,6 +17,7 @@ entry point; imports determine evaluation order and cache-busted asset URLs.
    - `settings-legacy-routers.js`
    - `settings-slack.js`
    - `settings-manual-threat.js`
+   - `settings-ai.js`
 7. `map-common.js`
 8. `stats.js`
 9. `time-filter.js`

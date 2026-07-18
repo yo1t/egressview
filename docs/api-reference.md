@@ -119,6 +119,16 @@ Create/detect bodies use `kind` (`yamaha` or `cisco`), `displayName`, `ip`, `use
 - `POST /api/backup/upload` accepts a raw SQLite file body up to 100 MB, not multipart form data.
 - `POST /api/backup/config` accepts positive `intervalHours` and `maxGenerations` values.
 
+## AI provider configuration
+
+This first AI-insights foundation release only configures and tests a provider. It does not send connection, device, threat, or router data to an AI service.
+
+- `GET /api/config/ai` returns the selected provider, model IDs, Ollama endpoint, and key-set flags. API key values are never returned.
+- `POST /api/config/ai` accepts `provider` (`disabled`, `ollama`, `anthropic`, or `openai`), provider-keyed `models`, `ollamaEndpoint`, optional cloud `keys`, and `clearKeys`.
+- `POST /api/ai/test` accepts an empty JSON object. It uses the saved configuration to retrieve at most 200 model IDs, with a 10-second timeout and a 1 MB response limit.
+
+Provider configuration is disabled by default. Anthropic and OpenAI use their fixed official API endpoints; only Ollama accepts a custom HTTP(S) endpoint.
+
 Restore is fail-closed: EgressView validates the source, confirms a safety backup, restores and reopens all database users, verifies the result, and rolls back on failure. Active browser sessions are revoked after a successful restore.
 
 ## Endpoint catalog
@@ -175,6 +185,9 @@ All 53 implemented REST endpoints are listed below. **Public** means no token is
 | Manual threat investigation | `GET /api/config/manual-threat` | Protected; returns key-set flags, never key values |
 | Manual threat investigation | `POST /api/config/manual-threat` | Protected; saves API keys, cache, and provider cooldown |
 | Manual threat investigation | `POST /api/threat/manual-lookup` | Protected; explicitly sends one public IP to selected providers |
+| AI configuration | `GET /api/config/ai` | Protected; returns key-set flags, never key values |
+| AI configuration | `POST /api/config/ai` | Protected; saves provider, models, endpoint, and cloud keys |
+| AI configuration | `POST /api/ai/test` | Protected; retrieves model IDs without sending network data |
 | Slack | `POST /api/slack/test` | Protected |
 | Slack | `POST /api/slack/verify` | Protected |
 | Slack | `POST /api/slack/lookup-user` | Protected |

@@ -8,6 +8,7 @@ import { initSessionSettings } from './settings-sessions.js?v=__ASSET_VERSION__'
 import { initBeaconSettings } from './settings-beacons.js?v=__ASSET_VERSION__';
 import { initSlackSettings } from './settings-slack.js?v=__ASSET_VERSION__';
 import { initManualThreatSettings } from './settings-manual-threat.js?v=__ASSET_VERSION__';
+import { initAiSettings } from './settings-ai.js?v=__ASSET_VERSION__';
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsBtn     = document.getElementById('settings-btn');
 
@@ -149,5 +150,6 @@ initSessionSettings(showStatus);
 initBeaconSettings(showStatus);
 initSlackSettings(showStatus);
 initManualThreatSettings();
+initAiSettings();
 
 export { openSettings, showStatus, loadBackupList, toggleSection, settingsBtn };
