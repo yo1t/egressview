@@ -539,7 +539,7 @@ server.listen(PORT, HOST, () => {
   enrichmentQueue.init({ history, enrichment, io, logger });
   if (staleEnrichmentIps.length) {
     logger.info(`[enrichment] Queuing ${staleEnrichmentIps.length} stale IPs for background refresh`);
-    enrichmentQueue.queueConnectionEnrichment(staleEnrichmentIps);
+    enrichmentQueue.queueStaleConnectionEnrichment(staleEnrichmentIps);
   }
   beaconScanRunner.init({ appState, beacons, beaconDetector, threatIntel, enrichment, logger });
 
