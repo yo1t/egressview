@@ -9,6 +9,7 @@ const REFRESH_MS = 15_000;
 const METRICS = ['connections', 'devices', 'destinations', 'warn', 'danger'];
 let refreshTimer = null;
 let generation = 0;
+let analysisController = null;
 
 function formatNumber(value) {
   return new Intl.NumberFormat().format(Number(value) || 0);
@@ -86,6 +87,53 @@ async function refreshAiInsights() {
   }
 }
 
+function setAnalysisRunning(running) {
+  document.getElementById('ai-analyze-btn').disabled = running;
+  document.getElementById('ai-cancel-btn').classList.toggle('is-hidden', !running);
+}
+
+async function analyzeCurrentRange() {
+  if (analysisController) return;
+  const now = Date.now();
+  const range = getTimeRange();
+  const from = range.from ?? now - 3600_000;
+  const to = range.to ?? now;
+  const result = document.getElementById('ai-analysis-result');
+  const meta = document.getElementById('ai-analysis-meta');
+  const error = document.getElementById('ai-error');
+  analysisController = new AbortController();
+  setAnalysisRunning(true);
+  error.classList.remove('is-visible');
+  result.textContent = t('ai.analysis.running');
+  meta.textContent = '';
+  try {
+    const response = await apiFetch(`${_BASE}/api/ai/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from, to }),
+      signal: analysisController.signal,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || t('ai.analysis.failed'));
+    result.textContent = body.text;
+    meta.textContent = tVars('ai.analysis.meta', {
+      provider: body.provider,
+      model: body.model,
+      time: new Date(body.generatedAt).toLocaleString(),
+    });
+  } catch (cause) {
+    if (cause.name === 'AbortError') result.textContent = t('ai.analysis.cancelled');
+    else {
+      result.textContent = t('ai.analysis.empty');
+      error.textContent = cause.message || t('ai.analysis.failed');
+      error.classList.add('is-visible');
+    }
+  } finally {
+    analysisController = null;
+    setAnalysisRunning(false);
+  }
+}
+
 function startAiInsights() {
   refreshAiInsights();
   if (!refreshTimer) refreshTimer = setInterval(refreshAiInsights, REFRESH_MS);
@@ -99,6 +147,8 @@ function stopAiInsights() {
 
 function initAiInsights() {
   document.getElementById('ai-refresh-btn').addEventListener('click', refreshAiInsights);
+  document.getElementById('ai-analyze-btn').addEventListener('click', analyzeCurrentRange);
+  document.getElementById('ai-cancel-btn').addEventListener('click', () => analysisController?.abort());
   document.querySelectorAll('[data-ai-metric]').forEach(card => {
     card.addEventListener('click', () => {
       const metric = card.dataset.aiMetric;
@@ -110,4 +160,4 @@ function initAiInsights() {
 
 initAiInsights();
 
-export { deltaSummary, renderFacts, refreshAiInsights, startAiInsights, stopAiInsights };
+export { analyzeCurrentRange, deltaSummary, renderFacts, refreshAiInsights, setAnalysisRunning, startAiInsights, stopAiInsights };

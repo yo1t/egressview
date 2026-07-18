@@ -170,6 +170,16 @@ function createHistoryQueries({
     ).all(...params);
   }
 
+  function groupServiceByTimeRange(from, to) {
+    const db = getDb();
+    if (!db) return [];
+    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] });
+    return db.prepare(
+      `SELECT dport, proto, COUNT(*) AS count FROM connections${where}
+       GROUP BY dport, proto ORDER BY count DESC LIMIT 20`
+    ).all(...params);
+  }
+
   function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
     const startedAt = process.hrtime.bigint();
     const timings = {};
@@ -305,6 +315,7 @@ function createHistoryQueries({
     countFactsByTimeRange,
     createConnectionExportReader,
     groupDstByTimeRange,
+    groupServiceByTimeRange,
     summarizeByTimeRange,
   };
 }
