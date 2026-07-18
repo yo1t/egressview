@@ -80,6 +80,8 @@ playwright-report/
 .egressview.pid
 local-media/
 redacted-media/
+.pages-source/
+_site/
 
 # Playwright test output
 test-results/

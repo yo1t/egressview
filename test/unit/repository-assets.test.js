@@ -3,10 +3,12 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { preparePagesSource } = require('../../scripts/prepare-pages-source');
 
 const root = path.join(__dirname, '..', '..');
-const sourceFiles = ['README.md', 'README.ja.md', 'index.html', 'index.ja.html'];
+const sourceFiles = ['README.md', 'README.ja.md', 'site/index.html', 'site/index.ja.html'];
 const packageJson = require('../../package.json');
 
 function localImageReferences(file) {
@@ -32,12 +34,17 @@ function rawGitHubImageReferences(file) {
   return references;
 }
 
+function resolveLocalImage(file, reference) {
+  const cleanReference = decodeURIComponent(reference.split(/[?#]/, 1)[0]);
+  if (file.startsWith('site/')) return path.resolve(root, cleanReference);
+  return path.resolve(root, path.dirname(file), cleanReference);
+}
+
 describe('repository public assets', () => {
   it('keeps every local image reference resolvable', () => {
     for (const file of sourceFiles) {
       for (const reference of localImageReferences(file)) {
-        const cleanReference = decodeURIComponent(reference.split(/[?#]/, 1)[0]);
-        const resolved = path.resolve(root, path.dirname(file), cleanReference);
+        const resolved = resolveLocalImage(file, reference);
         assert(resolved.startsWith(root + path.sep), `${file} references an image outside the repository: ${reference}`);
         assert(fs.existsSync(resolved), `${file} references a missing image: ${reference}`);
       }
@@ -58,5 +65,35 @@ describe('repository public assets', () => {
     assert.deepEqual(rootImages, []);
     assert(packageJson.files.includes('docs/assets/*.png'));
     assert(!packageJson.files.includes('docs/*.png'));
+  });
+
+  it('keeps Pages source separate from application and package roots', () => {
+    for (const file of ['index.html', 'index.ja.html', 'sitemap.xml', '_config.yml']) {
+      assert(!fs.existsSync(path.join(root, file)), `${file} must remain under site/`);
+      assert(fs.existsSync(path.join(root, 'site', file)), `site/${file} is missing`);
+      assert(!packageJson.files.includes(file), `${file} must not be published in the runtime package`);
+    }
+  });
+
+  it('assembles a self-contained Jekyll source without application files', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-pages-'));
+    const output = path.join(tempDir, 'source');
+    try {
+      preparePagesSource({ rootDir: root, destination: output });
+      for (const file of [
+        'index.html',
+        'index.ja.html',
+        'sitemap.xml',
+        '_config.yml',
+        'docs/setup-yamaha.md',
+        'docs/assets/egressview-graph-map.png',
+      ]) {
+        assert(fs.existsSync(path.join(output, file)), `Pages source is missing ${file}`);
+      }
+      assert(!fs.existsSync(path.join(output, 'public', 'index.html')));
+      assert(!fs.existsSync(path.join(output, 'server.js')));
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
