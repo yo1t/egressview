@@ -49,6 +49,7 @@ describe('AI configuration routes', () => {
       provider: 'anthropic',
       models: { anthropic: 'claude-test' },
       keys: { anthropic: 'secret-key' },
+      cloudConsent: { anthropic: true },
     });
     assert.equal(saved.status, 200);
     assert.equal(saved.body.provider, 'anthropic');
@@ -60,12 +61,38 @@ describe('AI configuration routes', () => {
     assert.equal(JSON.stringify(loaded.body).includes('secret-key'), false);
   });
 
+  it('requires cloud consent when saving and again when analyzing', async () => {
+    const provider = createAiProvider({ fetchImpl: async () =>
+      new Response(JSON.stringify({ output_text: 'ok' }), { status: 200 }) });
+    const app = appFor(provider, undefined, {
+      history: {
+        countFactsByTimeRange: () => ({}), groupDstByTimeRange: () => [], groupServiceByTimeRange: () => [],
+      },
+      threatIntel: null,
+      routerManager: { list: () => [] },
+    });
+    const deniedSave = await request(app, 'POST', '/api/config/ai', {
+      provider: 'openai', models: { openai: 'gpt-test' }, keys: { openai: 'secret-key' },
+    });
+    assert.equal(deniedSave.status, 400);
+    const saved = await request(app, 'POST', '/api/config/ai', {
+      provider: 'openai', models: { openai: 'gpt-test' }, keys: { openai: 'secret-key' },
+      cloudConsent: { openai: true },
+    });
+    assert.equal(saved.status, 200);
+    assert.equal((await request(app, 'POST', '/api/ai/analyze', { from: 1, to: 2 })).status, 403);
+    assert.equal((await request(app, 'POST', '/api/ai/analyze', {
+      from: 1, to: 2, cloudConsentConfirmed: true,
+    })).status, 200);
+  });
+
   it('rolls runtime configuration back when persistence fails', async () => {
     const aiProvider = createAiProvider();
     aiProvider.configure({ provider: 'ollama', models: { ollama: 'old-model' } });
     const app = appFor(aiProvider, () => { throw new Error('disk full'); });
     const result = await request(app, 'POST', '/api/config/ai', {
       provider: 'openai', keys: { openai: 'new-secret' }, models: { openai: 'new-model' },
+      cloudConsent: { openai: true },
     });
     assert.equal(result.status, 500);
     assert.equal(aiProvider.exportConfig().provider, 'ollama');

@@ -107,10 +107,18 @@ async function analyzeCurrentRange() {
   result.textContent = t('ai.analysis.running');
   meta.textContent = '';
   try {
+    const configResponse = await apiFetch(`${_BASE}/api/config/ai`, { signal: analysisController.signal });
+    const config = await configResponse.json().catch(() => ({}));
+    if (!configResponse.ok) throw new Error(config.error || t('ai.analysis.failed'));
+    const cloud = config.provider === 'anthropic' || config.provider === 'openai';
+    if (cloud && !globalThis.confirm(tVars('ai.analysis.cloudConfirm', { provider: config.provider }))) {
+      result.textContent = t('ai.analysis.cancelled');
+      return;
+    }
     const response = await apiFetch(`${_BASE}/api/ai/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to }),
+      body: JSON.stringify({ from, to, cloudConsentConfirmed: cloud }),
       signal: analysisController.signal,
     });
     const body = await response.json().catch(() => ({}));

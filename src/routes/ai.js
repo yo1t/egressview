@@ -21,6 +21,10 @@ const configSchema = z.object({
     openai: z.string().max(4096).optional(),
   }).strict().optional(),
   clearKeys: z.array(cloudProviderSchema).max(2).optional(),
+  cloudConsent: z.object({
+    anthropic: z.boolean().optional(),
+    openai: z.boolean().optional(),
+  }).strict().optional(),
   ollamaEndpoint: z.string().max(2048).optional(),
 }).strict();
 const emptySchema = z.object({}).strict();
@@ -30,7 +34,7 @@ const factsQuerySchema = z.object({
   to: timestampSchema.optional(),
 }).strict();
 const MAX_FACTS_RANGE_MS = 14 * 24 * 60 * 60 * 1000;
-const analysisSchema = factsQuerySchema;
+const analysisSchema = factsQuerySchema.extend({ cloudConsentConfirmed: z.boolean().optional() });
 
 module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, history, threatIntel, routerManager }) {
   const router = Router();
@@ -48,11 +52,17 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
       if (key) nextKeys[name] = key;
     }
     for (const name of parsed.data.clearKeys || []) nextKeys[name] = '';
+    const nextProvider = parsed.data.provider ?? previous.provider;
+    const nextConsent = { ...previous.cloudConsent, ...(parsed.data.cloudConsent || {}) };
+    if (cloudProviderSchema.safeParse(nextProvider).success && !nextConsent[nextProvider]) {
+      return res.status(400).json({ error: 'Cloud AI data sharing consent is required' });
+    }
     try {
       aiProvider.configure({
-        provider: parsed.data.provider ?? previous.provider,
+        provider: nextProvider,
         models: { ...previous.models, ...(parsed.data.models || {}) },
         keys: nextKeys,
+        cloudConsent: nextConsent,
         ollamaEndpoint: parsed.data.ollamaEndpoint ?? previous.ollamaEndpoint,
       });
       saveConfig();
@@ -115,9 +125,10 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
       const context = buildAnonymousAiContext({ facts, history, routers, from, to });
       res.json({ success: true, range: { from, to }, ...await aiProvider.generateInsight(context, {
         signal: controller.signal,
+        cloudConsentConfirmed: parsed.data.cloudConsentConfirmed,
       }) });
     } catch (error) {
-      const status = error.code === 'AI_BUSY' ? 409 : 400;
+      const status = error.code === 'AI_BUSY' ? 409 : error.code === 'AI_CONSENT_REQUIRED' ? 403 : 400;
       res.status(status).json({ success: false, error: error.message });
     }
   });
