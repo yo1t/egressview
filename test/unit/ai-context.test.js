@@ -13,7 +13,7 @@ describe('anonymous AI context', () => {
       current: { connections: 4, devices: 2, destinations: 3, safe: 3, warn: 1, danger: 0 },
       previous: { connections: 2, devices: 1, destinations: 2, safe: 2, warn: 0, danger: 0 },
     };
-    const secretValues = ['192.168.41.10', 'AA:BB:CC:DD:EE:FF', 'office-laptop', 'router.internal'];
+    const secretValues = ['192.0.2.10', 'AA:BB:CC:DD:EE:FF', 'office-laptop', 'router.internal'];
     const context = buildAnonymousAiContext({
       facts,
       from: 1,
