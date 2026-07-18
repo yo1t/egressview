@@ -64,7 +64,7 @@
           <div class="router-pane-head">
             <div>
               <div class="pane-title router-pane-title" data-i18n="settings.routers.title">L3/L4 ルーター</div>
-              <div class="router-pane-copy" data-i18n="settings.routers.desc">YamahaとCiscoを合計10台まで登録できます。</div>
+              <div class="router-pane-copy" data-i18n="settings.routers.desc">Yamaha、Cisco、Linux conntrackを合計10台まで登録できます。</div>
             </div>
             <span id="router-count" class="router-count">0 / 10</span>
           </div>
@@ -80,7 +80,7 @@
             <div class="settings-row">
               <div class="form-group">
                 <label class="form-label" data-i18n="settings.routers.type">種類</label>
-                <select id="router-kind" class="form-input"><option value="yamaha">Yamaha RTX</option><option value="cisco">Cisco IOS</option></select>
+                <select id="router-kind" class="form-input"><option value="yamaha">Yamaha RTX</option><option value="cisco">Cisco IOS</option><option value="conntrack">Linux conntrack</option></select>
               </div>
               <div class="form-group">
                 <label class="form-label" data-i18n="settings.routers.name">表示名</label>
@@ -295,6 +295,57 @@
           <div class="threat-feed-status" id="threat-feed-status"></div>
           <button class="connect-btn settings-save-spaced" id="threat-save-btn" data-i18n="settings.btn.save">保存</button>
           <div class="settings-status" id="threat-status"></div>
+
+          <hr class="settings-divider">
+
+          <div class="pane-title settings-subsection-title" data-i18n="settings.manualThreat.section">外部サービスで手動調査</div>
+          <p class="settings-copy settings-copy-section" data-i18n="settings.manualThreat.desc">
+            ボタンを押した場合だけ、指定した公開IPアドレスを選択中の外部サービスへ送信します。自動送信は行いません。
+          </p>
+          <div class="manual-threat-keys">
+            <div class="form-group">
+              <label class="form-label">AbuseIPDB API key</label>
+              <input id="s-manual-threat-abuseipdb" class="form-input" type="password" autocomplete="off">
+              <label class="settings-check-label manual-threat-clear"><input id="s-manual-threat-abuseipdb-clear" type="checkbox"> <span data-i18n="settings.manualThreat.clear">保存済みキーを削除</span></label>
+            </div>
+            <div class="form-group">
+              <label class="form-label">VirusTotal API key</label>
+              <input id="s-manual-threat-virustotal" class="form-input" type="password" autocomplete="off">
+              <label class="settings-check-label manual-threat-clear"><input id="s-manual-threat-virustotal-clear" type="checkbox"> <span data-i18n="settings.manualThreat.clear">保存済みキーを削除</span></label>
+            </div>
+            <div class="form-group">
+              <label class="form-label">AlienVault OTX API key</label>
+              <input id="s-manual-threat-otx" class="form-input" type="password" autocomplete="off">
+              <label class="settings-check-label manual-threat-clear"><input id="s-manual-threat-otx-clear" type="checkbox"> <span data-i18n="settings.manualThreat.clear">保存済みキーを削除</span></label>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="form-group">
+              <label class="form-label" data-i18n="settings.manualThreat.cache">キャッシュ時間（分）</label>
+              <input id="s-manual-threat-cache" class="form-input" type="number" min="5" max="1440" value="60">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="settings.manualThreat.interval">サービス別の最小間隔（秒）</label>
+              <input id="s-manual-threat-interval" class="form-input" type="number" min="1" max="3600" value="15">
+            </div>
+          </div>
+          <button class="connect-btn" id="manual-threat-config-save" type="button" data-i18n="settings.btn.save">保存</button>
+          <div class="settings-status" id="manual-threat-config-status"></div>
+
+          <div class="manual-threat-lookup">
+            <div class="form-group">
+              <label class="form-label" data-i18n="settings.manualThreat.ip">調査する公開IPアドレス</label>
+              <input id="manual-threat-ip" class="form-input" type="text" placeholder="8.8.8.8" autocomplete="off">
+            </div>
+            <div class="manual-threat-provider-row">
+              <label class="settings-check-label"><input id="manual-threat-use-abuseipdb" type="checkbox" checked> AbuseIPDB</label>
+              <label class="settings-check-label"><input id="manual-threat-use-virustotal" type="checkbox" checked> VirusTotal</label>
+              <label class="settings-check-label"><input id="manual-threat-use-otx" type="checkbox" checked> OTX</label>
+            </div>
+            <button class="connect-btn manual-threat-send" id="manual-threat-lookup-btn" type="button" data-i18n="settings.manualThreat.lookup">IPを外部サービスへ送信して調査</button>
+            <div class="settings-status" id="manual-threat-lookup-status"></div>
+            <div id="manual-threat-results" class="manual-threat-results"></div>
+          </div>
 
           <hr class="settings-divider">
 

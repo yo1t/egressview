@@ -26,6 +26,8 @@ EgressViewは、多くの家庭ユーザーが答えを持てていない問い�
 - **パッシブ・ゼロインパクト監視** — ルーターのNATセッションテーブルをSSHで読み取るだけ。通信の中継・傍受なし、スループット低下なし
 - **デバイス単位の可視性** — OUI・mDNS・SSDP・NetBIOSによるデバイス識別で、どの機器が何と通信しているかを把握
 - **自動脅威検出** — Feodo Tracker・ThreatFox・URLhaus・Spamhaus DROPとリアルタイムに全接続を照合
+- **外部サービスによる手動脅威調査** — 明示操作時だけAbuseIPDB・VirusTotal・AlienVault OTXへ問い合わせ（cache/rate limit対応、[ガイド](docs/manual-threat-investigation.ja.md)）
+- **Linux conntrackプレビュー** — Linux系ルーターからSSH収集。Docker統合試験済み、実機確認は未完了（[設定](docs/setup-conntrack.ja.md)）
 - **即時Slackアラート** — 任意のデバイスが既知のC2サーバーやマルウェア配布元に接続した瞬間にDM通知
 - **ハードウェア変更不要** — Mac・PC・Raspberry Piにインストールするだけ。既存のYamaha RTX / Cisco IOSルーターと共存
 

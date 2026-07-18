@@ -4,6 +4,7 @@ const { createRouterRegistry } = require('./router-registry');
 const { createRouterPollScheduler } = require('./router-poll-scheduler');
 const { createYamahaAdapter } = require('./pollers/yamaha-adapter');
 const { createCiscoAdapter } = require('./pollers/cisco-adapter');
+const { createConntrackAdapter } = require('./pollers/conntrack-adapter');
 const { MAX_ROUTERS, normalizeRouterRecord, publicRouter } = require('./router-config');
 const { isAllowedRouterIp } = require('./utils');
 
@@ -86,9 +87,9 @@ function createRouterManager({
 
   function adapterFor(record) {
     if (createAdapter) return createAdapter(record);
-    return record.kind === 'yamaha'
-      ? createYamahaAdapter({ id: record.id })
-      : createCiscoAdapter({ id: record.id });
+    if (record.kind === 'yamaha') return createYamahaAdapter({ id: record.id });
+    if (record.kind === 'cisco') return createCiscoAdapter({ id: record.id });
+    return createConntrackAdapter({ id: record.id });
   }
 
   function startRouter(entry) {
@@ -211,7 +212,7 @@ function createRouterManager({
     if (!isAllowedRouterIp(input?.ip)) throw new Error('router IP must be private');
     const existing = input?.id ? configs.get(input.id) : null;
     const kind = input?.kind || existing?.kind;
-    if (!['yamaha', 'cisco'].includes(kind)) throw new Error('unsupported router kind');
+    if (!['yamaha', 'cisco', 'conntrack'].includes(kind)) throw new Error('unsupported router kind');
     const adapter = adapterFor({ id: existing?.id || `${kind}-detect`, kind });
     const pass = input?.pass || existing?.pass || '';
     if (!input?.ip || !input?.user || !pass) throw new Error('IP, username and password are required');

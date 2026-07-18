@@ -16,6 +16,7 @@ entry point; imports determine evaluation order and cache-busted asset URLs.
    - `settings-beacons.js`
    - `settings-legacy-routers.js`
    - `settings-slack.js`
+   - `settings-manual-threat.js`
 7. `map-common.js`
 8. `stats.js`
 9. `time-filter.js`
@@ -57,8 +58,8 @@ resolved by the ES module graph rather than script tags:
 ## Settings sections (P2-39)
 
 `settings.js` coordinates the modal, data sources, and general settings.
-Backup/restore, authentication sessions, beacon detection, and the legacy
-Yamaha/Cisco/ASUS controls each own their listeners and API calls in a focused section module.
+Backup/restore, authentication sessions, beacon detection, manual threat lookup,
+and the legacy Yamaha/Cisco/ASUS controls each own their listeners and API calls in a focused section module.
 The parent passes only the shared status renderer, avoiding circular imports.
 
 ## Reviewed HTML sinks (P2-27)

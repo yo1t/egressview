@@ -6,6 +6,12 @@ const configIo = require('./config');
 
 const MAX_ROUTERS = 10;
 
+const DEFAULT_NAMES = Object.freeze({
+  yamaha: 'Yamaha RTX',
+  cisco: 'Cisco IOS',
+  conntrack: 'Linux conntrack',
+});
+
 function legacyRouter(data, kind) {
   const legacy = data?.[kind];
   if (!legacy || (!legacy.ip && !legacy.user)) return null;
@@ -34,7 +40,7 @@ function normalizeRouterRecord(input, { existing = null, knownIds = [] } = {}) {
   const ip = String(input?.ip ?? existing?.ip ?? '').trim();
   const user = String(input?.user ?? existing?.user ?? '').trim();
   const displayName = String(input?.displayName ?? existing?.displayName ?? '').trim().slice(0, 80)
-    || (kind === 'yamaha' ? 'Yamaha RTX' : 'Cisco IOS');
+    || DEFAULT_NAMES[kind];
   const passInput = typeof input?.pass === 'string' ? input.pass : '';
   const enableInput = typeof input?.enablePass === 'string' ? input.enablePass : '';
   const ipChanged = !!existing && ip !== existing.ip;

@@ -16,6 +16,7 @@ const slackRoutes = require('./routes/slack');
 const notificationLogRoutes = require('./routes/notification-log');
 const beaconsRoutes = require('./routes/beacons');
 const routerRoutes = require('./routes/routers');
+const manualThreatRoutes = require('./routes/manual-threat');
 const { createSlowRequestLogger } = require('./slow-request-log');
 const i18nCatalog = require('./data/i18n.json');
 
@@ -162,6 +163,7 @@ function configureHttpApp(app, {
       beaconScanRunner.runBeaconScan();
     },
   }));
+  if (routeCtx.manualThreat) app.use('/api', manualThreatRoutes(routeCtx));
 
   app.use((err, req, res, next) => {
     logger.error('[express] unhandled error:', err.message);

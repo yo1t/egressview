@@ -62,6 +62,7 @@ const APP_SCRIPT_FILES = [
   'settings-beacons.js',
   'settings-legacy-routers.js',
   'settings-slack.js',
+  'settings-manual-threat.js',
   'settings.js',
   'time-filter.js',
   'main.js',

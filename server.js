@@ -19,6 +19,7 @@ const enrichment      = require('./src/enrichment');
 const history         = require('./src/history');
 const deviceId        = require('./src/device-identify');
 const threatIntel     = require('./src/threat-intel');
+const { manualThreatLookup } = require('./src/manual-threat-lookup');
 const notifier        = require('./src/notifier');
 const i18n            = require('./src/i18n-server');
 const backup          = require('./src/backup');
@@ -163,6 +164,7 @@ function loadConfig() {
   }
   applyConfigToAppState(appState, data, { isAllowedLogPath: utils.isAllowedLogPath, logger });
   if (data.slack) notifier.configure({ ...data.slack, language: appState.uiLanguage });
+  if (data.manualThreat) manualThreatLookup.configure(data.manualThreat);
   i18n.setLanguage(appState.uiLanguage);
 
   dhcpdSyslog.configure({ logFile: appState.dhcpdLogFile, enabled: appState.dhcpdEnabled });
@@ -202,6 +204,7 @@ function saveConfig(sectionOverrides = {}) {
     beacons: appState.beaconConfig,
     https:   { enabled: appState.httpsEnabled, certPath: appState.httpsCertPath, keyPath: appState.httpsKeyPath },
     auth:    { passwordHash: appState.authPasswordHash, salt: appState.authPasswordSalt },
+    manualThreat: manualThreatLookup.exportConfig(),
   };
   // Preserve passwords from the strict read above (not held in module getters).
   try {
@@ -330,6 +333,7 @@ const routeCtx = {
   startYamahaPolling: pollScheduler.startYamahaPolling,
   startCiscoPolling:  pollScheduler.startCiscoPolling,
   routerManager:      routerManagerApi,
+  manualThreat:       manualThreatLookup,
 };
 
 configureHttpApp(app, {

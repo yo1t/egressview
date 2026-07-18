@@ -346,15 +346,16 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
 function _ensureRouterRow(routerId) {
   if (ensuredRouterIds.has(routerId)) return;
   const isLegacy = routerId.startsWith('legacy-');
+  const kind = routerKinds.get(routerId) || routerKindForId(routerId, sourceRouterMap);
   stmtEnsureRouter.run(
     routerId,
-    routerKindForId(routerId, sourceRouterMap),
+    kind,
     routerId,
     Date.now(),
     isLegacy ? Date.now() : null,
   );
   ensuredRouterIds.add(routerId);
-  routerKinds.set(routerId, routerKindForId(routerId, sourceRouterMap));
+  routerKinds.set(routerId, kind);
 }
 
 function upsertEntry(entry) {

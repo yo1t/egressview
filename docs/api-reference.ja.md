@@ -172,6 +172,9 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Data source | `POST /api/config/datasources` | 認証必須 |
 | Slack | `GET /api/config/slack` | 認証必須 |
 | Slack | `POST /api/config/slack` | 認証必須 |
+| 手動脅威調査 | `GET /api/config/manual-threat` | 認証必須。APIキー値は返さず設定済みかだけ返す |
+| 手動脅威調査 | `POST /api/config/manual-threat` | 認証必須。APIキー、cache、provider別cooldownを保存 |
+| 手動脅威調査 | `POST /api/threat/manual-lookup` | 認証必須。明示操作で公開IP 1件を選択providerへ送信 |
 | Slack | `POST /api/slack/test` | 認証必須 |
 | Slack | `POST /api/slack/verify` | 認証必須 |
 | Slack | `POST /api/slack/lookup-user` | 認証必須 |
