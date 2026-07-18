@@ -6,6 +6,8 @@
 - **Node.js**: >=22 (tested on 22, 24)
 - **Evaluator**: Automated static analysis + manual code review (Kiro AI)
 
+> This report is a historical snapshot of v1.3.5. For the current release, see the [changelog](../CHANGELOG.md).
+
 ---
 
 ## Executive Summary
@@ -33,7 +35,7 @@ EgressView demonstrates **production-grade quality** across all evaluated framew
 
 ### Changes Since v1.2.2
 
-| Item | v1.2.2 | v1.3.5 (current) | Change |
+| Item | v1.2.2 | v1.3.5 (assessed) | Change |
 |---|---|---|---|
 | Source lines | 16,791 | 19,975 | +19.0% |
 | Test lines | 12,577 | 18,793 | +49.4% |

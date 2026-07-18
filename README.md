@@ -8,6 +8,7 @@ No new hardware. No inline traffic interception. Works via the NAT session table
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
+![Release](https://img.shields.io/badge/release-v1.4.0-3fb950)
 
 > 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/egressview/)
 
@@ -16,6 +17,12 @@ No new hardware. No inline traffic interception. Works via the NAT session table
 ## Project Status
 
 EgressView is production-oriented for home/SOHO networks using Yamaha RTX or Cisco IOS. ASUS AP support and optional data sources are maintained as companion integrations.
+
+### What's new in v1.4.0
+
+Version 1.4.0 adds a mobile monitoring view, filtered connection-history export in CSV/JSON, explicit manual threat investigation, and a Linux conntrack preview. It also completes the multi-router schema v5 migration, removes HTML-string rendering and the remaining inline-style CSP exception, and strengthens database restore and configuration persistence with fail-closed verification. See the [changelog](CHANGELOG.md) for upgrade details.
+
+Existing databases upgrade automatically. Before schema v5 is applied, EgressView creates and verifies a backup and checks observation consistency; startup stops without modifying the database if either check fails. Linux conntrack remains a Docker-validated preview pending physical-router testing.
 
 ## For Home / SOHO Security
 
