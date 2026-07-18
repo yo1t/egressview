@@ -92,6 +92,7 @@ async function main() {
       commit: commit || 'unknown',
       durationMs: Date.now() - startedAt,
       passed: false,
+      failureType: 'operational',
       failures: [String(err?.message || err).slice(0, 300)],
     };
     try { appendRecord(record); } catch (writeErr) {
