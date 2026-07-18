@@ -1,7 +1,7 @@
 // ─── D3 Graph Setup ───────────────────────────────────────────────────────────
 import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, fmtBytes } from './utils.js?v=__ASSET_VERSION__';
-import { getFilteredConnections, getTimeRange, currentTimeFilter, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
+import { getTimeRange, currentTimeFilter, setFetching, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
 import { statsMode, nlMode, logMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { apiFetch, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
 import { flagEmoji, meshNodeId, normalizeGraphLinks, currentGraphRangeKey as _rangeKey, routerTargetsFromObservedBy } from './graph-helpers.js?v=__ASSET_VERSION__';
@@ -148,7 +148,10 @@ let lastClients = [];
 let lastMainMac = '';
 let graphSummary = null;
 let graphSummaryKey = null;
-let graphSummaryInflight = { key: null, promise: null };
+let graphSummaryFetchedAt = 0;
+const graphSummaryInflight = new Map();
+let lastNetworkData = null;
+const GRAPH_SUMMARY_CACHE_MS = 60_000;
 
 // Per-AiMesh-node identity colour
 const MESH_COLORS = ['#f59e0b','#f97316','#14b8a6','#a78bfa','#fb7185'];
@@ -198,8 +201,6 @@ function graphSummaryNotice(show, summary) {
   const notice = document.getElementById('graph-summary-notice');
   if (!notice) return;
   notice.classList.toggle('is-visible', show);
-  const truncated = document.getElementById('graph-truncated-notice');
-  if (truncated && show) truncated.classList.remove('is-visible');
   if (show && summary) {
     notice.textContent = tVars('graph.summary', {
       total: Number(summary.total || 0).toLocaleString(),
@@ -209,39 +210,43 @@ function graphSummaryNotice(show, summary) {
   }
 }
 
-function clearGraphSummary() {
-  graphSummary = null;
-  graphSummaryKey = null;
-  graphSummaryNotice(false);
-}
-
 async function fetchGraphSummary(from, to) {
   const key = currentGraphRangeKey(from, to);
-  if (graphSummary && graphSummaryKey === key) return graphSummary;
-  if (graphSummaryInflight.key === key && graphSummaryInflight.promise) return graphSummaryInflight.promise;
+  const now = Date.now();
+  if (graphSummary && graphSummaryKey === key && now - graphSummaryFetchedAt < GRAPH_SUMMARY_CACHE_MS) {
+    return graphSummary;
+  }
+  if (graphSummaryInflight.has(key)) return graphSummaryInflight.get(key);
+  const showLoading = !graphSummary || graphSummaryKey !== key;
   const params = new URLSearchParams();
   if (from != null) params.set('from', from);
   if (to != null) params.set('to', to);
   params.set('buckets', '60');
-  graphSummaryInflight = {
-    key,
-    promise: (async () => {
+  const promise = (async () => {
       const res = await apiFetch(`${_BASE}/api/connections/summary?${params}`);
       if (!res.ok) throw new Error(`graph summary failed: ${res.status}`);
-      graphSummary = await res.json();
-      graphSummaryKey = key;
-      graphSummaryNotice(true, graphSummary);
-      return graphSummary;
-    })(),
-  };
+      const summary = await res.json();
+      const activeRange = getTimeRange();
+      if (currentGraphRangeKey(activeRange.from, activeRange.to) === key) {
+        graphSummary = summary;
+        graphSummaryKey = key;
+        graphSummaryFetchedAt = Date.now();
+        graphSummaryNotice(true, graphSummary);
+      }
+      return summary;
+    })();
+  graphSummaryInflight.set(key, promise);
+  if (showLoading) setFetching(+1);
   try {
-    return await graphSummaryInflight.promise;
+    return await promise;
   } finally {
-    if (graphSummaryInflight.key === key) graphSummaryInflight = { key: null, promise: null };
+    if (showLoading) setFetching(-1);
+    if (graphSummaryInflight.get(key) === promise) graphSummaryInflight.delete(key);
   }
 }
 
-function buildGraph(data, { resetPositions = false } = {}) {
+function buildGraph(data, { resetPositions = false, cacheNetworkData = true } = {}) {
+  if (cacheNetworkData && (data.routerIp || (data.meshNodes || []).length)) lastNetworkData = data;
   const clients = data.clients || [];
   lastClients = clients;
   const meshNodes = data.meshNodes || [];
@@ -350,86 +355,34 @@ function updateHeader(data) {
   document.getElementById('last-update').textContent = t('last-update.prefix') + new Date(data.timestamp).toLocaleTimeString();
 }
 
-// Yamaha-only mode: build the graph treating src IPs as clients
+// Graph history is always rendered from the bounded server-side summary.
 function buildGraphFromConnections({ resetPositions = false } = {}) {
   const tr = typeof getTimeRange === 'function' ? getTimeRange() : { from: null, to: null };
   if (graphSummary && graphSummaryKey === currentGraphRangeKey(tr.from, tr.to)) {
     buildGraphFromSummary(graphSummary, { resetPositions });
-    return;
-  } else if (graphSummary) {
-    clearGraphSummary();
   }
-  // Do not early-return: still call buildGraph with empty arrays to clear the graph
-  const filtered = getFilteredConnections();
-
-  // Determine active routers for multi-router topology
-  const topology = activeRouterTopology();
-  const { isMulti } = topology;
-  const srcRouterMap = isMulti ? new Map() : null; // ip → Set<routerNodeId>
-
-  const srcCounts    = new Map();
-  const srcMeta      = new Map(); // ip → {mac, vendor, dnsName, mdnsName}
-  const srcFirstSeen = new Map(); // ip → min firstSeen
-  for (const c of filtered) {
-    srcCounts.set(c.src, (srcCounts.get(c.src) || 0) + 1);
-    if (!srcMeta.has(c.src) && (c.srcMac || c.srcVendor || c.srcDnsName || c.srcMdnsName)) {
-      srcMeta.set(c.src, {
-        mac: c.srcMac, vendor: c.srcVendor, dnsName: c.srcDnsName, mdnsName: c.srcMdnsName,
-      });
-    }
-    if (c.firstSeen) {
-      const cur = srcFirstSeen.get(c.src);
-      if (!cur || c.firstSeen < cur) srcFirstSeen.set(c.src, c.firstSeen);
-    }
-    if (isMulti) {
-      if (!srcRouterMap.has(c.src)) srcRouterMap.set(c.src, new Set());
-      for (const target of routerTargetsFromObservedBy(c.observedBy, c.source, isMulti, topology)) {
-        srcRouterMap.get(c.src).add(target);
-      }
-    }
-  }
-
-  const syntheticClients = [...srcCounts.keys()].map(ip => {
-    const m = srcMeta.get(ip) || {};
-    const routerTargets = isMulti
-      ? [...(srcRouterMap.get(ip) || ['__router__'])]
-      : undefined;
-    return {
-      mac: m.mac || ip, ip, name: ip, type: '0',
-      rxRate: 0, txRate: 0, rssi: null, amesh_papMac: null,
-      vendor: m.vendor || '', dnsName: m.dnsName || null, mdnsName: m.mdnsName || null,
-      deviceFirstSeen: srcFirstSeen.get(ip) || 0,
-      ...(routerTargets ? { routerTargets } : {}),
-    };
-  });
-
-  buildGraph({
-    clients: syntheticClients, satellites: [], meshNodes: [],
-    wanRx: 0, wanTx: 0, routerIp: null, timestamp: Date.now(),
-    mainRouterLabel: topology.mainRouterLabel,
-    extraRouters: topology.extraRouters,
-  }, { resetPositions });
-  updateOrgGraph({ resetPositions });
 }
 
 function buildGraphFromSummary(summary, { resetPositions = false } = {}) {
   const topology = activeRouterTopology();
+  const networkClientsByIp = new Map((lastNetworkData?.clients || []).map(client => [client.ip, client]));
   const deviceRows = (summary.byDevice || []).slice(0, 120);
   const targetRows = (summary.byTarget || []).slice(0, 160);
   const allowedDevices = new Set(deviceRows.map(r => r.src));
   const allowedTargets = new Set(targetRows.map(r => r.key || r.label));
   const syntheticClients = deviceRows.map(r => ({
-    mac: r.src,
+    ...(networkClientsByIp.get(r.src) || {}),
+    mac: networkClientsByIp.get(r.src)?.mac || r.srcMac || r.src,
     ip: r.src,
-    name: `${r.src} (${Number(r.count || 0).toLocaleString()})`,
-    type: '0',
-    rxRate: 0,
-    txRate: 0,
-    rssi: null,
-    amesh_papMac: null,
+    name: networkClientsByIp.get(r.src)?.name || r.srcMdnsName || r.srcDnsName || `${r.src} (${Number(r.count || 0).toLocaleString()})`,
+    type: networkClientsByIp.get(r.src)?.type || '0',
+    rxRate: networkClientsByIp.get(r.src)?.rxRate || 0,
+    txRate: networkClientsByIp.get(r.src)?.txRate || 0,
+    rssi: networkClientsByIp.get(r.src)?.rssi ?? null,
+    amesh_papMac: networkClientsByIp.get(r.src)?.amesh_papMac || null,
     vendor: r.srcVendor || '',
-    dnsName: null,
-    mdnsName: null,
+    dnsName: r.srcDnsName || null,
+    mdnsName: r.srcMdnsName || null,
     deviceFirstSeen: r.firstSeen || 0,
     summarySessions: r.count || 0,
     ...(topology.isMulti ? {
@@ -438,11 +391,16 @@ function buildGraphFromSummary(summary, { resetPositions = false } = {}) {
   }));
 
   buildGraph({
-    clients: syntheticClients, satellites: [], meshNodes: [],
-    wanRx: 0, wanTx: 0, routerIp: null, timestamp: Date.now(),
+    clients: syntheticClients,
+    satellites: [],
+    meshNodes: lastNetworkData?.meshNodes || [],
+    wanRx: lastNetworkData?.wanRx || 0,
+    wanTx: lastNetworkData?.wanTx || 0,
+    routerIp: lastNetworkData?.routerIp || null,
+    timestamp: lastNetworkData?.timestamp || Date.now(),
     mainRouterLabel: topology.mainRouterLabel,
     extraRouters: topology.extraRouters,
-  }, { resetPositions });
+  }, { resetPositions, cacheNetworkData: false });
 
   const orgPosMap = {};
   if (!resetPositions) {
@@ -514,61 +472,7 @@ function buildGraphFromSummary(summary, { resetPositions = false } = {}) {
 }
 
 function updateOrgGraph({ resetPositions = false } = {}) {
-  if (!simulation) return; // skip if simulation not yet initialised
-
-  // Stash existing org nodes/links (preserve positions) then remove them
-  const orgPosMap = {};
-  if (!resetPositions) {
-    nodes.forEach(n => { if (n.type === 'org') orgPosMap[n.id] = { x: n.x, y: n.y, vx: n.vx||0, vy: n.vy||0 }; });
-  }
-  nodes = nodes.filter(n => n.type !== 'org');
-  links = links.filter(l => l.ltype !== 'dev-org');
-
-  // Aggregate destinations per org (after period filter is applied)
-  // Drop sessions without lat/lon → make this exactly match the map display
-  const orgMap = new Map();
-  for (const c of getFilteredConnections()) {
-    if (c.lat == null || c.lon == null) continue;
-    const key = c.org || c.dst;
-    const label = c.org || (c.dstHost !== c.dst ? c.dstHost : c.dst);
-    if (!orgMap.has(key)) orgMap.set(key, { id: `__org__:${key}`, type: 'org', label, flag: flagEmoji(c.country), country: c.country, srcs: new Map() });
-    const e = orgMap.get(key);
-    e.srcs.set(c.src, (e.srcs.get(c.src) || 0) + 1);
-  }
-  const orgList = [...orgMap.values()]
-    .map(e => ({ ...e, totalSessions: [...e.srcs.values()].reduce((a,b)=>a+b,0) }))
-    .sort((a,b) => b.totalSessions - a.totalSessions);
-
-  // Add org nodes (prefer existing positions, otherwise evenly around the perimeter)
-  const cx = width / 2, cy = height / 2;
-  const r0 = Math.min(cx, cy) * 0.75;
-  const newOrgNodes = orgList.map((o, i) => {
-    const pos = orgPosMap[o.id];
-    if (pos) return { ...o, ...pos };
-    const angle = (2 * Math.PI * i) / Math.max(orgList.length, 1);
-    return { ...o, x: cx + r0 * Math.cos(angle), y: cy + r0 * Math.sin(angle) };
-  });
-  nodes = [...nodes, ...newOrgNodes];
-
-  // Device → org links (find device node by IP)
-  const clientByIp = {};
-  nodes.forEach(n => { if (n.type === 'client' && n.client?.ip) clientByIp[n.client.ip] = n.id; });
-  for (const o of newOrgNodes) {
-    for (const [srcIp, count] of o.srcs) {
-      const srcId = clientByIp[srcIp];
-      if (srcId) links.push({ source: srcId, target: o.id, id: `dev-org:${srcId}:${o.id}`, ltype: 'dev-org', sessionCount: count, rxRate: 0, txRate: 0 });
-    }
-  }
-
-  links = normalizeGraphLinks(links, nodes);
-  simulation.nodes(nodes);
-  simulation.force('link').links(links);
-  simulation.force('x-center', d3.forceX(cx).strength(0.04));
-  simulation.force('y-split',  d3.forceY(d => d.type === 'org' ? height * 0.22 : height * 0.72).strength(d => d.type === 'org' ? 0.15 : 0.06));
-  simulation.alpha(0.3).restart();
-  drawLinks();
-  drawNodes();
-  applyGraphFilter();
+  buildGraphFromConnections({ resetPositions });
 }
 
 function showToast(message, durationMs = 5000) {
@@ -590,12 +494,13 @@ function stopGraph() {
   // Clear ASUS-derived caches too (prevents stale mesh-badge display)
   lastMeshNodes = [];
   lastClients = [];
+  lastNetworkData = null;
   meshColorMap = {};
   document.getElementById('device-list').replaceChildren();
   document.getElementById('conn-panel').classList.remove('is-visible');
 }
 
-export { selectedMac, selectedIp, nodes, links, graphSummary, graphSummaryKey, buildGraph, buildGraphFromConnections, buildGraphFromSummary, updateOrgGraph, stopGraph, showToast, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, currentGraphRangeKey, updateSideHighlight, initGraph, lastMeshNodes, lastRouterIp, lastClients, lastMainMac, updateFilterTabs, applyFilter };
+export { selectedMac, selectedIp, nodes, links, buildGraph, buildGraphFromConnections, buildGraphFromSummary, updateOrgGraph, stopGraph, showToast, scheduleGraphAutoFit, fetchGraphSummary, currentGraphRangeKey, updateSideHighlight, initGraph, lastMeshNodes, lastRouterIp, lastClients, lastMainMac, updateFilterTabs, applyFilter };
 export function clearSelection() { selectedMac = null; selectedIp = null; }
 export function setSelection(mac, ip) { selectedMac = mac; selectedIp = ip; }
 export function resizeGraph(opts) { return resize(opts); }

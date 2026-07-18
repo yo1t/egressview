@@ -785,7 +785,6 @@
   .legend-internet { background: #6b7280; }
   .graph-notice { display: none; position: absolute; left: 50%; transform: translateX(-50%); border-radius: 6px; font-size: 11px; pointer-events: none; }
   .graph-summary-notice { top: 10px; background: rgba(124,58,237,0.18); border: 1px solid rgba(167,139,250,0.65); padding: 5px 12px; color: #ddd6fe; box-shadow: 0 0 18px rgba(124,58,237,0.18); }
-  .graph-truncated-notice { bottom: 8px; background: var(--panel); border: 1px solid var(--border); padding: 4px 12px; color: var(--muted); }
   .last-update { position: absolute; top: 10px; right: 10px; font-size: 10px; color: var(--muted); }
   .data-fetching { display: none; position: absolute; top: 26px; right: 10px; font-size: 10px; color: var(--muted); align-items: center; gap: 4px; }
   .data-fetching.is-visible { display: flex; }

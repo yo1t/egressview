@@ -155,22 +155,6 @@ describe('initial connection filter (P2-4: 1h initial emit + 24h background fetc
     assert(results.every(r => r.lastSeen >= cutoff), 'all results must be within 24h');
   });
 
-  it('in-memory Map filter mirrors queryByTimeRange for background 24h fetch', () => {
-    const now    = Date.now();
-    const cutoff = now - 86400_000; // 24h — used by client background fetch
-
-    // _appendAndLoad populates both DB and in-memory Map
-    history._appendAndLoad({ src: '192.168.1.1', dst: '10.0.0.1', dport: 80,  proto: 'TCP', firstSeen: now - 90_000_000, lastSeen: now - 90_000_000 });
-    history._appendAndLoad({ src: '192.168.1.1', dst: '10.0.0.2', dport: 443, proto: 'TCP', firstSeen: now - 1000,       lastSeen: now - 1000       });
-
-    // Simulate what the client background-fetches via GET /api/connections?from=<24h>
-    const bgPayload = [...history.getConnectionHistory().values()]
-      .filter(c => c.lastSeen >= cutoff);
-
-    assert.equal(bgPayload.length, 1, 'only 1 recent entry should appear in background 24h fetch');
-    assert.equal(bgPayload[0].dst, '10.0.0.2');
-  });
-
 });
 
 // ─── Corrupt DB recovery (integrity check → backup restore) ───────────────────
@@ -561,6 +545,21 @@ describe('summarizeByTimeRange', () => {
     assert.ok(dev10.sources.includes('yamaha'));
     assert.ok(dev10.sources.includes('cisco'));
     assert.equal(dev20.sources, 'cisco');
+  });
+
+  it('keeps device identity metadata in the graph summary', () => {
+    const t = Date.now();
+    insert({
+      src: '192.168.1.30', srcMac: 'AA:BB:CC:DD:EE:FF', srcVendor: 'Example Vendor',
+      srcDnsName: 'camera.example', srcMdnsName: 'Office Camera',
+      dst: '10.0.0.30', lastSeen: t, firstSeen: t,
+    });
+
+    const device = history.summarizeByTimeRange(null, null).byDevice[0];
+    assert.equal(device.srcMac, 'AA:BB:CC:DD:EE:FF');
+    assert.equal(device.srcVendor, 'Example Vendor');
+    assert.equal(device.srcDnsName, 'camera.example');
+    assert.equal(device.srcMdnsName, 'Office Camera');
   });
 
   it('respects time range in summary', () => {

@@ -7,7 +7,8 @@ const { parseTimestamp } = require('../utils');
 const { streamConnectionExport } = require('../connection-export');
 const logger = require('../logger');
 
-// Send helper for large JSON payloads (full graph fetch: up to 50k rows, 20MB+).
+// Send helper for compatibility consumers that request an unpaged response
+// (up to 50k rows, 20MB+). The graph uses the bounded summary endpoint.
 // The compression middleware's streaming gzip splits the response across many
 // event-loop turns, which stretches into tens of seconds on a production
 // process that's busy with polling and socket.io broadcasts (measured on EC2:
@@ -27,7 +28,7 @@ function sendLargeJson(req, res, obj) {
 }
 
 const MAX_LIMIT = 1000;
-// Cap for the no-limit "full graph fetch" path. A synchronous better-sqlite3
+// Cap for the no-limit compatibility path. A synchronous better-sqlite3
 // .all() + JSON.stringify on 100k+ rows blocks the Node.js event loop for
 // several seconds, delaying Socket.IO heartbeats and router polling.
 const MAX_FULL_FETCH = 50_000;
@@ -299,7 +300,7 @@ function connectionsRoutes(ctx) {
       return res.json({ connections, total, limit: clampedLimit, offset, serverTime: Date.now() });
     }
 
-    // No-limit path (graph full-fetch). Cap at MAX_FULL_FETCH to prevent
+    // No-limit compatibility path. Cap at MAX_FULL_FETCH to prevent
     // blocking the event loop with synchronous SQLite + JSON.stringify on
     // large time ranges (100k+ rows freeze heartbeats and router polling).
     const opts = parsePaginationOpts(req.query);

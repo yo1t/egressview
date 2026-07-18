@@ -1,75 +1,18 @@
 // ─── Time filter ──────────────────────────────────────────────────────────────
-import { _BASE } from './utils.js?v=__ASSET_VERSION__';
-import { allConnections, serverTimeOffset, dataRangeFrom, setDataRangeFrom, setServerTimeOffset, setCustomRangeFrom, setCustomRangeTo, currentTimeFilter, setCurrentTimeFilter, mergeConnections, getTimeRange, setFetching, setAllConnections, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
+import { serverTimeOffset, setCustomRangeFrom, setCustomRangeTo, currentTimeFilter, setCurrentTimeFilter, getTimeRange, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
 import { statsMode, logMode } from './view-tabs.js?v=__ASSET_VERSION__';
-import { graphSummary, graphSummaryKey, nodes, selectedMac, updateOrgGraph, buildGraphFromConnections, scheduleGraphAutoFit, fetchGraphSummary, clearGraphSummary, currentGraphRangeKey } from './graph.js?v=__ASSET_VERSION__';
+import { nodes, selectedMac, buildGraphFromConnections, scheduleGraphAutoFit, fetchGraphSummary } from './graph.js?v=__ASSET_VERSION__';
 import { updateStats } from './stats.js?v=__ASSET_VERSION__';
-import { apiFetch, asusActive } from './auth-socket.js?v=__ASSET_VERSION__';
 import { updateLogView } from './log.js?v=__ASSET_VERSION__';
-
-const truncatedGraphRangeKeys = new Set();
-
-function timeFilterRangeKey(from, to) {
-  if (typeof currentGraphRangeKey === 'function') return currentGraphRangeKey(from, to);
-  return `${from ?? ''}:${to ?? ''}`;
-}
-
-function rememberGraphTruncation(from, to, truncated) {
-  const key = timeFilterRangeKey(from, to);
-  if (truncated) truncatedGraphRangeKeys.add(key);
-  else truncatedGraphRangeKeys.delete(key);
-}
-
-function needsGraphSummaryForRange(from, to) {
-  const key = timeFilterRangeKey(from, to);
-  return truncatedGraphRangeKeys.has(key)
-    && (!graphSummary || graphSummaryKey !== key);
-}
-
-async function fetchConnectionRange(from, to) {
-  const params = new URLSearchParams();
-  if (from != null) params.set('from', from);
-  if (to   != null) params.set('to',   to);
-  setFetching(+1);
-  try {
-    const res = await apiFetch(`${_BASE}/api/connections?${params}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    setAllConnections(mergeConnections(allConnections, data.connections || []));
-    if (to == null) {
-      setDataRangeFrom(from != null ? Math.min(dataRangeFrom, from) : 0);
-    }
-    if (data.serverTime) setServerTimeOffset(data.serverTime - Date.now());
-    const notice = document.getElementById('graph-truncated-notice');
-    if (notice) notice.classList.toggle('is-visible', !!data.truncated);
-    rememberGraphTruncation(from, to, !!data.truncated);
-    if (data.truncated && fetchGraphSummary) {
-      await fetchGraphSummary(from, to);
-    } else if (!data.truncated && clearGraphSummary) {
-      clearGraphSummary();
-    }
-  } catch (e) {
-    console.error('[connections] fetch failed:', e);
-  } finally {
-    setFetching(-1);
-  }
-}
 
 let timeFilterGeneration = 0;
 
 function renderTimeFilteredViews({ delayedData = false } = {}) {
-  if (graphSummary) buildGraphFromConnections({ resetPositions: true });
-  else if (asusActive) updateOrgGraph({ resetPositions: true });
-  else            buildGraphFromConnections({ resetPositions: true });
+  buildGraphFromConnections({ resetPositions: true });
   scheduleGraphAutoFit({ delayedData });
   if (statsMode)  updateStats();
   const selNode = nodes.find(n => n.id === selectedMac);
   updateConnPanel(selNode?.client?.ip || null);
-}
-
-function timeFilterNeedsFetch() {
-  const { from } = getTimeRange();
-  return from === null || from < dataRangeFrom;
 }
 
 async function applyTimeFilter() {
@@ -77,38 +20,23 @@ async function applyTimeFilter() {
   const { from, to } = getTimeRange();
   const now = Date.now() + serverTimeOffset;
   const rangeMs = from == null ? Infinity : Math.max(0, (to ?? now) - from);
-  const needsFetch = timeFilterNeedsFetch();
-  const delayedData = needsFetch || rangeMs > 24 * 3600_000;
+  const delayedData = rangeMs > 24 * 3600_000;
 
-  // Log view fetches its own data from the API independently — start it immediately
-  // so it responds without waiting for the (potentially large) graph data fetch.
+  // Log view fetches paged data independently, so start it without waiting for
+  // the bounded graph summary.
   if (logMode) updateLogView();
 
-  if (needsFetch) {
-    // Redraw immediately with locally available data, then redraw again after
-    // the historical fetch finishes.
-    renderTimeFilteredViews({ delayedData: false });
-    await fetchConnectionRange(from, to);
-    if (generation !== timeFilterGeneration) return;
-    renderTimeFilteredViews({ delayedData });
-  } else {
-    if (needsGraphSummaryForRange(from, to) && fetchGraphSummary) {
-      await fetchGraphSummary(from, to);
-      if (generation !== timeFilterGeneration) return;
-    }
-    renderTimeFilteredViews({ delayedData });
+  try {
+    await fetchGraphSummary(from, to);
+  } catch (e) {
+    console.error('[graph] summary fetch failed:', e);
   }
+  if (generation !== timeFilterGeneration) return;
+  renderTimeFilteredViews({ delayedData });
 }
 
 function refreshCurrentTimeFilterView() {
-  const { from, to } = getTimeRange();
-  if (timeFilterNeedsFetch() || needsGraphSummaryForRange(from, to)) {
-    return applyTimeFilter();
-  } else {
-    renderTimeFilteredViews();
-    if (logMode) updateLogView();
-    return Promise.resolve();
-  }
+  return applyTimeFilter();
 }
 
 // Changes to the custom-period datetime-local inputs
