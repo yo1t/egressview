@@ -124,10 +124,10 @@ EgressViewには、Yamaha/Ciscoを混在して最大10台登録できます。
 AI洞察はローカル集計を常時表示し、利用者が明示的に実行した場合だけ、匿名化済み集計を設定済みのOllamaへ送信します。
 
 - `GET /api/config/ai`は選択中provider、モデルID、Ollama endpoint、キー設定済みフラグを返します。APIキー値は返しません。
-- `POST /api/config/ai`は`provider`（`disabled`、`ollama`、`anthropic`、`openai`）、provider別`models`、`ollamaEndpoint`、任意のcloud `keys`と`clearKeys`を受け付けます。
+- `POST /api/config/ai`は`provider`（`disabled`、`ollama`、`anthropic`、`openai`）、provider別`models`、`ollamaEndpoint`、任意のcloud `keys`と`clearKeys`を受け付けます。cloud provider選択時はprovider別`cloudConsent: true`が必須です。
 - `POST /api/ai/test`は空のJSON objectを受け付けます。保存済み設定で最大200件のモデルIDだけを取得し、timeoutは10秒、応答上限は1MBです。
 - `GET /api/ai/facts`はepoch millisecondsの`from`が必須で、`to`は任意です。接続、端末、宛先、脅威レベルについて、選択期間と直前の同一期間の件数、およびcredentialを含まないrouter収集状態を返します。期間上限は14日で、AI providerへは送信しません。
-- `POST /api/ai/analyze`は`from`と任意の`to`を受け付け、内部IP、MAC、端末名、router管理情報、raw logを除いた集計をOllamaへ送信します。期間上限は14日、timeoutは30秒、サーバー全体の同時分析は1件です。Anthropic/OpenAIへの生成要求はこの段階では拒否します。
+- `POST /api/ai/analyze`は`from`と任意の`to`を受け付け、内部IP、MAC、端末名、router管理情報、raw logを除いた集計を選択providerへ送信します。Anthropic/OpenAIでは保存済み同意に加えて要求ごとの`cloudConsentConfirmed: true`が必須です。期間上限は14日、timeoutは30秒、サーバー全体の同時分析は1件です。
 
 providerは初期状態で無効です。Anthropic/OpenAIは固定の公式API endpointを使い、任意HTTP(S) endpointを設定できるのはOllamaだけです。
 
@@ -191,7 +191,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | AI設定 | `POST /api/config/ai` | 認証必須。provider、model、endpoint、cloud APIキーを保存 |
 | AI設定 | `POST /api/ai/test` | 認証必須。通信データを送らずモデルIDを取得 |
 | AI洞察 | `GET /api/ai/facts` | 認証必須。local factsと直前期間比較のみ |
-| AI洞察 | `POST /api/ai/analyze` | 認証必須。匿名化した集計をOllamaで手動分析 |
+| AI洞察 | `POST /api/ai/analyze` | 認証必須。匿名化した集計を選択providerで手動分析。cloudは二重同意必須 |
 | Slack | `POST /api/slack/test` | 認証必須 |
 | Slack | `POST /api/slack/verify` | 認証必須 |
 | Slack | `POST /api/slack/lookup-user` | 認証必須 |

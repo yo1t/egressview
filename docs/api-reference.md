@@ -124,10 +124,10 @@ Create/detect bodies use `kind` (`yamaha` or `cisco`), `displayName`, `ip`, `use
 AI insights always shows locally calculated facts. It sends anonymized aggregates to the configured Ollama server only after an explicit user action.
 
 - `GET /api/config/ai` returns the selected provider, model IDs, Ollama endpoint, and key-set flags. API key values are never returned.
-- `POST /api/config/ai` accepts `provider` (`disabled`, `ollama`, `anthropic`, or `openai`), provider-keyed `models`, `ollamaEndpoint`, optional cloud `keys`, and `clearKeys`.
+- `POST /api/config/ai` accepts `provider` (`disabled`, `ollama`, `anthropic`, or `openai`), provider-keyed `models`, `ollamaEndpoint`, optional cloud `keys`, and `clearKeys`. Selecting a cloud provider requires provider-specific `cloudConsent: true`.
 - `POST /api/ai/test` accepts an empty JSON object. It uses the saved configuration to retrieve at most 200 model IDs, with a 10-second timeout and a 1 MB response limit.
 - `GET /api/ai/facts` requires `from` and accepts `to` as epoch milliseconds. It returns current and immediately preceding equal-period counts for connections, devices, destinations, and threat levels, plus credential-free router collection status. The range is capped at 14 days and no data is sent to an AI provider.
-- `POST /api/ai/analyze` accepts `from` and optional `to`, then sends aggregates without internal IPs, MAC addresses, device names, router management details, or raw logs to Ollama. The range is capped at 14 days, timeout is 30 seconds, and only one analysis may run server-wide. Anthropic/OpenAI generation is rejected in this phase.
+- `POST /api/ai/analyze` accepts `from` and optional `to`, then sends aggregates without internal IPs, MAC addresses, device names, router management details, or raw logs to the selected provider. Anthropic/OpenAI require both saved consent and `cloudConsentConfirmed: true` on each request. The range is capped at 14 days, timeout is 30 seconds, and only one analysis may run server-wide.
 
 Provider configuration is disabled by default. Anthropic and OpenAI use their fixed official API endpoints; only Ollama accepts a custom HTTP(S) endpoint.
 
@@ -191,7 +191,7 @@ All 60 implemented REST endpoints are listed below. **Public** means no token is
 | AI configuration | `POST /api/config/ai` | Protected; saves provider, models, endpoint, and cloud keys |
 | AI configuration | `POST /api/ai/test` | Protected; retrieves model IDs without sending network data |
 | AI insights | `GET /api/ai/facts` | Protected; local facts and prior-period comparison only |
-| AI insights | `POST /api/ai/analyze` | Protected; manually analyzes anonymized aggregates with Ollama |
+| AI insights | `POST /api/ai/analyze` | Protected; manually analyzes anonymized aggregates; cloud requires double consent |
 | Slack | `POST /api/slack/test` | Protected |
 | Slack | `POST /api/slack/verify` | Protected |
 | Slack | `POST /api/slack/lookup-user` | Protected |

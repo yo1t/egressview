@@ -80,6 +80,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
   let provider = 'disabled';
   let models = { ollama: '', anthropic: '', openai: '' };
   let keys = { anthropic: '', openai: '' };
+  let cloudConsent = { anthropic: false, openai: false };
   let ollamaEndpoint = DEFAULT_OLLAMA_ENDPOINT;
   let generationInFlight = false;
 
@@ -100,6 +101,11 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
         if (typeof input.keys[name] === 'string') keys[name] = input.keys[name].trim();
       }
     }
+    if (input.cloudConsent) {
+      for (const name of CLOUD_PROVIDERS) {
+        if (typeof input.cloudConsent[name] === 'boolean') cloudConsent[name] = input.cloudConsent[name];
+      }
+    }
     if (input.ollamaEndpoint !== undefined) ollamaEndpoint = normalizeEndpoint(input.ollamaEndpoint);
   }
 
@@ -108,6 +114,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
       provider,
       models: { ...models },
       keys: { ...keys },
+      cloudConsent: { ...cloudConsent },
       ollamaEndpoint,
     };
   }
@@ -119,8 +126,8 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
       ollamaEndpoint,
       providers: {
         ollama: { keySet: false },
-        anthropic: { keySet: !!keys.anthropic },
-        openai: { keySet: !!keys.openai },
+        anthropic: { keySet: !!keys.anthropic, consented: cloudConsent.anthropic },
+        openai: { keySet: !!keys.openai, consented: cloudConsent.openai },
       },
     };
   }
@@ -150,9 +157,17 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
     return { provider, models: modelIds(await readJsonResponse(response), provider) };
   }
 
-  async function generateInsight(context, { signal } = {}) {
-    if (provider !== 'ollama') throw new Error('Ollama must be selected for local analysis');
-    if (!models.ollama) throw new Error('Ollama model is not configured');
+  async function generateInsight(context, { signal, cloudConsentConfirmed = false } = {}) {
+    if (provider === 'disabled') throw new Error('AI provider is disabled');
+    if (!models[provider]) throw new Error(`${provider} model is not configured`);
+    if (CLOUD_PROVIDERS.includes(provider)) {
+      if (!keys[provider]) throw new Error('API key is not configured');
+      if (!cloudConsent[provider] || !cloudConsentConfirmed) {
+        const error = new Error('Cloud AI data sharing consent is required');
+        error.code = 'AI_CONSENT_REQUIRED';
+        throw error;
+      }
+    }
     if (generationInFlight) {
       const error = new Error('Another AI analysis is already running');
       error.code = 'AI_BUSY';
@@ -164,25 +179,40 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
     const timeoutSignal = AbortSignal.timeout(GENERATE_TIMEOUT_MS);
     const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
     try {
-      const response = await fetchImpl(`${ollamaEndpoint}/api/generate`, {
+      const prompt = [
+        'You are a read-only network security analyst.',
+        'Use only the anonymized JSON facts below. Do not invent hosts, IP addresses, or events.',
+        'Reply in concise Japanese with sections: 概要, 注目すべき変化, リスク, 推奨確認事項.',
+        contextText,
+      ].join('\n\n');
+      let url;
+      let headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
+      let requestBody;
+      if (provider === 'ollama') {
+        url = `${ollamaEndpoint}/api/generate`;
+        requestBody = { model: models.ollama, stream: false, prompt };
+      } else if (provider === 'anthropic') {
+        url = 'https://api.anthropic.com/v1/messages';
+        headers = { ...headers, 'x-api-key': keys.anthropic, 'anthropic-version': '2023-06-01' };
+        requestBody = { model: models.anthropic, max_tokens: 2048, messages: [{ role: 'user', content: prompt }] };
+      } else {
+        url = 'https://api.openai.com/v1/responses';
+        headers = { ...headers, Authorization: `Bearer ${keys.openai}` };
+        requestBody = { model: models.openai, input: prompt, max_output_tokens: 2048 };
+      }
+      const response = await fetchImpl(url, {
         method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: models.ollama,
-          stream: false,
-          prompt: [
-            'You are a read-only network security analyst.',
-            'Use only the anonymized JSON facts below. Do not invent hosts, IP addresses, or events.',
-            'Reply in concise Japanese with sections: 概要, 注目すべき変化, リスク, 推奨確認事項.',
-            contextText,
-          ].join('\n\n'),
-        }),
+        headers,
+        body: JSON.stringify(requestBody),
         signal: requestSignal,
       });
       const body = await readJsonResponse(response);
-      const text = String(body?.response || '').trim();
+      const text = String(provider === 'ollama' ? body?.response
+        : provider === 'anthropic' ? body?.content?.find(item => item?.type === 'text')?.text
+          : body?.output_text || body?.output?.flatMap(item => item?.content || [])
+            .find(item => item?.type === 'output_text')?.text || '').trim();
       if (!text) throw new Error('Provider returned an empty analysis');
-      return { provider, model: models.ollama, text, generatedAt: Date.now() };
+      return { provider, model: models[provider], text, generatedAt: Date.now() };
     } catch (error) {
       if (error?.name === 'TimeoutError') throw new Error('AI analysis timed out', { cause: error });
       if (error?.name === 'AbortError') throw new Error('AI analysis was cancelled', { cause: error });

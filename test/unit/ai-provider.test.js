@@ -101,7 +101,7 @@ describe('AI provider model discovery', () => {
   });
 });
 
-describe('Ollama insight generation', () => {
+describe('AI insight generation', () => {
   it('sends a bounded non-streaming request and returns display metadata', async () => {
     let request;
     const provider = createAiProvider({ fetchImpl: async (url, options) => {
@@ -117,10 +117,10 @@ describe('Ollama insight generation', () => {
     assert.match(result.text, /異常なし/);
   });
 
-  it('rejects cloud generation and concurrent work in the Ollama-only phase', async () => {
+  it('requires explicit cloud consent and limits concurrent work', async () => {
     const cloud = createAiProvider();
     cloud.configure({ provider: 'openai', models: { openai: 'gpt-test' }, keys: { openai: 'key' } });
-    await assert.rejects(cloud.generateInsight({}), /Ollama/);
+    await assert.rejects(cloud.generateInsight({}), error => error.code === 'AI_CONSENT_REQUIRED');
 
     let release;
     const provider = createAiProvider({ fetchImpl: () => new Promise(resolve => { release = resolve; }) });
@@ -129,5 +129,26 @@ describe('Ollama insight generation', () => {
     await assert.rejects(provider.generateInsight({}), error => error.code === 'AI_BUSY');
     release(jsonResponse({ response: 'ok' }));
     await first;
+  });
+
+  it('uses the official Anthropic and OpenAI generation APIs after double consent', async () => {
+    const requests = [];
+    const provider = createAiProvider({ fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (url.includes('anthropic')) return jsonResponse({ content: [{ type: 'text', text: 'Claude result' }] });
+      return jsonResponse({ output_text: 'OpenAI result' });
+    } });
+    provider.configure({
+      provider: 'anthropic', models: { anthropic: 'claude-test', openai: 'gpt-test' },
+      keys: { anthropic: 'anthropic-key', openai: 'openai-key' },
+      cloudConsent: { anthropic: true, openai: true },
+    });
+    assert.equal((await provider.generateInsight({}, { cloudConsentConfirmed: true })).text, 'Claude result');
+    provider.configure({ provider: 'openai' });
+    assert.equal((await provider.generateInsight({}, { cloudConsentConfirmed: true })).text, 'OpenAI result');
+    assert.equal(requests[0].url, 'https://api.anthropic.com/v1/messages');
+    assert.equal(requests[0].options.headers['x-api-key'], 'anthropic-key');
+    assert.equal(requests[1].url, 'https://api.openai.com/v1/responses');
+    assert.equal(requests[1].options.headers.Authorization, 'Bearer openai-key');
   });
 });

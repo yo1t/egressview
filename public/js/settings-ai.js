@@ -35,6 +35,7 @@ function renderProvider(provider) {
   byId('ai-provider-fields').classList.toggle('disabled', !enabled);
   byId('ai-endpoint-group').classList.toggle('is-hidden', provider !== 'ollama');
   byId('ai-key-group').classList.toggle('is-hidden', !CLOUD_PROVIDERS.has(provider));
+  byId('ai-consent-group').classList.toggle('is-hidden', !CLOUD_PROVIDERS.has(provider));
   byId('ai-test-btn').disabled = !enabled;
   byId('s-ai-model').disabled = !enabled;
   byId('s-ai-model').value = enabled ? (config?.models?.[provider] || '') : '';
@@ -43,6 +44,7 @@ function renderProvider(provider) {
   keyInput.value = '';
   keyInput.placeholder = config?.providers?.[provider]?.keySet ? t('settings.ai.keySaved') : '';
   byId('s-ai-key-clear').checked = false;
+  byId('s-ai-cloud-consent').checked = !!config?.providers?.[provider]?.consented;
 }
 
 function applyConfig(next) {
@@ -81,6 +83,7 @@ async function saveConfig({ showSuccess = true } = {}) {
     const key = byId('s-ai-key').value.trim();
     if (key) body.keys = { [provider]: key };
     if (byId('s-ai-key-clear').checked) body.clearKeys = [provider];
+    body.cloudConsent = { [provider]: byId('s-ai-cloud-consent').checked };
   }
   const response = await apiFetch(`${_BASE}/api/config/ai`, {
     method: 'POST',

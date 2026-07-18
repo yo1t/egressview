@@ -484,6 +484,9 @@
               <input id="s-ai-key" class="form-input" type="password" autocomplete="new-password">
               <label class="settings-check-label ai-key-clear"><input id="s-ai-key-clear" type="checkbox"> <span data-i18n="settings.ai.clearKey">保存済みキーを削除</span></label>
             </div>
+            <div id="ai-consent-group" class="form-group is-hidden">
+              <label class="settings-check-label"><input id="s-ai-cloud-consent" type="checkbox"> <span data-i18n="settings.ai.cloudConsent">匿名化した集計を選択中のクラウドAIへ送信することに同意します</span></label>
+            </div>
             <div class="form-group">
               <label class="form-label" for="s-ai-model" data-i18n="settings.ai.model">モデル</label>
               <input id="s-ai-model" class="form-input" type="text" list="ai-model-options" maxlength="200" autocomplete="off" spellcheck="false">
@@ -497,7 +500,7 @@
           </div>
           <div class="settings-status" id="ai-status"></div>
           <p class="settings-field-hint ai-privacy-note" data-i18n="settings.ai.privacy">
-            APIキーは保存後に再表示されません。AI分析と外部への通信データ送信は、この段階では実装されていません。
+            APIキーは保存後に再表示されません。生のIP、MAC、端末名、ルーター情報、通信ログはAIへ送信しません。
           </p>
         </div>
         <!-- Backup / Restore -->
