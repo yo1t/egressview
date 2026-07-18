@@ -979,6 +979,36 @@ test('graph map uses summary without full-history requests or console errors', a
   expect(fatalErrors(errors), `Graph notice errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });
 
+test('bounded five-minute live graph uses detailed rendering', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+  const historyRequests = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith('/api/connections')) historyRequests.push(url.toString());
+  });
+
+  await page.locator('#time-filter-select').selectOption('live');
+  await expect(page.locator('#time-filter-select option:checked')).toContainText(/5 min|5分/);
+  await expect(page.locator('#graph-summary-notice')).not.toBeVisible();
+  await expect(page.locator('#graph text').filter({ hasText: 'Σ' })).toHaveCount(0);
+  expect(historyRequests, 'bounded live rendering must reuse WebSocket history').toHaveLength(0);
+  expect(fatalErrors(errors), `Live graph errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+test('fifteen-minute graph remains available as a summary range', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  await authPage(page);
+  await page.locator('#time-filter-select').selectOption('15m');
+  await expect(page.locator('#time-filter-select option:checked')).toContainText(/15 min|15分/);
+  await expect(page.locator('#graph-summary-notice')).toBeVisible();
+  expect(fatalErrors(errors), `15-minute graph errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
 test('general settings save round-trip works without console errors', async ({ page, request }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 

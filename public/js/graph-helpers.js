@@ -35,6 +35,13 @@ export function currentGraphRangeKey(from, to, timeFilter) {
   return `${from ?? ''}:${to ?? ''}`;
 }
 
+export function shouldUseDetailedGraph(summary, timeFilter) {
+  if (timeFilter !== 'live' || !summary) return false;
+  return Number(summary.total || 0) <= 1000
+    && (summary.byTarget || []).length <= 400
+    && (summary.byEdge || []).length <= 500;
+}
+
 export function routerTargetsFromSource(source, isMulti) {
   if (!isMulti) return undefined;
   const raw = String(source || 'yamaha').toLowerCase();

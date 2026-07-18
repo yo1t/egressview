@@ -43,8 +43,9 @@ function mergeConnections(existing, incoming) {
 function getTimeRange() {
   const now = Date.now() + serverTimeOffset; // server time basis
   switch (currentTimeFilter) {
-    // Live: sessions observed within the last 15 min (matches Yamaha NAT default TTL=15min)
-    case 'live':      return { from: now - 15 * 60_000,   to: null };
+    // Keep the detailed live graph bounded; longer periods use summaries.
+    case 'live':      return { from: now - 5 * 60_000,    to: null };
+    case '15m':       return { from: now - 15 * 60_000,   to: null };
     case '1h':        return { from: now - 3600_000,      to: null };
     case '3h':        return { from: now - 3 * 3600_000,  to: null };
     case '6h':        return { from: now - 6 * 3600_000,  to: null };
@@ -68,7 +69,7 @@ function getFilteredConnections() {
   const { from, to, minTtl = 0 } = getTimeRange();
   return allConnections.filter(c => {
     // All filters judge by lastSeen: "connections active within the period"
-    // live=15min means currently active; 1h means seen in last hour (superset of live), etc.
+    // live=5min means currently active; 15m and longer ranges are progressively broader.
     const t = c.lastSeen || c.firstSeen || 0;
     if (from !== null && t < from) return false;
     if (to   !== null && t > to)   return false;
