@@ -54,6 +54,8 @@ function loadTimeFilterVm(options = {}) {
     calls,
     logMode: false,
     statsMode: false,
+    aiMode: false,
+    refreshAiView: () => calls.push(['refreshAiView']),
     selectedMac: null,
     nodes: [],
     buildGraphFromConnections: opts => calls.push(['buildGraphFromConnections', opts]),
@@ -140,6 +142,18 @@ describe('summary-backed client time filter', () => {
     assert.equal(calls.filter(call => call[0] === 'fetchGraphSummary').length, 1);
     assert.equal(calls.filter(call => call[0] === 'updateStats').length, 1);
     assert.equal(calls.filter(call => call[0] === 'updateLogView').length, 1);
+  });
+
+  it('refreshes only AI facts while the AI tab owns the selected period', async () => {
+    const calls = [];
+    const context = loadTimeFilterVm({ calls });
+    vm.runInContext("currentTimeFilter = '1h'; aiMode = true;", context);
+
+    await vm.runInContext('applyTimeFilter()', context);
+
+    assert.equal(calls.filter(call => call[0] === 'refreshAiView').length, 1);
+    assert.equal(calls.filter(call => call[0] === 'fetchGraphSummary').length, 0);
+    assert.equal(calls.filter(call => call[0] === 'buildGraphFromConnections').length, 0);
   });
 
   it('contains no unpaged connection-history request', () => {

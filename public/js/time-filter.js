@@ -1,6 +1,6 @@
 // ─── Time filter ──────────────────────────────────────────────────────────────
 import { serverTimeOffset, setCustomRangeFrom, setCustomRangeTo, currentTimeFilter, setCurrentTimeFilter, getTimeRange, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
-import { statsMode, logMode } from './view-tabs.js?v=__ASSET_VERSION__';
+import { statsMode, logMode, aiMode, refreshAiView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { nodes, selectedMac, buildGraphFromConnections, scheduleGraphAutoFit, fetchGraphSummary } from './graph.js?v=__ASSET_VERSION__';
 import { updateStats } from './stats.js?v=__ASSET_VERSION__';
 import { updateLogView } from './log.js?v=__ASSET_VERSION__';
@@ -25,6 +25,7 @@ async function applyTimeFilter() {
   // Log view fetches paged data independently, so start it without waiting for
   // the bounded graph summary.
   if (logMode) updateLogView();
+  if (aiMode) return refreshAiView();
 
   try {
     await fetchGraphSummary(from, to);

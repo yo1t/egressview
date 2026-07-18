@@ -13,6 +13,7 @@ import { loadNotifLog } from './notif-log.js?v=__ASSET_VERSION__';
 import { refreshCurrentTimeFilterView } from './time-filter.js?v=__ASSET_VERSION__';
 import { loadBeacons } from './beacon.js?v=__ASSET_VERSION__';
 import './router-settings.js?v=__ASSET_VERSION__';
+import { startAiInsights, stopAiInsights, refreshAiInsights } from './ai-insights.js?v=__ASSET_VERSION__';
 
 // ─── Cross-module reference injection ────────────────────────────────────────
 // auth-socket.js and graph.js both need devicesData but can't import from devices.js
@@ -27,6 +28,9 @@ setViewTabHandlers({
   onLog: () => { updateLogView(); loadBeacons(); },
   onDevices: loadDevicesView,
   onNotifLog: loadNotifLog,
+  onAi: startAiInsights,
+  onAiRefresh: refreshAiInsights,
+  onLeaveAi: stopAiInsights,
   onDeviceSearch: () => { applyFilter(lastClients); applyGraphFilter(); },
 });
 

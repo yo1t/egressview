@@ -363,6 +363,11 @@ function renderThreatBadges() {
   threatCountEl.replaceChildren(...badges);
 }
 
+function setLogThreatFilter(kind) {
+  logThreatFilter = ['safe', 'warn', 'danger'].includes(kind) ? kind : null;
+  renderThreatBadges();
+}
+
 function createThreatCell(connection, isLowConfidence) {
   const cell = document.createElement('td');
   if (!connection.threat) {
@@ -707,4 +712,4 @@ logSearchInput.addEventListener('keydown', (e) => {
 
 initLog();
 
-export { buildConnectionExportUrl, downloadConnectionExport, updateLogView, initLog, resetAndFetch };
+export { buildConnectionExportUrl, downloadConnectionExport, updateLogView, initLog, resetAndFetch, setLogThreatFilter };

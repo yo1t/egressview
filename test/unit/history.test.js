@@ -429,6 +429,22 @@ describe('countByTimeRange', () => {
   });
 });
 
+describe('countFactsByTimeRange', () => {
+  it('counts connections, stable devices, and destinations in one range', () => {
+    const t = Date.now();
+    insert({ src: '192.0.2.1', srcMac: '02:00:00:00:00:01', dst: '198.51.100.1', lastSeen: t - 2000 });
+    insert({ src: '192.0.2.2', srcMac: '02:00:00:00:00:01', dst: '198.51.100.2', lastSeen: t - 1000 });
+    insert({ src: '192.0.2.3', dst: '198.51.100.2', lastSeen: t - 1000 });
+    insert({ src: '192.0.2.4', dst: '198.51.100.3', lastSeen: t - 10_000 });
+
+    assert.deepEqual(history.countFactsByTimeRange(t - 3000, t), {
+      connections: 3,
+      devices: 2,
+      destinations: 2,
+    });
+  });
+});
+
 describe('createConnectionExportReader', () => {
   it('holds a stable read snapshot while live history continues accepting writes', () => {
     const fs = require('fs');
