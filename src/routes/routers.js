@@ -6,7 +6,7 @@ const { parseRequest } = require('../http-validation');
 const PROCESS_STARTED_AT = Date.now();
 
 const routerBodySchema = z.object({
-  kind: z.enum(['yamaha', 'cisco']).optional(),
+  kind: z.enum(['yamaha', 'cisco', 'conntrack']).optional(),
   displayName: z.string().max(80).optional(),
   ip: z.string().max(255).optional(),
   user: z.string().max(255).optional(),

@@ -75,6 +75,9 @@ describe('generateRouterId', () => {
     assert.match(id, /^cisco-[0-9a-f]{8}$/);
     assert.ok(isValidRouterId(id));
   });
+  it('supports Linux conntrack router ids', () => {
+    assert.match(generateRouterId('conntrack'), /^conntrack-[0-9a-f]{8}$/);
+  });
   it('avoids collisions with existing ids', () => {
     const existing = new Set();
     for (let i = 0; i < 50; i++) existing.add(generateRouterId('yamaha', existing));

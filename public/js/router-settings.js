@@ -51,8 +51,9 @@ function createRouterCard(router) {
 
   const details = document.createElement('div');
   details.appendChild(routerTextElement('div', router.displayName, { className: 'router-card-name' }));
+  const labels = { yamaha: 'Yamaha RTX', cisco: 'Cisco IOS', conntrack: 'Linux conntrack' };
   const meta = [
-    router.kind === 'yamaha' ? 'Yamaha RTX' : 'Cisco IOS',
+    labels[router.kind] || router.kind,
     router.ip,
     stateLabel(router),
   ];
@@ -82,10 +83,13 @@ function render() {
 }
 
 function updateKindFields() {
-  const isCisco = byId('router-kind').value === 'cisco';
-  byId('router-nat-group').classList.toggle('hidden', isCisco);
+  const kind = byId('router-kind').value;
+  const isCisco = kind === 'cisco';
+  byId('router-nat-group').classList.toggle('hidden', kind !== 'yamaha');
   byId('router-enable-group').classList.toggle('hidden', !isCisco);
-  byId('router-display-name').placeholder = isCisco ? 'Cisco IOS' : 'Yamaha RTX';
+  byId('router-display-name').placeholder = {
+    yamaha: 'Yamaha RTX', cisco: 'Cisco IOS', conntrack: 'Linux conntrack',
+  }[kind];
 }
 
 function openEditor(router = null) {

@@ -69,6 +69,17 @@ describe('legacy router config migration', () => {
 });
 
 describe('normalizeRouterRecord', () => {
+  it('normalizes a Linux conntrack router without vendor-specific fields', () => {
+    const record = normalizeRouterRecord({
+      kind: 'conntrack', ip: '192.168.1.1', user: 'root', pass: 'secret',
+      nat: '100', enablePass: 'unused',
+    });
+    assert.match(record.id, /^conntrack-[a-f0-9]{8}$/);
+    assert.equal(record.displayName, 'Linux conntrack');
+    assert.equal(record.nat, '');
+    assert.equal(record.enablePass, '');
+  });
+
   it('keeps saved secrets when edit fields are empty and resets TOFU on IP change', () => {
     const existing = {
       id: 'cisco-12345678', kind: 'cisco', displayName: 'Edge', ip: '192.168.1.2', user: 'u',

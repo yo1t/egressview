@@ -318,6 +318,7 @@ describe('router routes', () => {
 
     assert.equal((await request(app, 'GET', '/api/routers')).body.routers.length, 1);
     assert.equal((await request(app, 'POST', '/api/routers', { kind: 'cisco' })).status, 201);
+    assert.equal((await request(app, 'POST', '/api/routers', { kind: 'conntrack' })).status, 201);
     assert.equal((await request(app, 'PUT', '/api/routers/yamaha1', { displayName: 'Main' })).status, 200);
     assert.equal((await request(app, 'DELETE', '/api/routers/yamaha1')).status, 200);
     assert.equal((await request(app, 'DELETE', '/api/routers/missing')).status, 404);

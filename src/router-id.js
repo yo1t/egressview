@@ -22,7 +22,7 @@ const MIGRATED_IDS = Object.freeze({
 
 const LEGACY_PREFIX = 'legacy-';
 
-const SUPPORTED_KINDS = Object.freeze(['yamaha', 'cisco']);
+const SUPPORTED_KINDS = Object.freeze(['yamaha', 'cisco', 'conntrack']);
 
 function isValidRouterId(id) {
   return typeof id === 'string' && ROUTER_ID_RE.test(id);
@@ -40,7 +40,7 @@ function isReservedRouterId(id) {
 
 /**
  * The deterministic routerId for a legacy single-router config section.
- * @param {'yamaha'|'cisco'} kind
+ * @param {'yamaha'|'cisco'|'conntrack'} kind
  */
 function migratedRouterId(kind) {
   const id = MIGRATED_IDS[kind];

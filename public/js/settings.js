@@ -7,6 +7,7 @@ import { initBackupSettings } from './settings-backup.js?v=__ASSET_VERSION__';
 import { initSessionSettings } from './settings-sessions.js?v=__ASSET_VERSION__';
 import { initBeaconSettings } from './settings-beacons.js?v=__ASSET_VERSION__';
 import { initSlackSettings } from './settings-slack.js?v=__ASSET_VERSION__';
+import { initManualThreatSettings } from './settings-manual-threat.js?v=__ASSET_VERSION__';
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsBtn     = document.getElementById('settings-btn');
 
@@ -147,5 +148,6 @@ const { loadBackupList } = initBackupSettings(showStatus);
 initSessionSettings(showStatus);
 initBeaconSettings(showStatus);
 initSlackSettings(showStatus);
+initManualThreatSettings();
 
 export { openSettings, showStatus, loadBackupList, toggleSection, settingsBtn };
