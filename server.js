@@ -15,6 +15,7 @@ const fs      = require('fs');
 const utils           = require('./src/utils');
 const { htmlEscape }  = utils;
 const logger          = require('./src/logger');
+const runtimeProfiler = require('./src/runtime-profiler');
 const enrichment      = require('./src/enrichment');
 const history         = require('./src/history');
 const deviceId        = require('./src/device-identify');
@@ -295,6 +296,7 @@ function requireAdmin(req, res, next) {
 // without needing to manually trigger an API fetch.
 
 async function reMatchAndNotify() {
+  const startedAt = Date.now();
   const connectionHistory = history.getConnectionHistory();
   const updated = [];
   const CHUNK = 5000;
@@ -317,6 +319,7 @@ async function reMatchAndNotify() {
   } else {
     logger.debug('[threat-intel] Re-match complete, no threat changes');
   }
+  runtimeProfiler.recordWall('threatIntel.reMatch', Date.now() - startedAt);
 }
 
 // ─── Beacon detection scan ────────────────────────────────────────────────────
@@ -468,6 +471,7 @@ dhcpdSyslog.configure({
 const HOST = process.env.HOST || undefined;
 
 server.listen(PORT, HOST, () => {
+  runtimeProfiler.start({ logger });
   logger.info(`EgressView: ${tlsOptions ? 'https' : 'http'}://${HOST || 'localhost'}:${PORT}`);
   try {
     loadConfig();
@@ -562,8 +566,10 @@ server.listen(PORT, HOST, () => {
     deviceId.loadOuiDb();
   }
 
-  setInterval(() => history.snapshotHistory(),    10 * 60 * 1000);
-  setInterval(() => history.compactHistoryLog(),  30 * 60 * 1000);
+  setInterval(() => runtimeProfiler.measureSync('history.snapshot', () => history.snapshotHistory()),
+    10 * 60 * 1000);
+  setInterval(() => runtimeProfiler.measureSync('history.compact', () => history.compactHistoryLog()),
+    30 * 60 * 1000);
 
   threatIntel.fetchThreatIntel()
     .then(() => reMatchAndNotify())
@@ -584,7 +590,8 @@ server.listen(PORT, HOST, () => {
 function shutdown(exitCode = 0) {
   logger.info('[shutdown] Saving history...');
   try { routerManager?.stopAll();   } catch {}
-  try { history.snapshotHistory(); } catch {}
+  try { runtimeProfiler.measureSync('history.shutdownSnapshot', () => history.snapshotHistory()); } catch {}
+  runtimeProfiler.stop();
   try { history.closeDb();         } catch {}
   try { dnsmasqLog.stop();         } catch {}
   try { inspectSyslog.stop();      } catch {}

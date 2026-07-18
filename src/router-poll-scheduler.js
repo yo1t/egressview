@@ -12,6 +12,7 @@
 'use strict';
 
 const logger = require('./logger');
+const runtimeProfiler = require('./runtime-profiler');
 
 const DEFAULT_MAX_CONCURRENT  = 3;
 const DEFAULT_CYCLE_TIMEOUT   = 120_000;
@@ -108,7 +109,9 @@ function createRouterPollScheduler({
     let failed = false;
     const controller = new AbortController();
     st.controller = controller;
-    const cyclePromise = Promise.resolve().then(() => runCycle(st.entry, { signal: controller.signal }));
+    const cyclePromise = Promise.resolve().then(() =>
+      runtimeProfiler.measureAsync(`router.${st.entry.kind}.poll.total`, () =>
+        runCycle(st.entry, { signal: controller.signal })));
     try {
       await withTimeout(cyclePromise, cycleTimeoutMs, st, controller);
       st.consecutiveFailures = 0;

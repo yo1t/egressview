@@ -1,5 +1,7 @@
 'use strict';
 
+const runtimeProfiler = require('./runtime-profiler');
+
 let _history = null;
 let _enrichment = null;
 let _io = null;
@@ -83,6 +85,7 @@ function queueConnectionEnrichment(ips) {
     backgroundQueue.delete(ip);
     foregroundQueue.add(ip);
   }
+  updateQueueGauges();
   if (wakeForeground) wakeForeground();
   startQueue();
 }
@@ -91,7 +94,13 @@ function queueStaleConnectionEnrichment(ips) {
   for (const ip of ips) {
     if (!foregroundQueue.has(ip)) backgroundQueue.add(ip);
   }
+  updateQueueGauges();
   startQueue();
+}
+
+function updateQueueGauges() {
+  runtimeProfiler.setGauge('enrichment.foregroundQueued', foregroundQueue.size);
+  runtimeProfiler.setGauge('enrichment.staleQueued', backgroundQueue.size);
 }
 
 function startQueue() {
@@ -107,6 +116,7 @@ function takeBatch(queue, size) {
     queue.delete(ip);
     if (batch.length === size) break;
   }
+  updateQueueGauges();
   return batch;
 }
 
@@ -131,17 +141,23 @@ async function runConnectionEnrichmentQueue() {
         isForeground ? FOREGROUND_BATCH_SIZE : BACKGROUND_BATCH_SIZE,
       );
       if (isForeground) {
-        await Promise.allSettled(batch.map(ip => _enrichment.reverseDns(ip)));
-        await _enrichment.lookupRdapBatch(batch);
+        await runtimeProfiler.measureAsync('enrichment.live.ptr', () =>
+          Promise.allSettled(batch.map(ip => _enrichment.reverseDns(ip))));
+        await runtimeProfiler.measureAsync('enrichment.live.rdap', () =>
+          _enrichment.lookupRdapBatch(batch));
       } else {
         // Stale startup work only refreshes persisted caches; PTR is populated by live polling.
-        await _enrichment.lookupRdapBatch(batch, BACKGROUND_RDAP_CONCURRENCY);
+        await runtimeProfiler.measureAsync('enrichment.stale.rdap', () =>
+          _enrichment.lookupRdapBatch(batch, BACKGROUND_RDAP_CONCURRENCY));
       }
-      await _enrichment.lookupGeoBatch(batch);
+      await runtimeProfiler.measureAsync(`enrichment.${isForeground ? 'live' : 'stale'}.geo`, () =>
+        _enrichment.lookupGeoBatch(batch));
       if (!isForeground && !backgroundHistoryIndex) {
-        backgroundHistoryIndex = buildHistoryDestinationIndex();
+        backgroundHistoryIndex = runtimeProfiler.measureSync(
+          'enrichment.stale.historyIndex', buildHistoryDestinationIndex);
       }
-      refreshCachedEnrichmentForDestinations(batch, isForeground ? null : backgroundHistoryIndex);
+      runtimeProfiler.measureSync(`enrichment.${isForeground ? 'live' : 'stale'}.apply`, () =>
+        refreshCachedEnrichmentForDestinations(batch, isForeground ? null : backgroundHistoryIndex));
       if (!isForeground && backgroundQueue.size) await waitForBackgroundDelay();
     }
   } catch (err) {
@@ -149,6 +165,7 @@ async function runConnectionEnrichmentQueue() {
   } finally {
     enrichmentQueueRunning = false;
     if (!backgroundQueue.size) backgroundHistoryIndex = null;
+    updateQueueGauges();
     if (foregroundQueue.size || backgroundQueue.size) {
       startQueue();
     } else {
