@@ -7,12 +7,9 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const settingsJs = fs.readFileSync(
-  path.join(__dirname, '..', '..', 'public', 'js', 'settings.js'),
+  path.join(__dirname, '..', '..', 'public', 'js', 'settings-sessions.js'),
   'utf8'
-);
-const sectionStart = settingsJs.indexOf('// ── Login sessions list');
-const sectionEnd = settingsJs.indexOf("document.getElementById('sessions-revoke-all-btn')", sectionStart);
-const sessionsJs = settingsJs.slice(sectionStart, sectionEnd);
+).replace(/^import\s[^;]+;?\s*$/gm, '').replace(/^export\s+function\s/gm, 'function ');
 
 class FakeElement {
   constructor(tagName = 'div') {
@@ -41,6 +38,7 @@ class FakeElement {
     this.children.push(child);
     return child;
   }
+  append(...children) { children.forEach(child => this.appendChild(child)); }
   replaceChildren(...children) {
     this.children.forEach(child => { child.parentNode = null; });
     this.children = [];
@@ -87,11 +85,13 @@ function makeHarness(responses = []) {
     },
     document: {
       createElement: tag => new FakeElement(tag),
-      getElementById: id => id === 'sessions-list' ? box : null,
+      getElementById: id => id === 'sessions-list' ? box : new FakeElement('button'),
+      querySelector: () => new FakeElement('button'),
     },
   };
   vm.createContext(context);
-  vm.runInContext(sessionsJs, context, { filename: 'settings-sessions.js' });
+  vm.runInContext(settingsJs, context, { filename: 'settings-sessions.js' });
+  Object.assign(context, context.initSessionSettings(() => {}));
   return { context, box, calls };
 }
 

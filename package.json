@@ -40,6 +40,7 @@
     "scripts/check-frontend-innerhtml.js",
     "scripts/frontend-innerhtml-allowlist.json",
     "scripts/check-observation-consistency.js",
+    "scripts/benchmark-summary.js",
     "docs/*.md",
     "docs/assets/*.png",
     ".env.example",
@@ -71,7 +72,8 @@
     "soak:check": "node scripts/check-observation-consistency.js",
     "release:check": "npm run lint && npm run test:unit && npm run test:smoke && npm run security:check && npm pack --dry-run",
     "mcp": "node mcp-server.js",
-    "gen:demo-db": "node scripts/gen-demo-db.js"
+    "gen:demo-db": "node scripts/gen-demo-db.js",
+    "benchmark:summary": "node scripts/benchmark-summary.js --generate 100000"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

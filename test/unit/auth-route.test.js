@@ -153,6 +153,12 @@ describe('auth route: POST /api/login Yamaha setup', () => {
 });
 
 describe('auth route: POST /api/admin/verify', () => {
+  it('rejects unknown token fields with the existing 400 response shape', async () => {
+    const app = makeApp();
+    const { status, body } = await request(app, 'POST', '/api/admin/verify', { token: 'token', extra: true });
+    assert.equal(status, 400);
+    assert.equal(body.ok, false);
+  });
   it('rejects a non-string token with 400 instead of throwing', async () => {
     const app = makeApp();
     const { status, body } = await request(app, 'POST', '/api/admin/verify', { token: 123 });

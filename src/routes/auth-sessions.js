@@ -2,8 +2,24 @@
 
 const crypto = require('crypto');
 const { Router } = require('express');
+const { z } = require('zod');
 const logger = require('../logger');
 const { t } = require('../i18n-server');
+const { parseRequest } = require('../http-validation');
+
+const loginSchema = z.object({
+  password: z.string().min(1).max(256),
+  deviceLabel: z.string().max(200).optional(),
+}).strict();
+const sessionIdSchema = z.object({ id: z.coerce.number().int().positive() }).strict();
+const revokeAllSchema = z.object({ includeSelf: z.boolean().optional() }).strict();
+const changePasswordSchema = z.object({
+  currentPassword: z.string().max(256),
+  newPassword: z.string().min(8).max(256),
+  revokeOtherSessions: z.boolean().optional(),
+}).strict();
+const currentPasswordSchema = z.object({ currentPassword: z.string().max(256) }).strict();
+const tokenSchema = z.object({ token: z.string().max(4096) }).strict();
 
 module.exports = function authSessionRoutes(ctx) {
   const {
@@ -50,12 +66,10 @@ module.exports = function authSessionRoutes(ctx) {
   }
 
   router.post('/auth/login', (req, res) => {
-    const { password, deviceLabel } = req.body || {};
     if (!appState.authPasswordHash) return res.status(503).json({ error: t('auth.not-init') });
-    if (typeof password !== 'string' || password.length === 0) {
-      return res.status(400).json({ error: t('auth.enter-password') });
-    }
-    if (password.length > 256) return res.status(400).json({ error: t('auth.password-too-long') });
+    const parsed = parseRequest(loginSchema, req.body, res, { error: t('auth.enter-password') });
+    if (!parsed.ok) return;
+    const { password, deviceLabel } = parsed.data;
     const clientIp = req.ip || req.socket?.remoteAddress || '';
     const rateLimitError = checkRateLimit(clientIp);
     if (rateLimitError) return res.status(429).json({ error: rateLimitError });
@@ -85,23 +99,25 @@ module.exports = function authSessionRoutes(ctx) {
   });
 
   router.post('/auth/sessions/:id/revoke', requireAdmin, (req, res) => {
-    const id = parseInt(req.params.id, 10);
-    if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'invalid id' });
+    const parsed = parseRequest(sessionIdSchema, req.params, res, { error: 'invalid id' });
+    if (!parsed.ok) return;
+    const { id } = parsed.data;
     if (!sessions.revokeSession(id)) return res.status(404).json({ error: 'session not found' });
     res.json({ success: true });
   });
 
   router.post('/auth/sessions/revoke-all', requireAdmin, (req, res) => {
-    const keepSelf = req.body?.includeSelf !== true && req.session;
+    const parsed = parseRequest(revokeAllSchema, req.body, res);
+    if (!parsed.ok) return;
+    const keepSelf = parsed.data.includeSelf !== true && req.session;
     const revoked = sessions.revokeAll(keepSelf ? req.session.id : null);
     res.json({ success: true, revoked });
   });
 
   router.post('/auth/change-password', requireAdmin, (req, res) => {
-    const { currentPassword, newPassword, revokeOtherSessions } = req.body || {};
-    if (typeof newPassword !== 'string' || newPassword.length < 8 || newPassword.length > 256) {
-      return res.status(400).json({ error: t('auth.password-too-short') });
-    }
+    const parsed = parseRequest(changePasswordSchema, req.body, res, { error: t('auth.password-too-short') });
+    if (!parsed.ok) return;
+    const { currentPassword, newPassword, revokeOtherSessions } = parsed.data;
     const clientIp = req.ip || req.socket?.remoteAddress || '';
     const rateLimitError = checkRateLimit(clientIp);
     if (rateLimitError) return res.status(429).json({ error: rateLimitError });
@@ -133,7 +149,9 @@ module.exports = function authSessionRoutes(ctx) {
   });
 
   router.post('/admin/regenerate-token', requireAdmin, (req, res) => {
-    const { currentPassword } = req.body || {};
+    const parsed = parseRequest(currentPasswordSchema, req.body, res);
+    if (!parsed.ok) return;
+    const { currentPassword } = parsed.data;
     const clientIp = req.ip || req.socket?.remoteAddress || '';
     const rateLimitError = checkRateLimit(clientIp);
     if (rateLimitError) return res.status(429).json({ error: rateLimitError });
@@ -162,10 +180,9 @@ module.exports = function authSessionRoutes(ctx) {
     const clientIp = req.ip || req.socket?.remoteAddress || '';
     const rateLimitError = checkRateLimit(clientIp);
     if (rateLimitError) return res.status(429).json({ ok: false, error: rateLimitError });
-    const provided = req.body?.token || '';
-    if (typeof provided !== 'string') {
-      return res.status(400).json({ ok: false, error: t('auth.token-invalid') });
-    }
+    const parsed = parseRequest(tokenSchema, req.body, res, { ok: false, error: t('auth.token-invalid') });
+    if (!parsed.ok) return;
+    const provided = parsed.data.token;
     const adminToken = getAdminToken();
     if (!adminToken) return res.status(503).json({ ok: false, error: t('auth.not-init-verify') });
     const a = Buffer.from(provided);

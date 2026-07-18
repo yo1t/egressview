@@ -9,15 +9,15 @@ const path = require('path');
 const { runMigrations } = require('./db-migrate');
 const { MIGRATED_IDS, expandSourceToRouterIds, routerKindForId } = require('./router-id');
 const { checkObservationConsistency: checkConsistency } = require('./observation-consistency');
+const { createHistoryCache, DEFAULT_HOT_MAX_ENTRIES } = require('./history-cache');
+const { createHistoryQueries } = require('./history-queries');
 
 const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
   ? path.resolve(process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB)
   : path.join(__dirname, '..', '.egressview.db');
 const JSONL_PATH = path.join(__dirname, '..', '.egressview.connections.jsonl');
 const HISTORY_TTL_MS = 2 * 365 * 24 * 60 * 60 * 1000; // 2 years (default)
-const DEFAULT_HOT_MAX_ENTRIES = 100_000;
 let historyTtlMs = HISTORY_TTL_MS;
-let hotMaxEntries = parseHotMaxEntries(process.env.EGRESSVIEW_HISTORY_HOT_MAX);
 
 let db = null;
 let stmtUpsert = null;
@@ -38,13 +38,9 @@ let sourceRouterMap = { yamaha: MIGRATED_IDS.yamaha, cisco: MIGRATED_IDS.cisco }
 let ensuredRouterIds = new Set();
 let routerKinds = new Map();
 
-// In-memory cache (same interface as before for Socket.IO emissions)
-const connectionHistory = new Map();
-
-function parseHotMaxEntries(value) {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_HOT_MAX_ENTRIES;
-}
+// Keep one stable Map instance because Socket.IO and runtime consumers retain it.
+const hotCache = createHistoryCache(process.env.EGRESSVIEW_HISTORY_HOT_MAX);
+const connectionHistory = hotCache.map;
 
 const CONNECTION_READ_COLUMNS = [
   'src', 'dst', 'dport', 'proto', 'sport', 'ttl', 'srcMac', 'srcVendor',
@@ -88,17 +84,26 @@ function hydrateConnectionRows(rows) {
   return rows.map(hydrateConnectionRow);
 }
 
-function enforceHotLimit() {
-  if (connectionHistory.size <= hotMaxEntries) return 0;
-  const reserve = hotMaxEntries >= 1_000 ? Math.max(100, Math.floor(hotMaxEntries * 0.01)) : 0;
-  const targetSize = Math.max(1, hotMaxEntries - reserve);
-  const evictCount = connectionHistory.size - targetSize;
-  const oldest = [...connectionHistory.entries()]
-    .sort((a, b) => (a[1].lastSeen || 0) - (b[1].lastSeen || 0))
-    .slice(0, evictCount);
-  for (const [key] of oldest) connectionHistory.delete(key);
-  return oldest.length;
-}
+const {
+  queryByTimeRange,
+  queryByTimeRangePaged,
+  countByTimeRange,
+  createConnectionExportReader,
+  groupDstByTimeRange,
+  summarizeByTimeRange,
+} = createHistoryQueries({
+  getDb: () => db,
+  getDbPath: () => currentDbPath,
+  Database,
+  connectionReadColumns,
+  hydrateConnectionRows,
+  normalizeObservedBy,
+  compatibilitySource,
+  summarizeAppGroups,
+  onSummaryTiming: process.env.EGRESSVIEW_SUMMARY_TIMING === '1'
+    ? timings => logger.info(`[history] summary timing ${JSON.stringify(timings)}`)
+    : null,
+});
 
 function _secureDbFiles() {
   for (const suffix of ['', '-shm', '-wal']) {
@@ -422,14 +427,9 @@ function migrateFromJsonl() {
 // Load all active entries into memory cache
 function loadIntoMemory() {
   const cutoff = Date.now() - historyTtlMs;
-  const rows = stmtSelectAll.all(cutoff, hotMaxEntries);
-  connectionHistory.clear();
-  for (const row of rows) {
-    const hydrated = hydrateConnectionRow(row);
-    const key = `${hydrated.src}|${hydrated.dst}|${hydrated.dport}|${hydrated.proto}`;
-    connectionHistory.set(key, hydrated);
-  }
-  logger.info(`[history] Loaded ${connectionHistory.size} hot sessions from SQLite (max ${hotMaxEntries})`);
+  const rows = hydrateConnectionRows(stmtSelectAll.all(cutoff, hotCache.limit));
+  hotCache.replace(rows, row => `${row.src}|${row.dst}|${row.dport}|${row.proto}`);
+  logger.info(`[history] Loaded ${connectionHistory.size} hot sessions from SQLite (max ${hotCache.limit})`);
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -502,23 +502,15 @@ function checkObservationConsistency() {
 // Prune memory cache
 function pruneHistory() {
   const cutoff = Date.now() - historyTtlMs;
-  let expired = 0;
-  for (const [k, v] of connectionHistory) {
-    if (v.lastSeen < cutoff) {
-      connectionHistory.delete(k);
-      expired++;
-    }
-  }
-  const evicted = enforceHotLimit();
-  if (evicted) logger.info(`[history] Evicted ${evicted} cold entries from memory (${connectionHistory.size}/${hotMaxEntries} hot)`);
-  return { expired, evicted };
+  const result = hotCache.prune(cutoff);
+  if (result.evicted) logger.info(`[history] Evicted ${result.evicted} cold entries from memory (${connectionHistory.size}/${hotCache.limit} hot)`);
+  return result;
 }
 
 function getConnectionHistory() { return connectionHistory; }
 
 function cacheConnection(key, entry) {
-  connectionHistory.set(key, entry);
-  return enforceHotLimit();
+  return hotCache.set(key, entry);
 }
 
 function getConnection(key) {
@@ -537,10 +529,9 @@ function getConnection(key) {
 }
 
 function setHotMaxEntries(value) {
-  hotMaxEntries = parseHotMaxEntries(value);
-  const evicted = enforceHotLimit();
-  logger.info(`[history] Hot cache limit set to ${hotMaxEntries} entries`);
-  return { hotMaxEntries, evicted };
+  const result = hotCache.setLimit(value);
+  logger.info(`[history] Hot cache limit set to ${result.hotMaxEntries} entries`);
+  return result;
 }
 
 function getMemoryStats() {
@@ -550,168 +541,9 @@ function getMemoryStats() {
     heapUsedBytes: memory.heapUsed,
     heapTotalBytes: memory.heapTotal,
     hotEntries: connectionHistory.size,
-    hotMaxEntries,
+    hotMaxEntries: hotCache.limit,
     persistedEntries: db ? db.prepare('SELECT COUNT(*) AS n FROM connections').get().n : 0,
   };
-}
-
-function queryByTimeRange(from, to) {
-  if (!db) return [];
-  const conditions = [];
-  const params = [];
-  if (from != null) { conditions.push('lastSeen >= ?'); params.push(from); }
-  if (to   != null) { conditions.push('lastSeen <= ?'); params.push(to); }
-  const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
-  return hydrateConnectionRows(db.prepare(
-    `SELECT ${connectionReadColumns('c')} FROM connections c${where} ORDER BY c.lastSeen DESC`
-  ).all(...params));
-}
-
-// Safe whitelist for ORDER BY column names
-const SORT_COL_SQL = {
-  lastSeen: 'lastSeen',
-  src:      'src',
-  dst:      'dstHost, dst',
-  dport:    'dport',
-  proto:    'proto',
-  country:  'country',
-  org:      'org',
-};
-
-function escapeLikeValue(value) {
-  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
-}
-
-function makeLikePat(mode, value) {
-  const v = escapeLikeValue(value);
-  if (mode === 'startsWith') return v + '%';
-  if (mode === 'endsWith')   return '%' + v;
-  return '%' + v + '%'; // contains (default)
-}
-
-function buildFilterConditions(filters) {
-  const conditions = [];
-  const params = [];
-  if (filters.src?.value) {
-    if (filters.src.mode === 'exact') {
-      conditions.push('src = ?');
-      params.push(filters.src.value);
-    } else {
-      const p = makeLikePat(filters.src.mode, filters.src.value);
-      conditions.push("(src LIKE ? ESCAPE '\\' OR srcDnsName LIKE ? ESCAPE '\\' OR srcMdnsName LIKE ? ESCAPE '\\')");
-      params.push(p, p, p);
-    }
-  }
-  if (filters.dst?.value) {
-    const p = makeLikePat(filters.dst.mode, filters.dst.value);
-    conditions.push("(dst LIKE ? ESCAPE '\\' OR dstHost LIKE ? ESCAPE '\\')");
-    params.push(p, p);
-  }
-  if (filters.dport?.value) {
-    const p = makeLikePat(filters.dport.mode, filters.dport.value);
-    conditions.push("CAST(dport AS TEXT) LIKE ? ESCAPE '\\'");
-    params.push(p);
-  }
-  if (filters.proto?.value) {
-    const p = makeLikePat(filters.proto.mode, filters.proto.value);
-    conditions.push("proto LIKE ? ESCAPE '\\'");
-    params.push(p);
-  }
-  if (filters.country?.value) {
-    const p = makeLikePat(filters.country.mode, filters.country.value);
-    conditions.push("country LIKE ? ESCAPE '\\'");
-    params.push(p);
-  }
-  if (filters.org?.value) {
-    const p = makeLikePat(filters.org.mode, filters.org.value);
-    conditions.push("org LIKE ? ESCAPE '\\'");
-    params.push(p);
-  }
-  if (filters.srcMac?.value) {
-    // MAC is always exact match (no LIKE — colons and case must match stored value)
-    conditions.push('srcMac = ?');
-    params.push(filters.srcMac.value);
-  }
-  return { conditions, params };
-}
-
-function buildWhereAndParams(from, to, filterConditions) {
-  const conditions = [];
-  const params = [];
-  if (from != null) { conditions.push('lastSeen >= ?'); params.push(from); }
-  if (to   != null) { conditions.push('lastSeen <= ?'); params.push(to); }
-  conditions.push(...filterConditions.conditions);
-  params.push(...filterConditions.params);
-  return {
-    where:  conditions.length ? ' WHERE ' + conditions.join(' AND ') : '',
-    params,
-  };
-}
-
-function queryByTimeRangePaged(from, to, limit, offset, { sort = 'lastSeen', sortDir = 'desc', filters = {} } = {}) {
-  if (!db) return [];
-  const sortSql = SORT_COL_SQL[sort] || 'lastSeen';
-  const dir = sortDir === 'asc' ? 'ASC' : 'DESC';
-  const fc = buildFilterConditions(filters);
-  const { where, params } = buildWhereAndParams(from, to, fc);
-  // Apply direction to each comma-separated sort column (e.g. 'dstHost, dst')
-  const orderClause = sortSql.split(',').map(c => c.trim() + ' ' + dir).join(', ');
-  if (limit == null) {
-    return hydrateConnectionRows(db.prepare(
-      `SELECT ${connectionReadColumns('c')} FROM connections c${where} ORDER BY ${orderClause}`
-    ).all(...params));
-  }
-  return hydrateConnectionRows(db.prepare(
-    `SELECT ${connectionReadColumns('c')} FROM connections c${where} ORDER BY ${orderClause} LIMIT ? OFFSET ?`
-  ).all(...params, limit, offset));
-}
-
-function countByTimeRange(from, to, { filters = {} } = {}) {
-  if (!db) return 0;
-  const fc = buildFilterConditions(filters);
-  const { where, params } = buildWhereAndParams(from, to, fc);
-  const row = db.prepare(`SELECT COUNT(*) as cnt FROM connections${where}`).get(...params);
-  return row ? row.cnt : 0;
-}
-
-function createConnectionExportReader(from, to) {
-  if (!db || currentDbPath === ':memory:') {
-    return {
-      countByTimeRange: () => countByTimeRange(from, to),
-      queryByTimeRangePaged: (_from, _to, limit, offset, opts) =>
-        queryByTimeRangePaged(from, to, limit, offset, opts),
-      close() {},
-    };
-  }
-
-  const snapshotDb = new Database(currentDbPath, { readonly: true, fileMustExist: true });
-  try {
-    snapshotDb.pragma('query_only = ON');
-    snapshotDb.exec('BEGIN');
-    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] });
-    const count = snapshotDb.prepare(`SELECT COUNT(*) as cnt FROM connections${where}`).get(...params)?.cnt || 0;
-    const pageStatement = snapshotDb.prepare(
-      `SELECT ${connectionReadColumns('c')} FROM connections c${where}
-       ORDER BY c.lastSeen DESC LIMIT ? OFFSET ?`
-    );
-    let closed = false;
-
-    return {
-      countByTimeRange: () => count,
-      queryByTimeRangePaged: (_from, _to, limit, offset) =>
-        hydrateConnectionRows(pageStatement.all(...params, limit, offset)),
-      close() {
-        if (closed) return;
-        closed = true;
-        try { snapshotDb.exec('ROLLBACK'); } catch {}
-        try { snapshotDb.close(); } catch {}
-      },
-    };
-  } catch (error) {
-    try { snapshotDb.exec('ROLLBACK'); } catch {}
-    try { snapshotDb.close(); } catch {}
-    throw error;
-  }
 }
 
 // Bulk-inserts entries for demo / seed purposes. Silently skips failures.
@@ -722,137 +554,6 @@ function seedConnections(entries) {
     try { upsertEntry(entry); count++; } catch {}
   }
   return count;
-}
-
-// Returns unique (dst, dstHost) pairs with connection counts for the time range.
-// Used by the threat-counts endpoint to apply JS-side threat matching without
-// fetching every row — only unique destinations need to be checked.
-function groupDstByTimeRange(from, to, { filters = {} } = {}) {
-  if (!db) return [];
-  const fc = buildFilterConditions(filters);
-  const { where, params } = buildWhereAndParams(from, to, fc);
-  return db.prepare(
-    `SELECT dst, MAX(dstHost) AS dstHost, COUNT(*) AS cnt FROM connections${where} GROUP BY dst`
-  ).all(...params);
-}
-
-function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
-  if (!db) return { byDst: [], byDevice: [] };
-  const conditions = [];
-  const params = [];
-  if (from != null) { conditions.push('lastSeen >= ?'); params.push(from); }
-  if (to   != null) { conditions.push('lastSeen <= ?'); params.push(to); }
-  if (src  != null) { conditions.push('src = ?');       params.push(src); }
-  const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
-  const targetExpr = "COALESCE(NULLIF(org, ''), NULLIF(dstHost, ''), dst)";
-  const countRow = db.prepare(
-    `SELECT COUNT(*) as total, MIN(lastSeen) as minLastSeen, MAX(lastSeen) as maxLastSeen
-     FROM connections${where}`
-  ).get(...params) || {};
-  const total = countRow.total || 0;
-  const rangeFrom = from ?? countRow.minLastSeen ?? Date.now();
-  const rangeTo = to ?? countRow.maxLastSeen ?? Date.now();
-  const bucketCount = Math.max(1, Math.min(240, Number(buckets) || 60));
-  const bucketMs = Math.max(1, (Math.max(rangeTo, rangeFrom + 1) - rangeFrom) / bucketCount);
-
-  const byDst = db.prepare(
-    `SELECT dst, dstHost, country, org,
-            COUNT(*) as count, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
-     FROM connections${where}
-     GROUP BY dst ORDER BY count DESC LIMIT 500`
-  ).all(...params);
-  const byDevice = db.prepare(
-    `SELECT src, MAX(srcMac) AS srcMac, MAX(srcVendor) AS srcVendor,
-            MAX(srcDnsName) AS srcDnsName, MAX(srcMdnsName) AS srcMdnsName,
-            COUNT(*) as count, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
-     FROM connections${where}
-     GROUP BY src ORDER BY count DESC LIMIT 200`
-  ).all(...params);
-  const deviceObservations = db.prepare(`
-    WITH filtered_connections AS (SELECT * FROM connections${where})
-    SELECT c.src, GROUP_CONCAT(DISTINCT o.routerId) AS observedByCsv
-    FROM filtered_connections c
-    JOIN connection_observations o
-      ON o.src = c.src AND o.dst = c.dst AND o.dport = c.dport AND o.proto = c.proto
-    GROUP BY c.src
-  `).all(...params);
-  const observationsByDevice = new Map(deviceObservations.map(row => [row.src, normalizeObservedBy(row.observedByCsv)]));
-  for (const row of byDevice) {
-    row.observedBy = observationsByDevice.get(row.src) || [];
-    row.sources = compatibilitySource(row.observedBy);
-  }
-  const byTarget = db.prepare(
-    `SELECT ${targetExpr} as key, ${targetExpr} as label,
-            COUNT(*) as count, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
-     FROM connections${where}
-     GROUP BY key ORDER BY count DESC LIMIT 1000`
-  ).all(...params);
-  const byEdge = db.prepare(
-    `SELECT src, ${targetExpr} as key,
-            COUNT(*) as count, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
-     FROM connections${where}
-     GROUP BY src, key ORDER BY count DESC LIMIT 3000`
-  ).all(...params);
-  const LOCATION_LIMIT = 500;
-  const byLocation = db.prepare(
-    `SELECT ${targetExpr} as key, ${targetExpr} as org,
-            country, city, lat, lon,
-            COUNT(*) as totalSessions, COUNT(DISTINCT src) as srcCount,
-            MAX(ttl) as maxTtl, MIN(firstSeen) as firstSeen, MAX(lastSeen) as lastSeen
-     FROM connections${where}${where ? ' AND' : ' WHERE'} lat IS NOT NULL AND lon IS NOT NULL
-     GROUP BY key, lat, lon ORDER BY totalSessions DESC LIMIT ?`
-  ).all(...params, LOCATION_LIMIT);
-  const locationStats = db.prepare(
-    `SELECT COUNT(*) as totalGroups, COALESCE(SUM(totalSessions), 0) as totalSessions
-     FROM (
-       SELECT COUNT(*) as totalSessions
-       FROM connections${where}${where ? ' AND' : ' WHERE'} lat IS NOT NULL AND lon IS NOT NULL
-       GROUP BY ${targetExpr}, lat, lon
-     )`
-  ).get(...params) || {};
-  const locationTotalSessions = locationStats.totalSessions || 0;
-  const locationShownSessions = byLocation.reduce((sum, r) => sum + (r.totalSessions || 0), 0);
-  const locationTotalGroups = locationStats.totalGroups || 0;
-  const appRows = db.prepare(
-    `SELECT dport, proto, COALESCE(NULLIF(dstHost, ''), dst) as dstHost,
-            COUNT(*) as count
-     FROM connections${where}
-     GROUP BY dport, proto, dstHost ORDER BY count DESC`
-  ).all(...params);
-  const appGroups = summarizeAppGroups(appRows);
-  const timeline = db.prepare(
-    `SELECT ${targetExpr} as key,
-            CASE
-              WHEN lastSeen < ? THEN 0
-              WHEN lastSeen >= ? THEN ?
-              ELSE CAST((lastSeen - ?) / ? AS INTEGER)
-            END as bucket,
-            COUNT(*) as count
-     FROM connections${where}
-     GROUP BY key, bucket ORDER BY bucket ASC, count DESC`
-  ).all(rangeFrom, rangeTo, bucketCount - 1, rangeFrom, bucketMs, ...params);
-  return {
-    byDst,
-    byDevice,
-    byTarget,
-    byEdge,
-    byLocation,
-    mapCoverage: {
-      limit: LOCATION_LIMIT,
-      totalGroups: locationTotalGroups,
-      shownGroups: byLocation.length,
-      totalSessions: locationTotalSessions,
-      shownSessions: locationShownSessions,
-      percent: locationTotalSessions ? (locationShownSessions / locationTotalSessions) * 100 : 0,
-      capped: locationTotalGroups > byLocation.length,
-    },
-    appGroups,
-    timeline,
-    total,
-    buckets: bucketCount,
-    from: rangeFrom,
-    to: rangeTo,
-  };
 }
 
 function logNotification(entry, type, slackSent) {
@@ -960,8 +661,8 @@ function closeDb() {
 /** Re-initialize with an in-memory SQLite DB (or a given path) for unit tests. */
 function _initForTest(dbPath, opts = {}) {
   if (db) { try { db.close(); } catch {} db = null; }
-  connectionHistory.clear();
-  hotMaxEntries = parseHotMaxEntries(opts.hotMaxEntries);
+  hotCache.clear();
+  hotCache.setLimit(opts.hotMaxEntries);
   initDb(dbPath || ':memory:', opts);
 }
 

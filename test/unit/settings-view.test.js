@@ -15,7 +15,7 @@ function stripEsModule(src) {
     .replace(/^export\s+\{[^}]*\};?\s*$/gm, '');
 }
 const settingsJs = stripEsModule(fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'settings.js'), 'utf8'));
-const modalJs = settingsJs.slice(0, settingsJs.indexOf('// Checkbox toggles'));
+const modalJs = settingsJs.slice(0, settingsJs.indexOf('// Load threat settings'));
 
 class FakeElement {
   constructor(id = '', dataset = {}) {
