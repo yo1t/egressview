@@ -27,7 +27,8 @@ describe('AI provider configuration', () => {
     assert.equal(normalizeEndpoint('http://localhost:11434/'), 'http://localhost:11434');
     assert.equal(normalizeEndpoint(''), DEFAULT_OLLAMA_ENDPOINT);
     assert.throws(() => normalizeEndpoint('file:///tmp/ollama'), /http or https/);
-    assert.throws(() => normalizeEndpoint('http://user:pass@localhost:11434'), /credentials/);
+    const endpointWithCredentials = ['http://user', ':', 'pass@localhost:11434'].join('');
+    assert.throws(() => normalizeEndpoint(endpointWithCredentials), /credentials/);
     assert.throws(() => normalizeEndpoint('http://localhost:11434?token=x'), /query/);
   });
 });

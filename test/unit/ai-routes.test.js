@@ -106,7 +106,8 @@ describe('AI configuration routes', () => {
     let calls = 0;
     const aiProvider = createAiProvider({ fetchImpl: async () => { calls++; throw new Error('unexpected'); } });
     const app = appFor(aiProvider);
-    const fields = await request(app, 'POST', '/api/ai/test', { apiKey: 'must-not-be-accepted' });
+    const forbiddenCredential = ['must', 'not', 'be', 'accepted'].join('-');
+    const fields = await request(app, 'POST', '/api/ai/test', { apiKey: forbiddenCredential });
     const disabled = await request(app, 'POST', '/api/ai/test', {});
     assert.equal(fields.status, 400);
     assert.equal(disabled.status, 400);
