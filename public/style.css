@@ -846,8 +846,15 @@
     /* Header: pin to top, allow wrapping, keep compact */
     header {
       position: sticky; top: 0; z-index: 20;
-      flex-wrap: wrap; gap: 6px; padding: 6px 8px;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+      gap: 6px; padding: 6px 8px;
     }
+    header .status-dot { grid-column: 1; grid-row: 1; }
+    header h1 { grid-column: 2; grid-row: 1; min-width: 0; }
+    header .demo-banner { grid-column: 3; grid-row: 1; }
+    header .conn-badges { grid-column: 4; grid-row: 1; }
+    header .settings-btn { grid-column: 5; grid-row: 1; }
     header h1 { font-size: 13px; }
     .header-stats { display: none; }
     .conn-badges { gap: 3px; }
@@ -855,13 +862,56 @@
     .conn-badge .badge-layer { font-size: 8px; }
     .conn-badge .badge-dot { width: 5px; height: 5px; }
     .conn-badge .badge-ip { font-size: 9px; }
-    .view-tabs { padding: 1px; }
-    .view-tab { padding: 3px 7px; font-size: 10px; }
-    .time-filter { padding: 1px 3px; gap: 4px; }
+    .view-tabs {
+      grid-column: 1 / -1; grid-row: 2;
+      display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+      width: 100%; padding: 2px;
+    }
+    .view-tab {
+      min-width: 0; min-height: 38px; padding: 3px 2px;
+      font-size: 9px; line-height: 1.25; white-space: normal;
+    }
+    .time-filter {
+      grid-column: 1 / -1; grid-row: 3;
+      width: 100%; padding: 2px 4px; gap: 4px;
+    }
     .time-filter-label { display: none; }
-    .time-filter select { font-size: 10px; padding: 2px; }
+    .time-filter select { flex: 1; min-width: 0; font-size: 10px; padding: 4px 2px; }
+    .custom-range.is-visible { display: grid; grid-template-columns: 1fr auto 1fr; width: 100%; margin-left: 0; }
     .time-custom-input { font-size: 9px; padding: 1px 2px; max-width: 110px; }
-    .settings-btn { padding: 3px 6px; font-size: 12px; }
+    .settings-btn { margin-left: 0; min-width: 34px; min-height: 34px; padding: 3px 6px; font-size: 12px; }
+    .activity-view { padding: 6px; gap: 6px; }
+    .activity-view.view-active { min-height: calc(100dvh - 132px); }
+    .log-header { flex-wrap: wrap; min-height: 38px; padding: 4px; }
+    .log-export-controls { margin-left: 0; }
+    .activity-refresh { min-height: 34px; }
+    .log-table-wrap {
+      min-height: 45vh;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+    }
+    .log-table th, .log-table td { padding: 8px; }
+    .log-table th:first-child {
+      left: 0; z-index: 3; box-shadow: 1px 0 0 var(--border);
+    }
+    .log-table td:first-child {
+      position: sticky; left: 0; z-index: 1;
+      background: var(--panel); box-shadow: 1px 0 0 var(--border);
+    }
+    .log-table tr.threat-row td:first-child { background: #211923; }
+    .log-table tr.warn-row td:first-child { background: #201d1c; }
+    .dv-main-area { position: relative; min-height: 62vh; }
+    #dv-detail-panel {
+      position: absolute; inset: 0; z-index: 5;
+      width: 100%; min-width: 0; border-left: none;
+      box-shadow: 0 0 24px rgba(0,0,0,0.55);
+    }
+    .dv-detail-close, .dv-detail-actions button, .dv-status-btn { min-height: 36px; }
+    .log-search-popup { max-width: calc(100vw - 16px); }
+    .log-search-popup-inner { min-width: min(280px, calc(100vw - 16px)); }
+    .threat-detail-card { max-height: calc(100dvh - 20px); }
+    #toast-container { right: 10px; bottom: 10px; left: 10px; }
+    .toast { max-width: none; }
     /* Hide legend (gets in the way on small screens) */
     .legend { display: none; }
     .last-update { font-size: 9px; top: 4px; right: 6px; }
@@ -881,6 +931,6 @@
     /* Connection badges hidden to free up horizontal space */
     .conn-badges { display: none; }
     /* Even more compact tabs */
-    .view-tab { padding: 2px 5px; font-size: 9px; }
+    .view-tab { padding: 3px 1px; font-size: 8px; }
     .panel-header { font-size: 10px; }
   }
