@@ -16,6 +16,7 @@ EGRESSVIEW_SOAK_TOKEN=replace-with-the-admin-token
 EGRESSVIEW_BUILD_COMMIT=replace-with-the-deployed-git-commit
 EGRESSVIEW_SOAK_OUTPUT=/absolute/path/to/.egressview-soak.jsonl
 EGRESSVIEW_SOAK_REQUIRED_KINDS=yamaha,cisco
+EGRESSVIEW_SOAK_API_TIMEOUT_SECONDS=30
 ```
 
 Do not commit this file. `EGRESSVIEW_SOAK_TOKEN` is sent only to HTTPS URLs or
@@ -38,6 +39,9 @@ runs; choose a minute that does not coincide with backups:
 The process exits with status `1` for a mismatch, stale/missing Yamaha or Cisco
 collection, unknown commit, API error, DB error, or output error. Monitor cron
 failures separately; a missing daily record must not count as success.
+The router-status API timeout defaults to 30 seconds and may be configured from
+1 to 300 seconds. Keep enough headroom for a large, busy database without
+hiding a sustained application outage.
 
 Each run also prints a `summary`. Its streak resets after a failed check, a
 version/commit change, or a gap longer than 36 hours. `readyForV5` becomes true

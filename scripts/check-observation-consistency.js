@@ -17,6 +17,16 @@ const commit = process.env.EGRESSVIEW_BUILD_COMMIT || '';
 const requiredKinds = String(process.env.EGRESSVIEW_SOAK_REQUIRED_KINDS || 'yamaha,cisco')
   .split(',').map(value => value.trim()).filter(Boolean);
 const recentHours = Number(process.env.EGRESSVIEW_SOAK_RECENT_HOURS || 24);
+const apiTimeoutMs = parseApiTimeoutMs(process.env.EGRESSVIEW_SOAK_API_TIMEOUT_SECONDS);
+
+function parseApiTimeoutMs(value) {
+  if (value === undefined || value === '') return 30_000;
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 1 || seconds > 300) {
+    throw new Error('EGRESSVIEW_SOAK_API_TIMEOUT_SECONDS must be between 1 and 300');
+  }
+  return Math.round(seconds * 1000);
+}
 
 function assertSafeApiUrl(value) {
   const url = new URL(value);
@@ -32,7 +42,7 @@ async function fetchRouterStatus() {
   const url = assertSafeApiUrl(`${baseUrl}/api/routers`);
   const response = await fetch(url, {
     headers: { 'X-Admin-Token': token, Accept: 'application/json', Connection: 'close' },
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(apiTimeoutMs),
   });
   if (!response.ok) throw new Error(`router status API returned HTTP ${response.status}`);
   const body = await response.json();
@@ -94,4 +104,6 @@ async function main() {
   }
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { parseApiTimeoutMs };
