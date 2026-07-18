@@ -781,6 +781,25 @@
         <pre id="ai-analysis-result" class="ai-analysis-result" data-i18n="ai.analysis.empty">まだ分析していません。</pre>
       </div>
     </section>
+    <section class="ai-chat">
+      <div class="ai-chat-head">
+        <div>
+          <h3 data-i18n="ai.chat.title">AIと確認する</h3>
+          <p data-i18n="ai.chat.desc">選択期間の匿名化集計と、この会話で表示済みの内容だけを使います。</p>
+        </div>
+        <div class="ai-chat-tools">
+          <select id="ai-conversation-select" class="form-input" data-i18n-title="ai.chat.conversations" title="保存済み会話"></select>
+          <button id="ai-new-chat-btn" class="ai-analysis-cancel" type="button" data-i18n="ai.chat.new">新しい会話</button>
+          <button id="ai-delete-chat-btn" class="ai-analysis-cancel" type="button" data-i18n="ai.chat.delete">削除</button>
+        </div>
+      </div>
+      <div id="ai-chat-messages" class="ai-chat-messages"></div>
+      <div class="ai-chat-compose">
+        <textarea id="ai-chat-input" class="form-input" maxlength="4000" rows="3" data-i18n-placeholder="ai.chat.placeholder" placeholder="この期間で注意すべき変化は？"></textarea>
+        <button id="ai-chat-send-btn" class="ai-refresh" type="button" data-i18n="ai.chat.send">質問する</button>
+      </div>
+      <div id="ai-chat-storage" class="ai-analysis-meta"></div>
+    </section>
   </div>
   <!-- Connection Log View -->
   <div id="log-container" class="activity-view">

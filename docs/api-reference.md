@@ -128,6 +128,8 @@ AI insights always shows locally calculated facts. It sends anonymized aggregate
 - `POST /api/ai/test` accepts an empty JSON object. It uses the saved configuration to retrieve at most 200 model IDs, with a 10-second timeout and a 1 MB response limit.
 - `GET /api/ai/facts` requires `from` and accepts `to` as epoch milliseconds. It returns current and immediately preceding equal-period counts for connections, devices, destinations, and threat levels, plus credential-free router collection status. The range is capped at 14 days and no data is sent to an AI provider.
 - `POST /api/ai/analyze` accepts `from` and optional `to`, then sends aggregates without internal IPs, MAC addresses, device names, router management details, or raw logs to the selected provider. Anthropic/OpenAI require both saved consent and `cloudConsentConfirmed: true` on each request. The range is capped at 14 days, timeout is 30 seconds, and only one analysis may run server-wide.
+- `POST /api/ai/chat` accepts a `message` of at most 4,000 characters, a range, and optional `conversationId` and `requestId`. It appends the user row to v6 SQLite before calling AI, then appends an assistant row on success or a body-free failure row. The same `requestId + role` is never duplicated.
+- `GET /api/ai/conversations` returns at most 100 conversations plus stored counts and body bytes. `GET /api/ai/conversations/:id` returns at most 500 messages in append order, while `DELETE /api/ai/conversations/:id` is the only explicit conversation deletion path. Restart and configuration changes never update or truncate existing rows.
 
 Provider configuration is disabled by default. Anthropic and OpenAI use their fixed official API endpoints; only Ollama accepts a custom HTTP(S) endpoint.
 
@@ -192,6 +194,10 @@ All 60 implemented REST endpoints are listed below. **Public** means no token is
 | AI configuration | `POST /api/ai/test` | Protected; retrieves model IDs without sending network data |
 | AI insights | `GET /api/ai/facts` | Protected; local facts and prior-period comparison only |
 | AI insights | `POST /api/ai/analyze` | Protected; manually analyzes anonymized aggregates; cloud requires double consent |
+| AI chat | `POST /api/ai/chat` | Protected; appends the question first and stores an answer or failure row |
+| AI chat | `GET /api/ai/conversations` | Protected; conversation list and storage usage |
+| AI chat | `GET /api/ai/conversations/:id` | Protected; message history preserved across restarts |
+| AI chat | `DELETE /api/ai/conversations/:id` | Protected; explicit conversation-level deletion |
 | Slack | `POST /api/slack/test` | Protected |
 | Slack | `POST /api/slack/verify` | Protected |
 | Slack | `POST /api/slack/lookup-user` | Protected |

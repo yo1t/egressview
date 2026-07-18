@@ -399,6 +399,19 @@
   .ai-placeholder-mark { font-size: 28px; color: #38bdf8; }
   .ai-analysis h3 { margin: 0 0 5px; font-size: 14px; }
   .ai-analysis p { margin: 0; color: var(--muted); font-size: 11px; }
+  .ai-chat { max-width: 1180px; width: 100%; margin: 0 auto; padding: 20px; border: 1px solid var(--border); border-radius: 14px; background: rgba(17,24,39,0.72); }
+  .ai-chat-head, .ai-chat-tools, .ai-chat-compose { display: flex; align-items: center; gap: 10px; }
+  .ai-chat-head { justify-content: space-between; align-items: flex-start; }
+  .ai-chat h3 { margin: 0 0 5px; font-size: 14px; }
+  .ai-chat p { margin: 0; color: var(--muted); font-size: 11px; }
+  .ai-chat-tools select { min-width: 180px; }
+  .ai-chat-messages { display: flex; flex-direction: column; gap: 8px; min-height: 100px; max-height: 340px; margin: 16px 0; overflow: auto; }
+  .ai-chat-message { max-width: 82%; padding: 10px 12px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+  .ai-chat-message.is-user { align-self: flex-end; background: rgba(14,165,233,0.18); }
+  .ai-chat-message.is-assistant { align-self: flex-start; background: rgba(31,41,55,0.92); }
+  .ai-chat-message.is-failed { color: #fca5a5; border: 1px solid rgba(239,68,68,0.35); }
+  .ai-chat-compose textarea { flex: 1; resize: vertical; }
+  @media (max-width: 700px) { .ai-chat-head, .ai-chat-tools, .ai-chat-compose { align-items: stretch; flex-direction: column; } .ai-chat-message { max-width: 95%; } }
   .log-header { font-size: 12px; font-weight: 600; color: var(--text); padding: 4px 8px; display: flex; align-items: center; gap: 8px; }
   .log-title { font-size: 13px; }
   .activity-count { color: var(--muted); font-size: 11px; }
