@@ -1,12 +1,10 @@
 # EgressView コード品質レポート
 
 - **評価日**: 2026-07-18
-- **コミット**: `65de1486080473afc1eaa12fdf0bea87429215e5` (main)
-- **バージョン**: 1.3.5
+- **コミット**: `9968c18a3a3d4e418d6d09e97b38c56095c2899a` (main)
+- **バージョン**: 1.4.0
 - **Node.js**: >=22 (テスト: 22, 24)
 - **評価者**: 自動静的解析 + 手動コードレビュー (Kiro AI)
-
-> このレポートはv1.3.5時点の評価記録です。最新リリースは[変更履歴](../CHANGELOG.md)を参照してください。
 
 ---
 
@@ -14,7 +12,7 @@
 
 **総合グレード: A**
 
-EgressView は評価した全フレームワークにおいて**プロダクショングレードの品質**を示しています。前回評価 (v1.2.2) からの大幅な改善点として、テスト対ソース比率 94.1% (+19.2pp)、HTTP ルートへの zod スキーマ検証展開 (5/13 ルートファイル適用済)、history.js の分割リファクタリング (985→718行)、conntrack ポーラーおよび手動脅威調査機能の追加が確認されました。セキュリティ設計は引き続き OWASP ASVS L1 に適合し、最小限の依存フットプリント (本番 11 パッケージ) も維持されています。
+EgressView は評価した全フレームワークにおいて**プロダクショングレードの品質**を示しています。v1.3.5 からの改善として、enrichment キャッシュ TTL の最適化 (RDAP/Geo 30日, 起動時 API 負荷削減)、バックグラウンドスロットリング、bounded ライブグラフ詳細、モバイル対応ビューが追加されました。テスト対ソース比率 93.7% を維持しつつ、ソースコード +280行・テストコード +189行の機能拡張が達成されています。
 
 | # | フレームワーク | スコア | 判定 |
 |---|---|---|---|
@@ -26,20 +24,33 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 ### 主な強み
 
-- **セキュリティ設計** — scrypt パスワードハッシュ, タイミングセーフなトークン比較, リクエスト毎 CSP nonce, `style-src 'self'` (style-src-attr 除去済), CI 統合 ASH + secret scan + npm audit, SHA ピン留め GitHub Actions (2 ワークフロー)
-- **テスト文化** — 84 unit + 4 integration + Playwright smoke (1,163行); テスト対ソース比率 94.1%; 全ドメインモジュールで `_resetForTest()` パターン
+- **セキュリティ設計** — scrypt パスワードハッシュ, タイミングセーフなトークン比較, リクエスト毎 CSP nonce, `style-src 'self'`, CI 統合 ASH + secret scan + npm audit, SHA ピン留め GitHub Actions (2 ワークフロー)
+- **テスト文化** — 84 unit + 4 integration + Playwright smoke (1,163行); テスト対ソース比率 93.7%; 全ドメインモジュールで `_resetForTest()` パターン (15箇所)
 - **コード規律** — サーバーサイド `var` ゼロ, `eval` ゼロ, TODO/FIXME ゼロ, 命名規約一貫, ESLint v10 + innerHTML 監査
-- **入力検証** — HTTP ルートに zod スキーマ検証を段階展開 (5/13 ルートファイル, `http-validation.js` ヘルパー)
+- **入力検証** — HTTP ルートに zod スキーマ検証を段階展開 (5/13 ルートファイル, `http-validation.js` ヘルパー, スキーマ定義 39個)
 - **最小依存** — 本番パッケージ 11 個のみ; Dependabot (cooldown 7日)
-- **アーキテクチャ改善** — history.js 分割 (history-queries.js), auth.js 分割 (auth-sessions + router-setup), AbortSignal 対応
+- **性能最適化** — enrichment キャッシュ 30日 TTL, バックグラウンドスロットリング, bounded ライブグラフ, stale 一括リフレッシュ
 
-### v1.2.2 からの主な変更点
+### v1.3.5 からの主な変更点
 
-| 項目 | v1.2.2 | v1.3.5 (評価対象) | 変化 |
+| 項目 | v1.3.5 (65de148) | v1.4.0 (現在) | 変化 |
 |---|---|---|---|
-| ソースコード行数 | 16,791 | 19,975 | +19.0% |
-| テストコード行数 | 12,577 | 18,793 | +49.4% |
-| テスト対ソース比率 | 74.9% | 94.1% | +19.2pp |
+| ソースコード行数 | 19,975 | 20,255 | +280 (+1.4%) |
+| テストコード行数 | 18,793 | 18,982 | +189 (+1.0%) |
+| テスト対ソース比率 | 94.1% | 93.7% | -0.4pp (微減) |
+| バージョン | 1.3.5 | 1.4.0 | メジャー機能リリース |
+| enrichment RDAP TTL | 不明 | 30日 | 起動負荷削減 |
+| enrichment Geo TTL | 不明 | 30日 (private IP: 永久) | API コール削減 |
+| ライブグラフ | 無制限描画 | bounded 詳細表示 | パフォーマンス改善 |
+| モバイルビュー | なし | レスポンシブ対応 | UX 改善 |
+
+### v1.2.2 からの累積変更点
+
+| 項目 | v1.2.2 | v1.4.0 (現在) | 変化 |
+|---|---|---|---|
+| ソースコード行数 | 16,791 | 20,255 | +20.6% |
+| テストコード行数 | 12,577 | 18,982 | +50.9% |
+| テスト対ソース比率 | 74.9% | 93.7% | +18.8pp |
 | ユニットテストファイル | 54 | 84 | +30 |
 | インテグレーションテスト | 3 | 4 | +1 |
 | ソースモジュール (src/) | 48 | 69 | +21 |
@@ -70,9 +81,9 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | メトリクス | 値 |
 |---|---|
-| ソースコード行数 (server + src + public/js + mcp) | 19,975 |
-| テストコード行数 (unit + integration + smoke) | 18,793 |
-| テスト対ソース比率 | 94.1% |
+| ソースコード行数 (server + src + public/js + mcp) | 20,255 |
+| テストコード行数 (unit + integration + smoke) | 18,982 |
+| テスト対ソース比率 | 93.7% |
 | ユニットテストファイル数 | 84 |
 | インテグレーションテストファイル数 | 4 |
 | Smoke テスト (Playwright) ファイル数 | 1 |
@@ -81,7 +92,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | ルートファイル数 (src/routes/) | 13 |
 | API エンドポイント数 | 56 |
 | 本番依存パッケージ数 | 11 |
-| 関数あたり平均行数 | ~15.4 |
+| 関数あたり平均行数 | ~15.7 |
 | 深いネスト行数 (>5レベル) | 7 |
 | `var` 使用箇所 (サーバーサイド) | 0 |
 | `eval` / `new Function` 使用箇所 | 0 |
@@ -112,8 +123,6 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | V14 設定 | ✅ | ハードコード秘密情報なし, env/config file 経由, CI secret scan |
 | V11 ビジネスロジック | ⚠️ | CSRF 明示的対策なし (same-origin CSP + token 認証で緩和) |
 
-**v1.2.2 からの改善:** V5 (入力検証) が zod 展開により実質的に強化、V12 (ファイル操作) が zod バックアップ名検証により PASS に昇格。
-
 ---
 
 ## 2. OpenSSF Scorecard (推定)
@@ -132,7 +141,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | Vulnerabilities | 10/10 | `npm audit --omit=dev` (CI) |
 | Dependency-Update-Tool | 10/10 | Dependabot (npm + Actions, weekly, cooldown 7日) |
 | CI-Tests | 10/10 | Unit + Integration + Playwright smoke, Node 22/24 マトリクス |
-| Maintained | 9/10 | 活発なリリース (v1.0.0→v1.3.5, 71 PR merged), PR テンプレート, CONTRIBUTING.md |
+| Maintained | 9/10 | 活発なリリース (v1.0.0→v1.4.0, 78 PR merged), PR テンプレート, CONTRIBUTING.md |
 | Code-Review | 7/10 | PR テンプレート + CI 必須 (branch protection は確認不可) |
 | Fuzzing | 0/10 | なし (ネットワーク監視ツールでは一般的) |
 | Signed-Releases | 0/10 | GPG 署名なし (git clone 配布) |
@@ -143,13 +152,13 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | 品質特性 | スコア | 主な強み | 主なギャップ |
 |---|---|---|---|
-| 機能適合性 | 9/10 | 56 API, 15 ポーラー (conntrack 追加), MCP サーバー, 手動脅威調査, CSV エクスポート | OpenAPI 定義なし |
-| 性能効率性 | 9/10 | 多層キャッシュ (history-cache), WAL, 圧縮, バッチ化, 重複排除, bounded summaries | 負荷テストなし |
-| 互換性 | 8/10 | Node 22/24, JA/EN i18n, OS 非依存, Linux conntrack 対応 | Docker なし |
-| 使用性 | 9/10 | Demo モード, .env.example, 自動パスワード生成, MCP 統合, API/アーキテクチャドキュメント (JA/EN) | ワンクリックデプロイなし |
-| 信頼性 | 9/10 | Graceful shutdown, 自動バックアップ, WAL checkpoint, reopen(), DB マイグレーション v5, AbortSignal 対応 | Health-check なし |
+| 機能適合性 | 9/10 | 56 API, 15 ポーラー, MCP サーバー, 手動脅威調査, CSV/JSON エクスポート, モバイルビュー | OpenAPI 定義なし |
+| 性能効率性 | 9/10 | 多層キャッシュ (history-cache, enrichment 30日 TTL), WAL, 圧縮, バッチ化, 重複排除, bounded summaries, バックグラウンドスロットリング | 負荷テストなし |
+| 互換性 | 8/10 | Node 22/24, JA/EN i18n, OS 非依存, Linux conntrack 対応, モバイルレスポンシブ | Docker なし |
+| 使用性 | 9/10 | Demo モード, .env.example, 自動パスワード生成, MCP 統合, API/アーキテクチャドキュメント, モバイル対応 | ワンクリックデプロイなし |
+| 信頼性 | 9/10 | Graceful shutdown, 自動バックアップ, WAL checkpoint, reopen(), DB マイグレーション v5, AbortSignal, stale enrichment リフレッシュ | Health-check なし |
 | セキュリティ | 9/10 | OWASP ASVS L1 適合 (13/14), innerHTML 監査, zod 段階展開 | CSRF 明示なし |
-| 保守性 | 9/10 | 69 モジュール, テスト比率 94.1%, 分割リファクタ (history, auth), http-validation ヘルパー | TypeScript なし |
+| 保守性 | 9/10 | 69 モジュール, テスト比率 93.7%, 分割リファクタ (history, auth), http-validation ヘルパー | TypeScript なし |
 | 移植性 | 7/10 | Pure Node.js, ENV 設定, OS 非依存 | Docker/systemd なし |
 
 ---
@@ -163,7 +172,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | 1. プロジェクト構造 | 9/10 | ドメイン分割 (routes/pollers/core), レイヤー分離, 13 ルートファイル, history 分割リファクタ |
 | 2. エラー処理 | 9/10 | async/await 統一, 中央エラーハンドラ, graceful exit (SIGTERM/SIGINT), AbortSignal |
 | 3. コードスタイル | 10/10 | ESLint v10, const 優先 (var ゼロ), innerHTML 監査, 命名規約一貫 |
-| 4. テスト | 9/10 | 84 unit + 4 integration + Playwright smoke, AAA パターン, 分離初期化, 94.1% テスト比率 |
+| 4. テスト | 9/10 | 84 unit + 4 integration + Playwright smoke, AAA パターン, 分離初期化, 93.7% テスト比率 |
 | 5. プロダクション | 7/10 | 構造化ログ, 脆弱性自動検出, LTS Node, GitHub Pages ドキュメント |
 | 6. セキュリティ | 9/10 | ASH, security headers, eval ゼロ, auth rate limit, zod (HTTP + MCP) |
 
@@ -181,8 +190,8 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | メトリクス | 値 | レーティング |
 |---|---|---|
-| コード行数 | 19,975 | - |
-| テスト対ソース比率 | 94.1% | Excellent (>80%) |
+| コード行数 | 20,255 | - |
+| テスト対ソース比率 | 93.7% | Excellent (>80%) |
 | 重複率 | < 2% | **A** (閾値: <=3%) |
 | 認知的複雑度 | 非常に低い | **A** (深いネスト: 7行のみ) |
 | 技術的負債比率 | 3.5% (~20h) | **A** (閾値: <=5%) |
@@ -202,29 +211,41 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | routes/connections.js | 329 | 25.5 |
 | db-migrate.js | 353 | 19.3 |
 | pollers/cisco.js | 643 | 17.0 |
-| devices.js | 656 | 16.8 |
+| enrichment.js | 479 | 16.9 |
 
 ### コードスメル (合計 12 件)
 
 | 重要度 | 件数 | 例 |
 |---|---|---|
 | MAJOR | 2 | `history.js` 718行 (分割後も多責務), `devices.js` 656行 |
-| MINOR | 4 | `pollers/cisco.js` 643行, `pollers/yamaha.js` 598行, `device-identify.js` 547行, `server.js` 600行 |
+| MINOR | 4 | `pollers/cisco.js` 643行, `pollers/yamaha.js` 598行, `device-identify.js` 547行, `server.js` 609行 |
 | INFO | 6 | マジックナンバー `8000`ms x10箇所, DB initDb() ボイラープレート重複 (5ファイル) |
 
 ---
 
-## 6. 前回評価 (v1.2.2) → 現在 (v1.3.5) 改善サマリー
+## 6. バージョン別改善サマリー
+
+### v1.3.5 → v1.4.0
 
 | 領域 | 改善内容 |
 |---|---|
-| テスト | ユニットテスト +30 ファイル (54→84), インテグレーション +1, テスト比率 74.9%→94.1% |
+| 性能 | enrichment キャッシュ TTL 最適化 (RDAP/Geo 30日), バックグラウンドスロットリング, bounded ライブグラフ詳細 |
+| 信頼性 | stale enrichment 一括リフレッシュ (起動時 API 負荷削減), private IP 永久キャッシュ |
+| UX | レスポンシブモバイルビュー追加, bounded ライブグラフ詳細表示 |
+| リリース管理 | v1.4.0 CHANGELOG, site/ 更新 |
+
+### v1.2.2 → v1.4.0 (累積)
+
+| 領域 | 改善内容 |
+|---|---|
+| テスト | ユニットテスト +30 ファイル (54→84), インテグレーション +1, テスト比率 74.9%→93.7% |
 | セキュリティ | zod スキーマ検証を HTTP ルートに段階展開 (5/13), `http-validation.js` ヘルパー, requireAdmin +17 |
-| アーキテクチャ | `history.js` 分割 (history-queries.js 300行分離), `auth.js` 分割 (auth-sessions + router-setup), AbortSignal 対応 |
-| 機能 | conntrack ポーラー, 手動脅威調査 (AbuseIPDB/VirusTotal/OTX), CSV エクスポート, history-cache, schema v5 migration |
-| CI/CD | GitHub Pages ワークフロー追加 (SHA pinned), soak 安定性修正 |
-| ドキュメント | API リファレンス (JA/EN), アーキテクチャ (JA/EN), conntrack セットアップ (JA/EN), 手動脅威調査 (JA/EN) |
-| 依存管理 | zod v4 追加 (スキーマ検証基盤), express v5 維持 |
+| アーキテクチャ | `history.js` 分割 (history-queries.js), `auth.js` 分割 (auth-sessions + router-setup), AbortSignal 対応 |
+| 機能 | conntrack ポーラー, 手動脅威調査, CSV/JSON エクスポート, history-cache, schema v5 migration, モバイルビュー |
+| 性能 | enrichment TTL 最適化, バックグラウンドスロットリング, bounded summaries/graph |
+| CI/CD | GitHub Pages ワークフロー追加 (SHA pinned) |
+| ドキュメント | API リファレンス (JA/EN), アーキテクチャ (JA/EN), conntrack/manual-threat セットアップ (JA/EN) |
+| 依存管理 | zod v4 追加, express v5 維持 |
 | コード品質 | `history.js` 985→718行 (-27%), MAJOR コードスメル 3→2件, パラメータ化 SQL 77→99 |
 
 ---
