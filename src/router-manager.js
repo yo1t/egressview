@@ -46,9 +46,11 @@ function createRouterManager({
 
     const updated = runtimeProfiler.measureSync(`router.${kind}.poll.recordConnections`, () => {
       const result = new Map();
-      for (const session of sessions) {
-        signal?.throwIfAborted();
-        const recorded = runtime.recordConnection(session, now, kind, id);
+      signal?.throwIfAborted();
+      const recordedSessions = runtime.recordConnections
+        ? runtime.recordConnections(sessions, now, kind, id)
+        : sessions.map(session => runtime.recordConnection(session, now, kind, id));
+      for (const recorded of recordedSessions) {
         result.set(recorded.key, recorded.entry);
       }
       return result;

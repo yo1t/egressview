@@ -110,10 +110,25 @@ function _mergeSource(existing, incoming) {
  * @returns {{ entry, key, isNew }}
  */
 function recordConnection(session, now = Date.now(), source = 'nat', routerId = '') {
+  const record = _prepareConnection(session, now, source, routerId);
+  const { entry, key, isNew, observerAdded } = record;
+  _cacheConnection(key, entry);
+  _publishConnection(record);
+  if (isNew || observerAdded) _history.appendHistoryLog(entry);
+  _observeDevices([record], source);
+  return { entry, key, isNew };
+}
+
+function _prepareConnection(session, now, source, routerId, staged = null, sourceMeta = null) {
   const { src, sport, dst, dport, proto } = session;
 
-  const srcMac  = resolveMacByIp(src);
-  const srcMeta = _deviceId.getNodeMeta(src, srcMac);
+  let sourceIdentity = sourceMeta?.get(src);
+  if (!sourceIdentity) {
+    const srcMac = resolveMacByIp(src);
+    sourceIdentity = { srcMac, srcMeta: _deviceId.getNodeMeta(src, srcMac) };
+    sourceMeta?.set(src, sourceIdentity);
+  }
+  const { srcMac, srcMeta } = sourceIdentity;
 
   // Resolve dstHost: prefer dnsmasq > non-junk PTR > raw IP
   const dnsCached = _enrichment.getDnsCache().get(dst);
@@ -145,7 +160,7 @@ function recordConnection(session, now = Date.now(), source = 'nat', routerId = 
 
   const connectionHistory = _history.getConnectionHistory();
   const key      = `${src}|${dst}|${dport}|${proto}`;
-  const existing = connectionHistory.get(key) || _history.getConnection?.(key) || null;
+  const existing = staged?.get(key) || connectionHistory.get(key) || _history.getConnection?.(key) || null;
   const isNew    = !existing;
   const mergedSource = _mergeSource(existing?.source, source);
   const incomingObservedBy = routerId ? [routerId] : (_history.observationIdsForSource?.(source) || []);
@@ -157,18 +172,26 @@ function recordConnection(session, now = Date.now(), source = 'nat', routerId = 
   const firstSeen = existing?.firstSeen
     ?? (Number.isFinite(hint) && hint > 0 && hint <= now ? hint : now);
   const entry    = { ...enriched, source: mergedSource, observedBy, firstSeen, lastSeen: now };
-  if (_history.cacheConnection) _history.cacheConnection(key, entry);
-  else connectionHistory.set(key, entry);
+  staged?.set(key, entry);
+  return { entry, key, isNew, observerAdded };
+}
 
+function _cacheConnection(key, entry) {
+  if (_history.cacheConnection) _history.cacheConnection(key, entry);
+  else _history.getConnectionHistory().set(key, entry);
+}
+
+function _publishConnection({ entry }) {
   if (entry.threat) _notifier.notify(entry);
   if (entry.srcMac && !knownMacs.has(entry.srcMac)) {
     knownMacs.add(entry.srcMac);
     _notifier.notifyNewDevice(entry);
     _io.emit('new-device', entry);
   }
-  if (isNew || observerAdded) _history.appendHistoryLog(entry);
+}
 
-  _devices.observeDevice({
+function _deviceObservation(entry, source) {
+  return {
     ip:        entry.src,
     mac:       entry.srcMac      || null,
     vendor:    entry.srcVendor   || null,
@@ -177,9 +200,51 @@ function recordConnection(session, now = Date.now(), source = 'nat', routerId = 
     firstSeen: entry.firstSeen,
     lastSeen:  entry.lastSeen,
     source,
-  });
+  };
+}
 
-  return { entry, key, isNew };
+function _observeDevices(records, source) {
+  const byIp = new Map();
+  for (const { entry } of records) {
+    const next = _deviceObservation(entry, source);
+    const previous = byIp.get(next.ip);
+    if (previous) {
+      next.firstSeen = Math.min(previous.firstSeen, next.firstSeen);
+      next.lastSeen = Math.max(previous.lastSeen, next.lastSeen);
+    }
+    byIp.set(next.ip, next);
+  }
+  const observations = [...byIp.values()];
+  if (_devices.observeDevices) _devices.observeDevices(observations);
+  else for (const observation of observations) _devices.observeDevice(observation);
+}
+
+/**
+ * Record one router poll. Durable history is committed before any in-memory
+ * cache, notification, or device side effect becomes visible.
+ */
+function recordConnections(sessions, now = Date.now(), source = 'nat', routerId = '') {
+  if (!sessions?.length) return [];
+  const staged = new Map();
+  const sourceMeta = new Map();
+  const records = sessions.map(session => _prepareConnection(session, now, source, routerId, staged, sourceMeta));
+  const persistByKey = new Map();
+  for (const record of records) {
+    if (record.isNew || record.observerAdded || persistByKey.has(record.key)) {
+      persistByKey.set(record.key, staged.get(record.key));
+    }
+  }
+
+  const entries = [...persistByKey.values()];
+  if (entries.length) {
+    if (_history.appendHistoryLogs) _history.appendHistoryLogs(entries);
+    else for (const entry of entries) _history.appendHistoryLog(entry);
+  }
+
+  for (const [key, entry] of staged) _cacheConnection(key, entry);
+  for (const record of records) _publishConnection(record);
+  _observeDevices(records, source);
+  return records.map(({ entry, key, isNew }) => ({ entry, key, isNew }));
 }
 
 // ─── [INSPECT] session handler ────────────────────────────────────────────────
@@ -242,6 +307,7 @@ module.exports = {
   scheduleInspectEmit,
   resolveMacByIp,
   recordConnection,
+  recordConnections,
   handleInspectSession,
   getKnownMacs,
   setKnownMacs,

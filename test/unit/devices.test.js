@@ -72,6 +72,26 @@ describe('devices.upsert / getAll', () => {
   });
 });
 
+describe('devices.observeDevices batch', () => {
+  it('commits every device in one batch', () => {
+    const ids = devicesModule.observeDevices([
+      { ip: '192.168.1.10', firstSeen: 1, lastSeen: 2, source: 'yamaha' },
+      { ip: '192.168.1.11', firstSeen: 1, lastSeen: 2, source: 'yamaha' },
+    ]);
+    assert.equal(ids.length, 2);
+    assert.ok(devicesModule.getByIp('192.168.1.10'));
+    assert.ok(devicesModule.getByIp('192.168.1.11'));
+  });
+
+  it('rolls back the whole batch when one device cannot be bound', () => {
+    assert.throws(() => devicesModule.observeDevices([
+      { ip: '192.168.1.20', firstSeen: 1, lastSeen: 2, source: 'yamaha' },
+      { ip: { invalid: true }, firstSeen: 1, lastSeen: 2, source: 'yamaha' },
+    ]));
+    assert.equal(devicesModule.getByIp('192.168.1.20'), null);
+  });
+});
+
 describe('devices.getByIp', () => {
   it('returns null for unknown IP', () => {
     assert.equal(devicesModule.getByIp('1.2.3.4'), null);

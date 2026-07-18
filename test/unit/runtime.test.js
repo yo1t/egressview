@@ -17,13 +17,19 @@ function makeIo() {
 function makeHistory() {
   const map = new Map();
   const log = [];
+  const batches = [];
   return {
     getConnectionHistory: () => map,
     appendHistoryLog:     (e) => log.push(e),
+    appendHistoryLogs:    (entries) => {
+      batches.push(entries);
+      log.push(...entries);
+    },
     observationIdsForSource: source => source === 'yamaha'
       ? ['yamaha1']
       : source === 'cisco' ? ['cisco1'] : [`legacy-${source}`],
     _log: log,
+    _batches: batches,
   };
 }
 
@@ -293,6 +299,76 @@ describe('recordConnection', () => {
     runtime.recordConnection(SESSION);
     assert.equal(devs._upserted.length, 1);
     assert.equal(devs._upserted[0].ip, SESSION.src);
+  });
+});
+
+describe('recordConnections', () => {
+  it('persists one history batch and deduplicates device updates by IP', () => {
+    const devs = makeDevices();
+    const { history: hist } = initRuntime({ devices: devs });
+    const sessions = [SESSION, { ...SESSION, dst: '1.1.1.1', sport: 54321 }];
+
+    const recorded = runtime.recordConnections(sessions, Date.now(), 'yamaha', 'yamaha1');
+
+    assert.equal(recorded.length, 2);
+    assert.equal(hist._batches.length, 1);
+    assert.equal(hist._batches[0].length, 2);
+    assert.equal(hist.getConnectionHistory().size, 2);
+    assert.equal(devs._upserted.length, 1);
+  });
+
+  it('keeps cache, notifications, and devices unchanged when history commit fails', () => {
+    const hist = makeHistory();
+    hist.appendHistoryLogs = () => { throw new Error('database is full'); };
+    const notif = makeNotifier();
+    const devs = makeDevices();
+    const io = makeIo();
+    initRuntime({
+      history: hist,
+      notifier: notif,
+      devices: devs,
+      io,
+      asus: makeAsus('00:11:22:33:44:55'),
+      threatIntel: makeThreatIntel({ tag: 'test' }),
+    });
+
+    assert.throws(
+      () => runtime.recordConnections([SESSION], Date.now(), 'yamaha', 'yamaha1'),
+      /database is full/,
+    );
+    assert.equal(hist.getConnectionHistory().size, 0);
+    assert.equal(notif._calls.notify.length, 0);
+    assert.equal(notif._calls.newDevice.length, 0);
+    assert.equal(devs._upserted.length, 0);
+    assert.equal(io._emitted.length, 0);
+  });
+
+  it('persists the final value when a poll contains a duplicate natural key', () => {
+    const { history: hist } = initRuntime();
+    runtime.recordConnections([
+      SESSION,
+      { ...SESSION, sport: 54321 },
+    ], Date.now(), 'yamaha', 'yamaha1');
+
+    assert.equal(hist._batches[0].length, 1);
+    assert.equal(hist._batches[0][0].sport, 54321);
+  });
+
+  it('resolves source identity once per IP within a poll', () => {
+    let macLookups = 0;
+    let metaLookups = 0;
+    initRuntime({
+      asus: { getClientMac: () => { macLookups++; return null; } },
+      deviceId: { getNodeMeta: () => { metaLookups++; return { vendor: null, dnsName: null, mdnsName: null }; } },
+    });
+
+    runtime.recordConnections([
+      SESSION,
+      { ...SESSION, dst: '1.1.1.1' },
+    ], Date.now(), 'yamaha', 'yamaha1');
+
+    assert.equal(macLookups, 1);
+    assert.equal(metaLookups, 1);
   });
 });
 

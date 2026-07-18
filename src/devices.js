@@ -29,6 +29,7 @@ let stmtInsertObservation = null;
 let stmtByMdns            = null;
 let stmtByDns             = null;
 let stmtUpsertCandidate   = null;
+let observeManyTxn        = null;
 
 // ─── isStableMac ──────────────────────────────────────────────────────────────
 
@@ -198,6 +199,7 @@ function initDb(dbPath) {
       reasons = excluded.reasons
     WHERE status = 'pending'
   `);
+  observeManyTxn = db.transaction(rows => rows.map(observeDevice));
 }
 
 // ─── Upsert ───────────────────────────────────────────────────────────────────
@@ -326,6 +328,12 @@ function observeDevice(d) {
   }
 
   return deviceId;
+}
+
+/** Persist a poll's deduplicated device observations in one transaction. */
+function observeDevices(observations) {
+  if (!db || !observations?.length) return [];
+  return observeManyTxn(observations);
 }
 
 function _hasObservationChanged(deviceId, source, attrs) {
@@ -638,6 +646,7 @@ module.exports = {
   closeDb,
   upsert,
   observeDevice,
+  observeDevices,
   deviceStatus,
   getAll,
   getByIp,

@@ -86,6 +86,37 @@ describe('observation write: source → junction expansion', () => {
   });
 });
 
+describe('poll batch write', () => {
+  it('writes connections and observations for the whole batch', () => {
+    history.appendHistoryLogs([
+      { ...ENTRY, observedBy: ['yamaha1'] },
+      { ...ENTRY, dst: '9.9.9.9', observedBy: ['cisco1'] },
+    ]);
+
+    assert.deepEqual(history.getConnection('192.168.1.100|8.8.8.8|443|TCP').observedBy, ['yamaha1']);
+    assert.deepEqual(history.getConnection('192.168.1.100|9.9.9.9|443|TCP').observedBy, ['cisco1']);
+    const consistency = history.checkObservationConsistency();
+    assert.equal(consistency.missingObservations, 0);
+    assert.equal(consistency.orphanObservations, 0);
+    assert.equal(consistency.underMerged, 0);
+    assert.equal(consistency.kindMismatches, 0);
+  });
+
+  it('rolls back every connection and observation when one row fails', () => {
+    assert.throws(() => history.appendHistoryLogs([
+      { ...ENTRY, observedBy: ['yamaha1'] },
+      { ...ENTRY, dst: { invalid: true }, observedBy: ['cisco1'] },
+    ]));
+
+    assert.equal(history.getConnection('192.168.1.100|8.8.8.8|443|TCP'), null);
+    const consistency = history.checkObservationConsistency();
+    assert.equal(consistency.missingObservations, 0);
+    assert.equal(consistency.orphanObservations, 0);
+    assert.equal(consistency.underMerged, 0);
+    assert.equal(consistency.kindMismatches, 0);
+  });
+});
+
 describe('prune keeps connections and junction in step', () => {
   it('compactHistoryLog deletes the junction rows of pruned connections', () => {
     history.setRetentionDays(1);
