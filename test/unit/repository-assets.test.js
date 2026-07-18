@@ -96,4 +96,13 @@ describe('repository public assets', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('pins every GitHub Pages action to an immutable commit', () => {
+    const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'pages.yml'), 'utf8');
+    const actionReferences = [...workflow.matchAll(/uses:\s+(actions\/[^@\s]+)@([^\s#]+)/g)];
+    assert.equal(actionReferences.length, 5);
+    for (const [, action, reference] of actionReferences) {
+      assert.match(reference, /^[a-f0-9]{40}$/, `${action} must use a full commit SHA`);
+    }
+  });
 });
