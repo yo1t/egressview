@@ -92,6 +92,14 @@ describe('config routes', () => {
     assert.equal(body.routerIp, '192.168.1.1');
   });
 
+  it('rejects unknown general-setting keys without changing state', async () => {
+    const context = configContext();
+    const app = mount(configRoutes(context));
+    const result = await request(app, 'POST', '/api/config/general', { language: 'en', typo: true });
+    assert.equal(result.status, 400);
+    assert.equal(context.appState.uiLanguage, 'ja');
+  });
+
   it('rolls back general settings when persistence fails', async () => {
     const appState = configContext().appState;
     const retentionCalls = [];
@@ -138,6 +146,18 @@ describe('config routes', () => {
 });
 
 describe('backup configuration route', () => {
+  it('coerces positive integer strings through the shared schema', async () => {
+    let config = { intervalHours: 24, maxGenerations: 7 };
+    const backup = {
+      getConfig: () => ({ ...config }),
+      configure: updates => { config = { ...config, ...updates }; },
+      stopPeriodicBackup() {}, startPeriodicBackup() {},
+    };
+    const app = mount(backupRoutes({ requireAdmin, backup, saveConfig() {}, appRoot: process.cwd() }));
+    const result = await request(app, 'POST', '/api/backup/config', { intervalHours: '12', maxGenerations: '3' });
+    assert.equal(result.status, 200);
+    assert.deepEqual(config, { intervalHours: 12, maxGenerations: 3 });
+  });
   it('rolls back backup scheduling when persistence fails', async () => {
     let config = { intervalHours: 24, maxGenerations: 7 };
     let starts = 0;
@@ -277,6 +297,16 @@ describe('beacon configuration route', () => {
 });
 
 describe('router routes', () => {
+  it('rejects unknown router fields before calling the manager', async () => {
+    let called = false;
+    const app = mount(routerRoutes({
+      requireAdmin,
+      routerManager: { upsert: () => { called = true; } },
+    }));
+    const result = await request(app, 'POST', '/api/routers', { kind: 'cisco', unexpected: true });
+    assert.equal(result.status, 400);
+    assert.equal(called, false);
+  });
   it('covers list, create, update, and delete responses', async () => {
     const records = [{ id: 'yamaha1', kind: 'yamaha' }];
     const manager = {

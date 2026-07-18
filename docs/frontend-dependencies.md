@@ -1,9 +1,7 @@
 # Frontend JavaScript dependencies
 
-This note tracks the pre-module frontend script wiring for P2-13/P2-13a.
-EgressView still loads classic scripts from `public/index.html`, so load order
-and top-level side effects matter. The temporary public surface is
-`window.EgressView`.
+This note tracks the frontend ES module graph. `main.js` is the single HTML
+entry point; imports determine evaluation order and cache-busted asset URLs.
 
 ## Current load order
 
@@ -13,6 +11,11 @@ and top-level side effects matter. The temporary public surface is
 4. `auth-socket.js`
 5. `graph.js`
 6. `settings.js`
+   - `settings-backup.js`
+   - `settings-sessions.js`
+   - `settings-beacons.js`
+   - `settings-legacy-routers.js`
+   - `settings-slack.js`
 7. `map-common.js`
 8. `stats.js`
 9. `time-filter.js`
@@ -50,6 +53,13 @@ resolved by the ES module graph rather than script tags:
   stack/line chart-mode toggle
 - `stats-map.js` — globe and flat-map rendering; owns all map state
   (projection, rotation, spin, particles, zoom/pan, resize bookkeeping)
+
+## Settings sections (P2-39)
+
+`settings.js` coordinates the modal, data sources, and general settings.
+Backup/restore, authentication sessions, beacon detection, and the legacy
+Yamaha/Cisco/ASUS controls each own their listeners and API calls in a focused section module.
+The parent passes only the shared status renderer, avoiding circular imports.
 
 ## Reviewed HTML sinks (P2-27)
 

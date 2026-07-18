@@ -2,15 +2,20 @@
 'use strict';
 
 const { Router } = require('express');
+const { z } = require('zod');
 const path = require('path');
 const fs   = require('fs');
-const { parsePositiveInt } = require('../utils');
+const { parseRequest } = require('../http-validation');
 const logger = require('../logger');
-const { t } = require('../i18n-server');
 
 const crypto = require('crypto');
 
 const UPLOAD_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
+const backupNameSchema = z.object({ name: z.string().min(1).max(255) }).strict();
+const backupConfigSchema = z.object({
+  intervalHours: z.coerce.number().int().positive().optional(),
+  maxGenerations: z.coerce.number().int().positive().optional(),
+}).strict();
 
 /**
  * @param {{
@@ -65,8 +70,9 @@ module.exports = function backupRoutes(ctx) {
   });
 
   router.post('/backup/restore', requireAdmin, async (req, res) => {
-    const { name } = req.body || {};
-    if (!name) return res.status(400).json({ error: 'Backup name required' });
+    const parsed = parseRequest(backupNameSchema, req.body, res, { error: 'Backup name required' });
+    if (!parsed.ok) return;
+    const { name } = parsed.data;
     try {
       await backup.restoreFromGeneration(name, {
         beforeReplace: closeDbConnections,
@@ -124,18 +130,16 @@ module.exports = function backupRoutes(ctx) {
   });
 
   router.post('/backup/config', requireAdmin, (req, res) => {
-    const { intervalHours, maxGenerations } = req.body || {};
+    const parsed = parseRequest(backupConfigSchema, req.body, res);
+    if (!parsed.ok) return;
+    const { intervalHours, maxGenerations } = parsed.data;
     const previous = backup.getConfig();
     const updates = {};
     if (intervalHours != null) {
-      const h = parsePositiveInt(intervalHours);
-      if (h === null) return res.status(400).json({ error: t('backup.intervalHours-invalid') });
-      updates.intervalHours = h;
+      updates.intervalHours = intervalHours;
     }
     if (maxGenerations != null) {
-      const g = parsePositiveInt(maxGenerations);
-      if (g === null) return res.status(400).json({ error: t('backup.maxGenerations-invalid') });
-      updates.maxGenerations = g;
+      updates.maxGenerations = maxGenerations;
     }
     backup.configure(updates);
     backup.stopPeriodicBackup();

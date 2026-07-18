@@ -57,6 +57,11 @@ const APP_SCRIPT_FILES = [
   'devices.js',
   'notif-log.js',
   'log.js',
+  'settings-backup.js',
+  'settings-sessions.js',
+  'settings-beacons.js',
+  'settings-legacy-routers.js',
+  'settings-slack.js',
   'settings.js',
   'time-filter.js',
   'main.js',
@@ -411,12 +416,8 @@ describe('Frontend TDZ lint', () => {
   });
 
   it('login session settings use DOM APIs and CSS classes', () => {
-    const source = moduleSources['settings.js'];
-    const start = source.indexOf('// ── Login sessions list');
-    const end = source.indexOf('// ── Beacon detection settings', start);
-    assert.notEqual(start, -1);
-    assert.notEqual(end, -1);
-    const section = source.slice(start, end);
+    const section = moduleSources['settings-sessions.js'];
+    assert.ok(section);
     assert.doesNotMatch(section, /\.innerHTML\s*=/);
     assert.doesNotMatch(section, /\.style\./);
 

@@ -3,7 +3,9 @@
 const logger = require('../logger');
 
 const { Router } = require('express');
+const { z } = require('zod');
 const { t, setLanguage } = require('../i18n-server');
+const { parseRequest } = require('../http-validation');
 // Log path validation restricted to an allowlist of prefixes (tail runs via
 // sudo, so arbitrary paths must not be permitted)
 const { isAllowedLogPath: isValidLogPath } = require('../utils');
@@ -12,6 +14,18 @@ const ALLOWED_COUNTRIES = new Set([
   'JP','US','CA','GB','DE','FR','IT','ES','NL','SE','CH','NO',
   'AU','NZ','CN','KR','TW','HK','SG','IN','BR','RU',
 ]);
+const generalConfigSchema = z.object({
+  homeCountry: z.string().optional(),
+  language: z.enum(['ja', 'en']).optional(),
+  autoInvestigate: z.boolean().optional(),
+  retentionDays: z.coerce.number().int().refine(value => [7, 30, 90, 180, 365, 730].includes(value)).optional(),
+}).strict();
+const dataSourceSchema = z.object({ enabled: z.boolean().optional(), logFile: z.string().max(4096).optional() }).strict();
+const dataSourcesSchema = z.object({
+  dnsmasq: dataSourceSchema.optional(),
+  inspect: dataSourceSchema.optional(),
+  dhcpd: dataSourceSchema.optional(),
+}).strict();
 
 /**
  * @param {{
@@ -75,7 +89,9 @@ module.exports = function configRoutes(ctx) {
 
   // ── POST /api/config/general ───────────────────────────────────────────────
   router.post('/config/general', requireAdmin, (req, res) => {
-    const { homeCountry: hc, language: lang, autoInvestigate: ai, retentionDays: rd } = req.body || {};
+    const parsed = parseRequest(generalConfigSchema, req.body, res);
+    if (!parsed.ok) return;
+    const { homeCountry: hc, language: lang, autoInvestigate: ai, retentionDays: rd } = parsed.data;
     const previous = {
       homeCountry: appState.homeCountry,
       uiLanguage: appState.uiLanguage,
@@ -133,7 +149,9 @@ module.exports = function configRoutes(ctx) {
 
   // ── POST /api/config/datasources ───────────────────────────────────────────
   router.post('/config/datasources', requireAdmin, (req, res) => {
-    const { dnsmasq, inspect, dhcpd } = req.body || {};
+    const parsed = parseRequest(dataSourcesSchema, req.body, res);
+    if (!parsed.ok) return;
+    const { dnsmasq, inspect, dhcpd } = parsed.data;
     const previous = {
       dnsmasqEnabled: appState.dnsmasqEnabled,
       dnsmasqLogFile: appState.dnsmasqLogFile,
