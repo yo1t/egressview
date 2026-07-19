@@ -121,7 +121,7 @@ Create/detect bodies use `kind` (`yamaha` or `cisco`), `displayName`, `ip`, `use
 
 ## AI provider configuration
 
-AI insights always shows locally calculated facts. It sends anonymized aggregates to the configured Ollama server only after an explicit user action.
+AI insights always shows locally calculated facts. It sends anonymized aggregates to the configured AI provider only after an explicit user action.
 
 - `GET /api/config/ai` returns the selected provider, model IDs, Ollama endpoint, AWS `region`, and key-set/consent flags. API key values are never returned.
 - `POST /api/config/ai` accepts `provider` (`disabled`, `ollama`, `anthropic`, `openai`, or `bedrock`), provider-keyed `models`, `ollamaEndpoint`, a Bedrock `region`, optional cloud `keys`, and `clearKeys`. Any externally transmitting provider (`anthropic`, `openai`, `bedrock`) requires provider-specific `cloudConsent: true`. Bedrock stores no key and delegates authentication to the AWS SDK default credential chain; `models.bedrock` accepts a foundation model ID, a cross-region inference profile ID (`global`/`us`/`eu`/`apac`/`jp`/`au`), or an ARN (up to 400 chars).

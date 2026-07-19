@@ -121,7 +121,7 @@ EgressViewには、Yamaha/Ciscoを混在して最大10台登録できます。
 
 ## AIプロバイダー設定
 
-AI洞察はローカル集計を常時表示し、利用者が明示的に実行した場合だけ、匿名化済み集計を設定済みのOllamaへ送信します。
+AI洞察はローカル集計を常時表示し、利用者が明示的に実行した場合だけ、匿名化済み集計を設定済みのAI providerへ送信します。
 
 - `GET /api/config/ai`は選択中provider、モデルID、Ollama endpoint、AWS `region`、キー設定済み・同意済みフラグを返します。APIキー値は返しません。
 - `POST /api/config/ai`は`provider`（`disabled`、`ollama`、`anthropic`、`openai`、`bedrock`）、provider別`models`、`ollamaEndpoint`、Bedrock用`region`、任意のcloud `keys`と`clearKeys`を受け付けます。外部送信を伴うprovider（`anthropic`、`openai`、`bedrock`）選択時はprovider別`cloudConsent: true`が必須です。Bedrockはキーを保存せず、認証はAWS SDKのdefault credential chainに委譲します。`models.bedrock`は基盤モデルID、cross-region推論プロファイルID（`global`/`us`/`eu`/`apac`/`jp`/`au`）、またはARN（最大400文字）を受け付けます。
