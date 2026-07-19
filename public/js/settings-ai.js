@@ -15,9 +15,45 @@ let config = {
   providers: {},
 };
 let activeProvider = 'disabled';
+// Models discovered by the last "test connection" (Bedrock), kept so the geo
+// inference-profile selector can re-filter the model dropdown client-side.
+let discoveredModels = [];
+const GEO_PREFIXES = ['global.', 'us.', 'eu.', 'apac.', 'jp.', 'au.'];
+
+function modelMatchesProfile(id, prefix) {
+  if (!prefix) return true;                       // "All"
+  if (prefix === 'ondemand') return !GEO_PREFIXES.some(p => id.startsWith(p));
+  return id.startsWith(prefix);                   // geo profile prefix
+}
 
 function byId(id) {
   return document.getElementById(id);
+}
+
+// Rebuild the model dropdown from the discovered list, filtered by the selected
+// inference-profile geo. Picking an entry fills the model text input.
+function renderModelSelect() {
+  const select = byId('s-ai-model-select');
+  if (!select) return;
+  const prefix = byId('s-ai-profile-select')?.value || '';
+  const filtered = discoveredModels.filter(id => modelMatchesProfile(id, prefix));
+  if (!filtered.length) {
+    select.replaceChildren();
+    select.classList.add('is-hidden');
+    return;
+  }
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = t('settings.ai.modelPick');
+  select.replaceChildren(placeholder, ...filtered.map(id => {
+    const option = document.createElement('option');
+    option.value = id;
+    option.textContent = id;
+    return option;
+  }));
+  const current = byId('s-ai-model').value.trim();
+  if (current && filtered.includes(current)) select.value = current;
+  select.classList.remove('is-hidden');
 }
 
 function setStatus(message, ok) {
@@ -50,6 +86,7 @@ function renderProvider(provider) {
   modelInput.value = enabled ? (config?.models?.[provider] || '') : '';
   if (provider === 'bedrock') renderGuardrail();
   byId('ai-model-options').replaceChildren();
+  discoveredModels = [];
   const modelSelect = byId('s-ai-model-select');
   modelSelect.replaceChildren();
   modelSelect.classList.add('is-hidden');
@@ -150,30 +187,14 @@ async function testConnection() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
     const models = result.models || [];
+    discoveredModels = models;
     byId('ai-model-options').replaceChildren(...models.map(model => {
       const option = document.createElement('option');
       option.value = model;
       return option;
     }));
-    // Populate a real clickable dropdown; picking an entry fills the text input.
-    const select = byId('s-ai-model-select');
-    if (models.length) {
-      const placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = t('settings.ai.modelPick');
-      select.replaceChildren(placeholder, ...models.map(model => {
-        const option = document.createElement('option');
-        option.value = model;
-        option.textContent = model;
-        return option;
-      }));
-      const current = byId('s-ai-model').value.trim();
-      if (current && models.includes(current)) select.value = current;
-      select.classList.remove('is-hidden');
-    } else {
-      select.replaceChildren();
-      select.classList.add('is-hidden');
-    }
+    // Build the clickable dropdown, filtered by the selected inference profile.
+    renderModelSelect();
     if (result.verified === false) {
       // Bedrock discovery succeeded but no model is selected yet — prompt the
       // user to pick one and test again (the InvokeModel check needs a model).
@@ -197,6 +218,7 @@ function initAiSettings() {
   byId('s-ai-region-select')?.addEventListener('change', event => {
     if (event.target.value) byId('s-ai-region').value = event.target.value;
   });
+  byId('s-ai-profile-select')?.addEventListener('change', renderModelSelect);
   byId('ai-save-btn')?.addEventListener('click', async event => {
     event.currentTarget.disabled = true;
     try {
