@@ -367,6 +367,7 @@
   .ai-hero p { margin: 0; color: var(--muted); font-size: 12px; }
   .ai-refresh { border: 1px solid rgba(56,189,248,0.4); border-radius: 999px; padding: 7px 16px; color: #7dd3fc; background: rgba(14,165,233,0.08); cursor: pointer; }
   .ai-refresh:hover { background: rgba(14,165,233,0.16); }
+  .ai-period { margin-top: 4px; color: var(--muted); font-size: 11px; }
   .ai-collection { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; max-width: 1180px; width: 100%; margin: 0 auto; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(17,24,39,0.72); font-size: 11px; }
   .ai-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
   .ai-collection.is-ok .ai-pulse { background: var(--green); box-shadow: 0 0 10px var(--green); }
