@@ -1,0 +1,105 @@
+'use strict';
+
+// Amazon Bedrock transport for the AI provider: Converse API generation plus
+// optional (fail-open) model/inference-profile discovery. This module isolates
+// the AWS SDK so ai-provider.js stays transport-agnostic and unit-testable.
+//
+// Authentication is delegated entirely to the AWS SDK default credential
+// provider chain. This module never reads, stores, logs, or accepts AWS keys —
+// only a region and a model/inference-profile id (which may be a foundation
+// model id, a geographic cross-region inference profile us./eu./apac./jp./au.,
+// a Global profile, or an ARN).
+
+let _runtimeMod = null;
+let _controlMod = null;
+function loadRuntime() {
+  return _runtimeMod || (_runtimeMod = require('@aws-sdk/client-bedrock-runtime'));
+}
+function loadControl() {
+  return _controlMod || (_controlMod = require('@aws-sdk/client-bedrock'));
+}
+
+// Map AWS SDK errors to plain, non-sensitive Error messages. Never surface raw
+// SDK metadata (which can include ARNs/account ids) beyond the short reason.
+function mapAwsError(err) {
+  const name = String(err?.name || '');
+  if (err?.name === 'AbortError') return new Error('Bedrock request was cancelled');
+  if (/Timeout/i.test(name)) return new Error('Bedrock request timed out');
+  if (/CredentialsProviderError|CredentialsError|Credentials/i.test(name)) {
+    return new Error('AWS credentials could not be resolved (check SDK credential chain / SSO login)');
+  }
+  if (/AccessDenied|Forbidden|Unauthorized/i.test(name)) {
+    return new Error('Bedrock access denied — verify bedrock:InvokeModel permission for this model/region');
+  }
+  if (/Throttling|TooManyRequests|LimitExceeded/i.test(name)) {
+    return new Error('Bedrock throttled the request — retry later');
+  }
+  if (/ValidationException|ResourceNotFound|NotFound/i.test(name)) {
+    return new Error('Bedrock rejected the model or region (unsupported model/inference profile for this region)');
+  }
+  return new Error('Bedrock request failed');
+}
+
+function extractText(output) {
+  const blocks = output?.output?.message?.content || [];
+  return blocks.map(block => block?.text).filter(Boolean).join('\n');
+}
+
+function createBedrockTransport({ runtime = null, control = null } = {}) {
+  const runtimeClients = new Map(); // region -> BedrockRuntimeClient
+
+  function runtimeClient(region) {
+    const { BedrockRuntimeClient } = runtime || loadRuntime();
+    if (!runtimeClients.has(region)) runtimeClients.set(region, new BedrockRuntimeClient({ region }));
+    return runtimeClients.get(region);
+  }
+
+  async function converse({ region, modelId, prompt, maxTokens = 2048, maxBytes = 1024 * 1024, signal }) {
+    if (!region) throw new Error('AWS region is not configured');
+    if (!modelId) throw new Error('Bedrock model is not configured');
+    const { ConverseCommand } = runtime || loadRuntime();
+    let output;
+    try {
+      output = await runtimeClient(region).send(
+        new ConverseCommand({
+          modelId,
+          messages: [{ role: 'user', content: [{ text: prompt }] }],
+          inferenceConfig: { maxTokens },
+        }),
+        { abortSignal: signal },
+      );
+    } catch (err) {
+      throw mapAwsError(err);
+    }
+    const text = extractText(output);
+    if (maxBytes && Buffer.byteLength(text) > maxBytes) throw new Error('Bedrock response was too large');
+    return text;
+  }
+
+  // Best-effort discovery. Any failure returns [] so the caller falls back to
+  // direct model/inference-profile id entry (fail-open by design).
+  async function listModels({ region }) {
+    if (!region) return [];
+    try {
+      const { BedrockClient, ListFoundationModelsCommand, ListInferenceProfilesCommand } = control || loadControl();
+      const client = new BedrockClient({ region });
+      const ids = new Set();
+      const fm = await client.send(new ListFoundationModelsCommand({ byOutputModality: 'TEXT' }));
+      for (const model of fm?.modelSummaries || []) if (model?.modelId) ids.add(model.modelId);
+      // Inference profiles (incl. geographic CRIS) are optional; ignore failure.
+      try {
+        const profiles = await client.send(new ListInferenceProfilesCommand({}));
+        for (const p of profiles?.inferenceProfileSummaries || []) {
+          if (p?.inferenceProfileId) ids.add(p.inferenceProfileId);
+        }
+      } catch { /* inference profile listing is optional */ }
+      return [...ids].sort((a, b) => a.localeCompare(b)).slice(0, 200);
+    } catch {
+      return [];
+    }
+  }
+
+  return { converse, listModels };
+}
+
+module.exports = { createBedrockTransport, mapAwsError, extractText };
