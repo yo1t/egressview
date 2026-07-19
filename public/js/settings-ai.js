@@ -36,8 +36,12 @@ function renderModelSelect() {
   const select = byId('s-ai-model-select');
   if (!select) return;
   const prefix = byId('s-ai-profile-select')?.value || '';
-  const filtered = discoveredModels.filter(id => modelMatchesProfile(id, prefix));
-  if (!filtered.length) {
+  const current = byId('s-ai-model').value.trim();
+  const ids = discoveredModels.filter(id => modelMatchesProfile(id, prefix));
+  // Always offer the currently-configured model so the dropdown is usable and
+  // visible even before "test connection" discovers the full list.
+  if (current && !ids.includes(current)) ids.unshift(current);
+  if (!ids.length) {
     select.replaceChildren();
     select.classList.add('is-hidden');
     return;
@@ -45,14 +49,13 @@ function renderModelSelect() {
   const placeholder = document.createElement('option');
   placeholder.value = '';
   placeholder.textContent = t('settings.ai.modelPick');
-  select.replaceChildren(placeholder, ...filtered.map(id => {
+  select.replaceChildren(placeholder, ...ids.map(id => {
     const option = document.createElement('option');
     option.value = id;
     option.textContent = id;
     return option;
   }));
-  const current = byId('s-ai-model').value.trim();
-  if (current && filtered.includes(current)) select.value = current;
+  select.value = current && ids.includes(current) ? current : '';
   select.classList.remove('is-hidden');
 }
 
@@ -87,9 +90,9 @@ function renderProvider(provider) {
   if (provider === 'bedrock') renderGuardrail();
   byId('ai-model-options').replaceChildren();
   discoveredModels = [];
-  const modelSelect = byId('s-ai-model-select');
-  modelSelect.replaceChildren();
-  modelSelect.classList.add('is-hidden');
+  // Show the configured model as a one-item dropdown now; "test connection"
+  // fills it with the discovered list. renderModelSelect handles show/hide.
+  renderModelSelect();
   const keyInput = byId('s-ai-key');
   keyInput.value = '';
   keyInput.placeholder = config?.providers?.[provider]?.keySet ? t('settings.ai.keySaved') : '';
