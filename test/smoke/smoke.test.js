@@ -416,6 +416,40 @@ async function expectConnectedDevicesAcrossTabs(page, viewportWidth) {
   }
 }
 
+test('initial device panel loads when live socket updates are unavailable', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  const errors = collectErrors(page);
+  let summaryRequests = 0;
+  await page.route('**/socket.io/**', route => {
+    const isTransportRequest = new URL(route.request().url()).searchParams.has('EIO');
+    return isTransportRequest ? route.abort() : route.continue();
+  });
+  await page.route(/\/api\/connections\/summary\?/, route => {
+    summaryRequests += 1;
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        byDevice: [{ src: '192.0.2.25', count: 7, srcMdnsName: 'socket-independent-device' }],
+        byTarget: [],
+        edges: [],
+        total: 7,
+        buckets: 60,
+        serverTime: Date.now(),
+      }),
+    });
+  });
+  await page.addInitScript(tok => {
+    localStorage.setItem('egressview_admin_token', tok);
+  }, TOKEN);
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+  await expect.poll(() => summaryRequests).toBeGreaterThan(0);
+  expect(errors, `Startup errors:\n  ${errors.join('\n  ')}`).toHaveLength(0);
+  await expect(page.locator('#device-list .device-card')).toHaveCount(1);
+  await expect(page.locator('#device-list')).toContainText('socket-independent-device');
+});
+
 test('desktop keeps the connected device panel populated across every tab', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 

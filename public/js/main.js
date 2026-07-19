@@ -38,6 +38,9 @@ setViewTabHandlers({
   onDeviceSearch: () => { applyFilter(lastClients); applyGraphFilter(); },
 });
 switchView('ai');
+// Populate the shared device panel even when the initial socket snapshot is
+// delayed or unavailable. The graph itself remains deferred while hidden.
+refreshGraphSummary();
 
 // ─── Main socket event handlers ───────────────────────────────────────────────
 
