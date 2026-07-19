@@ -45,6 +45,7 @@ const configSchema = z.object({
   }).strict().optional(),
 }).strict();
 const emptySchema = z.object({}).strict();
+const bedrockModelDiscoverySchema = z.object({ region: regionSchema }).strict();
 const timestampSchema = z.coerce.number().int().nonnegative();
 const factsQuerySchema = z.object({
   from: timestampSchema,
@@ -115,6 +116,19 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     if (!parsed.ok) return;
     try {
       res.json({ success: true, ...await aiProvider.testConnection() });
+    } catch (error) {
+      res.status(400).json({ success: false, error: error.message });
+    }
+  });
+
+  router.post('/ai/models', requireAdmin, async (req, res) => {
+    const parsed = parseRequest(bedrockModelDiscoverySchema, req.body, res);
+    if (!parsed.ok) return;
+    try {
+      res.json({ success: true, ...await aiProvider.listModels({
+        provider: 'bedrock',
+        region: parsed.data.region,
+      }) });
     } catch (error) {
       res.status(400).json({ success: false, error: error.message });
     }

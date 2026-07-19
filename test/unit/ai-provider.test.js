@@ -272,6 +272,20 @@ describe('AI provider — Amazon Bedrock (keyless, region-based, Converse)', () 
     assert.deepEqual((await withDiscovery.listModels()).models, ['jp.anthropic.claude-sonnet-4-5-20250929-v1:0', 'jp.anthropic.claude-haiku-4-5-v1:0']);
   });
 
+  it('discovers Bedrock models for an unsaved region without changing provider state', async () => {
+    const regions = [];
+    const provider = bedrockProvider({
+      listModels: async ({ region }) => {
+        regions.push(region);
+        return ['jp.anthropic.claude-sonnet-4-5-20250929-v1:0'];
+      },
+    });
+    const result = await provider.listModels({ provider: 'bedrock', region: 'ap-northeast-1' });
+    assert.deepEqual(result.models, ['jp.anthropic.claude-sonnet-4-5-20250929-v1:0']);
+    assert.deepEqual(regions, ['ap-northeast-1']);
+    assert.equal(provider.getPublicConfig().provider, 'disabled');
+  });
+
   it('requires the model/profile id before invoking', async () => {
     const provider = bedrockProvider({ converse: async () => 'x' });
     provider.configure({ provider: 'bedrock', region: 'us-east-1', cloudConsent: { bedrock: true } });
