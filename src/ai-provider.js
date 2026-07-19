@@ -174,10 +174,12 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
   let cloudConsent = { anthropic: false, openai: false, bedrock: false };
   let ollamaEndpoint = DEFAULT_OLLAMA_ENDPOINT;
   let region = '';
+  // Amazon Bedrock Guardrails (opt-in, default off). id/version are not secrets.
+  let guardrail = { enabled: false, id: '', version: '' };
   let generationInFlight = false;
 
   function state() {
-    return { provider, models, keys, cloudConsent, ollamaEndpoint, region };
+    return { provider, models, keys, cloudConsent, ollamaEndpoint, region, guardrail };
   }
 
   function configure(input = {}) {
@@ -204,6 +206,11 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
     }
     if (input.ollamaEndpoint !== undefined) ollamaEndpoint = normalizeEndpoint(input.ollamaEndpoint);
     if (input.region !== undefined) region = String(input.region || '').trim();
+    if (input.guardrail) {
+      if (typeof input.guardrail.enabled === 'boolean') guardrail.enabled = input.guardrail.enabled;
+      if (typeof input.guardrail.id === 'string') guardrail.id = input.guardrail.id.trim();
+      if (typeof input.guardrail.version === 'string') guardrail.version = input.guardrail.version.trim();
+    }
   }
 
   function exportConfig() {
@@ -214,6 +221,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
       cloudConsent: { ...cloudConsent },
       ollamaEndpoint,
       region,
+      guardrail: { ...guardrail },
     };
   }
 
@@ -223,6 +231,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
       models: { ...models },
       ollamaEndpoint,
       region,
+      guardrail: { ...guardrail },
       providers: {
         ollama: { keySet: false },
         anthropic: { keySet: !!keys.anthropic, consented: cloudConsent.anthropic },
@@ -325,6 +334,9 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
           prompt,
           maxTokens: 2048,
           maxBytes: MAX_RESPONSE_BYTES,
+          guardrail: guardrail.enabled && guardrail.id
+            ? { id: guardrail.id, version: guardrail.version || 'DRAFT' }
+            : null,
           signal: requestSignal,
         }) || '').trim();
       } else {

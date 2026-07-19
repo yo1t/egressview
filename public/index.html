@@ -492,7 +492,18 @@
                 <option value="ap-southeast-2">Asia Pacific (Sydney)</option>
               </datalist>
               <p class="settings-field-hint" data-i18n="settings.ai.bedrockHint">認証はAWS SDKの標準credential chainに委譲します（キー入力なし）。モデル欄には基盤モデルID、cross-region推論プロファイルID（Global / us. / eu. / apac. / jp.（東京・大阪、日本内処理） / au.）、またはARNを直接入力できます。対応モデルはAWSの提供状況に依存します。</p>
-            </div>
+              <label class="settings-check-label ai-guardrail-toggle"><input id="s-ai-guardrail-enabled" type="checkbox"> <span data-i18n="settings.ai.guardrailEnable">Bedrock Guardrails を使う（任意）</span></label>
+              <div id="ai-guardrail-fields" class="is-hidden">
+                <div class="form-group">
+                  <label class="form-label" for="s-ai-guardrail-id" data-i18n="settings.ai.guardrailId">Guardrail ID / ARN</label>
+                  <input id="s-ai-guardrail-id" class="form-input" type="text" maxlength="2048" autocomplete="off" spellcheck="false">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="s-ai-guardrail-version" data-i18n="settings.ai.guardrailVersion">Guardrail バージョン</label>
+                  <input id="s-ai-guardrail-version" class="form-input" type="text" maxlength="64" placeholder="DRAFT" autocomplete="off" spellcheck="false">
+                </div>
+                <p class="settings-field-hint ai-guardrail-warning" data-i18n="settings.ai.guardrailResidency">⚠ Guardrails は日本内処理を保証しません。日本限定（jp.）の guardrail profile は存在せず、cross-region guardrail は APAC 全域（日本外を含む）へルーティングされ得ます。日本内データレジデンシーが必須の場合は Guardrails をオフにするか、呼び出しリージョン内の single-region guardrail を使ってください。分類フラグ付きの入出力は最大30日保持され得ます。</p>
+              </div>
             <div id="ai-key-group" class="form-group is-hidden">
               <label class="form-label" for="s-ai-key" data-i18n="settings.ai.apiKey">APIキー</label>
               <input id="s-ai-key" class="form-input" type="password" autocomplete="new-password">

@@ -69,18 +69,29 @@ function createBedrockTransport({ runtime = null, control = null, requireModule 
     return runtimeClients.get(region);
   }
 
-  async function converse({ region, modelId, prompt, maxTokens = 2048, maxBytes = 1024 * 1024, signal }) {
+  async function converse({ region, modelId, prompt, maxTokens = 2048, maxBytes = 1024 * 1024, guardrail = null, signal }) {
     if (!region) throw new Error('AWS region is not configured');
     if (!modelId) throw new Error('Bedrock model is not configured');
     const { ConverseCommand } = getRuntime();
+    const commandInput = {
+      modelId,
+      messages: [{ role: 'user', content: [{ text: prompt }] }],
+      inferenceConfig: { maxTokens },
+    };
+    // Optional Bedrock Guardrails. NOTE: a cross-region (geographic) guardrail
+    // profile routes across the whole geography and there is no Japan-only
+    // profile, so enabling this can break in-Japan data residency — the caller
+    // is responsible for warning the user. This module just forwards the config.
+    if (guardrail?.id) {
+      commandInput.guardrailConfig = {
+        guardrailIdentifier: guardrail.id,
+        guardrailVersion: guardrail.version || 'DRAFT',
+      };
+    }
     let output;
     try {
       output = await runtimeClient(region).send(
-        new ConverseCommand({
-          modelId,
-          messages: [{ role: 'user', content: [{ text: prompt }] }],
-          inferenceConfig: { maxTokens },
-        }),
+        new ConverseCommand(commandInput),
         { abortSignal: signal },
       );
     } catch (err) {

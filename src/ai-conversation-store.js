@@ -51,9 +51,12 @@ function createAiConversationStore({ getDb }) {
   }
 
   function getMessages(conversationId, limit = 500) {
+    // rowid (monotonic insertion order) is the tiebreaker so messages created
+    // in the same millisecond keep stable append order — messageId is a random
+    // UUID and must not decide ordering.
     return requireDb().prepare(`
       SELECT * FROM ai_messages WHERE conversationId = ?
-      ORDER BY createdAt ASC, messageId ASC LIMIT ?
+      ORDER BY createdAt ASC, rowid ASC LIMIT ?
     `).all(conversationId, Math.max(1, Math.min(500, Number(limit) || 500)));
   }
 

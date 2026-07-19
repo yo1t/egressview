@@ -37,6 +37,12 @@ const configSchema = z.object({
   }).strict().optional(),
   ollamaEndpoint: z.string().max(2048).optional(),
   region: regionSchema.optional(),
+  // Amazon Bedrock Guardrails (opt-in). id may be a guardrail id or ARN.
+  guardrail: z.object({
+    enabled: z.boolean().optional(),
+    id: z.string().max(2048).optional(),
+    version: z.string().max(64).optional(),
+  }).strict().optional(),
 }).strict();
 const emptySchema = z.object({}).strict();
 const timestampSchema = z.coerce.number().int().nonnegative();
@@ -83,6 +89,7 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
         cloudConsent: nextConsent,
         ollamaEndpoint: parsed.data.ollamaEndpoint ?? previous.ollamaEndpoint,
         region: parsed.data.region ?? previous.region,
+        guardrail: { ...previous.guardrail, ...(parsed.data.guardrail || {}) },
       });
       saveConfig();
     } catch (error) {

@@ -126,6 +126,20 @@ describe('ai-bedrock: converse', () => {
     await transport.converse({ region: 'us-east-1', modelId: 'm', prompt: 'a', signal });
     assert.equal(runtime.sent[0].opts.abortSignal, signal);
   });
+
+  it('adds guardrailConfig to the command only when a guardrail is provided', async () => {
+    const runtime = fakeRuntime({ onSend: () => ({ output: { message: { content: [{ text: 'ok' }] } } }) });
+    const transport = createBedrockTransport({ runtime: runtime.mod });
+
+    await transport.converse({ region: 'us-east-1', modelId: 'm', prompt: 'a' });
+    assert.equal(runtime.sent[0].command.input.guardrailConfig, undefined);
+
+    await transport.converse({ region: 'us-east-1', modelId: 'm', prompt: 'a', guardrail: { id: 'gr-1', version: '3' } });
+    assert.deepEqual(runtime.sent[1].command.input.guardrailConfig, { guardrailIdentifier: 'gr-1', guardrailVersion: '3' });
+
+    await transport.converse({ region: 'us-east-1', modelId: 'm', prompt: 'a', guardrail: { id: 'gr-2' } });
+    assert.deepEqual(runtime.sent[2].command.input.guardrailConfig, { guardrailIdentifier: 'gr-2', guardrailVersion: 'DRAFT' });
+  });
 });
 
 describe('ai-bedrock: listModels (fail-open discovery)', () => {
