@@ -121,7 +121,7 @@ Create/detect bodies use `kind` (`yamaha` or `cisco`), `displayName`, `ip`, `use
 
 ## AI provider configuration
 
-AI insights always shows locally calculated facts. Only after an explicit user action, it sends aggregates — including destination IPs, hostnames, and device names — to the configured AI provider. MAC addresses, credentials, and raw connection logs are never sent.
+AI insights always shows locally calculated facts. Only after an explicit user action, it sends aggregates — including destination IPs, hostnames, device names, and MAC addresses — to the configured AI provider. Credentials such as passwords are never sent.
 
 - `GET /api/config/ai` returns the selected provider, model IDs, Ollama endpoint, AWS `region`, and key-set/consent flags. API key values are never returned.
 - `POST /api/config/ai` accepts `provider` (`disabled`, `ollama`, `anthropic`, `openai`, or `bedrock`), provider-keyed `models`, `ollamaEndpoint`, a Bedrock `region`, optional cloud `keys`, and `clearKeys`. Any externally transmitting provider (`anthropic`, `openai`, `bedrock`) requires provider-specific `cloudConsent: true`. Bedrock stores no key and delegates authentication to the AWS SDK default credential chain; `models.bedrock` accepts a foundation model ID, a cross-region inference profile ID (`global`/`us`/`eu`/`apac`/`jp`/`au`), or an ARN (up to 400 chars). An optional `guardrail` (`{ enabled, id, version }`) attaches a Bedrock Guardrail, passed to Converse via `guardrailConfig` when enabled (requires `bedrock:ApplyGuardrail`); note that Guardrails do not guarantee in-Japan processing (see `docs/setup-bedrock.md`).
@@ -193,7 +193,7 @@ All 60 implemented REST endpoints are listed below. **Public** means no token is
 | AI configuration | `POST /api/config/ai` | Protected; saves provider, models, endpoint, and cloud keys |
 | AI configuration | `POST /api/ai/test` | Protected; retrieves model IDs without sending network data |
 | AI insights | `GET /api/ai/facts` | Protected; local facts and prior-period comparison only |
-| AI insights | `POST /api/ai/analyze` | Protected; manually analyzes aggregates (incl. destination IPs, hostnames, device names); cloud requires double consent |
+| AI insights | `POST /api/ai/analyze` | Protected; manually analyzes aggregates (incl. destination IPs, hostnames, device names, MAC); cloud requires double consent |
 | AI chat | `POST /api/ai/chat` | Protected; appends the question first and stores an answer or failure row |
 | AI chat | `GET /api/ai/conversations` | Protected; conversation list and storage usage |
 | AI chat | `GET /api/ai/conversations/:id` | Protected; message history preserved across restarts |

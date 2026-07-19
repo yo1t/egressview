@@ -7,8 +7,8 @@ provider chain**. You configure only an AWS **region** and a **model /
 inference-profile ID** in the settings UI.
 
 > AI is read-only. Bounded aggregates are sent — including destination IPs,
-> hostnames, and device names — but never MAC addresses, router credentials, or
-> full connection logs.
+> hostnames, device names, and MAC addresses — but credentials such as passwords
+> are never sent.
 
 ## Prerequisites
 

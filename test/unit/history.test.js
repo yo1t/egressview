@@ -989,8 +989,8 @@ describe('groupSrcForDstsByTimeRange', () => {
   it('returns source devices that contacted the given destinations', () => {
     const t = Date.now();
     // Two distinct rows (different dport) for the same src→dst pair so the group count is 2.
-    insert({ src: '192.168.1.10', srcDnsName: 'laptop-a', dst: '203.0.113.9', dport: 443, lastSeen: t, firstSeen: t });
-    insert({ src: '192.168.1.10', srcDnsName: 'laptop-a', dst: '203.0.113.9', dport: 8080, lastSeen: t, firstSeen: t });
+    insert({ src: '192.168.1.10', srcDnsName: 'laptop-a', srcMac: 'AA:BB:CC:00:11:22', dst: '203.0.113.9', dport: 443, lastSeen: t, firstSeen: t });
+    insert({ src: '192.168.1.10', srcDnsName: 'laptop-a', srcMac: 'AA:BB:CC:00:11:22', dst: '203.0.113.9', dport: 8080, lastSeen: t, firstSeen: t });
     insert({ src: '192.168.1.20', srcMdnsName: 'phone-b', dst: '198.51.100.5', dport: 80, lastSeen: t, firstSeen: t });
     insert({ src: '192.168.1.30', dst: '8.8.8.8', dport: 53, lastSeen: t, firstSeen: t }); // not a threat dst
 
@@ -1000,6 +1000,7 @@ describe('groupSrcForDstsByTimeRange', () => {
     assert.equal(rows.length, 2);
     assert.equal(byDst['203.0.113.9|192.168.1.10'].cnt, 2);
     assert.equal(byDst['203.0.113.9|192.168.1.10'].srcDnsName, 'laptop-a');
+    assert.equal(byDst['203.0.113.9|192.168.1.10'].srcMac, 'AA:BB:CC:00:11:22');
     assert.equal(byDst['198.51.100.5|192.168.1.20'].srcMdnsName, 'phone-b');
     // The non-threat destination is not returned.
     assert.equal(rows.some(row => row.dst === '8.8.8.8'), false);

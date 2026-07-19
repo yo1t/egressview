@@ -199,6 +199,7 @@ function createHistoryQueries({
       `SELECT dst, src,
               MAX(srcDnsName) AS srcDnsName,
               MAX(srcMdnsName) AS srcMdnsName,
+              MAX(srcMac) AS srcMac,
               COUNT(*) AS cnt
        FROM connections${where}
        GROUP BY dst, src ORDER BY cnt DESC LIMIT 200`
