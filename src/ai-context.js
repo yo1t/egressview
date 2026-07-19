@@ -3,9 +3,9 @@
 // AI analysis context builder.
 //
 // This context is NOT anonymized: destination IPs/hostnames and source device
-// IPs/names are included so the model can produce actionable, threat-focused
+// IPs/names/MACs are included so the model can produce actionable, threat-focused
 // guidance that names the devices and destinations involved. What is still
-// excluded: MAC addresses, credentials, raw logs, and router addresses.
+// excluded: credentials, raw per-connection logs, and router addresses.
 // The consent/privacy UI copy reflects this boundary.
 
 const MAX_SERVICES = 20;
@@ -59,7 +59,13 @@ function buildThreats({ dstGroups, threatIntel, history, from, to }) {
     const list = devicesByDst.get(row.dst) || [];
     if (list.length >= MAX_DEVICES_PER_THREAT) continue;
     const name = String(row.srcDnsName || row.srcMdnsName || '').trim();
-    list.push({ ip: row.src, name: name ? name.slice(0, 253) : null, connections: Number(row.cnt) || 0 });
+    const mac = String(row.srcMac || '').trim();
+    list.push({
+      ip: row.src,
+      name: name ? name.slice(0, 253) : null,
+      mac: mac ? mac.slice(0, 32) : null,
+      connections: Number(row.cnt) || 0,
+    });
     devicesByDst.set(row.dst, list);
   }
   for (const threat of top) threat.devices = devicesByDst.get(threat.ip) || [];
@@ -104,8 +110,8 @@ function buildAiContext({ facts, history, routers, from, to, threatIntel = null 
     threats,
     privacy: {
       anonymized: false,
-      includes: ['ip', 'hostname', 'deviceName'],
-      excluded: ['mac', 'credentials', 'rawLogs', 'routerAddress'],
+      includes: ['ip', 'hostname', 'deviceName', 'mac'],
+      excluded: ['credentials', 'rawLogs', 'routerAddress'],
     },
   };
 }

@@ -32,8 +32,8 @@ describe('AI context', () => {
       groupSrcForDstsByTimeRange: (_from, _to, dsts) => {
         assert.ok(dsts.includes('203.0.113.9'));
         return [
-          { dst: '203.0.113.9', src: '192.168.1.10', srcDnsName: 'laptop-a', srcMdnsName: null, cnt: 2 },
-          { dst: '198.51.100.5', src: '192.168.1.20', srcDnsName: null, srcMdnsName: 'phone-b', cnt: 8 },
+          { dst: '203.0.113.9', src: '192.168.1.10', srcDnsName: 'laptop-a', srcMdnsName: null, srcMac: 'AA:BB:CC:00:11:22', cnt: 2 },
+          { dst: '198.51.100.5', src: '192.168.1.20', srcDnsName: null, srcMdnsName: 'phone-b', srcMac: null, cnt: 8 },
         ];
       },
     };
@@ -53,9 +53,10 @@ describe('AI context', () => {
     assert.equal(context.threats[0].level, 'danger');
     assert.equal(context.threats[0].host, 'evil.example');
     assert.equal(context.threats[0].source, 'feodo');
-    assert.deepEqual(context.threats[0].devices[0], { ip: '192.168.1.10', name: 'laptop-a', connections: 2 });
+    assert.deepEqual(context.threats[0].devices[0], { ip: '192.168.1.10', name: 'laptop-a', mac: 'AA:BB:CC:00:11:22', connections: 2 });
     assert.equal(context.threats[1].level, 'warn');
     assert.equal(context.threats[1].devices[0].name, 'phone-b');
+    assert.equal(context.threats[1].devices[0].mac, null);
 
     // Top destinations sorted by connections, with IP + hostname.
     assert.equal(context.topDestinations[0].ip, '93.184.216.34');
