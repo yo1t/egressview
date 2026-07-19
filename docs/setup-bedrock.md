@@ -16,8 +16,10 @@ ships as a standard dependency, so `npm install` already includes Bedrock
 support — no separate install step.
 
 1. An AWS account with Amazon Bedrock enabled in your chosen region.
-2. **Model access granted** for the model(s) you intend to use (Bedrock console →
-   *Model access*). Access is per-region and per-model.
+2. **Model access / subscription** for the model(s) you intend to use.
+   Serverless foundation models are auto-enabled on first invocation, but
+   third-party **AWS Marketplace-served models (e.g. Anthropic Claude) require a
+   one-time subscription** — see [Marketplace subscription](#marketplace-subscription-first-time-only) below.
 3. Credentials resolvable by the AWS SDK default chain on the host running
    EgressView (see below).
 
@@ -52,6 +54,55 @@ refreshed by the SDK.
   fail-open — without it you simply type the model/profile ID directly. Note
   that listing succeeding does **not** imply `bedrock:InvokeModel` is granted,
   which is why the connection test also performs a minimal generation call.
+
+## Marketplace subscription (first-time only)
+
+Third-party models served through **AWS Marketplace (e.g. Anthropic Claude)**
+must be **subscribed once per account** before they can be invoked. Until then,
+invocation fails with:
+
+> `AccessDeniedException ... not authorized to perform the required AWS
+> Marketplace actions (aws-marketplace:ViewSubscriptions, aws-marketplace:Subscribe)`
+
+even when `bedrock:InvokeModel` is granted with `Resource: "*"`. The
+`aws-marketplace:*` permission is only needed **at subscription time** — once the
+subscription exists it **persists account-wide** and `bedrock:InvokeModel` alone
+is enough. Amazon's own models (e.g. Amazon Nova) need no Marketplace
+subscription.
+
+Complete the subscription **once**, then keep the runtime role least-privilege:
+
+**Option A (recommended) — an admin subscribes; the service role is untouched.**
+A user/principal that holds `aws-marketplace:ViewSubscriptions` and
+`aws-marketplace:Subscribe` invokes the model once (Bedrock console playground,
+AWS Marketplace console, or CLI). The subscription then covers the whole account.
+
+**Option B — temporarily grant the service role, then remove it.**
+
+1. Add to the EgressView role, save:
+   ```json
+   { "Sid": "BedrockMarketplaceSubscribe", "Effect": "Allow",
+     "Action": ["aws-marketplace:ViewSubscriptions", "aws-marketplace:Subscribe"],
+     "Resource": "*" }
+   ```
+2. Invoke the model once (e.g. the settings **Save & test connection** button, or
+   `aws bedrock-runtime converse ...`). Propagation can take ~2 minutes. For a
+   `jp.`/`apac.` profile, invoke until it succeeds consistently, since the profile
+   routes across multiple destination Regions (Tokyo + Osaka for `jp.`) and each
+   must be subscribed.
+3. **Remove the `BedrockMarketplaceSubscribe` statement** to return to
+   least-privilege. The subscription remains; generation keeps working with just
+   `bedrock:InvokeModel`.
+
+> **Re-subscription:** switching later to a **different, not-yet-subscribed
+> model** requires the subscription again — either repeat Option A/B for that
+> model, or have an admin subscribe it. Removing the permission is not
+> permanent lock-out; it just means new models need a fresh one-time subscribe.
+
+> **Org restrictions:** if an AWS Organizations **SCP** or a **Private
+> Marketplace** blocks subscribing, even a user with `aws-marketplace:Subscribe`
+> cannot complete it — an organization/procurement admin must allow the
+> subscription or add the product to the Private Marketplace.
 
 ## Region and model / inference-profile selection
 
