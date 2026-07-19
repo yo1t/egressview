@@ -39,7 +39,7 @@ function harness() {
     return ids.get(id);
   };
   const context = {
-    Intl, URLSearchParams, Date,
+    Intl, URLSearchParams, Date, currentLang: 'en',
     t: key => key,
     tVars: (key, values) => `${key}:${JSON.stringify(values)}`,
     document: {
@@ -59,6 +59,13 @@ function harness() {
 }
 
 describe('AI insights view', () => {
+  it('formats USD estimates as dollars in English and explicit USD in Japanese', () => {
+    const { context } = harness();
+    assert.equal(context.formatUsd(0.0012), '$0.0012');
+    context.currentLang = 'ja';
+    assert.match(context.formatUsd(0.0012), /^USD\s*0\.0012$/);
+  });
+
   it('calculates percentage deltas without dividing by zero', () => {
     const { context } = harness();
     assert.deepEqual({ ...context.deltaSummary(15, 10) }, { delta: 5, percent: 50 });
@@ -91,15 +98,38 @@ describe('AI insights view', () => {
     assert.equal(get('ai-cancel-btn').classList.contains('is-hidden'), true);
   });
 
+  it('renders monthly tokens, estimated cost, and an unpriced-model warning', () => {
+    const { context, get } = harness();
+    context.renderAiUsage({
+      current: { requests: 3, pricedRequests: 2, inputTokens: 1200, outputTokens: 300, totalTokens: 1500, estimatedCostUsd: 0.0084 },
+      previous: { requests: 1, pricedRequests: 1, inputTokens: 100, outputTokens: 50, totalTokens: 150, estimatedCostUsd: 0.0004 },
+    });
+    assert.equal(get('ai-usage-current-tokens').textContent, 'ai.usage.tokens:{"tokens":"1,500"}');
+    assert.equal(get('ai-usage-current-detail').textContent, 'ai.usage.detail:{"input":"1,200","output":"300"}');
+    assert.equal(get('ai-usage-current-cost').textContent, 'ai.usage.cost:{"cost":"$0.0084"}');
+    assert.equal(get('ai-usage-caveat').textContent, 'ai.usage.partial');
+  });
+
   it('renders persisted conversation messages as untrusted text', () => {
     const { context, get } = harness();
     context.renderChatMessages([
       { role: 'user', status: 'complete', body: '<img src=x onerror=alert(1)>' },
-      { role: 'assistant', status: 'failed', body: null },
+      {
+        role: 'assistant', status: 'complete', body: '<script>alert(1)</script>',
+        provider: 'anthropic', model: 'claude-sonnet-4-5', usageTotalTokens: 150,
+        estimatedCostUsd: 0.0012,
+      },
+      { role: 'assistant', status: 'failed', body: null, provider: 'openai', model: 'gpt-5.4' },
     ]);
     const children = get('ai-chat-messages').children;
-    assert.equal(children[0].textContent, '<img src=x onerror=alert(1)>');
-    assert.equal(children[1].textContent, 'ai.chat.failed');
-    assert.equal(children[1].classList.contains('is-failed'), true);
+    assert.equal(children[0].children[0].textContent, '<img src=x onerror=alert(1)>');
+    assert.equal(children[1].children[0].textContent, '<script>alert(1)</script>');
+    assert.equal(children[1].children[1].textContent,
+      'ai.chat.responseMeta:{"provider":"Anthropic","model":"claude-sonnet-4-5"} · ' +
+      'ai.chat.usagePriced:{"tokens":"150","cost":"$0.0012"}');
+    assert.equal(children[2].children[0].textContent, 'ai.chat.failed');
+    assert.equal(children[2].children[1].textContent,
+      'ai.chat.responseMeta:{"provider":"OpenAI","model":"gpt-5.4"} · ai.chat.usageUnavailable');
+    assert.equal(children[2].classList.contains('is-failed'), true);
   });
 });

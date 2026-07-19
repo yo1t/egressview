@@ -2,7 +2,7 @@
 import { t, tVars, currentLang, applyI18n, setCurrentLang } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, aggregateRouterHealth, setButtonLoading } from './utils.js?v=__ASSET_VERSION__';
 import { setHomeCountry, worldGeo } from './map-common.js?v=__ASSET_VERSION__';
-import { statsMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
+import { statsMode, currentView, refreshAiView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { updateStats, initStatsMaps, resetStatsMaps } from './stats.js?v=__ASSET_VERSION__';
 import { updateLogView } from './log.js?v=__ASSET_VERSION__';
 import { renderDevicesTable } from './devices.js?v=__ASSET_VERSION__';
@@ -438,6 +438,7 @@ document.getElementById('general-save-btn').addEventListener('click', async () =
         if (lastMeshNodes && lastClients) updateFilterTabs(lastMeshNodes, lastMainMac || '', lastClients);
         // Re-render stats if shown (to update legend labels)
         if (statsMode) updateStats();
+        if (currentView === 'ai') refreshAiView();
       }
       showStatus('general-status', t('settings.status.saved'), true);
       document.getElementById('s-retention').dataset.saved = String(newRetention);

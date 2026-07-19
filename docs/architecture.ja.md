@@ -60,12 +60,13 @@ EgressViewは1つのSQLite databaseをWAL modeで使用し、history、sessions�
 
 Migrationは末尾追加方式でfail-closedです。データ変更を伴うmigrationの前に空き容量を検査し、整合性を検証したbackupを作成してからtransactionを実行し、完了後のdatabaseも検証します。Restoreも同じ原則で、復元元検査、安全backup必須、置換、全利用者の再接続、復元後検査を行い、どこかで失敗すればrollbackします。
 
-Schema v5ではrouterの観測情報を`connection_observations`だけに保存し、旧`connections.source` columnは削除済みです。APIの互換用`source`値は、観測したrouterのkindから導出します。Observation consistency診断では観測漏れ、孤立した観測、router metadataの欠落を検査します。
+Schema v5ではrouterの観測情報を`connection_observations`だけに保存し、旧`connections.source` columnは削除済みです。APIの互換用`source`値は、観測したrouterのkindから導出します。Observation consistency診断では観測漏れ、孤立した観測、router metadataの欠落を検査します。Schema v6はappend-only AI会話、v7はproviderが返したtoken使用量と呼び出し時点のUSD概算を保存します。過去会話や未知modelの料金は推測しません。
 
 ## Interface
 
-- **Browser UI:** static single-page applicationと認証済みSocket.IO update。
-- **REST:** `/api`配下の管理・検索API 53本。[REST APIリファレンス](api-reference.ja.md)を参照してください。
+- **Browser UI:** AI洞察をスタートページにしたstatic single-page applicationと認証済みSocket.IO update。
+- **REST:** `/api`配下の管理・検索API 68本。[REST APIリファレンス](api-reference.ja.md)を参照してください。
+- **AI provider:** Ollama / Anthropic / OpenAI / Amazon Bedrockへの明示操作型read-only分析。設定とprivacy境界は[AI洞察設定ガイド](setup-ai-insights.ja.md)を参照してください。
 - **MCP:** stdioまたは認証済みHTTPで利用する11本のread/write tool。[MCP設定ガイド](setup-mcp.ja.md)を参照してください。
 - **Export:** 履歴全体をmemoryへ載せない、上限付きstreaming CSV/JSON。
 - **通知:** 任意のSlack送信。Slack無効時も検出結果はlocal notification logへ保存します。

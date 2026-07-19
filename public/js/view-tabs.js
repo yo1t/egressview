@@ -1,11 +1,11 @@
 // ─── View tabs ────────────────────────────────────────────────────────────────
 
-var currentView = 'graph';
+var currentView = 'ai';
 var statsMode = false;
 var logMode = false;
 var devicesMode = false;
 var nlMode = false;
-var aiMode = false;
+var aiMode = true;
 var viewTabHandlers = {};
 
 function setViewTabHandlers(handlers) {

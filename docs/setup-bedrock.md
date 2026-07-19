@@ -168,3 +168,15 @@ The **Save & test connection** button, for Bedrock, both:
 
 A credential, permission, throttling, timeout, or unsupported model/region
 problem is reported as a short error message.
+
+## Token usage and estimated cost
+
+Successful Converse usage is appended to schema v7. The AI Insights start page
+shows current/previous-month tokens and an estimated USD cost, while each saved
+assistant answer shows its provider, model, tokens, and estimate. English uses
+`$0.0012`; Japanese uses explicit `USD 0.0012` notation.
+
+This is not the AWS bill. It uses the embedded price table effective when the
+request was recorded and excludes Guardrails, prompt caching, tax, exchange
+rates, contractual discounts, and other add-ons. Unknown models retain token
+counts but no guessed cost. See the [AI Insights setup guide](setup-ai-insights.md).

@@ -129,7 +129,8 @@ AI insights always shows locally calculated facts. Only after an explicit user a
 - `POST /api/ai/guardrails` accepts a Bedrock `region` and lists that region's Guardrails (id, name, and versions) without running inference. Fail-open: a missing `bedrock:ListGuardrails` permission returns an empty list so the settings UI falls back to manual guardrail entry.
 - `POST /api/ai/test` accepts an empty JSON object. Fetch-based providers retrieve at most 200 model IDs (10-second timeout, 1 MB limit). Bedrock runs fail-open model discovery and additionally sends a short fixed string via Converse to verify `bedrock:InvokeModel` permission (no network, device, or threat data is sent).
 - `GET /api/ai/facts` requires `from` and accepts `to` as epoch milliseconds. It returns current and immediately preceding equal-period counts for connections, devices, destinations, and threat levels, plus credential-free router collection status. The range is capped at 14 days and no data is sent to an AI provider.
-- `POST /api/ai/analyze` accepts `from` and optional `to`, then sends aggregates without internal IPs, MAC addresses, device names, router management details, or raw logs to the selected provider. Externally transmitting providers (Anthropic/OpenAI/Bedrock) require both saved consent and `cloudConsentConfirmed: true` on each request. The range is capped at 14 days, timeout is 30 seconds, and only one analysis may run server-wide.
+- `POST /api/ai/analyze` accepts `from` and optional `to`, then sends connection aggregates including destination IPs, hostnames, device names, and MAC addresses, but never credentials, router management details, or raw logs. Externally transmitting providers (Anthropic/OpenAI/Bedrock) require both saved consent and `cloudConsentConfirmed: true` on each request. The range is capped at 14 days, timeout is 30 seconds, and only one analysis may run server-wide.
+- `GET /api/ai/usage/monthly` accepts the browser `timezoneOffset` in minutes and returns current/previous local-calendar-month request and token totals. Successful Ollama, Anthropic, OpenAI, and Bedrock calls are appended to v7 SQLite with the provider/model and the price-table version used for the USD estimate. Unknown model prices are reported separately rather than guessed; add-on charges such as Bedrock Guardrails are excluded. Conversation retrieval joins `usageInputTokens`, `usageOutputTokens`, `usageTotalTokens`, `estimatedCostUsd`, and `pricingVersion` from the same request onto assistant messages; history created before usage recording keeps provider/model with null usage instead of inferred values. The UI uses `$` in English and explicit `USD` notation in Japanese without currency conversion.
 - `POST /api/ai/chat` accepts a `message` of at most 4,000 characters, a range, and optional `conversationId` and `requestId`. It appends the user row to v6 SQLite before calling AI, then appends an assistant row on success or a body-free failure row. The same `requestId + role` is never duplicated.
 - `GET /api/ai/conversations` returns at most 100 conversations plus stored counts and body bytes. `GET /api/ai/conversations/:id` returns at most 500 messages in append order, while `DELETE /api/ai/conversations/:id` is the only explicit conversation deletion path. Restart and configuration changes never update or truncate existing rows.
 
@@ -139,7 +140,7 @@ Restore is fail-closed: EgressView validates the source, confirms a safety backu
 
 ## Endpoint catalog
 
-All 66 implemented REST endpoints are listed below. **Public** means no token is required; every other row requires `X-Admin-Token`.
+All 68 implemented REST endpoints are listed below. **Public** means no token is required; every other row requires `X-Admin-Token`.
 
 | Area | Method and path | Access |
 |---|---|---|
@@ -197,6 +198,7 @@ All 66 implemented REST endpoints are listed below. **Public** means no token is
 | AI configuration | `POST /api/ai/guardrails` | Protected; discovers Bedrock guardrails without inference (fail-open) |
 | AI configuration | `POST /api/ai/test` | Protected; retrieves model IDs without sending network data |
 | AI insights | `GET /api/ai/facts` | Protected; local facts and prior-period comparison only |
+| AI insights | `GET /api/ai/usage/monthly` | Protected; current and previous local-month token usage and approximate USD cost |
 | AI insights | `POST /api/ai/analyze` | Protected; manually analyzes aggregates (incl. destination IPs, hostnames, device names, MAC); cloud requires double consent |
 | AI chat | `POST /api/ai/chat` | Protected; appends the question first and stores an answer or failure row |
 | AI chat | `GET /api/ai/conversations` | Protected; conversation list and storage usage |

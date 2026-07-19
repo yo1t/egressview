@@ -42,23 +42,29 @@ function fakeControl({ foundation = [], profiles = [], guardrails = [], failProf
     },
     ListFoundationModelsCommand: class { constructor() { this.kind = 'fm'; } },
     ListInferenceProfilesCommand: class { constructor() { this.kind = 'ip'; } },
-    ListGuardrailsCommand: class { constructor() { this.kind = 'gr'; } },
+    ListGuardrailsCommand: class { constructor(input = {}) { this.kind = 'gr'; this.input = input; } },
   };
 }
 
 describe('ai-bedrock: converse', () => {
   it('invokes Converse with region + modelId and returns joined text', async () => {
-    const runtime = fakeRuntime({ onSend: () => ({ output: { message: { content: [{ text: '概要' }, { text: '異常なし' }] } } }) });
+    const runtime = fakeRuntime({ onSend: () => ({
+      output: { message: { content: [{ text: '概要' }, { text: '異常なし' }] } },
+      usage: { inputTokens: 40, outputTokens: 12, totalTokens: 52 },
+    }) });
     const transport = createBedrockTransport({ runtime: runtime.mod });
+    let usage;
     const text = await transport.converse({
       region: 'ap-northeast-1',
       modelId: 'jp.anthropic.claude-sonnet-4-5-20250929-v1:0',
       prompt: 'analyze this',
+      onUsage: value => { usage = value; },
     });
     assert.equal(text, '概要\n異常なし');
     assert.equal(runtime.constructed[0].region, 'ap-northeast-1');
     assert.equal(runtime.sent[0].command.input.modelId, 'jp.anthropic.claude-sonnet-4-5-20250929-v1:0');
     assert.deepEqual(runtime.sent[0].command.input.messages, [{ role: 'user', content: [{ text: 'analyze this' }] }]);
+    assert.deepEqual(usage, { inputTokens: 40, outputTokens: 12, totalTokens: 52 });
   });
 
   it('reuses one client per region', async () => {
@@ -194,6 +200,39 @@ describe('ai-bedrock: listGuardrails (fail-open discovery)', () => {
     assert.deepEqual(first.versions, ['DRAFT', '2']);
     const second = result.find(g => g.id === 'gr-2');
     assert.deepEqual(second.versions, ['DRAFT']);
+  });
+
+  it('follows Guardrail pagination tokens and merges versions across pages', async () => {
+    const requests = [];
+    const control = {
+      BedrockClient: class {
+        async send(command, options) {
+          requests.push({ input: command.input, options });
+          if (!command.input.nextToken) {
+            return {
+              guardrails: [{ id: 'gr-1', name: 'PII Filter', version: '1' }],
+              nextToken: 'page-2',
+            };
+          }
+          return { guardrails: [
+            { id: 'gr-1', name: 'PII Filter', version: '2' },
+            { id: 'gr-2', name: 'Toxicity', version: 'DRAFT' },
+          ] };
+        }
+      },
+      ListGuardrailsCommand: class { constructor(input) { this.input = input; } },
+    };
+    const result = await createBedrockTransport({ control })
+      .listGuardrails({ region: 'ap-northeast-1' });
+
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map(request => request.input), [
+      { maxResults: 100 },
+      { maxResults: 100, nextToken: 'page-2' },
+    ]);
+    assert.ok(requests.every(request => request.options.abortSignal));
+    assert.deepEqual(result.find(guardrail => guardrail.id === 'gr-1').versions, ['DRAFT', '1', '2']);
+    assert.deepEqual(result.find(guardrail => guardrail.id === 'gr-2').versions, ['DRAFT']);
   });
 
   it('returns [] (fail-open) on error or missing region', async () => {

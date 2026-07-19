@@ -357,6 +357,9 @@ function updateHeader(data) {
 
 // The summary is also the safety gate for the bounded detailed live view.
 function buildGraphFromConnections({ resetPositions = false } = {}) {
+  // Keep hidden views cheap and avoid creating a zero-sized D3 simulation.
+  // The graph tab rebuilds from the latest cached summary when it becomes active.
+  if (currentView !== 'graph') return;
   const tr = typeof getTimeRange === 'function' ? getTimeRange() : { from: null, to: null };
   if (graphSummary && graphSummaryKey === currentGraphRangeKey(tr.from, tr.to)) {
     if (shouldUseDetailedGraph(graphSummary, currentTimeFilter)) {

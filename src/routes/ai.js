@@ -6,6 +6,8 @@ const { parseRequest } = require('../http-validation');
 const { buildAiFacts } = require('../ai-facts');
 const { buildAiContext } = require('../ai-context');
 const { randomUUID } = require('node:crypto');
+const { monthlyRanges } = require('../ai-usage');
+const logger = require('../logger');
 
 const providerSchema = z.enum(['disabled', 'ollama', 'anthropic', 'openai', 'bedrock']);
 const cloudProviderSchema = z.enum(['anthropic', 'openai']);
@@ -68,9 +70,38 @@ const chatSchema = analysisSchema.extend({
   priorAnalysis: z.string().max(8000).optional(),
 });
 const conversationParamsSchema = z.object({ id: idSchema }).strict();
+const usageQuerySchema = z.object({
+  timezoneOffset: z.coerce.number().int().min(-840).max(840).default(0),
+}).strict();
 
 module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, history, threatIntel, routerManager }) {
   const router = Router();
+
+  function persistUsage(result, { kind, requestId = randomUUID(), conversationId = null } = {}) {
+    if (!result?.usage || typeof history?.appendAiUsage !== 'function') return;
+    const pricing = result.pricing || {};
+    try {
+      history.appendAiUsage({
+        usageId: randomUUID(),
+        requestId,
+        conversationId,
+        kind,
+        createdAt: result.generatedAt || Date.now(),
+        provider: result.provider,
+        model: result.model || '',
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        totalTokens: result.usage.totalTokens,
+        estimatedCostUsd: Number.isFinite(result.estimatedCostUsd) ? result.estimatedCostUsd : null,
+        pricingVersion: pricing.pricingVersion || null,
+        inputUsdPerMillion: pricing.inputUsdPerMillion ?? null,
+        outputUsdPerMillion: pricing.outputUsdPerMillion ?? null,
+      });
+    } catch (error) {
+      // Usage telemetry must not discard a successfully generated answer.
+      logger.warn('[ai] Usage persistence failed:', error.message);
+    }
+  }
 
   router.get('/config/ai', requireAdmin, (_req, res) => {
     res.json(aiProvider.getPublicConfig());
@@ -115,7 +146,9 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     const parsed = parseRequest(emptySchema, req.body, res);
     if (!parsed.ok) return;
     try {
-      res.json({ success: true, ...await aiProvider.testConnection() });
+      const result = await aiProvider.testConnection();
+      persistUsage(result, { kind: 'test' });
+      res.json({ success: true, ...result });
     } catch (error) {
       res.status(400).json({ success: false, error: error.message });
     }
@@ -175,6 +208,21 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     }
   });
 
+  router.get('/ai/usage/monthly', requireAdmin, (req, res) => {
+    const parsed = parseRequest(usageQuerySchema, req.query, res);
+    if (!parsed.ok) return;
+    try {
+      const ranges = monthlyRanges(Date.now(), parsed.data.timezoneOffset);
+      res.json({
+        pricing: { currency: 'USD', approximate: true },
+        current: { ...ranges.current, ...history.summarizeAiUsage(ranges.current.from, ranges.current.to) },
+        previous: { ...ranges.previous, ...history.summarizeAiUsage(ranges.previous.from, ranges.previous.to) },
+      });
+    } catch {
+      res.status(500).json({ error: 'AI usage could not be calculated' });
+    }
+  });
+
   router.post('/ai/analyze', requireAdmin, async (req, res) => {
     const parsed = parseRequest(analysisSchema, req.body, res);
     if (!parsed.ok) return;
@@ -190,11 +238,13 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
       const routers = routerManager.list();
       const facts = buildAiFacts({ history, threatIntel, routers, from, to });
       const context = buildAiContext({ facts, history, routers, from, to, threatIntel });
-      res.json({ success: true, range: { from, to }, ...await aiProvider.generateInsight(context, {
+      const result = await aiProvider.generateInsight(context, {
         signal: controller.signal,
         cloudConsentConfirmed: parsed.data.cloudConsentConfirmed,
         language: parsed.data.language,
-      }) });
+      });
+      persistUsage(result, { kind: 'analysis' });
+      res.json({ success: true, range: { from, to }, ...result });
     } catch (error) {
       const status = error.code === 'AI_BUSY' ? 409 : error.code === 'AI_CONSENT_REQUIRED' ? 403 : 400;
       res.status(status).json({ success: false, error: error.message });
@@ -277,7 +327,15 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
         createdAt: Date.now(), provider: response.provider, model: response.model, rangeFrom: from, rangeTo: to,
         status: 'complete', errorCode: null,
       });
-      res.json({ success: true, conversationId, requestId, message: assistant });
+      persistUsage(response, { kind: 'chat', requestId, conversationId });
+      res.json({
+        success: true,
+        conversationId,
+        requestId,
+        message: assistant,
+        usage: response.usage,
+        estimatedCostUsd: response.estimatedCostUsd,
+      });
     } catch (error) {
       history.appendMessage({
         messageId: randomUUID(), conversationId, requestId, role: 'assistant', body: null,
