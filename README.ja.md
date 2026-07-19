@@ -72,6 +72,7 @@ https://github.com/user-attachments/assets/9448d75b-a7fe-4363-8d35-da17abaed0ee
 
 ## スクリーンショット
 
+![AI洞察によるネットワークの現在地](docs/assets/egressview-ai-insights-ja.png)
 ![グラフマップによる全体把握](docs/assets/egressview-graph-map.png)
 ![統計情報ビュー](docs/assets/egressview-statistics.png)
 ![通信ログのドリルダウン](docs/assets/egressview-connection-log.png)

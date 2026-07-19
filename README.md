@@ -74,6 +74,7 @@ Connection Log and Devices let you drill down into suspicious destinations, nois
 
 ## Screenshots
 
+![AI Insights overview](docs/assets/egressview-ai-insights-en.png)
 ![Graph Map overview](docs/assets/egressview-graph-map.png)
 ![Statistics view](docs/assets/egressview-statistics.png)
 ![Connection Log drill-down](docs/assets/egressview-connection-log.png)
