@@ -1191,6 +1191,11 @@ test('settings tabs save and connection buttons work without console errors', as
   await expect(page.locator('#ai-model-options option')).toHaveCount(2);
   await expect(page.locator('#ai-model-options img')).toHaveCount(0);
   await expect(page.locator('#s-ai-key')).toHaveValue('');
+  // The model dropdown (select) is populated and selecting an entry fills the model input.
+  await expect(page.locator('#s-ai-model-select')).toBeVisible();
+  const pickedModel = await page.locator('#s-ai-model-select option').nth(1).getAttribute('value');
+  await page.locator('#s-ai-model-select').selectOption(pickedModel);
+  await expect(page.locator('#s-ai-model')).toHaveValue(pickedModel);
 
   await page.click('.settings-tab[data-tab="backup"]');
   await expect(page.locator('#pane-backup')).toHaveClass(/active/);
