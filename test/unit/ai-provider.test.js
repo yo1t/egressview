@@ -241,6 +241,35 @@ describe('AI provider — Amazon Bedrock (keyless, region-based, Converse)', () 
     await assert.rejects(provider.generateInsight({}, { cloudConsentConfirmed: true }), /bedrock model is not configured/);
   });
 
+  it('testConnection discovers models first; no model returns candidates unverified (no converse)', async () => {
+    let converseCalls = 0;
+    const provider = bedrockProvider({
+      converse: async () => { converseCalls++; return 'ok'; },
+      listModels: async () => ['jp.anthropic.claude-sonnet-4-5-20250929-v1:0', 'jp.anthropic.claude-haiku-4-5-v1:0'],
+    });
+    provider.configure({ provider: 'bedrock', region: 'ap-northeast-1', cloudConsent: { bedrock: true } });
+    const result = await provider.testConnection();
+    assert.equal(result.verified, false);
+    assert.deepEqual(result.models, ['jp.anthropic.claude-sonnet-4-5-20250929-v1:0', 'jp.anthropic.claude-haiku-4-5-v1:0']);
+    assert.equal(converseCalls, 0, 'no InvokeModel check without a model');
+  });
+
+  it('testConnection verifies InvokeModel via converse once a model is set', async () => {
+    const calls = [];
+    const provider = bedrockProvider({
+      converse: async (args) => { calls.push(args); return 'OK'; },
+      listModels: async () => ['jp.anthropic.claude-sonnet-4-5-20250929-v1:0'],
+    });
+    provider.configure({
+      provider: 'bedrock', region: 'ap-northeast-1',
+      models: { bedrock: 'jp.anthropic.claude-sonnet-4-5-20250929-v1:0' }, cloudConsent: { bedrock: true },
+    });
+    const result = await provider.testConnection();
+    assert.equal(result.verified, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].modelId, 'jp.anthropic.claude-sonnet-4-5-20250929-v1:0');
+  });
+
   it('forwards Guardrails only when enabled with an id (opt-in, default off)', async () => {
     const calls = [];
     const provider = bedrockProvider({ converse: async (args) => { calls.push(args); return 'ok'; } });

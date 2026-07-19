@@ -275,7 +275,15 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
     if (adapter.needsKey && !keys[provider]) throw new Error('API key is not configured');
     if (adapter.needsRegion && !region) throw new Error('AWS region is not configured');
     if (adapter.transport === 'sdk') {
-      if (!models[provider]) throw new Error(`${provider} model is not configured`);
+      // Discovery first so the model dropdown can be populated before a model is
+      // chosen (avoids a chicken-and-egg where the InvokeModel check needs a
+      // model that the user can only discover via this same test).
+      const { models: discovered } = await listModels().catch(() => ({ models: [] }));
+      if (!models[provider]) {
+        // No model selected yet: return the candidate list unverified so the UI
+        // can prompt the user to pick one and test again.
+        return { provider, models: discovered, verified: false };
+      }
       if (!bedrock?.converse) throw new Error('Bedrock transport is not configured');
       await bedrock.converse({
         region,
@@ -285,7 +293,6 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
         maxBytes: MAX_RESPONSE_BYTES,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-      const { models: discovered } = await listModels().catch(() => ({ models: [] }));
       return { provider, models: discovered, verified: true };
     }
     return listModels();
