@@ -78,6 +78,8 @@
     "benchmark:poll-batch": "node scripts/benchmark-poll-batch.js 600"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock": "^3.1090.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1090.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "axios": "^1.18.1",
     "better-sqlite3": "^12.11.1",
@@ -88,14 +90,6 @@
     "socket.io": "^4.7.0",
     "ssh2": "^1.17.0",
     "zod": "^4.4.3"
-  },
-  "peerDependencies": {
-    "@aws-sdk/client-bedrock": "^3.1090.0",
-    "@aws-sdk/client-bedrock-runtime": "^3.1090.0"
-  },
-  "peerDependenciesMeta": {
-    "@aws-sdk/client-bedrock": { "optional": true },
-    "@aws-sdk/client-bedrock-runtime": { "optional": true }
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

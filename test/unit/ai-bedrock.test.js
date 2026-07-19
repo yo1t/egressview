@@ -104,6 +104,28 @@ describe('ai-bedrock: converse', () => {
     await assert.rejects(transport.converse({ region: 'us-east-1', modelId: 'm', prompt: 'a' }),
       error => error.message === 'Bedrock request failed' && !/secret-detail/.test(error.message));
   });
+
+  it('reports a timeout (not cancellation) when the abort reason is a TimeoutError', async () => {
+    const runtime = fakeRuntime({ onSend: () => { const e = new Error('aborted'); e.name = 'AbortError'; throw e; } });
+    const transport = createBedrockTransport({ runtime: runtime.mod });
+    const signal = { aborted: true, reason: { name: 'TimeoutError' } };
+    await assert.rejects(transport.converse({ region: 'us-east-1', modelId: 'm', prompt: 'a', signal }), /timed out/);
+  });
+
+  it('reports cancellation when aborted without a timeout reason', async () => {
+    const runtime = fakeRuntime({ onSend: () => { const e = new Error('aborted'); e.name = 'AbortError'; throw e; } });
+    const transport = createBedrockTransport({ runtime: runtime.mod });
+    const signal = { aborted: true, reason: { name: 'AbortError' } };
+    await assert.rejects(transport.converse({ region: 'us-east-1', modelId: 'm', prompt: 'a', signal }), /cancelled/);
+  });
+
+  it('passes the caller abort signal to the Converse send', async () => {
+    const runtime = fakeRuntime({ onSend: () => ({ output: { message: { content: [{ text: 'ok' }] } } }) });
+    const transport = createBedrockTransport({ runtime: runtime.mod });
+    const signal = { aborted: false };
+    await transport.converse({ region: 'us-east-1', modelId: 'm', prompt: 'a', signal });
+    assert.equal(runtime.sent[0].opts.abortSignal, signal);
+  });
 });
 
 describe('ai-bedrock: listModels (fail-open discovery)', () => {
@@ -136,6 +158,24 @@ describe('ai-bedrock: listModels (fail-open discovery)', () => {
     assert.deepEqual(await transport.listModels({ region: 'us-east-1' }), []);
     assert.deepEqual(await transport.listModels({}), []);
   });
+
+  it('bounds both control-plane calls with an abort signal (timeout)', async () => {
+    const opts = [];
+    const control = {
+      BedrockClient: class {
+        async send(command, o) {
+          opts.push(o);
+          return command.kind === 'fm' ? { modelSummaries: [] } : { inferenceProfileSummaries: [] };
+        }
+      },
+      ListFoundationModelsCommand: class { constructor() { this.kind = 'fm'; } },
+      ListInferenceProfilesCommand: class { constructor() { this.kind = 'ip'; } },
+    };
+    const transport = createBedrockTransport({ control });
+    await transport.listModels({ region: 'us-east-1', timeoutMs: 5000 });
+    assert.equal(opts.length, 2);
+    assert.ok(opts.every(o => o && o.abortSignal), 'both sends receive an abortSignal');
+  });
 });
 
 describe('ai-bedrock: optional SDK not installed', () => {
@@ -162,6 +202,39 @@ describe('ai-bedrock: optional SDK not installed', () => {
     const boom = () => { throw new Error('syntax error in dependency'); };
     const transport = createBedrockTransport({ requireModule: boom });
     await assert.rejects(transport.converse({ region: 'us-east-1', modelId: 'm', prompt: 'a' }), /syntax error in dependency/);
+  });
+});
+
+describe('ai-bedrock: real AWS SDK contract (no network)', () => {
+  // The AWS SDK ships as a standard dependency, so verify our usage matches the
+  // real API surface. This catches SDK drift without making any network call.
+  const runtime = require('@aws-sdk/client-bedrock-runtime');
+  const control = require('@aws-sdk/client-bedrock');
+
+  it('exposes the runtime client + Converse command we depend on', () => {
+    assert.equal(typeof runtime.BedrockRuntimeClient, 'function');
+    assert.equal(typeof runtime.ConverseCommand, 'function');
+    const command = new runtime.ConverseCommand({
+      modelId: 'jp.anthropic.claude-sonnet-4-5-20250929-v1:0',
+      messages: [{ role: 'user', content: [{ text: 'ping' }] }],
+      inferenceConfig: { maxTokens: 8 },
+    });
+    assert.equal(command.input.modelId, 'jp.anthropic.claude-sonnet-4-5-20250929-v1:0');
+    assert.equal(command.input.messages[0].content[0].text, 'ping');
+  });
+
+  it('exposes the control client + discovery commands we depend on', () => {
+    assert.equal(typeof control.BedrockClient, 'function');
+    assert.equal(typeof control.ListFoundationModelsCommand, 'function');
+    assert.equal(typeof control.ListInferenceProfilesCommand, 'function');
+    const command = new control.ListFoundationModelsCommand({ byOutputModality: 'TEXT' });
+    assert.equal(command.input.byOutputModality, 'TEXT');
+  });
+
+  it('createBedrockTransport() builds against the real SDK without injection', () => {
+    const transport = createBedrockTransport();
+    assert.equal(typeof transport.converse, 'function');
+    assert.equal(typeof transport.listModels, 'function');
   });
 });
 

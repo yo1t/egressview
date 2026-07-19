@@ -8,27 +8,16 @@ AWS SDK for JavaScript v3 の **default credential provider chain** に完全委
 > AI は読み取り専用です。送信されるのは上限内・匿名化済みの集計のみで、生の IP・
 > MAC・端末名・ルーター認証情報・通信ログ全件は送信しません。
 
-## Bedrock サポートを有効化（SDK を追加インストール）
-
-AWS SDK は **optional peer dependency** で、**デフォルトではインストールされません**
-（基本インストールを軽量に保つため）。Bedrock を使うホストで一度だけインストールします。
-
-```bash
-npm install @aws-sdk/client-bedrock-runtime @aws-sdk/client-bedrock
-```
-
-SDK 未インストールの間に Amazon Bedrock を選んで接続確認すると、次のメッセージが
-返ります: *「Amazon Bedrock support is not installed. Run: npm install
-@aws-sdk/client-bedrock-runtime @aws-sdk/client-bedrock」*。他のプロバイダー
-（Ollama・Anthropic・OpenAI）や EgressView の他機能は SDK 無しで動作します。
-
 ## 前提条件
 
-1. 上記の Bedrock SDK をインストール済みであること。
-2. 対象リージョンで Amazon Bedrock を有効化した AWS アカウント。
-3. 使用するモデルの **モデルアクセス許可**（Bedrock コンソール → *モデルアクセス*）。
+AWS SDK（`@aws-sdk/client-bedrock-runtime` と `@aws-sdk/client-bedrock`）は通常
+依存として同梱されるため、`npm install` の時点で Bedrock サポートも入ります
+（追加インストール不要）。
+
+1. 対象リージョンで Amazon Bedrock を有効化した AWS アカウント。
+2. 使用するモデルの **モデルアクセス許可**（Bedrock コンソール → *モデルアクセス*）。
    アクセスはリージョン単位・モデル単位です。
-4. EgressView を動かすホストで、AWS SDK 標準 chain により解決できる認証情報。
+3. EgressView を動かすホストで、AWS SDK 標準 chain により解決できる認証情報。
 
 ## 環境別の認証
 

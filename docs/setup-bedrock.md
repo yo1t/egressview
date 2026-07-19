@@ -9,28 +9,16 @@ inference-profile ID** in the settings UI.
 > AI is read-only. Only bounded, anonymized aggregates are sent — never raw IPs,
 > MAC addresses, device names, router credentials, or full connection logs.
 
-## Enable Bedrock support (install the SDK)
-
-The AWS SDK is an **optional peer dependency** and is **not installed by
-default**, keeping the base install lean. Install it once on the host that will
-use Bedrock:
-
-```bash
-npm install @aws-sdk/client-bedrock-runtime @aws-sdk/client-bedrock
-```
-
-Until the SDK is installed, selecting Amazon Bedrock and testing the connection
-returns: *"Amazon Bedrock support is not installed. Run: npm install
-@aws-sdk/client-bedrock-runtime @aws-sdk/client-bedrock"*. All other providers
-(Ollama, Anthropic, OpenAI) and the rest of EgressView work without it.
-
 ## Prerequisites
 
-1. The Bedrock SDK installed (see above).
-2. An AWS account with Amazon Bedrock enabled in your chosen region.
-3. **Model access granted** for the model(s) you intend to use (Bedrock console →
+The AWS SDK (`@aws-sdk/client-bedrock-runtime` and `@aws-sdk/client-bedrock`)
+ships as a standard dependency, so `npm install` already includes Bedrock
+support — no separate install step.
+
+1. An AWS account with Amazon Bedrock enabled in your chosen region.
+2. **Model access granted** for the model(s) you intend to use (Bedrock console →
    *Model access*). Access is per-region and per-model.
-4. Credentials resolvable by the AWS SDK default chain on the host running
+3. Credentials resolvable by the AWS SDK default chain on the host running
    EgressView (see below).
 
 ## Authentication by environment

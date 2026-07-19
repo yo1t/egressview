@@ -84,6 +84,15 @@ function createBedrockTransport({ runtime = null, control = null, requireModule 
         { abortSignal: signal },
       );
     } catch (err) {
+      // AbortSignal.timeout() surfaces as an AbortError; distinguish a real
+      // timeout (reason is a TimeoutError) from a caller cancellation before
+      // falling back to the generic SDK error mapping.
+      if (err?.name === 'AbortError' || err?.name === 'TimeoutError') {
+        if (err?.name === 'TimeoutError' || signal?.reason?.name === 'TimeoutError') {
+          throw new Error('Bedrock request timed out', { cause: err });
+        }
+        throw new Error('Bedrock request was cancelled', { cause: err });
+      }
       throw mapAwsError(err);
     }
     const text = extractText(output);
@@ -92,18 +101,20 @@ function createBedrockTransport({ runtime = null, control = null, requireModule 
   }
 
   // Best-effort discovery. Any failure returns [] so the caller falls back to
-  // direct model/inference-profile id entry (fail-open by design).
-  async function listModels({ region }) {
+  // direct model/inference-profile id entry (fail-open by design). A timeout
+  // bounds the two control-plane calls so "test connection" never hangs.
+  async function listModels({ region, timeoutMs = 10_000 }) {
     if (!region) return [];
+    const abortSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
     try {
       const { BedrockClient, ListFoundationModelsCommand, ListInferenceProfilesCommand } = getControl();
       const client = new BedrockClient({ region });
       const ids = new Set();
-      const fm = await client.send(new ListFoundationModelsCommand({ byOutputModality: 'TEXT' }));
+      const fm = await client.send(new ListFoundationModelsCommand({ byOutputModality: 'TEXT' }), { abortSignal });
       for (const model of fm?.modelSummaries || []) if (model?.modelId) ids.add(model.modelId);
       // Inference profiles (incl. geographic CRIS) are optional; ignore failure.
       try {
-        const profiles = await client.send(new ListInferenceProfilesCommand({}));
+        const profiles = await client.send(new ListInferenceProfilesCommand({}), { abortSignal });
         for (const p of profiles?.inferenceProfileSummaries || []) {
           if (p?.inferenceProfileId) ids.add(p.inferenceProfileId);
         }
