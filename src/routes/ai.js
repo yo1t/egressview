@@ -121,6 +121,9 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     }
   });
 
+  // Discovery-only model listing (no InvokeModel verification, no config save).
+  // Lets the settings UI populate the model dropdown for a region so the
+  // inference-profile filter has data to work with, without a full test.
   router.post('/ai/models', requireAdmin, async (req, res) => {
     const parsed = parseRequest(bedrockModelDiscoverySchema, req.body, res);
     if (!parsed.ok) return;
