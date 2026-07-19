@@ -117,6 +117,42 @@ describe('AI insight generation', () => {
     assert.match(result.text, /異常なし/);
   });
 
+  it('forbids tables, caps length, and honors the selected output language', async () => {
+    const prompts = {};
+    const provider = createAiProvider({ fetchImpl: async (_url, options) => {
+      prompts.last = JSON.parse(options.body).prompt;
+      return jsonResponse({ response: 'ok' });
+    } });
+    provider.configure({ provider: 'ollama', models: { ollama: 'm' } });
+
+    await provider.generateInsight({ current: {} }, { language: 'en' });
+    assert.match(prompts.last, /Respond in English/);
+    assert.match(prompts.last, /Recommended actions/);
+    assert.match(prompts.last, /Do not use tables/);
+    assert.match(prompts.last, /at most about 20 lines/);
+
+    await provider.generateInsight({ current: {} }, { language: 'ja' });
+    assert.match(prompts.last, /Respond in Japanese/);
+    assert.match(prompts.last, /推奨アクション/);
+    assert.match(prompts.last, /Do not use tables/);
+  });
+
+  it('includes the prior analysis and question in chat prompts', async () => {
+    let sentPrompt;
+    const provider = createAiProvider({ fetchImpl: async (_url, options) => {
+      sentPrompt = JSON.parse(options.body).prompt;
+      return jsonResponse({ response: 'ok' });
+    } });
+    provider.configure({ provider: 'ollama', models: { ollama: 'm' } });
+    await provider.generateInsight({ current: {} }, {
+      question: 'なぜ危険なの？',
+      priorAnalysis: 'PRIOR-ANALYSIS-TEXT',
+      conversation: [],
+    });
+    assert.match(sentPrompt, /PRIOR-ANALYSIS-TEXT/);
+    assert.match(sentPrompt, /なぜ危険なの/);
+  });
+
   it('requires explicit cloud consent and limits concurrent work', async () => {
     const cloud = createAiProvider();
     cloud.configure({ provider: 'openai', models: { openai: 'gpt-test' }, keys: { openai: 'key' } });

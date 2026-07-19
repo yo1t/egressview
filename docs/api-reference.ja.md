@@ -121,7 +121,7 @@ EgressViewには、Yamaha/Ciscoを混在して最大10台登録できます。
 
 ## AIプロバイダー設定
 
-AI洞察はローカル集計を常時表示し、利用者が明示的に実行した場合だけ、匿名化済み集計を設定済みのAI providerへ送信します。
+AI洞察はローカル集計を常時表示し、利用者が明示的に実行した場合だけ、通信先IP・ホスト名・端末名を含む集計を設定済みのAI providerへ送信します。MAC・認証情報・生の通信ログは送信しません。
 
 - `GET /api/config/ai`は選択中provider、モデルID、Ollama endpoint、AWS `region`、キー設定済み・同意済みフラグを返します。APIキー値は返しません。
 - `POST /api/config/ai`は`provider`（`disabled`、`ollama`、`anthropic`、`openai`、`bedrock`）、provider別`models`、`ollamaEndpoint`、Bedrock用`region`、任意のcloud `keys`と`clearKeys`を受け付けます。外部送信を伴うprovider（`anthropic`、`openai`、`bedrock`）選択時はprovider別`cloudConsent: true`が必須です。Bedrockはキーを保存せず、認証はAWS SDKのdefault credential chainに委譲します。`models.bedrock`は基盤モデルID、cross-region推論プロファイルID（`global`/`us`/`eu`/`apac`/`jp`/`au`）、またはARN（最大400文字）を受け付けます。任意の`guardrail`（`{ enabled, id, version }`）でBedrock Guardrailを有効化でき、有効時はConverseの`guardrailConfig`へ渡します（`bedrock:ApplyGuardrail`が必要）。Guardrailは日本内処理を保証しない点に注意（`docs/setup-bedrock.ja.md`参照）。
@@ -193,7 +193,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | AI設定 | `POST /api/config/ai` | 認証必須。provider、model、endpoint、cloud APIキーを保存 |
 | AI設定 | `POST /api/ai/test` | 認証必須。通信データを送らずモデルIDを取得 |
 | AI洞察 | `GET /api/ai/facts` | 認証必須。local factsと直前期間比較のみ |
-| AI洞察 | `POST /api/ai/analyze` | 認証必須。匿名化した集計を選択providerで手動分析。cloudは二重同意必須 |
+| AI洞察 | `POST /api/ai/analyze` | 認証必須。通信先IP・ホスト名・端末名を含む集計を選択providerで手動分析。cloudは二重同意必須 |
 | AI対話 | `POST /api/ai/chat` | 認証必須。質問を先に追記し、回答または失敗行をappend-only保存 |
 | AI対話 | `GET /api/ai/conversations` | 認証必須。会話一覧と保存量 |
 | AI対話 | `GET /api/ai/conversations/:id` | 認証必須。再起動後も残るメッセージ履歴 |

@@ -411,6 +411,7 @@
   .ai-chat-message.is-user { align-self: flex-end; background: rgba(14,165,233,0.18); }
   .ai-chat-message.is-assistant { align-self: flex-start; background: rgba(31,41,55,0.92); }
   .ai-chat-message.is-failed { color: #fca5a5; border: 1px solid rgba(239,68,68,0.35); }
+  .ai-chat-message.is-pending { color: var(--muted); font-style: italic; }
   .ai-chat-compose textarea { flex: 1; resize: vertical; }
   @media (max-width: 700px) { .ai-chat-head, .ai-chat-tools, .ai-chat-compose { align-items: stretch; flex-direction: column; } .ai-chat-message { max-width: 95%; } }
   .log-header { font-size: 12px; font-weight: 600; color: var(--text); padding: 4px 8px; display: flex; align-items: center; gap: 8px; }

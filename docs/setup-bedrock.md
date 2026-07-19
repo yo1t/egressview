@@ -6,8 +6,9 @@ is delegated entirely to the AWS SDK for JavaScript v3 **default credential
 provider chain**. You configure only an AWS **region** and a **model /
 inference-profile ID** in the settings UI.
 
-> AI is read-only. Only bounded, anonymized aggregates are sent — never raw IPs,
-> MAC addresses, device names, router credentials, or full connection logs.
+> AI is read-only. Bounded aggregates are sent — including destination IPs,
+> hostnames, and device names — but never MAC addresses, router credentials, or
+> full connection logs.
 
 ## Prerequisites
 

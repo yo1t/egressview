@@ -4,7 +4,7 @@ const { Router } = require('express');
 const { z } = require('zod');
 const { parseRequest } = require('../http-validation');
 const { buildAiFacts } = require('../ai-facts');
-const { buildAnonymousAiContext } = require('../ai-context');
+const { buildAiContext } = require('../ai-context');
 const { randomUUID } = require('node:crypto');
 
 const providerSchema = z.enum(['disabled', 'ollama', 'anthropic', 'openai', 'bedrock']);
@@ -51,12 +51,20 @@ const factsQuerySchema = z.object({
   to: timestampSchema.optional(),
 }).strict();
 const MAX_FACTS_RANGE_MS = 14 * 24 * 60 * 60 * 1000;
-const analysisSchema = factsQuerySchema.extend({ cloudConsentConfirmed: z.boolean().optional() });
+const languageSchema = z.enum(['ja', 'en']);
+const analysisSchema = factsQuerySchema.extend({
+  cloudConsentConfirmed: z.boolean().optional(),
+  // UI language so the model replies in the language the user selected.
+  language: languageSchema.optional(),
+});
 const idSchema = z.string().uuid();
 const chatSchema = analysisSchema.extend({
   conversationId: idSchema.optional(),
   requestId: idSchema.optional(),
   message: z.string().trim().min(1).max(4000),
+  // Optional text of the most recent "analyze current period" result so the
+  // chat can reason about the same threats. Bounded to keep the prompt small.
+  priorAnalysis: z.string().max(8000).optional(),
 });
 const conversationParamsSchema = z.object({ id: idSchema }).strict();
 
@@ -148,10 +156,11 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     try {
       const routers = routerManager.list();
       const facts = buildAiFacts({ history, threatIntel, routers, from, to });
-      const context = buildAnonymousAiContext({ facts, history, routers, from, to });
+      const context = buildAiContext({ facts, history, routers, from, to, threatIntel });
       res.json({ success: true, range: { from, to }, ...await aiProvider.generateInsight(context, {
         signal: controller.signal,
         cloudConsentConfirmed: parsed.data.cloudConsentConfirmed,
+        language: parsed.data.language,
       }) });
     } catch (error) {
       const status = error.code === 'AI_BUSY' ? 409 : error.code === 'AI_CONSENT_REQUIRED' ? 403 : 400;
@@ -220,11 +229,13 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     try {
       const routers = routerManager.list();
       const facts = buildAiFacts({ history, threatIntel, routers, from, to });
-      const context = buildAnonymousAiContext({ facts, history, routers, from, to });
+      const context = buildAiContext({ facts, history, routers, from, to, threatIntel });
       const response = await aiProvider.generateInsight(context, {
         signal: controller.signal,
         cloudConsentConfirmed: parsed.data.cloudConsentConfirmed,
         question: parsed.data.message,
+        priorAnalysis: parsed.data.priorAnalysis,
+        language: parsed.data.language,
         conversation: prior.filter(message => message.status === 'complete' && message.body)
           .slice(-20).map(message => ({ role: message.role, body: message.body })),
       });
