@@ -55,8 +55,17 @@ function createAiConversationStore({ getDb }) {
     // in the same millisecond keep stable append order — messageId is a random
     // UUID and must not decide ordering.
     return requireDb().prepare(`
-      SELECT * FROM ai_messages WHERE conversationId = ?
-      ORDER BY createdAt ASC, rowid ASC LIMIT ?
+      SELECT m.*,
+             u.inputTokens AS usageInputTokens,
+             u.outputTokens AS usageOutputTokens,
+             u.totalTokens AS usageTotalTokens,
+             u.estimatedCostUsd,
+             u.pricingVersion
+      FROM ai_messages m
+      LEFT JOIN ai_usage u
+        ON m.role = 'assistant' AND u.requestId = m.requestId AND u.kind = 'chat'
+      WHERE m.conversationId = ?
+      ORDER BY m.createdAt ASC, m.rowid ASC LIMIT ?
     `).all(conversationId, Math.max(1, Math.min(500, Number(limit) || 500)));
   }
 

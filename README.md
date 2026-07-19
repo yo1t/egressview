@@ -36,6 +36,7 @@ EgressView answers the question most home users can't ask: *what is each device 
 - **Manual threat investigation** — explicitly query AbuseIPDB, VirusTotal, or AlienVault OTX with server-side caching and rate limits ([guide](docs/manual-threat-investigation.md))
 - **Linux conntrack preview** — collect from Linux-based routers over SSH; Docker integration verified, hardware validation pending ([setup](docs/setup-conntrack.md))
 - **Mobile monitoring view** — check router health, Graph Map, Statistics, Connection Log, Devices, and Detection Log from a phone on your VPN/private network
+- **AI Insights start page** — opens with collection health, connections, devices, destinations, threats, and previous-period comparisons. Run manual analysis/chat through Ollama, Anthropic, OpenAI, or Amazon Bedrock, with monthly tokens/estimated cost and per-answer model/cost metadata ([setup guide](docs/setup-ai-insights.md))
 - **Instant Slack alerts** — DM the moment any device connects to a known C2 server or malware distribution host
 - **No hardware changes** — runs on any Mac, PC, or Raspberry Pi alongside your existing Yamaha RTX or Cisco IOS routers
 
@@ -57,7 +58,7 @@ EgressView answers the question most home users can't ask: *what is each device 
 - **🔔 Detection Log** — persistent history of all threat detections and new-device alerts, with per-column filter, sort, and click-to-detail popup; logged regardless of Slack configuration
 - **📡 Data Sources tab** — configure each data source (dnsmasq / [INSPECT] / [DHCPD]) independently from the settings UI
 - **🤖 AI Agent access (MCP)** — built-in [Model Context Protocol](https://modelcontextprotocol.io/) server exposes 11 tools (traffic summary, threat connections, top destinations, device list, device notes, and more) to AI assistants such as AWS Kiro, Anthropic Claude, and Anysphere Cursor; supports both stdio and HTTP transport
-- Single-page dark-themed UI: Graph Map, Statistics, Connection Log, Devices, Detection Log, and Settings
+- Single-page dark-themed UI with **✦ AI Insights** as the leftmost start page, plus Graph Map, Statistics, Connection Log, Devices, Detection Log, and Settings
 
 ## Demo
 
@@ -193,6 +194,7 @@ Start with the smallest path that matches your network, then add sources later f
 | ✅ | Node.js 22+ installed on your Mac/PC/Raspberry Pi | [nodejs.org](https://nodejs.org) |
 | ✅ | At least one Yamaha RTX or Cisco IOS router with SSH enabled | [Yamaha guide →](docs/setup-yamaha.md) / [Cisco guide →](docs/setup-cisco.md) |
 | ☐ | (Optional) ASUS WiFi AP with web admin enabled | [Setup guide →](docs/setup-asus.md) |
+| ☐ | (Optional) in-app AI Insights (Ollama / Anthropic / OpenAI / Amazon Bedrock) | [Setup guide →](docs/setup-ai-insights.md) |
 | ☐ | (Optional) AI assistant access via MCP (AWS Kiro, Anthropic Claude, Anysphere Cursor…) | [Setup guide →](docs/setup-mcp.md) |
 
 ### Step 2 — Install and launch

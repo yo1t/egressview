@@ -30,7 +30,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -228,6 +228,32 @@ const MIGRATIONS = [
         );
         CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation
           ON ai_messages(conversationId, createdAt, messageId);
+      `);
+    },
+  },
+  {
+    version: 7,
+    description: 'append-only AI token usage and cost estimates',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS ai_usage (
+          usageId             TEXT PRIMARY KEY,
+          requestId           TEXT NOT NULL UNIQUE,
+          conversationId      TEXT,
+          kind                TEXT NOT NULL CHECK(kind IN ('analysis', 'chat', 'test')),
+          createdAt           INTEGER NOT NULL,
+          provider            TEXT NOT NULL,
+          model               TEXT NOT NULL,
+          inputTokens         INTEGER NOT NULL CHECK(inputTokens >= 0),
+          outputTokens        INTEGER NOT NULL CHECK(outputTokens >= 0),
+          totalTokens         INTEGER NOT NULL CHECK(totalTokens >= 0),
+          estimatedCostUsd    REAL,
+          pricingVersion      TEXT,
+          inputUsdPerMillion  REAL,
+          outputUsdPerMillion REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_usage_created
+          ON ai_usage(createdAt);
       `);
     },
   },

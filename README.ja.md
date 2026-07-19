@@ -36,6 +36,7 @@ EgressViewは、多くの家庭ユーザーが答えを持てていない問い�
 - **外部サービスによる手動脅威調査** — 明示操作時だけAbuseIPDB・VirusTotal・AlienVault OTXへ問い合わせ（cache/rate limit対応、[ガイド](docs/manual-threat-investigation.ja.md)）
 - **Linux conntrackプレビュー** — Linux系ルーターからSSH収集。Docker統合試験済み、実機確認は未完了（[設定](docs/setup-conntrack.ja.md)）
 - **モバイル監視ビュー** — VPN・プライベートネットワーク内のスマートフォンから、ルーター状態、グラフ、統計、通信ログ、端末一覧、検出ログを確認
+- **AI洞察スタートページ** — 起動直後に収集状態・接続・端末・宛先・脅威と前期間比較を表示。Ollama / Anthropic / OpenAI / Amazon Bedrockで手動分析・対話でき、月次token・概算料金と回答ごとのモデル/料金も確認可能（[設定ガイド](docs/setup-ai-insights.ja.md)）
 - **即時Slackアラート** — 任意のデバイスが既知のC2サーバーやマルウェア配布元に接続した瞬間にDM通知
 - **ハードウェア変更不要** — Mac・PC・Raspberry Piにインストールするだけ。既存のYamaha RTX / Cisco IOSルーターと共存
 
@@ -57,7 +58,7 @@ EgressViewは、多くの家庭ユーザーが答えを持てていない問い�
 - **🔔 検出ログ** — 脅威検出・新規端末アラートの永続履歴。カラム別フィルター・ソート・クリック詳細ポップアップ付き。Slack設定の有無にかかわらず全検出を記録
 - **📡 データソースタブ** — dnsmasq・[INSPECT]・[DHCPD] の ON/OFF とパスを設定画面から個別に制御
 - **🤖 AI エージェント連携（MCP）** — [Model Context Protocol](https://modelcontextprotocol.io/) サーバーを内蔵し、11本のツール（通信サマリー・脅威接続・宛先ランキング・端末一覧・端末メモなど）を AWS Kiro・Anthropic Claude・Anysphere Cursor 等の AI アシスタントに公開。stdio / HTTP 両対応
-- グラフマップ、統計情報、通信ログ、端末一覧、検出ログ、設定を備えたダークテーマのシングルページUI
+- **✦ AI洞察**を先頭・スタートページにした、グラフマップ、統計情報、通信ログ、端末一覧、検出ログ、設定を備えるダークテーマのシングルページUI
 
 ## デモ
 
@@ -194,6 +195,7 @@ DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start
 | ✅ | Mac/PC/Raspberry Pi に Node.js 22以上をインストール | [nodejs.org](https://nodejs.org) |
 | ✅ | Yamaha RTX または Cisco IOS ルーターを1台以上SSH有効化 | [Yamaha設定 →](docs/setup-yamaha.ja.md) / [Cisco設定 →](docs/setup-cisco.ja.md) |
 | ☐ | （任意）ASUS WiFi AP の Web 管理画面を有効化 | [設定ガイド →](docs/setup-asus.ja.md) |
+| ☐ | （任意）画面内AI洞察（Ollama / Anthropic / OpenAI / Amazon Bedrock） | [設定ガイド →](docs/setup-ai-insights.ja.md) |
 | ☐ | （任意）AI アシスタント連携（AWS Kiro・Anthropic Claude・Anysphere Cursor 等） | [設定ガイド →](docs/setup-mcp.ja.md) |
 
 ### Step 2 — インストールと起動

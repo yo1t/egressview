@@ -45,14 +45,16 @@ describe('db-migrate: fresh database', () => {
     }
   });
 
-  it('creates append-only AI conversation tables at v6', () => {
+  it('creates append-only AI conversation and usage tables at v7', () => {
     const db = openDb(':memory:');
     runMigrations(db, ':memory:');
     const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all().map(row => row.name);
     assert.ok(tables.includes('ai_conversations'));
     assert.ok(tables.includes('ai_messages'));
+    assert.ok(tables.includes('ai_usage'));
     const indexes = db.prepare(`SELECT name FROM sqlite_master WHERE type='index'`).all().map(row => row.name);
     assert.ok(indexes.includes('idx_ai_messages_conversation'));
+    assert.ok(indexes.includes('idx_ai_usage_created'));
     db.close();
   });
 

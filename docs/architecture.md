@@ -60,12 +60,13 @@ EgressView uses one SQLite database in WAL mode with separate module connections
 
 Migrations are append-only and fail-closed. Before a data-changing migration, EgressView checks free space, creates and validates a consistent backup, runs the migration transaction, and verifies the resulting database. Backup restore follows the same principle: validate source, require a safety backup, replace, reopen all consumers, validate the result, and roll back if any stage fails.
 
-Schema v5 stores router ownership only in `connection_observations`; the legacy `connections.source` column has been removed. API responses still expose a compatibility `source` value derived from the observer router kinds. The observation-consistency diagnostic checks for missing or orphaned observations and missing router metadata.
+Schema v5 stores router ownership only in `connection_observations`; the legacy `connections.source` column has been removed. API responses still expose a compatibility `source` value derived from the observer router kinds. The observation-consistency diagnostic checks for missing or orphaned observations and missing router metadata. Schema v6 stores append-only AI conversations; v7 stores provider-reported token usage and the USD estimate calculated at request time. EgressView does not infer costs for older conversations or unknown models.
 
 ## Interfaces
 
-- **Browser UI:** static single-page application plus authenticated Socket.IO updates.
-- **REST:** 53 administration and query endpoints rooted at `/api`; see the [REST API reference](api-reference.md).
+- **Browser UI:** static single-page application with AI Insights as the start page plus authenticated Socket.IO updates.
+- **REST:** 68 administration and query endpoints rooted at `/api`; see the [REST API reference](api-reference.md).
+- **AI providers:** explicit-action, read-only analysis through Ollama, Anthropic, OpenAI, or Amazon Bedrock; see the [AI Insights setup guide](setup-ai-insights.md) for configuration and privacy boundaries.
 - **MCP:** 11 read/write tools over stdio or authenticated HTTP; see the [MCP setup guide](setup-mcp.md).
 - **Exports:** bounded streaming CSV/JSON output to avoid loading an unbounded history into memory.
 - **Notifications:** optional Slack delivery; detections remain in the local notification log even when Slack is disabled.

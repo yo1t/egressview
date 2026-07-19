@@ -69,7 +69,7 @@ function createBedrockTransport({ runtime = null, control = null, requireModule 
     return runtimeClients.get(region);
   }
 
-  async function converse({ region, modelId, prompt, maxTokens = 2048, maxBytes = 1024 * 1024, guardrail = null, signal }) {
+  async function converse({ region, modelId, prompt, maxTokens = 2048, maxBytes = 1024 * 1024, guardrail = null, signal, onUsage }) {
     if (!region) throw new Error('AWS region is not configured');
     if (!modelId) throw new Error('Bedrock model is not configured');
     const { ConverseCommand } = getRuntime();
@@ -108,6 +108,13 @@ function createBedrockTransport({ runtime = null, control = null, requireModule 
     }
     const text = extractText(output);
     if (maxBytes && Buffer.byteLength(text) > maxBytes) throw new Error('Bedrock response was too large');
+    if (typeof onUsage === 'function') {
+      onUsage({
+        inputTokens: output?.usage?.inputTokens,
+        outputTokens: output?.usage?.outputTokens,
+        totalTokens: output?.usage?.totalTokens,
+      });
+    }
     return text;
   }
 
@@ -147,17 +154,28 @@ function createBedrockTransport({ runtime = null, control = null, requireModule 
       const { BedrockClient, ListGuardrailsCommand } = getControl();
       const client = new BedrockClient({ region });
       const byId = new Map();
-      const out = await client.send(new ListGuardrailsCommand({}), { abortSignal });
-      for (const guardrail of out?.guardrails || []) {
-        if (!guardrail?.id) continue;
-        const entry = byId.get(guardrail.id) || {
-          id: guardrail.id,
-          arn: guardrail.arn || null,
-          name: guardrail.name || guardrail.id,
-          versions: new Set(),
-        };
-        if (guardrail.version) entry.versions.add(String(guardrail.version));
-        byId.set(guardrail.id, entry);
+      let nextToken;
+      // Ten pages is a defensive upper bound for best-effort UI discovery. It
+      // also protects against a broken service repeatedly returning new tokens.
+      for (let page = 0; page < 10; page++) {
+        const out = await client.send(new ListGuardrailsCommand({
+          maxResults: 100,
+          ...(nextToken ? { nextToken } : {}),
+        }), { abortSignal });
+        for (const guardrail of out?.guardrails || []) {
+          if (!guardrail?.id) continue;
+          const entry = byId.get(guardrail.id) || {
+            id: guardrail.id,
+            arn: guardrail.arn || null,
+            name: guardrail.name || guardrail.id,
+            versions: new Set(),
+          };
+          if (guardrail.version) entry.versions.add(String(guardrail.version));
+          byId.set(guardrail.id, entry);
+        }
+        const returnedToken = out?.nextToken;
+        if (!returnedToken || returnedToken === nextToken) break;
+        nextToken = returnedToken;
       }
       return [...byId.values()].map(entry => {
         const versions = [...entry.versions];

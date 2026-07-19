@@ -203,6 +203,9 @@ function renderGuardrail() {
   if (enabled && activeProvider === 'bedrock') {
     discoverGuardrails();
   } else {
+    // Invalidate an in-flight lookup so a late response cannot repopulate
+    // options after Guardrails have been disabled.
+    guardrailDiscoveryRequest++;
     discoveredGuardrails = [];
     renderGuardrailSelect();
   }
@@ -257,6 +260,9 @@ function renderGuardrailVersionSelect() {
     return option;
   }));
   select.value = versions.includes(currentVersion) ? currentVersion : versions[0];
+  // The text input is the canonical value used by saveConfig. Keep it aligned
+  // with the visible dropdown even when discovery selects a fallback version.
+  byId('s-ai-guardrail-version').value = select.value;
   select.classList.remove('is-hidden');
 }
 
@@ -273,7 +279,11 @@ async function discoverGuardrails() {
       body: JSON.stringify({ region }),
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok || requestId !== guardrailDiscoveryRequest || activeProvider !== 'bedrock') return;
+    if (!response.ok
+      || requestId !== guardrailDiscoveryRequest
+      || activeProvider !== 'bedrock'
+      || !byId('s-ai-guardrail-enabled').checked
+      || byId('s-ai-region').value.trim() !== region) return;
     discoveredGuardrails = Array.isArray(result.guardrails) ? result.guardrails : [];
     renderGuardrailSelect();
   } catch { /* best-effort; manual entry remains */ }
@@ -399,6 +409,9 @@ function initAiSettings() {
   byId('s-ai-guardrail-select')?.addEventListener('change', event => {
     if (!event.target.value) return;
     byId('s-ai-guardrail-id').value = event.target.value;
+    // A version belongs to one guardrail only. Do not carry a version selected
+    // for the previous guardrail into the newly-selected one.
+    byId('s-ai-guardrail-version').value = '';
     renderGuardrailVersionSelect();
   });
   byId('s-ai-guardrail-version-select')?.addEventListener('change', event => {

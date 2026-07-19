@@ -3,7 +3,7 @@ import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 import { allConnections, mergeConnections, setAllConnections, setDataRangeFrom, setServerTimeOffset, getTimeRange, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
 import { socket, connState, asusActive, setAsusActive, yamahaConfigured, setNotesMap, apiFetch, errorBanner, updateConnBadge, refreshAllNotes, setDevicesDataRef, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
-import { statsMode, setViewTabHandlers } from './view-tabs.js?v=__ASSET_VERSION__';
+import { statsMode, setViewTabHandlers, switchView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { nodes, selectedMac, buildGraph, buildGraphFromConnections, updateOrgGraph, scheduleGraphAutoFit, fetchGraphSummary, stopGraph, showToast, applyFilter, applyGraphFilter, lastClients, resizeGraph, setGraphDevicesDataRef } from './graph.js?v=__ASSET_VERSION__';
 import { updateStats, stStopSpin, stStopFlatAnim } from './stats.js?v=__ASSET_VERSION__';
 import { openSettings, showStatus } from './settings.js?v=__ASSET_VERSION__';
@@ -22,7 +22,11 @@ setDevicesDataRef(devicesData);
 setGraphDevicesDataRef(devicesData);
 setOnDevicesLoaded(data => { setDevicesDataRef(data); setGraphDevicesDataRef(data); });
 setViewTabHandlers({
-  onGraph: scheduleGraphAutoFit,
+  onGraph: () => {
+    resizeGraph({ refreshStats: false });
+    buildGraphFromConnections();
+    scheduleGraphAutoFit();
+  },
   onStats: () => refreshCurrentTimeFilterView?.() || updateStats(),
   onLeaveStats: () => { stStopSpin(); stStopFlatAnim(); },
   onLog: () => { updateLogView(); loadBeacons(); },
@@ -33,6 +37,7 @@ setViewTabHandlers({
   onLeaveAi: stopAiInsights,
   onDeviceSearch: () => { applyFilter(lastClients); applyGraphFilter(); },
 });
+switchView('ai');
 
 // ─── Main socket event handlers ───────────────────────────────────────────────
 

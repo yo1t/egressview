@@ -155,3 +155,13 @@ Bedrock の場合、**保存して接続確認**ボタンは次を行います�
 
 認証・権限・throttling・timeout・非対応モデル / リージョンの問題は短いエラーメッセージ
 として表示されます。
+
+## Token使用量と概算料金
+
+成功したConverse応答のusageをschema v7へappend-onlyで記録し、AI洞察スタートページに
+今月・先月のtoken数と概算USDを表示します。会話履歴の各回答にもprovider、model、token、
+概算料金を表示します。日本語UIは`USD 0.0012`、英語UIは`$0.0012`表記です。
+
+これはAWS請求額ではありません。呼び出し時点の内蔵料金表による概算で、Guardrails、
+prompt caching、税、為替、契約割引等を含みません。未知modelはtokenだけを記録して料金を
+推測しません。詳細は[AI洞察設定ガイド](setup-ai-insights.ja.md)を参照してください。

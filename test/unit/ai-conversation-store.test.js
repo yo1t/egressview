@@ -28,7 +28,17 @@ describe('append-only AI conversation store', () => {
       messageId: 'm2', conversationId: 'c1', requestId: 'r1', role: 'assistant', body: 'answer',
       createdAt: 3, provider: 'ollama', model: 'm1', rangeFrom: 0, rangeTo: 1, status: 'complete', errorCode: null,
     });
-    assert.deepEqual(store.getMessages('c1').map(row => row.body), ['question', 'answer']);
+    db.prepare(`INSERT INTO ai_usage VALUES
+      ('u1', 'r1', 'c1', 'chat', 3, 'ollama', 'm1', 10, 4, 14, 0, 'v1', 0, 0)`
+    ).run();
+    const messages = store.getMessages('c1');
+    assert.deepEqual(messages.map(row => row.body), ['question', 'answer']);
+    assert.equal(messages[0].usageTotalTokens, null);
+    assert.equal(messages[1].usageInputTokens, 10);
+    assert.equal(messages[1].usageOutputTokens, 4);
+    assert.equal(messages[1].usageTotalTokens, 14);
+    assert.equal(messages[1].estimatedCostUsd, 0);
+    assert.equal(messages[1].pricingVersion, 'v1');
     assert.equal(store.listConversations()[0].messageCount, 2);
     assert.deepEqual(store.getStorageStats(), { conversations: 1, messages: 2, bodyBytes: 14 });
     db.close();

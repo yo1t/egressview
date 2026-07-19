@@ -387,11 +387,15 @@ test('tab bar renders after auth', async ({ page }) => {
 
   await authPage(page);
 
-  // Exactly 5 tabs: graph map / stats / connection log / devices / notification log
+  // AI Insights is the leftmost tab and the authenticated start page.
   const tabs = page.locator('.view-tab');
   await expect(tabs.first()).toBeVisible();
   const count = await tabs.count();
   expect(count).toBe(6);
+  await expect(tabs.first()).toHaveAttribute('id', 'btn-ai');
+  await expect(page.locator('#btn-ai')).toHaveClass(/active/);
+  await expect(page.locator('#ai-container')).toHaveClass(/view-active/);
+  await expect(page.locator('#graph-container')).not.toHaveClass(/view-active/);
 });
 
 test('mobile viewer keeps navigation, logs, and device details inside the viewport', async ({ page }) => {
@@ -449,7 +453,8 @@ test('graph canvas renders after auth from the summary API', async ({ page }) =>
 
   await authPage(page);
 
-  // The initial Socket.IO payload triggers a bounded summary fetch and render.
+  // The initial Socket.IO payload caches the summary; opening Graph renders it.
+  await page.click('#btn-graph');
   const graphContainer = page.locator('#graph-container');
   await expect(graphContainer).toBeVisible();
   const childCount = await graphContainer.evaluate(el => el.children.length);
@@ -470,6 +475,7 @@ test('graph tooltips render external values as text', async ({ page }) => {
 
   const errors = collectErrors(page);
   await authPage(page);
+  await page.click('#btn-graph');
   await page.evaluate(async () => {
     const panels = await import('/js/graph-panels.js?v=p2-27-tooltip-smoke');
     panels.showTooltip({ clientX: 100, clientY: 100 }, {
@@ -609,10 +615,29 @@ test('AI insights renders local facts and links threats to the filtered log', as
       previous: { connections: 20, devices: 3, destinations: 8, safe: 20, warn: 0, danger: 0 },
     }),
   }));
+  await page.route(/\/api\/ai\/usage\/monthly(?:\?|$)/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      pricing: { currency: 'USD', approximate: true },
+      current: { requests: 3, pricedRequests: 3, inputTokens: 1200, outputTokens: 300, totalTokens: 1500, estimatedCostUsd: 0.0084 },
+      previous: { requests: 1, pricedRequests: 1, inputTokens: 100, outputTokens: 50, totalTokens: 150, estimatedCostUsd: 0.0004 },
+    }),
+  }));
 
   await page.click('#btn-ai');
   await expect(page.locator('#ai-container')).toHaveClass(/view-active/);
   await expect(page.locator('#ai-value-connections')).toHaveText('25');
+  await expect(page.locator('#ai-usage-current-tokens')).toContainText('1,500');
+  await expect(page.locator('#ai-usage-current-cost')).toContainText(/USD\s*0\.0084/);
+  await page.route(/\/api\/config\/general$/, route => route.request().method() === 'POST'
+    ? route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true, language: 'en' }) })
+    : route.continue());
+  await page.click('#settings-btn');
+  await page.click('.settings-tab[data-tab="general"]');
+  await page.locator('#s-language').selectOption('en');
+  await page.click('#general-save-btn');
+  await expect(page.locator('#ai-usage-current-cost')).toContainText('$0.0084');
+  await page.click('#settings-close');
   await expect(page.locator('#ai-collection-label')).toContainText(/1\/2/);
   await expect(page.locator('[data-ai-metric="danger"]')).toHaveClass(/has-findings/);
   await page.locator('[data-ai-metric="danger"]').click();
@@ -1079,6 +1104,7 @@ test('fifteen-minute graph remains available as a summary range', async ({ page 
 
   const errors = collectErrors(page);
   await authPage(page);
+  await page.click('#btn-graph');
   await page.locator('#time-filter-select').selectOption('15m');
   await expect(page.locator('#time-filter-select option:checked')).toContainText(/15 min|15分/);
   await expect(page.locator('#graph-summary-notice')).toBeVisible();

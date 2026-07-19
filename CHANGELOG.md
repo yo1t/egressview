@@ -4,6 +4,22 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Added an AI Insights start page with local live metrics, bounded manual analysis, and append-only chat through Ollama, Anthropic, OpenAI, or Amazon Bedrock.
+- Added schema v7 append-only AI token usage, current/previous monthly totals, versioned USD estimates, and per-answer provider/model/token/cost metadata. Unknown model prices remain explicitly unpriced rather than guessed.
+- Added Bedrock model/inference-profile and Guardrail discovery, geo-aware selection, Converse-based connection testing, and AWS default credential-chain authentication without storing AWS keys.
+
+### Changed
+
+- Made AI Insights the leftmost default view while retaining all existing Graph Map, Statistics, Connection Log, Devices, and Detection Log workflows.
+- Made estimated-cost formatting language-aware: English uses dollar notation and Japanese uses explicit `USD` notation; no exchange-rate conversion is implied.
+
+### Security and Reliability
+
+- Cloud AI providers remain explicit opt-in and require saved plus per-request consent. AI context is bounded, credentials and router management details are excluded, and provider failures cannot stop collection.
+- Schema v7 preserves all earlier migrations and uses the existing verified fail-closed pre-migration backup path.
+
 ## [1.4.0] - 2026-07-18
 
 ### Added

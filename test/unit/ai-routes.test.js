@@ -202,11 +202,28 @@ describe('AI configuration routes', () => {
     assert.equal(calls, 0);
   });
 
+  it('returns current and previous local-calendar-month usage', async () => {
+    const ranges = [];
+    const history = {
+      summarizeAiUsage(from, to) {
+        ranges.push([from, to]);
+        return { requests: 2, inputTokens: 10, outputTokens: 5, totalTokens: 15, pricedRequests: 2, estimatedCostUsd: 0.001 };
+      },
+    };
+    const result = await request(appFor(createAiProvider(), undefined, { history }), 'GET', '/api/ai/usage/monthly?timezoneOffset=-540');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.current.requests, 2);
+    assert.equal(result.body.pricing.approximate, true);
+    assert.equal(ranges.length, 2);
+    assert.equal(ranges[1][1], ranges[0][0]);
+  });
+
   it('generates an Ollama insight from anonymized aggregates', async () => {
     let context;
+    let usage;
     const provider = createAiProvider({ fetchImpl: async (_url, options) => {
       context = JSON.parse(JSON.parse(options.body).prompt.split('\n\n').at(-1));
-      return new Response(JSON.stringify({ response: '確認結果' }), { status: 200 });
+      return new Response(JSON.stringify({ response: '確認結果', prompt_eval_count: 40, eval_count: 10 }), { status: 200 });
     } });
     provider.configure({ provider: 'ollama', models: { ollama: 'local-model' } });
     const result = await request(appFor(provider, undefined, {
@@ -214,6 +231,7 @@ describe('AI configuration routes', () => {
         countFactsByTimeRange: () => ({ connections: 1, devices: 1, destinations: 1 }),
         groupDstByTimeRange: () => [],
         groupServiceByTimeRange: () => [{ dport: 443, proto: 'tcp', count: 1 }],
+        appendAiUsage: row => { usage = row; },
       },
       threatIntel: null,
       routerManager: { list: () => [{ id: 'secret-id', displayName: 'secret-name', kind: 'cisco', enabled: true, ready: true }] },
@@ -222,6 +240,26 @@ describe('AI configuration routes', () => {
     assert.equal(result.body.text, '確認結果');
     assert.equal(JSON.stringify(context).includes('secret-name'), false);
     assert.deepEqual(context.topServices, [{ port: 443, protocol: 'tcp', connections: 1 }]);
+    assert.equal(usage.kind, 'analysis');
+    assert.equal(usage.totalTokens, 50);
+    assert.equal(usage.estimatedCostUsd, 0);
+  });
+
+  it('does not discard a generated answer when usage logging fails', async () => {
+    const provider = createAiProvider({ fetchImpl: async () => new Response(JSON.stringify({
+      response: 'generated answer', prompt_eval_count: 10, eval_count: 2,
+    }), { status: 200 }) });
+    provider.configure({ provider: 'ollama', models: { ollama: 'local-model' } });
+    const result = await request(appFor(provider, undefined, {
+      history: {
+        countFactsByTimeRange: () => ({}), groupDstByTimeRange: () => [], groupServiceByTimeRange: () => [],
+        appendAiUsage: () => { throw new Error('disk full'); },
+      },
+      threatIntel: null,
+      routerManager: { list: () => [] },
+    }), 'POST', '/api/ai/analyze', { from: 1000, to: 2000 });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.text, 'generated answer');
   });
 
   it('persists chat messages, restores them through the API, and deduplicates retries', async () => {
