@@ -11,6 +11,7 @@ let config = {
   models: { ollama: '', anthropic: '', openai: '', bedrock: '' },
   ollamaEndpoint: 'http://127.0.0.1:11434',
   region: '',
+  guardrail: { enabled: false, id: '', version: '' },
   providers: {},
 };
 let activeProvider = 'disabled';
@@ -47,6 +48,7 @@ function renderProvider(provider) {
   // used for the other providers.
   modelInput.maxLength = provider === 'bedrock' ? 400 : 200;
   modelInput.value = enabled ? (config?.models?.[provider] || '') : '';
+  if (provider === 'bedrock') renderGuardrail();
   byId('ai-model-options').replaceChildren();
   const keyInput = byId('s-ai-key');
   keyInput.value = '';
@@ -55,17 +57,27 @@ function renderProvider(provider) {
   byId('s-ai-cloud-consent').checked = !!config?.providers?.[provider]?.consented;
 }
 
+function renderGuardrail() {
+  const enabled = byId('s-ai-guardrail-enabled').checked;
+  byId('ai-guardrail-fields').classList.toggle('is-hidden', !enabled);
+}
+
 function applyConfig(next) {
+  const guardrail = next.guardrail || {};
   config = {
     provider: next.provider || 'disabled',
     models: Object.fromEntries(PROVIDERS.map(name => [name, next.models?.[name] || ''])),
     ollamaEndpoint: next.ollamaEndpoint || 'http://127.0.0.1:11434',
     region: next.region || '',
+    guardrail: { enabled: !!guardrail.enabled, id: guardrail.id || '', version: guardrail.version || '' },
     providers: next.providers || {},
   };
   byId('s-ai-provider').value = config.provider;
   byId('s-ai-endpoint').value = config.ollamaEndpoint;
   byId('s-ai-region').value = config.region;
+  byId('s-ai-guardrail-enabled').checked = config.guardrail.enabled;
+  byId('s-ai-guardrail-id').value = config.guardrail.id;
+  byId('s-ai-guardrail-version').value = config.guardrail.version;
   activeProvider = 'disabled';
   renderProvider(config.provider);
 }
@@ -97,6 +109,13 @@ async function saveConfig({ showSuccess = true } = {}) {
   }
   if (CONSENT_PROVIDERS.has(provider)) {
     body.cloudConsent = { [provider]: byId('s-ai-cloud-consent').checked };
+  }
+  if (provider === 'bedrock') {
+    body.guardrail = {
+      enabled: byId('s-ai-guardrail-enabled').checked,
+      id: byId('s-ai-guardrail-id').value.trim(),
+      version: byId('s-ai-guardrail-version').value.trim(),
+    };
   }
   const response = await apiFetch(`${_BASE}/api/config/ai`, {
     method: 'POST',
@@ -138,6 +157,7 @@ async function testConnection() {
 
 function initAiSettings() {
   byId('s-ai-provider')?.addEventListener('change', event => renderProvider(event.target.value));
+  byId('s-ai-guardrail-enabled')?.addEventListener('change', renderGuardrail);
   byId('ai-save-btn')?.addEventListener('click', async event => {
     event.currentTarget.disabled = true;
     try {
@@ -149,7 +169,8 @@ function initAiSettings() {
     }
   });
   byId('ai-test-btn')?.addEventListener('click', testConnection);
-  loadConfig();
+  // settings.js calls this after authentication when the settings modal opens.
+  return loadConfig;
 }
 
 export { applyConfig, initAiSettings, renderProvider };

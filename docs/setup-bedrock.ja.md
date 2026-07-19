@@ -80,6 +80,25 @@ commercial リージョンへルーティングされ得る（レジデンシー
 持つわけではありません（例: Japan CRIS は特定の Claude モデルから提供開始）。特定地理
 での処理が必須なら、その地理にプロファイルがあるモデルに限られます。
 
+## Guardrails（任意・デフォルトOFF）
+
+Bedrock の生成に Amazon Bedrock Guardrail を適用できます。*設定 → AI 洞察* で
+**Bedrock Guardrails を使う**を有効化し、guardrail の **ID/ARN** と**バージョン**
+（既定 `DRAFT`）を入力します。有効時は Converse の `guardrailConfig` に渡されます。
+`bedrock:ApplyGuardrail`（cross-Region guardrail profile 使用時は全 destination
+region の profile object への `bedrock:ApplyGuardrail`）が必要です。
+
+> ⚠ **Guardrails は日本内処理を保証しません。** **日本限定（`jp.`）の guardrail
+> profile は存在しません**。APAC の guardrail profile（`apac.guardrail.v1:0`）は
+> APAC 全域へルーティングされ、東京 source でもシンガポール・ムンバイ・ソウル・
+> シドニー等で評価され得ます。したがって `jp.` モデル推論プロファイルを使っていても、
+> cross-Region guardrail を有効化すると同じ入出力内容が日本外へ送られ得ます。
+> 分類フラグ付きの入出力は不正利用検知のため最大30日保持され得ます。
+>
+> 日本内データレジデンシーが必須の場合は、Guardrails を **OFF** にするか、
+> cross-Region guardrail profile ではなく**呼び出しリージョン内（例
+> ap-northeast-1）の single-Region guardrail** を使ってください。
+
 ## 接続確認
 
 Bedrock の場合、**保存して接続確認**ボタンは次を行います。

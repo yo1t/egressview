@@ -51,8 +51,8 @@ describe('shared i18n catalog', () => {
   });
 
   it('contains the complete migrated catalog in both languages', () => {
-    assert.equal(jaKeys.size, 678);
-    assert.equal(enKeys.size, 678);
+    assert.equal(jaKeys.size, 682);
+    assert.equal(enKeys.size, 682);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 

@@ -240,4 +240,42 @@ describe('AI provider — Amazon Bedrock (keyless, region-based, Converse)', () 
     provider.configure({ provider: 'bedrock', region: 'us-east-1', cloudConsent: { bedrock: true } });
     await assert.rejects(provider.generateInsight({}, { cloudConsentConfirmed: true }), /bedrock model is not configured/);
   });
+
+  it('forwards Guardrails only when enabled with an id (opt-in, default off)', async () => {
+    const calls = [];
+    const provider = bedrockProvider({ converse: async (args) => { calls.push(args); return 'ok'; } });
+    provider.configure({ provider: 'bedrock', region: 'us-east-1', models: { bedrock: 'm' }, cloudConsent: { bedrock: true } });
+
+    // default: no guardrail forwarded
+    await provider.generateInsight({}, { cloudConsentConfirmed: true });
+    assert.equal(calls[0].guardrail, null);
+
+    // enabled + id: forwarded with version
+    provider.configure({ guardrail: { enabled: true, id: 'gr-123', version: '2' } });
+    await provider.generateInsight({}, { cloudConsentConfirmed: true });
+    assert.deepEqual(calls[1].guardrail, { id: 'gr-123', version: '2' });
+
+    // enabled but no id: not forwarded
+    provider.configure({ guardrail: { enabled: true, id: '', version: '' } });
+    await provider.generateInsight({}, { cloudConsentConfirmed: true });
+    assert.equal(calls[2].guardrail, null);
+
+    // id but disabled: not forwarded
+    provider.configure({ guardrail: { enabled: false, id: 'gr-123' } });
+    await provider.generateInsight({}, { cloudConsentConfirmed: true });
+    assert.equal(calls[3].guardrail, null);
+  });
+
+  it('defaults guardrail version to DRAFT and exposes guardrail in public config', async () => {
+    const calls = [];
+    const provider = bedrockProvider({ converse: async (args) => { calls.push(args); return 'ok'; } });
+    provider.configure({
+      provider: 'bedrock', region: 'us-east-1', models: { bedrock: 'm' }, cloudConsent: { bedrock: true },
+      guardrail: { enabled: true, id: 'gr-abc' },
+    });
+    await provider.generateInsight({}, { cloudConsentConfirmed: true });
+    assert.deepEqual(calls[0].guardrail, { id: 'gr-abc', version: 'DRAFT' });
+    const publicConfig = provider.getPublicConfig();
+    assert.deepEqual(publicConfig.guardrail, { enabled: true, id: 'gr-abc', version: '' });
+  });
 });

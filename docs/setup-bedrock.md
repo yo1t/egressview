@@ -84,6 +84,28 @@ data-residency needs, use a `jp.` profile (e.g.
 geography (for example, Japan CRIS launched for specific Claude models). If a
 geography is required, you are limited to models that offer a profile there.
 
+## Guardrails (optional, off by default)
+
+You can attach an Amazon Bedrock Guardrail to Bedrock generations. In
+*Settings → AI Insights*, enable **Use Bedrock Guardrails** and enter the
+guardrail **ID/ARN** and **version** (defaults to `DRAFT`). When enabled, the
+guardrail is passed to Converse via `guardrailConfig`. Requires
+`bedrock:ApplyGuardrail` (plus, for a cross-Region guardrail profile,
+`bedrock:ApplyGuardrail` on every destination-Region profile object).
+
+> ⚠ **Guardrails do not guarantee in-Japan processing.** There is **no
+> Japan-only (`jp.`) guardrail profile**. The APAC guardrail profile
+> (`apac.guardrail.v1:0`) routes across the entire APAC geography — a Tokyo
+> source region can route guardrail evaluation to Singapore, Mumbai, Seoul,
+> Sydney, etc. So even with a `jp.` model inference profile, enabling a
+> cross-Region guardrail can send the same input/output content outside Japan.
+> Classifier-flagged inputs/outputs may also be retained for up to 30 days for
+> abuse detection.
+>
+> If in-Japan data residency is required, either keep Guardrails **off**, or use
+> a **single-Region guardrail in the calling region** (e.g. ap-northeast-1)
+> rather than a cross-Region guardrail profile.
+
 ## Connection test
 
 The **Save & test connection** button, for Bedrock, both:

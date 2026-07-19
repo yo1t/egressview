@@ -11,10 +11,12 @@ import { initManualThreatSettings } from './settings-manual-threat.js?v=__ASSET_
 import { initAiSettings } from './settings-ai.js?v=__ASSET_VERSION__';
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsBtn     = document.getElementById('settings-btn');
+let loadAiConfig = () => {};
 
 function openSettings(tab) {
   settingsOverlay.classList.remove('hidden');
   settingsBtn.classList.remove('alert');
+  loadAiConfig();
   if (typeof tab === 'string' && tab) {
     document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));
@@ -150,6 +152,6 @@ initSessionSettings(showStatus);
 initBeaconSettings(showStatus);
 initSlackSettings(showStatus);
 initManualThreatSettings();
-initAiSettings();
+loadAiConfig = initAiSettings();
 
 export { openSettings, showStatus, loadBackupList, toggleSection, settingsBtn };
