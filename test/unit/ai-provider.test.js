@@ -130,6 +130,7 @@ describe('AI insight generation', () => {
     assert.match(prompts.last, /Recommended actions/);
     assert.match(prompts.last, /Do not use tables/);
     assert.match(prompts.last, /at most about 20 lines/);
+    assert.match(prompts.last, /false positive/i);
 
     await provider.generateInsight({ current: {} }, { language: 'ja' });
     assert.match(prompts.last, /Respond in Japanese/);

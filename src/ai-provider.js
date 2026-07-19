@@ -172,6 +172,7 @@ function buildPrompt(context, { question = '', conversation = [], priorAnalysis 
       `Respond in ${langName} with two parts and nothing else.`,
       `Part 1 — a heading "${headings.status}" followed by a single narrative of about 300 characters (do not exceed 350). Summarize overall activity, the most notable changes versus the previous period, and the current threat posture. Cite specific devices (name/IP) and destinations (host/IP) where they matter.`,
       `Part 2 — a heading "${headings.actions}" followed by a bulleted list ordered by priority: list danger-level threats first, then warn-level threats, then general hygiene items. Each bullet must state the concrete action, the device and destination involved (name/IP), and the reason. If there are no threats, say so in a single bullet.`,
+      'For each flagged threat, briefly assess whether it may be a false positive using the destination IP/host — for example a well-known CDN, cloud, or platform (such as GitHub, Google, Microsoft) or shared hosting where the threat intel likely targets a specific URL or subdomain rather than the whole host. State the false-positive likelihood and recommend verifying before taking disruptive action.',
       ...formatRules,
     ].join('\n');
   return {
