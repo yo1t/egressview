@@ -138,6 +138,33 @@ describe('ai-bedrock: listModels (fail-open discovery)', () => {
   });
 });
 
+describe('ai-bedrock: optional SDK not installed', () => {
+  function missingRequire(name) {
+    const err = new Error(`Cannot find module '${name}'`);
+    err.code = 'MODULE_NOT_FOUND';
+    throw err;
+  }
+
+  it('converse surfaces a clear "not installed" error (not a mapped/raw error)', async () => {
+    const transport = createBedrockTransport({ requireModule: missingRequire });
+    await assert.rejects(
+      transport.converse({ region: 'us-east-1', modelId: 'm', prompt: 'a' }),
+      error => error.code === 'BEDROCK_SDK_MISSING' && /npm install @aws-sdk\/client-bedrock-runtime/.test(error.message),
+    );
+  });
+
+  it('discovery stays fail-open ([]) when the SDK is not installed', async () => {
+    const transport = createBedrockTransport({ requireModule: missingRequire });
+    assert.deepEqual(await transport.listModels({ region: 'us-east-1' }), []);
+  });
+
+  it('non-MODULE_NOT_FOUND require errors propagate unchanged', async () => {
+    const boom = () => { throw new Error('syntax error in dependency'); };
+    const transport = createBedrockTransport({ requireModule: boom });
+    await assert.rejects(transport.converse({ region: 'us-east-1', modelId: 'm', prompt: 'a' }), /syntax error in dependency/);
+  });
+});
+
 describe('ai-bedrock: helpers', () => {
   it('extractText joins text content blocks', () => {
     assert.equal(extractText({ output: { message: { content: [{ text: 'a' }, { foo: 1 }, { text: 'b' }] } } }), 'a\nb');

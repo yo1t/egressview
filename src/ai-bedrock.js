@@ -10,13 +10,17 @@
 // model id, a geographic cross-region inference profile us./eu./apac./jp./au.,
 // a Global profile, or an ARN).
 
-let _runtimeMod = null;
-let _controlMod = null;
-function loadRuntime() {
-  return _runtimeMod || (_runtimeMod = require('@aws-sdk/client-bedrock-runtime'));
-}
-function loadControl() {
-  return _controlMod || (_controlMod = require('@aws-sdk/client-bedrock'));
+// The AWS SDK is an OPTIONAL peer dependency (opt-in): it is not installed by
+// default. Surface a clear, actionable message when it is missing instead of a
+// raw MODULE_NOT_FOUND (or a generic mapped error).
+const BEDROCK_NOT_INSTALLED =
+  'Amazon Bedrock support is not installed. Run: '
+  + 'npm install @aws-sdk/client-bedrock-runtime @aws-sdk/client-bedrock';
+
+function bedrockNotInstalledError() {
+  const error = new Error(BEDROCK_NOT_INSTALLED);
+  error.code = 'BEDROCK_SDK_MISSING';
+  return error;
 }
 
 // Map AWS SDK errors to plain, non-sensitive Error messages. Never surface raw
@@ -45,11 +49,22 @@ function extractText(output) {
   return blocks.map(block => block?.text).filter(Boolean).join('\n');
 }
 
-function createBedrockTransport({ runtime = null, control = null } = {}) {
+function createBedrockTransport({ runtime = null, control = null, requireModule = require } = {}) {
   const runtimeClients = new Map(); // region -> BedrockRuntimeClient
 
+  function loadModule(name) {
+    try {
+      return requireModule(name);
+    } catch (err) {
+      if (err && err.code === 'MODULE_NOT_FOUND') throw bedrockNotInstalledError();
+      throw err;
+    }
+  }
+  const getRuntime = () => runtime || loadModule('@aws-sdk/client-bedrock-runtime');
+  const getControl = () => control || loadModule('@aws-sdk/client-bedrock');
+
   function runtimeClient(region) {
-    const { BedrockRuntimeClient } = runtime || loadRuntime();
+    const { BedrockRuntimeClient } = getRuntime();
     if (!runtimeClients.has(region)) runtimeClients.set(region, new BedrockRuntimeClient({ region }));
     return runtimeClients.get(region);
   }
@@ -57,7 +72,7 @@ function createBedrockTransport({ runtime = null, control = null } = {}) {
   async function converse({ region, modelId, prompt, maxTokens = 2048, maxBytes = 1024 * 1024, signal }) {
     if (!region) throw new Error('AWS region is not configured');
     if (!modelId) throw new Error('Bedrock model is not configured');
-    const { ConverseCommand } = runtime || loadRuntime();
+    const { ConverseCommand } = getRuntime();
     let output;
     try {
       output = await runtimeClient(region).send(
@@ -81,7 +96,7 @@ function createBedrockTransport({ runtime = null, control = null } = {}) {
   async function listModels({ region }) {
     if (!region) return [];
     try {
-      const { BedrockClient, ListFoundationModelsCommand, ListInferenceProfilesCommand } = control || loadControl();
+      const { BedrockClient, ListFoundationModelsCommand, ListInferenceProfilesCommand } = getControl();
       const client = new BedrockClient({ region });
       const ids = new Set();
       const fm = await client.send(new ListFoundationModelsCommand({ byOutputModality: 'TEXT' }));
@@ -102,4 +117,4 @@ function createBedrockTransport({ runtime = null, control = null } = {}) {
   return { converse, listModels };
 }
 
-module.exports = { createBedrockTransport, mapAwsError, extractText };
+module.exports = { createBedrockTransport, mapAwsError, extractText, bedrockNotInstalledError, BEDROCK_NOT_INSTALLED };
