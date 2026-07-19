@@ -20,11 +20,51 @@ let activeProvider = 'disabled';
 let discoveredModels = [];
 let modelDiscoveryRequest = 0;
 const GEO_PREFIXES = ['global.', 'us.', 'eu.', 'apac.', 'jp.', 'au.'];
+// Inference-profile (geo) filter options. Labels mirror the static markup; the
+// list shown is narrowed to what the discovered model set actually contains.
+const PROFILE_OPTIONS = [
+  { value: '', label: 'All' },
+  { value: 'global.', label: 'Global (global.)' },
+  { value: 'us.', label: 'US (us.)' },
+  { value: 'eu.', label: 'EU (eu.)' },
+  { value: 'apac.', label: 'APAC (apac.)' },
+  { value: 'jp.', label: 'Japan (jp.)' },
+  { value: 'au.', label: 'Australia (au.)' },
+  { value: 'ondemand', label: 'Single-Region (on-demand)' },
+];
 
 function modelMatchesProfile(id, prefix) {
   if (!prefix) return true;                       // "All"
   if (prefix === 'ondemand') return !GEO_PREFIXES.some(p => id.startsWith(p));
   return id.startsWith(prefix);                   // geo profile prefix
+}
+
+// Narrow the inference-profile (geo) dropdown to the geos actually present in
+// the discovered model set for the selected region, so the user can't pick a
+// geo that yields no models. Falls back to the full list before discovery.
+function renderProfileSelect() {
+  const select = byId('s-ai-profile-select');
+  if (!select) return;
+  const present = new Set();
+  let hasOnDemand = false;
+  for (const id of discoveredModels) {
+    const geo = GEO_PREFIXES.find(prefix => id.startsWith(prefix));
+    if (geo) present.add(geo);
+    else hasOnDemand = true;
+  }
+  const options = discoveredModels.length
+    ? PROFILE_OPTIONS.filter(option => option.value === ''
+      || (option.value === 'ondemand' ? hasOnDemand : present.has(option.value)))
+    : PROFILE_OPTIONS;
+  const previous = select.value;
+  select.replaceChildren(...options.map(option => {
+    const element = document.createElement('option');
+    element.value = option.value;
+    element.textContent = option.label;
+    return element;
+  }));
+  // Keep the current geo if it still has models; otherwise fall back to "All".
+  select.value = options.some(option => option.value === previous) ? previous : '';
 }
 
 function byId(id) {
@@ -68,10 +108,17 @@ function applyDiscoveredModels(models) {
     option.value = model;
     return option;
   }));
+  // Narrow the geo profile options to what this region offers, then render the
+  // model list for the (possibly reset) profile selection.
+  renderProfileSelect();
   renderModelSelect();
 }
 
-async function discoverBedrockModels() {
+// Discovery-only model listing for the selected region (no InvokeModel, no
+// config save). Auto-called silently when Bedrock is shown / the region
+// changes; explicit calls surface a status message. Stale responses are
+// dropped so overlapping requests don't clobber a newer one.
+async function discoverBedrockModels({ silent = false } = {}) {
   const region = byId('s-ai-region').value.trim();
   if (activeProvider !== 'bedrock' || !region) return;
   const requestId = ++modelDiscoveryRequest;
@@ -85,11 +132,11 @@ async function discoverBedrockModels() {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    if (requestId !== modelDiscoveryRequest) return;
+    if (requestId !== modelDiscoveryRequest || activeProvider !== 'bedrock') return;
     applyDiscoveredModels(result.models);
-    setStatus(tVars('settings.ai.testModels', { count: discoveredModels.length }), true);
+    if (!silent) setStatus(tVars('settings.ai.testModels', { count: discoveredModels.length }), true);
   } catch (error) {
-    if (requestId === modelDiscoveryRequest) {
+    if (!silent && requestId === modelDiscoveryRequest) {
       setStatus(tVars('settings.ai.testFailed', { message: error.message }), false);
     }
   } finally {
@@ -106,32 +153,6 @@ function setStatus(message, ok) {
   const status = byId('ai-status');
   status.textContent = message;
   status.className = `settings-status is-visible ${ok ? 'ok' : 'err'}`;
-}
-
-// Populate the discovered model list without a full "test connection" (no
-// InvokeModel verification, no save). Used so the model dropdown and the
-// inference-profile filter have data as soon as Bedrock is shown. Best-effort:
-// discovery is fail-open and any error just leaves the list as-is.
-async function discoverModels(provider) {
-  const region = byId('s-ai-region').value.trim();
-  if (region.length === 0) return;                 // discovery needs a region
-  try {
-    const response = await apiFetch(`${_BASE}/api/ai/models`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ region }),
-    });
-    const body = await response.json().catch(() => ({}));
-    // Ignore stale responses if the user switched provider meanwhile.
-    if (!response.ok || activeProvider !== provider) return;
-    discoveredModels = Array.isArray(body.models) ? body.models : [];
-    byId('ai-model-options').replaceChildren(...discoveredModels.map(model => {
-      const option = document.createElement('option');
-      option.value = model;
-      return option;
-    }));
-    renderModelSelect();
-  } catch { /* best-effort discovery */ }
 }
 
 function rememberModel() {
@@ -162,10 +183,10 @@ function renderProvider(provider) {
   // Show the configured model as a one-item dropdown now; "test connection"
   // fills it with the discovered list. renderModelSelect handles show/hide.
   renderModelSelect();
-  // Bedrock discovery is keyless, so auto-populate the model list for the saved
-  // provider. This gives the inference-profile filter data to work with without
-  // requiring a manual "test connection" first.
-  if (provider === 'bedrock') discoverModels(provider);
+  // Bedrock discovery is keyless, so auto-populate the model list (and narrow
+  // the geo profile options) for the saved region without requiring a manual
+  // "test connection". Silent: opening settings should not post a status.
+  if (provider === 'bedrock') discoverBedrockModels({ silent: true });
   const keyInput = byId('s-ai-key');
   keyInput.value = '';
   keyInput.placeholder = config?.providers?.[provider]?.keySet ? t('settings.ai.keySaved') : '';
@@ -287,8 +308,8 @@ function initAiSettings() {
   byId('s-ai-region-select')?.addEventListener('change', event => {
     if (!event.target.value) return;
     byId('s-ai-region').value = event.target.value;
-    // A new region can expose a different model set — refresh the dropdown.
-    if (activeProvider === 'bedrock') discoverModels('bedrock');
+    // A new region can expose a different model set and geo profiles — refresh.
+    if (activeProvider === 'bedrock') discoverBedrockModels();
   });
   byId('s-ai-profile-select')?.addEventListener('change', handleProfileChange);
   byId('ai-save-btn')?.addEventListener('click', async event => {
