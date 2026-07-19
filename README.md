@@ -8,7 +8,7 @@ No new hardware. No inline traffic interception. Works via the NAT session table
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
-![Release](https://img.shields.io/badge/release-v1.4.0-3fb950)
+![Release](https://img.shields.io/badge/release-v1.5.0-3fb950)
 
 > 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/egressview/)
 
@@ -18,9 +18,11 @@ No new hardware. No inline traffic interception. Works via the NAT session table
 
 EgressView is production-oriented for home/SOHO networks using Yamaha RTX or Cisco IOS. ASUS AP support and optional data sources are maintained as companion integrations.
 
-### What's new in v1.4.0
+### What's new in v1.5.0
 
-Version 1.4.0 adds a mobile monitoring view, filtered connection-history export in CSV/JSON, explicit manual threat investigation, and a Linux conntrack preview. It also completes the multi-router schema v5 migration, removes HTML-string rendering and the remaining inline-style CSP exception, and strengthens database restore and configuration persistence with fail-closed verification. See the [changelog](CHANGELOG.md) for upgrade details.
+Version 1.5.0 makes AI Insights the start page, with local live metrics, previous-period comparisons, explicit manual analysis/chat through Ollama, Anthropic, OpenAI, or Amazon Bedrock, append-only conversations, and monthly token/cost estimates. It also adds Bedrock model, inference-profile, and Guardrail discovery, runtime CPU diagnostics, and collection-path performance improvements. See the [changelog](CHANGELOG.md) for upgrade details.
+
+Existing databases migrate automatically to schema v7. Startup creates and verifies a complete backup first, and stops without changing the database if free-space, checkpoint, copy, or integrity verification fails. Linux conntrack remains a Docker-validated preview pending physical-router validation.
 
 Existing databases upgrade automatically. Before schema v5 is applied, EgressView creates and verifies a backup and checks observation consistency; startup stops without modifying the database if either check fails. Linux conntrack remains a Docker-validated preview pending physical-router testing.
 

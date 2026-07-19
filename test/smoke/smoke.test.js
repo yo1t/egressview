@@ -629,6 +629,7 @@ test('AI insights renders local facts and links threats to the filtered log', as
   await expect(page.locator('#ai-value-connections')).toHaveText('25');
   await expect(page.locator('#ai-usage-current-tokens')).toContainText('1,500');
   await expect(page.locator('#ai-usage-current-cost')).toContainText(/USD\s*0\.0084/);
+  await expect(page.locator('.ai-chat + .ai-usage-summary')).toBeVisible();
   await page.route(/\/api\/config\/general$/, route => route.request().method() === 'POST'
     ? route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true, language: 'en' }) })
     : route.continue());

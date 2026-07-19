@@ -4,21 +4,31 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-07-19
+
 ### Added
 
 - Added an AI Insights start page with local live metrics, bounded manual analysis, and append-only chat through Ollama, Anthropic, OpenAI, or Amazon Bedrock.
 - Added schema v7 append-only AI token usage, current/previous monthly totals, versioned USD estimates, and per-answer provider/model/token/cost metadata. Unknown model prices remain explicitly unpriced rather than guessed.
 - Added Bedrock model/inference-profile and Guardrail discovery, geo-aware selection, Converse-based connection testing, and AWS default credential-chain authentication without storing AWS keys.
+- Added runtime CPU profiling and per-stage router polling diagnostics for production performance analysis.
 
 ### Changed
 
 - Made AI Insights the leftmost default view while retaining all existing Graph Map, Statistics, Connection Log, Devices, and Detection Log workflows.
+- Placed monthly AI usage at the end of the Insights page so live posture, generated analysis, and chat remain the primary workflow.
 - Made estimated-cost formatting language-aware: English uses dollar notation and Japanese uses explicit `USD` notation; no exchange-rate conversion is implied.
+- Restored bounded five-minute live graph detail while retaining summary rendering for larger ranges, extended enrichment cache lifetimes, throttled stale refresh work, and batched router poll persistence to reduce steady-state CPU and API load.
 
 ### Security and Reliability
 
 - Cloud AI providers remain explicit opt-in and require saved plus per-request consent. AI context is bounded, credentials and router management details are excluded, and provider failures cannot stop collection.
 - Schema v7 preserves all earlier migrations and uses the existing verified fail-closed pre-migration backup path.
+
+### Upgrade Notes
+
+- Existing databases migrate automatically from schema v6 to v7. Startup first creates and verifies a full pre-migration backup and stops without changing the database if free space, checkpoint, copy, or integrity verification fails.
+- Amazon Bedrock uses the AWS SDK default credential chain. Foundation-model access or Marketplace subscription may still be required for the selected model; see the Bedrock setup guide.
 
 ## [1.4.0] - 2026-07-18
 
