@@ -18,6 +18,7 @@ let activeProvider = 'disabled';
 // Models discovered by the last "test connection" (Bedrock), kept so the geo
 // inference-profile selector can re-filter the model dropdown client-side.
 let discoveredModels = [];
+let modelDiscoveryRequest = 0;
 const GEO_PREFIXES = ['global.', 'us.', 'eu.', 'apac.', 'jp.', 'au.'];
 
 function modelMatchesProfile(id, prefix) {
@@ -57,6 +58,47 @@ function renderModelSelect() {
   }));
   select.value = current && ids.includes(current) ? current : '';
   select.classList.remove('is-hidden');
+}
+
+function applyDiscoveredModels(models) {
+  discoveredModels = Array.isArray(models) ? models : [];
+  byId('ai-model-options').replaceChildren(...discoveredModels.map(model => {
+    const option = document.createElement('option');
+    option.value = model;
+    return option;
+  }));
+  renderModelSelect();
+}
+
+async function discoverBedrockModels() {
+  const region = byId('s-ai-region').value.trim();
+  if (activeProvider !== 'bedrock' || !region) return;
+  const requestId = ++modelDiscoveryRequest;
+  const select = byId('s-ai-model-select');
+  select.disabled = true;
+  try {
+    const response = await apiFetch(`${_BASE}/api/ai/models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ region }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    if (requestId !== modelDiscoveryRequest) return;
+    applyDiscoveredModels(result.models);
+    setStatus(tVars('settings.ai.testModels', { count: discoveredModels.length }), true);
+  } catch (error) {
+    if (requestId === modelDiscoveryRequest) {
+      setStatus(tVars('settings.ai.testFailed', { message: error.message }), false);
+    }
+  } finally {
+    if (requestId === modelDiscoveryRequest) select.disabled = false;
+  }
+}
+
+function handleProfileChange() {
+  renderModelSelect();
+  if (activeProvider === 'bedrock' && !discoveredModels.length) discoverBedrockModels();
 }
 
 function setStatus(message, ok) {
@@ -190,14 +232,7 @@ async function testConnection() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
     const models = result.models || [];
-    discoveredModels = models;
-    byId('ai-model-options').replaceChildren(...models.map(model => {
-      const option = document.createElement('option');
-      option.value = model;
-      return option;
-    }));
-    // Build the clickable dropdown, filtered by the selected inference profile.
-    renderModelSelect();
+    applyDiscoveredModels(models);
     if (result.verified === false) {
       // Bedrock discovery succeeded but no model is selected yet — prompt the
       // user to pick one and test again (the InvokeModel check needs a model).
@@ -221,7 +256,7 @@ function initAiSettings() {
   byId('s-ai-region-select')?.addEventListener('change', event => {
     if (event.target.value) byId('s-ai-region').value = event.target.value;
   });
-  byId('s-ai-profile-select')?.addEventListener('change', renderModelSelect);
+  byId('s-ai-profile-select')?.addEventListener('change', handleProfileChange);
   byId('ai-save-btn')?.addEventListener('click', async event => {
     event.currentTarget.disabled = true;
     try {

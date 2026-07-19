@@ -261,27 +261,31 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
     };
   }
 
-  async function listModels() {
-    if (provider === 'disabled') throw new Error('AI provider is disabled');
-    const adapter = ADAPTERS[provider];
-    if (adapter.needsKey && !keys[provider]) {
+  async function listModels(overrides = {}) {
+    const selectedProvider = overrides.provider ?? provider;
+    const selectedRegion = overrides.region ?? region;
+    if (selectedProvider === 'disabled') throw new Error('AI provider is disabled');
+    const adapter = ADAPTERS[selectedProvider];
+    if (!adapter) throw new Error(`Unsupported AI provider: ${selectedProvider}`);
+    if (adapter.needsKey && !keys[selectedProvider]) {
       throw new Error('API key is not configured');
     }
-    if (adapter.needsRegion && !region) throw new Error('AWS region is not configured');
+    if (adapter.needsRegion && !selectedRegion) throw new Error('AWS region is not configured');
     if (adapter.transport === 'sdk') {
       // Discovery is best-effort/fail-open; callers fall back to direct
       // model/inference-profile ID entry when this is unavailable.
-      if (!bedrock?.listModels) return { provider, models: [] };
-      const ids = await bedrock.listModels({ region, timeoutMs: REQUEST_TIMEOUT_MS });
-      return { provider, models: (Array.isArray(ids) ? ids : []).slice(0, 200) };
+      if (!bedrock?.listModels) return { provider: selectedProvider, models: [] };
+      const ids = await bedrock.listModels({ region: selectedRegion, timeoutMs: REQUEST_TIMEOUT_MS });
+      return { provider: selectedProvider, models: (Array.isArray(ids) ? ids : []).slice(0, 200) };
     }
-    const { url, headers } = adapter.listRequest(state());
+    const requestState = { ...state(), provider: selectedProvider, region: selectedRegion };
+    const { url, headers } = adapter.listRequest(requestState);
     const response = await fetchImpl(url, {
       method: 'GET',
       headers,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    return { provider, models: modelIds(await readJsonResponse(response), provider) };
+    return { provider: selectedProvider, models: modelIds(await readJsonResponse(response), selectedProvider) };
   }
 
   // Connection test. Fetch providers list models (also confirms auth). Bedrock

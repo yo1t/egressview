@@ -130,6 +130,22 @@ describe('AI configuration routes', () => {
     assert.equal(calls, 1);
   });
 
+  it('discovers Bedrock models for a selected region without running inference', async () => {
+    const calls = [];
+    const aiProvider = createAiProvider({ bedrock: {
+      listModels: async args => { calls.push(args); return ['jp.anthropic.claude-test']; },
+      converse: async () => { throw new Error('must not run inference'); },
+    } });
+    const result = await request(appFor(aiProvider), 'POST', '/api/ai/models', {
+      region: 'ap-northeast-1',
+    });
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body.models, ['jp.anthropic.claude-test']);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].region, 'ap-northeast-1');
+    assert.equal(aiProvider.getPublicConfig().provider, 'disabled');
+  });
+
   it('rejects test payload fields and disabled providers before fetching', async () => {
     let calls = 0;
     const aiProvider = createAiProvider({ fetchImpl: async () => { calls++; throw new Error('unexpected'); } });

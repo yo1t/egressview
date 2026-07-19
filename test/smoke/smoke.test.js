@@ -267,6 +267,15 @@ async function mockSettingsRoutes(page) {
     contentType: 'application/json',
     body: JSON.stringify({ success: true, provider: 'anthropic', models: ['claude-test', '<img src=x onerror=alert(1)>'] }),
   }));
+  await page.route('**/api/ai/models', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      provider: 'bedrock',
+      models: ['jp.anthropic.claude-sonnet-test', 'us.anthropic.claude-sonnet-test'],
+    }),
+  }));
   await page.route('**/api/slack/verify', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -1196,6 +1205,16 @@ test('settings tabs save and connection buttons work without console errors', as
   const pickedModel = await page.locator('#s-ai-model-select option').nth(1).getAttribute('value');
   await page.locator('#s-ai-model-select').selectOption(pickedModel);
   await expect(page.locator('#s-ai-model')).toHaveValue(pickedModel);
+
+  // Bedrock geo selection discovers and filters models without requiring a
+  // second click on the connection/model refresh button.
+  await page.locator('#s-ai-provider').selectOption('bedrock');
+  await page.locator('#s-ai-region-select').selectOption('ap-northeast-1');
+  await page.locator('#s-ai-profile-select').selectOption('jp.');
+  await expect(page.locator('#s-ai-model-select')).toBeEnabled();
+  await expect(page.locator('#s-ai-model-select option')).toHaveCount(2);
+  await page.locator('#s-ai-model-select').selectOption('jp.anthropic.claude-sonnet-test');
+  await expect(page.locator('#s-ai-model')).toHaveValue('jp.anthropic.claude-sonnet-test');
 
   await page.click('.settings-tab[data-tab="backup"]');
   await expect(page.locator('#pane-backup')).toHaveClass(/active/);
