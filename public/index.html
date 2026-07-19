@@ -812,36 +812,6 @@
         <span class="ai-delta" id="ai-delta-danger">—</span>
       </button>
     </div>
-    <section class="ai-usage-summary" aria-labelledby="ai-usage-title">
-      <div class="ai-usage-head">
-        <div>
-          <h3 id="ai-usage-title" data-i18n="ai.usage.title">AI使用量</h3>
-          <p data-i18n="ai.usage.note">この機能の記録開始後に、成功したAI呼び出しでproviderが返した実測トークンです。料金は概算で、Guardrailsなどの追加料金を含みません。</p>
-        </div>
-        <span class="ai-usage-currency">USD</span>
-      </div>
-      <div class="ai-usage-grid">
-        <article class="ai-usage-card">
-          <span class="ai-usage-period" data-i18n="ai.usage.current">今月</span>
-          <strong id="ai-usage-current-tokens">—</strong>
-          <span id="ai-usage-current-detail" class="ai-usage-detail">—</span>
-          <div class="ai-usage-foot">
-            <span id="ai-usage-current-cost">—</span>
-            <span id="ai-usage-current-requests">—</span>
-          </div>
-        </article>
-        <article class="ai-usage-card">
-          <span class="ai-usage-period" data-i18n="ai.usage.previous">先月</span>
-          <strong id="ai-usage-previous-tokens">—</strong>
-          <span id="ai-usage-previous-detail" class="ai-usage-detail">—</span>
-          <div class="ai-usage-foot">
-            <span id="ai-usage-previous-cost">—</span>
-            <span id="ai-usage-previous-requests">—</span>
-          </div>
-        </article>
-      </div>
-      <p id="ai-usage-caveat" class="ai-usage-caveat"></p>
-    </section>
     <div id="ai-error" class="ai-error"></div>
     <section class="ai-analysis">
       <div class="ai-placeholder-mark">✦</div>
@@ -874,6 +844,36 @@
         <button id="ai-chat-send-btn" class="ai-refresh" type="button" data-i18n="ai.chat.send">質問する</button>
       </div>
       <div id="ai-chat-storage" class="ai-analysis-meta"></div>
+    </section>
+    <section class="ai-usage-summary" aria-labelledby="ai-usage-title">
+      <div class="ai-usage-head">
+        <div>
+          <h3 id="ai-usage-title" data-i18n="ai.usage.title">AI使用量</h3>
+          <p data-i18n="ai.usage.note">この機能の記録開始後に、成功したAI呼び出しでproviderが返した実測トークンです。料金は概算で、Guardrailsなどの追加料金を含みません。</p>
+        </div>
+        <span class="ai-usage-currency">USD</span>
+      </div>
+      <div class="ai-usage-grid">
+        <article class="ai-usage-card">
+          <span class="ai-usage-period" data-i18n="ai.usage.current">今月</span>
+          <strong id="ai-usage-current-tokens">—</strong>
+          <span id="ai-usage-current-detail" class="ai-usage-detail">—</span>
+          <div class="ai-usage-foot">
+            <span id="ai-usage-current-cost">—</span>
+            <span id="ai-usage-current-requests">—</span>
+          </div>
+        </article>
+        <article class="ai-usage-card">
+          <span class="ai-usage-period" data-i18n="ai.usage.previous">先月</span>
+          <strong id="ai-usage-previous-tokens">—</strong>
+          <span id="ai-usage-previous-detail" class="ai-usage-detail">—</span>
+          <div class="ai-usage-foot">
+            <span id="ai-usage-previous-cost">—</span>
+            <span id="ai-usage-previous-requests">—</span>
+          </div>
+        </article>
+      </div>
+      <p id="ai-usage-caveat" class="ai-usage-caveat"></p>
     </section>
   </div>
   <!-- Connection Log View -->

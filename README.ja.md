@@ -8,7 +8,7 @@
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
-![Release](https://img.shields.io/badge/release-v1.4.0-3fb950)
+![Release](https://img.shields.io/badge/release-v1.5.0-3fb950)
 
 > 🇬🇧 [English README](README.md) | 🌐 [プロジェクトページ](https://yo1t.github.io/egressview/index.ja.html)
 
@@ -18,11 +18,11 @@
 
 EgressView は Yamaha RTX / Cisco IOS を使う家庭・SOHOネットワーク向けに、実運用を意識して開発しています。ASUS AP 連携と任意のデータソースは補助的な連携としてメンテナンスしています。
 
-### v1.4.0の主な変更
+### v1.5.0の主な変更
 
-v1.4.0では、モバイル監視ビュー、絞り込んだ通信履歴のCSV/JSON出力、明示操作による手動脅威調査、Linux conntrackプレビューを追加しました。複数ルーター向けDB schema v5移行も完了し、HTML文字列による画面描画とCSPのinline style例外を廃止しました。DBリストアと設定保存もfail-closed方式に強化しています。詳細は[変更履歴](CHANGELOG.md)を参照してください。
+v1.5.0では、AI洞察をスタートページとして正式追加しました。ローカル指標、前期間比較、Ollama / Anthropic / OpenAI / Amazon Bedrockによる明示実行の分析・対話、append-only会話履歴、月次token使用量と概算料金を確認できます。Bedrockのmodel / inference profile / Guardrail自動検出、CPU負荷の計測と収集処理の最適化も追加しています。詳細は[変更履歴](CHANGELOG.md)を参照してください。
 
-既存DBは起動時に自動移行されます。schema v5適用前にバックアップの作成・検証と観測データの整合性確認を行い、いずれかが失敗した場合はDBを変更せず起動を停止します。Linux conntrackはDocker統合試験済みのプレビューで、実機ルーターでの検証は未完了です。
+既存DBは起動時にschema v7へ自動移行されます。適用前に完全バックアップを作成・検証し、空き容量、checkpoint、copy、integrity検査のいずれかが失敗した場合はDBを変更せず起動を停止します。Linux conntrackはDocker統合試験済みのプレビューで、実機ルーターでの検証は未完了です。
 
 ## 家庭・SOHOのセキュリティ対策として
 
