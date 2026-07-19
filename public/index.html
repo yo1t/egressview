@@ -493,6 +493,20 @@
               </select>
               <input id="s-ai-region" class="form-input" type="text" maxlength="64" placeholder="ap-northeast-1" autocomplete="off" spellcheck="false">
               <p class="settings-field-hint" data-i18n="settings.ai.bedrockHint">認証はAWS SDKの標準credential chainに委譲します（キー入力なし）。モデル欄には基盤モデルID、cross-region推論プロファイルID（Global / us. / eu. / apac. / jp.（東京・大阪、日本内処理） / au.）、またはARNを直接入力できます。対応モデルはAWSの提供状況に依存します。</p>
+              <div class="form-group">
+                <label class="form-label" for="s-ai-profile-select" data-i18n="settings.ai.profile">推論プロファイル（geo）</label>
+                <select id="s-ai-profile-select" class="form-input">
+                  <option value="">All</option>
+                  <option value="global.">Global (global.)</option>
+                  <option value="us.">US (us.)</option>
+                  <option value="eu.">EU (eu.)</option>
+                  <option value="apac.">APAC (apac.)</option>
+                  <option value="jp.">Japan (jp.)</option>
+                  <option value="au.">Australia (au.)</option>
+                  <option value="ondemand">Single-Region (on-demand)</option>
+                </select>
+                <p class="settings-field-hint" data-i18n="settings.ai.profileHint">geo を選ぶと、その推論プロファイルのモデルだけを下のモデル欄に表示します。cross-region プロファイル（jp. 等）は on-demand で呼べます。Single-Region は素の基盤モデルで、リージョンによっては呼び出せないことがあります。</p>
+              </div>
               <label class="settings-check-label ai-guardrail-toggle"><input id="s-ai-guardrail-enabled" type="checkbox"> <span data-i18n="settings.ai.guardrailEnable">Bedrock Guardrails を使う（任意）</span></label>
               <div id="ai-guardrail-fields" class="is-hidden">
                 <div class="form-group">
