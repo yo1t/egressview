@@ -39,9 +39,10 @@ function renderModelSelect() {
   const prefix = byId('s-ai-profile-select')?.value || '';
   const current = byId('s-ai-model').value.trim();
   const ids = discoveredModels.filter(id => modelMatchesProfile(id, prefix));
-  // Always offer the currently-configured model so the dropdown is usable and
-  // visible even before "test connection" discovers the full list.
-  if (current && !ids.includes(current)) ids.unshift(current);
+  // Fallback only: when nothing is discovered yet (or none match the selected
+  // profile), still offer the configured model so the dropdown stays usable.
+  // Once discovery populates the list, the profile filter drives the options.
+  if (!ids.length && current) ids.push(current);
   if (!ids.length) {
     select.replaceChildren();
     select.classList.add('is-hidden');
@@ -107,6 +108,32 @@ function setStatus(message, ok) {
   status.className = `settings-status is-visible ${ok ? 'ok' : 'err'}`;
 }
 
+// Populate the discovered model list without a full "test connection" (no
+// InvokeModel verification, no save). Used so the model dropdown and the
+// inference-profile filter have data as soon as Bedrock is shown. Best-effort:
+// discovery is fail-open and any error just leaves the list as-is.
+async function discoverModels(provider) {
+  const region = byId('s-ai-region').value.trim();
+  if (region.length === 0) return;                 // discovery needs a region
+  try {
+    const response = await apiFetch(`${_BASE}/api/ai/models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ region }),
+    });
+    const body = await response.json().catch(() => ({}));
+    // Ignore stale responses if the user switched provider meanwhile.
+    if (!response.ok || activeProvider !== provider) return;
+    discoveredModels = Array.isArray(body.models) ? body.models : [];
+    byId('ai-model-options').replaceChildren(...discoveredModels.map(model => {
+      const option = document.createElement('option');
+      option.value = model;
+      return option;
+    }));
+    renderModelSelect();
+  } catch { /* best-effort discovery */ }
+}
+
 function rememberModel() {
   if (config && PROVIDERS.includes(activeProvider)) {
     config.models[activeProvider] = byId('s-ai-model').value.trim();
@@ -135,6 +162,10 @@ function renderProvider(provider) {
   // Show the configured model as a one-item dropdown now; "test connection"
   // fills it with the discovered list. renderModelSelect handles show/hide.
   renderModelSelect();
+  // Bedrock discovery is keyless, so auto-populate the model list for the saved
+  // provider. This gives the inference-profile filter data to work with without
+  // requiring a manual "test connection" first.
+  if (provider === 'bedrock') discoverModels(provider);
   const keyInput = byId('s-ai-key');
   keyInput.value = '';
   keyInput.placeholder = config?.providers?.[provider]?.keySet ? t('settings.ai.keySaved') : '';
@@ -254,7 +285,10 @@ function initAiSettings() {
     if (event.target.value) byId('s-ai-model').value = event.target.value;
   });
   byId('s-ai-region-select')?.addEventListener('change', event => {
-    if (event.target.value) byId('s-ai-region').value = event.target.value;
+    if (!event.target.value) return;
+    byId('s-ai-region').value = event.target.value;
+    // A new region can expose a different model set — refresh the dropdown.
+    if (activeProvider === 'bedrock') discoverModels('bedrock');
   });
   byId('s-ai-profile-select')?.addEventListener('change', handleProfileChange);
   byId('ai-save-btn')?.addEventListener('click', async event => {
