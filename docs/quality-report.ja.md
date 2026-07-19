@@ -1,12 +1,12 @@
 # EgressView コード品質レポート
 
-- **評価日**: 2026-07-18
-- **コミット**: `9968c18a3a3d4e418d6d09e97b38c56095c2899a` (main)
-- **バージョン**: 1.4.0
+- **評価日**: 2026-07-19
+- **コミット**: `15ab4090c7b753cf621f9ea2d021bf2558c99672` (main)
+- **バージョン**: 1.5.1
 - **Node.js**: >=22 (テスト: 22, 24)
-- **評価者**: 自動静的解析 + 手動コードレビュー (Kiro AI)
+- **評価者**: 自動静的解析 + 手動コードレビュー (Claude Code)
 
-> この文書はv1.4.0時点の測定スナップショットです。最新リリースの変更点は`CHANGELOG.md`を参照してください。
+> この文書はv1.5.1時点の測定スナップショットです。最新リリースの変更点は`CHANGELOG.md`を参照してください。
 
 ---
 
@@ -14,12 +14,12 @@
 
 **総合グレード: A**
 
-EgressView は評価した全フレームワークにおいて**プロダクショングレードの品質**を示しています。v1.3.5 からの改善として、enrichment キャッシュ TTL の最適化 (RDAP/Geo 30日, 起動時 API 負荷削減)、バックグラウンドスロットリング、bounded ライブグラフ詳細、モバイル対応ビューが追加されました。テスト対ソース比率 93.7% を維持しつつ、ソースコード +280行・テストコード +189行の機能拡張が達成されています。
+EgressView は評価した全フレームワークにおいて**プロダクショングレードの品質**を示しています。v1.4.0 からの改善として、AI洞察タブ (マルチプロバイダー対応: Ollama/Anthropic/OpenAI)、conntrack ポーラー (TCP/UDP/ICMP parser, SSH/TOFU, ARP/NDP, router manager, Docker SSH統合試験)、enrichment 非同期チャンク化、Smoke テスト大幅拡充が追加されました。ソースコード +2,822行 (+13.9%)、テストコード +2,243行 (+11.8%) の大規模機能拡張に対し、テスト対ソース比率 92.0% を維持しています。zod スキーマ定義は 39→77 (+97%) と倍増し、入力検証の網羅性が大幅に向上しました。
 
 | # | フレームワーク | スコア | 判定 |
 |---|---|---|---|
 | 1 | OWASP ASVS Level 1 | 13/14 セクション適合 | ✅ 適合 |
-| 2 | OpenSSF Scorecard | ~8.2/10 | 上位 15% |
+| 2 | OpenSSF Scorecard | ~8.3/10 | 上位 15% |
 | 3 | ISO/IEC 25010 | 平均 8.6/10 | 高品質 |
 | 4 | Node.js Best Practices (goldbergyoni) | 44/50 (88%) | 優秀 |
 | 5 | SonarQube Quality Gate (推定) | 全項目 A (Coverage 除く) | ✅ PASSED |
@@ -27,42 +27,51 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 ### 主な強み
 
 - **セキュリティ設計** — scrypt パスワードハッシュ, タイミングセーフなトークン比較, リクエスト毎 CSP nonce, `style-src 'self'`, CI 統合 ASH + secret scan + npm audit, SHA ピン留め GitHub Actions (2 ワークフロー)
-- **テスト文化** — 84 unit + 4 integration + Playwright smoke (1,163行); テスト対ソース比率 93.7%; 全ドメインモジュールで `_resetForTest()` パターン (15箇所)
+- **テスト文化** — 96 unit + 4 integration + Playwright smoke (1,441行); テスト対ソース比率 92.0%; 全ドメインモジュールで `_resetForTest()` パターン (9箇所)
 - **コード規律** — サーバーサイド `var` ゼロ, `eval` ゼロ, TODO/FIXME ゼロ, 命名規約一貫, ESLint v10 + innerHTML 監査
-- **入力検証** — HTTP ルートに zod スキーマ検証を段階展開 (5/13 ルートファイル, `http-validation.js` ヘルパー, スキーマ定義 39個)
-- **最小依存** — 本番パッケージ 11 個のみ; Dependabot (cooldown 7日)
-- **性能最適化** — enrichment キャッシュ 30日 TTL, バックグラウンドスロットリング, bounded ライブグラフ, stale 一括リフレッシュ
+- **入力検証** — HTTP ルートに zod スキーマ検証を段階展開 (6/14 ルートファイル, `http-validation.js` ヘルパー, スキーマ定義 77個)
+- **最小依存** — 本番パッケージ 12 個のみ; Dependabot (cooldown 7日)
+- **性能最適化** — enrichment キャッシュ 30日 TTL, バックグラウンドスロットリング, bounded ライブグラフ, stale 一括リフレッシュ, reMatchAndNotify 非同期チャンク化
+- **AI統合** — マルチプロバイダー adapter (Ollama/Anthropic/OpenAI), モデル一覧, 接続テスト, ライブ指標 facts タブ
 
-### v1.3.5 からの主な変更点
+### v1.4.0 からの主な変更点
 
-| 項目 | v1.3.5 (65de148) | v1.4.0 (評価時点) | 変化 |
+| 項目 | v1.4.0 (9968c18) | v1.5.1 (評価時点) | 変化 |
 |---|---|---|---|
-| ソースコード行数 | 19,975 | 20,255 | +280 (+1.4%) |
-| テストコード行数 | 18,793 | 18,982 | +189 (+1.0%) |
-| テスト対ソース比率 | 94.1% | 93.7% | -0.4pp (微減) |
-| バージョン | 1.3.5 | 1.4.0 | メジャー機能リリース |
-| enrichment RDAP TTL | 不明 | 30日 | 起動負荷削減 |
-| enrichment Geo TTL | 不明 | 30日 (private IP: 永久) | API コール削減 |
-| ライブグラフ | 無制限描画 | bounded 詳細表示 | パフォーマンス改善 |
-| モバイルビュー | なし | レスポンシブ対応 | UX 改善 |
+| ソースコード行数 | 20,255 | 23,077 | +2,822 (+13.9%) |
+| テストコード行数 | 18,982 | 21,225 | +2,243 (+11.8%) |
+| テスト対ソース比率 | 93.7% | 92.0% | -1.7pp (微減) |
+| ユニットテストファイル | 84 | 96 | +12 |
+| ソースモジュール (src/) | 69 | 79 | +10 |
+| ルートファイル (src/routes/) | 13 | 14 | +1 |
+| API エンドポイント | 56 | 68 | +12 |
+| 本番依存パッケージ | 11 | 12 | +1 (AI provider SDK) |
+| requireAdmin 適用ルート | 79 | 87 | +8 |
+| zod 検証適用ルート | 5/13 | 6/14 | +1 |
+| zod スキーマ定義 | 39 | 77 | +38 (+97%) |
+| パラメータ化 SQL | 99 | 117 | +18 |
+| ドキュメント (docs/*.md) | 22 | 26 | +4 |
+| PRs merged | 78 | 101 | +23 |
+| Smoke テスト行数 | 1,163 | 1,441 | +278 (+23.9%) |
 
 ### v1.2.2 からの累積変更点
 
-| 項目 | v1.2.2 | v1.4.0 (評価時点) | 変化 |
+| 項目 | v1.2.2 | v1.5.1 (評価時点) | 変化 |
 |---|---|---|---|
-| ソースコード行数 | 16,791 | 20,255 | +20.6% |
-| テストコード行数 | 12,577 | 18,982 | +50.9% |
-| テスト対ソース比率 | 74.9% | 93.7% | +18.8pp |
-| ユニットテストファイル | 54 | 84 | +30 |
+| ソースコード行数 | 16,791 | 23,077 | +37.4% |
+| テストコード行数 | 12,577 | 21,225 | +68.8% |
+| テスト対ソース比率 | 74.9% | 92.0% | +17.1pp |
+| ユニットテストファイル | 54 | 96 | +42 |
 | インテグレーションテスト | 3 | 4 | +1 |
-| ソースモジュール (src/) | 48 | 69 | +21 |
+| ソースモジュール (src/) | 48 | 79 | +31 |
 | ポーラー (src/pollers/) | 11 | 15 | +4 |
-| ルートファイル (src/routes/) | 10 | 13 | +3 |
-| API エンドポイント | 46 | 56 | +10 |
-| 本番依存パッケージ | 10 | 11 | +1 (zod) |
-| requireAdmin 適用ルート | 62 | 79 | +17 |
-| zod 検証適用ルート | 0/10 | 5/13 | +5 |
-| ドキュメント (docs/*.md) | 14 | 22 | +8 |
+| ルートファイル (src/routes/) | 10 | 14 | +4 |
+| API エンドポイント | 46 | 68 | +22 |
+| 本番依存パッケージ | 10 | 12 | +2 (zod, AI provider SDK) |
+| requireAdmin 適用ルート | 62 | 87 | +25 |
+| zod 検証適用ルート | 0/10 | 6/14 | +6 |
+| zod スキーマ定義 | 0 | 77 | +77 |
+| ドキュメント (docs/*.md) | 14 | 26 | +12 |
 
 ### 主なギャップと次のステップ
 
@@ -83,25 +92,27 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | メトリクス | 値 |
 |---|---|
-| ソースコード行数 (server + src + public/js + mcp) | 20,255 |
-| テストコード行数 (unit + integration + smoke) | 18,982 |
-| テスト対ソース比率 | 93.7% |
-| ユニットテストファイル数 | 84 |
+| ソースコード行数 (server + src + public/js + mcp) | 23,077 |
+| テストコード行数 (unit + integration + smoke) | 21,225 |
+| テスト対ソース比率 | 92.0% |
+| ユニットテストファイル数 | 96 |
 | インテグレーションテストファイル数 | 4 |
-| Smoke テスト (Playwright) ファイル数 | 1 |
-| ソースモジュール数 (src/) | 69 |
+| Smoke テスト (Playwright) ファイル数 | 1 (1,441行) |
+| テスト合格数 | 1,406 (失敗: 0) |
+| ソースモジュール数 (src/) | 79 |
 | ポーラー数 (src/pollers/) | 15 |
-| ルートファイル数 (src/routes/) | 13 |
-| API エンドポイント数 | 56 |
-| 本番依存パッケージ数 | 11 |
-| 関数あたり平均行数 | ~15.7 |
+| ルートファイル数 (src/routes/) | 14 |
+| API エンドポイント数 | 68 |
+| 本番依存パッケージ数 | 12 |
+| 関数あたり平均行数 | ~18.4 |
 | 深いネスト行数 (>5レベル) | 7 |
 | `var` 使用箇所 (サーバーサイド) | 0 |
 | `eval` / `new Function` 使用箇所 | 0 |
 | TODO/FIXME/HACK コメント | 0 |
-| パラメータ化 SQL 文 | 99 |
-| requireAdmin 適用ルート | 79 |
-| zod スキーマ定義 (HTTP ルート) | 39 |
+| パラメータ化 SQL 文 | 117 |
+| requireAdmin 適用ルート | 87 |
+| zod スキーマ定義 (HTTP ルート) | 77 |
+| `_resetForTest`/`_initForTest` パターン | 9 ソースファイル |
 
 ---
 
@@ -113,8 +124,8 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 |---|---|---|
 | V2 認証 | ✅ | scrypt (N=16384, r=8, p=1), timingSafeEqual, 256bit セッショントークン, ブルートフォース防御 (5回/5分ロック), パスワード 8-256文字, zod スキーマ検証 |
 | V3 セッション管理 | ✅ | トークン SHA-256 ハッシュ保存, 30日スライディング失効, パスワード変更時に全セッション無効化, 定期 prune, タッチスロットル (5分) |
-| V4 アクセス制御 | ✅ | 79 ルートに `requireAdmin` 適用、未認証は login/verify の 2 エンドポイントのみ |
-| V5 入力検証 | ✅ | Body 64KB 制限, zod スキーマ検証 (5/13 ルート, `http-validation.js` ヘルパー), プライベート IP のみルーターアクセス許可 (SSRF 防止), パストラバーサル防止, null バイト拒否 |
+| V4 アクセス制御 | ✅ | 87 ルートに `requireAdmin` 適用、未認証は login/verify の 2 エンドポイントのみ |
+| V5 入力検証 | ✅ | Body 64KB 制限, zod スキーマ検証 (6/14 ルート, `http-validation.js` ヘルパー, 77 スキーマ定義), プライベート IP のみルーターアクセス許可 (SSRF 防止), パストラバーサル防止, null バイト拒否 |
 | V6 暗号化 | ✅ | scrypt (パスワード), randomBytes (トークン/nonce/salt), SHA-256 (TOFU ホスト鍵/セッション), timingSafeEqual |
 | V7 エラー処理 | ✅ | 汎用 500 レスポンス, スタックトレース非露出, タイミング攻撃対策 (500ms 遅延) |
 | V8 データ保護 | ✅ | 設定ファイル mode 0o600, バックアップ 0o600, TLS 秘密鍵 0o600, ログにパスワード非出力 |
@@ -129,7 +140,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 ## 2. OpenSSF Scorecard (推定)
 
-**推定スコア: 8.2/10**
+**推定スコア: 8.3/10**
 
 | チェック項目 | スコア | 根拠 |
 |---|---|---|
@@ -143,7 +154,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | Vulnerabilities | 10/10 | `npm audit --omit=dev` (CI) |
 | Dependency-Update-Tool | 10/10 | Dependabot (npm + Actions, weekly, cooldown 7日) |
 | CI-Tests | 10/10 | Unit + Integration + Playwright smoke, Node 22/24 マトリクス |
-| Maintained | 9/10 | 活発なリリース (v1.0.0→v1.4.0, 78 PR merged), PR テンプレート, CONTRIBUTING.md |
+| Maintained | 10/10 | 活発なリリース (v1.0.0→v1.5.1, 101 PR merged), PR テンプレート, CONTRIBUTING.md |
 | Code-Review | 7/10 | PR テンプレート + CI 必須 (branch protection は確認不可) |
 | Fuzzing | 0/10 | なし (ネットワーク監視ツールでは一般的) |
 | Signed-Releases | 0/10 | GPG 署名なし (git clone 配布) |
@@ -154,13 +165,13 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | 品質特性 | スコア | 主な強み | 主なギャップ |
 |---|---|---|---|
-| 機能適合性 | 9/10 | 56 API, 15 ポーラー, MCP サーバー, 手動脅威調査, CSV/JSON エクスポート, モバイルビュー | OpenAPI 定義なし |
-| 性能効率性 | 9/10 | 多層キャッシュ (history-cache, enrichment 30日 TTL), WAL, 圧縮, バッチ化, 重複排除, bounded summaries, バックグラウンドスロットリング | 負荷テストなし |
+| 機能適合性 | 9/10 | 68 API, 15 ポーラー, MCP サーバー, AI洞察タブ, 手動脅威調査, CSV/JSON エクスポート, モバイルビュー | OpenAPI 定義なし |
+| 性能効率性 | 9/10 | 多層キャッシュ (history-cache, enrichment 30日 TTL), WAL, 圧縮, バッチ化, 重複排除, bounded summaries, バックグラウンドスロットリング, reMatchAndNotify 非同期チャンク化 | 負荷テストなし |
 | 互換性 | 8/10 | Node 22/24, JA/EN i18n, OS 非依存, Linux conntrack 対応, モバイルレスポンシブ | Docker なし |
-| 使用性 | 9/10 | Demo モード, .env.example, 自動パスワード生成, MCP 統合, API/アーキテクチャドキュメント, モバイル対応 | ワンクリックデプロイなし |
+| 使用性 | 9/10 | Demo モード, .env.example, 自動パスワード生成, MCP 統合, API/アーキテクチャドキュメント, モバイル対応, AI洞察 | ワンクリックデプロイなし |
 | 信頼性 | 9/10 | Graceful shutdown, 自動バックアップ, WAL checkpoint, reopen(), DB マイグレーション v5, AbortSignal, stale enrichment リフレッシュ | Health-check なし |
-| セキュリティ | 9/10 | OWASP ASVS L1 適合 (13/14), innerHTML 監査, zod 段階展開 | CSRF 明示なし |
-| 保守性 | 9/10 | 69 モジュール, テスト比率 93.7%, 分割リファクタ (history, auth), http-validation ヘルパー | TypeScript なし |
+| セキュリティ | 9/10 | OWASP ASVS L1 適合 (13/14), innerHTML 監査, zod 段階展開 (77 スキーマ) | CSRF 明示なし |
+| 保守性 | 9/10 | 79 モジュール, テスト比率 92.0%, 分割リファクタ (history, auth), http-validation ヘルパー | TypeScript なし |
 | 移植性 | 7/10 | Pure Node.js, ENV 設定, OS 非依存 | Docker/systemd なし |
 
 ---
@@ -171,12 +182,12 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | セクション | スコア | ハイライト |
 |---|---|---|
-| 1. プロジェクト構造 | 9/10 | ドメイン分割 (routes/pollers/core), レイヤー分離, 13 ルートファイル, history 分割リファクタ |
+| 1. プロジェクト構造 | 9/10 | ドメイン分割 (routes/pollers/core), レイヤー分離, 14 ルートファイル, history 分割リファクタ |
 | 2. エラー処理 | 9/10 | async/await 統一, 中央エラーハンドラ, graceful exit (SIGTERM/SIGINT), AbortSignal |
 | 3. コードスタイル | 10/10 | ESLint v10, const 優先 (var ゼロ), innerHTML 監査, 命名規約一貫 |
-| 4. テスト | 9/10 | 84 unit + 4 integration + Playwright smoke, AAA パターン, 分離初期化, 93.7% テスト比率 |
+| 4. テスト | 9/10 | 96 unit + 4 integration + Playwright smoke, AAA パターン, 分離初期化, 92.0% テスト比率 |
 | 5. プロダクション | 7/10 | 構造化ログ, 脆弱性自動検出, LTS Node, GitHub Pages ドキュメント |
-| 6. セキュリティ | 9/10 | ASH, security headers, eval ゼロ, auth rate limit, zod (HTTP + MCP) |
+| 6. セキュリティ | 9/10 | ASH, security headers, eval ゼロ, auth rate limit, zod (HTTP + MCP + AI) |
 
 **未対応の主要プラクティス:**
 - コードカバレッジ計測ツール (c8/nyc) なし
@@ -192,11 +203,11 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | メトリクス | 値 | レーティング |
 |---|---|---|
-| コード行数 | 20,255 | - |
-| テスト対ソース比率 | 93.7% | Excellent (>80%) |
+| コード行数 | 23,077 | - |
+| テスト対ソース比率 | 92.0% | Excellent (>80%) |
 | 重複率 | < 2% | **A** (閾値: <=3%) |
 | 認知的複雑度 | 非常に低い | **A** (深いネスト: 7行のみ) |
-| 技術的負債比率 | 3.5% (~20h) | **A** (閾値: <=5%) |
+| 技術的負債比率 | 3.5% (~22h) | **A** (閾値: <=5%) |
 | 信頼性 | 既知バグ 0 | **A** |
 | セキュリティホットスポット | 0 | **A** |
 | セキュリティレーティング | - | **A** |
@@ -211,45 +222,48 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 |---|---|---|
 | device-identify.js | 547 | 25.2 |
 | routes/connections.js | 329 | 25.5 |
-| db-migrate.js | 353 | 19.3 |
+| db-migrate.js | 413 | 19.3 |
 | pollers/cisco.js | 643 | 17.0 |
 | enrichment.js | 479 | 16.9 |
 
-### コードスメル (合計 12 件)
+### コードスメル (合計 13 件)
 
 | 重要度 | 件数 | 例 |
 |---|---|---|
-| MAJOR | 2 | `history.js` 718行 (分割後も多責務), `devices.js` 656行 |
-| MINOR | 4 | `pollers/cisco.js` 643行, `pollers/yamaha.js` 598行, `device-identify.js` 547行, `server.js` 609行 |
+| MAJOR | 2 | `history.js` 761行 (分割後も多責務), `devices.js` 665行 |
+| MINOR | 5 | `pollers/cisco.js` 643行, `server.js` 621行, `pollers/yamaha.js` 612行, `device-identify.js` 547行, `ai-provider.js` 477行 |
 | INFO | 6 | マジックナンバー `8000`ms x10箇所, DB initDb() ボイラープレート重複 (5ファイル) |
 
 ---
 
 ## 6. バージョン別改善サマリー
 
-### v1.3.5 → v1.4.0
+### v1.4.0 → v1.5.1
 
 | 領域 | 改善内容 |
 |---|---|
-| 性能 | enrichment キャッシュ TTL 最適化 (RDAP/Geo 30日), バックグラウンドスロットリング, bounded ライブグラフ詳細 |
-| 信頼性 | stale enrichment 一括リフレッシュ (起動時 API 負荷削減), private IP 永久キャッシュ |
-| UX | レスポンシブモバイルビュー追加, bounded ライブグラフ詳細表示 |
-| リリース管理 | v1.4.0 CHANGELOG, site/ 更新 |
+| AI統合 | AI洞察タブ: マルチプロバイダー adapter (Ollama/Anthropic/OpenAI), モデル一覧, 接続テスト, ライブ指標 facts タブ |
+| ネットワーク監視 | conntrack ポーラー: TCP/UDP/ICMP parser, SSH/TOFU, ARP/NDP, router manager, 設定UI/自動検出, Docker SSH統合試験 |
+| 性能 | enrichment queue 50ms ディレイ, reMatchAndNotify 非同期チャンク化 |
+| 入力検証 | zod スキーマ定義 39→77 (+97%), routes/ai.js に zod 検証追加 |
+| テスト | ユニットテスト +12 ファイル (84→96), Smoke テスト 1,163→1,441行, テスト合格数 1,406 |
+| UI | device panel bootstrap 修正, live graph detail threshold 改善 |
+| リリース管理 | 23 PR merged (78→101), ドキュメント +4 (22→26) |
 
-### v1.2.2 → v1.4.0 (累積)
+### v1.2.2 → v1.5.1 (累積)
 
 | 領域 | 改善内容 |
 |---|---|
-| テスト | ユニットテスト +30 ファイル (54→84), インテグレーション +1, テスト比率 74.9%→93.7% |
-| セキュリティ | zod スキーマ検証を HTTP ルートに段階展開 (5/13), `http-validation.js` ヘルパー, requireAdmin +17 |
+| テスト | ユニットテスト +42 ファイル (54→96), インテグレーション +1, テスト比率 74.9%→92.0% |
+| セキュリティ | zod スキーマ検証を HTTP ルートに段階展開 (6/14), `http-validation.js` ヘルパー, requireAdmin +25, 77 スキーマ定義 |
 | アーキテクチャ | `history.js` 分割 (history-queries.js), `auth.js` 分割 (auth-sessions + router-setup), AbortSignal 対応 |
-| 機能 | conntrack ポーラー, 手動脅威調査, CSV/JSON エクスポート, history-cache, schema v5 migration, モバイルビュー |
-| 性能 | enrichment TTL 最適化, バックグラウンドスロットリング, bounded summaries/graph |
+| 機能 | AI洞察タブ, conntrack ポーラー, 手動脅威調査, CSV/JSON エクスポート, history-cache, schema v5 migration, モバイルビュー |
+| 性能 | enrichment TTL 最適化, バックグラウンドスロットリング, bounded summaries/graph, 非同期チャンク化 |
 | CI/CD | GitHub Pages ワークフロー追加 (SHA pinned) |
-| ドキュメント | API リファレンス (JA/EN), アーキテクチャ (JA/EN), conntrack/manual-threat セットアップ (JA/EN) |
-| 依存管理 | zod v4 追加, express v5 維持 |
-| コード品質 | `history.js` 985→718行 (-27%), MAJOR コードスメル 3→2件, パラメータ化 SQL 77→99 |
+| ドキュメント | API リファレンス (JA/EN), アーキテクチャ (JA/EN), conntrack/manual-threat セットアップ (JA/EN), AI設定ガイド |
+| 依存管理 | zod v4 追加, AI provider SDK 追加, express v5 維持 |
+| コード品質 | `history.js` 985→761行 (-23%), MAJOR コードスメル 3→2件, パラメータ化 SQL 77→117 |
 
 ---
 
-*本レポートはリポジトリソースコードの自動静的解析により生成されました。動的テスト (ペネトレーションテスト, ファジング) は実施していません。SonarQube メトリクスは grep ベースの分析からの推定値であり、実際の SonarQube スキャナーによるものではありません。OpenSSF Scorecard はリポジトリ内容からの推定であり、正確なスコアは `scorecard` CLI をライブ GitHub リポジトリに対して実行する必要があります。*
+*本レポートはリポジトリソースコードの自動静的解析および手動コードレビューにより生成されました。動的テスト (ペネトレーションテスト, ファジング) は実施していません。SonarQube メトリクスは grep ベースの分析からの推定値であり、実際の SonarQube スキャナーによるものではありません。OpenSSF Scorecard はリポジトリ内容からの推定であり、正確なスコアは `scorecard` CLI をライブ GitHub リポジトリに対して実行する必要があります。*
