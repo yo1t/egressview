@@ -137,6 +137,22 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     }
   });
 
+  // Discovery-only Guardrail listing for the region (no InvokeModel, no save).
+  // Fail-open: missing bedrock:ListGuardrails yields an empty list so the UI
+  // falls back to manual guardrail id/version entry.
+  router.post('/ai/guardrails', requireAdmin, async (req, res) => {
+    const parsed = parseRequest(bedrockModelDiscoverySchema, req.body, res);
+    if (!parsed.ok) return;
+    try {
+      res.json({ success: true, ...await aiProvider.listGuardrails({
+        provider: 'bedrock',
+        region: parsed.data.region,
+      }) });
+    } catch (error) {
+      res.status(400).json({ success: false, error: error.message, guardrails: [] });
+    }
+  });
+
   router.get('/ai/facts', requireAdmin, (req, res) => {
     const parsed = parseRequest(factsQuerySchema, req.query, res);
     if (!parsed.ok) return;

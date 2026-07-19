@@ -146,6 +146,22 @@ describe('AI configuration routes', () => {
     assert.equal(aiProvider.getPublicConfig().provider, 'disabled');
   });
 
+  it('discovers Bedrock guardrails for a region without saving config', async () => {
+    const calls = [];
+    const aiProvider = createAiProvider({ bedrock: {
+      listGuardrails: async args => { calls.push(args); return [{ id: 'gr-1', arn: 'arn:...', name: 'PII', versions: ['DRAFT'] }]; },
+      converse: async () => { throw new Error('must not run inference'); },
+    } });
+    const result = await request(appFor(aiProvider), 'POST', '/api/ai/guardrails', {
+      region: 'ap-northeast-1',
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.guardrails[0].id, 'gr-1');
+    assert.deepEqual(result.body.guardrails[0].versions, ['DRAFT']);
+    assert.equal(calls[0].region, 'ap-northeast-1');
+    assert.equal(aiProvider.getPublicConfig().provider, 'disabled');
+  });
+
   it('rejects test payload fields and disabled providers before fetching', async () => {
     let calls = 0;
     const aiProvider = createAiProvider({ fetchImpl: async () => { calls++; throw new Error('unexpected'); } });

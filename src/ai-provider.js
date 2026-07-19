@@ -288,6 +288,19 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
     return { provider: selectedProvider, models: modelIds(await readJsonResponse(response), selectedProvider) };
   }
 
+  // Best-effort Bedrock Guardrail discovery for the settings UI. Fail-open:
+  // returns an empty list for non-Bedrock providers or when the transport /
+  // permission is unavailable, so the UI simply falls back to manual entry.
+  async function listGuardrails(overrides = {}) {
+    const selectedProvider = overrides.provider ?? provider;
+    const selectedRegion = overrides.region ?? region;
+    if (selectedProvider !== 'bedrock') return { provider: selectedProvider, guardrails: [] };
+    if (!selectedRegion) throw new Error('AWS region is not configured');
+    if (!bedrock?.listGuardrails) return { provider: selectedProvider, guardrails: [] };
+    const guardrails = await bedrock.listGuardrails({ region: selectedRegion, timeoutMs: REQUEST_TIMEOUT_MS });
+    return { provider: selectedProvider, guardrails: Array.isArray(guardrails) ? guardrails.slice(0, 100) : [] };
+  }
+
   // Connection test. Fetch providers list models (also confirms auth). Bedrock
   // lists models via fail-open discovery AND sends a minimal fixed-string
   // Converse to verify bedrock:InvokeModel — because model discovery uses a
@@ -394,7 +407,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
     }
   }
 
-  return { configure, exportConfig, generateInsight, getPublicConfig, listModels, testConnection };
+  return { configure, exportConfig, generateInsight, getPublicConfig, listModels, listGuardrails, testConnection };
 }
 
 // Lazy Bedrock transport for the shared singleton: the AWS SDK (via
@@ -406,6 +419,7 @@ function defaultBedrockTransport() {
   return {
     converse: args => get().converse(args),
     listModels: args => get().listModels(args),
+    listGuardrails: args => get().listGuardrails(args),
   };
 }
 
