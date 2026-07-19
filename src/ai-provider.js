@@ -255,6 +255,33 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
     return { provider, models: modelIds(await readJsonResponse(response), provider) };
   }
 
+  // Connection test. Fetch providers list models (also confirms auth). Bedrock
+  // lists models via fail-open discovery AND sends a minimal fixed-string
+  // Converse to verify bedrock:InvokeModel — because model discovery uses a
+  // different (control-plane) permission and can succeed while generation is
+  // denied. No network/device/threat data is sent by the test.
+  async function testConnection() {
+    if (provider === 'disabled') throw new Error('AI provider is disabled');
+    const adapter = ADAPTERS[provider];
+    if (adapter.needsKey && !keys[provider]) throw new Error('API key is not configured');
+    if (adapter.needsRegion && !region) throw new Error('AWS region is not configured');
+    if (adapter.transport === 'sdk') {
+      if (!models[provider]) throw new Error(`${provider} model is not configured`);
+      if (!bedrock?.converse) throw new Error('Bedrock transport is not configured');
+      await bedrock.converse({
+        region,
+        modelId: models.bedrock,
+        prompt: 'Reply with the single word OK.',
+        maxTokens: 8,
+        maxBytes: MAX_RESPONSE_BYTES,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      const { models: discovered } = await listModels().catch(() => ({ models: [] }));
+      return { provider, models: discovered, verified: true };
+    }
+    return listModels();
+  }
+
   async function generateInsight(context, {
     signal,
     cloudConsentConfirmed = false,
@@ -322,10 +349,22 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
     }
   }
 
-  return { configure, exportConfig, generateInsight, getPublicConfig, listModels };
+  return { configure, exportConfig, generateInsight, getPublicConfig, listModels, testConnection };
 }
 
-const aiProvider = createAiProvider();
+// Lazy Bedrock transport for the shared singleton: the AWS SDK (via
+// ./ai-bedrock) is only require()d the first time Bedrock is actually used, so
+// startup stays light and non-Bedrock deployments never load it.
+function defaultBedrockTransport() {
+  let transport = null;
+  const get = () => (transport ||= require('./ai-bedrock').createBedrockTransport());
+  return {
+    converse: args => get().converse(args),
+    listModels: args => get().listModels(args),
+  };
+}
+
+const aiProvider = createAiProvider({ bedrock: defaultBedrockTransport() });
 
 module.exports = {
   CLOUD_PROVIDERS,

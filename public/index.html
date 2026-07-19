@@ -472,12 +472,26 @@
               <option value="ollama">Ollama</option>
               <option value="anthropic">Anthropic</option>
               <option value="openai">OpenAI</option>
+              <option value="bedrock">Amazon Bedrock</option>
             </select>
           </div>
           <div id="ai-provider-fields" class="section-inputs disabled">
             <div id="ai-endpoint-group" class="form-group is-hidden">
               <label class="form-label" for="s-ai-endpoint" data-i18n="settings.ai.endpoint">Ollamaエンドポイント</label>
               <input id="s-ai-endpoint" class="form-input" type="url" value="http://127.0.0.1:11434" autocomplete="off" spellcheck="false">
+            </div>
+            <div id="ai-bedrock-group" class="form-group is-hidden">
+              <label class="form-label" for="s-ai-region" data-i18n="settings.ai.region">AWSリージョン（source region）</label>
+              <input id="s-ai-region" class="form-input" type="text" list="ai-region-options" maxlength="64" placeholder="ap-northeast-1" autocomplete="off" spellcheck="false">
+              <datalist id="ai-region-options">
+                <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
+                <option value="ap-northeast-3">Asia Pacific (Osaka)</option>
+                <option value="us-east-1">US East (N. Virginia)</option>
+                <option value="us-west-2">US West (Oregon)</option>
+                <option value="eu-central-1">Europe (Frankfurt)</option>
+                <option value="ap-southeast-2">Asia Pacific (Sydney)</option>
+              </datalist>
+              <p class="settings-field-hint" data-i18n="settings.ai.bedrockHint">認証はAWS SDKの標準credential chainに委譲します（キー入力なし）。モデル欄には基盤モデルID、cross-region推論プロファイルID（Global / us. / eu. / apac. / jp.（東京・大阪、日本内処理） / au.）、またはARNを直接入力できます。対応モデルはAWSの提供状況に依存します。</p>
             </div>
             <div id="ai-key-group" class="form-group is-hidden">
               <label class="form-label" for="s-ai-key" data-i18n="settings.ai.apiKey">APIキー</label>

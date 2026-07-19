@@ -7,15 +7,23 @@ const { buildAiFacts } = require('../ai-facts');
 const { buildAnonymousAiContext } = require('../ai-context');
 const { randomUUID } = require('node:crypto');
 
-const providerSchema = z.enum(['disabled', 'ollama', 'anthropic', 'openai']);
+const providerSchema = z.enum(['disabled', 'ollama', 'anthropic', 'openai', 'bedrock']);
 const cloudProviderSchema = z.enum(['anthropic', 'openai']);
+// Providers that transmit data externally and therefore require explicit consent.
+const consentProviderSchema = z.enum(['anthropic', 'openai', 'bedrock']);
 const modelSchema = z.string().max(200);
+// Bedrock model may be a foundation model id, a cross-region inference profile
+// id (us./eu./apac./jp./au./global), or an ARN — allow extra length for ARNs.
+const bedrockModelSchema = z.string().max(400);
+// AWS region such as ap-northeast-1 (Tokyo) or us-east-1.
+const regionSchema = z.string().max(64);
 const configSchema = z.object({
   provider: providerSchema.optional(),
   models: z.object({
     ollama: modelSchema.optional(),
     anthropic: modelSchema.optional(),
     openai: modelSchema.optional(),
+    bedrock: bedrockModelSchema.optional(),
   }).strict().optional(),
   keys: z.object({
     anthropic: z.string().max(4096).optional(),
@@ -25,8 +33,10 @@ const configSchema = z.object({
   cloudConsent: z.object({
     anthropic: z.boolean().optional(),
     openai: z.boolean().optional(),
+    bedrock: z.boolean().optional(),
   }).strict().optional(),
   ollamaEndpoint: z.string().max(2048).optional(),
+  region: regionSchema.optional(),
 }).strict();
 const emptySchema = z.object({}).strict();
 const timestampSchema = z.coerce.number().int().nonnegative();
@@ -62,7 +72,7 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     for (const name of parsed.data.clearKeys || []) nextKeys[name] = '';
     const nextProvider = parsed.data.provider ?? previous.provider;
     const nextConsent = { ...previous.cloudConsent, ...(parsed.data.cloudConsent || {}) };
-    if (cloudProviderSchema.safeParse(nextProvider).success && !nextConsent[nextProvider]) {
+    if (consentProviderSchema.safeParse(nextProvider).success && !nextConsent[nextProvider]) {
       return res.status(400).json({ error: 'Cloud AI data sharing consent is required' });
     }
     try {
@@ -72,11 +82,12 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
         keys: nextKeys,
         cloudConsent: nextConsent,
         ollamaEndpoint: parsed.data.ollamaEndpoint ?? previous.ollamaEndpoint,
+        region: parsed.data.region ?? previous.region,
       });
       saveConfig();
     } catch (error) {
       aiProvider.configure(previous);
-      const validationError = /Ollama endpoint|Unsupported AI provider/.test(error.message);
+      const validationError = /Ollama endpoint|Unsupported AI provider|AWS region/.test(error.message);
       return res.status(validationError ? 400 : 500).json({
         error: validationError ? error.message : 'Settings were not saved. Check server logs.',
       });
@@ -88,7 +99,7 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     const parsed = parseRequest(emptySchema, req.body, res);
     if (!parsed.ok) return;
     try {
-      res.json({ success: true, ...await aiProvider.listModels() });
+      res.json({ success: true, ...await aiProvider.testConnection() });
     } catch (error) {
       res.status(400).json({ success: false, error: error.message });
     }
