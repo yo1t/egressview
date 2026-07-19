@@ -4,6 +4,20 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-07-20
+
+### Fixed
+
+- Restored the shared connected-device list on AI Insights and every other tab after making AI Insights the default start page.
+- Populated the device list directly from bounded summary data without requiring the hidden graph renderer or the initial Socket.IO snapshot to complete.
+
+### Testing
+
+- Added desktop and mobile browser coverage that verifies the connected-device list across all six tabs.
+- Added startup coverage with live Socket.IO transport unavailable and preserved configured URL subpaths in deployed smoke tests.
+- Verified the fix through the production `/egressview` reverse-proxy path on EC2 with live Yamaha and Cisco data.
+- Added separate English and Japanese AI Insights screenshots with IP and MAC addresses redacted, and promoted them to the first README and GitHub Pages screenshots.
+
 ## [1.5.0] - 2026-07-19
 
 ### Added
