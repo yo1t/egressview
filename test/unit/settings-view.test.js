@@ -82,9 +82,10 @@ function makeHarness() {
 }
 
 describe('Settings modal view behavior', () => {
-  it('defers AI config loading until auth-socket finishes initializing', () => {
-    assert.match(aiSettingsJs, /queueMicrotask\(loadConfig\)/);
-    assert.doesNotMatch(aiSettingsJs, /\n\s{2}loadConfig\(\);\n/);
+  it('loads AI config only after the authenticated user opens settings', () => {
+    assert.match(aiSettingsJs, /return loadConfig;/);
+    assert.match(settingsJs, /loadAiConfig = initAiSettings\(\);/);
+    assert.match(settingsJs, /function openSettings[\s\S]*?loadAiConfig\(\);/);
   });
 
   it('normal settings button clicks open the modal without clearing the active tab', () => {

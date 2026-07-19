@@ -301,6 +301,12 @@ describe('Frontend script wiring invariants', () => {
 });
 
 describe('Frontend TDZ lint', () => {
+  it('keeps HTML div elements balanced', () => {
+    const opening = (html.match(/<div\b/g) || []).length;
+    const closing = (html.match(/<\/div>/g) || []).length;
+    assert.equal(closing, opening, `index.html has ${opening} opening divs but ${closing} closing divs`);
+  });
+
   const script = getScriptContent();
   const lines  = script.split('\n');
 
