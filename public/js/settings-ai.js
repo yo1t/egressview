@@ -3,11 +3,14 @@ import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 
 const CLOUD_PROVIDERS = new Set(['anthropic', 'openai']);
-const PROVIDERS = ['ollama', 'anthropic', 'openai'];
+// Providers that require explicit consent before sending data externally.
+const CONSENT_PROVIDERS = new Set(['anthropic', 'openai', 'bedrock']);
+const PROVIDERS = ['ollama', 'anthropic', 'openai', 'bedrock'];
 let config = {
   provider: 'disabled',
-  models: { ollama: '', anthropic: '', openai: '' },
+  models: { ollama: '', anthropic: '', openai: '', bedrock: '' },
   ollamaEndpoint: 'http://127.0.0.1:11434',
+  region: '',
   providers: {},
 };
 let activeProvider = 'disabled';
@@ -34,11 +37,16 @@ function renderProvider(provider) {
   const enabled = PROVIDERS.includes(provider);
   byId('ai-provider-fields').classList.toggle('disabled', !enabled);
   byId('ai-endpoint-group').classList.toggle('is-hidden', provider !== 'ollama');
+  byId('ai-bedrock-group').classList.toggle('is-hidden', provider !== 'bedrock');
   byId('ai-key-group').classList.toggle('is-hidden', !CLOUD_PROVIDERS.has(provider));
-  byId('ai-consent-group').classList.toggle('is-hidden', !CLOUD_PROVIDERS.has(provider));
+  byId('ai-consent-group').classList.toggle('is-hidden', !CONSENT_PROVIDERS.has(provider));
   byId('ai-test-btn').disabled = !enabled;
-  byId('s-ai-model').disabled = !enabled;
-  byId('s-ai-model').value = enabled ? (config?.models?.[provider] || '') : '';
+  const modelInput = byId('s-ai-model');
+  modelInput.disabled = !enabled;
+  // Bedrock model/inference-profile ids (and ARNs) can exceed the 200-char cap
+  // used for the other providers.
+  modelInput.maxLength = provider === 'bedrock' ? 400 : 200;
+  modelInput.value = enabled ? (config?.models?.[provider] || '') : '';
   byId('ai-model-options').replaceChildren();
   const keyInput = byId('s-ai-key');
   keyInput.value = '';
@@ -52,10 +60,12 @@ function applyConfig(next) {
     provider: next.provider || 'disabled',
     models: Object.fromEntries(PROVIDERS.map(name => [name, next.models?.[name] || ''])),
     ollamaEndpoint: next.ollamaEndpoint || 'http://127.0.0.1:11434',
+    region: next.region || '',
     providers: next.providers || {},
   };
   byId('s-ai-provider').value = config.provider;
   byId('s-ai-endpoint').value = config.ollamaEndpoint;
+  byId('s-ai-region').value = config.region;
   activeProvider = 'disabled';
   renderProvider(config.provider);
 }
@@ -78,11 +88,14 @@ async function saveConfig({ showSuccess = true } = {}) {
     provider,
     models: { ...config.models },
     ollamaEndpoint: byId('s-ai-endpoint').value.trim(),
+    region: byId('s-ai-region').value.trim(),
   };
   if (CLOUD_PROVIDERS.has(provider)) {
     const key = byId('s-ai-key').value.trim();
     if (key) body.keys = { [provider]: key };
     if (byId('s-ai-key-clear').checked) body.clearKeys = [provider];
+  }
+  if (CONSENT_PROVIDERS.has(provider)) {
     body.cloudConsent = { [provider]: byId('s-ai-cloud-consent').checked };
   }
   const response = await apiFetch(`${_BASE}/api/config/ai`, {

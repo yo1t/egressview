@@ -121,17 +121,17 @@ EgressViewには、Yamaha/Ciscoを混在して最大10台登録できます。
 
 ## AIプロバイダー設定
 
-AI洞察はローカル集計を常時表示し、利用者が明示的に実行した場合だけ、匿名化済み集計を設定済みのOllamaへ送信します。
+AI洞察はローカル集計を常時表示し、利用者が明示的に実行した場合だけ、匿名化済み集計を設定済みのAI providerへ送信します。
 
-- `GET /api/config/ai`は選択中provider、モデルID、Ollama endpoint、キー設定済みフラグを返します。APIキー値は返しません。
-- `POST /api/config/ai`は`provider`（`disabled`、`ollama`、`anthropic`、`openai`）、provider別`models`、`ollamaEndpoint`、任意のcloud `keys`と`clearKeys`を受け付けます。cloud provider選択時はprovider別`cloudConsent: true`が必須です。
-- `POST /api/ai/test`は空のJSON objectを受け付けます。保存済み設定で最大200件のモデルIDだけを取得し、timeoutは10秒、応答上限は1MBです。
+- `GET /api/config/ai`は選択中provider、モデルID、Ollama endpoint、AWS `region`、キー設定済み・同意済みフラグを返します。APIキー値は返しません。
+- `POST /api/config/ai`は`provider`（`disabled`、`ollama`、`anthropic`、`openai`、`bedrock`）、provider別`models`、`ollamaEndpoint`、Bedrock用`region`、任意のcloud `keys`と`clearKeys`を受け付けます。外部送信を伴うprovider（`anthropic`、`openai`、`bedrock`）選択時はprovider別`cloudConsent: true`が必須です。Bedrockはキーを保存せず、認証はAWS SDKのdefault credential chainに委譲します。`models.bedrock`は基盤モデルID、cross-region推論プロファイルID（`global`/`us`/`eu`/`apac`/`jp`/`au`）、またはARN（最大400文字）を受け付けます。
+- `POST /api/ai/test`は空のJSON objectを受け付けます。fetch系providerは保存済み設定で最大200件のモデルIDを取得します（timeout 10秒、応答上限1MB）。Bedrockはfail-openのmodel discoveryに加え、`bedrock:InvokeModel`権限を確認するため固定の短い文をConverseへ送信します（通信・端末・脅威データは送信しません）。
 - `GET /api/ai/facts`はepoch millisecondsの`from`が必須で、`to`は任意です。接続、端末、宛先、脅威レベルについて、選択期間と直前の同一期間の件数、およびcredentialを含まないrouter収集状態を返します。期間上限は14日で、AI providerへは送信しません。
-- `POST /api/ai/analyze`は`from`と任意の`to`を受け付け、内部IP、MAC、端末名、router管理情報、raw logを除いた集計を選択providerへ送信します。Anthropic/OpenAIでは保存済み同意に加えて要求ごとの`cloudConsentConfirmed: true`が必須です。期間上限は14日、timeoutは30秒、サーバー全体の同時分析は1件です。
+- `POST /api/ai/analyze`は`from`と任意の`to`を受け付け、内部IP、MAC、端末名、router管理情報、raw logを除いた集計を選択providerへ送信します。外部送信を伴うprovider（Anthropic/OpenAI/Bedrock）では保存済み同意に加えて要求ごとの`cloudConsentConfirmed: true`が必須です。期間上限は14日、timeoutは30秒、サーバー全体の同時分析は1件です。
 - `POST /api/ai/chat`は最大4,000文字の`message`、期間、任意の`conversationId`と`requestId`を受け付けます。user行をAI呼び出し前にv6 SQLiteへ追記し、完了後にassistant行、失敗時は本文を含まない失敗行を追記します。同じ`requestId + role`は重複しません。
 - `GET /api/ai/conversations`は最大100会話と保存件数・本文bytesを返します。`GET /api/ai/conversations/:id`は最大500メッセージを追記順に返し、`DELETE /api/ai/conversations/:id`だけが会話を明示削除します。再起動や設定変更で既存行を更新・truncateしません。
 
-providerは初期状態で無効です。Anthropic/OpenAIは固定の公式API endpointを使い、任意HTTP(S) endpointを設定できるのはOllamaだけです。
+providerは初期状態で無効です。Anthropic/OpenAIは固定の公式API endpointを使い、任意HTTP(S) endpointを設定できるのはOllamaだけです。BedrockはリージョンとConverse APIを使い、認証はAWS SDKのdefault credential chainに委譲します（キー入力・保存なし）。Bedrock対応は通常依存（`@aws-sdk/client-bedrock-runtime`と`@aws-sdk/client-bedrock`）として同梱され、追加インストールは不要です。詳細は`docs/setup-bedrock.ja.md`を参照してください。
 
 Restoreはfail-closedです。復元元の検査、安全backup成功の確認、restore、全DB利用者の再接続、復元後検査を行い、失敗時はrollbackします。成功後は既存のbrowser sessionを失効します。
 

@@ -121,17 +121,17 @@ Create/detect bodies use `kind` (`yamaha` or `cisco`), `displayName`, `ip`, `use
 
 ## AI provider configuration
 
-AI insights always shows locally calculated facts. It sends anonymized aggregates to the configured Ollama server only after an explicit user action.
+AI insights always shows locally calculated facts. It sends anonymized aggregates to the configured AI provider only after an explicit user action.
 
-- `GET /api/config/ai` returns the selected provider, model IDs, Ollama endpoint, and key-set flags. API key values are never returned.
-- `POST /api/config/ai` accepts `provider` (`disabled`, `ollama`, `anthropic`, or `openai`), provider-keyed `models`, `ollamaEndpoint`, optional cloud `keys`, and `clearKeys`. Selecting a cloud provider requires provider-specific `cloudConsent: true`.
-- `POST /api/ai/test` accepts an empty JSON object. It uses the saved configuration to retrieve at most 200 model IDs, with a 10-second timeout and a 1 MB response limit.
+- `GET /api/config/ai` returns the selected provider, model IDs, Ollama endpoint, AWS `region`, and key-set/consent flags. API key values are never returned.
+- `POST /api/config/ai` accepts `provider` (`disabled`, `ollama`, `anthropic`, `openai`, or `bedrock`), provider-keyed `models`, `ollamaEndpoint`, a Bedrock `region`, optional cloud `keys`, and `clearKeys`. Any externally transmitting provider (`anthropic`, `openai`, `bedrock`) requires provider-specific `cloudConsent: true`. Bedrock stores no key and delegates authentication to the AWS SDK default credential chain; `models.bedrock` accepts a foundation model ID, a cross-region inference profile ID (`global`/`us`/`eu`/`apac`/`jp`/`au`), or an ARN (up to 400 chars).
+- `POST /api/ai/test` accepts an empty JSON object. Fetch-based providers retrieve at most 200 model IDs (10-second timeout, 1 MB limit). Bedrock runs fail-open model discovery and additionally sends a short fixed string via Converse to verify `bedrock:InvokeModel` permission (no network, device, or threat data is sent).
 - `GET /api/ai/facts` requires `from` and accepts `to` as epoch milliseconds. It returns current and immediately preceding equal-period counts for connections, devices, destinations, and threat levels, plus credential-free router collection status. The range is capped at 14 days and no data is sent to an AI provider.
-- `POST /api/ai/analyze` accepts `from` and optional `to`, then sends aggregates without internal IPs, MAC addresses, device names, router management details, or raw logs to the selected provider. Anthropic/OpenAI require both saved consent and `cloudConsentConfirmed: true` on each request. The range is capped at 14 days, timeout is 30 seconds, and only one analysis may run server-wide.
+- `POST /api/ai/analyze` accepts `from` and optional `to`, then sends aggregates without internal IPs, MAC addresses, device names, router management details, or raw logs to the selected provider. Externally transmitting providers (Anthropic/OpenAI/Bedrock) require both saved consent and `cloudConsentConfirmed: true` on each request. The range is capped at 14 days, timeout is 30 seconds, and only one analysis may run server-wide.
 - `POST /api/ai/chat` accepts a `message` of at most 4,000 characters, a range, and optional `conversationId` and `requestId`. It appends the user row to v6 SQLite before calling AI, then appends an assistant row on success or a body-free failure row. The same `requestId + role` is never duplicated.
 - `GET /api/ai/conversations` returns at most 100 conversations plus stored counts and body bytes. `GET /api/ai/conversations/:id` returns at most 500 messages in append order, while `DELETE /api/ai/conversations/:id` is the only explicit conversation deletion path. Restart and configuration changes never update or truncate existing rows.
 
-Provider configuration is disabled by default. Anthropic and OpenAI use their fixed official API endpoints; only Ollama accepts a custom HTTP(S) endpoint.
+Provider configuration is disabled by default. Anthropic and OpenAI use their fixed official API endpoints; only Ollama accepts a custom HTTP(S) endpoint. Bedrock uses a region and the Converse API, delegating authentication to the AWS SDK default credential chain (no key entry or storage). Bedrock support ships as a standard dependency (`@aws-sdk/client-bedrock-runtime` and `@aws-sdk/client-bedrock`); no extra install. See `docs/setup-bedrock.md`.
 
 Restore is fail-closed: EgressView validates the source, confirms a safety backup, restores and reopens all database users, verifies the result, and rolls back on failure. Active browser sessions are revoked after a successful restore.
 
