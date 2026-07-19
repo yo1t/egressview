@@ -15,6 +15,7 @@ function stripEsModule(src) {
     .replace(/^export\s+\{[^}]*\};?\s*$/gm, '');
 }
 const settingsJs = stripEsModule(fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'settings.js'), 'utf8'));
+const aiSettingsJs = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'settings-ai.js'), 'utf8');
 const modalJs = settingsJs.slice(0, settingsJs.indexOf('// Load threat settings'));
 
 class FakeElement {
@@ -81,6 +82,11 @@ function makeHarness() {
 }
 
 describe('Settings modal view behavior', () => {
+  it('defers AI config loading until auth-socket finishes initializing', () => {
+    assert.match(aiSettingsJs, /queueMicrotask\(loadConfig\)/);
+    assert.doesNotMatch(aiSettingsJs, /\n\s{2}loadConfig\(\);\n/);
+  });
+
   it('normal settings button clicks open the modal without clearing the active tab', () => {
     const h = makeHarness();
 

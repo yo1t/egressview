@@ -169,7 +169,9 @@ function initAiSettings() {
     }
   });
   byId('ai-test-btn')?.addEventListener('click', testConnection);
-  loadConfig();
+  // auth-socket imports settings.js, so defer the API call until that module
+  // finishes initializing its admin token binding.
+  queueMicrotask(loadConfig);
 }
 
 export { applyConfig, initAiSettings, renderProvider };
