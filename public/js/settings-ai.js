@@ -78,6 +78,11 @@ function applyConfig(next) {
   byId('s-ai-provider').value = config.provider;
   byId('s-ai-endpoint').value = config.ollamaEndpoint;
   byId('s-ai-region').value = config.region;
+  // Reflect the saved region in the dropdown when it matches a known option.
+  const regionSelect = byId('s-ai-region-select');
+  if (regionSelect) {
+    regionSelect.value = [...regionSelect.options].some(o => o.value === config.region) ? config.region : '';
+  }
   byId('s-ai-guardrail-enabled').checked = config.guardrail.enabled;
   byId('s-ai-guardrail-id').value = config.guardrail.id;
   byId('s-ai-guardrail-version').value = config.guardrail.version;
@@ -169,7 +174,13 @@ async function testConnection() {
       select.replaceChildren();
       select.classList.add('is-hidden');
     }
-    setStatus(tVars('settings.ai.testOk', { count: models.length }), true);
+    if (result.verified === false) {
+      // Bedrock discovery succeeded but no model is selected yet — prompt the
+      // user to pick one and test again (the InvokeModel check needs a model).
+      setStatus(tVars('settings.ai.testModels', { count: models.length }), true);
+    } else {
+      setStatus(tVars('settings.ai.testOk', { count: models.length }), true);
+    }
   } catch (error) {
     setStatus(tVars('settings.ai.testFailed', { message: error.message }), false);
   } finally {
@@ -182,6 +193,9 @@ function initAiSettings() {
   byId('s-ai-guardrail-enabled')?.addEventListener('change', renderGuardrail);
   byId('s-ai-model-select')?.addEventListener('change', event => {
     if (event.target.value) byId('s-ai-model').value = event.target.value;
+  });
+  byId('s-ai-region-select')?.addEventListener('change', event => {
+    if (event.target.value) byId('s-ai-region').value = event.target.value;
   });
   byId('ai-save-btn')?.addEventListener('click', async event => {
     event.currentTarget.disabled = true;
