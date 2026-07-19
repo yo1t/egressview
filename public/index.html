@@ -515,9 +515,10 @@
             </div>
             <div class="form-group">
               <label class="form-label" for="s-ai-model" data-i18n="settings.ai.model">モデル</label>
+              <select id="s-ai-model-select" class="form-input is-hidden" data-i18n-title="settings.ai.modelSelect" title="取得したモデルから選択"></select>
               <input id="s-ai-model" class="form-input" type="text" list="ai-model-options" maxlength="200" autocomplete="off" spellcheck="false">
               <datalist id="ai-model-options"></datalist>
-              <p class="settings-field-hint" data-i18n="settings.ai.modelHint">候補から選択するか、モデルIDを直接入力できます。</p>
+              <p class="settings-field-hint" data-i18n="settings.ai.modelHint">「接続確認」でモデル一覧を取得すると下のプルダウンから選べます。ARN や未取得モデルは直接入力できます。</p>
             </div>
           </div>
           <div class="ai-settings-actions">
@@ -757,6 +758,7 @@
         <div class="ai-eyebrow" data-i18n="ai.eyebrow">LIVE NETWORK POSTURE</div>
         <h2 data-i18n="ai.title">ネットワークの現在地</h2>
         <p data-i18n="ai.subtitle">選択期間と直前の同一期間を比較します。分析はボタンを押した時だけ実行します。</p>
+        <div id="ai-period" class="ai-period"></div>
       </div>
       <button id="ai-refresh-btn" class="ai-refresh" type="button" data-i18n="ai.refresh">更新</button>
     </div>

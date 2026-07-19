@@ -15,8 +15,10 @@ AWS SDK（`@aws-sdk/client-bedrock-runtime` と `@aws-sdk/client-bedrock`）は�
 （追加インストール不要）。
 
 1. 対象リージョンで Amazon Bedrock を有効化した AWS アカウント。
-2. 使用するモデルの **モデルアクセス許可**（Bedrock コンソール → *モデルアクセス*）。
-   アクセスはリージョン単位・モデル単位です。
+2. 使用するモデルの **モデルアクセス / サブスクリプション**。サーバーレス基盤
+   モデルは初回呼び出しで自動有効化されますが、サードパーティの **AWS Marketplace
+   提供モデル（例: Anthropic Claude）は一度だけサブスクリプションが必要**です。
+   下記の[Marketplace サブスクリプション](#marketplace-サブスクリプション初回のみ)を参照。
 3. EgressView を動かすホストで、AWS SDK 標準 chain により解決できる認証情報。
 
 ## 環境別の認証
@@ -48,6 +50,50 @@ SDK に任せます。
   fail-open で、無くてもモデル / プロファイル ID を直接入力できます。なお一覧取得
   の成功は `bedrock:InvokeModel` の付与を意味しないため、接続確認では最小の生成
   呼び出しも行います。
+
+## Marketplace サブスクリプション（初回のみ）
+
+**AWS Marketplace 提供のサードパーティモデル（例: Anthropic Claude）**は、呼び出す
+前に **アカウントで一度サブスクリプションを確立**する必要があります。未確立の間は、
+`bedrock:InvokeModel` を `Resource: "*"` で付与していても、次のように失敗します。
+
+> `AccessDeniedException ... not authorized to perform the required AWS
+> Marketplace actions (aws-marketplace:ViewSubscriptions, aws-marketplace:Subscribe)`
+
+`aws-marketplace:*` 権限は**サブスク確立時にだけ**必要で、確立後はサブスクが
+**アカウント全体に永続**するため `bedrock:InvokeModel` だけで動作します。AWS 純正
+モデル（例: Amazon Nova）は Marketplace サブスク不要です。
+
+サブスクは**一度だけ**確立し、実行ロールは最小権限に戻します。
+
+**方法A（推奨）— 管理者がサブスク、サービスロールは触らない。**
+`aws-marketplace:ViewSubscriptions` と `aws-marketplace:Subscribe` を持つ
+ユーザー/プリンシパルが、対象モデルを一度呼び出す（Bedrock コンソールの playground、
+AWS Marketplace コンソール、または CLI）。以後アカウント全体で有効になります。
+
+**方法B — サービスロールに一時付与して、後で削除する。**
+
+1. EgressView ロールに次を追加して保存:
+   ```json
+   { "Sid": "BedrockMarketplaceSubscribe", "Effect": "Allow",
+     "Action": ["aws-marketplace:ViewSubscriptions", "aws-marketplace:Subscribe"],
+     "Resource": "*" }
+   ```
+2. モデルを一度呼び出す（設定の**保存して接続確認**ボタン、または
+   `aws bedrock-runtime converse ...`）。反映に約2分かかることがあります。
+   `jp.`/`apac.` プロファイルは複数の宛先リージョン（`jp.` なら東京＋大阪）に
+   ルーティングし各リージョンでサブスクが要るため、安定して成功するまで数回叩く。
+3. **`BedrockMarketplaceSubscribe` の Statement を削除**して最小権限に戻す。
+   サブスクは残るので、`bedrock:InvokeModel` だけで生成は動き続けます。
+
+> **再サブスク:** 後で**未サブスクの別モデル**へ切り替える場合は、そのモデルに対し
+> 再度サブスクが必要です（方法A/B を再実施、または管理者がサブスク）。権限削除は
+> 恒久的なロックアウトではなく、新モデル導入時に一度だけ再サブスクが要るという意味です。
+
+> **組織の制限:** AWS Organizations の **SCP** や **Private Marketplace** で
+> サブスク自体がブロックされている場合、`aws-marketplace:Subscribe` を持つユーザー
+> でも完了できません。組織/調達（procurement）管理者がサブスクを許可するか、対象
+> 製品を Private Marketplace に追加する必要があります。
 
 ## リージョンとモデル / 推論プロファイルの選択
 

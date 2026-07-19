@@ -7,6 +7,18 @@ import { setLogThreatFilter } from './log.js?v=__ASSET_VERSION__';
 
 const REFRESH_MS = 15_000;
 const METRICS = ['connections', 'devices', 'destinations', 'warn', 'danger'];
+// Providers that transmit data externally and require per-request consent.
+const CLOUD_CONSENT_PROVIDERS = ['anthropic', 'openai', 'bedrock'];
+const PROVIDER_LABELS = { ollama: 'Ollama', anthropic: 'Anthropic', openai: 'OpenAI', bedrock: 'Amazon Bedrock' };
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+function formatStamp(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function formatRange(from, to) {
+  return `(${formatStamp(from)} - ${formatStamp(to)})`;
+}
 let refreshTimer = null;
 let generation = 0;
 let analysisController = null;
@@ -70,6 +82,8 @@ async function refreshAiInsights() {
   const range = getTimeRange();
   const from = range.from ?? now - 3600_000;
   const to = range.to ?? now;
+  const period = document.getElementById('ai-period');
+  if (period) period.textContent = formatRange(from, to);
   const error = document.getElementById('ai-error');
   error.classList.remove('is-visible');
   try {
@@ -156,8 +170,8 @@ async function sendChatMessage() {
     const configResponse = await apiFetch(`${_BASE}/api/config/ai`, { signal: chatController.signal });
     const config = await configResponse.json().catch(() => ({}));
     if (!configResponse.ok) throw new Error(config.error || t('ai.chat.failed'));
-    const cloud = config.provider === 'anthropic' || config.provider === 'openai';
-    if (cloud && !globalThis.confirm(tVars('ai.analysis.cloudConfirm', { provider: config.provider }))) return;
+    const cloud = CLOUD_CONSENT_PROVIDERS.includes(config.provider);
+    if (cloud && !globalThis.confirm(tVars('ai.analysis.cloudConfirm', { provider: PROVIDER_LABELS[config.provider] || config.provider }))) return;
     const response = await apiFetch(`${_BASE}/api/ai/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -205,8 +219,8 @@ async function analyzeCurrentRange() {
     const configResponse = await apiFetch(`${_BASE}/api/config/ai`, { signal: analysisController.signal });
     const config = await configResponse.json().catch(() => ({}));
     if (!configResponse.ok) throw new Error(config.error || t('ai.analysis.failed'));
-    const cloud = config.provider === 'anthropic' || config.provider === 'openai';
-    if (cloud && !globalThis.confirm(tVars('ai.analysis.cloudConfirm', { provider: config.provider }))) {
+    const cloud = CLOUD_CONSENT_PROVIDERS.includes(config.provider);
+    if (cloud && !globalThis.confirm(tVars('ai.analysis.cloudConfirm', { provider: PROVIDER_LABELS[config.provider] || config.provider }))) {
       result.textContent = t('ai.analysis.cancelled');
       return;
     }
@@ -237,8 +251,22 @@ async function analyzeCurrentRange() {
   }
 }
 
+async function updateProviderLabel() {
+  const el = document.getElementById('ai-analysis-privacy');
+  if (!el) return;
+  try {
+    const response = await apiFetch(`${_BASE}/api/config/ai`);
+    const config = await response.json().catch(() => ({}));
+    if (!response.ok) return;
+    const label = PROVIDER_LABELS[config.provider];
+    // Only rename to a specific provider; leave the generic default when disabled.
+    if (label) el.textContent = tVars('ai.analysis.privacyProvider', { provider: label });
+  } catch { /* keep the generic default text */ }
+}
+
 function startAiInsights() {
   refreshAiInsights();
+  updateProviderLabel();
   loadConversations().catch(() => {});
   if (!refreshTimer) refreshTimer = setInterval(refreshAiInsights, REFRESH_MS);
 }

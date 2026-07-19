@@ -50,6 +50,9 @@ function renderProvider(provider) {
   modelInput.value = enabled ? (config?.models?.[provider] || '') : '';
   if (provider === 'bedrock') renderGuardrail();
   byId('ai-model-options').replaceChildren();
+  const modelSelect = byId('s-ai-model-select');
+  modelSelect.replaceChildren();
+  modelSelect.classList.add('is-hidden');
   const keyInput = byId('s-ai-key');
   keyInput.value = '';
   keyInput.placeholder = config?.providers?.[provider]?.keySet ? t('settings.ai.keySaved') : '';
@@ -141,13 +144,32 @@ async function testConnection() {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    const options = (result.models || []).map(model => {
+    const models = result.models || [];
+    byId('ai-model-options').replaceChildren(...models.map(model => {
       const option = document.createElement('option');
       option.value = model;
       return option;
-    });
-    byId('ai-model-options').replaceChildren(...options);
-    setStatus(tVars('settings.ai.testOk', { count: options.length }), true);
+    }));
+    // Populate a real clickable dropdown; picking an entry fills the text input.
+    const select = byId('s-ai-model-select');
+    if (models.length) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = t('settings.ai.modelPick');
+      select.replaceChildren(placeholder, ...models.map(model => {
+        const option = document.createElement('option');
+        option.value = model;
+        option.textContent = model;
+        return option;
+      }));
+      const current = byId('s-ai-model').value.trim();
+      if (current && models.includes(current)) select.value = current;
+      select.classList.remove('is-hidden');
+    } else {
+      select.replaceChildren();
+      select.classList.add('is-hidden');
+    }
+    setStatus(tVars('settings.ai.testOk', { count: models.length }), true);
   } catch (error) {
     setStatus(tVars('settings.ai.testFailed', { message: error.message }), false);
   } finally {
@@ -158,6 +180,9 @@ async function testConnection() {
 function initAiSettings() {
   byId('s-ai-provider')?.addEventListener('change', event => renderProvider(event.target.value));
   byId('s-ai-guardrail-enabled')?.addEventListener('change', renderGuardrail);
+  byId('s-ai-model-select')?.addEventListener('change', event => {
+    if (event.target.value) byId('s-ai-model').value = event.target.value;
+  });
   byId('ai-save-btn')?.addEventListener('click', async event => {
     event.currentTarget.disabled = true;
     try {
