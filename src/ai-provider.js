@@ -75,6 +75,83 @@ async function readJsonResponse(response) {
   }
 }
 
+// ─── Provider adapters ─────────────────────────────────────────────────────────
+// Each adapter only supplies provider-specific request shapes and response
+// parsing. The shared orchestration (disabled/key/consent/single-flight checks,
+// timeouts, error mapping) stays in createAiProvider so behavior is uniform.
+//
+// `transport: 'fetch'` adapters go through the injected fetchImpl. Future
+// non-fetch providers (e.g. Amazon Bedrock via the AWS SDK) will register with a
+// different transport and their own invoke seam.
+const ADAPTERS = Object.freeze({
+  ollama: {
+    transport: 'fetch',
+    needsKey: false,
+    needsConsent: false,
+    listRequest: state => ({ url: `${state.ollamaEndpoint}/api/tags`, headers: { Accept: 'application/json' } }),
+    generateRequest: (state, prompt) => ({
+      url: `${state.ollamaEndpoint}/api/generate`,
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: { model: state.models.ollama, stream: false, prompt },
+    }),
+    parseText: body => body?.response,
+  },
+  anthropic: {
+    transport: 'fetch',
+    needsKey: true,
+    needsConsent: true,
+    listRequest: state => ({
+      url: 'https://api.anthropic.com/v1/models?limit=100',
+      headers: { Accept: 'application/json', 'x-api-key': state.keys.anthropic, 'anthropic-version': '2023-06-01' },
+    }),
+    generateRequest: (state, prompt) => ({
+      url: 'https://api.anthropic.com/v1/messages',
+      headers: {
+        Accept: 'application/json', 'Content-Type': 'application/json',
+        'x-api-key': state.keys.anthropic, 'anthropic-version': '2023-06-01',
+      },
+      body: { model: state.models.anthropic, max_tokens: 2048, messages: [{ role: 'user', content: prompt }] },
+    }),
+    parseText: body => body?.content?.find(item => item?.type === 'text')?.text,
+  },
+  openai: {
+    transport: 'fetch',
+    needsKey: true,
+    needsConsent: true,
+    listRequest: state => ({
+      url: 'https://api.openai.com/v1/models',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${state.keys.openai}` },
+    }),
+    generateRequest: (state, prompt) => ({
+      url: 'https://api.openai.com/v1/responses',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${state.keys.openai}` },
+      body: { model: state.models.openai, input: prompt, max_output_tokens: 2048 },
+    }),
+    parseText: body => body?.output_text || body?.output?.flatMap(item => item?.content || [])
+      .find(item => item?.type === 'output_text')?.text,
+  },
+});
+
+function buildPrompt(context, { question = '', conversation = [] } = {}) {
+  const contextText = JSON.stringify(context);
+  const task = question
+    ? [
+      'Answer the user question using only the anonymized facts and prior displayed conversation.',
+      `Prior conversation: ${JSON.stringify(conversation.slice(-20))}`,
+      `User question: ${question}`,
+    ].join('\n')
+    : 'Reply in concise Japanese with sections: 概要, 注目すべき変化, リスク, 推奨確認事項.';
+  return {
+    contextText,
+    prompt: [
+      'You are a read-only network security analyst.',
+      'Use only the anonymized JSON facts below. Do not invent hosts, IP addresses, or events.',
+      task,
+      contextText,
+    ].join('\n\n'),
+  };
+}
+
 function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('fetch implementation is required');
   let provider = 'disabled';
@@ -83,6 +160,10 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
   let cloudConsent = { anthropic: false, openai: false };
   let ollamaEndpoint = DEFAULT_OLLAMA_ENDPOINT;
   let generationInFlight = false;
+
+  function state() {
+    return { provider, models, keys, cloudConsent, ollamaEndpoint };
+  }
 
   function configure(input = {}) {
     if (input.provider !== undefined) {
@@ -134,21 +215,11 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
 
   async function listModels() {
     if (provider === 'disabled') throw new Error('AI provider is disabled');
-    if (CLOUD_PROVIDERS.includes(provider) && !keys[provider]) {
+    const adapter = ADAPTERS[provider];
+    if (adapter.needsKey && !keys[provider]) {
       throw new Error('API key is not configured');
     }
-    let url;
-    const headers = { Accept: 'application/json' };
-    if (provider === 'ollama') {
-      url = `${ollamaEndpoint}/api/tags`;
-    } else if (provider === 'anthropic') {
-      url = 'https://api.anthropic.com/v1/models?limit=100';
-      headers['x-api-key'] = keys.anthropic;
-      headers['anthropic-version'] = '2023-06-01';
-    } else {
-      url = 'https://api.openai.com/v1/models';
-      headers.Authorization = `Bearer ${keys.openai}`;
-    }
+    const { url, headers } = adapter.listRequest(state());
     const response = await fetchImpl(url, {
       method: 'GET',
       headers,
@@ -165,8 +236,9 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
   } = {}) {
     if (provider === 'disabled') throw new Error('AI provider is disabled');
     if (!models[provider]) throw new Error(`${provider} model is not configured`);
-    if (CLOUD_PROVIDERS.includes(provider)) {
-      if (!keys[provider]) throw new Error('API key is not configured');
+    const adapter = ADAPTERS[provider];
+    if (adapter.needsKey && !keys[provider]) throw new Error('API key is not configured');
+    if (adapter.needsConsent) {
       if (!cloudConsent[provider] || !cloudConsentConfirmed) {
         const error = new Error('Cloud AI data sharing consent is required');
         error.code = 'AI_CONSENT_REQUIRED';
@@ -178,51 +250,21 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
       error.code = 'AI_BUSY';
       throw error;
     }
-    const contextText = JSON.stringify(context);
+    const { contextText, prompt } = buildPrompt(context, { question, conversation });
     if (Buffer.byteLength(contextText) > MAX_PROMPT_BYTES) throw new Error('AI context was too large');
     generationInFlight = true;
     const timeoutSignal = AbortSignal.timeout(GENERATE_TIMEOUT_MS);
     const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
     try {
-      const task = question
-        ? [
-          'Answer the user question using only the anonymized facts and prior displayed conversation.',
-          `Prior conversation: ${JSON.stringify(conversation.slice(-20))}`,
-          `User question: ${question}`,
-        ].join('\n')
-        : 'Reply in concise Japanese with sections: 概要, 注目すべき変化, リスク, 推奨確認事項.';
-      const prompt = [
-        'You are a read-only network security analyst.',
-        'Use only the anonymized JSON facts below. Do not invent hosts, IP addresses, or events.',
-        task,
-        contextText,
-      ].join('\n\n');
-      let url;
-      let headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
-      let requestBody;
-      if (provider === 'ollama') {
-        url = `${ollamaEndpoint}/api/generate`;
-        requestBody = { model: models.ollama, stream: false, prompt };
-      } else if (provider === 'anthropic') {
-        url = 'https://api.anthropic.com/v1/messages';
-        headers = { ...headers, 'x-api-key': keys.anthropic, 'anthropic-version': '2023-06-01' };
-        requestBody = { model: models.anthropic, max_tokens: 2048, messages: [{ role: 'user', content: prompt }] };
-      } else {
-        url = 'https://api.openai.com/v1/responses';
-        headers = { ...headers, Authorization: `Bearer ${keys.openai}` };
-        requestBody = { model: models.openai, input: prompt, max_output_tokens: 2048 };
-      }
+      const { url, headers, body } = adapter.generateRequest(state(), prompt);
       const response = await fetchImpl(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(body),
         signal: requestSignal,
       });
-      const body = await readJsonResponse(response);
-      const text = String(provider === 'ollama' ? body?.response
-        : provider === 'anthropic' ? body?.content?.find(item => item?.type === 'text')?.text
-          : body?.output_text || body?.output?.flatMap(item => item?.content || [])
-            .find(item => item?.type === 'output_text')?.text || '').trim();
+      const parsed = await readJsonResponse(response);
+      const text = String(adapter.parseText(parsed) || '').trim();
       if (!text) throw new Error('Provider returned an empty analysis');
       return { provider, model: models[provider], text, generatedAt: Date.now() };
     } catch (error) {
