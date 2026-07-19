@@ -1,7 +1,11 @@
 'use strict';
 
-const PROVIDERS = Object.freeze(['ollama', 'anthropic', 'openai']);
+const PROVIDERS = Object.freeze(['ollama', 'anthropic', 'openai', 'bedrock']);
+// Cloud providers authenticated with a stored API key.
 const CLOUD_PROVIDERS = Object.freeze(['anthropic', 'openai']);
+// Providers that send data to a third party and therefore require explicit
+// consent. Bedrock is cloud + consent but keyless (AWS SDK credential chain).
+const CONSENT_PROVIDERS = Object.freeze(['anthropic', 'openai', 'bedrock']);
 const DEFAULT_OLLAMA_ENDPOINT = 'http://127.0.0.1:11434';
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -130,6 +134,16 @@ const ADAPTERS = Object.freeze({
     parseText: body => body?.output_text || body?.output?.flatMap(item => item?.content || [])
       .find(item => item?.type === 'output_text')?.text,
   },
+  // Amazon Bedrock: keyless (AWS SDK default credential chain), region-based,
+  // invoked via the Converse API through an injected transport rather than
+  // fetch. modelId may be a foundation model ID, a geographic cross-region
+  // inference profile (us./eu./apac./jp./au.) or a Global profile ID/ARN.
+  bedrock: {
+    transport: 'sdk',
+    needsKey: false,
+    needsConsent: true,
+    needsRegion: true,
+  },
 });
 
 function buildPrompt(context, { question = '', conversation = [] } = {}) {
@@ -152,17 +166,18 @@ function buildPrompt(context, { question = '', conversation = [] } = {}) {
   };
 }
 
-function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
+function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('fetch implementation is required');
   let provider = 'disabled';
-  let models = { ollama: '', anthropic: '', openai: '' };
+  let models = { ollama: '', anthropic: '', openai: '', bedrock: '' };
   let keys = { anthropic: '', openai: '' };
-  let cloudConsent = { anthropic: false, openai: false };
+  let cloudConsent = { anthropic: false, openai: false, bedrock: false };
   let ollamaEndpoint = DEFAULT_OLLAMA_ENDPOINT;
+  let region = '';
   let generationInFlight = false;
 
   function state() {
-    return { provider, models, keys, cloudConsent, ollamaEndpoint };
+    return { provider, models, keys, cloudConsent, ollamaEndpoint, region };
   }
 
   function configure(input = {}) {
@@ -183,11 +198,12 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
       }
     }
     if (input.cloudConsent) {
-      for (const name of CLOUD_PROVIDERS) {
+      for (const name of CONSENT_PROVIDERS) {
         if (typeof input.cloudConsent[name] === 'boolean') cloudConsent[name] = input.cloudConsent[name];
       }
     }
     if (input.ollamaEndpoint !== undefined) ollamaEndpoint = normalizeEndpoint(input.ollamaEndpoint);
+    if (input.region !== undefined) region = String(input.region || '').trim();
   }
 
   function exportConfig() {
@@ -197,6 +213,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
       keys: { ...keys },
       cloudConsent: { ...cloudConsent },
       ollamaEndpoint,
+      region,
     };
   }
 
@@ -205,10 +222,12 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
       provider,
       models: { ...models },
       ollamaEndpoint,
+      region,
       providers: {
         ollama: { keySet: false },
         anthropic: { keySet: !!keys.anthropic, consented: cloudConsent.anthropic },
         openai: { keySet: !!keys.openai, consented: cloudConsent.openai },
+        bedrock: { keySet: false, consented: cloudConsent.bedrock },
       },
     };
   }
@@ -218,6 +237,14 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
     const adapter = ADAPTERS[provider];
     if (adapter.needsKey && !keys[provider]) {
       throw new Error('API key is not configured');
+    }
+    if (adapter.needsRegion && !region) throw new Error('AWS region is not configured');
+    if (adapter.transport === 'sdk') {
+      // Discovery is best-effort/fail-open; callers fall back to direct
+      // model/inference-profile ID entry when this is unavailable.
+      if (!bedrock?.listModels) return { provider, models: [] };
+      const ids = await bedrock.listModels({ region, timeoutMs: REQUEST_TIMEOUT_MS });
+      return { provider, models: (Array.isArray(ids) ? ids : []).slice(0, 200) };
     }
     const { url, headers } = adapter.listRequest(state());
     const response = await fetchImpl(url, {
@@ -238,12 +265,16 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
     if (!models[provider]) throw new Error(`${provider} model is not configured`);
     const adapter = ADAPTERS[provider];
     if (adapter.needsKey && !keys[provider]) throw new Error('API key is not configured');
+    if (adapter.needsRegion && !region) throw new Error('AWS region is not configured');
     if (adapter.needsConsent) {
       if (!cloudConsent[provider] || !cloudConsentConfirmed) {
         const error = new Error('Cloud AI data sharing consent is required');
         error.code = 'AI_CONSENT_REQUIRED';
         throw error;
       }
+    }
+    if (adapter.transport === 'sdk' && !bedrock?.converse) {
+      throw new Error('Bedrock transport is not configured');
     }
     if (generationInFlight) {
       const error = new Error('Another AI analysis is already running');
@@ -256,15 +287,30 @@ function createAiProvider({ fetchImpl = globalThis.fetch } = {}) {
     const timeoutSignal = AbortSignal.timeout(GENERATE_TIMEOUT_MS);
     const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
     try {
-      const { url, headers, body } = adapter.generateRequest(state(), prompt);
-      const response = await fetchImpl(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal: requestSignal,
-      });
-      const parsed = await readJsonResponse(response);
-      const text = String(adapter.parseText(parsed) || '').trim();
+      let text;
+      if (adapter.transport === 'sdk') {
+        // Amazon Bedrock Converse via injected transport. The transport maps
+        // AWS SDK errors (AccessDenied/Throttling/credential/timeout) to plain
+        // Error messages and enforces the response byte bound.
+        text = String(await bedrock.converse({
+          region,
+          modelId: models.bedrock,
+          prompt,
+          maxTokens: 2048,
+          maxBytes: MAX_RESPONSE_BYTES,
+          signal: requestSignal,
+        }) || '').trim();
+      } else {
+        const { url, headers, body } = adapter.generateRequest(state(), prompt);
+        const response = await fetchImpl(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: requestSignal,
+        });
+        const parsed = await readJsonResponse(response);
+        text = String(adapter.parseText(parsed) || '').trim();
+      }
       if (!text) throw new Error('Provider returned an empty analysis');
       return { provider, model: models[provider], text, generatedAt: Date.now() };
     } catch (error) {
@@ -283,6 +329,7 @@ const aiProvider = createAiProvider();
 
 module.exports = {
   CLOUD_PROVIDERS,
+  CONSENT_PROVIDERS,
   DEFAULT_OLLAMA_ENDPOINT,
   GENERATE_TIMEOUT_MS,
   PROVIDERS,
