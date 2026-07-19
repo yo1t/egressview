@@ -128,7 +128,7 @@ async function authPage(page) {
   await page.addInitScript(tok => {
     localStorage.setItem('egressview_admin_token', tok);
   }, TOKEN);
-  await page.goto('/');
+  await page.goto(`${BASE}/`);
   await page.waitForLoadState('networkidle');
 }
 
@@ -442,7 +442,7 @@ test('initial device panel loads when live socket updates are unavailable', asyn
   await page.addInitScript(tok => {
     localStorage.setItem('egressview_admin_token', tok);
   }, TOKEN);
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
 
   await expect.poll(() => summaryRequests).toBeGreaterThan(0);
   expect(errors, `Startup errors:\n  ${errors.join('\n  ')}`).toHaveLength(0);
