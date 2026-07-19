@@ -146,20 +146,39 @@ const ADAPTERS = Object.freeze({
   },
 });
 
-function buildPrompt(context, { question = '', conversation = [] } = {}) {
+function buildPrompt(context, { question = '', conversation = [], priorAnalysis = '', language = 'ja' } = {}) {
   const contextText = JSON.stringify(context);
+  const langName = language === 'en' ? 'English' : 'Japanese';
+  const headings = language === 'en'
+    ? { status: 'Situation', actions: 'Recommended actions' }
+    : { status: '状況', actions: '推奨アクション' };
+  // Readability rules applied to every response: no tables, keep it short.
+  const formatRules = [
+    'Do not use tables of any kind (no Markdown tables, no ASCII or pipe-delimited tables). Use only prose and short bullet lists.',
+    'Keep the whole response readable and concise — at most about 20 lines total.',
+  ];
   const task = question
     ? [
-      'Answer the user question using only the anonymized facts and prior displayed conversation.',
+      'Answer the user question about this network monitoring period.',
+      'Base your answer on the JSON facts, the prior period analysis (if provided), and the displayed conversation. Do not invent hosts, IP addresses, devices, or events that are not present.',
+      'When relevant, focus on threats and cite the specific devices (name/IP) and destinations (host/IP) involved.',
+      `Reply in ${langName}.`,
+      ...formatRules,
+      priorAnalysis ? `Prior period analysis you produced:\n${String(priorAnalysis).slice(0, 8000)}` : '',
       `Prior conversation: ${JSON.stringify(conversation.slice(-20))}`,
       `User question: ${question}`,
-    ].join('\n')
-    : 'Reply in concise Japanese with sections: 概要, 注目すべき変化, リスク, 推奨確認事項.';
+    ].filter(Boolean).join('\n')
+    : [
+      `Respond in ${langName} with two parts and nothing else.`,
+      `Part 1 — a heading "${headings.status}" followed by a single narrative of about 300 characters (do not exceed 350). Summarize overall activity, the most notable changes versus the previous period, and the current threat posture. Cite specific devices (name/IP) and destinations (host/IP) where they matter.`,
+      `Part 2 — a heading "${headings.actions}" followed by a bulleted list ordered by priority: list danger-level threats first, then warn-level threats, then general hygiene items. Each bullet must state the concrete action, the device and destination involved (name/IP), and the reason. If there are no threats, say so in a single bullet.`,
+      ...formatRules,
+    ].join('\n');
   return {
     contextText,
     prompt: [
       'You are a read-only network security analyst.',
-      'Use only the anonymized JSON facts below. Do not invent hosts, IP addresses, or events.',
+      'Use the JSON facts below. They include real IP addresses, hostnames, and device names, which you may cite. Do not invent hosts, IP addresses, devices, or events that are not present in the facts.',
       task,
       contextText,
     ].join('\n\n'),
@@ -303,6 +322,8 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
     cloudConsentConfirmed = false,
     question = '',
     conversation = [],
+    priorAnalysis = '',
+    language = 'ja',
   } = {}) {
     if (provider === 'disabled') throw new Error('AI provider is disabled');
     if (!models[provider]) throw new Error(`${provider} model is not configured`);
@@ -324,7 +345,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
       error.code = 'AI_BUSY';
       throw error;
     }
-    const { contextText, prompt } = buildPrompt(context, { question, conversation });
+    const { contextText, prompt } = buildPrompt(context, { question, conversation, priorAnalysis, language });
     if (Buffer.byteLength(contextText) > MAX_PROMPT_BYTES) throw new Error('AI context was too large');
     generationInFlight = true;
     const timeoutSignal = AbortSignal.timeout(GENERATE_TIMEOUT_MS);

@@ -94,6 +94,7 @@ const {
   createConnectionExportReader,
   groupDstByTimeRange,
   groupServiceByTimeRange,
+  groupSrcForDstsByTimeRange,
   summarizeByTimeRange,
 } = createHistoryQueries({
   getDb: () => db,
@@ -737,6 +738,7 @@ module.exports = {
   seedConnections,
   groupDstByTimeRange,
   groupServiceByTimeRange,
+  groupSrcForDstsByTimeRange,
   summarizeByTimeRange,
   ...aiConversationStore,
   getKnownMacs,

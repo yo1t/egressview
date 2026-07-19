@@ -1,4 +1,4 @@
-import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
+import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 import { getTimeRange } from './connections-panel.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
@@ -38,6 +38,9 @@ let generation = 0;
 let analysisController = null;
 let activeConversationId = null;
 let chatController = null;
+// Text of the most recent "analyze current period" result, so the chat can
+// reason about the same threats. Reset when a new analysis is run.
+let lastAnalysis = null;
 
 function formatNumber(value) {
   return new Intl.NumberFormat().format(Number(value) || 0);
@@ -133,6 +136,20 @@ function renderChatMessages(messages) {
   container.scrollTop = container.scrollHeight;
 }
 
+// Optimistically append the submitted question plus a "thinking" placeholder so
+// the user sees their input immediately and knows inference is in progress.
+function renderPendingExchange(userText) {
+  const container = document.getElementById('ai-chat-messages');
+  const user = document.createElement('div');
+  user.className = 'ai-chat-message is-user';
+  user.textContent = userText;
+  const pending = document.createElement('div');
+  pending.className = 'ai-chat-message is-assistant is-pending';
+  pending.textContent = t('ai.chat.thinking');
+  container.append(user, pending);
+  container.scrollTop = container.scrollHeight;
+}
+
 async function loadConversation(conversationId) {
   activeConversationId = conversationId || null;
   if (!activeConversationId) {
@@ -180,12 +197,13 @@ async function sendChatMessage() {
   chatController = new AbortController();
   const button = document.getElementById('ai-chat-send-btn');
   button.disabled = true;
+  // Reflect the submitted question right away and show a "thinking" bubble; no
+  // per-message confirmation popup (settings-level consent is the gate).
+  input.value = '';
+  renderPendingExchange(message);
+  const error = document.getElementById('ai-error');
+  error.classList.remove('is-visible');
   try {
-    const configResponse = await apiFetch(`${_BASE}/api/config/ai`, { signal: chatController.signal });
-    const config = await configResponse.json().catch(() => ({}));
-    if (!configResponse.ok) throw new Error(config.error || t('ai.chat.failed'));
-    const cloud = CLOUD_CONSENT_PROVIDERS.includes(config.provider);
-    if (cloud && !globalThis.confirm(tVars('ai.analysis.cloudConfirm', { provider: PROVIDER_LABELS[config.provider] || config.provider }))) return;
     const response = await apiFetch(`${_BASE}/api/ai/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -195,20 +213,25 @@ async function sendChatMessage() {
         message,
         from,
         to,
-        cloudConsentConfirmed: cloud,
+        cloudConsentConfirmed: true,
+        language: currentLang,
+        // Include the latest analysis for the same range so the AI can build on it.
+        priorAnalysis: lastAnalysis && lastAnalysis.from === from && lastAnalysis.to === to
+          ? lastAnalysis.text
+          : undefined,
       }),
       signal: chatController.signal,
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || t('ai.chat.failed'));
     activeConversationId = body.conversationId;
-    input.value = '';
     await loadConversations();
-  } catch (error) {
-    const display = document.getElementById('ai-error');
-    display.textContent = error.message || t('ai.chat.failed');
-    display.classList.add('is-visible');
+  } catch (cause) {
+    error.textContent = cause.message || t('ai.chat.failed');
+    error.classList.add('is-visible');
+    // Drop the optimistic bubbles: restore the real conversation, or clear.
     if (activeConversationId) await loadConversation(activeConversationId).catch(() => {});
+    else renderChatMessages([]);
   } finally {
     chatController = null;
     button.disabled = false;
@@ -241,12 +264,13 @@ async function analyzeCurrentRange() {
     const response = await apiFetch(`${_BASE}/api/ai/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, cloudConsentConfirmed: cloud }),
+      body: JSON.stringify({ from, to, cloudConsentConfirmed: cloud, language: currentLang }),
       signal: analysisController.signal,
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || t('ai.analysis.failed'));
     result.textContent = body.text;
+    lastAnalysis = { text: body.text, from, to };
     meta.textContent = tVars('ai.analysis.meta', {
       provider: body.provider,
       model: body.model,

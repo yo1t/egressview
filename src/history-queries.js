@@ -180,6 +180,31 @@ function createHistoryQueries({
     ).all(...params);
   }
 
+  // Which source devices contacted a given (small) set of destination IPs.
+  // Used by the AI context to link devices to threat destinations. Bounded by
+  // both the destination list size and a hard row cap so it never scans wide.
+  function groupSrcForDstsByTimeRange(from, to, dsts) {
+    const db = getDb();
+    if (!db || !Array.isArray(dsts) || dsts.length === 0) return [];
+    const capped = dsts.slice(0, 50);
+    const placeholders = capped.map(() => '?').join(',');
+    const conditions = [];
+    const params = [];
+    if (from != null) { conditions.push('lastSeen >= ?'); params.push(from); }
+    if (to != null) { conditions.push('lastSeen <= ?'); params.push(to); }
+    conditions.push(`dst IN (${placeholders})`);
+    params.push(...capped);
+    const where = ' WHERE ' + conditions.join(' AND ');
+    return db.prepare(
+      `SELECT dst, src,
+              MAX(srcDnsName) AS srcDnsName,
+              MAX(srcMdnsName) AS srcMdnsName,
+              COUNT(*) AS cnt
+       FROM connections${where}
+       GROUP BY dst, src ORDER BY cnt DESC LIMIT 200`
+    ).all(...params);
+  }
+
   function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
     const startedAt = process.hrtime.bigint();
     const timings = {};
@@ -316,6 +341,7 @@ function createHistoryQueries({
     createConnectionExportReader,
     groupDstByTimeRange,
     groupServiceByTimeRange,
+    groupSrcForDstsByTimeRange,
     summarizeByTimeRange,
   };
 }
