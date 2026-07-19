@@ -232,6 +232,7 @@ async function fetchGraphSummary(from, to) {
         graphSummaryKey = key;
         graphSummaryFetchedAt = Date.now();
         graphSummaryNotice(true, graphSummary);
+        updateDevicePanelFromSummary(graphSummary);
       }
       return summary;
     })();
@@ -518,13 +519,10 @@ function buildDetailedTargets(filtered, { resetPositions = false } = {}) {
   applyGraphFilter();
 }
 
-function buildGraphFromSummary(summary, { resetPositions = false } = {}) {
+function summaryDevicePanelData(summary) {
   const topology = activeRouterTopology();
   const networkClientsByIp = new Map((lastNetworkData?.clients || []).map(client => [client.ip, client]));
   const deviceRows = (summary.byDevice || []).slice(0, 120);
-  const targetRows = (summary.byTarget || []).slice(0, 160);
-  const allowedDevices = new Set(deviceRows.map(r => r.src));
-  const allowedTargets = new Set(targetRows.map(r => r.key || r.label));
   const syntheticClients = deviceRows.map(r => ({
     ...(networkClientsByIp.get(r.src) || {}),
     mac: networkClientsByIp.get(r.src)?.mac || r.srcMac || r.src,
@@ -542,8 +540,31 @@ function buildGraphFromSummary(summary, { resetPositions = false } = {}) {
     summarySessions: r.count || 0,
     ...(topology.isMulti ? {
       routerTargets: routerTargetsFromObservedBy(r.observedBy, r.sources || r.source, topology.isMulti, topology),
-    } : {}),
+      } : {}),
   }));
+  return { deviceRows, syntheticClients };
+}
+
+function updateDevicePanelFromSummary(summary) {
+  const { deviceRows, syntheticClients } = summaryDevicePanelData(summary);
+  const meshNodes = lastNetworkData?.meshNodes || [];
+  updateSidePanel(syntheticClients, {
+    clients: syntheticClients,
+    wanRx: lastNetworkData?.wanRx || 0,
+    wanTx: lastNetworkData?.wanTx || 0,
+    timestamp: Date.now(),
+  }, meshNodes, lastMainMac);
+  updateFilterTabs(meshNodes, lastMainMac, syntheticClients);
+  document.getElementById('hdr-devices').textContent = deviceRows.length;
+  return { deviceRows, syntheticClients };
+}
+
+function buildGraphFromSummary(summary, { resetPositions = false } = {}) {
+  const topology = activeRouterTopology();
+  const { deviceRows, syntheticClients } = summaryDevicePanelData(summary);
+  const targetRows = (summary.byTarget || []).slice(0, 160);
+  const allowedDevices = new Set(deviceRows.map(r => r.src));
+  const allowedTargets = new Set(targetRows.map(r => r.key || r.label));
 
   buildGraph({
     clients: syntheticClients,
@@ -617,13 +638,6 @@ function buildGraphFromSummary(summary, { resetPositions = false } = {}) {
   drawNodes();
   applyGraphFilter();
   graphSummaryNotice(true, summary);
-  updateSidePanel(syntheticClients, {
-    clients: syntheticClients,
-    wanRx: 0,
-    wanTx: 0,
-    timestamp: Date.now(),
-  }, [], '');
-  document.getElementById('hdr-devices').textContent = deviceRows.length;
 }
 
 function updateOrgGraph({ resetPositions = false } = {}) {

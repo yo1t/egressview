@@ -398,6 +398,41 @@ test('tab bar renders after auth', async ({ page }) => {
   await expect(page.locator('#graph-container')).not.toHaveClass(/view-active/);
 });
 
+async function expectConnectedDevicesAcrossTabs(page, viewportWidth) {
+  const panel = page.locator('.side-panel');
+  const cards = page.locator('#device-list .device-card');
+  const tabIds = ['btn-ai', 'btn-graph', 'btn-stats', 'btn-log', 'btn-devices', 'btn-notif-log'];
+
+  await expect.poll(() => cards.count(), { timeout: 15_000 }).toBeGreaterThan(0);
+  for (const tabId of tabIds) {
+    await page.click(`#${tabId}`);
+    await expect(panel, `device panel should remain visible on ${tabId}`).toBeVisible();
+    await expect.poll(() => cards.count(), { timeout: 15_000 }).toBeGreaterThan(0);
+    await panel.scrollIntoViewIfNeeded();
+    const box = await panel.boundingBox();
+    expect(box, `device panel should have a layout box on ${tabId}`).not.toBeNull();
+    expect(box.x, `device panel should not overflow left on ${tabId}`).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, `device panel should not overflow right on ${tabId}`).toBeLessThanOrEqual(viewportWidth);
+  }
+}
+
+test('desktop keeps the connected device panel populated across every tab', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await authPage(page);
+  await expectConnectedDevicesAcrossTabs(page, 1440);
+});
+
+test('mobile keeps the connected device panel populated across every tab', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await authPage(page);
+  await expectConnectedDevicesAcrossTabs(page, 390);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
 test('mobile viewer keeps navigation, logs, and device details inside the viewport', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
