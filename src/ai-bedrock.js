@@ -136,7 +136,40 @@ function createBedrockTransport({ runtime = null, control = null, requireModule 
     }
   }
 
-  return { converse, listModels };
+  // Best-effort Guardrail discovery for the settings UI. Returns one entry per
+  // guardrail with the versions seen (always incl. DRAFT). Any failure (incl.
+  // missing bedrock:ListGuardrails permission) returns [] so the UI falls back
+  // to manual id/version entry (fail-open by design).
+  async function listGuardrails({ region, timeoutMs = 10_000 }) {
+    if (!region) return [];
+    const abortSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+    try {
+      const { BedrockClient, ListGuardrailsCommand } = getControl();
+      const client = new BedrockClient({ region });
+      const byId = new Map();
+      const out = await client.send(new ListGuardrailsCommand({}), { abortSignal });
+      for (const guardrail of out?.guardrails || []) {
+        if (!guardrail?.id) continue;
+        const entry = byId.get(guardrail.id) || {
+          id: guardrail.id,
+          arn: guardrail.arn || null,
+          name: guardrail.name || guardrail.id,
+          versions: new Set(),
+        };
+        if (guardrail.version) entry.versions.add(String(guardrail.version));
+        byId.set(guardrail.id, entry);
+      }
+      return [...byId.values()].map(entry => {
+        const versions = [...entry.versions];
+        if (!versions.includes('DRAFT')) versions.unshift('DRAFT');
+        return { id: entry.id, arn: entry.arn, name: entry.name, versions };
+      }).slice(0, 100);
+    } catch {
+      return [];
+    }
+  }
+
+  return { converse, listModels, listGuardrails };
 }
 
 module.exports = { createBedrockTransport, mapAwsError, extractText, bedrockNotInstalledError, BEDROCK_NOT_INSTALLED };

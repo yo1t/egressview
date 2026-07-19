@@ -22,7 +22,7 @@ function fakeRuntime({ onSend } = {}) {
   };
 }
 
-function fakeControl({ foundation = [], profiles = [], failProfiles = false, failAll = false } = {}) {
+function fakeControl({ foundation = [], profiles = [], guardrails = [], failProfiles = false, failGuardrails = false, failAll = false } = {}) {
   return {
     BedrockClient: class {
       constructor(cfg) { this.cfg = cfg; }
@@ -33,11 +33,16 @@ function fakeControl({ foundation = [], profiles = [], failProfiles = false, fai
           if (failProfiles) throw new Error('no profiles');
           return { inferenceProfileSummaries: profiles };
         }
+        if (command.kind === 'gr') {
+          if (failGuardrails) throw new Error('no guardrails');
+          return { guardrails };
+        }
         return {};
       }
     },
     ListFoundationModelsCommand: class { constructor() { this.kind = 'fm'; } },
     ListInferenceProfilesCommand: class { constructor() { this.kind = 'ip'; } },
+    ListGuardrailsCommand: class { constructor() { this.kind = 'gr'; } },
   };
 }
 
@@ -171,6 +176,32 @@ describe('ai-bedrock: listModels (fail-open discovery)', () => {
     const transport = createBedrockTransport({ control });
     assert.deepEqual(await transport.listModels({ region: 'us-east-1' }), []);
     assert.deepEqual(await transport.listModels({}), []);
+  });
+});
+
+describe('ai-bedrock: listGuardrails (fail-open discovery)', () => {
+  it('groups guardrails by id with versions (always incl. DRAFT)', async () => {
+    const control = fakeControl({ guardrails: [
+      { id: 'gr-1', arn: 'arn:aws:bedrock:...:guardrail/gr-1', name: 'PII Filter', version: 'DRAFT' },
+      { id: 'gr-1', arn: 'arn:aws:bedrock:...:guardrail/gr-1', name: 'PII Filter', version: '2' },
+      { id: 'gr-2', arn: 'arn:aws:bedrock:...:guardrail/gr-2', name: 'Toxicity' },
+    ] });
+    const transport = createBedrockTransport({ control });
+    const result = await transport.listGuardrails({ region: 'ap-northeast-1' });
+    assert.equal(result.length, 2);
+    const first = result.find(g => g.id === 'gr-1');
+    assert.equal(first.name, 'PII Filter');
+    assert.deepEqual(first.versions, ['DRAFT', '2']);
+    const second = result.find(g => g.id === 'gr-2');
+    assert.deepEqual(second.versions, ['DRAFT']);
+  });
+
+  it('returns [] (fail-open) on error or missing region', async () => {
+    assert.deepEqual(await createBedrockTransport({ control: fakeControl({ failGuardrails: true }) })
+      .listGuardrails({ region: 'us-east-1' }), []);
+    assert.deepEqual(await createBedrockTransport({ control: fakeControl({ failAll: true }) })
+      .listGuardrails({ region: 'us-east-1' }), []);
+    assert.deepEqual(await createBedrockTransport({ control: fakeControl({}) }).listGuardrails({}), []);
   });
 
   it('bounds both control-plane calls with an abort signal (timeout)', async () => {

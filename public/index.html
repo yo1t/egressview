@@ -511,10 +511,12 @@
               <div id="ai-guardrail-fields" class="is-hidden">
                 <div class="form-group">
                   <label class="form-label" for="s-ai-guardrail-id" data-i18n="settings.ai.guardrailId">Guardrail ID / ARN</label>
+                  <select id="s-ai-guardrail-select" class="form-input is-hidden"></select>
                   <input id="s-ai-guardrail-id" class="form-input" type="text" maxlength="2048" autocomplete="off" spellcheck="false">
                 </div>
                 <div class="form-group">
                   <label class="form-label" for="s-ai-guardrail-version" data-i18n="settings.ai.guardrailVersion">Guardrail バージョン</label>
+                  <select id="s-ai-guardrail-version-select" class="form-input is-hidden"></select>
                   <input id="s-ai-guardrail-version" class="form-input" type="text" maxlength="64" placeholder="DRAFT" autocomplete="off" spellcheck="false">
                 </div>
                 <p class="settings-field-hint ai-guardrail-warning" data-i18n="settings.ai.guardrailResidency">⚠ Guardrails は日本内処理を保証しません。日本限定（jp.）の guardrail profile は存在せず、cross-region guardrail は APAC 全域（日本外を含む）へルーティングされ得ます。日本内データレジデンシーが必須の場合は Guardrails をオフにするか、呼び出しリージョン内の single-region guardrail を使ってください。分類フラグ付きの入出力は最大30日保持され得ます。</p>

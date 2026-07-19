@@ -19,6 +19,9 @@ let activeProvider = 'disabled';
 // inference-profile selector can re-filter the model dropdown client-side.
 let discoveredModels = [];
 let modelDiscoveryRequest = 0;
+// Guardrails discovered by the last region lookup: [{ id, arn, name, versions }].
+let discoveredGuardrails = [];
+let guardrailDiscoveryRequest = 0;
 const GEO_PREFIXES = ['global.', 'us.', 'eu.', 'apac.', 'jp.', 'au.'];
 // Inference-profile (geo) filter options. Labels mirror the static markup; the
 // list shown is narrowed to what the discovered model set actually contains.
@@ -197,6 +200,83 @@ function renderProvider(provider) {
 function renderGuardrail() {
   const enabled = byId('s-ai-guardrail-enabled').checked;
   byId('ai-guardrail-fields').classList.toggle('is-hidden', !enabled);
+  if (enabled && activeProvider === 'bedrock') {
+    discoverGuardrails();
+  } else {
+    discoveredGuardrails = [];
+    renderGuardrailSelect();
+  }
+}
+
+// Rebuild the Guardrail dropdown from the discovered list. Picking one fills
+// the id input and refreshes the version dropdown. Hidden (manual entry only)
+// when nothing was discovered — e.g. no bedrock:ListGuardrails permission.
+function renderGuardrailSelect() {
+  const select = byId('s-ai-guardrail-select');
+  if (!select) return;
+  if (!discoveredGuardrails.length) {
+    select.replaceChildren();
+    select.classList.add('is-hidden');
+    renderGuardrailVersionSelect();
+    return;
+  }
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = t('settings.ai.modelPick');
+  const current = byId('s-ai-guardrail-id').value.trim();
+  select.replaceChildren(placeholder, ...discoveredGuardrails.map(guardrail => {
+    const option = document.createElement('option');
+    option.value = guardrail.id;
+    option.textContent = guardrail.name && guardrail.name !== guardrail.id
+      ? `${guardrail.name} (${guardrail.id})` : guardrail.id;
+    return option;
+  }));
+  select.value = discoveredGuardrails.some(guardrail => guardrail.id === current) ? current : '';
+  select.classList.remove('is-hidden');
+  renderGuardrailVersionSelect();
+}
+
+// Version dropdown for the currently-selected guardrail (from discovery). Falls
+// back to hidden (manual version entry) when the guardrail is not in the list.
+function renderGuardrailVersionSelect() {
+  const select = byId('s-ai-guardrail-version-select');
+  if (!select) return;
+  const currentId = byId('s-ai-guardrail-id').value.trim();
+  const match = discoveredGuardrails.find(guardrail => guardrail.id === currentId);
+  const versions = match?.versions?.length ? match.versions : [];
+  if (!versions.length) {
+    select.replaceChildren();
+    select.classList.add('is-hidden');
+    return;
+  }
+  const currentVersion = byId('s-ai-guardrail-version').value.trim();
+  select.replaceChildren(...versions.map(version => {
+    const option = document.createElement('option');
+    option.value = version;
+    option.textContent = version;
+    return option;
+  }));
+  select.value = versions.includes(currentVersion) ? currentVersion : versions[0];
+  select.classList.remove('is-hidden');
+}
+
+// Always silent/best-effort: guardrails are optional, so a discovery failure
+// (incl. missing permission) just leaves the manual id/version inputs in place.
+async function discoverGuardrails() {
+  const region = byId('s-ai-region').value.trim();
+  if (activeProvider !== 'bedrock' || !region || !byId('s-ai-guardrail-enabled').checked) return;
+  const requestId = ++guardrailDiscoveryRequest;
+  try {
+    const response = await apiFetch(`${_BASE}/api/ai/guardrails`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ region }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || requestId !== guardrailDiscoveryRequest || activeProvider !== 'bedrock') return;
+    discoveredGuardrails = Array.isArray(result.guardrails) ? result.guardrails : [];
+    renderGuardrailSelect();
+  } catch { /* best-effort; manual entry remains */ }
 }
 
 function applyConfig(next) {
@@ -308,10 +388,22 @@ function initAiSettings() {
   byId('s-ai-region-select')?.addEventListener('change', event => {
     if (!event.target.value) return;
     byId('s-ai-region').value = event.target.value;
-    // A new region can expose a different model set and geo profiles — refresh.
-    if (activeProvider === 'bedrock') discoverBedrockModels();
+    // A new region can expose a different model set, geo profiles, and
+    // guardrails — refresh all of them.
+    if (activeProvider === 'bedrock') {
+      discoverBedrockModels();
+      discoverGuardrails();
+    }
   });
   byId('s-ai-profile-select')?.addEventListener('change', handleProfileChange);
+  byId('s-ai-guardrail-select')?.addEventListener('change', event => {
+    if (!event.target.value) return;
+    byId('s-ai-guardrail-id').value = event.target.value;
+    renderGuardrailVersionSelect();
+  });
+  byId('s-ai-guardrail-version-select')?.addEventListener('change', event => {
+    if (event.target.value) byId('s-ai-guardrail-version').value = event.target.value;
+  });
   byId('ai-save-btn')?.addEventListener('click', async event => {
     event.currentTarget.disabled = true;
     try {
