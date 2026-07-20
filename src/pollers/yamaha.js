@@ -13,6 +13,8 @@ const crypto = require('crypto');
 const { Client: SshClient } = require('ssh2');
 const { abortError, attachAbortHandler } = require('./abort-signal');
 
+const YAMAHA_INITIAL_PROMPT_TIMEOUT_MS = 8_000;
+
 // ── Parsers (pure, shared by all instances) ───────────────────────────────────
 
 function parseNatDetail(text) {
@@ -145,7 +147,7 @@ function createTempYamahaShell({ ip, user, pass, expectedHostFp }) {
           if (!settled) fail(new Error('SSH shell closed'));
         });
         try {
-          await waitForPromptLocal(8000);
+          await waitForPromptLocal(YAMAHA_INITIAL_PROMPT_TIMEOUT_MS);
           await exec('console lines 0');
           settled = true;
           resolve({ exec, close: cleanup, hostFp });
@@ -428,7 +430,7 @@ function createYamahaPoller({ id = '', profiler = runtimeProfiler } = {}) {
 
         setTimeout(async () => {
           try {
-            await waitForPrompt(8000);
+            await waitForPrompt(YAMAHA_INITIAL_PROMPT_TIMEOUT_MS);
             shellBuf = '';
             stream.write('console lines 0\n');
             await waitForPrompt(5000);

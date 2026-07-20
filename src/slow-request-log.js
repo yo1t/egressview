@@ -24,7 +24,8 @@ function createSlowRequestLogger({
       // Don't log the query string (avoids log bloat and guards against future params)
       const path = String(req.originalUrl || req.url || '').split('?')[0];
       const size = res.getHeader && res.getHeader('content-length') || '-';
-      log(`[slow-request] ${req.method} ${path} ${res.statusCode} ${ms.toFixed(0)}ms size=${size}`);
+      const requestId = req.requestId ? ` requestId=${req.requestId}` : '';
+      log(`[slow-request] ${req.method} ${path} ${res.statusCode} ${ms.toFixed(0)}ms size=${size}${requestId}`);
     });
     next();
   };

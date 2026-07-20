@@ -1,13 +1,13 @@
 # EgressView コード品質レポート
 
 - **評価日**: 2026-07-20
-- **コミット**: `31266cb`基準スナップショット。入力検証の状態は`d7718eb` + P2-51作業ツリーで更新
+- **コミット**: `31266cb`基準スナップショット。入力検証・信頼性の状態はP2-53作業ツリーまで更新
 - **バージョン**: 1.5.1
 - **Node.js**: >=22 (テスト: 22, 24)
 - **評価者**: 自動静的解析 + 手動コードレビュー (Claude Code)
 
 > この文書はv1.5.1時点の測定スナップショットです。最新リリースの変更点は`CHANGELOG.md`を参照してください。
-> 特記のないコード量メトリクスは元のスナップショットを維持します。P2-51更新ではunit 1,451件成功と、endpointを持つ13/13 route moduleのstrict Zod対応を確認しました。
+> 特記のないコード量メトリクスは元のスナップショットを維持します。P2-51〜P2-53更新ではunit 1,460件成功、endpointを持つ13/13 route moduleのstrict Zod対応、HTTP request相関、用途別8秒上限を確認しました。
 
 ---
 
@@ -77,8 +77,6 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | 優先度 | ギャップ | 推定工数 |
 |---|---|---|
-| 中 | HTTP request ID (`X-Request-Id`, P2-52) | 2〜3h |
-| 低 | 意味の異なる`8000`を用途別定数化 (12箇所, P2-53) | 1〜2h |
 | 低・条件付き | OpenAPI (P2-54) / Docker・OCI配布 (P3-5) | spec後に見積もり |
 
 残りのギャップは家庭内/SOHO ネットワーク監視ツールとしては典型的であり、アーキテクチャ変更なしに段階的に対応可能です。
@@ -166,7 +164,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | 性能効率性 | 9/10 | 多層キャッシュ (history-cache, enrichment 30日 TTL), WAL, 圧縮, バッチ化, 重複排除, bounded summaries, バックグラウンドスロットリング, backup検証のworker分離 | EC2高負荷時に3秒監視timeoutがごく少数発生 |
 | 互換性 | 8/10 | Node 22/24, JA/EN i18n, OS 非依存, Linux conntrack 対応, モバイルレスポンシブ | Docker なし |
 | 使用性 | 9/10 | Demo モード, .env.example, 自動パスワード生成, MCP 統合, API/アーキテクチャドキュメント, モバイル対応, AI洞察 | ワンクリックデプロイなし |
-| 信頼性 | 9/10 | Graceful shutdown, 自動バックアップ, WAL checkpoint, reopen(), DB マイグレーション, AbortSignal, prune同時実行制限・cancel/timeout, Health/readiness | HTTP request IDは未対応 |
+| 信頼性 | 9/10 | Graceful shutdown, 自動バックアップ, WAL checkpoint, reopen(), DB マイグレーション, AbortSignal, prune同時実行制限・cancel/timeout, Health/readiness, HTTP request相関 | 組み込みのプロセス監視なし |
 | セキュリティ | 9/10 | OWASP ASVS L1 適合 (13/14), innerHTML 監査, 全endpoint routeのstrict Zod境界 | CSRF 明示なし |
 | 保守性 | 9/10 | 79 モジュール, テスト比率 92.0%, 分割リファクタ (history, auth), http-validation ヘルパー | TypeScript なし |
 | 移植性 | 7/10 | Pure Node.js, ENV 設定, OS 非依存 | Docker/systemd なし |
@@ -221,13 +219,13 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | pollers/cisco.js | 643 | 17.0 |
 | enrichment.js | 479 | 16.9 |
 
-### コードスメル (合計 13 件)
+### コードスメル (合計 12 件)
 
 | 重要度 | 件数 | 例 |
 |---|---|---|
 | MAJOR | 2 | `history.js` 761行 (分割後も多責務), `devices.js` 665行 |
 | MINOR | 5 | `pollers/cisco.js` 643行, `server.js` 621行, `pollers/yamaha.js` 612行, `device-identify.js` 547行, `ai-provider.js` 477行 |
-| INFO | 6 | 意味の異なる`8000`が12箇所、DB initDb() ボイラープレート重複 (5ファイル) |
+| INFO | 5 | DB initDb() ボイラープレート重複 (5ファイル) |
 
 ---
 

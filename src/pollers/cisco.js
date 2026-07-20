@@ -21,6 +21,8 @@ const {
 } = require('./cisco-session');
 const { abortError, attachAbortHandler } = require('./abort-signal');
 
+const CISCO_INITIAL_PROMPT_TIMEOUT_MS = 8_000;
+
 // ── Parsers (pure, shared by all instances) ───────────────────────────────────
 
 // Convert Cisco dot-notation MAC (aabb.cc11.0200) to colon notation (aa:bb:cc:11:02:00)
@@ -248,7 +250,7 @@ function createTempCiscoShell({ ip, user, pass, enablePass, expectedHostFp }) {
         stream.on('error', fail);
         stream.on('close', () => { if (!settled) fail(new Error('SSH shell closed')); });
         try {
-          await waitForPromptLocal(8000);
+          await waitForPromptLocal(CISCO_INITIAL_PROMPT_TIMEOUT_MS);
           // Enter privileged (enable) mode via the shared handshake state machine.
           await runEnableHandshake({
             initialBuf: buf,
@@ -458,7 +460,7 @@ function createCiscoPoller({ id = '' } = {}) {
 
         setTimeout(async () => {
           try {
-            await waitForPrompt(8000);
+            await waitForPrompt(CISCO_INITIAL_PROMPT_TIMEOUT_MS);
             // Enter privileged (enable) mode via the shared handshake state machine.
             await runEnableHandshake({
               initialBuf: shellBuf,

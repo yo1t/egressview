@@ -10,6 +10,8 @@
 // password, enable rejected — testable in CI.
 'use strict';
 
+const CISCO_ENABLE_HANDSHAKE_TIMEOUT_MS = 8_000;
+
 // ── Prompt classifiers (pure) ────────────────────────────────────────────────
 
 // A shell prompt ends in ">" (user mode) or "#" (privileged mode).
@@ -121,7 +123,13 @@ function enableHandshakeStep(phase, buf, { enablePass } = {}) {
  *   timeoutMs?: number,
  * }} io
  */
-async function runEnableHandshake({ initialBuf, enablePass, write, waitForPrompt, timeoutMs = 8000 }) {
+async function runEnableHandshake({
+  initialBuf,
+  enablePass,
+  write,
+  waitForPrompt,
+  timeoutMs = CISCO_ENABLE_HANDSHAKE_TIMEOUT_MS,
+}) {
   let phase = ENABLE_START;
   let buf = initialBuf;
   // Bounded loop: the machine has at most 3 phases, so 4 iterations is plenty.

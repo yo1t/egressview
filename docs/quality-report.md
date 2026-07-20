@@ -1,13 +1,13 @@
 # EgressView Code Quality Report
 
 - **Date**: 2026-07-20
-- **Commit**: `31266cb` baseline snapshot; input-validation status refreshed on `d7718eb` + P2-51 working tree
+- **Commit**: `31266cb` baseline snapshot; validation and reliability status refreshed through the P2-53 working tree
 - **Version**: 1.5.1
 - **Node.js**: >=22 (tested on 22, 24)
 - **Evaluator**: Automated static analysis + manual code review (Claude Code)
 
 > This report is a snapshot of v1.5.1. For the current release, see the [changelog](../CHANGELOG.md).
-> Quantitative size metrics remain the original snapshot unless stated otherwise. The P2-51 refresh records 1,451 passing unit tests and strict Zod coverage across all 13 endpoint-bearing route modules.
+> Quantitative size metrics remain the original snapshot unless stated otherwise. The P2-51-P2-53 refresh records 1,460 passing unit tests, strict Zod coverage across all 13 endpoint-bearing route modules, HTTP request correlation, and domain-owned 8-second limits.
 
 ---
 
@@ -69,8 +69,6 @@ EgressView demonstrates **production-grade quality** across all evaluated framew
 
 | Priority | Gap | Effort |
 |---|---|---|
-| Medium | HTTP request IDs (`X-Request-Id`, P2-52) | 2-3 h |
-| Low | Replace the 12 semantically different `8000` values with domain constants (P2-53) | 1-2 h |
 | Low, conditional | OpenAPI (P2-54) / Docker and OCI distribution (P3-5) | Estimate after specification |
 
 The remaining gaps are typical for a home-lab/SOHO network monitoring tool and can be addressed incrementally without architectural changes.
@@ -158,7 +156,7 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | Performance Efficiency | 9/10 | Multi-layer caching, WAL, compression, batching, dedup, bounded summaries, and worker-isolated backup verification | A few 3-second probe timeouts under full EC2 backup verification load |
 | Compatibility | 8/10 | Node 22/24, JA/EN i18n, OS-independent, Linux conntrack support | No Docker |
 | Usability | 9/10 | Demo mode, .env.example, auto-generated password, MCP integration, AI insights, API/architecture docs | No one-click deploy |
-| Reliability | 9/10 | Graceful shutdown, auto-backup, DB migration, AbortSignal, single-flight prune cancellation/timeouts, health/readiness | No HTTP request correlation ID yet |
+| Reliability | 9/10 | Graceful shutdown, auto-backup, DB migration, AbortSignal, single-flight prune cancellation/timeouts, health/readiness, HTTP request correlation | No built-in process supervision |
 | Security | 9/10 | OWASP ASVS L1 compliant (13/14), innerHTML audit, strict Zod boundary across all endpoint routes | No explicit CSRF |
 | Maintainability | 9/10 | 79 modules, 92.0% test ratio, split refactors, http-validation helper, _resetForTest pattern | No TypeScript |
 | Portability | 7/10 | Pure Node.js, ENV config, OS-independent | No Docker/systemd |
@@ -213,13 +211,13 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | pollers/cisco.js | 643 | 17.0 |
 | devices.js | 665 | 16.5 |
 
-### Code Smells (13 total)
+### Code Smells (12 total)
 
 | Severity | Count | Examples |
 |---|---|---|
 | MAJOR | 2 | `history.js` 761L (still multi-concern after split), `devices.js` 665L |
 | MINOR | 5 | `pollers/cisco.js` 643L, `server.js` 621L, `pollers/yamaha.js` 612L, `device-identify.js` 547L, `ai-provider.js` 477L |
-| INFO | 6 | Twelve semantically different `8000` values, DB initDb() boilerplate duplication (5 files) |
+| INFO | 5 | DB initDb() boilerplate duplication (5 files) |
 
 ---
 

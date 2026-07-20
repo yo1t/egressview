@@ -118,11 +118,14 @@ describe('cisco-session: runEnableHandshake', () => {
   // to the next scripted buffer, which the injected waitForPrompt returns.
   function makeFakeShell(responses) {
     const writes = [];
+    const timeouts = [];
     let idx = 0;
     return {
       writes,
+      timeouts,
       write: (text) => { writes.push(text); },
-      waitForPrompt: async (matcher) => {
+      waitForPrompt: async (matcher, timeoutMs) => {
+        timeouts.push(timeoutMs);
         const buf = responses[idx++];
         if (buf === undefined) throw new Error('SSH timeout');
         if (!matcher(buf)) throw new Error(`unexpected buffer did not match: ${JSON.stringify(buf)}`);
@@ -147,6 +150,7 @@ describe('cisco-session: runEnableHandshake', () => {
       write: shell.write, waitForPrompt: shell.waitForPrompt,
     });
     assert.deepEqual(shell.writes, ['enable\n', 's3cr3t\n']);
+    assert.deepEqual(shell.timeouts, [8_000, 8_000]);
   });
 
   it('enable needs no password: sends enable, lands privileged directly', async () => {
