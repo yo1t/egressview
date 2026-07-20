@@ -215,7 +215,7 @@ describe('AI configuration routes', () => {
     assert.equal(result.status, 200);
     assert.equal(result.body.current.requests, 2);
     assert.equal(result.body.pricing.approximate, true);
-    assert.equal(result.body.pricing.catalogVersion, '2026-05-27');
+    assert.equal(result.body.pricing.catalogVersion, '2026-07-20');
     assert.equal(result.body.pricing.effectiveFrom, '2026-05-27');
     assert.ok(result.body.pricing.sourceUrls.includes('https://aws.amazon.com/bedrock/pricing/'));
     assert.equal(ranges.length, 2);
