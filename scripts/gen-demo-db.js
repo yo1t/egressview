@@ -24,11 +24,14 @@ history.loadConnectionHistory();
 
 const seeded = seedDemoConnections(history);
 history.snapshotHistory();
+history.closeDb();
 
-// Checkpoint WAL back into the main file so the committed DB is self-contained
+// Checkpoint WAL and leave the committed snapshot in DELETE mode so merely
+// inspecting it does not create sidecars. Runtime initialization enables WAL.
 const Database = require('better-sqlite3');
 const db = new Database(OUT);
 db.pragma('wal_checkpoint(TRUNCATE)');
+db.pragma('journal_mode = DELETE');
 db.close();
 
 // Remove WAL/SHM — we only want the main file in git

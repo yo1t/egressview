@@ -27,6 +27,8 @@ node_modules/
 .egressview.db-shm
 .egressview-backups/
 # demo DB snapshot is committed to git; runtime copy and WAL/SHM are excluded
+.egressview-demo-runtime/
+# Legacy runtime paths kept ignored for upgrades and local cleanup.
 .egressview.demo.runtime.db
 .egressview.demo.runtime.db-wal
 .egressview.demo.runtime.db-shm

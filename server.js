@@ -70,8 +70,9 @@ const CONFIG_FILE       = process.env.EGRESSVIEW_CONFIG_PATH
 const DEMO_MODE       = process.env.DEMO_MODE === 'true';
 const DEMO_ADMIN_TOKEN = process.env.DEMO_ADMIN_TOKEN || 'demo-token-ci';
 const DEMO_DB_PATH         = path.join(__dirname, '.egressview.demo.db');
-const DEMO_RUNTIME_DB_PATH = path.join(__dirname, '.egressview.demo.runtime.db');
-const DEMO_BACKUP_DIR      = path.join(__dirname, '.egressview-demo-backups');
+const DEMO_RUNTIME_DIR     = path.join(__dirname, '.egressview-demo-runtime');
+const DEMO_RUNTIME_DB_PATH = path.join(DEMO_RUNTIME_DIR, 'runtime.db');
+const DEMO_BACKUP_DIR      = path.join(DEMO_RUNTIME_DIR, 'backups');
 const _rawAssetVersion = process.env.EGRESSVIEW_ASSET_VERSION || '';
 const ASSET_VERSION    = /^[A-Za-z0-9._-]+$/.test(_rawAssetVersion) ? _rawAssetVersion : (() => {
   if (_rawAssetVersion) console.warn(`[server] EGRESSVIEW_ASSET_VERSION contains invalid characters ('${_rawAssetVersion}'); falling back to timestamp.`);
@@ -499,6 +500,7 @@ server.listen(PORT, HOST, () => {
     // Copy the committed snapshot to a separate runtime file so the tracked
     // snapshot is never modified at runtime. Remove sidecars from a previous
     // run first; pairing stale WAL data with a fresh snapshot corrupts it.
+    fs.mkdirSync(DEMO_RUNTIME_DIR, { recursive: true, mode: 0o700 });
     for (const suffix of ['-wal', '-shm']) {
       try { fs.unlinkSync(DEMO_RUNTIME_DB_PATH + suffix); } catch (err) {
         if (err.code !== 'ENOENT') throw err;

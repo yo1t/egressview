@@ -26,6 +26,7 @@ All notable changes to EgressView are documented here.
 - Completed strict Zod request validation across all 13 endpoint-bearing route modules. Unknown fields, arrays or objects supplied for scalar parameters, and oversized values are rejected before route logic runs while existing SSRF checks, defaults, limits, and error shapes are preserved.
 - Backup cleanup always protects at least two normal generations and the latest migration generation, never removes corrupt or unverified files, and regenerates plus reverifies the plan immediately before deletion.
 - Disk warnings now appear before deployment-time migration failures while the existing fail-closed migration and restore paths remain unchanged.
+- Isolated demo runtime databases and backups in one ignored directory and refreshed the committed demo snapshot to prevent migration backups accumulating in the repository root.
 - Historical AI usage keeps the rates recorded at invocation time; later catalog updates do not recalculate prior estimates.
 - Moved verified backup cleanup planning and execution to a single-concurrency worker job with progress, cancellation, timeout, and status APIs so multi-gigabyte integrity checks do not block collection or HTTP.
 
