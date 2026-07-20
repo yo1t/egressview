@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
 const http = require('node:http');
 const { Readable, Writable } = require('node:stream');
 const { describe, it } = require('node:test');
@@ -312,5 +313,76 @@ describe('AI configuration routes', () => {
     assert.equal(afterRetry.body.messages[0].body, 'What changed?');
     assert.equal((await request(app, 'DELETE', `/api/ai/conversations/${conversationId}`)).status, 200);
     assert.equal((await request(app, 'GET', `/api/ai/conversations/${conversationId}`)).status, 404);
+  });
+
+  it('starts a new conversation after switching to OpenAI, Anthropic, or Ollama', async () => {
+    const providers = [
+      { name: 'openai', model: 'gpt-test', key: 'openai-key', response: { output_text: 'OpenAI answer' } },
+      {
+        name: 'anthropic', model: 'claude-test', key: 'anthropic-key',
+        response: { content: [{ type: 'text', text: 'Anthropic answer' }] },
+      },
+      { name: 'ollama', model: 'local-test', response: { response: 'Ollama answer' } },
+    ];
+
+    for (const selected of providers) {
+      historyStore._initForTest();
+      const oldConversationId = randomUUID();
+      historyStore.createConversation({
+        conversationId: oldConversationId,
+        createdAt: 1,
+        provider: 'bedrock',
+        model: 'old-bedrock-model',
+        rangeFrom: 1000,
+        rangeTo: 2000,
+      });
+      historyStore.appendMessage({
+        messageId: randomUUID(),
+        conversationId: oldConversationId,
+        requestId: randomUUID(),
+        role: 'user',
+        body: 'Preserved Bedrock question',
+        createdAt: 2,
+        provider: 'bedrock',
+        model: 'old-bedrock-model',
+        rangeFrom: 1000,
+        rangeTo: 2000,
+        status: 'complete',
+        errorCode: null,
+      });
+
+      const provider = createAiProvider({ fetchImpl: async () =>
+        new Response(JSON.stringify(selected.response), { status: 200 }) });
+      provider.configure({
+        provider: selected.name,
+        models: { [selected.name]: selected.model },
+        keys: selected.key ? { [selected.name]: selected.key } : undefined,
+        cloudConsent: selected.key ? { [selected.name]: true } : undefined,
+      });
+      const app = appFor(provider, undefined, {
+        history: historyStore,
+        threatIntel: null,
+        routerManager: { list: () => [] },
+      });
+      const sent = await request(app, 'POST', '/api/ai/chat', {
+        conversationId: oldConversationId,
+        requestId: randomUUID(),
+        message: `Question for ${selected.name}`,
+        from: 1000,
+        to: 2000,
+        cloudConsentConfirmed: true,
+      });
+
+      assert.equal(sent.status, 200, selected.name);
+      assert.equal(sent.body.startedNewConversation, true, selected.name);
+      assert.notEqual(sent.body.conversationId, oldConversationId, selected.name);
+      assert.equal(sent.body.message.provider, selected.name);
+      assert.equal(historyStore.getMessages(oldConversationId).length, 1, selected.name);
+      assert.deepEqual(
+        historyStore.getMessages(sent.body.conversationId).map(message => message.role),
+        ['user', 'assistant'],
+        selected.name
+      );
+    }
   });
 });
