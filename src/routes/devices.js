@@ -2,7 +2,22 @@
 'use strict';
 
 const { Router } = require('express');
+const { z } = require('zod');
+const { parseRequest } = require('../http-validation');
 const { t } = require('../i18n-server');
+
+const deviceId = z.string().min(1).max(128);
+const devicesQuerySchema = z.object({ includeArchived: z.enum(['0', '1']).optional() }).strict();
+const mergeCandidatesQuerySchema = z.object({
+  status: z.enum(['pending', 'approved', 'rejected', 'all']).optional(),
+}).strict();
+const mergeSchema = z.object({ keepId: deviceId, dropId: deviceId }).strict();
+const candidateId = z.union([
+  z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  z.string().regex(/^\d+$/).max(16),
+]).transform(Number).refine(Number.isSafeInteger);
+const rejectSchema = z.object({ id: candidateId }).strict();
+const archiveSchema = z.object({ deviceId }).strict();
 
 /**
  * @param {{
@@ -19,7 +34,9 @@ module.exports = function devicesRoutes(ctx) {
   // GET /api/devices[?includeArchived=1]
   // Returns devices with status (active/recent/stale/archived), IPv6, and notes.
   router.get('/devices', requireAdmin, (req, res) => {
-    const includeArchived = req.query.includeArchived === '1';
+    const parsed = parseRequest(devicesQuerySchema, req.query, res);
+    if (!parsed.ok) return;
+    const includeArchived = parsed.data.includeArchived === '1';
     const all = devices.getAll({ includeArchived });
     for (const d of all) {
       d.ipv6Addrs = d.mac ? (yamaha.getNdpByMac(d.mac) || null) : null;
@@ -32,8 +49,9 @@ module.exports = function devicesRoutes(ctx) {
 
   // GET /api/devices/merge-candidates?status=pending
   router.get('/devices/merge-candidates', requireAdmin, (req, res) => {
-    const status = ['pending', 'approved', 'rejected', 'all']
-      .includes(req.query.status) ? req.query.status : 'pending';
+    const parsed = parseRequest(mergeCandidatesQuerySchema, req.query, res);
+    if (!parsed.ok) return;
+    const status = parsed.data.status || 'pending';
     const candidates = devices.getMergeCandidates(status);
     // Parse reasons JSON for convenience
     for (const c of candidates) {
@@ -45,10 +63,9 @@ module.exports = function devicesRoutes(ctx) {
   // POST /api/devices/merge  — approve a merge candidate
   // Body: { keepId, dropId }
   router.post('/devices/merge', requireAdmin, (req, res) => {
-    const { keepId, dropId } = req.body || {};
-    if (!keepId || !dropId) {
-      return res.status(400).json({ error: t('device.merge-missing-id') });
-    }
+    const parsed = parseRequest(mergeSchema, req.body, res, { error: t('device.merge-missing-id') });
+    if (!parsed.ok) return;
+    const { keepId, dropId } = parsed.data;
     if (keepId === dropId) {
       return res.status(400).json({ error: t('device.merge-same-id') });
     }
@@ -72,8 +89,9 @@ module.exports = function devicesRoutes(ctx) {
   // POST /api/devices/reject  — reject a merge candidate
   // Body: { id }
   router.post('/devices/reject', requireAdmin, (req, res) => {
-    const { id } = req.body || {};
-    if (!id) return res.status(400).json({ error: t('device.id-required') });
+    const parsed = parseRequest(rejectSchema, req.body, res, { error: t('device.id-required') });
+    if (!parsed.ok) return;
+    const { id } = parsed.data;
     devices.rejectCandidate(id);
     res.json({ success: true });
   });
@@ -81,8 +99,9 @@ module.exports = function devicesRoutes(ctx) {
   // POST /api/devices/archive  — manually archive a device
   // Body: { deviceId }
   router.post('/devices/archive', requireAdmin, (req, res) => {
-    const { deviceId } = req.body || {};
-    if (!deviceId) return res.status(400).json({ error: t('device.device-id-required') });
+    const parsed = parseRequest(archiveSchema, req.body, res, { error: t('device.device-id-required') });
+    if (!parsed.ok) return;
+    const { deviceId } = parsed.data;
     const ok = devices.archiveDevice(deviceId);
     if (!ok) return res.status(404).json({ error: t('device.already-archived') });
     res.json({ success: true });
@@ -91,8 +110,9 @@ module.exports = function devicesRoutes(ctx) {
   // POST /api/devices/unarchive  — restore an archived device
   // Body: { deviceId }
   router.post('/devices/unarchive', requireAdmin, (req, res) => {
-    const { deviceId } = req.body || {};
-    if (!deviceId) return res.status(400).json({ error: t('device.device-id-required') });
+    const parsed = parseRequest(archiveSchema, req.body, res, { error: t('device.device-id-required') });
+    if (!parsed.ok) return;
+    const { deviceId } = parsed.data;
     const ok = devices.unarchiveDevice(deviceId);
     if (!ok) return res.status(404).json({ error: t('device.not-found') });
     res.json({ success: true });

@@ -1,12 +1,13 @@
 # EgressView Code Quality Report
 
 - **Date**: 2026-07-20
-- **Commit**: `31266cb` (main) + P2-49/P2-50 working tree
+- **Commit**: `31266cb` baseline snapshot; input-validation status refreshed on `d7718eb` + P2-51 working tree
 - **Version**: 1.5.1
 - **Node.js**: >=22 (tested on 22, 24)
 - **Evaluator**: Automated static analysis + manual code review (Claude Code)
 
 > This report is a snapshot of v1.5.1. For the current release, see the [changelog](../CHANGELOG.md).
+> Quantitative size metrics remain the original snapshot unless stated otherwise. The P2-51 refresh records 1,451 passing unit tests and strict Zod coverage across all 13 endpoint-bearing route modules.
 
 ---
 
@@ -14,7 +15,7 @@
 
 **Overall Grade: A**
 
-EgressView demonstrates **production-grade quality** across all evaluated frameworks. Since the previous assessment (v1.4.0), significant improvements include the addition of an AI insight tab with multi-provider support (Ollama/Anthropic/OpenAI), a near-doubling of zod schema definitions (39→77), 12 new API endpoints, and continued growth of the test suite (+2,243 lines). The test-to-source ratio remains excellent at 92.0%, security design continues to meet OWASP ASVS L1, and the minimal dependency footprint (12 production packages) is maintained.
+EgressView demonstrates **production-grade quality** across all evaluated frameworks. Since the previous assessment (v1.4.0), significant improvements include the addition of an AI insight tab with multi-provider support (Ollama/Anthropic/OpenAI), strict Zod validation across every endpoint-bearing route module, 12 new API endpoints, and continued growth of the test suite. Security design continues to meet OWASP ASVS L1, and the minimal dependency footprint (12 production packages) is maintained.
 
 | # | Framework | Score | Verdict |
 |---|---|---|---|
@@ -29,7 +30,7 @@ EgressView demonstrates **production-grade quality** across all evaluated framew
 - **Security by design** — scrypt password hashing, timing-safe token comparison, per-request CSP nonce, `style-src 'self'`, CI-integrated ASH + secret scan + npm audit, SHA-pinned GitHub Actions (2 workflows)
 - **Testing culture** — 96 unit + 4 integration + Playwright smoke (1,441 lines); 92.0% test-to-source ratio; `_resetForTest()` pattern across 9 domain modules
 - **Code discipline** — server-side `var` zero, `eval` zero, TODO/FIXME zero, consistent naming, ESLint v10 + innerHTML audit
-- **Input validation** — zod schema validation across 6/13 endpoint-bearing route modules with 77 schema definitions; `http-validation.js` helper
+- **Input validation** — strict Zod validation across all 13/13 endpoint-bearing route modules, enforced by the shared `http-validation.js` helper and a static coverage test
 - **Coverage gate** — Node.js built-in V8 coverage runs in Node 22 CI with enforced minimums of 70% lines, 75% branches, and 65% functions
 - **Minimal dependencies** — 12 production packages only; Dependabot with 7-day cooldown
 - **AI integration** — multi-provider adapter (Ollama/Anthropic/OpenAI) with model list, connection test, and live metrics facts tab
@@ -47,8 +48,7 @@ EgressView demonstrates **production-grade quality** across all evaluated framew
 | HTTP endpoints | 56 | 73 | +17 |
 | Production dependencies | 11 | 12 | +1 |
 | requireAdmin routes | 79 | 87 | +8 |
-| zod-validated routes | 5/12 | 6/13 | +1 |
-| zod schema definitions | 39 | 77 | +38 |
+| zod-validated routes | 5/12 | 13/13 | +8 |
 | Parameterized SQL | 99 | 117 | +18 |
 | Documentation (docs/*.md) | 22 | 26 | +4 |
 | PRs merged | 78 | 101 | +23 |
@@ -69,9 +69,6 @@ EgressView demonstrates **production-grade quality** across all evaluated framew
 
 | Priority | Gap | Effort |
 |---|---|---|
-| High | Make backup dry-run / prune non-blocking (P2-49) | 4-8 h |
-| Medium | Health / readiness endpoint (P2-50) | 1-2 h |
-| Medium | Incrementally validate the remaining 7 route modules with zod (P2-51) | 6-9 h |
 | Medium | HTTP request IDs (`X-Request-Id`, P2-52) | 2-3 h |
 | Low | Replace the 12 semantically different `8000` values with domain constants (P2-53) | 1-2 h |
 | Low, conditional | OpenAPI (P2-54) / Docker and OCI distribution (P3-5) | Estimate after specification |
@@ -102,7 +99,7 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | TODO/FIXME/HACK comments | 0 |
 | Parameterized SQL statements | 117 |
 | requireAdmin routes | 87 |
-| zod schema definitions | 77 |
+| zod-validated endpoint route modules | 13/13 |
 
 ---
 
@@ -115,7 +112,7 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | V2 Authentication | ✅ | scrypt (N=16384, r=8, p=1), timingSafeEqual, 256-bit session tokens, brute-force lockout (5 fails / 5-min lock), password 8–256 chars, zod schema validation |
 | V3 Session Management | ✅ | Tokens stored hashed (SHA-256), sliding 30-day expiry, revoke on password change, periodic pruning, touch throttle (5 min) |
 | V4 Access Control | ✅ | 87 routes use `requireAdmin`; only 2 unauthenticated (login, verify) |
-| V5 Input Validation | ✅ | Body limit 64 KB, zod schema validation (6/13 endpoint-bearing route modules, 77 schemas), private-IP-only router access (SSRF prevention), path traversal check, null-byte rejection |
+| V5 Input Validation | ✅ | Body limit 64 KB, strict Zod validation across 13/13 endpoint-bearing route modules, unknown-key and type rejection, private-IP-only router access (SSRF prevention), path traversal check, null-byte rejection |
 | V6 Cryptography | ✅ | scrypt for passwords, randomBytes for tokens/nonces/salts, SHA-256 for TOFU host keys/sessions, timingSafeEqual |
 | V7 Error Handling | ✅ | Generic 500 responses, no stack traces leaked, timing-attack-resistant error responses (500 ms delay) |
 | V8 Data Protection | ✅ | Config file mode 0o600, backup 0o600, TLS private key 0o600, no plaintext passwords in logs |
@@ -126,7 +123,7 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | V14 Configuration | ✅ | No hardcoded secrets, all credentials via env or config file, CI secret scan |
 | V11 Business Logic | ⚠️ | No explicit CSRF protection (mitigated by same-origin CSP + token-based auth) |
 
-**Improvement since v1.4.0:** V5 (Input Validation) further strengthened by zod schema definitions nearly doubling (39→77); V4 (Access Control) expanded with 8 new requireAdmin routes covering AI endpoints.
+**Improvement since v1.4.0:** V5 (Input Validation) now covers all 13 endpoint-bearing route modules and is protected against coverage regression by a static unit test; V4 (Access Control) expanded with 8 new requireAdmin routes covering AI endpoints.
 
 ---
 
@@ -162,7 +159,7 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | Compatibility | 8/10 | Node 22/24, JA/EN i18n, OS-independent, Linux conntrack support | No Docker |
 | Usability | 9/10 | Demo mode, .env.example, auto-generated password, MCP integration, AI insights, API/architecture docs | No one-click deploy |
 | Reliability | 9/10 | Graceful shutdown, auto-backup, DB migration, AbortSignal, single-flight prune cancellation/timeouts, health/readiness | No HTTP request correlation ID yet |
-| Security | 9/10 | OWASP ASVS L1 compliant (13/14), innerHTML audit, zod rollout (77 schemas) | No explicit CSRF |
+| Security | 9/10 | OWASP ASVS L1 compliant (13/14), innerHTML audit, strict Zod boundary across all endpoint routes | No explicit CSRF |
 | Maintainability | 9/10 | 79 modules, 92.0% test ratio, split refactors, http-validation helper, _resetForTest pattern | No TypeScript |
 | Portability | 7/10 | Pure Node.js, ENV config, OS-independent | No Docker/systemd |
 
@@ -231,13 +228,13 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | Area | Improvements |
 |---|---|
 | Testing | Unit tests +12 files (84→96), smoke test grew (1,163→1,441 lines), test lines +2,243 |
-| Security | zod schemas nearly doubled (39→77), requireAdmin +8, AI endpoints fully validated |
+| Security | Strict Zod validation expanded to all 13 endpoint route modules, requireAdmin +8, AI endpoints fully validated |
 | Architecture | AI provider adapter (Ollama/Anthropic/OpenAI), enrichment cache TTL 30d, reMatchAndNotify chunked async, enrichment queue 50ms delay |
 | Features | AI insight tab (provider infrastructure + live metrics facts), conntrack SSH/TOFU, ARP/NDP, router manager, settings UI/auto-detect |
 | CI/CD | Docker SSH test for conntrack, continued soak stability |
 | Documentation | +4 docs (26 total), API/architecture kept current |
 | Dependencies | AI provider SDK added (+1, total 12) |
-| Code Quality | Parameterized SQL 99→117, zod schemas 39→77, MINOR code smells +1 (ai-provider.js 477L) |
+| Code Quality | Parameterized SQL 99→117, complete endpoint-route validation coverage, MINOR code smells +1 (ai-provider.js 477L) |
 
 ---
 
@@ -246,7 +243,7 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | Area | Improvements |
 |---|---|
 | Testing | Unit tests +42 files (54→96), integration +1, test ratio 74.9%→92.0% (+17.1pp), smoke test added and grew to 1,441 lines |
-| Security | zod validation from 0 to 77 schemas across 6 route files, requireAdmin 62→87 (+25), CI secret scan + ASH + innerHTML audit |
+| Security | Zod validation expanded from 0/9 to 13/13 endpoint route modules, requireAdmin 62→87 (+25), CI secret scan + ASH + innerHTML audit |
 | Architecture | history.js split, auth.js split, AbortSignal support, AI multi-provider adapter, enrichment cache with TTL |
 | Features | conntrack poller, manual threat investigation, AI insight tab, CSV export, history-cache, Docker SSH test |
 | Documentation | 14→26 docs (+12), API reference (JA/EN), architecture docs, conntrack setup |

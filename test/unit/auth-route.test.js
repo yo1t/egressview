@@ -547,4 +547,22 @@ describe('auth route: connection failures', () => {
     assert.equal(noTarget.status, 400);
     assert.equal(badNat.status, 400);
   });
+
+  it('rejects unknown, mistyped, and oversized router setup fields before connecting', async () => {
+    const app = makeApp();
+    const unknown = await request(app, 'POST', '/api/login', { doYamaha: false, typo: true });
+    const mistyped = await request(app, 'POST', '/api/yamaha/detect', {
+      yamahaIp: ['192.168.1.1'], yamahaUser: 'admin', yamahaPass: 'password',
+    });
+    const oversized = await request(app, 'POST', '/api/cisco/detect', {
+      ciscoIp: '192.168.1.254', ciscoUser: 'x'.repeat(65), ciscoPass: 'password',
+    });
+    const invalidNat = await request(app, 'POST', '/api/yamaha/detect', {
+      yamahaIp: '192.168.1.1', yamahaUser: 'admin', yamahaPass: 'password', yamahaNat: 'abc',
+    });
+    assert.equal(unknown.status, 400);
+    assert.equal(mistyped.status, 400);
+    assert.equal(oversized.status, 400);
+    assert.equal(invalidNat.status, 400);
+  });
 });

@@ -113,4 +113,10 @@ describe('notification-log route: GET /api/notification-log', () => {
     const { status } = await request(app, 'GET', '/api/notification-log?from=1700000000000');
     assert.equal(status, 200);
   });
+
+  it('rejects unknown, repeated, and oversized query values', async () => {
+    assert.equal((await request(app, 'GET', '/api/notification-log?extra=1')).status, 400);
+    assert.equal((await request(app, 'GET', '/api/notification-log?from=1&from=2')).status, 400);
+    assert.equal((await request(app, 'GET', `/api/notification-log?from=${'1'.repeat(21)}`)).status, 400);
+  });
 });

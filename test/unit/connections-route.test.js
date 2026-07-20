@@ -230,6 +230,19 @@ describe('connections route: GET /connections pagination', () => {
     assert.equal(res._body.connections[0].dst, 'warn-2.example');
     assert.equal(res._body.connections[0].threat.confidence, 'low');
   });
+
+  it('rejects unknown, array, and oversized query values before querying history', () => {
+    assert.equal(callRoute([], { unexpected: '1' })._status, 400);
+    assert.equal(callRoute([], { from: ['1', '2'] })._status, 400);
+    assert.equal(callRoute([], { fOrg: 'x'.repeat(513) })._status, 400);
+  });
+
+  it('preserves the existing fallback for bounded unknown sort values', () => {
+    const rows = [{ src: '192.168.1.1', dst: '10.0.0.1', dport: 443, proto: 'TCP' }];
+    const res = callRoute(rows, { limit: '10', sort: 'unknown', sortDir: 'sideways' });
+    assert.equal(res._status, 200);
+    assert.equal(res._body.connections.length, 1);
+  });
 });
 
 describe('connections route: GET /connections/export validation', () => {
@@ -266,6 +279,11 @@ describe('connections route: GET /connections/export validation', () => {
     const res = await callExport({ format: 'csv', from: '200', to: '100' });
     assert.equal(res._status, 400);
     assert.match(res._body.error, /must not precede/);
+  });
+
+  it('rejects unknown and structured export query values', async () => {
+    assert.equal((await callExport({ format: 'csv', from: '1', extra: 'x' }))._status, 400);
+    assert.equal((await callExport({ format: ['csv'], from: '1' }))._status, 400);
   });
 });
 
@@ -330,6 +348,12 @@ describe('connections route: GET /connections/summary', () => {
   it('returns 400 for invalid buckets', () => {
     const res = callSummaryRoute({ buckets: 'bad' });
     assert.equal(res._status, 400);
+  });
+
+  it('rejects unknown and structured summary query values', () => {
+    assert.equal(callSummaryRoute({ extra: '1' })._status, 400);
+    assert.equal(callSummaryRoute({ buckets: ['60'] })._status, 400);
+    assert.equal(callSummaryRoute({ src: 'x'.repeat(65) })._status, 400);
   });
 });
 

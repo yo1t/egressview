@@ -3,9 +3,45 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const { Router } = require('express');
+const { z } = require('zod');
+const { parseRequest } = require('../http-validation');
 const logger = require('../logger');
 const { t } = require('../i18n-server');
 const { isAllowedRouterIp } = require('../utils');
+
+const optionalText = max => z.string().max(max).optional();
+const nonceSchema = z.object({
+  routerIp: optionalText(45),
+  id: optionalText(128),
+}).strict();
+const yamahaDetectSchema = z.object({
+  yamahaIp: optionalText(45),
+  yamahaUser: optionalText(64),
+  yamahaPass: optionalText(256),
+  yamahaNat: z.union([z.string().regex(/^\d{1,6}$/), z.number().int().nonnegative().max(999999)]).optional(),
+}).strict();
+const ciscoDetectSchema = z.object({
+  ciscoIp: optionalText(45),
+  ciscoUser: optionalText(64),
+  ciscoPass: optionalText(256),
+  ciscoEnablePass: optionalText(256),
+}).strict();
+const routerLoginSchema = z.object({
+  username: optionalText(64),
+  password: optionalText(256),
+  routerIp: optionalText(45),
+  yamahaIp: optionalText(45),
+  yamahaUser: optionalText(64),
+  yamahaPass: optionalText(256),
+  yamahaNat: z.union([z.string().max(6), z.number().int().nonnegative().max(999999)]).optional(),
+  ciscoIp: optionalText(45),
+  ciscoUser: optionalText(64),
+  ciscoPass: optionalText(256),
+  ciscoEnablePass: optionalText(256),
+  doAsus: z.boolean().optional(),
+  doYamaha: z.boolean().optional(),
+  doCisco: z.boolean().optional(),
+}).strict();
 
 module.exports = function routerSetupRoutes(ctx) {
   const {
@@ -48,10 +84,12 @@ module.exports = function routerSetupRoutes(ctx) {
   }
 
   router.post('/nonce', requireAdmin, async (req, res) => {
-    const ip = req.body.routerIp || DEFAULT_ROUTER_IP;
+    const parsed = parseRequest(nonceSchema, req.body, res);
+    if (!parsed.ok) return;
+    const ip = parsed.data.routerIp || DEFAULT_ROUTER_IP;
     if (!isAllowedRouterIp(ip)) return res.status(400).json({ error: t('auth.ip-not-allowed') });
     try {
-      const id = req.body.id || crypto.randomBytes(5).toString('hex');
+      const id = parsed.data.id || crypto.randomBytes(5).toString('hex');
       const response = await axios.post(`http://${ip}/get_Nonce.cgi`, JSON.stringify({ id }), {
         headers: { 'Content-Type': 'application/json' },
         timeout: 8000,
@@ -63,12 +101,12 @@ module.exports = function routerSetupRoutes(ctx) {
   });
 
   router.post('/yamaha/detect', requireAdmin, async (req, res) => {
-    const { yamahaIp: ipInput, yamahaUser: userInput, yamahaPass: passInput, yamahaNat } = req.body || {};
+    const parsed = parseRequest(yamahaDetectSchema, req.body, res);
+    if (!parsed.ok) return;
+    const { yamahaIp: ipInput, yamahaUser: userInput, yamahaPass: passInput, yamahaNat } = parsed.data;
     if (ipInput !== undefined && ipInput !== '' && !isAllowedRouterIp(ipInput)) {
       return res.status(400).json({ code: 'routerIpPrivate', error: t('auth.yamaha-ip-private') });
     }
-    if (typeof userInput === 'string' && userInput.length > 64) return res.status(400).json({ error: t('auth.username-too-long') });
-    if (typeof passInput === 'string' && passInput.length > 256) return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
     let stored = {};
     try { stored = loadConfig().yamaha || {}; } catch {}
     const ip = ipInput || yamaha.getIp() || stored.ip || '';
@@ -93,12 +131,12 @@ module.exports = function routerSetupRoutes(ctx) {
   });
 
   router.post('/cisco/detect', requireAdmin, async (req, res) => {
-    const { ciscoIp: ipInput, ciscoUser: userInput, ciscoPass: passInput, ciscoEnablePass } = req.body || {};
+    const parsed = parseRequest(ciscoDetectSchema, req.body, res);
+    if (!parsed.ok) return;
+    const { ciscoIp: ipInput, ciscoUser: userInput, ciscoPass: passInput, ciscoEnablePass } = parsed.data;
     if (ipInput !== undefined && ipInput !== '' && !isAllowedRouterIp(ipInput)) {
       return res.status(400).json({ code: 'routerIpPrivate', error: t('auth.yamaha-ip-private') });
     }
-    if (typeof userInput === 'string' && userInput.length > 64) return res.status(400).json({ error: t('auth.username-too-long') });
-    if (typeof passInput === 'string' && passInput.length > 256) return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
     let stored = {};
     try { stored = loadConfig().cisco || {}; } catch {}
     const ip = ipInput || cisco.getIp() || stored.ip || '';
@@ -122,12 +160,14 @@ module.exports = function routerSetupRoutes(ctx) {
   });
 
   router.post('/login', requireAdmin, async (req, res) => {
+    const parsed = parseRequest(routerLoginSchema, req.body, res);
+    if (!parsed.ok) return;
     const {
       username, password, routerIp,
       yamahaIp, yamahaUser, yamahaPass, yamahaNat,
       ciscoIp, ciscoUser, ciscoPass, ciscoEnablePass,
       doAsus, doYamaha, doCisco,
-    } = req.body || {};
+    } = parsed.data;
 
     if (doAsus === undefined && doYamaha === undefined && doCisco === undefined) {
       return res.status(400).json({ error: t('auth.no-target') });
@@ -135,11 +175,6 @@ module.exports = function routerSetupRoutes(ctx) {
     if (routerIp !== undefined && routerIp !== '' && !isAllowedRouterIp(routerIp)) return res.status(400).json({ error: t('auth.asus-ip-private') });
     if (yamahaIp !== undefined && yamahaIp !== '' && !isAllowedRouterIp(yamahaIp)) return res.status(400).json({ error: t('auth.yamaha-ip-private') });
     if (ciscoIp !== undefined && ciscoIp !== '' && !isAllowedRouterIp(ciscoIp)) return res.status(400).json({ error: t('auth.yamaha-ip-private') });
-    if (typeof username === 'string' && username.length > 64) return res.status(400).json({ error: t('auth.username-too-long') });
-    if (typeof password === 'string' && password.length > 256) return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
-    if (typeof yamahaPass === 'string' && yamahaPass.length > 256) return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
-    if (typeof ciscoPass === 'string' && ciscoPass.length > 256) return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
-    if (typeof ciscoEnablePass === 'string' && ciscoEnablePass.length > 256) return res.status(400).json({ error: t('auth.password-too-long') }); // pragma: allowlist secret
     if (yamahaNat !== undefined && yamahaNat !== '' && !/^\d{1,6}$/.test(String(yamahaNat))) {
       return res.status(400).json({ error: t('auth.yamaha-nat-invalid') });
     }
