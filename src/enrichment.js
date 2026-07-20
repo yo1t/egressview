@@ -146,6 +146,7 @@ function _persistGeo(ip, entry) {
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
 const RDAP_MAX_BYTES = 1 * 1024 * 1024; // 1 MB
+const ENRICHMENT_HTTP_TIMEOUT_MS = 8_000;
 
 function httpsGetJson(url, redirects = 0) {
   return new Promise((resolve, reject) => {
@@ -168,7 +169,7 @@ function httpsGetJson(url, redirects = 0) {
       res.on('end', () => { try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
     });
     req.on('error', reject);
-    req.setTimeout(8000, () => { req.destroy(); reject(new Error('timeout')); });
+    req.setTimeout(ENRICHMENT_HTTP_TIMEOUT_MS, () => { req.destroy(); reject(new Error('timeout')); });
   });
 }
 
@@ -209,7 +210,7 @@ function httpPostJson(url, body) {
       });
     });
     req.on('error', reject);
-    req.setTimeout(8000, () => { req.destroy(); reject(new Error('geo timeout')); });
+    req.setTimeout(ENRICHMENT_HTTP_TIMEOUT_MS, () => { req.destroy(); reject(new Error('geo timeout')); });
     req.write(data); req.end();
   });
 }

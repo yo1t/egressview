@@ -9,6 +9,8 @@ const logger = require('../logger');
 const { t } = require('../i18n-server');
 const { isAllowedRouterIp } = require('../utils');
 
+const ASUS_NONCE_REQUEST_TIMEOUT_MS = 8_000;
+
 const optionalText = max => z.string().max(max).optional();
 const nonceSchema = z.object({
   routerIp: optionalText(45),
@@ -92,7 +94,7 @@ module.exports = function routerSetupRoutes(ctx) {
       const id = parsed.data.id || crypto.randomBytes(5).toString('hex');
       const response = await axios.post(`http://${ip}/get_Nonce.cgi`, JSON.stringify({ id }), {
         headers: { 'Content-Type': 'application/json' },
-        timeout: 8000,
+        timeout: ASUS_NONCE_REQUEST_TIMEOUT_MS,
       });
       res.json({ nonce: response.data?.nonce || '', id });
     } catch {

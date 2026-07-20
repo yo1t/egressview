@@ -39,6 +39,7 @@ curl --fail-with-body \
 ## 共通仕様
 
 - 時刻はUnix epoch millisecondです。個別の指定がない限り、空の`from`/`to`は期間の始端/終端を制限しません。
+- すべてのresponseに`X-Request-Id`を付与します。`[A-Za-z0-9][A-Za-z0-9._:-]{0,63}`に一致する呼び出し元IDは維持し、未指定または安全でない値は生成したUUIDへ置換します。同じ安全なIDでrequest、非同期処理、slow-request、error logを関連付けます。HTTP完了logにはquery stringを含めません。
 - endpointを持つ全route moduleで、request body、query、path parameterをstrictなZod境界で検証します。未知field、scalar parameterへの配列・object混入、文書化した上限を超える値は、状態を変更する前に`400`を返します。
 - 成功時のJSONは`application/json`、エラーは原則として`{ "error": "message" }`です。
 - 主なstatus codeは、入力不正`400`、認証失敗`401`、対象なし`404`、upload過大`413`、内部処理・永続化失敗`500`、router検出失敗`502`、認証初期化前`503`です。

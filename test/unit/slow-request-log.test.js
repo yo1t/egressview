@@ -29,11 +29,11 @@ describe('slow-request-log', () => {
   it('logs method, path, status, duration, size when over threshold', () => {
     const logged = run({
       thresholdMs: 0, // 0ms threshold = log everything
-      req: { method: 'GET', originalUrl: '/api/connections?from=123&to=456' },
+      req: { method: 'GET', originalUrl: '/api/connections?from=123&to=456', requestId: 'req-123' },
       res: makeRes({ statusCode: 200, contentLength: '2311153' }),
     });
     assert.equal(logged.length, 1);
-    assert.match(logged[0], /^\[slow-request\] GET \/api\/connections 200 \d+ms size=2311153$/);
+    assert.match(logged[0], /^\[slow-request\] GET \/api\/connections 200 \d+ms size=2311153 requestId=req-123$/);
   });
 
   it('strips the query string from the logged path', () => {
@@ -72,5 +72,14 @@ describe('slow-request-log', () => {
     });
     assert.ok(logged[0].includes('/fallback'));
     assert.ok(!logged[0].includes('x=1'));
+  });
+
+  it('omits the request ID field for legacy middleware callers', () => {
+    const logged = run({
+      thresholdMs: 0,
+      req: { method: 'GET', originalUrl: '/healthz' },
+      res: makeRes(),
+    });
+    assert.doesNotMatch(logged[0], /requestId=/);
   });
 });

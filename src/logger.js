@@ -5,6 +5,8 @@
 // - Drop-in for console.log/warn/error throughout src/
 'use strict';
 
+const { getRequestId } = require('./request-context');
+
 const LEVELS = { error: 0, warn: 1, info: 2, debug: 3 };
 const currentLevel = LEVELS[process.env.LOG_LEVEL] ?? LEVELS.info;
 
@@ -14,7 +16,9 @@ function fmt(args) {
 
 function write(stream, level, args) {
   if (LEVELS[level] > currentLevel) return;
-  stream.write(`${new Date().toISOString()} ${level.toUpperCase().padEnd(5)} ${fmt(args)}\n`);
+  const requestId = getRequestId();
+  const requestPrefix = requestId ? `[request:${requestId}] ` : '';
+  stream.write(`${new Date().toISOString()} ${level.toUpperCase().padEnd(5)} ${requestPrefix}${fmt(args)}\n`);
 }
 
 const logger = {

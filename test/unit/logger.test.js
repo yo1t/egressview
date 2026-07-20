@@ -3,6 +3,7 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const { runWithRequestId } = require('../../src/request-context');
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -134,5 +135,20 @@ describe('logger', () => {
       cap.restore();
     }
     assert.match(cap.lines()[0], /ERROR\s+\[test\] serious/);
+  });
+
+  it('adds the active request ID without changing logs outside HTTP context', () => {
+    const logger = freshLogger();
+    const cap = captureStream(process.stdout);
+    try {
+      runWithRequestId('req-123', () => {
+        logger.info('[test] correlated');
+      });
+      logger.info('[test] background');
+    } finally {
+      cap.restore();
+    }
+    assert.match(cap.lines()[0], /INFO\s+\[request:req-123\] \[test\] correlated/);
+    assert.doesNotMatch(cap.lines()[1], /\[request:/);
   });
 });

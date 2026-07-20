@@ -23,15 +23,17 @@ test('GET / returns 200 with correct title', async ({ request }) => {
 });
 
 test('health and readiness endpoints are public and ready after startup', async ({ request }) => {
-  const health = await request.get(`${BASE}/healthz`);
+  const health = await request.get(`${BASE}/healthz`, { headers: { 'X-Request-Id': 'smoke-health-1' } });
   expect(health.status()).toBe(200);
   expect(await health.json()).toEqual({ status: 'ok' });
   expect(health.headers()['cache-control']).toContain('no-store');
+  expect(health.headers()['x-request-id']).toBe('smoke-health-1');
 
-  const readiness = await request.get(`${BASE}/readyz`);
+  const readiness = await request.get(`${BASE}/readyz`, { headers: { 'X-Request-Id': 'invalid request id' } });
   expect(readiness.status()).toBe(200);
   expect(await readiness.json()).toEqual({ status: 'ready' });
   expect(readiness.headers()['cache-control']).toContain('no-store');
+  expect(readiness.headers()['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
 });
 
 test('style.css is served (200, text/css)', async ({ request }) => {

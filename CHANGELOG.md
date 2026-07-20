@@ -6,6 +6,7 @@ All notable changes to EgressView are documented here.
 
 ### Added
 
+- Added request correlation for every HTTP response through `X-Request-Id`, with safe caller-provided IDs, generated UUID fallbacks, asynchronous logger context, and correlated slow/error logs.
 - Added unified inventory and capacity diagnostics for normal and pre-migration SQLite backups, including schema, integrity, disk headroom, and next-migration readiness.
 - Added dry-run and confirmed cleanup for verified backup generations, with optional explicit auto-prune and configurable storage limits.
 - Moved AI list prices into a validated, versioned data catalog with required effective dates and source URLs, so price updates no longer require pricing-logic changes.
@@ -15,6 +16,7 @@ All notable changes to EgressView are documented here.
 
 ### Security and Reliability
 
+- Replaced ambiguous 8-second literals with domain-owned timeout and input-limit constants while preserving existing values, abort behavior, and error contracts.
 - Completed strict Zod request validation across all 13 endpoint-bearing route modules. Unknown fields, arrays or objects supplied for scalar parameters, and oversized values are rejected before route logic runs while existing SSRF checks, defaults, limits, and error shapes are preserved.
 - Backup cleanup always protects at least two normal generations and the latest migration generation, never removes corrupt or unverified files, and regenerates plus reverifies the plan immediately before deletion.
 - Disk warnings now appear before deployment-time migration failures while the existing fail-closed migration and restore paths remain unchanged.

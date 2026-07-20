@@ -7,6 +7,7 @@ const {
   createAiProvider,
   normalizeEndpoint,
 } = require('../../src/ai-provider');
+const { AI_PRIOR_ANALYSIS_MAX_CHARS } = require('../../src/ai-limits');
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -156,6 +157,21 @@ describe('AI insight generation', () => {
     });
     assert.match(sentPrompt, /PRIOR-ANALYSIS-TEXT/);
     assert.match(sentPrompt, /なぜ危険なの/);
+  });
+
+  it('uses the shared prior-analysis limit without changing the 8,000 character contract', async () => {
+    let sentPrompt;
+    const provider = createAiProvider({ fetchImpl: async (_url, options) => {
+      sentPrompt = JSON.parse(options.body).prompt;
+      return jsonResponse({ response: 'ok' });
+    } });
+    provider.configure({ provider: 'ollama', models: { ollama: 'm' } });
+    await provider.generateInsight({ current: {} }, {
+      question: 'question',
+      priorAnalysis: 'P'.repeat(AI_PRIOR_ANALYSIS_MAX_CHARS + 1),
+    });
+    const prior = sentPrompt.match(/Prior period analysis you produced:\n(P+)/)?.[1] || '';
+    assert.equal(prior.length, 8_000);
   });
 
   it('bounds the complete prompt and drops the oldest conversation first', async () => {

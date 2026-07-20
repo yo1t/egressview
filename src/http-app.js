@@ -19,6 +19,7 @@ const routerRoutes = require('./routes/routers');
 const manualThreatRoutes = require('./routes/manual-threat');
 const aiRoutes = require('./routes/ai');
 const { createSlowRequestLogger } = require('./slow-request-log');
+const { createRequestContextMiddleware } = require('./request-context');
 const i18nCatalog = require('./data/i18n.json');
 
 function serializeI18nModule(catalog) {
@@ -82,6 +83,7 @@ function configureHttpApp(app, {
   logger,
   healthState,
 }) {
+  app.use(createRequestContextMiddleware({ logger }));
   app.use(createSlowRequestLogger());
 
   app.use((req, res, next) => {

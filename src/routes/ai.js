@@ -7,6 +7,7 @@ const { buildAiFacts } = require('../ai-facts');
 const { buildAiContext } = require('../ai-context');
 const { randomUUID } = require('node:crypto');
 const { monthlyRanges, pricingMetadata } = require('../ai-usage');
+const { AI_PRIOR_ANALYSIS_MAX_CHARS } = require('../ai-limits');
 const logger = require('../logger');
 
 const providerSchema = z.enum(['disabled', 'ollama', 'anthropic', 'openai', 'bedrock']);
@@ -67,7 +68,7 @@ const chatSchema = analysisSchema.extend({
   message: z.string().trim().min(1).max(4000),
   // Optional text of the most recent "analyze current period" result so the
   // chat can reason about the same threats. Bounded to keep the prompt small.
-  priorAnalysis: z.string().max(8000).optional(),
+  priorAnalysis: z.string().max(AI_PRIOR_ANALYSIS_MAX_CHARS).optional(),
 });
 const conversationParamsSchema = z.object({ id: idSchema }).strict();
 const usageQuerySchema = z.object({

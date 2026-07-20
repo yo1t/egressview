@@ -1,6 +1,7 @@
 'use strict';
 
 const { estimateAiCost, normalizeTokenUsage } = require('./ai-usage');
+const { AI_PRIOR_ANALYSIS_MAX_CHARS } = require('./ai-limits');
 
 const PROVIDERS = Object.freeze(['ollama', 'anthropic', 'openai', 'bedrock']);
 // Cloud providers authenticated with a stored API key.
@@ -173,7 +174,9 @@ function buildPrompt(context, { question = '', conversation = [], priorAnalysis 
     'Keep the whole response readable and concise — at most about 20 lines total.',
   ];
   let promptConversation = conversation.slice(-20);
-  let promptPriorAnalysis = priorAnalysis ? String(priorAnalysis).slice(0, 8000) : '';
+  let promptPriorAnalysis = priorAnalysis
+    ? String(priorAnalysis).slice(0, AI_PRIOR_ANALYSIS_MAX_CHARS)
+    : '';
   const buildTask = () => question
     ? [
       'Answer the user question about this network monitoring period.',

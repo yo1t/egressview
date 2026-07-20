@@ -24,6 +24,7 @@ let consecutivePollErrors = 0;
 const POLL_ERROR_THRESHOLD = 3;
 const ASUS_API_TIMEOUT_MS = 12000;
 const ASUS_API_RETRY_DELAY_MS = 350;
+const ASUS_AUTH_REQUEST_TIMEOUT_MS = 8_000;
 
 // Callbacks
 let onAuthRequired = () => {};
@@ -51,7 +52,7 @@ async function loginToRouter(ip, username, password) {
   const id = crypto.randomBytes(5).toString('hex');
   const nonceRes = await axios.post(`${base}/get_Nonce.cgi`, JSON.stringify({ id }), {
     headers: { 'Content-Type': 'application/json' },
-    timeout: 8000,
+    timeout: ASUS_AUTH_REQUEST_TIMEOUT_MS,
   });
   const nonce = nonceRes.data?.nonce;
   if (!nonce) throw new Error(t('asus.nonce-failed'));
@@ -76,7 +77,7 @@ async function loginToRouter(ip, username, password) {
 
   const res = await axios.post(`${base}/login_v2.cgi`, params.toString(), {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    timeout: 8000,
+    timeout: ASUS_AUTH_REQUEST_TIMEOUT_MS,
     maxRedirects: 0,
     validateStatus: () => true,
   });
