@@ -27,17 +27,20 @@ describe('AI usage store', () => {
 
     assert.deepEqual(store.summarizeAiUsage(1000, 2000), {
       requests: 1, inputTokens: 100, outputTokens: 20, totalTokens: 120,
-      pricedRequests: 1, usageMissingRequests: 0, unknownPriceRequests: 0,
+      pricedRequests: 1, pricedTokens: 120, usageMissingRequests: 0,
+      unknownPriceRequests: 0, unpricedTokens: 0,
       estimatedCostUsd: 0.0006,
     });
     assert.deepEqual(store.summarizeAiUsage(1000, 3000), {
       requests: 2, inputTokens: 150, outputTokens: 30, totalTokens: 180,
-      pricedRequests: 1, usageMissingRequests: 0, unknownPriceRequests: 1,
+      pricedRequests: 1, pricedTokens: 120, usageMissingRequests: 0,
+      unknownPriceRequests: 1, unpricedTokens: 60,
       estimatedCostUsd: 0.0006,
     });
     assert.deepEqual(store.summarizeAiUsage(3000, 4000), {
       requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0,
-      pricedRequests: 0, usageMissingRequests: 0, unknownPriceRequests: 0,
+      pricedRequests: 0, pricedTokens: 0, usageMissingRequests: 0,
+      unknownPriceRequests: 0, unpricedTokens: 0,
       estimatedCostUsd: 0,
     });
     db.close();
@@ -60,9 +63,14 @@ describe('AI usage store', () => {
     });
     assert.deepEqual(store.summarizeAiUsage(0, 2000), {
       requests: 2, inputTokens: 10, outputTokens: 5, totalTokens: 15,
-      pricedRequests: 0, usageMissingRequests: 1, unknownPriceRequests: 1,
+      pricedRequests: 0, pricedTokens: 0, usageMissingRequests: 1,
+      unknownPriceRequests: 1, unpricedTokens: 15,
       estimatedCostUsd: 0,
     });
+    assert.deepEqual(store.summarizeUnpricedAiUsage(0, 2000), [{
+      provider: 'anthropic', model: 'future-model', requests: 1,
+      inputTokens: 10, outputTokens: 5, totalTokens: 15, lastUsedAt: 1000,
+    }]);
     db.close();
   });
 });

@@ -43,6 +43,8 @@ AI洞察には今月・先月の呼び出し回数、input/output/total token、
 持ちます。更新後も過去行は保存済みのversionと単価で集計され、再計算されません。未知modelは
 tokenを保持して「料金未設定」とし、0 USDとして扱いません。成功してもproviderがusageを
 返さなかった呼び出しは、未知料金とは別の「token使用量なし」として件数を表示します。
+未価格usageがある場合、USDを部分合計と明記し、未価格token数・request数・model IDを別表示します。
+設定画面でも取得候補と手入力modelを「料金対応済み / 料金未設定」として利用前に確認できます。
 Guardrails、cached token、batch/service tier、税、為替、
 providerやAWSの契約割引、失敗時にprovider側だけで発生した費用は含まれません。請求確認には
 各providerのbilling consoleを使用してください。

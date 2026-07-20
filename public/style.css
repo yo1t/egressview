@@ -142,6 +142,8 @@
   .settings-pane-toggle { margin-bottom: 8px; font-size: 12px; }
   .settings-list-textarea { resize: vertical; font-family: monospace; font-size: 10px; line-height: 1.6; }
   .settings-field-hint { font-size: 9px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+  .ai-model-pricing-status.is-priced { color: var(--green); }
+  .ai-model-pricing-status.is-unpriced { color: #fbbf24; }
   .settings-subsection-title-wide { margin-bottom: 12px; }
   .slack-small-button { padding: 5px 12px; width: auto; }
   .slack-verify-button { margin-top: 6px; font-size: 10px; }
@@ -400,6 +402,7 @@
   .ai-usage-card strong { display: block; margin: 6px 0 3px; font-size: 22px; letter-spacing: -0.03em; }
   .ai-usage-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 10px; color: #bae6fd; font-size: 10px; }
   .ai-usage-caveat { min-height: 1em; margin: 8px 0 0; color: #fbbf24; font-size: 9px; }
+  .ai-usage-unpriced { min-height: 1em; color: #fbbf24; font-size: 9px; }
   .ai-error { display: none; max-width: 1180px; width: 100%; margin: 0 auto; color: #fca5a5; }
   .ai-error.is-visible { display: block; }
   .ai-analysis { display: flex; align-items: flex-start; gap: 16px; max-width: 1180px; width: 100%; margin: 2px auto 0; padding: 24px; border: 1px solid rgba(56,189,248,0.32); border-radius: 14px; background: linear-gradient(135deg, rgba(14,165,233,0.08), rgba(17,24,39,0.82)); }

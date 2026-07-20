@@ -35,6 +35,15 @@ describe('AI provider configuration', () => {
 });
 
 describe('AI provider model discovery', () => {
+  it('filters specialized OpenAI models while preserving future text models', async () => {
+    const provider = createAiProvider({ fetchImpl: async () => jsonResponse({ data: [
+      { id: 'gpt-5.6-terra' }, { id: 'future-text-model' }, { id: 'gpt-image-2' },
+      { id: 'text-embedding-3-large' }, { id: 'gpt-realtime-2' }, { id: 'sora-2' },
+    ] }) });
+    provider.configure({ provider: 'openai', keys: { openai: 'key' } });
+    assert.deepEqual((await provider.listModels()).models, ['future-text-model', 'gpt-5.6-terra']);
+  });
+
   it('lists Ollama models without credentials', async () => {
     let request;
     const provider = createAiProvider({

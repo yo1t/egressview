@@ -56,7 +56,7 @@ class FakeElement {
   }
 }
 
-function makeHarness({ models = [], guardrailFetch = null } = {}) {
+function makeHarness({ models = [], modelPricing = null, guardrailFetch = null } = {}) {
   const ids = new Map();
   const elementIds = [
     's-ai-provider', 'ai-provider-fields', 'ai-model-group', 's-ai-model',
@@ -66,13 +66,13 @@ function makeHarness({ models = [], guardrailFetch = null } = {}) {
     's-ai-guardrail-select', 's-ai-guardrail-id', 's-ai-guardrail-version-select',
     's-ai-guardrail-version', 'ai-key-group', 's-ai-key', 's-ai-key-clear',
     'ai-consent-group', 's-ai-cloud-consent', 'ai-status', 'ai-test-btn',
-    'ai-save-btn',
+    'ai-save-btn', 'ai-model-pricing-status',
   ];
   elementIds.forEach(id => ids.set(id, new FakeElement('div', id)));
   const savedBodies = [];
   const apiFetch = async (url, options = {}) => {
     if (url.endsWith('/api/ai/models')) {
-      return { ok: true, json: async () => ({ models }) };
+      return { ok: true, json: async () => ({ models, modelPricing }) };
     }
     if (url.endsWith('/api/ai/guardrails')) {
       if (guardrailFetch) return guardrailFetch();
@@ -88,6 +88,10 @@ function makeHarness({ models = [], guardrailFetch = null } = {}) {
         providers: { bedrock: { consented: true, keySet: false } },
       }) };
     }
+    if (url.endsWith('/api/ai/pricing/check')) {
+      const body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ priced: body.model.includes('sonnet') }) };
+    }
     throw new Error(`Unexpected request: ${url}`);
   };
   const context = {
@@ -97,6 +101,8 @@ function makeHarness({ models = [], guardrailFetch = null } = {}) {
     t: key => key,
     tVars: (key, vars) => `${key}:${JSON.stringify(vars)}`,
     apiFetch,
+    setTimeout,
+    clearTimeout,
     document: {
       createElement: tagName => new FakeElement(tagName),
       getElementById: id => ids.get(id) || null,
@@ -137,6 +143,11 @@ describe('AI settings DOM behavior', () => {
   it('filters discovered Bedrock models by geo and applies the selected model', async () => {
     const { context, ids } = makeHarness({
       models: ['jp.example-sonnet', 'us.example-sonnet', 'example-on-demand'],
+      modelPricing: { models: [
+        { model: 'jp.example-sonnet', priced: true },
+        { model: 'us.example-sonnet', priced: true },
+        { model: 'example-on-demand', priced: false },
+      ] },
     });
     context.applyConfig({
       provider: 'bedrock',
@@ -157,6 +168,18 @@ describe('AI settings DOM behavior', () => {
     modelSelect.value = 'jp.example-sonnet';
     await modelSelect.dispatch('change');
     assert.equal(ids.get('s-ai-model').value, 'jp.example-sonnet');
+    assert.equal(ids.get('ai-model-pricing-status').textContent, 'settings.ai.pricingKnown');
+  });
+
+  it('checks manually entered model pricing without blocking unknown models', async () => {
+    const { context, ids } = makeHarness();
+    context.applyConfig({
+      provider: 'openai', models: { openai: '' }, providers: { openai: { consented: true, keySet: true } },
+    });
+    ids.get('s-ai-model').value = 'future-model';
+    await ids.get('s-ai-model').dispatch('input');
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(ids.get('ai-model-pricing-status').textContent, 'settings.ai.pricingUnknown');
   });
 
   it('ignores a Guardrail discovery response that arrives after disabling it', async () => {

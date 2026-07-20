@@ -104,6 +104,28 @@ function pricingMetadata() {
   };
 }
 
+function pricingStatus(provider, model) {
+  const normalizedProvider = String(provider || '');
+  const normalizedModel = String(model || '');
+  const pricing = pricingFor(normalizedProvider, normalizedModel);
+  return {
+    provider: normalizedProvider,
+    model: normalizedModel,
+    priced: !!pricing,
+    pricing,
+  };
+}
+
+function pricingCoverage(provider, models) {
+  const statuses = (Array.isArray(models) ? models : []).map(model => pricingStatus(provider, model));
+  return {
+    catalogVersion: PRICING_VERSION,
+    priced: statuses.filter(status => status.priced).length,
+    unpriced: statuses.filter(status => !status.priced).length,
+    models: statuses,
+  };
+}
+
 function estimateAiCost(provider, model, rawUsage) {
   const usage = normalizeTokenUsage(rawUsage);
   if (!usage) return { usage: null, pricing: null, estimatedCostUsd: null };
@@ -134,6 +156,8 @@ module.exports = {
   monthlyRanges,
   normalizeTokenUsage,
   pricingFor,
+  pricingCoverage,
   pricingMetadata,
+  pricingStatus,
   validatePricingCatalog,
 };

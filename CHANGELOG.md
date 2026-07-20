@@ -12,6 +12,7 @@ All notable changes to EgressView are documented here.
 - Moved AI list prices into a validated, versioned data catalog with required effective dates and source URLs, so price updates no longer require pricing-logic changes.
 - Added separate diagnostics for unknown model prices and successful calls where the provider returned no token usage.
 - Added official GPT-5.5 standard API pricing so future token usage contributes to the estimated USD total instead of remaining explicitly unpriced.
+- Added pricing coverage for major OpenAI text-generation models, model-level coverage checks in AI settings, grouped unpriced-usage diagnostics, and explicit partial-total USD labels.
 - Added production Bedrock guidance for least-privilege IAM, invocation logging, PrivateLink, and standard versus adaptive AWS SDK retries.
 - Added unauthenticated, minimal `/healthz` liveness and `/readyz` bootstrap-readiness endpoints for monitoring and deployment gates.
 

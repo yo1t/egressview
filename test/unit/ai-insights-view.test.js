@@ -107,14 +107,17 @@ describe('AI insights view', () => {
     const { context, get } = harness();
     context.renderAiUsage({
       pricing: { catalogVersion: '2026-05-27', effectiveFrom: '2026-05-27' },
-      current: { requests: 3, pricedRequests: 2, unknownPriceRequests: 1, usageMissingRequests: 0, inputTokens: 1200, outputTokens: 300, totalTokens: 1500, estimatedCostUsd: 0.0084 },
+      current: { requests: 3, pricedRequests: 2, unknownPriceRequests: 1, usageMissingRequests: 0, inputTokens: 1200, outputTokens: 300, totalTokens: 1500, unpricedTokens: 450, estimatedCostUsd: 0.0084, unpricedModels: [{ provider: 'openai', model: 'future-model' }] },
       previous: { requests: 1, pricedRequests: 1, unknownPriceRequests: 0, usageMissingRequests: 1, inputTokens: 100, outputTokens: 50, totalTokens: 150, estimatedCostUsd: 0.0004 },
     });
     assert.equal(get('ai-usage-current-tokens').textContent, 'ai.usage.tokens:{"tokens":"1,500"}');
     assert.equal(get('ai-usage-current-detail').textContent, 'ai.usage.detail:{"input":"1,200","output":"300"}');
-    assert.equal(get('ai-usage-current-cost').textContent, 'ai.usage.cost:{"cost":"$0.0084"}');
+    assert.equal(get('ai-usage-current-cost').textContent, 'ai.usage.costPartial:{"cost":"$0.0084"}');
+    assert.equal(get('ai-usage-current-unpriced').textContent,
+      'ai.usage.unpricedDetail:{"tokens":"450","requests":"1"}');
     assert.equal(get('ai-usage-caveat').textContent,
-      'ai.usage.unpriced ai.usage.missing ai.usage.catalog:{"version":"2026-05-27","effective":"2026-05-27"}');
+      'ai.usage.unpriced ai.usage.unpricedModels:{"models":"openai/future-model","remaining":""} ' +
+      'ai.usage.missing ai.usage.catalog:{"version":"2026-05-27","effective":"2026-05-27"}');
   });
 
   it('renders persisted conversation messages as untrusted text', () => {

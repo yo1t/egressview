@@ -18,7 +18,10 @@ let activeProvider = 'disabled';
 // Models discovered by the last "test connection" (Bedrock), kept so the geo
 // inference-profile selector can re-filter the model dropdown client-side.
 let discoveredModels = [];
+let modelPricing = new Map();
 let modelDiscoveryRequest = 0;
+let pricingCheckRequest = 0;
+let pricingCheckTimer = null;
 // Guardrails discovered by the last region lookup: [{ id, arn, name, versions }].
 let discoveredGuardrails = [];
 let guardrailDiscoveryRequest = 0;
@@ -74,6 +77,55 @@ function byId(id) {
   return document.getElementById(id);
 }
 
+function renderModelPricingStatus() {
+  const status = byId('ai-model-pricing-status');
+  if (!status) return;
+  const model = byId('s-ai-model').value.trim();
+  const priced = modelPricing.get(model);
+  status.className = 'settings-field-hint ai-model-pricing-status';
+  if (!model || !PROVIDERS.includes(activeProvider) || priced === undefined) {
+    status.textContent = '';
+    return;
+  }
+  status.textContent = t(priced ? 'settings.ai.pricingKnown' : 'settings.ai.pricingUnknown');
+  status.classList.add(priced ? 'is-priced' : 'is-unpriced');
+}
+
+async function checkModelPricing() {
+  const provider = activeProvider;
+  const model = byId('s-ai-model').value.trim();
+  if (!PROVIDERS.includes(provider) || !model) {
+    renderModelPricingStatus();
+    return;
+  }
+  const requestId = ++pricingCheckRequest;
+  try {
+    const response = await apiFetch(`${_BASE}/api/ai/pricing/check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, model }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    if (requestId !== pricingCheckRequest || provider !== activeProvider || model !== byId('s-ai-model').value.trim()) return;
+    modelPricing.set(model, !!result.priced);
+    renderModelPricingStatus();
+  } catch {
+    // Pricing lookup is advisory; saving a valid provider model must remain possible.
+  }
+}
+
+function queueModelPricingCheck() {
+  if (pricingCheckTimer) clearTimeout(pricingCheckTimer);
+  const model = byId('s-ai-model').value.trim();
+  if (modelPricing.has(model)) {
+    renderModelPricingStatus();
+    return;
+  }
+  renderModelPricingStatus();
+  pricingCheckTimer = setTimeout(checkModelPricing, 250);
+}
+
 // Rebuild the model dropdown from the discovered list, filtered by the selected
 // inference-profile geo. Picking an entry fills the model text input.
 function renderModelSelect() {
@@ -97,15 +149,21 @@ function renderModelSelect() {
   select.replaceChildren(placeholder, ...ids.map(id => {
     const option = document.createElement('option');
     option.value = id;
-    option.textContent = id;
+    const priced = modelPricing.get(id);
+    const suffix = priced === undefined ? ''
+      : ` — ${t(priced ? 'settings.ai.pricingKnownShort' : 'settings.ai.pricingUnknownShort')}`;
+    option.textContent = `${id}${suffix}`;
     return option;
   }));
   select.value = current && ids.includes(current) ? current : '';
   select.classList.remove('is-hidden');
 }
 
-function applyDiscoveredModels(models) {
+function applyDiscoveredModels(models, pricingCoverage = null) {
   discoveredModels = Array.isArray(models) ? models : [];
+  for (const status of pricingCoverage?.models || []) {
+    modelPricing.set(status.model, !!status.priced);
+  }
   byId('ai-model-options').replaceChildren(...discoveredModels.map(model => {
     const option = document.createElement('option');
     option.value = model;
@@ -115,6 +173,7 @@ function applyDiscoveredModels(models) {
   // model list for the (possibly reset) profile selection.
   renderProfileSelect();
   renderModelSelect();
+  renderModelPricingStatus();
 }
 
 // Discovery-only model listing for the selected region (no InvokeModel, no
@@ -136,7 +195,7 @@ async function discoverBedrockModels({ silent = false } = {}) {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
     if (requestId !== modelDiscoveryRequest || activeProvider !== 'bedrock') return;
-    applyDiscoveredModels(result.models);
+    applyDiscoveredModels(result.models, result.modelPricing);
     if (!silent) setStatus(tVars('settings.ai.testModels', { count: discoveredModels.length }), true);
   } catch (error) {
     if (!silent && requestId === modelDiscoveryRequest) {
@@ -180,12 +239,18 @@ function renderProvider(provider) {
   // used for the other providers.
   modelInput.maxLength = provider === 'bedrock' ? 400 : 200;
   modelInput.value = enabled ? (config?.models?.[provider] || '') : '';
+  modelPricing = new Map();
+  if (config?.selectedModelPricing?.provider === provider
+      && config.selectedModelPricing.model === modelInput.value) {
+    modelPricing.set(modelInput.value, !!config.selectedModelPricing.priced);
+  }
   if (provider === 'bedrock') renderGuardrail();
   byId('ai-model-options').replaceChildren();
   discoveredModels = [];
   // Show the configured model as a one-item dropdown now; "test connection"
   // fills it with the discovered list. renderModelSelect handles show/hide.
   renderModelSelect();
+  renderModelPricingStatus();
   // Bedrock discovery is keyless, so auto-populate the model list (and narrow
   // the geo profile options) for the saved region without requiring a manual
   // "test connection". Silent: opening settings should not post a status.
@@ -298,6 +363,7 @@ function applyConfig(next) {
     region: next.region || '',
     guardrail: { enabled: !!guardrail.enabled, id: guardrail.id || '', version: guardrail.version || '' },
     providers: next.providers || {},
+    selectedModelPricing: next.selectedModelPricing || null,
   };
   byId('s-ai-provider').value = config.provider;
   byId('s-ai-endpoint').value = config.ollamaEndpoint;
@@ -374,7 +440,7 @@ async function testConnection() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
     const models = result.models || [];
-    applyDiscoveredModels(models);
+    applyDiscoveredModels(models, result.modelPricing);
     if (result.verified === false) {
       // Bedrock discovery succeeded but no model is selected yet — prompt the
       // user to pick one and test again (the InvokeModel check needs a model).
@@ -393,8 +459,12 @@ function initAiSettings() {
   byId('s-ai-provider')?.addEventListener('change', event => renderProvider(event.target.value));
   byId('s-ai-guardrail-enabled')?.addEventListener('change', renderGuardrail);
   byId('s-ai-model-select')?.addEventListener('change', event => {
-    if (event.target.value) byId('s-ai-model').value = event.target.value;
+    if (event.target.value) {
+      byId('s-ai-model').value = event.target.value;
+      queueModelPricingCheck();
+    }
   });
+  byId('s-ai-model')?.addEventListener('input', queueModelPricingCheck);
   byId('s-ai-region-select')?.addEventListener('change', event => {
     if (!event.target.value) return;
     byId('s-ai-region').value = event.target.value;

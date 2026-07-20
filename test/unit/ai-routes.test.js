@@ -128,6 +128,7 @@ describe('AI configuration routes', () => {
     const result = await request(appFor(aiProvider), 'POST', '/api/ai/test', {});
     assert.equal(result.status, 200);
     assert.deepEqual(result.body.models, ['qwen3:8b']);
+    assert.equal(result.body.modelPricing.priced, 1);
     assert.equal(calls, 1);
   });
 
@@ -142,6 +143,7 @@ describe('AI configuration routes', () => {
     });
     assert.equal(result.status, 200);
     assert.deepEqual(result.body.models, ['jp.anthropic.claude-test']);
+    assert.equal(result.body.modelPricing.unpriced, 1);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].region, 'ap-northeast-1');
     assert.equal(aiProvider.getPublicConfig().provider, 'disabled');
@@ -210,16 +212,44 @@ describe('AI configuration routes', () => {
         ranges.push([from, to]);
         return { requests: 2, inputTokens: 10, outputTokens: 5, totalTokens: 15, pricedRequests: 2, estimatedCostUsd: 0.001 };
       },
+      summarizeUnpricedAiUsage: () => [{ provider: 'openai', model: 'future-model', requests: 1, totalTokens: 15 }],
     };
     const result = await request(appFor(createAiProvider(), undefined, { history }), 'GET', '/api/ai/usage/monthly?timezoneOffset=-540');
     assert.equal(result.status, 200);
     assert.equal(result.body.current.requests, 2);
     assert.equal(result.body.pricing.approximate, true);
     assert.equal(result.body.pricing.catalogVersion, '2026-07-20');
-    assert.equal(result.body.pricing.effectiveFrom, '2026-05-27');
+    assert.equal(result.body.pricing.effectiveFrom, '2026-07-20');
+    assert.equal(result.body.current.unpricedModels[0].model, 'future-model');
     assert.ok(result.body.pricing.sourceUrls.includes('https://aws.amazon.com/bedrock/pricing/'));
     assert.equal(ranges.length, 2);
     assert.equal(ranges[1][1], ranges[0][0]);
+  });
+
+  it('checks model pricing and returns current pricing diagnostics', async () => {
+    const aiProvider = createAiProvider();
+    aiProvider.configure({ provider: 'openai', models: { openai: 'gpt-5.5' } });
+    const history = {
+      summarizeUnpricedAiUsage: () => [{
+        provider: 'openai', model: 'future-model', requests: 2, totalTokens: 30,
+      }],
+    };
+    const app = appFor(aiProvider, undefined, { history });
+    const known = await request(app, 'POST', '/api/ai/pricing/check', {
+      provider: 'openai', model: 'gpt-5.5',
+    });
+    const unknown = await request(app, 'POST', '/api/ai/pricing/check', {
+      provider: 'openai', model: 'future-model',
+    });
+    const diagnostics = await request(app, 'GET', '/api/ai/pricing/diagnostics?timezoneOffset=-540');
+    assert.equal(known.status, 200);
+    assert.equal(known.body.priced, true);
+    assert.equal(unknown.body.priced, false);
+    assert.equal(diagnostics.body.selectedModel.priced, true);
+    assert.equal(diagnostics.body.currentUnpricedModels[0].totalTokens, 30);
+    assert.equal((await request(app, 'POST', '/api/ai/pricing/check', {
+      provider: 'disabled', model: 'x',
+    })).status, 400);
   });
 
   it('records a successful generation when the provider omits token usage', async () => {
