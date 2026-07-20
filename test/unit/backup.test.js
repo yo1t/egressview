@@ -235,6 +235,10 @@ describe('automatic backup prune', () => {
     }
     // Creating a generation runs the verified prune plan only after opt-in.
     await backup.createBackup();
+    for (let i = 0; i < 100 && backup.getActivePruneJob(); i++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(backup.getActivePruneJob(), null, 'automatic prune worker should finish');
     const list = backup.listBackups();
     assert.ok(list.length <= 3, `Expected ≤3 backups, got ${list.length}`);
   });

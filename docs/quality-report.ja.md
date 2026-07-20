@@ -1,7 +1,7 @@
 # EgressView コード品質レポート
 
-- **評価日**: 2026-07-19
-- **コミット**: `15ab4090c7b753cf621f9ea2d021bf2558c99672` (main)
+- **評価日**: 2026-07-20
+- **コミット**: `31266cb` (main) + P2-49/P2-50作業ツリー
 - **バージョン**: 1.5.1
 - **Node.js**: >=22 (テスト: 22, 24)
 - **評価者**: 自動静的解析 + 手動コードレビュー (Claude Code)
@@ -29,7 +29,8 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 - **セキュリティ設計** — scrypt パスワードハッシュ, タイミングセーフなトークン比較, リクエスト毎 CSP nonce, `style-src 'self'`, CI 統合 ASH + secret scan + npm audit, SHA ピン留め GitHub Actions (2 ワークフロー)
 - **テスト文化** — 96 unit + 4 integration + Playwright smoke (1,441行); テスト対ソース比率 92.0%; 全ドメインモジュールで `_resetForTest()` パターン (9箇所)
 - **コード規律** — サーバーサイド `var` ゼロ, `eval` ゼロ, TODO/FIXME ゼロ, 命名規約一貫, ESLint v10 + innerHTML 監査
-- **入力検証** — HTTP ルートに zod スキーマ検証を段階展開 (6/14 ルートファイル, `http-validation.js` ヘルパー, スキーマ定義 77個)
+- **入力検証** — HTTP ルートに zod スキーマ検証を段階展開 (endpointを持つ13ルート中6ルート, `http-validation.js` ヘルパー, スキーマ定義 77個)
+- **カバレッジゲート** — Node.js標準V8 coverageをNode 22 CIで計測し、line 70%・branch 75%・function 65%を下限として強制
 - **最小依存** — 本番パッケージ 12 個のみ; Dependabot (cooldown 7日)
 - **性能最適化** — enrichment キャッシュ 30日 TTL, バックグラウンドスロットリング, bounded ライブグラフ, stale 一括リフレッシュ, reMatchAndNotify 非同期チャンク化
 - **AI統合** — マルチプロバイダー adapter (Ollama/Anthropic/OpenAI), モデル一覧, 接続テスト, ライブ指標 facts タブ
@@ -44,10 +45,10 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | ユニットテストファイル | 84 | 96 | +12 |
 | ソースモジュール (src/) | 69 | 79 | +10 |
 | ルートファイル (src/routes/) | 13 | 14 | +1 |
-| API エンドポイント | 56 | 68 | +12 |
+| HTTP endpoint | 56 | 73 | +17 |
 | 本番依存パッケージ | 11 | 12 | +1 (AI provider SDK) |
 | requireAdmin 適用ルート | 79 | 87 | +8 |
-| zod 検証適用ルート | 5/13 | 6/14 | +1 |
+| zod 検証適用ルート | 5/12 | 6/13 | +1 |
 | zod スキーマ定義 | 39 | 77 | +38 (+97%) |
 | パラメータ化 SQL | 99 | 117 | +18 |
 | ドキュメント (docs/*.md) | 22 | 26 | +4 |
@@ -66,10 +67,10 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | ソースモジュール (src/) | 48 | 79 | +31 |
 | ポーラー (src/pollers/) | 11 | 15 | +4 |
 | ルートファイル (src/routes/) | 10 | 14 | +4 |
-| API エンドポイント | 46 | 68 | +22 |
+| HTTP endpoint | 46 | 73 | +27 |
 | 本番依存パッケージ | 10 | 12 | +2 (zod, AI provider SDK) |
 | requireAdmin 適用ルート | 62 | 87 | +25 |
-| zod 検証適用ルート | 0/10 | 6/14 | +6 |
+| zod 検証適用ルート | 0/9 | 6/13 | +6 |
 | zod スキーマ定義 | 0 | 77 | +77 |
 | ドキュメント (docs/*.md) | 14 | 26 | +12 |
 
@@ -77,12 +78,12 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | 優先度 | ギャップ | 推定工数 |
 |---|---|---|
-| 高 | コードカバレッジ計測 (c8) | 2h |
-| 高 | 残り 8 ルートファイルへの zod 検証展開 | 4h |
-| 中 | Health-check エンドポイント | 0.5h |
-| 中 | リクエスト ID (X-Request-Id) | 1h |
-| 中 | マジックナンバー 8000ms を定数化 (10箇所) | 1h |
-| 低 | OpenAPI スキーマ / Dockerfile | 6h |
+| 高 | backup dry-run / pruneの非ブロッキング化 (P2-49) | 4〜8h |
+| 中 | Health / readinessエンドポイント (P2-50) | 1〜2h |
+| 中 | 残り7ルートへのzod段階展開 (P2-51) | 6〜9h |
+| 中 | HTTP request ID (`X-Request-Id`, P2-52) | 2〜3h |
+| 低 | 意味の異なる`8000`を用途別定数化 (12箇所, P2-53) | 1〜2h |
+| 低・条件付き | OpenAPI (P2-54) / Docker・OCI配布 (P3-5) | spec後に見積もり |
 
 残りのギャップは家庭内/SOHO ネットワーク監視ツールとしては典型的であり、アーキテクチャ変更なしに段階的に対応可能です。
 
@@ -102,7 +103,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | ソースモジュール数 (src/) | 79 |
 | ポーラー数 (src/pollers/) | 15 |
 | ルートファイル数 (src/routes/) | 14 |
-| API エンドポイント数 | 68 |
+| HTTP endpoint数 | 73（`/api` 71 + health 2） |
 | 本番依存パッケージ数 | 12 |
 | 関数あたり平均行数 | ~18.4 |
 | 深いネスト行数 (>5レベル) | 7 |
@@ -125,7 +126,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | V2 認証 | ✅ | scrypt (N=16384, r=8, p=1), timingSafeEqual, 256bit セッショントークン, ブルートフォース防御 (5回/5分ロック), パスワード 8-256文字, zod スキーマ検証 |
 | V3 セッション管理 | ✅ | トークン SHA-256 ハッシュ保存, 30日スライディング失効, パスワード変更時に全セッション無効化, 定期 prune, タッチスロットル (5分) |
 | V4 アクセス制御 | ✅ | 87 ルートに `requireAdmin` 適用、未認証は login/verify の 2 エンドポイントのみ |
-| V5 入力検証 | ✅ | Body 64KB 制限, zod スキーマ検証 (6/14 ルート, `http-validation.js` ヘルパー, 77 スキーマ定義), プライベート IP のみルーターアクセス許可 (SSRF 防止), パストラバーサル防止, null バイト拒否 |
+| V5 入力検証 | ✅ | Body 64KB 制限, zod スキーマ検証 (endpointを持つ13ルート中6ルート, `http-validation.js` ヘルパー, 77 スキーマ定義), プライベート IP のみルーターアクセス許可 (SSRF 防止), パストラバーサル防止, null バイト拒否 |
 | V6 暗号化 | ✅ | scrypt (パスワード), randomBytes (トークン/nonce/salt), SHA-256 (TOFU ホスト鍵/セッション), timingSafeEqual |
 | V7 エラー処理 | ✅ | 汎用 500 レスポンス, スタックトレース非露出, タイミング攻撃対策 (500ms 遅延) |
 | V8 データ保護 | ✅ | 設定ファイル mode 0o600, バックアップ 0o600, TLS 秘密鍵 0o600, ログにパスワード非出力 |
@@ -165,11 +166,11 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 
 | 品質特性 | スコア | 主な強み | 主なギャップ |
 |---|---|---|---|
-| 機能適合性 | 9/10 | 68 API, 15 ポーラー, MCP サーバー, AI洞察タブ, 手動脅威調査, CSV/JSON エクスポート, モバイルビュー | OpenAPI 定義なし |
-| 性能効率性 | 9/10 | 多層キャッシュ (history-cache, enrichment 30日 TTL), WAL, 圧縮, バッチ化, 重複排除, bounded summaries, バックグラウンドスロットリング, reMatchAndNotify 非同期チャンク化 | 負荷テストなし |
+| 機能適合性 | 9/10 | 73 HTTP endpoint, 15 ポーラー, MCP サーバー, AI洞察タブ, 手動脅威調査, CSV/JSON エクスポート, モバイルビュー | OpenAPI 定義なし |
+| 性能効率性 | 9/10 | 多層キャッシュ (history-cache, enrichment 30日 TTL), WAL, 圧縮, バッチ化, 重複排除, bounded summaries, バックグラウンドスロットリング, backup検証のworker分離 | EC2の4GB超backupで再検証待ち |
 | 互換性 | 8/10 | Node 22/24, JA/EN i18n, OS 非依存, Linux conntrack 対応, モバイルレスポンシブ | Docker なし |
 | 使用性 | 9/10 | Demo モード, .env.example, 自動パスワード生成, MCP 統合, API/アーキテクチャドキュメント, モバイル対応, AI洞察 | ワンクリックデプロイなし |
-| 信頼性 | 9/10 | Graceful shutdown, 自動バックアップ, WAL checkpoint, reopen(), DB マイグレーション v5, AbortSignal, stale enrichment リフレッシュ | Health-check なし |
+| 信頼性 | 9/10 | Graceful shutdown, 自動バックアップ, WAL checkpoint, reopen(), DB マイグレーション, AbortSignal, prune同時実行制限・cancel/timeout, Health/readiness | EC2デプロイ後のreadiness運用確認待ち |
 | セキュリティ | 9/10 | OWASP ASVS L1 適合 (13/14), innerHTML 監査, zod 段階展開 (77 スキーマ) | CSRF 明示なし |
 | 保守性 | 9/10 | 79 モジュール, テスト比率 92.0%, 分割リファクタ (history, auth), http-validation ヘルパー | TypeScript なし |
 | 移植性 | 7/10 | Pure Node.js, ENV 設定, OS 非依存 | Docker/systemd なし |
@@ -190,8 +191,6 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | 6. セキュリティ | 9/10 | ASH, security headers, eval ゼロ, auth rate limit, zod (HTTP + MCP + AI) |
 
 **未対応の主要プラクティス:**
-- コードカバレッジ計測ツール (c8/nyc) なし
-- Health-check エンドポイントなし
 - リクエスト/トランザクション ID なし
 - Docker / プロセスマネージャなし
 - OpenAPI ドキュメントなし (API リファレンスは Markdown で提供)
@@ -208,11 +207,11 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | 重複率 | < 2% | **A** (閾値: <=3%) |
 | 認知的複雑度 | 非常に低い | **A** (深いネスト: 7行のみ) |
 | 技術的負債比率 | 3.5% (~22h) | **A** (閾値: <=5%) |
-| 信頼性 | 既知バグ 0 | **A** |
+| 信頼性 | 既知の未修正障害 0件（P2-49はworker分離済み） | **A** |
 | セキュリティホットスポット | 0 | **A** |
 | セキュリティレーティング | - | **A** |
 | 保守性 | 負債比率 3.5% | **A** |
-| カバレッジ (推定) | ~70-80% | **B** (計測ツールなし) |
+| カバレッジ (実測) | line 78.33%, branch 79.10%, function 75.12% | **B** (CI下限を通過) |
 
 **Quality Gate: ✅ PASSED**
 
@@ -232,7 +231,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 |---|---|---|
 | MAJOR | 2 | `history.js` 761行 (分割後も多責務), `devices.js` 665行 |
 | MINOR | 5 | `pollers/cisco.js` 643行, `server.js` 621行, `pollers/yamaha.js` 612行, `device-identify.js` 547行, `ai-provider.js` 477行 |
-| INFO | 6 | マジックナンバー `8000`ms x10箇所, DB initDb() ボイラープレート重複 (5ファイル) |
+| INFO | 6 | 意味の異なる`8000`が12箇所、DB initDb() ボイラープレート重複 (5ファイル) |
 
 ---
 
@@ -255,7 +254,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | 領域 | 改善内容 |
 |---|---|
 | テスト | ユニットテスト +42 ファイル (54→96), インテグレーション +1, テスト比率 74.9%→92.0% |
-| セキュリティ | zod スキーマ検証を HTTP ルートに段階展開 (6/14), `http-validation.js` ヘルパー, requireAdmin +25, 77 スキーマ定義 |
+| セキュリティ | zod スキーマ検証をendpointを持つ13ルート中6ルートへ段階展開, `http-validation.js` ヘルパー, requireAdmin +25, 77 スキーマ定義 |
 | アーキテクチャ | `history.js` 分割 (history-queries.js), `auth.js` 分割 (auth-sessions + router-setup), AbortSignal 対応 |
 | 機能 | AI洞察タブ, conntrack ポーラー, 手動脅威調査, CSV/JSON エクスポート, history-cache, schema v5 migration, モバイルビュー |
 | 性能 | enrichment TTL 最適化, バックグラウンドスロットリング, bounded summaries/graph, 非同期チャンク化 |

@@ -60,12 +60,14 @@ EgressViewは1つのSQLite databaseをWAL modeで使用し、history、sessions�
 
 Migrationは末尾追加方式でfail-closedです。データ変更を伴うmigrationの前に空き容量を検査し、整合性を検証したbackupを作成してからtransactionを実行し、完了後のdatabaseも検証します。Restoreも同じ原則で、復元元検査、安全backup必須、置換、全利用者の再接続、復元後検査を行い、どこかで失敗すればrollbackします。
 
+Backup cleanupのpreviewと実行は専用worker threadで行います。SQLiteのintegrity checkは同期処理で数GBを走査する可能性があるためです。Main processはcleanupを同時1件に制限し、進捗、cancel、timeout状態を公開します。Workerでも検証済み世代の最低保持条件と削除直前の再検証を維持し、event loopから分離してもfail-closed条件は緩めません。
+
 Schema v5ではrouterの観測情報を`connection_observations`だけに保存し、旧`connections.source` columnは削除済みです。APIの互換用`source`値は、観測したrouterのkindから導出します。Observation consistency診断では観測漏れ、孤立した観測、router metadataの欠落を検査します。Schema v6はappend-only AI会話、v7はproviderが返したtoken使用量と呼び出し時点のUSD概算を保存します。検証済み`src/data/ai-pricing.json`が版管理単価と根拠情報を提供し、各usage行は呼び出し時点の単価を保持します。過去会話、未知model、usage未返却の料金は推測しません。
 
 ## Interface
 
 - **Browser UI:** AI洞察をスタートページにしたstatic single-page applicationと認証済みSocket.IO update。
-- **REST:** `/api`配下の管理・検索API 69本。[REST APIリファレンス](api-reference.ja.md)を参照してください。
+- **REST:** `/api`配下の管理・検索API 71本と、最小情報だけを返す`/healthz`・`/readyz`。[REST APIリファレンス](api-reference.ja.md)を参照してください。
 - **AI provider:** Ollama / Anthropic / OpenAI / Amazon Bedrockへの明示操作型read-only分析。設定とprivacy境界は[AI洞察設定ガイド](setup-ai-insights.ja.md)を参照してください。
 - **MCP:** stdioまたは認証済みHTTPで利用する11本のread/write tool。[MCP設定ガイド](setup-mcp.ja.md)を参照してください。
 - **Export:** 履歴全体をmemoryへ載せない、上限付きstreaming CSV/JSON。
@@ -75,7 +77,7 @@ Schema v5ではrouterの観測情報を`connection_observations`だけに保存�
 
 - RouterのSSH接続先はRFC 1918 private IPv4 addressに限定します。SSH host keyはTOFUで保存し、fingerprint変化を検出します。
 - Router credentialとtokenはlocalのmode `0600`設定ファイルへ保存し、APIは`passSet`/`enablePassSet`だけを返します。
-- Loginとtoken検証以外のREST APIは`X-Admin-Token`必須です。Socket.IOも同じ認証方針です。
+- Login、token検証、詳細情報を返さないhealth/readiness以外のREST APIは`X-Admin-Token`必須です。Socket.IOも同じ認証方針です。
 - ServerはCSP、clickjacking防止、MIME sniffing防止、referrer制限を設定し、TLS利用時はHSTSも有効にします。
 - EgressViewはinline装置ではありません。収集失敗はroutingを止めず、1台のrouter障害が他のcollectorを止めません。
 - EgressViewはHTTPSまたは信頼できるVPN内だけで公開し、application、router管理画面、backup fileをInternetへ直接公開しないでください。
@@ -84,7 +86,7 @@ Schema v5ではrouterの観測情報を`connection_observations`だけに保存�
 
 | 責務 | 主な実装 |
 |---|---|
-| Process wiring / lifecycle | `server.js` |
+| Process wiring / readiness / lifecycle | `server.js`, `src/health-state.js` |
 | HTTP構成と保護 | `src/http-app.js`, `src/routes/` |
 | 複数router lifecycle | `src/router-manager.js`, `src/router-registry.js` |
 | Poll scheduling | `src/router-poll-scheduler.js` |
@@ -92,5 +94,5 @@ Schema v5ではrouterの観測情報を`connection_observations`だけに保存�
 | Runtime正規化・重複排除 | `src/runtime.js` |
 | 履歴・観測のread/write | `src/history.js` |
 | DB bootstrap / migration | `src/db-bootstrap.js`, `src/db-migrate.js` |
-| Backup inventory・容量・prune・restore | `src/backup-inventory.js`, `src/backup.js`, `src/routes/backup.js` |
+| Backup inventory・worker job・prune・restore | `src/backup-inventory.js`, `src/backup-prune-runner.js`, `src/backup-prune-worker.js`, `src/backup.js`, `src/routes/backup.js` |
 | Browser module | `public/js/` |

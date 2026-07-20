@@ -19,6 +19,10 @@ function implementedRoutes() {
       routes.push(`${match[1].toUpperCase()} /api${match[2]}`);
     }
   }
+  const httpApp = fs.readFileSync(path.join(root, 'src', 'http-app.js'), 'utf8');
+  for (const match of httpApp.matchAll(/app\.(get|post|put|delete|patch)\(\s*['"](\/(?:healthz|readyz))['"]/g)) {
+    routes.push(`${match[1].toUpperCase()} ${match[2]}`);
+  }
   return [...new Set(routes)].sort();
 }
 
@@ -37,14 +41,14 @@ function publicRoutes() {
 }
 
 function documentedRoutes(source) {
-  return [...source.matchAll(/`(GET|POST|PUT|DELETE|PATCH) (\/api\/[^`?\s]+)`/g)]
+  return [...source.matchAll(/`(GET|POST|PUT|DELETE|PATCH) (\/(?:api\/[^`?\s]+|healthz|readyz))`/g)]
     .map(match => `${match[1]} ${match[2]}`);
 }
 
 describe('REST API documentation', () => {
   it('lists every implemented endpoint and no nonexistent endpoint in both languages', () => {
     const implemented = implementedRoutes();
-    assert.equal(implemented.length, 69, 'review the API reference when the route count changes');
+    assert.equal(implemented.length, 73, 'review the API reference when the route count changes');
 
     for (const file of apiDocs) {
       const source = fs.readFileSync(path.join(root, file), 'utf8');

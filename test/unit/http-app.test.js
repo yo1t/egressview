@@ -2,13 +2,47 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const http = require('node:http');
+const { Readable, Writable } = require('node:stream');
 
 const {
   buildCspHeader,
   createIndexHtmlBase,
   injectIndexBootstrap,
+  registerHealthRoutes,
   serializeI18nModule,
 } = require('../../src/http-app');
+const { createHealthState } = require('../../src/health-state');
+const express = require('express');
+
+function request(app, url) {
+  return new Promise((resolve, reject) => {
+    const req = new Readable({ read() { this.push(null); } });
+    req.method = 'GET';
+    req.url = url;
+    req.headers = {};
+    const res = new http.ServerResponse(req);
+    const chunks = [];
+    const socket = new Writable({
+      write(chunk, _encoding, callback) { chunks.push(Buffer.from(chunk)); callback(); },
+    });
+    socket.cork = () => {};
+    socket.uncork = () => {};
+    socket.setTimeout = () => {};
+    socket.destroy = () => {};
+    res.assignSocket(socket);
+    res.on('finish', () => {
+      const raw = Buffer.concat(chunks).toString();
+      const [headers, ...parts] = raw.split('\r\n\r\n');
+      resolve({
+        status: res.statusCode,
+        headers: headers.toLowerCase(),
+        body: JSON.parse(parts.join('\r\n\r\n') || 'null'),
+      });
+    });
+    app.handle(req, res, reject);
+  });
+}
 
 describe('serializeI18nModule', () => {
   it('returns an ES module and escapes script-breaking characters', () => {
@@ -51,5 +85,37 @@ describe('buildCspHeader', () => {
   it('omits HSTS for plain HTTP mode', () => {
     const csp = buildCspHeader('abc', false);
     assert.equal(csp.hsts, null);
+  });
+});
+
+describe('health endpoints', () => {
+  function makeApp() {
+    const app = express();
+    const healthState = createHealthState();
+    registerHealthRoutes(app, healthState);
+    return { app, healthState };
+  }
+
+  it('reports liveness without exposing runtime details', async () => {
+    const { app } = makeApp();
+    const response = await request(app, '/healthz');
+    assert.equal(response.status, 200);
+    assert.match(response.headers, /cache-control: no-store/);
+    assert.deepEqual(response.body, { status: 'ok' });
+  });
+
+  it('reports readiness only after bootstrap is marked complete', async () => {
+    const { app, healthState } = makeApp();
+    const starting = await request(app, '/readyz');
+    assert.equal(starting.status, 503);
+    assert.deepEqual(starting.body, { status: 'not_ready' });
+
+    healthState.markReady();
+    const ready = await request(app, '/readyz');
+    assert.equal(ready.status, 200);
+    assert.deepEqual(ready.body, { status: 'ready' });
+
+    healthState.markNotReady();
+    assert.equal((await request(app, '/readyz')).status, 503);
   });
 });

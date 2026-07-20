@@ -206,32 +206,81 @@ describe('backup configuration route', () => {
   it('previews and executes safe backup cleanup through separate requests', async () => {
     const calls = [];
     const plan = { candidates: [{ name: 'old.db', size: 100 }], candidateBytes: 100 };
+    const previewId = '11111111-1111-4111-8111-111111111111';
+    const executeId = '22222222-2222-4222-8222-222222222222';
+    const jobs = new Map();
     const backup = {
-      previewPrune: () => { calls.push('preview'); return plan; },
-      pruneBackups: () => { calls.push('execute'); return { deleted: plan.candidates, deletedBytes: 100 }; },
+      startPruneJob: ({ execute }) => {
+        calls.push(execute ? 'execute' : 'preview');
+        const id = execute ? executeId : previewId;
+        const job = { id, operation: execute ? 'execute' : 'preview', status: 'running' };
+        jobs.set(id, execute
+          ? { ...job, status: 'completed', result: { deleted: plan.candidates, deletedBytes: 100 } }
+          : { ...job, status: 'completed', result: plan });
+        return job;
+      },
+      getPruneJob: id => jobs.get(id),
     };
     const app = mount(backupRoutes({ requireAdmin, backup, appRoot: process.cwd() }));
 
     const preview = await request(app, 'POST', '/api/backup/prune', { execute: false });
     const execute = await request(app, 'POST', '/api/backup/prune', { execute: true });
+    const previewResult = await request(app, 'GET', `/api/backup/prune/${previewId}`);
+    const executeResult = await request(app, 'GET', `/api/backup/prune/${executeId}`);
 
-    assert.equal(preview.status, 200);
-    assert.equal(preview.body.dryRun, true);
-    assert.equal(execute.status, 200);
-    assert.equal(execute.body.dryRun, false);
+    assert.equal(preview.status, 202);
+    assert.equal(execute.status, 202);
+    assert.deepEqual(previewResult.body.job.result, plan);
+    assert.equal(executeResult.body.job.result.deletedBytes, 100);
     assert.deepEqual(calls, ['preview', 'execute']);
   });
 
   it('rejects malformed prune confirmation without touching backups', async () => {
     let called = false;
     const backup = {
-      previewPrune: () => { called = true; },
-      pruneBackups: () => { called = true; },
+      startPruneJob: () => { called = true; },
     };
     const app = mount(backupRoutes({ requireAdmin, backup, appRoot: process.cwd() }));
     const result = await request(app, 'POST', '/api/backup/prune', { execute: 'yes' });
     assert.equal(result.status, 400);
     assert.equal(called, false);
+  });
+
+  it('rejects concurrent cleanup and returns the active job', async () => {
+    const active = {
+      id: '11111111-1111-4111-8111-111111111111',
+      operation: 'preview',
+      status: 'running',
+    };
+    const backup = {
+      startPruneJob() {
+        const error = new Error('busy');
+        error.code = 'BACKUP_PRUNE_BUSY';
+        error.job = active;
+        throw error;
+      },
+    };
+    const app = mount(backupRoutes({ requireAdmin, backup, appRoot: process.cwd() }));
+
+    const result = await request(app, 'POST', '/api/backup/prune', { execute: false });
+    assert.equal(result.status, 409);
+    assert.deepEqual(result.body.job, active);
+  });
+
+  it('cancels only a known running cleanup job', async () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    let job = { id, operation: 'preview', status: 'running' };
+    const backup = {
+      getPruneJob: requested => requested === id ? job : null,
+      cancelPruneJob: () => { job = { ...job, status: 'cancelling' }; return true; },
+    };
+    const app = mount(backupRoutes({ requireAdmin, backup, appRoot: process.cwd() }));
+
+    const cancelled = await request(app, 'DELETE', `/api/backup/prune/${id}`);
+    assert.equal(cancelled.status, 200);
+    assert.equal(cancelled.body.job.status, 'cancelling');
+    assert.equal((await request(app, 'DELETE', `/api/backup/prune/${id}`)).status, 409);
+    assert.equal((await request(app, 'GET', '/api/backup/prune/not-a-uuid')).status, 400);
   });
 
   it('closes every DB connection before restore and reopens them afterward', async () => {

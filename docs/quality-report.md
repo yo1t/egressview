@@ -1,7 +1,7 @@
 # EgressView Code Quality Report
 
-- **Date**: 2026-07-19
-- **Commit**: `15ab4090c7b753cf621f9ea2d021bf2558c99672` (main)
+- **Date**: 2026-07-20
+- **Commit**: `31266cb` (main) + P2-49/P2-50 working tree
 - **Version**: 1.5.1
 - **Node.js**: >=22 (tested on 22, 24)
 - **Evaluator**: Automated static analysis + manual code review (Claude Code)
@@ -29,7 +29,8 @@ EgressView demonstrates **production-grade quality** across all evaluated framew
 - **Security by design** — scrypt password hashing, timing-safe token comparison, per-request CSP nonce, `style-src 'self'`, CI-integrated ASH + secret scan + npm audit, SHA-pinned GitHub Actions (2 workflows)
 - **Testing culture** — 96 unit + 4 integration + Playwright smoke (1,441 lines); 92.0% test-to-source ratio; `_resetForTest()` pattern across 9 domain modules
 - **Code discipline** — server-side `var` zero, `eval` zero, TODO/FIXME zero, consistent naming, ESLint v10 + innerHTML audit
-- **Input validation** — zod schema validation across 6/14 route files with 77 schema definitions; `http-validation.js` helper
+- **Input validation** — zod schema validation across 6/13 endpoint-bearing route modules with 77 schema definitions; `http-validation.js` helper
+- **Coverage gate** — Node.js built-in V8 coverage runs in Node 22 CI with enforced minimums of 70% lines, 75% branches, and 65% functions
 - **Minimal dependencies** — 12 production packages only; Dependabot with 7-day cooldown
 - **AI integration** — multi-provider adapter (Ollama/Anthropic/OpenAI) with model list, connection test, and live metrics facts tab
 
@@ -43,10 +44,10 @@ EgressView demonstrates **production-grade quality** across all evaluated framew
 | Unit test files | 84 | 96 | +12 |
 | Source modules (src/) | 69 | 79 | +10 |
 | Route files (src/routes/) | 13 | 14 | +1 |
-| API endpoints | 56 | 68 | +12 |
+| HTTP endpoints | 56 | 73 | +17 |
 | Production dependencies | 11 | 12 | +1 |
 | requireAdmin routes | 79 | 87 | +8 |
-| zod-validated routes | 5/13 | 6/14 | +1 |
+| zod-validated routes | 5/12 | 6/13 | +1 |
 | zod schema definitions | 39 | 77 | +38 |
 | Parameterized SQL | 99 | 117 | +18 |
 | Documentation (docs/*.md) | 22 | 26 | +4 |
@@ -61,19 +62,19 @@ EgressView demonstrates **production-grade quality** across all evaluated framew
 | Test-to-source ratio | 74.9% | 92.0% | +17.1pp |
 | Unit test files | 54 | 96 | +42 |
 | Source modules (src/) | 48 | 79 | +31 |
-| API endpoints | 46 | 68 | +22 |
+| HTTP endpoints | 46 | 73 | +27 |
 | Production dependencies | 10 | 12 | +2 |
 
 ### Key Gaps and Next Steps
 
 | Priority | Gap | Effort |
 |---|---|---|
-| High | Code coverage measurement (c8) | 2 h |
-| High | Expand zod validation to remaining 8 route files | 4 h |
-| Medium | Health-check endpoint | 0.5 h |
-| Medium | Request IDs (X-Request-Id) | 1 h |
-| Medium | Extract magic number 8000 ms to constant (10 occurrences) | 1 h |
-| Low | OpenAPI schema / Dockerfile | 6 h |
+| High | Make backup dry-run / prune non-blocking (P2-49) | 4-8 h |
+| Medium | Health / readiness endpoint (P2-50) | 1-2 h |
+| Medium | Incrementally validate the remaining 7 route modules with zod (P2-51) | 6-9 h |
+| Medium | HTTP request IDs (`X-Request-Id`, P2-52) | 2-3 h |
+| Low | Replace the 12 semantically different `8000` values with domain constants (P2-53) | 1-2 h |
+| Low, conditional | OpenAPI (P2-54) / Docker and OCI distribution (P3-5) | Estimate after specification |
 
 The remaining gaps are typical for a home-lab/SOHO network monitoring tool and can be addressed incrementally without architectural changes.
 
@@ -92,7 +93,7 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | Source modules (src/) | 79 |
 | Pollers (src/pollers/) | 15 |
 | Route files (src/routes/) | 14 |
-| API endpoints | 68 |
+| HTTP endpoints | 73 (71 under `/api` plus 2 health endpoints) |
 | Production dependencies | 12 |
 | Average lines per function | ~18.4 |
 | Deeply nested lines (>5 levels) | 7 |
@@ -114,7 +115,7 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | V2 Authentication | ✅ | scrypt (N=16384, r=8, p=1), timingSafeEqual, 256-bit session tokens, brute-force lockout (5 fails / 5-min lock), password 8–256 chars, zod schema validation |
 | V3 Session Management | ✅ | Tokens stored hashed (SHA-256), sliding 30-day expiry, revoke on password change, periodic pruning, touch throttle (5 min) |
 | V4 Access Control | ✅ | 87 routes use `requireAdmin`; only 2 unauthenticated (login, verify) |
-| V5 Input Validation | ✅ | Body limit 64 KB, zod schema validation (6/14 routes, 77 schemas), private-IP-only router access (SSRF prevention), path traversal check, null-byte rejection |
+| V5 Input Validation | ✅ | Body limit 64 KB, zod schema validation (6/13 endpoint-bearing route modules, 77 schemas), private-IP-only router access (SSRF prevention), path traversal check, null-byte rejection |
 | V6 Cryptography | ✅ | scrypt for passwords, randomBytes for tokens/nonces/salts, SHA-256 for TOFU host keys/sessions, timingSafeEqual |
 | V7 Error Handling | ✅ | Generic 500 responses, no stack traces leaked, timing-attack-resistant error responses (500 ms delay) |
 | V8 Data Protection | ✅ | Config file mode 0o600, backup 0o600, TLS private key 0o600, no plaintext passwords in logs |
@@ -156,11 +157,11 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 
 | Quality Characteristic | Score | Key Strengths | Key Gaps |
 |---|---|---|---|
-| Functional Suitability | 9/10 | 68 APIs, 15 pollers, MCP server, AI insight tab (multi-provider), CSV export | No OpenAPI spec |
-| Performance Efficiency | 9/10 | Multi-layer caching (history-cache, enrichment 30d TTL), WAL, compression, batching, dedup | No load tests |
+| Functional Suitability | 9/10 | 73 HTTP endpoints, 15 pollers, MCP server, AI insight tab (multi-provider), CSV export | No OpenAPI spec |
+| Performance Efficiency | 9/10 | Multi-layer caching, WAL, compression, batching, dedup, bounded summaries, and worker-isolated backup verification | Pending re-verification with the 4+ GB EC2 backup set |
 | Compatibility | 8/10 | Node 22/24, JA/EN i18n, OS-independent, Linux conntrack support | No Docker |
 | Usability | 9/10 | Demo mode, .env.example, auto-generated password, MCP integration, AI insights, API/architecture docs | No one-click deploy |
-| Reliability | 9/10 | Graceful shutdown, auto-backup, WAL checkpoint, reopen(), DB migration, AbortSignal support | No health-check |
+| Reliability | 9/10 | Graceful shutdown, auto-backup, DB migration, AbortSignal, single-flight prune cancellation/timeouts, health/readiness | Pending post-deploy readiness verification on EC2 |
 | Security | 9/10 | OWASP ASVS L1 compliant (13/14), innerHTML audit, zod rollout (77 schemas) | No explicit CSRF |
 | Maintainability | 9/10 | 79 modules, 92.0% test ratio, split refactors, http-validation helper, _resetForTest pattern | No TypeScript |
 | Portability | 7/10 | Pure Node.js, ENV config, OS-independent | No Docker/systemd |
@@ -181,8 +182,6 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | 6. Security | 9/10 | ASH, security headers, no eval, auth rate limit, zod (HTTP + MCP), AI provider input validation |
 
 **Notable gaps:**
-- No code coverage measurement tool (c8/nyc)
-- No health-check endpoint
 - No request/transaction IDs
 - No Docker / process manager
 - No OpenAPI documentation (API reference provided in Markdown)
@@ -199,11 +198,11 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | Duplications | <2% | **A** (threshold: <=3%) |
 | Cognitive Complexity | Very low | **A** (7 deeply-nested lines) |
 | Technical Debt Ratio | 3.5% (~22 h) | **A** (threshold: <=5%) |
-| Reliability | 0 known bugs | **A** |
+| Reliability | 0 known unfixed defects (P2-49 is worker-isolated) | **A** |
 | Security Hotspots | 0 open | **A** |
 | Security Rating | - | **A** |
 | Maintainability | Debt ratio 3.5% | **A** |
-| Coverage (estimated) | ~70-80% | **B** (no measurement tool) |
+| Coverage (measured) | 78.33% lines, 79.10% branches, 75.12% functions | **B** (CI thresholds passed) |
 
 **Quality Gate: ✅ PASSED**
 
@@ -223,7 +222,7 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 |---|---|---|
 | MAJOR | 2 | `history.js` 761L (still multi-concern after split), `devices.js` 665L |
 | MINOR | 5 | `pollers/cisco.js` 643L, `server.js` 621L, `pollers/yamaha.js` 612L, `device-identify.js` 547L, `ai-provider.js` 477L |
-| INFO | 6 | Magic number `8000` ms ×10, DB initDb() boilerplate duplication (5 files) |
+| INFO | 6 | Twelve semantically different `8000` values, DB initDb() boilerplate duplication (5 files) |
 
 ---
 

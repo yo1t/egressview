@@ -54,6 +54,18 @@ function buildCspHeader(cspNonce, tlsEnabled) {
   return { value: parts.join('; ') + ';', hsts: tlsEnabled ? 'max-age=31536000; includeSubDomains' : null };
 }
 
+function registerHealthRoutes(app, healthState) {
+  app.get('/healthz', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(healthState.liveness());
+  });
+  app.get('/readyz', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const ready = healthState.isReady();
+    res.status(ready ? 200 : 503).json(healthState.readiness());
+  });
+}
+
 function configureHttpApp(app, {
   subpath,
   assetVersion,
@@ -68,6 +80,7 @@ function configureHttpApp(app, {
   saveConfig,
   beaconScanRunner,
   logger,
+  healthState,
 }) {
   app.use(createSlowRequestLogger());
 
@@ -81,6 +94,8 @@ function configureHttpApp(app, {
     res.setHeader('Content-Security-Policy', csp.value);
     next();
   });
+
+  registerHealthRoutes(app, healthState);
 
   app.use(compression());
 
@@ -179,5 +194,6 @@ module.exports = {
   configureHttpApp,
   createIndexHtmlBase,
   injectIndexBootstrap,
+  registerHealthRoutes,
   serializeI18nModule,
 };

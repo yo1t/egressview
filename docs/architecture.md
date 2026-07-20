@@ -60,12 +60,14 @@ EgressView uses one SQLite database in WAL mode with separate module connections
 
 Migrations are append-only and fail-closed. Before a data-changing migration, EgressView checks free space, creates and validates a consistent backup, runs the migration transaction, and verifies the resulting database. Backup restore follows the same principle: validate source, require a safety backup, replace, reopen all consumers, validate the result, and roll back if any stage fails.
 
+Backup cleanup preview and execution run in a dedicated worker thread because SQLite integrity checks are synchronous and may scan several gigabytes. The main process permits one cleanup job at a time and exposes bounded progress, cancellation, and timeout states. The worker retains the same verified-generation floors and revalidates candidates immediately before deletion; moving work off the event loop does not weaken fail-closed behavior.
+
 Schema v5 stores router ownership only in `connection_observations`; the legacy `connections.source` column has been removed. API responses still expose a compatibility `source` value derived from the observer router kinds. The observation-consistency diagnostic checks for missing or orphaned observations and missing router metadata. Schema v6 stores append-only AI conversations; v7 stores provider-reported token usage and the USD estimate calculated at request time. The validated `src/data/ai-pricing.json` catalog supplies versioned rates and source metadata, while each usage row preserves its invocation-time rates. EgressView does not infer costs for older conversations, unknown models, or responses without usage.
 
 ## Interfaces
 
 - **Browser UI:** static single-page application with AI Insights as the start page plus authenticated Socket.IO updates.
-- **REST:** 69 administration and query endpoints rooted at `/api`; see the [REST API reference](api-reference.md).
+- **REST:** 71 administration and query endpoints rooted at `/api`, plus minimal `/healthz` and `/readyz`; see the [REST API reference](api-reference.md).
 - **AI providers:** explicit-action, read-only analysis through Ollama, Anthropic, OpenAI, or Amazon Bedrock; see the [AI Insights setup guide](setup-ai-insights.md) for configuration and privacy boundaries.
 - **MCP:** 11 read/write tools over stdio or authenticated HTTP; see the [MCP setup guide](setup-mcp.md).
 - **Exports:** bounded streaming CSV/JSON output to avoid loading an unbounded history into memory.
@@ -75,7 +77,7 @@ Schema v5 stores router ownership only in `connection_observations`; the legacy 
 
 - Router SSH targets must be RFC 1918 private IPv4 addresses. SSH host keys use trust-on-first-use and saved fingerprints detect unexpected changes.
 - Router credentials and tokens stay in the local mode-`0600` configuration file; API responses expose only `passSet`/`enablePassSet` flags.
-- All REST endpoints except login and token verification require `X-Admin-Token`. Socket.IO applies the same authentication policy.
+- All REST endpoints except login, token verification, and the detail-free health/readiness checks require `X-Admin-Token`. Socket.IO applies the same authentication policy.
 - The server sets CSP, clickjacking, MIME-sniffing, and referrer protections; HSTS is enabled when TLS is configured.
 - EgressView is not an inline network device. Polling failure does not interrupt routed traffic, and one router's failure does not stop other collectors.
 - Administrators should expose EgressView only through HTTPS or a trusted VPN and should keep the application, router management interfaces, and backup files off the public Internet.
@@ -84,7 +86,7 @@ Schema v5 stores router ownership only in `connection_observations`; the legacy 
 
 | Responsibility | Main implementation |
 |---|---|
-| Process wiring and lifecycle | `server.js` |
+| Process wiring, readiness, and lifecycle | `server.js`, `src/health-state.js` |
 | HTTP composition and protections | `src/http-app.js`, `src/routes/` |
 | Multi-router lifecycle | `src/router-manager.js`, `src/router-registry.js` |
 | Poll scheduling | `src/router-poll-scheduler.js` |
@@ -92,5 +94,5 @@ Schema v5 stores router ownership only in `connection_observations`; the legacy 
 | Runtime normalization/deduplication | `src/runtime.js` |
 | History and observation reads/writes | `src/history.js` |
 | DB bootstrap and migrations | `src/db-bootstrap.js`, `src/db-migrate.js` |
-| Backup inventory, capacity, prune, and restore | `src/backup-inventory.js`, `src/backup.js`, `src/routes/backup.js` |
+| Backup inventory, worker jobs, prune, and restore | `src/backup-inventory.js`, `src/backup-prune-runner.js`, `src/backup-prune-worker.js`, `src/backup.js`, `src/routes/backup.js` |
 | Browser modules | `public/js/` |

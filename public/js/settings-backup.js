@@ -3,6 +3,8 @@ import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 
 export function initBackupSettings(showStatus) {
+  const PRUNE_POLL_INTERVAL_MS = 1000;
+
   function formatBytes(value) {
     const bytes = Number(value) || 0;
     if (bytes < 1024) return `${bytes} B`;
@@ -113,6 +115,26 @@ export function initBackupSettings(showStatus) {
     }
   }
 
+  async function waitForPruneJob(initialJob) {
+    let job = initialJob;
+    while (job?.status === 'running') {
+      const progress = job.progress || {};
+      showStatus('backup-prune-status', tVars('settings.backup.cleanupRunning', {
+        completed: progress.completed || 0,
+        total: progress.total || 0,
+      }), true);
+      await new Promise(resolve => setTimeout(resolve, PRUNE_POLL_INTERVAL_MS));
+      const response = await apiFetch(_BASE + '/api/backup/prune/' + encodeURIComponent(job.id));
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || t('settings.error.generic'));
+      job = data.job;
+    }
+    if (job?.status !== 'completed') {
+      throw new Error(job?.error || t('settings.backup.cleanupFailed'));
+    }
+    return job;
+  }
+
   document.getElementById('backup-config-save').addEventListener('click', async () => {
     try {
       await apiFetch(_BASE + '/api/backup/config', {
@@ -149,7 +171,8 @@ export function initBackupSettings(showStatus) {
       });
       const preview = await previewResponse.json();
       if (!previewResponse.ok) throw new Error(preview.error || t('settings.error.generic'));
-      const plan = preview.plan;
+      const previewJob = await waitForPruneJob(preview.job);
+      const plan = previewJob.result;
       if (!plan.candidates.length) {
         showStatus('backup-prune-status', t(plan.blocked ? 'settings.backup.cleanupBlocked' : 'settings.backup.cleanupNone'), !plan.blocked);
         return;
@@ -163,9 +186,11 @@ export function initBackupSettings(showStatus) {
       });
       const executed = await executeResponse.json();
       if (!executeResponse.ok) throw new Error(executed.error || t('settings.error.generic'));
+      const executeJob = await waitForPruneJob(executed.job);
+      const result = executeJob.result;
       showStatus('backup-prune-status', tVars('settings.backup.cleanupDone', {
-        count: executed.result.deleted.length,
-        size: formatBytes(executed.result.deletedBytes),
+        count: result.deleted.length,
+        size: formatBytes(result.deletedBytes),
       }), true);
       await loadBackupList();
     } catch (error) {

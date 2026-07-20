@@ -34,7 +34,7 @@ curl --fail-with-body \
 {"success":true,"token":"session-token","expiresAt":1784304000000}
 ```
 
-`POST /api/admin/verify`も公開APIで、request body内のtokenを検証します。それ以外はすべて認証必須です。
+`POST /api/admin/verify`も公開APIで、request body内のtokenを検証します。詳細情報を返さない`/healthz`と`/readyz`も公開し、それ以外はすべて認証必須です。
 
 ## 共通仕様
 
@@ -118,7 +118,13 @@ EgressViewには、Yamaha/Ciscoを混在して最大10台登録できます。
 - `POST /api/backup/restore`は`{ "name": "..." }`を使います。
 - `POST /api/backup/upload`はmultipartではなく、最大100 MBのSQLite fileをraw bodyで受け取ります。
 - `POST /api/backup/config`は正の`intervalHours`、2以上の`maxGenerations`、0以上の`maxBackupBytes`（`0`は上限無効）、booleanの`autoPrune`を受け取ります。自動pruneは既定で無効です。
-- `POST /api/backup/prune`は`{ "execute": false }`で検証付きdry-run、`{ "execute": true }`で確認済みcleanupを実行します。通常2世代と最新の検証済みmigration世代を常に残し、破損・未検証・変更済み・一時ファイルは削除しません。
+- `POST /api/backup/prune`は`{ "execute": false }`で検証付きdry-run、`{ "execute": true }`で確認済みcleanupを開始し、worker jobを含む`202`を返します。整合性検証はmain event loop外で動作するため、収集とHTTP応答を継続します。同時実行は1件だけで、重複要求には`409`を返します。
+- `GET /api/backup/prune/:jobId`はjob状態（`running`、`cancelling`、`timing_out`、`completed`、`cancelled`、`timed_out`、`failed`）、進捗、完了後の計画／結果を返します。`DELETE /api/backup/prune/:jobId`は安全なcancelを要求します。通常2世代と最新の検証済みmigration世代を常に残し、破損・未検証・変更済み・一時ファイルは削除しません。
+
+## プロセスhealth
+
+- `GET /healthz`は認証不要・cache無効のliveness確認で、Node.js event loopが応答できる場合だけ`{ "status": "ok" }`を返します。
+- `GET /readyz`は認証不要・cache無効のreadiness確認です。設定とDB bootstrap完了前は`503`と`{ "status": "not_ready" }`、完了後は`200`と`{ "status": "ready" }`を返します。router、DB、認証情報は公開しません。
 
 ## AIプロバイダー設定
 
@@ -141,7 +147,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 
 ## Endpoint一覧
 
-実装済みREST API 69本の全一覧です。**公開**以外はすべて`X-Admin-Token`が必要です。
+実装済みHTTP endpoint 73本の全一覧です。**公開**以外はすべて`X-Admin-Token`が必要です。
 
 | 分類 | Methodとpath | Access |
 |---|---|---|
@@ -185,6 +191,10 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Backup | `POST /api/backup/upload` | 認証必須 |
 | Backup | `POST /api/backup/config` | 認証必須 |
 | Backup | `POST /api/backup/prune` | 認証必須 |
+| Backup | `GET /api/backup/prune/:jobId` | 認証必須 |
+| Backup | `DELETE /api/backup/prune/:jobId` | 認証必須 |
+| Process health | `GET /healthz` | 認証不要。最小livenessのみ |
+| Process health | `GET /readyz` | 認証不要。最小readinessのみ |
 | 全般設定 | `GET /api/status` | 認証必須 |
 | 全般設定 | `POST /api/config/general` | 認証必須 |
 | Data source | `GET /api/config/datasources` | 認証必須 |

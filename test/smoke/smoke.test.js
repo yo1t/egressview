@@ -22,6 +22,18 @@ test('GET / returns 200 with correct title', async ({ request }) => {
   expect(body).toContain('<title>EgressView</title>');
 });
 
+test('health and readiness endpoints are public and ready after startup', async ({ request }) => {
+  const health = await request.get(`${BASE}/healthz`);
+  expect(health.status()).toBe(200);
+  expect(await health.json()).toEqual({ status: 'ok' });
+  expect(health.headers()['cache-control']).toContain('no-store');
+
+  const readiness = await request.get(`${BASE}/readyz`);
+  expect(readiness.status()).toBe(200);
+  expect(await readiness.json()).toEqual({ status: 'ready' });
+  expect(readiness.headers()['cache-control']).toContain('no-store');
+});
+
 test('style.css is served (200, text/css)', async ({ request }) => {
   const res = await request.get(`${BASE}/style.css`);
   expect(res.status()).toBe(200);
@@ -377,11 +389,36 @@ async function mockSettingsRoutes(page) {
   await page.route('**/api/backup/prune', async route => {
     const body = route.request().postDataJSON();
     await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        job: {
+          id: body.execute ? '22222222-2222-4222-8222-222222222222' : '11111111-1111-4111-8111-111111111111',
+          operation: body.execute ? 'execute' : 'preview',
+          status: 'running',
+          progress: { phase: 'queued', completed: 0, total: 0 },
+        },
+      }),
+    });
+  });
+  await page.route('**/api/backup/prune/*', async route => {
+    const id = route.request().url().split('/').pop();
+    const execute = id.startsWith('2222');
+    await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(body.execute
-        ? { success: true, dryRun: false, result: { deleted: [], deletedBytes: 0 } }
-        : { success: true, dryRun: true, plan: { candidates: [], candidateBytes: 0, blocked: false } }),
+      body: JSON.stringify({
+        success: true,
+        job: {
+          id,
+          operation: execute ? 'execute' : 'preview',
+          status: 'completed',
+          result: execute
+            ? { deleted: [], deletedBytes: 0 }
+            : { candidates: [], candidateBytes: 0, blocked: false },
+        },
+      }),
     });
   });
   await page.route('**/api/config/datasources', route => route.fulfill({
