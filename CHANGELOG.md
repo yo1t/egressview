@@ -11,12 +11,14 @@ All notable changes to EgressView are documented here.
 - Moved AI list prices into a validated, versioned data catalog with required effective dates and source URLs, so price updates no longer require pricing-logic changes.
 - Added separate diagnostics for unknown model prices and successful calls where the provider returned no token usage.
 - Added production Bedrock guidance for least-privilege IAM, invocation logging, PrivateLink, and standard versus adaptive AWS SDK retries.
+- Added unauthenticated, minimal `/healthz` liveness and `/readyz` bootstrap-readiness endpoints for monitoring and deployment gates.
 
 ### Security and Reliability
 
 - Backup cleanup always protects at least two normal generations and the latest migration generation, never removes corrupt or unverified files, and regenerates plus reverifies the plan immediately before deletion.
 - Disk warnings now appear before deployment-time migration failures while the existing fail-closed migration and restore paths remain unchanged.
 - Historical AI usage keeps the rates recorded at invocation time; later catalog updates do not recalculate prior estimates.
+- Moved verified backup cleanup planning and execution to a single-concurrency worker job with progress, cancellation, timeout, and status APIs so multi-gigabyte integrity checks do not block collection or HTTP.
 
 ## [1.5.1] - 2026-07-20
 

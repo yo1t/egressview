@@ -7,6 +7,7 @@ const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 const backupInventory = require('./backup-inventory');
+const { BackupPruneRunner, DEFAULT_TIMEOUT_MS } = require('./backup-prune-runner');
 
 const DEFAULT_DB_PATH    = path.join(__dirname, '..', '.egressview.db');
 const DEFAULT_BACKUP_DIR = path.join(__dirname, '..', '.egressview-backups');
@@ -19,6 +20,26 @@ let backupIntervalHours = 24; // default: daily
 let maxGenerations = 7;       // default: 7 backups
 let maxBackupBytes = 0;       // default: no storage cap
 let autoPrune = false;        // explicit opt-in only
+
+function resolvePruneTimeout(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 60_000 && parsed <= 6 * 60 * 60 * 1000
+    ? Math.trunc(parsed)
+    : DEFAULT_TIMEOUT_MS;
+}
+
+const pruneRunner = new BackupPruneRunner({
+  timeoutMs: resolvePruneTimeout(process.env.EGRESSVIEW_BACKUP_PRUNE_TIMEOUT_MS),
+  onSettled(job, internalError) {
+    if (job.status === 'completed' && job.operation === 'execute') {
+      const deleted = job.result?.deleted || [];
+      logger.info(`[backup] Cleanup ${job.id} completed: ${deleted.length} verified generation(s), ` +
+                  `${job.result?.deletedBytes || 0} bytes released`);
+    } else if (!['completed', 'cancelled'].includes(job.status)) {
+      logger.warn(`[backup] Cleanup ${job.id} ${job.status}:`, internalError || job.error || 'unknown error');
+    }
+  },
+});
 
 function configure(cfg) {
   if (cfg.dbPath) DB_PATH = cfg.dbPath;
@@ -93,11 +114,8 @@ async function createBackup() {
     logger.info(`[backup] Created: ${backupName}`);
     if (autoPrune) {
       try {
-        const result = pruneBackups();
-        if (result.deleted.length) {
-          logger.info(`[backup] Auto-pruned ${result.deleted.length} verified generation(s), ` +
-                      `${result.deletedBytes} bytes released`);
-        }
+        const job = startPruneJob({ execute: true, source: 'automatic' });
+        logger.info(`[backup] Automatic cleanup started: ${job.id}`);
       } catch (pruneError) {
         logger.warn('[backup] Automatic prune failed; the new backup was kept:', pruneError.message);
       }
@@ -261,6 +279,36 @@ function pruneBackups() {
   });
 }
 
+function pruneOptions() {
+  return {
+    dbPath: DB_PATH,
+    backupDir: BACKUP_DIR,
+    maxGenerations,
+    maxBackupBytes,
+  };
+}
+
+function startPruneJob({ execute = false, source = 'manual' } = {}) {
+  ensureBackupDir();
+  return pruneRunner.start({
+    operation: execute ? 'execute' : 'preview',
+    options: pruneOptions(),
+    source,
+  });
+}
+
+function getPruneJob(id) {
+  return pruneRunner.get(id);
+}
+
+function getActivePruneJob() {
+  return pruneRunner.getActive();
+}
+
+function cancelPruneJob(id) {
+  return pruneRunner.cancel(id);
+}
+
 function logCapacityWarning() {
   try {
     const diagnostics = inventory();
@@ -280,6 +328,7 @@ function logCapacityWarning() {
 
 /** Override DB and backup directory paths for unit testing. */
 function _setPathsForTest(dbPath, backupDir) {
+  pruneRunner.reset();
   DB_PATH    = dbPath;
   BACKUP_DIR = backupDir;
   // Reset config to defaults so tests start from a known state
@@ -303,6 +352,10 @@ module.exports = {
   inventory,
   previewPrune,
   pruneBackups,
+  startPruneJob,
+  getPruneJob,
+  getActivePruneJob,
+  cancelPruneJob,
   logCapacityWarning,
   _setPathsForTest,
   _verifyDbFile: verifyDbFile,

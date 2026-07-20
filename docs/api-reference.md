@@ -34,7 +34,7 @@ curl --fail-with-body \
 {"success":true,"token":"session-token","expiresAt":1784304000000}
 ```
 
-`POST /api/admin/verify` is also public and verifies a token supplied in the request body. All other endpoints are protected.
+`POST /api/admin/verify` is also public and verifies a token supplied in the request body. The detail-free `/healthz` and `/readyz` checks are public; all other endpoints are protected.
 
 ## Common behavior
 
@@ -118,7 +118,13 @@ Create/detect bodies use `kind` (`yamaha` or `cisco`), `displayName`, `ip`, `use
 - `POST /api/backup/restore` uses `{ "name": "..." }`.
 - `POST /api/backup/upload` accepts a raw SQLite file body up to 100 MB, not multipart form data.
 - `POST /api/backup/config` accepts positive `intervalHours`, `maxGenerations` (minimum 2), non-negative `maxBackupBytes` (`0` disables the storage cap), and boolean `autoPrune`. Auto-prune defaults to off.
-- `POST /api/backup/prune` accepts `{ "execute": false }` for a verified dry-run or `{ "execute": true }` for confirmed cleanup. It always keeps two normal generations and the latest verified migration generation; corrupt, unverified, changed, and temporary files are never deleted.
+- `POST /api/backup/prune` accepts `{ "execute": false }` for a verified dry-run or `{ "execute": true }` for confirmed cleanup and returns `202` with a worker job. Integrity checks run outside the main event loop, so collection and HTTP remain responsive. Only one cleanup job may run; another request receives `409`.
+- `GET /api/backup/prune/:jobId` returns job status (`running`, `cancelling`, `timing_out`, `completed`, `cancelled`, `timed_out`, or `failed`), progress, and the completed plan/result. `DELETE /api/backup/prune/:jobId` requests safe cancellation. Cleanup always keeps two normal generations and the latest verified migration generation; corrupt, unverified, changed, and temporary files are never deleted.
+
+## Process health
+
+- `GET /healthz` is an unauthenticated, cache-disabled liveness check and returns only `{ "status": "ok" }` when the Node.js event loop can respond.
+- `GET /readyz` is an unauthenticated, cache-disabled readiness check. It returns `503` with `{ "status": "not_ready" }` until configuration and DB bootstrap complete, then `200` with `{ "status": "ready" }`. It exposes no router, database, or credential details.
 
 ## AI provider configuration
 
@@ -141,7 +147,7 @@ Restore is fail-closed: EgressView validates the source, confirms a safety backu
 
 ## Endpoint catalog
 
-All 69 implemented REST endpoints are listed below. **Public** means no token is required; every other row requires `X-Admin-Token`.
+All 73 implemented HTTP endpoints are listed below. **Public** means no token is required; every other row requires `X-Admin-Token`.
 
 | Area | Method and path | Access |
 |---|---|---|
@@ -185,6 +191,10 @@ All 69 implemented REST endpoints are listed below. **Public** means no token is
 | Backup | `POST /api/backup/upload` | Protected |
 | Backup | `POST /api/backup/config` | Protected |
 | Backup | `POST /api/backup/prune` | Protected |
+| Backup | `GET /api/backup/prune/:jobId` | Protected |
+| Backup | `DELETE /api/backup/prune/:jobId` | Protected |
+| Process health | `GET /healthz` | Public; minimal liveness only |
+| Process health | `GET /readyz` | Public; minimal readiness only |
 | General configuration | `GET /api/status` | Protected |
 | General configuration | `POST /api/config/general` | Protected |
 | Data sources | `GET /api/config/datasources` | Protected |

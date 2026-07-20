@@ -114,8 +114,23 @@ function buildPrunePlan({
   maxBackupBytes = 0,
   safetyMarginBytes = DEFAULT_SAFETY_MARGIN_BYTES,
   freeBytes,
+  onProgress,
 } = {}) {
-  const entries = candidateFiles(dbPath, backupDir).map(verifyEntry);
+  const rawEntries = candidateFiles(dbPath, backupDir);
+  const totalBytes = rawEntries.reduce((sum, entry) => sum + entry.size, 0);
+  let verifiedBytes = 0;
+  const entries = rawEntries.map((entry, index) => {
+    const verified = verifyEntry(entry);
+    verifiedBytes += entry.size;
+    onProgress?.({
+      phase: 'planning',
+      completed: index + 1,
+      total: rawEntries.length,
+      verifiedBytes,
+      totalBytes,
+    });
+    return verified;
+  });
   const summary = capacity(dbPath, entries, safetyMarginBytes, freeBytes);
   const candidates = [];
   const selected = new Set();
@@ -195,8 +210,10 @@ function buildPrunePlan({
 function executePrune(options = {}) {
   const plan = buildPrunePlan(options);
   const deleted = [];
+  let verifiedBytes = 0;
+  const totalBytes = plan.candidates.reduce((sum, entry) => sum + entry.size, 0);
   const unlinkFile = options.unlinkFile || fs.unlinkSync;
-  for (const candidate of plan.candidates) {
+  for (const [index, candidate] of plan.candidates.entries()) {
     const source = candidateFiles(options.dbPath, options.backupDir)
       .find(entry => entry.name === candidate.name && entry.kind === candidate.kind);
     if (!source || source.size !== candidate.size || source.created !== candidate.created) {
@@ -206,8 +223,16 @@ function executePrune(options = {}) {
     if (verified.integrity !== 'ok') {
       throw new Error(`Backup failed integrity verification before prune: ${candidate.name}`);
     }
+    verifiedBytes += source.size;
     unlinkFile(source.path);
     deleted.push({ name: source.name, kind: source.kind, size: source.size, reason: candidate.reason });
+    options.onProgress?.({
+      phase: 'deleting',
+      completed: index + 1,
+      total: plan.candidates.length,
+      verifiedBytes,
+      totalBytes,
+    });
   }
   return {
     deleted,

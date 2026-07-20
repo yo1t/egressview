@@ -50,6 +50,7 @@ const { createDefaultAppState, applyConfigToAppState } = require('./src/app-stat
 const enrichmentQueue = require('./src/enrichment-queue');
 const beaconScanRunner = require('./src/beacon-scan-runner');
 const { configureHttpApp } = require('./src/http-app');
+const { createHealthState } = require('./src/health-state');
 const { registerSocketHandlers } = require('./src/socket-handlers');
 const { migrateRouterConfigFile, loadRouterConfig, publicRouter } = require('./src/router-config');
 const { createRouterManager } = require('./src/router-manager');
@@ -81,6 +82,7 @@ const ASSET_VERSION    = /^[A-Za-z0-9._-]+$/.test(_rawAssetVersion) ? _rawAssetV
 // ─── Shared mutable state ─────────────────────────────────────────────────────
 // Passed by reference to route modules so they can read and mutate it.
 const appState = createDefaultAppState();
+const healthState = createHealthState();
 let routerConfigState = { routers: [], tombstones: [], migrated: false };
 let routerManager = null;
 const routerManagerApi = {
@@ -369,6 +371,7 @@ configureHttpApp(app, {
   saveConfig,
   beaconScanRunner,
   logger,
+  healthState,
 });
 
 // ─── Socket.IO ────────────────────────────────────────────────────────────────
@@ -594,11 +597,13 @@ server.listen(PORT, HOST, () => {
   if (!DEMO_MODE) beaconScanRunner.scheduleBeaconScan();
 
   backup.startPeriodicBackup();
+  healthState.markReady();
 });
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
 
 function shutdown(exitCode = 0) {
+  healthState.markNotReady();
   logger.info('[shutdown] Saving history...');
   try { routerManager?.stopAll();   } catch {}
   try { runtimeProfiler.measureSync('history.shutdownSnapshot', () => history.snapshotHistory()); } catch {}
