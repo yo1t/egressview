@@ -16,6 +16,7 @@ All notable changes to EgressView are documented here.
 
 ### Security and Reliability
 
+- Restored saved ASUS polling automatically after service restarts and coalesced overlapping polls to avoid duplicate token renewals and API request bursts.
 - Started a fresh append-only AI conversation automatically when the configured provider or model changes, preserving the previous conversation instead of rejecting the next question.
 - Preserved AI chat questions when provider generation fails after server-side persistence, and restored unsent questions to the input when a request fails before persistence.
 - Made every device-note write path fail closed: failed writes restore the previous runtime snapshot, suppress success notifications, and prevent dependent device merges from starting.
