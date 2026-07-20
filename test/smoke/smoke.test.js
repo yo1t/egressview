@@ -357,7 +357,11 @@ async function mockSettingsRoutes(page) {
     contentType: 'application/json',
     body: JSON.stringify({
       backups: [],
-      config: { intervalHours: 24, maxGenerations: 7 },
+      config: { intervalHours: 24, maxGenerations: 7, maxBackupBytes: 0, autoPrune: false },
+      diagnostics: {
+        entries: [{ name: 'runtime.db.pre-migration.v6-to-v7.test.bak', kind: 'migration', size: 1024, created: new Date().toISOString(), integrity: 'unchecked', schema: null }],
+        summary: { backupBytes: 1024, freeBytes: 8 * 1024 ** 3, migrationRequiredBytes: 2 * 1024 ** 3, migrationReady: true, shortfallBytes: 0 },
+      },
     }),
   }));
   await page.route('**/api/backup/config', route => route.fulfill({
@@ -370,6 +374,16 @@ async function mockSettingsRoutes(page) {
     contentType: 'application/json',
     body: JSON.stringify({ success: true, name: 'egressview-demo.db' }),
   }));
+  await page.route('**/api/backup/prune', async route => {
+    const body = route.request().postDataJSON();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(body.execute
+        ? { success: true, dryRun: false, result: { deleted: [], deletedBytes: 0 } }
+        : { success: true, dryRun: true, plan: { candidates: [], candidateBytes: 0, blocked: false } }),
+    });
+  });
   await page.route('**/api/config/datasources', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -1315,8 +1329,11 @@ test('settings tabs save and connection buttons work without console errors', as
   await page.click('.settings-tab[data-tab="backup"]');
   await expect(page.locator('#pane-backup')).toHaveClass(/active/);
   await expect(page.locator('#backup-list .backup-list-empty')).toHaveCount(1);
+  await expect(page.locator('#backup-capacity-status')).toContainText('8.00 GiB');
   await page.click('#backup-config-save');
   await expect(page.locator('#backup-config-status')).toBeVisible();
+  await page.click('#backup-prune-btn');
+  await expect(page.locator('#backup-prune-status')).toBeVisible();
   await page.click('#backup-create-btn');
   await expect(page.locator('#backup-action-status')).toBeVisible();
 

@@ -14,8 +14,11 @@ const UPLOAD_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
 const backupNameSchema = z.object({ name: z.string().min(1).max(255) }).strict();
 const backupConfigSchema = z.object({
   intervalHours: z.coerce.number().int().positive().optional(),
-  maxGenerations: z.coerce.number().int().positive().optional(),
+  maxGenerations: z.coerce.number().int().min(2).optional(),
+  maxBackupBytes: z.coerce.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  autoPrune: z.boolean().optional(),
 }).strict();
+const backupPruneSchema = z.object({ execute: z.boolean().default(false) }).strict();
 
 /**
  * @param {{
@@ -49,7 +52,16 @@ module.exports = function backupRoutes(ctx) {
   }
 
   router.get('/backup/list', requireAdmin, (req, res) => {
-    res.json({ backups: backup.listBackups(), config: backup.getConfig() });
+    try {
+      res.json({
+        backups: backup.listBackups(),
+        config: backup.getConfig(),
+        diagnostics: backup.inventory(),
+      });
+    } catch (error) {
+      logger.error('[backup] inventory error:', error.message);
+      res.status(500).json({ error: 'Backup diagnostics failed. Check server logs.' });
+    }
   });
 
   router.post('/backup/create', requireAdmin, async (req, res) => {
@@ -132,7 +144,7 @@ module.exports = function backupRoutes(ctx) {
   router.post('/backup/config', requireAdmin, (req, res) => {
     const parsed = parseRequest(backupConfigSchema, req.body, res);
     if (!parsed.ok) return;
-    const { intervalHours, maxGenerations } = parsed.data;
+    const { intervalHours, maxGenerations, maxBackupBytes, autoPrune } = parsed.data;
     const previous = backup.getConfig();
     const updates = {};
     if (intervalHours != null) {
@@ -140,6 +152,12 @@ module.exports = function backupRoutes(ctx) {
     }
     if (maxGenerations != null) {
       updates.maxGenerations = maxGenerations;
+    }
+    if (maxBackupBytes != null) {
+      updates.maxBackupBytes = maxBackupBytes;
+    }
+    if (autoPrune != null) {
+      updates.autoPrune = autoPrune;
     }
     backup.configure(updates);
     backup.stopPeriodicBackup();
@@ -154,6 +172,21 @@ module.exports = function backupRoutes(ctx) {
       return res.status(500).json({ error: 'Backup settings were not saved. Check server logs.' });
     }
     res.json({ success: true, config: backup.getConfig() });
+  });
+
+  router.post('/backup/prune', requireAdmin, (req, res) => {
+    const parsed = parseRequest(backupPruneSchema, req.body, res);
+    if (!parsed.ok) return;
+    try {
+      if (!parsed.data.execute) {
+        return res.json({ success: true, dryRun: true, plan: backup.previewPrune() });
+      }
+      const result = backup.pruneBackups();
+      res.json({ success: true, dryRun: false, result });
+    } catch (error) {
+      logger.error('[backup] prune error:', error.message);
+      res.status(500).json({ error: 'Backup cleanup failed safely. No unverified backup was removed.' });
+    }
   });
 
   return router;

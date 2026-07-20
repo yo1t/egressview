@@ -214,8 +214,30 @@ describe('AI configuration routes', () => {
     assert.equal(result.status, 200);
     assert.equal(result.body.current.requests, 2);
     assert.equal(result.body.pricing.approximate, true);
+    assert.equal(result.body.pricing.catalogVersion, '2026-05-27');
+    assert.equal(result.body.pricing.effectiveFrom, '2026-05-27');
+    assert.ok(result.body.pricing.sourceUrls.includes('https://aws.amazon.com/bedrock/pricing/'));
     assert.equal(ranges.length, 2);
     assert.equal(ranges[1][1], ranges[0][0]);
+  });
+
+  it('records a successful generation when the provider omits token usage', async () => {
+    let usage;
+    const provider = createAiProvider({ fetchImpl: async () =>
+      new Response(JSON.stringify({ response: 'answer without usage' }), { status: 200 }) });
+    provider.configure({ provider: 'ollama', models: { ollama: 'local-model' } });
+    const result = await request(appFor(provider, undefined, {
+      history: {
+        countFactsByTimeRange: () => ({}), groupDstByTimeRange: () => [], groupServiceByTimeRange: () => [],
+        appendAiUsage: row => { usage = row; },
+      },
+      threatIntel: null,
+      routerManager: { list: () => [] },
+    }), 'POST', '/api/ai/analyze', { from: 1000, to: 2000 });
+    assert.equal(result.status, 200);
+    assert.equal(usage.totalTokens, 0);
+    assert.equal(usage.estimatedCostUsd, null);
+    assert.equal(usage.pricingVersion, null);
   });
 
   it('generates an Ollama insight from anonymized aggregates', async () => {

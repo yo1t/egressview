@@ -6,7 +6,7 @@ const { parseRequest } = require('../http-validation');
 const { buildAiFacts } = require('../ai-facts');
 const { buildAiContext } = require('../ai-context');
 const { randomUUID } = require('node:crypto');
-const { monthlyRanges } = require('../ai-usage');
+const { monthlyRanges, pricingMetadata } = require('../ai-usage');
 const logger = require('../logger');
 
 const providerSchema = z.enum(['disabled', 'ollama', 'anthropic', 'openai', 'bedrock']);
@@ -78,7 +78,9 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
   const router = Router();
 
   function persistUsage(result, { kind, requestId = randomUUID(), conversationId = null } = {}) {
-    if (!result?.usage || typeof history?.appendAiUsage !== 'function') return;
+    if (!result || typeof history?.appendAiUsage !== 'function') return;
+    if (!result.usage && !result.text && result.verified !== true) return;
+    const usage = result.usage || { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     const pricing = result.pricing || {};
     try {
       history.appendAiUsage({
@@ -89,9 +91,9 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
         createdAt: result.generatedAt || Date.now(),
         provider: result.provider,
         model: result.model || '',
-        inputTokens: result.usage.inputTokens,
-        outputTokens: result.usage.outputTokens,
-        totalTokens: result.usage.totalTokens,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.totalTokens,
         estimatedCostUsd: Number.isFinite(result.estimatedCostUsd) ? result.estimatedCostUsd : null,
         pricingVersion: pricing.pricingVersion || null,
         inputUsdPerMillion: pricing.inputUsdPerMillion ?? null,
@@ -214,7 +216,7 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     try {
       const ranges = monthlyRanges(Date.now(), parsed.data.timezoneOffset);
       res.json({
-        pricing: { currency: 'USD', approximate: true },
+        pricing: { ...pricingMetadata(), approximate: true },
         current: { ...ranges.current, ...history.summarizeAiUsage(ranges.current.from, ranges.current.to) },
         previous: { ...ranges.previous, ...history.summarizeAiUsage(ranges.previous.from, ranges.previous.to) },
       });

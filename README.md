@@ -38,7 +38,7 @@ EgressView answers the question most home users can't ask: *what is each device 
 - **Manual threat investigation** — explicitly query AbuseIPDB, VirusTotal, or AlienVault OTX with server-side caching and rate limits ([guide](docs/manual-threat-investigation.md))
 - **Linux conntrack preview** — collect from Linux-based routers over SSH; Docker integration verified, hardware validation pending ([setup](docs/setup-conntrack.md))
 - **Mobile monitoring view** — check router health, Graph Map, Statistics, Connection Log, Devices, and Detection Log from a phone on your VPN/private network
-- **AI Insights start page** — opens with collection health, connections, devices, destinations, threats, and previous-period comparisons. Run manual analysis/chat through Ollama, Anthropic, OpenAI, or Amazon Bedrock, with monthly tokens/estimated cost and per-answer model/cost metadata ([setup guide](docs/setup-ai-insights.md))
+- **AI Insights start page** — opens with collection health, connections, devices, destinations, threats, and previous-period comparisons. Run manual analysis/chat through Ollama, Anthropic, OpenAI, or Amazon Bedrock, with versioned-catalog monthly tokens/estimated cost and per-answer model/cost metadata ([setup guide](docs/setup-ai-insights.md), [Bedrock production setup](docs/setup-bedrock.md))
 - **Instant Slack alerts** — DM the moment any device connects to a known C2 server or malware distribution host
 - **No hardware changes** — runs on any Mac, PC, or Raspberry Pi alongside your existing Yamaha RTX or Cisco IOS routers
 
@@ -56,6 +56,7 @@ EgressView answers the question most home users can't ask: *what is each device 
 - Uses **Graph Map** and **Statistics** for whole-network overview, then **Connection Log** and **Devices** for per-session and per-device drill-down
 - Optionally connects to an **ASUS WiFi access point** (used as AP/mesh, not as a router) to get WiFi client details (band, signal strength, traffic rates, AiMesh topology)
 - Keeps a **connection history** in **SQLite** (WAL mode, crash-safe; configurable retention up to 2 years)
+- Inventories normal and pre-migration backups, warns when the next migration lacks disk headroom, and offers dry-run cleanup that preserves verified restore points
 - **Connection log**: sortable/searchable table of all sessions with threat status badges; **App column** infers the application or service name from port number and destination hostname (APNs, FCM, AirPlay, MQTT/TLS, QUIC, iCloud, YouTube, AWS, Slack, Zoom, Tuya Smart, Gaijin/DCS, and more)
 - **🔔 Detection Log** — persistent history of all threat detections and new-device alerts, with per-column filter, sort, and click-to-detail popup; logged regardless of Slack configuration
 - **📡 Data Sources tab** — configure each data source (dnsmasq / [INSPECT] / [DHCPD]) independently from the settings UI

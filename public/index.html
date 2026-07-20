@@ -562,6 +562,7 @@
           <div class="form-group settings-form-top-8">
             <label class="form-label" data-i18n="settings.backup.generations">保持世代数</label>
             <select id="s-backup-generations" class="form-input">
+              <option value="2" data-i18n="settings.backup.gen2">2世代</option>
               <option value="3" data-i18n="settings.backup.gen3">3世代</option>
               <option value="5" data-i18n="settings.backup.gen5">5世代</option>
               <option value="7" selected data-i18n="settings.backup.gen7">7世代</option>
@@ -569,9 +570,27 @@
               <option value="14" data-i18n="settings.backup.gen14">14世代</option>
             </select>
           </div>
+          <div class="form-group settings-form-top-8">
+            <label class="form-label" data-i18n="settings.backup.storageLimit">バックアップ最大使用量</label>
+            <select id="s-backup-max-bytes" class="form-input">
+              <option value="0" selected data-i18n="settings.backup.storageUnlimited">制限なし（警告のみ）</option>
+              <option value="4294967296">4 GiB</option>
+              <option value="8589934592">8 GiB</option>
+              <option value="17179869184">16 GiB</option>
+            </select>
+          </div>
+          <label class="settings-check-label settings-form-top-8">
+            <input id="s-backup-auto-prune" type="checkbox">
+            <span data-i18n="settings.backup.autoPrune">検証済みの安全な候補だけを自動削除</span>
+          </label>
+          <p class="settings-field-hint" data-i18n="settings.backup.retentionSafety">通常バックアップ2世代と最新のmigrationバックアップ1世代は常に保護されます。</p>
           <button class="connect-btn settings-form-top-12" id="backup-config-save" data-i18n="settings.btn.save">保存</button>
           <div class="settings-status" id="backup-config-status"></div>
           <div class="backup-list-section">
+            <label class="form-label" data-i18n="settings.backup.capacity">容量診断</label>
+            <div id="backup-capacity-status" class="settings-status backup-capacity-status"></div>
+            <button class="connect-btn" id="backup-prune-btn" data-i18n="settings.backup.cleanup">安全な削除候補を確認</button>
+            <div class="settings-status" id="backup-prune-status"></div>
             <label class="form-label" data-i18n="settings.backup.list">バックアップ一覧</label>
             <div id="backup-list" class="backup-list"></div>
             <div class="backup-actions">

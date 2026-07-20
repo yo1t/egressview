@@ -56,6 +56,60 @@ refreshed by the SDK.
   that listing succeeding does **not** imply `bedrock:InvokeModel` is granted,
   which is why the connection test also performs a minimal generation call.
 
+### Least-privilege IAM example
+
+Limit the runtime role to the inference profile and foundation models it actually
+uses. The following is a skeleton for a `jp.` profile. Replace `ACCOUNT_ID`,
+`PROFILE_ID`, and `MODEL_ID`, and keep the destination Regions aligned with the
+profile's current definition.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeConfiguredProfile",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": "arn:aws:bedrock:ap-northeast-1:ACCOUNT_ID:inference-profile/PROFILE_ID"
+    },
+    {
+      "Sid": "InvokeOnlyThroughConfiguredProfile",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": [
+        "arn:aws:bedrock:ap-northeast-1::foundation-model/MODEL_ID",
+        "arn:aws:bedrock:ap-northeast-3::foundation-model/MODEL_ID"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "bedrock:InferenceProfileArn": "arn:aws:bedrock:ap-northeast-1:ACCOUNT_ID:inference-profile/PROFILE_ID"
+        }
+      }
+    },
+    {
+      "Sid": "DiscoverModelsAndProfiles",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:ListFoundationModels",
+        "bedrock:ListInferenceProfiles"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+Use the model ARNs returned by `GetInferenceProfile` to avoid manually guessing
+destination Regions. Compare the policy with the
+[AWS geographic-profile IAM example](https://docs.aws.amazon.com/bedrock/latest/userguide/geographic-cross-region-inference.html)
+and review it when the selected profile changes.
+
+Only when Guardrails are enabled, add `bedrock:ApplyGuardrail` for the selected
+guardrail ARN and, only for settings-page discovery, `bedrock:ListGuardrails`
+with `Resource: "*"`. Remove the discovery statement if model IDs are entered
+manually. Do not leave Marketplace subscription permissions on the runtime role.
+
 ## Marketplace subscription (first-time only)
 
 Third-party models served through **AWS Marketplace (e.g. Anthropic Claude)**
@@ -157,6 +211,57 @@ guardrail is passed to Converse via `guardrailConfig`. Requires
 > If in-Japan data residency is required, either keep Guardrails **off**, or use
 > a **single-Region guardrail in the calling region** (e.g. ap-northeast-1)
 > rather than a cross-Region guardrail profile.
+
+## Model invocation logging (optional, off by default)
+
+Bedrock can deliver Converse invocation records to CloudWatch Logs, S3, or both.
+This is an account-and-Region setting in AWS, not an EgressView setting. **When
+content logging is enabled, the saved request and response can include the IPs,
+hostnames, device names, and MAC addresses sent by EgressView.** Decide retention,
+reader roles, KMS encryption, and S3 lifecycle before enabling it.
+See the [AWS model invocation logging guide](https://docs.aws.amazon.com/bedrock/latest/userguide/model-invocation-logging.html).
+
+1. In the target Region, open *Bedrock → Settings → Model invocation logging*.
+2. Select only required modalities and a CloudWatch Logs destination, a same-account/same-Region S3 bucket, or both.
+3. Configure log-group retention and S3 lifecycle, Block Public Access, and SSE-KMS when required.
+4. Alarm on `AWS/Bedrock` delivery-failure metrics and verify that a test invocation arrives.
+
+If full content is not required, leave content logging off and use the standard
+Bedrock runtime metrics for invocation count, latency, tokens, and errors. Turning
+logging off does not delete existing records; retention/lifecycle on the destination
+remains necessary.
+
+## VPC interface endpoints (PrivateLink, optional)
+
+For a private-subnet deployment, create at least the
+`com.amazonaws.REGION.bedrock-runtime` interface endpoint and enable Private DNS.
+EgressView then uses the private route for Converse without a code change. Add
+`com.amazonaws.REGION.bedrock` when model or Guardrail discovery must also remain private.
+See the [AWS PrivateLink guide for Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/vpc-interface-endpoints.html).
+
+- Allow TCP 443 from the EgressView host in the endpoint security group.
+- Restrict the endpoint policy to the runtime role, `bedrock:InvokeModel`, and the selected model/profile.
+- Verify that standard `bedrock-runtime.REGION.amazonaws.com` DNS resolves to private addresses in the subnet.
+- EgressView does not currently accept a custom endpoint URL, so Private DNS is recommended.
+- A cross-Region inference profile enters through the source-Region endpoint and then routes inside AWS; separately verify the profile's residency boundary.
+
+## SDK retries
+
+The default `standard` mode uses exponential backoff with jitter and is recommended
+for normal workloads. Consider `adaptive` only for a throttling-heavy, latency-tolerant,
+single-resource workload because it may delay the initial request.
+The [AWS SDK retry behavior guide](https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html)
+documents `standard` as the default and `adaptive` as a specialized mode.
+
+```dotenv
+AWS_RETRY_MODE=standard
+AWS_MAX_ATTEMPTS=3
+```
+
+Adaptive mode is not a general performance switch. EgressView's 30-second timeout
+and single-flight limit still apply, so excessive attempts may hit the application
+timeout before SDK retries finish. Compare throttling, latency, and errors in
+CloudWatch after a change, and return to `standard` if it does not help.
 
 ## Connection test
 

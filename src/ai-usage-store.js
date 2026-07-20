@@ -27,6 +27,8 @@ function createAiUsageStore({ getDb }) {
              COALESCE(SUM(outputTokens), 0) AS outputTokens,
              COALESCE(SUM(totalTokens), 0) AS totalTokens,
              COALESCE(SUM(CASE WHEN estimatedCostUsd IS NOT NULL THEN 1 ELSE 0 END), 0) AS pricedRequests,
+             COALESCE(SUM(CASE WHEN totalTokens = 0 THEN 1 ELSE 0 END), 0) AS usageMissingRequests,
+             COALESCE(SUM(CASE WHEN totalTokens > 0 AND estimatedCostUsd IS NULL THEN 1 ELSE 0 END), 0) AS unknownPriceRequests,
              COALESCE(SUM(estimatedCostUsd), 0) AS estimatedCostUsd
       FROM ai_usage
       WHERE createdAt >= ? AND createdAt < ?

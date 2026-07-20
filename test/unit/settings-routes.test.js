@@ -147,16 +147,20 @@ describe('config routes', () => {
 
 describe('backup configuration route', () => {
   it('coerces positive integer strings through the shared schema', async () => {
-    let config = { intervalHours: 24, maxGenerations: 7 };
+    let config = { intervalHours: 24, maxGenerations: 7, maxBackupBytes: 0, autoPrune: false };
     const backup = {
       getConfig: () => ({ ...config }),
       configure: updates => { config = { ...config, ...updates }; },
       stopPeriodicBackup() {}, startPeriodicBackup() {},
     };
     const app = mount(backupRoutes({ requireAdmin, backup, saveConfig() {}, appRoot: process.cwd() }));
-    const result = await request(app, 'POST', '/api/backup/config', { intervalHours: '12', maxGenerations: '3' });
+    const result = await request(app, 'POST', '/api/backup/config', {
+      intervalHours: '12', maxGenerations: '3', maxBackupBytes: '4294967296', autoPrune: true,
+    });
     assert.equal(result.status, 200);
-    assert.deepEqual(config, { intervalHours: 12, maxGenerations: 3 });
+    assert.deepEqual(config, {
+      intervalHours: 12, maxGenerations: 3, maxBackupBytes: 4294967296, autoPrune: true,
+    });
   });
   it('rolls back backup scheduling when persistence fails', async () => {
     let config = { intervalHours: 24, maxGenerations: 7 };
@@ -197,6 +201,37 @@ describe('backup configuration route', () => {
     });
     assert.equal(status, 400);
     assert.deepEqual(config, { intervalHours: 24, maxGenerations: 7 });
+  });
+
+  it('previews and executes safe backup cleanup through separate requests', async () => {
+    const calls = [];
+    const plan = { candidates: [{ name: 'old.db', size: 100 }], candidateBytes: 100 };
+    const backup = {
+      previewPrune: () => { calls.push('preview'); return plan; },
+      pruneBackups: () => { calls.push('execute'); return { deleted: plan.candidates, deletedBytes: 100 }; },
+    };
+    const app = mount(backupRoutes({ requireAdmin, backup, appRoot: process.cwd() }));
+
+    const preview = await request(app, 'POST', '/api/backup/prune', { execute: false });
+    const execute = await request(app, 'POST', '/api/backup/prune', { execute: true });
+
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.dryRun, true);
+    assert.equal(execute.status, 200);
+    assert.equal(execute.body.dryRun, false);
+    assert.deepEqual(calls, ['preview', 'execute']);
+  });
+
+  it('rejects malformed prune confirmation without touching backups', async () => {
+    let called = false;
+    const backup = {
+      previewPrune: () => { called = true; },
+      pruneBackups: () => { called = true; },
+    };
+    const app = mount(backupRoutes({ requireAdmin, backup, appRoot: process.cwd() }));
+    const result = await request(app, 'POST', '/api/backup/prune', { execute: 'yes' });
+    assert.equal(result.status, 400);
+    assert.equal(called, false);
   });
 
   it('closes every DB connection before restore and reopens them afterward', async () => {

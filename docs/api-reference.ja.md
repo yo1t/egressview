@@ -112,12 +112,13 @@ EgressViewには、Yamaha/Ciscoを混在して最大10台登録できます。
 
 ## Backupとrestore
 
-- `GET /api/backup/list`はgenerationと保持設定を返します。
+- `GET /api/backup/list`は通常generation、保持設定、通常／pre-migration inventory、ディスク余力、次回migration準備状態を返します。軽量inventoryでは、検証付きcleanup previewを実行するまで`integrity: "unchecked"`です。
 - `POST /api/backup/create`は整合性のあるSQLite snapshotを作成・検証します。
 - `GET /api/backup/download/:name`は指定generationをdownloadします。
 - `POST /api/backup/restore`は`{ "name": "..." }`を使います。
 - `POST /api/backup/upload`はmultipartではなく、最大100 MBのSQLite fileをraw bodyで受け取ります。
-- `POST /api/backup/config`は正の`intervalHours`と`maxGenerations`を受け取ります。
+- `POST /api/backup/config`は正の`intervalHours`、2以上の`maxGenerations`、0以上の`maxBackupBytes`（`0`は上限無効）、booleanの`autoPrune`を受け取ります。自動pruneは既定で無効です。
+- `POST /api/backup/prune`は`{ "execute": false }`で検証付きdry-run、`{ "execute": true }`で確認済みcleanupを実行します。通常2世代と最新の検証済みmigration世代を常に残し、破損・未検証・変更済み・一時ファイルは削除しません。
 
 ## AIプロバイダー設定
 
@@ -130,7 +131,7 @@ AI洞察はローカル集計を常時表示し、利用者が明示的に実行
 - `POST /api/ai/test`は空のJSON objectを受け付けます。fetch系providerは保存済み設定で最大200件のモデルIDを取得します（timeout 10秒、応答上限1MB）。Bedrockはfail-openのmodel discoveryに加え、`bedrock:InvokeModel`権限を確認するため固定の短い文をConverseへ送信します（通信・端末・脅威データは送信しません）。
 - `GET /api/ai/facts`はepoch millisecondsの`from`が必須で、`to`は任意です。接続、端末、宛先、脅威レベルについて、選択期間と直前の同一期間の件数、およびcredentialを含まないrouter収集状態を返します。期間上限は14日で、AI providerへは送信しません。
 - `POST /api/ai/analyze`は`from`と任意の`to`を受け付け、通信先IP・ホスト名・端末名・MACを含む接続集計を選択providerへ送信します。認証情報、router管理情報、raw logは送信しません。外部送信を伴うprovider（Anthropic/OpenAI/Bedrock）では保存済み同意に加えて要求ごとの`cloudConsentConfirmed: true`が必須です。期間上限は14日、timeoutは30秒、サーバー全体の同時分析は1件です。
-- `GET /api/ai/usage/monthly`はbrowserの`timezoneOffset`（分）を受け取り、現地暦の今月・先月について呼び出し回数とtoken合計を返します。成功したOllama / Anthropic / OpenAI / Bedrock呼び出しはprovider/modelとUSD概算に使った価格表versionとともにv7 SQLiteへ追記します。未知modelの料金は推測せず別扱いとし、Bedrock Guardrailsなどの追加料金は含みません。会話履歴取得時はassistant回答へ同じrequest IDの`usageInputTokens` / `usageOutputTokens` / `usageTotalTokens` / `estimatedCostUsd` / `pricingVersion`を付加し、記録開始前の履歴はprovider/modelとnullのusageだけを返します。UIは英語で`$`、日本語で明示的な`USD`表記を使い、為替換算しません。
+- `GET /api/ai/usage/monthly`はbrowserの`timezoneOffset`（分）を受け取り、現地暦の今月・先月について呼び出し回数とtoken合計を返します。応答の`pricing`にはcatalog version、基準日、根拠URLを含みます。成功したOllama / Anthropic / OpenAI / Bedrock呼び出しはprovider/modelと呼び出し時点の価格表version・単価をv7 SQLiteへ追記するため、料金表更新後も過去月を再計算しません。未知model料金の`unknownPriceRequests`とproviderがusageを返さなかった`usageMissingRequests`を区別し、0 USDと誤表示しません。Bedrock Guardrailsなどの追加料金は含みません。会話履歴取得時はassistant回答へ同じrequest IDの`usageInputTokens` / `usageOutputTokens` / `usageTotalTokens` / `estimatedCostUsd` / `pricingVersion`を付加し、記録開始前の履歴はprovider/modelとnullのusageだけを返します。UIは英語で`$`、日本語で明示的な`USD`表記を使い、為替換算しません。
 - `POST /api/ai/chat`は最大4,000文字の`message`、期間、任意の`conversationId`と`requestId`を受け付けます。user行をAI呼び出し前にv6 SQLiteへ追記し、完了後にassistant行、失敗時は本文を含まない失敗行を追記します。同じ`requestId + role`は重複しません。
 - `GET /api/ai/conversations`は最大100会話と保存件数・本文bytesを返します。`GET /api/ai/conversations/:id`は最大500メッセージを追記順に返し、`DELETE /api/ai/conversations/:id`だけが会話を明示削除します。再起動や設定変更で既存行を更新・truncateしません。
 
@@ -140,7 +141,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 
 ## Endpoint一覧
 
-実装済みREST API 68本の全一覧です。**公開**以外はすべて`X-Admin-Token`が必要です。
+実装済みREST API 69本の全一覧です。**公開**以外はすべて`X-Admin-Token`が必要です。
 
 | 分類 | Methodとpath | Access |
 |---|---|---|
@@ -183,6 +184,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Backup | `POST /api/backup/restore` | 認証必須 |
 | Backup | `POST /api/backup/upload` | 認証必須 |
 | Backup | `POST /api/backup/config` | 認証必須 |
+| Backup | `POST /api/backup/prune` | 認証必須 |
 | 全般設定 | `GET /api/status` | 認証必須 |
 | 全般設定 | `POST /api/config/general` | 認証必須 |
 | Data source | `GET /api/config/datasources` | 認証必須 |

@@ -3,6 +3,34 @@ import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 
 export function initBackupSettings(showStatus) {
+  function formatBytes(value) {
+    const bytes = Number(value) || 0;
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+    let scaled = bytes;
+    let unit = -1;
+    do { scaled /= 1024; unit += 1; } while (scaled >= 1024 && unit < units.length - 1);
+    return `${scaled.toFixed(scaled >= 10 ? 1 : 2)} ${units[unit]}`;
+  }
+
+  function renderCapacity(diagnostics) {
+    const status = document.getElementById('backup-capacity-status');
+    if (!status || !diagnostics?.summary) return;
+    const normal = diagnostics.entries.filter(entry => entry.kind === 'normal').length;
+    const migration = diagnostics.entries.filter(entry => entry.kind === 'migration').length;
+    const summary = diagnostics.summary;
+    const key = summary.migrationReady ? 'settings.backup.capacityReady' : 'settings.backup.capacityLow';
+    status.textContent = tVars(key, {
+      backup: formatBytes(summary.backupBytes),
+      free: formatBytes(summary.freeBytes),
+      required: formatBytes(summary.migrationRequiredBytes),
+      shortfall: formatBytes(summary.shortfallBytes),
+      normal,
+      migration,
+    });
+    status.className = `settings-status multiline is-visible ${summary.migrationReady ? 'ok' : 'err'} backup-capacity-status`;
+  }
+
   async function backupDownload(name) {
     try {
       const response = await apiFetch(_BASE + '/api/backup/download/' + encodeURIComponent(name));
@@ -43,7 +71,18 @@ export function initBackupSettings(showStatus) {
       if (data.config) {
         document.getElementById('s-backup-interval').value = String(data.config.intervalHours);
         document.getElementById('s-backup-generations').value = String(data.config.maxGenerations);
+        const maxBytes = document.getElementById('s-backup-max-bytes');
+        const configuredBytes = String(data.config.maxBackupBytes || 0);
+        if (![...maxBytes.options].some(option => option.value === configuredBytes)) {
+          const custom = document.createElement('option');
+          custom.value = configuredBytes;
+          custom.textContent = formatBytes(data.config.maxBackupBytes);
+          maxBytes.appendChild(custom);
+        }
+        maxBytes.value = configuredBytes;
+        document.getElementById('s-backup-auto-prune').checked = data.config.autoPrune === true;
       }
+      renderCapacity(data.diagnostics);
       if (!data.backups?.length) {
         const empty = document.createElement('div');
         empty.className = 'backup-list-empty';
@@ -81,6 +120,8 @@ export function initBackupSettings(showStatus) {
         body: JSON.stringify({
           intervalHours: parseInt(document.getElementById('s-backup-interval').value, 10),
           maxGenerations: parseInt(document.getElementById('s-backup-generations').value, 10),
+          maxBackupBytes: Number(document.getElementById('s-backup-max-bytes').value),
+          autoPrune: document.getElementById('s-backup-auto-prune').checked,
         }),
       });
       showStatus('backup-config-status', t('settings.status.saved'), true);
@@ -96,6 +137,41 @@ export function initBackupSettings(showStatus) {
       loadBackupList();
     } catch (error) {
       showStatus('backup-action-status', tVars('settings.error.withMessage', { message: error.message }), false);
+    }
+  });
+
+  document.getElementById('backup-prune-btn').addEventListener('click', async () => {
+    const button = document.getElementById('backup-prune-btn');
+    button.disabled = true;
+    try {
+      const previewResponse = await apiFetch(_BASE + '/api/backup/prune', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execute: false }),
+      });
+      const preview = await previewResponse.json();
+      if (!previewResponse.ok) throw new Error(preview.error || t('settings.error.generic'));
+      const plan = preview.plan;
+      if (!plan.candidates.length) {
+        showStatus('backup-prune-status', t(plan.blocked ? 'settings.backup.cleanupBlocked' : 'settings.backup.cleanupNone'), !plan.blocked);
+        return;
+      }
+      if (!confirm(tVars('settings.backup.cleanupConfirm', {
+        count: plan.candidates.length,
+        size: formatBytes(plan.candidateBytes),
+      }))) return;
+      const executeResponse = await apiFetch(_BASE + '/api/backup/prune', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execute: true }),
+      });
+      const executed = await executeResponse.json();
+      if (!executeResponse.ok) throw new Error(executed.error || t('settings.error.generic'));
+      showStatus('backup-prune-status', tVars('settings.backup.cleanupDone', {
+        count: executed.result.deleted.length,
+        size: formatBytes(executed.result.deletedBytes),
+      }), true);
+      await loadBackupList();
+    } catch (error) {
+      showStatus('backup-prune-status', tVars('settings.error.withMessage', { message: error.message }), false);
+    } finally {
+      button.disabled = false;
     }
   });
 
