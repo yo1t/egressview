@@ -957,6 +957,10 @@ describe('Server runtime invariants', () => {
       'backups should follow the selected runtime DB path');
     assert.match(serverJs, /backup\.configure\(\{\s*backupDir:\s*DEMO_BACKUP_DIR\s*\}\)/,
       'demo mode backups should not use the production backup directory');
+    assert.match(serverJs, /DEMO_RUNTIME_DB_PATH\s*=\s*path\.join\(DEMO_RUNTIME_DIR,\s*['"]runtime\.db['"]\)/,
+      'demo runtime DB should live in its dedicated ignored directory');
+    assert.match(serverJs, /DEMO_BACKUP_DIR\s*=\s*path\.join\(DEMO_RUNTIME_DIR,\s*['"]backups['"]\)/,
+      'demo backups should live beside the isolated runtime DB');
   });
 
   it('history default DB path honors the documented EGRESSVIEW_DB fallback', () => {
