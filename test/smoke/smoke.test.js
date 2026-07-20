@@ -767,6 +767,59 @@ test('AI insights renders local facts and links threats to the filtered log', as
   await expect(page.locator('#log-container')).toHaveClass(/view-active/);
 });
 
+test('AI chat keeps a persisted question visible when provider inference fails', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  let questionPersisted = false;
+  await page.route(/\/api\/ai\/conversations(?:\/conversation-1)?(?:\?|$)/, route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/conversation-1')) {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          messages: [
+            { role: 'user', body: 'Which connection should I review?', status: 'completed' },
+            { role: 'assistant', body: '', status: 'failed', provider: 'openai', model: 'gpt-5-mini' },
+          ],
+        }),
+      });
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        conversations: questionPersisted
+          ? [{ conversationId: 'conversation-1', createdAt: Date.now(), messageCount: 2 }]
+          : [],
+        storage: questionPersisted
+          ? { conversations: 1, messages: 2, bodyBytes: 33 }
+          : { conversations: 0, messages: 0, bodyBytes: 0 },
+      }),
+    });
+  });
+  await page.route(/\/api\/ai\/chat$/, route => {
+    questionPersisted = true;
+    return route.fulfill({
+      status: 502,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: 'Provider temporarily unavailable',
+        conversationId: 'conversation-1',
+      }),
+    });
+  });
+
+  await authPage(page);
+  await page.click('#btn-ai');
+  await page.locator('#ai-chat-input').fill('Which connection should I review?');
+  await page.click('#ai-chat-send-btn');
+
+  await expect(page.locator('#ai-error')).toContainText('Provider temporarily unavailable');
+  await expect(page.locator('#ai-chat-messages .is-user')).toHaveText('Which connection should I review?');
+  await expect(page.locator('#ai-chat-messages .is-assistant')).toHaveClass(/is-failed/);
+  await expect(page.locator('#ai-chat-messages .is-assistant')).not.toHaveClass(/is-pending/);
+  await expect(page.locator('#ai-conversation-select')).toHaveValue('conversation-1');
+});
+
 // (7) Notification log detail: clicking a row opens it, the top-right X closes it
 test('notification log detail popup opens and closes', async ({ page }) => {
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');

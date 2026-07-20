@@ -14,6 +14,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 
 class FakeElement {
   constructor() {
     this.textContent = '';
+    this.value = '';
     this.disabled = false;
     this.scrollTop = 0;
     this.scrollHeight = 100;
@@ -29,9 +30,10 @@ class FakeElement {
   set className(value) { this._classes = new Set(value.split(/\s+/).filter(Boolean)); }
   get className() { return [...this._classes].join(' '); }
   replaceChildren(...children) { this.children = children; }
+  append(...children) { this.children.push(...children); }
 }
 
-function harness() {
+function harness({ apiFetch = async () => { throw new Error('Unexpected request'); } } = {}) {
   const ids = new Map();
   const cards = new Map();
   const get = id => {
@@ -39,9 +41,12 @@ function harness() {
     return ids.get(id);
   };
   const context = {
-    Intl, URLSearchParams, Date, currentLang: 'en',
+    Intl, URLSearchParams, Date, AbortController, Uint8Array, Math, currentLang: 'en', _BASE: '',
     t: key => key,
     tVars: (key, values) => `${key}:${JSON.stringify(values)}`,
+    apiFetch,
+    getTimeRange: () => ({ from: 1, to: 2 }),
+    crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
     document: {
       getElementById: get,
       createElement: () => new FakeElement(),
@@ -142,5 +147,59 @@ describe('AI insights view', () => {
       usageInputTokens: 0, usageOutputTokens: 0, usageTotalTokens: 0, estimatedCostUsd: null,
     }]);
     assert.match(get('ai-chat-messages').children[0].children[1].textContent, /ai\.chat\.usageUnavailable/);
+  });
+
+  it('keeps a server-persisted question visible when provider inference fails', async () => {
+    const calls = [];
+    const apiFetch = async (url, options = {}) => {
+      calls.push({ url, options });
+      if (url.endsWith('/api/ai/chat')) {
+        return {
+          ok: false,
+          json: async () => ({ conversationId: 'conversation-1', error: 'Provider request failed (400)' }),
+        };
+      }
+      if (url.endsWith('/api/ai/conversations')) {
+        return {
+          ok: true,
+          json: async () => ({
+            conversations: [{ conversationId: 'conversation-1', createdAt: 1, messageCount: 2 }],
+            storage: { conversations: 1, messages: 2, bodyBytes: 12 },
+          }),
+        };
+      }
+      if (url.endsWith('/api/ai/conversations/conversation-1')) {
+        return {
+          ok: true,
+          json: async () => ({ messages: [
+            { role: 'user', status: 'complete', body: 'What changed?' },
+            { role: 'assistant', status: 'failed', body: null, provider: 'openai', model: 'gpt-test' },
+          ] }),
+        };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
+    const { context, get } = harness({ apiFetch });
+    get('ai-chat-input').value = 'What changed?';
+
+    await context.sendChatMessage();
+
+    assert.equal(get('ai-chat-input').value, '');
+    assert.equal(get('ai-conversation-select').value, 'conversation-1');
+    assert.equal(get('ai-chat-messages').children[0].children[0].textContent, 'What changed?');
+    assert.equal(get('ai-chat-messages').children[1].children[0].textContent, 'ai.chat.failed');
+    assert.equal(get('ai-error').textContent, 'Provider request failed (400)');
+    assert.equal(calls.length, 3);
+  });
+
+  it('restores the question when the request fails before server persistence', async () => {
+    const { context, get } = harness({ apiFetch: async () => { throw new Error('network unavailable'); } });
+    get('ai-chat-input').value = 'Can I retry this?';
+
+    await context.sendChatMessage();
+
+    assert.equal(get('ai-chat-input').value, 'Can I retry this?');
+    assert.equal(get('ai-chat-messages').children.length, 0);
+    assert.equal(get('ai-error').textContent, 'network unavailable');
   });
 });
