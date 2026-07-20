@@ -285,12 +285,17 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     }
     const publicConfig = aiProvider.getPublicConfig();
     if (publicConfig.provider === 'disabled') return res.status(400).json({ error: 'AI provider is disabled' });
-    const conversationId = parsed.data.conversationId || randomUUID();
+    let conversationId = parsed.data.conversationId || randomUUID();
     const requestId = parsed.data.requestId || randomUUID();
     const model = publicConfig.models[publicConfig.provider] || '';
     const existingConversation = history.getConversation(conversationId);
+    let startedNewConversation = false;
     if (existingConversation && (existingConversation.provider !== publicConfig.provider || existingConversation.model !== model)) {
-      return res.status(409).json({ error: 'Continue this conversation with its original provider and model' });
+      // A provider/model switch must not mix identities inside an append-only
+      // conversation. Preserve the old history and continue the question in a
+      // fresh conversation instead of rejecting an otherwise valid request.
+      conversationId = randomUUID();
+      startedNewConversation = true;
     }
     history.createConversation({
       conversationId, createdAt: Date.now(), provider: publicConfig.provider, model, rangeFrom: from, rangeTo: to,
@@ -335,6 +340,7 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
         success: true,
         conversationId,
         requestId,
+        startedNewConversation,
         message: assistant,
         usage: response.usage,
         estimatedCostUsd: response.estimatedCostUsd,
@@ -346,7 +352,9 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
         status: 'failed', errorCode: error.code || error.name || 'AI_ERROR',
       });
       const status = error.code === 'AI_BUSY' ? 409 : error.code === 'AI_CONSENT_REQUIRED' ? 403 : 400;
-      res.status(status).json({ success: false, conversationId, requestId, error: error.message });
+      res.status(status).json({
+        success: false, conversationId, requestId, startedNewConversation, error: error.message,
+      });
     }
   });
 
