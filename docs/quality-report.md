@@ -158,10 +158,10 @@ The remaining gaps are typical for a home-lab/SOHO network monitoring tool and c
 | Quality Characteristic | Score | Key Strengths | Key Gaps |
 |---|---|---|---|
 | Functional Suitability | 9/10 | 73 HTTP endpoints, 15 pollers, MCP server, AI insight tab (multi-provider), CSV export | No OpenAPI spec |
-| Performance Efficiency | 9/10 | Multi-layer caching, WAL, compression, batching, dedup, bounded summaries, and worker-isolated backup verification | Pending re-verification with the 4+ GB EC2 backup set |
+| Performance Efficiency | 9/10 | Multi-layer caching, WAL, compression, batching, dedup, bounded summaries, and worker-isolated backup verification | A few 3-second probe timeouts under full EC2 backup verification load |
 | Compatibility | 8/10 | Node 22/24, JA/EN i18n, OS-independent, Linux conntrack support | No Docker |
 | Usability | 9/10 | Demo mode, .env.example, auto-generated password, MCP integration, AI insights, API/architecture docs | No one-click deploy |
-| Reliability | 9/10 | Graceful shutdown, auto-backup, DB migration, AbortSignal, single-flight prune cancellation/timeouts, health/readiness | Pending post-deploy readiness verification on EC2 |
+| Reliability | 9/10 | Graceful shutdown, auto-backup, DB migration, AbortSignal, single-flight prune cancellation/timeouts, health/readiness | No HTTP request correlation ID yet |
 | Security | 9/10 | OWASP ASVS L1 compliant (13/14), innerHTML audit, zod rollout (77 schemas) | No explicit CSRF |
 | Maintainability | 9/10 | 79 modules, 92.0% test ratio, split refactors, http-validation helper, _resetForTest pattern | No TypeScript |
 | Portability | 7/10 | Pure Node.js, ENV config, OS-independent | No Docker/systemd |
