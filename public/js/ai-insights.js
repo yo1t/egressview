@@ -236,6 +236,16 @@ function renderPendingExchange(userText) {
   container.scrollTop = container.scrollHeight;
 }
 
+function markPendingExchangeFailed() {
+  const container = document.getElementById('ai-chat-messages');
+  const pending = [...container.children].reverse()
+    .find(element => element.classList.contains('is-pending'));
+  if (!pending) return;
+  pending.classList.remove('is-pending');
+  pending.classList.add('is-failed');
+  pending.textContent = t('ai.chat.failed');
+}
+
 async function loadConversation(conversationId) {
   activeConversationId = conversationId || null;
   if (!activeConversationId) {
@@ -289,6 +299,7 @@ async function sendChatMessage() {
   renderPendingExchange(message);
   const error = document.getElementById('ai-error');
   error.classList.remove('is-visible');
+  let persistedByServer = false;
   try {
     const response = await apiFetch(`${_BASE}/api/ai/chat`, {
       method: 'POST',
@@ -309,16 +320,35 @@ async function sendChatMessage() {
       signal: chatController.signal,
     });
     const body = await response.json().catch(() => ({}));
+    // The server persists the user message before invoking the provider and
+    // returns its conversationId even when inference fails. Keep that ID so an
+    // error response reloads the durable question instead of clearing it.
+    if (body.conversationId) {
+      activeConversationId = body.conversationId;
+      persistedByServer = true;
+    }
     if (!response.ok) throw new Error(body.error || t('ai.chat.failed'));
-    activeConversationId = body.conversationId;
     await loadConversations();
     await refreshAiUsage();
   } catch (cause) {
     error.textContent = cause.message || t('ai.chat.failed');
     error.classList.add('is-visible');
-    // Drop the optimistic bubbles: restore the real conversation, or clear.
-    if (activeConversationId) await loadConversation(activeConversationId).catch(() => {});
-    else renderChatMessages([]);
+    if (persistedByServer) {
+      // Show the append-only user/failed-assistant records written by the
+      // server. If that reload also fails, keep the optimistic question visible
+      // and replace only the thinking indicator with a failed state.
+      try {
+        await loadConversations();
+      } catch {
+        markPendingExchangeFailed();
+      }
+    } else {
+      // The request did not reach a persistence boundary. Restore the previous
+      // conversation and put the question back so the user can retry it.
+      if (activeConversationId) await loadConversation(activeConversationId).catch(() => {});
+      else renderChatMessages([]);
+      input.value = message;
+    }
   } finally {
     chatController = null;
     button.disabled = false;

@@ -16,6 +16,7 @@ All notable changes to EgressView are documented here.
 
 ### Security and Reliability
 
+- Preserved AI chat questions when provider generation fails after server-side persistence, and restored unsent questions to the input when a request fails before persistence.
 - Made every device-note write path fail closed: failed writes restore the previous runtime snapshot, suppress success notifications, and prevent dependent device merges from starting.
 - Replaced ambiguous 8-second literals with domain-owned timeout and input-limit constants while preserving existing values, abort behavior, and error contracts.
 - Completed strict Zod request validation across all 13 endpoint-bearing route modules. Unknown fields, arrays or objects supplied for scalar parameters, and oversized values are rejected before route logic runs while existing SSRF checks, defaults, limits, and error shapes are preserved.
