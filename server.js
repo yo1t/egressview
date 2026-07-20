@@ -572,6 +572,10 @@ server.listen(PORT, HOST, () => {
 
   if (!DEMO_MODE) {
     logger.info(`Router IP: ${asus.getRouterIp()}`);
+    if (asus.isEnabled() && asus.getUser() && asus.hasPass()) {
+      logger.info('[asus] Restoring polling from saved configuration');
+      asus.startPolling(POLL_INTERVAL);
+    }
     deviceId.loadOuiDb();
     dnsmasqLog.start();
     inspectSyslog.start();

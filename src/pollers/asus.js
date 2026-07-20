@@ -13,6 +13,7 @@ let asusEnabled = false;
 let lastAsusUser = '';
 let lastAsusPass = '';
 let pollTimer = null;
+let pollInFlight = null;
 let prevNetdev = {};
 let prevPollTime = Date.now();
 let latestAsusClients = [];
@@ -221,7 +222,7 @@ async function ensureAsusAuth() {
   }
 }
 
-async function poll() {
+async function runPoll() {
   if (!await ensureAsusAuth()) return;
   try {
     const now = Date.now();
@@ -270,10 +271,19 @@ async function poll() {
   }
 }
 
+function poll() {
+  // setInterval does not wait for the previous callback. Keep one ASUS request
+  // batch in flight so a slow router cannot trigger overlapping token renewals
+  // or duplicate appGet.cgi requests.
+  if (pollInFlight) return pollInFlight;
+  pollInFlight = runPoll().finally(() => { pollInFlight = null; });
+  return pollInFlight;
+}
+
 function startPolling(intervalMs) {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(poll, intervalMs);
-  poll();
+  return poll();
 }
 
 function stopPolling() {
