@@ -57,6 +57,8 @@ describe('configure / getConfig', () => {
     const c = backup.getConfig();
     assert.equal(c.intervalHours, 24);
     assert.equal(c.maxGenerations, 7);
+    assert.equal(c.maxBackupBytes, 0);
+    assert.equal(c.autoPrune, false);
   });
 
   it('configure() updates intervalHours', () => {
@@ -219,19 +221,19 @@ describe('createBackup', () => {
   });
 });
 
-describe('pruneOldBackups', () => {
+describe('automatic backup prune', () => {
   before(() => {
     setup();
-    backup.configure({ maxGenerations: 3 });
+    backup.configure({ maxGenerations: 3, autoPrune: true });
     fs.mkdirSync(backupDir, { recursive: true });
   });
   after(teardown);
 
-  it('removes oldest files when count exceeds maxGenerations', async () => {
+  it('removes only verified oldest files when explicitly enabled', async () => {
     for (let i = 1; i <= 5; i++) {
-      fs.writeFileSync(path.join(backupDir, `egressview_2025-01-0${i}_00-00-00.db`), 'x');
+      makeRealDb(path.join(backupDir, `egressview_2025-01-0${i}_00-00-00.db`), `generation-${i}`);
     }
-    // Trigger prune by creating one more backup (createBackup calls pruneOldBackups)
+    // Creating a generation runs the verified prune plan only after opt-in.
     await backup.createBackup();
     const list = backup.listBackups();
     assert.ok(list.length <= 3, `Expected ≤3 backups, got ${list.length}`);

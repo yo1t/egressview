@@ -41,8 +41,12 @@ tokens, and an estimated USD cost. English uses `$0.0012`; Japanese uses explici
 `USD 0.0012` notation. Language selection never performs currency conversion.
 
 Estimates use the versioned embedded rate table effective when the request was
-recorded. Unknown models keep their tokens and show an unavailable price rather
-than zero. Guardrails, cached-token tiers, batch/service tiers, tax, exchange
+recorded. The catalog lives in `src/data/ai-pricing.json`; every entry requires
+a provider/model matcher, rates, an effective date, and a source URL. Updating it
+does not recalculate older rows because each usage row keeps the version and rates
+used at invocation time. Unknown models keep their tokens and show an unavailable
+price rather than zero. Successful calls where the provider omitted usage are
+counted separately from unknown-price calls. Guardrails, cached-token tiers, batch/service tiers, tax, exchange
 rates, provider/AWS contractual discounts, and provider-side charges for failed
 requests are excluded. Use the provider billing console for invoice reconciliation.
 

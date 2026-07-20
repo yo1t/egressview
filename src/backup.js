@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
+const backupInventory = require('./backup-inventory');
 
 const DEFAULT_DB_PATH    = path.join(__dirname, '..', '.egressview.db');
 const DEFAULT_BACKUP_DIR = path.join(__dirname, '..', '.egressview-backups');
@@ -16,12 +17,16 @@ let BACKUP_DIR = DEFAULT_BACKUP_DIR;
 let backupIntervalTimer = null;
 let backupIntervalHours = 24; // default: daily
 let maxGenerations = 7;       // default: 7 backups
+let maxBackupBytes = 0;       // default: no storage cap
+let autoPrune = false;        // explicit opt-in only
 
 function configure(cfg) {
   if (cfg.dbPath) DB_PATH = cfg.dbPath;
   if (cfg.backupDir) BACKUP_DIR = cfg.backupDir;
-  if (cfg.intervalHours) backupIntervalHours = cfg.intervalHours;
-  if (cfg.maxGenerations) maxGenerations = cfg.maxGenerations;
+  if (Number.isInteger(cfg.intervalHours) && cfg.intervalHours > 0) backupIntervalHours = cfg.intervalHours;
+  if (Number.isInteger(cfg.maxGenerations) && cfg.maxGenerations >= 2) maxGenerations = cfg.maxGenerations;
+  if (Number.isSafeInteger(cfg.maxBackupBytes) && cfg.maxBackupBytes >= 0) maxBackupBytes = cfg.maxBackupBytes;
+  if (typeof cfg.autoPrune === 'boolean') autoPrune = cfg.autoPrune;
 }
 
 function ensureBackupDir() {
@@ -86,7 +91,19 @@ async function createBackup() {
     await src.backup(backupPath);
     verifyDbFile(backupPath);
     logger.info(`[backup] Created: ${backupName}`);
-    pruneOldBackups();
+    if (autoPrune) {
+      try {
+        const result = pruneBackups();
+        if (result.deleted.length) {
+          logger.info(`[backup] Auto-pruned ${result.deleted.length} verified generation(s), ` +
+                      `${result.deletedBytes} bytes released`);
+        }
+      } catch (pruneError) {
+        logger.warn('[backup] Automatic prune failed; the new backup was kept:', pruneError.message);
+      }
+    } else {
+      logCapacityWarning();
+    }
     return backupName;
   } catch (err) {
     logger.error('[backup] Failed:', err.message);
@@ -94,21 +111,6 @@ async function createBackup() {
     return null;
   } finally {
     if (src) { try { src.close(); } catch {} }
-  }
-}
-
-// Remove excess backups (keep only maxGenerations)
-function pruneOldBackups() {
-  ensureBackupDir();
-  const files = listBackups();
-  if (files.length <= maxGenerations) return;
-  // Sort oldest first (by name = timestamp)
-  const toRemove = files.slice(0, files.length - maxGenerations);
-  for (const f of toRemove) {
-    try {
-      fs.unlinkSync(path.join(BACKUP_DIR, f.name));
-      logger.info(`[backup] Pruned: ${f.name}`);
-    } catch {}
   }
 }
 
@@ -209,6 +211,7 @@ function startPeriodicBackup() {
   const intervalMs = backupIntervalHours * 60 * 60 * 1000;
   backupIntervalTimer = setInterval(() => { createBackup().catch(() => {}); }, intervalMs);
   logger.info(`[backup] Periodic backup every ${backupIntervalHours}h, keep ${maxGenerations} generations`);
+  logCapacityWarning();
   // Create a backup on startup if none exist or the latest is older than the interval.
   // This ensures a backup is taken even when the service restarts before the interval elapses.
   const existing = listBackups();
@@ -230,7 +233,49 @@ function stopPeriodicBackup() {
 }
 
 function getConfig() {
-  return { intervalHours: backupIntervalHours, maxGenerations };
+  return { intervalHours: backupIntervalHours, maxGenerations, maxBackupBytes, autoPrune };
+}
+
+function inventory({ verify = false } = {}) {
+  ensureBackupDir();
+  return backupInventory.buildInventory({ dbPath: DB_PATH, backupDir: BACKUP_DIR, verify });
+}
+
+function previewPrune() {
+  ensureBackupDir();
+  return backupInventory.buildPrunePlan({
+    dbPath: DB_PATH,
+    backupDir: BACKUP_DIR,
+    maxGenerations,
+    maxBackupBytes,
+  });
+}
+
+function pruneBackups() {
+  ensureBackupDir();
+  return backupInventory.executePrune({
+    dbPath: DB_PATH,
+    backupDir: BACKUP_DIR,
+    maxGenerations,
+    maxBackupBytes,
+  });
+}
+
+function logCapacityWarning() {
+  try {
+    const diagnostics = inventory();
+    const { summary } = diagnostics;
+    if (!summary.migrationReady) {
+      logger.warn(`[backup] Disk capacity warning: migration needs ${summary.migrationRequiredBytes} bytes, ` +
+                  `${summary.freeBytes} bytes available (${summary.shortfallBytes} bytes short)`);
+    }
+    if (maxBackupBytes > 0 && summary.backupBytes > maxBackupBytes) {
+      logger.warn(`[backup] Backup storage warning: ${summary.backupBytes} bytes exceeds ` +
+                  `${maxBackupBytes} byte limit; review the dry-run prune plan`);
+    }
+  } catch (error) {
+    logger.warn('[backup] Capacity diagnostics failed:', error.message);
+  }
 }
 
 /** Override DB and backup directory paths for unit testing. */
@@ -240,6 +285,8 @@ function _setPathsForTest(dbPath, backupDir) {
   // Reset config to defaults so tests start from a known state
   backupIntervalHours = 24;
   maxGenerations      = 7;
+  maxBackupBytes      = 0;
+  autoPrune           = false;
   stopPeriodicBackup();
 }
 
@@ -253,6 +300,10 @@ module.exports = {
   startPeriodicBackup,
   stopPeriodicBackup,
   getConfig,
+  inventory,
+  previewPrune,
+  pruneBackups,
+  logCapacityWarning,
   _setPathsForTest,
   _verifyDbFile: verifyDbFile,
 };

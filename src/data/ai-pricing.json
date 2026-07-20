@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026-05-27",
+  "currency": "USD",
+  "entries": [
+    {
+      "id": "ollama-local",
+      "provider": "ollama",
+      "modelPattern": ".+",
+      "routing": "any",
+      "inputUsdPerMillion": 0,
+      "outputUsdPerMillion": 0,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://ollama.com/"
+    },
+    {
+      "id": "anthropic-haiku-4-5",
+      "provider": "anthropic",
+      "modelPattern": "haiku[-.]?4[-.]?5|haiku-4-5",
+      "routing": "any",
+      "inputUsdPerMillion": 1,
+      "outputUsdPerMillion": 5,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/pricing"
+    },
+    {
+      "id": "anthropic-sonnet-4",
+      "provider": "anthropic",
+      "modelPattern": "sonnet[-.]?4|sonnet-4",
+      "routing": "any",
+      "inputUsdPerMillion": 3,
+      "outputUsdPerMillion": 15,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/pricing"
+    },
+    {
+      "id": "anthropic-opus-4-5-plus",
+      "provider": "anthropic",
+      "modelPattern": "opus[-.]?4[-.](?:5|6|7|8)|opus-4-(?:5|6|7|8)",
+      "routing": "any",
+      "inputUsdPerMillion": 5,
+      "outputUsdPerMillion": 25,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/pricing"
+    },
+    {
+      "id": "anthropic-opus-4",
+      "provider": "anthropic",
+      "modelPattern": "opus[-.]?4(?:[-.]?1)?|opus-4(?:-1)?",
+      "routing": "any",
+      "inputUsdPerMillion": 15,
+      "outputUsdPerMillion": 75,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://docs.anthropic.com/en/docs/about-claude/pricing"
+    },
+    {
+      "id": "openai-gpt-5-nano",
+      "provider": "openai",
+      "modelPattern": "^gpt-5-nano(?:-\\d{4}-\\d{2}-\\d{2})?$",
+      "routing": "any",
+      "inputUsdPerMillion": 0.05,
+      "outputUsdPerMillion": 0.4,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://openai.com/api/pricing/"
+    },
+    {
+      "id": "openai-gpt-5-mini",
+      "provider": "openai",
+      "modelPattern": "^gpt-5-mini(?:-\\d{4}-\\d{2}-\\d{2})?$",
+      "routing": "any",
+      "inputUsdPerMillion": 0.25,
+      "outputUsdPerMillion": 2,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://openai.com/api/pricing/"
+    },
+    {
+      "id": "openai-gpt-5",
+      "provider": "openai",
+      "modelPattern": "^gpt-5(?:-\\d{4}-\\d{2}-\\d{2}|-chat-latest)?$",
+      "routing": "any",
+      "inputUsdPerMillion": 1.25,
+      "outputUsdPerMillion": 10,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://openai.com/api/pricing/"
+    },
+    {
+      "id": "bedrock-global-haiku-4-5",
+      "provider": "bedrock",
+      "modelPattern": "haiku[-.]?4[-.]?5|haiku-4-5",
+      "routing": "global",
+      "inputUsdPerMillion": 1,
+      "outputUsdPerMillion": 5,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://aws.amazon.com/bedrock/pricing/"
+    },
+    {
+      "id": "bedrock-global-sonnet-4",
+      "provider": "bedrock",
+      "modelPattern": "sonnet[-.]?4|sonnet-4",
+      "routing": "global",
+      "inputUsdPerMillion": 3,
+      "outputUsdPerMillion": 15,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://aws.amazon.com/bedrock/pricing/"
+    },
+    {
+      "id": "bedrock-global-opus-4-5-plus",
+      "provider": "bedrock",
+      "modelPattern": "opus[-.]?4[-.](?:5|6|7|8)|opus-4-(?:5|6|7|8)",
+      "routing": "global",
+      "inputUsdPerMillion": 5,
+      "outputUsdPerMillion": 25,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://aws.amazon.com/bedrock/pricing/"
+    },
+    {
+      "id": "bedrock-global-opus-4",
+      "provider": "bedrock",
+      "modelPattern": "opus[-.]?4(?:[-.]?1)?|opus-4(?:-1)?",
+      "routing": "global",
+      "inputUsdPerMillion": 15,
+      "outputUsdPerMillion": 75,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://aws.amazon.com/bedrock/pricing/"
+    },
+    {
+      "id": "bedrock-non-global-haiku-4-5",
+      "provider": "bedrock",
+      "modelPattern": "haiku[-.]?4[-.]?5|haiku-4-5",
+      "routing": "non-global",
+      "inputUsdPerMillion": 1.1,
+      "outputUsdPerMillion": 5.5,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://aws.amazon.com/bedrock/pricing/"
+    },
+    {
+      "id": "bedrock-non-global-sonnet-4",
+      "provider": "bedrock",
+      "modelPattern": "sonnet[-.]?4|sonnet-4",
+      "routing": "non-global",
+      "inputUsdPerMillion": 3.3,
+      "outputUsdPerMillion": 16.5,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://aws.amazon.com/bedrock/pricing/"
+    },
+    {
+      "id": "bedrock-non-global-opus-4-5-plus",
+      "provider": "bedrock",
+      "modelPattern": "opus[-.]?4[-.](?:5|6|7|8)|opus-4-(?:5|6|7|8)",
+      "routing": "non-global",
+      "inputUsdPerMillion": 5.5,
+      "outputUsdPerMillion": 27.5,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://aws.amazon.com/bedrock/pricing/"
+    },
+    {
+      "id": "bedrock-non-global-opus-4",
+      "provider": "bedrock",
+      "modelPattern": "opus[-.]?4(?:[-.]?1)?|opus-4(?:-1)?",
+      "routing": "non-global",
+      "inputUsdPerMillion": 16.5,
+      "outputUsdPerMillion": 82.5,
+      "effectiveFrom": "2026-05-27",
+      "sourceUrl": "https://aws.amazon.com/bedrock/pricing/"
+    }
+  ]
+}

@@ -360,7 +360,14 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         onUsage: value => { usage = normalizeTokenUsage(value); },
       });
-      return { provider, models: discovered, verified: true, ...estimateAiCost(provider, models[provider], usage) };
+      return {
+        provider,
+        model: models[provider],
+        models: discovered,
+        verified: true,
+        generatedAt: Date.now(),
+        ...estimateAiCost(provider, models[provider], usage),
+      };
     }
     return listModels();
   }

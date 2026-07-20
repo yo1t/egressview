@@ -77,9 +77,17 @@ function renderUsagePeriod(name, data) {
 function renderAiUsage(data) {
   renderUsagePeriod('current', data.current);
   renderUsagePeriod('previous', data.previous);
-  const hasUnpriced = [data.current, data.previous]
-    .some(period => Number(period.pricedRequests) < Number(period.requests));
-  document.getElementById('ai-usage-caveat').textContent = hasUnpriced ? t('ai.usage.partial') : '';
+  const periods = [data.current, data.previous];
+  const messages = [];
+  if (periods.some(period => Number(period.unknownPriceRequests) > 0)) messages.push(t('ai.usage.unpriced'));
+  if (periods.some(period => Number(period.usageMissingRequests) > 0)) messages.push(t('ai.usage.missing'));
+  if (data.pricing?.catalogVersion) {
+    messages.push(tVars('ai.usage.catalog', {
+      version: data.pricing.catalogVersion,
+      effective: data.pricing.effectiveFrom || data.pricing.catalogVersion,
+    }));
+  }
+  document.getElementById('ai-usage-caveat').textContent = messages.join(' ');
 }
 
 async function refreshAiUsage() {
@@ -193,7 +201,11 @@ function renderChatMessages(messages) {
     const provider = PROVIDER_LABELS[message.provider] || message.provider || t('ai.chat.unknownProvider');
     const model = message.model || t('ai.chat.unknownModel');
     const identity = tVars('ai.chat.responseMeta', { provider, model });
-    if (message.usageTotalTokens == null) {
+    if (message.usageTotalTokens == null || (
+      Number(message.usageTotalTokens) === 0
+      && Number(message.usageInputTokens) === 0
+      && Number(message.usageOutputTokens) === 0
+    )) {
       meta.textContent = `${identity} · ${t('ai.chat.usageUnavailable')}`;
     } else {
       const usage = message.estimatedCostUsd == null

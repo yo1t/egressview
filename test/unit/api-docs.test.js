@@ -44,7 +44,7 @@ function documentedRoutes(source) {
 describe('REST API documentation', () => {
   it('lists every implemented endpoint and no nonexistent endpoint in both languages', () => {
     const implemented = implementedRoutes();
-    assert.equal(implemented.length, 68, 'review the API reference when the route count changes');
+    assert.equal(implemented.length, 69, 'review the API reference when the route count changes');
 
     for (const file of apiDocs) {
       const source = fs.readFileSync(path.join(root, file), 'utf8');
@@ -79,6 +79,22 @@ describe('REST API documentation', () => {
       const source = fs.readFileSync(path.join(root, file), 'utf8');
       assert(source.includes('api-reference'), `${file} must link the API reference`);
       assert(source.includes('architecture'), `${file} must link the architecture guide`);
+    }
+  });
+
+  it('documents Bedrock production hardening in both languages', () => {
+    for (const file of ['docs/setup-bedrock.md', 'docs/setup-bedrock.ja.md']) {
+      const source = fs.readFileSync(path.join(root, file), 'utf8');
+      for (const value of [
+        'bedrock:InvokeModel',
+        'bedrock:ApplyGuardrail',
+        'Model invocation logging',
+        'com.amazonaws.REGION.bedrock-runtime',
+        'AWS_RETRY_MODE=standard',
+        'AWS_MAX_ATTEMPTS=3',
+      ]) {
+        assert(source.includes(value), `${file} must document ${value}`);
+      }
     }
   });
 });

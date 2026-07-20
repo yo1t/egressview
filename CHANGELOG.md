@@ -4,6 +4,20 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Added unified inventory and capacity diagnostics for normal and pre-migration SQLite backups, including schema, integrity, disk headroom, and next-migration readiness.
+- Added dry-run and confirmed cleanup for verified backup generations, with optional explicit auto-prune and configurable storage limits.
+- Moved AI list prices into a validated, versioned data catalog with required effective dates and source URLs, so price updates no longer require pricing-logic changes.
+- Added separate diagnostics for unknown model prices and successful calls where the provider returned no token usage.
+- Added production Bedrock guidance for least-privilege IAM, invocation logging, PrivateLink, and standard versus adaptive AWS SDK retries.
+
+### Security and Reliability
+
+- Backup cleanup always protects at least two normal generations and the latest migration generation, never removes corrupt or unverified files, and regenerates plus reverifies the plan immediately before deletion.
+- Disk warnings now appear before deployment-time migration failures while the existing fail-closed migration and restore paths remain unchanged.
+- Historical AI usage keeps the rates recorded at invocation time; later catalog updates do not recalculate prior estimates.
+
 ## [1.5.1] - 2026-07-20
 
 ### Fixed

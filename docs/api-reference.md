@@ -112,12 +112,13 @@ Create/detect bodies use `kind` (`yamaha` or `cisco`), `displayName`, `ip`, `use
 
 ## Backup and restore
 
-- `GET /api/backup/list` lists generations and retention settings.
+- `GET /api/backup/list` lists normal generations, retention settings, normal/pre-migration inventory, disk headroom, and next-migration readiness. Inventory entries are lightweight and report `integrity: "unchecked"` until a verified cleanup preview runs.
 - `POST /api/backup/create` creates and verifies a consistent SQLite snapshot.
 - `GET /api/backup/download/:name` downloads a named generation.
 - `POST /api/backup/restore` uses `{ "name": "..." }`.
 - `POST /api/backup/upload` accepts a raw SQLite file body up to 100 MB, not multipart form data.
-- `POST /api/backup/config` accepts positive `intervalHours` and `maxGenerations` values.
+- `POST /api/backup/config` accepts positive `intervalHours`, `maxGenerations` (minimum 2), non-negative `maxBackupBytes` (`0` disables the storage cap), and boolean `autoPrune`. Auto-prune defaults to off.
+- `POST /api/backup/prune` accepts `{ "execute": false }` for a verified dry-run or `{ "execute": true }` for confirmed cleanup. It always keeps two normal generations and the latest verified migration generation; corrupt, unverified, changed, and temporary files are never deleted.
 
 ## AI provider configuration
 
@@ -130,7 +131,7 @@ AI insights always shows locally calculated facts. Only after an explicit user a
 - `POST /api/ai/test` accepts an empty JSON object. Fetch-based providers retrieve at most 200 model IDs (10-second timeout, 1 MB limit). Bedrock runs fail-open model discovery and additionally sends a short fixed string via Converse to verify `bedrock:InvokeModel` permission (no network, device, or threat data is sent).
 - `GET /api/ai/facts` requires `from` and accepts `to` as epoch milliseconds. It returns current and immediately preceding equal-period counts for connections, devices, destinations, and threat levels, plus credential-free router collection status. The range is capped at 14 days and no data is sent to an AI provider.
 - `POST /api/ai/analyze` accepts `from` and optional `to`, then sends connection aggregates including destination IPs, hostnames, device names, and MAC addresses, but never credentials, router management details, or raw logs. Externally transmitting providers (Anthropic/OpenAI/Bedrock) require both saved consent and `cloudConsentConfirmed: true` on each request. The range is capped at 14 days, timeout is 30 seconds, and only one analysis may run server-wide.
-- `GET /api/ai/usage/monthly` accepts the browser `timezoneOffset` in minutes and returns current/previous local-calendar-month request and token totals. Successful Ollama, Anthropic, OpenAI, and Bedrock calls are appended to v7 SQLite with the provider/model and the price-table version used for the USD estimate. Unknown model prices are reported separately rather than guessed; add-on charges such as Bedrock Guardrails are excluded. Conversation retrieval joins `usageInputTokens`, `usageOutputTokens`, `usageTotalTokens`, `estimatedCostUsd`, and `pricingVersion` from the same request onto assistant messages; history created before usage recording keeps provider/model with null usage instead of inferred values. The UI uses `$` in English and explicit `USD` notation in Japanese without currency conversion.
+- `GET /api/ai/usage/monthly` accepts the browser `timezoneOffset` in minutes and returns current/previous local-calendar-month request and token totals. Its `pricing` object includes the catalog version, effective date, and source URLs. Successful Ollama, Anthropic, OpenAI, and Bedrock calls are appended to v7 SQLite with the provider/model and the price-table version and rates used at invocation time, so later catalog updates do not recalculate prior months. `unknownPriceRequests` and provider responses without usage (`usageMissingRequests`) remain distinct and are never mislabeled as USD 0; add-on charges such as Bedrock Guardrails are excluded. Conversation retrieval joins `usageInputTokens`, `usageOutputTokens`, `usageTotalTokens`, `estimatedCostUsd`, and `pricingVersion` from the same request onto assistant messages; history created before usage recording keeps provider/model with null usage instead of inferred values. The UI uses `$` in English and explicit `USD` notation in Japanese without currency conversion.
 - `POST /api/ai/chat` accepts a `message` of at most 4,000 characters, a range, and optional `conversationId` and `requestId`. It appends the user row to v6 SQLite before calling AI, then appends an assistant row on success or a body-free failure row. The same `requestId + role` is never duplicated.
 - `GET /api/ai/conversations` returns at most 100 conversations plus stored counts and body bytes. `GET /api/ai/conversations/:id` returns at most 500 messages in append order, while `DELETE /api/ai/conversations/:id` is the only explicit conversation deletion path. Restart and configuration changes never update or truncate existing rows.
 
@@ -140,7 +141,7 @@ Restore is fail-closed: EgressView validates the source, confirms a safety backu
 
 ## Endpoint catalog
 
-All 68 implemented REST endpoints are listed below. **Public** means no token is required; every other row requires `X-Admin-Token`.
+All 69 implemented REST endpoints are listed below. **Public** means no token is required; every other row requires `X-Admin-Token`.
 
 | Area | Method and path | Access |
 |---|---|---|
@@ -183,6 +184,7 @@ All 68 implemented REST endpoints are listed below. **Public** means no token is
 | Backup | `POST /api/backup/restore` | Protected |
 | Backup | `POST /api/backup/upload` | Protected |
 | Backup | `POST /api/backup/config` | Protected |
+| Backup | `POST /api/backup/prune` | Protected |
 | General configuration | `GET /api/status` | Protected |
 | General configuration | `POST /api/config/general` | Protected |
 | Data sources | `GET /api/config/datasources` | Protected |

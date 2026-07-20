@@ -37,8 +37,12 @@ AI洞察はEgressViewの先頭タブ兼スタートページです。上段の�
 AI洞察には今月・先月の呼び出し回数、input/output/total token、概算USDを表示します。
 英語UIは`$0.0012`、日本語UIは`USD 0.0012`です。言語による為替換算は行いません。
 
-概算は呼び出し時点のversioned内蔵料金表を使います。未知modelはtokenを保持して「料金未設定」
-とし、0 USDとして扱いません。Guardrails、cached token、batch/service tier、税、為替、
+概算は呼び出し時点のversioned内蔵料金表を使います。料金表は
+`src/data/ai-pricing.json`に分離され、各entryにprovider/model matcher、単価、発効日、根拠URLを
+持ちます。更新後も過去行は保存済みのversionと単価で集計され、再計算されません。未知modelは
+tokenを保持して「料金未設定」とし、0 USDとして扱いません。成功してもproviderがusageを
+返さなかった呼び出しは、未知料金とは別の「token使用量なし」として件数を表示します。
+Guardrails、cached token、batch/service tier、税、為替、
 providerやAWSの契約割引、失敗時にprovider側だけで発生した費用は含まれません。請求確認には
 各providerのbilling consoleを使用してください。
 

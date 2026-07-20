@@ -101,13 +101,15 @@ describe('AI insights view', () => {
   it('renders monthly tokens, estimated cost, and an unpriced-model warning', () => {
     const { context, get } = harness();
     context.renderAiUsage({
-      current: { requests: 3, pricedRequests: 2, inputTokens: 1200, outputTokens: 300, totalTokens: 1500, estimatedCostUsd: 0.0084 },
-      previous: { requests: 1, pricedRequests: 1, inputTokens: 100, outputTokens: 50, totalTokens: 150, estimatedCostUsd: 0.0004 },
+      pricing: { catalogVersion: '2026-05-27', effectiveFrom: '2026-05-27' },
+      current: { requests: 3, pricedRequests: 2, unknownPriceRequests: 1, usageMissingRequests: 0, inputTokens: 1200, outputTokens: 300, totalTokens: 1500, estimatedCostUsd: 0.0084 },
+      previous: { requests: 1, pricedRequests: 1, unknownPriceRequests: 0, usageMissingRequests: 1, inputTokens: 100, outputTokens: 50, totalTokens: 150, estimatedCostUsd: 0.0004 },
     });
     assert.equal(get('ai-usage-current-tokens').textContent, 'ai.usage.tokens:{"tokens":"1,500"}');
     assert.equal(get('ai-usage-current-detail').textContent, 'ai.usage.detail:{"input":"1,200","output":"300"}');
     assert.equal(get('ai-usage-current-cost').textContent, 'ai.usage.cost:{"cost":"$0.0084"}');
-    assert.equal(get('ai-usage-caveat').textContent, 'ai.usage.partial');
+    assert.equal(get('ai-usage-caveat').textContent,
+      'ai.usage.unpriced ai.usage.missing ai.usage.catalog:{"version":"2026-05-27","effective":"2026-05-27"}');
   });
 
   it('renders persisted conversation messages as untrusted text', () => {
@@ -131,5 +133,14 @@ describe('AI insights view', () => {
     assert.equal(children[2].children[1].textContent,
       'ai.chat.responseMeta:{"provider":"OpenAI","model":"gpt-5.4"} · ai.chat.usageUnavailable');
     assert.equal(children[2].classList.contains('is-failed'), true);
+  });
+
+  it('shows zeroed usage sentinel rows as provider usage unavailable', () => {
+    const { context, get } = harness();
+    context.renderChatMessages([{
+      role: 'assistant', body: 'answer', provider: 'anthropic', model: 'claude-test',
+      usageInputTokens: 0, usageOutputTokens: 0, usageTotalTokens: 0, estimatedCostUsd: null,
+    }]);
+    assert.match(get('ai-chat-messages').children[0].children[1].textContent, /ai\.chat\.usageUnavailable/);
   });
 });

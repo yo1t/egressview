@@ -22,7 +22,9 @@
   },
   "backup": {
     "intervalHours": 24,
-    "maxGenerations": 7
+    "maxGenerations": 7,
+    "maxBackupBytes": 0,
+    "autoPrune": false
   },
   "slack": {
     "enabled": false,

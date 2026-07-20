@@ -51,6 +51,57 @@ SDK に任せます。
   の成功は `bedrock:InvokeModel` の付与を意味しないため、接続確認では最小の生成
   呼び出しも行います。
 
+### 最小IAMポリシー例
+
+実行ロールには、実際に使う推論プロファイルと基盤モデルだけを許可します。次は
+`jp.`プロファイルを使う場合の骨格です。`ACCOUNT_ID`、`PROFILE_ID`、`MODEL_ID`を実値へ
+置き換え、destination regionは選択したプロファイルの現在の構成に合わせてください。
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeConfiguredProfile",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": "arn:aws:bedrock:ap-northeast-1:ACCOUNT_ID:inference-profile/PROFILE_ID"
+    },
+    {
+      "Sid": "InvokeOnlyThroughConfiguredProfile",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": [
+        "arn:aws:bedrock:ap-northeast-1::foundation-model/MODEL_ID",
+        "arn:aws:bedrock:ap-northeast-3::foundation-model/MODEL_ID"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "bedrock:InferenceProfileArn": "arn:aws:bedrock:ap-northeast-1:ACCOUNT_ID:inference-profile/PROFILE_ID"
+        }
+      }
+    },
+    {
+      "Sid": "DiscoverModelsAndProfiles",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:ListFoundationModels",
+        "bedrock:ListInferenceProfiles"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+`GetInferenceProfile`の`models`に返るARNを使うと、destination regionの手入力ミスを避けられます。
+[AWS公式の地理profile IAM例](https://docs.aws.amazon.com/bedrock/latest/userguide/geographic-cross-region-inference.html)と
+照合し、profile変更時はpolicyも見直してください。
+
+Guardrailsを使う場合だけ、対象guardrail ARNへの`bedrock:ApplyGuardrail`と、設定画面で
+自動検出する場合だけ`bedrock:ListGuardrails`（`Resource: "*"`）を追加します。モデルIDを
+直接入力する運用ならdiscovery statementは削除できます。Marketplace購読権限は常設しません。
+
 ## Marketplace サブスクリプション（初回のみ）
 
 **AWS Marketplace 提供のサードパーティモデル（例: Anthropic Claude）**は、呼び出す
@@ -144,6 +195,53 @@ region の profile object への `bedrock:ApplyGuardrail`）が必要です。
 > 日本内データレジデンシーが必須の場合は、Guardrails を **OFF** にするか、
 > cross-Region guardrail profile ではなく**呼び出しリージョン内（例
 > ap-northeast-1）の single-Region guardrail** を使ってください。
+
+## モデル呼び出しログ（任意・デフォルトOFF）
+
+Bedrockのアカウント／リージョン設定で、Converseの呼び出しをCloudWatch Logs、S3、または
+両方へ保存できます。これはEgressViewのアプリ設定ではなくAWS側の設定です。**有効にすると
+AIへ送った本文と回答も記録対象になり、EgressViewの場合はIP、ホスト名、端末名、MACを含み
+得ます。** 先に保存期間、閲覧ロール、KMS暗号化、S3 lifecycleを決めてください。
+詳細は[AWS公式のmodel invocation logging手順](https://docs.aws.amazon.com/bedrock/latest/userguide/model-invocation-logging.html)を参照してください。
+
+1. Bedrock consoleの対象リージョンで *Settings → Model invocation logging* を開く。
+2. 監査要件に必要なmodalityだけを選び、CloudWatch Logsまたは同一account/regionのS3を指定する。
+3. CloudWatch log groupのretentionと、S3 lifecycle・Block Public Access・必要ならSSE-KMSを設定する。
+4. `AWS/Bedrock`のdelivery failure metricsへalarmを設定し、テスト呼び出しが届くことを確認する。
+
+秘密情報の長期保存を避ける場合は本文loggingを有効にせず、標準のCloudWatch runtime metricsで
+呼び出し数、latency、token、errorだけを監視します。logging停止後も既存ログは自動削除されない
+ため、保存先側のretention/lifecycleが必要です。
+
+## VPC interface endpoint（PrivateLink、任意）
+
+EC2等をprivate subnetで動かす場合、最低限`com.amazonaws.REGION.bedrock-runtime`のinterface
+endpointを作成し、Private DNSを有効にするとEgressViewのコード変更なしでConverseをprivate
+経路へ流せます。モデル／Guardrail discoveryもprivate経路にする場合は
+`com.amazonaws.REGION.bedrock`も作成します。
+[AWS公式のPrivateLink手順](https://docs.aws.amazon.com/bedrock/latest/userguide/vpc-interface-endpoints.html)も参照してください。
+
+- endpoint security groupはEgressView hostからTCP 443だけを許可する。
+- endpoint policyでも実行role、`bedrock:InvokeModel`、利用model/profileを絞る。
+- private subnetのDNSで標準`bedrock-runtime.REGION.amazonaws.com`がprivate IPへ解決されることを確認する。
+- Private DNSを無効にした独自endpoint URLは現在のEgressView設定では指定できないため、Private DNSを推奨する。
+- cross-region inference profileはsource regionのendpointへ接続後、AWSサービス内で宛先regionへrouteされる。profile自体のresidency条件は別途確認する。
+
+## SDKリトライ
+
+既定の`standard` modeは指数backoffとjitterを使い、通常運用に推奨です。throttlingが継続し、
+初回requestも遅延し得ることを許容できる単一workloadだけ`adaptive`を検討します。
+[AWS SDK retry behavior](https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html)では
+`standard`が既定、`adaptive`は特定用途向けと説明されています。
+
+```dotenv
+AWS_RETRY_MODE=standard
+AWS_MAX_ATTEMPTS=3
+```
+
+`adaptive`は全workload向けの高速化設定ではありません。EgressView自身の30秒timeoutと単一実行制限は
+維持されるため、attempt数を増やしすぎるとSDK retry完了前にtimeoutします。変更後はCloudWatchの
+throttling、latency、errorを比較し、改善がなければ`standard`へ戻してください。
 
 ## 接続確認
 

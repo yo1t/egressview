@@ -10,9 +10,8 @@
 // model id, a geographic cross-region inference profile us./eu./apac./jp./au.,
 // a Global profile, or an ARN).
 
-// The AWS SDK is an OPTIONAL peer dependency (opt-in): it is not installed by
-// default. Surface a clear, actionable message when it is missing instead of a
-// raw MODULE_NOT_FOUND (or a generic mapped error).
+// The AWS SDK ships as a standard dependency. Keep a clear fallback error for
+// incomplete production installs instead of surfacing a raw MODULE_NOT_FOUND.
 const BEDROCK_NOT_INSTALLED =
   'Amazon Bedrock support is not installed. Run: '
   + 'npm install @aws-sdk/client-bedrock-runtime @aws-sdk/client-bedrock';

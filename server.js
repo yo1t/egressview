@@ -164,6 +164,12 @@ function loadConfig() {
   if (data.backup) {
     if (data.backup.intervalHours)  backup.configure({ intervalHours:  data.backup.intervalHours  });
     if (data.backup.maxGenerations) backup.configure({ maxGenerations: data.backup.maxGenerations });
+    if (Number.isInteger(data.backup.maxBackupBytes) && data.backup.maxBackupBytes >= 0) {
+      backup.configure({ maxBackupBytes: data.backup.maxBackupBytes });
+    }
+    if (typeof data.backup.autoPrune === 'boolean') {
+      backup.configure({ autoPrune: data.backup.autoPrune });
+    }
   }
   applyConfigToAppState(appState, data, { isAllowedLogPath: utils.isAllowedLogPath, logger });
   if (data.slack) notifier.configure({ ...data.slack, language: appState.uiLanguage });
