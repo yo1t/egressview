@@ -96,6 +96,7 @@ const {
   groupDstByTimeRange,
   groupServiceByTimeRange,
   groupSrcForDstsByTimeRange,
+  groupSrcByTimeRange,
   summarizeByTimeRange,
 } = createHistoryQueries({
   getDb: () => db,
@@ -741,6 +742,7 @@ module.exports = {
   groupDstByTimeRange,
   groupServiceByTimeRange,
   groupSrcForDstsByTimeRange,
+  groupSrcByTimeRange,
   summarizeByTimeRange,
   ...aiConversationStore,
   ...aiUsageStore,

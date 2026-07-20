@@ -20,8 +20,9 @@ does not accept or store AWS keys for Bedrock; see the [Bedrock setup guide](set
 
 ## Data and safety boundary
 
-- Selected-period aggregates include destination IPs, hostnames, device names, MACs, and threat counts.
-- Router management addresses, usernames/passwords, enable passwords, API keys, admin tokens, and raw logs are excluded.
+- Selected-period aggregates include destination IPs, hostnames, threat counts, and up to 30 devices prioritized by activity. Device fields can include IP, name, MAC, vendor, IPv6, first/last seen, source, status, and connection count.
+- When ASUS data is available, up to 10 mesh-node summaries are included, with connected-device counts and up to 5 sample devices per node.
+- Router/node management addresses, device notes, archived devices, usernames/passwords, enable passwords, API keys, admin tokens, and raw logs are excluded.
 - The range is limited to 14 days, prompts/responses are bounded, timeout is 30 seconds, and only one generation runs server-wide.
 - Anthropic, OpenAI, and Bedrock require saved consent plus confirmation when analysis runs.
 - AI failure or latency cannot stop router collection, SQLite, Socket.IO, or other views.
@@ -53,5 +54,9 @@ requests are excluded. Use the provider billing console for invoice reconciliati
 ## Privacy choice
 
 Leave AI disabled or use an Ollama endpoint you control when external submission
-is not acceptable. For cloud providers, expose EgressView only through HTTPS or
-a trusted VPN and keep API keys and the mode-`0600` configuration file protected.
+is not acceptable. Bedrock still sends the request to AWS and is therefore not
+equivalent to local Ollama. Under standard Bedrock data protection, prompts and
+outputs are not exposed to model providers or used to train base models; verify
+the selected model's data-retention mode because provider-sharing exceptions can
+exist. For cloud providers, expose EgressView only through HTTPS or a trusted VPN
+and keep API keys and the mode-`0600` configuration file protected.

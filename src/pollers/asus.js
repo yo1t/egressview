@@ -17,6 +17,7 @@ let pollInFlight = null;
 let prevNetdev = {};
 let prevPollTime = Date.now();
 let latestAsusClients = [];
+let latestMeshNodes = [];
 let asusRenewFailures = 0;
 const ASUS_RENEW_MAX_FAILURES = 3;
 // Transient errors (EPIPE, ECONNRESET, etc.) are common on home routers.
@@ -242,6 +243,7 @@ async function runPoll() {
     }
     const netdev = netdevRaw ? parseNetdev(netdevRaw) : {};
     const meshNodes = meshRaw ? parseMeshNodes(meshRaw) : [];
+    latestMeshNodes = meshNodes;
     prevPollTime = now;
 
     onNetworkUpdate({
@@ -311,6 +313,7 @@ function disable() {
 }
 
 function getClients() { return latestAsusClients; }
+function getMeshNodes() { return latestMeshNodes; }
 function getClientMac(ip) {
   const c = latestAsusClients.find(cl => cl.ip === ip);
   return c?.mac || null;
@@ -335,6 +338,7 @@ module.exports = {
   parseMeshNodes,
   apiGet,
   getClients,
+  getMeshNodes,
   getClientMac,
   isEnabled,
   isAuthenticated,

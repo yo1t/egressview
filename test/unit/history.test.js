@@ -1011,3 +1011,19 @@ describe('groupSrcForDstsByTimeRange', () => {
     assert.deepEqual(history.groupSrcForDstsByTimeRange(null, null, []), []);
   });
 });
+
+describe('groupSrcByTimeRange', () => {
+  it('returns bounded source activity ordered by connection count', () => {
+    const t = Date.now();
+    insert({ src: '192.168.1.10', srcDnsName: 'laptop', srcMac: 'AA:BB:CC:00:11:22', dst: '203.0.113.9', dport: 443, firstSeen: t - 20, lastSeen: t });
+    insert({ src: '192.168.1.10', srcDnsName: 'laptop', srcMac: 'AA:BB:CC:00:11:22', dst: '203.0.113.10', dport: 443, firstSeen: t - 10, lastSeen: t });
+    insert({ src: '192.168.1.20', srcMdnsName: 'phone', dst: '198.51.100.5', dport: 80, firstSeen: t, lastSeen: t });
+
+    const rows = history.groupSrcByTimeRange(t - 1000, t, 1);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].src, '192.168.1.10');
+    assert.equal(rows[0].count, 2);
+    assert.equal(rows[0].srcDnsName, 'laptop');
+    assert.equal(rows[0].srcMac, 'AA:BB:CC:00:11:22');
+  });
+});

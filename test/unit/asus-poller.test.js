@@ -27,7 +27,10 @@ describe('ASUS polling lifecycle', () => {
       const hook = options.params.hook;
       if (hook === 'get_clientlist()') return { data: { get_clientlist: {} } };
       if (hook === 'netdev()') return { data: { netdev: {} } };
-      return { data: { get_cfg_clientlist: [] } };
+      return { data: { get_cfg_clientlist: [{
+        mac: '00:11:22:33:44:55', ip: '192.168.1.3', alias: 'upstairs',
+        ui_model_name: 'RT-AX88U', online: '1',
+      }] } };
     };
     asus.configure({
       routerIp: '192.168.1.2',
@@ -42,6 +45,9 @@ describe('ASUS polling lifecycle', () => {
     assert.equal(asus.isAuthenticated(), true);
     assert.equal(postUrls.length, 2);
     assert.equal(updates.length, 1);
+    assert.deepEqual(asus.getMeshNodes(), [{
+      mac: '00:11:22:33:44:55', ip: '192.168.1.3', model: 'RT-AX88U', alias: 'upstairs', online: true,
+    }]);
   });
 
   it('coalesces overlapping poll requests into one ASUS API batch', async () => {

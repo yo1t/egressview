@@ -6,9 +6,23 @@ is delegated entirely to the AWS SDK for JavaScript v3 **default credential
 provider chain**. You configure only an AWS **region** and a **model /
 inference-profile ID** in the settings UI.
 
-> AI is read-only. Bounded aggregates are sent — including destination IPs,
-> hostnames, device names, and MAC addresses — but credentials such as passwords
-> are never sent.
+> AI is read-only. Bounded connection aggregates, device inventory, and network-
+> node summaries are sent. Credentials, device notes, raw logs, and management
+> addresses are never sent.
+
+## Data handling boundary
+
+Bedrock is a cloud service, not a local provider like Ollama: analysis requests
+leave the EgressView host and are processed by AWS in the selected model/profile
+routing boundary. AWS states that, under standard Bedrock data protection, model
+providers do not access customer prompts or completions and inputs/outputs are
+not used to train the underlying base models. Some models can expose a different
+data-retention mode, including provider-data-sharing terms, so verify the model's
+current retention mode before enabling it. EgressView therefore keeps explicit
+cloud consent mandatory for Bedrock.
+
+See the AWS documentation for [Bedrock data protection](https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html)
+and [model data-retention modes](https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html).
 
 ## Prerequisites
 

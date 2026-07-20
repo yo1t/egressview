@@ -36,7 +36,7 @@ EgressViewは、多くの家庭ユーザーが答えを持てていない問い�
 - **外部サービスによる手動脅威調査** — 明示操作時だけAbuseIPDB・VirusTotal・AlienVault OTXへ問い合わせ（cache/rate limit対応、[ガイド](docs/manual-threat-investigation.ja.md)）
 - **Linux conntrackプレビュー** — Linux系ルーターからSSH収集。Docker統合試験済み、実機確認は未完了（[設定](docs/setup-conntrack.ja.md)）
 - **モバイル監視ビュー** — VPN・プライベートネットワーク内のスマートフォンから、ルーター状態、グラフ、統計、通信ログ、端末一覧、検出ログを確認
-- **AI洞察スタートページ** — 起動直後に収集状態・接続・端末・宛先・脅威と前期間比較を表示。Ollama / Anthropic / OpenAI / Amazon Bedrockで手動分析・対話でき、版管理料金表による月次token・概算料金と回答ごとのモデル/料金も確認可能（[設定ガイド](docs/setup-ai-insights.ja.md)、[Bedrock本番設定](docs/setup-bedrock.ja.md)）
+- **AI洞察スタートページ** — 起動直後に収集状態・接続・端末・宛先・脅威と前期間比較を表示。上限付き端末一覧とASUS node要約を使ってOllama / Anthropic / OpenAI / Amazon Bedrockで手動分析・対話でき、版管理料金表による月次token・概算料金と回答ごとのモデル/料金も確認可能（[設定ガイド](docs/setup-ai-insights.ja.md)、[Bedrock本番設定](docs/setup-bedrock.ja.md)）
 - **即時Slackアラート** — 任意のデバイスが既知のC2サーバーやマルウェア配布元に接続した瞬間にDM通知
 - **ハードウェア変更不要** — Mac・PC・Raspberry Piにインストールするだけ。既存のYamaha RTX / Cisco IOSルーターと共存
 
