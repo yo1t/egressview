@@ -66,9 +66,17 @@ function renderUsagePeriod(name, data) {
     input: formatNumber(data.inputTokens),
     output: formatNumber(data.outputTokens),
   });
-  document.getElementById(`ai-usage-${name}-cost`).textContent = tVars('ai.usage.cost', {
+  const isPartial = Number(data.unpricedTokens) > 0;
+  document.getElementById(`ai-usage-${name}-cost`).textContent = tVars(
+    isPartial ? 'ai.usage.costPartial' : 'ai.usage.cost', {
     cost: formatUsd(data.estimatedCostUsd),
   });
+  document.getElementById(`ai-usage-${name}-unpriced`).textContent = isPartial
+    ? tVars('ai.usage.unpricedDetail', {
+      tokens: formatNumber(data.unpricedTokens),
+      requests: formatNumber(data.unknownPriceRequests),
+    })
+    : '';
   document.getElementById(`ai-usage-${name}-requests`).textContent = tVars('ai.usage.requests', {
     requests: formatNumber(data.requests),
   });
@@ -80,6 +88,16 @@ function renderAiUsage(data) {
   const periods = [data.current, data.previous];
   const messages = [];
   if (periods.some(period => Number(period.unknownPriceRequests) > 0)) messages.push(t('ai.usage.unpriced'));
+  const unpricedModels = [...new Set(periods.flatMap(period => period.unpricedModels || [])
+    .map(row => `${row.provider}/${row.model || t('ai.chat.unknownModel')}`))];
+  if (unpricedModels.length) {
+    const shown = unpricedModels.slice(0, 5);
+    const remaining = unpricedModels.length - shown.length;
+    messages.push(tVars('ai.usage.unpricedModels', {
+      models: shown.join(', '),
+      remaining: remaining ? ` +${remaining}` : '',
+    }));
+  }
   if (periods.some(period => Number(period.usageMissingRequests) > 0)) messages.push(t('ai.usage.missing'));
   if (data.pricing?.catalogVersion) {
     messages.push(tVars('ai.usage.catalog', {

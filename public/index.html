@@ -536,6 +536,7 @@
               <input id="s-ai-model" class="form-input" type="text" list="ai-model-options" maxlength="200" autocomplete="off" spellcheck="false">
               <datalist id="ai-model-options"></datalist>
               <p class="settings-field-hint" data-i18n="settings.ai.modelHint">「接続確認」でモデル一覧を取得すると下のプルダウンから選べます。ARN や未取得モデルは直接入力できます。</p>
+              <p id="ai-model-pricing-status" class="settings-field-hint ai-model-pricing-status"></p>
             </div>
           </div>
           <div class="ai-settings-actions">
@@ -877,6 +878,7 @@
           <span class="ai-usage-period" data-i18n="ai.usage.current">今月</span>
           <strong id="ai-usage-current-tokens">—</strong>
           <span id="ai-usage-current-detail" class="ai-usage-detail">—</span>
+          <span id="ai-usage-current-unpriced" class="ai-usage-unpriced"></span>
           <div class="ai-usage-foot">
             <span id="ai-usage-current-cost">—</span>
             <span id="ai-usage-current-requests">—</span>
@@ -886,6 +888,7 @@
           <span class="ai-usage-period" data-i18n="ai.usage.previous">先月</span>
           <strong id="ai-usage-previous-tokens">—</strong>
           <span id="ai-usage-previous-detail" class="ai-usage-detail">—</span>
+          <span id="ai-usage-previous-unpriced" class="ai-usage-unpriced"></span>
           <div class="ai-usage-foot">
             <span id="ai-usage-previous-cost">—</span>
             <span id="ai-usage-previous-requests">—</span>

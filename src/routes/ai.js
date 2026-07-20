@@ -6,7 +6,7 @@ const { parseRequest } = require('../http-validation');
 const { buildAiFacts } = require('../ai-facts');
 const { buildAiContext } = require('../ai-context');
 const { randomUUID } = require('node:crypto');
-const { monthlyRanges, pricingMetadata } = require('../ai-usage');
+const { monthlyRanges, pricingCoverage, pricingMetadata, pricingStatus } = require('../ai-usage');
 const { AI_PRIOR_ANALYSIS_MAX_CHARS } = require('../ai-limits');
 const logger = require('../logger');
 
@@ -74,17 +74,29 @@ const conversationParamsSchema = z.object({ id: idSchema }).strict();
 const usageQuerySchema = z.object({
   timezoneOffset: z.coerce.number().int().min(-840).max(840).default(0),
 }).strict();
+const pricingCheckSchema = z.object({
+  provider: z.enum(['ollama', 'anthropic', 'openai', 'bedrock']),
+  model: z.string().trim().min(1).max(400),
+}).strict();
 
 module.exports = function aiRoutes({
   requireAdmin, aiProvider, saveConfig, history, threatIntel, routerManager, devices, asus,
 }) {
   const router = Router();
+  const warnedUnpricedModels = new Set();
 
   function persistUsage(result, { kind, requestId = randomUUID(), conversationId = null } = {}) {
     if (!result || typeof history?.appendAiUsage !== 'function') return;
     if (!result.usage && !result.text && result.verified !== true) return;
     const usage = result.usage || { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     const pricing = result.pricing || {};
+    const unpricedKey = `${result.provider || 'unknown'}/${result.model || 'unknown'}`;
+    if (usage.totalTokens > 0 && !result.pricing && !warnedUnpricedModels.has(unpricedKey)) {
+      warnedUnpricedModels.add(unpricedKey);
+      logger.warn(`[ai] Pricing unavailable; cost total is partial: ${JSON.stringify({
+        provider: result.provider || 'unknown', model: result.model || 'unknown',
+      })}`);
+    }
     try {
       history.appendAiUsage({
         usageId: randomUUID(),
@@ -108,8 +120,23 @@ module.exports = function aiRoutes({
     }
   }
 
+  function withModelPricing(result) {
+    const models = Array.isArray(result?.models) ? result.models : [];
+    return { ...result, modelPricing: pricingCoverage(result?.provider, models) };
+  }
+
+  function publicConfigWithPricing() {
+    const publicConfig = aiProvider.getPublicConfig();
+    const provider = publicConfig.provider;
+    const model = publicConfig.models?.[provider] || '';
+    return {
+      ...publicConfig,
+      selectedModelPricing: provider === 'disabled' || !model ? null : pricingStatus(provider, model),
+    };
+  }
+
   router.get('/config/ai', requireAdmin, (_req, res) => {
-    res.json(aiProvider.getPublicConfig());
+    res.json(publicConfigWithPricing());
   });
 
   router.post('/config/ai', requireAdmin, (req, res) => {
@@ -144,7 +171,7 @@ module.exports = function aiRoutes({
         error: validationError ? error.message : 'Settings were not saved. Check server logs.',
       });
     }
-    res.json({ success: true, ...aiProvider.getPublicConfig() });
+    res.json({ success: true, ...publicConfigWithPricing() });
   });
 
   router.post('/ai/test', requireAdmin, async (req, res) => {
@@ -153,7 +180,7 @@ module.exports = function aiRoutes({
     try {
       const result = await aiProvider.testConnection();
       persistUsage(result, { kind: 'test' });
-      res.json({ success: true, ...result });
+      res.json({ success: true, ...withModelPricing(result) });
     } catch (error) {
       res.status(400).json({ success: false, error: error.message });
     }
@@ -166,13 +193,19 @@ module.exports = function aiRoutes({
     const parsed = parseRequest(bedrockModelDiscoverySchema, req.body, res);
     if (!parsed.ok) return;
     try {
-      res.json({ success: true, ...await aiProvider.listModels({
+      res.json({ success: true, ...withModelPricing(await aiProvider.listModels({
         provider: 'bedrock',
         region: parsed.data.region,
-      }) });
+      })) });
     } catch (error) {
       res.status(400).json({ success: false, error: error.message });
     }
+  });
+
+  router.post('/ai/pricing/check', requireAdmin, (req, res) => {
+    const parsed = parseRequest(pricingCheckSchema, req.body, res);
+    if (!parsed.ok) return;
+    res.json({ success: true, ...pricingStatus(parsed.data.provider, parsed.data.model) });
   });
 
   // Discovery-only Guardrail listing for the region (no InvokeModel, no save).
@@ -218,13 +251,37 @@ module.exports = function aiRoutes({
     if (!parsed.ok) return;
     try {
       const ranges = monthlyRanges(Date.now(), parsed.data.timezoneOffset);
+      const summarizePeriod = range => ({
+        ...range,
+        ...history.summarizeAiUsage(range.from, range.to),
+        unpricedModels: typeof history.summarizeUnpricedAiUsage === 'function'
+          ? history.summarizeUnpricedAiUsage(range.from, range.to)
+          : [],
+      });
       res.json({
         pricing: { ...pricingMetadata(), approximate: true },
-        current: { ...ranges.current, ...history.summarizeAiUsage(ranges.current.from, ranges.current.to) },
-        previous: { ...ranges.previous, ...history.summarizeAiUsage(ranges.previous.from, ranges.previous.to) },
+        selectedModel: publicConfigWithPricing().selectedModelPricing,
+        current: summarizePeriod(ranges.current),
+        previous: summarizePeriod(ranges.previous),
       });
     } catch {
       res.status(500).json({ error: 'AI usage could not be calculated' });
+    }
+  });
+
+  router.get('/ai/pricing/diagnostics', requireAdmin, (req, res) => {
+    const parsed = parseRequest(usageQuerySchema, req.query, res);
+    if (!parsed.ok) return;
+    try {
+      const ranges = monthlyRanges(Date.now(), parsed.data.timezoneOffset);
+      res.json({
+        pricing: pricingMetadata(),
+        selectedModel: publicConfigWithPricing().selectedModelPricing,
+        currentUnpricedModels: history.summarizeUnpricedAiUsage(ranges.current.from, ranges.current.to),
+        previousUnpricedModels: history.summarizeUnpricedAiUsage(ranges.previous.from, ranges.previous.to),
+      });
+    } catch {
+      res.status(500).json({ error: 'AI pricing diagnostics could not be calculated' });
     }
   });
 

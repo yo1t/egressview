@@ -37,8 +37,28 @@ function modelIds(body, provider) {
   const rows = provider === 'ollama' ? body?.models : body?.data;
   if (!Array.isArray(rows)) throw new Error('Provider returned an invalid model list');
   return [...new Set(rows.map(row => String(row?.id || row?.model || row?.name || '').trim())
-    .filter(id => id && id.length <= 200))]
+    .filter(id => id && id.length <= 200 && isTextGenerationCandidate(provider, id)))]
     .sort((a, b) => a.localeCompare(b))
+    .slice(0, 200);
+}
+
+function isTextGenerationCandidate(provider, model) {
+  const id = String(model || '').toLowerCase();
+  if (!id) return false;
+  if (provider === 'openai') {
+    return !/(?:audio|realtime|transcrib|tts|image|embedding|moderation|whisper|sora|search|codex)/.test(id)
+      && !/^(?:babbage|davinci)-/.test(id);
+  }
+  if (provider === 'bedrock') {
+    return !/(?:embed|embedding|image|canvas|reel|multimodal-embed)/.test(id);
+  }
+  return true;
+}
+
+function filterTextGenerationModels(provider, models) {
+  return (Array.isArray(models) ? models : [])
+    .map(model => String(model || '').trim())
+    .filter((model, index, all) => model && isTextGenerationCandidate(provider, model) && all.indexOf(model) === index)
     .slice(0, 200);
 }
 
@@ -307,7 +327,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
       // model/inference-profile ID entry when this is unavailable.
       if (!bedrock?.listModels) return { provider: selectedProvider, models: [] };
       const ids = await bedrock.listModels({ region: selectedRegion, timeoutMs: REQUEST_TIMEOUT_MS });
-      return { provider: selectedProvider, models: (Array.isArray(ids) ? ids : []).slice(0, 200) };
+      return { provider: selectedProvider, models: filterTextGenerationModels(selectedProvider, ids) };
     }
     const requestState = { ...state(), provider: selectedProvider, region: selectedRegion };
     const { url, headers } = adapter.listRequest(requestState);

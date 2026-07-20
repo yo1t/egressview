@@ -47,7 +47,10 @@ a provider/model matcher, rates, an effective date, and a source URL. Updating i
 does not recalculate older rows because each usage row keeps the version and rates
 used at invocation time. Unknown models keep their tokens and show an unavailable
 price rather than zero. Successful calls where the provider omitted usage are
-counted separately from unknown-price calls. Guardrails, cached-token tiers, batch/service tiers, tax, exchange
+counted separately from unknown-price calls. When any usage is unpriced, the UI
+labels USD as a partial total and separately shows unpriced token/request counts
+and model IDs. The settings picker marks each discovered or manually entered
+model as price-tracked or price-unavailable before it is used. Guardrails, cached-token tiers, batch/service tiers, tax, exchange
 rates, provider/AWS contractual discounts, and provider-side charges for failed
 requests are excluded. Use the provider billing console for invoice reconciliation.
 

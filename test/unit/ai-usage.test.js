@@ -7,7 +7,9 @@ const {
   monthlyRanges,
   normalizeTokenUsage,
   pricingFor,
+  pricingCoverage,
   pricingMetadata,
+  pricingStatus,
   validatePricingCatalog,
 } = require('../../src/ai-usage');
 
@@ -38,14 +40,18 @@ describe('AI usage pricing', () => {
     assert.equal(gpt55.pricing.sourceUrl, 'https://developers.openai.com/api/docs/models/gpt-5.5');
     assert.equal(pricingFor('openai', 'gpt-5.5-2026-04-23').inputUsdPerMillion, 5);
     assert.equal(estimateAiCost('openai', 'future-model', { inputTokens: 10, outputTokens: 5 }).estimatedCostUsd, null);
-    assert.equal(estimateAiCost('openai', 'gpt-5.4', { inputTokens: 10, outputTokens: 5 }).estimatedCostUsd, null);
+    assert.equal(estimateAiCost('openai', 'gpt-5.4', { inputTokens: 1_000_000, outputTokens: 100_000 }).estimatedCostUsd, 4);
+    assert.equal(pricingFor('openai', 'gpt-5.4-pro-2026-03-05').outputUsdPerMillion, 180);
+    assert.equal(pricingFor('openai', 'gpt-5.6-terra').inputUsdPerMillion, 2.5);
+    assert.equal(pricingStatus('openai', 'future-model').priced, false);
+    assert.deepEqual(pricingCoverage('openai', ['gpt-5.5', 'future-model']).models.map(row => row.priced), [true, false]);
   });
 
   it('exposes version, effective date, and source metadata', () => {
     const metadata = pricingMetadata();
     assert.equal(metadata.catalogVersion, '2026-07-20');
     assert.equal(metadata.currency, 'USD');
-    assert.equal(metadata.effectiveFrom, '2026-05-27');
+    assert.equal(metadata.effectiveFrom, '2026-07-20');
     assert.ok(metadata.sourceUrls.every(url => url.startsWith('https://')));
   });
 

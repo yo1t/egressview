@@ -741,7 +741,12 @@ test('AI insights renders local facts and links threats to the filtered log', as
     contentType: 'application/json',
     body: JSON.stringify({
       pricing: { currency: 'USD', approximate: true },
-      current: { requests: 3, pricedRequests: 3, inputTokens: 1200, outputTokens: 300, totalTokens: 1500, estimatedCostUsd: 0.0084 },
+      current: {
+        requests: 3, pricedRequests: 2, unknownPriceRequests: 1,
+        inputTokens: 1200, outputTokens: 300, totalTokens: 1500,
+        pricedTokens: 1050, unpricedTokens: 450, estimatedCostUsd: 0.0084,
+        unpricedModels: [{ provider: 'openai', model: 'future-model', requests: 1, totalTokens: 450 }],
+      },
       previous: { requests: 1, pricedRequests: 1, inputTokens: 100, outputTokens: 50, totalTokens: 150, estimatedCostUsd: 0.0004 },
     }),
   }));
@@ -751,6 +756,9 @@ test('AI insights renders local facts and links threats to the filtered log', as
   await expect(page.locator('#ai-value-connections')).toHaveText('25');
   await expect(page.locator('#ai-usage-current-tokens')).toContainText('1,500');
   await expect(page.locator('#ai-usage-current-cost')).toContainText(/USD\s*0\.0084/);
+  await expect(page.locator('#ai-usage-current-cost')).toContainText('部分合計');
+  await expect(page.locator('#ai-usage-current-unpriced')).toContainText('450');
+  await expect(page.locator('#ai-usage-caveat')).toContainText('openai/future-model');
   await expect(page.locator('.ai-chat + .ai-usage-summary')).toBeVisible();
   await page.route(/\/api\/config\/general$/, route => route.request().method() === 'POST'
     ? route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true, language: 'en' }) })
@@ -759,7 +767,7 @@ test('AI insights renders local facts and links threats to the filtered log', as
   await page.click('.settings-tab[data-tab="general"]');
   await page.locator('#s-language').selectOption('en');
   await page.click('#general-save-btn');
-  await expect(page.locator('#ai-usage-current-cost')).toContainText('$0.0084');
+  await expect(page.locator('#ai-usage-current-cost')).toContainText(/partial total.*\$0\.0084/);
   await page.click('#settings-close');
   await expect(page.locator('#ai-collection-label')).toContainText(/1\/2/);
   await expect(page.locator('[data-ai-metric="danger"]')).toHaveClass(/has-findings/);
