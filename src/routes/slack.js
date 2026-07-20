@@ -2,7 +2,24 @@
 'use strict';
 
 const { Router } = require('express');
+const { z } = require('zod');
+const { parseRequest } = require('../http-validation');
 const logger = require('../logger');
+
+const slackConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  token: z.string().max(512).optional(),
+  userId: z.string().max(256).optional(),
+  cooldownMinutes: z.number().finite().positive().max(1440).optional(),
+  displayName: z.string().max(256).optional(),
+}).strict();
+const emptyBodySchema = z.object({}).strict();
+const emptyQuerySchema = z.object({}).strict();
+const slackVerifySchema = z.object({ token: z.string().max(512).optional() }).strict();
+const slackLookupSchema = z.object({
+  username: z.string().min(1).max(256),
+  token: z.string().max(512).optional(),
+}).strict();
 
 /**
  * @param {{
@@ -16,6 +33,8 @@ module.exports = function slackRoutes(ctx) {
   const router = Router();
 
   router.get('/config/slack', requireAdmin, (req, res) => {
+    const parsed = parseRequest(emptyQuerySchema, req.query, res);
+    if (!parsed.ok) return;
     const cfg = notifier.getConfig();
     let displayName = '';
     try { displayName = loadConfig().slack?.displayName || ''; } catch {}
@@ -23,10 +42,9 @@ module.exports = function slackRoutes(ctx) {
   });
 
   router.post('/config/slack', requireAdmin, (req, res) => {
-    const { enabled, token, userId, cooldownMinutes, displayName } = req.body || {};
-    if (typeof token       === 'string' && token.length       > 512) return res.status(400).json({ error: 'token too long' });
-    if (typeof userId      === 'string' && userId.length      > 256) return res.status(400).json({ error: 'userId too long' });
-    if (typeof displayName === 'string' && displayName.length > 256) return res.status(400).json({ error: 'displayName too long' });
+    const parsed = parseRequest(slackConfigSchema, req.body, res);
+    if (!parsed.ok) return;
+    const { enabled, token, userId, cooldownMinutes, displayName } = parsed.data;
     const previous = notifier.getConfig();
     let previousStored = {};
     try { previousStored = loadConfig().slack || {}; } catch {}
@@ -52,6 +70,8 @@ module.exports = function slackRoutes(ctx) {
   });
 
   router.post('/slack/test', requireAdmin, async (req, res) => {
+    const parsed = parseRequest(emptyBodySchema, req.body, res);
+    if (!parsed.ok) return;
     try {
       const result = await notifier.test();
       if (result.ok) res.json({ success: true });
@@ -62,7 +82,9 @@ module.exports = function slackRoutes(ctx) {
   });
 
   router.post('/slack/verify', requireAdmin, async (req, res) => {
-    let { token } = req.body || {};
+    const parsed = parseRequest(slackVerifySchema, req.body, res);
+    if (!parsed.ok) return;
+    let { token } = parsed.data;
     if (!token) {
       try { token = loadConfig().slack?.token || ''; } catch {}
     }
@@ -74,7 +96,9 @@ module.exports = function slackRoutes(ctx) {
   });
 
   router.post('/slack/lookup-user', requireAdmin, async (req, res) => {
-    let { username, token } = req.body || {};
+    const parsed = parseRequest(slackLookupSchema, req.body, res);
+    if (!parsed.ok) return;
+    let { username, token } = parsed.data;
     if (!token) {
       try { token = loadConfig().slack?.token || ''; } catch {}
     }

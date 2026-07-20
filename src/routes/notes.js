@@ -2,9 +2,21 @@
 'use strict';
 
 const { Router } = require('express');
+const { z } = require('zod');
+const { parseRequest } = require('../http-validation');
 const { isAllowedRouterIp } = require('../utils');
 const { t } = require('../i18n-server');
 const logger = require('../logger');
+
+const notesBodySchema = z.object({
+  ip: z.string().max(45).optional(),
+  mac: z.string().max(64).optional(),
+  note: z.string().max(500).optional(),
+  deviceId: z.string().max(128).optional(),
+  key: z.string().max(256).optional(),
+}).strict();
+const notesDraftSchema = z.object({ ip: z.string().min(1).max(45) }).strict();
+const emptyQuerySchema = z.object({}).strict();
 
 /**
  * @param {{
@@ -21,6 +33,8 @@ module.exports = function notesRoutes(ctx) {
 
   // GET /api/notes
   router.get('/notes', requireAdmin, (req, res) => {
+    const parsed = parseRequest(emptyQuerySchema, req.query, res);
+    if (!parsed.ok) return;
     res.json({ notes: notes.getAll() });
   });
 
@@ -29,7 +43,9 @@ module.exports = function notesRoutes(ctx) {
   // When ip/mac is provided and the device has a deviceId in the inventory,
   // the note is stored under deviceId (step 8: notes follow the device, not the IP).
   router.post('/notes', requireAdmin, (req, res) => {
-    const { ip, mac, note, deviceId: reqDeviceId } = req.body || {};
+    const parsed = parseRequest(notesBodySchema, req.body, res);
+    if (!parsed.ok) return;
+    const { ip, mac, note, deviceId: reqDeviceId, key: legacyKey } = parsed.data;
 
     // ── Resolve canonical key ──────────────────────────────────────────────
     let canonicalId = reqDeviceId || null;
@@ -46,7 +62,7 @@ module.exports = function notesRoutes(ctx) {
       if (ip && mac)        key = `${ip}|${mac}`;
       else if (ip)          key = ip;
       else if (mac)         key = mac;
-      else if (req.body?.key) key = req.body.key;
+      else if (legacyKey)     key = legacyKey;
     }
 
     if (!notes.isSafeKey(key)) {
@@ -83,7 +99,9 @@ module.exports = function notesRoutes(ctx) {
 
   // POST /api/notes/draft  — on-demand investigation
   router.post('/notes/draft', requireAdmin, async (req, res) => {
-    const ip = req.body?.ip;
+    const parsed = parseRequest(notesDraftSchema, req.body, res, { error: t('notes.invalid-ip') });
+    if (!parsed.ok) return;
+    const { ip } = parsed.data;
     if (!ip || !isAllowedRouterIp(ip)) {
       return res.status(400).json({ error: t('notes.invalid-ip') });
     }

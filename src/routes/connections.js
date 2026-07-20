@@ -3,6 +3,8 @@
 
 const zlib = require('zlib');
 const { Router } = require('express');
+const { z } = require('zod');
+const { parseRequest } = require('../http-validation');
 const { parseTimestamp } = require('../utils');
 const { streamConnectionExport } = require('../connection-export');
 const logger = require('../logger');
@@ -41,6 +43,58 @@ const SERVER_FILTER_COLS = ['src', 'dst', 'dport', 'proto', 'country', 'org', 's
 const SUMMARY_CACHE_TTL_MS = 10_000;
 const summaryCache = new Map();
 const THREAT_FILTER_SCAN_CHUNK = 1000;
+
+const boundedText = max => z.string().max(max).optional();
+const timestampQuery = z.union([
+  z.string().max(20),
+  z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+]).optional();
+const unsignedIntegerQuery = z.union([
+  z.string().regex(/^\d+$/).max(16),
+  z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+]).optional();
+const timeQueryShape = { from: timestampQuery, to: timestampQuery };
+const filterQueryShape = {
+  sort: boundedText(32),
+  sortDir: boundedText(16),
+  fSrc: boundedText(512),
+  fSrcMode: boundedText(32),
+  fDst: boundedText(512),
+  fDstMode: boundedText(32),
+  fDport: boundedText(64),
+  fDportMode: boundedText(32),
+  fProto: boundedText(64),
+  fProtoMode: boundedText(32),
+  fCountry: boundedText(64),
+  fCountryMode: boundedText(32),
+  fOrg: boundedText(512),
+  fOrgMode: boundedText(32),
+  fSrcMac: boundedText(64),
+};
+const emptyQuerySchema = z.object({}).strict();
+const summaryQuerySchema = z.object({
+  ...timeQueryShape,
+  buckets: unsignedIntegerQuery,
+  src: boundedText(64),
+}).strict();
+const timeQuerySchema = z.object(timeQueryShape).strict();
+const threatConnectionsQuerySchema = z.object({
+  ...timeQueryShape,
+  confidence: boundedText(16),
+  limit: unsignedIntegerQuery,
+}).strict();
+const threatCountsQuerySchema = z.object({ ...timeQueryShape, ...filterQueryShape }).strict();
+const exportQuerySchema = z.object({
+  ...timeQueryShape,
+  format: z.string().max(8),
+}).strict();
+const connectionsQuerySchema = z.object({
+  ...timeQueryShape,
+  ...filterQueryShape,
+  limit: unsignedIntegerQuery,
+  offset: unsignedIntegerQuery,
+  fThreat: boundedText(16),
+}).strict();
 
 function getSummaryCache(key) {
   const hit = summaryCache.get(key);
@@ -152,22 +206,27 @@ function connectionsRoutes(ctx) {
   const router = Router();
 
   router.get('/connections/memory', requireAdmin, (req, res) => {
+    const parsed = parseRequest(emptyQuerySchema, req.query, res);
+    if (!parsed.ok) return;
     res.json({ ...history.getMemoryStats(), serverTime: Date.now() });
   });
 
   router.get('/connections/summary', requireAdmin, (req, res) => {
-    const { ts: from, err: e1 } = parseTimestampParam(req.query.from, 'from', res);
+    const parsed = parseRequest(summaryQuerySchema, req.query, res);
+    if (!parsed.ok) return;
+    const query = parsed.data;
+    const { ts: from, err: e1 } = parseTimestampParam(query.from, 'from', res);
     if (e1) return;
-    const { ts: to, err: e2 } = parseTimestampParam(req.query.to, 'to', res);
+    const { ts: to, err: e2 } = parseTimestampParam(query.to, 'to', res);
     if (e2) return;
-    const bucketsRaw = req.query.buckets;
+    const bucketsRaw = query.buckets;
     let buckets = 60;
     if (bucketsRaw != null && bucketsRaw !== '') {
       if (!/^\d+$/.test(bucketsRaw))
         return res.status(400).json({ error: 'invalid "buckets" parameter' });
       buckets = Math.max(1, Math.min(240, parseInt(bucketsRaw, 10)));
     }
-    const src = req.query.src || null;
+    const src = query.src || null;
     const cacheKey = JSON.stringify({ from, to, src, buckets });
     const cached = getSummaryCache(cacheKey);
     if (cached) return res.json({ ...cached, serverTime: Date.now(), cached: true });
@@ -177,20 +236,26 @@ function connectionsRoutes(ctx) {
   });
 
   router.get('/connections/new-nodes', requireAdmin, (req, res) => {
-    const { ts: from, err: e1 } = parseTimestampParam(req.query.from, 'from', res);
+    const parsed = parseRequest(timeQuerySchema, req.query, res);
+    if (!parsed.ok) return;
+    const { from: fromRaw, to: toRaw } = parsed.data;
+    const { ts: from, err: e1 } = parseTimestampParam(fromRaw, 'from', res);
     if (e1) return;
-    const { ts: to, err: e2 } = parseTimestampParam(req.query.to, 'to', res);
+    const { ts: to, err: e2 } = parseTimestampParam(toRaw, 'to', res);
     if (e2) return;
     res.json({ ...history.queryNewNodes(from, to), serverTime: Date.now() });
   });
 
   router.get('/connections/threat-connections', requireAdmin, (req, res) => {
-    const { ts: from, err: e1 } = parseTimestampParam(req.query.from, 'from', res);
+    const parsed = parseRequest(threatConnectionsQuerySchema, req.query, res);
+    if (!parsed.ok) return;
+    const query = parsed.data;
+    const { ts: from, err: e1 } = parseTimestampParam(query.from, 'from', res);
     if (e1) return;
-    const { ts: to, err: e2 } = parseTimestampParam(req.query.to, 'to', res);
+    const { ts: to, err: e2 } = parseTimestampParam(query.to, 'to', res);
     if (e2) return;
-    const confidence = ['low', 'high', 'all'].includes(req.query.confidence) ? req.query.confidence : 'all';
-    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const confidence = ['low', 'high', 'all'].includes(query.confidence) ? query.confidence : 'all';
+    const limit = Math.min(parseInt(query.limit, 10) || 50, 200);
     const groups = history.groupDstByTimeRange(from, to);
     const hits = [];
     for (const { dst, dstHost, cnt } of groups) {
@@ -218,11 +283,14 @@ function connectionsRoutes(ctx) {
   });
 
   router.get('/connections/threat-counts', requireAdmin, (req, res) => {
-    const { ts: from, err: e1 } = parseTimestampParam(req.query.from, 'from', res);
+    const parsed = parseRequest(threatCountsQuerySchema, req.query, res);
+    if (!parsed.ok) return;
+    const query = parsed.data;
+    const { ts: from, err: e1 } = parseTimestampParam(query.from, 'from', res);
     if (e1) return;
-    const { ts: to, err: e2 } = parseTimestampParam(req.query.to, 'to', res);
+    const { ts: to, err: e2 } = parseTimestampParam(query.to, 'to', res);
     if (e2) return;
-    const { filters } = parsePaginationOpts(req.query);
+    const { filters } = parsePaginationOpts(query);
     const groups = history.groupDstByTimeRange(from, to, { filters });
     let safe = 0, warn = 0, danger = 0;
     for (const { dst, dstHost, cnt } of groups) {
@@ -235,14 +303,17 @@ function connectionsRoutes(ctx) {
   });
 
   router.get('/connections/export', requireAdmin, async (req, res) => {
-    const format = String(req.query.format || '').toLowerCase();
+    const parsed = parseRequest(exportQuerySchema, req.query, res);
+    if (!parsed.ok) return;
+    const query = parsed.data;
+    const format = String(query.format || '').toLowerCase();
     if (!['csv', 'json'].includes(format)) {
       return res.status(400).json({ error: 'format must be "csv" or "json"' });
     }
-    const { ts: from, err: fromError } = parseTimestampParam(req.query.from, 'from', res);
+    const { ts: from, err: fromError } = parseTimestampParam(query.from, 'from', res);
     if (fromError) return;
     if (from == null) return res.status(400).json({ error: '"from" timestamp is required' });
-    const { ts: requestedTo, err: toError } = parseTimestampParam(req.query.to, 'to', res);
+    const { ts: requestedTo, err: toError } = parseTimestampParam(query.to, 'to', res);
     if (toError) return;
     const to = requestedTo ?? Date.now();
     if (to < from) return res.status(400).json({ error: '"to" timestamp must not precede "from"' });
@@ -261,13 +332,16 @@ function connectionsRoutes(ctx) {
   });
 
   router.get('/connections', requireAdmin, (req, res) => {
-    const { ts: from, err: e1 } = parseTimestampParam(req.query.from, 'from', res);
+    const parsed = parseRequest(connectionsQuerySchema, req.query, res);
+    if (!parsed.ok) return;
+    const query = parsed.data;
+    const { ts: from, err: e1 } = parseTimestampParam(query.from, 'from', res);
     if (e1) return;
-    const { ts: to, err: e2 } = parseTimestampParam(req.query.to, 'to', res);
+    const { ts: to, err: e2 } = parseTimestampParam(query.to, 'to', res);
     if (e2) return;
 
-    const limitRaw  = req.query.limit;
-    const offsetRaw = req.query.offset;
+    const limitRaw  = query.limit;
+    const offsetRaw = query.offset;
 
     if (limitRaw != null) {
       if (!/^\d+$/.test(limitRaw))
@@ -281,8 +355,8 @@ function connectionsRoutes(ctx) {
       if (!Number.isFinite(offset) || offset < 0)
         return res.status(400).json({ error: 'invalid "offset" parameter' });
       const clampedLimit = Math.min(limit, MAX_LIMIT);
-      const opts = parsePaginationOpts(req.query);
-      const fThreat = req.query.fThreat;
+      const opts = parsePaginationOpts(query);
+      const fThreat = query.fThreat;
       if (['safe', 'warn', 'danger'].includes(fThreat)) {
         const result = queryThreatFilteredPage(history, threatIntel, from, to, clampedLimit, offset, opts, fThreat);
         return res.json({
@@ -303,8 +377,8 @@ function connectionsRoutes(ctx) {
     // No-limit compatibility path. Cap at MAX_FULL_FETCH to prevent
     // blocking the event loop with synchronous SQLite + JSON.stringify on
     // large time ranges (100k+ rows freeze heartbeats and router polling).
-    const opts = parsePaginationOpts(req.query);
-    const fThreat = req.query.fThreat;
+    const opts = parsePaginationOpts(query);
+    const fThreat = query.fThreat;
     if (['safe', 'warn', 'danger'].includes(fThreat)) {
       const result = queryThreatFilteredPage(history, threatIntel, from, to, MAX_FULL_FETCH, 0, opts, fThreat);
       return sendLargeJson(req, res, { connections: result.connections, truncated: result.truncated, serverTime: Date.now() });

@@ -39,6 +39,7 @@ curl --fail-with-body \
 ## Common behavior
 
 - Timestamps are Unix epoch milliseconds. Empty `from` and `to` values mean an open time range unless an endpoint says otherwise.
+- Every endpoint-bearing route module validates request bodies, query strings, and path parameters at a strict Zod boundary. Unknown fields, arrays or objects supplied for scalar parameters, and values over the documented limits return `400` before application state is changed.
 - Successful JSON responses use `application/json`; errors normally use `{ "error": "message" }`.
 - Common status codes are `400` for invalid input, `401` for invalid authentication, `404` for a missing resource, `413` for an oversized upload, `500` for an internal or persistence failure, `502` for router detection failure, and `503` while authentication is not initialized.
 - Router passwords, enable passwords, host fingerprints, and admin tokens are never returned by router-list APIs.

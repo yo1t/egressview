@@ -91,6 +91,10 @@ describe('slack route: GET /api/config/slack', () => {
     assert.equal(status, 200);
     assert.equal(body.config.displayName, '');
   });
+
+  it('rejects unknown query fields', async () => {
+    assert.equal((await req(makeApp(), 'GET', '/api/config/slack?extra=1')).status, 400);
+  });
 });
 
 // ─── POST /api/config/slack ───────────────────────────────────────────────────
@@ -137,6 +141,18 @@ describe('slack route: POST /api/config/slack', () => {
     const app = makeApp({ loadConfig: () => ({ slack: { displayName: 'Saved' } }) });
     const { body } = await req(app, 'POST', '/api/config/slack', {});
     assert.equal(body.config.displayName, 'Saved');
+  });
+
+  it('rejects unknown, mistyped, and out-of-range settings before configuring', async () => {
+    let configureCalls = 0;
+    const app = makeApp({
+      notifier: { ...defaultNotifier, configure: () => { configureCalls++; } },
+    });
+    assert.equal((await req(app, 'POST', '/api/config/slack', { enabled: true, typo: 1 })).status, 400);
+    assert.equal((await req(app, 'POST', '/api/config/slack', { enabled: 'true' })).status, 400);
+    assert.equal((await req(app, 'POST', '/api/config/slack', { cooldownMinutes: 1441 })).status, 400);
+    assert.equal((await req(app, 'POST', '/api/config/slack', { token: 'x'.repeat(513) })).status, 400);
+    assert.equal(configureCalls, 0);
   });
 });
 
@@ -197,6 +213,12 @@ describe('slack route: POST /api/slack/verify', () => {
     const { status } = await req(app, 'POST', '/api/slack/verify', { token: 'x' });
     assert.equal(status, 500);
   });
+
+  it('rejects unknown and non-string token fields', async () => {
+    const app = makeApp();
+    assert.equal((await req(app, 'POST', '/api/slack/verify', { token: {} })).status, 400);
+    assert.equal((await req(app, 'POST', '/api/slack/verify', { extra: true })).status, 400);
+  });
 });
 
 // ─── POST /api/slack/lookup-user ─────────────────────────────────────────────
@@ -228,5 +250,12 @@ describe('slack route: POST /api/slack/lookup-user', () => {
     });
     const { status } = await req(app, 'POST', '/api/slack/lookup-user', { username: 'bob', token: 'x' });
     assert.equal(status, 500);
+  });
+
+  it('rejects missing, oversized, and object usernames', async () => {
+    const app = makeApp();
+    assert.equal((await req(app, 'POST', '/api/slack/lookup-user', {})).status, 400);
+    assert.equal((await req(app, 'POST', '/api/slack/lookup-user', { username: 'x'.repeat(257) })).status, 400);
+    assert.equal((await req(app, 'POST', '/api/slack/lookup-user', { username: {} })).status, 400);
   });
 });

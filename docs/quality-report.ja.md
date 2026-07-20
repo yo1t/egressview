@@ -1,12 +1,13 @@
 # EgressView コード品質レポート
 
 - **評価日**: 2026-07-20
-- **コミット**: `31266cb` (main) + P2-49/P2-50作業ツリー
+- **コミット**: `31266cb`基準スナップショット。入力検証の状態は`d7718eb` + P2-51作業ツリーで更新
 - **バージョン**: 1.5.1
 - **Node.js**: >=22 (テスト: 22, 24)
 - **評価者**: 自動静的解析 + 手動コードレビュー (Claude Code)
 
 > この文書はv1.5.1時点の測定スナップショットです。最新リリースの変更点は`CHANGELOG.md`を参照してください。
+> 特記のないコード量メトリクスは元のスナップショットを維持します。P2-51更新ではunit 1,451件成功と、endpointを持つ13/13 route moduleのstrict Zod対応を確認しました。
 
 ---
 
@@ -14,7 +15,7 @@
 
 **総合グレード: A**
 
-EgressView は評価した全フレームワークにおいて**プロダクショングレードの品質**を示しています。v1.4.0 からの改善として、AI洞察タブ (マルチプロバイダー対応: Ollama/Anthropic/OpenAI)、conntrack ポーラー (TCP/UDP/ICMP parser, SSH/TOFU, ARP/NDP, router manager, Docker SSH統合試験)、enrichment 非同期チャンク化、Smoke テスト大幅拡充が追加されました。ソースコード +2,822行 (+13.9%)、テストコード +2,243行 (+11.8%) の大規模機能拡張に対し、テスト対ソース比率 92.0% を維持しています。zod スキーマ定義は 39→77 (+97%) と倍増し、入力検証の網羅性が大幅に向上しました。
+EgressView は評価した全フレームワークにおいて**プロダクショングレードの品質**を示しています。v1.4.0 からの改善として、AI洞察タブ (マルチプロバイダー対応: Ollama/Anthropic/OpenAI)、conntrack ポーラー、enrichment 非同期チャンク化、Smoke テスト拡充に加え、endpointを持つ全route moduleへのstrictなZod入力検証が追加されました。セキュリティ設計はOWASP ASVS L1適合を維持し、本番依存も12 packageに抑えています。
 
 | # | フレームワーク | スコア | 判定 |
 |---|---|---|---|
@@ -29,7 +30,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 - **セキュリティ設計** — scrypt パスワードハッシュ, タイミングセーフなトークン比較, リクエスト毎 CSP nonce, `style-src 'self'`, CI 統合 ASH + secret scan + npm audit, SHA ピン留め GitHub Actions (2 ワークフロー)
 - **テスト文化** — 96 unit + 4 integration + Playwright smoke (1,441行); テスト対ソース比率 92.0%; 全ドメインモジュールで `_resetForTest()` パターン (9箇所)
 - **コード規律** — サーバーサイド `var` ゼロ, `eval` ゼロ, TODO/FIXME ゼロ, 命名規約一貫, ESLint v10 + innerHTML 監査
-- **入力検証** — HTTP ルートに zod スキーマ検証を段階展開 (endpointを持つ13ルート中6ルート, `http-validation.js` ヘルパー, スキーマ定義 77個)
+- **入力検証** — endpointを持つ13/13 route moduleへstrictなZod検証を適用し、共通`http-validation.js` helperと静的coverage testで固定
 - **カバレッジゲート** — Node.js標準V8 coverageをNode 22 CIで計測し、line 70%・branch 75%・function 65%を下限として強制
 - **最小依存** — 本番パッケージ 12 個のみ; Dependabot (cooldown 7日)
 - **性能最適化** — enrichment キャッシュ 30日 TTL, バックグラウンドスロットリング, bounded ライブグラフ, stale 一括リフレッシュ, reMatchAndNotify 非同期チャンク化
@@ -48,8 +49,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | HTTP endpoint | 56 | 73 | +17 |
 | 本番依存パッケージ | 11 | 12 | +1 (AI provider SDK) |
 | requireAdmin 適用ルート | 79 | 87 | +8 |
-| zod 検証適用ルート | 5/12 | 6/13 | +1 |
-| zod スキーマ定義 | 39 | 77 | +38 (+97%) |
+| zod 検証適用ルート | 5/12 | 13/13 | +8 |
 | パラメータ化 SQL | 99 | 117 | +18 |
 | ドキュメント (docs/*.md) | 22 | 26 | +4 |
 | PRs merged | 78 | 101 | +23 |
@@ -70,17 +70,13 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | HTTP endpoint | 46 | 73 | +27 |
 | 本番依存パッケージ | 10 | 12 | +2 (zod, AI provider SDK) |
 | requireAdmin 適用ルート | 62 | 87 | +25 |
-| zod 検証適用ルート | 0/9 | 6/13 | +6 |
-| zod スキーマ定義 | 0 | 77 | +77 |
+| zod 検証適用ルート | 0/9 | 13/13 | +13 |
 | ドキュメント (docs/*.md) | 14 | 26 | +12 |
 
 ### 主なギャップと次のステップ
 
 | 優先度 | ギャップ | 推定工数 |
 |---|---|---|
-| 高 | backup dry-run / pruneの非ブロッキング化 (P2-49) | 4〜8h |
-| 中 | Health / readinessエンドポイント (P2-50) | 1〜2h |
-| 中 | 残り7ルートへのzod段階展開 (P2-51) | 6〜9h |
 | 中 | HTTP request ID (`X-Request-Id`, P2-52) | 2〜3h |
 | 低 | 意味の異なる`8000`を用途別定数化 (12箇所, P2-53) | 1〜2h |
 | 低・条件付き | OpenAPI (P2-54) / Docker・OCI配布 (P3-5) | spec後に見積もり |
@@ -112,7 +108,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | TODO/FIXME/HACK コメント | 0 |
 | パラメータ化 SQL 文 | 117 |
 | requireAdmin 適用ルート | 87 |
-| zod スキーマ定義 (HTTP ルート) | 77 |
+| zod検証済みendpoint route module | 13/13 |
 | `_resetForTest`/`_initForTest` パターン | 9 ソースファイル |
 
 ---
@@ -126,7 +122,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | V2 認証 | ✅ | scrypt (N=16384, r=8, p=1), timingSafeEqual, 256bit セッショントークン, ブルートフォース防御 (5回/5分ロック), パスワード 8-256文字, zod スキーマ検証 |
 | V3 セッション管理 | ✅ | トークン SHA-256 ハッシュ保存, 30日スライディング失効, パスワード変更時に全セッション無効化, 定期 prune, タッチスロットル (5分) |
 | V4 アクセス制御 | ✅ | 87 ルートに `requireAdmin` 適用、未認証は login/verify の 2 エンドポイントのみ |
-| V5 入力検証 | ✅ | Body 64KB 制限, zod スキーマ検証 (endpointを持つ13ルート中6ルート, `http-validation.js` ヘルパー, 77 スキーマ定義), プライベート IP のみルーターアクセス許可 (SSRF 防止), パストラバーサル防止, null バイト拒否 |
+| V5 入力検証 | ✅ | Body 64KB 制限, endpointを持つ13/13 route moduleへのstrictなZod検証, 未知key・型不正拒否, プライベート IP のみルーターアクセス許可 (SSRF 防止), パストラバーサル防止, null バイト拒否 |
 | V6 暗号化 | ✅ | scrypt (パスワード), randomBytes (トークン/nonce/salt), SHA-256 (TOFU ホスト鍵/セッション), timingSafeEqual |
 | V7 エラー処理 | ✅ | 汎用 500 レスポンス, スタックトレース非露出, タイミング攻撃対策 (500ms 遅延) |
 | V8 データ保護 | ✅ | 設定ファイル mode 0o600, バックアップ 0o600, TLS 秘密鍵 0o600, ログにパスワード非出力 |
@@ -171,7 +167,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | 互換性 | 8/10 | Node 22/24, JA/EN i18n, OS 非依存, Linux conntrack 対応, モバイルレスポンシブ | Docker なし |
 | 使用性 | 9/10 | Demo モード, .env.example, 自動パスワード生成, MCP 統合, API/アーキテクチャドキュメント, モバイル対応, AI洞察 | ワンクリックデプロイなし |
 | 信頼性 | 9/10 | Graceful shutdown, 自動バックアップ, WAL checkpoint, reopen(), DB マイグレーション, AbortSignal, prune同時実行制限・cancel/timeout, Health/readiness | HTTP request IDは未対応 |
-| セキュリティ | 9/10 | OWASP ASVS L1 適合 (13/14), innerHTML 監査, zod 段階展開 (77 スキーマ) | CSRF 明示なし |
+| セキュリティ | 9/10 | OWASP ASVS L1 適合 (13/14), innerHTML 監査, 全endpoint routeのstrict Zod境界 | CSRF 明示なし |
 | 保守性 | 9/10 | 79 モジュール, テスト比率 92.0%, 分割リファクタ (history, auth), http-validation ヘルパー | TypeScript なし |
 | 移植性 | 7/10 | Pure Node.js, ENV 設定, OS 非依存 | Docker/systemd なし |
 
@@ -244,7 +240,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | AI統合 | AI洞察タブ: マルチプロバイダー adapter (Ollama/Anthropic/OpenAI), モデル一覧, 接続テスト, ライブ指標 facts タブ |
 | ネットワーク監視 | conntrack ポーラー: TCP/UDP/ICMP parser, SSH/TOFU, ARP/NDP, router manager, 設定UI/自動検出, Docker SSH統合試験 |
 | 性能 | enrichment queue 50ms ディレイ, reMatchAndNotify 非同期チャンク化 |
-| 入力検証 | zod スキーマ定義 39→77 (+97%), routes/ai.js に zod 検証追加 |
+| 入力検証 | strict Zod検証をendpointを持つ13/13 route moduleへ展開 |
 | テスト | ユニットテスト +12 ファイル (84→96), Smoke テスト 1,163→1,441行, テスト合格数 1,406 |
 | UI | device panel bootstrap 修正, live graph detail threshold 改善 |
 | リリース管理 | 23 PR merged (78→101), ドキュメント +4 (22→26) |
@@ -254,7 +250,7 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | 領域 | 改善内容 |
 |---|---|
 | テスト | ユニットテスト +42 ファイル (54→96), インテグレーション +1, テスト比率 74.9%→92.0% |
-| セキュリティ | zod スキーマ検証をendpointを持つ13ルート中6ルートへ段階展開, `http-validation.js` ヘルパー, requireAdmin +25, 77 スキーマ定義 |
+| セキュリティ | Zod検証を0/9から13/13 endpoint route moduleへ展開, `http-validation.js` helper, requireAdmin +25 |
 | アーキテクチャ | `history.js` 分割 (history-queries.js), `auth.js` 分割 (auth-sessions + router-setup), AbortSignal 対応 |
 | 機能 | AI洞察タブ, conntrack ポーラー, 手動脅威調査, CSV/JSON エクスポート, history-cache, schema v5 migration, モバイルビュー |
 | 性能 | enrichment TTL 最適化, バックグラウンドスロットリング, bounded summaries/graph, 非同期チャンク化 |

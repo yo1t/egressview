@@ -2,6 +2,8 @@
 'use strict';
 
 const { Router } = require('express');
+const { z } = require('zod');
+const { parseRequest } = require('../http-validation');
 const { parsePositiveInt } = require('../utils');
 const { t } = require('../i18n-server');
 const logger = require('../logger');
@@ -9,6 +11,20 @@ const logger = require('../logger');
 const MAX_WHITELIST_ENTRIES = 200;
 const MAX_ORG_ENTRIES       = 100;
 const DOMAIN_RE = /^[a-z0-9]([a-z0-9-]{0,62}\.)+[a-z]{2,}$/i;
+const numericInput = z.union([z.number().finite(), z.string().max(32)]);
+const beaconQuerySchema = z.object({ includeDismissed: z.enum(['0', '1']).optional() }).strict();
+const emptyQuerySchema = z.object({}).strict();
+const beaconConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  minObs: numericInput.optional(),
+  maxCov: numericInput.optional(),
+  minIntervalMs: numericInput.optional(),
+  maxIntervalMs: numericInput.optional(),
+  scanIntervalMs: numericInput.optional(),
+  whitelistDomains: z.array(z.string().max(253)).max(MAX_WHITELIST_ENTRIES).optional(),
+  orgAllowlist: z.array(z.string().max(100)).max(MAX_ORG_ENTRIES).optional(),
+}).strict();
+const beaconIdSchema = z.object({ id: z.string().regex(/^\d+$/).max(16) }).strict();
 
 /** Normalize a domain list from the request body; returns null on invalid input. */
 function sanitizeDomainList(val) {
@@ -47,24 +63,29 @@ function beaconsRoutes(ctx) {
 
   // GET /api/beacons — return all beacon candidates (excluding dismissed)
   router.get('/beacons', requireAdmin, (req, res) => {
+    const parsed = parseRequest(beaconQuerySchema, req.query, res);
+    if (!parsed.ok) return;
     const all = beacons.getBeacons();
-    const includeDismissed = req.query.includeDismissed === '1';
+    const includeDismissed = parsed.data.includeDismissed === '1';
     const results = includeDismissed ? all : all.filter(b => b.status !== 'dismissed');
     res.json({ beacons: results });
   });
 
   // GET /api/beacons/config — current detection settings
   router.get('/beacons/config', requireAdmin, (req, res) => {
+    const parsed = parseRequest(emptyQuerySchema, req.query, res);
+    if (!parsed.ok) return;
     res.json({ config: appState.beaconConfig });
   });
 
   // POST /api/beacons/config — update detection settings, persist, rescan
   router.post('/beacons/config', requireAdmin, (req, res) => {
-    const body = req.body || {};
+    const parsed = parseRequest(beaconConfigSchema, req.body, res);
+    if (!parsed.ok) return;
+    const body = parsed.data;
     const cfg  = { ...appState.beaconConfig };
 
     if (body.enabled !== undefined) {
-      if (typeof body.enabled !== 'boolean') return res.status(400).json({ error: t('beacon.enabled-bool') });
       cfg.enabled = body.enabled;
     }
     if (body.minObs !== undefined) {
@@ -121,8 +142,9 @@ function beaconsRoutes(ctx) {
 
   // POST /api/beacons/:id/dismiss — dismiss a beacon candidate
   router.post('/beacons/:id/dismiss', requireAdmin, (req, res) => {
-    const id = parsePositiveInt(req.params.id);
-    if (id === null) return res.status(400).json({ error: 'invalid id' });
+    const parsed = parseRequest(beaconIdSchema, req.params, res, { error: 'invalid id' });
+    if (!parsed.ok) return;
+    const id = parsePositiveInt(parsed.data.id);
     const ok = beacons.dismissBeacon(id);
     if (!ok) return res.status(404).json({ error: 'beacon not found' });
     res.json({ success: true });

@@ -378,6 +378,33 @@ describe('beacon configuration route', () => {
     assert.strictEqual(appState.beaconConfig, original);
     assert.equal(rescanned, false);
   });
+
+  it('rejects unknown, mistyped, oversized, and invalid query fields before mutation', async () => {
+    const original = {
+      enabled: false, minObs: 4, maxCov: 0.15,
+      minIntervalMs: 60_000, maxIntervalMs: 14_400_000,
+      scanIntervalMs: 900_000, whitelistDomains: [], orgAllowlist: [],
+    };
+    const appState = { beaconConfig: original };
+    let saves = 0;
+    const app = mount(beaconRoutes({
+      requireAdmin,
+      beacons: { getBeacons: () => [], dismissBeacon: () => true },
+      appState,
+      saveConfig: () => { saves++; },
+    }));
+
+    assert.equal((await request(app, 'POST', '/api/beacons/config', { enabled: true, typo: 1 })).status, 400);
+    assert.equal((await request(app, 'POST', '/api/beacons/config', { minObs: {} })).status, 400);
+    assert.equal((await request(app, 'POST', '/api/beacons/config', {
+      whitelistDomains: Array.from({ length: 201 }, () => 'example.com'),
+    })).status, 400);
+    assert.equal((await request(app, 'GET', '/api/beacons?includeDismissed=yes')).status, 400);
+    assert.equal((await request(app, 'GET', '/api/beacons/config?extra=1')).status, 400);
+    assert.equal((await request(app, 'POST', '/api/beacons/not-a-number/dismiss', {})).status, 400);
+    assert.equal(saves, 0);
+    assert.strictEqual(appState.beaconConfig, original);
+  });
 });
 
 describe('router routes', () => {
@@ -439,5 +466,35 @@ describe('device routes', () => {
     assert.equal((await request(app, 'POST', '/api/devices/archive', { deviceId: 'dev1' })).status, 200);
     assert.equal((await request(app, 'POST', '/api/devices/unarchive', { deviceId: 'dev1' })).status, 200);
     assert.equal((await request(app, 'POST', '/api/devices/archive', {})).status, 400);
+  });
+
+  it('rejects unknown, mistyped, and oversized device inputs before mutation', async () => {
+    let mutations = 0;
+    const devices = {
+      getAll: () => [],
+      getMergeCandidates: () => [],
+      approveMerge: () => { mutations++; return true; },
+      rejectCandidate: () => { mutations++; },
+      archiveDevice: () => { mutations++; return true; },
+      unarchiveDevice: () => { mutations++; return true; },
+    };
+    const app = mount(devicesRoutes({
+      requireAdmin,
+      devices,
+      notes: null,
+      yamaha: { getNdpByMac: () => null },
+    }));
+
+    assert.equal((await request(app, 'GET', '/api/devices?unknown=1')).status, 400);
+    assert.equal((await request(app, 'GET', '/api/devices/merge-candidates?status=invalid')).status, 400);
+    assert.equal((await request(app, 'POST', '/api/devices/merge', { keepId: {}, dropId: 'dev2' })).status, 400);
+    assert.equal((await request(app, 'POST', '/api/devices/reject', { id: [] })).status, 400);
+    assert.equal((await request(app, 'POST', '/api/devices/archive', {
+      deviceId: 'x'.repeat(129),
+    })).status, 400);
+    assert.equal((await request(app, 'POST', '/api/devices/unarchive', {
+      deviceId: 'dev1', extra: true,
+    })).status, 400);
+    assert.equal(mutations, 0);
   });
 });
