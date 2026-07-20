@@ -13,10 +13,16 @@ const investigation = require('../../src/investigation');
 function makeStubs({ autoInvestigate = false, routerIp = '192.168.1.1', yamahaIp = '192.168.1.2' } = {}) {
   const savedNotes = new Map();
   return {
+    savedNotes,
     notes: {
       has:       () => false,
       set:       (k, v) => savedNotes.set(k, v),
       save:      () => {},
+      snapshot:  () => new Map(savedNotes),
+      restore:   snapshot => {
+        savedNotes.clear();
+        for (const [key, value] of snapshot) savedNotes.set(key, value);
+      },
       getAll:    () => ({}),
       isSafeKey: (k) => typeof k === 'string' && k.length > 0,
     },
@@ -114,5 +120,28 @@ describe('enqueue notes guard', () => {
 
     // Should silently skip without adding to queue
     assert.doesNotThrow(() => investigation.enqueue('10.55.55.1', null));
+  });
+});
+
+describe('automatic note persistence', () => {
+  it('restores runtime notes and suppresses notification when saving fails', async () => {
+    let emitted = 0;
+    let saveAttempted;
+    const attempted = new Promise(resolve => { saveAttempted = resolve; });
+    const stubs = makeStubs({ autoInvestigate: true });
+    stubs.io.emit = () => { emitted++; };
+    stubs.deviceId.investigateIp = async () => ({ draft: 'identified device' });
+    stubs.notes.save = () => {
+      saveAttempted();
+      throw new Error('disk full');
+    };
+    investigation.init(stubs);
+
+    investigation.enqueue('10.66.66.1', null);
+    await attempted;
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(stubs.savedNotes.size, 0);
+    assert.equal(emitted, 0);
   });
 });

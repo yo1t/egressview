@@ -1,253 +1,193 @@
 # EgressView Code Quality Report
 
-- **Date**: 2026-07-20
-- **Commit**: `31266cb` baseline snapshot; validation and reliability status refreshed through the P2-53 working tree
+- **Assessment date**: 2026-07-20
+- **Baseline**: `e4dd97c` (main after PR #111), including the note-persistence fix in this review
 - **Version**: 1.5.1
-- **Node.js**: >=22 (tested on 22, 24)
-- **Evaluator**: Automated static analysis + manual code review (Claude Code)
+- **Node.js**: >=22 (CI: 22 and 24)
+- **Method**: automated tests, V8 coverage, static analysis, dependency/secret scans, browser smoke tests, and manual review
 
-> This report is a snapshot of v1.5.1. For the current release, see the [changelog](../CHANGELOG.md).
-> Quantitative size metrics remain the original snapshot unless stated otherwise. The P2-51-P2-53 refresh records 1,460 passing unit tests, strict Zod coverage across all 13 endpoint-bearing route modules, HTTP request correlation, and domain-owned 8-second limits.
+> This report evaluates the current main line. SonarQube and OpenSSF scores are repository-based estimates; neither official scanner was run. No penetration test or fuzzing campaign was performed.
 
 ---
 
 ## Executive Summary
 
-**Overall Grade: A**
+**Overall grade: A**
 
-EgressView demonstrates **production-grade quality** across all evaluated frameworks. Since the previous assessment (v1.4.0), significant improvements include the addition of an AI insight tab with multi-provider support (Ollama/Anthropic/OpenAI), strict Zod validation across every endpoint-bearing route module, 12 new API endpoints, and continued growth of the test suite. Security design continues to meet OWASP ASVS L1, and the minimal dependency footprint (12 production packages) is maintained.
+No critical or high-severity defect was found. One medium reliability defect was found and fixed during this review: failed device-note writes could leave unpersisted runtime state in the manual route, automatic investigation, and device merge flows. All three paths are now fail-closed, restore the previous in-memory snapshot, suppress success notifications, and prevent dependent device merges from starting.
 
-| # | Framework | Score | Verdict |
-|---|---|---|---|
-| 1 | OWASP ASVS Level 1 | 13/14 sections pass | ✅ Compliant |
-| 2 | OpenSSF Scorecard | ~8.4/10 | Top 15% |
-| 3 | ISO/IEC 25010 | Average 8.8/10 | High Quality |
-| 4 | Node.js Best Practices (goldbergyoni) | 45/50 (90%) | Excellent |
-| 5 | SonarQube Quality Gate (estimated) | All A (except Coverage B) | ✅ PASSED |
+The current codebase has strong automated controls for a self-hosted SOHO network monitor: all endpoint-bearing route modules use strict Zod validation, 69 of 71 API endpoints require authentication, database migrations and restores are fail-closed, request IDs correlate HTTP logs, and backup verification runs outside the main event loop. The main residual risks are hardware-dependent integration coverage, several large orchestration modules, and additional boundary controls if the application is exposed directly to the Internet.
 
-### Key Strengths
+| Framework | Result | Verdict |
+|---|---:|---|
+| OWASP ASVS Level 1 | 13/14 areas satisfied or mitigated | Compliant for the documented private-network deployment model |
+| OpenSSF Scorecard | ~8.4/10 estimated | Strong repository hygiene |
+| ISO/IEC 25010 | 8.6/10 average | High quality |
+| Node.js Best Practices | 45/50 | Excellent |
+| SonarQube-equivalent gate | Passed; coverage rating B | No high-severity blocker |
 
-- **Security by design** — scrypt password hashing, timing-safe token comparison, per-request CSP nonce, `style-src 'self'`, CI-integrated ASH + secret scan + npm audit, SHA-pinned GitHub Actions (2 workflows)
-- **Testing culture** — 96 unit + 4 integration + Playwright smoke (1,441 lines); 92.0% test-to-source ratio; `_resetForTest()` pattern across 9 domain modules
-- **Code discipline** — server-side `var` zero, `eval` zero, TODO/FIXME zero, consistent naming, ESLint v10 + innerHTML audit
-- **Input validation** — strict Zod validation across all 13/13 endpoint-bearing route modules, enforced by the shared `http-validation.js` helper and a static coverage test
-- **Coverage gate** — Node.js built-in V8 coverage runs in Node 22 CI with enforced minimums of 70% lines, 75% branches, and 65% functions
-- **Minimal dependencies** — 12 production packages only; Dependabot with 7-day cooldown
-- **AI integration** — multi-provider adapter (Ollama/Anthropic/OpenAI) with model list, connection test, and live metrics facts tab
+## Review Findings
 
-### Changes Since v1.4.0
+### Fixed in this review
 
-| Item | v1.4.0 | v1.5.1 (assessed) | Change |
-|---|---|---|---|
-| Source lines | 20,255 | 23,077 | +13.9% |
-| Test lines | 18,982 | 21,225 | +11.8% |
-| Test-to-source ratio | 93.7% | 92.0% | −1.7pp |
-| Unit test files | 84 | 96 | +12 |
-| Source modules (src/) | 69 | 79 | +10 |
-| Route files (src/routes/) | 13 | 14 | +1 |
-| HTTP endpoints | 56 | 73 | +17 |
-| Production dependencies | 11 | 12 | +1 |
-| requireAdmin routes | 79 | 87 | +8 |
-| zod-validated routes | 5/12 | 13/13 | +8 |
-| Parameterized SQL | 99 | 117 | +18 |
-| Documentation (docs/*.md) | 22 | 26 | +4 |
-| PRs merged | 78 | 101 | +23 |
+**Medium - device-note persistence was fail-open.** `src/notes.js` swallowed filesystem errors, while the manual note route, automatic investigation, and device merge flow could retain an in-memory change that was not persisted. A restart could therefore discard a note that appeared saved; a merge could also start after its note migration failed. All three write paths now snapshot state before mutation, restore it on persistence failure, suppress success notifications, and prevent the dependent device merge from starting. Unit tests cover runtime rollback, HTTP 500 behavior, event suppression, and merge isolation.
 
-### Cumulative Changes Since v1.2.2
+### Open risks
 
-| Item | v1.2.2 | v1.5.1 (assessed) | Change |
-|---|---|---|---|
-| Source lines | 16,791 | 23,077 | +37.4% |
-| Test lines | 12,577 | 21,225 | +68.8% |
-| Test-to-source ratio | 74.9% | 92.0% | +17.1pp |
-| Unit test files | 54 | 96 | +42 |
-| Source modules (src/) | 48 | 79 | +31 |
-| HTTP endpoints | 46 | 73 | +27 |
-| Production dependencies | 10 | 12 | +2 |
-
-### Key Gaps and Next Steps
-
-| Priority | Gap | Effort |
-|---|---|---|
-| Low, conditional | OpenAPI (P2-54) / Docker and OCI distribution (P3-5) | Estimate after specification |
-
-The remaining gaps are typical for a home-lab/SOHO network monitoring tool and can be addressed incrementally without architectural changes.
+- **Medium, operational**: the four hardware/external-service integration files are not part of the default CI workflow. Unit and browser smoke tests use fixtures and demo mode; Yamaha, ASUS, Slack, and conntrack integration still require an explicit environment.
+- **Low, maintainability**: `history.js` (761 lines), `public/js/log.js` (715), `public/js/graph.js` (675), `devices.js` (665), and the Cisco/Yamaha pollers remain the largest change surfaces. Their critical parsers and data paths are tested, but future feature growth should preserve the existing extraction pattern.
+- **Low, conditional security**: the current design assumes VPN/private-network access and header-token/session authentication. Direct Internet or multi-user exposure should first add a trusted TLS reverse proxy, IP allowlisting, proxy-aware global rate limiting, and audited client-IP handling (P2-41).
+- **Low, ecosystem**: no OpenAPI contract, signed release artifacts, fuzzing, or OCI image is provided. These remain demand-driven tasks rather than release blockers.
 
 ---
 
-## Codebase Metrics
+## Measured Evidence
+
+| Check | Result |
+|---|---|
+| Unit tests with coverage | 1,465 passed, 0 failed |
+| V8 coverage | 79.36% lines, 79.40% branches, 75.94% functions |
+| CI coverage minimums | 70% lines, 75% branches, 65% functions - passed |
+| Playwright browser smoke | 64 passed, 1 conditional skip |
+| ESLint | Passed |
+| Frontend HTML insertion audit | 0 `innerHTML` / `insertAdjacentHTML` assignments |
+| Production dependency audit | 0 vulnerabilities |
+| Secret scan | Passed; no high-signal secrets or environment-specific LAN IPs |
+| Package dry-run | Passed, 178 entries |
+| GitHub CI on PR #111 | Node 22/24, release safety, ASH, browser smoke, and Pages build passed |
+
+### Codebase Metrics
 
 | Metric | Value |
-|---|---|
-| Source lines (server + src + public/js + mcp) | 23,077 |
-| Test lines (unit + integration + smoke) | 21,225 |
-| Test-to-source ratio | 92.0% |
-| Unit test files | 96 |
+|---|---:|
+| Source lines (`server`, `mcp`, `src`, `public/js`) | 24,271 |
+| Test lines (unit, integration, smoke) | 22,465 |
+| Test-to-source ratio | 92.6% |
+| Unit test files | 102 |
 | Integration test files | 4 |
-| Smoke test (Playwright) files | 1 (1,441 lines) |
-| Source modules (src/) | 79 |
-| Pollers (src/pollers/) | 15 |
-| Route files (src/routes/) | 14 |
-| HTTP endpoints | 73 (71 under `/api` plus 2 health endpoints) |
+| Browser smoke file | 1 (1,497 lines) |
+| Source modules under `src/` | 85 |
+| Poller modules | 15 |
+| Route modules | 14 |
+| HTTP endpoints | 73 (71 API + 2 health) |
+| Authenticated API endpoints | 69/71 |
+| Public API endpoints | Login and admin-token verification |
+| Public operational endpoints | `/healthz` and `/readyz`, fixed minimal responses |
+| Endpoint-bearing route modules using strict Zod | 13/13 |
 | Production dependencies | 12 |
-| Average lines per function | ~18.4 |
-| Deeply nested lines (>5 levels) | 7 |
-| `var` usage (server-side) | 0 |
-| `eval` / `new Function` usage | 0 |
-| TODO/FIXME/HACK comments | 0 |
-| Parameterized SQL statements | 117 |
-| requireAdmin routes | 87 |
-| zod-validated endpoint route modules | 13/13 |
+| Parameterized SQL preparation sites | 117 |
+| Server-side `var` | 0 |
+| `eval` / `new Function` | 0 |
+| TODO/FIXME/HACK markers | 0 |
 
 ---
 
 ## 1. OWASP ASVS Level 1
 
-**Verdict: Compliant (13/14 categories pass)**
+**Verdict: compliant for the documented deployment model (13/14 areas satisfied or mitigated).**
 
-| Category | Status | Evidence |
+| Area | Status | Evidence |
 |---|---|---|
-| V2 Authentication | ✅ | scrypt (N=16384, r=8, p=1), timingSafeEqual, 256-bit session tokens, brute-force lockout (5 fails / 5-min lock), password 8–256 chars, zod schema validation |
-| V3 Session Management | ✅ | Tokens stored hashed (SHA-256), sliding 30-day expiry, revoke on password change, periodic pruning, touch throttle (5 min) |
-| V4 Access Control | ✅ | 87 routes use `requireAdmin`; only 2 unauthenticated (login, verify) |
-| V5 Input Validation | ✅ | Body limit 64 KB, strict Zod validation across 13/13 endpoint-bearing route modules, unknown-key and type rejection, private-IP-only router access (SSRF prevention), path traversal check, null-byte rejection |
-| V6 Cryptography | ✅ | scrypt for passwords, randomBytes for tokens/nonces/salts, SHA-256 for TOFU host keys/sessions, timingSafeEqual |
-| V7 Error Handling | ✅ | Generic 500 responses, no stack traces leaked, timing-attack-resistant error responses (500 ms delay) |
-| V8 Data Protection | ✅ | Config file mode 0o600, backup 0o600, TLS private key 0o600, no plaintext passwords in logs |
-| V9 Communications | ✅ | HTTPS opt-in with HSTS (max-age 1 year), CSP with per-request nonces, style-src 'self' |
-| V10 Malicious Code | ✅ | Zero eval/new Function, innerHTML usage audited in CI (allowlist approach) |
-| V12 File Handling | ✅ | Upload size limits, backup name zod validation (1–255 chars), path traversal prevention |
-| V13 API Security | ✅ | JSON-only, express.json 64 KB limit, per-method routes, zod `.strict()` rejects unknown fields |
-| V14 Configuration | ✅ | No hardcoded secrets, all credentials via env or config file, CI secret scan |
-| V11 Business Logic | ⚠️ | No explicit CSRF protection (mitigated by same-origin CSP + token-based auth) |
+| Authentication | Pass | scrypt password hashing, timing-safe comparisons, 256-bit session tokens, delayed failures, per-IP lockout |
+| Session management | Pass | Hashed tokens, sliding expiry, revocation, password-change handling, periodic pruning |
+| Access control | Pass | 69/71 API endpoints use `requireAdmin`; WebSocket handshake uses the same authentication boundary |
+| Input validation | Pass | 64 KB JSON limit, strict Zod on 13/13 endpoint modules, unknown-key rejection, bounded strings/ranges |
+| Cryptography | Pass | `randomBytes`/UUID for secrets and correlation, SHA-256 for session/TOFU identity, timing-safe equality |
+| Error handling | Pass | Generic 500 responses, no stack exposure, request-correlated server logs |
+| Data protection | Pass | Config, backup, and TLS key mode 0600; secrets excluded from public config and logs |
+| Communications | Pass with deployment condition | Optional HTTPS and HSTS; private-network/VPN deployment remains the default |
+| Malicious code | Pass | No eval; frontend HTML insertion audit is enforced in CI |
+| File handling | Pass | Bounded uploads, validated backup names, traversal checks, fail-closed restore/migration |
+| API security | Pass | Method-specific routes, strict schemas, response-size/time bounds, authenticated exports |
+| Configuration | Pass | No hard-coded credentials, example configuration, secret scan, production demo-mode refusal |
+| Business logic | Mitigated | No cookie-based authentication; classic CSRF is reduced by explicit header tokens. Reassess if cookie auth or direct Internet exposure is introduced |
 
-**Improvement since v1.4.0:** V5 (Input Validation) now covers all 13 endpoint-bearing route modules and is protected against coverage regression by a static unit test; V4 (Access Control) expanded with 8 new requireAdmin routes covering AI endpoints.
+The health endpoints are intentionally unauthenticated but return only fixed liveness/readiness state with `no-store`; they expose no router addresses, credentials, or counts.
 
 ---
 
 ## 2. OpenSSF Scorecard (Estimated)
 
-**Estimated Score: 8.4/10**
+**Estimated score: 8.4/10.**
 
 | Check | Score | Evidence |
-|---|---|---|
-| Pinned-Dependencies | 10/10 | All GitHub Actions pinned to full SHA with version comment (ci.yml + pages.yml) |
-| Token-Permissions | 10/10 | `permissions: contents: read` (least privilege), pages uses `pages: write` + `id-token: write` only |
-| Dangerous-Workflow | 10/10 | No `pull_request_target` |
-| Binary-Artifacts | 10/10 | None |
-| Security-Policy | 10/10 | SECURITY.md + GitHub private reporting |
-| License | 10/10 | AGPL-3.0-only |
-| SAST | 10/10 | ASH scanner + custom secret scan + innerHTML audit (CI) |
-| Vulnerabilities | 10/10 | `npm audit --omit=dev` in CI |
-| Dependency-Update-Tool | 10/10 | Dependabot (npm + Actions, weekly, 7-day cooldown) |
-| CI-Tests | 10/10 | Unit + integration + Playwright smoke; Node 22/24 matrix |
-| Maintained | 10/10 | Active releases (v1.0.0 to v1.5.1, 101 PRs merged), PR template, CONTRIBUTING.md |
-| Code-Review | 7/10 | PR template + CI required on PRs (branch protection not verifiable) |
-| Fuzzing | 0/10 | None (typical for network monitoring tools) |
-| Signed-Releases | 0/10 | No GPG signing (distributed via git clone) |
+|---|---:|---|
+| Pinned dependencies | 10 | Every GitHub Action is pinned to a full commit SHA |
+| Token permissions | 10 | Read-only default; Pages widens only the permissions it needs |
+| Dangerous workflow | 10 | No `pull_request_target` |
+| Binary artifacts | 10 | No committed binaries |
+| Security policy | 10 | `SECURITY.md` and private vulnerability reporting |
+| License | 10 | AGPL-3.0-only |
+| SAST | 10 | ASH, secret scan, ESLint, and frontend insertion audit |
+| Vulnerabilities | 10 | Production `npm audit` in CI; 0 findings in this review |
+| Dependency updates | 10 | Weekly Dependabot for npm and Actions with a 7-day cooldown |
+| CI tests | 9 | Unit/coverage and browser smoke on PRs; hardware integration is explicit, not default |
+| Maintained | 10 | Active release and PR history through PR #111 |
+| Code review | 7 | PR workflow and required checks are used; branch-protection policy was not independently verified |
+| Fuzzing | 0 | No continuous fuzzing |
+| Signed releases | 0 | No GPG/Sigstore release signing |
 
 ---
 
 ## 3. ISO/IEC 25010
 
-| Quality Characteristic | Score | Key Strengths | Key Gaps |
-|---|---|---|---|
-| Functional Suitability | 9/10 | 73 HTTP endpoints, 15 pollers, MCP server, AI insight tab (multi-provider), CSV export | No OpenAPI spec |
-| Performance Efficiency | 9/10 | Multi-layer caching, WAL, compression, batching, dedup, bounded summaries, and worker-isolated backup verification | A few 3-second probe timeouts under full EC2 backup verification load |
-| Compatibility | 8/10 | Node 22/24, JA/EN i18n, OS-independent, Linux conntrack support | No Docker |
-| Usability | 9/10 | Demo mode, .env.example, auto-generated password, MCP integration, AI insights, API/architecture docs | No one-click deploy |
-| Reliability | 9/10 | Graceful shutdown, auto-backup, DB migration, AbortSignal, single-flight prune cancellation/timeouts, health/readiness, HTTP request correlation | No built-in process supervision |
-| Security | 9/10 | OWASP ASVS L1 compliant (13/14), innerHTML audit, strict Zod boundary across all endpoint routes | No explicit CSRF |
-| Maintainability | 9/10 | 79 modules, 92.0% test ratio, split refactors, http-validation helper, _resetForTest pattern | No TypeScript |
-| Portability | 7/10 | Pure Node.js, ENV config, OS-independent | No Docker/systemd |
+| Characteristic | Score | Strengths | Remaining gap |
+|---|---:|---|---|
+| Functional suitability | 9 | Multi-router collection, AI insights, threat investigation, exports, MCP | No OpenAPI contract |
+| Performance efficiency | 9 | WAL, batching, bounded summaries, caches, worker-isolated backup verification | Heavy backup checks can still create short host-level latency spikes |
+| Compatibility | 8 | Node 22/24, JA/EN, Yamaha/Cisco/ASUS/conntrack paths | Hardware-specific verification remains fixture-dependent in CI |
+| Usability | 9 | Responsive UI, setup guides, auto-detection, health diagnostics | No one-click deployment |
+| Reliability | 9 | Fail-closed migration/restore/config/notes, health/readiness, cancellation, request IDs | No built-in service supervisor |
+| Security | 9 | Strict schemas, CSP, secret controls, ASH, bounded provider calls | Internet-edge controls are conditional |
+| Maintainability | 9 | 85 modules, strong tests, split route/poller/query boundaries | Several 600-760-line orchestration modules remain |
+| Portability | 7 | Pure Node runtime and environment configuration | No supported OCI image/systemd unit |
+
+**Average: 8.6/10.**
 
 ---
 
-## 4. Node.js Best Practices (goldbergyoni)
+## 4. Node.js Best Practices
 
-**Adherence: 45/50 key practices (90%)**
+**Adherence: 45/50 (90%).**
 
-| Section | Score | Highlights |
-|---|---|---|
-| 1. Project Structure | 9/10 | Domain-based (routes/pollers/core), layer separation, 14 route files, history split refactor |
-| 2. Error Handling | 9/10 | async/await unified, central handler, graceful exit (SIGTERM/SIGINT), AbortSignal |
-| 3. Code Style | 10/10 | ESLint v10, const-first (0 var), innerHTML audit, consistent naming |
-| 4. Testing | 9/10 | 96 unit + 4 integration + Playwright smoke, AAA pattern, isolated init, 92.0% test ratio |
-| 5. Production | 8/10 | Structured logging, vuln detection, LTS Node, GitHub Pages documentation, enrichment queue |
-| 6. Security | 9/10 | ASH, security headers, no eval, auth rate limit, zod (HTTP + MCP), AI provider input validation |
+- Domain modules, route modules, poller adapters, DB bootstrap, and browser rendering responsibilities are separated.
+- Async external calls have timeouts/AbortSignal bounds; backup pruning uses a worker and single-flight job state.
+- The logger adds a bounded `X-Request-Id` context through `AsyncLocalStorage` without logging query strings.
+- Graceful shutdown, readiness, schema migration, config rollback, and persistence failure tests cover important lifecycle boundaries.
+- ESLint, V8 coverage, Node 22/24, Playwright, ASH, secret scanning, and dependency audit run as PR gates.
 
-**Notable gaps:**
-- No request/transaction IDs
-- No Docker / process manager
-- No OpenAPI documentation (API reference provided in Markdown)
-- No global HTTP rate limiting (auth rate limiting only)
+Points are withheld for no default hardware integration CI, no process manager/container artifact, no OpenAPI contract, and no global edge rate limit for Internet-facing operation.
 
 ---
 
-## 5. SonarQube-Equivalent Metrics
+## 5. SonarQube-Equivalent Gate
 
-| Metric | Value | Rating |
-|---|---|---|
-| Lines of Code | 23,077 | - |
-| Test-to-Source Ratio | 92.0% | Excellent (>80%) |
-| Duplications | <2% | **A** (threshold: <=3%) |
-| Cognitive Complexity | Very low | **A** (7 deeply-nested lines) |
-| Technical Debt Ratio | 3.5% (~22 h) | **A** (threshold: <=5%) |
-| Reliability | 0 known unfixed defects (P2-49 is worker-isolated) | **A** |
-| Security Hotspots | 0 open | **A** |
-| Security Rating | - | **A** |
-| Maintainability | Debt ratio 3.5% | **A** |
-| Coverage (measured) | 78.33% lines, 79.10% branches, 75.12% functions | **B** (CI thresholds passed) |
+| Metric | Result | Rating |
+|---|---:|---|
+| Reliability | No known critical/high defect; medium note-write defect fixed | A |
+| Security | No open high-signal secret or dependency finding | A |
+| Maintainability | Large modules are known but bounded by tests and extracted helpers | A |
+| Coverage | 79.36% lines / 79.40% branches / 75.94% functions | B |
+| Duplication | No material new duplication identified in manual/static review | A (estimated) |
 
-**Quality Gate: ✅ PASSED**
+**Quality gate: passed.**
 
-### Complexity Hotspots (Top 5)
+### Primary Maintainability Hotspots
 
-| File | Lines | Decisions/100L |
-|---|---|---|
-| device-identify.js | 547 | 25.2 |
-| routes/connections.js | 329 | 25.5 |
-| db-migrate.js | 413 | 18.1 |
-| pollers/cisco.js | 643 | 17.0 |
-| devices.js | 665 | 16.5 |
+| File | Lines | Review note |
+|---|---:|---|
+| `src/history.js` | 761 | Store orchestration remains large after query/cache/bootstrap extraction |
+| `public/js/log.js` | 715 | Pagination, filtering, and rendering share one view module |
+| `public/js/graph.js` | 675 | Orchestrates extracted graph helpers/panels/renderer |
+| `src/devices.js` | 665 | Device identity, persistence, and merge lifecycle |
+| `src/pollers/cisco.js` | 645 | Stateful SSH lifecycle around extracted parser/handshake modules |
+| `server.js` | 632 | Bootstrap and dependency wiring |
+| `src/pollers/yamaha.js` | 614 | Stateful SSH lifecycle around adapter parsers |
 
-### Code Smells (12 total)
-
-| Severity | Count | Examples |
-|---|---|---|
-| MAJOR | 2 | `history.js` 761L (still multi-concern after split), `devices.js` 665L |
-| MINOR | 5 | `pollers/cisco.js` 643L, `server.js` 621L, `pollers/yamaha.js` 612L, `device-identify.js` 547L, `ai-provider.js` 477L |
-| INFO | 5 | DB initDb() boilerplate duplication (5 files) |
+These are refactoring candidates, not current release blockers. Changes should remain incremental and behavior-preserving.
 
 ---
 
-## 6. Improvement Summary: v1.4.0 → v1.5.1
+## Conclusion
 
-| Area | Improvements |
-|---|---|
-| Testing | Unit tests +12 files (84→96), smoke test grew (1,163→1,441 lines), test lines +2,243 |
-| Security | Strict Zod validation expanded to all 13 endpoint route modules, requireAdmin +8, AI endpoints fully validated |
-| Architecture | AI provider adapter (Ollama/Anthropic/OpenAI), enrichment cache TTL 30d, reMatchAndNotify chunked async, enrichment queue 50ms delay |
-| Features | AI insight tab (provider infrastructure + live metrics facts), conntrack SSH/TOFU, ARP/NDP, router manager, settings UI/auto-detect |
-| CI/CD | Docker SSH test for conntrack, continued soak stability |
-| Documentation | +4 docs (26 total), API/architecture kept current |
-| Dependencies | AI provider SDK added (+1, total 12) |
-| Code Quality | Parameterized SQL 99→117, complete endpoint-route validation coverage, MINOR code smells +1 (ai-provider.js 477L) |
-
----
-
-## 7. Cumulative Improvement: v1.2.2 → v1.5.1
-
-| Area | Improvements |
-|---|---|
-| Testing | Unit tests +42 files (54→96), integration +1, test ratio 74.9%→92.0% (+17.1pp), smoke test added and grew to 1,441 lines |
-| Security | Zod validation expanded from 0/9 to 13/13 endpoint route modules, requireAdmin 62→87 (+25), CI secret scan + ASH + innerHTML audit |
-| Architecture | history.js split, auth.js split, AbortSignal support, AI multi-provider adapter, enrichment cache with TTL |
-| Features | conntrack poller, manual threat investigation, AI insight tab, CSV export, history-cache, Docker SSH test |
-| Documentation | 14→26 docs (+12), API reference (JA/EN), architecture docs, conntrack setup |
-| Dependencies | 10→12 (zod + AI provider SDK) |
-| Code Quality | `history.js` 985→761L (−23%), MAJOR code smells 3→2, parameterized SQL 77→117 |
-
----
-
-*This report was generated via automated static analysis of the repository source code. No dynamic testing (penetration testing, fuzzing) was performed. SonarQube metrics are estimated from grep-based analysis, not from the actual SonarQube scanner. OpenSSF Scorecard is estimated from repository contents; the actual score requires running the `scorecard` CLI against the live GitHub repository.*
+The current main line is suitable for its documented self-hosted, private-network deployment model. Automated quality gates are broad, data-changing operations fail closed, and no critical/high issue remains after this review. The next highest-value work is product feedback on the second mobile phase (P2-8); OpenAPI, Internet-edge hardening, conntrack hardware expansion, and OCI distribution should remain requirement-driven.

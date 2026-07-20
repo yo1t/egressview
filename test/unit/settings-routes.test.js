@@ -450,6 +450,7 @@ describe('device routes', () => {
   it('covers inventory and archive lifecycle', async () => {
     const devices = {
       getAll: () => [{ deviceId: 'dev1', ip: '192.168.1.10', mac: '00:11:22:33:44:55' }],
+      getByDeviceId: id => id === 'dev1' ? { deviceId: id } : null,
       archiveDevice: id => id === 'dev1',
       unarchiveDevice: id => id === 'dev1',
     };
@@ -473,6 +474,7 @@ describe('device routes', () => {
     const devices = {
       getAll: () => [],
       getMergeCandidates: () => [],
+      getByDeviceId: () => null,
       approveMerge: () => { mutations++; return true; },
       rejectCandidate: () => { mutations++; },
       archiveDevice: () => { mutations++; return true; },
@@ -496,5 +498,71 @@ describe('device routes', () => {
       deviceId: 'dev1', extra: true,
     })).status, 400);
     assert.equal(mutations, 0);
+  });
+
+  it('does not merge devices when note persistence fails', async () => {
+    const values = new Map([['drop', 'printer']]);
+    let merges = 0;
+    const devices = {
+      getByDeviceId: id => ({ deviceId: id }),
+      approveMerge: () => { merges++; return true; },
+    };
+    const notes = {
+      get: key => values.get(key),
+      set: (key, value) => values.set(key, value),
+      del: key => values.delete(key),
+      snapshot: () => new Map(values),
+      restore: snapshot => {
+        values.clear();
+        for (const [key, value] of snapshot) values.set(key, value);
+      },
+      save: () => { throw new Error('disk full'); },
+    };
+    const app = mount(devicesRoutes({
+      requireAdmin,
+      devices,
+      notes,
+      yamaha: { getNdpByMac: () => null },
+    }));
+
+    const result = await request(app, 'POST', '/api/devices/merge', { keepId: 'keep', dropId: 'drop' });
+
+    assert.equal(result.status, 500);
+    assert.equal(values.get('drop'), 'printer');
+    assert.equal(values.has('keep'), false);
+    assert.equal(merges, 0);
+  });
+
+  it('restores a migrated note when the device transaction fails', async () => {
+    const values = new Map([['drop', 'printer']]);
+    let saves = 0;
+    const devices = {
+      getByDeviceId: id => ({ deviceId: id }),
+      approveMerge: () => { throw new Error('database is busy'); },
+    };
+    const notes = {
+      get: key => values.get(key),
+      set: (key, value) => values.set(key, value),
+      del: key => values.delete(key),
+      snapshot: () => new Map(values),
+      restore: snapshot => {
+        values.clear();
+        for (const [key, value] of snapshot) values.set(key, value);
+      },
+      save: () => { saves++; },
+    };
+    const app = mount(devicesRoutes({
+      requireAdmin,
+      devices,
+      notes,
+      yamaha: { getNdpByMac: () => null },
+    }));
+
+    const result = await request(app, 'POST', '/api/devices/merge', { keepId: 'keep', dropId: 'drop' });
+
+    assert.equal(result.status, 500);
+    assert.equal(values.get('drop'), 'printer');
+    assert.equal(values.has('keep'), false);
+    assert.equal(saves, 2);
   });
 });
