@@ -167,10 +167,10 @@ EgressView は評価した全フレームワークにおいて**プロダクシ�
 | 品質特性 | スコア | 主な強み | 主なギャップ |
 |---|---|---|---|
 | 機能適合性 | 9/10 | 73 HTTP endpoint, 15 ポーラー, MCP サーバー, AI洞察タブ, 手動脅威調査, CSV/JSON エクスポート, モバイルビュー | OpenAPI 定義なし |
-| 性能効率性 | 9/10 | 多層キャッシュ (history-cache, enrichment 30日 TTL), WAL, 圧縮, バッチ化, 重複排除, bounded summaries, バックグラウンドスロットリング, backup検証のworker分離 | EC2の4GB超backupで再検証待ち |
+| 性能効率性 | 9/10 | 多層キャッシュ (history-cache, enrichment 30日 TTL), WAL, 圧縮, バッチ化, 重複排除, bounded summaries, バックグラウンドスロットリング, backup検証のworker分離 | EC2高負荷時に3秒監視timeoutがごく少数発生 |
 | 互換性 | 8/10 | Node 22/24, JA/EN i18n, OS 非依存, Linux conntrack 対応, モバイルレスポンシブ | Docker なし |
 | 使用性 | 9/10 | Demo モード, .env.example, 自動パスワード生成, MCP 統合, API/アーキテクチャドキュメント, モバイル対応, AI洞察 | ワンクリックデプロイなし |
-| 信頼性 | 9/10 | Graceful shutdown, 自動バックアップ, WAL checkpoint, reopen(), DB マイグレーション, AbortSignal, prune同時実行制限・cancel/timeout, Health/readiness | EC2デプロイ後のreadiness運用確認待ち |
+| 信頼性 | 9/10 | Graceful shutdown, 自動バックアップ, WAL checkpoint, reopen(), DB マイグレーション, AbortSignal, prune同時実行制限・cancel/timeout, Health/readiness | HTTP request IDは未対応 |
 | セキュリティ | 9/10 | OWASP ASVS L1 適合 (13/14), innerHTML 監査, zod 段階展開 (77 スキーマ) | CSRF 明示なし |
 | 保守性 | 9/10 | 79 モジュール, テスト比率 92.0%, 分割リファクタ (history, auth), http-validation ヘルパー | TypeScript なし |
 | 移植性 | 7/10 | Pure Node.js, ENV 設定, OS 非依存 | Docker/systemd なし |
