@@ -75,7 +75,9 @@ const usageQuerySchema = z.object({
   timezoneOffset: z.coerce.number().int().min(-840).max(840).default(0),
 }).strict();
 
-module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, history, threatIntel, routerManager }) {
+module.exports = function aiRoutes({
+  requireAdmin, aiProvider, saveConfig, history, threatIntel, routerManager, devices, asus,
+}) {
   const router = Router();
 
   function persistUsage(result, { kind, requestId = randomUUID(), conversationId = null } = {}) {
@@ -240,7 +242,7 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     try {
       const routers = routerManager.list();
       const facts = buildAiFacts({ history, threatIntel, routers, from, to });
-      const context = buildAiContext({ facts, history, routers, from, to, threatIntel });
+      const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus });
       const result = await aiProvider.generateInsight(context, {
         signal: controller.signal,
         cloudConsentConfirmed: parsed.data.cloudConsentConfirmed,
@@ -320,7 +322,7 @@ module.exports = function aiRoutes({ requireAdmin, aiProvider, saveConfig, histo
     try {
       const routers = routerManager.list();
       const facts = buildAiFacts({ history, threatIntel, routers, from, to });
-      const context = buildAiContext({ facts, history, routers, from, to, threatIntel });
+      const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus });
       const response = await aiProvider.generateInsight(context, {
         signal: controller.signal,
         cloudConsentConfirmed: parsed.data.cloudConsentConfirmed,

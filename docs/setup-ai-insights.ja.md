@@ -19,8 +19,9 @@ AI洞察はEgressViewの先頭タブ兼スタートページです。上段の�
 
 ## 送信データと安全境界
 
-- 選択期間の接続集計には通信先IP、hostname、端末名、MAC、脅威件数が含まれます。
-- Router管理IP、username/password、enable password、API key、admin token、raw logは送りません。
+- 選択期間の接続集計には通信先IP、hostname、脅威件数と、通信量を優先した最大30台の端末一覧が含まれます。端末情報にはIP、名前、MAC、vendor、IPv6、初回/最終観測、収集元、状態、接続数を含み得ます。
+- ASUS情報がある場合は、最大10件のmesh node要約と、nodeごとの接続台数・代表端末最大5台も含めます。
+- Router/node管理IP、端末メモ、archive済み端末、username/password、enable password、API key、admin token、raw logは送りません。
 - 対象期間は最大14日、promptと応答に上限があり、timeoutは30秒、同時実行は全体で1件です。
 - Anthropic / OpenAI / Bedrockは保存済み同意に加え、分析実行時にも確認します。
 - AI失敗・遅延はrouter収集、SQLite、Socket.IO、他画面を停止させません。
@@ -48,6 +49,9 @@ providerやAWSの契約割引、失敗時にprovider側だけで発生した費�
 
 ## Privacy上の選択
 
-外部送信を避ける場合はAIを無効のまま使うか、管理下のOllamaを選択してください。Cloud
-provider利用時はEgressViewをHTTPSまたは信頼できるVPN内に置き、API keyと設定ファイルを
-mode `0600`で保護してください。
+外部送信を避ける場合はAIを無効のまま使うか、管理下のOllamaを選択してください。Bedrockも
+requestをAWSへ送るため、local Ollamaと同じではありません。標準的なBedrockのデータ保護では
+prompt/応答をmodel providerへ公開せずbase modelの学習にも使いませんが、modelのdata-retention
+modeによってprovider共有の例外があり得るため利用modelの条件を確認してください。Cloud provider
+利用時はEgressViewをHTTPSまたは信頼できるVPN内に置き、API keyと設定ファイルをmode `0600`で
+保護してください。

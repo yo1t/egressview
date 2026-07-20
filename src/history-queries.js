@@ -206,6 +206,27 @@ function createHistoryQueries({
     ).all(...params);
   }
 
+  // Bounded source-device summary for AI context. Keep this separate from the
+  // full graph summary so a manual AI request does not run its heavier queries.
+  function groupSrcByTimeRange(from, to, limit = 30) {
+    const db = getDb();
+    if (!db) return [];
+    const cappedLimit = Math.max(1, Math.min(100, Number(limit) || 30));
+    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] });
+    return db.prepare(
+      `SELECT src,
+              MAX(srcMac) AS srcMac,
+              MAX(srcVendor) AS srcVendor,
+              MAX(srcDnsName) AS srcDnsName,
+              MAX(srcMdnsName) AS srcMdnsName,
+              COUNT(*) AS count,
+              MIN(firstSeen) AS firstSeen,
+              MAX(lastSeen) AS lastSeen
+       FROM connections${where}
+       GROUP BY src ORDER BY count DESC LIMIT ?`
+    ).all(...params, cappedLimit);
+  }
+
   function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
     const startedAt = process.hrtime.bigint();
     const timings = {};
@@ -343,6 +364,7 @@ function createHistoryQueries({
     groupDstByTimeRange,
     groupServiceByTimeRange,
     groupSrcForDstsByTimeRange,
+    groupSrcByTimeRange,
     summarizeByTimeRange,
   };
 }

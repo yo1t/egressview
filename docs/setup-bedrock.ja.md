@@ -5,8 +5,19 @@ Bedrock は **キーレス**です。EgressView は AWS 認証情報を保存し
 AWS SDK for JavaScript v3 の **default credential provider chain** に完全委譲し、
 設定 UI では AWS **リージョン**と**モデル / 推論プロファイル ID** だけを設定します。
 
-> AI は読み取り専用です。送信されるのは上限内の集計で、通信先 IP・ホスト名・端末名・
-> MAC を含みます。ただしパスワード等の認証情報は送信しません。
+> AIは読み取り専用です。上限付きの接続集計、端末一覧、network node要約を送信します。
+> 認証情報、端末メモ、生ログ、管理IPは送信しません。
+
+## データ処理の境界
+
+BedrockはOllamaのようなlocal providerではありません。分析requestはEgressView hostを出て、
+選択model/profileのrouting境界に従ってAWSで処理されます。AWSの標準的なBedrockデータ保護では、
+model providerは利用者のprompt/応答へアクセスせず、入出力はbase modelの学習に使われません。
+ただしmodelによってはprovider data sharingを含む別のdata-retention modeがあり得るため、有効化前に
+利用modelの最新条件を確認してください。このためEgressViewはBedrockにも明示的なcloud同意を必須とします。
+
+AWS公式の[Bedrock data protection](https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html)と
+[model data-retention mode](https://docs.aws.amazon.com/bedrock/latest/userguide/data-retention.html)も確認してください。
 
 ## 前提条件
 

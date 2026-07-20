@@ -2,7 +2,9 @@
 
 const assert = require('node:assert/strict');
 const { describe, it } = require('node:test');
-const { buildAiContext } = require('../../src/ai-context');
+const {
+  buildAiContext, MAX_DEVICE_INVENTORY, MAX_NETWORK_NODES, MAX_DEVICES_PER_NODE, MAX_CONTEXT_BYTES,
+} = require('../../src/ai-context');
 
 const baseFacts = {
   range: { from: 1, to: 2, durationMs: 1 },
@@ -110,5 +112,122 @@ describe('AI context', () => {
     });
     assert.equal(context.topServices.length, 20);
     assert.equal(context.topDestinations.length, 15);
+  });
+
+  it('adds a bounded device inventory and ASUS topology without private database fields', () => {
+    const knownDevices = Array.from({ length: 40 }, (_, i) => ({
+      ip: `192.168.1.${i + 1}`,
+      mac: `AA:BB:CC:DD:EE:${String(i).padStart(2, '0')}`,
+      vendor: `Vendor ${i}`,
+      dnsName: `device-${i}.example`,
+      ipv6Addr: `2001:db8::${i}`,
+      firstSeen: 100 + i,
+      lastSeen: 200 + i,
+      sources: 'asus,arp',
+      noteKey: `private-note-${i}`,
+      deviceId: `private-id-${i}`,
+      status: 'online',
+    }));
+    const activity = [
+      { src: '192.168.1.2', srcMac: knownDevices[1].mac, count: 99, firstSeen: 150, lastSeen: 250 },
+      { src: '192.168.1.99', srcMac: '12:34:56:78:90:AB', srcVendor: 'Observed vendor', srcMdnsName: 'observed-only', count: 30, firstSeen: 160, lastSeen: 260 },
+    ];
+    const meshNodes = Array.from({ length: 12 }, (_, i) => ({
+      mac: `00:11:22:33:44:${String(i).padStart(2, '0')}`,
+      ip: `192.168.50.${i + 1}`,
+      alias: `mesh-${i}`,
+      model: 'ASUS Node',
+      online: true,
+    }));
+    const clients = Array.from({ length: 8 }, (_, i) => ({
+      ip: `192.168.1.${i + 1}`,
+      mac: knownDevices[i].mac,
+      name: `client-${i}`,
+      vendor: `Vendor ${i}`,
+      type: '2',
+      rssi: -40 - i,
+      amesh_papMac: meshNodes[0].mac.toLowerCase(),
+    }));
+    clients.push({ ip: '192.168.1.250', mac: '22:22:22:22:22:22', name: 'unassigned' });
+
+    const context = buildAiContext({
+      facts: baseFacts,
+      routers: [],
+      from: 100,
+      to: 300,
+      history: {
+        groupServiceByTimeRange: () => [],
+        groupDstByTimeRange: () => [],
+        groupSrcForDstsByTimeRange: () => [],
+        groupSrcByTimeRange: (_from, _to, limit) => {
+          assert.equal(limit, MAX_DEVICE_INVENTORY);
+          return activity;
+        },
+      },
+      devices: { getAll: () => knownDevices },
+      asus: { getClients: () => clients, getMeshNodes: () => meshNodes },
+    });
+
+    assert.equal(context.schemaVersion, 3);
+    assert.equal(context.deviceInventory.totalKnown, 40);
+    assert.equal(context.deviceInventory.included, MAX_DEVICE_INVENTORY);
+    assert.equal(context.deviceInventory.devices[0].connections, 99);
+    assert.equal(context.deviceInventory.devices[0].name, 'device-1.example');
+    assert.equal(context.deviceInventory.devices[1].name, 'observed-only');
+    assert.deepEqual(context.deviceInventory.devices[0].sources, ['asus', 'arp']);
+    assert.equal(context.networkTopology.nodes.length, MAX_NETWORK_NODES);
+    assert.equal(context.networkTopology.nodes[0].connectedDevices, 8);
+    assert.equal(context.networkTopology.nodes[0].sampleDevices.length, MAX_DEVICES_PER_NODE);
+    assert.equal(context.networkTopology.unassignedDevices, 1);
+    assert.equal(context.networkTopology.nodes[0].ip, undefined);
+
+    const serialized = JSON.stringify(context);
+    assert.equal(serialized.includes('private-note'), false);
+    assert.equal(serialized.includes('private-id'), false);
+    assert.equal(serialized.includes('192.168.50.'), false);
+    assert.ok(Buffer.byteLength(serialized) <= MAX_CONTEXT_BYTES);
+    assert.equal(context.limits.serializedBytes, Buffer.byteLength(serialized));
+    assert.ok(context.privacy.excluded.includes('userNotes'));
+    assert.ok(context.privacy.excluded.includes('nodeManagementAddress'));
+  });
+
+  it('trims duplicated detail to enforce the final serialized byte limit', () => {
+    const long = 'x'.repeat(253);
+    const destinations = Array.from({ length: 40 }, (_, i) => ({
+      dst: `203.0.113.${i}`, dstHost: `${i}.${long}`, cnt: 100 - i,
+    }));
+    const context = buildAiContext({
+      facts: baseFacts,
+      routers: [],
+      from: 100,
+      to: 300,
+      threatIntel: { matchThreatIntel: () => ({ confidence: 'high', source: long, tag: long }) },
+      history: {
+        groupServiceByTimeRange: () => [],
+        groupDstByTimeRange: () => destinations,
+        groupSrcByTimeRange: () => Array.from({ length: 30 }, (_, i) => ({
+          src: `192.168.1.${i}`, srcMac: `AA:BB:CC:DD:EE:${String(i).padStart(2, '0')}`,
+          srcDnsName: long, srcVendor: long, count: 100 - i,
+        })),
+        groupSrcForDstsByTimeRange: (_from, _to, dsts) => dsts.flatMap(dst =>
+          Array.from({ length: 5 }, (_, i) => ({
+            dst, src: `192.168.2.${i}`, srcDnsName: long,
+            srcMac: `11:22:33:44:55:${String(i).padStart(2, '0')}`, cnt: 10,
+          }))),
+      },
+      devices: { getAll: () => [] },
+      asus: {
+        getMeshNodes: () => Array.from({ length: 10 }, (_, i) => ({
+          mac: `00:11:22:33:44:${String(i).padStart(2, '0')}`, alias: long, model: long, online: true,
+        })),
+        getClients: () => Array.from({ length: 50 }, (_, i) => ({
+          ip: `192.168.3.${i}`, mac: `22:33:44:55:66:${String(i).padStart(2, '0')}`,
+          name: long, vendor: long, amesh_papMac: `00:11:22:33:44:${String(Math.floor(i / 5)).padStart(2, '0')}`,
+        })),
+      },
+    });
+
+    assert.ok(Buffer.byteLength(JSON.stringify(context)) <= MAX_CONTEXT_BYTES);
+    assert.equal(context.limits.serializedBytes, Buffer.byteLength(JSON.stringify(context)));
   });
 });

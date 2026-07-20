@@ -254,7 +254,19 @@ describe('AI configuration routes', () => {
         countFactsByTimeRange: () => ({ connections: 1, devices: 1, destinations: 1 }),
         groupDstByTimeRange: () => [],
         groupServiceByTimeRange: () => [{ dport: 443, proto: 'tcp', count: 1 }],
+        groupSrcByTimeRange: () => [{ src: '192.168.1.20', srcMac: 'AA:BB:CC:DD:EE:FF', count: 1 }],
         appendAiUsage: row => { usage = row; },
+      },
+      devices: { getAll: () => [{
+        ip: '192.168.1.20', mac: 'AA:BB:CC:DD:EE:FF', asusName: 'workstation',
+        vendor: 'Example Vendor', firstSeen: 900, lastSeen: 2000, sources: 'asus',
+      }] },
+      asus: {
+        getMeshNodes: () => [{ mac: '00:11:22:33:44:55', alias: 'office', model: 'RT-Test', online: true }],
+        getClients: () => [{
+          ip: '192.168.1.20', mac: 'AA:BB:CC:DD:EE:FF', name: 'workstation',
+          amesh_papMac: '00:11:22:33:44:55', rssi: -45,
+        }],
       },
       threatIntel: null,
       routerManager: { list: () => [{ id: 'secret-id', displayName: 'secret-name', kind: 'cisco', enabled: true, ready: true }] },
@@ -263,6 +275,10 @@ describe('AI configuration routes', () => {
     assert.equal(result.body.text, '確認結果');
     assert.equal(JSON.stringify(context).includes('secret-name'), false);
     assert.deepEqual(context.topServices, [{ port: 443, protocol: 'tcp', connections: 1 }]);
+    assert.equal(context.deviceInventory.devices[0].name, 'workstation');
+    assert.equal(context.deviceInventory.devices[0].mac, 'AA:BB:CC:DD:EE:FF');
+    assert.equal(context.networkTopology.nodes[0].name, 'office');
+    assert.equal(context.networkTopology.nodes[0].connectedDevices, 1);
     assert.equal(usage.kind, 'analysis');
     assert.equal(usage.totalTokens, 50);
     assert.equal(usage.estimatedCostUsd, 0);
