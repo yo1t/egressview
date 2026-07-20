@@ -81,8 +81,14 @@ async function _run(ip, mac) {
     if (_notes.has(ip, mac)) return;
     const key = (ip && mac) ? `${ip}|${mac}` : (ip || mac);
     if (!_notes.isSafeKey(key)) return;
+    const previousNotes = _notes.snapshot();
     _notes.set(key, ('[Auto] ' + result.draft).substring(0, 500));
-    _notes.save();
+    try {
+      _notes.save();
+    } catch (e) {
+      _notes.restore(previousNotes);
+      throw e;
+    }
     _io.emit('notes-update', { notes: _notes.getAll() });
     logger.info(`[auto-investigate] saved ${ip}`);
   } catch (e) {

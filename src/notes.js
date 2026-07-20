@@ -65,9 +65,17 @@ function save() {
     fs.writeFileSync(tmp, JSON.stringify(notes, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, NOTES_FILE);
   } catch (e) {
-    logger.error('[notes] save failed:', e.message);
     try { fs.unlinkSync(tmp); } catch {}
+    throw e;
   }
+}
+
+function snapshot() {
+  return { ...notes };
+}
+
+function restore(snapshotValue) {
+  notes = Object.assign(Object.create(null), snapshotValue);
 }
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
@@ -106,4 +114,7 @@ function has(ip, mac) {
   return false;
 }
 
-module.exports = { isSafeKey, load, save, getAll, get, set, del, clearByIpMac, has, getForDevice };
+module.exports = {
+  isSafeKey, load, save, snapshot, restore,
+  getAll, get, set, del, clearByIpMac, has, getForDevice,
+};

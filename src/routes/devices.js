@@ -5,6 +5,7 @@ const { Router } = require('express');
 const { z } = require('zod');
 const { parseRequest } = require('../http-validation');
 const { t } = require('../i18n-server');
+const logger = require('../logger');
 
 const deviceId = z.string().min(1).max(128);
 const devicesQuerySchema = z.object({ includeArchived: z.enum(['0', '1']).optional() }).strict();
@@ -69,20 +70,44 @@ module.exports = function devicesRoutes(ctx) {
     if (keepId === dropId) {
       return res.status(400).json({ error: t('device.merge-same-id') });
     }
+    if (!devices.getByDeviceId(keepId) || !devices.getByDeviceId(dropId)) {
+      return res.status(404).json({ error: t('device.not-found') });
+    }
 
     // Migrate note from dropId to keepId (if dropId had a note and keepId does not)
+    let previousNotes = null;
     if (notes) {
       const dropNote = notes.get(dropId);
       const keepNote = notes.get(keepId);
       if (dropNote && !keepNote) {
+        previousNotes = notes.snapshot();
         notes.set(keepId, dropNote);
         notes.del(dropId);
-        notes.save();
+        try {
+          notes.save();
+        } catch (e) {
+          notes.restore(previousNotes);
+          logger.error(`[devices] Note migration failed before merging ${dropId} into ${keepId}: ${e.message}`);
+          return res.status(500).json({ error: t('common.internal-error') });
+        }
       }
     }
 
-    const ok = devices.approveMerge(keepId, dropId);
-    if (!ok) return res.status(404).json({ error: t('device.not-found') });
+    try {
+      const ok = devices.approveMerge(keepId, dropId);
+      if (!ok) throw new Error('Device merge precondition changed');
+    } catch (e) {
+      if (previousNotes) {
+        notes.restore(previousNotes);
+        try {
+          notes.save();
+        } catch (rollbackError) {
+          logger.error(`[devices] Failed to persist note rollback: ${rollbackError.message}`);
+        }
+      }
+      logger.error(`[devices] Merge failed for ${dropId} into ${keepId}: ${e.message}`);
+      return res.status(500).json({ error: t('common.internal-error') });
+    }
     res.json({ success: true });
   });
 

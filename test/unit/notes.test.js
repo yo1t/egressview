@@ -81,6 +81,15 @@ describe('notes CRUD', () => {
     assert.equal(all['10.0.0.1'], 'a');
     assert.equal(all['10.0.0.2'], 'b');
   });
+
+  it('restores an isolated snapshot after a failed persistence attempt', () => {
+    notes.set('10.0.0.1', 'before');
+    const snapshot = notes.snapshot();
+    notes.set('10.0.0.1', 'after');
+    notes.set('10.0.0.2', 'new');
+    notes.restore(snapshot);
+    assert.deepEqual({ ...notes.getAll() }, { '10.0.0.1': 'before' });
+  });
 });
 
 describe('notes.has', () => {

@@ -69,6 +69,8 @@ module.exports = function notesRoutes(ctx) {
       return res.status(400).json({ error: 'invalid key (IP/MAC または deviceId 形式のみ)' });
     }
 
+    const previousNotes = notes.snapshot();
+
     // ── Migrate old IP/MAC note to deviceId key ────────────────────────────
     if (canonicalId && (ip || mac)) {
       const oldKey = ip && mac ? `${ip}|${mac}` : (ip || mac);
@@ -92,7 +94,13 @@ module.exports = function notesRoutes(ctx) {
       }
     }
 
-    notes.save();
+    try {
+      notes.save();
+    } catch (err) {
+      notes.restore(previousNotes);
+      logger.error('[notes] save failed:', err.message);
+      return res.status(500).json({ error: 'Note was not saved. Check server logs.' });
+    }
     io.emit('notes-update', { notes: notes.getAll() });
     res.json({ success: true });
   });
