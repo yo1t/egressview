@@ -209,4 +209,4 @@ Default hardware integration CI、process manager/container成果物、OpenAPI�
 
 ## 結論
 
-現在のmainは、文書化されたself-hosted/private network運用に適した品質です。自動gateは広く、data変更処理はfail-closedで、AI provider呼び出しは時間制限・コンテキスト上限付きで、本レビュー後にCritical/Highの既知問題は残っていません。前回レポート以降、AIチャット耐障害性、ASUSブートストラップ信頼性、価格可観測性が向上し、新たな不具合やregressionは導入されていません。次の費用対効果が高い作業はP2-8第二段階の実利用判断です。OpenAPI、Internet境界強化、conntrack実機拡大、OCI配布は需要に応じて着手します。
+現在のmainは、文書化されたself-hosted/private network運用に適した品質です。自動gateは広く、data変更処理はfail-closedで、AI provider呼び出しは時間制限・コンテキスト上限付きで、本レビュー後にCritical/Highの既知問題は残っていません。前回レポート以降、AIチャット耐障害性、ASUSブートストラップ信頼性、価格可観測性が向上し、新たな不具合やregressionは導入されていません。OpenAPI、Internet境界強化、conntrack実機拡大、OCI配布は需要に応じて着手します。
