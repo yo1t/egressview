@@ -360,7 +360,7 @@ The ASUS device is used as a **WiFi access point (AP mode or AiMesh)**, not as a
 - Configurable per-destination cooldown (default 1 hour) to prevent notification spam
 - Message language follows the UI language setting (English / Japanese)
 - Test-send button in settings to verify configuration
-- Requires a Slack Bot Token and your User ID (`U01XXXXXXX`) — set up via Settings → Threat Detection
+- Requires a Slack Bot Token and your User ID (`U01XXXXXXX`) — set up via Settings → General
 
 ### Security
 

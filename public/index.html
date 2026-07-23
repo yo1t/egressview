@@ -32,17 +32,17 @@
     <div class="settings-body">
       <!-- Left: tabs -->
       <nav class="settings-tabs">
-        <button class="settings-tab active" data-tab="l3l4">
+        <button class="settings-tab active" data-tab="general">
+          <span class="tab-badge" data-i18n="settings.tab.general">一般</span>
+          <span class="tab-name">General</span>
+        </button>
+        <button class="settings-tab" data-tab="l3l4">
           <span class="tab-badge">L3/L4</span>
           <span class="tab-name" data-i18n="settings.tab.l3l4">ルーター</span>
         </button>
         <button class="settings-tab" data-tab="l2">
           <span class="tab-badge">L2</span>
           <span class="tab-name" data-i18n="settings.tab.l2">WiFi AP</span>
-        </button>
-        <button class="settings-tab" data-tab="general">
-          <span class="tab-badge" data-i18n="settings.tab.general">一般</span>
-          <span class="tab-name">General</span>
         </button>
         <button class="settings-tab" data-tab="threat">
           <span class="tab-badge">🛡️</span>
@@ -64,7 +64,7 @@
       <!-- Right: content -->
       <div class="settings-panes">
         <!-- L3/L4 routers -->
-        <div class="settings-pane active" id="pane-l3l4">
+        <div class="settings-pane" id="pane-l3l4">
           <div class="router-pane-head">
             <div>
               <div class="pane-title router-pane-title" data-i18n="settings.routers.title">L3/L4 ルーター</div>
@@ -153,7 +153,7 @@
           <div class="settings-status" id="asus-status"></div>
         </div>
         <!-- General settings -->
-        <div class="settings-pane" id="pane-general">
+        <div class="settings-pane active" id="pane-general">
           <div class="pane-title pane-title-static" data-i18n="settings.section.general">一般設定</div>
           <div class="form-group">
             <label class="form-label" data-i18n="settings.general.lang">言語 (Language)</label>
@@ -259,6 +259,53 @@
           </div>
           <button class="connect-btn settings-inline-button token-regenerate-btn" id="token-regen-btn" data-i18n="settings.token.regen">トークンを再生成</button>
           <div class="settings-status" id="token-status"></div>
+
+          <hr class="settings-divider">
+
+          <div class="pane-title settings-subsection-title settings-subsection-title-wide" data-i18n="settings.slack.section">🔔 Slack通知</div>
+          <p class="settings-copy settings-copy-section" data-i18n="settings.slack.desc">
+            脅威検出時に Slack DM で通知します。
+          </p>
+          <div class="form-group">
+            <label class="settings-check-label">
+              <input type="checkbox" id="s-slack-enabled" class="settings-checkbox-accent">
+              <span data-i18n="settings.slack.enable">Slack通知を有効化</span>
+            </label>
+          </div>
+          <div class="form-group settings-form-top-10">
+            <label class="form-label" data-i18n="settings.slack.token">Bot Token</label>
+            <input type="password" id="s-slack-token" class="form-input" placeholder="xoxb-..." autocomplete="off">
+            <button class="connect-btn slack-small-button slack-verify-button" id="slack-verify-btn" data-i18n="settings.slack.verify">接続確認</button>
+            <div id="slack-workspace-info" class="slack-info"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-i18n="settings.slack.username">通知先ユーザー名</label>
+            <div class="slack-user-row">
+              <input type="text" id="s-slack-username" class="form-input slack-user-input" placeholder="@username" autocomplete="off">
+              <button class="connect-btn slack-small-button slack-lookup-button" id="slack-lookup-btn" data-i18n="settings.slack.lookup">検索</button>
+            </div>
+            <div id="slack-user-info" class="slack-info"></div>
+            <input type="hidden" id="s-slack-userid">
+          </div>
+          <div class="form-group">
+            <label class="form-label" data-i18n="settings.slack.cooldown">同一宛先の再通知間隔</label>
+            <select id="s-slack-cooldown" class="form-input">
+              <option value="15" data-i18n="settings.slack.cooldown.15m">15分</option>
+              <option value="30" data-i18n="settings.slack.cooldown.30m">30分</option>
+              <option value="60" selected data-i18n="settings.slack.cooldown.1h">1時間</option>
+              <option value="180" data-i18n="settings.slack.cooldown.3h">3時間</option>
+              <option value="360" data-i18n="settings.slack.cooldown.6h">6時間</option>
+            </select>
+          </div>
+          <div class="slack-create-wrap">
+            <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener noreferrer"
+               class="slack-create-link" data-i18n="settings.slack.create">🔗 Slack Appを作成する（chat:write, users:read スコープ必要）</a>
+          </div>
+          <div class="slack-actions">
+            <button class="connect-btn" id="slack-save-btn" data-i18n="settings.btn.save">保存</button>
+            <button class="connect-btn slack-test-button" id="slack-test-btn" data-i18n="settings.slack.test">テスト送信</button>
+          </div>
+          <div class="settings-status" id="slack-status"></div>
         </div>
         <!-- Threat Intel settings -->
         <div class="settings-pane" id="pane-threat">
@@ -412,52 +459,6 @@
             <div class="settings-status" id="beacon-status"></div>
           </div>
 
-          <hr class="settings-divider">
-
-          <div class="pane-title settings-subsection-title settings-subsection-title-wide" data-i18n="settings.slack.section">🔔 Slack通知</div>
-          <p class="settings-copy settings-copy-section" data-i18n="settings.slack.desc">
-            脅威検出時に Slack DM で通知します。
-          </p>
-          <div class="form-group">
-            <label class="settings-check-label">
-              <input type="checkbox" id="s-slack-enabled" class="settings-checkbox-accent">
-              <span data-i18n="settings.slack.enable">Slack通知を有効化</span>
-            </label>
-          </div>
-          <div class="form-group settings-form-top-10">
-            <label class="form-label" data-i18n="settings.slack.token">Bot Token</label>
-            <input type="password" id="s-slack-token" class="form-input" placeholder="xoxb-..." autocomplete="off">
-            <button class="connect-btn slack-small-button slack-verify-button" id="slack-verify-btn" data-i18n="settings.slack.verify">接続確認</button>
-            <div id="slack-workspace-info" class="slack-info"></div>
-          </div>
-          <div class="form-group">
-            <label class="form-label" data-i18n="settings.slack.username">通知先ユーザー名</label>
-            <div class="slack-user-row">
-              <input type="text" id="s-slack-username" class="form-input slack-user-input" placeholder="@username" autocomplete="off">
-              <button class="connect-btn slack-small-button slack-lookup-button" id="slack-lookup-btn" data-i18n="settings.slack.lookup">検索</button>
-            </div>
-            <div id="slack-user-info" class="slack-info"></div>
-            <input type="hidden" id="s-slack-userid">
-          </div>
-          <div class="form-group">
-            <label class="form-label" data-i18n="settings.slack.cooldown">同一宛先の再通知間隔</label>
-            <select id="s-slack-cooldown" class="form-input">
-              <option value="15" data-i18n="settings.slack.cooldown.15m">15分</option>
-              <option value="30" data-i18n="settings.slack.cooldown.30m">30分</option>
-              <option value="60" selected data-i18n="settings.slack.cooldown.1h">1時間</option>
-              <option value="180" data-i18n="settings.slack.cooldown.3h">3時間</option>
-              <option value="360" data-i18n="settings.slack.cooldown.6h">6時間</option>
-            </select>
-          </div>
-          <div class="slack-create-wrap">
-            <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener noreferrer"
-               class="slack-create-link" data-i18n="settings.slack.create">🔗 Slack Appを作成する（chat:write, users:read スコープ必要）</a>
-          </div>
-          <div class="slack-actions">
-            <button class="connect-btn" id="slack-save-btn" data-i18n="settings.btn.save">保存</button>
-            <button class="connect-btn slack-test-button" id="slack-test-btn" data-i18n="settings.slack.test">テスト送信</button>
-          </div>
-          <div class="settings-status" id="slack-status"></div>
         </div>
         <!-- AI provider settings -->
         <div class="settings-pane" id="pane-ai">

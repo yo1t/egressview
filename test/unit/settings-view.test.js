@@ -55,8 +55,8 @@ function makeHarness() {
   button.classList.add('alert');
   getEl('settings-close');
 
-  const tabs = ['l3l4', 'general'].map(name => new FakeElement(`tab-${name}`, { tab: name }));
-  const panes = ['l3l4', 'general'].map(name => getEl(`pane-${name}`));
+  const tabs = ['general', 'l3l4'].map(name => new FakeElement(`tab-${name}`, { tab: name }));
+  const panes = ['general', 'l3l4'].map(name => getEl(`pane-${name}`));
   tabs[0].classList.add('active');
   panes[0].classList.add('active');
 
@@ -104,7 +104,7 @@ describe('Settings modal view behavior', () => {
   it('openSettings can still select a requested tab explicitly', () => {
     const h = makeHarness();
 
-    h.context.openSettings('general');
+    h.context.openSettings('l3l4');
 
     assert.equal(h.tabs[0].classList.contains('active'), false);
     assert.equal(h.panes[0].classList.contains('active'), false);

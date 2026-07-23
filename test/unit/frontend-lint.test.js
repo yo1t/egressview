@@ -368,21 +368,37 @@ describe('Frontend TDZ lint', () => {
   });
 
   it('general settings pane does not use inline style attributes', () => {
-    const start = html.indexOf('<div class="settings-pane" id="pane-general">');
+    const start = html.indexOf('id="pane-general">');
     const end = html.indexOf('<!-- Threat Intel settings -->', start);
     assert.notEqual(start, -1);
     assert.notEqual(end, -1);
     assert.doesNotMatch(html.slice(start, end), /\sstyle\s*=/,
-      'general, password, session, and token settings should use CSS classes');
+      'general, password, session, token, and Slack settings should use CSS classes');
   });
 
-  it('threat, beacon, and Slack settings do not use inline style attributes', () => {
+  it('shows General as the first and default settings tab with Slack inside it', () => {
+    const navStart = html.indexOf('<nav class="settings-tabs">');
+    const navEnd = html.indexOf('</nav>', navStart);
+    const nav = html.slice(navStart, navEnd);
+    assert.ok(nav.indexOf('data-tab="general"') < nav.indexOf('data-tab="l3l4"'));
+    assert.match(nav, /class="settings-tab active" data-tab="general"/);
+
+    const generalStart = html.indexOf('<div class="settings-pane active" id="pane-general">');
+    const threatStart = html.indexOf('<div class="settings-pane" id="pane-threat">');
+    const general = html.slice(generalStart, threatStart);
+    const threatEnd = html.indexOf('<!-- AI provider settings -->', threatStart);
+    const threat = html.slice(threatStart, threatEnd);
+    assert.match(general, /id="slack-save-btn"/);
+    assert.doesNotMatch(threat, /id="slack-save-btn"/);
+  });
+
+  it('threat and beacon settings do not use inline style attributes', () => {
     const start = html.indexOf('<div class="settings-pane" id="pane-threat">');
     const end = html.indexOf('<!-- Backup / Restore -->', start);
     assert.notEqual(start, -1);
     assert.notEqual(end, -1);
     assert.doesNotMatch(html.slice(start, end), /\sstyle\s*=/,
-      'threat, beacon, and Slack settings should use CSS classes');
+      'threat and beacon settings should use CSS classes');
   });
 
   it('backup and data source settings do not use inline style attributes', () => {
