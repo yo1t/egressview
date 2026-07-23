@@ -135,7 +135,7 @@ async function loadSlackSettings() {
   }
 }
 
-document.querySelector('.settings-tab[data-tab="threat"]')?.addEventListener('click', loadSlackSettings);
+document.querySelector('.settings-tab[data-tab="general"]')?.addEventListener('click', loadSlackSettings);
 loadSlackSettings();
 
 return { loadSlackSettings };

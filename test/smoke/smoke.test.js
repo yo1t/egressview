@@ -1426,7 +1426,9 @@ test('settings tabs save and connection buttons work without console errors', as
 
   await page.click('#settings-btn');
   await expect(page.locator('#settings-overlay')).toBeVisible();
+  await expect(page.locator('#pane-general')).toHaveClass(/active/);
 
+  await page.click('.settings-tab[data-tab="l3l4"]');
   await page.click('#router-add-btn');
   await page.locator('#router-display-name').fill('<img src=x onerror=alert(1)>');
   await page.locator('#router-ip').fill('192.168.1.1');
@@ -1468,18 +1470,10 @@ test('settings tabs save and connection buttons work without console errors', as
   await expect(page.locator('#general-status')).toBeVisible();
   await expect(page.locator('#general-status')).toContainText(/保存|Saved|✓/);
 
-  await page.click('.settings-tab[data-tab="threat"]');
-  await expect(page.locator('#pane-threat')).toHaveClass(/active/);
   await expect(page.locator('#s-slack-enabled')).toBeChecked();
   await expect(page.locator('#s-slack-token')).toHaveAttribute('placeholder', /保存済み|Saved/);
   await expect(page.locator('#s-slack-username')).toHaveValue('Saved User');
   await expect(page.locator('#s-slack-userid')).toHaveValue('USAVED123');
-  await page.click('#threat-save-btn');
-  await expect(page.locator('#threat-status')).toBeVisible();
-  await page.locator('#s-beacon-minobs').fill('4');
-  await page.click('#beacon-save-btn');
-  await expect(page.locator('#beacon-status')).toBeVisible();
-
   await page.locator('#s-slack-token').fill('xoxb-demo-token');
   await page.click('#slack-verify-btn');
   await expect(page.locator('#slack-workspace-info')).toBeVisible();
@@ -1493,6 +1487,14 @@ test('settings tabs save and connection buttons work without console errors', as
   expect(settingsState.savedSlackToken).toBe('xoxb-demo-token');
   await page.click('#slack-test-btn');
   await expect(page.locator('#slack-status')).toBeVisible();
+
+  await page.click('.settings-tab[data-tab="threat"]');
+  await expect(page.locator('#pane-threat')).toHaveClass(/active/);
+  await page.click('#threat-save-btn');
+  await expect(page.locator('#threat-status')).toBeVisible();
+  await page.locator('#s-beacon-minobs').fill('4');
+  await page.click('#beacon-save-btn');
+  await expect(page.locator('#beacon-status')).toBeVisible();
 
   await page.click('.settings-tab[data-tab="ai"]');
   await expect(page.locator('#pane-ai')).toHaveClass(/active/);
