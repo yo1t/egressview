@@ -6,7 +6,7 @@ EgressViewは、Web UIとローカル自動化向けに管理APIを提供しま�
 
 ## ベースURLと認証
 
-Web UIをサブパスで公開している場合も、APIは常に`/api`配下です。後述する2つの公開認証APIを除き、すべてのリクエストで`X-Admin-Token`ヘッダーにadmin tokenまたはブラウザのsession tokenを指定します。
+Web UIをサブパスで公開している場合も、APIは常に`/api`配下です。認証必須requestはautomation用`X-Admin-Token`またはHttpOnly browser session cookieを受け付けます。cookie認証による更新requestでは対応する`X-CSRF-Token`も必要です。
 
 ```bash
 export EGRESSVIEW_URL='https://egressview.example.net'
@@ -34,7 +34,7 @@ curl --fail-with-body \
 {"success":true,"token":"session-token","expiresAt":1784304000000}
 ```
 
-`POST /api/admin/verify`も公開APIで、request body内のtokenを検証します。詳細情報を返さない`/healthz`と`/readyz`も公開し、それ以外はすべて認証必須です。
+`POST /api/admin/verify`も公開APIで、request body内のtokenを検証します。認証状態・方式の取得、OIDC redirect/callback、詳細情報を返さない`/healthz`と`/readyz`も公開し、それ以外はすべて認証必須です。
 
 ## 共通仕様
 
@@ -151,18 +151,26 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 
 ## Endpoint一覧
 
-実装済みHTTP endpoint 80本の全一覧です。**公開**以外はすべて`X-Admin-Token`が必要です。
+実装済みHTTP endpoint 88本の全一覧です。**公開**以外は`X-Admin-Token`またはbrowserのHttpOnly session cookieが必要です。cookie認証による更新要求では`X-CSRF-Token`も必要です。
 
 | 分類 | Methodとpath | Access |
 |---|---|---|
 | 認証 | `POST /api/auth/login` | 公開 |
 | 認証 | `POST /api/admin/verify` | 公開 |
+| 認証 | `GET /api/auth/status` | 公開 |
+| 認証 | `GET /api/auth/methods` | 公開 |
+| 認証 | `GET /api/auth/oidc/start` | 公開 |
+| 認証 | `GET /api/auth/oidc/callback` | 公開 |
 | 認証 | `POST /api/auth/logout` | 認証必須 |
 | 認証 | `GET /api/auth/sessions` | 認証必須 |
 | 認証 | `POST /api/auth/sessions/:id/revoke` | 認証必須 |
 | 認証 | `POST /api/auth/sessions/revoke-all` | 認証必須 |
 | 認証 | `POST /api/auth/change-password` | 認証必須 |
 | 認証 | `POST /api/admin/regenerate-token` | 認証必須 |
+| 認証 | `GET /api/auth/security-config` | 認証必須 |
+| 認証 | `POST /api/auth/security-config` | 認証必須 |
+| 認証 | `POST /api/auth/oidc/test` | 認証必須 |
+| 認証 | `GET /api/auth/audit-events` | 認証必須 |
 | Router初期設定 | `POST /api/nonce` | 認証必須 |
 | Router初期設定 | `POST /api/yamaha/detect` | 認証必須 |
 | Router初期設定 | `POST /api/cisco/detect` | 認証必須 |

@@ -65,7 +65,7 @@ const PHASE2_JS_FILES = [
   'stats-helpers.js', 'stats-charts.js', 'stats-map.js',
   'view-tabs.js', 'log.js', 'ai-insights.js', 'beacon.js', 'threat-popup.js',
   'devices.js', 'notif-log.js', 'main.js',
-  'settings-ai.js',
+  'settings-ai.js', 'settings-security.js',
 ];
 for (const file of PHASE2_JS_FILES) {
   test(`js/${file} is served (200)`, async ({ request }) => {
@@ -132,6 +132,14 @@ test('no uncaught JS errors on page load', async ({ page }) => {
   await page.waitForTimeout(2000); // allow scripts to parse and execute
 
   expect(errors, `Uncaught JS errors:\n  ${errors.join('\n  ')}`).toHaveLength(0);
+});
+
+test('unauthenticated browser shows the local recovery login without storing a token', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.login-overlay')).toBeVisible();
+  await expect(page.locator('.login-primary')).toBeVisible();
+  await expect(page.locator('.login-google')).toBeHidden();
+  expect(await page.evaluate(() => localStorage.getItem('egressview_admin_token'))).toBeNull();
 });
 
 // ─── Auth-gated UI tests ──────────────────────────────────────────────────────

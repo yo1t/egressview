@@ -211,7 +211,7 @@ npm start
 
 ### Step 3 — ブラウザを開いてログイン
 
-初回起動時に初期**ログインパスワード**がコンソールに表示されます：
+初回起動時、対話terminalでは初期**ログインパスワード**を一度だけ表示します。service等の非対話起動では永続logへ出さず、mode `0600`の`.egressview.json.initial-login-password`へ保存します：
 
 ```
 ══════════════════════════════════════════════════════════════
@@ -240,16 +240,17 @@ npm start
 
 数秒後にデバイス、セッション、統計情報がUIに表示されはじめます。
 
-> **注意:** 認証情報は初回起動時に1度だけ生成され、（ハッシュ化して）`.egressview.json` に保存されます。パスワードを紛失した場合は `.egressview.json` の `auth` セクションを削除して再起動すれば、新しい初期パスワードが表示されます。
+> **注意:** パスワードはversion付きscrypt recordだけを保存します。初回ログイン成功後、one-time password fileは削除されます。
 
 ## 認証
 
-全APIエンドポイントとWebSocket接続は保護されています。認証情報は2種類あります：
+全APIエンドポイントとWebSocket接続は保護されています。ローカル管理者は無効化できず、Google OIDCは任意の追加ログイン方式です。
 
 | 認証情報 | 用途 | 場所 |
 |---------|------|------|
 | **ログインパスワード** | ブラウザのログイン。端末ごとに失効可能なセッションを発行（30日スライド有効期限） | 初回起動時に表示。変更は 設定 → 一般 |
 | **API トークン** | スクリプト・自動化（`X-Admin-Token` ヘッダー） | `.egressview.json`（`adminToken`）。再生成は 設定 → 一般 |
+| **Google OIDC** | 許可したGoogleアカウント。sessionはEgressView側で失効可能 | 設定 → 一般 → 認証と監査 |
 
 ### セッション管理
 
@@ -260,16 +261,21 @@ npm start
 ### パスワードを紛失した場合
 
 ```bash
-# auth セクションを削除して再起動 — 新しい初期パスワードが表示される
-node -e "const f='.egressview.json',c=require('./'+f);delete c.auth;require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
-npm start
+# 対話TTY専用。全browser sessionを失効
+npm run auth:reset
+# automation用tokenも同時に再生成
+npm run auth:reset -- --regenerate-api-token
 ```
 
 ### 仕組み
 
-- パスワードは scrypt でハッシュ化、セッションは SHA-256 ハッシュとして SQLite に保存
+- 新しいパスワードは14文字以上。version付きscrypt recordを使い、旧recordはログイン成功時に移行
 - ログイン失敗時は 500ms の遅延、比較は `crypto.timingSafeEqual` を使用
-- セッショントークンは API トークンと同じ `X-Admin-Token` ヘッダー / Socket.IO ハンドシェイクで送信
+- browser sessionはSecure/HttpOnly/SameSite cookieとCSRF保護を使用。既存header tokenはautomation互換として維持
+- login/logout/session失効/token変更/認証済み更新操作を、個人情報を伏せたappend-only監査logへ記録
+- Google OIDCはAuthorization Code + PKCE、state、nonce、JWKS署名、verified email、email/domain allowlistを検証
+
+Internet公開前に[認証・reverse proxyガイド](docs/authentication.ja.md)を確認してください。
 
 ## HTTPS（オプション）
 

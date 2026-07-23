@@ -227,7 +227,7 @@
               <input id="s-pw-current" class="form-input" type="password" autocomplete="current-password">
             </div>
             <div class="form-group">
-              <label class="form-label" data-i18n="settings.password.new">新しいパスワード（8文字以上）</label>
+              <label class="form-label" data-i18n="settings.password.new">新しいパスワード（14文字以上）</label>
               <input id="s-pw-new" class="form-input" type="password" autocomplete="new-password">
             </div>
           </div>
@@ -245,6 +245,42 @@
           <div id="sessions-list" class="settings-session-list"></div>
           <button class="connect-btn settings-session-revoke-all" id="sessions-revoke-all-btn" data-i18n="settings.sessions.revokeAll">他の端末を全てログアウト</button>
           <div class="settings-status" id="sessions-status"></div>
+
+          <hr class="settings-divider">
+
+          <div class="pane-title settings-subsection-title" data-i18n="settings.security.section">🛡️ 認証と監査</div>
+          <p class="settings-copy settings-copy-block" data-i18n="settings.security.local">
+            緊急用ローカル管理者は常に有効です。Googleログインは任意の追加経路です。
+          </p>
+          <label class="settings-check-label settings-revoke-label">
+            <input type="checkbox" id="s-oidc-enabled" class="settings-checkbox-accent">
+            <span data-i18n="settings.security.google">Google OIDCを有効にする</span>
+          </label>
+          <div class="form-group">
+            <label class="form-label">Google OAuth Client ID</label>
+            <input id="s-oidc-client-id" class="form-input" type="text" maxlength="500" autocomplete="off">
+          </div>
+          <div class="form-group settings-form-spaced">
+            <label class="form-label">Google OAuth Client Secret</label>
+            <input id="s-oidc-client-secret" class="form-input" type="password" maxlength="2000" autocomplete="new-password">
+          </div>
+          <div class="settings-row settings-form-spaced">
+            <div class="form-group">
+              <label class="form-label" data-i18n="settings.security.emails">許可メール（カンマ区切り）</label>
+              <input id="s-oidc-emails" class="form-input" type="text" autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="settings.security.domains">許可ドメイン（カンマ区切り）</label>
+              <input id="s-oidc-domains" class="form-input" type="text" autocomplete="off">
+            </div>
+          </div>
+          <div class="settings-security-actions">
+            <button class="connect-btn settings-inline-button" id="oidc-save-btn" data-i18n="settings.btn.save">保存</button>
+            <button class="connect-btn settings-inline-button router-secondary-btn" id="oidc-test-btn" data-i18n="settings.security.test">接続確認</button>
+          </div>
+          <div class="settings-status" id="oidc-status"></div>
+          <div class="pane-title settings-subsection-title settings-form-spaced" data-i18n="settings.security.audit">最近の監査イベント</div>
+          <div id="audit-events-list" class="settings-audit-list"></div>
 
           <hr class="settings-divider">
 

@@ -1,133 +1,148 @@
-// Unit tests for requireAdmin middleware behavior
-// Verifies both admin-token auth and session-token auth without starting the full server.
-// Run: node --test test/unit/middleware.test.js
 'use strict';
 
+const { EventEmitter } = require('node:events');
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const authCookies = require('../../src/auth-cookies');
+const { createAuthMiddleware } = require('../../src/auth-middleware');
 
-// ─── Recreate authenticate + requireAdmin from server.js logic ────────────────
-// We don't import server.js (it starts the server on require).
-// Instead we inline the identical logic so the test stays fast/offline.
-
-function makeAuthenticate(getAdminToken, verifySession) {
-  return function authenticate(provided) {
-    if (!provided) return null;
-    const session = verifySession(provided);
-    if (session) return session;
-    const adminToken = getAdminToken();
-    if (adminToken) {
-      const a = Buffer.from(provided);
-      const b = Buffer.from(adminToken);
-      if (a.length === b.length && crypto.timingSafeEqual(a, b)) return 'admin';
-    }
-    return null;
+function createFixture({
+  adminToken = crypto.randomBytes(24).toString('hex'),
+  sessionToken = 'session-token',
+  csrfToken = 'csrf-token',
+} = {}) {
+  const session = {
+    id: 42,
+    authMethod: 'local',
+    deviceLabel: 'My Mac',
   };
-}
-
-function makeRequireAdmin(getAdminToken, verifySession = () => null) {
-  const authenticate = makeAuthenticate(getAdminToken, verifySession);
-  return function requireAdmin(req, res, next) {
-    if (!getAdminToken()) return res.status(503).json({ error: '認証未初期化' });
-    const auth = authenticate(req.get('X-Admin-Token') || '');
-    if (!auth) return res.status(401).json({ error: '認証エラー' });
-    req.session = auth === 'admin' ? null : auth;
-    next();
+  const events = [];
+  const sessions = {
+    verifySession: token => token === sessionToken ? session : null,
+    verifyCsrf: (candidate, token) => candidate === session && token === csrfToken,
   };
+  const middleware = createAuthMiddleware({
+    appState: { adminToken },
+    sessions,
+    authCookies,
+    authAudit: { append: event => events.push(event) },
+  });
+  return { adminToken, csrfToken, events, middleware, session, sessionToken };
 }
 
-// Minimal mock res / req helpers
-function mockRes() {
-  const r = { _status: 200, _body: null };
-  r.status = (code) => { r._status = code; return r; };
-  r.json   = (body) => { r._body  = body;  return r; };
-  return r;
-}
-function mockReq(token) {
+function mockReq({
+  token = '',
+  cookie = '',
+  csrf = '',
+  method = 'GET',
+} = {}) {
+  const headers = {};
+  if (token) headers['x-admin-token'] = token;
+  if (cookie) headers.cookie = cookie;
+  if (csrf) headers['x-csrf-token'] = csrf;
   return {
-    headers: token != null ? { 'x-admin-token': token } : {},
-    get(name) { return this.headers[name.toLowerCase()] ?? null; },
-    session: undefined,
+    headers,
+    id: 'request-1',
+    ip: '192.0.2.10',
+    method,
+    originalUrl: '/api/settings',
+    get(name) {
+      return this.headers[name.toLowerCase()] || '';
+    },
   };
 }
 
-// ─── Admin-token path ─────────────────────────────────────────────────────────
+function mockRes() {
+  const res = new EventEmitter();
+  res.statusCode = 200;
+  res.body = null;
+  res.status = code => {
+    res.statusCode = code;
+    return res;
+  };
+  res.json = body => {
+    res.body = body;
+    return res;
+  };
+  return res;
+}
 
-describe('requireAdmin — admin token path', () => {
-  it('returns 503 when adminToken is not yet initialised', () => {
-    const mw  = makeRequireAdmin(() => '');
+describe('requireAdmin middleware', () => {
+  it('fails closed when authentication is not initialized', () => {
+    const { middleware } = createFixture({ adminToken: '' });
     const res = mockRes();
-    mw(mockReq('anything'), res, () => {});
-    assert.equal(res._status, 503);
+    middleware.requireAdmin(mockReq({ token: 'anything' }), res, () => {});
+    assert.equal(res.statusCode, 503);
   });
 
-  it('returns 401 when no token is provided', () => {
-    const token = crypto.randomBytes(24).toString('hex');
-    const mw    = makeRequireAdmin(() => token);
-    const res   = mockRes();
-    mw(mockReq(''), res, () => {});
-    assert.equal(res._status, 401);
+  it('rejects missing and invalid credentials', () => {
+    const { middleware } = createFixture();
+    for (const token of ['', 'wrong-token']) {
+      const res = mockRes();
+      middleware.requireAdmin(mockReq({ token }), res, () => {});
+      assert.equal(res.statusCode, 401);
+    }
   });
 
-  it('returns 401 when wrong token is provided', () => {
-    const token = crypto.randomBytes(24).toString('hex');
-    const mw    = makeRequireAdmin(() => token);
-    const res   = mockRes();
-    mw(mockReq('wrong-token'), res, () => {});
-    assert.equal(res._status, 401);
-  });
-
-  it('calls next() and sets req.session=null when the correct admin token is provided', () => {
-    const token = crypto.randomBytes(24).toString('hex');
-    const mw    = makeRequireAdmin(() => token);
-    const res   = mockRes();
-    const req   = mockReq(token);
+  it('accepts the admin API token without requiring browser CSRF', () => {
+    const { adminToken, middleware } = createFixture();
+    const req = mockReq({ token: adminToken, method: 'POST' });
+    const res = mockRes();
     let nextCalled = false;
-    mw(req, res, () => { nextCalled = true; });
-    assert.ok(nextCalled, 'next() should have been called');
-    assert.equal(res._status, 200);
-    assert.equal(req.session, null); // admin token → no session row
+    middleware.requireAdmin(req, res, () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
+    assert.equal(req.session, null);
+    assert.equal(req.authSource, 'header');
+    assert.equal(req.authMethod, 'api-token');
   });
-});
 
-// ─── Session token path ───────────────────────────────────────────────────────
-
-describe('requireAdmin — session token path', () => {
-  const fakeSession = { id: 42, deviceLabel: 'My Mac', createdAt: Date.now() };
-
-  it('calls next() and attaches the session row when a valid session token is provided', () => {
-    const adminToken   = crypto.randomBytes(24).toString('hex');
-    const sessionToken = crypto.randomBytes(24).toString('hex');
-    const verifySession = (t) => t === sessionToken ? fakeSession : null;
-    const mw  = makeRequireAdmin(() => adminToken, verifySession);
-    const res = mockRes();
-    const req = mockReq(sessionToken);
+  it('accepts a browser session cookie for safe requests', () => {
+    const { middleware, session, sessionToken } = createFixture();
+    const req = mockReq({
+      cookie: `${authCookies.SESSION_COOKIE}=${sessionToken}`,
+    });
     let nextCalled = false;
-    mw(req, res, () => { nextCalled = true; });
-    assert.ok(nextCalled, 'next() should have been called for a valid session token');
-    assert.deepEqual(req.session, fakeSession);
+    middleware.requireAdmin(req, mockRes(), () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
+    assert.equal(req.session, session);
+    assert.equal(req.authSource, 'cookie');
+    assert.equal(req.authMethod, 'local');
   });
 
-  it('returns 401 when neither session token nor admin token matches', () => {
-    const adminToken = crypto.randomBytes(24).toString('hex');
-    const verifySession = () => null;
-    const mw  = makeRequireAdmin(() => adminToken, verifySession);
+  it('rejects cookie mutations without a matching CSRF token and audits the failure', () => {
+    const { events, middleware, sessionToken } = createFixture();
+    const req = mockReq({
+      cookie: `${authCookies.SESSION_COOKIE}=${sessionToken}`,
+      method: 'POST',
+    });
     const res = mockRes();
-    mw(mockReq('invalid-session-token'), res, () => {});
-    assert.equal(res._status, 401);
+    middleware.requireAdmin(req, res, () => assert.fail('next must not run'));
+    assert.equal(res.statusCode, 403);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].eventType, 'csrf_rejected');
+    assert.equal(events[0].outcome, 'failure');
   });
 
-  it('session token takes priority: next() called even when admin token differs', () => {
-    const adminToken   = crypto.randomBytes(24).toString('hex');
-    const sessionToken = crypto.randomBytes(24).toString('hex');
-    const verifySession = (t) => t === sessionToken ? fakeSession : null;
-    const mw  = makeRequireAdmin(() => adminToken, verifySession);
+  it('accepts and audits a valid cookie mutation after the response finishes', () => {
+    const { csrfToken, events, middleware, sessionToken } = createFixture();
+    const req = mockReq({
+      cookie: [
+        `${authCookies.SESSION_COOKIE}=${sessionToken}`,
+        `${authCookies.CSRF_COOKIE}=${csrfToken}`,
+      ].join('; '),
+      csrf: csrfToken,
+      method: 'POST',
+    });
     const res = mockRes();
-    const req = mockReq(sessionToken);
     let nextCalled = false;
-    mw(req, res, () => { nextCalled = true; });
-    assert.ok(nextCalled);
-    assert.deepEqual(req.session, fakeSession);
+    middleware.requireAdmin(req, res, () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
+    assert.equal(events.length, 0);
+    res.emit('finish');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].eventType, 'api_mutation');
+    assert.equal(events[0].outcome, 'success');
+    assert.deepEqual(events[0].metadata, { statusCode: 200 });
   });
 });

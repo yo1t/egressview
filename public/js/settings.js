@@ -5,6 +5,7 @@ import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 import { toggleSection } from './settings-legacy-routers.js?v=__ASSET_VERSION__';
 import { initBackupSettings } from './settings-backup.js?v=__ASSET_VERSION__';
 import { initSessionSettings } from './settings-sessions.js?v=__ASSET_VERSION__';
+import { initSecuritySettings } from './settings-security.js?v=__ASSET_VERSION__';
 import { initBeaconSettings } from './settings-beacons.js?v=__ASSET_VERSION__';
 import { initSlackSettings } from './settings-slack.js?v=__ASSET_VERSION__';
 import { initManualThreatSettings } from './settings-manual-threat.js?v=__ASSET_VERSION__';
@@ -13,12 +14,14 @@ const settingsOverlay = document.getElementById('settings-overlay');
 const settingsBtn     = document.getElementById('settings-btn');
 let loadAiConfig = () => {};
 let loadSlackConfig = () => {};
+let loadSecurityConfig = () => {};
 
 function openSettings(tab) {
   settingsOverlay.classList.remove('hidden');
   settingsBtn.classList.remove('alert');
   loadAiConfig();
   loadSlackConfig();
+  loadSecurityConfig();
   if (typeof tab === 'string' && tab) {
     document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));
@@ -151,6 +154,7 @@ document.getElementById('token-regen-btn').addEventListener('click', async () =>
 
 const { loadBackupList } = initBackupSettings(showStatus);
 initSessionSettings(showStatus);
+({ loadSecurityConfig } = initSecuritySettings(showStatus));
 initBeaconSettings(showStatus);
 ({ loadSlackSettings: loadSlackConfig } = initSlackSettings(showStatus));
 initManualThreatSettings();

@@ -18,6 +18,14 @@ function createDefaultAppState() {
     httpsKeyPath: '',
     authPasswordHash: '',
     authPasswordSalt: '',
+    authPasswordRecord: null,
+    oidcConfig: {
+      enabled: false,
+      clientId: '',
+      clientSecret: '',
+      allowedEmails: [],
+      allowedDomains: [],
+    },
     beaconConfig: {
       enabled: true,
       minObs: 4,
@@ -56,6 +64,17 @@ function applyConfigToAppState(appState, data, { isAllowedLogPath, logger }) {
   if (data.auth && typeof data.auth === 'object') {
     appState.authPasswordHash = data.auth.passwordHash || '';
     appState.authPasswordSalt = data.auth.salt || '';
+    appState.authPasswordRecord = data.auth.password &&
+      typeof data.auth.password === 'object' ? data.auth.password : null;
+  }
+  if (data.oidc && typeof data.oidc === 'object') {
+    appState.oidcConfig = {
+      enabled: data.oidc.enabled === true,
+      clientId: typeof data.oidc.clientId === 'string' ? data.oidc.clientId : '',
+      clientSecret: typeof data.oidc.clientSecret === 'string' ? data.oidc.clientSecret : '',
+      allowedEmails: Array.isArray(data.oidc.allowedEmails) ? data.oidc.allowedEmails : [],
+      allowedDomains: Array.isArray(data.oidc.allowedDomains) ? data.oidc.allowedDomains : [],
+    };
   }
   if (data.https && typeof data.https === 'object') {
     appState.httpsEnabled = data.https.enabled === true;

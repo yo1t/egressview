@@ -69,6 +69,14 @@ function makeApp(overrides = {}) {
     io: null,
     sessions: {},
     authPassword: {},
+    authAudit: { append: () => {}, list: () => [] },
+    authCookies: {
+      cookieOptions: () => ({ path: '/' }),
+      parseCookies: () => ({}),
+      setSessionCookies: () => {},
+    },
+    oidc: { test: async () => ({ issuer: 'https://accounts.google.com' }) },
+    authenticateRequest: () => null,
     ...overrides,
   };
   const app = express();
@@ -179,6 +187,67 @@ describe('auth route: POST /api/admin/verify', () => {
     const { status, body } = await request(app, 'POST', '/api/admin/verify', { token: 'token' });
     assert.equal(status, 200);
     assert.equal(body.ok, true);
+  });
+});
+
+describe('auth route: P2-58 security configuration', () => {
+  it('keeps local login available while Google OIDC is disabled', async () => {
+    const { status, body } = await request(makeApp({
+      appState: { oidcConfig: { enabled: false } },
+    }), 'GET', '/api/auth/methods');
+    assert.equal(status, 200);
+    assert.deepEqual(body, {
+      local: { enabled: true },
+      google: { enabled: false },
+    });
+  });
+
+  it('saves an allowlisted Google configuration without returning its secret', async () => {
+    const appState = {
+      oidcConfig: {
+        enabled: false,
+        clientId: '',
+        clientSecret: 'existing-secret', // pragma: allowlist secret
+        allowedEmails: [],
+        allowedDomains: [],
+      },
+    };
+    let saved = 0;
+    const app = makeApp({ appState, saveConfig: () => { saved += 1; } });
+    const { status, body } = await request(app, 'POST', '/api/auth/security-config', {
+      enabled: true,
+      clientId: 'client-id',
+      clientSecret: '',
+      allowedEmails: [],
+      allowedDomains: ['Example.COM'],
+    });
+    assert.equal(status, 200);
+    assert.equal(body.clientSecretSet, true);
+    assert.equal(JSON.stringify(body).includes('existing-secret'), false);
+    assert.equal(appState.oidcConfig.allowedDomains[0], 'example.com');
+    assert.equal(saved, 1);
+  });
+
+  it('rejects enabling OIDC without an allowlist', async () => {
+    const app = makeApp({
+      appState: {
+        oidcConfig: {
+          enabled: false,
+          clientId: '',
+          clientSecret: '',
+          allowedEmails: [],
+          allowedDomains: [],
+        },
+      },
+    });
+    const { status } = await request(app, 'POST', '/api/auth/security-config', {
+      enabled: true,
+      clientId: 'client-id',
+      clientSecret: 'client-secret', // pragma: allowlist secret
+      allowedEmails: [],
+      allowedDomains: [],
+    });
+    assert.equal(status, 400);
   });
 });
 
@@ -318,7 +387,7 @@ describe('auth route: persistence failures', () => {
 
     const { status, body } = await request(app, 'POST', '/api/auth/change-password', {
       currentPassword: 'old-password', // pragma: allowlist secret
-      newPassword: 'new-password', // pragma: allowlist secret
+      newPassword: 'new-password-long-enough', // pragma: allowlist secret
     });
 
     assert.equal(status, 500);

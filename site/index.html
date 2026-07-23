@@ -418,13 +418,14 @@ npm install
 npm start</code></pre>
 
       <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:4px;">Step 3 — Open the browser and log in</p>
-      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:4px;">On first startup the initial login password is printed to the console:</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:4px;">On first startup the initial login password is shown once in an interactive terminal (or written to a mode-0600 one-time file for service startup):</p>
       <pre><code><span class="comment">══════════════════════════════════════
   EgressView login password (initial):
   KFpDqntYRfcr...
   → Log in with this password on first access
 ══════════════════════════════════════</span></code></pre>
       <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;">Open <code>http://localhost:3000</code> and enter the password.</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;">Optional Google OIDC, revocable sessions, CSRF protection, global API rate limits, and a pseudonymous audit log are available in Settings → General.</p>
 
       <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:8px;">Step 4 — Add up to 10 routers in Settings → L3/L4</p>
       <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">

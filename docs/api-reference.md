@@ -6,7 +6,7 @@ EgressView exposes a private administration API for its web UI and local automat
 
 ## Base URL and authentication
 
-API paths are rooted at `/api`, even when the web UI is served below a subpath. Except for the two public authentication endpoints noted below, every request requires an `X-Admin-Token` header containing either an admin token or a browser session token.
+API paths are rooted at `/api`, even when the web UI is served below a subpath. Protected requests accept an `X-Admin-Token` automation credential or an HttpOnly browser session cookie. Cookie-authenticated mutations also require the matching `X-CSRF-Token`.
 
 ```bash
 export EGRESSVIEW_URL='https://egressview.example.net'
@@ -34,7 +34,7 @@ curl --fail-with-body \
 {"success":true,"token":"session-token","expiresAt":1784304000000}
 ```
 
-`POST /api/admin/verify` is also public and verifies a token supplied in the request body. The detail-free `/healthz` and `/readyz` checks are public; all other endpoints are protected.
+`POST /api/admin/verify` is also public and verifies a token supplied in the request body. Authentication status/method discovery and the OIDC redirect/callback are public. The detail-free `/healthz` and `/readyz` checks are public; all other endpoints are protected.
 
 ## Common behavior
 
@@ -151,18 +151,26 @@ Restore is fail-closed: EgressView validates the source, confirms a safety backu
 
 ## Endpoint catalog
 
-All 80 implemented HTTP endpoints are listed below. **Public** means no token is required; every other row requires `X-Admin-Token`.
+All 88 implemented HTTP endpoints are listed below. **Public** means no token is required. Protected endpoints accept `X-Admin-Token` or the browser's HttpOnly session cookie; cookie-authenticated mutations additionally require `X-CSRF-Token`.
 
 | Area | Method and path | Access |
 |---|---|---|
 | Authentication | `POST /api/auth/login` | Public |
 | Authentication | `POST /api/admin/verify` | Public |
+| Authentication | `GET /api/auth/status` | Public |
+| Authentication | `GET /api/auth/methods` | Public |
+| Authentication | `GET /api/auth/oidc/start` | Public |
+| Authentication | `GET /api/auth/oidc/callback` | Public |
 | Authentication | `POST /api/auth/logout` | Protected |
 | Authentication | `GET /api/auth/sessions` | Protected |
 | Authentication | `POST /api/auth/sessions/:id/revoke` | Protected |
 | Authentication | `POST /api/auth/sessions/revoke-all` | Protected |
 | Authentication | `POST /api/auth/change-password` | Protected |
 | Authentication | `POST /api/admin/regenerate-token` | Protected |
+| Authentication | `GET /api/auth/security-config` | Protected |
+| Authentication | `POST /api/auth/security-config` | Protected |
+| Authentication | `POST /api/auth/oidc/test` | Protected |
+| Authentication | `GET /api/auth/audit-events` | Protected |
 | Router setup | `POST /api/nonce` | Protected |
 | Router setup | `POST /api/yamaha/detect` | Protected |
 | Router setup | `POST /api/cisco/detect` | Protected |

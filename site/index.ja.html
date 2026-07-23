@@ -418,13 +418,14 @@ npm install
 npm start</code></pre>
 
       <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:4px;">Step 3 — ブラウザを開いてログイン</p>
-      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:4px;">初回起動時にコンソールに初期ログインパスワードが表示されます：</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:4px;">初回起動時、対話terminalでは初期ログインパスワードを一度だけ表示し、service起動ではmode 0600のone-time fileへ保存します：</p>
       <pre><code><span class="comment">══════════════════════════════════════
   EgressView login password (initial):
   KFpDqntYRfcr...
   → ブラウザ初回アクセス時にこのパスワードでログインしてください
 ══════════════════════════════════════</span></code></pre>
       <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;"><code>http://localhost:3000</code> を開いてパスワードを入力してください。</p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:8px;">任意のGoogle OIDC、失効可能session、CSRF保護、global API rate limit、個人情報を伏せた監査logを設定 → 一般から利用できます。</p>
 
       <p style="font-size:0.95rem; font-weight:600; margin-top:16px; margin-bottom:8px;">Step 4 — 設定 → L3/L4で最大10台のルーターを追加</p>
       <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">

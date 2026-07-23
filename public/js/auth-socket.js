@@ -41,9 +41,8 @@ function refreshSavedPlaceholders() {
   });
 }
 
-// Password login → per-device session token, stored under the same key so
-// apiFetch / Socket.IO need no changes.  A legacy admin token already in
-// localStorage keeps working — the server accepts both credentials.
+// Existing header tokens remain supported for automation and upgrades. New
+// browser logins use an HttpOnly session cookie and a separate CSRF cookie.
 
 // In-flight dedup: if multiple concurrent requests all hit 401 simultaneously,
 // they share a single prompt session instead of stacking multiple dialogs.
@@ -56,47 +55,98 @@ function promptAdminToken(reason = '') {
 }
 
 async function _runPromptLoop(reason = '') {
-  while (true) {
-    const pw = prompt((reason ? reason + '\n\n' : '') + t('prompt.password'));
-    if (pw === null) { alert(t('alert.passwordRequired')); continue; }
-    try {
-      // Use raw fetch here — apiFetch calls this function to obtain a token,
-      // so using apiFetch would create an infinite loop.
-      const r = await fetch(_BASE+'/api/auth/login', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: pw, deviceLabel: describeThisDevice() }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (r.ok && data.token) {
-        adminToken = data.token;
-        localStorage.setItem(TOKEN_KEY, data.token);
-        return;
+  const english = currentLang === 'en';
+  const overlay = document.createElement('div');
+  overlay.className = 'login-overlay';
+  const card = document.createElement('form');
+  card.className = 'login-card';
+  const eyebrow = document.createElement('div');
+  eyebrow.className = 'login-eyebrow';
+  eyebrow.textContent = 'EGRESSVIEW / SECURE ACCESS';
+  const title = document.createElement('h1');
+  title.textContent = english ? 'Emergency local administrator' : '緊急用ローカル管理者';
+  const copy = document.createElement('p');
+  copy.textContent = reason || (english
+    ? 'Local login remains available even when the identity provider is offline.'
+    : '認証基盤やインターネットが停止していても、ローカルログインは利用できます。');
+  const password = document.createElement('input');
+  password.type = 'password';
+  password.autocomplete = 'current-password';
+  password.placeholder = english ? 'Login password' : 'ログインパスワード';
+  password.required = true;
+  const error = document.createElement('div');
+  error.className = 'login-error';
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.className = 'login-primary';
+  submit.textContent = english ? 'Sign in locally' : 'ローカルでログイン';
+  const google = document.createElement('a');
+  google.className = 'login-google is-hidden';
+  google.href = _BASE + '/api/auth/oidc/start';
+  google.textContent = english ? 'Continue with Google' : 'Googleでログイン';
+  card.append(eyebrow, title, copy, password, submit, google, error);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  try {
+    const methods = await fetch(_BASE + '/api/auth/methods', { credentials: 'same-origin' });
+    const body = await methods.json();
+    google.classList.toggle('is-hidden', !body.google?.enabled);
+  } catch {}
+
+  return new Promise(resolve => {
+    card.addEventListener('submit', async event => {
+      event.preventDefault();
+      submit.disabled = true;
+      error.textContent = '';
+      try {
+        const response = await fetch(_BASE + '/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            password: password.value,
+            deviceLabel: describeThisDevice(),
+          }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || t('err.passwordInvalid'));
+        adminToken = '';
+        localStorage.removeItem(TOKEN_KEY);
+        overlay.remove();
+        resolve();
+      } catch (loginError) {
+        error.textContent = loginError.message;
+        password.select();
+      } finally {
+        submit.disabled = false;
       }
-      alert(data.error || t('err.passwordInvalid'));
-    } catch (e) {
-      alert(t('err.serverGeneric') + e.message);
-    }
-  }
+    });
+    setTimeout(() => password.focus(), 0);
+  });
 }
-// On startup, show dialog if no saved token
 // Apply i18n once on startup (default 'ja' before config arrives) as a safeguard
 applyI18n();
-let _reloading = false;
-function reloadAfterLogin() {
-  _reloading = true;
-  try { socket.disconnect(); } catch {}
-  location.reload();
+
+function readCsrfCookie() {
+  const part = document.cookie.split('; ')
+    .find(item => item.startsWith('egressview_csrf='));
+  if (!part) return '';
+  try { return decodeURIComponent(part.slice(part.indexOf('=') + 1)); } catch { return ''; }
 }
 
-if (!adminToken) {
-  promptAdminToken().then(reloadAfterLogin);
-}
-
-// Wrapper that auto-adds the token header to every fetch
+// Wrapper that sends the legacy header only when present. Cookie-authenticated
+// mutations include the double-submit CSRF token.
 async function apiFetch(url, opts = {}) {
   const tokenUsed = adminToken; // snapshot at call time
-  const headers = { ...(opts.headers || {}), 'X-Admin-Token': tokenUsed };
-  const res = await fetch(url, { ...opts, headers });
+  const headers = { ...(opts.headers || {}) };
+  if (tokenUsed) headers['X-Admin-Token'] = tokenUsed;
+  const method = String(opts.method || 'GET').toUpperCase();
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    const csrf = readCsrfCookie();
+    if (csrf) headers['X-CSRF-Token'] = csrf;
+  }
+  const res = await fetch(url, { ...opts, headers, credentials: 'same-origin' });
   if (res.status === 401) {
     // If a concurrent login already refreshed adminToken, retry with the new token
     if (adminToken !== tokenUsed) return apiFetch(url, opts);
@@ -108,14 +158,40 @@ async function apiFetch(url, opts = {}) {
   return res;
 }
 
-const socket = io({ path: _BASE+'/socket.io/', auth: { token: adminToken } });
+const socket = io({
+  path: _BASE+'/socket.io/',
+  auth: { token: adminToken },
+  autoConnect: false,
+});
+
+async function startAuthenticatedClient() {
+  try {
+    const headers = adminToken ? { 'X-Admin-Token': adminToken } : {};
+    const response = await fetch(_BASE+'/api/auth/status', {
+      headers,
+      credentials: 'same-origin',
+    });
+    const status = await response.json().catch(() => ({}));
+    if (!status.authenticated) await promptAdminToken();
+  } catch {
+    await promptAdminToken();
+  }
+  socket.auth = { token: adminToken };
+  socket.connect();
+}
+
+startAuthenticatedClient();
+
 socket.on('connect_error', err => {
   if (String(err.message).toLowerCase().includes('unauth')) {
     // Skip if reload is in progress or a login prompt is already showing
-    if (_reloading || _promptInFlight) return;
+    if (_promptInFlight) return;
     localStorage.removeItem(TOKEN_KEY);
     adminToken = '';
-    promptAdminToken(t('err.sessionExpired')).then(reloadAfterLogin);
+    promptAdminToken(t('err.sessionExpired')).then(() => {
+      socket.auth = { token: adminToken };
+      socket.connect();
+    });
   }
 });
 const dot = document.getElementById('status-dot');
