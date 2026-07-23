@@ -2,8 +2,8 @@
 
 AI Insights is EgressView's leftmost tab and start page. Its collection health,
 connection, device, destination, threat, and previous-period metrics are local
-aggregates and work with no AI provider configured. Data is sent to a model only
-when an administrator explicitly selects **Analyze** or **Ask**.
+aggregates and work with no AI provider configured. By default, data is sent to a
+model only when an administrator explicitly selects **Analyze** or **Ask**.
 
 ## Providers
 
@@ -26,6 +26,25 @@ does not accept or store AWS keys for Bedrock; see the [Bedrock setup guide](set
 - The range is limited to 14 days, prompts/responses are bounded, timeout is 30 seconds, and only one generation runs server-wide.
 - Anthropic, OpenAI, and Bedrock require saved consent plus confirmation when analysis runs.
 - AI failure or latency cannot stop router collection, SQLite, Socket.IO, or other views.
+
+## Event notifications
+
+The **Event notifications** button opens an off-by-default automation panel:
+
+- scheduled reports can run daily or weekly at a selected local time;
+- threat-change analysis can trigger on danger count, new threat destinations, or a warn-plus-danger increase;
+- UI history and Slack are independent delivery destinations;
+- threat-triggered analysis is bounded by a daily limit of 1–6 and a 15–1,440 minute cause cooldown;
+- the delivery test does not invoke AI or consume model tokens;
+- **Run now** remains an explicit operation.
+
+Cloud automation requires a separate durable consent checkbox in addition to the
+provider's saved sharing consent. The server enforces consent, the global
+single-generation limit, idempotent schedule keys, daily limits, and cooldowns;
+consent is bound to the selected cloud provider and must be renewed after a
+provider change. Closing the browser cannot bypass these controls. Successful and failed events
+are appended under schema v8, while successful generation usage remains in the
+versioned usage ledger. A failed scheduled attempt remains retryable.
 
 ## Conversation history
 

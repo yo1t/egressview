@@ -41,6 +41,7 @@ let chatController = null;
 // Text of the most recent "analyze current period" result, so the chat can
 // reason about the same threats. Reset when a new analysis is run.
 let lastAnalysis = null;
+let aiNotificationProvider = 'disabled';
 
 function formatNumber(value) {
   return new Intl.NumberFormat().format(Number(value) || 0);
@@ -438,6 +439,172 @@ async function updateProviderLabel() {
   } catch { /* keep the generic default text */ }
 }
 
+function setNotificationStatus(message, failed = false) {
+  const status = document.getElementById('ai-notification-status');
+  status.textContent = message;
+  status.classList.toggle('error', failed);
+}
+
+function updateNotificationFrequencyFields() {
+  const weekly = document.getElementById('ai-notification-frequency').value === 'weekly';
+  document.getElementById('ai-notification-weekday-group').classList.toggle('is-hidden', !weekly);
+}
+
+function fillNotificationConfig(config) {
+  document.getElementById('ai-notification-frequency').value = config.frequency;
+  document.getElementById('ai-notification-weekday').value = String(config.weekday);
+  document.getElementById('ai-notification-time').value = config.time;
+  document.getElementById('ai-notification-range').value = String(config.rangeHours);
+  document.getElementById('ai-notification-ui').checked = config.destinations.ui;
+  document.getElementById('ai-notification-slack').checked = config.destinations.slack;
+  document.getElementById('ai-notification-threat-enabled').checked = config.threat.enabled;
+  document.getElementById('ai-notification-danger').value = String(config.threat.dangerThreshold);
+  document.getElementById('ai-notification-new-dst').value = String(config.threat.newDestinationsThreshold);
+  document.getElementById('ai-notification-increase').value = String(config.threat.increaseThreshold);
+  document.getElementById('ai-notification-limit').value = String(config.dailyLimit);
+  document.getElementById('ai-notification-cooldown').value = String(config.cooldownMinutes);
+  document.getElementById('ai-notification-consent').checked = config.automationConsent;
+  document.getElementById('ai-notification-timezone').textContent = tVars('ai.notification.timezone', {
+    timezone: config.timezone,
+  });
+  updateNotificationFrequencyFields();
+}
+
+function notificationConfigFromForm() {
+  return {
+    frequency: document.getElementById('ai-notification-frequency').value,
+    weekday: Number(document.getElementById('ai-notification-weekday').value),
+    time: document.getElementById('ai-notification-time').value,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    rangeHours: Number(document.getElementById('ai-notification-range').value),
+    destinations: {
+      ui: document.getElementById('ai-notification-ui').checked,
+      slack: document.getElementById('ai-notification-slack').checked,
+    },
+    threat: {
+      enabled: document.getElementById('ai-notification-threat-enabled').checked,
+      dangerThreshold: Number(document.getElementById('ai-notification-danger').value),
+      newDestinationsThreshold: Number(document.getElementById('ai-notification-new-dst').value),
+      increaseThreshold: Number(document.getElementById('ai-notification-increase').value),
+    },
+    dailyLimit: Number(document.getElementById('ai-notification-limit').value),
+    cooldownMinutes: Number(document.getElementById('ai-notification-cooldown').value),
+    automationConsent: document.getElementById('ai-notification-consent').checked,
+  };
+}
+
+function renderNotificationEvents(events) {
+  const container = document.getElementById('ai-notification-events');
+  if (!events.length) {
+    const empty = document.createElement('p');
+    empty.className = 'ai-analysis-meta';
+    empty.textContent = t('ai.notification.history.empty');
+    container.replaceChildren(empty);
+    return;
+  }
+  container.replaceChildren(...events.map(event => {
+    const item = document.createElement('article');
+    item.className = 'ai-notification-event';
+    const title = document.createElement('strong');
+    title.textContent = tVars('ai.notification.event', {
+      type: t(`ai.notification.type.${event.triggerType}`),
+      status: t(`ai.notification.status.${event.status}`),
+    });
+    const meta = document.createElement('span');
+    const identity = [event.provider, event.model].filter(Boolean).join(' / ');
+    meta.textContent = `${new Date(event.createdAt).toLocaleString()}${identity ? ` · ${identity}` : ''}` +
+      `${event.slackSent ? ` · ${t('ai.notification.slackSent')}` : ''}`;
+    const children = [title, meta];
+    if (event.body) {
+      const body = document.createElement('pre');
+      body.textContent = event.body;
+      children.push(body);
+    } else if (event.errorCode) {
+      const error = document.createElement('span');
+      error.textContent = event.errorCode;
+      children.push(error);
+    }
+    item.replaceChildren(...children);
+    return item;
+  }));
+}
+
+async function loadNotificationEvents() {
+  const response = await apiFetch(`${_BASE}/api/ai/notification-events?limit=10`);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || t('ai.notification.loadFailed'));
+  renderNotificationEvents(body.events || []);
+}
+
+async function openNotificationModal() {
+  const modal = document.getElementById('ai-notification-modal');
+  modal.classList.remove('is-hidden');
+  setNotificationStatus('');
+  try {
+    const response = await apiFetch(`${_BASE}/api/ai/notification-config`);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || t('ai.notification.loadFailed'));
+    aiNotificationProvider = body.status?.provider || 'disabled';
+    fillNotificationConfig(body.config);
+    await loadNotificationEvents();
+  } catch (cause) {
+    setNotificationStatus(cause.message || t('ai.notification.loadFailed'), true);
+  }
+}
+
+async function saveNotificationConfig() {
+  const button = document.getElementById('ai-notification-save-btn');
+  button.disabled = true;
+  setNotificationStatus(t('ai.notification.saving'));
+  try {
+    const config = notificationConfigFromForm();
+    const response = await apiFetch(`${_BASE}/api/ai/notification-config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || t('ai.notification.saveFailed'));
+    fillNotificationConfig(body.config);
+    setNotificationStatus(t('ai.notification.saved'));
+  } catch (cause) {
+    setNotificationStatus(cause.message || t('ai.notification.saveFailed'), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function runNotificationAction(kind) {
+  const button = document.getElementById(
+    kind === 'test' ? 'ai-notification-test-btn' : 'ai-notification-run-btn'
+  );
+  if (kind === 'run' && CLOUD_CONSENT_PROVIDERS.includes(aiNotificationProvider)
+    && !globalThis.confirm(tVars('ai.analysis.cloudConfirm', {
+      provider: PROVIDER_LABELS[aiNotificationProvider] || aiNotificationProvider,
+    }))) return;
+  button.disabled = true;
+  setNotificationStatus(t(kind === 'test' ? 'ai.notification.testing' : 'ai.notification.running'));
+  try {
+    const endpoint = kind === 'test' ? 'notification-test' : 'notification-run-now';
+    const response = await apiFetch(`${_BASE}/api/ai/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(kind === 'run'
+        ? { cloudConsentConfirmed: CLOUD_CONSENT_PROVIDERS.includes(aiNotificationProvider) }
+        : {}),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || t('ai.notification.actionFailed'));
+    setNotificationStatus(t(kind === 'test' ? 'ai.notification.tested' : 'ai.notification.completed'));
+    await Promise.all([loadNotificationEvents(), refreshAiUsage()]);
+  } catch (cause) {
+    setNotificationStatus(cause.message || t('ai.notification.actionFailed'), true);
+    await loadNotificationEvents().catch(() => {});
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function startAiInsights() {
   refreshAiInsights();
   updateProviderLabel();
@@ -456,6 +623,14 @@ function initAiInsights() {
   document.getElementById('ai-analyze-btn').addEventListener('click', analyzeCurrentRange);
   document.getElementById('ai-cancel-btn').addEventListener('click', () => analysisController?.abort());
   document.getElementById('ai-chat-send-btn').addEventListener('click', sendChatMessage);
+  document.getElementById('ai-notification-open-btn').addEventListener('click', openNotificationModal);
+  document.getElementById('ai-notification-close-btn').addEventListener('click', () => {
+    document.getElementById('ai-notification-modal').classList.add('is-hidden');
+  });
+  document.getElementById('ai-notification-frequency').addEventListener('change', updateNotificationFrequencyFields);
+  document.getElementById('ai-notification-save-btn').addEventListener('click', saveNotificationConfig);
+  document.getElementById('ai-notification-test-btn').addEventListener('click', () => runNotificationAction('test'));
+  document.getElementById('ai-notification-run-btn').addEventListener('click', () => runNotificationAction('run'));
   document.getElementById('ai-new-chat-btn').addEventListener('click', () => {
     activeConversationId = null;
     document.getElementById('ai-conversation-select').value = '';
@@ -481,4 +656,21 @@ function initAiInsights() {
 
 initAiInsights();
 
-export { analyzeCurrentRange, deltaSummary, loadConversations, renderAiUsage, renderChatMessages, renderFacts, refreshAiInsights, refreshAiUsage, sendChatMessage, setAnalysisRunning, startAiInsights, stopAiInsights };
+export {
+  analyzeCurrentRange,
+  deltaSummary,
+  fillNotificationConfig,
+  loadConversations,
+  openNotificationModal,
+  renderAiUsage,
+  renderChatMessages,
+  renderFacts,
+  renderNotificationEvents,
+  refreshAiInsights,
+  refreshAiUsage,
+  saveNotificationConfig,
+  sendChatMessage,
+  setAnalysisRunning,
+  startAiInsights,
+  stopAiInsights,
+};

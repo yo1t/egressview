@@ -36,8 +36,10 @@ module.exports = function slackRoutes(ctx) {
     const parsed = parseRequest(emptyQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const cfg = notifier.getConfig();
-    let displayName = '';
-    try { displayName = loadConfig().slack?.displayName || ''; } catch {}
+    let displayName = cfg.displayName || '';
+    if (!displayName) {
+      try { displayName = loadConfig().slack?.displayName || ''; } catch {}
+    }
     res.json({ config: { ...cfg, displayName } });
   });
 
@@ -52,6 +54,7 @@ module.exports = function slackRoutes(ctx) {
       enabled:          typeof enabled         === 'boolean' ? enabled         : undefined,
       token:            typeof token           === 'string' && token ? token   : undefined,
       userId:           typeof userId          === 'string' ? userId           : undefined,
+      displayName:      typeof displayName     === 'string' ? displayName      : undefined,
       cooldownMinutes:  typeof cooldownMinutes === 'number' ? cooldownMinutes  : undefined,
     });
     const slackUpdates = {};
@@ -89,7 +92,7 @@ module.exports = function slackRoutes(ctx) {
       try { token = loadConfig().slack?.token || ''; } catch {}
     }
     try {
-      res.json(await notifier.verifyToken(token));
+      res.json(await notifier.verifyToken(token || undefined));
     } catch (e) {
       res.status(500).json({ ok: false, error: 'Internal error' });
     }
@@ -103,7 +106,7 @@ module.exports = function slackRoutes(ctx) {
       try { token = loadConfig().slack?.token || ''; } catch {}
     }
     try {
-      res.json(await notifier.lookupUser(username, token));
+      res.json(await notifier.lookupUser(username, token || undefined));
     } catch (e) {
       res.status(500).json({ ok: false, error: 'Internal error' });
     }

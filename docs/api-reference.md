@@ -151,7 +151,7 @@ Restore is fail-closed: EgressView validates the source, confirms a safety backu
 
 ## Endpoint catalog
 
-All 75 implemented HTTP endpoints are listed below. **Public** means no token is required; every other row requires `X-Admin-Token`.
+All 80 implemented HTTP endpoints are listed below. **Public** means no token is required; every other row requires `X-Admin-Token`.
 
 | Area | Method and path | Access |
 |---|---|---|
@@ -218,6 +218,11 @@ All 75 implemented HTTP endpoints are listed below. **Public** means no token is
 | AI insights | `GET /api/ai/usage/monthly` | Protected; current and previous local-month token usage and approximate USD cost |
 | AI insights | `GET /api/ai/pricing/diagnostics` | Protected; selected-model status and grouped unpriced usage |
 | AI insights | `POST /api/ai/analyze` | Protected; manually analyzes aggregates (incl. destination IPs, hostnames, device names, MAC); cloud requires double consent |
+| AI notifications | `GET /api/ai/notification-config` | Protected; returns schedule, trigger, destination, and runtime status |
+| AI notifications | `POST /api/ai/notification-config` | Protected; saves validated scheduling and automation consent settings |
+| AI notifications | `GET /api/ai/notification-events` | Protected; returns up to 200 append-only delivery records |
+| AI notifications | `POST /api/ai/notification-test` | Protected; tests UI/Slack delivery without invoking AI |
+| AI notifications | `POST /api/ai/notification-run-now` | Protected; explicitly runs the configured analysis range |
 | AI chat | `POST /api/ai/chat` | Protected; appends the question first and stores an answer or failure row |
 | AI chat | `GET /api/ai/conversations` | Protected; conversation list and storage usage |
 | AI chat | `GET /api/ai/conversations/:id` | Protected; message history preserved across restarts |

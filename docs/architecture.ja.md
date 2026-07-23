@@ -62,7 +62,7 @@ Migrationは末尾追加方式でfail-closedです。データ変更を伴うmig
 
 Backup cleanupのpreviewと実行は専用worker threadで行います。SQLiteのintegrity checkは同期処理で数GBを走査する可能性があるためです。Main processはcleanupを同時1件に制限し、進捗、cancel、timeout状態を公開します。Workerでも検証済み世代の最低保持条件と削除直前の再検証を維持し、event loopから分離してもfail-closed条件は緩めません。
 
-Schema v5ではrouterの観測情報を`connection_observations`だけに保存し、旧`connections.source` columnは削除済みです。APIの互換用`source`値は、観測したrouterのkindから導出します。Observation consistency診断では観測漏れ、孤立した観測、router metadataの欠落を検査します。Schema v6はappend-only AI会話、v7はproviderが返したtoken使用量と呼び出し時点のUSD概算を保存します。検証済み`src/data/ai-pricing.json`が版管理単価と根拠情報を提供し、各usage行は呼び出し時点の単価を保持します。過去会話、未知model、usage未返却の料金は推測しません。
+Schema v5ではrouterの観測情報を`connection_observations`だけに保存し、旧`connections.source` columnは削除済みです。APIの互換用`source`値は、観測したrouterのkindから導出します。Observation consistency診断では観測漏れ、孤立した観測、router metadataの欠落を検査します。Schema v6はappend-only AI会話、v7はproviderが返したtoken使用量と呼び出し時点のUSD概算、v8は定期・脅威発火・手動・通知テストのAI通知eventをappend-only保存します。検証済み`src/data/ai-pricing.json`が版管理単価と根拠情報を提供し、各usage行は呼び出し時点の単価を保持します。過去会話、未知model、usage未返却の料金は推測しません。
 
 ## Interface
 
