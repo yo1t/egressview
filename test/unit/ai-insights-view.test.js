@@ -188,6 +188,88 @@ describe('AI insights view', () => {
     assert.equal(event.children[2].textContent, '<img src=x onerror=alert(1)>');
   });
 
+  it('previews AI notification settings before persisting and closes only after confirmation', async () => {
+    const calls = [];
+    const config = {
+      frequency: 'weekly',
+      weekday: 2,
+      time: '08:30',
+      timezone: 'Asia/Tokyo',
+      rangeHours: 168,
+      destinations: { ui: true, slack: true },
+      threat: {
+        enabled: true,
+        dangerThreshold: 1,
+        newDestinationsThreshold: 2,
+        increaseThreshold: 3,
+      },
+      dailyLimit: 3,
+      cooldownMinutes: 60,
+      automationConsent: true,
+    };
+    const { context, get } = harness({
+      apiFetch: async (url, options) => {
+        calls.push({ url, options });
+        return { ok: true, json: async () => ({ config }) };
+      },
+    });
+    get('ai-notification-modal').classList.remove('is-hidden');
+    get('ai-notification-confirm-modal').classList.add('is-hidden');
+    context.fillNotificationConfig(config);
+
+    context.saveNotificationConfig();
+
+    assert.equal(calls.length, 0);
+    assert.equal(get('ai-notification-confirm-modal').classList.contains('is-hidden'), false);
+    assert.equal(get('ai-notification-summary').children.length, 9);
+    assert.match(get('ai-notification-summary').children[0].children[1].textContent, /weekly/);
+
+    await context.confirmNotificationConfig();
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, '/api/ai/notification-config');
+    assert.equal(calls[0].options.method, 'POST');
+    assert.equal(get('ai-notification-confirm-modal').classList.contains('is-hidden'), true);
+    assert.equal(get('ai-notification-modal').classList.contains('is-hidden'), true);
+  });
+
+  it('keeps the AI notification confirmation open when persistence fails', async () => {
+    const config = {
+      frequency: 'off',
+      weekday: 0,
+      time: '09:00',
+      timezone: 'UTC',
+      rangeHours: 24,
+      destinations: { ui: true, slack: false },
+      threat: {
+        enabled: false,
+        dangerThreshold: 1,
+        newDestinationsThreshold: 1,
+        increaseThreshold: 1,
+      },
+      dailyLimit: 3,
+      cooldownMinutes: 60,
+      automationConsent: false,
+    };
+    const { context, get } = harness({
+      apiFetch: async () => ({
+        ok: false,
+        json: async () => ({ error: 'disk full' }),
+      }),
+    });
+    get('ai-notification-modal').classList.remove('is-hidden');
+    get('ai-notification-confirm-modal').classList.add('is-hidden');
+    context.fillNotificationConfig(config);
+    context.saveNotificationConfig();
+
+    await context.confirmNotificationConfig();
+
+    assert.equal(get('ai-notification-confirm-modal').classList.contains('is-hidden'), false);
+    assert.equal(get('ai-notification-modal').classList.contains('is-hidden'), false);
+    assert.equal(get('ai-notification-confirm-status').textContent, 'disk full');
+    assert.equal(get('ai-notification-confirm-status').classList.contains('err'), true);
+  });
+
   it('keeps a server-persisted question visible when provider inference fails', async () => {
     const calls = [];
     const apiFetch = async (url, options = {}) => {

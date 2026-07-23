@@ -433,6 +433,13 @@
   .ai-notification-modal { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 18px; background: rgba(2,6,23,0.78); backdrop-filter: blur(8px); }
   .ai-notification-modal.is-hidden { display: none; }
   .ai-notification-card { width: min(760px, 100%); max-height: min(850px, 92vh); overflow: auto; padding: 24px; border: 1px solid rgba(56,189,248,0.35); border-radius: 18px; background: #0f1726; box-shadow: 0 24px 80px rgba(0,0,0,0.55); }
+  .ai-notification-confirm-modal { z-index: 1210; }
+  .ai-notification-confirm-card { width: min(520px, 100%); }
+  .ai-notification-summary { display: grid; grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.5fr); margin: 20px 0 0; border-top: 1px solid var(--border); }
+  .ai-notification-summary-row { display: contents; }
+  .ai-notification-summary dt, .ai-notification-summary dd { margin: 0; padding: 10px 8px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+  .ai-notification-summary dt { color: var(--muted); font-size: 10px; }
+  .ai-notification-summary dd { color: var(--text); font-size: 11px; }
   .ai-notification-head { display: flex; justify-content: space-between; gap: 18px; }
   .ai-notification-head h3, .ai-notification-history h4 { margin: 0 0 5px; }
   .ai-notification-head p { margin: 0; color: var(--muted); font-size: 11px; }
@@ -993,6 +1000,9 @@
     .ai-metric { padding: 15px; }
     .ai-updated { width: 100%; margin-left: 17px; }
     .ai-notification-grid { grid-template-columns: 1fr; }
+    .ai-notification-summary { grid-template-columns: 1fr; }
+    .ai-notification-summary dt { padding-bottom: 2px; border-bottom: 0; }
+    .ai-notification-summary dd { padding-top: 2px; }
     .log-header { flex-wrap: wrap; min-height: 38px; padding: 4px; }
     .log-export-controls { margin-left: 0; }
     .activity-refresh { min-height: 34px; }

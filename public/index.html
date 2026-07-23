@@ -979,6 +979,26 @@
         </div>
       </div>
     </div>
+    <div id="ai-notification-confirm-modal"
+         class="ai-notification-modal ai-notification-confirm-modal is-hidden"
+         role="dialog" aria-modal="true" aria-labelledby="ai-notification-confirm-title">
+      <div class="ai-notification-card ai-notification-confirm-card">
+        <div class="ai-notification-head">
+          <div>
+            <h3 id="ai-notification-confirm-title" data-i18n="ai.notification.confirm.title">この内容で保存しますか？</h3>
+            <p data-i18n="ai.notification.confirm.desc">設定内容を確認し、「確認」を押すと保存が完了します。</p>
+          </div>
+        </div>
+        <dl id="ai-notification-summary" class="ai-notification-summary"></dl>
+        <div id="ai-notification-confirm-status" class="settings-status"></div>
+        <div class="ai-notification-actions">
+          <button id="ai-notification-confirm-btn" class="ai-refresh" type="button"
+                  data-i18n="ai.notification.confirm">確認</button>
+          <button id="ai-notification-confirm-cancel-btn" class="ai-analysis-cancel" type="button"
+                  data-i18n="ai.notification.confirm.back">戻る</button>
+        </div>
+      </div>
+    </div>
   </div>
   <!-- Connection Log View -->
   <div id="log-container" class="activity-view">
