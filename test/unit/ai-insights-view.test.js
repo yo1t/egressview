@@ -152,6 +152,42 @@ describe('AI insights view', () => {
     assert.match(get('ai-chat-messages').children[0].children[1].textContent, /ai\.chat\.usageUnavailable/);
   });
 
+  it('renders AI notification configuration and event bodies as untrusted text', () => {
+    const { context, get } = harness();
+    context.fillNotificationConfig({
+      frequency: 'weekly',
+      weekday: 2,
+      time: '08:30',
+      timezone: 'Asia/Tokyo',
+      rangeHours: 168,
+      destinations: { ui: true, slack: false },
+      threat: {
+        enabled: true,
+        dangerThreshold: 1,
+        newDestinationsThreshold: 2,
+        increaseThreshold: 3,
+      },
+      dailyLimit: 3,
+      cooldownMinutes: 60,
+      automationConsent: true,
+    });
+    assert.equal(get('ai-notification-frequency').value, 'weekly');
+    assert.equal(get('ai-notification-time').value, '08:30');
+    assert.equal(get('ai-notification-consent').checked, true);
+
+    context.renderNotificationEvents([{
+      triggerType: 'threat',
+      status: 'complete',
+      createdAt: 1000,
+      provider: 'openai',
+      model: 'gpt-test',
+      slackSent: 1,
+      body: '<img src=x onerror=alert(1)>',
+    }]);
+    const event = get('ai-notification-events').children[0];
+    assert.equal(event.children[2].textContent, '<img src=x onerror=alert(1)>');
+  });
+
   it('keeps a server-persisted question visible when provider inference fails', async () => {
     const calls = [];
     const apiFetch = async (url, options = {}) => {

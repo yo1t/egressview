@@ -4,6 +4,12 @@ import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 
 export function initSlackSettings(showStatus) {
 // ─── Slack notification settings UI ──────────────────────────────────────────
+function errorLabel(error) {
+  if (error === 'token_missing' || error === 'missing_params') return t('settings.slack.tokenRequired');
+  if (error === 'user_not_found') return t('settings.slack.userNotFound');
+  return error || t('settings.error.generic');
+}
+
 document.getElementById('slack-verify-btn').addEventListener('click', async () => {
   const btn = document.getElementById('slack-verify-btn');
   const token = document.getElementById('s-slack-token').value.trim();
@@ -21,7 +27,7 @@ document.getElementById('slack-verify-btn').addEventListener('click', async () =
       info.textContent = `✓ ${data.team} (${data.user})`;
     } else {
       info.className = 'slack-info is-visible err';
-      info.textContent = '✗ ' + (data.error || 'Failed');
+      info.textContent = '✗ ' + errorLabel(data.error);
     }
   } catch (e) {
     showStatus('slack-status', e.message, false);
@@ -50,7 +56,7 @@ document.getElementById('slack-lookup-btn').addEventListener('click', async () =
       document.getElementById('s-slack-username').value = displayName;
     } else {
       info.className = 'slack-info is-visible err';
-      info.textContent = '✗ ' + (data.error === 'user_not_found' ? t('settings.slack.userNotFound') : data.error);
+      info.textContent = '✗ ' + errorLabel(data.error);
     }
   } catch (e) {
     showStatus('slack-status', e.message, false);
@@ -62,7 +68,7 @@ document.getElementById('slack-save-btn').addEventListener('click', async () => 
   btn.disabled = true; btn.textContent = t('settings.btn.saving');
   try {
     const token = document.getElementById('s-slack-token').value.trim();
-    await apiFetch(_BASE+'/api/config/slack', {
+    const r = await apiFetch(_BASE+'/api/config/slack', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         enabled: document.getElementById('s-slack-enabled').checked,
@@ -72,7 +78,15 @@ document.getElementById('slack-save-btn').addEventListener('click', async () => 
         cooldownMinutes: parseInt(document.getElementById('s-slack-cooldown').value),
       }),
     });
+    const data = await r.json();
+    if (!r.ok || !data.success) {
+      throw new Error(data.error || t('settings.error.generic'));
+    }
+    if (token && !data.config?.tokenSet) {
+      throw new Error(t('settings.slack.tokenRequired'));
+    }
     if (token) document.getElementById('s-slack-token').value = '';
+    await loadSlackSettings();
     showStatus('slack-status', t('settings.status.saved'), true);
   } catch (e) {
     showStatus('slack-status', t('err.serverGeneric') + e.message, false);
@@ -99,20 +113,30 @@ document.getElementById('slack-test-btn').addEventListener('click', async () => 
   }
 });
 
-(function loadSlackSettings() {
-  apiFetch(_BASE+'/api/config/slack').then(async r => {
+async function loadSlackSettings() {
+  try {
+    const r = await apiFetch(_BASE+'/api/config/slack');
     const data = await r.json();
-    if (!data) return;
+    if (!r.ok || !data?.config) throw new Error(data?.error || t('settings.slack.configLoadFailed'));
     document.getElementById('s-slack-enabled').checked = !!data.config?.enabled;
-    if (data.config?.userId) document.getElementById('s-slack-userid').value = data.config.userId;
-    if (data.config?.displayName) document.getElementById('s-slack-username').value = data.config.displayName;
+    document.getElementById('s-slack-userid').value = data.config.userId || '';
+    document.getElementById('s-slack-username').value = data.config.displayName || data.config.userId || '';
     if (data.config?.cooldownMinutes) document.getElementById('s-slack-cooldown').value = String(data.config.cooldownMinutes);
+    const tokenInput = document.getElementById('s-slack-token');
     if (data.config?.tokenSet) {
-      document.getElementById('s-slack-token').placeholder = t('settings.pass.saved');
-      document.getElementById('s-slack-token').dataset.saved = 'true';
+      tokenInput.placeholder = t('settings.pass.saved');
+      tokenInput.dataset.saved = 'true';
+    } else {
+      tokenInput.placeholder = 'xoxb-...';
+      delete tokenInput.dataset.saved;
     }
-  }).catch(() => {});
-})();
-
+  } catch (error) {
+    showStatus('slack-status', error.message || t('settings.slack.configLoadFailed'), false);
+  }
 }
 
+document.querySelector('.settings-tab[data-tab="threat"]')?.addEventListener('click', loadSlackSettings);
+loadSlackSettings();
+
+return { loadSlackSettings };
+}

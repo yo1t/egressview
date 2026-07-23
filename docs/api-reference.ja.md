@@ -151,7 +151,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 
 ## Endpoint一覧
 
-実装済みHTTP endpoint 75本の全一覧です。**公開**以外はすべて`X-Admin-Token`が必要です。
+実装済みHTTP endpoint 80本の全一覧です。**公開**以外はすべて`X-Admin-Token`が必要です。
 
 | 分類 | Methodとpath | Access |
 |---|---|---|
@@ -218,6 +218,11 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | AI洞察 | `GET /api/ai/usage/monthly` | 認証必須。現地暦の今月・先月token使用量とUSD概算 |
 | AI洞察 | `GET /api/ai/pricing/diagnostics` | 認証必須。選択model状態と未価格usageのmodel別診断 |
 | AI洞察 | `POST /api/ai/analyze` | 認証必須。通信先IP・ホスト名・端末名・MACと接続集計を選択providerで手動分析。cloudは二重同意必須 |
+| AI通知 | `GET /api/ai/notification-config` | 認証必須。schedule、発火条件、通知先、実行状態を返す |
+| AI通知 | `POST /api/ai/notification-config` | 認証必須。検証済みscheduleと自動実行同意を保存 |
+| AI通知 | `GET /api/ai/notification-events` | 認証必須。append-only通知履歴を最大200件返す |
+| AI通知 | `POST /api/ai/notification-test` | 認証必須。AIを呼ばずUI/Slack通知をテスト |
+| AI通知 | `POST /api/ai/notification-run-now` | 認証必須。設定済み期間のAI分析を明示実行 |
 | AI対話 | `POST /api/ai/chat` | 認証必須。質問を先に追記し、回答または失敗行をappend-only保存 |
 | AI対話 | `GET /api/ai/conversations` | 認証必須。会話一覧と保存量 |
 | AI対話 | `GET /api/ai/conversations/:id` | 認証必須。再起動後も残るメッセージ履歴 |

@@ -41,6 +41,13 @@ describe('configure / getConfig', () => {
     assert.equal(notifier.getConfig().userId, 'U01ABC');
   });
 
+  it('stores the display name without exposing the token', () => {
+    notifier.configure({ displayName: 'Network Admin', token: 'xoxb-secret' });
+    const cfg = notifier.getConfig();
+    assert.equal(cfg.displayName, 'Network Admin');
+    assert(!('token' in cfg));
+  });
+
   it('stores cooldownMinutes', () => {
     notifier.configure({ cooldownMinutes: 30 });
     assert.equal(notifier.getConfig().cooldownMinutes, 30);
@@ -158,6 +165,31 @@ describe('notify — message content', () => {
     notifier._setHttpPost(async (body) => { captured = body; return { ok: true }; });
     await notifier.notify(makeEntry());
     assert.equal(captured.channel, 'U99XYZ');
+  });
+});
+
+describe('sendAiNotification()', () => {
+  it('sends a bounded English event report to the configured recipient', async () => {
+    notifier.configure({ enabled: true, token: 'xoxb-x', userId: 'U99XYZ', language: 'en' });
+    let captured = null;
+    notifier._setHttpPost(async (body) => { captured = body; return { ok: true }; });
+
+    const result = await notifier.sendAiNotification({
+      triggerType: 'scheduled',
+      text: 'x'.repeat(4000),
+      generatedAt: Date.UTC(2026, 6, 23, 0, 0, 0),
+      language: 'en',
+    });
+
+    assert.equal(result, true);
+    assert.equal(captured.channel, 'U99XYZ');
+    assert.match(captured.text, /Scheduled AI report/);
+    assert(!captured.text.includes('x'.repeat(3501)), 'report body must be capped at 3,500 characters');
+  });
+
+  it('does not send when Slack is disabled', async () => {
+    notifier.configure({ enabled: false, token: 'xoxb-x', userId: 'U01' });
+    assert.equal(await notifier.sendAiNotification({ triggerType: 'test', text: 'test' }), false);
   });
 });
 

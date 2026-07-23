@@ -13,6 +13,7 @@ const { createHistoryCache, DEFAULT_HOT_MAX_ENTRIES } = require('./history-cache
 const { createHistoryQueries } = require('./history-queries');
 const { createAiConversationStore } = require('./ai-conversation-store');
 const { createAiUsageStore } = require('./ai-usage-store');
+const { createAiNotificationStore } = require('./ai-notification-store');
 
 const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
   ? path.resolve(process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB)
@@ -114,6 +115,7 @@ const {
 
 const aiConversationStore = createAiConversationStore({ getDb: () => db });
 const aiUsageStore = createAiUsageStore({ getDb: () => db });
+const aiNotificationStore = createAiNotificationStore({ getDb: () => db });
 
 function _secureDbFiles() {
   for (const suffix of ['', '-shm', '-wal']) {
@@ -275,6 +277,29 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
       detectedAt      INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_nlog_detectedAt ON notification_log(detectedAt);
+    CREATE TABLE IF NOT EXISTS ai_notification_events (
+      eventId          TEXT PRIMARY KEY,
+      triggerType      TEXT NOT NULL CHECK(triggerType IN ('scheduled', 'threat', 'manual', 'test')),
+      triggerKey       TEXT UNIQUE,
+      cause            TEXT NOT NULL,
+      createdAt        INTEGER NOT NULL,
+      rangeFrom        INTEGER NOT NULL,
+      rangeTo          INTEGER NOT NULL,
+      status           TEXT NOT NULL CHECK(status IN ('complete', 'failed')),
+      provider         TEXT NOT NULL,
+      model            TEXT NOT NULL,
+      body             TEXT,
+      slackSent        INTEGER NOT NULL DEFAULT 0,
+      inputTokens      INTEGER NOT NULL DEFAULT 0 CHECK(inputTokens >= 0),
+      outputTokens     INTEGER NOT NULL DEFAULT 0 CHECK(outputTokens >= 0),
+      totalTokens      INTEGER NOT NULL DEFAULT 0 CHECK(totalTokens >= 0),
+      estimatedCostUsd REAL,
+      errorCode        TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_notification_created
+      ON ai_notification_events(createdAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_ai_notification_cause
+      ON ai_notification_events(triggerType, cause, createdAt DESC);
   `);
 
   stmtInsertNotifLog = db.prepare(`
@@ -746,6 +771,7 @@ module.exports = {
   summarizeByTimeRange,
   ...aiConversationStore,
   ...aiUsageStore,
+  ...aiNotificationStore,
   getKnownMacs,
   upsertRouterMetadata,
   tombstoneRouterMetadata,

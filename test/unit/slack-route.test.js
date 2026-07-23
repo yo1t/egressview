@@ -78,6 +78,15 @@ describe('slack route: GET /api/config/slack', () => {
     assert.equal(body.config.displayName, 'MyBot');
   });
 
+  it('prefers the notifier-held displayName', async () => {
+    const app = makeApp({
+      notifier: { ...defaultNotifier, getConfig: () => ({ displayName: 'Runtime User', userId: 'U1' }) },
+      loadConfig: () => ({ slack: { displayName: 'Stored User' } }),
+    });
+    const { body } = await req(app, 'GET', '/api/config/slack');
+    assert.equal(body.config.displayName, 'Runtime User');
+  });
+
   it('returns empty displayName when loadConfig throws', async () => {
     const app = makeApp({ loadConfig: () => { throw new Error('fail'); } });
     const { status, body } = await req(app, 'GET', '/api/config/slack');
@@ -206,6 +215,15 @@ describe('slack route: POST /api/slack/verify', () => {
     assert.equal(captured, 'xoxb-from-config');
   });
 
+  it('falls back to the notifier-held token when config has no token', async () => {
+    let captured = 'not-called';
+    const app = makeApp({
+      notifier: { ...defaultNotifier, verifyToken: async (t) => { captured = t; return { ok: true }; } },
+    });
+    await req(app, 'POST', '/api/slack/verify', {});
+    assert.equal(captured, undefined);
+  });
+
   it('returns 500 when verifyToken throws', async () => {
     const app = makeApp({
       notifier: { ...defaultNotifier, verifyToken: async () => { throw new Error('err'); } },
@@ -242,6 +260,18 @@ describe('slack route: POST /api/slack/lookup-user', () => {
     });
     await req(app, 'POST', '/api/slack/lookup-user', { username: 'alice' });
     assert.equal(capturedToken, 'xoxb-cfg');
+  });
+
+  it('falls back to the notifier-held token when config has no token', async () => {
+    let capturedToken = 'not-called';
+    const app = makeApp({
+      notifier: {
+        ...defaultNotifier,
+        lookupUser: async (_username, token) => { capturedToken = token; return { ok: true }; },
+      },
+    });
+    await req(app, 'POST', '/api/slack/lookup-user', { username: 'alice' });
+    assert.equal(capturedToken, undefined);
   });
 
   it('returns 500 when lookupUser throws', async () => {

@@ -6,6 +6,7 @@ const https = require('https');
 let _enabled = false;
 let _token = '';
 let _userId = '';
+let _displayName = '';
 let _cooldownMs = 60 * 60 * 1000; // 1 hour default
 let _language = 'ja';
 
@@ -51,10 +52,11 @@ function _defaultHttpPost(body, token) {
   });
 }
 
-function configure({ enabled, token, userId, cooldownMinutes, language } = {}) {
+function configure({ enabled, token, userId, displayName, cooldownMinutes, language } = {}) {
   if (typeof enabled === 'boolean') _enabled = enabled;
   if (typeof token === 'string') _token = token;
   if (typeof userId === 'string') _userId = userId;
+  if (typeof displayName === 'string') _displayName = displayName;
   if (typeof cooldownMinutes === 'number' && cooldownMinutes > 0 && cooldownMinutes <= 1440) {
     _cooldownMs = cooldownMinutes * 60 * 1000;
   }
@@ -65,6 +67,7 @@ function getConfig() {
   return {
     enabled: _enabled,
     userId: _userId,
+    displayName: _displayName,
     cooldownMinutes: Math.round(_cooldownMs / 60000),
     tokenSet: _token.length > 0,
   };
@@ -156,6 +159,42 @@ const _NEW_DEVICE_MSG = {
   },
 };
 
+const _AI_NOTIFICATION_TITLE = {
+  ja: {
+    scheduled: '📅 *定期AIレポート*',
+    threat: '🚨 *脅威変化のAI分析*',
+    manual: '✦ *AIイベント分析*',
+    test: '✅ *AIイベント通知テスト*',
+  },
+  en: {
+    scheduled: '📅 *Scheduled AI report*',
+    threat: '🚨 *AI threat-change analysis*',
+    manual: '✦ *AI event analysis*',
+    test: '✅ *AI event notification test*',
+  },
+};
+
+async function sendAiNotification({ triggerType, text, generatedAt, language } = {}) {
+  if (!_enabled || !_token || !_userId) return false;
+  const lang = language === 'en' ? 'en' : 'ja';
+  const title = _AI_NOTIFICATION_TITLE[lang][triggerType] || _AI_NOTIFICATION_TITLE[lang].manual;
+  const time = new Date(generatedAt || Date.now()).toLocaleString(lang === 'en' ? 'en-US' : 'ja-JP');
+  try {
+    const result = await _httpPost({
+      channel: _userId,
+      text: `${title}\n${String(text || '').slice(0, 3500)}\n_${time}_`,
+    }, _token);
+    if (!result.ok) {
+      logger.error('[notifier] AI notification Slack error:', result.error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    logger.error('[notifier] AI notification Slack post failed:', err.message);
+    return false;
+  }
+}
+
 async function notifyNewDevice(entry) {
   let slackSent = false;
 
@@ -231,6 +270,7 @@ function _slackGet(method, token) {
 
 // Verify token and get workspace info
 async function verifyToken(token) {
+  token ||= _token;
   if (!token) return { ok: false, error: 'token_missing' };
   try {
     const result = await _slackGet('auth.test', token);
@@ -245,6 +285,7 @@ async function verifyToken(token) {
 
 // Look up user by username (display name or real name)
 async function lookupUser(username, token) {
+  token ||= _token;
   if (!token || !username) return { ok: false, error: 'missing_params' };
   const name = username.replace(/^@/, '').toLowerCase();
   try {
@@ -272,4 +313,18 @@ async function lookupUser(username, token) {
   }
 }
 
-module.exports = { configure, getConfig, notify, notifyNewDevice, setLogCallback, test, verifyToken, lookupUser, _buildMessage, _setHttpPost, _resetCooldown, _resetLogCallback };
+module.exports = {
+  configure,
+  getConfig,
+  notify,
+  notifyNewDevice,
+  sendAiNotification,
+  setLogCallback,
+  test,
+  verifyToken,
+  lookupUser,
+  _buildMessage,
+  _setHttpPost,
+  _resetCooldown,
+  _resetLogCallback,
+};

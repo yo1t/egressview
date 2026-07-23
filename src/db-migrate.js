@@ -30,7 +30,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -254,6 +254,37 @@ const MIGRATIONS = [
         );
         CREATE INDEX IF NOT EXISTS idx_ai_usage_created
           ON ai_usage(createdAt);
+      `);
+    },
+  },
+  {
+    version: 8,
+    description: 'append-only AI event notification history (P2-57)',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS ai_notification_events (
+          eventId          TEXT PRIMARY KEY,
+          triggerType      TEXT NOT NULL CHECK(triggerType IN ('scheduled', 'threat', 'manual', 'test')),
+          triggerKey       TEXT UNIQUE,
+          cause            TEXT NOT NULL,
+          createdAt        INTEGER NOT NULL,
+          rangeFrom        INTEGER NOT NULL,
+          rangeTo          INTEGER NOT NULL,
+          status           TEXT NOT NULL CHECK(status IN ('complete', 'failed')),
+          provider         TEXT NOT NULL,
+          model            TEXT NOT NULL,
+          body             TEXT,
+          slackSent        INTEGER NOT NULL DEFAULT 0,
+          inputTokens      INTEGER NOT NULL DEFAULT 0 CHECK(inputTokens >= 0),
+          outputTokens     INTEGER NOT NULL DEFAULT 0 CHECK(outputTokens >= 0),
+          totalTokens      INTEGER NOT NULL DEFAULT 0 CHECK(totalTokens >= 0),
+          estimatedCostUsd REAL,
+          errorCode        TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_notification_created
+          ON ai_notification_events(createdAt DESC);
+        CREATE INDEX IF NOT EXISTS idx_ai_notification_cause
+          ON ai_notification_events(triggerType, cause, createdAt DESC);
       `);
     },
   },

@@ -18,6 +18,7 @@ const beaconsRoutes = require('./routes/beacons');
 const routerRoutes = require('./routes/routers');
 const manualThreatRoutes = require('./routes/manual-threat');
 const aiRoutes = require('./routes/ai');
+const aiNotificationRoutes = require('./routes/ai-notifications');
 const { createSlowRequestLogger } = require('./slow-request-log');
 const { createRequestContextMiddleware } = require('./request-context');
 const i18nCatalog = require('./data/i18n.json');
@@ -183,6 +184,7 @@ function configureHttpApp(app, {
   }));
   if (routeCtx.manualThreat) app.use('/api', manualThreatRoutes(routeCtx));
   if (routeCtx.aiProvider) app.use('/api', aiRoutes(routeCtx));
+  if (routeCtx.aiNotificationService) app.use('/api', aiNotificationRoutes(routeCtx));
 
   app.use((err, req, res, next) => {
     logger.error('[express] unhandled error:', err.message);

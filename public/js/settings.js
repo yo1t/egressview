@@ -12,11 +12,13 @@ import { initAiSettings } from './settings-ai.js?v=__ASSET_VERSION__';
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsBtn     = document.getElementById('settings-btn');
 let loadAiConfig = () => {};
+let loadSlackConfig = () => {};
 
 function openSettings(tab) {
   settingsOverlay.classList.remove('hidden');
   settingsBtn.classList.remove('alert');
   loadAiConfig();
+  loadSlackConfig();
   if (typeof tab === 'string' && tab) {
     document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));
@@ -150,7 +152,7 @@ document.getElementById('token-regen-btn').addEventListener('click', async () =>
 const { loadBackupList } = initBackupSettings(showStatus);
 initSessionSettings(showStatus);
 initBeaconSettings(showStatus);
-initSlackSettings(showStatus);
+({ loadSlackSettings: loadSlackConfig } = initSlackSettings(showStatus));
 initManualThreatSettings();
 loadAiConfig = initAiSettings();
 

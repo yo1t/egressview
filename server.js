@@ -23,6 +23,7 @@ const deviceId        = require('./src/device-identify');
 const threatIntel     = require('./src/threat-intel');
 const { manualThreatLookup } = require('./src/manual-threat-lookup');
 const { aiProvider }  = require('./src/ai-provider');
+const { createAiNotificationService } = require('./src/ai-notification-service');
 const notifier        = require('./src/notifier');
 const i18n            = require('./src/i18n-server');
 const backup          = require('./src/backup');
@@ -130,6 +131,17 @@ const io     = new Server(server, {
     catch { cb(null, false); }
   },
 });
+const aiNotificationService = createAiNotificationService({
+  aiProvider,
+  history,
+  threatIntel,
+  devices,
+  asus,
+  notifier,
+  getRouters: () => routerManagerApi.list(),
+  getLanguage: () => appState.uiLanguage,
+  emit: (event, payload) => io.emit(event, payload),
+});
 
 // ─── Config: load from / save to config file ─────────────────────────────────
 
@@ -178,6 +190,7 @@ function loadConfig() {
   if (data.slack) notifier.configure({ ...data.slack, language: appState.uiLanguage });
   if (data.manualThreat) manualThreatLookup.configure(data.manualThreat);
   if (data.ai) aiProvider.configure(data.ai);
+  if (data.aiNotifications) aiNotificationService.configure(data.aiNotifications);
   i18n.setLanguage(appState.uiLanguage);
 
   dhcpdSyslog.configure({ logFile: appState.dhcpdLogFile, enabled: appState.dhcpdEnabled });
@@ -219,6 +232,7 @@ function saveConfig(sectionOverrides = {}) {
     auth:    { passwordHash: appState.authPasswordHash, salt: appState.authPasswordSalt },
     manualThreat: manualThreatLookup.exportConfig(),
     ai:       aiProvider.exportConfig(),
+    aiNotifications: aiNotificationService.exportConfig(),
   };
   // Preserve passwords from the strict read above (not held in module getters).
   try {
@@ -356,6 +370,7 @@ const routeCtx = {
   routerManager:      routerManagerApi,
   manualThreat:       manualThreatLookup,
   aiProvider,
+  aiNotificationService,
 };
 
 configureHttpApp(app, {
@@ -396,6 +411,7 @@ registerSocketHandlers({
 
 notifier.setLogCallback((entry, type, slackSent) => {
   history.logNotification(entry, type, slackSent);
+  if (type === 'threat') aiNotificationService.observeThreat(entry);
 });
 
 // ─── Wire up poller callbacks ─────────────────────────────────────────────────
@@ -571,6 +587,7 @@ server.listen(PORT, HOST, () => {
     runtime, history, devices, beacons, enrichmentQueue, investigation, appState, io,
   });
   runtime.setRouterRegistry(routerManager.registry);
+  aiNotificationService.start();
 
   if (!DEMO_MODE) {
     logger.info(`Router IP: ${asus.getRouterIp()}`);
@@ -612,6 +629,7 @@ function shutdown(exitCode = 0) {
   healthState.markNotReady();
   logger.info('[shutdown] Saving history...');
   try { routerManager?.stopAll();   } catch {}
+  aiNotificationService.stop();
   try { runtimeProfiler.measureSync('history.shutdownSnapshot', () => history.snapshotHistory()); } catch {}
   runtimeProfiler.stop();
   try { history.closeDb();         } catch {}

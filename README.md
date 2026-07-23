@@ -22,7 +22,7 @@ EgressView is production-oriented for home/SOHO networks using Yamaha RTX or Cis
 
 Version 1.5.0 makes AI Insights the start page, with local live metrics, previous-period comparisons, explicit manual analysis/chat through Ollama, Anthropic, OpenAI, or Amazon Bedrock, append-only conversations, and monthly token/cost estimates. It also adds Bedrock model, inference-profile, and Guardrail discovery, runtime CPU diagnostics, and collection-path performance improvements. See the [changelog](CHANGELOG.md) for upgrade details.
 
-Existing databases migrate automatically to schema v7. Startup creates and verifies a complete backup first, and stops without changing the database if free-space, checkpoint, copy, or integrity verification fails. Linux conntrack remains a Docker-validated preview pending physical-router validation.
+Existing databases migrate automatically to schema v8. Startup creates and verifies a complete backup first, and stops without changing the database if free-space, checkpoint, copy, or integrity verification fails. Linux conntrack remains a Docker-validated preview pending physical-router validation.
 
 Existing databases upgrade automatically. Before schema v5 is applied, EgressView creates and verifies a backup and checks observation consistency; startup stops without modifying the database if either check fails. Linux conntrack remains a Docker-validated preview pending physical-router testing.
 
@@ -38,7 +38,7 @@ EgressView answers the question most home users can't ask: *what is each device 
 - **Manual threat investigation** — explicitly query AbuseIPDB, VirusTotal, or AlienVault OTX with server-side caching and rate limits ([guide](docs/manual-threat-investigation.md))
 - **Linux conntrack preview** — collect from Linux-based routers over SSH; Docker integration verified, hardware validation pending ([setup](docs/setup-conntrack.md))
 - **Mobile monitoring view** — check router health, Graph Map, Statistics, Connection Log, Devices, and Detection Log from a phone on your VPN/private network
-- **AI Insights start page** — opens with collection health, connections, devices, destinations, threats, and previous-period comparisons. Manual analysis/chat can use bounded device inventory and ASUS node summaries through Ollama, Anthropic, OpenAI, or Amazon Bedrock, with versioned-catalog monthly tokens/estimated cost, explicit partial totals for unpriced models, and per-answer model/cost metadata ([setup guide](docs/setup-ai-insights.md), [Bedrock production setup](docs/setup-bedrock.md))
+- **AI Insights start page** — opens with collection health, connections, devices, destinations, threats, and previous-period comparisons. Manual analysis/chat can use bounded device inventory and ASUS node summaries through Ollama, Anthropic, OpenAI, or Amazon Bedrock, with versioned-catalog monthly tokens/estimated cost, explicit partial totals for unpriced models, and per-answer model/cost metadata. Optional event notifications add off-by-default daily/weekly reports and bounded threat-change analysis to append-only UI history or Slack ([setup guide](docs/setup-ai-insights.md), [Bedrock production setup](docs/setup-bedrock.md))
 - **Instant Slack alerts** — DM the moment any device connects to a known C2 server or malware distribution host
 - **No hardware changes** — runs on any Mac, PC, or Raspberry Pi alongside your existing Yamaha RTX or Cisco IOS routers
 
