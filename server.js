@@ -45,6 +45,9 @@ const beacons        = require('./src/beacons');
 const beaconDetector = require('./src/beacon-detector');
 const sessions       = require('./src/sessions');
 const authPassword   = require('./src/auth-password');
+const authAudit      = require('./src/auth-audit');
+const authCookies    = require('./src/auth-cookies');
+const { createGoogleOidc } = require('./src/oidc-google');
 const { runDbBootstrap }    = require('./src/db-bootstrap');
 const { sourceRouterIdMap } = require('./src/router-id');
 const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
@@ -55,6 +58,8 @@ const { createHealthState } = require('./src/health-state');
 const { registerSocketHandlers } = require('./src/socket-handlers');
 const { migrateRouterConfigFile, loadRouterConfig, publicRouter } = require('./src/router-config');
 const { createRouterManager } = require('./src/router-manager');
+const { createAuthMiddleware } = require('./src/auth-middleware');
+const oidc = createGoogleOidc();
 
 // ─── Environment ──────────────────────────────────────────────────────────────
 const SUBPATH           = (process.env.SUBPATH || '').replace(/\/$/, '');
@@ -229,7 +234,12 @@ function saveConfig(sectionOverrides = {}) {
     dhcpd:   { enabled: appState.dhcpdEnabled,   logFile: appState.dhcpdLogFile   },
     beacons: appState.beaconConfig,
     https:   { enabled: appState.httpsEnabled, certPath: appState.httpsCertPath, keyPath: appState.httpsKeyPath },
-    auth:    { passwordHash: appState.authPasswordHash, salt: appState.authPasswordSalt },
+    auth:    {
+      passwordHash: appState.authPasswordHash,
+      salt: appState.authPasswordSalt,
+      password: appState.authPasswordRecord,
+    },
+    oidc:    appState.oidcConfig,
     manualThreat: manualThreatLookup.exportConfig(),
     ai:       aiProvider.exportConfig(),
     aiNotifications: aiNotificationService.exportConfig(),
@@ -260,56 +270,49 @@ function ensureAdminToken() {
   if (!appState.adminToken) {
     appState.adminToken = crypto.randomBytes(24).toString('hex');
     saveConfig();
-    process.stderr.write('\n══════════════════════════════════════════════════════════════\n');
-    process.stderr.write('  EgressView admin token (initial):\n');
-    process.stderr.write('  ' + appState.adminToken + '\n');
-    process.stderr.write('  → API/自動化用トークン（ブラウザはパスワードでログイン）\n');
-    process.stderr.write('══════════════════════════════════════════════════════════════\n\n');
+    exposeInitialCredential('admin API token', appState.adminToken, '.initial-admin-token');
   }
 }
 
 function ensureLoginPassword() {
   if (!appState.authPasswordHash) {
     const initial = authPassword.generateInitialPassword();
-    const { salt, hash } = authPassword.hashPassword(initial);
+    const { salt, hash, record } = authPassword.hashPassword(initial);
     appState.authPasswordSalt = salt;
     appState.authPasswordHash = hash;
+    appState.authPasswordRecord = record;
     saveConfig();
-    process.stderr.write('\n══════════════════════════════════════════════════════════════\n');
-    process.stderr.write('  EgressView login password (initial):\n');
-    process.stderr.write('  ' + initial + '\n');
-    process.stderr.write('  → ブラウザ初回アクセス時にこのパスワードでログインしてください\n');
-    process.stderr.write('    （設定画面からいつでも変更できます）\n');
-    process.stderr.write('══════════════════════════════════════════════════════════════\n\n');
+    exposeInitialCredential('login password', initial, '.initial-login-password');
   }
+}
+
+function exposeInitialCredential(label, value, suffix) {
+  if (process.stderr.isTTY) {
+    process.stderr.write(`\nEgressView ${label} (shown once):\n${value}\n\n`);
+    return;
+  }
+  const recoveryPath = CONFIG_FILE + suffix;
+  const tempPath = `${recoveryPath}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(tempPath, `${value}\n`, { mode: 0o600, flag: 'wx' });
+    fs.chmodSync(tempPath, 0o600);
+    fs.renameSync(tempPath, recoveryPath);
+  } catch (error) {
+    try { fs.unlinkSync(tempPath); } catch {}
+    throw error;
+  }
+  logger.warn(`[auth] Initial ${label} written once to ${recoveryPath} (mode 0600); remove after use`);
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
-// A request is authorized when the X-Admin-Token header carries either
-//   (a) a per-device session token issued by password login, or
-//   (b) the admin token (kept as an API/automation credential).
-// Returns the matching session row for (a), the string 'admin' for (b),
-// or null.  The same check covers Socket.IO handshakes.
-function authenticate(provided) {
-  if (!provided) return null;
-  const session = sessions.verifySession(provided);
-  if (session) return session;
-  if (appState.adminToken) {
-    const a = Buffer.from(provided);
-    const b = Buffer.from(appState.adminToken);
-    if (a.length === b.length && crypto.timingSafeEqual(a, b)) return 'admin';
-  }
-  return null;
-}
-
-function requireAdmin(req, res, next) {
-  if (!appState.adminToken) return res.status(503).json({ error: '認証未初期化' });
-  const auth = authenticate(req.get('X-Admin-Token') || '');
-  if (!auth) return res.status(401).json({ error: '認証エラー' });
-  req.session = auth === 'admin' ? null : auth;  // session row for login sessions
-  next();
-}
+const authBoundary = createAuthMiddleware({
+  appState,
+  sessions,
+  authCookies,
+  authAudit,
+});
+const { authenticate, authenticateRequest, requireAdmin } = authBoundary;
 
 // ─── Connection enrichment queue ──────────────────────────────────────────────
 // The poll loops themselves live in src/poll-scheduler.js (extracted in P2-23).
@@ -357,6 +360,9 @@ const routeCtx = {
   asus, yamaha, cisco, enrichment, threatIntel, notifier, history, devices, deviceId, backup,
   dnsmasqLog, inspectSyslog, dhcpdSyslog,
   runtime, notes, io, beacons, sessions, authPassword,
+  authAudit, authCookies, oidc,
+  authenticateRequest: req => authenticateRequest(req)?.auth || null,
+  subpath: SUBPATH,
   saveConfig,
   loadConfig:          () => configIo.loadFileSafe(CONFIG_FILE),
   configFile:          CONFIG_FILE,
@@ -557,8 +563,20 @@ server.listen(PORT, HOST, () => {
     hasYamahaConfig: !!(rawCfg.yamaha && (rawCfg.yamaha.ip || rawCfg.yamaha.user)),
     hasCiscoConfig:  !!(rawCfg.cisco  && (rawCfg.cisco.ip  || rawCfg.cisco.user)),
   });
-  const { staleEnrichmentIps } = runDbBootstrap({ dbPath: runtimeDbPath, sourceRouterMap, history, sessions, devices, enrichment, beacons });
+  authAudit.setHashKey(appState.adminToken);
+  const { staleEnrichmentIps } = runDbBootstrap({
+    dbPath: runtimeDbPath,
+    sourceRouterMap,
+    history,
+    sessions,
+    devices,
+    enrichment,
+    beacons,
+    authAudit,
+  });
   setInterval(() => sessions.pruneExpired(), 6 * 60 * 60 * 1000);
+  authAudit.prune();
+  setInterval(() => authAudit.prune(), 24 * 60 * 60 * 1000).unref();
 
   if (DEMO_MODE) {
     const { seedDemoConnections } = require('./scripts/demo-seed');

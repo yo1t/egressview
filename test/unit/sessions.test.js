@@ -13,13 +13,27 @@ describe('createSession / verifySession', () => {
   before(() => s._resetForTest());
 
   it('creates a session and verifies its raw token', () => {
-    const { token, id, expiresAt } = s.createSession('Safari on iPhone');
+    const { token, csrfToken, id, expiresAt } = s.createSession('Safari on iPhone');
     assert.equal(typeof token, 'string');
     assert.equal(token.length, 64);  // 32 bytes hex
     assert.ok(expiresAt > Date.now());
     const row = s.verifySession(token);
     assert.equal(row.id, id);
     assert.equal(row.deviceLabel, 'Safari on iPhone');
+    assert.equal(row.authMethod, 'local');
+    assert.equal(s.verifyCsrf(row, csrfToken), true);
+    assert.equal(s.verifyCsrf(row, 'wrong-token'), false);
+  });
+
+  it('records OIDC as a session method without exposing its subject', () => {
+    const created = s.createSession('Google OIDC', {
+      authMethod: 'oidc',
+      subject: 'https://accounts.google.com|subject-1',
+    });
+    const row = s.verifySession(created.token);
+    assert.equal(row.authMethod, 'oidc');
+    assert.equal(row.subjectHash.length, 64);
+    assert.equal(JSON.stringify(s.listSessions()).includes('subject-1'), false);
   });
 
   it('rejects an unknown token', () => {

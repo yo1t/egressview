@@ -40,6 +40,7 @@
     "scripts/check-frontend-innerhtml.js",
     "scripts/frontend-innerhtml-allowlist.json",
     "scripts/check-observation-consistency.js",
+    "scripts/reset-admin-password.js",
     "scripts/benchmark-summary.js",
     "docs/*.md",
     "docs/assets/*.png",
@@ -75,7 +76,8 @@
     "mcp": "node mcp-server.js",
     "gen:demo-db": "node scripts/gen-demo-db.js",
     "benchmark:summary": "node scripts/benchmark-summary.js --generate 100000",
-    "benchmark:poll-batch": "node scripts/benchmark-poll-batch.js 600"
+    "benchmark:poll-batch": "node scripts/benchmark-poll-batch.js 600",
+    "auth:reset": "node scripts/reset-admin-password.js"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock": "^3.1090.0",

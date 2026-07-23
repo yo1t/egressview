@@ -314,17 +314,23 @@ describe('backup configuration route', () => {
         reopen: () => calls.push('sessions-open'),
         revokeAll: () => calls.push('sessions-revoke'),
       },
+      authAudit: {
+        closeDb: () => calls.push('audit-close'),
+        reopen: () => calls.push('audit-open'),
+      },
       io: { disconnectSockets: () => calls.push('sockets-disconnect') },
       appRoot: process.cwd(),
     }));
 
     const { status } = await request(app, 'POST', '/api/backup/restore', { name: 'egressview_2025-01-01_00-00-00.db' });
     assert.equal(status, 200);
-    assert.deepEqual(calls.slice(0, 6), [
-      'history-close', 'sessions-close', 'devices-close', 'enrichment-close', 'beacons-close', 'replace',
+    assert.deepEqual(calls.slice(0, 7), [
+      'history-close', 'sessions-close', 'devices-close', 'enrichment-close', 'beacons-close',
+      'audit-close', 'replace',
     ]);
     assert.ok(calls.indexOf('history-open') > calls.indexOf('replace'));
     assert.ok(calls.includes('sessions-revoke'));
+    assert.ok(calls.includes('audit-open'));
     assert.ok(calls.includes('sockets-disconnect'));
   });
 

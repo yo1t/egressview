@@ -10,6 +10,7 @@ const ENDPOINT_MODULES = [
   'ai-notifications.js',
   'ai.js',
   'auth-sessions.js',
+  'auth-security.js',
   'backup.js',
   'beacons.js',
   'config.js',

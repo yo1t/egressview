@@ -29,7 +29,18 @@ describe('applyConfigToAppState', () => {
     applyConfigToAppState(state, {
       general: { homeCountry: 'US', language: 'en', autoInvestigate: true, retentionDays: 30 },
       adminToken: 'abc',
-      auth: { passwordHash: 'hash', salt: 'salt' },
+      auth: {
+        passwordHash: 'hash',
+        salt: 'salt',
+        password: { algorithm: 'scrypt', version: 1 },
+      },
+      oidc: {
+        enabled: true,
+        clientId: 'client-id',
+        clientSecret: 'client-secret', // pragma: allowlist secret
+        allowedEmails: ['admin@example.com'],
+        allowedDomains: ['example.com'],
+      },
       https: { enabled: true, certPath: '/tmp/cert.pem', keyPath: '/tmp/key.pem' },
       beacons: {
         enabled: false,
@@ -53,6 +64,10 @@ describe('applyConfigToAppState', () => {
     assert.equal(state.adminToken, 'abc');
     assert.equal(state.authPasswordHash, 'hash');
     assert.equal(state.authPasswordSalt, 'salt');
+    assert.equal(state.authPasswordRecord.version, 1);
+    assert.equal(state.oidcConfig.enabled, true);
+    assert.equal(state.oidcConfig.clientId, 'client-id');
+    assert.deepEqual(state.oidcConfig.allowedDomains, ['example.com']);
     assert.equal(state.httpsEnabled, true);
     assert.equal(state.httpsCertPath, '/tmp/cert.pem');
     assert.equal(state.httpsKeyPath, '/tmp/key.pem');

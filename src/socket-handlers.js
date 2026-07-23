@@ -1,5 +1,7 @@
 'use strict';
 
+const { parseCookies, SESSION_COOKIE } = require('./auth-cookies');
+
 function buildClientConfig({
   appState,
   asus,
@@ -57,7 +59,8 @@ function registerSocketHandlers({
   getRouters = () => [],
 }) {
   io.use((socket, next) => {
-    const provided = String(socket.handshake.auth?.token || '');
+    const cookies = parseCookies(socket.handshake.headers?.cookie);
+    const provided = String(socket.handshake.auth?.token || cookies[SESSION_COOKIE] || '');
     if (!appState.adminToken) return next(new Error('認証未初期化'));
     if (!authenticate(provided)) return next(new Error('Unauthorized'));
     next();

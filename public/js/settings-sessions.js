@@ -21,6 +21,11 @@ export function initSessionSettings(showStatus) {
       box.replaceChildren(...sessions.map(session => {
         const row = textElement('div', '', 'settings-session-row');
         const label = textElement('span', session.deviceLabel || 'Unknown device', 'settings-session-label');
+        label.appendChild(textElement(
+          'span',
+          session.authMethod === 'oidc' ? 'OIDC' : 'LOCAL',
+          'settings-session-method'
+        ));
         if (session.current) label.appendChild(textElement('span', `● ${t('settings.sessions.current')}`, 'settings-session-current'));
         row.append(label, textElement('span', fmtTs(session.lastSeenAt), 'settings-session-seen'));
         if (!session.current) {
@@ -43,7 +48,7 @@ export function initSessionSettings(showStatus) {
     const button = document.getElementById('pw-change-btn');
     const currentPassword = document.getElementById('s-pw-current').value;
     const newPassword = document.getElementById('s-pw-new').value;
-    if (newPassword.length < 8) return showStatus('pw-status', t('settings.password.tooShort'), false);
+    if (newPassword.length < 14) return showStatus('pw-status', t('settings.password.tooShort'), false);
     button.disabled = true;
     try {
       const data = await (await apiFetch(_BASE + '/api/auth/change-password', {

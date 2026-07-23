@@ -212,7 +212,7 @@ npm start
 
 ### Step 3 — Open the browser and log in
 
-On first startup, an initial **login password** is printed to the console:
+On first startup, an initial **login password** is shown once on an interactive terminal. Service/non-interactive startup writes it to `.egressview.json.initial-login-password` with mode `0600` instead of putting it in a persistent log:
 
 ```
 ══════════════════════════════════════════════════════════════
@@ -241,16 +241,17 @@ For each Cisco IOS router, **Connect & Auto-detect** verifies SSH and NAT access
 
 Within a few seconds, devices, sessions, and statistics will start appearing in the UI.
 
-> **Note:** Credentials are generated once on first startup and saved (hashed) in `.egressview.json`. If you lose the password, remove the `auth` section from `.egressview.json` and restart — a new initial password will be printed.
+> **Note:** The password is stored only as a versioned scrypt record. Remove the one-time password file after the first successful login.
 
 ## Authentication
 
-All API endpoints and the WebSocket connection are protected. Two credentials exist:
+All API endpoints and the WebSocket connection are protected. Local login can never be disabled; Google OIDC is an optional additional login method.
 
 | Credential | Purpose | Where |
 |-----------|---------|-------|
 | **Login password** | Browser login. Each device gets its own revocable session (30-day sliding expiry) | Printed on first startup; change it in Settings → General |
 | **API token** | Scripts / automation (`X-Admin-Token` header) | `.egressview.json` (`adminToken`); regenerate in Settings → General |
+| **Google OIDC** | Allowed Google accounts; sessions are revocable locally | Configure in Settings → General → Authentication & Audit |
 
 ### Session management
 
@@ -261,16 +262,21 @@ All API endpoints and the WebSocket connection are protected. Two credentials ex
 ### If you lose the password
 
 ```bash
-# Remove the auth section and restart — a new initial password is printed
-node -e "const f='.egressview.json',c=require('./'+f);delete c.auth;require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
-npm start
+# Interactive TTY only; revokes every browser session
+npm run auth:reset
+# Also rotate the automation credential
+npm run auth:reset -- --regenerate-api-token
 ```
 
 ### How it works
 
-- Passwords are hashed with scrypt; sessions are stored as SHA-256 hashes in SQLite
+- New passwords require at least 14 characters. Passwords use a versioned scrypt record; successful legacy logins upgrade the record.
 - Failed logins are delayed 500 ms; comparisons use `crypto.timingSafeEqual`
-- Session tokens ride the same `X-Admin-Token` header / Socket.IO handshake as the API token
+- Browser sessions use Secure/HttpOnly/SameSite cookies and CSRF protection. Existing header tokens remain supported for automation.
+- Login, logout, session revocation, token changes, and authenticated mutations are recorded in a pseudonymous append-only audit log.
+- Google OIDC uses Authorization Code + PKCE, state, nonce, JWKS signature validation, verified email, and an email/domain allowlist.
+
+See the [authentication and reverse-proxy guide](docs/authentication.md) before enabling internet access.
 
 ## HTTPS (optional)
 

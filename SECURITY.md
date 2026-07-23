@@ -18,12 +18,14 @@ EgressView ships from the `main` branch. Security fixes are applied to `main` on
 
 EgressView monitors your LAN passively and can be accessed remotely when HTTPS is enabled:
 
-- All API endpoints and the WebSocket are protected by login/session authentication or an API token (timing-safe comparison, brute-force delay, session expiry).
+- All API endpoints and the WebSocket are protected by local/OIDC sessions or an API token. Browser sessions use HttpOnly/SameSite cookies and CSRF protection.
+- Google OIDC is optional and uses PKCE, state, nonce, signed ID tokens, verified email, and an explicit email/domain allowlist. The emergency local administrator remains available during IdP or internet outages.
+- Authentication and mutating API events are appended to a pseudonymous SQLite audit log. Raw client IPs, email addresses, credentials, and request bodies are not stored there.
 - HTTPS protects credentials and dashboard data in transit when accessing EgressView from outside the LAN.
 - Router credentials and the SQLite database stay on the host machine; nothing is sent to a cloud service. Threat-intelligence feeds are downloaded and matched locally.
 - Router IP inputs are restricted to private address ranges (SSRF protection).
 
-For internet-facing deployments, enable HTTPS, use a strong unique login password, keep EgressView updated, and avoid sharing access with untrusted users. Security reports for internet-accessible deployments are in scope.
+For internet-facing deployments, terminate HTTPS at a trusted reverse proxy, set `EGRESSVIEW_PUBLIC_URL`, and configure an exact `EGRESSVIEW_TRUST_PROXY` IP/CIDR allowlist. Never trust forwarded headers from every source. Use a strong unique login password, keep EgressView updated, and avoid sharing access with untrusted users. Security reports for internet-accessible deployments are in scope.
 
 ## Out of scope
 

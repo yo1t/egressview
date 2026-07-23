@@ -15,7 +15,7 @@ const sessionIdSchema = z.object({ id: z.coerce.number().int().positive() }).str
 const revokeAllSchema = z.object({ includeSelf: z.boolean().optional() }).strict();
 const changePasswordSchema = z.object({
   currentPassword: z.string().max(256),
-  newPassword: z.string().min(8).max(256),
+  newPassword: z.string().min(14).max(256),
   revokeOtherSessions: z.boolean().optional(),
 }).strict();
 const currentPasswordSchema = z.object({ currentPassword: z.string().max(256) }).strict();
@@ -24,7 +24,8 @@ const tokenSchema = z.object({ token: z.string().max(4096) }).strict();
 module.exports = function authSessionRoutes(ctx) {
   const {
     requireAdmin, getAdminToken, saveConfig,
-    appState, io, sessions, authPassword,
+    appState, io, sessions, authPassword, authAudit, authCookies,
+    configFile, fs, subpath = '',
   } = ctx;
   const router = Router();
   const loginAttempts = new Map();
@@ -65,6 +66,28 @@ module.exports = function authSessionRoutes(ctx) {
     }, 500);
   }
 
+  function audit(req, eventType, outcome = 'success', metadata) {
+    authAudit?.append({
+      eventType,
+      outcome,
+      authMethod: req.authMethod || 'local',
+      actor: req.actor,
+      requestId: req.id,
+      clientIp: req.ip || req.socket?.remoteAddress || '',
+      httpMethod: req.method,
+      path: req.originalUrl,
+      metadata,
+    });
+  }
+
+  function verifyLocalPassword(password) {
+    return authPassword.verifyPassword(
+      password,
+      appState.authPasswordRecord || appState.authPasswordSalt,
+      appState.authPasswordHash
+    );
+  }
+
   router.post('/auth/login', (req, res) => {
     if (!appState.authPasswordHash) return res.status(503).json({ error: t('auth.not-init') });
     const parsed = parseRequest(loginSchema, req.body, res, { error: t('auth.enter-password') });
@@ -72,21 +95,54 @@ module.exports = function authSessionRoutes(ctx) {
     const { password, deviceLabel } = parsed.data;
     const clientIp = req.ip || req.socket?.remoteAddress || '';
     const rateLimitError = checkRateLimit(clientIp);
-    if (rateLimitError) return res.status(429).json({ error: rateLimitError });
-    if (!authPassword.verifyPassword(password, appState.authPasswordSalt, appState.authPasswordHash)) {
+    if (rateLimitError) {
+      audit(req, 'login', 'failure', { reason: 'rate_limited' });
+      return res.status(429).json({ error: rateLimitError });
+    }
+    if (!verifyLocalPassword(password)) {
       recordFailure(clientIp);
       logger.warn('[auth] Login failed');
+      audit(req, 'login', 'failure', { reason: 'invalid_credentials' });
       return delayedUnauthorized(res, { error: t('auth.wrong-password') });
     }
     loginAttempts.delete(clientIp);
-    const session = sessions.createSession(typeof deviceLabel === 'string' ? deviceLabel : '');
+    if (authPassword.needsRehash?.(appState.authPasswordRecord)) {
+      const previous = {
+        salt: appState.authPasswordSalt,
+        hash: appState.authPasswordHash,
+        record: appState.authPasswordRecord,
+      };
+      const next = authPassword.hashPassword(password);
+      appState.authPasswordSalt = next.salt;
+      appState.authPasswordHash = next.hash;
+      appState.authPasswordRecord = next.record;
+      try {
+        saveConfig();
+      } catch (error) {
+        appState.authPasswordSalt = previous.salt;
+        appState.authPasswordHash = previous.hash;
+        appState.authPasswordRecord = previous.record;
+        logger.warn('[auth] Password KDF record migration deferred:', error.message);
+      }
+    }
+    const session = sessions.createSession(
+      typeof deviceLabel === 'string' ? deviceLabel : '',
+      { authMethod: 'local' }
+    );
     if (!session) return res.status(500).json({ error: t('auth.session-failed') });
+    authCookies?.setSessionCookies(req, res, session, subpath);
+    if (configFile && fs) {
+      try { fs.unlinkSync(configFile + '.initial-login-password'); } catch {}
+    }
     logger.info(`[auth] Login OK (session ${session.id}: ${deviceLabel || 'unknown device'})`);
+    audit(req, 'login', 'success', { sessionId: Number(session.id) });
     res.json({ success: true, token: session.token, expiresAt: session.expiresAt });
   });
 
   router.post('/auth/logout', requireAdmin, (req, res) => {
     if (req.session) sessions.revokeSession(req.session.id);
+    authCookies?.clearSessionCookies(req, res, subpath);
+    audit(req, 'logout');
     res.json({ success: true });
   });
 
@@ -122,20 +178,26 @@ module.exports = function authSessionRoutes(ctx) {
     const rateLimitError = checkRateLimit(clientIp);
     if (rateLimitError) return res.status(429).json({ error: rateLimitError });
     if (!newPassword.trim()) return res.status(400).json({ error: t('auth.password-whitespace') });
-    if (!authPassword.verifyPassword(currentPassword, appState.authPasswordSalt, appState.authPasswordHash)) {
+    if (!verifyLocalPassword(currentPassword)) {
       recordFailure(clientIp);
       return delayedUnauthorized(res, { error: t('auth.current-wrong') });
     }
     loginAttempts.delete(clientIp);
-    const previousAuth = { salt: appState.authPasswordSalt, hash: appState.authPasswordHash };
-    const { salt, hash } = authPassword.hashPassword(newPassword);
+    const previousAuth = {
+      salt: appState.authPasswordSalt,
+      hash: appState.authPasswordHash,
+      record: appState.authPasswordRecord,
+    };
+    const { salt, hash, record } = authPassword.hashPassword(newPassword);
     appState.authPasswordSalt = salt;
     appState.authPasswordHash = hash;
+    appState.authPasswordRecord = record;
     try {
       saveConfig();
     } catch (err) {
       appState.authPasswordSalt = previousAuth.salt;
       appState.authPasswordHash = previousAuth.hash;
+      appState.authPasswordRecord = previousAuth.record;
       logger.error('[auth] Password save failed:', err.message);
       return res.status(500).json({ error: 'Password was not saved. Check server logs.' });
     }
@@ -145,6 +207,7 @@ module.exports = function authSessionRoutes(ctx) {
       if (io) io.disconnectSockets(true);
     }
     logger.info(`[auth] Password changed (${revoked} other session(s) revoked)`);
+    audit(req, 'password_changed', 'success', { revoked });
     res.json({ success: true, revoked });
   });
 
@@ -155,7 +218,7 @@ module.exports = function authSessionRoutes(ctx) {
     const clientIp = req.ip || req.socket?.remoteAddress || '';
     const rateLimitError = checkRateLimit(clientIp);
     if (rateLimitError) return res.status(429).json({ error: rateLimitError });
-    if (!authPassword.verifyPassword(currentPassword, appState.authPasswordSalt, appState.authPasswordHash)) {
+    if (!verifyLocalPassword(currentPassword)) {
       recordFailure(clientIp);
       logger.warn('[auth] Token regeneration rejected (password check failed)');
       return delayedUnauthorized(res, { error: t('auth.current-wrong') });

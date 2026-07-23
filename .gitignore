@@ -4,6 +4,7 @@ node_modules/
 .env.*.local
 # 設定・履歴ファイル（秘密情報含む）
 .egressview.json
+.egressview.json.initial-*
 .egressview*.pre-routers-v1.bak*
 # MCP サーバー固有設定（EGRESSVIEW_TOKEN 等を含む）
 .env.mcp

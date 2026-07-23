@@ -1,7 +1,7 @@
 // Explicit DB bootstrap boundary (P2-30 expand phase).
 //
-// Five modules keep long-lived connections to the same SQLite file:
-// history, sessions, devices, enrichment, and beacons (backup adds a
+// Six modules keep long-lived connections to the same SQLite file:
+// history, sessions, devices, enrichment, beacons, and authAudit (backup adds a
 // temporary one while running). Schema migrations are owned by history and
 // MUST complete before any other module opens the file — a migration
 // failure throws here, so the process stops with nothing else attached.
@@ -15,10 +15,12 @@
  * @param {{
  *   dbPath: string,
  *   sourceRouterMap?: { yamaha: string, cisco: string },
- *   history, sessions, devices, enrichment, beacons,
+ *   history, sessions, devices, enrichment, beacons, authAudit,
  * }} deps
  */
-function runDbBootstrap({ dbPath, sourceRouterMap, history, sessions, devices, enrichment, beacons }) {
+function runDbBootstrap({
+  dbPath, sourceRouterMap, history, sessions, devices, enrichment, beacons, authAudit,
+}) {
   // 1. history first: runs the versioned migrations (with the P2-33
   //    fail-closed backup). Throws on failure — nothing below runs.
   history.loadConnectionHistory(dbPath, sourceRouterMap ? { sourceRouterMap } : {});
@@ -28,6 +30,7 @@ function runDbBootstrap({ dbPath, sourceRouterMap, history, sessions, devices, e
   devices.initDb(dbPath);
   const enrichResult = enrichment.initDb(dbPath);
   beacons.initDb(dbPath);
+  if (authAudit) authAudit.initDb(dbPath);
   return { staleEnrichmentIps: enrichResult?.staleIps || [] };
 }
 
