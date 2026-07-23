@@ -800,7 +800,7 @@ test('AI event notification settings load and a test event appears in history', 
   if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
 
   const errors = collectErrors(page);
-  const config = {
+  let config = {
     frequency: 'weekly',
     weekday: 1,
     time: '09:30',
@@ -818,11 +818,18 @@ test('AI event notification settings load and a test event appears in history', 
     automationConsent: false,
   };
   let events = [];
+  let configSaveRequests = 0;
 
-  await page.route(/\/api\/ai\/notification-config$/, route => route.fulfill({
-    contentType: 'application/json',
-    body: JSON.stringify({ config, status: { provider: 'ollama' } }),
-  }));
+  await page.route(/\/api\/ai\/notification-config$/, route => {
+    if (route.request().method() === 'POST') {
+      configSaveRequests++;
+      config = route.request().postDataJSON();
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ config, status: { provider: 'ollama' } }),
+    });
+  });
   await page.route(/\/api\/ai\/notification-events(?:\?|$)/, route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ events }),
@@ -853,6 +860,18 @@ test('AI event notification settings load and a test event appears in history', 
   await expect(page.locator('#ai-notification-time')).toHaveValue('09:30');
   await expect(page.locator('#ai-notification-threat-enabled')).toBeChecked();
 
+  await page.locator('#ai-notification-limit').fill('4');
+  await page.click('#ai-notification-save-btn');
+  await expect(page.locator('#ai-notification-confirm-modal')).not.toHaveClass(/is-hidden/);
+  await expect(page.locator('#ai-notification-summary')).toContainText('4');
+  expect(configSaveRequests).toBe(0);
+  await page.click('#ai-notification-confirm-btn');
+  await expect(page.locator('#ai-notification-confirm-modal')).toHaveClass(/is-hidden/);
+  await expect(page.locator('#ai-notification-modal')).toHaveClass(/is-hidden/);
+  expect(configSaveRequests).toBe(1);
+
+  await page.click('#ai-notification-open-btn');
+  await expect(page.locator('#ai-notification-limit')).toHaveValue('4');
   await page.click('#ai-notification-test-btn');
   await expect(page.locator('#ai-notification-events .ai-notification-event')).toHaveCount(1);
   await expect(page.locator('#ai-notification-events')).toContainText('<script>notification test</script>');

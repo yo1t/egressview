@@ -42,6 +42,7 @@ let chatController = null;
 // reason about the same threats. Reset when a new analysis is run.
 let lastAnalysis = null;
 let aiNotificationProvider = 'disabled';
+let pendingNotificationConfig = null;
 
 function formatNumber(value) {
   return new Intl.NumberFormat().format(Number(value) || 0);
@@ -493,6 +494,93 @@ function notificationConfigFromForm() {
   };
 }
 
+function notificationSummaryRows(config) {
+  const destinations = [
+    config.destinations.ui ? t('ai.notification.destination.ui') : '',
+    config.destinations.slack ? t('ai.notification.destination.slack') : '',
+  ].filter(Boolean).join(', ') || t('ai.notification.summary.none');
+  const rows = [
+    {
+      label: t('ai.notification.summary.schedule'),
+      value: t(`ai.notification.frequency.${config.frequency}`),
+    },
+  ];
+  if (config.frequency !== 'off') {
+    if (config.frequency === 'weekly') {
+      rows.push({
+        label: t('ai.notification.weekday'),
+        value: t(`ai.notification.weekday.${['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][config.weekday]}`),
+      });
+    }
+    rows.push({
+      label: t('ai.notification.summary.time'),
+      value: `${config.time} (${config.timezone})`,
+    });
+    rows.push({
+      label: t('ai.notification.summary.range'),
+      value: t(`ai.notification.range.${config.rangeHours === 168 ? '7d' : `${config.rangeHours}h`}`),
+    });
+  }
+  rows.push(
+    { label: t('ai.notification.summary.destinations'), value: destinations },
+    {
+      label: t('ai.notification.summary.threat'),
+      value: t(config.threat.enabled
+        ? 'ai.notification.summary.enabled'
+        : 'ai.notification.summary.disabled'),
+    },
+  );
+  if (config.threat.enabled) {
+    rows.push({
+      label: t('ai.notification.summary.thresholds'),
+      value: tVars('ai.notification.summary.thresholdValues', {
+        danger: config.threat.dangerThreshold,
+        destinations: config.threat.newDestinationsThreshold,
+        increase: config.threat.increaseThreshold,
+      }),
+    });
+  }
+  rows.push(
+    {
+      label: t('ai.notification.summary.limits'),
+      value: tVars('ai.notification.summary.limitValues', {
+        daily: config.dailyLimit,
+        cooldown: config.cooldownMinutes,
+      }),
+    },
+    {
+      label: t('ai.notification.summary.consent'),
+      value: t(config.automationConsent
+        ? 'ai.notification.summary.enabled'
+        : 'ai.notification.summary.disabled'),
+    },
+  );
+  return rows;
+}
+
+function renderNotificationSummary(config) {
+  const container = document.getElementById('ai-notification-summary');
+  const rows = notificationSummaryRows(config).map(({ label, value }) => {
+    const row = document.createElement('div');
+    row.className = 'ai-notification-summary-row';
+    const term = document.createElement('dt');
+    term.textContent = label;
+    const detail = document.createElement('dd');
+    detail.textContent = value;
+    row.replaceChildren(term, detail);
+    return row;
+  });
+  container.replaceChildren(...rows);
+}
+
+function closeNotificationConfirmation() {
+  pendingNotificationConfig = null;
+  document.getElementById('ai-notification-confirm-modal').classList.add('is-hidden');
+  const status = document.getElementById('ai-notification-confirm-status');
+  status.textContent = '';
+  status.classList.remove('is-visible', 'err', 'ok');
+}
+
 function renderNotificationEvents(events) {
   const container = document.getElementById('ai-notification-events');
   if (!events.length) {
@@ -552,12 +640,24 @@ async function openNotificationModal() {
   }
 }
 
-async function saveNotificationConfig() {
-  const button = document.getElementById('ai-notification-save-btn');
+function saveNotificationConfig() {
+  pendingNotificationConfig = notificationConfigFromForm();
+  renderNotificationSummary(pendingNotificationConfig);
+  const status = document.getElementById('ai-notification-confirm-status');
+  status.textContent = '';
+  status.classList.remove('is-visible', 'err', 'ok');
+  document.getElementById('ai-notification-confirm-modal').classList.remove('is-hidden');
+}
+
+async function confirmNotificationConfig() {
+  if (!pendingNotificationConfig) return;
+  const button = document.getElementById('ai-notification-confirm-btn');
   button.disabled = true;
-  setNotificationStatus(t('ai.notification.saving'));
+  const status = document.getElementById('ai-notification-confirm-status');
+  status.textContent = t('ai.notification.saving');
+  status.className = 'settings-status is-visible';
   try {
-    const config = notificationConfigFromForm();
+    const config = pendingNotificationConfig;
     const response = await apiFetch(`${_BASE}/api/ai/notification-config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -566,9 +666,11 @@ async function saveNotificationConfig() {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || t('ai.notification.saveFailed'));
     fillNotificationConfig(body.config);
-    setNotificationStatus(t('ai.notification.saved'));
+    closeNotificationConfirmation();
+    document.getElementById('ai-notification-modal').classList.add('is-hidden');
   } catch (cause) {
-    setNotificationStatus(cause.message || t('ai.notification.saveFailed'), true);
+    status.textContent = cause.message || t('ai.notification.saveFailed');
+    status.className = 'settings-status is-visible err';
   } finally {
     button.disabled = false;
   }
@@ -625,10 +727,13 @@ function initAiInsights() {
   document.getElementById('ai-chat-send-btn').addEventListener('click', sendChatMessage);
   document.getElementById('ai-notification-open-btn').addEventListener('click', openNotificationModal);
   document.getElementById('ai-notification-close-btn').addEventListener('click', () => {
+    closeNotificationConfirmation();
     document.getElementById('ai-notification-modal').classList.add('is-hidden');
   });
   document.getElementById('ai-notification-frequency').addEventListener('change', updateNotificationFrequencyFields);
   document.getElementById('ai-notification-save-btn').addEventListener('click', saveNotificationConfig);
+  document.getElementById('ai-notification-confirm-btn').addEventListener('click', confirmNotificationConfig);
+  document.getElementById('ai-notification-confirm-cancel-btn').addEventListener('click', closeNotificationConfirmation);
   document.getElementById('ai-notification-test-btn').addEventListener('click', () => runNotificationAction('test'));
   document.getElementById('ai-notification-run-btn').addEventListener('click', () => runNotificationAction('run'));
   document.getElementById('ai-new-chat-btn').addEventListener('click', () => {
@@ -658,6 +763,7 @@ initAiInsights();
 
 export {
   analyzeCurrentRange,
+  confirmNotificationConfig,
   deltaSummary,
   fillNotificationConfig,
   loadConversations,
@@ -666,6 +772,7 @@ export {
   renderChatMessages,
   renderFacts,
   renderNotificationEvents,
+  renderNotificationSummary,
   refreshAiInsights,
   refreshAiUsage,
   saveNotificationConfig,
