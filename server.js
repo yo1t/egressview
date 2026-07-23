@@ -518,6 +518,9 @@ server.listen(PORT, HOST, () => {
     return;
   }
   const configuredDbPath = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB || '';
+  const productionDbPath = configuredDbPath
+    ? path.resolve(configuredDbPath)
+    : path.join(__dirname, '.egressview.db');
   if (DEMO_MODE && !configuredDbPath && fs.existsSync(DEMO_DB_PATH)) {
     // Copy the committed snapshot to a separate runtime file so the tracked
     // snapshot is never modified at runtime. Remove sidecars from a previous
@@ -530,8 +533,10 @@ server.listen(PORT, HOST, () => {
     }
     fs.copyFileSync(DEMO_DB_PATH, DEMO_RUNTIME_DB_PATH);
   }
-  const runtimeDbPath = DEMO_MODE ? (configuredDbPath || DEMO_RUNTIME_DB_PATH) : configuredDbPath;
-  if (runtimeDbPath) process.env.EGRESSVIEW_DB_PATH = runtimeDbPath;
+  const runtimeDbPath = DEMO_MODE
+    ? (configuredDbPath ? productionDbPath : DEMO_RUNTIME_DB_PATH)
+    : productionDbPath;
+  process.env.EGRESSVIEW_DB_PATH = runtimeDbPath;
   backup.configure({ dbPath: runtimeDbPath });
 
   if (DEMO_MODE) {

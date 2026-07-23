@@ -1,14 +1,16 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const path = require('node:path');
 const Database = require('better-sqlite3');
 const logger = require('./logger');
 
 const DEFAULT_RETENTION_DAYS = 180;
 const MAX_METADATA_BYTES = 4096;
+const DEFAULT_DB_PATH = path.join(__dirname, '..', '.egressview.db');
 
 let db = null;
-let lastDbPath = null;
+let lastDbPath = DEFAULT_DB_PATH;
 let hashKey = crypto.randomBytes(32);
 
 function sha256(value) {
@@ -16,9 +18,9 @@ function sha256(value) {
 }
 
 function initDb(dbPath, options = {}) {
-  lastDbPath = dbPath;
+  lastDbPath = dbPath || DEFAULT_DB_PATH;
   if (options.hashKey) hashKey = Buffer.from(options.hashKey);
-  db = new Database(dbPath);
+  db = new Database(lastDbPath);
   db.pragma('journal_mode = WAL');
 }
 

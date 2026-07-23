@@ -947,6 +947,8 @@ describe('Server runtime invariants', () => {
   it('demo mode passes the selected runtime DB path to every SQLite-backed store', () => {
     assert.match(serverJs, /const\s+configuredDbPath\s*=\s*process\.env\.EGRESSVIEW_DB_PATH\s*\|\|\s*process\.env\.EGRESSVIEW_DB\s*\|\|\s*['"]{2}/,
       'server startup should honor both EGRESSVIEW_DB_PATH and the documented EGRESSVIEW_DB');
+    assert.match(serverJs, /const\s+productionDbPath\s*=\s*configuredDbPath[\s\S]*?path\.join\(__dirname,\s*['"]\.egressview\.db['"]\)/,
+      'normal startup must resolve an explicit production DB path even when no DB env var is set');
     assert.match(serverJs, /const\s+runtimeDbPath\s*=\s*DEMO_MODE\s*\?/,
       'server startup should choose one runtime DB path before initializing stores');
     // All long-lived DB connections open through the bootstrap boundary on the
