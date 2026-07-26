@@ -1,4 +1,4 @@
-import { t } from './i18n.js?v=__ASSET_VERSION__';
+import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, fmtTs } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 
@@ -11,6 +11,23 @@ function textElement(tag, text, className = '') {
   if (className) element.className = className;
   element.textContent = text == null ? '' : String(text);
   return element;
+}
+
+// P2-61 Phase 0: an active domain allowlist grants every matching user full
+// administrator access, so surface it next to the field that configures it.
+function renderDomainWarning(warnings) {
+  const box = document.getElementById('oidc-domain-warning');
+  if (!box) return;
+  const warning = (warnings || []).find(item => item && item.code === 'domain_allowlist_grants_admin');
+  if (!warning) {
+    box.hidden = true;
+    box.textContent = '';
+    return;
+  }
+  box.textContent = tVars('settings.security.domainsActiveWarning', {
+    domains: (warning.domains || []).join(', '),
+  });
+  box.hidden = false;
 }
 
 export function initSecuritySettings(showStatus) {
@@ -51,6 +68,7 @@ export function initSecuritySettings(showStatus) {
       secret.placeholder = oidc.clientSecretSet ? t('settings.pass.saved') : '';
       document.getElementById('s-oidc-emails').value = (oidc.allowedEmails || []).join(', ');
       document.getElementById('s-oidc-domains').value = (oidc.allowedDomains || []).join(', ');
+      renderDomainWarning(body.warnings);
       await loadAuditEvents();
     } catch (error) {
       showStatus('oidc-status', error.message, false);
@@ -78,7 +96,10 @@ export function initSecuritySettings(showStatus) {
         response.ok ? t('settings.status.saved') : body.error,
         response.ok
       );
-      if (response.ok) await loadSecurityConfig();
+      if (response.ok) {
+        renderDomainWarning(body.warnings);
+        await loadSecurityConfig();
+      }
     } catch (error) {
       showStatus('oidc-status', error.message, false);
     } finally {
