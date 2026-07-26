@@ -1,8 +1,16 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { ALL_PERMISSIONS, checkPermissions } = require('./permissions');
+const { ACCESS, classifyHttpRequest } = require('./permission-matrix');
 
-function createAuthMiddleware({ appState, sessions, authCookies, authAudit }) {
+function createAuthMiddleware({
+  appState,
+  sessions,
+  authCookies,
+  authAudit,
+  resolvePermissions = () => ALL_PERMISSIONS,
+}) {
   function authenticate(provided) {
     if (!provided) return null;
     const session = sessions.verifySession(provided);
@@ -46,7 +54,7 @@ function createAuthMiddleware({ appState, sessions, authCookies, authAudit }) {
     });
   }
 
-  function requireAdmin(req, res, next) {
+  function authorizeRequest(req, res, next, requiredPermissions) {
     if (!appState.adminToken) return res.status(503).json({ error: '認証未初期化' });
     const result = authenticateRequest(req);
     if (!result) return res.status(401).json({ error: '認証エラー' });
@@ -54,6 +62,19 @@ function createAuthMiddleware({ appState, sessions, authCookies, authAudit }) {
     req.authSource = result.source;
     req.authMethod = result.auth === 'admin' ? 'api-token' : result.auth.authMethod || 'local';
     req.actor = result.auth === 'admin' ? 'admin-api-token' : `session:${result.auth.id}`;
+    req.permissions = Object.freeze([...resolvePermissions({
+      auth: result.auth,
+      source: result.source,
+      req,
+    })]);
+    const permissionCheck = checkPermissions(req.permissions, requiredPermissions);
+    if (!permissionCheck.allowed) {
+      appendAudit(req, 'permission_denied', 'failure', {
+        requiredPermissions,
+        missingPermissions: permissionCheck.missing,
+      });
+      return res.status(403).json({ error: 'Permission denied' });
+    }
     if (!authCookies.verifyCookieCsrf(req, sessions)) {
       appendAudit(req, 'csrf_rejected', 'failure');
       return res.status(403).json({ error: 'CSRF validation failed' });
@@ -68,10 +89,35 @@ function createAuthMiddleware({ appState, sessions, authCookies, authAudit }) {
         );
       });
     }
+    req.permissionAuthorized = true;
     next();
   }
 
-  return { authenticate, authenticateRequest, requireAdmin };
+  function enforceApiPermissions(req, res, next) {
+    const policy = classifyHttpRequest(req.method, req.originalUrl);
+    if (!policy) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    req.permissionPolicy = policy;
+    if (policy.access === ACCESS.PUBLIC) return next();
+    return authorizeRequest(req, res, next, policy.permissions);
+  }
+
+  function requireAdmin(req, res, next) {
+    if (req.permissionAuthorized) return next();
+    const policy = classifyHttpRequest(req.method, req.originalUrl);
+    const requiredPermissions = policy && policy.access !== ACCESS.PUBLIC
+      ? policy.permissions
+      : ALL_PERMISSIONS;
+    return authorizeRequest(req, res, next, requiredPermissions);
+  }
+
+  return {
+    authenticate,
+    authenticateRequest,
+    enforceApiPermissions,
+    requireAdmin,
+  };
 }
 
 module.exports = { createAuthMiddleware };

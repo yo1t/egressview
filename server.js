@@ -313,7 +313,12 @@ const authBoundary = createAuthMiddleware({
   authCookies,
   authAudit,
 });
-const { authenticate, authenticateRequest, requireAdmin } = authBoundary;
+const {
+  authenticate,
+  authenticateRequest,
+  enforceApiPermissions,
+  requireAdmin,
+} = authBoundary;
 
 // ─── Connection enrichment queue ──────────────────────────────────────────────
 // The poll loops themselves live in src/poll-scheduler.js (extracted in P2-23).
@@ -389,6 +394,7 @@ configureHttpApp(app, {
   tlsEnabled: Boolean(tlsOptions),
   routeCtx,
   requireAdmin,
+  enforceApiPermissions,
   beacons,
   appState,
   saveConfig,
