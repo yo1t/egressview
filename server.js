@@ -46,12 +46,12 @@ const beaconDetector = require('./src/beacon-detector');
 const sessions       = require('./src/sessions');
 const authPassword   = require('./src/auth-password');
 const authAudit      = require('./src/auth-audit');
+const apiIdentities  = require('./src/api-identities');
 const authCookies    = require('./src/auth-cookies');
 const { createGoogleOidc } = require('./src/oidc-google');
 const { runDbBootstrap }    = require('./src/db-bootstrap');
 const { sourceRouterIdMap } = require('./src/router-id');
 const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
-const { domainAllowlistWarning } = require('./src/domain-allowlist-warning');
 const enrichmentQueue = require('./src/enrichment-queue');
 const beaconScanRunner = require('./src/beacon-scan-runner');
 const { configureHttpApp } = require('./src/http-app');
@@ -312,8 +312,14 @@ const authBoundary = createAuthMiddleware({
   sessions,
   authCookies,
   authAudit,
+  apiIdentities,
 });
-const { authenticate, authenticateRequest, requireAdmin } = authBoundary;
+const {
+  authenticate,
+  authenticateRequest,
+  enforceApiPermissions,
+  requireAdmin,
+} = authBoundary;
 
 // ─── Connection enrichment queue ──────────────────────────────────────────────
 // The poll loops themselves live in src/poll-scheduler.js (extracted in P2-23).
@@ -361,7 +367,7 @@ const routeCtx = {
   asus, yamaha, cisco, enrichment, threatIntel, notifier, history, devices, deviceId, backup,
   dnsmasqLog, inspectSyslog, dhcpdSyslog,
   runtime, notes, io, beacons, sessions, authPassword,
-  authAudit, authCookies, oidc,
+  authAudit, authCookies, oidc, apiIdentities,
   authenticateRequest: req => authenticateRequest(req)?.auth || null,
   subpath: SUBPATH,
   saveConfig,
@@ -389,6 +395,7 @@ configureHttpApp(app, {
   tlsEnabled: Boolean(tlsOptions),
   routeCtx,
   requireAdmin,
+  enforceApiPermissions,
   beacons,
   appState,
   saveConfig,
@@ -518,16 +525,6 @@ server.listen(PORT, HOST, () => {
     server.close(() => process.exit(1));
     return;
   }
-  // P2-61 Phase 0: warn, but never disable an existing allowlist on startup.
-  const domainWarning = domainAllowlistWarning(appState.oidcConfig);
-  if (domainWarning) {
-    logger.warn(
-      `[auth] Google OIDC domain allowlist is active (${domainWarning.domains.join(', ')}). ` +
-      'Every user in these domains signs in as a full administrator because role-based access ' +
-      'control is not implemented yet. Prefer an explicit email allowlist until then — see ' +
-      'docs/authentication.md.'
-    );
-  }
   const configuredDbPath = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB || '';
   const productionDbPath = configuredDbPath
     ? path.resolve(configuredDbPath)
@@ -589,8 +586,11 @@ server.listen(PORT, HOST, () => {
     enrichment,
     beacons,
     authAudit,
+    apiIdentities,
   });
   setInterval(() => sessions.pruneExpired(), 6 * 60 * 60 * 1000);
+  apiIdentities.pruneExpired();
+  setInterval(() => apiIdentities.pruneExpired(), 24 * 60 * 60 * 1000).unref();
   authAudit.prune();
   setInterval(() => authAudit.prune(), 24 * 60 * 60 * 1000).unref();
 

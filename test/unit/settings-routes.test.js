@@ -11,6 +11,7 @@ const backupRoutes = require('../../src/routes/backup');
 const beaconRoutes = require('../../src/routes/beacons');
 const routerRoutes = require('../../src/routes/routers');
 const devicesRoutes = require('../../src/routes/devices');
+const apiIdentityRoutes = require('../../src/routes/api-identities');
 
 const requireAdmin = (_req, _res, next) => next();
 
@@ -26,6 +27,7 @@ function request(app, method, url, body = null) {
     req.method = method;
     req.url = url;
     req.headers = {};
+    Object.defineProperty(req, 'ip', { value: '127.0.0.1', configurable: true });
     if (payload) {
       req.headers['content-type'] = 'application/json';
       req.headers['content-length'] = String(payload.length);
@@ -43,8 +45,9 @@ function request(app, method, url, body = null) {
     res.assignSocket(socket);
     res.on('finish', () => {
       const raw = Buffer.concat(chunks).toString();
-      const text = raw.split('\r\n\r\n').slice(1).join('\r\n\r\n');
-      resolve({ status: res.statusCode, body: JSON.parse(text || 'null') });
+      const [headers, ...bodyParts] = raw.split('\r\n\r\n');
+      const text = bodyParts.join('\r\n\r\n');
+      resolve({ status: res.statusCode, headers, body: JSON.parse(text || 'null') });
     });
     app.handle(req, res, reject);
   });
@@ -82,6 +85,44 @@ function configContext(overrides = {}) {
     ...overrides,
   };
 }
+
+describe('API identity routes', () => {
+  it('returns the one-time credential with no-store and never lists it later', async () => {
+    const identity = {
+      id: 'identity-1',
+      label: 'automation',
+      permissions: ['network.read'],
+      permissionsValid: true,
+      createdAt: 1,
+      expiresAt: 3_600_001,
+      lastUsedAt: null,
+      revokedAt: null,
+    };
+    const apiIdentities = {
+      createIdentity: () => ({ token: `egv_${'a'.repeat(64)}`, identity }),
+      listIdentities: () => [identity],
+    };
+    const app = mount(apiIdentityRoutes({
+      requireAdmin,
+      apiIdentities,
+      authAudit: { append() {} },
+    }));
+
+    const created = await request(app, 'POST', '/api/auth/api-identities', {
+      label: 'automation',
+      permissions: ['network.read'],
+      expiresInMs: 3_600_000,
+    });
+    assert.equal(created.status, 201);
+    assert.match(created.headers, /cache-control: no-store/i);
+    assert.match(created.body.token, /^egv_[0-9a-f]{64}$/);
+
+    const listed = await request(app, 'GET', '/api/auth/api-identities');
+    assert.equal(listed.status, 200);
+    assert.match(listed.headers, /cache-control: no-store/i);
+    assert.equal(JSON.stringify(listed.body).includes(created.body.token), false);
+  });
+});
 
 describe('config routes', () => {
   it('returns status from runtime dependencies', async () => {
@@ -318,19 +359,24 @@ describe('backup configuration route', () => {
         closeDb: () => calls.push('audit-close'),
         reopen: () => calls.push('audit-open'),
       },
+      apiIdentities: {
+        closeDb: () => calls.push('api-identities-close'),
+        reopen: () => calls.push('api-identities-open'),
+      },
       io: { disconnectSockets: () => calls.push('sockets-disconnect') },
       appRoot: process.cwd(),
     }));
 
     const { status } = await request(app, 'POST', '/api/backup/restore', { name: 'egressview_2025-01-01_00-00-00.db' });
     assert.equal(status, 200);
-    assert.deepEqual(calls.slice(0, 7), [
+    assert.deepEqual(calls.slice(0, 8), [
       'history-close', 'sessions-close', 'devices-close', 'enrichment-close', 'beacons-close',
-      'audit-close', 'replace',
+      'audit-close', 'api-identities-close', 'replace',
     ]);
     assert.ok(calls.indexOf('history-open') > calls.indexOf('replace'));
     assert.ok(calls.includes('sessions-revoke'));
     assert.ok(calls.includes('audit-open'));
+    assert.ok(calls.includes('api-identities-open'));
     assert.ok(calls.includes('sockets-disconnect'));
   });
 
@@ -353,12 +399,19 @@ describe('backup configuration route', () => {
       runtime: { setKnownMacs() {} },
       devices: { closeDb() {}, reopen: () => calls.push('devices-open'), seedFromConnectionHistory() {} },
       enrichment: { closeDb() {}, reopen() {} },
+      apiIdentities: {
+        closeDb: () => calls.push('api-identities-close'),
+        reopen: () => calls.push('api-identities-open'),
+      },
       appRoot: process.cwd(),
     }));
 
     const { status } = await request(app, 'POST', '/api/backup/restore', { name: 'egressview_2025-01-01_00-00-00.db' });
     assert.equal(status, 500);
-    assert.deepEqual(calls, ['history-close', 'history-open', 'devices-open']);
+    assert.deepEqual(calls, [
+      'history-close', 'api-identities-close', 'history-open', 'devices-open',
+      'api-identities-open',
+    ]);
   });
 });
 

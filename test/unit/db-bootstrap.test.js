@@ -22,6 +22,8 @@ function makeSpies({ historyThrows = false } = {}) {
     devices:    { initDb: p => calls.push({ module: 'devices',    dbPath: p }) },
     enrichment: { initDb: p => calls.push({ module: 'enrichment', dbPath: p }) },
     beacons:    { initDb: p => calls.push({ module: 'beacons',    dbPath: p }) },
+    authAudit:  { initDb: p => calls.push({ module: 'authAudit',  dbPath: p }) },
+    apiIdentities: { initDb: p => calls.push({ module: 'apiIdentities', dbPath: p }) },
   };
 }
 
@@ -32,7 +34,7 @@ describe('db-bootstrap', () => {
     assert.equal(spies.calls[0].module, 'history');
     assert.deepEqual(
       spies.calls.map(c => c.module),
-      ['history', 'sessions', 'devices', 'enrichment', 'beacons']
+      ['history', 'sessions', 'devices', 'enrichment', 'beacons', 'authAudit', 'apiIdentities']
     );
     for (const c of spies.calls) assert.equal(c.dbPath, '/tmp/x.db');
   });

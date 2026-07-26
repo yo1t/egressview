@@ -148,3 +148,50 @@ describe('Settings login sessions DOM rendering', () => {
     assert.equal(descendants(box).some(element => element.tagName === 'IMG'), false);
   });
 });
+
+describe('Settings login sessions role badges', () => {
+  async function render(sessions) {
+    const harness = makeHarness([{ sessions }]);
+    await harness.context.loadSessionsList();
+    return harness.box;
+  }
+
+  it('shows a translated badge for each known role', async () => {
+    const box = await render([
+      { id: 1, deviceLabel: 'viewer box', role: 'viewer', authMethod: 'oidc', lastSeenAt: 1 },
+      { id: 2, deviceLabel: 'operator box', role: 'operator', authMethod: 'oidc', lastSeenAt: 2 },
+      { id: 3, deviceLabel: 'admin box', role: 'admin', authMethod: 'local', lastSeenAt: 3 },
+    ]);
+    assert.match(box.textContent, /<settings\.sessions\.role\.viewer>/);
+    assert.match(box.textContent, /<settings\.sessions\.role\.operator>/);
+    assert.match(box.textContent, /<settings\.sessions\.role\.admin>/);
+    assert.equal(box.querySelectorAll('.settings-session-role').length, 3);
+    assert.equal(box.querySelectorAll('.settings-session-role-admin').length, 1);
+  });
+
+  it('shows an unexpected role verbatim instead of disguising it', async () => {
+    const box = await render([
+      { id: 1, deviceLabel: 'odd box', role: 'superuser', authMethod: 'oidc', lastSeenAt: 1 },
+    ]);
+    // The raw value is surfaced, not mapped onto a familiar-looking label.
+    assert.match(box.textContent, /superuser/);
+    assert.doesNotMatch(box.textContent, /<settings\.sessions\.role\.superuser>/);
+    assert.equal(box.querySelectorAll('.settings-session-role-unknown').length, 1);
+  });
+
+  it('renders a missing role as a placeholder rather than blank or admin', async () => {
+    const box = await render([
+      { id: 1, deviceLabel: 'legacy box', authMethod: 'local', lastSeenAt: 1 },
+    ]);
+    assert.equal(box.querySelectorAll('.settings-session-role-unknown').length, 1);
+    assert.doesNotMatch(box.textContent, /<settings\.sessions\.role\.admin>/);
+  });
+
+  it('renders role values as text, never as markup', async () => {
+    const box = await render([
+      { id: 1, deviceLabel: 'x', role: '<img src=x onerror=alert(1)>', authMethod: 'oidc', lastSeenAt: 1 },
+    ]);
+    assert.match(box.textContent, /<img src=x onerror=alert\(1\)>/);
+    assert.equal(descendants(box).map(e => e.tagName).includes('IMG'), false);
+  });
+});

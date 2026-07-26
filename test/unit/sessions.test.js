@@ -6,14 +6,26 @@ const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const s = require('../../src/sessions');
 
+function createLocal(label) {
+  return s.createSession(label, { authMethod: 'local', role: 'admin' });
+}
+
 before(() => s._resetForTest());
 after (() => s._closeForTest());
 
 describe('createSession / verifySession', () => {
   before(() => s._resetForTest());
 
+  it('requires callers to assign a known role explicitly', () => {
+    assert.throws(() => s.createSession('missing role'), /Unknown session role/);
+    assert.throws(
+      () => s.createSession('unknown role', { authMethod: 'local', role: 'superuser' }),
+      /Unknown session role/
+    );
+  });
+
   it('creates a session and verifies its raw token', () => {
-    const { token, csrfToken, id, expiresAt } = s.createSession('Safari on iPhone');
+    const { token, csrfToken, id, expiresAt } = createLocal('Safari on iPhone');
     assert.equal(typeof token, 'string');
     assert.equal(token.length, 64);  // 32 bytes hex
     assert.ok(expiresAt > Date.now());
@@ -29,6 +41,7 @@ describe('createSession / verifySession', () => {
     const created = s.createSession('Google OIDC', {
       authMethod: 'oidc',
       subject: 'https://accounts.google.com|subject-1',
+      role: 'operator',
     });
     const row = s.verifySession(created.token);
     assert.equal(row.authMethod, 'oidc');
@@ -46,14 +59,14 @@ describe('createSession / verifySession', () => {
   });
 
   it('stores only a hash — raw token does not appear in the listing', () => {
-    const { token } = s.createSession('check-hash');
+    const { token } = createLocal('check-hash');
     for (const row of s.listSessions()) {
       assert.ok(!Object.values(row).includes(token), 'raw token must not be stored');
     }
   });
 
   it('truncates overlong device labels to 100 chars', () => {
-    const { token } = s.createSession('x'.repeat(500));
+    const { token } = createLocal('x'.repeat(500));
     assert.equal(s.verifySession(token).deviceLabel.length, 100);
   });
 });
@@ -62,7 +75,7 @@ describe('expiry', () => {
   before(() => s._resetForTest());
 
   it('an expired session is rejected and removed', () => {
-    const { token } = s.createSession('expiring');
+    const { token } = createLocal('expiring');
     // Force-expire directly in the DB via a second connection-free path:
     // verifySession deletes rows whose expiresAt <= now, so simulate by
     // creating, then manipulating through the module's own DB handle is not
@@ -73,7 +86,7 @@ describe('expiry', () => {
   });
 
   it('pruneExpired removes nothing when all sessions are fresh', () => {
-    s.createSession('fresh');
+    createLocal('fresh');
     assert.equal(s.pruneExpired(), 0);
   });
 });
@@ -82,8 +95,8 @@ describe('listSessions / revokeSession / revokeAll', () => {
   before(() => s._resetForTest());
 
   it('lists sessions without token hashes', () => {
-    s.createSession('dev-a');
-    s.createSession('dev-b');
+    createLocal('dev-a');
+    createLocal('dev-b');
     const list = s.listSessions();
     assert.equal(list.length, 2);
     for (const row of list) {
@@ -94,8 +107,8 @@ describe('listSessions / revokeSession / revokeAll', () => {
   });
 
   it('revokeSession invalidates exactly that session', () => {
-    const a = s.createSession('revoke-me');
-    const b = s.createSession('keep-me');
+    const a = createLocal('revoke-me');
+    const b = createLocal('keep-me');
     assert.equal(s.revokeSession(a.id), true);
     assert.equal(s.verifySession(a.token), null);
     assert.ok(s.verifySession(b.token));
@@ -107,9 +120,9 @@ describe('listSessions / revokeSession / revokeAll', () => {
 
   it('revokeAll(exceptId) keeps only the given session', () => {
     s._resetForTest();
-    const keep = s.createSession('mine');
-    s.createSession('other-1');
-    s.createSession('other-2');
+    const keep = createLocal('mine');
+    createLocal('other-1');
+    createLocal('other-2');
     const revoked = s.revokeAll(keep.id);
     assert.equal(revoked, 2);
     assert.ok(s.verifySession(keep.token));
@@ -118,8 +131,8 @@ describe('listSessions / revokeSession / revokeAll', () => {
 
   it('revokeAll() with no argument removes everything', () => {
     s._resetForTest();
-    s.createSession('a');
-    s.createSession('b');
+    createLocal('a');
+    createLocal('b');
     assert.equal(s.revokeAll(), 2);
     assert.equal(s.listSessions().length, 0);
   });
@@ -131,7 +144,7 @@ describe('reopen', () => {
     const tmp = path.join(os.tmpdir(), `sessions-reopen-${Date.now()}.db`);
     try {
       s._resetForTest(tmp);
-      const { token } = s.createSession('persistent');
+      const { token } = createLocal('persistent');
       s.reopen();
       assert.ok(s.verifySession(token), 'session survives reopen');
     } finally {

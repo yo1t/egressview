@@ -6,7 +6,9 @@ EgressView exposes a private administration API for its web UI and local automat
 
 ## Base URL and authentication
 
-API paths are rooted at `/api`, even when the web UI is served below a subpath. Protected requests accept an `X-Admin-Token` automation credential or an HttpOnly browser session cookie. Cookie-authenticated mutations also require the matching `X-CSRF-Token`.
+API paths are rooted at `/api`, even when the web UI is served below a subpath. Protected requests accept the legacy `X-Admin-Token`, a scoped API identity token in the same header, or an HttpOnly browser session cookie. Cookie-authenticated mutations also require the matching `X-CSRF-Token`.
+
+Scoped API identities are managed through `GET` / `POST /api/auth/api-identities` and `POST /api/auth/api-identities/:id/revoke`, all requiring `auth.admin`. Creation requires a label, a non-empty permission list, and `expiresInMs` between one minute and one year. The plaintext `egv_...` token is returned only in the `201` creation response; only its SHA-256 hash is stored. Identity-management responses use `Cache-Control: no-store`.
 
 ```bash
 export EGRESSVIEW_URL='https://egressview.example.net'
@@ -151,7 +153,7 @@ Restore is fail-closed: EgressView validates the source, confirms a safety backu
 
 ## Endpoint catalog
 
-All 88 implemented HTTP endpoints are listed below. **Public** means no token is required. Protected endpoints accept `X-Admin-Token` or the browser's HttpOnly session cookie; cookie-authenticated mutations additionally require `X-CSRF-Token`.
+All 91 implemented HTTP endpoints are listed below. **Public** means no token is required. Protected endpoints accept the legacy or scoped `X-Admin-Token` credential or the browser's HttpOnly session cookie; cookie-authenticated mutations additionally require `X-CSRF-Token`.
 
 | Area | Method and path | Access |
 |---|---|---|
@@ -170,6 +172,9 @@ All 88 implemented HTTP endpoints are listed below. **Public** means no token is
 | Authentication | `GET /api/auth/security-config` | Protected |
 | Authentication | `POST /api/auth/security-config` | Protected |
 | Authentication | `POST /api/auth/oidc/test` | Protected |
+| Authentication | `GET /api/auth/api-identities` | Protected |
+| Authentication | `POST /api/auth/api-identities` | Protected |
+| Authentication | `POST /api/auth/api-identities/:id/revoke` | Protected |
 | Authentication | `GET /api/auth/audit-events` | Protected |
 | Router setup | `POST /api/nonce` | Protected |
 | Router setup | `POST /api/yamaha/detect` | Protected |

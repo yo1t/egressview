@@ -242,6 +242,7 @@
 
           <!-- Login sessions (P2-23) -->
           <div class="pane-title settings-session-section-title" data-i18n="settings.sessions.section">📱 ログイン中の端末</div>
+          <p class="settings-field-hint" data-i18n="settings.sessions.roleHint">ロールはログイン方法から自動で決まります。ローカル管理者は管理者、許可メールでのGoogleログインは運用、許可ドメインのみで一致したGoogleログインは閲覧のみです。</p>
           <div id="sessions-list" class="settings-session-list"></div>
           <button class="connect-btn settings-session-revoke-all" id="sessions-revoke-all-btn" data-i18n="settings.sessions.revokeAll">他の端末を全てログアウト</button>
           <div class="settings-status" id="sessions-status"></div>
@@ -272,7 +273,6 @@
             <div class="form-group">
               <label class="form-label" data-i18n="settings.security.domains">許可ドメイン（カンマ区切り）</label>
               <input id="s-oidc-domains" class="form-input" type="text" autocomplete="off">
-              <p id="oidc-domain-warning" class="settings-field-hint security-domain-warning" hidden></p>
             </div>
           </div>
           <div class="settings-security-actions">

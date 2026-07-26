@@ -20,6 +20,7 @@ EgressView monitors your LAN passively and can be accessed remotely when HTTPS i
 
 - All API endpoints and the WebSocket are protected by local/OIDC sessions or an API token. Browser sessions use HttpOnly/SameSite cookies and CSRF protection.
 - Google OIDC is optional and uses PKCE, state, nonce, signed ID tokens, verified email, and an explicit email/domain allowlist. The emergency local administrator remains available during IdP or internet outages.
+- Browser authorization is least-privilege: local login is `admin`, an explicitly allowed Google email is `operator`, and a domain-only match is read-only `viewer`. Allowlist membership alone never grants Google users administrator access.
 - Authentication and mutating API events are appended to a pseudonymous SQLite audit log. Raw client IPs, email addresses, credentials, and request bodies are not stored there.
 - HTTPS protects credentials and dashboard data in transit when accessing EgressView from outside the LAN.
 - Router credentials and the SQLite database stay on the host machine; nothing is sent to a cloud service. Threat-intelligence feeds are downloaded and matched locally.

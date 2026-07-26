@@ -30,7 +30,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 12;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -329,6 +329,76 @@ const MIGRATIONS = [
         CREATE INDEX IF NOT EXISTS idx_audit_events_type
           ON audit_events(eventType, createdAt DESC);
       `);
+    },
+  },
+  {
+    version: 10,
+    description: 'scoped API identities (P2-61 Phase 2)',
+    up(db) {
+      // Additive only: the existing X-Admin-Token keeps working during the
+      // expand phase, so no data is read, rewritten, or removed here.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS api_identities (
+          id          TEXT PRIMARY KEY,
+          label       TEXT NOT NULL,
+          tokenHash   TEXT NOT NULL UNIQUE,
+          permissions TEXT NOT NULL,
+          createdAt   INTEGER NOT NULL,
+          expiresAt   INTEGER NOT NULL,
+          lastUsedAt  INTEGER,
+          revokedAt   INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_api_identities_token
+          ON api_identities(tokenHash);
+        CREATE INDEX IF NOT EXISTS idx_api_identities_active
+          ON api_identities(revokedAt, expiresAt);
+      `);
+    },
+  },
+  {
+    version: 11,
+    description: 'browser session roles (P2-61 Phase 3)',
+    up(db) {
+      const hasSessions = db.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'`
+      ).get();
+      if (!hasSessions) return; // fresh DB: sessions.js creates the column
+      const columns = new Set(
+        db.prepare('PRAGMA table_info(sessions)').all().map(row => row.name)
+      );
+      if (!columns.has('role')) {
+        // Old rows can include both local and OIDC sessions. Only local
+        // sessions have a role we can determine without guessing. Existing
+        // OIDC/unknown sessions must sign in again so the verified allowlist
+        // match can assign their least-privilege role.
+        db.exec(`
+          ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'viewer';
+          UPDATE sessions SET role = 'admin' WHERE authMethod = 'local';
+          DELETE FROM sessions WHERE authMethod <> 'local';
+        `);
+      }
+    },
+  },
+  {
+    version: 12,
+    description: 'stable audit principal identifier (P2-61 Phase 3)',
+    up(db) {
+      const hasAudit = db.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='audit_events'`
+      ).get();
+      if (!hasAudit) return;
+      const columns = new Set(
+        db.prepare('PRAGMA table_info(audit_events)').all().map(row => row.name)
+      );
+      if (!columns.has('principalHash')) {
+        // Additive and nullable. Existing rows keep actorHash unchanged and are
+        // deliberately NOT backfilled: the principal behind an old session id
+        // cannot be recovered, and guessing would put invented identities into
+        // an append-only audit trail.
+        db.exec('ALTER TABLE audit_events ADD COLUMN principalHash TEXT');
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_events_principal
+                   ON audit_events(principalHash, createdAt DESC)`);
+      }
     },
   },
 ];

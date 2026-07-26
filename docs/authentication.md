@@ -21,24 +21,24 @@ https://YOUR_EGRESSVIEW_ORIGIN/api/auth/oidc/callback
 
 In Settings → General → Authentication & Audit, enter the client ID, client secret, and at least one allowed email address or domain. EgressView validates Authorization Code + PKCE, state, nonce, the Google JWKS signature, issuer, audience, expiry, verified email, and the allowlist before creating a normal revocable session.
 
-### Every allowed user is an administrator
+### Browser roles
 
-> **Warning**
-> EgressView authenticates users but does not yet separate permissions. Any account that passes the allowlist signs in with full administrator access: it can read all captured traffic, change router credentials, rotate secrets, restore backups, and revoke other sessions.
+Roles are assigned on the server from the verified login path:
 
-A **domain** allowlist therefore grants that access to everyone in the domain, including accounts created after you configured it. Until role-based access control ships, prefer an explicit **email** allowlist that lists each person individually.
+| Login | Role | Access |
+|---|---|---|
+| Local administrator | `admin` | All settings, credentials, authentication, backups and operational features |
+| Google account matched by an explicit email entry | `operator` | Network data and device-note updates |
+| Google account matched only by a domain entry | `viewer` | Read-only network data |
 
-EgressView never disables an existing configuration on your behalf — locking out remote users silently would be worse. Instead it warns in the server log at startup, next to the field in Settings whenever any domain is present (saved or still being typed), and once more in a confirmation prompt when you save an enabled configuration that carries a domain allowlist.
+An authentication allowlist is not an administrator assignment. Google users
+cannot become administrators merely by appearing in the email or domain
+allowlist. Operators also cannot run AI analysis because it may transmit data
+to a configured provider and incur charges.
 
-These warnings are driven by the saved OIDC configuration and by what is currently entered in the form. EgressView deliberately does not try to infer whether it is reachable from the internet: a port forward or an unknown reverse proxy would defeat that guess, and hiding the risk on a wrong guess is the failure you cannot recover from.
-
-**Moving from a domain allowlist to an email allowlist**
-
-1. Sign in with the emergency local administrator, so you keep access even if the next step removes your own Google account. This account is always available and is unaffected by OIDC settings.
-2. In Settings → General → Authentication & Audit, add every person who needs access to **Allowed emails**.
-3. Clear the **Allowed domains** field and save. At least one email or domain must remain while Google OIDC is enabled.
-4. Revoke existing sessions in the session list so anyone who no longer matches the allowlist is signed out. Removing an allowlist entry does not end sessions that are already open.
-5. Confirm the startup warning is gone from the server log on the next restart.
+When upgrading from a version without browser roles, existing local sessions
+remain administrators. Existing OIDC sessions are revoked once and must sign in
+again so EgressView can assign a role from a newly verified allowlist match.
 
 ## Reverse proxy boundary
 

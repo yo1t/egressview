@@ -7,6 +7,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const authRoutes = require('./routes/auth');
+const apiIdentityRoutes = require('./routes/api-identities');
 const notesRoutes = require('./routes/notes');
 const connectionsRoutes = require('./routes/connections');
 const devicesRoutes = require('./routes/devices');
@@ -79,6 +80,7 @@ function configureHttpApp(app, {
   tlsEnabled,
   routeCtx,
   requireAdmin,
+  enforceApiPermissions,
   beacons,
   appState,
   saveConfig,
@@ -105,6 +107,8 @@ function configureHttpApp(app, {
   registerHealthRoutes(app, healthState);
 
   app.use(compression());
+  app.use('/api', express.json({ limit: '64kb' }));
+  app.use('/api', enforceApiPermissions);
 
   const indexRoutes = ['/', '/index.html'];
   if (subpath) indexRoutes.push(`${subpath}/`, `${subpath}/index.html`);
@@ -165,9 +169,9 @@ function configureHttpApp(app, {
   };
   if (subpath) app.use(subpath, express.static(path.join(appRoot, 'public'), staticOptions));
   app.use(express.static(path.join(appRoot, 'public'), staticOptions));
-  app.use(express.json({ limit: '64kb' }));
 
   app.use('/api', authRoutes(routeCtx));
+  if (routeCtx.apiIdentities) app.use('/api', apiIdentityRoutes(routeCtx));
   if (routeCtx.routerManager) app.use('/api', routerRoutes(routeCtx));
   app.use('/api', notesRoutes(routeCtx));
   app.use('/api', connectionsRoutes(routeCtx));
