@@ -5,6 +5,7 @@
 
 const crypto   = require('crypto');
 const Database = require('better-sqlite3');
+const { ROLES, normalizeRole } = require('./roles');
 
 // Use the same env var as history.js so DEMO_MODE / EGRESSVIEW_DB_PATH override works for both
 const DB_PATH = process.env.EGRESSVIEW_DB_PATH
@@ -42,7 +43,8 @@ function initDb(dbPath) {
       expiresAt   INTEGER NOT NULL,
       csrfHash    TEXT,
       authMethod  TEXT    NOT NULL DEFAULT 'local',
-      subjectHash TEXT
+      subjectHash TEXT,
+      role        TEXT    NOT NULL DEFAULT 'admin'
     );
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expiresAt);
   `);
@@ -73,10 +75,15 @@ function createSession(deviceLabel, options = {}) {
   const expiresAt = now + configuredTtlMs();
   const authMethod = options.authMethod === 'oidc' ? 'oidc' : 'local';
   const subjectHash = options.subject ? sha256(String(options.subject)) : null;
+  // The role is decided by the caller from how authentication succeeded. A
+  // value this build does not define is refused rather than stored, so an
+  // unreadable role can never end up in the table.
+  const role = normalizeRole(options.role ?? ROLES.ADMIN);
+  if (!role) throw new Error(`Unknown session role: ${options.role}`);
   const info = db.prepare(`
     INSERT INTO sessions
-      (tokenHash, deviceLabel, createdAt, lastSeenAt, expiresAt, csrfHash, authMethod, subjectHash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (tokenHash, deviceLabel, createdAt, lastSeenAt, expiresAt, csrfHash, authMethod, subjectHash, role)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     sha256(token),
     (deviceLabel || '').slice(0, 100) || null,
@@ -85,7 +92,8 @@ function createSession(deviceLabel, options = {}) {
     expiresAt,
     sha256(csrfToken),
     authMethod,
-    subjectHash
+    subjectHash,
+    role
   );
   return { token, csrfToken, id: info.lastInsertRowid, expiresAt };
 }
@@ -122,7 +130,7 @@ function verifyCsrf(session, token) {
 function listSessions() {
   if (!db) return [];
   return db.prepare(`
-    SELECT id, deviceLabel, createdAt, lastSeenAt, expiresAt, authMethod
+    SELECT id, deviceLabel, createdAt, lastSeenAt, expiresAt, authMethod, role
     FROM sessions ORDER BY lastSeenAt DESC
   `).all();
 }

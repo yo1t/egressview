@@ -18,6 +18,8 @@ function createFixture({
     id: 42,
     authMethod: 'local',
     deviceLabel: 'My Mac',
+    // Sessions carry a role from P2-61 Phase 3; the local administrator is admin.
+    role: 'admin',
   };
   const events = [];
   const sessions = {

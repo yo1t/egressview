@@ -1,5 +1,6 @@
 'use strict';
 
+const { ROLES } = require('../roles');
 const crypto = require('crypto');
 const { Router } = require('express');
 const { z } = require('zod');
@@ -127,7 +128,9 @@ module.exports = function authSessionRoutes(ctx) {
     }
     const session = sessions.createSession(
       typeof deviceLabel === 'string' ? deviceLabel : '',
-      { authMethod: 'local' }
+      // The emergency local administrator is always admin: it is the recovery
+      // path that has to work when an IdP is unreachable.
+      { authMethod: 'local', role: ROLES.ADMIN }
     );
     if (!session) return res.status(500).json({ error: t('auth.session-failed') });
     authCookies?.setSessionCookies(req, res, session, subpath);
