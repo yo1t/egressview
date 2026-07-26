@@ -6,6 +6,15 @@ All notable changes to EgressView are documented here.
 
 ### Security and Reliability
 
+- Added a staged, read-only OAuth Resource Server mode for remote MCP testing:
+  RFC 9728 metadata and challenges, authorization-server discovery, RS256
+  JWKS validation, exact issuer/audience/expiry/scope checks, bounded caches,
+  unknown-key refresh, and fail-closed provider errors.
+- HTTP token mode now requires a dedicated `MCP_TOKEN` and no longer falls
+  back to the full-access `EGRESSVIEW_TOKEN`. Existing private HTTP users must
+  set a separate endpoint token before upgrading; stdio mode is unchanged.
+- OAuth mode omits `set_device_note` until scoped write authorization and a
+  least-privilege internal service identity land in the next P2-60 phase.
 - Added least-privilege browser roles. Local login remains `admin`, an explicitly
   allowed Google email becomes `operator`, and a domain-only match becomes
   read-only `viewer`. Authentication allowlists no longer imply administrator

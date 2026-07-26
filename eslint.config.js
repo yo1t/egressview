@@ -17,7 +17,7 @@ module.exports = [
 
   // ── バックエンド（CommonJS / Node）─────────────────────────────────────────
   {
-    files: ['server.js', 'src/**/*.js', 'scripts/**/*.js', 'test/**/*.js', 'eslint.config.js', 'playwright.config.js'],
+    files: ['server.js', 'mcp-server.js', 'src/**/*.js', 'scripts/**/*.js', 'test/**/*.js', 'eslint.config.js', 'playwright.config.js'],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'commonjs',
