@@ -20,6 +20,7 @@
  */
 function runDbBootstrap({
   dbPath, sourceRouterMap, history, sessions, devices, enrichment, beacons, authAudit,
+  apiIdentities,
 }) {
   // 1. history first: runs the versioned migrations (with the P2-33
   //    fail-closed backup). Throws on failure — nothing below runs.
@@ -31,6 +32,7 @@ function runDbBootstrap({
   const enrichResult = enrichment.initDb(dbPath);
   beacons.initDb(dbPath);
   if (authAudit) authAudit.initDb(dbPath);
+  if (apiIdentities) apiIdentities.initDb(dbPath);
   return { staleEnrichmentIps: enrichResult?.staleIps || [] };
 }
 

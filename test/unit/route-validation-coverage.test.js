@@ -22,6 +22,7 @@ const ENDPOINT_MODULES = [
   'router-setup.js',
   'routers.js',
   'slack.js',
+  'api-identities.js',
 ];
 
 describe('HTTP route validation coverage', () => {

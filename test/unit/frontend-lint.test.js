@@ -953,7 +953,7 @@ describe('Server runtime invariants', () => {
       'server startup should choose one runtime DB path before initializing stores');
     // All long-lived DB connections open through the bootstrap boundary on the
     // selected runtime path (P2-30: history/migrations first, everything after).
-    assert.match(serverJs, /runDbBootstrap\(\{\s*dbPath:\s*runtimeDbPath,[\s\S]*?history,\s*sessions,\s*devices,\s*enrichment,\s*beacons,\s*authAudit,\s*\}\)/,
+    assert.match(serverJs, /runDbBootstrap\(\{\s*dbPath:\s*runtimeDbPath,[\s\S]*?history,\s*sessions,\s*devices,\s*enrichment,\s*beacons,\s*authAudit,\s*apiIdentities,\s*\}\)/,
       'server startup should open every SQLite-backed store via runDbBootstrap on the runtime DB path');
     const bootstrapJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'db-bootstrap.js'), 'utf8');
     for (const call of [
@@ -963,6 +963,7 @@ describe('Server runtime invariants', () => {
       'enrichment.initDb(dbPath)',
       'beacons.initDb(dbPath)',
       'authAudit.initDb(dbPath)',
+      'apiIdentities.initDb(dbPath)',
     ]) {
       assert.match(bootstrapJs, new RegExp(call.replace(/[().]/g, '\\$&')),
         `db-bootstrap must pass the DB path to ${call.split('.')[0]}`);
