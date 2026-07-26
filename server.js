@@ -46,6 +46,7 @@ const beaconDetector = require('./src/beacon-detector');
 const sessions       = require('./src/sessions');
 const authPassword   = require('./src/auth-password');
 const authAudit      = require('./src/auth-audit');
+const apiIdentities  = require('./src/api-identities');
 const authCookies    = require('./src/auth-cookies');
 const { createGoogleOidc } = require('./src/oidc-google');
 const { runDbBootstrap }    = require('./src/db-bootstrap');
@@ -312,6 +313,7 @@ const authBoundary = createAuthMiddleware({
   sessions,
   authCookies,
   authAudit,
+  apiIdentities,
 });
 const {
   authenticate,
@@ -366,7 +368,7 @@ const routeCtx = {
   asus, yamaha, cisco, enrichment, threatIntel, notifier, history, devices, deviceId, backup,
   dnsmasqLog, inspectSyslog, dhcpdSyslog,
   runtime, notes, io, beacons, sessions, authPassword,
-  authAudit, authCookies, oidc,
+  authAudit, authCookies, oidc, apiIdentities,
   authenticateRequest: req => authenticateRequest(req)?.auth || null,
   subpath: SUBPATH,
   saveConfig,
@@ -595,8 +597,11 @@ server.listen(PORT, HOST, () => {
     enrichment,
     beacons,
     authAudit,
+    apiIdentities,
   });
   setInterval(() => sessions.pruneExpired(), 6 * 60 * 60 * 1000);
+  apiIdentities.pruneExpired();
+  setInterval(() => apiIdentities.pruneExpired(), 24 * 60 * 60 * 1000).unref();
   authAudit.prune();
   setInterval(() => authAudit.prune(), 24 * 60 * 60 * 1000).unref();
 
