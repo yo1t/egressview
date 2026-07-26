@@ -118,7 +118,8 @@ If you publish or share the integration as a ChatGPT App, also plan for per-user
 ```bash
 # Copy and edit:
 cp .env.mcp.example .env.mcp
-# Set MCP_PORT=3010, EGRESSVIEW_URL=http://localhost:3000, EGRESSVIEW_TOKEN=...
+# Set MCP_PORT=3010, MCP_TOKEN=<a dedicated random token>,
+# EGRESSVIEW_URL=http://localhost:3000, EGRESSVIEW_TOKEN=...
 # If your EgressView service listens on a different local port behind a proxy,
 # use that local URL instead (for example http://localhost:3002).
 chmod 600 .env.mcp
@@ -128,6 +129,28 @@ set -a; source .env.mcp; set +a
 node mcp-server.js
 # → [egressview-mcp] HTTP transport listening on 127.0.0.1:3010/mcp
 ```
+
+`MCP_TOKEN` is now required explicitly in HTTP token mode and no longer
+defaults to `EGRESSVIEW_TOKEN`. This prevents a leaked MCP endpoint token from
+also granting full EgressView admin API access. Existing HTTP installations
+that relied on the old fallback must generate a separate token and set
+`MCP_TOKEN` before upgrading. Stdio mode is unchanged and does not use
+`MCP_TOKEN`.
+
+### Staged OAuth Resource Server mode
+
+P2-60's OAuth Resource Server boundary can be enabled for private integration
+testing with `MCP_AUTH_MODE=oauth`,
+`MCP_OAUTH_ISSUER`, `MCP_OAUTH_RESOURCE`, and `MCP_OAUTH_READ_SCOPE`.
+It publishes RFC 9728 Protected Resource Metadata, validates RS256 JWT
+signatures through the issuer's discovery/JWKS endpoints, and fails closed on
+issuer, expiry, audience, or scope mismatches. The issuer must advertise PKCE
+S256. HTTPS is required except for loopback-only testing.
+
+This stage intentionally exposes read tools only. `set_device_note`, the
+least-privilege internal service identity, OAuth audit/rate limits, and the
+Internet publication gate are delivered by later P2-60 phases. Do not publish
+this endpoint to the Internet yet.
 
 ### Step 2a — Apache (httpd) config
 
@@ -141,6 +164,10 @@ Add inside your existing `<VirtualHost>` or server config. The MCP block **must 
     # MCP Streamable HTTP requires both content types in Accept
     RequestHeader set Accept "application/json, text/event-stream"
 </Location>
+
+# OAuth mode only: expose RFC 9728 metadata while preserving its path.
+ProxyPass        /.well-known/oauth-protected-resource http://127.0.0.1:3010/.well-known/oauth-protected-resource
+ProxyPassReverse /.well-known/oauth-protected-resource http://127.0.0.1:3010/.well-known/oauth-protected-resource
 
 # ─── EgressView Web UI (existing rule — keep below) ──────────────────────────
 ProxyPass        /egressview/ http://127.0.0.1:3002/
@@ -170,6 +197,11 @@ location /egressview/mcp {
     proxy_buffering    off;
     proxy_cache        off;
     proxy_read_timeout 3600s;
+}
+
+# OAuth mode only: preserve root and resource-specific metadata paths.
+location /.well-known/oauth-protected-resource {
+    proxy_pass http://127.0.0.1:3010;
 }
 ```
 
@@ -213,7 +245,7 @@ For MCP clients that support HTTP transport (Anysphere Cursor, Zed, custom agent
     "egressview": {
       "url": "https://your-server/egressview/mcp",
       "headers": {
-        "X-Admin-Token": "your-admin-token"
+        "X-Admin-Token": "your-dedicated-mcp-token"
       }
     }
   }
@@ -231,14 +263,18 @@ Use `https://` if your reverse proxy terminates TLS (required for Claude Desktop
 | `EGRESSVIEW_URL` | ✅ | `http://localhost:3000` | Base URL of the EgressView server |
 | `EGRESSVIEW_TOKEN` | ✅ | — | API/admin token (shown on first EgressView startup; not the browser login password) |
 | `MCP_PORT` | HTTP mode | — | Local port for the MCP HTTP server (e.g. `3010`). Omit for stdio mode. |
-| `MCP_TOKEN` | — | same as `EGRESSVIEW_TOKEN` | Auth token for the MCP HTTP endpoint. Set to a different value to separate MCP and EgressView auth. |
+| `MCP_AUTH_MODE` | HTTP mode | `token` | HTTP endpoint authentication mode: `token` or staged `oauth`. |
+| `MCP_TOKEN` | HTTP token mode | — | Dedicated private HTTP endpoint token. It must be set explicitly and must differ from `EGRESSVIEW_TOKEN`. |
+| `MCP_OAUTH_ISSUER` | HTTP OAuth mode | — | Exact HTTPS authorization-server issuer URL. Loopback HTTP is allowed only for testing. |
+| `MCP_OAUTH_RESOURCE` | HTTP OAuth mode | — | Canonical public MCP resource URL used for exact JWT audience validation. |
+| `MCP_OAUTH_READ_SCOPE` | HTTP OAuth mode | — | Provider scope required for the staged read-only MCP endpoint. |
 
 ---
 
 ## Security Notes
 
 - The MCP HTTP server listens on `127.0.0.1` only — it is not reachable without the reverse proxy.
-- Authentication uses the `X-Admin-Token` header (same mechanism as the EgressView API).
+- Private token mode accepts the dedicated `MCP_TOKEN` through `X-Admin-Token` or `Authorization: Bearer`; it never falls back to the EgressView admin token.
 - Most tools are read-only. `set_device_note` can write device memo notes (stored in `.egressview.notes.json`, not the main database).
 - Keep `.env.mcp` permissions at `chmod 600`; it contains your API/admin token.
 

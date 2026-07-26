@@ -34,22 +34,58 @@ const { StdioServerTransport }           = require('@modelcontextprotocol/sdk/se
 const { StreamableHTTPServerTransport }  = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const { z } = require('zod');
 const { permissionForMcpTool } = require('./src/permission-matrix');
+const { createOAuthResourceServer } = require('./src/mcp-oauth');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const BASE      = (process.env.EGRESSVIEW_URL  || 'http://localhost:3000').replace(/\/$/, '');
 const TOKEN     = process.env.EGRESSVIEW_TOKEN || '';
-const MCP_PORT  = process.env.MCP_PORT ? parseInt(process.env.MCP_PORT, 10) : null;
-// Auth token for the HTTP MCP endpoint; defaults to EGRESSVIEW_TOKEN
-const MCP_TOKEN = process.env.MCP_TOKEN || TOKEN;
 
 if (!TOKEN) {
   process.stderr.write('[egressview-mcp] WARNING: EGRESSVIEW_TOKEN is not set — API calls will fail\n');
 }
-// Guard: HTTP mode with an empty token would allow unauthenticated access
-if (process.env.MCP_PORT && !MCP_TOKEN) {
-  process.stderr.write('[egressview-mcp] ERROR: EGRESSVIEW_TOKEN (or MCP_TOKEN) must be set in HTTP mode\n');
-  process.exit(1);
+
+function resolveHttpAuthConfig(env = process.env) {
+  const mode = String(env.MCP_AUTH_MODE || 'token').trim().toLowerCase();
+  if (mode === 'token') {
+    if (!env.MCP_TOKEN) {
+      throw new Error(
+        'MCP_TOKEN must be set explicitly in HTTP token mode; '
+        + 'it no longer defaults to EGRESSVIEW_TOKEN'
+      );
+    }
+    if (env.EGRESSVIEW_TOKEN && env.MCP_TOKEN === env.EGRESSVIEW_TOKEN) {
+      throw new Error('MCP_TOKEN must differ from EGRESSVIEW_TOKEN in HTTP token mode');
+    }
+    return Object.freeze({ mode, token: env.MCP_TOKEN });
+  }
+  if (mode === 'oauth') {
+    const issuer = String(env.MCP_OAUTH_ISSUER || '').trim();
+    const resource = String(env.MCP_OAUTH_RESOURCE || '').trim();
+    const requiredScope = String(env.MCP_OAUTH_READ_SCOPE || '').trim();
+    if (!issuer || !resource || !requiredScope) {
+      throw new Error(
+        'MCP_OAUTH_ISSUER, MCP_OAUTH_RESOURCE, and MCP_OAUTH_READ_SCOPE '
+        + 'must be set in HTTP OAuth mode'
+      );
+    }
+    return Object.freeze({
+      mode,
+      issuer,
+      resource,
+      requiredScope,
+      scopesSupported: Object.freeze([requiredScope]),
+    });
+  }
+  throw new Error('MCP_AUTH_MODE must be either "token" or "oauth"');
+}
+
+function resolveMcpPort(value) {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error('MCP_PORT must be an integer from 1 to 65535');
+  }
+  return port;
 }
 
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
@@ -114,7 +150,7 @@ function registerTool(server, name, ...args) {
   server.tool(name, ...args);
 }
 
-function buildMcpServer() {
+function buildMcpServer({ includeWriteTools = true } = {}) {
   const server = new McpServer({
     name: 'egressview',
     version: require('./package.json').version,
@@ -373,20 +409,22 @@ function buildMcpServer() {
     }
   );
 
-  // ⑪ Set device note
-  registerTool(server,
-    'set_device_note',
-    'Sets or updates the memo note for a device identified by its source IP address. Pass an empty string to delete the note.',
-    {
-      src:  z.string().describe('Source IP address of the device'),
-      note: z.string().max(500).describe('Memo text to save (empty string deletes the note)'),
-    },
-    async ({ src, note }) => {
-      await apiPost('/notes', { ip: src, note });
-      const trimmed = note.trim();
-      return ok({ src, note: trimmed || null, deleted: !trimmed });
-    }
-  );
+  if (includeWriteTools) {
+    // ⑪ Set device note
+    registerTool(server,
+      'set_device_note',
+      'Sets or updates the memo note for a device identified by its source IP address. Pass an empty string to delete the note.',
+      {
+        src:  z.string().describe('Source IP address of the device'),
+        note: z.string().max(500).describe('Memo text to save (empty string deletes the note)'),
+      },
+      async ({ src, note }) => {
+        await apiPost('/notes', { ip: src, note });
+        const trimmed = note.trim();
+        return ok({ src, note: trimmed || null, deleted: !trimmed });
+      }
+    );
+  }
 
   return server;
 }
@@ -417,17 +455,31 @@ function createAuthMiddleware(token) {
   };
 }
 
-async function startHttp(port) {
+async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
   const app = express();
   app.use(express.json());
 
-  // Auth: accept X-Admin-Token header or Authorization: Bearer <token>
-  app.use('/mcp', createAuthMiddleware(MCP_TOKEN));
+  let oauth = null;
+  if (authConfig.mode === 'oauth') {
+    oauth = createOAuthResourceServer(authConfig);
+    const sendMetadata = (_req, res) => res.json(oauth.metadata);
+    const metadataPaths = new Set([
+      '/.well-known/oauth-protected-resource',
+      '/.well-known/oauth-protected-resource/mcp',
+      new URL(oauth.protectedResourceMetadataUrl).pathname,
+    ]);
+    for (const path of metadataPaths) app.get(path, sendMetadata);
+    app.use('/mcp', oauth.middleware());
+  } else {
+    // Private token mode accepts the dedicated token in either supported header.
+    app.use('/mcp', createAuthMiddleware(authConfig.token));
+  }
 
   // Streamable HTTP — handles POST (tool calls) and GET (SSE stream)
   const handleMcp = async (req, res) => {
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    const server    = buildMcpServer();
+    // OAuth write scope and least-privilege service identity arrive in P2-60 PR 3.
+    const server = buildMcpServer({ includeWriteTools: authConfig.mode !== 'oauth' });
     try {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
@@ -443,17 +495,35 @@ async function startHttp(port) {
   app.get('/mcp',    handleMcp);
   app.delete('/mcp', handleMcp);
 
-  app.listen(port, '127.0.0.1', () => {
-    process.stderr.write(`[egressview-mcp] HTTP transport listening on 127.0.0.1:${port}/mcp\n`);
-    process.stderr.write(`[egressview-mcp] Proxying API calls to ${BASE}\n`);
+  return new Promise((resolve, reject) => {
+    const httpServer = app.listen(port, '127.0.0.1', (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      const actualPort = httpServer.address().port;
+      process.stderr.write(`[egressview-mcp] HTTP transport listening on 127.0.0.1:${actualPort}/mcp\n`);
+      process.stderr.write(`[egressview-mcp] HTTP authentication mode: ${authConfig.mode}\n`);
+      process.stderr.write(`[egressview-mcp] Proxying API calls to ${BASE}\n`);
+      resolve(httpServer);
+    });
   });
 }
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 if (require.main === module) {
-  if (MCP_PORT) {
-    startHttp(MCP_PORT).catch(err => {
+  if (process.env.MCP_PORT !== undefined && process.env.MCP_PORT !== '') {
+    let port;
+    let authConfig;
+    try {
+      port = resolveMcpPort(process.env.MCP_PORT);
+      authConfig = resolveHttpAuthConfig();
+    } catch (err) {
+      process.stderr.write(`[egressview-mcp] ${err.message}\n`);
+      process.exit(1);
+    }
+    startHttp(port, authConfig).catch(err => {
       process.stderr.write(`[egressview-mcp] ${err.message}\n`);
       process.exit(1);
     });
@@ -469,3 +539,6 @@ if (require.main === module) {
 module.exports._createAuthMiddleware = createAuthMiddleware;
 module.exports._buildMcpServer       = buildMcpServer;
 module.exports._apiPost              = apiPost;
+module.exports._resolveHttpAuthConfig = resolveHttpAuthConfig;
+module.exports._resolveMcpPort        = resolveMcpPort;
+module.exports._startHttp             = startHttp;

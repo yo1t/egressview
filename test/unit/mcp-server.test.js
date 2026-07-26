@@ -3,6 +3,7 @@
 
 const { describe, it, before, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 
 // Set env vars before requiring to prevent startup side-effects
 process.env.EGRESSVIEW_URL   = process.env.EGRESSVIEW_URL   || 'http://localhost:9999';
@@ -10,7 +11,14 @@ process.env.EGRESSVIEW_TOKEN = process.env.EGRESSVIEW_TOKEN || 'test-egressview-
 // MCP_PORT must be unset so the module does not try to bind a port
 delete process.env.MCP_PORT;
 
-const { _createAuthMiddleware, _buildMcpServer, _apiPost } = require('../../mcp-server');
+const {
+  _createAuthMiddleware,
+  _buildMcpServer,
+  _apiPost,
+  _resolveHttpAuthConfig,
+  _resolveMcpPort,
+  _startHttp,
+} = require('../../mcp-server');
 
 // ─── createAuthMiddleware ─────────────────────────────────────────────────────
 
@@ -91,6 +99,127 @@ describe('mcp-server: createAuthMiddleware', () => {
     let nextCalled = false;
     mw(makeReq({ 'x-admin-token': mcpToken }), res, () => { nextCalled = true; });
     assert.equal(nextCalled, true);
+  });
+});
+
+describe('mcp-server: HTTP auth configuration', () => {
+  it('requires a dedicated MCP_TOKEN in private HTTP token mode', () => {
+    assert.throws(
+      () => _resolveHttpAuthConfig({
+        MCP_AUTH_MODE: 'token',
+        EGRESSVIEW_TOKEN: 'admin-token',
+      }),
+      /MCP_TOKEN must be set explicitly/
+    );
+  });
+
+  it('does not accept EGRESSVIEW_TOKEN as an implicit MCP endpoint token', () => {
+    const config = _resolveHttpAuthConfig({
+      MCP_AUTH_MODE: 'token',
+      EGRESSVIEW_TOKEN: 'admin-token',
+      MCP_TOKEN: 'mcp-token',
+    });
+    assert.deepEqual(config, { mode: 'token', token: 'mcp-token' });
+  });
+
+  it('rejects an explicit MCP_TOKEN that equals the admin API token', () => {
+    assert.throws(
+      () => _resolveHttpAuthConfig({
+        MCP_AUTH_MODE: 'token',
+        EGRESSVIEW_TOKEN: 'shared-token',
+        MCP_TOKEN: 'shared-token',
+      }),
+      /must differ from EGRESSVIEW_TOKEN/
+    );
+  });
+
+  it('requires complete OAuth Resource Server configuration', () => {
+    assert.throws(
+      () => _resolveHttpAuthConfig({ MCP_AUTH_MODE: 'oauth' }),
+      /MCP_OAUTH_ISSUER/
+    );
+    const config = _resolveHttpAuthConfig({
+      MCP_AUTH_MODE: 'oauth',
+      MCP_OAUTH_ISSUER: 'https://idp.example.test/realms/egressview',
+      MCP_OAUTH_RESOURCE: 'https://monitor.example.test/mcp',
+      MCP_OAUTH_READ_SCOPE: 'egressview:read',
+    });
+    assert.deepEqual(config, {
+      mode: 'oauth',
+      issuer: 'https://idp.example.test/realms/egressview',
+      resource: 'https://monitor.example.test/mcp',
+      requiredScope: 'egressview:read',
+      scopesSupported: ['egressview:read'],
+    });
+  });
+
+  it('rejects unknown HTTP authentication modes', () => {
+    assert.throws(
+      () => _resolveHttpAuthConfig({ MCP_AUTH_MODE: 'none' }),
+      /must be either/
+    );
+  });
+
+  it('rejects invalid MCP_PORT values instead of falling back to stdio', () => {
+    for (const value of ['not-a-port', '0', '65536', '3010.5']) {
+      assert.throws(() => _resolveMcpPort(value), /MCP_PORT must be an integer/);
+    }
+    assert.equal(_resolveMcpPort('3010'), 3010);
+  });
+
+  it('exits fail-closed when HTTP token mode has only EGRESSVIEW_TOKEN', () => {
+    const result = spawnSync(process.execPath, ['mcp-server.js'], {
+      cwd: require('node:path').join(__dirname, '..', '..'),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        MCP_PORT: '3010',
+        MCP_AUTH_MODE: 'token',
+        EGRESSVIEW_TOKEN: 'legacy-admin-token',
+        MCP_TOKEN: '',
+      },
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /MCP_TOKEN must be set explicitly/);
+    assert.doesNotMatch(result.stderr, /legacy-admin-token/);
+  });
+
+  it('serves both PRM routes and challenges unauthenticated MCP requests', async () => {
+    const server = await _startHttp(0, {
+      mode: 'oauth',
+      issuer: 'https://idp.example.test/realms/egressview',
+      resource: 'https://monitor.example.test/egressview/mcp',
+      requiredScope: 'egressview:read',
+      scopesSupported: ['egressview:read'],
+    });
+    try {
+      const { port } = server.address();
+      const base = `http://127.0.0.1:${port}`;
+      for (const path of [
+        '/.well-known/oauth-protected-resource',
+        '/.well-known/oauth-protected-resource/mcp',
+        '/.well-known/oauth-protected-resource/egressview/mcp',
+      ]) {
+        const response = await fetch(`${base}${path}`);
+        assert.equal(response.status, 200);
+        const body = await response.json();
+        assert.equal(body.resource, 'https://monitor.example.test/egressview/mcp');
+        assert.deepEqual(body.scopes_supported, ['egressview:read']);
+      }
+
+      const response = await fetch(`${base}/mcp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }),
+      });
+      assert.equal(response.status, 401);
+      assert.match(response.headers.get('www-authenticate'), /resource_metadata=/);
+      assert.match(response.headers.get('www-authenticate'), /scope="egressview:read"/);
+    } finally {
+      await new Promise((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    }
   });
 });
 
