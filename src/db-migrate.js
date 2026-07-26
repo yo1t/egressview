@@ -30,7 +30,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -328,6 +328,30 @@ const MIGRATIONS = [
           ON audit_events(createdAt DESC);
         CREATE INDEX IF NOT EXISTS idx_audit_events_type
           ON audit_events(eventType, createdAt DESC);
+      `);
+    },
+  },
+  {
+    version: 10,
+    description: 'scoped API identities (P2-61 Phase 2)',
+    up(db) {
+      // Additive only: the existing X-Admin-Token keeps working during the
+      // expand phase, so no data is read, rewritten, or removed here.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS api_identities (
+          id          TEXT PRIMARY KEY,
+          label       TEXT NOT NULL,
+          tokenHash   TEXT NOT NULL UNIQUE,
+          permissions TEXT NOT NULL,
+          createdAt   INTEGER NOT NULL,
+          expiresAt   INTEGER NOT NULL,
+          lastUsedAt  INTEGER,
+          revokedAt   INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_api_identities_token
+          ON api_identities(tokenHash);
+        CREATE INDEX IF NOT EXISTS idx_api_identities_active
+          ON api_identities(revokedAt, expiresAt);
       `);
     },
   },
