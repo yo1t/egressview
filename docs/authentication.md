@@ -28,7 +28,9 @@ In Settings → General → Authentication & Audit, enter the client ID, client 
 
 A **domain** allowlist therefore grants that access to everyone in the domain, including accounts created after you configured it. Until role-based access control ships, prefer an explicit **email** allowlist that lists each person individually.
 
-EgressView never disables an existing configuration on your behalf — locking out remote users silently would be worse. Instead it warns in the server log at startup and next to the field in Settings whenever a domain allowlist is active.
+EgressView never disables an existing configuration on your behalf — locking out remote users silently would be worse. Instead it warns in the server log at startup, next to the field in Settings whenever any domain is present (saved or still being typed), and once more in a confirmation prompt when you save an enabled configuration that carries a domain allowlist.
+
+These warnings are driven only by the saved OIDC configuration. EgressView deliberately does not try to infer whether it is reachable from the internet: a port forward or an unknown reverse proxy would defeat that guess, and hiding the risk on a wrong guess is the failure you cannot recover from.
 
 **Moving from a domain allowlist to an email allowlist**
 

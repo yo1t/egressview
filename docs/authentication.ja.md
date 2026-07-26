@@ -28,7 +28,9 @@ https://YOUR_EGRESSVIEW_ORIGIN/api/auth/oidc/callback
 
 そのため**domain** allowlistは、そのdomainに所属する全員（設定後に作成されたアカウントを含む）へ管理者権限を与えることになります。role-based access controlが実装されるまでは、各利用者を個別に列挙する**email** allowlistでの運用を推奨します。
 
-EgressViewは既存設定を自動で無効化しません。無告知でremote利用者を締め出すほうが危険なためです。代わりにdomain allowlistが有効な間、起動時のサーバーログと設定画面の該当項目の横で警告します。
+EgressViewは既存設定を自動で無効化しません。無告知でremote利用者を締め出すほうが危険なためです。代わりに、起動時のサーバーログ、設定画面（保存済み・入力中を問わずdomainが存在する間）、およびdomain allowlistを含む有効な設定を保存する際の確認ダイアログで警告します。
+
+これらの警告は保存されたOIDC設定だけで決まります。インターネットから到達可能かどうかの推測は意図的に行いません。ポート転送や把握していないreverse proxyがあれば推測は外れ、外した状態でリスクを隠すことは取り返しがつかないためです。
 
 **domain allowlistからemail allowlistへの移行手順**
 
