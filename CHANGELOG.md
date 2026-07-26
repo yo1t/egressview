@@ -4,6 +4,19 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Security and Reliability
+
+- Added least-privilege browser roles. Local login remains `admin`, an explicitly
+  allowed Google email becomes `operator`, and a domain-only match becomes
+  read-only `viewer`. Authentication allowlists no longer imply administrator
+  access.
+- Existing local sessions remain administrators during migration. Existing
+  OIDC and unknown sessions are revoked once and must reauthenticate so their
+  role is derived from a newly verified allowlist match.
+- Kept provider-billed AI execution admin-only. Operators may update device
+  notes but cannot run AI, change settings or credentials, restore backups, or
+  manage authentication.
+
 ## [1.6.0] - 2026-07-26
 
 ### Added

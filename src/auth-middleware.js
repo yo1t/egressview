@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const { ALL_PERMISSIONS, checkPermissions } = require('./permissions');
 const { ACCESS, classifyHttpRequest } = require('./permission-matrix');
+const { permissionsForRole } = require('./roles');
 
 // Credential kinds are kept separate on purpose: a browser session is never
 // usable as an API credential and a scoped API identity is never usable as a
@@ -14,9 +15,13 @@ function isApiIdentity(auth) {
 function defaultResolvePermissions({ auth }) {
   // Scoped identities carry exactly what was granted at issue time.
   if (isApiIdentity(auth)) return auth.identity.permissions;
-  // Browser sessions and the legacy admin token stay full-access during the
-  // expand phase; Phase 3 narrows browser sessions by role.
-  return ALL_PERMISSIONS;
+  // The legacy admin token is the break-glass credential and stays full-access
+  // during the expand phase.
+  if (auth === 'admin') return ALL_PERMISSIONS;
+  // Browser sessions carry a role assigned at login. A session row with no
+  // role, or a role this build cannot interpret, grants nothing instead of
+  // falling back to a broader role.
+  return permissionsForRole(auth?.role);
 }
 
 function createAuthMiddleware({

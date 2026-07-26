@@ -251,7 +251,7 @@ describe('auth route: P2-58 security configuration', () => {
   });
 });
 
-describe('auth route: P2-61 Phase 0 domain allowlist warning', () => {
+describe('auth route: P2-61 Phase 3 domain role safety', () => {
   const enabledWithDomains = () => ({
     oidcConfig: {
       enabled: true,
@@ -262,16 +262,14 @@ describe('auth route: P2-61 Phase 0 domain allowlist warning', () => {
     },
   });
 
-  it('warns on read while a domain allowlist is active', async () => {
+  it('does not report the retired full-admin warning for a domain allowlist', async () => {
     const { status, body } = await request(
       makeApp({ appState: enabledWithDomains() }),
       'GET',
       '/api/auth/security-config'
     );
     assert.equal(status, 200);
-    assert.deepEqual(body.warnings, [
-      { code: 'domain_allowlist_grants_admin', domains: ['example.com'] },
-    ]);
+    assert.deepEqual(body.warnings, []);
   });
 
   it('does not warn for an email-only allowlist', async () => {
@@ -288,7 +286,7 @@ describe('auth route: P2-61 Phase 0 domain allowlist warning', () => {
     assert.deepEqual(body.warnings, []);
   });
 
-  it('warns on save but keeps the configuration the operator asked for', async () => {
+  it('saves a domain allowlist without the retired full-admin warning', async () => {
     const appState = {
       oidcConfig: {
         enabled: false,
@@ -307,14 +305,12 @@ describe('auth route: P2-61 Phase 0 domain allowlist warning', () => {
       allowedDomains: ['example.com'],
     });
     assert.equal(status, 200);
-    assert.equal(body.warnings.length, 1);
-    assert.equal(body.warnings[0].code, 'domain_allowlist_grants_admin');
-    // Phase 0 warns only: silently dropping the allowlist would lock users out.
+    assert.deepEqual(body.warnings, []);
     assert.deepEqual(appState.oidcConfig.allowedDomains, ['example.com']);
     assert.equal(appState.oidcConfig.enabled, true);
   });
 
-  it('clears the warning once the operator moves to an email allowlist', async () => {
+  it('also returns no warning for an email allowlist', async () => {
     const appState = enabledWithDomains();
     const app = makeApp({ appState, saveConfig: () => {} });
     const { status, body } = await request(app, 'POST', '/api/auth/security-config', {

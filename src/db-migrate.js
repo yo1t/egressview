@@ -30,7 +30,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -353,6 +353,30 @@ const MIGRATIONS = [
         CREATE INDEX IF NOT EXISTS idx_api_identities_active
           ON api_identities(revokedAt, expiresAt);
       `);
+    },
+  },
+  {
+    version: 11,
+    description: 'browser session roles (P2-61 Phase 3)',
+    up(db) {
+      const hasSessions = db.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'`
+      ).get();
+      if (!hasSessions) return; // fresh DB: sessions.js creates the column
+      const columns = new Set(
+        db.prepare('PRAGMA table_info(sessions)').all().map(row => row.name)
+      );
+      if (!columns.has('role')) {
+        // Old rows can include both local and OIDC sessions. Only local
+        // sessions have a role we can determine without guessing. Existing
+        // OIDC/unknown sessions must sign in again so the verified allowlist
+        // match can assign their least-privilege role.
+        db.exec(`
+          ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'viewer';
+          UPDATE sessions SET role = 'admin' WHERE authMethod = 'local';
+          DELETE FROM sessions WHERE authMethod <> 'local';
+        `);
+      }
     },
   },
 ];

@@ -1,4 +1,4 @@
-import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
+import { t } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, fmtTs } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 
@@ -11,33 +11,6 @@ function textElement(tag, text, className = '') {
   if (className) element.className = className;
   element.textContent = text == null ? '' : String(text);
   return element;
-}
-
-function configuredDomains() {
-  const field = document.getElementById('s-oidc-domains');
-  return field ? splitList(field.value) : [];
-}
-
-// P2-61 Phase 0: an active domain allowlist grants every matching user full
-// administrator access, so surface it next to the field that configures it.
-// Warn on any domain present in the field — saved, or still being typed —
-// rather than only on the saved-and-enabled state the server reports, so the
-// operator sees the consequence before committing to it.
-function renderDomainWarning(warnings) {
-  const box = document.getElementById('oidc-domain-warning');
-  if (!box) return;
-  const reported = (warnings || []).find(item => item && item.code === 'domain_allowlist_grants_admin');
-  const typed = configuredDomains();
-  const domains = typed.length ? typed : (reported ? reported.domains || [] : []);
-  if (!domains.length) {
-    box.hidden = true;
-    box.textContent = '';
-    return;
-  }
-  box.textContent = tVars('settings.security.domainsActiveWarning', {
-    domains: domains.join(', '),
-  });
-  box.hidden = false;
 }
 
 // The local administrator never changes behaviour: it is always available.
@@ -93,28 +66,16 @@ export function initSecuritySettings(showStatus) {
       document.getElementById('s-oidc-emails').value = (oidc.allowedEmails || []).join(', ');
       document.getElementById('s-oidc-domains').value = (oidc.allowedDomains || []).join(', ');
       renderLocalAdminCopy(oidc.enabled === true);
-      renderDomainWarning(body.warnings);
       await loadAuditEvents();
     } catch (error) {
       showStatus('oidc-status', error.message, false);
     }
   }
 
-  // Keep the advisory in step with what the operator is typing, so the
-  // consequence is visible before the configuration is saved.
-  document.getElementById('s-oidc-domains').addEventListener('input', () => renderDomainWarning([]));
-
   document.getElementById('oidc-save-btn').addEventListener('click', async () => {
     const button = document.getElementById('oidc-save-btn');
     const enabled = document.getElementById('s-oidc-enabled').checked;
     const allowedDomains = splitList(document.getElementById('s-oidc-domains').value);
-    // Re-state the consequence at the moment it takes effect.
-    if (enabled && allowedDomains.length &&
-        !globalThis.confirm(tVars('settings.security.domainsConfirm', {
-          domains: allowedDomains.join(', '),
-        }))) {
-      return;
-    }
     button.disabled = true;
     try {
       const response = await apiFetch(_BASE + '/api/auth/security-config', {
@@ -135,7 +96,6 @@ export function initSecuritySettings(showStatus) {
         response.ok
       );
       if (response.ok) {
-        renderDomainWarning(body.warnings);
         await loadSecurityConfig();
       }
     } catch (error) {
