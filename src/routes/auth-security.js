@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const { Router } = require('express');
 const { z } = require('zod');
 const { parseRequest } = require('../http-validation');
+const { securityConfigWarnings } = require('../domain-allowlist-warning');
 
 const configSchema = z.object({
   enabled: z.boolean(),
@@ -62,6 +63,7 @@ module.exports = function authSecurityRoutes(ctx) {
       },
       sessionTtlDays: Number(process.env.EGRESSVIEW_SESSION_TTL_DAYS) || 30,
       trustedProxyConfigured: Boolean(process.env.EGRESSVIEW_TRUST_PROXY),
+      warnings: securityConfigWarnings(config),
     });
   });
 
@@ -97,9 +99,13 @@ module.exports = function authSecurityRoutes(ctx) {
       clientIp: req.ip,
       httpMethod: req.method,
       path: req.originalUrl,
-      metadata: { oidcEnabled: next.enabled },
+      metadata: { oidcEnabled: next.enabled, domainAllowlistCount: next.allowedDomains.length },
     });
-    res.json({ success: true, clientSecretSet: Boolean(next.clientSecret) });
+    res.json({
+      success: true,
+      clientSecretSet: Boolean(next.clientSecret),
+      warnings: securityConfigWarnings(next),
+    });
   });
 
   router.post('/auth/oidc/test', requireAdmin, async (req, res) => {

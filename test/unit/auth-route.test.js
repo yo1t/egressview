@@ -251,6 +251,94 @@ describe('auth route: P2-58 security configuration', () => {
   });
 });
 
+describe('auth route: P2-61 Phase 0 domain allowlist warning', () => {
+  const enabledWithDomains = () => ({
+    oidcConfig: {
+      enabled: true,
+      clientId: 'client-id',
+      clientSecret: 'client-secret', // pragma: allowlist secret
+      allowedEmails: [],
+      allowedDomains: ['example.com'],
+    },
+  });
+
+  it('warns on read while a domain allowlist is active', async () => {
+    const { status, body } = await request(
+      makeApp({ appState: enabledWithDomains() }),
+      'GET',
+      '/api/auth/security-config'
+    );
+    assert.equal(status, 200);
+    assert.deepEqual(body.warnings, [
+      { code: 'domain_allowlist_grants_admin', domains: ['example.com'] },
+    ]);
+  });
+
+  it('does not warn for an email-only allowlist', async () => {
+    const appState = {
+      oidcConfig: {
+        enabled: true,
+        clientId: 'client-id',
+        clientSecret: 'client-secret', // pragma: allowlist secret
+        allowedEmails: ['person@example.com'],
+        allowedDomains: [],
+      },
+    };
+    const { body } = await request(makeApp({ appState }), 'GET', '/api/auth/security-config');
+    assert.deepEqual(body.warnings, []);
+  });
+
+  it('warns on save but keeps the configuration the operator asked for', async () => {
+    const appState = {
+      oidcConfig: {
+        enabled: false,
+        clientId: '',
+        clientSecret: 'existing-secret', // pragma: allowlist secret
+        allowedEmails: [],
+        allowedDomains: [],
+      },
+    };
+    const app = makeApp({ appState, saveConfig: () => {} });
+    const { status, body } = await request(app, 'POST', '/api/auth/security-config', {
+      enabled: true,
+      clientId: 'client-id',
+      clientSecret: '',
+      allowedEmails: [],
+      allowedDomains: ['example.com'],
+    });
+    assert.equal(status, 200);
+    assert.equal(body.warnings.length, 1);
+    assert.equal(body.warnings[0].code, 'domain_allowlist_grants_admin');
+    // Phase 0 warns only: silently dropping the allowlist would lock users out.
+    assert.deepEqual(appState.oidcConfig.allowedDomains, ['example.com']);
+    assert.equal(appState.oidcConfig.enabled, true);
+  });
+
+  it('clears the warning once the operator moves to an email allowlist', async () => {
+    const appState = enabledWithDomains();
+    const app = makeApp({ appState, saveConfig: () => {} });
+    const { status, body } = await request(app, 'POST', '/api/auth/security-config', {
+      enabled: true,
+      clientId: 'client-id',
+      clientSecret: '',
+      allowedEmails: ['person@example.com'],
+      allowedDomains: [],
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body.warnings, []);
+    assert.deepEqual(appState.oidcConfig.allowedDomains, []);
+  });
+
+  it('never leaks the warning payload into the stored secret', async () => {
+    const { body } = await request(
+      makeApp({ appState: enabledWithDomains() }),
+      'GET',
+      '/api/auth/security-config'
+    );
+    assert.equal(JSON.stringify(body).includes('client-secret'), false);
+  });
+});
+
 describe('auth route: session lifecycle', () => {
   it('rejects login before password initialization', async () => {
     const app = makeApp({ appState: {} });

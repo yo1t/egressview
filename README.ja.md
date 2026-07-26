@@ -275,6 +275,9 @@ npm run auth:reset -- --regenerate-api-token
 - login/logout/session失効/token変更/認証済み更新操作を、個人情報を伏せたappend-only監査logへ記録
 - Google OIDCはAuthorization Code + PKCE、state、nonce、JWKS署名、verified email、email/domain allowlistを検証
 
+> **警告**
+> EgressViewは本人確認を行いますが、権限の分離はまだ実装していません。allowlistを通過したアカウントは全員が管理者としてログインします。**domain** allowlistはそのdomainの全員に管理者権限を与えるため、role-based access controlが実装されるまでは個別指定の**email** allowlistを推奨します。domain allowlistが有効な間は起動時と設定画面で警告しますが、EgressViewが設定を自動で無効化することはありません。
+
 Internet公開前に[認証・reverse proxyガイド](docs/authentication.ja.md)を確認してください。
 
 ## HTTPS（オプション）

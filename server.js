@@ -51,6 +51,7 @@ const { createGoogleOidc } = require('./src/oidc-google');
 const { runDbBootstrap }    = require('./src/db-bootstrap');
 const { sourceRouterIdMap } = require('./src/router-id');
 const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
+const { domainAllowlistWarning } = require('./src/domain-allowlist-warning');
 const enrichmentQueue = require('./src/enrichment-queue');
 const beaconScanRunner = require('./src/beacon-scan-runner');
 const { configureHttpApp } = require('./src/http-app');
@@ -516,6 +517,16 @@ server.listen(PORT, HOST, () => {
     logger.error('[startup] Failed to load config; refusing to continue:', err.message);
     server.close(() => process.exit(1));
     return;
+  }
+  // P2-61 Phase 0: warn, but never disable an existing allowlist on startup.
+  const domainWarning = domainAllowlistWarning(appState.oidcConfig);
+  if (domainWarning) {
+    logger.warn(
+      `[auth] Google OIDC domain allowlist is active (${domainWarning.domains.join(', ')}). ` +
+      'Every user in these domains signs in as a full administrator because role-based access ' +
+      'control is not implemented yet. Prefer an explicit email allowlist until then — see ' +
+      'docs/authentication.md.'
+    );
   }
   const configuredDbPath = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB || '';
   const productionDbPath = configuredDbPath
