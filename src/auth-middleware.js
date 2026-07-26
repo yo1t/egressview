@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 const { ALL_PERMISSIONS, checkPermissions } = require('./permissions');
 const { ACCESS, classifyHttpRequest } = require('./permission-matrix');
-const { permissionsForRole } = require('./roles');
+const { permissionsForRole, principalFor } = require('./roles');
 
 // Credential kinds are kept separate on purpose: a browser session is never
 // usable as an API credential and a scoped API identity is never usable as a
@@ -75,6 +75,7 @@ function createAuthMiddleware({
       outcome,
       authMethod: req.authMethod,
       actor: req.actor,
+      principal: req.principal,
       requestId: req.id,
       clientIp: req.ip,
       httpMethod: req.method,
@@ -101,6 +102,13 @@ function createAuthMiddleware({
       req.authMethod = result.auth.authMethod || 'local';
       req.actor = `session:${result.auth.id}`;
     }
+    // actor names the credential instance; principal names the identity behind
+    // it and stays stable across sessions and transports.
+    req.principal = principalFor({
+      authMethod: req.authMethod,
+      subject: identity ? null : result.auth?.subjectHash,
+      apiIdentityId: identity?.id,
+    });
     req.permissions = Object.freeze([...resolvePermissions({
       auth: result.auth,
       source: result.source,

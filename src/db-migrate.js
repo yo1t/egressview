@@ -30,7 +30,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -376,6 +376,28 @@ const MIGRATIONS = [
           UPDATE sessions SET role = 'admin' WHERE authMethod = 'local';
           DELETE FROM sessions WHERE authMethod <> 'local';
         `);
+      }
+    },
+  },
+  {
+    version: 12,
+    description: 'stable audit principal identifier (P2-61 Phase 3)',
+    up(db) {
+      const hasAudit = db.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='audit_events'`
+      ).get();
+      if (!hasAudit) return;
+      const columns = new Set(
+        db.prepare('PRAGMA table_info(audit_events)').all().map(row => row.name)
+      );
+      if (!columns.has('principalHash')) {
+        // Additive and nullable. Existing rows keep actorHash unchanged and are
+        // deliberately NOT backfilled: the principal behind an old session id
+        // cannot be recovered, and guessing would put invented identities into
+        // an append-only audit trail.
+        db.exec('ALTER TABLE audit_events ADD COLUMN principalHash TEXT');
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_events_principal
+                   ON audit_events(principalHash, createdAt DESC)`);
       }
     },
   },

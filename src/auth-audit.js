@@ -57,6 +57,10 @@ function append(event = {}) {
     outcome: event.outcome === 'failure' ? 'failure' : 'success',
     authMethod: event.authMethod ? String(event.authMethod).slice(0, 20) : null,
     actorHash: event.actor ? sha256(event.actor) : null,
+    // Stable identity behind the credential. Hashed with the same key as
+    // actorHash so no raw identifier is stored. NULL when the request has no
+    // stable principal, rather than a guess.
+    principalHash: event.principal ? sha256(event.principal) : null,
     requestId: event.requestId ? String(event.requestId).slice(0, 100) : null,
     clientIpHash: event.clientIp ? sha256(event.clientIp) : null,
     httpMethod: event.httpMethod ? String(event.httpMethod).slice(0, 10) : null,
@@ -66,10 +70,10 @@ function append(event = {}) {
   try {
     db.prepare(`
       INSERT INTO audit_events
-        (eventId, createdAt, eventType, outcome, authMethod, actorHash,
+        (eventId, createdAt, eventType, outcome, authMethod, actorHash, principalHash,
          requestId, clientIpHash, httpMethod, path, metadata)
       VALUES
-        (@eventId, @createdAt, @eventType, @outcome, @authMethod, @actorHash,
+        (@eventId, @createdAt, @eventType, @outcome, @authMethod, @actorHash, @principalHash,
          @requestId, @clientIpHash, @httpMethod, @path, @metadata)
     `).run(row);
     return row.eventId;
@@ -84,13 +88,13 @@ function list({ limit = 100, before } = {}) {
   const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
   const rows = before
     ? db.prepare(`
-        SELECT eventId, createdAt, eventType, outcome, authMethod, actorHash,
+        SELECT eventId, createdAt, eventType, outcome, authMethod, actorHash, principalHash,
                requestId, clientIpHash, httpMethod, path, metadata
         FROM audit_events WHERE createdAt < ?
         ORDER BY createdAt DESC, eventId DESC LIMIT ?
       `).all(Number(before), safeLimit)
     : db.prepare(`
-        SELECT eventId, createdAt, eventType, outcome, authMethod, actorHash,
+        SELECT eventId, createdAt, eventType, outcome, authMethod, actorHash, principalHash,
                requestId, clientIpHash, httpMethod, path, metadata
         FROM audit_events ORDER BY createdAt DESC, eventId DESC LIMIT ?
       `).all(safeLimit);
