@@ -276,8 +276,11 @@ npm run auth:reset -- --regenerate-api-token
 - Login, logout, session revocation, token changes, and authenticated mutations are recorded in a pseudonymous append-only audit log.
 - Google OIDC uses Authorization Code + PKCE, state, nonce, JWKS signature validation, verified email, and an email/domain allowlist.
 
-> **Warning**
-> EgressView authenticates users but does not separate permissions yet. Every account that passes the allowlist signs in as a full administrator. A **domain** allowlist grants that to everyone in the domain, so prefer an explicit **email** allowlist until role-based access control ships. EgressView warns at startup and in Settings while a domain allowlist is active, and never disables it for you.
+Browser sessions use least-privilege roles derived on the server. The local
+administrator is always `admin`; a Google account matched by an explicit email
+entry is `operator`; and one matched only by a domain entry is read-only
+`viewer`. Operators can add device notes but cannot run paid AI analysis,
+change settings or credentials, restore backups, or manage authentication.
 
 See the [authentication and reverse-proxy guide](docs/authentication.md) before enabling internet access.
 
