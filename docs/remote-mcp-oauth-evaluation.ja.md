@@ -1,0 +1,141 @@
+# Remote MCP OAuth互換性評価
+
+最終確認: 2026-07-26
+
+本書はP2-60 PR 1の認可サーバー・MCPクライアント互換性評価を記録する。
+設計判断だけを対象とし、public MCP endpointの有効化やコード変更は行わない。
+
+AWS固有の判定は、Kiroに設定済みのAWS Documentation MCP serverでも二重確認した。
+このserverはAWS一次資料を検索するものであり、AWS accountへの接続やCognito
+requestの実行は行わない。
+
+## 結論
+
+厳格profileを完全に通過する認可サーバーはない。ただし、**単一resource限定の
+相互接続pilotではKeycloakを暫定第一候補**とする。
+
+- **Amazon Cognitoも厳格なMCP 2025-11-25構成では現時点で採用しない。**
+  実際のdiscovery documentに`code_challenge_methods_supported`がなかった。
+  MCP clientはこのfieldがない場合に認可を中止する必要がある。CognitoはRFC 8707
+  resource bindingとPKCE S256自体には対応するが、metadata要件を代替しない。
+- **Keycloakは厳格profileへ完全準拠しない。** 公式MCPガイド自身がRFC 8707
+  未対応としており、clientの`resource` parameterは処理しない。ただし初期版を
+  MCP resource 1つに限定し、全許可scopeを同じcanonical `aud`へmappingし、
+  EgressViewが完全一致しないtokenを拒否すれば、token用途制限というsecurity
+  goalは維持できる。RFC 8707準拠とは表記せず、暫定互換例外として扱う。
+- **authentikは根拠不足のため未選定とする。** 公式文書でOIDC discovery、PKCE、
+  refresh token rotation、失効は確認できるが、RFC 8707 resource indicator、
+  CIMD、DCRは確認できない。公式化または実測後に再評価する。
+
+Keycloakを単一canonical MCP resource、固定audience mapper、事前登録clientで
+開始し、KeycloakがRFC 8707へ正式対応した時点で標準方式へ移行する。Keycloakの
+CIMDはexperimentalのため初期登録方式に使わない。Cognitoの前にMCP互換
+authorization facadeを置く方式は別の複雑な設計となるため採用しない。
+
+## 必須profile
+
+EgressViewはMCP Authorization 2025-11-25を対象とする。
+
+- clientはcanonical `resource`をauthorization requestとtoken requestの両方へ送る。
+- 認可サーバーは`code_challenge_methods_supported`に`S256`を公開する。
+- Authorization Code + PKCEと完全一致する登録済みredirect URIを使う。
+- 事前登録、CIMD、DCRのいずれかのclient登録経路を持つ。
+- public clientのrefresh tokenをrotationし、運用可能な失効経路を持つ。
+- MCP serverはtoken passthroughを行わず、署名、issuer、期限、audience、
+  resource、scopeを検証する。
+
+暫定Keycloak profileは最初の要件に対する明示的な例外である。MCP resourceを
+1つに限定し、公開する全scopeが同じcanonical audienceを付与することを必須とする。
+RFC 8707正式対応まではmulti-resource構成を禁止する。
+
+本評価ではpublic DNS名を推測で決めない。実接続試験前に
+`https://mcp.example.net/mcp`のようなURIを1つ確定し、MCP endpoint、
+Protected Resource Metadataの`resource`、Cognito resource server identifier、
+authorization/token requestの`resource`、access tokenの`aud`で完全に一致させる。
+
+## 認可サーバー対応表
+
+| 要件 | Cognito | Keycloak | authentik |
+| --- | --- | --- | --- |
+| RFC 8707 resource binding | authorize側は公式確認済み、token endpointの文書化parameterに`resource`なし | 非対応と公式明記 | 公式な対応根拠なし、不可 |
+| canonical resourceへの`aud`束縛 | resource binding成功時は対応 | scope mapperによる回避のみ | custom claimはRFC 8707の代替にならない |
+| PKCE S256 | protocol対応はあるが実discoveryに`code_challenge_methods_supported`なし、厳格判定は失敗 | 対応・強制可能 | 対応、discovery fieldは実測保存 |
+| client登録 | 本設計では事前登録のみ | 事前登録、DCR、実験的CIMD | 事前登録は確認、DCR/CIMDは未確認 |
+| callback | 固定callbackを最大100件登録可能、wildcard挙動は公式文書になし | 完全一致redirectを設定可能 | 完全一致またはregex |
+| refresh / rotation | 対応、rotation grace periodは最大60秒 | 対応・設定可能 | `offline_access`必須、rotation設定可能 |
+| 失効endpoint | `/oauth2/revoke` | OIDC revoke endpoint | `/application/o/revoke/` |
+| P2-60判定 | **direct MCP discoveryでは不採用** | **単一resource pilotの暫定第一候補** | **根拠不足で未選定** |
+
+## MCPクライアント対応表
+
+公式client文書はOAuthの全wire parameterを公開していない。「実測必須」は、
+authorization/token両方の`resource`、PKCE S256、refresh、失効を認可traceで
+確認するまで、そのclient向けproviderを採用しないことを意味する。
+
+| Client | 公式確認できた機能 | 登録・callback | Cognito判定 |
+| --- | --- | --- | --- |
+| ChatGPT custom MCP app | OAuth、refresh token、`offline_access`広告の必要性 | 汎用のstatic client ID・callback仕様は公開文書で未確認 | **Cognito不採用:** AS metadataで先に失敗 |
+| Claude web / Desktop | OAuth、DCR、custom client ID/secret、token期限・refresh | `https://claude.ai/api/mcp/auth_callback`固定。将来用`https://claude.com/api/mcp/auth_callback`も登録 | **Cognito不採用:** AS metadataで先に失敗 |
+| Claude Code | browser OAuth、token安全保存、自動refresh | localhost callbackは公式guideにあるがstatic client設定は未確認 | **Cognito不採用:** AS metadataで先に失敗 |
+| Cursor | Streamable HTTP/SSE OAuth、static-client OAuth改善 | release間でcallback挙動が変化し、公開MCP referenceでは設定不可 | **Cognito不採用:** AS metadataで先に失敗 |
+| Kiro CLI | browser OAuth、事前登録public/confidential client、scope指定、refresh/再認証 | loopback URL、port、pathを完全指定可能 | **Cognito不採用:** AS metadataで先に失敗 |
+
+Cognitoはclient固有の挙動を評価する前にPKCE metadata gateで対象外となる。
+Keycloakは事前登録clientを使い、Kiro CLIを最初、Claudeを次に実測する。
+experimentalなCIMDは初期pilotで有効化しない。
+
+## Cognito実測結果
+
+既存の無関係なAmplify user poolは変更・流用しなかった。自己登録を無効化した
+tag付きP2-60専用poolを一時作成し、次の試験後に削除した。
+
+1. managed login domain、URL形式resource server、`network.read` /
+   `notes.write` scope、secretなしpublic clientを作成した。
+2. clientはAuthorization Codeだけ、完全一致localhost callback、access token
+   5分、refresh token rotation、rotation grace period 0秒に固定した。
+3. domain付き新規poolの公開OIDC discoveryにも
+   `code_challenge_methods_supported`と`registration_endpoint`がなかった。
+   managed login domain自身の`/.well-known/openid-configuration`は404で、
+   discoveryはregional issuer pathから提供された。
+4. 同じ無効authorization code requestは`resource`なし・ありの両方で
+   `invalid_grant`となった。無効refresh token + `resource`も`invalid_grant`だった。
+   Cognitoはgrant検証前にparameter自体を拒否しないが、このnegative testだけでは
+   正常発行tokenへのbindingを証明しない。
+5. implicit `response_type=token`は`unauthorized_client`で拒否され、
+   code-only client gateは成功した。
+6. test userと有効tokenは作成していない。managed login domainとuser poolを
+   削除し、最終listで検証poolが残っていないことを確認した。
+
+MCP Authorization 2025-11-25はPKCE metadata fieldがない場合、clientへ認可中止を
+要求する。その他のsecurity設定を正しく構成できてもCognito候補はこのgateで失敗する。
+
+AWS Documentation MCPでも、AWSが`resource`を`/oauth2/authorize`で説明する一方、
+`/oauth2/token`のparameter一覧には含めていないことを確認した。ただし、文書に
+ないことは未知parameterを拒否する証明にはならない。また、AWSはPKCEでS256だけを
+対応すると明記するが、MCP必須のdiscovery JSON fieldは明記していない。この2点は
+実測gateのままとする。
+
+Kiro設定内に見つかったaccount操作型AWS MCP entryはactiveではなく、proxy
+executableも存在しなかった。AWS Documentation MCPを一次資料調査に、認証済み
+AWS CLIを一時検証に使用した。有効tokenは発行せず、検証resourceは全て削除した。
+
+## 運用判断
+
+port 3010はまだ公開しない。P2-60 PR 2をproduction-readyと判断する前に、private
+Keycloak相互接続pilotを行う。Kiro CLI、次にClaudeでPKCE metadata、事前登録
+callback、固定audience mapping、scope分離、refresh rotation、失効、誤`aud`
+拒否を確認する。KeycloakがRFC 8707へ対応するまでは部分準拠として記録する。
+
+## 一次資料
+
+- [MCP Authorization 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
+- [Amazon Cognito resource binding](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-define-resource-servers.html)
+- [Amazon Cognito token endpoint](https://docs.aws.amazon.com/cognito/latest/developerguide/token-endpoint.html)
+- [Amazon Cognito revocation endpoint](https://docs.aws.amazon.com/cognito/latest/developerguide/revocation-endpoint.html)
+- [Keycloak MCP integration](https://www.keycloak.org/securing-apps/mcp-authz-server)
+- [authentik OAuth 2.0 provider](https://docs.goauthentik.io/add-secure-apps/providers/oauth2/)
+- [ChatGPT developer mode and MCP apps](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)
+- [Claude custom remote MCP connectors](https://support.claude.com/en/articles/11503834-build-custom-connectors-via-remote-mcp-servers)
+- [Claude custom connector setup](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
+- [Cursor MCP documentation](https://docs.cursor.com/context/model-context-protocol)
+- [Kiro CLI MCP OAuth configuration](https://kiro.dev/docs/cli/mcp/configuration/)
