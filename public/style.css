@@ -123,6 +123,13 @@
     margin-left: 6px; padding: 1px 4px; border: 1px solid var(--border);
     border-radius: 4px; color: var(--cyan); font-size: 8px;
   }
+  .settings-session-role {
+    margin-left: 6px; padding: 1px 4px; border: 1px solid var(--border);
+    border-radius: 4px; font-size: 8px; color: var(--muted);
+  }
+  .settings-session-role-admin { color: #fbbf24; }
+  .settings-session-role-operator { color: var(--cyan); }
+  .settings-session-role-unknown { color: var(--red, #ef4444); }
   .settings-session-seen, .settings-session-muted { color: var(--muted); font-size: 10px; }
   .settings-session-revoke-all { width: auto; padding: 5px 14px; margin-top: 8px; font-size: 10px; background: transparent; border: 1px solid var(--border); color: var(--muted); }
   .settings-security-actions { display: flex; gap: 8px; }
