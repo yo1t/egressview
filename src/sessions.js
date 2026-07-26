@@ -5,7 +5,7 @@
 
 const crypto   = require('crypto');
 const Database = require('better-sqlite3');
-const { ROLES, normalizeRole } = require('./roles');
+const { normalizeRole } = require('./roles');
 
 // Use the same env var as history.js so DEMO_MODE / EGRESSVIEW_DB_PATH override works for both
 const DB_PATH = process.env.EGRESSVIEW_DB_PATH
@@ -44,7 +44,7 @@ function initDb(dbPath) {
       csrfHash    TEXT,
       authMethod  TEXT    NOT NULL DEFAULT 'local',
       subjectHash TEXT,
-      role        TEXT    NOT NULL DEFAULT 'admin'
+      role        TEXT    NOT NULL DEFAULT 'viewer'
     );
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expiresAt);
   `);
@@ -64,7 +64,7 @@ function closeDb() {
 /**
  * Create a session and return the RAW token (only time it is available).
  * @param {string} [deviceLabel] e.g. "Safari on iPhone"
- * @param {{ authMethod?: string, subject?: string }} [options]
+ * @param {{ authMethod?: string, subject?: string, role: string }} options
  * @returns {{ token: string, csrfToken: string, id: number, expiresAt: number }|null}
  */
 function createSession(deviceLabel, options = {}) {
@@ -78,7 +78,7 @@ function createSession(deviceLabel, options = {}) {
   // The role is decided by the caller from how authentication succeeded. A
   // value this build does not define is refused rather than stored, so an
   // unreadable role can never end up in the table.
-  const role = normalizeRole(options.role ?? ROLES.ADMIN);
+  const role = normalizeRole(options.role);
   if (!role) throw new Error(`Unknown session role: ${options.role}`);
   const info = db.prepare(`
     INSERT INTO sessions

@@ -367,10 +367,15 @@ const MIGRATIONS = [
         db.prepare('PRAGMA table_info(sessions)').all().map(row => row.name)
       );
       if (!columns.has('role')) {
-        // Existing sessions predate roles and belong to the local
-        // administrator, so they keep full access. Narrowing them here would
-        // sign out the only operator mid-upgrade.
-        db.exec(`ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'`);
+        // Old rows can include both local and OIDC sessions. Only local
+        // sessions have a role we can determine without guessing. Existing
+        // OIDC/unknown sessions must sign in again so the verified allowlist
+        // match can assign their least-privilege role.
+        db.exec(`
+          ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'viewer';
+          UPDATE sessions SET role = 'admin' WHERE authMethod = 'local';
+          DELETE FROM sessions WHERE authMethod <> 'local';
+        `);
       }
     },
   },
