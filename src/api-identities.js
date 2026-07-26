@@ -26,6 +26,7 @@ const DB_PATH = path.join(__dirname, '..', '.egressview.db');
 
 const TOKEN_BYTES = 32;
 const TOKEN_PREFIX = 'egv_';
+const TOKEN_PATTERN = /^egv_[0-9a-f]{64}$/;
 const MAX_ACTIVE_IDENTITIES = 25;
 const MAX_TTL_MS = 365 * 24 * 60 * 60 * 1000; // one year
 const MIN_TTL_MS = 60 * 1000;
@@ -50,6 +51,11 @@ function initDb(dbPath) {
 
 function closeDb() {
   if (db) { try { db.close(); } catch {} db = null; }
+}
+
+function reopen(dbPath) {
+  closeDb();
+  initDb(dbPath || _lastDbPath);
 }
 
 function serializePermissions(permissions) {
@@ -174,7 +180,7 @@ function revokeIdentity(id, options = {}) {
  * unexpired, unrevoked record with a permission list this build understands.
  */
 function verifyToken(token, options = {}) {
-  if (!db || typeof token !== 'string' || !token) return null;
+  if (!db || typeof token !== 'string' || !TOKEN_PATTERN.test(token)) return null;
   const now = Number(options.now) || Date.now();
   const row = db.prepare('SELECT * FROM api_identities WHERE tokenHash = ?').get(sha256(token));
   if (!row) return null;
@@ -243,6 +249,7 @@ module.exports = {
   TOKEN_PREFIX,
   initDb,
   closeDb,
+  reopen,
   createIdentity,
   listIdentities,
   revokeIdentity,
