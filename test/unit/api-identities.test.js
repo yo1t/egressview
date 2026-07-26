@@ -215,6 +215,34 @@ describe('API identity credential separation', () => {
     assert.deepEqual(auth.auth.identity.permissions, ['network.read']);
   });
 
+  it('enforces auth.admin on API identity management routes', () => {
+    function response() {
+      return {
+        statusCode: 200,
+        body: null,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; },
+        on() {},
+      };
+    }
+
+    const readOnly = create({ permissions: [PERMISSIONS.NETWORK_READ] });
+    const denied = response();
+    makeBoundary().enforceApiPermissions({
+      ...request({ 'X-Admin-Token': readOnly.token }),
+      originalUrl: '/api/auth/api-identities',
+    }, denied, () => assert.fail('read-only identity must not manage credentials'));
+    assert.equal(denied.statusCode, 403);
+
+    const administrator = create({ permissions: [PERMISSIONS.AUTH_ADMIN] });
+    let allowed = false;
+    makeBoundary().enforceApiPermissions({
+      ...request({ 'X-Admin-Token': administrator.token }),
+      originalUrl: '/api/auth/api-identities',
+    }, response(), () => { allowed = true; });
+    assert.equal(allowed, true);
+  });
+
   it('refuses to accept an API identity as a browser session cookie', () => {
     const { token } = create();
     assert.equal(makeBoundary().authenticateRequest(request({}, token)), null);

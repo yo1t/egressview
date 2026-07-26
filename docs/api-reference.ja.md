@@ -6,7 +6,9 @@ EgressViewは、Web UIとローカル自動化向けに管理APIを提供しま�
 
 ## ベースURLと認証
 
-Web UIをサブパスで公開している場合も、APIは常に`/api`配下です。認証必須requestはautomation用`X-Admin-Token`またはHttpOnly browser session cookieを受け付けます。cookie認証による更新requestでは対応する`X-CSRF-Token`も必要です。
+Web UIをサブパスで公開している場合も、APIは常に`/api`配下です。認証必須requestは従来の`X-Admin-Token`、同じheaderへ指定するscoped API identity token、またはHttpOnly browser session cookieを受け付けます。cookie認証による更新requestでは対応する`X-CSRF-Token`も必要です。
+
+scoped API identityは`GET` / `POST /api/auth/api-identities`と`POST /api/auth/api-identities/:id/revoke`で管理し、いずれも`auth.admin`が必要です。作成時はlabel、空でないpermission一覧、1分以上1年以下の`expiresInMs`を指定します。平文の`egv_...` tokenを返すのは`201`作成responseだけで、DBにはSHA-256 hashだけを保存します。identity管理responseには`Cache-Control: no-store`を付けます。
 
 ```bash
 export EGRESSVIEW_URL='https://egressview.example.net'
@@ -151,7 +153,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 
 ## Endpoint一覧
 
-実装済みHTTP endpoint 88本の全一覧です。**公開**以外は`X-Admin-Token`またはbrowserのHttpOnly session cookieが必要です。cookie認証による更新要求では`X-CSRF-Token`も必要です。
+実装済みHTTP endpoint 91本の全一覧です。**公開**以外は従来またはscopedの`X-Admin-Token` credential、もしくはbrowserのHttpOnly session cookieが必要です。cookie認証による更新要求では`X-CSRF-Token`も必要です。
 
 | 分類 | Methodとpath | Access |
 |---|---|---|

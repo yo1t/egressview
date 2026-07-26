@@ -23,6 +23,11 @@ module.exports = function apiIdentityRoutes(ctx) {
   const { requireAdmin, apiIdentities, authAudit } = ctx;
   const router = Router();
 
+  router.use('/auth/api-identities', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
+
   function audit(req, eventType, outcome, metadata) {
     authAudit.append({
       eventType,
