@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const { Router } = require('express');
 const { z } = require('zod');
 const { parseRequest } = require('../http-validation');
-const { securityConfigWarnings } = require('../domain-allowlist-warning');
+const { roleForOidcMatch } = require('../roles');
 
 const configSchema = z.object({
   enabled: z.boolean(),
@@ -63,7 +63,7 @@ module.exports = function authSecurityRoutes(ctx) {
       },
       sessionTtlDays: Number(process.env.EGRESSVIEW_SESSION_TTL_DAYS) || 30,
       trustedProxyConfigured: Boolean(process.env.EGRESSVIEW_TRUST_PROXY),
-      warnings: securityConfigWarnings(config),
+      warnings: [],
     });
   });
 
@@ -104,7 +104,7 @@ module.exports = function authSecurityRoutes(ctx) {
     res.json({
       success: true,
       clientSecretSet: Boolean(next.clientSecret),
-      warnings: securityConfigWarnings(next),
+      warnings: [],
     });
   });
 
@@ -155,9 +155,15 @@ module.exports = function authSecurityRoutes(ctx) {
         subpath,
       }));
       const identity = await oidc.complete(appState.oidcConfig, req.query);
+      // Derived from the server-side allowlist comparison, never from a claim
+      // in the token. An explicit email entry is an operator, while a bulk
+      // domain grant is read-only.
+      const role = roleForOidcMatch(identity.allowlistMatch);
+      if (!role) throw new Error('Google account is not in the allowlist');
       const session = sessions.createSession('Google OIDC', {
         authMethod: 'oidc',
         subject: identity.subject,
+        role,
       });
       if (!session) throw new Error('Session creation failed');
       authCookies.setSessionCookies(req, res, session, subpath);

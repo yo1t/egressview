@@ -123,6 +123,13 @@
     margin-left: 6px; padding: 1px 4px; border: 1px solid var(--border);
     border-radius: 4px; color: var(--cyan); font-size: 8px;
   }
+  .settings-session-role {
+    margin-left: 6px; padding: 1px 4px; border: 1px solid var(--border);
+    border-radius: 4px; font-size: 8px; color: var(--muted);
+  }
+  .settings-session-role-admin { color: #fbbf24; }
+  .settings-session-role-operator { color: var(--cyan); }
+  .settings-session-role-unknown { color: var(--red, #ef4444); }
   .settings-session-seen, .settings-session-muted { color: var(--muted); font-size: 10px; }
   .settings-session-revoke-all { width: auto; padding: 5px 14px; margin-top: 8px; font-size: 10px; background: transparent; border: 1px solid var(--border); color: var(--muted); }
   .settings-security-actions { display: flex; gap: 8px; }
@@ -185,7 +192,6 @@
   .settings-field-hint { font-size: 9px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
   .ai-model-pricing-status.is-priced { color: var(--green); }
   .ai-model-pricing-status.is-unpriced { color: #fbbf24; }
-  .security-domain-warning { color: #fbbf24; }
   .settings-subsection-title-wide { margin-bottom: 12px; }
   .slack-small-button { padding: 5px 12px; width: auto; }
   .slack-verify-button { margin-top: 6px; font-size: 10px; }

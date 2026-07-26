@@ -33,6 +33,7 @@ const { McpServer }                      = require('@modelcontextprotocol/sdk/se
 const { StdioServerTransport }           = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { StreamableHTTPServerTransport }  = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const { z } = require('zod');
+const { permissionForMcpTool } = require('./src/permission-matrix');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -106,6 +107,13 @@ function ok(obj)     { return { content: [{ type: 'text', text: JSON.stringify(o
 
 // ─── Tool registration (shared between stdio and HTTP transports) ─────────────
 
+function registerTool(server, name, ...args) {
+  if (!permissionForMcpTool(name)) {
+    throw new Error(`MCP tool is missing a permission classification: ${name}`);
+  }
+  server.tool(name, ...args);
+}
+
 function buildMcpServer() {
   const server = new McpServer({
     name: 'egressview',
@@ -113,7 +121,7 @@ function buildMcpServer() {
   });
 
   // ① Threat summary
-  server.tool(
+  registerTool(server,
     'get_threat_summary',
     'Counts sessions classified as safe / warn / danger for the given time period.',
     { period: PERIOD_ENUM.default('24h').describe('Time window') },
@@ -125,7 +133,7 @@ function buildMcpServer() {
   );
 
   // ② Traffic summary
-  server.tool(
+  registerTool(server,
     'get_traffic_summary',
     'Returns total session count, unique destination count, and unique device count for the period.',
     { period: PERIOD_ENUM.default('24h').describe('Time window') },
@@ -142,7 +150,7 @@ function buildMcpServer() {
   );
 
   // ③ Top destinations
-  server.tool(
+  registerTool(server,
     'get_top_destinations',
     'Returns the most frequently contacted destinations, ranked by session count, with country, org, and threat level.',
     {
@@ -167,7 +175,7 @@ function buildMcpServer() {
   );
 
   // ④ Device traffic
-  server.tool(
+  registerTool(server,
     'get_device_traffic',
     'Per-device traffic. Omit src to list all devices. Pass src IP to get that device\'s top destinations.',
     {
@@ -202,7 +210,7 @@ function buildMcpServer() {
   );
 
   // ⑤ New nodes
-  server.tool(
+  registerTool(server,
     'get_new_nodes',
     'Lists devices and destinations that were seen for the very first time during the period.',
     { period: PERIOD_ENUM.default('24h') },
@@ -232,7 +240,7 @@ function buildMcpServer() {
   );
 
   // ⑥ Threat connections
-  server.tool(
+  registerTool(server,
     'get_threat_connections',
     'Lists destinations flagged as threats. confidence: "low"=warn, "high"=danger, "all"=both.',
     {
@@ -248,7 +256,7 @@ function buildMcpServer() {
   );
 
   // ⑦ Alerts
-  server.tool(
+  registerTool(server,
     'get_alerts',
     'Returns recent detection alerts from the notification log (threats, new devices, beacons).',
     {
@@ -272,7 +280,7 @@ function buildMcpServer() {
   );
 
   // ⑧ Devices
-  server.tool(
+  registerTool(server,
     'get_devices',
     'Lists all known devices with MAC address, vendor, names, status, and last-seen time.',
     {
@@ -296,7 +304,7 @@ function buildMcpServer() {
   );
 
   // ⑨ Query connections
-  server.tool(
+  registerTool(server,
     'query_connections',
     'Searches the connection log with optional src/dst filters. Returns matching rows with threat assessment.',
     {
@@ -329,7 +337,7 @@ function buildMcpServer() {
   );
 
   // ⑩ Get device notes
-  server.tool(
+  registerTool(server,
     'get_device_notes',
     'Returns memo notes attached to devices. Omit src to list all devices that have a note. Pass a source IP to get that device\'s note.',
     {
@@ -366,7 +374,7 @@ function buildMcpServer() {
   );
 
   // ⑪ Set device note
-  server.tool(
+  registerTool(server,
     'set_device_note',
     'Sets or updates the memo note for a device identified by its source IP address. Pass an empty string to delete the note.',
     {

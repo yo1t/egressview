@@ -6,16 +6,20 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const authCookies = require('../../src/auth-cookies');
 const { createAuthMiddleware } = require('../../src/auth-middleware');
+const { PERMISSIONS } = require('../../src/permissions');
 
 function createFixture({
   adminToken = crypto.randomBytes(24).toString('hex'),
   sessionToken = 'session-token',
   csrfToken = 'csrf-token',
+  resolvePermissions,
 } = {}) {
   const session = {
     id: 42,
     authMethod: 'local',
     deviceLabel: 'My Mac',
+    // Sessions carry a role from P2-61 Phase 3; the local administrator is admin.
+    role: 'admin',
   };
   const events = [];
   const sessions = {
@@ -27,6 +31,7 @@ function createFixture({
     sessions,
     authCookies,
     authAudit: { append: event => events.push(event) },
+    resolvePermissions,
   });
   return { adminToken, csrfToken, events, middleware, session, sessionToken };
 }
@@ -36,6 +41,7 @@ function mockReq({
   cookie = '',
   csrf = '',
   method = 'GET',
+  originalUrl = '/api/settings',
 } = {}) {
   const headers = {};
   if (token) headers['x-admin-token'] = token;
@@ -46,7 +52,7 @@ function mockReq({
     id: 'request-1',
     ip: '192.0.2.10',
     method,
-    originalUrl: '/api/settings',
+    originalUrl,
     get(name) {
       return this.headers[name.toLowerCase()] || '';
     },
@@ -144,5 +150,80 @@ describe('requireAdmin middleware', () => {
     assert.equal(events[0].eventType, 'api_mutation');
     assert.equal(events[0].outcome, 'success');
     assert.deepEqual(events[0].metadata, { statusCode: 200 });
+  });
+});
+
+describe('API permission boundary', () => {
+  it('allows explicitly public routes without initialized authentication', () => {
+    const { middleware } = createFixture({ adminToken: '' });
+    let nextCalled = false;
+    middleware.enforceApiPermissions(
+      mockReq({ method: 'GET', originalUrl: '/api/auth/status' }),
+      mockRes(),
+      () => { nextCalled = true; }
+    );
+    assert.equal(nextCalled, true);
+  });
+
+  it('rejects unclassified API routes before they reach Express routers', () => {
+    const { adminToken, middleware } = createFixture();
+    const res = mockRes();
+    middleware.enforceApiPermissions(
+      mockReq({ token: adminToken, method: 'GET', originalUrl: '/api/future-route' }),
+      res,
+      () => assert.fail('next must not run')
+    );
+    assert.equal(res.statusCode, 404);
+    assert.deepEqual(res.body, { error: 'Not found' });
+  });
+
+  it('allows only the permissions assigned to the authenticated identity', () => {
+    const fixture = createFixture({
+      resolvePermissions: () => [PERMISSIONS.NETWORK_READ],
+    });
+    const readReq = mockReq({
+      token: fixture.adminToken,
+      method: 'GET',
+      originalUrl: '/api/connections?limit=10',
+    });
+    let nextCalled = false;
+    fixture.middleware.enforceApiPermissions(readReq, mockRes(), () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
+    assert.deepEqual(readReq.permissions, [PERMISSIONS.NETWORK_READ]);
+
+    const writeReq = mockReq({
+      token: fixture.adminToken,
+      method: 'POST',
+      originalUrl: '/api/notes',
+    });
+    const res = mockRes();
+    fixture.middleware.enforceApiPermissions(
+      writeReq,
+      res,
+      () => assert.fail('next must not run')
+    );
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(res.body, { error: 'Permission denied' });
+    assert.equal(fixture.events.at(-1).eventType, 'permission_denied');
+    assert.deepEqual(fixture.events.at(-1).metadata.missingPermissions, [
+      PERMISSIONS.NOTES_WRITE,
+    ]);
+  });
+
+  it('does not repeat authentication and mutation auditing in route middleware', () => {
+    const { adminToken, events, middleware } = createFixture();
+    const req = mockReq({
+      token: adminToken,
+      method: 'POST',
+      originalUrl: '/api/notes',
+    });
+    const res = mockRes();
+    let nextCalls = 0;
+    middleware.enforceApiPermissions(req, res, () => {
+      middleware.requireAdmin(req, res, () => { nextCalls += 1; });
+    });
+    assert.equal(nextCalls, 1);
+    res.emit('finish');
+    assert.equal(events.filter(event => event.eventType === 'api_mutation').length, 1);
   });
 });

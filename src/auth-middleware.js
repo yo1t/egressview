@@ -1,8 +1,37 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { ALL_PERMISSIONS, checkPermissions } = require('./permissions');
+const { ACCESS, classifyHttpRequest } = require('./permission-matrix');
+const { permissionsForRole, principalFor } = require('./roles');
 
-function createAuthMiddleware({ appState, sessions, authCookies, authAudit }) {
+// Credential kinds are kept separate on purpose: a browser session is never
+// usable as an API credential and a scoped API identity is never usable as a
+// browser session. Only the permission decision is shared between them.
+function isApiIdentity(auth) {
+  return Boolean(auth) && typeof auth === 'object' && auth.kind === 'api-identity';
+}
+
+function defaultResolvePermissions({ auth }) {
+  // Scoped identities carry exactly what was granted at issue time.
+  if (isApiIdentity(auth)) return auth.identity.permissions;
+  // The legacy admin token is the break-glass credential and stays full-access
+  // during the expand phase.
+  if (auth === 'admin') return ALL_PERMISSIONS;
+  // Browser sessions carry a role assigned at login. A session row with no
+  // role, or a role this build cannot interpret, grants nothing instead of
+  // falling back to a broader role.
+  return permissionsForRole(auth?.role);
+}
+
+function createAuthMiddleware({
+  appState,
+  sessions,
+  authCookies,
+  authAudit,
+  apiIdentities = null,
+  resolvePermissions = defaultResolvePermissions,
+}) {
   function authenticate(provided) {
     if (!provided) return null;
     const session = sessions.verifySession(provided);
@@ -14,6 +43,12 @@ function createAuthMiddleware({ appState, sessions, authCookies, authAudit }) {
           crypto.timingSafeEqual(candidate, stored)) {
         return 'admin';
       }
+    }
+    // Scoped API identities are verified last so an existing deployment keeps
+    // its current behaviour unchanged until identities are actually issued.
+    if (apiIdentities) {
+      const identity = apiIdentities.verifyToken(provided);
+      if (identity) return { kind: 'api-identity', identity };
     }
     return null;
   }
@@ -27,7 +62,9 @@ function createAuthMiddleware({ appState, sessions, authCookies, authAudit }) {
     const cookieToken = authCookies.sessionToken(req);
     if (cookieToken) {
       const auth = authenticate(cookieToken);
-      if (auth && auth !== 'admin') return { auth, source: 'cookie' };
+      // Cookies carry browser sessions only. Refusing the other kinds here
+      // stops an API credential from being replayed as a browser session.
+      if (auth && auth !== 'admin' && !isApiIdentity(auth)) return { auth, source: 'cookie' };
     }
     return null;
   }
@@ -38,6 +75,7 @@ function createAuthMiddleware({ appState, sessions, authCookies, authAudit }) {
       outcome,
       authMethod: req.authMethod,
       actor: req.actor,
+      principal: req.principal,
       requestId: req.id,
       clientIp: req.ip,
       httpMethod: req.method,
@@ -46,14 +84,44 @@ function createAuthMiddleware({ appState, sessions, authCookies, authAudit }) {
     });
   }
 
-  function requireAdmin(req, res, next) {
+  function authorizeRequest(req, res, next, requiredPermissions) {
     if (!appState.adminToken) return res.status(503).json({ error: '認証未初期化' });
     const result = authenticateRequest(req);
     if (!result) return res.status(401).json({ error: '認証エラー' });
-    req.session = result.auth === 'admin' ? null : result.auth;
+    const identity = isApiIdentity(result.auth) ? result.auth.identity : null;
+    req.session = result.auth === 'admin' || identity ? null : result.auth;
+    req.apiIdentity = identity;
     req.authSource = result.source;
-    req.authMethod = result.auth === 'admin' ? 'api-token' : result.auth.authMethod || 'local';
-    req.actor = result.auth === 'admin' ? 'admin-api-token' : `session:${result.auth.id}`;
+    if (identity) {
+      req.authMethod = 'api-identity';
+      req.actor = `api:${identity.id}`;
+    } else if (result.auth === 'admin') {
+      req.authMethod = 'api-token';
+      req.actor = 'admin-api-token';
+    } else {
+      req.authMethod = result.auth.authMethod || 'local';
+      req.actor = `session:${result.auth.id}`;
+    }
+    // actor names the credential instance; principal names the identity behind
+    // it and stays stable across sessions and transports.
+    req.principal = principalFor({
+      authMethod: req.authMethod,
+      subject: identity ? null : result.auth?.subjectHash,
+      apiIdentityId: identity?.id,
+    });
+    req.permissions = Object.freeze([...resolvePermissions({
+      auth: result.auth,
+      source: result.source,
+      req,
+    })]);
+    const permissionCheck = checkPermissions(req.permissions, requiredPermissions);
+    if (!permissionCheck.allowed) {
+      appendAudit(req, 'permission_denied', 'failure', {
+        requiredPermissions,
+        missingPermissions: permissionCheck.missing,
+      });
+      return res.status(403).json({ error: 'Permission denied' });
+    }
     if (!authCookies.verifyCookieCsrf(req, sessions)) {
       appendAudit(req, 'csrf_rejected', 'failure');
       return res.status(403).json({ error: 'CSRF validation failed' });
@@ -68,10 +136,35 @@ function createAuthMiddleware({ appState, sessions, authCookies, authAudit }) {
         );
       });
     }
+    req.permissionAuthorized = true;
     next();
   }
 
-  return { authenticate, authenticateRequest, requireAdmin };
+  function enforceApiPermissions(req, res, next) {
+    const policy = classifyHttpRequest(req.method, req.originalUrl);
+    if (!policy) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    req.permissionPolicy = policy;
+    if (policy.access === ACCESS.PUBLIC) return next();
+    return authorizeRequest(req, res, next, policy.permissions);
+  }
+
+  function requireAdmin(req, res, next) {
+    if (req.permissionAuthorized) return next();
+    const policy = classifyHttpRequest(req.method, req.originalUrl);
+    const requiredPermissions = policy && policy.access !== ACCESS.PUBLIC
+      ? policy.permissions
+      : ALL_PERMISSIONS;
+    return authorizeRequest(req, res, next, requiredPermissions);
+  }
+
+  return {
+    authenticate,
+    authenticateRequest,
+    enforceApiPermissions,
+    requireAdmin,
+  };
 }
 
 module.exports = { createAuthMiddleware };

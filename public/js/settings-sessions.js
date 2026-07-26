@@ -3,7 +3,21 @@ import { _BASE, fmtTs } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 
 export function initSessionSettings(showStatus) {
-  function textElement(tag, text, className = '') {
+  // Roles are assigned by the server. Only the roles this build knows get a
+// translated label; anything else is shown verbatim so an unexpected value is
+// visible rather than disguised as a familiar one.
+const KNOWN_ROLES = ['viewer', 'operator', 'admin'];
+
+function roleLabel(role) {
+  return KNOWN_ROLES.includes(role) ? t(`settings.sessions.role.${role}`) : String(role || '—');
+}
+
+function roleClass(role) {
+  const suffix = KNOWN_ROLES.includes(role) ? role : 'unknown';
+  return `settings-session-role settings-session-role-${suffix}`;
+}
+
+function textElement(tag, text, className = '') {
     const element = document.createElement(tag);
     if (className) element.className = className;
     element.textContent = text == null ? '' : String(text);
@@ -26,6 +40,7 @@ export function initSessionSettings(showStatus) {
           session.authMethod === 'oidc' ? 'OIDC' : 'LOCAL',
           'settings-session-method'
         ));
+        label.appendChild(textElement('span', roleLabel(session.role), roleClass(session.role)));
         if (session.current) label.appendChild(textElement('span', `● ${t('settings.sessions.current')}`, 'settings-session-current'));
         row.append(label, textElement('span', fmtTs(session.lastSeenAt), 'settings-session-seen'));
         if (!session.current) {
