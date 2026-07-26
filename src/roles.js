@@ -80,6 +80,26 @@ function roleForOidcMatch(match) {
   return null; // no match means no session at all
 }
 
+/**
+ * Canonical, stable identifier for the person or service behind a request.
+ *
+ * Distinct from the audit `actor`, which names the credential instance
+ * (`session:12`, `api:<uuid>`) and changes every time someone signs in again.
+ * The principal stays the same across sessions and transports, so browser and
+ * MCP activity by the same identity can be correlated.
+ *
+ * Returns null when no stable identity exists, so the caller stores NULL
+ * rather than inventing one.
+ */
+function principalFor({ authMethod, subject, apiIdentityId } = {}) {
+  if (apiIdentityId) return `api:${apiIdentityId}`;
+  if (authMethod === 'oidc') {
+    return subject ? `federated:${subject}` : null;
+  }
+  if (authMethod === 'local' || authMethod === 'api-token') return 'local:admin';
+  return null;
+}
+
 module.exports = {
   ROLES,
   ALL_ROLES,
@@ -88,4 +108,5 @@ module.exports = {
   permissionsForRole,
   normalizeRole,
   roleForOidcMatch,
+  principalFor,
 };
