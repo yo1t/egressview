@@ -170,6 +170,9 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | 認証 | `GET /api/auth/security-config` | 認証必須 |
 | 認証 | `POST /api/auth/security-config` | 認証必須 |
 | 認証 | `POST /api/auth/oidc/test` | 認証必須 |
+| 認証 | `GET /api/auth/api-identities` | 認証必須 |
+| 認証 | `POST /api/auth/api-identities` | 認証必須 |
+| 認証 | `POST /api/auth/api-identities/:id/revoke` | 認証必須 |
 | 認証 | `GET /api/auth/audit-events` | 認証必須 |
 | Router初期設定 | `POST /api/nonce` | 認証必須 |
 | Router初期設定 | `POST /api/yamaha/detect` | 認証必須 |

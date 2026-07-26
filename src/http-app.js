@@ -7,6 +7,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const authRoutes = require('./routes/auth');
+const apiIdentityRoutes = require('./routes/api-identities');
 const notesRoutes = require('./routes/notes');
 const connectionsRoutes = require('./routes/connections');
 const devicesRoutes = require('./routes/devices');
@@ -170,6 +171,7 @@ function configureHttpApp(app, {
   app.use(express.static(path.join(appRoot, 'public'), staticOptions));
 
   app.use('/api', authRoutes(routeCtx));
+  if (routeCtx.apiIdentities) app.use('/api', apiIdentityRoutes(routeCtx));
   if (routeCtx.routerManager) app.use('/api', routerRoutes(routeCtx));
   app.use('/api', notesRoutes(routeCtx));
   app.use('/api', connectionsRoutes(routeCtx));

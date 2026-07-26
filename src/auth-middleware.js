@@ -4,12 +4,28 @@ const crypto = require('node:crypto');
 const { ALL_PERMISSIONS, checkPermissions } = require('./permissions');
 const { ACCESS, classifyHttpRequest } = require('./permission-matrix');
 
+// Credential kinds are kept separate on purpose: a browser session is never
+// usable as an API credential and a scoped API identity is never usable as a
+// browser session. Only the permission decision is shared between them.
+function isApiIdentity(auth) {
+  return Boolean(auth) && typeof auth === 'object' && auth.kind === 'api-identity';
+}
+
+function defaultResolvePermissions({ auth }) {
+  // Scoped identities carry exactly what was granted at issue time.
+  if (isApiIdentity(auth)) return auth.identity.permissions;
+  // Browser sessions and the legacy admin token stay full-access during the
+  // expand phase; Phase 3 narrows browser sessions by role.
+  return ALL_PERMISSIONS;
+}
+
 function createAuthMiddleware({
   appState,
   sessions,
   authCookies,
   authAudit,
-  resolvePermissions = () => ALL_PERMISSIONS,
+  apiIdentities = null,
+  resolvePermissions = defaultResolvePermissions,
 }) {
   function authenticate(provided) {
     if (!provided) return null;
@@ -23,6 +39,12 @@ function createAuthMiddleware({
         return 'admin';
       }
     }
+    // Scoped API identities are verified last so an existing deployment keeps
+    // its current behaviour unchanged until identities are actually issued.
+    if (apiIdentities) {
+      const identity = apiIdentities.verifyToken(provided);
+      if (identity) return { kind: 'api-identity', identity };
+    }
     return null;
   }
 
@@ -35,7 +57,9 @@ function createAuthMiddleware({
     const cookieToken = authCookies.sessionToken(req);
     if (cookieToken) {
       const auth = authenticate(cookieToken);
-      if (auth && auth !== 'admin') return { auth, source: 'cookie' };
+      // Cookies carry browser sessions only. Refusing the other kinds here
+      // stops an API credential from being replayed as a browser session.
+      if (auth && auth !== 'admin' && !isApiIdentity(auth)) return { auth, source: 'cookie' };
     }
     return null;
   }
@@ -58,10 +82,20 @@ function createAuthMiddleware({
     if (!appState.adminToken) return res.status(503).json({ error: '認証未初期化' });
     const result = authenticateRequest(req);
     if (!result) return res.status(401).json({ error: '認証エラー' });
-    req.session = result.auth === 'admin' ? null : result.auth;
+    const identity = isApiIdentity(result.auth) ? result.auth.identity : null;
+    req.session = result.auth === 'admin' || identity ? null : result.auth;
+    req.apiIdentity = identity;
     req.authSource = result.source;
-    req.authMethod = result.auth === 'admin' ? 'api-token' : result.auth.authMethod || 'local';
-    req.actor = result.auth === 'admin' ? 'admin-api-token' : `session:${result.auth.id}`;
+    if (identity) {
+      req.authMethod = 'api-identity';
+      req.actor = `api:${identity.id}`;
+    } else if (result.auth === 'admin') {
+      req.authMethod = 'api-token';
+      req.actor = 'admin-api-token';
+    } else {
+      req.authMethod = result.auth.authMethod || 'local';
+      req.actor = `session:${result.auth.id}`;
+    }
     req.permissions = Object.freeze([...resolvePermissions({
       auth: result.auth,
       source: result.source,

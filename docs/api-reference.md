@@ -170,6 +170,9 @@ All 88 implemented HTTP endpoints are listed below. **Public** means no token is
 | Authentication | `GET /api/auth/security-config` | Protected |
 | Authentication | `POST /api/auth/security-config` | Protected |
 | Authentication | `POST /api/auth/oidc/test` | Protected |
+| Authentication | `GET /api/auth/api-identities` | Protected |
+| Authentication | `POST /api/auth/api-identities` | Protected |
+| Authentication | `POST /api/auth/api-identities/:id/revoke` | Protected |
 | Authentication | `GET /api/auth/audit-events` | Protected |
 | Router setup | `POST /api/nonce` | Protected |
 | Router setup | `POST /api/yamaha/detect` | Protected |
