@@ -168,6 +168,43 @@ describe('db-migrate: in-memory database', () => {
   });
 });
 
+describe('db-migrate: v11 browser roles', () => {
+  it('keeps local sessions as admin and revokes OIDC or unknown sessions', () => {
+    const db = openDb(':memory:');
+    db.exec(`
+      CREATE TABLE sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tokenHash TEXT NOT NULL UNIQUE,
+        deviceLabel TEXT,
+        createdAt INTEGER NOT NULL,
+        lastSeenAt INTEGER NOT NULL,
+        expiresAt INTEGER NOT NULL,
+        csrfHash TEXT,
+        authMethod TEXT NOT NULL DEFAULT 'local',
+        subjectHash TEXT
+      );
+      INSERT INTO sessions
+        (tokenHash, createdAt, lastSeenAt, expiresAt, authMethod)
+      VALUES
+        ('local-token', 1, 1, 9999999999999, 'local'),
+        ('oidc-token', 1, 1, 9999999999999, 'oidc'),
+        ('future-token', 1, 1, 9999999999999, 'future-auth');
+    `);
+    db.pragma('user_version = 10');
+
+    runMigrations(db, ':memory:');
+
+    assert.deepEqual(
+      db.prepare('SELECT tokenHash, authMethod, role FROM sessions').all(),
+      [{ tokenHash: 'local-token', authMethod: 'local', role: 'admin' }]
+    );
+    const roleColumn = db.prepare('PRAGMA table_info(sessions)').all()
+      .find(column => column.name === 'role');
+    assert.equal(roleColumn.dflt_value, "'viewer'");
+    db.close();
+  });
+});
+
 // ─── P2-30 v4/v5: expand observations, then remove source ─────────────────────
 
 describe('db-migrate: v4 observation backfill', () => {

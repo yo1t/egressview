@@ -19,7 +19,7 @@ const { HTTP_ROUTE_MATRIX, ACCESS } = require('../../src/permission-matrix');
 describe('role permission table', () => {
   it('pins exactly what each role may do', () => {
     assert.deepEqual([...ROLE_PERMISSIONS[ROLES.VIEWER]].sort(), ['network.read']);
-    assert.deepEqual([...ROLE_PERMISSIONS[ROLES.OPERATOR]].sort(), ['ai.run', 'network.read', 'notes.write']);
+    assert.deepEqual([...ROLE_PERMISSIONS[ROLES.OPERATOR]].sort(), ['network.read', 'notes.write']);
     assert.deepEqual([...ROLE_PERMISSIONS[ROLES.ADMIN]].sort(), [...ALL_PERMISSIONS].sort());
   });
 
@@ -62,6 +62,13 @@ describe('role permission table', () => {
       assert.equal(checkPermissions(permissionsForRole(ROLES.VIEWER), [permission]).allowed, false);
     }
   });
+
+  it('keeps provider-billed AI execution admin-only', () => {
+    assert.equal(
+      checkPermissions(permissionsForRole(ROLES.OPERATOR), [PERMISSIONS.AI_RUN]).allowed,
+      false
+    );
+  });
 });
 
 describe('role resolution is fail-closed', () => {
@@ -86,8 +93,8 @@ describe('role resolution is fail-closed', () => {
 });
 
 describe('OIDC role assignment', () => {
-  it('makes an explicitly listed email an administrator', () => {
-    assert.equal(roleForOidcMatch('email'), ROLES.ADMIN);
+  it('makes an explicitly listed email an operator, not an administrator', () => {
+    assert.equal(roleForOidcMatch('email'), ROLES.OPERATOR);
   });
 
   it('defaults a bulk domain grant to viewer', () => {
@@ -195,8 +202,9 @@ describe('role enforcement through the API boundary', () => {
     }
   });
 
-  it('lets an operator write notes but not touch settings or auth', () => {
+  it('lets an operator write notes but not run AI or touch settings or auth', () => {
     assert.equal(run(operator, 'POST', '/api/notes', cookie).reached, true);
+    assert.equal(run(operator, 'POST', '/api/ai/analyze', cookie).statusCode, 403);
     assert.equal(run(operator, 'GET', '/api/auth/sessions', cookie).statusCode, 403);
     assert.equal(run(operator, 'POST', '/api/auth/security-config', cookie).statusCode, 403);
   });

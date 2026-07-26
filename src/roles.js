@@ -11,8 +11,8 @@
 //   - the legacy X-Admin-Token is always `admin` during the expand phase
 //   - an OIDC user matched by the *domain* allowlist defaults to `viewer`,
 //     because a domain grant is a bulk grant nobody reviewed per person
-//   - an OIDC user matched by an explicit *email* entry is `admin`, because
-//     someone listed that person deliberately
+//   - an OIDC user matched by an explicit *email* entry defaults to `operator`;
+//     an authentication allowlist is not an administrator role assignment
 'use strict';
 
 const { PERMISSIONS, ALL_PERMISSIONS } = require('./permissions');
@@ -35,7 +35,6 @@ const VIEWER_PERMISSIONS = Object.freeze([
 const OPERATOR_PERMISSIONS = Object.freeze([
   ...VIEWER_PERMISSIONS,
   PERMISSIONS.NOTES_WRITE,
-  PERMISSIONS.AI_RUN,
 ]);
 
 // Everything, including routers, authentication, secrets and backup restore.
@@ -76,7 +75,7 @@ function normalizeRole(role) {
  * @param {'email'|'domain'|null} match
  */
 function roleForOidcMatch(match) {
-  if (match === 'email') return ROLES.ADMIN;
+  if (match === 'email') return ROLES.OPERATOR;
   if (match === 'domain') return ROLES.VIEWER;
   return null; // no match means no session at all
 }
