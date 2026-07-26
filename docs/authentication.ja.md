@@ -21,6 +21,23 @@ https://YOUR_EGRESSVIEW_ORIGIN/api/auth/oidc/callback
 
 設定 → 一般 → 認証と監査でclient ID、client secret、許可emailまたはdomainを1件以上設定します。EgressViewはAuthorization Code + PKCE、state、nonce、Google JWKS署名、issuer、audience、有効期限、verified email、allowlistを検証してから、通常の失効可能なsessionを作成します。
 
+### 許可された利用者は全員が管理者になります
+
+> **警告**
+> EgressViewは本人確認を行いますが、権限の分離はまだ実装していません。allowlistを通過したアカウントは全員が管理者としてログインし、収集した全通信の閲覧、ルーター認証情報の変更、シークレットの再生成、バックアップの復元、他sessionの失効まで実行できます。
+
+そのため**domain** allowlistは、そのdomainに所属する全員（設定後に作成されたアカウントを含む）へ管理者権限を与えることになります。role-based access controlが実装されるまでは、各利用者を個別に列挙する**email** allowlistでの運用を推奨します。
+
+EgressViewは既存設定を自動で無効化しません。無告知でremote利用者を締め出すほうが危険なためです。代わりにdomain allowlistが有効な間、起動時のサーバーログと設定画面の該当項目の横で警告します。
+
+**domain allowlistからemail allowlistへの移行手順**
+
+1. 緊急用ローカル管理者でログインします。次の手順で自分のGoogleアカウントが対象外になっても、アクセスを失わないためです。このアカウントは常に利用でき、OIDC設定の影響を受けません。
+2. 設定 → 一般 → 認証と監査で、アクセスが必要な全員を**許可メール**へ追加します。
+3. **許可ドメイン**欄を空にして保存します。Google OIDCが有効な間は、emailかdomainのどちらかが1件以上必要です。
+4. session一覧から既存sessionを失効させ、allowlistに該当しなくなった利用者をログアウトさせます。allowlistから削除しても、既に開いているsessionは終了しません。
+5. 次回再起動時に、サーバーログから警告が消えていることを確認します。
+
 ## Reverse proxy境界
 
 公開URLを指定し、自分で管理するproxy addressだけを信頼します。

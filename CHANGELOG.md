@@ -4,6 +4,8 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-07-26
+
 ### Added
 
 - Added request correlation for every HTTP response through `X-Request-Id`, with safe caller-provided IDs, generated UUID fallbacks, asynchronous logger context, and correlated slow/error logs.
@@ -18,6 +20,7 @@ All notable changes to EgressView are documented here.
 
 ### Security and Reliability
 
+- **Google OIDC domain allowlists now warn that every matching user becomes a full administrator.** EgressView authenticates users but does not separate permissions yet, so any account passing the allowlist can read all captured traffic, change router credentials, rotate secrets, and restore backups. A domain allowlist extends that to everyone in the domain, including accounts created after it was configured. The warning appears in the server log at startup, in Settings next to the allowed-domains field, in both READMEs, on the project site, and in the authentication guide, which also documents how to move to an explicit email allowlist without losing access. Existing configurations keep working unchanged — EgressView never disables an allowlist for you, because silently locking out remote users would be worse than the risk being reported. Prefer an explicit email allowlist until role-based access control ships.
 - Restored saved ASUS polling automatically after service restarts and coalesced overlapping polls to avoid duplicate token renewals and API request bursts.
 - Started a fresh append-only AI conversation automatically when the configured provider or model changes, preserving the previous conversation instead of rejecting the next question.
 - Preserved AI chat questions when provider generation fails after server-side persistence, and restored unsent questions to the input when a request fails before persistence.

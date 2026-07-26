@@ -272,6 +272,8 @@
             <div class="form-group">
               <label class="form-label" data-i18n="settings.security.domains">許可ドメイン（カンマ区切り）</label>
               <input id="s-oidc-domains" class="form-input" type="text" autocomplete="off">
+              <p class="settings-field-hint" data-i18n="settings.security.domainsHint">⚠ ロール管理は未実装です。許可ドメインに一致した利用者は全員、管理者としてログインします（ルーター認証情報・バックアップ復元・シークレットを含む全設定を変更できます）。個別の許可メールでの運用を推奨します。</p>
+              <p id="oidc-domain-warning" class="settings-field-hint security-domain-warning" hidden></p>
             </div>
           </div>
           <div class="settings-security-actions">
