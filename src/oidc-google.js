@@ -136,12 +136,20 @@ function createGoogleOidc({
     return claims;
   }
 
-  function isAllowed(claims, config) {
+  /**
+   * Report how the verified claims matched the allowlist, not merely whether
+   * they did. The caller derives the session role from this, so the decision
+   * stays server-side and cannot be influenced by a claim the caller supplies.
+   * An explicit email entry outranks a domain entry.
+   * @returns {'email'|'domain'|null}
+   */
+  function allowlistMatch(claims, config) {
     const email = String(claims.email || '').toLowerCase();
     const domain = email.split('@')[1] || '';
-    const emails = normalizeList(config.allowedEmails);
-    const domains = normalizeList(config.allowedDomains);
-    return emails.includes(email) || domains.includes(domain);
+    if (!email) return null;
+    if (normalizeList(config.allowedEmails).includes(email)) return 'email';
+    if (domain && normalizeList(config.allowedDomains).includes(domain)) return 'domain';
+    return null;
   }
 
   async function complete(config, { state, code }) {
@@ -165,10 +173,14 @@ function createGoogleOidc({
       body,
     });
     const claims = await verifyIdToken(tokens.id_token, config, flow.nonce, document);
-    if (!isAllowed(claims, config)) throw new Error('Google account is not in the allowlist');
+    const match = allowlistMatch(claims, config);
+    if (!match) throw new Error('Google account is not in the allowlist');
     return {
       subject: `${claims.iss}|${claims.sub}`,
       emailDomain: String(claims.email).split('@')[1]?.toLowerCase() || '',
+      // How the allowlist matched, decided here from verified claims. The
+      // caller maps this to a role; it is never taken from the token itself.
+      allowlistMatch: match,
     };
   }
 
@@ -180,7 +192,7 @@ function createGoogleOidc({
     return { issuer: document.issuer };
   }
 
-  return { begin, complete, test };
+  return { begin, complete, test, allowlistMatch };
 }
 
 module.exports = { createGoogleOidc, ISSUER };
