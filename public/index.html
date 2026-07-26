@@ -249,8 +249,8 @@
           <hr class="settings-divider">
 
           <div class="pane-title settings-subsection-title" data-i18n="settings.security.section">🛡️ 認証と監査</div>
-          <p class="settings-copy settings-copy-block" data-i18n="settings.security.local">
-            緊急用ローカル管理者は常に有効です。Googleログインは任意の追加経路です。
+          <p class="settings-copy settings-copy-block" data-i18n="settings.security.localOnly">
+            ログインはローカル管理者パスワードで行います。Google OIDCは任意で追加できます。
           </p>
           <label class="settings-check-label settings-revoke-label">
             <input type="checkbox" id="s-oidc-enabled" class="settings-checkbox-accent">
@@ -272,7 +272,6 @@
             <div class="form-group">
               <label class="form-label" data-i18n="settings.security.domains">許可ドメイン（カンマ区切り）</label>
               <input id="s-oidc-domains" class="form-input" type="text" autocomplete="off">
-              <p class="settings-field-hint" data-i18n="settings.security.domainsHint">⚠ ロール管理は未実装です。許可ドメインに一致した利用者は全員、管理者としてログインします（ルーター認証情報・バックアップ復元・シークレットを含む全設定を変更できます）。個別の許可メールでの運用を推奨します。</p>
               <p id="oidc-domain-warning" class="settings-field-hint security-domain-warning" hidden></p>
             </div>
           </div>

@@ -30,7 +30,7 @@ A **domain** allowlist therefore grants that access to everyone in the domain, i
 
 EgressView never disables an existing configuration on your behalf — locking out remote users silently would be worse. Instead it warns in the server log at startup, next to the field in Settings whenever any domain is present (saved or still being typed), and once more in a confirmation prompt when you save an enabled configuration that carries a domain allowlist.
 
-These warnings are driven only by the saved OIDC configuration. EgressView deliberately does not try to infer whether it is reachable from the internet: a port forward or an unknown reverse proxy would defeat that guess, and hiding the risk on a wrong guess is the failure you cannot recover from.
+These warnings are driven by the saved OIDC configuration and by what is currently entered in the form. EgressView deliberately does not try to infer whether it is reachable from the internet: a port forward or an unknown reverse proxy would defeat that guess, and hiding the risk on a wrong guess is the failure you cannot recover from.
 
 **Moving from a domain allowlist to an email allowlist**
 
