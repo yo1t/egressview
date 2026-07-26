@@ -118,7 +118,8 @@ ChatGPT Apps として公開・共有する場合は、利用者ごとの認証�
 ```bash
 # 環境ファイルをコピーして編集:
 cp .env.mcp.example .env.mcp
-# MCP_PORT=3010、EGRESSVIEW_URL=http://localhost:3000、EGRESSVIEW_TOKEN=... を設定
+# MCP_PORT=3010、MCP_TOKEN=<専用のランダムtoken>、
+# EGRESSVIEW_URL=http://localhost:3000、EGRESSVIEW_TOKEN=... を設定
 # EgressView をリバースプロキシ背後の別ポートで動かしている場合は、
 # そのローカルURLを指定してください（例: http://localhost:3002）。
 chmod 600 .env.mcp
@@ -128,6 +129,27 @@ set -a; source .env.mcp; set +a
 node mcp-server.js
 # → [egressview-mcp] HTTP transport listening on 127.0.0.1:3010/mcp
 ```
+
+HTTP tokenモードでは`MCP_TOKEN`の明示設定が必須となり、
+`EGRESSVIEW_TOKEN`へフォールバックしなくなりました。これによりMCP
+endpoint tokenが漏えいしても、EgressView管理APIの全権限へ直結しません。
+旧fallbackを利用していたHTTP環境は、更新前に別のtokenを生成して
+`MCP_TOKEN`へ設定してください。stdioモードは変更なく、`MCP_TOKEN`を
+使用しません。
+
+### 段階導入中のOAuth Resource Serverモード
+
+P2-60のOAuth Resource Server境界は、`MCP_AUTH_MODE=oauth`、
+`MCP_OAUTH_ISSUER`、`MCP_OAUTH_RESOURCE`、`MCP_OAUTH_READ_SCOPE`を
+設定するとprivate integration testで利用できます。RFC 9728 Protected
+Resource Metadataを提供し、issuerのdiscovery/JWKSからRS256署名を検証し、
+issuer、有効期限、audience、scopeの不一致をfail-closedで拒否します。
+issuerはPKCE S256をmetadataへ公開する必要があります。loopback限定試験を
+除きHTTPSが必須です。
+
+この段階では意図的にread toolだけを公開します。`set_device_note`、
+最小権限の内部service identity、OAuth監査/rate limit、Internet公開gateは
+後続のP2-60で実装します。現段階のendpointをInternetへ公開しないでください。
 
 ### Step 2a — Apache (httpd) の設定
 
@@ -141,6 +163,10 @@ node mcp-server.js
     # MCP Streamable HTTP は Accept ヘッダーに両タイプが必要
     RequestHeader set Accept "application/json, text/event-stream"
 </Location>
+
+# OAuthモードのみ: RFC 9728 metadataのpathを維持して公開
+ProxyPass        /.well-known/oauth-protected-resource http://127.0.0.1:3010/.well-known/oauth-protected-resource
+ProxyPassReverse /.well-known/oauth-protected-resource http://127.0.0.1:3010/.well-known/oauth-protected-resource
 
 # ─── EgressView Web UI（既存のルール — 下に置く） ────────────────────────────
 ProxyPass        /egressview/ http://127.0.0.1:3002/
@@ -170,6 +196,11 @@ location /egressview/mcp {
     proxy_buffering    off;
     proxy_cache        off;
     proxy_read_timeout 3600s;
+}
+
+# OAuthモードのみ: rootとresource固有のmetadata pathを維持
+location /.well-known/oauth-protected-resource {
+    proxy_pass http://127.0.0.1:3010;
 }
 ```
 
@@ -213,7 +244,7 @@ HTTP トランスポートをサポートする MCP クライアント（Anysphe
     "egressview": {
       "url": "https://your-server/egressview/mcp",
       "headers": {
-        "X-Admin-Token": "your-admin-token"
+        "X-Admin-Token": "your-dedicated-mcp-token"
       }
     }
   }
@@ -231,14 +262,18 @@ HTTP トランスポートをサポートする MCP クライアント（Anysphe
 | `EGRESSVIEW_URL` | ✅ | `http://localhost:3000` | EgressView サーバーのベース URL |
 | `EGRESSVIEW_TOKEN` | ✅ | — | API/admin トークン（EgressView 初回起動時にコンソールへ表示。ブラウザ用ログインパスワードではありません） |
 | `MCP_PORT` | HTTP モード | — | MCP HTTP サーバーのローカルポート（例: `3010`）。stdio モードの場合は不要 |
-| `MCP_TOKEN` | — | `EGRESSVIEW_TOKEN` と同じ | MCP HTTP エンドポイントの認証トークン。EgressView API とは別のトークンを使いたい場合に設定 |
+| `MCP_AUTH_MODE` | HTTP モード | `token` | HTTP endpointの認証モード。`token`または段階導入中の`oauth` |
+| `MCP_TOKEN` | HTTP tokenモード | — | private HTTP endpoint専用token。明示設定し、`EGRESSVIEW_TOKEN`と別の値にする |
+| `MCP_OAUTH_ISSUER` | HTTP OAuthモード | — | Authorization Serverの正確なHTTPS issuer URL。loopback HTTPは試験時だけ許可 |
+| `MCP_OAUTH_RESOURCE` | HTTP OAuthモード | — | JWT audienceの完全一致検証に使うcanonical public MCP resource URL |
+| `MCP_OAUTH_READ_SCOPE` | HTTP OAuthモード | — | 段階導入中のread-only MCP endpointで要求するprovider scope |
 
 ---
 
 ## セキュリティについて
 
 - MCP HTTP サーバーは `127.0.0.1` のみをリッスンします。リバースプロキシなしでは外部から到達できません
-- 認証は `X-Admin-Token` ヘッダーを使用します（EgressView API と同じ仕組み）
+- private tokenモードは専用`MCP_TOKEN`を`X-Admin-Token`または`Authorization: Bearer`で受け取り、EgressView管理tokenへfallbackしません
 - ほとんどのツールは読み取り専用です。`set_device_note` のみ端末メモの書き込みが可能です（`.egressview.notes.json` への保存。メインDBへの書き込みはありません）
 - `.env.mcp` には API/admin トークンが含まれるため、`chmod 600` で保護してください
 
