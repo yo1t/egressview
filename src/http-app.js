@@ -79,6 +79,7 @@ function configureHttpApp(app, {
   tlsEnabled,
   routeCtx,
   requireAdmin,
+  enforceApiPermissions,
   beacons,
   appState,
   saveConfig,
@@ -105,6 +106,8 @@ function configureHttpApp(app, {
   registerHealthRoutes(app, healthState);
 
   app.use(compression());
+  app.use('/api', express.json({ limit: '64kb' }));
+  app.use('/api', enforceApiPermissions);
 
   const indexRoutes = ['/', '/index.html'];
   if (subpath) indexRoutes.push(`${subpath}/`, `${subpath}/index.html`);
@@ -165,7 +168,6 @@ function configureHttpApp(app, {
   };
   if (subpath) app.use(subpath, express.static(path.join(appRoot, 'public'), staticOptions));
   app.use(express.static(path.join(appRoot, 'public'), staticOptions));
-  app.use(express.json({ limit: '64kb' }));
 
   app.use('/api', authRoutes(routeCtx));
   if (routeCtx.routerManager) app.use('/api', routerRoutes(routeCtx));
