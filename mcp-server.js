@@ -104,7 +104,7 @@ function resolveMcpPort(value) {
 
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
 
-function createApiClient({ base = BASE, token = TOKEN } = {}) {
+function createApiClient({ base = BASE, token = TOKEN, requestId = null } = {}) {
   async function parseResponse(res, label) {
     if (!res.ok) throw new Error(`${label} returned ${res.status}`);
     try {
@@ -114,14 +114,25 @@ function createApiClient({ base = BASE, token = TOKEN } = {}) {
     }
   }
 
+  // Carry the MCP request id into EgressView. The two audit trails are
+  // deliberately separate stores; this is the key that joins them, so an
+  // incident can be traced from "which OAuth subject asked" (MCP audit) to
+  // "what the service identity then did" (EgressView audit).
+  const correlationHeaders = requestId ? { 'X-Request-Id': requestId } : {};
+
   return Object.freeze({
+    /** A client bound to one inbound request, for audit correlation. */
+    withRequestId(id) {
+      return createApiClient({ base, token, requestId: id });
+    },
+
     async get(path, params = {}) {
       const url = new URL(`${base}/api${path}`);
       for (const [key, value] of Object.entries(params)) {
         if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
       }
       const res = await fetch(url.toString(), {
-        headers: { 'X-Admin-Token': token },
+        headers: { 'X-Admin-Token': token, ...correlationHeaders },
       });
       return parseResponse(res, `API ${path}`);
     },
@@ -129,7 +140,7 @@ function createApiClient({ base = BASE, token = TOKEN } = {}) {
     async post(path, body = {}) {
       const res = await fetch(`${base}/api${path}`, {
         method: 'POST',
-        headers: { 'X-Admin-Token': token, 'Content-Type': 'application/json' },
+        headers: { 'X-Admin-Token': token, 'Content-Type': 'application/json', ...correlationHeaders },
         body: JSON.stringify(body),
       });
       return parseResponse(res, `API POST ${path}`);
@@ -169,16 +180,25 @@ function createMcpServiceApiClient({ base = BASE, token } = {}) {
     return validationPromise;
   }
 
-  return Object.freeze({
-    async get(path, params = {}) {
-      await validateIdentity();
-      return client.get(path, params);
-    },
-    async post(path, body = {}) {
-      await validateIdentity();
-      return client.post(path, body);
-    },
-  });
+  function wrap(inner) {
+    return Object.freeze({
+      // Binding a request id must not skip identity validation, so the wrapper
+      // is rebuilt around the bound client rather than returning it directly.
+      withRequestId(id) {
+        return wrap(inner.withRequestId(id));
+      },
+      async get(path, params = {}) {
+        await validateIdentity();
+        return inner.get(path, params);
+      },
+      async post(path, body = {}) {
+        await validateIdentity();
+        return inner.post(path, body);
+      },
+    });
+  }
+
+  return wrap(client);
 }
 
 // ─── Period helpers ───────────────────────────────────────────────────────────
@@ -677,7 +697,10 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     const includeWriteTools = authConfig.mode !== 'oauth'
       || scopeMapping.authorizeTool('set_device_note', req.mcpAuth?.scopes).allowed;
-    const server = buildMcpServer({ includeWriteTools, apiClient: internalApiClient });
+    const apiClient = req.mcpRequestId && typeof internalApiClient.withRequestId === 'function'
+      ? internalApiClient.withRequestId(req.mcpRequestId)
+      : internalApiClient;
+    const server = buildMcpServer({ includeWriteTools, apiClient });
     try {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
