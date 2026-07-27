@@ -140,16 +140,36 @@ endpoint tokenが漏えいしても、EgressView管理APIの全権限へ直結�
 ### 段階導入中のOAuth Resource Serverモード
 
 P2-60のOAuth Resource Server境界は、`MCP_AUTH_MODE=oauth`、
-`MCP_OAUTH_ISSUER`、`MCP_OAUTH_RESOURCE`、`MCP_OAUTH_READ_SCOPE`を
+`MCP_OAUTH_ISSUER`、`MCP_OAUTH_RESOURCE`、`MCP_OAUTH_READ_SCOPE`、
+`MCP_OAUTH_NOTES_WRITE_SCOPE`、`MCP_SERVICE_TOKEN`を
 設定するとprivate integration testで利用できます。RFC 9728 Protected
 Resource Metadataを提供し、issuerのdiscovery/JWKSからRS256署名を検証し、
 issuer、有効期限、audience、scopeの不一致をfail-closedで拒否します。
 issuerはPKCE S256をmetadataへ公開する必要があります。loopback限定試験を
 除きHTTPSが必須です。
 
-この段階では意図的にread toolだけを公開します。`set_device_note`、
-最小権限の内部service identity、OAuth監査/rate limit、Internet公開gateは
-後続のP2-60で実装します。現段階のendpointをInternetへ公開しないでください。
+外部provider scopeはEgressViewの共通permissionへ変換します。
+`MCP_OAUTH_READ_SCOPE`は`network.read`、
+`MCP_OAUTH_NOTES_WRITE_SCOPE`は`notes.write`を付与します。read-onlyの
+access tokenでは`set_device_note`をtool一覧へ表示せず、直接呼び出しても
+`403 insufficient_scope`で拒否します。scope昇格時に既存のread scopeを
+失わないよう、write challengeには両方のscopeを含めます。
+
+`network.read`と`notes.write`だけを持つ専用API identityを作り、作成時に
+一度だけ返る平文tokenを`MCP_SERVICE_TOKEN`へ設定します:
+
+```bash
+curl -sS -X POST http://127.0.0.1:3002/api/auth/api-identities \
+  -H "X-Admin-Token: $EGRESSVIEW_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"label":"Remote MCP service","permissions":["network.read","notes.write"],"expiresInMs":31536000000}'
+```
+
+OAuth modeは`egv_...`形式のscoped identityだけを受け付け、
+`EGRESSVIEW_TOKEN`へfallbackしません。`.env.mcp`をmode `0600`で保護し、
+期限前にidentityをrotationして、確認後に旧identityを失効してください。
+OAuth監査/rate limitとInternet公開gateは後続のP2-60で実装します。
+現段階のendpointをInternetへ公開しないでください。
 
 ### Step 2a — Apache (httpd) の設定
 
@@ -266,7 +286,9 @@ HTTP トランスポートをサポートする MCP クライアント（Anysphe
 | `MCP_TOKEN` | HTTP tokenモード | — | private HTTP endpoint専用token。明示設定し、`EGRESSVIEW_TOKEN`と別の値にする |
 | `MCP_OAUTH_ISSUER` | HTTP OAuthモード | — | Authorization Serverの正確なHTTPS issuer URL。loopback HTTPは試験時だけ許可 |
 | `MCP_OAUTH_RESOURCE` | HTTP OAuthモード | — | JWT audienceの完全一致検証に使うcanonical public MCP resource URL |
-| `MCP_OAUTH_READ_SCOPE` | HTTP OAuthモード | — | 段階導入中のread-only MCP endpointで要求するprovider scope |
+| `MCP_OAUTH_READ_SCOPE` | HTTP OAuthモード | — | 内部`network.read` permissionへmappingするprovider scope |
+| `MCP_OAUTH_NOTES_WRITE_SCOPE` | HTTP OAuthモード | — | 内部`notes.write` permissionへmappingするprovider scope |
+| `MCP_SERVICE_TOKEN` | HTTP OAuthモード | — | `network.read`と`notes.write`だけを持つ専用`egv_...` API identity token |
 
 ---
 
@@ -275,7 +297,7 @@ HTTP トランスポートをサポートする MCP クライアント（Anysphe
 - MCP HTTP サーバーは `127.0.0.1` のみをリッスンします。リバースプロキシなしでは外部から到達できません
 - private tokenモードは専用`MCP_TOKEN`を`X-Admin-Token`または`Authorization: Bearer`で受け取り、EgressView管理tokenへfallbackしません
 - ほとんどのツールは読み取り専用です。`set_device_note` のみ端末メモの書き込みが可能です（`.egressview.notes.json` への保存。メインDBへの書き込みはありません）
-- `.env.mcp` には API/admin トークンが含まれるため、`chmod 600` で保護してください
+- `.env.mcp` には非公開API credentialが含まれるため、`chmod 600` で保護してください
 
 ## 商標について
 
