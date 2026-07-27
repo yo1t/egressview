@@ -119,6 +119,7 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   httpRoute('GET', '/api/auth/api-identities', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/auth/api-identities', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/auth/api-identities/:id/revoke', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  httpRoute('GET', '/api/auth/api-identities/self', ACCESS.PERMISSION, [R.NETWORK_READ]),
   httpRoute('GET', '/api/auth/security-config', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('GET', '/api/auth/sessions', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/admin/regenerate-token', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
