@@ -10,6 +10,11 @@ API paths are rooted at `/api`, even when the web UI is served below a subpath. 
 
 Scoped API identities are managed through `GET` / `POST /api/auth/api-identities` and `POST /api/auth/api-identities/:id/revoke`, all requiring `auth.admin`. Creation requires a label, a non-empty permission list, and `expiresInMs` between one minute and one year. The plaintext `egv_...` token is returned only in the `201` creation response; only its SHA-256 hash is stored. Identity-management responses use `Cache-Control: no-store`.
 
+`GET /api/auth/api-identities/self` returns only the currently authenticated
+scoped identity and requires `network.read`; browser sessions and the legacy
+admin token are rejected. The remote MCP server uses it to fail closed unless
+its internal service identity grants exactly `network.read` and `notes.write`.
+
 ```bash
 export EGRESSVIEW_URL='https://egressview.example.net'
 export EGRESSVIEW_TOKEN='replace-with-your-admin-token'
