@@ -299,6 +299,51 @@ Use `https://` if your reverse proxy terminates TLS (required for Claude Desktop
 - Most tools are read-only. `set_device_note` can write device memo notes (stored in `.egressview.notes.json`, not the main database).
 - Keep `.env.mcp` permissions at `chmod 600`; it contains private API credentials.
 
+---
+
+## Public MCP: limits, audit and revocation
+
+Applies to OAuth mode (`MCP_AUTH_MODE=oauth`) only. Private token and stdio modes are unaffected by everything in this section.
+
+### Request limits
+
+Three independent buckets apply, and all must allow a request. A separate concurrency cap bounds in-flight work, because slow tool calls exhaust the process long before a per-minute limit trips.
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `MCP_RATE_LIMIT_GLOBAL` | 240/min | Protects the host from any single burst |
+| `MCP_RATE_LIMIT_SUBJECT` | 60/min | One compromised user cannot consume the whole budget |
+| `MCP_RATE_LIMIT_CLIENT` | 120/min | One misbehaving client cannot either |
+| `MCP_MAX_CONCURRENT` | 8 | Bounds simultaneous tool calls |
+| `MCP_MAX_BODY` | `256kb` | Body is bounded before parsing or authentication |
+
+A rejected request returns `429` with `Retry-After`. Values that are not positive integers fall back to the default rather than disabling the limit — a typo cannot silently remove a bound.
+
+**Keep the reverse proxy's own limits as well.** These are the Node-side half; a bug or restart here must not leave the endpoint unbounded. Trust `X-Forwarded-For` only from the proxy addresses listed in `EGRESSVIEW_TRUST_PROXY` (see the [authentication guide](authentication.md)).
+
+### Audit
+
+Every request to the public endpoint is appended to a dedicated store (`MCP_AUDIT_DB_PATH`, default `.egressview-mcp-audit.db`). It is **separate from EgressView's own audit trail on purpose**: the MCP process runs with a scoped API identity, and giving it write access to the main trail would let a compromised MCP forge or tamper with those records.
+
+Recorded: pseudonymised OAuth subject and client id, tool name, granted scopes, outcome, a reason code, the request id, and duration.
+
+**Never recorded:** tool arguments, IP or MAC addresses, device note bodies, access tokens, raw JWTs, or provider error text.
+
+Reason codes: `unauthorized`, `invalid_token`, `insufficient_scope`, `global_rate_limit`, `subject_rate_limit`, `client_rate_limit`, `concurrency_limit`, `server_error`. A run of any of these is the signal to investigate.
+
+Subjects are pseudonymised with a keyed HMAC, so the same person correlates across requests without the identifier being stored. Entries older than 90 days are pruned at startup.
+
+### Revoking access
+
+1. **Revoke at the authorization server** — this is the only place that stops new tokens being issued. Revoke the user, or the client registration, depending on what went wrong.
+2. **Wait out the access token lifetime.** EgressView validates tokens offline, so a token already issued stays valid until it expires. Keep access token lifetime short (5–15 minutes is the working assumption) precisely so this window is small.
+3. **To cut access immediately**, stop the public endpoint: remove the proxy route or set `MCP_AUTH_MODE=token`. Local collection, the browser UI, stdio and private HTTP keep running.
+4. **Rotate `MCP_SERVICE_TOKEN`** if the MCP host itself may be compromised. Issue a new scoped API identity in EgressView, update `.env.mcp`, restart, then revoke the old identity.
+
+### If the authorization server or JWKS is unreachable
+
+The public MCP endpoint fails closed and returns `401`. Everything else keeps running: router collection, the browser UI, stdio clients and private HTTP mode. Do not treat an IdP outage as an EgressView outage.
+
 ## Trademarks
 
 AWS Kiro, Anthropic Claude, Anysphere Cursor, and other product names are trademarks or registered trademarks of their respective owners. EgressView is not affiliated with, endorsed by, or sponsored by those companies.

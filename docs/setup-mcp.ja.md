@@ -299,6 +299,51 @@ HTTP トランスポートをサポートする MCP クライアント（Anysphe
 - ほとんどのツールは読み取り専用です。`set_device_note` のみ端末メモの書き込みが可能です（`.egressview.notes.json` への保存。メインDBへの書き込みはありません）
 - `.env.mcp` には非公開API credentialが含まれるため、`chmod 600` で保護してください
 
+---
+
+## 公開MCP: 上限・監査・失効
+
+OAuthモード（`MCP_AUTH_MODE=oauth`）にのみ適用されます。private tokenモードとstdioモードは本節の影響を受けません。
+
+### リクエスト上限
+
+3つの独立したバケットがあり、すべてが許可した場合だけ通過します。加えて同時実行数の上限を別に設けています。遅いtool callは、毎分の上限に達するよりずっと早くプロセスを枯渇させるためです。
+
+| 設定 | 既定値 | 目的 |
+|---|---|---|
+| `MCP_RATE_LIMIT_GLOBAL` | 240/分 | 単一のバーストからホストを保護 |
+| `MCP_RATE_LIMIT_SUBJECT` | 60/分 | 侵害された1利用者が全体の枠を消費できない |
+| `MCP_RATE_LIMIT_CLIENT` | 120/分 | 異常な1クライアントも同様 |
+| `MCP_MAX_CONCURRENT` | 8 | 同時tool call数を制限 |
+| `MCP_MAX_BODY` | `256kb` | 解析・認証の前にbodyを制限 |
+
+拒否時は`429`と`Retry-After`を返します。正の整数でない値は上限を無効化せず既定値へfallbackします。設定ミスで上限が消えることはありません。
+
+**reverse proxy側の上限も併用してください。** これはNode側の半分にすぎず、ここの不具合や再起動でendpointが無制限になってはいけません。`X-Forwarded-For`は`EGRESSVIEW_TRUST_PROXY`に列挙したproxyアドレスからのみ信頼します（[認証ガイド](authentication.ja.md)参照）。
+
+### 監査
+
+公開endpointへの全リクエストを専用ストア（`MCP_AUDIT_DB_PATH`、既定`.egressview-mcp-audit.db`）へ追記します。EgressView本体の監査とは**意図的に分離**しています。MCPプロセスはscoped API identityで動作しており、本体の監査への書き込み権限を与えると、MCPが侵害された場合に本体の記録を偽造・改竄できてしまうためです。
+
+記録するもの: 仮名化したOAuth subjectとclient ID、tool名、付与scope、成否、理由コード、request ID、処理時間。
+
+**記録しないもの:** tool引数、IP/MACアドレス、端末メモ本文、access token、生のJWT、providerのエラー文言。
+
+理由コード: `unauthorized`、`invalid_token`、`insufficient_scope`、`global_rate_limit`、`subject_rate_limit`、`client_rate_limit`、`concurrency_limit`、`server_error`。これらが連続する場合は調査の合図です。
+
+subjectは鍵付きHMACで仮名化するため、識別子を保存せずに同一人物の活動を追跡できます。90日より古い記録は起動時に削除します。
+
+### アクセスの失効
+
+1. **認可サーバー側で失効させる** — 新しいtokenの発行を止められるのはここだけです。事象に応じて利用者かclient登録を失効します
+2. **access tokenの有効期限が切れるのを待つ。** EgressViewはtokenをoffline検証するため、**発行済みtokenは期限まで有効なままです**。この窓を小さく保つために、access tokenの寿命を短く（5〜15分を前提）設定してください
+3. **即座に遮断する場合**は公開endpointを止めます。proxyのrouteを外すか、`MCP_AUTH_MODE=token`に戻します。ローカル収集、ブラウザUI、stdio、private HTTPは動作を継続します
+4. **MCPホスト自体が侵害された可能性がある場合は`MCP_SERVICE_TOKEN`をrotateします。** EgressViewで新しいscoped API identityを発行し、`.env.mcp`を更新して再起動し、その後で旧identityを失効させます
+
+### 認可サーバーやJWKSへ到達できない場合
+
+公開MCP endpointはfail-closedで`401`を返します。それ以外は動作を継続します。ルーター収集、ブラウザUI、stdioクライアント、private HTTPモードはいずれも影響を受けません。IdP障害をEgressViewの障害として扱わないでください。
+
 ## 商標について
 
 AWS Kiro、Anthropic Claude、Anysphere Cursor などの製品名は、各社の商標または登録商標です。EgressView はこれらの企業と提携・承認・後援関係にありません。

@@ -37,6 +37,9 @@ const { permissionForMcpTool } = require('./src/permission-matrix');
 const { isApiIdentityToken } = require('./src/api-identities');
 const { createMcpScopeMapping } = require('./src/mcp-scope-mapping');
 const { createOAuthResourceServer } = require('./src/mcp-oauth');
+const crypto = require('node:crypto');
+const mcpAudit = require('./src/mcp-audit');
+const { createMcpRateLimiter, rateLimitOptionsFromEnv } = require('./src/mcp-rate-limit');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -537,9 +540,91 @@ function createToolScopeMiddleware(scopeMapping, oauth) {
   };
 }
 
+// Correlate a request across the rate limiter, the OAuth boundary and the
+// tool call. A caller-supplied id is accepted only in a safe shape.
+function requestIdFor(req) {
+  const supplied = String(req.get?.('X-Request-Id') || '').trim();
+  if (/^[A-Za-z0-9._-]{1,100}$/.test(supplied)) return supplied;
+  return crypto.randomUUID();
+}
+
+function auditContext(req) {
+  return {
+    subject: req.mcpAuth?.subject || null,
+    clientId: req.mcpAuth?.clientId || null,
+    scopes: req.mcpAuth?.scopes || null,
+    requestId: req.mcpRequestId,
+  };
+}
+
+function createRequestContextMiddleware() {
+  return (req, _res, next) => {
+    req.mcpRequestId = requestIdFor(req);
+    req.mcpStartedAt = Date.now();
+    next();
+  };
+}
+
+// Runs before authentication so an unauthenticated flood is also bounded.
+function createRateLimitMiddleware(limiter) {
+  return (req, res, next) => {
+    const verdict = limiter.check({
+      subject: req.mcpAuth?.subject,
+      clientId: req.mcpAuth?.clientId,
+    });
+    if (verdict.allowed) {
+      const release = limiter.acquire();
+      let done = false;
+      const finish = () => { if (!done) { done = true; release(); } };
+      res.on('finish', finish);
+      res.on('close', finish);
+      return next();
+    }
+    mcpAudit.append({
+      eventType: 'mcp_rate_limited',
+      outcome: 'failure',
+      reason: verdict.reason,
+      ...auditContext(req),
+      durationMs: Date.now() - req.mcpStartedAt,
+    });
+    res.set('Retry-After', String(verdict.retryAfterSeconds));
+    return res.status(429).json({ error: 'rate_limited' });
+  };
+}
+
+// Classifies the outcome of an authenticated MCP request for the audit trail.
+// Reason codes only — never provider text, which can echo token contents.
+function createAuditMiddleware() {
+  return (req, res, next) => {
+    res.on('finish', () => {
+      const toolName = req.body?.method === 'tools/call' ? req.body?.params?.name : null;
+      const status = res.statusCode;
+      const outcome = status < 400 ? 'success' : 'failure';
+      let reason = null;
+      if (status === 401) reason = res.get('WWW-Authenticate')?.includes('invalid_token')
+        ? 'invalid_token' : 'unauthorized';
+      else if (status === 403) reason = 'insufficient_scope';
+      else if (status === 429) return; // already audited by the limiter
+      else if (status >= 500) reason = 'server_error';
+      mcpAudit.append({
+        eventType: toolName ? 'mcp_tool_call' : 'mcp_request',
+        outcome,
+        reason,
+        toolName,
+        ...auditContext(req),
+        durationMs: Date.now() - req.mcpStartedAt,
+      });
+    });
+    next();
+  };
+}
+
 async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
   const app = express();
-  app.use(express.json());
+  // Bound the body before anything parses or authenticates it.
+  app.use(express.json({ limit: process.env.MCP_MAX_BODY || '256kb' }));
+
+  const limiter = createMcpRateLimiter(rateLimitOptionsFromEnv());
 
   let oauth = null;
   let scopeMapping = null;
@@ -551,6 +636,17 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
       notesWriteScope: authConfig.notesWriteScope,
     });
     internalApiClient = createMcpServiceApiClient({ token: authConfig.serviceToken });
+    // Audit is scoped to the public OAuth endpoint. A failure to open it must
+    // not stop the process: losing audit is bad, refusing to run is worse for
+    // the local collection this host also performs.
+    try {
+      mcpAudit.initDb(process.env.MCP_AUDIT_DB_PATH || undefined, {
+        hashKey: authConfig.serviceToken,
+      });
+      mcpAudit.prune();
+    } catch (error) {
+      process.stderr.write(`[egressview-mcp] audit store unavailable: ${error.message}\n`);
+    }
     const sendMetadata = (_req, res) => res.json(oauth.metadata);
     const metadataPaths = new Set([
       '/.well-known/oauth-protected-resource',
@@ -558,6 +654,12 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
       new URL(oauth.protectedResourceMetadataUrl).pathname,
     ]);
     for (const path of metadataPaths) app.get(path, sendMetadata);
+    // Order matters: context and limits first, so an unauthenticated flood is
+    // rejected before any JWKS work, then authentication, then scope, then the
+    // audit hook that classifies whatever the earlier layers decided.
+    app.use('/mcp', createRequestContextMiddleware());
+    app.use('/mcp', createRateLimitMiddleware(limiter));
+    app.use('/mcp', createAuditMiddleware());
     app.use('/mcp', oauth.middleware());
     app.use('/mcp', createToolScopeMiddleware(scopeMapping, oauth));
   } else {
@@ -601,6 +703,14 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
       process.stderr.write(`[egressview-mcp] HTTP transport listening on 127.0.0.1:${actualPort}/mcp\n`);
       process.stderr.write(`[egressview-mcp] HTTP authentication mode: ${authConfig.mode}\n`);
       process.stderr.write(`[egressview-mcp] Proxying API calls to ${BASE}\n`);
+      if (authConfig.mode === 'oauth') {
+        const limits = limiter.config;
+        process.stderr.write(
+          `[egressview-mcp] Limits: ${limits.globalPerMinute}/min global, `
+          + `${limits.perSubjectPerMinute}/min subject, ${limits.perClientPerMinute}/min client, `
+          + `${limits.maxConcurrent} concurrent\n`
+        );
+      }
       resolve(httpServer);
     });
   });
