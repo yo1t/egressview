@@ -122,6 +122,39 @@ describe('API identity routes', () => {
     assert.match(listed.headers, /cache-control: no-store/i);
     assert.equal(JSON.stringify(listed.body).includes(created.body.token), false);
   });
+
+  it('returns only the authenticated scoped identity from the self endpoint', async () => {
+    const identity = {
+      id: 'identity-1',
+      label: 'Remote MCP service',
+      permissions: ['network.read', 'notes.write'],
+      expiresAt: Date.now() + 60_000,
+    };
+    const requireIdentity = (req, _res, next) => {
+      req.apiIdentity = identity;
+      next();
+    };
+    const app = mount(apiIdentityRoutes({
+      requireAdmin: requireIdentity,
+      apiIdentities: {},
+      authAudit: { append() {} },
+    }));
+    const result = await request(app, 'GET', '/api/auth/api-identities/self');
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body, { identity });
+    assert.match(result.headers, /cache-control: no-store/i);
+  });
+
+  it('rejects browser and legacy admin credentials at the identity self endpoint', async () => {
+    const app = mount(apiIdentityRoutes({
+      requireAdmin,
+      apiIdentities: {},
+      authAudit: { append() {} },
+    }));
+    const result = await request(app, 'GET', '/api/auth/api-identities/self');
+    assert.equal(result.status, 403);
+    assert.deepEqual(result.body, { error: 'Scoped API identity required' });
+  });
 });
 
 describe('config routes', () => {

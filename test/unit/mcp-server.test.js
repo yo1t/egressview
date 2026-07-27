@@ -13,12 +13,18 @@ delete process.env.MCP_PORT;
 
 const {
   _createAuthMiddleware,
+  _createToolScopeMiddleware,
   _buildMcpServer,
   _apiPost,
+  _createApiClient,
+  _createMcpServiceApiClient,
   _resolveHttpAuthConfig,
   _resolveMcpPort,
   _startHttp,
 } = require('../../mcp-server');
+const { createMcpScopeMapping } = require('../../src/mcp-scope-mapping');
+
+const SERVICE_TOKEN = `egv_${'a'.repeat(64)}`;
 
 // ─── createAuthMiddleware ─────────────────────────────────────────────────────
 
@@ -143,14 +149,55 @@ describe('mcp-server: HTTP auth configuration', () => {
       MCP_OAUTH_ISSUER: 'https://idp.example.test/realms/egressview',
       MCP_OAUTH_RESOURCE: 'https://monitor.example.test/mcp',
       MCP_OAUTH_READ_SCOPE: 'egressview:read',
+      MCP_OAUTH_NOTES_WRITE_SCOPE: 'egressview:notes.write',
+      MCP_SERVICE_TOKEN: SERVICE_TOKEN,
     });
     assert.deepEqual(config, {
       mode: 'oauth',
       issuer: 'https://idp.example.test/realms/egressview',
       resource: 'https://monitor.example.test/mcp',
       requiredScope: 'egressview:read',
-      scopesSupported: ['egressview:read'],
+      readScope: 'egressview:read',
+      notesWriteScope: 'egressview:notes.write',
+      scopesSupported: ['egressview:read', 'egressview:notes.write'],
+      serviceToken: SERVICE_TOKEN,
     });
+  });
+
+  it('requires a scoped API identity for OAuth internal API calls', () => {
+    const base = {
+      MCP_AUTH_MODE: 'oauth',
+      MCP_OAUTH_ISSUER: 'https://idp.example.test/realms/egressview',
+      MCP_OAUTH_RESOURCE: 'https://monitor.example.test/mcp',
+      MCP_OAUTH_READ_SCOPE: 'egressview:read',
+      MCP_OAUTH_NOTES_WRITE_SCOPE: 'egressview:notes.write',
+    };
+    assert.throws(
+      () => _resolveHttpAuthConfig({ ...base, MCP_SERVICE_TOKEN: 'legacy-admin-token' }),
+      /scoped EgressView API identity/
+    );
+    assert.throws(
+      () => _resolveHttpAuthConfig({
+        ...base,
+        MCP_SERVICE_TOKEN: SERVICE_TOKEN,
+        EGRESSVIEW_TOKEN: SERVICE_TOKEN,
+      }),
+      /must differ from EGRESSVIEW_TOKEN/
+    );
+  });
+
+  it('rejects overlapping external OAuth scopes', () => {
+    assert.throws(
+      () => _resolveHttpAuthConfig({
+        MCP_AUTH_MODE: 'oauth',
+        MCP_OAUTH_ISSUER: 'https://idp.example.test/realms/egressview',
+        MCP_OAUTH_RESOURCE: 'https://monitor.example.test/mcp',
+        MCP_OAUTH_READ_SCOPE: 'egressview:shared',
+        MCP_OAUTH_NOTES_WRITE_SCOPE: 'egressview:shared',
+        MCP_SERVICE_TOKEN: SERVICE_TOKEN,
+      }),
+      /scopes must differ/
+    );
   });
 
   it('rejects unknown HTTP authentication modes', () => {
@@ -190,7 +237,10 @@ describe('mcp-server: HTTP auth configuration', () => {
       issuer: 'https://idp.example.test/realms/egressview',
       resource: 'https://monitor.example.test/egressview/mcp',
       requiredScope: 'egressview:read',
-      scopesSupported: ['egressview:read'],
+      readScope: 'egressview:read',
+      notesWriteScope: 'egressview:notes.write',
+      scopesSupported: ['egressview:read', 'egressview:notes.write'],
+      serviceToken: SERVICE_TOKEN,
     });
     try {
       const { port } = server.address();
@@ -204,7 +254,7 @@ describe('mcp-server: HTTP auth configuration', () => {
         assert.equal(response.status, 200);
         const body = await response.json();
         assert.equal(body.resource, 'https://monitor.example.test/egressview/mcp');
-        assert.deepEqual(body.scopes_supported, ['egressview:read']);
+        assert.deepEqual(body.scopes_supported, ['egressview:read', 'egressview:notes.write']);
       }
 
       const response = await fetch(`${base}/mcp`, {
@@ -219,6 +269,69 @@ describe('mcp-server: HTTP auth configuration', () => {
       await new Promise((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
       });
+    }
+  });
+});
+
+describe('mcp-server: OAuth tool scope enforcement', () => {
+  const scopeMapping = createMcpScopeMapping({
+    readScope: 'egressview:read',
+    notesWriteScope: 'egressview:notes.write',
+  });
+  const oauth = {
+    challenge: (error, scope) => `Bearer error="${error}", scope="${scope}"`,
+  };
+
+  function response() {
+    const res = { statusCode: null, body: null, headers: {} };
+    res.set = (name, value) => { res.headers[name] = value; return res; };
+    res.status = (statusCode) => { res.statusCode = statusCode; return res; };
+    res.json = (body) => { res.body = body; return res; };
+    return res;
+  }
+
+  it('returns 403 with both current and required scopes for a write tool', () => {
+    const middleware = _createToolScopeMiddleware(scopeMapping, oauth);
+    const req = {
+      method: 'POST',
+      body: { method: 'tools/call', params: { name: 'set_device_note' } },
+      mcpAuth: { scopes: ['egressview:read'] },
+    };
+    const res = response();
+    let nextCalled = false;
+    middleware(req, res, () => { nextCalled = true; });
+    assert.equal(nextCalled, false);
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(res.body, { error: 'insufficient_scope' });
+    assert.match(
+      res.headers['WWW-Authenticate'],
+      /scope="egressview:read egressview:notes\.write"/
+    );
+  });
+
+  it('allows the write tool when both scopes are granted', () => {
+    const middleware = _createToolScopeMiddleware(scopeMapping, oauth);
+    const req = {
+      method: 'POST',
+      body: { method: 'tools/call', params: { name: 'set_device_note' } },
+      mcpAuth: { scopes: ['egressview:read', 'egressview:notes.write'] },
+    };
+    let nextCalled = false;
+    middleware(req, response(), () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
+  });
+
+  it('leaves unknown methods and tools to the MCP protocol handler', () => {
+    const middleware = _createToolScopeMiddleware(scopeMapping, oauth);
+    for (const body of [
+      { method: 'tools/list' },
+      { method: 'tools/call', params: { name: 'future_tool' } },
+    ]) {
+      let nextCalled = false;
+      middleware({ method: 'POST', body, mcpAuth: { scopes: [] } }, response(), () => {
+        nextCalled = true;
+      });
+      assert.equal(nextCalled, true);
     }
   });
 });
@@ -253,6 +366,71 @@ describe('mcp-server: apiPost', () => {
     assert.equal(capturedOpts.headers['Content-Type'], 'application/json');
     assert.ok(capturedOpts.headers['X-Admin-Token'], 'should include auth token');
     assert.deepEqual(JSON.parse(capturedOpts.body), { ip: '192.168.1.1', note: 'test' });
+  });
+
+  it('uses only the injected service identity for internal API calls', async () => {
+    let capturedOpts;
+    globalThis.fetch = async (_url, opts) => {
+      capturedOpts = opts;
+      return { ok: true, status: 200, json: async () => ({ success: true }) };
+    };
+    const client = _createApiClient({
+      base: 'http://localhost:9999',
+      token: SERVICE_TOKEN,
+    });
+    await client.get('/devices');
+    assert.equal(capturedOpts.headers['X-Admin-Token'], SERVICE_TOKEN);
+    assert.notEqual(capturedOpts.headers['X-Admin-Token'], process.env.EGRESSVIEW_TOKEN);
+  });
+
+  it('verifies exact service permissions before forwarding an MCP API call', async () => {
+    const requests = [];
+    globalThis.fetch = async (url, opts) => {
+      requests.push({ url, opts });
+      if (url.endsWith('/api/auth/api-identities/self')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            identity: { permissions: ['notes.write', 'network.read'] },
+          }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ devices: [] }) };
+    };
+    const client = _createMcpServiceApiClient({
+      base: 'http://localhost:9999',
+      token: SERVICE_TOKEN,
+    });
+    await client.get('/devices');
+    await client.get('/connections');
+    assert.equal(requests.length, 3, 'identity permissions should be verified once');
+    assert(requests.every(({ opts }) => opts.headers['X-Admin-Token'] === SERVICE_TOKEN));
+  });
+
+  it('rejects an over-privileged service identity before the requested API call', async () => {
+    let requestCount = 0;
+    globalThis.fetch = async () => {
+      requestCount += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          identity: {
+            permissions: ['network.read', 'notes.write', 'auth.admin'],
+          },
+        }),
+      };
+    };
+    const client = _createMcpServiceApiClient({
+      base: 'http://localhost:9999',
+      token: SERVICE_TOKEN,
+    });
+    await assert.rejects(
+      () => client.get('/devices'),
+      /must grant exactly network\.read and notes\.write/
+    );
+    assert.equal(requestCount, 1);
   });
 
   it('returns parsed JSON on success', async () => {

@@ -34,16 +34,14 @@ const { StdioServerTransport }           = require('@modelcontextprotocol/sdk/se
 const { StreamableHTTPServerTransport }  = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const { z } = require('zod');
 const { permissionForMcpTool } = require('./src/permission-matrix');
+const { isApiIdentityToken } = require('./src/api-identities');
+const { createMcpScopeMapping } = require('./src/mcp-scope-mapping');
 const { createOAuthResourceServer } = require('./src/mcp-oauth');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const BASE      = (process.env.EGRESSVIEW_URL  || 'http://localhost:3000').replace(/\/$/, '');
 const TOKEN     = process.env.EGRESSVIEW_TOKEN || '';
-
-if (!TOKEN) {
-  process.stderr.write('[egressview-mcp] WARNING: EGRESSVIEW_TOKEN is not set — API calls will fail\n');
-}
 
 function resolveHttpAuthConfig(env = process.env) {
   const mode = String(env.MCP_AUTH_MODE || 'token').trim().toLowerCase();
@@ -62,19 +60,32 @@ function resolveHttpAuthConfig(env = process.env) {
   if (mode === 'oauth') {
     const issuer = String(env.MCP_OAUTH_ISSUER || '').trim();
     const resource = String(env.MCP_OAUTH_RESOURCE || '').trim();
-    const requiredScope = String(env.MCP_OAUTH_READ_SCOPE || '').trim();
-    if (!issuer || !resource || !requiredScope) {
+    const readScope = String(env.MCP_OAUTH_READ_SCOPE || '').trim();
+    const notesWriteScope = String(env.MCP_OAUTH_NOTES_WRITE_SCOPE || '').trim();
+    const serviceToken = String(env.MCP_SERVICE_TOKEN || '').trim();
+    if (!issuer || !resource || !readScope || !notesWriteScope || !serviceToken) {
       throw new Error(
-        'MCP_OAUTH_ISSUER, MCP_OAUTH_RESOURCE, and MCP_OAUTH_READ_SCOPE '
-        + 'must be set in HTTP OAuth mode'
+        'MCP_OAUTH_ISSUER, MCP_OAUTH_RESOURCE, MCP_OAUTH_READ_SCOPE, '
+        + 'MCP_OAUTH_NOTES_WRITE_SCOPE, and MCP_SERVICE_TOKEN must be set '
+        + 'in HTTP OAuth mode'
       );
     }
+    if (!isApiIdentityToken(serviceToken)) {
+      throw new Error('MCP_SERVICE_TOKEN must be a scoped EgressView API identity token');
+    }
+    if (env.EGRESSVIEW_TOKEN && serviceToken === env.EGRESSVIEW_TOKEN) {
+      throw new Error('MCP_SERVICE_TOKEN must differ from EGRESSVIEW_TOKEN');
+    }
+    const scopeMapping = createMcpScopeMapping({ readScope, notesWriteScope });
     return Object.freeze({
       mode,
       issuer,
       resource,
-      requiredScope,
-      scopesSupported: Object.freeze([requiredScope]),
+      requiredScope: readScope,
+      readScope,
+      notesWriteScope,
+      scopesSupported: scopeMapping.scopesSupported,
+      serviceToken,
     });
   }
   throw new Error('MCP_AUTH_MODE must be either "token" or "oauth"');
@@ -90,34 +101,81 @@ function resolveMcpPort(value) {
 
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
 
-async function api(path, params = {}) {
-  const url = new URL(`${BASE}/api${path}`);
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+function createApiClient({ base = BASE, token = TOKEN } = {}) {
+  async function parseResponse(res, label) {
+    if (!res.ok) throw new Error(`${label} returned ${res.status}`);
+    try {
+      return await res.json();
+    } catch {
+      throw new Error(`${label} returned non-JSON response`);
+    }
   }
-  const res = await fetch(url.toString(), {
-    headers: { 'X-Admin-Token': TOKEN },
+
+  return Object.freeze({
+    async get(path, params = {}) {
+      const url = new URL(`${base}/api${path}`);
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
+      }
+      const res = await fetch(url.toString(), {
+        headers: { 'X-Admin-Token': token },
+      });
+      return parseResponse(res, `API ${path}`);
+    },
+
+    async post(path, body = {}) {
+      const res = await fetch(`${base}/api${path}`, {
+        method: 'POST',
+        headers: { 'X-Admin-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return parseResponse(res, `API POST ${path}`);
+    },
   });
-  if (!res.ok) throw new Error(`API ${path} returned ${res.status}`);
-  try {
-    return await res.json();
-  } catch {
-    throw new Error(`API ${path} returned non-JSON response`);
-  }
 }
 
-async function apiPost(path, body = {}) {
-  const res = await fetch(`${BASE}/api${path}`, {
-    method:  'POST',
-    headers: { 'X-Admin-Token': TOKEN, 'Content-Type': 'application/json' },
-    body:    JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`API POST ${path} returned ${res.status}`);
-  try {
-    return await res.json();
-  } catch {
-    throw new Error(`API POST ${path} returned non-JSON response`);
+const defaultApiClient = createApiClient();
+async function apiPost(path, body = {}) { return defaultApiClient.post(path, body); }
+
+const MCP_SERVICE_PERMISSIONS = Object.freeze(['network.read', 'notes.write']);
+
+function createMcpServiceApiClient({ base = BASE, token } = {}) {
+  const client = createApiClient({ base, token });
+  let validationPromise = null;
+
+  async function validateIdentity() {
+    if (!validationPromise) {
+      validationPromise = client.get('/auth/api-identities/self')
+        .then((body) => {
+          const actual = Array.isArray(body?.identity?.permissions)
+            ? [...new Set(body.identity.permissions)].sort()
+            : [];
+          const expected = [...MCP_SERVICE_PERMISSIONS].sort();
+          if (actual.length !== expected.length
+              || actual.some((permission, index) => permission !== expected[index])) {
+            throw new Error(
+              'MCP service identity must grant exactly network.read and notes.write'
+            );
+          }
+        })
+        .catch((error) => {
+          validationPromise = null;
+          throw error;
+        });
+    }
+    return validationPromise;
   }
+
+  return Object.freeze({
+    async get(path, params = {}) {
+      await validateIdentity();
+      return client.get(path, params);
+    },
+    async post(path, body = {}) {
+      await validateIdentity();
+      return client.post(path, body);
+    },
+  });
 }
 
 // ─── Period helpers ───────────────────────────────────────────────────────────
@@ -150,7 +208,7 @@ function registerTool(server, name, ...args) {
   server.tool(name, ...args);
 }
 
-function buildMcpServer({ includeWriteTools = true } = {}) {
+function buildMcpServer({ includeWriteTools = true, apiClient = defaultApiClient } = {}) {
   const server = new McpServer({
     name: 'egressview',
     version: require('./package.json').version,
@@ -163,7 +221,7 @@ function buildMcpServer({ includeWriteTools = true } = {}) {
     { period: PERIOD_ENUM.default('24h').describe('Time window') },
     async ({ period }) => {
       const { from, to } = periodRange(period);
-      const data = await api('/connections/threat-counts', { from, to });
+      const data = await apiClient.get('/connections/threat-counts', { from, to });
       return ok({ period, safe: data.safe, warn: data.warn, danger: data.danger, total: data.safe + data.warn + data.danger });
     }
   );
@@ -175,7 +233,7 @@ function buildMcpServer({ includeWriteTools = true } = {}) {
     { period: PERIOD_ENUM.default('24h').describe('Time window') },
     async ({ period }) => {
       const { from, to } = periodRange(period);
-      const data = await api('/connections/summary', { from, to, buckets: 1 });
+      const data = await apiClient.get('/connections/summary', { from, to, buckets: 1 });
       return ok({
         period,
         totalSessions:      data.total        ?? 0,
@@ -195,7 +253,7 @@ function buildMcpServer({ includeWriteTools = true } = {}) {
     },
     async ({ period, limit }) => {
       const { from, to } = periodRange(period);
-      const data = await api('/connections/summary', { from, to, buckets: 1 });
+      const data = await apiClient.get('/connections/summary', { from, to, buckets: 1 });
       const rows = (data.byDst ?? []).slice(0, limit).map(d => ({
         dst:       d.dst,
         host:      d.dstHost  || null,
@@ -221,7 +279,7 @@ function buildMcpServer({ includeWriteTools = true } = {}) {
     },
     async ({ period, src, limit }) => {
       const { from, to } = periodRange(period);
-      const data = await api('/connections/summary', { from, to, buckets: 1, src: src || undefined });
+      const data = await apiClient.get('/connections/summary', { from, to, buckets: 1, src: src || undefined });
       if (src) {
         const topDst = (data.byDst ?? []).slice(0, limit).map(d => ({
           dst:      d.dst,
@@ -252,7 +310,7 @@ function buildMcpServer({ includeWriteTools = true } = {}) {
     { period: PERIOD_ENUM.default('24h') },
     async ({ period }) => {
       const { from, to } = periodRange(period);
-      const data = await api('/connections/new-nodes', { from, to });
+      const data = await apiClient.get('/connections/new-nodes', { from, to });
       return ok({
         period,
         deviceCount:      data.deviceCount,
@@ -286,7 +344,7 @@ function buildMcpServer({ includeWriteTools = true } = {}) {
     },
     async ({ period, confidence, limit }) => {
       const { from, to } = periodRange(period);
-      const data = await api('/connections/threat-connections', { from, to, confidence, limit });
+      const data = await apiClient.get('/connections/threat-connections', { from, to, confidence, limit });
       return ok({ period, confidence, count: data.count, threats: data.threats ?? [] });
     }
   );
@@ -301,7 +359,7 @@ function buildMcpServer({ includeWriteTools = true } = {}) {
     },
     async ({ period, limit }) => {
       const { from, to } = periodRange(period);
-      const data = await api('/notification-log', { from, to });
+      const data = await apiClient.get('/notification-log', { from, to });
       const alerts = (data.logs ?? []).slice(0, limit).map(r => ({
         type:       r.type,
         detectedAt: tsToIso(r.detectedAt),
@@ -323,7 +381,7 @@ function buildMcpServer({ includeWriteTools = true } = {}) {
       include_archived: z.boolean().default(false).describe('Include archived/merged devices'),
     },
     async ({ include_archived }) => {
-      const data = await api('/devices', { includeArchived: include_archived ? '1' : undefined });
+      const data = await apiClient.get('/devices', { includeArchived: include_archived ? '1' : undefined });
       const devs = (data.devices ?? data ?? []).map(d => ({
         deviceId:  d.deviceId,
         ip:        d.ip,
@@ -351,7 +409,7 @@ function buildMcpServer({ includeWriteTools = true } = {}) {
     },
     async ({ period, src, dst, limit }) => {
       const { from, to } = periodRange(period);
-      const data = await api('/connections', {
+      const data = await apiClient.get('/connections', {
         from, to, limit, offset: 0,
         fSrc: src || undefined,
         fDst: dst || undefined,
@@ -380,7 +438,7 @@ function buildMcpServer({ includeWriteTools = true } = {}) {
       src: z.string().optional().describe('Source IP address (omit for all devices with notes)'),
     },
     async ({ src }) => {
-      const data = await api('/devices');
+      const data = await apiClient.get('/devices');
       const devs = data.devices ?? [];
       if (src) {
         const dev = devs.find(d => d.ip === src);
@@ -419,7 +477,7 @@ function buildMcpServer({ includeWriteTools = true } = {}) {
         note: z.string().max(500).describe('Memo text to save (empty string deletes the note)'),
       },
       async ({ src, note }) => {
-        await apiPost('/notes', { ip: src, note });
+        await apiClient.post('/notes', { ip: src, note });
         const trimmed = note.trim();
         return ok({ src, note: trimmed || null, deleted: !trimmed });
       }
@@ -432,6 +490,11 @@ function buildMcpServer({ includeWriteTools = true } = {}) {
 // ─── stdio transport ──────────────────────────────────────────────────────────
 
 async function startStdio() {
+  if (!TOKEN) {
+    process.stderr.write(
+      '[egressview-mcp] WARNING: EGRESSVIEW_TOKEN is not set — API calls will fail\n'
+    );
+  }
   const server    = buildMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
@@ -455,13 +518,39 @@ function createAuthMiddleware(token) {
   };
 }
 
+function createToolScopeMiddleware(scopeMapping, oauth) {
+  return (req, res, next) => {
+    if (req.method !== 'POST' || req.body?.method !== 'tools/call') return next();
+    const authorization = scopeMapping.authorizeTool(
+      req.body?.params?.name,
+      req.mcpAuth?.scopes
+    );
+    if (!authorization.classified) return next();
+    if (authorization.allowed) return next();
+
+    const challenge = oauth.challenge(
+      'insufficient_scope',
+      authorization.requiredScopes.join(' ')
+    );
+    res.set('WWW-Authenticate', challenge);
+    return res.status(403).json({ error: 'insufficient_scope' });
+  };
+}
+
 async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
   const app = express();
   app.use(express.json());
 
   let oauth = null;
+  let scopeMapping = null;
+  let internalApiClient = defaultApiClient;
   if (authConfig.mode === 'oauth') {
     oauth = createOAuthResourceServer(authConfig);
+    scopeMapping = createMcpScopeMapping({
+      readScope: authConfig.readScope || authConfig.requiredScope,
+      notesWriteScope: authConfig.notesWriteScope,
+    });
+    internalApiClient = createMcpServiceApiClient({ token: authConfig.serviceToken });
     const sendMetadata = (_req, res) => res.json(oauth.metadata);
     const metadataPaths = new Set([
       '/.well-known/oauth-protected-resource',
@@ -470,7 +559,13 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
     ]);
     for (const path of metadataPaths) app.get(path, sendMetadata);
     app.use('/mcp', oauth.middleware());
+    app.use('/mcp', createToolScopeMiddleware(scopeMapping, oauth));
   } else {
+    if (!TOKEN) {
+      process.stderr.write(
+        '[egressview-mcp] WARNING: EGRESSVIEW_TOKEN is not set — API calls will fail\n'
+      );
+    }
     // Private token mode accepts the dedicated token in either supported header.
     app.use('/mcp', createAuthMiddleware(authConfig.token));
   }
@@ -478,8 +573,9 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
   // Streamable HTTP — handles POST (tool calls) and GET (SSE stream)
   const handleMcp = async (req, res) => {
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    // OAuth write scope and least-privilege service identity arrive in P2-60 PR 3.
-    const server = buildMcpServer({ includeWriteTools: authConfig.mode !== 'oauth' });
+    const includeWriteTools = authConfig.mode !== 'oauth'
+      || scopeMapping.authorizeTool('set_device_note', req.mcpAuth?.scopes).allowed;
+    const server = buildMcpServer({ includeWriteTools, apiClient: internalApiClient });
     try {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
@@ -539,6 +635,9 @@ if (require.main === module) {
 module.exports._createAuthMiddleware = createAuthMiddleware;
 module.exports._buildMcpServer       = buildMcpServer;
 module.exports._apiPost              = apiPost;
+module.exports._createApiClient      = createApiClient;
+module.exports._createMcpServiceApiClient = createMcpServiceApiClient;
+module.exports._createToolScopeMiddleware = createToolScopeMiddleware;
 module.exports._resolveHttpAuthConfig = resolveHttpAuthConfig;
 module.exports._resolveMcpPort        = resolveMcpPort;
 module.exports._startHttp             = startHttp;
