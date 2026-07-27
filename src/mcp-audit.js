@@ -19,7 +19,11 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 
 const DEFAULT_DB_PATH = path.join(__dirname, '..', '.egressview-mcp-audit.db');
-const DEFAULT_RETENTION_DAYS = 90;
+// Matches EgressView's own audit retention. Keeping the two in step matters:
+// an incident is reconstructed by joining both stores, and if this one expired
+// first the main trail would still show that the service identity acted while
+// the record of who asked for it had gone.
+const DEFAULT_RETENTION_DAYS = 180;
 const MAX_TOOL_NAME = 100;
 const MAX_REASON = 60;
 const MAX_REQUEST_ID = 100;

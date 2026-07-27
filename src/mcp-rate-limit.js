@@ -13,11 +13,16 @@
 // so a bug or restart here cannot leave the endpoint unbounded.
 'use strict';
 
+// Deliberately tight. There is no measured usage to size these from yet, and
+// loosening after a false positive is cheap and safe; discovering a limit was
+// too loose only happens after abuse. An agent bursting a dozen calls during
+// one investigation fits comfortably; sustained multi-per-second traffic does
+// not, and is either a flood or a runaway loop.
 const DEFAULTS = Object.freeze({
-  globalPerMinute: 240,
-  perSubjectPerMinute: 60,
-  perClientPerMinute: 120,
-  maxConcurrent: 8,
+  globalPerMinute: 60,
+  perSubjectPerMinute: 30,
+  perClientPerMinute: 30,
+  maxConcurrent: 4,
   windowMs: 60_000,
   maxTrackedKeys: 5_000,
 });

@@ -60,14 +60,14 @@ describe('MCP audit records', () => {
       eventType: 'mcp_tool_call',
       outcome: 'success',
       toolName: 'set_device_note',
-      args: { ip: '192.168.41.19', note: 'personal note body' },
+      args: { ip: '198.51.100.7', note: 'personal note body' },
       token: 'egv_secret_token_value',
       rawJwt: 'eyJhbGciOiJSUzI1NiJ9.payload.signature',
       providerError: 'token signature mismatch for kid=abc',
     });
     const serialized = JSON.stringify(mcpAudit.list());
     for (const forbidden of [
-      '192.168.41.19', 'personal note body', 'egv_secret_token_value',
+      '198.51.100.7', 'personal note body', 'egv_secret_token_value',
       'eyJhbGciOiJSUzI1NiJ9', 'kid=abc',
     ]) {
       assert.equal(serialized.includes(forbidden), false, `${forbidden} must not be stored`);
@@ -158,5 +158,49 @@ describe('MCP audit resilience', () => {
     }
     assert.equal(mcpAudit.list({ limit: 2 }).length, 2);
     assert.equal(mcpAudit.list()[0].requestId, 'r4');
+  });
+});
+
+describe('audit correlation between the two stores', () => {
+  const { _createApiClient: createApiClient } = require('../../mcp-server.js');
+
+  function captureFetch() {
+    const calls = [];
+    const original = global.fetch;
+    global.fetch = async (url, options = {}) => {
+      calls.push({ url: String(url), headers: options.headers || {} });
+      return { ok: true, json: async () => ({}) };
+    };
+    return { calls, restore: () => { global.fetch = original; } };
+  }
+
+  it('forwards the MCP request id to EgressView so both trails can be joined', async () => {
+    const { calls, restore } = captureFetch();
+    try {
+      const client = createApiClient({ base: 'http://api.test', token: 'tkn' }); // pragma: allowlist secret
+      await client.withRequestId('req-join-1').get('/devices');
+      await client.withRequestId('req-join-1').post('/notes', { ip: '10.0.0.1' });
+      assert.equal(calls.length, 2);
+      for (const call of calls) {
+        assert.equal(call.headers['X-Request-Id'], 'req-join-1');
+      }
+    } finally {
+      restore();
+    }
+  });
+
+  it('omits the header when no request id is bound', async () => {
+    const { calls, restore } = captureFetch();
+    try {
+      await createApiClient({ base: 'http://api.test', token: 'tkn' }).get('/devices'); // pragma: allowlist secret
+      assert.equal('X-Request-Id' in calls[0].headers, false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('keeps the audited request id in the same shape that is forwarded', () => {
+    mcpAudit.append({ eventType: 'mcp_tool_call', outcome: 'success', requestId: 'req-join-1' });
+    assert.equal(mcpAudit.list()[0].requestId, 'req-join-1');
   });
 });

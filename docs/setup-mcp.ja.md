@@ -311,11 +311,13 @@ OAuthモード（`MCP_AUTH_MODE=oauth`）にのみ適用されます。private t
 
 | 設定 | 既定値 | 目的 |
 |---|---|---|
-| `MCP_RATE_LIMIT_GLOBAL` | 240/分 | 単一のバーストからホストを保護 |
-| `MCP_RATE_LIMIT_SUBJECT` | 60/分 | 侵害された1利用者が全体の枠を消費できない |
-| `MCP_RATE_LIMIT_CLIENT` | 120/分 | 異常な1クライアントも同様 |
-| `MCP_MAX_CONCURRENT` | 8 | 同時tool call数を制限 |
+| `MCP_RATE_LIMIT_GLOBAL` | 60/分 | 単一のバーストからホストを保護 |
+| `MCP_RATE_LIMIT_SUBJECT` | 30/分 | 侵害された1利用者が全体の枠を消費できない |
+| `MCP_RATE_LIMIT_CLIENT` | 30/分 | 異常な1クライアントも同様 |
+| `MCP_MAX_CONCURRENT` | 4 | 同時tool call数を制限 |
 | `MCP_MAX_BODY` | `256kb` | 解析・認証の前にbodyを制限 |
+
+既定値は意図的に厳しくしています。実測した使用量がまだ無く、誤検知が出てから緩めるのは容易ですが、緩すぎたと気づくのは悪用された後だからです。正当な処理が上限に当たる場合は引き上げてください。
 
 拒否時は`429`と`Retry-After`を返します。正の整数でない値は上限を無効化せず既定値へfallbackします。設定ミスで上限が消えることはありません。
 
@@ -329,9 +331,11 @@ OAuthモード（`MCP_AUTH_MODE=oauth`）にのみ適用されます。private t
 
 **記録しないもの:** tool引数、IP/MACアドレス、端末メモ本文、access token、生のJWT、providerのエラー文言。
 
+**2つの監査の突き合わせ。** EgressView本体はMCP service identityが何をしたかを記録し（`actor: api:<id>`）、こちらのストアはそれをどのOAuth subjectが要求したかを記録します。MCPのrequest IDは`X-Request-Id`としてEgressViewへ転送されるため、1つの事象を両者で追跡できます。**保持期間は必ず揃えてください。**片方だけ先に消えると、「何が起きたか」は残るのに「誰が指示したか」が失われます。
+
 理由コード: `unauthorized`、`invalid_token`、`insufficient_scope`、`global_rate_limit`、`subject_rate_limit`、`client_rate_limit`、`concurrency_limit`、`server_error`。これらが連続する場合は調査の合図です。
 
-subjectは鍵付きHMACで仮名化するため、識別子を保存せずに同一人物の活動を追跡できます。90日より古い記録は起動時に削除します。
+subjectは鍵付きHMACで仮名化するため、識別子を保存せずに同一人物の活動を追跡できます。180日より古い記録は起動時に削除します。EgressView本体の監査保持期間と揃えています。
 
 ### アクセスの失効
 

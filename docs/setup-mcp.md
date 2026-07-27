@@ -311,11 +311,13 @@ Three independent buckets apply, and all must allow a request. A separate concur
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `MCP_RATE_LIMIT_GLOBAL` | 240/min | Protects the host from any single burst |
-| `MCP_RATE_LIMIT_SUBJECT` | 60/min | One compromised user cannot consume the whole budget |
-| `MCP_RATE_LIMIT_CLIENT` | 120/min | One misbehaving client cannot either |
-| `MCP_MAX_CONCURRENT` | 8 | Bounds simultaneous tool calls |
+| `MCP_RATE_LIMIT_GLOBAL` | 60/min | Protects the host from any single burst |
+| `MCP_RATE_LIMIT_SUBJECT` | 30/min | One compromised user cannot consume the whole budget |
+| `MCP_RATE_LIMIT_CLIENT` | 30/min | One misbehaving client cannot either |
+| `MCP_MAX_CONCURRENT` | 4 | Bounds simultaneous tool calls |
 | `MCP_MAX_BODY` | `256kb` | Body is bounded before parsing or authentication |
+
+The defaults are deliberately tight: there is no measured usage to size them from yet, and loosening one after a false positive is cheap, while discovering one was too loose only happens after abuse. Raise them if a legitimate workload trips a limit.
 
 A rejected request returns `429` with `Retry-After`. Values that are not positive integers fall back to the default rather than disabling the limit — a typo cannot silently remove a bound.
 
@@ -329,9 +331,11 @@ Recorded: pseudonymised OAuth subject and client id, tool name, granted scopes, 
 
 **Never recorded:** tool arguments, IP or MAC addresses, device note bodies, access tokens, raw JWTs, or provider error text.
 
+**Joining the two trails.** EgressView audits what the MCP service identity did (`actor: api:<id>`); this store records which OAuth subject asked for it. The MCP request id is forwarded to EgressView as `X-Request-Id`, so one incident can be followed across both. Keep the two retention windows equal, or the record of *who asked* will expire while the record of *what happened* remains.
+
 Reason codes: `unauthorized`, `invalid_token`, `insufficient_scope`, `global_rate_limit`, `subject_rate_limit`, `client_rate_limit`, `concurrency_limit`, `server_error`. A run of any of these is the signal to investigate.
 
-Subjects are pseudonymised with a keyed HMAC, so the same person correlates across requests without the identifier being stored. Entries older than 90 days are pruned at startup.
+Subjects are pseudonymised with a keyed HMAC, so the same person correlates across requests without the identifier being stored. Entries older than 180 days are pruned at startup, matching EgressView's own audit retention.
 
 ### Revoking access
 
