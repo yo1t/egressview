@@ -40,6 +40,10 @@ function sha256(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
 
+function isApiIdentityToken(value) {
+  return typeof value === 'string' && TOKEN_PATTERN.test(value);
+}
+
 function initDb(dbPath) {
   _lastDbPath = dbPath || DB_PATH;
   db = new Database(_lastDbPath);
@@ -180,7 +184,7 @@ function revokeIdentity(id, options = {}) {
  * unexpired, unrevoked record with a permission list this build understands.
  */
 function verifyToken(token, options = {}) {
-  if (!db || typeof token !== 'string' || !TOKEN_PATTERN.test(token)) return null;
+  if (!db || !isApiIdentityToken(token)) return null;
   const now = Number(options.now) || Date.now();
   const row = db.prepare('SELECT * FROM api_identities WHERE tokenHash = ?').get(sha256(token));
   if (!row) return null;
@@ -247,6 +251,7 @@ module.exports = {
   MAX_TTL_MS,
   MIN_TTL_MS,
   TOKEN_PREFIX,
+  isApiIdentityToken,
   initDb,
   closeDb,
   reopen,

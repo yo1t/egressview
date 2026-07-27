@@ -49,6 +49,13 @@ module.exports = function apiIdentityRoutes(ctx) {
     });
   });
 
+  router.get('/auth/api-identities/self', requireAdmin, (req, res) => {
+    if (!req.apiIdentity) {
+      return res.status(403).json({ error: 'Scoped API identity required' });
+    }
+    return res.json({ identity: req.apiIdentity });
+  });
+
   router.post('/auth/api-identities', requireAdmin, (req, res) => {
     const parsed = parseRequest(createSchema, req.body, res);
     if (!parsed.ok) return;

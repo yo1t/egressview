@@ -141,16 +141,35 @@ that relied on the old fallback must generate a separate token and set
 
 P2-60's OAuth Resource Server boundary can be enabled for private integration
 testing with `MCP_AUTH_MODE=oauth`,
-`MCP_OAUTH_ISSUER`, `MCP_OAUTH_RESOURCE`, and `MCP_OAUTH_READ_SCOPE`.
+`MCP_OAUTH_ISSUER`, `MCP_OAUTH_RESOURCE`, `MCP_OAUTH_READ_SCOPE`,
+`MCP_OAUTH_NOTES_WRITE_SCOPE`, and `MCP_SERVICE_TOKEN`.
 It publishes RFC 9728 Protected Resource Metadata, validates RS256 JWT
 signatures through the issuer's discovery/JWKS endpoints, and fails closed on
 issuer, expiry, audience, or scope mismatches. The issuer must advertise PKCE
 S256. HTTPS is required except for loopback-only testing.
 
-This stage intentionally exposes read tools only. `set_device_note`, the
-least-privilege internal service identity, OAuth audit/rate limits, and the
-Internet publication gate are delivered by later P2-60 phases. Do not publish
-this endpoint to the Internet yet.
+External provider scopes map to EgressView's shared permissions:
+`MCP_OAUTH_READ_SCOPE` grants `network.read`, while
+`MCP_OAUTH_NOTES_WRITE_SCOPE` grants `notes.write`. A read-only access token
+does not list `set_device_note`; a direct call is rejected with `403
+insufficient_scope`. The write challenge includes both scopes so a step-up
+authorization does not discard the already granted read scope.
+
+Create a dedicated API identity with exactly `network.read` and `notes.write`,
+then place its one-time plaintext token in `MCP_SERVICE_TOKEN`:
+
+```bash
+curl -sS -X POST http://127.0.0.1:3002/api/auth/api-identities \
+  -H "X-Admin-Token: $EGRESSVIEW_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"label":"Remote MCP service","permissions":["network.read","notes.write"],"expiresInMs":31536000000}'
+```
+
+OAuth mode accepts only an `egv_...` scoped identity and never falls back to
+`EGRESSVIEW_TOKEN`. Store `.env.mcp` with mode `0600`, rotate the identity
+before expiry, and revoke the previous identity after validation. OAuth
+audit/rate limits and the Internet publication gate are delivered by later
+P2-60 phases. Do not publish this endpoint to the Internet yet.
 
 ### Step 2a — Apache (httpd) config
 
@@ -267,7 +286,9 @@ Use `https://` if your reverse proxy terminates TLS (required for Claude Desktop
 | `MCP_TOKEN` | HTTP token mode | — | Dedicated private HTTP endpoint token. It must be set explicitly and must differ from `EGRESSVIEW_TOKEN`. |
 | `MCP_OAUTH_ISSUER` | HTTP OAuth mode | — | Exact HTTPS authorization-server issuer URL. Loopback HTTP is allowed only for testing. |
 | `MCP_OAUTH_RESOURCE` | HTTP OAuth mode | — | Canonical public MCP resource URL used for exact JWT audience validation. |
-| `MCP_OAUTH_READ_SCOPE` | HTTP OAuth mode | — | Provider scope required for the staged read-only MCP endpoint. |
+| `MCP_OAUTH_READ_SCOPE` | HTTP OAuth mode | — | Provider scope mapped to the internal `network.read` permission. |
+| `MCP_OAUTH_NOTES_WRITE_SCOPE` | HTTP OAuth mode | — | Provider scope mapped to the internal `notes.write` permission. |
+| `MCP_SERVICE_TOKEN` | HTTP OAuth mode | — | Dedicated `egv_...` API identity token with exactly `network.read` and `notes.write`. |
 
 ---
 
@@ -276,7 +297,7 @@ Use `https://` if your reverse proxy terminates TLS (required for Claude Desktop
 - The MCP HTTP server listens on `127.0.0.1` only — it is not reachable without the reverse proxy.
 - Private token mode accepts the dedicated `MCP_TOKEN` through `X-Admin-Token` or `Authorization: Bearer`; it never falls back to the EgressView admin token.
 - Most tools are read-only. `set_device_note` can write device memo notes (stored in `.egressview.notes.json`, not the main database).
-- Keep `.env.mcp` permissions at `chmod 600`; it contains your API/admin token.
+- Keep `.env.mcp` permissions at `chmod 600`; it contains private API credentials.
 
 ## Trademarks
 

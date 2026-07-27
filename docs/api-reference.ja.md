@@ -10,6 +10,11 @@ Web UIをサブパスで公開している場合も、APIは常に`/api`配下�
 
 scoped API identityは`GET` / `POST /api/auth/api-identities`と`POST /api/auth/api-identities/:id/revoke`で管理し、いずれも`auth.admin`が必要です。作成時はlabel、空でないpermission一覧、1分以上1年以下の`expiresInMs`を指定します。平文の`egv_...` tokenを返すのは`201`作成responseだけで、DBにはSHA-256 hashだけを保存します。identity管理responseには`Cache-Control: no-store`を付けます。
 
+`GET /api/auth/api-identities/self`は、現在認証中のscoped identity自身だけを
+返し、`network.read`を要求します。browser sessionと従来のadmin tokenは
+拒否します。remote MCP serverはこのAPIを使い、内部service identityの権限が
+`network.read`と`notes.write`だけでない場合にfail-closedで停止します。
+
 ```bash
 export EGRESSVIEW_URL='https://egressview.example.net'
 export EGRESSVIEW_TOKEN='replace-with-your-admin-token'
