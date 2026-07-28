@@ -355,6 +355,92 @@ subjectは専用`MCP_AUDIT_HMAC_KEY`によるHMACで仮名化するため、識�
 
 公開MCP endpointはfail-closedで`401`を返します。それ以外は動作を継続します。ルーター収集、ブラウザUI、stdioクライアント、private HTTPモードはいずれも影響を受けません。IdP障害をEgressViewの障害として扱わないでください。
 
+## 公開前gate
+
+P2-60には、公開DNSを作成する前に必ず成功させるfail-closed gateが
+あります。このgateは**DNS、証明書、load balancer、security group、
+Keycloak、EgressView設定を作成・変更しません**。成功結果も
+`ready_for_manual_dns_review`であり、DNS公開は別途レビューする操作です。
+
+DNS未公開のALBまたはreverse proxyに対して実行します。
+`MCP_GATE_CONNECT_ADDRESS`へstaging targetを指定しても、TLS SNIとHTTP
+`Host`にはcanonical hostnameを維持します。これは
+`curl --connect-to`と同じ考え方です。
+
+```bash
+cp .env.mcp-gate.example .env.mcp-gate
+chmod 600 .env.mcp-gate
+cp docs/mcp-publication-evidence.example.json \
+  .egressview-mcp-publication-evidence.json
+
+set -a
+. ./.env.mcp-gate
+set +a
+npm run mcp:publication-gate
+```
+
+2つのlocalファイルはいずれもgitignoreされています。Bearer tokenは
+mode `0600`の環境ファイルだけに置き、試験直後に削除してください。
+証跡JSONと生成レポートにはtoken、tool引数、通信観測、IP/MAC、credentialを
+記録しません。
+
+### 必須証跡
+
+すべて成功済みで、deployした40文字のGit commitと一致し、試験から30日以内
+でなければなりません。
+
+- production DNSが無効で、EC2の443/3000/3002/3010へInternetから直接
+  ingressできない
+- reverse proxyのbody、request rate、同時実行、timeout上限を実測した
+- stagingでapplication rollbackとMCP service identity rotationを試験した
+- Keycloak DB backupを使い捨て環境へrestoreした
+- Keycloak/JWKSを到達不能にしMCPのJWKS cacheを空にした状態で、公開MCPだけが
+  fail-closedとなり、`/healthz`、`/readyz`、全有効routerの収集が継続した
+- refresh token rotation後に旧refresh tokenを拒否し、最新token familyは
+  継続利用できた
+- Claude CodeとGitHub Copilot CLIがstaging endpointでread toolとrefreshを
+  完了した
+
+JWKS障害試験ではMCP processをcold startしてください。起動済みprocessが
+有効なcached JWKSで署名検証を継続するのは正常であり、discoveryの
+fail-closed証跡にはなりません。
+
+### 自動probe
+
+CLIは続けて次を確認します。
+
+- public hostnameにA/AAAA recordがない
+- TLS hostname検証とRFC 9728 metadataの2経路
+- 未認証要求がscope付き`401` challengeになる
+- configured issuerのJWKSでfixture署名を独立検証した上で、malformed、期限切れ、
+  誤audience、失効後に期限切れとなったaccess tokenを拒否
+- scoped internal service identityを通した実際のread tool
+- read tokenで`set_device_note`を試した時の`403`と、write tokenでのtool表示
+- staging burst後の`429`と`Retry-After`
+- 対応するappend-only監査行と仮名化identity
+- local readinessと、全有効routerの直近収集成功
+
+rate probeはstaging processのglobal 1分bucketを意図的に使い切ります。
+公開中のendpointでは実行しないでください。
+
+EgressViewはJWTをoffline検証するため、Keycloak sessionやrefresh familyを
+失効しても、発行済みaccess tokenは`exp`まで無効になりません。そのため
+`MCP_GATE_REVOKED_EXPIRED_TOKEN`は短いaccess token TTLの経過後に検査し、
+旧refresh tokenから再発行できないことは別の必須証跡で確認します。
+即時遮断が必要なら最初にpublic proxy routeを外し、access tokenを即時失効
+できるとは表現しません。
+
+### 結果とrollback
+
+成功するとmode `0600`の`.egressview-mcp-publication-gate.json`を生成します。
+deploy commit、実行日時、hostname、router数、各分類の成否だけを記録し、
+秘密情報は保存しません。失敗時はnonzeroで終了し、DNS公開を禁止します。
+
+公開後の確認に失敗した場合はWeb/MCPのDNS aliasを削除し、MCP proxy routeを
+無効化してVPN/SSM運用へ戻します。applicationの確認済みreleaseとKeycloak
+DBは、それぞれ事前試験したrollback手順だけで復元します。router収集と
+local recovery administratorは常に利用可能な状態を維持してください。
+
 ## 商標について
 
 AWS Kiro、Anthropic Claude、Anysphere Cursor などの製品名は、各社の商標または登録商標です。EgressView はこれらの企業と提携・承認・後援関係にありません。
