@@ -66,10 +66,11 @@ function resolveHttpAuthConfig(env = process.env) {
     const readScope = String(env.MCP_OAUTH_READ_SCOPE || '').trim();
     const notesWriteScope = String(env.MCP_OAUTH_NOTES_WRITE_SCOPE || '').trim();
     const serviceToken = String(env.MCP_SERVICE_TOKEN || '').trim();
-    if (!issuer || !resource || !readScope || !notesWriteScope || !serviceToken) {
+    const auditHashKey = String(env.MCP_AUDIT_HMAC_KEY || '').trim();
+    if (!issuer || !resource || !readScope || !notesWriteScope || !serviceToken || !auditHashKey) {
       throw new Error(
         'MCP_OAUTH_ISSUER, MCP_OAUTH_RESOURCE, MCP_OAUTH_READ_SCOPE, '
-        + 'MCP_OAUTH_NOTES_WRITE_SCOPE, and MCP_SERVICE_TOKEN must be set '
+        + 'MCP_OAUTH_NOTES_WRITE_SCOPE, MCP_SERVICE_TOKEN, and MCP_AUDIT_HMAC_KEY must be set '
         + 'in HTTP OAuth mode'
       );
     }
@@ -78,6 +79,12 @@ function resolveHttpAuthConfig(env = process.env) {
     }
     if (env.EGRESSVIEW_TOKEN && serviceToken === env.EGRESSVIEW_TOKEN) {
       throw new Error('MCP_SERVICE_TOKEN must differ from EGRESSVIEW_TOKEN');
+    }
+    if (auditHashKey.length < 32) {
+      throw new Error('MCP_AUDIT_HMAC_KEY must contain at least 32 characters');
+    }
+    if (auditHashKey === serviceToken || auditHashKey === env.EGRESSVIEW_TOKEN) {
+      throw new Error('MCP_AUDIT_HMAC_KEY must be dedicated to MCP audit pseudonyms');
     }
     const scopeMapping = createMcpScopeMapping({ readScope, notesWriteScope });
     return Object.freeze({
@@ -89,6 +96,7 @@ function resolveHttpAuthConfig(env = process.env) {
       notesWriteScope,
       scopesSupported: scopeMapping.scopesSupported,
       serviceToken,
+      auditHashKey,
     });
   }
   throw new Error('MCP_AUTH_MODE must be either "token" or "oauth"');
@@ -107,9 +115,13 @@ function resolveMcpPort(value) {
 // A tool call that never returns holds a concurrency slot until the request
 // deadline. Bounding the upstream call itself frees the slot sooner and gives
 // a clearer failure than a whole-request timeout.
-const API_TIMEOUT_MS = resolveTimeoutMs(process.env.MCP_API_TIMEOUT_MS, 15_000);
-
-function createApiClient({ base = BASE, token = TOKEN, requestId = null } = {}) {
+function createApiClient({
+  base = BASE,
+  token = TOKEN,
+  requestId = null,
+  requestSignal = null,
+  timeoutMs = resolveTimeoutMs(process.env.MCP_API_TIMEOUT_MS, 15_000),
+} = {}) {
   async function parseResponse(res, label) {
     if (!res.ok) throw new Error(`${label} returned ${res.status}`);
     try {
@@ -124,11 +136,15 @@ function createApiClient({ base = BASE, token = TOKEN, requestId = null } = {}) 
   // incident can be traced from "which OAuth subject asked" (MCP audit) to
   // "what the service identity then did" (EgressView audit).
   const correlationHeaders = requestId ? { 'X-Request-Id': requestId } : {};
+  const signalForCall = () => {
+    const apiDeadline = AbortSignal.timeout(timeoutMs);
+    return requestSignal ? AbortSignal.any([requestSignal, apiDeadline]) : apiDeadline;
+  };
 
   return Object.freeze({
     /** A client bound to one inbound request, for audit correlation. */
-    withRequestId(id) {
-      return createApiClient({ base, token, requestId: id });
+    withRequestId(id, signal = requestSignal) {
+      return createApiClient({ base, token, requestId: id, requestSignal: signal, timeoutMs });
     },
 
     async get(path, params = {}) {
@@ -138,7 +154,7 @@ function createApiClient({ base = BASE, token = TOKEN, requestId = null } = {}) 
       }
       const res = await fetch(url.toString(), {
         headers: { 'X-Admin-Token': token, ...correlationHeaders },
-        signal: AbortSignal.timeout(API_TIMEOUT_MS),
+        signal: signalForCall(),
       });
       return parseResponse(res, `API ${path}`);
     },
@@ -147,7 +163,7 @@ function createApiClient({ base = BASE, token = TOKEN, requestId = null } = {}) 
       const res = await fetch(`${base}/api${path}`, {
         method: 'POST',
         headers: { 'X-Admin-Token': token, 'Content-Type': 'application/json', ...correlationHeaders },
-        signal: AbortSignal.timeout(API_TIMEOUT_MS),
+        signal: signalForCall(),
         body: JSON.stringify(body),
       });
       return parseResponse(res, `API POST ${path}`);
@@ -164,9 +180,9 @@ function createMcpServiceApiClient({ base = BASE, token } = {}) {
   const client = createApiClient({ base, token });
   let validationPromise = null;
 
-  async function validateIdentity() {
+  async function validateIdentity(validationClient = client) {
     if (!validationPromise) {
-      validationPromise = client.get('/auth/api-identities/self')
+      validationPromise = validationClient.get('/auth/api-identities/self')
         .then((body) => {
           const actual = Array.isArray(body?.identity?.permissions)
             ? [...new Set(body.identity.permissions)].sort()
@@ -191,15 +207,15 @@ function createMcpServiceApiClient({ base = BASE, token } = {}) {
     return Object.freeze({
       // Binding a request id must not skip identity validation, so the wrapper
       // is rebuilt around the bound client rather than returning it directly.
-      withRequestId(id) {
-        return wrap(inner.withRequestId(id));
+      withRequestId(id, signal) {
+        return wrap(inner.withRequestId(id, signal));
       },
       async get(path, params = {}) {
-        await validateIdentity();
+        await validateIdentity(inner);
         return inner.get(path, params);
       },
       async post(path, body = {}) {
-        await validateIdentity();
+        await validateIdentity(inner);
         return inner.post(path, body);
       },
     });
@@ -570,10 +586,15 @@ function createToolScopeMiddleware(scopeMapping, oauth) {
 // Correlate a request across the rate limiter, the OAuth boundary and the
 // tool call. A caller-supplied id is accepted only in a safe shape.
 function resolveTimeoutMs(value, fallback) {
-  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) return fallback;
+  const parsed = Number(text);
   // A zero or negative timeout would disable the deadline entirely, which is
-  // the failure this exists to prevent.
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+  // the failure this exists to prevent. Node timers also overflow above a
+  // signed 32-bit delay, so keep the operational setting deliberately bounded.
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 600_000
+    ? parsed
+    : fallback;
 }
 
 function requestIdFor(req) {
@@ -695,7 +716,7 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
     // router collection, browser UI, stdio clients and private HTTP mode
     // running untouched.
     mcpAudit.initDb(process.env.MCP_AUDIT_DB_PATH || undefined, {
-      hashKey: authConfig.serviceToken,
+      hashKey: authConfig.auditHashKey,
     });
     mcpAudit.assertWritable();
     mcpAudit.prune();
@@ -750,6 +771,15 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
 
   // Streamable HTTP — handles POST (tool calls) and GET (SSE stream)
   const handleMcp = async (req, res) => {
+    const requestController = new AbortController();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    const includeWriteTools = authConfig.mode !== 'oauth'
+      || scopeMapping.authorizeTool('set_device_note', req.mcpAuth?.scopes).allowed;
+    const apiClient = req.mcpRequestId && typeof internalApiClient.withRequestId === 'function'
+      ? internalApiClient.withRequestId(req.mcpRequestId, requestController.signal)
+      : internalApiClient;
+    const server = buildMcpServer({ includeWriteTools, apiClient });
+
     // Record the timeout as a flag rather than writing a row here: the audit
     // middleware still fires on finish, and two writes would leave the trail
     // claiming both request_timeout and server_error for one request.
@@ -761,18 +791,12 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
     // stalled calls wedging the endpoint closed.
     const deadline = setTimeout(() => {
       req.mcpTimedOut = true;
-      if (res.headersSent) return;
-      res.status(504).json({ error: 'request_timeout' });
+      requestController.abort(new DOMException('MCP request timed out', 'TimeoutError'));
+      if (res.writableEnded) return;
+      if (res.headersSent) res.end();
+      else res.status(504).json({ error: 'request_timeout' });
     }, requestTimeoutMs);
     deadline.unref?.();
-
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    const includeWriteTools = authConfig.mode !== 'oauth'
-      || scopeMapping.authorizeTool('set_device_note', req.mcpAuth?.scopes).allowed;
-    const apiClient = req.mcpRequestId && typeof internalApiClient.withRequestId === 'function'
-      ? internalApiClient.withRequestId(req.mcpRequestId)
-      : internalApiClient;
-    const server = buildMcpServer({ includeWriteTools, apiClient });
 
     // Release both the timer and the MCP server exactly once, however the
     // request ends. Registering the close listener only in `finally` used to
@@ -783,6 +807,9 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
       if (released) return;
       released = true;
       clearTimeout(deadline);
+      if (!requestController.signal.aborted) {
+        requestController.abort(new DOMException('MCP response closed', 'AbortError'));
+      }
       server.close().catch(() => {});
     };
     res.on('close', release);

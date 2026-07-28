@@ -16,6 +16,7 @@ const mcpAudit = require('../../src/mcp-audit');
 const mcpServer = require('../../mcp-server.js');
 
 const SERVICE_TOKEN = `egv_${'a'.repeat(64)}`;
+const AUDIT_HASH_KEY = 'test-audit-hmac-key-that-is-independent';
 const ISSUER = 'https://issuer.example';
 const RESOURCE = 'https://mcp.example/mcp';
 
@@ -32,6 +33,7 @@ function authConfig(overrides = {}) {
     readScope: 'egressview:read',
     notesWriteScope: 'egressview:notes.write',
     serviceToken: SERVICE_TOKEN,
+    auditHashKey: AUDIT_HASH_KEY,
     scopesSupported: ['egressview:read', 'egressview:notes.write'],
     ...overrides,
   };
@@ -61,6 +63,7 @@ function mintToken(claims = {}) {
   const payload = {
     iss: ISSUER,
     sub: 'user-1',
+    client_id: 'client-default',
     aud: RESOURCE,
     exp: now + 300,
     iat: now,
@@ -178,9 +181,18 @@ describe('MCP HTTP boundary: per-identity limits', () => {
   it('accepts Keycloak azp as the client identifier', async () => {
     const restore = await start({ limits: { client: 1, subject: 1000, global: 1000 } });
     try {
-      await call(mintToken({ sub: 'u1', azp: 'kc-client' }));
-      const second = await call(mintToken({ sub: 'u2', azp: 'kc-client' }));
+      await call(mintToken({ sub: 'u1', client_id: undefined, azp: 'kc-client' }));
+      const second = await call(mintToken({ sub: 'u2', client_id: undefined, azp: 'kc-client' }));
       assert.equal(second.status, 429, 'azp must identify the client when client_id is absent');
+    } finally { restore(); }
+  });
+
+  it('rejects a token without a client identifier instead of bypassing the client limit', async () => {
+    const restore = await start();
+    try {
+      const res = await call(mintToken({ client_id: undefined, azp: undefined }));
+      assert.equal(res.status, 401);
+      assert.match(res.headers.get('WWW-Authenticate'), /invalid_token/);
     } finally { restore(); }
   });
 
@@ -315,13 +327,23 @@ describe('MCP HTTP boundary: timeout accounting', () => {
     // The deadline only bites once the exchange is slow, so stall the upstream
     // API the tool proxies to rather than relying on incidental latency.
     const realFetch = global.fetch;
-    global.fetch = (url, options) => (String(url).includes('/api/')
-      ? new Promise(resolve => setTimeout(resolve, 5_000))
-      : realFetch(url, options));
+    let abortCount = 0;
+    global.fetch = (url, options = {}) => {
+      if (!String(url).includes('/api/')) return realFetch(url, options);
+      return new Promise((resolve, reject) => {
+        const rejectAborted = () => {
+          abortCount += 1;
+          reject(options.signal?.reason || new Error('aborted'));
+        };
+        if (options.signal?.aborted) rejectAborted();
+        else options.signal?.addEventListener('abort', rejectAborted, { once: true });
+      });
+    };
     const restore = await start({ env: { MCP_REQUEST_TIMEOUT_MS: '30' } });
     try {
       // Valid arguments, so the call actually reaches the stalled upstream API
       // instead of failing schema validation before the deadline matters.
+      const startedAt = Date.now();
       const res = await call(
         mintToken({ client_id: 'c' }),
         { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_devices', arguments: {} } },
@@ -330,6 +352,8 @@ describe('MCP HTTP boundary: timeout accounting', () => {
       // The transport streams, so headers are already sent and the status can
       // no longer become 504. What must hold is the audit record.
       await res.text();
+      assert.ok(Date.now() - startedAt < 1_000, 'the deadline must abort work, not only label it');
+      assert.ok(abortCount > 0, 'the request signal must reach the internal API fetch');
       await new Promise(r => setTimeout(r, 200));
       const rows = mcpAudit.list().filter(r => r.requestId === 'timeout-1');
       assert.equal(rows.length, 1, 'a timeout must not be recorded twice');
@@ -357,18 +381,34 @@ describe('MCP HTTP boundary: timeout accounting', () => {
   });
 
   it('keeps serving after a timeout, with the concurrency slot returned', async () => {
+    const realFetch = global.fetch;
+    global.fetch = (url, options = {}) => {
+      if (!String(url).includes('/api/')) return realFetch(url, options);
+      return new Promise((resolve, reject) => {
+        const rejectAborted = () => reject(options.signal?.reason || new Error('aborted'));
+        if (options.signal?.aborted) rejectAborted();
+        else options.signal?.addEventListener('abort', rejectAborted, { once: true });
+      });
+    };
     const restore = await start({
-      env: { MCP_REQUEST_TIMEOUT_MS: '1' },
+      env: { MCP_REQUEST_TIMEOUT_MS: '20' },
       limits: { concurrent: 2 },
     });
     try {
       const token = mintToken({ client_id: 'c' });
       for (let i = 0; i < 4; i++) {
-        const res = await call(token);
+        const res = await call(
+          token,
+          { jsonrpc: '2.0', id: i, method: 'tools/call', params: { name: 'get_devices', arguments: {} } }
+        );
+        await res.text();
         // A leaked slot would surface as 429 concurrency_limit once the cap
         // filled; every request must still be served.
         assert.notEqual(res.status, 429, `request ${i} must not hit the concurrency cap`);
       }
-    } finally { restore(); }
+    } finally {
+      restore();
+      global.fetch = realFetch;
+    }
   });
 });

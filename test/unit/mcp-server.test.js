@@ -28,6 +28,7 @@ const {
 const { createMcpScopeMapping } = require('../../src/mcp-scope-mapping');
 
 const SERVICE_TOKEN = `egv_${'a'.repeat(64)}`;
+const AUDIT_HASH_KEY = 'test-audit-hmac-key-that-is-independent';
 
 // ─── createAuthMiddleware ─────────────────────────────────────────────────────
 
@@ -154,6 +155,7 @@ describe('mcp-server: HTTP auth configuration', () => {
       MCP_OAUTH_READ_SCOPE: 'egressview:read',
       MCP_OAUTH_NOTES_WRITE_SCOPE: 'egressview:notes.write',
       MCP_SERVICE_TOKEN: SERVICE_TOKEN,
+      MCP_AUDIT_HMAC_KEY: AUDIT_HASH_KEY,
     });
     assert.deepEqual(config, {
       mode: 'oauth',
@@ -164,6 +166,7 @@ describe('mcp-server: HTTP auth configuration', () => {
       notesWriteScope: 'egressview:notes.write',
       scopesSupported: ['egressview:read', 'egressview:notes.write'],
       serviceToken: SERVICE_TOKEN,
+      auditHashKey: AUDIT_HASH_KEY,
     });
   });
 
@@ -174,6 +177,7 @@ describe('mcp-server: HTTP auth configuration', () => {
       MCP_OAUTH_RESOURCE: 'https://monitor.example.test/mcp',
       MCP_OAUTH_READ_SCOPE: 'egressview:read',
       MCP_OAUTH_NOTES_WRITE_SCOPE: 'egressview:notes.write',
+      MCP_AUDIT_HMAC_KEY: AUDIT_HASH_KEY,
     };
     assert.throws(
       () => _resolveHttpAuthConfig({ ...base, MCP_SERVICE_TOKEN: 'legacy-admin-token' }),
@@ -183,6 +187,7 @@ describe('mcp-server: HTTP auth configuration', () => {
       () => _resolveHttpAuthConfig({
         ...base,
         MCP_SERVICE_TOKEN: SERVICE_TOKEN,
+        MCP_AUDIT_HMAC_KEY: AUDIT_HASH_KEY,
         EGRESSVIEW_TOKEN: SERVICE_TOKEN,
       }),
       /must differ from EGRESSVIEW_TOKEN/
@@ -198,8 +203,28 @@ describe('mcp-server: HTTP auth configuration', () => {
         MCP_OAUTH_READ_SCOPE: 'egressview:shared',
         MCP_OAUTH_NOTES_WRITE_SCOPE: 'egressview:shared',
         MCP_SERVICE_TOKEN: SERVICE_TOKEN,
+        MCP_AUDIT_HMAC_KEY: AUDIT_HASH_KEY,
       }),
       /scopes must differ/
+    );
+  });
+
+  it('requires a dedicated stable audit HMAC key in OAuth mode', () => {
+    const base = {
+      MCP_AUTH_MODE: 'oauth',
+      MCP_OAUTH_ISSUER: 'https://idp.example.test/realms/egressview',
+      MCP_OAUTH_RESOURCE: 'https://monitor.example.test/mcp',
+      MCP_OAUTH_READ_SCOPE: 'egressview:read',
+      MCP_OAUTH_NOTES_WRITE_SCOPE: 'egressview:notes.write',
+      MCP_SERVICE_TOKEN: SERVICE_TOKEN,
+    };
+    assert.throws(
+      () => _resolveHttpAuthConfig({ ...base, MCP_AUDIT_HMAC_KEY: 'too-short' }),
+      /at least 32 characters/
+    );
+    assert.throws(
+      () => _resolveHttpAuthConfig({ ...base, MCP_AUDIT_HMAC_KEY: SERVICE_TOKEN }),
+      /dedicated/
     );
   });
 
@@ -249,6 +274,7 @@ describe('mcp-server: HTTP auth configuration', () => {
       notesWriteScope: 'egressview:notes.write',
       scopesSupported: ['egressview:read', 'egressview:notes.write'],
       serviceToken: SERVICE_TOKEN,
+      auditHashKey: AUDIT_HASH_KEY,
     });
     try {
       const { port } = server.address();

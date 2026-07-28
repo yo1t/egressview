@@ -25,7 +25,7 @@ class OAuthError extends Error {
  */
 function normalizeClientId(claims) {
   for (const value of [claims.client_id, claims.azp]) {
-    if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 200);
+    if (typeof value === 'string' && value.trim()) return value.trim();
   }
   return null;
 }
@@ -268,6 +268,10 @@ function createOAuthResourceServer(options) {
     if (typeof claims.sub !== 'string' || !claims.sub) {
       throw new OAuthError('invalid_token', 'Access token subject is missing');
     }
+    const clientId = normalizeClientId(claims);
+    if (!clientId) {
+      throw new OAuthError('invalid_token', 'Access token client identifier is missing');
+    }
     const scopes = tokenScopes(claims);
     if (!scopes.includes(requiredScope)) {
       throw new OAuthError('insufficient_scope', 'Required scope is missing', 403);
@@ -278,7 +282,7 @@ function createOAuthResourceServer(options) {
       // Normalized identity for per-subject limits and audit pseudonyms.
       // Qualified by issuer so two providers cannot collide on the same sub.
       subject: `${issuer}|${claims.sub}`,
-      clientId: normalizeClientId(claims),
+      clientId,
     });
   }
 
