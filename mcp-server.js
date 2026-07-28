@@ -104,6 +104,11 @@ function resolveMcpPort(value) {
 
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
 
+// A tool call that never returns holds a concurrency slot until the request
+// deadline. Bounding the upstream call itself frees the slot sooner and gives
+// a clearer failure than a whole-request timeout.
+const API_TIMEOUT_MS = resolveTimeoutMs(process.env.MCP_API_TIMEOUT_MS, 15_000);
+
 function createApiClient({ base = BASE, token = TOKEN, requestId = null } = {}) {
   async function parseResponse(res, label) {
     if (!res.ok) throw new Error(`${label} returned ${res.status}`);
@@ -133,6 +138,7 @@ function createApiClient({ base = BASE, token = TOKEN, requestId = null } = {}) 
       }
       const res = await fetch(url.toString(), {
         headers: { 'X-Admin-Token': token, ...correlationHeaders },
+        signal: AbortSignal.timeout(API_TIMEOUT_MS),
       });
       return parseResponse(res, `API ${path}`);
     },
@@ -141,6 +147,7 @@ function createApiClient({ base = BASE, token = TOKEN, requestId = null } = {}) 
       const res = await fetch(`${base}/api${path}`, {
         method: 'POST',
         headers: { 'X-Admin-Token': token, 'Content-Type': 'application/json', ...correlationHeaders },
+        signal: AbortSignal.timeout(API_TIMEOUT_MS),
         body: JSON.stringify(body),
       });
       return parseResponse(res, `API POST ${path}`);
@@ -562,12 +569,22 @@ function createToolScopeMiddleware(scopeMapping, oauth) {
 
 // Correlate a request across the rate limiter, the OAuth boundary and the
 // tool call. A caller-supplied id is accepted only in a safe shape.
+function resolveTimeoutMs(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+  // A zero or negative timeout would disable the deadline entirely, which is
+  // the failure this exists to prevent.
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function requestIdFor(req) {
   const supplied = String(req.get?.('X-Request-Id') || '').trim();
   if (/^[A-Za-z0-9._-]{1,100}$/.test(supplied)) return supplied;
   return crypto.randomUUID();
 }
 
+// req.mcpAuth is populated by the OAuth layer with a normalized, verified
+// identity. Before authentication it is absent, and the hashes are then null
+// by design rather than by accident.
 function auditContext(req) {
   return {
     subject: req.mcpAuth?.subject || null,
@@ -585,19 +602,34 @@ function createRequestContextMiddleware() {
   };
 }
 
-// Runs before authentication so an unauthenticated flood is also bounded.
-function createRateLimitMiddleware(limiter) {
+// Two passes are required, and the order is load-bearing.
+//
+// The first runs before the body is parsed and before authentication, so a
+// flood of unauthenticated or malformed requests is rejected without spending
+// JSON parsing or JWKS work on it. At that point there is no identity, so only
+// the global window and the concurrency cap can apply.
+//
+// The second runs after authentication, once req.mcpAuth carries a verified
+// subject and client id. Applying per-identity limits any earlier would have
+// silently done nothing.
+function createRateLimitMiddleware(limiter, { stage = 'pre-auth' } = {}) {
   return (req, res, next) => {
-    const verdict = limiter.check({
-      subject: req.mcpAuth?.subject,
-      clientId: req.mcpAuth?.clientId,
-    });
+    const identified = stage === 'post-auth';
+    const verdict = limiter.check(
+      identified
+        ? { subject: req.mcpAuth?.subject, clientId: req.mcpAuth?.clientId, skipGlobal: true }
+        : {}
+    );
     if (verdict.allowed) {
-      const release = limiter.acquire();
-      let done = false;
-      const finish = () => { if (!done) { done = true; release(); } };
-      res.on('finish', finish);
-      res.on('close', finish);
+      // Only the pre-auth pass holds a concurrency slot; taking a second one
+      // after authentication would double-count the same request.
+      if (!identified) {
+        const release = limiter.acquire();
+        let done = false;
+        const finish = () => { if (!done) { done = true; release(); } };
+        res.on('finish', finish);
+        res.on('close', finish);
+      }
       return next();
     }
     mcpAudit.append({
@@ -641,9 +673,7 @@ function createAuditMiddleware() {
 
 async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
   const app = express();
-  // Bound the body before anything parses or authenticates it.
-  app.use(express.json({ limit: process.env.MCP_MAX_BODY || '256kb' }));
-
+  const MAX_BODY = process.env.MCP_MAX_BODY || '256kb';
   const limiter = createMcpRateLimiter(rateLimitOptionsFromEnv());
 
   let oauth = null;
@@ -656,17 +686,25 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
       notesWriteScope: authConfig.notesWriteScope,
     });
     internalApiClient = createMcpServiceApiClient({ token: authConfig.serviceToken });
-    // Audit is scoped to the public OAuth endpoint. A failure to open it must
-    // not stop the process: losing audit is bad, refusing to run is worse for
-    // the local collection this host also performs.
-    try {
-      mcpAudit.initDb(process.env.MCP_AUDIT_DB_PATH || undefined, {
-        hashKey: authConfig.serviceToken,
-      });
-      mcpAudit.prune();
-    } catch (error) {
-      process.stderr.write(`[egressview-mcp] audit store unavailable: ${error.message}\n`);
-    }
+    // Fail closed. An internet-facing endpoint that cannot record who called
+    // it should not accept calls. This costs nothing elsewhere: the MCP server
+    // is a separate process, so refusing to start here leaves EgressView's
+    // router collection, browser UI, stdio clients and private HTTP mode
+    // running untouched.
+    mcpAudit.initDb(process.env.MCP_AUDIT_DB_PATH || undefined, {
+      hashKey: authConfig.serviceToken,
+    });
+    mcpAudit.assertWritable();
+    mcpAudit.prune();
+    mcpAudit.setWriteFailureHandler((error, total) => {
+      // Report the first failure and then every hundredth, so a persistent
+      // fault stays visible without flooding the log.
+      if (total === 1 || total % 100 === 0) {
+        process.stderr.write(
+          `[egressview-mcp] AUDIT WRITE FAILED (${total} total): ${error.message}\n`
+        );
+      }
+    });
     const sendMetadata = (_req, res) => res.json(oauth.metadata);
     const metadataPaths = new Set([
       '/.well-known/oauth-protected-resource',
@@ -677,10 +715,20 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
     // Order matters: context and limits first, so an unauthenticated flood is
     // rejected before any JWKS work, then authentication, then scope, then the
     // audit hook that classifies whatever the earlier layers decided.
+    // Order is load-bearing:
+    //   context  -> every later layer can correlate on one request id
+    //   audit    -> registered early so it observes whatever any layer decides
+    //   limit    -> rejects floods before JSON parsing or JWKS work
+    //   body     -> bounded parse, scoped to /mcp only
+    //   oauth    -> establishes the verified identity
+    //   limit    -> per-subject and per-client, now that identity exists
+    //   scope    -> per-tool authorization
     app.use('/mcp', createRequestContextMiddleware());
-    app.use('/mcp', createRateLimitMiddleware(limiter));
     app.use('/mcp', createAuditMiddleware());
+    app.use('/mcp', createRateLimitMiddleware(limiter, { stage: 'pre-auth' }));
+    app.use('/mcp', express.json({ limit: MAX_BODY }));
     app.use('/mcp', oauth.middleware());
+    app.use('/mcp', createRateLimitMiddleware(limiter, { stage: 'post-auth' }));
     app.use('/mcp', createToolScopeMiddleware(scopeMapping, oauth));
   } else {
     if (!TOKEN) {
@@ -690,10 +738,30 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
     }
     // Private token mode accepts the dedicated token in either supported header.
     app.use('/mcp', createAuthMiddleware(authConfig.token));
+    app.use('/mcp', express.json({ limit: MAX_BODY }));
   }
+
+  // Without a deadline a stalled upstream call holds its concurrency slot for
+  // ever; MCP_MAX_CONCURRENT such requests would wedge the endpoint closed.
+  const requestTimeoutMs = resolveTimeoutMs(process.env.MCP_REQUEST_TIMEOUT_MS, 30_000);
 
   // Streamable HTTP — handles POST (tool calls) and GET (SSE stream)
   const handleMcp = async (req, res) => {
+    const deadline = setTimeout(() => {
+      if (res.headersSent) return;
+      mcpAudit.append({
+        eventType: 'mcp_tool_call',
+        outcome: 'failure',
+        reason: 'request_timeout',
+        toolName: req.body?.method === 'tools/call' ? req.body?.params?.name : null,
+        ...auditContext(req),
+        durationMs: Date.now() - (req.mcpStartedAt || Date.now()),
+      });
+      res.status(504).json({ error: 'request_timeout' });
+    }, requestTimeoutMs);
+    deadline.unref?.();
+    res.on('close', () => clearTimeout(deadline));
+    res.on('finish', () => clearTimeout(deadline));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     const includeWriteTools = authConfig.mode !== 'oauth'
       || scopeMapping.authorizeTool('set_device_note', req.mcpAuth?.scopes).allowed;

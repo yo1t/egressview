@@ -1,0 +1,310 @@
+// End-to-end checks of the public MCP middleware chain (P2-60 PR 4 review).
+//
+// The component tests cover the limiter and the audit store in isolation, which
+// is exactly why they missed a wiring bug: per-identity limits read fields the
+// OAuth layer never set, and ran before authentication anyway. These tests
+// drive the real HTTP chain so the order of the middleware is what is asserted.
+'use strict';
+
+const { describe, it, beforeEach, afterEach } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const mcpAudit = require('../../src/mcp-audit');
+const mcpServer = require('../../mcp-server.js');
+
+const SERVICE_TOKEN = `egv_${'a'.repeat(64)}`;
+const ISSUER = 'https://issuer.example';
+const RESOURCE = 'https://mcp.example/mcp';
+
+let dir;
+let server;
+let baseUrl;
+
+function authConfig(overrides = {}) {
+  return {
+    mode: 'oauth',
+    issuer: ISSUER,
+    resource: RESOURCE,
+    requiredScope: 'egressview:read',
+    readScope: 'egressview:read',
+    notesWriteScope: 'egressview:notes.write',
+    serviceToken: SERVICE_TOKEN,
+    scopesSupported: ['egressview:read', 'egressview:notes.write'],
+    ...overrides,
+  };
+}
+
+/**
+ * Start the real chain against a fake issuer.
+ *
+ * Nothing is stubbed inside EgressView: the shipped OAuth verifier runs, mints
+ * req.mcpAuth from a genuinely signed token, and the middleware order under
+ * test is the production one. Only the network calls to the issuer are served
+ * locally, through the fetchImpl seam the resource server already exposes.
+ */
+const { generateKeyPairSync, createSign } = require('node:crypto');
+
+const KEY_ID = 'test-key-1';
+const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const jwk = { ...publicKey.export({ format: 'jwk' }), kid: KEY_ID, kty: 'RSA', alg: 'RS256', use: 'sig' };
+
+function b64(value) {
+  return Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)).toString('base64url');
+}
+
+/** Mint a real RS256 access token for the fake issuer. */
+function mintToken(claims = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: ISSUER,
+    sub: 'user-1',
+    aud: RESOURCE,
+    exp: now + 300,
+    iat: now,
+    scope: 'egressview:read',
+    ...claims,
+  };
+  const signingInput = `${b64({ alg: 'RS256', typ: 'JWT', kid: KEY_ID })}.${b64(payload)}`;
+  const signature = createSign('RSA-SHA256').update(signingInput).sign(privateKey).toString('base64url');
+  return `${signingInput}.${signature}`;
+}
+
+function issuerFetch(url) {
+  const target = String(url);
+  const body = target.includes('jwks')
+    ? { keys: [jwk] }
+    : {
+        issuer: ISSUER,
+        jwks_uri: `${ISSUER}/jwks`,
+        token_endpoint: `${ISSUER}/token`,
+        // The resource server refuses an issuer that does not advertise PKCE
+        // S256 — the same check that rules Cognito out.
+        code_challenge_methods_supported: ['S256'],
+      };
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  });
+}
+
+async function start({ limits = {}, env = {} } = {}) {
+  const previous = {};
+  const applied = {
+    MCP_RATE_LIMIT_GLOBAL: String(limits.global ?? 1000),
+    MCP_RATE_LIMIT_SUBJECT: String(limits.subject ?? 1000),
+    MCP_RATE_LIMIT_CLIENT: String(limits.client ?? 1000),
+    MCP_MAX_CONCURRENT: String(limits.concurrent ?? 50),
+    MCP_AUDIT_DB_PATH: path.join(dir, 'audit.db'),
+    ...env,
+  };
+  for (const [key, value] of Object.entries(applied)) {
+    previous[key] = process.env[key];
+    process.env[key] = value;
+  }
+
+  server = await mcpServer._startHttp(0, authConfig({ fetchImpl: issuerFetch }));
+  baseUrl = `http://127.0.0.1:${server.address().port}`;
+  return () => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+}
+
+function call(token, body = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_devices' } }, extra = {}) {
+  return fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extra,
+    },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+}
+
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-mcp-http-'));
+  mcpAudit._resetForTest(path.join(dir, 'audit.db'));
+});
+
+afterEach(async () => {
+  if (server) { server.close(); server = null; }
+  mcpAudit.closeDb();
+  if (dir) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+describe('MCP HTTP boundary: per-identity limits', () => {
+  it('applies the per-subject limit, which needs the identity the OAuth layer sets', async () => {
+    const restore = await start({ limits: { subject: 2, global: 1000 } });
+    try {
+      const token = mintToken({ sub: 'user-1', client_id: 'client-a' });
+      assert.notEqual((await call(token)).status, 429);
+      assert.notEqual((await call(token)).status, 429);
+      const third = await call(token);
+      assert.equal(third.status, 429, 'the third call from one subject must be limited');
+      assert.ok(third.headers.get('Retry-After'));
+    } finally { restore(); }
+  });
+
+  it('limits one subject without affecting another', async () => {
+    const restore = await start({ limits: { subject: 1, client: 1000, global: 1000 } });
+    try {
+      const a = mintToken({ sub: 'user-a', client_id: 'c' });
+      const b = mintToken({ sub: 'user-b', client_id: 'c' });
+      await call(a);
+      assert.equal((await call(a)).status, 429);
+      assert.notEqual((await call(b)).status, 429, 'a different subject keeps working');
+    } finally { restore(); }
+  });
+
+  it('applies the per-client limit across different subjects', async () => {
+    const restore = await start({ limits: { client: 2, subject: 1000, global: 1000 } });
+    try {
+      await call(mintToken({ sub: 'u1', client_id: 'shared' }));
+      await call(mintToken({ sub: 'u2', client_id: 'shared' }));
+      const third = await call(mintToken({ sub: 'u3', client_id: 'shared' }));
+      assert.equal(third.status, 429, 'one client is limited even across subjects');
+    } finally { restore(); }
+  });
+
+  it('accepts Keycloak azp as the client identifier', async () => {
+    const restore = await start({ limits: { client: 1, subject: 1000, global: 1000 } });
+    try {
+      await call(mintToken({ sub: 'u1', azp: 'kc-client' }));
+      const second = await call(mintToken({ sub: 'u2', azp: 'kc-client' }));
+      assert.equal(second.status, 429, 'azp must identify the client when client_id is absent');
+    } finally { restore(); }
+  });
+
+  it('counts the global budget once per request, not twice', async () => {
+    const restore = await start({ limits: { global: 2, subject: 1000, client: 1000 } });
+    try {
+      const token = mintToken({ client_id: 'c' });
+      assert.notEqual((await call(token)).status, 429);
+      assert.notEqual((await call(token)).status, 429, 'two requests must fit a budget of two');
+      assert.equal((await call(token)).status, 429);
+    } finally { restore(); }
+  });
+});
+
+describe('MCP HTTP boundary: audit identity', () => {
+  it('records a non-null subject and client hash for an authenticated call', async () => {
+    const restore = await start();
+    try {
+      await call(mintToken({ sub: 'user-1', client_id: 'client-a' }), undefined, { 'X-Request-Id': 'probe-1' });
+      await new Promise(r => setTimeout(r, 120));
+      const row = mcpAudit.list().find(r => r.requestId === 'probe-1');
+      assert.ok(row, 'the call should be audited');
+      assert.match(row.subjectHash, /^[0-9a-f]{64}$/, 'subject hash must not be null');
+      assert.match(row.clientIdHash, /^[0-9a-f]{64}$/, 'client hash must not be null');
+      assert.equal(row.scopes, 'egressview:read');
+    } finally { restore(); }
+  });
+
+  it('gives two subjects different hashes and one subject a stable hash', async () => {
+    const restore = await start();
+    try {
+      await call(mintToken({ sub: 'same', client_id: 'c' }), undefined, { 'X-Request-Id': 'p-a' });
+      await call(mintToken({ sub: 'same', client_id: 'c' }), undefined, { 'X-Request-Id': 'p-b' });
+      await call(mintToken({ sub: 'other', client_id: 'c' }), undefined, { 'X-Request-Id': 'p-c' });
+      await new Promise(r => setTimeout(r, 120));
+      const rows = mcpAudit.list();
+      const find = id => rows.find(r => r.requestId === id);
+      assert.equal(find('p-a').subjectHash, find('p-b').subjectHash);
+      assert.notEqual(find('p-a').subjectHash, find('p-c').subjectHash);
+    } finally { restore(); }
+  });
+
+  it('leaves the hashes null for an unauthenticated call, by design', async () => {
+    const restore = await start();
+    try {
+      const res = await call('not-a-token', undefined, { 'X-Request-Id': 'probe-2' });
+      assert.equal(res.status, 401);
+      await new Promise(r => setTimeout(r, 120));
+      const row = mcpAudit.list().find(r => r.requestId === 'probe-2');
+      assert.equal(row.subjectHash, null);
+      assert.equal(row.outcome, 'failure');
+    } finally { restore(); }
+  });
+
+  it('never stores the presented bearer token', async () => {
+    const restore = await start();
+    try {
+      const token = mintToken({ sub: 'user-1', client_id: 'client-a' });
+      await call(token);
+      await new Promise(r => setTimeout(r, 120));
+      const serialized = JSON.stringify(mcpAudit.list());
+      assert.equal(serialized.includes(token), false);
+      assert.equal(serialized.includes(token.split('.')[1]), false, 'not even the payload segment');
+    } finally { restore(); }
+  });
+});
+
+describe('MCP HTTP boundary: body handling runs after the limits', () => {
+  it('rate limits malformed JSON instead of letting it bypass the limiter', async () => {
+    const restore = await start({ limits: { global: 2 } });
+    try {
+      await call(null, '{ this is not json');
+      await call(null, '{ still not json');
+      const third = await call(null, '{ nor is this');
+      assert.equal(third.status, 429, 'malformed bodies must consume the global budget');
+    } finally { restore(); }
+  });
+
+  it('rejects an oversized body', async () => {
+    const restore = await start({ env: { MCP_MAX_BODY: '1kb' } });
+    try {
+      const huge = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', pad: 'x'.repeat(5000) });
+      const res = await call(mintToken(), huge);
+      assert.equal(res.status, 413, 'an oversized body must be refused');
+    } finally { restore(); }
+  });
+
+  it('audits a malformed request even though it never reaches a tool', async () => {
+    const restore = await start();
+    try {
+      await call(null, '{ broken', { 'X-Request-Id': 'probe-3' });
+      await new Promise(r => setTimeout(r, 120));
+      assert.ok(mcpAudit.list().some(r => r.requestId === 'probe-3'));
+    } finally { restore(); }
+  });
+});
+
+describe('MCP HTTP boundary: audit availability', () => {
+  it('refuses to start the public endpoint when the audit store is unwritable', async () => {
+    mcpAudit.closeDb();
+    const unwritable = path.join(dir, 'no-such-directory', 'audit.db');
+    const previous = process.env.MCP_AUDIT_DB_PATH;
+    process.env.MCP_AUDIT_DB_PATH = unwritable;
+    try {
+      await assert.rejects(
+        () => mcpServer._startHttp(0, authConfig({ fetchImpl: issuerFetch })),
+        'an internet-facing endpoint that cannot record calls must not accept them'
+      );
+    } finally {
+      if (previous === undefined) delete process.env.MCP_AUDIT_DB_PATH;
+      else process.env.MCP_AUDIT_DB_PATH = previous;
+    }
+  });
+
+  it('reports write failures instead of swallowing them', () => {
+    const reported = [];
+    mcpAudit.setWriteFailureHandler((error, total) => reported.push(total));
+    mcpAudit.closeDb();
+    assert.equal(mcpAudit.append({ eventType: 'x', outcome: 'success' }), null);
+    assert.equal(mcpAudit.health().open, false);
+  });
+
+  it('proves writability rather than trusting that the file opened', () => {
+    mcpAudit._resetForTest(path.join(dir, 'probe.db'));
+    assert.doesNotThrow(() => mcpAudit.assertWritable());
+    assert.ok(mcpAudit.list().some(r => r.eventType === 'mcp_audit_startup'));
+  });
+});
