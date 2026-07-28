@@ -101,3 +101,10 @@ docs/github-traffic-last-month.svg
 scripts/render-traffic-report.js
 # Local-only Claude Code guidance (not shared with other contributors)
 CLAUDE.local.md
+# AWS CDK infrastructure (P2-63 web public exposure; local deploy tooling, not distributed)
+infra/
+
+# MCP audit store (P2-60 PR 4) — local operational data
+.egressview-mcp-audit.db
+.egressview-mcp-audit.db-shm
+.egressview-mcp-audit.db-wal

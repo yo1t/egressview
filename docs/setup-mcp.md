@@ -142,7 +142,8 @@ that relied on the old fallback must generate a separate token and set
 P2-60's OAuth Resource Server boundary can be enabled for private integration
 testing with `MCP_AUTH_MODE=oauth`,
 `MCP_OAUTH_ISSUER`, `MCP_OAUTH_RESOURCE`, `MCP_OAUTH_READ_SCOPE`,
-`MCP_OAUTH_NOTES_WRITE_SCOPE`, and `MCP_SERVICE_TOKEN`.
+`MCP_OAUTH_NOTES_WRITE_SCOPE`, `MCP_SERVICE_TOKEN`, and
+`MCP_AUDIT_HMAC_KEY`.
 It publishes RFC 9728 Protected Resource Metadata, validates RS256 JWT
 signatures through the issuer's discovery/JWKS endpoints, and fails closed on
 issuer, expiry, audience, or scope mismatches. The issuer must advertise PKCE
@@ -167,9 +168,10 @@ curl -sS -X POST http://127.0.0.1:3002/api/auth/api-identities \
 
 OAuth mode accepts only an `egv_...` scoped identity and never falls back to
 `EGRESSVIEW_TOKEN`. Store `.env.mcp` with mode `0600`, rotate the identity
-before expiry, and revoke the previous identity after validation. OAuth
-audit/rate limits and the Internet publication gate are delivered by later
-P2-60 phases. Do not publish this endpoint to the Internet yet.
+before expiry, and revoke the previous identity after validation. Generate the
+audit key once with `openssl rand -hex 32` and keep it unchanged when rotating
+the service identity. The Internet publication gate is delivered by the next
+P2-60 phase. Do not publish this endpoint to the Internet yet.
 
 ### Step 2a — Apache (httpd) config
 
@@ -289,6 +291,7 @@ Use `https://` if your reverse proxy terminates TLS (required for Claude Desktop
 | `MCP_OAUTH_READ_SCOPE` | HTTP OAuth mode | — | Provider scope mapped to the internal `network.read` permission. |
 | `MCP_OAUTH_NOTES_WRITE_SCOPE` | HTTP OAuth mode | — | Provider scope mapped to the internal `notes.write` permission. |
 | `MCP_SERVICE_TOKEN` | HTTP OAuth mode | — | Dedicated `egv_...` API identity token with exactly `network.read` and `notes.write`. |
+| `MCP_AUDIT_HMAC_KEY` | HTTP OAuth mode | — | Stable secret of at least 32 characters used only to pseudonymise audit subjects and clients. |
 
 ---
 
@@ -298,6 +301,59 @@ Use `https://` if your reverse proxy terminates TLS (required for Claude Desktop
 - Private token mode accepts the dedicated `MCP_TOKEN` through `X-Admin-Token` or `Authorization: Bearer`; it never falls back to the EgressView admin token.
 - Most tools are read-only. `set_device_note` can write device memo notes (stored in `.egressview.notes.json`, not the main database).
 - Keep `.env.mcp` permissions at `chmod 600`; it contains private API credentials.
+
+---
+
+## Public MCP: limits, audit and revocation
+
+Applies to OAuth mode (`MCP_AUTH_MODE=oauth`) only. Private token and stdio modes are unaffected by everything in this section.
+
+### Request limits
+
+Three independent buckets apply, and all must allow a request. A separate concurrency cap bounds in-flight work, because slow tool calls exhaust the process long before a per-minute limit trips.
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `MCP_RATE_LIMIT_GLOBAL` | 60/min | Protects the host from any single burst |
+| `MCP_RATE_LIMIT_SUBJECT` | 30/min | One compromised user cannot consume the whole budget |
+| `MCP_RATE_LIMIT_CLIENT` | 30/min | One misbehaving client cannot either |
+| `MCP_MAX_CONCURRENT` | 4 | Bounds simultaneous tool calls |
+| `MCP_MAX_BODY` | `256kb` | Body is bounded before parsing or authentication |
+| `MCP_REQUEST_TIMEOUT_MS` | 30000 | Deadline for one MCP exchange |
+| `MCP_API_TIMEOUT_MS` | 15000 | Deadline for one internal EgressView API call |
+
+Without a deadline, `MCP_MAX_CONCURRENT` stalled calls would hold every slot and wedge the endpoint closed. The request deadline aborts the internal API call and ends the response. Note that the MCP transport streams: once it has begun a response the status can no longer become `504`, so a call that blows its deadline mid-stream is recorded as `request_timeout` in the audit rather than reported by status code. Timeout values must be whole milliseconds from 1 through 600000; invalid values fall back to the documented defaults.
+
+The defaults are deliberately tight: there is no measured usage to size them from yet, and loosening one after a false positive is cheap, while discovering one was too loose only happens after abuse. Raise them if a legitimate workload trips a limit.
+
+A rejected request returns `429` with `Retry-After`. Values that are not positive integers fall back to the default rather than disabling the limit — a typo cannot silently remove a bound.
+
+**Keep the reverse proxy's own limits as well.** These are the Node-side half; a bug or restart here must not leave the endpoint unbounded. Trust `X-Forwarded-For` only from the proxy addresses listed in `EGRESSVIEW_TRUST_PROXY` (see the [authentication guide](authentication.md)).
+
+### Audit
+
+Every request to the public endpoint is appended to a dedicated store (`MCP_AUDIT_DB_PATH`, default `.egressview-mcp-audit.db`). It is **separate from EgressView's own audit trail on purpose**: the MCP process runs with a scoped API identity, and giving it write access to the main trail would let a compromised MCP forge or tamper with those records.
+
+Recorded: pseudonymised OAuth subject and client id, tool name, granted scopes, outcome, a reason code, the request id, and duration.
+
+**Never recorded:** tool arguments, IP or MAC addresses, device note bodies, access tokens, raw JWTs, or provider error text.
+
+**Joining the two trails.** EgressView audits what the MCP service identity did (`actor: api:<id>`); this store records which OAuth subject asked for it. The MCP request id is forwarded to EgressView as `X-Request-Id`, so one incident can be followed across both. Keep the two retention windows equal, or the record of *who asked* will expire while the record of *what happened* remains.
+
+Reason codes: `unauthorized`, `invalid_token`, `insufficient_scope`, `global_rate_limit`, `subject_rate_limit`, `client_rate_limit`, `concurrency_limit`, `request_timeout`, `server_error`. A run of any of these is the signal to investigate.
+
+Subjects are pseudonymised with the dedicated `MCP_AUDIT_HMAC_KEY`, so the same person correlates across requests without the identifier being stored. Keep this key stable when rotating `MCP_SERVICE_TOKEN`; changing it intentionally starts a new pseudonym namespace. Entries older than 180 days are pruned at startup, matching EgressView's own audit retention.
+
+### Revoking access
+
+1. **Revoke at the authorization server** — this is the only place that stops new tokens being issued. Revoke the user, or the client registration, depending on what went wrong.
+2. **Wait out the access token lifetime.** EgressView validates tokens offline, so a token already issued stays valid until it expires. Keep access token lifetime short (5–15 minutes is the working assumption) precisely so this window is small.
+3. **To cut access immediately**, stop the public endpoint: remove the proxy route or set `MCP_AUTH_MODE=token`. Local collection, the browser UI, stdio and private HTTP keep running.
+4. **Rotate `MCP_SERVICE_TOKEN`** if the MCP host itself may be compromised. Issue a new scoped API identity in EgressView, update `.env.mcp`, restart, then revoke the old identity.
+
+### If the authorization server or JWKS is unreachable
+
+The public MCP endpoint fails closed and returns `401`. Everything else keeps running: router collection, the browser UI, stdio clients and private HTTP mode. Do not treat an IdP outage as an EgressView outage.
 
 ## Trademarks
 
