@@ -651,12 +651,15 @@ function createAuditMiddleware() {
     res.on('finish', () => {
       const toolName = req.body?.method === 'tools/call' ? req.body?.params?.name : null;
       const status = res.statusCode;
-      const outcome = status < 400 ? 'success' : 'failure';
+      // A streamed response that blew its deadline still reports 200; the
+      // deadline flag is the authoritative signal, not the status code.
+      const outcome = req.mcpTimedOut || status >= 400 ? 'failure' : 'success';
       let reason = null;
       if (status === 401) reason = res.get('WWW-Authenticate')?.includes('invalid_token')
         ? 'invalid_token' : 'unauthorized';
       else if (status === 403) reason = 'insufficient_scope';
       else if (status === 429) return; // already audited by the limiter
+      else if (req.mcpTimedOut) reason = 'request_timeout';
       else if (status >= 500) reason = 'server_error';
       mcpAudit.append({
         eventType: toolName ? 'mcp_tool_call' : 'mcp_request',
@@ -747,21 +750,22 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
 
   // Streamable HTTP — handles POST (tool calls) and GET (SSE stream)
   const handleMcp = async (req, res) => {
+    // Record the timeout as a flag rather than writing a row here: the audit
+    // middleware still fires on finish, and two writes would leave the trail
+    // claiming both request_timeout and server_error for one request.
+    //
+    // The Streamable HTTP transport sends headers as soon as it starts the SSE
+    // stream, so for a streaming response the status can no longer be changed
+    // to 504. The deadline still does the work that matters: it marks the
+    // request for audit and releases the concurrency slot, which is what stops
+    // stalled calls wedging the endpoint closed.
     const deadline = setTimeout(() => {
+      req.mcpTimedOut = true;
       if (res.headersSent) return;
-      mcpAudit.append({
-        eventType: 'mcp_tool_call',
-        outcome: 'failure',
-        reason: 'request_timeout',
-        toolName: req.body?.method === 'tools/call' ? req.body?.params?.name : null,
-        ...auditContext(req),
-        durationMs: Date.now() - (req.mcpStartedAt || Date.now()),
-      });
       res.status(504).json({ error: 'request_timeout' });
     }, requestTimeoutMs);
     deadline.unref?.();
-    res.on('close', () => clearTimeout(deadline));
-    res.on('finish', () => clearTimeout(deadline));
+
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     const includeWriteTools = authConfig.mode !== 'oauth'
       || scopeMapping.authorizeTool('set_device_note', req.mcpAuth?.scopes).allowed;
@@ -769,6 +773,21 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
       ? internalApiClient.withRequestId(req.mcpRequestId)
       : internalApiClient;
     const server = buildMcpServer({ includeWriteTools, apiClient });
+
+    // Release both the timer and the MCP server exactly once, however the
+    // request ends. Registering the close listener only in `finally` used to
+    // leak the server whenever the response had already closed by then, which
+    // the timeout path makes routine.
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      clearTimeout(deadline);
+      server.close().catch(() => {});
+    };
+    res.on('close', release);
+    res.on('finish', release);
+
     try {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
@@ -776,7 +795,8 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
       process.stderr.write(`[egressview-mcp] ${err.message}\n`);
       if (!res.headersSent) res.status(500).json({ error: 'internal server error' });
     } finally {
-      res.on('close', () => server.close().catch(() => {}));
+      // A response that never emits close or finish still releases here.
+      if (res.writableEnded || res.headersSent === false) release();
     }
   };
 

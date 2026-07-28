@@ -1,5 +1,8 @@
 // Unit tests for mcp-server.js — auth middleware, apiPost helper, and server construction
 'use strict';
+const os = require('node:os');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const { describe, it, before, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -232,6 +235,11 @@ describe('mcp-server: HTTP auth configuration', () => {
   });
 
   it('serves both PRM routes and challenges unauthenticated MCP requests', async () => {
+    // Keep the audit store out of the repository root: OAuth mode now opens it
+    // at startup, and the default path would leave a stray database behind.
+    const auditDir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-mcp-audit-'));
+    const previousAuditPath = process.env.MCP_AUDIT_DB_PATH;
+    process.env.MCP_AUDIT_DB_PATH = path.join(auditDir, 'audit.db');
     const server = await _startHttp(0, {
       mode: 'oauth',
       issuer: 'https://idp.example.test/realms/egressview',
@@ -266,6 +274,9 @@ describe('mcp-server: HTTP auth configuration', () => {
       assert.match(response.headers.get('www-authenticate'), /resource_metadata=/);
       assert.match(response.headers.get('www-authenticate'), /scope="egressview:read"/);
     } finally {
+      if (previousAuditPath === undefined) delete process.env.MCP_AUDIT_DB_PATH;
+      else process.env.MCP_AUDIT_DB_PATH = previousAuditPath;
+      fs.rmSync(auditDir, { recursive: true, force: true });
       await new Promise((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
       });
