@@ -348,4 +348,20 @@ describe('mcp-oauth middleware', () => {
     assert.deepEqual(response.body, { error: 'invalid_token' });
     assert.doesNotMatch(JSON.stringify(response.body), /malformed|JWT|Keycloak/i);
   });
+
+  it('fails the public boundary closed when discovery or JWKS is unreachable', async () => {
+    const server = oauthServer({
+      fetchImpl: async () => {
+        throw new Error('getaddrinfo ENOTFOUND auth.internal.example');
+      },
+    });
+    const { response, nextCalled } = await runMiddleware(
+      server,
+      `Bearer ${jwt(firstKey)}`
+    );
+    assert.equal(nextCalled, false);
+    assert.equal(response.statusCode, 401);
+    assert.deepEqual(response.body, { error: 'invalid_token' });
+    assert.doesNotMatch(JSON.stringify(response.body), /ENOTFOUND|auth\.internal|JWKS/i);
+  });
 });
