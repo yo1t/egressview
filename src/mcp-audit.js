@@ -32,6 +32,11 @@ const MAX_SCOPES = 300;
 let db = null;
 let hashKey = null;
 let lastDbPath = DEFAULT_DB_PATH;
+// Write failures must be visible. Silently dropping rows would leave the
+// public endpoint running blind while looking healthy.
+let writeFailures = 0;
+let lastWriteError = null;
+let onWriteFailure = null;
 
 /**
  * Pseudonymise an identifier. Without a key we store nothing rather than a
@@ -128,8 +133,36 @@ function append(event = {}) {
          @clientIdHash, @toolName, @scopes, @requestId, @durationMs)
     `).run(row);
     return row.eventId;
-  } catch {
+  } catch (error) {
+    // Still never throws — a lost row must not fail a tool call the caller has
+    // already been authorized for — but the loss is now counted and reported.
+    writeFailures += 1;
+    lastWriteError = error.message;
+    try { onWriteFailure?.(error, writeFailures); } catch {}
     return null;
+  }
+}
+
+/** Operational health of the store, for startup checks and monitoring. */
+function health() {
+  return { open: Boolean(db), writeFailures, lastWriteError, dbPath: lastDbPath };
+}
+
+/** Register a reporter so runtime write failures are surfaced, not swallowed. */
+function setWriteFailureHandler(handler) {
+  onWriteFailure = typeof handler === 'function' ? handler : null;
+}
+
+/**
+ * Prove the store is actually writable before the public endpoint accepts
+ * traffic. Opening the file successfully is not the same as being able to
+ * append to it — a read-only mount or a full disk both pass initDb.
+ */
+function assertWritable() {
+  if (!db) throw new Error('MCP audit store is not initialized');
+  const probeId = append({ eventType: 'mcp_audit_startup', outcome: 'success' });
+  if (!probeId) {
+    throw new Error(`MCP audit store is not writable: ${lastWriteError || 'unknown error'}`);
   }
 }
 
@@ -173,6 +206,9 @@ function prune({ retentionDays = DEFAULT_RETENTION_DAYS, now } = {}) {
 module.exports = {
   DEFAULT_RETENTION_DAYS,
   append,
+  assertWritable,
+  health,
+  setWriteFailureHandler,
   closeDb,
   initDb,
   list,
@@ -182,6 +218,9 @@ module.exports = {
   _resetForTest(dbPath = ':memory:', options = {}) {
     closeDb();
     hashKey = null;
+    writeFailures = 0;
+    lastWriteError = null;
+    onWriteFailure = null;
     initDb(dbPath, options.withoutHashKey ? {} : { hashKey: 'test-mcp-audit-key' });
   },
 };

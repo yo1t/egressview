@@ -70,18 +70,21 @@ function createMcpRateLimiter(options = {}) {
    * Decide whether a request may proceed.
    * @returns {{allowed: boolean, reason?: string, retryAfterSeconds?: number}}
    */
-  function check({ subject, clientId } = {}) {
+  function check({ subject, clientId, skipGlobal = false } = {}) {
     const at = now();
     counter.sweep(at, config.maxTrackedKeys);
 
-    if (inFlight >= config.maxConcurrent) {
+    // The concurrency cap belongs to the pre-auth pass, which owns the slot.
+    if (!skipGlobal && inFlight >= config.maxConcurrent) {
       return { allowed: false, reason: 'concurrency_limit', retryAfterSeconds: 1 };
     }
 
     const checks = [
-      ['global_rate_limit', 'global', config.globalPerMinute],
-      // An unauthenticated request has no subject yet; the global and client
-      // buckets still apply to it.
+      // Counted once per request, in the pre-auth pass. Counting it again
+      // after authentication would consume the budget twice as fast.
+      ...(skipGlobal ? [] : [['global_rate_limit', 'global', config.globalPerMinute]]),
+      // Identity is only known after authentication, so these apply in the
+      // post-auth pass.
       ...(subject ? [['subject_rate_limit', `sub:${subject}`, config.perSubjectPerMinute]] : []),
       ...(clientId ? [['client_rate_limit', `cli:${clientId}`, config.perClientPerMinute]] : []),
     ];
