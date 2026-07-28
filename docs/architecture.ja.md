@@ -69,7 +69,9 @@ Schema v5ではrouterの観測情報を`connection_observations`だけに保存�
 - **Browser UI:** AI洞察をスタートページにしたstatic single-page applicationと認証済みSocket.IO update。
 - **REST:** `/api`配下の管理・検索API 71本と、最小情報だけを返す`/healthz`・`/readyz`。[REST APIリファレンス](api-reference.ja.md)を参照してください。
 - **AI provider:** Ollama / Anthropic / OpenAI / Amazon Bedrockへの明示操作型read-only分析。設定とprivacy境界は[AI洞察設定ガイド](setup-ai-insights.ja.md)を参照してください。
-- **MCP:** stdioまたは認証済みHTTPで利用する11本のread/write tool。[MCP設定ガイド](setup-mcp.ja.md)を参照してください。
+- **MCP:** stdioまたは認証済みHTTPで利用する11本のread/write tool。公開OAuth
+  stagingはDNSやinfraを変更しないfail-closed公開gateで保護します。
+  [MCP設定ガイド](setup-mcp.ja.md)を参照してください。
 - **Export:** 履歴全体をmemoryへ載せない、上限付きstreaming CSV/JSON。
 - **通知:** 任意のSlack送信。Slack無効時も検出結果はlocal notification logへ保存します。
 

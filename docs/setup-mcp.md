@@ -355,6 +355,98 @@ Subjects are pseudonymised with the dedicated `MCP_AUDIT_HMAC_KEY`, so the same 
 
 The public MCP endpoint fails closed and returns `401`. Everything else keeps running: router collection, the browser UI, stdio clients and private HTTP mode. Do not treat an IdP outage as an EgressView outage.
 
+## Pre-publication gate
+
+P2-60 provides a fail-closed gate that must pass before a public DNS record is
+created. The gate **does not create or modify DNS, certificates, load
+balancers, security groups, Keycloak, or EgressView configuration**. A passing
+result is only `ready_for_manual_dns_review`; publishing DNS remains a separate
+reviewed operation.
+
+Run it against the DNS-unpublished ALB or reverse proxy. The canonical hostname
+is retained for TLS SNI and the HTTP `Host` header, while
+`MCP_GATE_CONNECT_ADDRESS` pins the staged target like `curl --connect-to`.
+
+```bash
+cp .env.mcp-gate.example .env.mcp-gate
+chmod 600 .env.mcp-gate
+cp docs/mcp-publication-evidence.example.json \
+  .egressview-mcp-publication-evidence.json
+
+set -a
+. ./.env.mcp-gate
+set +a
+npm run mcp:publication-gate
+```
+
+Both local files are gitignored. Keep bearer tokens only in the mode-`0600`
+environment file and remove them immediately after the run. The evidence JSON
+and generated report contain no token values, tool arguments, network
+observations, IP/MAC addresses, or credentials.
+
+### Required evidence
+
+Every evidence item must be successful, refer to the exact deployed
+40-character Git commit, and be no more than 30 days old:
+
+- production DNS is still disabled and EC2 has no direct Internet ingress to
+  ports 443, 3000, 3002, or 3010;
+- reverse-proxy body, request-rate, concurrency, and timeout limits were
+  exercised;
+- staged application rollback and MCP service-identity rotation were tested;
+- the Keycloak database backup was restored into a disposable environment;
+- with Keycloak/JWKS unavailable and the MCP JWKS cache cold, public MCP failed
+  closed while `/healthz`, `/readyz`, and current router collection remained
+  healthy;
+- refresh-token rotation rejected the old refresh token while the latest token
+  family continued to work;
+- Claude Code and GitHub Copilot CLI completed read-tool and refresh tests
+  against the staged endpoint.
+
+The JWKS outage test must use a cold MCP process. A running process may
+legitimately continue validating signatures with a still-valid cached JWKS;
+that is not evidence that discovery fails closed.
+
+### Active probes
+
+The command then verifies:
+
+- the public hostname has no A or AAAA record;
+- TLS hostname verification and both RFC 9728 metadata paths;
+- scope-bearing `401` challenges for unauthenticated calls;
+- rejection of malformed, expired, wrong-audience, and revoked-then-expired
+  access tokens, after independently verifying the fixture signatures against
+  the configured issuer's JWKS;
+- a real read tool through the scoped internal service identity;
+- `403` for a read token attempting `set_device_note`, and visibility of that
+  tool with a write-scoped token;
+- `429` plus `Retry-After` after the configured staging burst;
+- corresponding append-only audit rows and pseudonymized identity fields;
+- local readiness and recent successful collection from every enabled router.
+
+The rate probe intentionally fills the staging process's global one-minute
+bucket. Do not run it against a live public endpoint.
+
+Because EgressView validates JWTs offline, revoking a Keycloak session or
+refresh family does not invalidate an already-issued access token before its
+`exp`. `MCP_GATE_REVOKED_EXPIRED_TOKEN` is therefore checked after the short
+access-token TTL expires. The evidence separately proves that the old refresh
+token cannot mint a replacement. For immediate containment, remove the public
+proxy route first; do not claim immediate access-token revocation.
+
+### Result and rollback
+
+A successful run writes a mode-`0600`
+`.egressview-mcp-publication-gate.json`. It records the deployed commit,
+timestamp, hostname, router count, and pass/fail categories, but no secrets.
+Failure exits nonzero and must block DNS publication.
+
+If any post-publication check fails, remove the Web/MCP DNS aliases, disable the
+MCP proxy route, and return to VPN/SSM access. Restore the last verified
+application release and Keycloak database only through their separately tested
+rollback procedures. Router collection and the local recovery administrator
+must remain available throughout.
+
 ## Trademarks
 
 AWS Kiro, Anthropic Claude, Anysphere Cursor, and other product names are trademarks or registered trademarks of their respective owners. EgressView is not affiliated with, endorsed by, or sponsored by those companies.
