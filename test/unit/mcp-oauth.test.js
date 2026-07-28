@@ -47,6 +47,7 @@ function jwt(key, claims = {}, header = {}) {
   const encodedClaims = Buffer.from(JSON.stringify({
     iss: ISSUER,
     sub: 'pilot-user',
+    client_id: 'pilot-client',
     aud: RESOURCE,
     scope: SCOPE,
     iat: NOW_MS / 1000,
@@ -175,7 +176,7 @@ describe('mcp-oauth JWT verification', () => {
     assert.deepEqual(result.scopes, [SCOPE]);
   });
 
-  it('rejects wrong issuer, audience, expiry, and missing subject', async () => {
+  it('rejects wrong issuer, audience, expiry, and missing identity claims', async () => {
     const server = oauthServer();
     await assert.rejects(
       () => server.verifyToken(jwt(firstKey, { iss: 'https://other.example.test' })),
@@ -196,6 +197,10 @@ describe('mcp-oauth JWT verification', () => {
     await assert.rejects(
       () => server.verifyToken(jwt(firstKey, { sub: '' })),
       /subject is missing/
+    );
+    await assert.rejects(
+      () => server.verifyToken(jwt(firstKey, { client_id: undefined, azp: undefined })),
+      /client identifier is missing/
     );
     await assert.rejects(
       () => server.verifyToken(jwt(firstKey, { iat: NOW_MS / 1000 + 31 })),

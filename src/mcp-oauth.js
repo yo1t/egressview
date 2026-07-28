@@ -18,6 +18,18 @@ class OAuthError extends Error {
   }
 }
 
+/**
+ * The client that presented the token. `client_id` is the standard claim;
+ * Keycloak issues `azp` instead. Only these two verified claims are trusted —
+ * never a header, which the caller controls.
+ */
+function normalizeClientId(claims) {
+  for (const value of [claims.client_id, claims.azp]) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
 function safeUrl(value, name) {
   let url;
   try {
@@ -256,11 +268,22 @@ function createOAuthResourceServer(options) {
     if (typeof claims.sub !== 'string' || !claims.sub) {
       throw new OAuthError('invalid_token', 'Access token subject is missing');
     }
+    const clientId = normalizeClientId(claims);
+    if (!clientId) {
+      throw new OAuthError('invalid_token', 'Access token client identifier is missing');
+    }
     const scopes = tokenScopes(claims);
     if (!scopes.includes(requiredScope)) {
       throw new OAuthError('insufficient_scope', 'Required scope is missing', 403);
     }
-    return Object.freeze({ claims: Object.freeze({ ...claims }), scopes: Object.freeze(scopes) });
+    return Object.freeze({
+      claims: Object.freeze({ ...claims }),
+      scopes: Object.freeze(scopes),
+      // Normalized identity for per-subject limits and audit pseudonyms.
+      // Qualified by issuer so two providers cannot collide on the same sub.
+      subject: `${issuer}|${claims.sub}`,
+      clientId,
+    });
   }
 
   const metadata = Object.freeze({

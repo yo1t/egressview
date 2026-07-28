@@ -37,6 +37,9 @@ const { permissionForMcpTool } = require('./src/permission-matrix');
 const { isApiIdentityToken } = require('./src/api-identities');
 const { createMcpScopeMapping } = require('./src/mcp-scope-mapping');
 const { createOAuthResourceServer } = require('./src/mcp-oauth');
+const crypto = require('node:crypto');
+const mcpAudit = require('./src/mcp-audit');
+const { createMcpRateLimiter, rateLimitOptionsFromEnv } = require('./src/mcp-rate-limit');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -63,10 +66,11 @@ function resolveHttpAuthConfig(env = process.env) {
     const readScope = String(env.MCP_OAUTH_READ_SCOPE || '').trim();
     const notesWriteScope = String(env.MCP_OAUTH_NOTES_WRITE_SCOPE || '').trim();
     const serviceToken = String(env.MCP_SERVICE_TOKEN || '').trim();
-    if (!issuer || !resource || !readScope || !notesWriteScope || !serviceToken) {
+    const auditHashKey = String(env.MCP_AUDIT_HMAC_KEY || '').trim();
+    if (!issuer || !resource || !readScope || !notesWriteScope || !serviceToken || !auditHashKey) {
       throw new Error(
         'MCP_OAUTH_ISSUER, MCP_OAUTH_RESOURCE, MCP_OAUTH_READ_SCOPE, '
-        + 'MCP_OAUTH_NOTES_WRITE_SCOPE, and MCP_SERVICE_TOKEN must be set '
+        + 'MCP_OAUTH_NOTES_WRITE_SCOPE, MCP_SERVICE_TOKEN, and MCP_AUDIT_HMAC_KEY must be set '
         + 'in HTTP OAuth mode'
       );
     }
@@ -75,6 +79,12 @@ function resolveHttpAuthConfig(env = process.env) {
     }
     if (env.EGRESSVIEW_TOKEN && serviceToken === env.EGRESSVIEW_TOKEN) {
       throw new Error('MCP_SERVICE_TOKEN must differ from EGRESSVIEW_TOKEN');
+    }
+    if (auditHashKey.length < 32) {
+      throw new Error('MCP_AUDIT_HMAC_KEY must contain at least 32 characters');
+    }
+    if (auditHashKey === serviceToken || auditHashKey === env.EGRESSVIEW_TOKEN) {
+      throw new Error('MCP_AUDIT_HMAC_KEY must be dedicated to MCP audit pseudonyms');
     }
     const scopeMapping = createMcpScopeMapping({ readScope, notesWriteScope });
     return Object.freeze({
@@ -86,6 +96,7 @@ function resolveHttpAuthConfig(env = process.env) {
       notesWriteScope,
       scopesSupported: scopeMapping.scopesSupported,
       serviceToken,
+      auditHashKey,
     });
   }
   throw new Error('MCP_AUTH_MODE must be either "token" or "oauth"');
@@ -101,7 +112,16 @@ function resolveMcpPort(value) {
 
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
 
-function createApiClient({ base = BASE, token = TOKEN } = {}) {
+// A tool call that never returns holds a concurrency slot until the request
+// deadline. Bounding the upstream call itself frees the slot sooner and gives
+// a clearer failure than a whole-request timeout.
+function createApiClient({
+  base = BASE,
+  token = TOKEN,
+  requestId = null,
+  requestSignal = null,
+  timeoutMs = resolveTimeoutMs(process.env.MCP_API_TIMEOUT_MS, 15_000),
+} = {}) {
   async function parseResponse(res, label) {
     if (!res.ok) throw new Error(`${label} returned ${res.status}`);
     try {
@@ -111,14 +131,30 @@ function createApiClient({ base = BASE, token = TOKEN } = {}) {
     }
   }
 
+  // Carry the MCP request id into EgressView. The two audit trails are
+  // deliberately separate stores; this is the key that joins them, so an
+  // incident can be traced from "which OAuth subject asked" (MCP audit) to
+  // "what the service identity then did" (EgressView audit).
+  const correlationHeaders = requestId ? { 'X-Request-Id': requestId } : {};
+  const signalForCall = () => {
+    const apiDeadline = AbortSignal.timeout(timeoutMs);
+    return requestSignal ? AbortSignal.any([requestSignal, apiDeadline]) : apiDeadline;
+  };
+
   return Object.freeze({
+    /** A client bound to one inbound request, for audit correlation. */
+    withRequestId(id, signal = requestSignal) {
+      return createApiClient({ base, token, requestId: id, requestSignal: signal, timeoutMs });
+    },
+
     async get(path, params = {}) {
       const url = new URL(`${base}/api${path}`);
       for (const [key, value] of Object.entries(params)) {
         if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
       }
       const res = await fetch(url.toString(), {
-        headers: { 'X-Admin-Token': token },
+        headers: { 'X-Admin-Token': token, ...correlationHeaders },
+        signal: signalForCall(),
       });
       return parseResponse(res, `API ${path}`);
     },
@@ -126,7 +162,8 @@ function createApiClient({ base = BASE, token = TOKEN } = {}) {
     async post(path, body = {}) {
       const res = await fetch(`${base}/api${path}`, {
         method: 'POST',
-        headers: { 'X-Admin-Token': token, 'Content-Type': 'application/json' },
+        headers: { 'X-Admin-Token': token, 'Content-Type': 'application/json', ...correlationHeaders },
+        signal: signalForCall(),
         body: JSON.stringify(body),
       });
       return parseResponse(res, `API POST ${path}`);
@@ -143,9 +180,9 @@ function createMcpServiceApiClient({ base = BASE, token } = {}) {
   const client = createApiClient({ base, token });
   let validationPromise = null;
 
-  async function validateIdentity() {
+  async function validateIdentity(validationClient = client) {
     if (!validationPromise) {
-      validationPromise = client.get('/auth/api-identities/self')
+      validationPromise = validationClient.get('/auth/api-identities/self')
         .then((body) => {
           const actual = Array.isArray(body?.identity?.permissions)
             ? [...new Set(body.identity.permissions)].sort()
@@ -166,16 +203,25 @@ function createMcpServiceApiClient({ base = BASE, token } = {}) {
     return validationPromise;
   }
 
-  return Object.freeze({
-    async get(path, params = {}) {
-      await validateIdentity();
-      return client.get(path, params);
-    },
-    async post(path, body = {}) {
-      await validateIdentity();
-      return client.post(path, body);
-    },
-  });
+  function wrap(inner) {
+    return Object.freeze({
+      // Binding a request id must not skip identity validation, so the wrapper
+      // is rebuilt around the bound client rather than returning it directly.
+      withRequestId(id, signal) {
+        return wrap(inner.withRequestId(id, signal));
+      },
+      async get(path, params = {}) {
+        await validateIdentity(inner);
+        return inner.get(path, params);
+      },
+      async post(path, body = {}) {
+        await validateIdentity(inner);
+        return inner.post(path, body);
+      },
+    });
+  }
+
+  return wrap(client);
 }
 
 // ─── Period helpers ───────────────────────────────────────────────────────────
@@ -537,9 +583,122 @@ function createToolScopeMiddleware(scopeMapping, oauth) {
   };
 }
 
+// Correlate a request across the rate limiter, the OAuth boundary and the
+// tool call. A caller-supplied id is accepted only in a safe shape.
+function resolveTimeoutMs(value, fallback) {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) return fallback;
+  const parsed = Number(text);
+  // A zero or negative timeout would disable the deadline entirely, which is
+  // the failure this exists to prevent. Node timers also overflow above a
+  // signed 32-bit delay, so keep the operational setting deliberately bounded.
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 600_000
+    ? parsed
+    : fallback;
+}
+
+function requestIdFor(req) {
+  const supplied = String(req.get?.('X-Request-Id') || '').trim();
+  if (/^[A-Za-z0-9._-]{1,100}$/.test(supplied)) return supplied;
+  return crypto.randomUUID();
+}
+
+// req.mcpAuth is populated by the OAuth layer with a normalized, verified
+// identity. Before authentication it is absent, and the hashes are then null
+// by design rather than by accident.
+function auditContext(req) {
+  return {
+    subject: req.mcpAuth?.subject || null,
+    clientId: req.mcpAuth?.clientId || null,
+    scopes: req.mcpAuth?.scopes || null,
+    requestId: req.mcpRequestId,
+  };
+}
+
+function createRequestContextMiddleware() {
+  return (req, _res, next) => {
+    req.mcpRequestId = requestIdFor(req);
+    req.mcpStartedAt = Date.now();
+    next();
+  };
+}
+
+// Two passes are required, and the order is load-bearing.
+//
+// The first runs before the body is parsed and before authentication, so a
+// flood of unauthenticated or malformed requests is rejected without spending
+// JSON parsing or JWKS work on it. At that point there is no identity, so only
+// the global window and the concurrency cap can apply.
+//
+// The second runs after authentication, once req.mcpAuth carries a verified
+// subject and client id. Applying per-identity limits any earlier would have
+// silently done nothing.
+function createRateLimitMiddleware(limiter, { stage = 'pre-auth' } = {}) {
+  return (req, res, next) => {
+    const identified = stage === 'post-auth';
+    const verdict = limiter.check(
+      identified
+        ? { subject: req.mcpAuth?.subject, clientId: req.mcpAuth?.clientId, skipGlobal: true }
+        : {}
+    );
+    if (verdict.allowed) {
+      // Only the pre-auth pass holds a concurrency slot; taking a second one
+      // after authentication would double-count the same request.
+      if (!identified) {
+        const release = limiter.acquire();
+        let done = false;
+        const finish = () => { if (!done) { done = true; release(); } };
+        res.on('finish', finish);
+        res.on('close', finish);
+      }
+      return next();
+    }
+    mcpAudit.append({
+      eventType: 'mcp_rate_limited',
+      outcome: 'failure',
+      reason: verdict.reason,
+      ...auditContext(req),
+      durationMs: Date.now() - req.mcpStartedAt,
+    });
+    res.set('Retry-After', String(verdict.retryAfterSeconds));
+    return res.status(429).json({ error: 'rate_limited' });
+  };
+}
+
+// Classifies the outcome of an authenticated MCP request for the audit trail.
+// Reason codes only — never provider text, which can echo token contents.
+function createAuditMiddleware() {
+  return (req, res, next) => {
+    res.on('finish', () => {
+      const toolName = req.body?.method === 'tools/call' ? req.body?.params?.name : null;
+      const status = res.statusCode;
+      // A streamed response that blew its deadline still reports 200; the
+      // deadline flag is the authoritative signal, not the status code.
+      const outcome = req.mcpTimedOut || status >= 400 ? 'failure' : 'success';
+      let reason = null;
+      if (status === 401) reason = res.get('WWW-Authenticate')?.includes('invalid_token')
+        ? 'invalid_token' : 'unauthorized';
+      else if (status === 403) reason = 'insufficient_scope';
+      else if (status === 429) return; // already audited by the limiter
+      else if (req.mcpTimedOut) reason = 'request_timeout';
+      else if (status >= 500) reason = 'server_error';
+      mcpAudit.append({
+        eventType: toolName ? 'mcp_tool_call' : 'mcp_request',
+        outcome,
+        reason,
+        toolName,
+        ...auditContext(req),
+        durationMs: Date.now() - req.mcpStartedAt,
+      });
+    });
+    next();
+  };
+}
+
 async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
   const app = express();
-  app.use(express.json());
+  const MAX_BODY = process.env.MCP_MAX_BODY || '256kb';
+  const limiter = createMcpRateLimiter(rateLimitOptionsFromEnv());
 
   let oauth = null;
   let scopeMapping = null;
@@ -551,6 +710,25 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
       notesWriteScope: authConfig.notesWriteScope,
     });
     internalApiClient = createMcpServiceApiClient({ token: authConfig.serviceToken });
+    // Fail closed. An internet-facing endpoint that cannot record who called
+    // it should not accept calls. This costs nothing elsewhere: the MCP server
+    // is a separate process, so refusing to start here leaves EgressView's
+    // router collection, browser UI, stdio clients and private HTTP mode
+    // running untouched.
+    mcpAudit.initDb(process.env.MCP_AUDIT_DB_PATH || undefined, {
+      hashKey: authConfig.auditHashKey,
+    });
+    mcpAudit.assertWritable();
+    mcpAudit.prune();
+    mcpAudit.setWriteFailureHandler((error, total) => {
+      // Report the first failure and then every hundredth, so a persistent
+      // fault stays visible without flooding the log.
+      if (total === 1 || total % 100 === 0) {
+        process.stderr.write(
+          `[egressview-mcp] AUDIT WRITE FAILED (${total} total): ${error.message}\n`
+        );
+      }
+    });
     const sendMetadata = (_req, res) => res.json(oauth.metadata);
     const metadataPaths = new Set([
       '/.well-known/oauth-protected-resource',
@@ -558,7 +736,23 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
       new URL(oauth.protectedResourceMetadataUrl).pathname,
     ]);
     for (const path of metadataPaths) app.get(path, sendMetadata);
+    // Order matters: context and limits first, so an unauthenticated flood is
+    // rejected before any JWKS work, then authentication, then scope, then the
+    // audit hook that classifies whatever the earlier layers decided.
+    // Order is load-bearing:
+    //   context  -> every later layer can correlate on one request id
+    //   audit    -> registered early so it observes whatever any layer decides
+    //   limit    -> rejects floods before JSON parsing or JWKS work
+    //   body     -> bounded parse, scoped to /mcp only
+    //   oauth    -> establishes the verified identity
+    //   limit    -> per-subject and per-client, now that identity exists
+    //   scope    -> per-tool authorization
+    app.use('/mcp', createRequestContextMiddleware());
+    app.use('/mcp', createAuditMiddleware());
+    app.use('/mcp', createRateLimitMiddleware(limiter, { stage: 'pre-auth' }));
+    app.use('/mcp', express.json({ limit: MAX_BODY }));
     app.use('/mcp', oauth.middleware());
+    app.use('/mcp', createRateLimitMiddleware(limiter, { stage: 'post-auth' }));
     app.use('/mcp', createToolScopeMiddleware(scopeMapping, oauth));
   } else {
     if (!TOKEN) {
@@ -568,14 +762,59 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
     }
     // Private token mode accepts the dedicated token in either supported header.
     app.use('/mcp', createAuthMiddleware(authConfig.token));
+    app.use('/mcp', express.json({ limit: MAX_BODY }));
   }
+
+  // Without a deadline a stalled upstream call holds its concurrency slot for
+  // ever; MCP_MAX_CONCURRENT such requests would wedge the endpoint closed.
+  const requestTimeoutMs = resolveTimeoutMs(process.env.MCP_REQUEST_TIMEOUT_MS, 30_000);
 
   // Streamable HTTP — handles POST (tool calls) and GET (SSE stream)
   const handleMcp = async (req, res) => {
+    const requestController = new AbortController();
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     const includeWriteTools = authConfig.mode !== 'oauth'
       || scopeMapping.authorizeTool('set_device_note', req.mcpAuth?.scopes).allowed;
-    const server = buildMcpServer({ includeWriteTools, apiClient: internalApiClient });
+    const apiClient = req.mcpRequestId && typeof internalApiClient.withRequestId === 'function'
+      ? internalApiClient.withRequestId(req.mcpRequestId, requestController.signal)
+      : internalApiClient;
+    const server = buildMcpServer({ includeWriteTools, apiClient });
+
+    // Record the timeout as a flag rather than writing a row here: the audit
+    // middleware still fires on finish, and two writes would leave the trail
+    // claiming both request_timeout and server_error for one request.
+    //
+    // The Streamable HTTP transport sends headers as soon as it starts the SSE
+    // stream, so for a streaming response the status can no longer be changed
+    // to 504. The deadline still does the work that matters: it marks the
+    // request for audit and releases the concurrency slot, which is what stops
+    // stalled calls wedging the endpoint closed.
+    const deadline = setTimeout(() => {
+      req.mcpTimedOut = true;
+      requestController.abort(new DOMException('MCP request timed out', 'TimeoutError'));
+      if (res.writableEnded) return;
+      if (res.headersSent) res.end();
+      else res.status(504).json({ error: 'request_timeout' });
+    }, requestTimeoutMs);
+    deadline.unref?.();
+
+    // Release both the timer and the MCP server exactly once, however the
+    // request ends. Registering the close listener only in `finally` used to
+    // leak the server whenever the response had already closed by then, which
+    // the timeout path makes routine.
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      clearTimeout(deadline);
+      if (!requestController.signal.aborted) {
+        requestController.abort(new DOMException('MCP response closed', 'AbortError'));
+      }
+      server.close().catch(() => {});
+    };
+    res.on('close', release);
+    res.on('finish', release);
+
     try {
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
@@ -583,7 +822,8 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
       process.stderr.write(`[egressview-mcp] ${err.message}\n`);
       if (!res.headersSent) res.status(500).json({ error: 'internal server error' });
     } finally {
-      res.on('close', () => server.close().catch(() => {}));
+      // A response that never emits close or finish still releases here.
+      if (res.writableEnded || res.headersSent === false) release();
     }
   };
 
@@ -601,6 +841,14 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
       process.stderr.write(`[egressview-mcp] HTTP transport listening on 127.0.0.1:${actualPort}/mcp\n`);
       process.stderr.write(`[egressview-mcp] HTTP authentication mode: ${authConfig.mode}\n`);
       process.stderr.write(`[egressview-mcp] Proxying API calls to ${BASE}\n`);
+      if (authConfig.mode === 'oauth') {
+        const limits = limiter.config;
+        process.stderr.write(
+          `[egressview-mcp] Limits: ${limits.globalPerMinute}/min global, `
+          + `${limits.perSubjectPerMinute}/min subject, ${limits.perClientPerMinute}/min client, `
+          + `${limits.maxConcurrent} concurrent\n`
+        );
+      }
       resolve(httpServer);
     });
   });
