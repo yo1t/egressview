@@ -1002,6 +1002,7 @@ describe('npm package invariants', () => {
       'scripts/secret-scan.js',
       'scripts/check-frontend-innerhtml.js',
       'scripts/frontend-innerhtml-allowlist.json',
+      'scripts/check-mcp-publication-gate.js',
       'scripts/gen-demo-db.js',
       'scripts/demo-seed.js',
     ]) {
