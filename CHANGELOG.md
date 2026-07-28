@@ -19,6 +19,14 @@ All notable changes to EgressView are documented here.
 - OAuth MCP API calls now require a dedicated, expiring `egv_...` service
   identity with only `network.read` and `notes.write`; the browser/admin token
   is rejected and never used as a fallback.
+- Public OAuth MCP now applies global, per-subject, and per-client rate limits,
+  a concurrency cap, bounded request bodies and deadlines, and a dedicated
+  append-only HMAC-pseudonymized audit trail.
+- Added a fail-closed pre-publication gate for staged MCP deployments. It
+  verifies unpublished DNS, TLS and OAuth metadata, invalid/expired/audience
+  rejection, read/write scope separation, rate limiting, audit correlation,
+  and continuing local router collection. It never publishes DNS or changes
+  infrastructure; a pass only permits a separate manual DNS review.
 - Added least-privilege browser roles. Local login remains `admin`, an explicitly
   allowed Google email becomes `operator`, and a domain-only match becomes
   read-only `viewer`. Authentication allowlists no longer imply administrator
