@@ -316,6 +316,10 @@ OAuthモード（`MCP_AUTH_MODE=oauth`）にのみ適用されます。private t
 | `MCP_RATE_LIMIT_CLIENT` | 30/分 | 異常な1クライアントも同様 |
 | `MCP_MAX_CONCURRENT` | 4 | 同時tool call数を制限 |
 | `MCP_MAX_BODY` | `256kb` | 解析・認証の前にbodyを制限 |
+| `MCP_REQUEST_TIMEOUT_MS` | 30000 | MCP処理1回の締切 |
+| `MCP_API_TIMEOUT_MS` | 15000 | 内部EgressView API呼び出し1回の締切 |
+
+締切が無いと、停止した呼び出しが`MCP_MAX_CONCURRENT`個の枠をすべて占有し、endpointが閉塞します。なおMCPのtransportはストリーミングのため、応答を開始した後はステータスを`504`へ変更できません。ストリーム途中で締切を超えた呼び出しは、ステータスではなく監査の`request_timeout`として記録されます。締切は枠の解放を行い、これがendpointを稼働させ続ける要です。
 
 既定値は意図的に厳しくしています。実測した使用量がまだ無く、誤検知が出てから緩めるのは容易ですが、緩すぎたと気づくのは悪用された後だからです。正当な処理が上限に当たる場合は引き上げてください。
 

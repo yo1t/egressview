@@ -122,6 +122,7 @@ function call(token, body = { jsonrpc: '2.0', id: 1, method: 'tools/call', param
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...extra,
     },
@@ -306,5 +307,68 @@ describe('MCP HTTP boundary: audit availability', () => {
     mcpAudit._resetForTest(path.join(dir, 'probe.db'));
     assert.doesNotThrow(() => mcpAudit.assertWritable());
     assert.ok(mcpAudit.list().some(r => r.eventType === 'mcp_audit_startup'));
+  });
+});
+
+describe('MCP HTTP boundary: timeout accounting', () => {
+  it('writes exactly one audit row for a timed-out request', async () => {
+    // The deadline only bites once the exchange is slow, so stall the upstream
+    // API the tool proxies to rather than relying on incidental latency.
+    const realFetch = global.fetch;
+    global.fetch = (url, options) => (String(url).includes('/api/')
+      ? new Promise(resolve => setTimeout(resolve, 5_000))
+      : realFetch(url, options));
+    const restore = await start({ env: { MCP_REQUEST_TIMEOUT_MS: '30' } });
+    try {
+      // Valid arguments, so the call actually reaches the stalled upstream API
+      // instead of failing schema validation before the deadline matters.
+      const res = await call(
+        mintToken({ client_id: 'c' }),
+        { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_devices', arguments: {} } },
+        { 'X-Request-Id': 'timeout-1' }
+      );
+      // The transport streams, so headers are already sent and the status can
+      // no longer become 504. What must hold is the audit record.
+      await res.text();
+      await new Promise(r => setTimeout(r, 200));
+      const rows = mcpAudit.list().filter(r => r.requestId === 'timeout-1');
+      assert.equal(rows.length, 1, 'a timeout must not be recorded twice');
+      assert.equal(rows[0].reason, 'request_timeout',
+        'and must not be downgraded to a generic server error');
+      assert.equal(rows[0].outcome, 'failure',
+        'a streamed 200 that blew its deadline is still a failure');
+    } finally {
+      restore();
+      global.fetch = realFetch;
+    }
+  });
+
+  it('rejects a non-positive timeout rather than disabling the deadline', async () => {
+    const restore = await start({ env: { MCP_REQUEST_TIMEOUT_MS: '0' } });
+    try {
+      const res = await call(mintToken({ client_id: 'c' }), undefined, { 'X-Request-Id': 'zero-timeout' });
+      await res.text();
+      await new Promise(r => setTimeout(r, 150));
+      const row = mcpAudit.list().find(r => r.requestId === 'zero-timeout');
+      // A deadline of zero would expire instantly; falling back to the default
+      // means this ordinary request is not marked as timed out.
+      assert.notEqual(row?.reason, 'request_timeout');
+    } finally { restore(); }
+  });
+
+  it('keeps serving after a timeout, with the concurrency slot returned', async () => {
+    const restore = await start({
+      env: { MCP_REQUEST_TIMEOUT_MS: '1' },
+      limits: { concurrent: 2 },
+    });
+    try {
+      const token = mintToken({ client_id: 'c' });
+      for (let i = 0; i < 4; i++) {
+        const res = await call(token);
+        // A leaked slot would surface as 429 concurrency_limit once the cap
+        // filled; every request must still be served.
+        assert.notEqual(res.status, 429, `request ${i} must not hit the concurrency cap`);
+      }
+    } finally { restore(); }
   });
 });

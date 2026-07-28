@@ -316,6 +316,10 @@ Three independent buckets apply, and all must allow a request. A separate concur
 | `MCP_RATE_LIMIT_CLIENT` | 30/min | One misbehaving client cannot either |
 | `MCP_MAX_CONCURRENT` | 4 | Bounds simultaneous tool calls |
 | `MCP_MAX_BODY` | `256kb` | Body is bounded before parsing or authentication |
+| `MCP_REQUEST_TIMEOUT_MS` | 30000 | Deadline for one MCP exchange |
+| `MCP_API_TIMEOUT_MS` | 15000 | Deadline for one internal EgressView API call |
+
+Without a deadline, `MCP_MAX_CONCURRENT` stalled calls would hold every slot and wedge the endpoint closed. Note that the MCP transport streams: once it has begun a response the status can no longer become `504`, so a call that blows its deadline mid-stream is recorded as `request_timeout` in the audit rather than reported by status code. The deadline still releases the slot, which is the part that keeps the endpoint serving.
 
 The defaults are deliberately tight: there is no measured usage to size them from yet, and loosening one after a false positive is cheap, while discovering one was too loose only happens after abuse. Raise them if a legitimate workload trips a limit.
 
