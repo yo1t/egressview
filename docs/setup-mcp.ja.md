@@ -4,6 +4,16 @@ EgressView は [Model Context Protocol (MCP)](https://modelcontextprotocol.io) �
 
 > 🇬🇧 [English version](setup-mcp.md)
 
+MCP SDK v2 serverは1つのtool定義で両方のprotocol eraを提供します。
+`2025-11-25` clientは従来の`initialize` flow、`2026-07-28` clientは
+statelessな`server/discover`とrequest単位のmetadataを使用します。互換性のため
+legacy fallbackを維持し、sticky sessionは必要ありません。
+
+Transportを選ぶ前に、cloud非依存の[Deployment profile](deployment-profiles.ja.md)
+から`local-stdio`、`private-http`、`private-oauth`、`public-oauth`のいずれかを
+選びます。管理環境では`EGRESSVIEW_DEPLOYMENT_PROFILE`を明示してください。
+Transport/認証との矛盾はendpoint起動前に拒否します。
+
 ## 使い方の例
 
 接続後は自然な言葉で質問するだけです:
@@ -281,6 +291,7 @@ HTTP トランスポートをサポートする MCP クライアント（Anysphe
 
 | 変数 | 必須 | デフォルト | 説明 |
 |---|---|---|---|
+| `EGRESSVIEW_DEPLOYMENT_PROFILE` | 推奨 | 推定 | `local-stdio`、`private-http`、`private-oauth`、`public-oauth`。deployment profile matrix参照 |
 | `EGRESSVIEW_URL` | ✅ | `http://localhost:3000` | EgressView サーバーのベース URL |
 | `EGRESSVIEW_TOKEN` | ✅ | — | API/admin トークン（EgressView 初回起動時にコンソールへ表示。ブラウザ用ログインパスワードではありません） |
 | `MCP_PORT` | HTTP モード | — | MCP HTTP サーバーのローカルポート（例: `3010`）。stdio モードの場合は不要 |
@@ -384,6 +395,10 @@ mode `0600`の環境ファイルだけに置き、試験直後に削除してく
 証跡JSONと生成レポートにはtoken、tool引数、通信観測、IP/MAC、credentialを
 記録しません。
 
+dual-era gateは証跡schema v2を要求します。旧schema v1はversion番号だけを
+書き換えず、新しいtemplateへ置き換えてください。v2のclient protocol fieldは
+実際のclient試験結果から記録する必須項目です。
+
 ### 必須証跡
 
 すべて成功済みで、deployした40文字のGit commitと一致し、試験から30日以内
@@ -396,10 +411,14 @@ mode `0600`の環境ファイルだけに置き、試験直後に削除してく
 - Keycloak DB backupを使い捨て環境へrestoreした
 - Keycloak/JWKSを到達不能にしMCPのJWKS cacheを空にした状態で、公開MCPだけが
   fail-closedとなり、`/healthz`、`/readyz`、全有効routerの収集が継続した
-- refresh token rotation後に旧refresh tokenを拒否し、最新token familyは
-  継続利用できた
+- refresh token replay対策が、次のどちらかの記録済み方式で成功した:
+  replay requestを拒否して現行familyを維持する`reject-replay`、または
+  replay検知後にfamily全体を失効して現行refresh tokenも拒否する`revoke-family`
+- family失効前に発行され得るtokenの影響を限定するため、access token寿命を記録し
+  15分以下にした
 - Claude CodeとGitHub Copilot CLIがstaging endpointでread toolとrefreshを
-  完了した
+  完了し、それぞれ選択したprotocol versionが`2026-07-28`であることを記録した
+- 保持したlegacy clientが`2025-11-25`で同じtool discoveryを完了した
 
 JWKS障害試験ではMCP processをcold startしてください。起動済みprocessが
 有効なcached JWKSで署名検証を継続するのは正常であり、discoveryの
@@ -412,6 +431,9 @@ CLIは続けて次を確認します。
 - public hostnameにA/AAAA recordがない
 - TLS hostname検証とRFC 9728 metadataの2経路
 - 未認証要求がscope付き`401` challengeになる
+- `2025-11-25`の`initialize`と`2026-07-28`の`server/discover`が成功する
+- 両protocol revisionで同じ11本のtoolを表示する
+- modern header/body不整合が`-32020`、未対応versionが`-32022`を返す
 - configured issuerのJWKSでfixture署名を独立検証した上で、malformed、期限切れ、
   誤audience、失効後に期限切れとなったaccess tokenを拒否
 - scoped internal service identityを通した実際のread tool
@@ -425,8 +447,11 @@ rate probeはstaging processのglobal 1分bucketを意図的に使い切りま�
 
 EgressViewはJWTをoffline検証するため、Keycloak sessionやrefresh familyを
 失効しても、発行済みaccess tokenは`exp`まで無効になりません。そのため
-`MCP_GATE_REVOKED_EXPIRED_TOKEN`は短いaccess token TTLの経過後に検査し、
-旧refresh tokenから再発行できないことは別の必須証跡で確認します。
+`MCP_GATE_REVOKED_EXPIRED_TOKEN`は短いaccess token TTLの経過後に検査します。
+`reject-replay`はreplay request自体の失敗と現行familyの継続を要求します。
+Keycloak 26.7.0の実測に一致する`revoke-family`はreplay検知後に現行familyも
+失敗することを要求します。この方式ではreplay requestが最後の短命access tokenを
+発行する可能性があるため、どちらの方式でもaccess token寿命を15分以下にします。
 即時遮断が必要なら最初にpublic proxy routeを外し、access tokenを即時失効
 できるとは表現しません。
 

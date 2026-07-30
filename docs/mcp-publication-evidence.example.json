@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "deployedCommit": "0000000000000000000000000000000000000000",
   "publishDns": false,
   "directIngress": {
@@ -32,13 +32,20 @@
   "refreshRevocation": {
     "passed": false,
     "testedAt": "2026-01-01T00:00:00.000Z",
-    "oldRefreshRejected": false,
-    "latestRefreshWorked": false
+    "mode": "revoke-family",
+    "replayRequestRejected": false,
+    "familyRevoked": false,
+    "currentFamilyUsable": false,
+    "accessTokenLifetimeSeconds": 0
   },
   "clientCompatibility": {
     "passed": false,
     "testedAt": "2026-01-01T00:00:00.000Z",
     "claudeCode": false,
-    "copilotCli": false
+    "copilotCli": false,
+    "claudeCodeProtocolVersion": "",
+    "copilotCliProtocolVersion": "",
+    "legacyClient": false,
+    "legacyProtocolVersion": ""
   }
 }
