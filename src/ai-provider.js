@@ -13,10 +13,11 @@ const OFFLINE_FEATURE_BY_PROVIDER = Object.freeze({
   bedrock: 'ai-bedrock',
 });
 
-function offlineBlocksProvider(provider) {
+function offlineBlocksProvider(provider, endpoint) {
   const feature = OFFLINE_FEATURE_BY_PROVIDER[provider];
   if (!feature || !_offline?.allows) return false;
-  return !_offline.allows(feature);
+  if (!_offline.allows(feature)) return true;
+  return provider === 'ollama' && !_offline.allowsEndpoint(feature, endpoint);
 }
 
 const { estimateAiCost, normalizeTokenUsage } = require('./ai-usage');
@@ -273,6 +274,13 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
   }
 
   function configure(input = {}) {
+    const nextProvider = input.provider ?? provider;
+    const nextOllamaEndpoint = input.ollamaEndpoint !== undefined
+      ? normalizeEndpoint(input.ollamaEndpoint)
+      : ollamaEndpoint;
+    if (offlineBlocksProvider(nextProvider, nextOllamaEndpoint)) {
+      throw new Error(`AI provider ${nextProvider} is disabled in offline mode`);
+    }
     if (input.provider !== undefined) {
       if (input.provider !== 'disabled' && !PROVIDERS.includes(input.provider)) {
         throw new Error('Unsupported AI provider');
@@ -294,7 +302,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
         if (typeof input.cloudConsent[name] === 'boolean') cloudConsent[name] = input.cloudConsent[name];
       }
     }
-    if (input.ollamaEndpoint !== undefined) ollamaEndpoint = normalizeEndpoint(input.ollamaEndpoint);
+    if (input.ollamaEndpoint !== undefined) ollamaEndpoint = nextOllamaEndpoint;
     if (input.region !== undefined) region = String(input.region || '').trim();
     if (input.guardrail) {
       if (typeof input.guardrail.enabled === 'boolean') guardrail.enabled = input.guardrail.enabled;
@@ -333,7 +341,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
 
   async function listModels(overrides = {}) {
     const selectedProvider = overrides.provider ?? provider;
-    if (offlineBlocksProvider(selectedProvider)) {
+    if (offlineBlocksProvider(selectedProvider, ollamaEndpoint)) {
       const error = new Error(`AI provider ${selectedProvider} is disabled in offline mode`);
       error.code = 'offline_mode';
       throw error;
@@ -358,6 +366,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
     const response = await fetchImpl(url, {
       method: 'GET',
       headers,
+      redirect: 'error',
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     return { provider: selectedProvider, models: modelIds(await readJsonResponse(response), selectedProvider) };
@@ -382,7 +391,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
   // different (control-plane) permission and can succeed while generation is
   // denied. No network/device/threat data is sent by the test.
   async function testConnection() {
-    if (offlineBlocksProvider(provider)) {
+    if (offlineBlocksProvider(provider, ollamaEndpoint)) {
       const error = new Error(`AI provider ${provider} is disabled in offline mode`);
       error.code = 'offline_mode';
       throw error;
@@ -432,7 +441,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
     priorAnalysis = '',
     language = 'ja',
   } = {}) {
-    if (offlineBlocksProvider(provider)) {
+    if (offlineBlocksProvider(provider, ollamaEndpoint)) {
       const error = new Error(`AI provider ${provider} is disabled in offline mode`);
       error.code = 'offline_mode';
       throw error;
@@ -487,6 +496,7 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
           method: 'POST',
           headers,
           body: JSON.stringify(body),
+          redirect: 'error',
           signal: requestSignal,
         });
         const parsed = await readJsonResponse(response);

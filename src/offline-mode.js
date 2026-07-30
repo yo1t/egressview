@@ -6,19 +6,18 @@
 // still emit packets, still leak the fact that EgressView is running, and
 // still stall startup for the length of every timeout.
 //
-// So every outbound-dependent feature is decided here, before the module that
-// would perform the call is wired up, and provider SDK clients are never even
-// constructed.
+// So every outbound-dependent feature is decided here before startup work can
+// perform a call, and provider SDK clients are never even constructed.
 //
 // What keeps working: router SSH collection, SQLite, the web UI, stdio and
 // private HTTP MCP. Those are local by definition.
 //
-// What is allowed only when explicitly configured: internal DNS/PTR, a
-// self-hosted Ollama endpoint, and an internal OIDC issuer. These can be
-// reachable inside an isolated network, but they are opt-in rather than
-// assumed, because "internal" is a claim about the operator's network that
-// EgressView cannot verify.
+// What is allowed only when explicitly configured: internal DNS/PTR and a
+// self-hosted Ollama endpoint. They must use private or loopback IP literals so
+// offline mode does not depend on untrusted DNS classification.
 'use strict';
+
+const net = require('node:net');
 
 const OFFLINE_ENV = 'EGRESSVIEW_OFFLINE_MODE';
 
@@ -40,7 +39,6 @@ const INTERNET_FEATURES = Object.freeze([
 const INTERNAL_CAPABLE_FEATURES = Object.freeze([
   'dns-ptr',
   'ai-ollama',
-  'internal-oidc',
 ]);
 
 const ALL_GATED_FEATURES = Object.freeze([...INTERNET_FEATURES, ...INTERNAL_CAPABLE_FEATURES]);
@@ -55,6 +53,60 @@ function truthy(value) {
  */
 function isOfflineMode(env = process.env) {
   return truthy(env[OFFLINE_ENV]);
+}
+
+function isPrivateIpv4(address) {
+  const parts = address.split('.').map(Number);
+  if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  const [a, b] = parts;
+  return a === 10
+    || a === 127
+    || a === 0
+    || (a === 100 && b >= 64 && b <= 127)
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168);
+}
+
+function isPrivateIpv6(address) {
+  const normalized = address.toLowerCase().replace(/^\[|\]$/g, '');
+  if (normalized === '::1' || normalized === '::') return true;
+  const first = Number.parseInt(normalized.split(':')[0] || '0', 16);
+  return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+}
+
+function isPrivateIpLiteral(address) {
+  const normalized = String(address || '').trim().replace(/^\[|\]$/g, '');
+  const family = net.isIP(normalized);
+  return family === 4 ? isPrivateIpv4(normalized) : family === 6 && isPrivateIpv6(normalized);
+}
+
+function parseInternalEndpoint(feature, value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (feature === 'dns-ptr') {
+    if (!isPrivateIpLiteral(raw)) {
+      throw new Error('EGRESSVIEW_INTERNAL_DNS must be a loopback or private IP address in offline mode');
+    }
+    return raw;
+  }
+  if (feature === 'ai-ollama') {
+    let parsed;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      throw new Error('Ollama endpoint must be a valid URL');
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)
+        || parsed.username || parsed.password || parsed.search || parsed.hash) {
+      throw new Error('Ollama endpoint must use HTTP(S) without credentials, query, or fragment');
+    }
+    if (!isPrivateIpLiteral(parsed.hostname)) {
+      throw new Error('Ollama endpoint must use a loopback or private IP address in offline mode');
+    }
+    return raw;
+  }
+  throw new Error(`Unknown internal endpoint feature: ${feature}`);
 }
 
 /**
@@ -89,10 +141,16 @@ function featureStatus(feature, { offline, configured = false } = {}) {
 function createOfflinePolicy({ env = process.env, internalEndpoints = {} } = {}) {
   const offline = isOfflineMode(env);
   const features = {};
+  const endpoints = {};
   for (const feature of ALL_GATED_FEATURES) {
+    let configured = Boolean(internalEndpoints[feature]);
+    if (offline && INTERNAL_CAPABLE_FEATURES.includes(feature) && configured) {
+      endpoints[feature] = parseInternalEndpoint(feature, internalEndpoints[feature]);
+      configured = true;
+    }
     features[feature] = featureStatus(feature, {
       offline,
-      configured: Boolean(internalEndpoints[feature]),
+      configured,
     });
   }
   return Object.freeze({
@@ -109,6 +167,22 @@ function createOfflinePolicy({ env = process.env, internalEndpoints = {} } = {})
       const status = features[feature];
       if (!status) throw new Error(`Unknown offline-gated feature: ${feature}`);
       return status.reason;
+    },
+    endpointFor(feature) {
+      if (!INTERNAL_CAPABLE_FEATURES.includes(feature)) {
+        throw new Error(`Feature does not accept an internal endpoint: ${feature}`);
+      }
+      return endpoints[feature] || null;
+    },
+    allowsEndpoint(feature, value) {
+      if (!offline) return true;
+      if (!features[feature]?.enabled) return false;
+      try {
+        parseInternalEndpoint(feature, value);
+        return true;
+      } catch {
+        return false;
+      }
     },
     /** Shape returned to the UI and API so both explain a disabled feature identically. */
     describe() {
@@ -128,6 +202,8 @@ module.exports = {
   INTERNAL_CAPABLE_FEATURES,
   ALL_GATED_FEATURES,
   isOfflineMode,
+  isPrivateIpLiteral,
+  parseInternalEndpoint,
   featureStatus,
   createOfflinePolicy,
 };

@@ -13,9 +13,8 @@ All notable changes to EgressView are documented here.
   Anthropic/OpenAI/Bedrock providers. Cloud provider SDK clients are never
   constructed, so no credential resolution or connection setup occurs. Router
   SSH collection, SQLite, the web UI, and stdio/private HTTP MCP are
-  unaffected. Internal DNS/PTR, a self-hosted Ollama endpoint, and an internal
-  OIDC issuer stay disabled until explicitly configured, because "reachable
-  internally" is a claim about the operator's network that cannot be verified.
+  unaffected. Internal DNS/PTR and a self-hosted Ollama endpoint stay disabled
+  until explicitly configured with a loopback or private IP address.
   The API and settings report which features are off and why.
 - Self-hosted D3 7.9.0, TopoJSON client 3.1.0, and world-atlas 2.0.2 at pinned
   versions and removed every external origin from the CSP and HTML. The map and

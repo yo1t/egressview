@@ -5,6 +5,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 const {
   OFFLINE_ENV,
@@ -12,9 +13,15 @@ const {
   INTERNAL_CAPABLE_FEATURES,
   ALL_GATED_FEATURES,
   isOfflineMode,
+  isPrivateIpLiteral,
+  parseInternalEndpoint,
   featureStatus,
   createOfflinePolicy,
 } = require('../../src/offline-mode');
+const {
+  createAiProvider,
+  setOfflinePolicy: setAiOfflinePolicy,
+} = require('../../src/ai-provider');
 
 const root = path.join(__dirname, '..', '..');
 
@@ -65,13 +72,56 @@ describe('feature gating', () => {
   it('enables an internal-capable feature once configured', () => {
     const policy = createOfflinePolicy({
       env: { [OFFLINE_ENV]: 'true' },
-      internalEndpoints: { 'ai-ollama': true, 'dns-ptr': true },
+      internalEndpoints: {
+        'ai-ollama': 'http://10.0.0.20:11434',
+        'dns-ptr': '10.0.0.53',
+      },
     });
     assert.equal(policy.allows('ai-ollama'), true);
     assert.equal(policy.allows('dns-ptr'), true);
-    assert.equal(policy.allows('internal-oidc'), false, 'unconfigured ones stay off');
+    assert.equal(policy.endpointFor('dns-ptr'), '10.0.0.53');
     // Configuring an internal endpoint must never re-enable an internet feature.
     assert.equal(policy.allows('ai-anthropic'), false);
+  });
+
+  it('accepts only private or loopback IP literals for internal endpoints', () => {
+    for (const address of ['127.0.0.1', '10.0.0.20', '172.16.1.2', '192.168.1.2', '::1', 'fd00::20']) {
+      assert.equal(isPrivateIpLiteral(address), true, address);
+    }
+    for (const address of ['8.8.8.8', '203.0.113.10', '2606:4700:4700::1111', 'ollama.internal']) {
+      assert.equal(isPrivateIpLiteral(address), false, address);
+    }
+    assert.equal(parseInternalEndpoint('ai-ollama', 'http://[::1]:11434'), 'http://[::1]:11434');
+    assert.throws(
+      () => parseInternalEndpoint('ai-ollama', 'https://ollama.internal'),
+      /loopback or private IP/
+    );
+    assert.throws(
+      () => createOfflinePolicy({
+        env: { [OFFLINE_ENV]: 'true' },
+        internalEndpoints: { 'dns-ptr': '8.8.8.8' },
+      }),
+      /EGRESSVIEW_INTERNAL_DNS/
+    );
+  });
+
+  it('revalidates Ollama endpoints when settings change', () => {
+    const policy = createOfflinePolicy({
+      env: { [OFFLINE_ENV]: 'true' },
+      internalEndpoints: { 'ai-ollama': 'http://10.0.0.20:11434' },
+    });
+    setAiOfflinePolicy(policy);
+    try {
+      const provider = createAiProvider();
+      provider.configure({ provider: 'ollama', ollamaEndpoint: 'http://10.0.0.20:11434' });
+      assert.throws(
+        () => provider.configure({ ollamaEndpoint: 'https://api.example.com' }),
+        /disabled in offline mode/
+      );
+      assert.equal(provider.getPublicConfig().ollamaEndpoint, 'http://10.0.0.20:11434');
+    } finally {
+      setAiOfflinePolicy(null);
+    }
   });
 
   it('refuses an unknown feature instead of defaulting to allowed', () => {
@@ -101,14 +151,15 @@ describe('no external asset references remain', () => {
     }
   });
 
-  it('keeps the pinned vendor copies present and non-empty', () => {
-    for (const asset of [
-      'public/vendor/d3-7.9.0.min.js',
-      'public/vendor/topojson-client-3.1.0.min.js',
-      'public/vendor/world-atlas-countries-110m-2.0.2.json',
-    ]) {
-      const stat = fs.statSync(path.join(root, asset));
-      assert.ok(stat.size > 1000, `${asset} looks truncated`);
+  it('keeps the pinned vendor copies byte-for-byte intact', () => {
+    const assets = {
+      'public/vendor/d3-7.9.0.min.js': 'f2094bbf6141b359722c4fe454eb6c4b0f0e42cc10cc7af921fc158fceb86539',
+      'public/vendor/topojson-client-3.1.0.min.js': '25cd02ae486cc5063e0215a4e4cfb15de83700c87ac48bac4d57dc6aaf3ebb89',
+      'public/vendor/world-atlas-countries-110m-2.0.2.json': '2516c915867c7baf18ddec727aec46c315541a07cfb3d79a6559b05d5e94eee8',
+    };
+    for (const [asset, expected] of Object.entries(assets)) {
+      const actual = crypto.createHash('sha256').update(fs.readFileSync(path.join(root, asset))).digest('hex');
+      assert.equal(actual, expected, `${asset} differs from the reviewed upstream asset`);
     }
   });
 

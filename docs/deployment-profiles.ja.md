@@ -107,15 +107,14 @@ RDAP、GeoIP、脅威フィード、WiresharkのOUIベンダーデータベー�
 |---|---|
 | 内部DNS / PTR | `EGRESSVIEW_INTERNAL_DNS` |
 | 自己ホストのOllama | `EGRESSVIEW_OLLAMA_URL` |
-| 内部OIDC issuer | `EGRESSVIEW_INTERNAL_OIDC_ISSUER` |
 
-これらは隔離網の内部で到達可能な場合がありますが、**接続先を指定するまでは無効のまま**です。「内部にある」というのは運用者のネットワークについての主張であり、EgressView側では検証できないため、前提にしません。
+これらは隔離網の内部で到達可能な場合がありますが、**loopbackまたはprivate IPの接続先を指定するまでは無効のまま**です。offline modeでは、DNSによって許可済み接続先が隔離網外へ向けられることを防ぐためhostnameを拒否します。MCPのprivate OAuthは[MCP設定ガイド](setup-mcp.ja.md)に記載したMCP OAuth設定で別途構成します。
 
 ### 失われる機能
 
 通信先の組織名・国・座標が表示されず、脅威判定は既にキャッシュ済みの情報だけで行われ、未知のMACプレフィックスにはベンダー名が付きません。既存のキャッシュはそのまま利用でき、更新が止まるだけです。
 
-起動ログに無効化した機能が列挙されます。`GET /api/config/status` も同じ状態を返すため、UIは空欄を放置せず「オフラインモードのため無効」と説明できます。
+起動ログに無効化した機能が列挙されます。`GET /api/status` も同じ状態を返すため、UIは空欄を放置せず「オフラインモードのため無効」と説明できます。
 
 ### フロントエンドのasset
 
