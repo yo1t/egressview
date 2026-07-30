@@ -105,6 +105,21 @@ describe('getDnsCache — dnsmasq priority', () => {
   });
 });
 
+describe('internal PTR resolver', () => {
+  beforeEach(reset);
+
+  it('pins PTR lookups to the configured DNS server', async () => {
+    let servers = [];
+    class FakeResolver {
+      setServers(value) { servers = value; }
+      async reverse() { return ['device.internal']; }
+    }
+    enrichment._configurePtrResolverForTest('10.0.0.53', FakeResolver);
+    assert.equal(await enrichment.reverseDns('192.168.1.20'), 'device.internal');
+    assert.deepEqual(servers, ['10.0.0.53']);
+  });
+});
+
 // ─── getApiStats structure ────────────────────────────────────────────────────
 
 describe('getApiStats', () => {

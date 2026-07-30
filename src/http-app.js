@@ -48,11 +48,11 @@ function injectIndexBootstrap(indexHtmlBase, subpath, demoMode, nonce, htmlEscap
 function buildCspHeader(cspNonce, tlsEnabled) {
   const parts = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${cspNonce}' https://d3js.org https://cdn.jsdelivr.net`,
+    `script-src 'self' 'nonce-${cspNonce}'`,
     "style-src 'self'",
     "style-src-elem 'self'",
     "img-src 'self' data:",
-    "connect-src 'self' wss: https://cdn.jsdelivr.net",
+    "connect-src 'self' wss:",
     "object-src 'none'",
     "base-uri 'self'",
   ];

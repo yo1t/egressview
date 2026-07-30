@@ -11,6 +11,10 @@ const dns = require('dns').promises;
 const fs = require('fs');
 const path = require('path');
 const { isAllowedRouterIp } = require('./utils');
+
+// Injected at startup so the decision is made before any request is built.
+let _offline = null;
+function setOfflinePolicy(policy) { _offline = policy; }
 const { t, getLang } = require('./i18n-server');
 
 // bonjour-service is a heavyweight optional dep
@@ -50,6 +54,13 @@ async function loadOuiDb() {
       logger.info(`[oui] Cache loaded (${ouiDb.size || '…'} entries)`);
     }
   } catch {}
+
+  if (!text && _offline?.allows && !_offline.allows('oui-update')) {
+    // Offline mode: never attempt the download. A stale or absent cache means
+    // vendor names are missing, which is preferable to emitting traffic.
+    logger.info('[oui] Offline mode: skipping the vendor database download');
+    return;
+  }
 
   if (!text) {
     logger.info('[oui] Downloading Wireshark OUI database…');
@@ -528,6 +539,7 @@ async function investigateIp(ip, { ouiDb: ouiDbRef, yamahaExec, yamahaEnabled, y
 }
 
 module.exports = {
+  setOfflinePolicy,
   parseOuiManuf,
   loadOuiDb,
   lookupVendor,

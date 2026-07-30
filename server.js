@@ -21,8 +21,10 @@ const enrichment      = require('./src/enrichment');
 const history         = require('./src/history');
 const deviceId        = require('./src/device-identify');
 const threatIntel     = require('./src/threat-intel');
-const { manualThreatLookup } = require('./src/manual-threat-lookup');
-const { aiProvider }  = require('./src/ai-provider');
+const manualThreatModule = require('./src/manual-threat-lookup');
+const { manualThreatLookup } = manualThreatModule;
+const aiProviderModule = require('./src/ai-provider');
+const { aiProvider }  = aiProviderModule;
 const { createAiNotificationService } = require('./src/ai-notification-service');
 const notifier        = require('./src/notifier');
 const i18n            = require('./src/i18n-server');
@@ -48,7 +50,9 @@ const authPassword   = require('./src/auth-password');
 const authAudit      = require('./src/auth-audit');
 const apiIdentities  = require('./src/api-identities');
 const authCookies    = require('./src/auth-cookies');
-const { createGoogleOidc } = require('./src/oidc-google');
+const oidcModule = require('./src/oidc-google');
+const { createGoogleOidc } = oidcModule;
+const { createOfflinePolicy } = require('./src/offline-mode');
 const { runDbBootstrap }    = require('./src/db-bootstrap');
 const { sourceRouterIdMap } = require('./src/router-id');
 const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
@@ -520,6 +524,31 @@ server.listen(PORT, HOST, () => {
   logger.info(`EgressView: ${tlsOptions ? 'https' : 'http'}://${HOST || 'localhost'}:${PORT}`);
   try {
     loadConfig();
+    const configuredAi = aiProvider.getPublicConfig();
+    if (process.env.EGRESSVIEW_OLLAMA_URL) {
+      aiProvider.configure({ ollamaEndpoint: process.env.EGRESSVIEW_OLLAMA_URL });
+    }
+    // Config loading is local-only. Decide outbound capability after it so a
+    // saved Ollama endpoint is validated before any collector or feed starts.
+    const offlinePolicy = createOfflinePolicy({
+      internalEndpoints: {
+        'dns-ptr': process.env.EGRESSVIEW_INTERNAL_DNS || '',
+        'ai-ollama': process.env.EGRESSVIEW_OLLAMA_URL
+          || (configuredAi.provider === 'ollama' ? configuredAi.ollamaEndpoint : ''),
+      },
+    });
+    appState.offlinePolicy = offlinePolicy;
+    enrichment.setOfflinePolicy(offlinePolicy);
+    threatIntel.setOfflinePolicy(offlinePolicy);
+    deviceId.setOfflinePolicy(offlinePolicy);
+    manualThreatModule.setOfflinePolicy(offlinePolicy);
+    aiProviderModule.setOfflinePolicy(offlinePolicy);
+    oidcModule.setOfflinePolicy(offlinePolicy);
+    if (offlinePolicy.offline) {
+      const disabled = Object.entries(offlinePolicy.features)
+        .filter(([, status]) => !status.enabled).map(([name]) => name);
+      logger.info(`[offline] Offline mode is on. Disabled before startup: ${disabled.join(', ')}`);
+    }
   } catch (err) {
     logger.error('[startup] Failed to load config; refusing to continue:', err.message);
     server.close(() => process.exit(1));

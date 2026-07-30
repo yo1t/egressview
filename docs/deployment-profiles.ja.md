@@ -86,3 +86,36 @@ modelを使用します。
 同じapplicationをオンプレミスのreverse proxy・内部Keycloak、または他CSPの同等
 serviceでも利用できます。AWS構築はMCP protocol/publication gate完了まで
 `publishDns=false`を維持します。
+
+## オフラインモード
+
+エアギャップ環境や外向き通信を遮断した環境では `EGRESSVIEW_OFFLINE_MODE=true` を設定します。有効化されるのは正確に `true` の場合だけです。綴り間違いで「隔離されているつもり」の状態が生まれないようにしています。
+
+保証するのは「外向きリクエストを**試行しない**」ことであり、「失敗する」ことではありません。実行してタイムアウトさせる方式では、パケットは出てしまい、EgressViewの稼働が外部に伝わり、タイムアウト分だけ起動も遅れます。そのため各機能は、通信を行うモジュールが組み立てられる前に判定されます。クラウドプロバイダのSDK clientも生成しないので、認証情報の解決も接続の確立も発生しません。
+
+### 起動前に無効化されるもの
+
+RDAP、GeoIP、脅威フィード、WiresharkのOUIベンダーデータベース、手動脅威調査、Google OIDC、Anthropic / OpenAI / Bedrock の各AIプロバイダ。
+
+### 影響を受けないもの
+
+ルーターのSSH収集、SQLiteの保存とmigration、Web UI、stdio および private HTTP のMCP。いずれも定義上ローカルで完結します。
+
+### 明示設定時のみ許可されるもの
+
+| 機能 | 有効化する変数 |
+|---|---|
+| 内部DNS / PTR | `EGRESSVIEW_INTERNAL_DNS` |
+| 自己ホストのOllama | `EGRESSVIEW_OLLAMA_URL` |
+
+これらは隔離網の内部で到達可能な場合がありますが、**loopbackまたはprivate IPの接続先を指定するまでは無効のまま**です。offline modeでは、DNSによって許可済み接続先が隔離網外へ向けられることを防ぐためhostnameを拒否します。MCPのprivate OAuthは[MCP設定ガイド](setup-mcp.ja.md)に記載したMCP OAuth設定で別途構成します。
+
+### 失われる機能
+
+通信先の組織名・国・座標が表示されず、脅威判定は既にキャッシュ済みの情報だけで行われ、未知のMACプレフィックスにはベンダー名が付きません。既存のキャッシュはそのまま利用でき、更新が止まるだけです。
+
+起動ログに無効化した機能が列挙されます。`GET /api/status` も同じ状態を返すため、UIは空欄を放置せず「オフラインモードのため無効」と説明できます。
+
+### フロントエンドのasset
+
+D3、TopoJSON、world atlasは固定版を同一オリジンから配信し、CSPは外部オリジンを一切許可しません。オフラインモードでのページ読み込みで外部リクエストは発生しません。

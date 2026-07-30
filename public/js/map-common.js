@@ -1,3 +1,4 @@
+import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 // ─── Shared geo / map utilities ──────────────────────────────────────────────
 import { getFilteredConnections } from './connections-panel.js?v=__ASSET_VERSION__';
 
@@ -65,7 +66,7 @@ function buildMapPoints() {
 
 function ensureWorldGeo(cb) {
   if (worldGeo) { cb(); return; }
-  d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
+  d3.json(`${_BASE}/vendor/world-atlas-countries-110m-2.0.2.json`)
     .then(topo => { worldGeo = topojson.feature(topo, topo.objects.countries); cb(); })
     .catch(err => console.error('[geo] load failed', err));
 }
