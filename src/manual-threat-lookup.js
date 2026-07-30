@@ -1,5 +1,9 @@
 'use strict';
 
+// Injected at startup; see src/offline-mode.js.
+let _offline = null;
+function setOfflinePolicy(policy) { _offline = policy; }
+
 const net = require('node:net');
 const axios = require('axios');
 
@@ -137,6 +141,11 @@ function createManualThreatLookup({ http = axios, now = Date.now } = {}) {
   }
 
   async function lookup(ip, requestedProviders = PROVIDERS) {
+    if (_offline?.allows && !_offline.allows('manual-threat-lookup')) {
+      const error = new Error('Manual threat lookup is disabled in offline mode');
+      error.code = 'offline_mode';
+      throw error;
+    }
     if (!isPublicIpAddress(ip)) throw new Error('a public IP address is required');
     const providers = [...new Set(requestedProviders)];
     if (!providers.length || providers.some(provider => !PROVIDERS.includes(provider))) {
@@ -186,6 +195,7 @@ function createManualThreatLookup({ http = axios, now = Date.now } = {}) {
 const manualThreatLookup = createManualThreatLookup();
 
 module.exports = {
+  setOfflinePolicy,
   PROVIDERS,
   createManualThreatLookup,
   isPublicIpAddress,

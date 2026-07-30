@@ -2,6 +2,10 @@
 'use strict';
 const logger = require('./logger');
 
+// Injected at startup; see src/offline-mode.js.
+let _offline = null;
+function setOfflinePolicy(policy) { _offline = policy; }
+
 const axios = require('axios');
 
 // IP set: exact match
@@ -216,6 +220,11 @@ function _applyFeedResults(results) {
 }
 
 async function fetchThreatIntel() {
+  if (_offline?.allows && !_offline.allows('threat-intel')) {
+    // Decided before any feed URL is touched, so nothing leaves the host.
+    logger.info('[threat-intel] Offline mode: feeds are disabled');
+    return;
+  }
   if (fetching) return;
   fetching = true;
   logger.info('[threat-intel] Fetching feeds...');
@@ -283,6 +292,7 @@ function getStats() {
 }
 
 module.exports = {
+  setOfflinePolicy,
   fetchThreatIntel,
   matchThreatIntel,
   needsRefresh,

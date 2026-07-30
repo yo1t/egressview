@@ -6,6 +6,22 @@ All notable changes to EgressView are documented here.
 
 ### Security and Reliability
 
+- Added `EGRESSVIEW_OFFLINE_MODE` for air-gapped and egress-filtered
+  deployments. Internet-dependent features are decided and disabled before
+  startup rather than attempted and timed out: RDAP, GeoIP, threat feeds, the
+  OUI vendor database, manual threat lookup, Google OIDC, and the
+  Anthropic/OpenAI/Bedrock providers. Cloud provider SDK clients are never
+  constructed, so no credential resolution or connection setup occurs. Router
+  SSH collection, SQLite, the web UI, and stdio/private HTTP MCP are
+  unaffected. Internal DNS/PTR, a self-hosted Ollama endpoint, and an internal
+  OIDC issuer stay disabled until explicitly configured, because "reachable
+  internally" is a claim about the operator's network that cannot be verified.
+  The API and settings report which features are off and why.
+- Self-hosted D3 7.9.0, TopoJSON client 3.1.0, and world-atlas 2.0.2 at pinned
+  versions and removed every external origin from the CSP and HTML. The map and
+  graph now render with no CDN request, which also removes a third-party
+  dependency from every ordinary page load.
+
 - Added a staged OAuth Resource Server mode for remote MCP testing:
   RFC 9728 metadata and challenges, authorization-server discovery, RS256
   JWKS validation, exact issuer/audience/expiry/scope checks, bounded caches,

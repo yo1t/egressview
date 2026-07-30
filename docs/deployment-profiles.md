@@ -91,3 +91,55 @@ application edition:
 The same application can instead use an on-premises reverse proxy and internal
 Keycloak, or equivalent services in another cloud. AWS construction remains
 `publishDns=false` until the MCP protocol and publication gates pass.
+
+## Offline mode
+
+Set `EGRESSVIEW_OFFLINE_MODE=true` for an air-gapped or egress-filtered
+deployment. Only the exact string `true` enables it, so a typo cannot leave a
+deployment believing it is isolated.
+
+The guarantee is that no outbound request is **attempted** — not that it fails.
+Letting a call go out and time out would still emit packets, still reveal that
+EgressView is running, and still stall startup for the length of every timeout.
+Each feature is therefore decided before the module that would perform the call
+is wired up, and cloud provider SDK clients are never constructed, so no
+credential resolution or connection setup happens either.
+
+### Disabled before startup
+
+RDAP, GeoIP, threat intelligence feeds, the Wireshark OUI vendor database,
+manual threat lookup, Google OIDC, and the Anthropic, OpenAI and Bedrock AI
+providers.
+
+### Unaffected
+
+Router SSH collection, SQLite storage and migrations, the web UI, and stdio and
+private HTTP MCP. These are local by definition.
+
+### Allowed only when explicitly configured
+
+| Feature | Enable with |
+|---|---|
+| Internal DNS / PTR | `EGRESSVIEW_INTERNAL_DNS` |
+| Self-hosted Ollama | `EGRESSVIEW_OLLAMA_URL` |
+| Internal OIDC issuer | `EGRESSVIEW_INTERNAL_OIDC_ISSUER` |
+
+These can be reachable inside an isolated network, but they stay off until you
+point them somewhere. "Internal" is a claim about your network that EgressView
+cannot verify, so it is never assumed.
+
+### What you lose
+
+Destinations show no owner, country or coordinates, threat matching uses only
+what is already cached, and unknown MAC prefixes have no vendor name. Existing
+cached data keeps working; it simply stops being refreshed.
+
+The startup log lists exactly which features were disabled, and `GET
+/api/config/status` reports the same state so the UI can explain a disabled
+panel instead of leaving it blank.
+
+### Front-end assets
+
+D3, TopoJSON and the world atlas are served from this origin at pinned versions,
+and the CSP allows no external origin. A page load in offline mode makes no
+third-party request.
