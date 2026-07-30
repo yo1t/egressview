@@ -200,7 +200,8 @@ Start with the smallest path that matches your network, then add sources later f
 | ☐ | (Optional) ASUS WiFi AP with web admin enabled | [Setup guide →](docs/setup-asus.md) |
 | ☐ | (Optional) in-app AI Insights (Ollama / Anthropic / OpenAI / Amazon Bedrock) | [Setup guide →](docs/setup-ai-insights.md) |
 | ☐ | (Optional) AI assistant access via MCP (AWS Kiro, Anthropic Claude, Anysphere Cursor…) | [Setup guide →](docs/setup-mcp.md) |
-| ☐ | Choose local, private, public, or future air-gapped deployment boundaries | [Deployment profiles →](docs/deployment-profiles.md) |
+| ☐ | Choose local, private, public, or air-gapped deployment boundaries | [Deployment profiles →](docs/deployment-profiles.md) |
+| ☐ | Run with no internet access at all (`EGRESSVIEW_OFFLINE_MODE=true`) | [Offline mode →](docs/deployment-profiles.md#offline-mode) |
 
 ### Step 2 — Install and launch
 

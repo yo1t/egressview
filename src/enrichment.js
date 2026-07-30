@@ -2,15 +2,22 @@
 'use strict';
 const logger = require('./logger');
 
+// Injected at startup; see src/offline-mode.js. RDAP and GeoIP always need the
+// public internet. DNS PTR may be served by an internal resolver, so it is
+// allowed only when the operator has opted in.
+let _offline = null;
+function applyOfflinePolicy(policy) { _offline = policy; }
+
 const http = require('http');
 const https = require('https');
-const dns = require('dns').promises;
+const dns = require('node:dns').promises;
 const Database = require('better-sqlite3');
 const path = require('path');
 
 const DB_PATH = path.join(__dirname, '..', '.egressview.db');
 
 let db            = null;
+let ptrResolver   = dns;
 let _dbPath       = DB_PATH;
 let stmtUpsertRdap = null;
 let stmtUpsertGeo  = null;
@@ -229,6 +236,8 @@ let geoFlushPromise = null;
 let geoBackoffUntil = 0;
 
 function lookupGeoBatch(ips) {
+  // ip-api.com is internet-only; refuse before a request object is built.
+  if (_offline?.allows && !_offline.allows('geoip')) return Promise.resolve();
   const now = Date.now();
 
   // Private/loopback/special-use IPs are cached with a permanent TTL (no API call needed)
@@ -379,6 +388,7 @@ async function _doLookupRdap(ip, generation = rdapGeneration) {
 // Collapses concurrent fetches for the same IP into one, regardless of which
 // caller (Yamaha poll / INSPECT / investigation) triggered it
 async function lookupRdap(ip) {
+  if (_offline?.allows && !_offline.allows('rdap')) return null;
   const now = Date.now();
   const cached = rdapCache.get(ip);
   if (cached && now < cached.expires) return cached;  // cache hit: return immediately, no Map write
@@ -417,13 +427,14 @@ function isPtrJunk(host) {
 }
 
 async function reverseDns(ip) {
+  if (_offline?.allows && !_offline.allows('dns-ptr')) return null;
   const now = Date.now();
   const cached = dnsCache.get(ip);
   // dnsmasq forward-DNS entries take priority — never overwrite with PTR
   if (cached && cached.source === 'dnsmasq') return cached.host;
   if (cached && now < cached.expires) return cached.host;
   try {
-    const [host] = await dns.reverse(ip);
+    const [host] = await ptrResolver.reverse(ip);
     dnsCache.set(ip, { host, expires: now + DNS_TTL_MS, source: 'ptr' });
     recordApiOk('ptr');
     return host;
@@ -446,6 +457,8 @@ function _initForTest() {
   geoPendingIps.clear();
   geoFlushPromise = null;
   geoBackoffUntil = 0;
+  _offline = null;
+  ptrResolver = dns;
   initDb(':memory:');
 }
 
@@ -460,7 +473,21 @@ function getDnsCache() { return dnsCache; }
 function getRdapCache() { return rdapCache; }
 function getGeoCache() { return geoCache; }
 
+function configurePtrResolver(server, Resolver = dns.Resolver) {
+  if (!server) {
+    ptrResolver = dns;
+    return;
+  }
+  const resolver = new Resolver();
+  resolver.setServers([server]);
+  ptrResolver = resolver;
+}
+
 module.exports = {
+  setOfflinePolicy(policy) {
+    applyOfflinePolicy(policy);
+    configurePtrResolver(policy?.offline ? policy.endpointFor('dns-ptr') : null);
+  },
   initDb,
   reopen,
   closeDb,
@@ -477,4 +504,5 @@ module.exports = {
   _setGeoFlushMsForTest,
   _setGeoBackoffUntilForTest,
   _getGeoBackoffUntilForTest,
+  _configurePtrResolverForTest: configurePtrResolver,
 };

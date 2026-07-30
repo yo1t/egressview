@@ -84,6 +84,9 @@ module.exports = function configRoutes(ctx) {
       authenticated: asus.isAuthenticated(),
       routerIp:      asus.getRouterIp(),
       enrichment:    enrichment.getApiStats(),
+      // Lets the UI say a feature is off because of offline mode rather than
+      // leaving an unexplained empty panel.
+      ...(appState.offlinePolicy ? appState.offlinePolicy.describe() : {}),
     });
   });
 
