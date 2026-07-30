@@ -153,9 +153,9 @@ describe('no external asset references remain', () => {
 
   it('keeps the pinned vendor copies byte-for-byte intact', () => {
     const assets = {
-      'public/vendor/d3-7.9.0.min.js': 'f2094bbf6141b359722c4fe454eb6c4b0f0e42cc10cc7af921fc158fceb86539',
-      'public/vendor/topojson-client-3.1.0.min.js': '25cd02ae486cc5063e0215a4e4cfb15de83700c87ac48bac4d57dc6aaf3ebb89',
-      'public/vendor/world-atlas-countries-110m-2.0.2.json': '2516c915867c7baf18ddec727aec46c315541a07cfb3d79a6559b05d5e94eee8',
+      'public/vendor/d3-7.9.0.min.js': 'f2094bbf6141b359722c4fe454eb6c4b0f0e42cc10cc7af921fc158fceb86539', // pragma: allowlist secret
+      'public/vendor/topojson-client-3.1.0.min.js': '25cd02ae486cc5063e0215a4e4cfb15de83700c87ac48bac4d57dc6aaf3ebb89', // pragma: allowlist secret
+      'public/vendor/world-atlas-countries-110m-2.0.2.json': '2516c915867c7baf18ddec727aec46c315541a07cfb3d79a6559b05d5e94eee8', // pragma: allowlist secret
     };
     for (const [asset, expected] of Object.entries(assets)) {
       const actual = crypto.createHash('sha256').update(fs.readFileSync(path.join(root, asset))).digest('hex');
