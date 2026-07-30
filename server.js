@@ -21,8 +21,10 @@ const enrichment      = require('./src/enrichment');
 const history         = require('./src/history');
 const deviceId        = require('./src/device-identify');
 const threatIntel     = require('./src/threat-intel');
-const { manualThreatLookup } = require('./src/manual-threat-lookup');
-const { aiProvider }  = require('./src/ai-provider');
+const manualThreatModule = require('./src/manual-threat-lookup');
+const { manualThreatLookup } = manualThreatModule;
+const aiProviderModule = require('./src/ai-provider');
+const { aiProvider }  = aiProviderModule;
 const { createAiNotificationService } = require('./src/ai-notification-service');
 const notifier        = require('./src/notifier');
 const i18n            = require('./src/i18n-server');
@@ -48,7 +50,9 @@ const authPassword   = require('./src/auth-password');
 const authAudit      = require('./src/auth-audit');
 const apiIdentities  = require('./src/api-identities');
 const authCookies    = require('./src/auth-cookies');
-const { createGoogleOidc } = require('./src/oidc-google');
+const oidcModule = require('./src/oidc-google');
+const { createGoogleOidc } = oidcModule;
+const { createOfflinePolicy } = require('./src/offline-mode');
 const { runDbBootstrap }    = require('./src/db-bootstrap');
 const { sourceRouterIdMap } = require('./src/router-id');
 const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
@@ -518,6 +522,29 @@ const HOST = process.env.HOST || undefined;
 server.listen(PORT, HOST, () => {
   runtimeProfiler.start({ logger });
   logger.info(`EgressView: ${tlsOptions ? 'https' : 'http'}://${HOST || 'localhost'}:${PORT}`);
+  // Decide outbound capability before any collector, provider or feed starts.
+  // Internal-capable features are enabled only where the operator pointed them
+  // at something; nothing is inferred from reachability.
+  const offlinePolicy = createOfflinePolicy({
+    internalEndpoints: {
+      'dns-ptr': Boolean(process.env.EGRESSVIEW_INTERNAL_DNS),
+      'ai-ollama': Boolean(appState.aiConfig?.ollamaUrl || process.env.EGRESSVIEW_OLLAMA_URL),
+      'internal-oidc': Boolean(process.env.EGRESSVIEW_INTERNAL_OIDC_ISSUER),
+    },
+  });
+  appState.offlinePolicy = offlinePolicy;
+  enrichment.setOfflinePolicy(offlinePolicy);
+  threatIntel.setOfflinePolicy(offlinePolicy);
+  deviceId.setOfflinePolicy(offlinePolicy);
+  manualThreatModule.setOfflinePolicy(offlinePolicy);
+  aiProviderModule.setOfflinePolicy(offlinePolicy);
+  oidcModule.setOfflinePolicy(offlinePolicy);
+  if (offlinePolicy.offline) {
+    const disabled = Object.entries(offlinePolicy.features)
+      .filter(([, status]) => !status.enabled).map(([name]) => name);
+    logger.info(`[offline] Offline mode is on. Disabled before startup: ${disabled.join(', ')}`);
+  }
+
   try {
     loadConfig();
   } catch (err) {

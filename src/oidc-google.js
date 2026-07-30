@@ -1,5 +1,9 @@
 'use strict';
 
+// Injected at startup; see src/offline-mode.js.
+let _offline = null;
+function setOfflinePolicy(policy) { _offline = policy; }
+
 const crypto = require('node:crypto');
 
 const ISSUER = 'https://accounts.google.com';
@@ -48,6 +52,11 @@ function createGoogleOidc({
   }
 
   async function discovery() {
+    if (_offline?.allows && !_offline.allows('google-oidc')) {
+      const error = new Error('Google OIDC is disabled in offline mode');
+      error.code = 'offline_mode';
+      throw error;
+    }
     if (discoveryCache && discoveryExpiresAt > now()) return discoveryCache;
     const document = await fetchJson(DISCOVERY_URL);
     if (document.issuer !== ISSUER ||
@@ -195,4 +204,4 @@ function createGoogleOidc({
   return { begin, complete, test, allowlistMatch };
 }
 
-module.exports = { createGoogleOidc, ISSUER };
+module.exports = { createGoogleOidc, setOfflinePolicy, ISSUER };

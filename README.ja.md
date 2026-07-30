@@ -199,7 +199,8 @@ DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start
 | ☐ | （任意）ASUS WiFi AP の Web 管理画面を有効化 | [設定ガイド →](docs/setup-asus.ja.md) |
 | ☐ | （任意）画面内AI洞察（Ollama / Anthropic / OpenAI / Amazon Bedrock） | [設定ガイド →](docs/setup-ai-insights.ja.md) |
 | ☐ | （任意）AI アシスタント連携（AWS Kiro・Anthropic Claude・Anysphere Cursor 等） | [設定ガイド →](docs/setup-mcp.ja.md) |
-| ☐ | local、private、public、将来の完全閉域の境界を選択 | [Deployment profile →](docs/deployment-profiles.ja.md) |
+| ☐ | local、private、public、完全閉域の境界を選択 | [Deployment profile →](docs/deployment-profiles.ja.md) |
+| ☐ | インターネット非接続で運用（`EGRESSVIEW_OFFLINE_MODE=true`） | [オフラインモード →](docs/deployment-profiles.ja.md#オフラインモード) |
 
 ### Step 2 — インストールと起動
 

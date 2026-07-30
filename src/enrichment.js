@@ -2,6 +2,12 @@
 'use strict';
 const logger = require('./logger');
 
+// Injected at startup; see src/offline-mode.js. RDAP and GeoIP always need the
+// public internet. DNS PTR may be served by an internal resolver, so it is
+// allowed only when the operator has opted in.
+let _offline = null;
+function setOfflinePolicy(policy) { _offline = policy; }
+
 const http = require('http');
 const https = require('https');
 const dns = require('dns').promises;
@@ -229,6 +235,8 @@ let geoFlushPromise = null;
 let geoBackoffUntil = 0;
 
 function lookupGeoBatch(ips) {
+  // ip-api.com is internet-only; refuse before a request object is built.
+  if (_offline?.allows && !_offline.allows('geoip')) return Promise.resolve();
   const now = Date.now();
 
   // Private/loopback/special-use IPs are cached with a permanent TTL (no API call needed)
@@ -379,6 +387,7 @@ async function _doLookupRdap(ip, generation = rdapGeneration) {
 // Collapses concurrent fetches for the same IP into one, regardless of which
 // caller (Yamaha poll / INSPECT / investigation) triggered it
 async function lookupRdap(ip) {
+  if (_offline?.allows && !_offline.allows('rdap')) return null;
   const now = Date.now();
   const cached = rdapCache.get(ip);
   if (cached && now < cached.expires) return cached;  // cache hit: return immediately, no Map write
@@ -417,6 +426,7 @@ function isPtrJunk(host) {
 }
 
 async function reverseDns(ip) {
+  if (_offline?.allows && !_offline.allows('dns-ptr')) return null;
   const now = Date.now();
   const cached = dnsCache.get(ip);
   // dnsmasq forward-DNS entries take priority — never overwrite with PTR
@@ -461,6 +471,7 @@ function getRdapCache() { return rdapCache; }
 function getGeoCache() { return geoCache; }
 
 module.exports = {
+  setOfflinePolicy,
   initDb,
   reopen,
   closeDb,
