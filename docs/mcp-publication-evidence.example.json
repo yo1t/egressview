@@ -32,8 +32,11 @@
   "refreshRevocation": {
     "passed": false,
     "testedAt": "2026-01-01T00:00:00.000Z",
-    "oldRefreshRejected": false,
-    "latestRefreshWorked": false
+    "mode": "revoke-family",
+    "replayRequestRejected": false,
+    "familyRevoked": false,
+    "currentFamilyUsable": false,
+    "accessTokenLifetimeSeconds": 0
   },
   "clientCompatibility": {
     "passed": false,

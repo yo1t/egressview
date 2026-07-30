@@ -61,16 +61,18 @@ An independent probe proved that EgressView accepts the fixed audience,
 read/write scopes, RS256 signature, and 60-second access token, and that normal
 refresh rotation succeeds repeatedly. Reusing a two-generation-old refresh
 token, however, succeeded once and then caused the entire family to return
-`invalid_grant`. That Keycloak 26.7.0 behavior does not match the current gate
-wording of rejecting the first replay while preserving the latest family.
-The Keycloak settings, version, and reuse semantics must be reviewed, and the
-spec must choose either immediate replay rejection or family revocation on
-replay detection. Issuer-change binding, scope step-up, and real-client refresh
-will be retested when a modern-revision client release is available.
+`invalid_grant`. The gate accepts that behavior as the explicit
+`revoke-family` mode only when the current family also fails after replay and
+the access-token lifetime is at most 15 minutes. Providers that reject the
+replay while preserving the current family use `reject-replay`. The evidence
+records the selected mode instead of treating these different semantics as the
+same result. Issuer-change binding, scope step-up, and real-client refresh will
+be retested when a modern-revision client release is available.
 
 ## Required profile
 
-EgressView targets the MCP Authorization 2025-11-25 revision:
+EgressView supports the MCP Authorization requirements used by both the
+legacy `2025-11-25` and modern `2026-07-28` protocol eras:
 
 - clients send the canonical `resource` in both authorization and token
   requests;
