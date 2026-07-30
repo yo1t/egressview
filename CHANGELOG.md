@@ -41,6 +41,10 @@ All notable changes to EgressView are documented here.
   HTTP, private OAuth, and public OAuth. Conflicting transport/auth settings now
   fail before MCP startup, with English/Japanese threat, TLS, identity, and
   outbound-dependency matrices documenting the staged air-gapped path.
+- Hardened private HTTP MCP with the same fail-closed audit, rate/concurrency
+  limits, bounded bodies, deadlines, and scoped service identity used by OAuth.
+  HTTP remains loopback-only by default; non-loopback bind requires an explicit
+  deployment profile and a separate approval setting.
 - Added least-privilege browser roles. Local login remains `admin`, an explicitly
   allowed Google email becomes `operator`, and a domain-only match becomes
   read-only `viewer`. Authentication allowlists no longer imply administrator
