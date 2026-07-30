@@ -4,6 +4,10 @@
 
 This document describes the production architecture and the boundaries that preserve router isolation, observation attribution, database safety, and API security.
 
+The application core is cloud-neutral. See [Deployment profiles](deployment-profiles.md)
+for the local stdio, private HTTP, private OAuth, and public OAuth boundaries,
+including the planned air-gapped profile.
+
 ## System view
 
 ```mermaid
@@ -69,9 +73,13 @@ Schema v5 stores router ownership only in `connection_observations`; the legacy 
 - **Browser UI:** static single-page application with AI Insights as the start page plus authenticated Socket.IO updates.
 - **REST:** 71 administration and query endpoints rooted at `/api`, plus minimal `/healthz` and `/readyz`; see the [REST API reference](api-reference.md).
 - **AI providers:** explicit-action, read-only analysis through Ollama, Anthropic, OpenAI, or Amazon Bedrock; see the [AI Insights setup guide](setup-ai-insights.md) for configuration and privacy boundaries.
-- **MCP:** 11 read/write tools over stdio or authenticated HTTP. Public OAuth
-  staging is protected by a fail-closed publication gate that does not modify
-  DNS or infrastructure; see the [MCP setup guide](setup-mcp.md).
+- **MCP:** 11 read/write tools over stdio or authenticated HTTP. One SDK v2
+  factory serves the legacy `2025-11-25` initialize flow and the stateless
+  `2026-07-28` discover flow without tool drift. Public OAuth staging is
+  protected by a fail-closed dual-era publication gate that does not modify
+  DNS or infrastructure; see the [MCP setup guide](setup-mcp.md). The selected
+  runtime boundary is validated by `src/deployment-profile.js`; AWS is one
+  public-profile adapter rather than a core dependency.
 - **Exports:** bounded streaming CSV/JSON output to avoid loading an unbounded history into memory.
 - **Notifications:** optional Slack delivery; detections remain in the local notification log even when Slack is disabled.
 

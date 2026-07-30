@@ -1,9 +1,15 @@
 # Remote MCP OAuth互換性評価
 
-最終確認: 2026-07-26
+最終確認: 2026-07-29
 
 本書はP2-60 PR 1の認可サーバー・MCPクライアント互換性評価を記録する。
 設計判断だけを対象とし、public MCP endpointの有効化やコード変更は行わない。
+
+以下の認可サーバー比較は、当初のMCP Authorization `2025-11-25`に対する
+判断記録であり、OAuth profileとして引き続き有効である。EgressViewのtransportは
+現在`2025-11-25`と`2026-07-28`の両方を提供し、公開gateでは最新Claude Code /
+Copilot CLIのmodern接続証跡と、明示的なlegacy client互換結果を要求する。
+この更新によってendpointを公開することはない。
 
 AWS固有の判定は、Kiroに設定済みのAWS Documentation MCP serverでも二重確認した。
 このserverはAWS一次資料を検索するものであり、AWS accountへの接続やCognito
@@ -32,9 +38,27 @@ Keycloakを単一canonical MCP resource、固定audience mapper、事前登録cl
 CIMDはexperimentalのため初期登録方式に使わない。Cognitoの前にMCP互換
 authorization facadeを置く方式は別の複雑な設計となるため採用しない。
 
+## 2026-07-28 client private再試験（2026-07-29）
+
+Internet公開やAWS環境変更を行わず、Keycloak 26.7.0、EgressView MCP、fixture APIを
+loopbackだけで試験した。Claude Code 2.1.220とGitHub Copilot CLI 1.0.75はいずれも
+PKCE S256、`resource`、RFC 9207 response `iss`を送受信できたが、wire traceでは
+legacy `initialize`を使い、選択revisionは`2025-11-25`だった。したがって
+`2026-07-28` client gateは未達で、公開禁止を維持する。
+
+独立probeでは固定audience、read/write scope、RS256、60秒access tokenを
+EgressViewが受理し、連続refresh rotationも成功した。ただし2世代前のrefresh
+token再利用は最初のrequestが成功し、その後family全体が`invalid_grant`となった。
+gateはこの挙動を`revoke-family`方式として、replay後に現行familyも失敗し、
+access token寿命が15分以下の場合だけ許可する。replay request自体を拒否しながら
+現行familyを維持するproviderは`reject-replay`方式を使う。異なる意味を同じ成功と
+みなさず、証跡へ採用方式を記録する。modern対応client release後にissuer変更、
+scope step-up、実client refreshを再試験する。
+
 ## 必須profile
 
-EgressViewはMCP Authorization 2025-11-25を対象とする。
+EgressViewはlegacy `2025-11-25`とmodern `2026-07-28`の両protocol eraで
+必要なMCP Authorization要件に対応する。
 
 - clientはcanonical `resource`をauthorization requestとtoken requestの両方へ送る。
 - 認可サーバーは`code_challenge_methods_supported`に`S256`を公開する。
