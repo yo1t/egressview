@@ -35,9 +35,8 @@ remain distinct.
 The application serves plain HTTP, so any non-loopback path must be protected
 by a TLS reverse proxy or equivalent trusted private transport plus firewall,
 security-group, or network-policy controls. Explicit bind approval is not a
-claim that the network is safe. A guaranteed offline switch and self-hosted
-browser assets belong to Phase 2. Do not claim an air-gapped installation
-until those gates pass.
+claim that the network is safe. Offline mode and self-hosted browser assets are
+covered by the mandatory portability gate described below.
 
 For a private CA, start Node with `NODE_EXTRA_CA_CERTS` pointing to a protected
 PEM trust bundle and install the same CA in each MCP client trust store. Never
@@ -64,7 +63,7 @@ must also prove its firewall, security-group, network-policy, or proxy boundary.
 |---|---|---|---|
 | Router collection and SQLite | None | Same runtime | Supported |
 | MCP stdio/private HTTP | None after installation | Private API and optional internal TLS | Supported with a local MCP client |
-| Browser graph libraries and world map | Public D3/jsDelivr assets | Self-hosted assets | Phase 2 |
+| Browser graph libraries and world map | None at runtime | Self-hosted assets | Supported |
 | Reverse DNS | Resolver-dependent | Internal DNS | Optional |
 | RDAP, threat feeds, OUI updates | Public services | Controlled mirror where available | Disabled with visible status |
 | Browser OIDC | Google in the current optional implementation | Local administrator or future generic internal OIDC | Local administrator |
@@ -144,3 +143,27 @@ panel instead of leaving it blank.
 D3, TopoJSON and the world atlas are served from this origin at pinned versions,
 and the CSP allows no external origin. A page load in offline mode makes no
 third-party request.
+
+## Portability gate
+
+Run `npm run test:portability` against every release candidate. The gate starts
+the same application artifact with outbound DNS and non-loopback sockets denied,
+then verifies:
+
+- the primary Web runtime, self-hosted assets, demo data, and restart;
+- representative Cisco IOS and Linux conntrack acquisition fixtures;
+- verified SQLite backup and restore;
+- local stdio MCP and authenticated private HTTP MCP;
+- rejection of missing and administrator credentials at the private MCP
+  boundary, plus append-only MCP audit records;
+- zero attempted public DNS or socket connections.
+
+CI runs this gate both on a Linux host and inside a generic Debian container
+started with `--network none`. The container is the non-AWS reference runtime:
+no AWS credentials or metadata service are available. A positive control makes
+one blocked DNS call and requires it to appear in a separate audit file, so a
+zero-egress result cannot pass because the detector was not installed.
+
+The gate does not open a firewall, publish DNS, create cloud infrastructure, or
+prove that an operator's surrounding network is private. Those remain
+deployment controls.

@@ -20,6 +20,10 @@ All notable changes to EgressView are documented here.
   versions and removed every external origin from the CSP and HTML. The map and
   graph now render with no CDN request, which also removes a third-party
   dependency from every ordinary page load.
+- Added a mandatory offline portability gate for Linux hosts and a generic
+  Debian container. It denies and audits external DNS/socket attempts while
+  exercising Web startup/restart, Cisco and conntrack fixtures, SQLite
+  backup/restore, stdio MCP, authenticated private HTTP MCP, and MCP audit.
 
 - Added a staged OAuth Resource Server mode for remote MCP testing:
   RFC 9728 metadata and challenges, authorization-server discovery, RS256
