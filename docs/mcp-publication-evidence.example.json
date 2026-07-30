@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "deployedCommit": "0000000000000000000000000000000000000000",
   "publishDns": false,
   "directIngress": {
@@ -39,6 +39,10 @@
     "passed": false,
     "testedAt": "2026-01-01T00:00:00.000Z",
     "claudeCode": false,
-    "copilotCli": false
+    "copilotCli": false,
+    "claudeCodeProtocolVersion": "",
+    "copilotCliProtocolVersion": "",
+    "legacyClient": false,
+    "legacyProtocolVersion": ""
   }
 }

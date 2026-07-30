@@ -4,6 +4,11 @@ EgressView は [Model Context Protocol (MCP)](https://modelcontextprotocol.io) �
 
 > 🇬🇧 [English version](setup-mcp.md)
 
+MCP SDK v2 serverは1つのtool定義で両方のprotocol eraを提供します。
+`2025-11-25` clientは従来の`initialize` flow、`2026-07-28` clientは
+statelessな`server/discover`とrequest単位のmetadataを使用します。互換性のため
+legacy fallbackを維持し、sticky sessionは必要ありません。
+
 ## 使い方の例
 
 接続後は自然な言葉で質問するだけです:
@@ -384,6 +389,10 @@ mode `0600`の環境ファイルだけに置き、試験直後に削除してく
 証跡JSONと生成レポートにはtoken、tool引数、通信観測、IP/MAC、credentialを
 記録しません。
 
+dual-era gateは証跡schema v2を要求します。旧schema v1はversion番号だけを
+書き換えず、新しいtemplateへ置き換えてください。v2のclient protocol fieldは
+実際のclient試験結果から記録する必須項目です。
+
 ### 必須証跡
 
 すべて成功済みで、deployした40文字のGit commitと一致し、試験から30日以内
@@ -399,7 +408,8 @@ mode `0600`の環境ファイルだけに置き、試験直後に削除してく
 - refresh token rotation後に旧refresh tokenを拒否し、最新token familyは
   継続利用できた
 - Claude CodeとGitHub Copilot CLIがstaging endpointでread toolとrefreshを
-  完了した
+  完了し、それぞれ選択したprotocol versionが`2026-07-28`であることを記録した
+- 保持したlegacy clientが`2025-11-25`で同じtool discoveryを完了した
 
 JWKS障害試験ではMCP processをcold startしてください。起動済みprocessが
 有効なcached JWKSで署名検証を継続するのは正常であり、discoveryの
@@ -412,6 +422,9 @@ CLIは続けて次を確認します。
 - public hostnameにA/AAAA recordがない
 - TLS hostname検証とRFC 9728 metadataの2経路
 - 未認証要求がscope付き`401` challengeになる
+- `2025-11-25`の`initialize`と`2026-07-28`の`server/discover`が成功する
+- 両protocol revisionで同じ11本のtoolを表示する
+- modern header/body不整合が`-32020`、未対応versionが`-32022`を返す
 - configured issuerのJWKSでfixture署名を独立検証した上で、malformed、期限切れ、
   誤audience、失効後に期限切れとなったaccess tokenを拒否
 - scoped internal service identityを通した実際のread tool

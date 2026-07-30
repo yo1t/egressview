@@ -24,6 +24,19 @@ const RESOURCE = 'https://mcp.example.test/mcp';
 const ISSUER = 'https://auth.example.test/realms/egressview';
 const READ_SCOPE = 'egressview:read';
 const WRITE_SCOPE = 'egressview:notes.write';
+const TOOL_NAMES = [
+  'get_alerts',
+  'get_device_notes',
+  'get_device_traffic',
+  'get_devices',
+  'get_new_nodes',
+  'get_threat_connections',
+  'get_threat_summary',
+  'get_top_destinations',
+  'get_traffic_summary',
+  'query_connections',
+  'set_device_note',
+];
 
 function token(claims) {
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -51,7 +64,7 @@ function tokens() {
 function evidence(overrides = {}) {
   const entry = { passed: true, testedAt: '2026-07-28T00:00:00.000Z' };
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     deployedCommit: COMMIT,
     publishDns: false,
     directIngress: { ...entry, portsClosed: true },
@@ -73,6 +86,10 @@ function evidence(overrides = {}) {
       ...entry,
       claudeCode: true,
       copilotCli: true,
+      claudeCodeProtocolVersion: '2026-07-28',
+      copilotCliProtocolVersion: '2026-07-28',
+      legacyClient: true,
+      legacyProtocolVersion: '2025-11-25',
     },
     ...overrides,
   };
@@ -167,6 +184,22 @@ describe('MCP publication gate evidence', () => {
     assert.ok(failures.some((item) => item.includes('deployedCommit')));
     assert.ok(failures.some((item) => item.includes('rollback.testedAt')));
   });
+
+  it('requires explicit modern clients and a retained legacy client', () => {
+    const failures = validateEvidence(evidence({
+      clientCompatibility: {
+        passed: true,
+        testedAt: '2026-07-28T00:00:00.000Z',
+        claudeCode: true,
+        copilotCli: true,
+        claudeCodeProtocolVersion: '2025-11-25',
+        copilotCliProtocolVersion: '2026-07-28',
+        legacyClient: false,
+      },
+    }), { deployedCommit: COMMIT, now: NOW });
+    assert.ok(failures.some((item) => item.includes('must select 2026-07-28')));
+    assert.ok(failures.some((item) => item.includes('retain a 2025-11-25')));
+  });
 });
 
 describe('MCP publication gate active probes', () => {
@@ -213,6 +246,7 @@ describe('MCP publication gate active probes', () => {
   it('passes only after metadata, token, scope, rate, audit, and local checks', async () => {
     let unauthenticatedRequests = 0;
     let auditArguments = null;
+    const wireRequests = {};
     const requester = async (url, options = {}) => {
       if (url.pathname.startsWith('/.well-known/')) {
         return response(200, {
@@ -224,6 +258,19 @@ describe('MCP publication gate active probes', () => {
       const authorization = options.headers?.Authorization;
       const requestId = options.headers?.['X-Request-Id'];
       const requestBody = JSON.parse(options.body);
+      for (const name of [
+        'legacyInitialize',
+        'legacyTools',
+        'modernDiscover',
+        'modernTools',
+        'protocolMismatch',
+        'unsupportedVersion',
+        'read',
+      ]) {
+        if (requestId?.includes(name)) {
+          wireRequests[name] = { headers: options.headers, body: requestBody };
+        }
+      }
       if (!authorization) {
         unauthenticatedRequests += 1;
         if (unauthenticatedRequests >= 4) {
@@ -246,11 +293,39 @@ describe('MCP publication gate active probes', () => {
           'www-authenticate': `Bearer error="insufficient_scope" scope="${READ_SCOPE} ${WRITE_SCOPE}"`,
         });
       }
+      if (requestId.includes('protocolMismatch')) {
+        return response(400, {
+          jsonrpc: '2.0',
+          id: requestBody.id,
+          error: { code: -32020, message: 'header/body mismatch' },
+        });
+      }
+      if (requestId.includes('unsupportedVersion')) {
+        return response(400, {
+          jsonrpc: '2.0',
+          id: requestBody.id,
+          error: { code: -32022, message: 'unsupported protocol version' },
+        });
+      }
+      if (requestBody.method === 'initialize') {
+        return response(200, {
+          jsonrpc: '2.0',
+          id: requestBody.id,
+          result: { protocolVersion: '2025-11-25' },
+        });
+      }
+      if (requestBody.method === 'server/discover') {
+        return response(200, {
+          jsonrpc: '2.0',
+          id: requestBody.id,
+          result: { supportedVersions: ['2026-07-28'] },
+        });
+      }
       if (requestBody.method === 'tools/list') {
         return response(200, `data: ${JSON.stringify({
           jsonrpc: '2.0',
           id: requestBody.id,
-          result: { tools: [{ name: 'set_device_note' }] },
+          result: { tools: TOOL_NAMES.map((name) => ({ name })) },
         })}\n\n`, { 'content-type': 'text/event-stream' });
       }
       return response(200, `data: ${JSON.stringify({
@@ -276,8 +351,26 @@ describe('MCP publication gate active probes', () => {
     assert.equal(report.status, 'ready_for_manual_dns_review');
     assert.equal(report.dnsPublished, false);
     assert.equal(report.enabledRouters, 2);
+    assert.deepEqual(report.checks.protocolRevisions, {
+      '2025-11-25': 'pass',
+      '2026-07-28': 'pass',
+    });
+    assert.equal(report.checks.protocolErrors, 'pass');
     assert.equal(auditArguments.dbPath, '/unused/audit.db');
     assert.ok(auditArguments.requestIds.rateLimited.startsWith('mcp-gate-rate-'));
+    assert.equal(wireRequests.legacyInitialize.headers['MCP-Protocol-Version'], undefined);
+    assert.equal(wireRequests.legacyInitialize.body.method, 'initialize');
+    assert.equal(wireRequests.modernDiscover.headers['MCP-Protocol-Version'], '2026-07-28');
+    assert.equal(wireRequests.modernDiscover.headers['Mcp-Method'], 'server/discover');
+    assert.equal(
+      wireRequests.modernDiscover.body.params._meta['io.modelcontextprotocol/protocolVersion'],
+      '2026-07-28'
+    );
+    assert.equal(wireRequests.modernTools.headers['Mcp-Method'], 'tools/list');
+    assert.equal(wireRequests.read.headers['Mcp-Name'], 'get_devices');
+    assert.equal(wireRequests.protocolMismatch.headers['Mcp-Method'], 'tools/call');
+    assert.equal(wireRequests.protocolMismatch.body.method, 'tools/list');
+    assert.equal(wireRequests.unsupportedVersion.headers['MCP-Protocol-Version'], '2099-01-01');
   });
 
   it('fails before probing when public DNS already resolves', async () => {
@@ -308,6 +401,8 @@ describe('MCP publication gate report', () => {
       revokedExpired: 'revoked-expired',
       insufficientScope: 'scope',
       rateLimited: 'rate',
+      protocolMismatch: 'protocol-mismatch',
+      unsupportedVersion: 'unsupported-version',
       read: 'read',
     };
     try {
@@ -339,6 +434,8 @@ describe('MCP publication gate report', () => {
         revokedExpired: 'invalid_token',
         insufficientScope: 'insufficient_scope',
         rateLimited: 'global_rate_limit',
+        protocolMismatch: null,
+        unsupportedVersion: null,
       })) {
         insert.run(Date.now(), 'failure', reason, null, null, requestIds[name]);
       }

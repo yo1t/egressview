@@ -1,10 +1,17 @@
 # Remote MCP OAuth compatibility evaluation
 
-Last reviewed: 2026-07-26
+Last reviewed: 2026-07-29
 
 This document records the P2-60 PR 1 authorization-server and MCP-client
 compatibility evaluation. It is a design decision only. It does not enable a
 public MCP endpoint or change application code.
+
+The authorization-server comparison below records the original
+MCP Authorization `2025-11-25` decision and remains relevant to the OAuth
+profile. The EgressView transport now serves both `2025-11-25` and
+`2026-07-28`; its publication gate requires modern Claude Code and Copilot CLI
+evidence plus an explicit legacy-client compatibility result. This update does
+not publish the endpoint.
 
 The AWS-specific findings were checked a second time with the AWS
 Documentation MCP server configured in Kiro. That server searches AWS primary
@@ -39,6 +46,27 @@ pre-registered clients, and exact audience validation. Move to standard RFC
 experimental and is not the initial registration method. An MCP-compliant
 authorization facade in front of Cognito would be a separate, more complex
 design and is not selected.
+
+## 2026-07-28 private client retest (2026-07-29)
+
+The retest used Keycloak 26.7.0, EgressView MCP, and a fixture API bound only
+to loopback. It made no Internet publication or AWS infrastructure change.
+Claude Code 2.1.220 and GitHub Copilot CLI 1.0.75 both completed PKCE S256,
+`resource`, and RFC 9207 authorization-response `iss` handling, but the wire
+trace showed legacy `initialize` traffic and an actual selected revision of
+`2025-11-25`. The `2026-07-28` client gate therefore remains incomplete and
+publication stays blocked.
+
+An independent probe proved that EgressView accepts the fixed audience,
+read/write scopes, RS256 signature, and 60-second access token, and that normal
+refresh rotation succeeds repeatedly. Reusing a two-generation-old refresh
+token, however, succeeded once and then caused the entire family to return
+`invalid_grant`. That Keycloak 26.7.0 behavior does not match the current gate
+wording of rejecting the first replay while preserving the latest family.
+The Keycloak settings, version, and reuse semantics must be reviewed, and the
+spec must choose either immediate replay rejection or family revocation on
+replay detection. Issuer-change binding, scope step-up, and real-client refresh
+will be retested when a modern-revision client release is available.
 
 ## Required profile
 

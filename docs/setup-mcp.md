@@ -4,6 +4,11 @@ EgressView exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol
 
 > 🇯🇵 [日本語版はこちら](setup-mcp.ja.md)
 
+The MCP SDK v2 server uses one tool definition for both protocol eras:
+`2025-11-25` clients use the legacy `initialize` flow, while `2026-07-28`
+clients use stateless `server/discover` and per-request metadata. The legacy
+fallback is retained for compatibility; no sticky session is required.
+
 ## Example Conversations
 
 Once connected, just ask in natural language:
@@ -384,6 +389,10 @@ environment file and remove them immediately after the run. The evidence JSON
 and generated report contain no token values, tool arguments, network
 observations, IP/MAC addresses, or credentials.
 
+The dual-era gate requires evidence schema v2. Replace an older schema-v1
+template rather than editing its version number alone; the v2 client protocol
+fields are mandatory and must come from actual client runs.
+
 ### Required evidence
 
 Every evidence item must be successful, refer to the exact deployed
@@ -401,7 +410,10 @@ Every evidence item must be successful, refer to the exact deployed
 - refresh-token rotation rejected the old refresh token while the latest token
   family continued to work;
 - Claude Code and GitHub Copilot CLI completed read-tool and refresh tests
-  against the staged endpoint.
+  against the staged endpoint and each recorded `2026-07-28` as the selected
+  protocol version;
+- one retained legacy client completed the same tool-discovery check with
+  `2025-11-25`.
 
 The JWKS outage test must use a cold MCP process. A running process may
 legitimately continue validating signatures with a still-valid cached JWKS;
@@ -414,6 +426,10 @@ The command then verifies:
 - the public hostname has no A or AAAA record;
 - TLS hostname verification and both RFC 9728 metadata paths;
 - scope-bearing `401` challenges for unauthenticated calls;
+- successful `2025-11-25` `initialize` and `2026-07-28` `server/discover`;
+- the same 11-tool inventory through both protocol revisions;
+- modern header/body mismatch error `-32020` and unsupported-version error
+  `-32022`;
 - rejection of malformed, expired, wrong-audience, and revoked-then-expired
   access tokens, after independently verifying the fixture signatures against
   the configured issuer's JWKS;
