@@ -407,8 +407,12 @@ Every evidence item must be successful, refer to the exact deployed
 - with Keycloak/JWKS unavailable and the MCP JWKS cache cold, public MCP failed
   closed while `/healthz`, `/readyz`, and current router collection remained
   healthy;
-- refresh-token rotation rejected the old refresh token while the latest token
-  family continued to work;
+- refresh-token replay protection passed in one documented mode: either the
+  replay request was rejected while the current family remained usable
+  (`reject-replay`), or replay detection revoked the complete family and the
+  current refresh token was then rejected (`revoke-family`);
+- the access-token lifetime was recorded and was no more than 15 minutes, which
+  bounds a token minted before family revocation takes effect;
 - Claude Code and GitHub Copilot CLI completed read-tool and refresh tests
   against the staged endpoint and each recorded `2026-07-28` as the selected
   protocol version;
@@ -446,8 +450,12 @@ bucket. Do not run it against a live public endpoint.
 Because EgressView validates JWTs offline, revoking a Keycloak session or
 refresh family does not invalidate an already-issued access token before its
 `exp`. `MCP_GATE_REVOKED_EXPIRED_TOKEN` is therefore checked after the short
-access-token TTL expires. The evidence separately proves that the old refresh
-token cannot mint a replacement. For immediate containment, remove the public
+access-token TTL expires. Evidence mode `reject-replay` requires the replay
+request itself to fail while the current family remains usable. Mode
+`revoke-family`, matching the observed Keycloak 26.7.0 behavior, requires the
+current family to fail after replay detection; the replay request may have
+minted one final short-lived access token. Both modes require an access-token
+lifetime of at most 15 minutes. For immediate containment, remove the public
 proxy route first; do not claim immediate access-token revocation.
 
 ### Result and rollback

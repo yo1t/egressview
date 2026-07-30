@@ -16,6 +16,11 @@ const MODERN_PROTOCOL_VERSION = '2026-07-28';
 const PROTOCOL_VERSION_META_KEY = 'io.modelcontextprotocol/protocolVersion';
 const CLIENT_INFO_META_KEY = 'io.modelcontextprotocol/clientInfo';
 const CLIENT_CAPABILITIES_META_KEY = 'io.modelcontextprotocol/clientCapabilities';
+const MAX_REPLAY_ACCESS_TOKEN_LIFETIME_SECONDS = 15 * 60;
+const REFRESH_REPLAY_MODES = Object.freeze({
+  REJECT_REPLAY: 'reject-replay',
+  REVOKE_FAMILY: 'revoke-family',
+});
 const REQUIRED_EVIDENCE = Object.freeze([
   'directIngress',
   'reverseProxyLimits',
@@ -147,9 +152,30 @@ function validateEvidence(evidence, { deployedCommit, now = Date.now() }) {
       || evidence.jwksOutage?.localCollectionContinued !== true) {
     failures.push('jwksOutage must prove MCP fail-closed and local collection continuity');
   }
-  if (evidence.refreshRevocation?.oldRefreshRejected !== true
-      || evidence.refreshRevocation?.latestRefreshWorked !== true) {
-    failures.push('refreshRevocation must prove old-token rejection and current-token continuity');
+  const refresh = evidence.refreshRevocation;
+  const boundedAccessToken = Number.isInteger(refresh?.accessTokenLifetimeSeconds)
+    && refresh.accessTokenLifetimeSeconds > 0
+    && refresh.accessTokenLifetimeSeconds <= MAX_REPLAY_ACCESS_TOKEN_LIFETIME_SECONDS;
+  if (!boundedAccessToken) {
+    failures.push(
+      `refreshRevocation.accessTokenLifetimeSeconds must be from 1 to `
+      + `${MAX_REPLAY_ACCESS_TOKEN_LIFETIME_SECONDS}`
+    );
+  }
+  if (refresh?.mode === REFRESH_REPLAY_MODES.REJECT_REPLAY) {
+    if (refresh.replayRequestRejected !== true || refresh.currentFamilyUsable !== true) {
+      failures.push(
+        'refreshRevocation reject-replay mode must reject the replay and preserve the current family'
+      );
+    }
+  } else if (refresh?.mode === REFRESH_REPLAY_MODES.REVOKE_FAMILY) {
+    if (refresh.familyRevoked !== true || refresh.currentFamilyUsable !== false) {
+      failures.push(
+        'refreshRevocation revoke-family mode must revoke the complete refresh family'
+      );
+    }
+  } else {
+    failures.push('refreshRevocation.mode must be reject-replay or revoke-family');
   }
   if (evidence.clientCompatibility?.claudeCode !== true
       || evidence.clientCompatibility?.copilotCli !== true) {
@@ -737,7 +763,9 @@ function writeReport(filePath, report) {
 module.exports = {
   EVIDENCE_MAX_AGE_MS,
   LEGACY_PROTOCOL_VERSION,
+  MAX_REPLAY_ACCESS_TOKEN_LIFETIME_SECONDS,
   MODERN_PROTOCOL_VERSION,
+  REFRESH_REPLAY_MODES,
   REQUIRED_EVIDENCE,
   loadGateConfig,
   loadEvidence,

@@ -49,14 +49,16 @@ legacy `initialize`を使い、選択revisionは`2025-11-25`だった。した�
 独立probeでは固定audience、read/write scope、RS256、60秒access tokenを
 EgressViewが受理し、連続refresh rotationも成功した。ただし2世代前のrefresh
 token再利用は最初のrequestが成功し、その後family全体が`invalid_grant`となった。
-Keycloak 26.7.0のこの挙動は「旧tokenを最初から拒否し最新familyを維持」という
-現行gateと一致しない。Keycloakの設定・version・reuse semanticsを再評価し、
-replay即時拒否またはreplay検知時family全失効のどちらを要求するかspecで固定する。
-modern対応client release後にissuer変更、scope step-up、実client refreshを再試験する。
+gateはこの挙動を`revoke-family`方式として、replay後に現行familyも失敗し、
+access token寿命が15分以下の場合だけ許可する。replay request自体を拒否しながら
+現行familyを維持するproviderは`reject-replay`方式を使う。異なる意味を同じ成功と
+みなさず、証跡へ採用方式を記録する。modern対応client release後にissuer変更、
+scope step-up、実client refreshを再試験する。
 
 ## 必須profile
 
-EgressViewはMCP Authorization 2025-11-25を対象とする。
+EgressViewはlegacy `2025-11-25`とmodern `2026-07-28`の両protocol eraで
+必要なMCP Authorization要件に対応する。
 
 - clientはcanonical `resource`をauthorization requestとtoken requestの両方へ送る。
 - 認可サーバーは`code_challenge_methods_supported`に`S256`を公開する。

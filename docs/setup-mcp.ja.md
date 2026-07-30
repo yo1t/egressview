@@ -405,8 +405,11 @@ dual-era gateは証跡schema v2を要求します。旧schema v1はversion番号
 - Keycloak DB backupを使い捨て環境へrestoreした
 - Keycloak/JWKSを到達不能にしMCPのJWKS cacheを空にした状態で、公開MCPだけが
   fail-closedとなり、`/healthz`、`/readyz`、全有効routerの収集が継続した
-- refresh token rotation後に旧refresh tokenを拒否し、最新token familyは
-  継続利用できた
+- refresh token replay対策が、次のどちらかの記録済み方式で成功した:
+  replay requestを拒否して現行familyを維持する`reject-replay`、または
+  replay検知後にfamily全体を失効して現行refresh tokenも拒否する`revoke-family`
+- family失効前に発行され得るtokenの影響を限定するため、access token寿命を記録し
+  15分以下にした
 - Claude CodeとGitHub Copilot CLIがstaging endpointでread toolとrefreshを
   完了し、それぞれ選択したprotocol versionが`2026-07-28`であることを記録した
 - 保持したlegacy clientが`2025-11-25`で同じtool discoveryを完了した
@@ -438,8 +441,11 @@ rate probeはstaging processのglobal 1分bucketを意図的に使い切りま�
 
 EgressViewはJWTをoffline検証するため、Keycloak sessionやrefresh familyを
 失効しても、発行済みaccess tokenは`exp`まで無効になりません。そのため
-`MCP_GATE_REVOKED_EXPIRED_TOKEN`は短いaccess token TTLの経過後に検査し、
-旧refresh tokenから再発行できないことは別の必須証跡で確認します。
+`MCP_GATE_REVOKED_EXPIRED_TOKEN`は短いaccess token TTLの経過後に検査します。
+`reject-replay`はreplay request自体の失敗と現行familyの継続を要求します。
+Keycloak 26.7.0の実測に一致する`revoke-family`はreplay検知後に現行familyも
+失敗することを要求します。この方式ではreplay requestが最後の短命access tokenを
+発行する可能性があるため、どちらの方式でもaccess token寿命を15分以下にします。
 即時遮断が必要なら最初にpublic proxy routeを外し、access tokenを即時失効
 できるとは表現しません。
 

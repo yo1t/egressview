@@ -79,8 +79,11 @@ function evidence(overrides = {}) {
     },
     refreshRevocation: {
       ...entry,
-      oldRefreshRejected: true,
-      latestRefreshWorked: true,
+      mode: 'revoke-family',
+      replayRequestRejected: false,
+      familyRevoked: true,
+      currentFamilyUsable: false,
+      accessTokenLifetimeSeconds: 60,
     },
     clientCompatibility: {
       ...entry,
@@ -199,6 +202,36 @@ describe('MCP publication gate evidence', () => {
     }), { deployedCommit: COMMIT, now: NOW });
     assert.ok(failures.some((item) => item.includes('must select 2026-07-28')));
     assert.ok(failures.some((item) => item.includes('retain a 2025-11-25')));
+  });
+
+  it('accepts both safe refresh replay modes and rejects ambiguous evidence', () => {
+    const immediate = evidence({
+      refreshRevocation: {
+        passed: true,
+        testedAt: '2026-07-28T00:00:00.000Z',
+        mode: 'reject-replay',
+        replayRequestRejected: true,
+        familyRevoked: false,
+        currentFamilyUsable: true,
+        accessTokenLifetimeSeconds: 300,
+      },
+    });
+    assert.deepEqual(validateEvidence(immediate, { deployedCommit: COMMIT, now: NOW }), []);
+
+    const unsafe = evidence({
+      refreshRevocation: {
+        passed: true,
+        testedAt: '2026-07-28T00:00:00.000Z',
+        mode: 'revoke-family',
+        replayRequestRejected: false,
+        familyRevoked: false,
+        currentFamilyUsable: true,
+        accessTokenLifetimeSeconds: 3600,
+      },
+    });
+    const failures = validateEvidence(unsafe, { deployedCommit: COMMIT, now: NOW });
+    assert.ok(failures.some((item) => item.includes('from 1 to 900')));
+    assert.ok(failures.some((item) => item.includes('revoke the complete refresh family')));
   });
 });
 

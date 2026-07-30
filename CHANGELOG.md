@@ -34,6 +34,9 @@ All notable changes to EgressView are documented here.
   identical tool-inventory checks, standard modern protocol-error probes, and
   explicit evidence of modern Claude Code/Copilot CLI plus legacy-client
   compatibility.
+- Made refresh replay evidence provider-neutral: the gate accepts either
+  immediate replay rejection with family continuity or replay-triggered family
+  revocation, while requiring access tokens to expire within 15 minutes.
 - Added least-privilege browser roles. Local login remains `admin`, an explicitly
   allowed Google email becomes `operator`, and a domain-only match becomes
   read-only `viewer`. Authentication allowlists no longer imply administrator
