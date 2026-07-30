@@ -66,6 +66,34 @@ jobs:
       - name: Secret scan
         run: npm run security:secrets
 
+  portability:
+    name: Offline portability (${{ matrix.runtime }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runtime: [linux-host, debian-container]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        if: matrix.runtime == 'linux-host'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Run host portability gate
+        if: matrix.runtime == 'linux-host'
+        run: npm ci && npm run test:portability
+
+      - name: Run container portability gate
+        if: matrix.runtime == 'debian-container'
+        run: |
+          docker build -f test/portability/Dockerfile -t egressview-portability .
+          docker run --rm \
+            --network none \
+            egressview-portability
+
   ash:
     name: ASH security scan
     runs-on: ubuntu-latest

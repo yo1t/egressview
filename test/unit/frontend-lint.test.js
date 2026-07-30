@@ -973,10 +973,12 @@ describe('Server runtime invariants', () => {
   });
 
   it('backup uses the selected runtime DB path in both normal and demo mode', () => {
-    assert.match(serverJs, /backup\.configure\(\{\s*dbPath:\s*runtimeDbPath\s*\}\)/,
+    assert.match(serverJs, /backup\.configure\(\{[\s\S]*?dbPath:\s*runtimeDbPath,[\s\S]*?\}\)/,
       'backups should follow the selected runtime DB path');
-    assert.match(serverJs, /backup\.configure\(\{\s*backupDir:\s*DEMO_BACKUP_DIR\s*\}\)/,
+    assert.match(serverJs, /if\s*\(!configuredBackupDir\)\s*backup\.configure\(\{\s*backupDir:\s*DEMO_BACKUP_DIR\s*\}\)/,
       'demo mode backups should not use the production backup directory');
+    assert.match(serverJs, /process\.env\.EGRESSVIEW_BACKUP_DIR[\s\S]*path\.resolve\(process\.env\.EGRESSVIEW_BACKUP_DIR\)/,
+      'an explicit backup directory should be resolved before backup startup');
     assert.match(serverJs, /DEMO_RUNTIME_DB_PATH\s*=\s*path\.join\(DEMO_RUNTIME_DIR,\s*['"]runtime\.db['"]\)/,
       'demo runtime DB should live in its dedicated ignored directory');
     assert.match(serverJs, /DEMO_BACKUP_DIR\s*=\s*path\.join\(DEMO_RUNTIME_DIR,\s*['"]backups['"]\)/,
