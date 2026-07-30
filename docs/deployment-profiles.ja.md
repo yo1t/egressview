@@ -32,8 +32,7 @@ endpoint token、service identity、監査鍵、管理tokenは別々の値にし
 Application自体は平文HTTPを提供するため、非loopback経路はTLS reverse proxy
 または同等の信頼できるprivate transportと、firewall、security group、
 network policyで保護します。bindの明示承認はnetworkの安全性を保証しません。
-外向き通信を保証付きで止めるoffline switchとfrontend assetのself-hostは
-Phase 2です。それらのgate完了前に「air-gapped対応済み」と表記しません。
+offline modeとfrontend assetのself-hostは、後述の必須portability gateで検証します。
 
 内部CAを使う場合、保護したPEM trust bundleを`NODE_EXTRA_CA_CERTS`へ指定して
 Nodeを起動し、各MCP clientのtrust storeにも同じCAを登録します。CA配布の代わりに
@@ -59,7 +58,7 @@ Private networkも既定では信頼しません。private HTTPでbrowser管理t
 |---|---|---|---|
 | Router収集とSQLite | なし | 同じruntime | 対応 |
 | MCP stdio/private HTTP | install後はなし | private API、任意の内部TLS | local MCP clientで対応 |
-| Browser graph library/world map | public D3/jsDelivr asset | self-host asset | Phase 2 |
+| Browser graph library/world map | runtime依存なし | self-host asset | 対応 |
 | Reverse DNS | resolver依存 | 内部DNS | 任意 |
 | RDAP、threat feed、OUI更新 | public service | 必要なら管理mirror | 状態を表示して無効化 |
 | Browser OIDC | 現行の任意機能はGoogle | local管理者、将来の汎用内部OIDC | local管理者 |
@@ -119,3 +118,24 @@ RDAP、GeoIP、脅威フィード、WiresharkのOUIベンダーデータベー�
 ### フロントエンドのasset
 
 D3、TopoJSON、world atlasは固定版を同一オリジンから配信し、CSPは外部オリジンを一切許可しません。オフラインモードでのページ読み込みで外部リクエストは発生しません。
+
+## Portability gate
+
+各release candidateで`npm run test:portability`を実行します。同じapplication
+artifactを、外向きDNSと非loopback socketを拒否した状態で起動し、次を検証します。
+
+- Web主要経路、self-host asset、demo data、再起動
+- Cisco IOSとLinux conntrackの代表的な収集fixture
+- 整合性検査付きSQLite backup/restore
+- local stdio MCPと認証付きprivate HTTP MCP
+- private MCP境界での未認証・管理credential拒否とappend-only MCP監査
+- public DNSまたは外向きsocketの試行が0件
+
+CIではLinux hostと、`--network none`で起動した汎用Debian containerの両方で
+実行します。このcontainerをAWS外の基準runtimeとし、AWS credentialとmetadata
+serviceを与えません。別audit fileを使った正の対照で、遮断したDNS試行が実際に
+記録されることも必須にするため、検出器の配線漏れによる偽の0件では合格しません。
+
+このgateはfirewallを開かず、DNSを公開せず、cloud infrastructureも作成しません。
+また、運用環境の周辺networkがprivateであることまでは証明しないため、そこは
+deployment側のcontrolとして別途確認します。

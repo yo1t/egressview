@@ -574,7 +574,13 @@ server.listen(PORT, HOST, () => {
     ? (configuredDbPath ? productionDbPath : DEMO_RUNTIME_DB_PATH)
     : productionDbPath;
   process.env.EGRESSVIEW_DB_PATH = runtimeDbPath;
-  backup.configure({ dbPath: runtimeDbPath });
+  const configuredBackupDir = process.env.EGRESSVIEW_BACKUP_DIR
+    ? path.resolve(process.env.EGRESSVIEW_BACKUP_DIR)
+    : '';
+  backup.configure({
+    dbPath: runtimeDbPath,
+    ...(configuredBackupDir ? { backupDir: configuredBackupDir } : {}),
+  });
 
   if (DEMO_MODE) {
     if (process.env.NODE_ENV === 'production') {
@@ -584,7 +590,7 @@ server.listen(PORT, HOST, () => {
     // Use a separate DB file for demo mode so production data is never touched.
     // If .egressview.demo.db exists (committed to git), start from that snapshot.
     // Otherwise fall back to a fresh in-memory-style DB at the demo path.
-    backup.configure({ backupDir: DEMO_BACKUP_DIR });
+    if (!configuredBackupDir) backup.configure({ backupDir: DEMO_BACKUP_DIR });
     // Override token with a known value so CI / contributors can authenticate
     appState.adminToken = DEMO_ADMIN_TOKEN;
     logger.info(`[demo] DEMO_MODE active — admin token: ${DEMO_ADMIN_TOKEN}`);
