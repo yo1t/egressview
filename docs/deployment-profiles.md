@@ -23,12 +23,21 @@ values. When omitted, EgressView preserves compatibility by inferring
 for HTTP OAuth mode. An explicit profile that conflicts with `MCP_PORT` or
 `MCP_AUTH_MODE` fails before the MCP endpoint starts.
 
-The matrix states the required end-state controls. The current Phase 0
-implementation validates the profile name plus its transport/authentication
-pair. HTTP still listens on `127.0.0.1`; configurable private/container
-binding and enforcement of the private least-privilege controls belong to
-Phase 1. A guaranteed offline switch and self-hosted browser assets belong to
-Phase 2. Do not claim an air-gapped installation until those gates pass.
+Phase 1 enforces the private HTTP controls. HTTP binds to `127.0.0.1` by
+default. A non-loopback `MCP_BIND_ADDRESS` is accepted only when the deployment
+profile is explicit and `MCP_ALLOW_NON_LOOPBACK=true`; hostnames are rejected
+to avoid resolver-dependent exposure. Every HTTP profile uses a dedicated
+`MCP_SERVICE_TOKEN` with exactly `network.read` and `notes.write`, append-only
+audit, rate and concurrency limits, bounded bodies, and request/API deadlines.
+The endpoint token, service identity, audit key, and administrator token must
+remain distinct.
+
+The application serves plain HTTP, so any non-loopback path must be protected
+by a TLS reverse proxy or equivalent trusted private transport plus firewall,
+security-group, or network-policy controls. Explicit bind approval is not a
+claim that the network is safe. A guaranteed offline switch and self-hosted
+browser assets belong to Phase 2. Do not claim an air-gapped installation
+until those gates pass.
 
 For a private CA, start Node with `NODE_EXTRA_CA_CERTS` pointing to a protected
 PEM trust bundle and install the same CA in each MCP client trust store. Never

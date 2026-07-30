@@ -1,7 +1,10 @@
 'use strict';
 
-const { afterEach, describe, it } = require('node:test');
+const { afterEach, beforeEach, describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const {
   Client,
   StreamableHTTPClientTransport,
@@ -12,14 +15,27 @@ process.env.EGRESSVIEW_TOKEN = process.env.EGRESSVIEW_TOKEN || 'test-egressview-
 delete process.env.MCP_PORT;
 
 const { _startHttp } = require('../../mcp-server');
+const mcpAudit = require('../../src/mcp-audit');
 
 const MCP_TOKEN = 'dual-era-test-token';
+const SERVICE_TOKEN = `egv_${'a'.repeat(64)}`;
+const AUDIT_HASH_KEY = 'dual-era-test-audit-key-that-is-stable';
 const MODERN_VERSION = '2026-07-28';
 const PROTOCOL_VERSION_META_KEY = 'io.modelcontextprotocol/protocolVersion';
 const CLIENT_INFO_META_KEY = 'io.modelcontextprotocol/clientInfo';
 const CLIENT_CAPABILITIES_META_KEY = 'io.modelcontextprotocol/clientCapabilities';
 let httpServer;
+let auditDir;
 const clients = [];
+
+function privateAuthConfig() {
+  return {
+    mode: 'token',
+    token: MCP_TOKEN,
+    serviceToken: SERVICE_TOKEN,
+    auditHashKey: AUDIT_HASH_KEY,
+  };
+}
 
 function endpointUrl() {
   return new URL(`http://127.0.0.1:${httpServer.address().port}/mcp`);
@@ -69,6 +85,11 @@ async function postModern({
   });
 }
 
+beforeEach(() => {
+  auditDir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-mcp-dual-era-'));
+  process.env.MCP_AUDIT_DB_PATH = path.join(auditDir, 'audit.db');
+});
+
 afterEach(async () => {
   await Promise.allSettled(clients.splice(0).map((client) => client.close()));
   if (httpServer) {
@@ -77,11 +98,14 @@ afterEach(async () => {
     });
     httpServer = null;
   }
+  mcpAudit.closeDb();
+  delete process.env.MCP_AUDIT_DB_PATH;
+  if (auditDir) fs.rmSync(auditDir, { recursive: true, force: true });
 });
 
 describe('MCP dual-era HTTP compatibility', () => {
   it('serves the 2025-11-25 initialize era', async () => {
-    httpServer = await _startHttp(0, { mode: 'token', token: MCP_TOKEN });
+    httpServer = await _startHttp(0, privateAuthConfig());
     const client = await startClient();
 
     assert.equal(client.getProtocolEra(), 'legacy');
@@ -92,7 +116,7 @@ describe('MCP dual-era HTTP compatibility', () => {
   });
 
   it('serves the 2026-07-28 discover era from the same tool factory', async () => {
-    httpServer = await _startHttp(0, { mode: 'token', token: MCP_TOKEN });
+    httpServer = await _startHttp(0, privateAuthConfig());
     const client = await startClient({ mode: { pin: '2026-07-28' } });
 
     assert.equal(client.getProtocolEra(), 'modern');
@@ -103,7 +127,7 @@ describe('MCP dual-era HTTP compatibility', () => {
   });
 
   it('negotiates the modern era automatically without tool drift', async () => {
-    httpServer = await _startHttp(0, { mode: 'token', token: MCP_TOKEN });
+    httpServer = await _startHttp(0, privateAuthConfig());
     const client = await startClient({ mode: 'auto' });
 
     assert.equal(client.getProtocolEra(), 'modern');
@@ -127,7 +151,7 @@ describe('MCP dual-era HTTP compatibility', () => {
   });
 
   it('rejects a modern header/body method mismatch with the standard error', async () => {
-    httpServer = await _startHttp(0, { mode: 'token', token: MCP_TOKEN });
+    httpServer = await _startHttp(0, privateAuthConfig());
     const response = await postModern({
       method: 'tools/list',
       methodHeader: 'tools/call',
@@ -139,7 +163,7 @@ describe('MCP dual-era HTTP compatibility', () => {
   });
 
   it('rejects an unsupported modern protocol version with the standard error', async () => {
-    httpServer = await _startHttp(0, { mode: 'token', token: MCP_TOKEN });
+    httpServer = await _startHttp(0, privateAuthConfig());
     const response = await postModern({ version: '2099-01-01' });
 
     assert.equal(response.status, 400);

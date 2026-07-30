@@ -130,7 +130,9 @@ If you publish or share the integration as a ChatGPT App, also plan for per-user
 # Copy and edit:
 cp .env.mcp.example .env.mcp
 # Set MCP_PORT=3010, MCP_TOKEN=<a dedicated random token>,
-# EGRESSVIEW_URL=http://localhost:3000, EGRESSVIEW_TOKEN=...
+# MCP_SERVICE_TOKEN=<a scoped egv_... identity>,
+# MCP_AUDIT_HMAC_KEY=<a dedicated 32+ character secret>,
+# and EGRESSVIEW_URL=http://localhost:3000.
 # If your EgressView service listens on a different local port behind a proxy,
 # use that local URL instead (for example http://localhost:3002).
 chmod 600 .env.mcp
@@ -141,12 +143,12 @@ node mcp-server.js
 # → [egressview-mcp] HTTP transport listening on 127.0.0.1:3010/mcp
 ```
 
-`MCP_TOKEN` is now required explicitly in HTTP token mode and no longer
-defaults to `EGRESSVIEW_TOKEN`. This prevents a leaked MCP endpoint token from
-also granting full EgressView admin API access. Existing HTTP installations
-that relied on the old fallback must generate a separate token and set
-`MCP_TOKEN` before upgrading. Stdio mode is unchanged and does not use
-`MCP_TOKEN`.
+HTTP token mode requires three distinct credentials: `MCP_TOKEN` authenticates
+the MCP client, `MCP_SERVICE_TOKEN` is an `egv_...` API identity with exactly
+`network.read` and `notes.write`, and `MCP_AUDIT_HMAC_KEY` pseudonymises the
+append-only audit trail. None may equal `EGRESSVIEW_TOKEN` or each other.
+HTTP mode never uses the browser/admin token for runtime API calls. Stdio mode
+is unchanged.
 
 ### Staged OAuth Resource Server mode
 
@@ -167,8 +169,9 @@ does not list `set_device_note`; a direct call is rejected with `403
 insufficient_scope`. The write challenge includes both scopes so a step-up
 authorization does not discard the already granted read scope.
 
-Create a dedicated API identity with exactly `network.read` and `notes.write`,
-then place its one-time plaintext token in `MCP_SERVICE_TOKEN`:
+Both HTTP token and OAuth modes require a dedicated API identity with exactly
+`network.read` and `notes.write`. Place its one-time plaintext token in
+`MCP_SERVICE_TOKEN`:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:3002/api/auth/api-identities \
@@ -294,31 +297,36 @@ Use `https://` if your reverse proxy terminates TLS (required for Claude Desktop
 |---|---|---|---|
 | `EGRESSVIEW_DEPLOYMENT_PROFILE` | Recommended | Inferred | `local-stdio`, `private-http`, `private-oauth`, or `public-oauth`; see the deployment-profile matrix. |
 | `EGRESSVIEW_URL` | ✅ | `http://localhost:3000` | Base URL of the EgressView server |
-| `EGRESSVIEW_TOKEN` | ✅ | — | API/admin token (shown on first EgressView startup; not the browser login password) |
+| `EGRESSVIEW_TOKEN` | stdio/setup | — | API/admin token used by stdio compatibility or to create the HTTP service identity; HTTP runtime calls use `MCP_SERVICE_TOKEN`. |
 | `MCP_PORT` | HTTP mode | — | Local port for the MCP HTTP server (e.g. `3010`). Omit for stdio mode. |
+| `MCP_BIND_ADDRESS` | HTTP mode | `127.0.0.1` | Literal IPv4/IPv6 bind address. Hostnames are rejected. |
+| `MCP_ALLOW_NON_LOOPBACK` | Non-loopback bind | `false` | Must be exactly `true`, together with an explicit deployment profile, before a LAN/container/all-interface bind is allowed. |
 | `MCP_AUTH_MODE` | HTTP mode | `token` | HTTP endpoint authentication mode: `token` or staged `oauth`. |
 | `MCP_TOKEN` | HTTP token mode | — | Dedicated private HTTP endpoint token. It must be set explicitly and must differ from `EGRESSVIEW_TOKEN`. |
 | `MCP_OAUTH_ISSUER` | HTTP OAuth mode | — | Exact HTTPS authorization-server issuer URL. Loopback HTTP is allowed only for testing. |
 | `MCP_OAUTH_RESOURCE` | HTTP OAuth mode | — | Canonical public MCP resource URL used for exact JWT audience validation. |
 | `MCP_OAUTH_READ_SCOPE` | HTTP OAuth mode | — | Provider scope mapped to the internal `network.read` permission. |
 | `MCP_OAUTH_NOTES_WRITE_SCOPE` | HTTP OAuth mode | — | Provider scope mapped to the internal `notes.write` permission. |
-| `MCP_SERVICE_TOKEN` | HTTP OAuth mode | — | Dedicated `egv_...` API identity token with exactly `network.read` and `notes.write`. |
-| `MCP_AUDIT_HMAC_KEY` | HTTP OAuth mode | — | Stable secret of at least 32 characters used only to pseudonymise audit subjects and clients. |
+| `MCP_SERVICE_TOKEN` | HTTP mode | — | Dedicated `egv_...` API identity token with exactly `network.read` and `notes.write`. |
+| `MCP_AUDIT_HMAC_KEY` | HTTP mode | — | Stable secret of at least 32 characters used only to pseudonymise audit subjects and clients. |
 
 ---
 
 ## Security Notes
 
-- The MCP HTTP server listens on `127.0.0.1` only — it is not reachable without the reverse proxy.
+- The MCP HTTP server listens on `127.0.0.1` by default. A non-loopback literal IP requires both an explicit profile and `MCP_ALLOW_NON_LOOPBACK=true`; protect that path with TLS and network policy.
 - Private token mode accepts the dedicated `MCP_TOKEN` through `X-Admin-Token` or `Authorization: Bearer`; it never falls back to the EgressView admin token.
+- Every HTTP mode uses the same fail-closed audit, rate/concurrency limits, body bounds, deadlines, and least-privilege service identity.
 - Most tools are read-only. `set_device_note` can write device memo notes (stored in `.egressview.notes.json`, not the main database).
 - Keep `.env.mcp` permissions at `chmod 600`; it contains private API credentials.
 
 ---
 
-## Public MCP: limits, audit and revocation
+## HTTP MCP: limits, audit and revocation
 
-Applies to OAuth mode (`MCP_AUTH_MODE=oauth`) only. Private token and stdio modes are unaffected by everything in this section.
+The runtime limits and audit controls apply to both private token and OAuth
+HTTP modes. Stdio mode is unaffected. OAuth provides per-user/per-client
+identity; private token mode records and limits the shared private credential.
 
 ### Request limits
 
@@ -344,7 +352,7 @@ A rejected request returns `429` with `Retry-After`. Values that are not positiv
 
 ### Audit
 
-Every request to the public endpoint is appended to a dedicated store (`MCP_AUDIT_DB_PATH`, default `.egressview-mcp-audit.db`). It is **separate from EgressView's own audit trail on purpose**: the MCP process runs with a scoped API identity, and giving it write access to the main trail would let a compromised MCP forge or tamper with those records.
+Every HTTP request is appended to a dedicated store (`MCP_AUDIT_DB_PATH`, default `.egressview-mcp-audit.db`). The HTTP endpoint fails to start if this store cannot be verified writable. It is **separate from EgressView's own audit trail on purpose**: the MCP process runs with a scoped API identity, and giving it write access to the main trail would let a compromised MCP forge or tamper with those records.
 
 Recorded: pseudonymised OAuth subject and client id, tool name, granted scopes, outcome, a reason code, the request id, and duration.
 
