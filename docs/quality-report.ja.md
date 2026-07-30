@@ -1,8 +1,8 @@
 # EgressView コード品質レポート
 
-- **評価日**: 2026-07-21
-- **評価基準**: PR #121後のmain `cee5f5f`
-- **バージョン**: 1.5.1
+- **評価日**: 2026-07-28
+- **評価基準**: PR #140後のmain `fea7843`
+- **バージョン**: 1.6.0
 - **Node.js**: >=22（CI: 22 / 24）
 - **評価方法**: 自動テスト、V8 coverage、静的解析、依存・secret scan、browser smoke、手動コードレビュー
 
@@ -14,48 +14,54 @@
 
 **総合グレード: A**
 
-CriticalまたはHighの不具合は見つかりませんでした。前回レビューで発見し修正した中程度の端末メモ永続化問題（PR #112）は引き続き修正済みです。以降10件のPR（#112〜#121）がマージされました: AIチャット信頼性修正3件、ASUSブートストラップ再接続、AI洞察への端末コンテキスト追加、価格カバレッジ診断、デモDB隔離、および依存関係メンテナンスです。全変更にregression testが含まれ、unit test数は1,465件から1,477件に増加しました。
+CriticalまたはHighの不具合は見つかりませんでした。前回レポート（PR #121基準）以降、17件のPR（#124--#140）がマージされました: AI event notifications、認証フル強化（Google OIDC + PKCE、HttpOnly cookie、CSRF保護）、deny-by-default権限境界（3ロール・7パーミッション）、scoped API identity、ブラウザセッションRBAC、MCP OAuth保護（RFC 9728メタデータ）、rate limiting、監査trailです。DBスキーマはv7からv12に進みました。Unit test数は1,477件から1,670件に、Playwright smokeは66件から69件に増加しました。
 
-SOHO向けself-hosted network monitorとして、自動品質管理は引き続き強固です。endpointを持つ全route moduleでstrict Zodを利用し、API 73件中71件を認証で保護し、DB migration/restoreはfail-closed、HTTP logはrequest IDで相関でき、AI provider呼び出しはAbortSignalで時間制限され、ASUSポーリングのoverlap coalescingでトークン更新の重複を防止し、backup検証はmain event loopから分離されています。
+本コードベースはprivate networkとauthenticated multi-user双方に適した強固なsecurity postureを備えています: API 90件中84件が認証・権限gatingを要求し、permission matrixがHTTP routeとMCP tool全93件を分類し、deny-by-default middlewareが未分類routeを起動時に拒否し、API identityはhash-only storageと独立revocationを採用し、MCP accessはRS256 JWT検証（JWKS経由）とsubject単位rate limitで保護されています。
 
 | 評価軸 | 結果 | 判定 |
 |---|---:|---|
-| OWASP ASVS Level 1 | 14領域中13領域が適合または緩和済み | private network前提で適合 |
-| OpenSSF Scorecard | 推定約8.4/10 | 強いrepository hygiene |
-| ISO/IEC 25010 | 平均8.6/10 | 高品質 |
-| Node.js Best Practices | 45/50 | 優秀 |
+| OWASP ASVS Level 1 | 14領域中14領域が適合または緩和済み | 完全適合 |
+| OpenSSF Scorecard | 推定約8.6/10 | 強いrepository hygiene |
+| ISO/IEC 25010 | 平均8.8/10 | 高品質 |
+| Node.js Best Practices | 46/50 | 優秀 |
 | SonarQube相当gate | 合格、coverageはB | High以上のblockerなし |
 
 ## レビュー結果
 
-### 前回レポート（PR #111基準）以降の変更
+### 前回レポート（PR #121基準）以降の変更
 
 | PR | タイトル | 分類 |
 |---:|---|---|
-| #112 | 端末メモ保存のfail-closed化 | 信頼性修正 |
-| #113 | AI chat質問消失の防止 | AI信頼性 |
-| #114 | AI provider変更後の新規chat開始 | AI信頼性 |
-| #115 | サーバ再起動後のASUSポーリング復元 | ブートストラップ修正 |
-| #116 | AI洞察へ端末コンテキスト追加 | 機能追加 |
-| #117 | GPT-5.5利用価格の追加 | 機能追加 |
-| #118 | AI価格カバレッジ診断の改善 | 機能追加 |
-| #119 | デモDB runtime成果物の隔離 | 衛生 |
-| #120 | actionsグループ更新（setup-node 7、configure-pages 6、upload-pages-artifact 5、deploy-pages 5） | 依存 |
-| #121 | bonjour-service 1.4.3、eslint 10.7.0 | 依存 |
+| #125 | AI event notifications | 機能追加 |
+| #126 | Slack設定をGeneralタブへ移動 | UX |
+| #127 | AI通知設定を保存前に確認 | UX |
+| #128 | 認証強化 + 監査ログ（OIDC、PKCE、HttpOnly cookie、CSRF、rate limit、schema v9） | セキュリティ |
+| #129 | auth audit用デフォルトDBパス修正 | バグ修正 |
+| #130 | OIDCドメインallowlist警告 + v1.6.0 release（schema v9維持） | セキュリティ |
+| #131 | Deny-by-default権限境界（7パーミッション、permission-matrix） | セキュリティ |
+| #132 | OAuth認可サーバ評価ドキュメント | ドキュメント |
+| #133 | Scoped API identities（schema v10） | セキュリティ |
+| #134 | ブラウザセッションRBAC（viewer/operator/admin、schema v11） | セキュリティ |
+| #135 | 安定audit principalHash（schema v12） | セキュリティ |
+| #136 | 設定画面にセッションロール表示 | UX |
+| #137 | リモートMCPのOAuth保護（JWKS、RFC 9728） | セキュリティ |
+| #138 | Dependabot actions更新（checkout 7.0.1、setup-python 7.0.0） | 依存 |
+| #139 | MCP scope-to-service-identity mapping | セキュリティ |
+| #140 | MCP audit + rate limiting（rate limit、audit trail、concurrency cap） | セキュリティ |
 
 ### 主な改善点
 
-- **AIチャット耐障害性**: inference失敗時にconversation IDを保持。pre-persistence network障害時は未送信の質問を入力欄に復元。provider/model変更時はHTTP 409を返さず自動的に新規conversationを開始。
-- **ASUSブートストラップ**: 保存済みASUS認証情報がserver起動時に復元され、overlap-coalescedなpoll cycleでトークン更新の重複を防止。
-- **AIコンテキスト境界**: 端末インベントリ（最大30台、合計48KiB）をAI分析に含めつつ、credential、メモ、生ログ、アーカイブ端末、管理アドレスを除外。
-- **価格診断**: pricing dataが不完全な場合に月額AI費用をpartialと表示。発見済み・手動登録モデルのカバレッジ指標を表示。
-- **デモ隔離**: runtime DBとbackupを1つのignore対象ディレクトリに集約し、schema v7 snapshot health checkを追加。
+- **認証**: Google OIDC + PKCEフロー、HttpOnly session cookie、CSRFトークン保護、IP単位lockout、ローカル復旧ログイン（TTY CLI）。Versioned KDF migrationによりpassword hashのダウンタイムなしアップグレードを実現。
+- **認可**: deny-by-default権限境界。7パーミッション（network.read、notes.write、ai.run、settings.write、backup.restore、auth.admin、audit.read）と3ロール（viewer、operator、admin）をネスト定義。Permission matrixがHTTP route + MCP toolの93件を網羅し、未分類routeは起動時に拒否。
+- **API identity**: スコープ付き、有効期限付きトークン。hash-only storageと独立revocationを採用。各identityは特定のpermission setに紐付け。
+- **監査**: append-only audit_eventsテーブル。pseudonymous actorHash/principalHash、180日retention、専用audit.readパーミッション。
+- **MCP OAuth**: RFC 9728 protected-resource metadata discovery、RS256 JWT検証（JWKSエンドポイント経由）、scope-to-service-identity mapping、rate limiting（60/min global、30/min subject/client、4 concurrent）、独立MCP audit store。
+- **セッションRBAC**: ブラウザセッションがロール（viewer/operator/admin）を保持し、設定画面に表示。権限enforceはsessionとAPI identity双方に均一適用。
 
 ### 残余リスク
 
 - **中・運用**: hardware/external service依存のintegration test 4ファイルはdefault CI workflowに含まれません。unitとbrowser smokeはfixture/demo modeで動きますが、Yamaha、ASUS、Slack、conntrackの確認には明示的な環境が必要です。
-- **低・保守性**: `history.js`（763行）、`public/js/log.js`（715行）、`public/js/graph.js`（675行）、`devices.js`（665行）、Cisco/Yamaha pollerは引き続き大きな変更面です。重要parserとdata pathにはtestがありますが、今後も既存の段階的抽出を維持すべきです。
-- **低・条件付きsecurity**: 現行設計はVPN/private networkとheader token/session認証が前提です。Internetへ直接公開、またはmulti-user化する場合は、信頼できるTLS reverse proxy、IP allowlist、proxy側global rate limit、監査可能なclient IP処理を先に追加します（P2-41）。
+- **低・保守性**: `mcp-server.js`（891行）、`src/history.js`（789行）、`public/js/ai-insights.js`（783行）、`public/js/log.js`（715行）、`server.js`（690行）が大きな変更面です。重要pathにはtestがありますが、今後もhelper抽出の継続を推奨します。
 - **低・ecosystem**: OpenAPI、署名付きrelease、継続fuzzing、OCI imageはありません。現時点では需要発生時のtaskで、release blockerではありません。
 
 ---
@@ -64,62 +70,68 @@ SOHO向けself-hosted network monitorとして、自動品質管理は引き続�
 
 | 検査 | 結果 |
 |---|---|
-| Coverage付きunit test | 1,477件成功、失敗0 |
-| V8 coverage | line 79.36%、branch 79.40%、function 75.94% |
+| Coverage付きunit test | 1,670件成功、失敗0 |
+| V8 coverage | line 81.23%、branch 78.27%、function 77.74% |
 | CI coverage下限 | line 70%、branch 75%、function 65% — 合格 |
-| Playwright browser smoke | 66件成功、条件付き1件skip |
+| Playwright browser smoke | 69件成功 |
 | ESLint | 合格 |
 | Frontend HTML挿入監査 | `innerHTML` / `insertAdjacentHTML` 0件 |
 | Production依存監査 | 脆弱性0件 |
 | Secret scan | 高確度secret・環境固有LAN IPなし |
-| Package dry-run | 成功 |
-| PR #121 GitHub CI | Node 22/24、release safety、ASH、browser smoke、Pages build成功 |
+| ASH（Automated Security Helper） | actionable finding 0件 |
+| GitHub Actions SHA pinning | 15/15 pinned、0 unpinned |
+| PR #140 GitHub CI | Node 22/24、release safety、ASH、browser smoke、Pages build成功 |
 
 ### コードベースメトリクス
 
 | メトリクス | 値 |
 |---|---:|
-| Source行数（server、mcp、src、public/js） | 24,739 |
-| Test行数（unit、integration、smoke） | 22,999 |
-| Test対source比率 | 93.0% |
-| Unit test file | 104 |
+| Source行数（server、mcp、src、public/js） | 29,165 |
+| Test行数（unit、integration、smoke） | 26,929 |
+| Test対source比率 | 92.3% |
+| Unit test file | 122 |
 | Integration test file | 4 |
-| Browser smoke | 1 file（1,558行） |
-| `src/` module | 85 |
+| Browser smoke | 1 file（1,681行） |
+| `src/` module | 104 |
 | Poller module | 15 |
-| Route module | 14 |
-| HTTP endpoint | 75（API 73 + health 2） |
-| 認証済みAPI endpoint | 71/73 |
-| 公開API endpoint | login、admin token verify |
+| Route module | 17 |
+| HTTP endpoint | 92（API 90 + health 2） |
+| 認証・権限gating済みAPI endpoint | 84/90 |
+| 公開API endpoint | login、admin-verify、auth-status、auth-methods、oidc-start、oidc-callback |
 | 公開運用endpoint | `/healthz`、`/readyz`。固定最小responseのみ |
-| strict Zod適用済みendpoint route module | 13/13 |
-| Production依存package | 12 |
-| Parameterized SQL preparation | 119 |
+| strict Zod適用済みendpoint route module | 16/17（auth.jsはendpoint 0件） |
+| Permission matrix entries | 93（HTTP route + MCP tool全分類） |
+| 定義済みpermission | 7 |
+| ロール | 3（viewer、operator、admin） |
+| Production依存package | 13 |
+| Parameterized SQL preparation | 150 |
 | Server-side `var` | 0 |
 | `eval` / `new Function` | 0 |
 | TODO/FIXME/HACK | 0 |
+| `innerHTML` / `insertAdjacentHTML` | 0 |
 
 ---
 
 ## 1. OWASP ASVS Level 1
 
-**判定: 文書化されたprivate network前提で適合（14領域中13領域が適合または緩和済み）。**
+**判定: 完全適合（14領域中14領域が適合または緩和済み）。**
 
 | 領域 | 状況 | 根拠 |
 |---|---|---|
-| 認証 | 合格 | scrypt、timing-safe比較、256bit session token、失敗遅延、IP単位lockout |
-| Session管理 | 合格 | token hash保存、sliding expiry、revoke、password変更処理、定期prune |
-| Access control | 合格 | API 73件中71件に`requireAdmin`。WebSocket handshakeも同じ認証境界 |
-| 入力検証 | 合格 | JSON 64KB、13/13 endpoint moduleのstrict Zod、未知key拒否、文字列・範囲上限 |
-| 暗号 | 合格 | secret/correlationの`randomBytes`/UUID、session/TOFUのSHA-256、timing-safe equality |
+| 認証 | 合格 | scrypt（versioned KDF migration）、timing-safe比較、256bit session token、失敗遅延、IP単位lockout、Google OIDC + PKCE |
+| Session管理 | 合格 | token hash保存、sliding expiry、revoke、password変更処理、定期prune、ロール付きsession |
+| Access control | 合格 | API 90件中84件に`enforceApiPermissions`。deny-by-default権限境界。WebSocket handshakeも同じ境界。permission matrix 93件 |
+| 入力検証 | 合格 | JSON 64KB、16/17 endpoint moduleのstrict Zod、未知key拒否、文字列・範囲上限 |
+| 暗号 | 合格 | secret/correlationの`randomBytes`/UUID、session/TOFU/principalHashのSHA-256、timing-safe equality、MCPのRS256 JWT検証 |
 | Error処理 | 合格 | 汎用500、stack非公開、request ID付きserver log |
-| Data保護 | 合格 | config/backup/TLS keyは0600、公開config/logからsecret除外 |
-| 通信 | 条件付き合格 | HTTPS/HSTS対応。既定はprivate network/VPN運用 |
+| Data保護 | 合格 | config/backup/TLS keyは0600、公開config/logからsecret除外、API identity hash-only storage |
+| 通信 | 合格 | HTTPS/HSTS対応。OIDC callbackはsecure redirectを強制。MCP OAuthはHTTPS JWKS経由 |
 | 悪意コード | 合格 | evalなし、frontend HTML挿入監査をCIで強制 |
 | File処理 | 合格 | upload上限、backup名検証、traversal防止、restore/migration fail-closed |
-| API security | 合格 | method別route、strict schema、response size/time上限、認証付きexport |
+| API security | 合格 | method別route、strict schema、response size/time上限、認証付きexport、MCP rate limiting |
 | Configuration | 合格 | hard-coded credentialなし、example設定、secret scan、production demo拒否 |
-| Business logic | 緩和済み | cookie認証を使わず明示header tokenを使用。cookie authやInternet直接公開時は再評価 |
+| Business logic | 合格 | HttpOnly cookie + CSRF保護、API identity用explicit permission token、deny-by-default enforcement |
+| 監査・ログ | 合格 | append-only audit_events（pseudonymous actorHash/principalHash）、180日retention、MCP専用audit store |
 
 Health endpointは意図的に未認証ですが、`no-store`付きの固定liveness/readinessのみを返し、router IP、credential、件数は公開しません。
 
@@ -127,22 +139,22 @@ Health endpointは意図的に未認証ですが、`no-store`付きの固定live
 
 ## 2. OpenSSF Scorecard（推定）
 
-**推定スコア: 8.4/10。**
+**推定スコア: 8.6/10。**
 
 | Check | Score | 根拠 |
 |---|---:|---|
-| Pinned dependencies | 10 | 全GitHub Actionをfull commit SHAへ固定 |
+| Pinned dependencies | 10 | 全15 GitHub Actionをfull commit SHAへ固定 |
 | Token permissions | 10 | 既定read-only。Pagesだけ必要権限を追加 |
 | Dangerous workflow | 10 | `pull_request_target`なし |
 | Binary artifacts | 10 | commit済みbinaryなし |
 | Security policy | 10 | `SECURITY.md`とprivate vulnerability reporting |
 | License | 10 | AGPL-3.0-only |
-| SAST | 10 | ASH、secret scan、ESLint、frontend挿入監査 |
+| SAST | 10 | ASH、secret scan、ESLint、frontend挿入監査、npm audit |
 | Vulnerabilities | 10 | production `npm audit`をCI実行。本レビュー0件 |
 | Dependency updates | 10 | npm/Actionsのweekly Dependabot、7日cooldown |
 | CI tests | 9 | PRでunit/coverageとbrowser smoke。実機integrationは明示実行 |
-| Maintained | 10 | PR #121まで継続的にrelease・改善 |
-| Code review | 7 | PRと必須checkを運用。branch protection policyは独立検証していない |
+| Maintained | 10 | PR #140まで継続的にrelease・改善 |
+| Code review | 8 | PRと必須checkを運用。RBACとpermission matrixがreview基準を強化 |
 | Fuzzing | 0 | Continuous fuzzingなし |
 | Signed releases | 0 | GPG/Sigstore署名なし |
 
@@ -152,30 +164,31 @@ Health endpointは意図的に未認証ですが、`no-store`付きの固定live
 
 | 品質特性 | Score | 強み | 残るgap |
 |---|---:|---|---|
-| 機能適合性 | 9 | 複数router、AI洞察（端末コンテキスト付き）、脅威調査、export、MCP | OpenAPIなし |
-| 性能効率性 | 9 | WAL、batch、bounded summary、cache、backup worker | 重いbackup検証中はhost-levelの短い遅延が残り得る |
+| 機能適合性 | 9 | 複数router、AI洞察（notification付き）、脅威調査、export、MCP + OAuth | OpenAPIなし |
+| 性能効率性 | 9 | WAL、batch、bounded summary、cache、worker分離backup、MCP concurrency cap | 重いbackup検証中はhost-levelの短い遅延が残り得る |
 | 互換性 | 8 | Node 22/24、JA/EN、Yamaha/Cisco/ASUS/conntrack | CIのhardware確認はfixture中心 |
-| 使用性 | 9 | Responsive UI、setup guide、自動検出、health診断、AI価格カバレッジ表示 | One-click deployなし |
-| 信頼性 | 9 | migration/restore/config/notes fail-closed、health、cancel、request ID、ASUS自動再接続 | 組み込みservice supervisorなし |
-| Security | 9 | strict schema、CSP、secret管理、ASH、bounded AI context（48KiB上限、credential除外） | Internet境界防御は条件付き |
-| 保守性 | 9 | 85 module、強いtest、route/poller/query分離 | 600-763行のorchestration moduleが残る |
+| 使用性 | 9 | Responsive UI、setup guide、自動検出、health診断、ロール表示、通知設定確認 | One-click deployなし |
+| 信頼性 | 9 | migration/restore/config/notes fail-closed、health、cancel、request ID、ASUS再接続、rate limiting | 組み込みservice supervisorなし |
+| Security | 10 | OIDC/PKCE、RBAC、deny-by-default permission、CSRF、HttpOnly cookie、API identity hash-only storage、MCP OAuth/JWKS、audit trail、rate limit | -- |
+| 保守性 | 9 | 104 module、強いtest、route/poller/query分離、permission matrix | 690-891行のorchestration moduleが残る |
 | 移植性 | 7 | Pure Node runtime、環境設定 | 正式OCI image/systemd unitなし |
 
-**平均: 8.6/10。**
+**平均: 8.8/10。**
 
 ---
 
 ## 4. Node.js Best Practices
 
-**準拠率: 45/50（90%）。**
+**準拠率: 46/50（92%）。**
 
-- Domain、route、poller adapter、DB bootstrap、browser renderingの責務を分離しています。
-- 外部async処理にtimeout/AbortSignal上限があり、backup pruneはworkerとsingle-flight jobで隔離され、ASUSポーリングはoverlapping cycleをcoalesceします。
+- Domain、route、poller adapter、DB bootstrap、auth middleware、browser renderingの責務を分離しています。
+- 外部async処理にtimeout/AbortSignal上限があり、backup pruneはworkerとsingle-flight jobで隔離され、ASUSポーリングはoverlapping cycleをcoalesceし、MCP requestはconcurrency capを適用しています。
 - Loggerは`AsyncLocalStorage`で安全な`X-Request-Id`を付け、query stringは記録しません。
-- Graceful shutdown、readiness、schema migration、config rollback、永続化失敗をtestしています。
+- Graceful shutdown、readiness、schema migration、config rollback、永続化失敗、permission enforcementをtestしています。
 - ESLint、V8 coverage、Node 22/24、Playwright、ASH、secret scan、dependency auditをPR gateにしています。
+- 認証ロジックは専用module（auth-middleware、auth-cookies、auth-audit、oidc-google）に分離し、single-responsibilityを遵守しています。
 
-Default hardware integration CI、process manager/container成果物、OpenAPI、Internet向けglobal edge rate limitがないため満点とはしません。
+Default hardware integration CI、process manager/container成果物、OpenAPI、continuous fuzzingがないため満点とはしません。
 
 ---
 
@@ -183,10 +196,10 @@ Default hardware integration CI、process manager/container成果物、OpenAPI�
 
 | Metric | 結果 | Rating |
 |---|---:|---|
-| Reliability | Critical/Highの既知不具合なし。前回の中メモ保存問題は修正済み | A |
-| Security | 高確度secret・dependency findingなし | A |
+| Reliability | Critical/Highの既知不具合なし | A |
+| Security | 高確度secret・dependency findingなし。完全なRBACと監査 | A |
 | Maintainability | 大きなmoduleはあるがtestと抽出済みhelperで境界化 | A |
-| Coverage | line 79.36% / branch 79.40% / function 75.94% | B |
+| Coverage | line 81.23% / branch 78.27% / function 77.74% | B |
 | Duplication | 手動・静的reviewで重大な新規重複なし | A（推定） |
 
 **Quality gate: 合格。**
@@ -195,13 +208,17 @@ Default hardware integration CI、process manager/container成果物、OpenAPI�
 
 | File | 行数 | 評価 |
 |---|---:|---|
-| `src/history.js` | 763 | query/cache/bootstrap抽出後もstore orchestrationが大きい |
+| `mcp-server.js` | 891 | OAuth、rate-limit、audit責務追加で大幅に成長 |
+| `src/history.js` | 789 | query/cache/bootstrap抽出後もstore orchestrationが大きい |
+| `public/js/ai-insights.js` | 783 | notification/insight renderingが同居 |
 | `public/js/log.js` | 715 | pagination、filter、renderが同居 |
+| `server.js` | 690 | bootstrapとdependency wiring |
 | `public/js/graph.js` | 675 | 抽出済みhelper/panel/rendererのorchestration |
 | `src/devices.js` | 665 | device identity、persistence、merge lifecycle |
 | `src/pollers/cisco.js` | 645 | parser/handshake抽出後のstateful SSH lifecycle |
-| `server.js` | 638 | bootstrapとdependency wiring |
 | `src/pollers/yamaha.js` | 614 | adapter parser周辺のstateful SSH lifecycle |
+| `public/js/devices.js` | 593 | device UI orchestration |
+| `src/db-migrate.js` | 557 | schema migration v1-v12 |
 
 いずれも将来の段階的refactor候補で、現在のrelease blockerではありません。変更はbehaviorを維持し、小さなPRで行うべきです。
 
@@ -209,4 +226,4 @@ Default hardware integration CI、process manager/container成果物、OpenAPI�
 
 ## 結論
 
-現在のmainは、文書化されたself-hosted/private network運用に適した品質です。自動gateは広く、data変更処理はfail-closedで、AI provider呼び出しは時間制限・コンテキスト上限付きで、本レビュー後にCritical/Highの既知問題は残っていません。前回レポート以降、AIチャット耐障害性、ASUSブートストラップ信頼性、価格可観測性が向上し、新たな不具合やregressionは導入されていません。OpenAPI、Internet境界強化、conntrack実機拡大、OCI配布は需要に応じて着手します。
+現在のmainは、文書化されたself-hosted運用モデルに加え、強固なmulti-user security controlを備えた品質です。自動gateは広く、data変更処理はfail-closedで、AI provider呼び出しは時間制限・コンテキスト上限付きで、完全なRBACとdeny-by-default permissionが適用され、MCP accessはOAuth保護・rate limiting・監査を受け、Critical/Highの既知問題は残っていません。前回レポート以降、OIDC認証、セッションRBAC、scoped API identity、包括的な監査ログを通じてsecurity postureが大幅に強化され、testのカバレッジと件数も比例して増加しています。OpenAPI、continuous fuzzing、OCI配布は需要に応じて着手します。
