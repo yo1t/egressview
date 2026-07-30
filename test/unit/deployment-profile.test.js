@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   DEPLOYMENT_PROFILES,
   PROFILE_IDS,
+  resolveMcpBindConfig,
   resolveDeploymentProfile,
 } = require('../../src/deployment-profile');
 
@@ -81,5 +82,68 @@ describe('deployment profile contract', () => {
       }),
       /must be one of/
     );
+  });
+
+  it('keeps HTTP on IPv4 or IPv6 loopback by default', () => {
+    const profile = resolveDeploymentProfile({
+      EGRESSVIEW_DEPLOYMENT_PROFILE: 'private-http',
+    }, {
+      httpEnabled: true,
+      authMode: 'token',
+    });
+    assert.deepEqual(resolveMcpBindConfig({}, profile), {
+      address: '127.0.0.1',
+      loopback: true,
+      explicitlyApproved: false,
+    });
+    assert.equal(resolveMcpBindConfig({ MCP_BIND_ADDRESS: '::1' }, profile).loopback, true);
+  });
+
+  it('requires an explicit profile and approval for non-loopback bind', () => {
+    const inferred = resolveDeploymentProfile({}, {
+      httpEnabled: true,
+      authMode: 'token',
+    });
+    assert.throws(
+      () => resolveMcpBindConfig({
+        MCP_BIND_ADDRESS: '192.168.1.20',
+        MCP_ALLOW_NON_LOOPBACK: 'true',
+      }, inferred),
+      /explicit EGRESSVIEW_DEPLOYMENT_PROFILE/
+    );
+
+    const configured = resolveDeploymentProfile({
+      EGRESSVIEW_DEPLOYMENT_PROFILE: 'private-http',
+    }, {
+      httpEnabled: true,
+      authMode: 'token',
+    });
+    assert.throws(
+      () => resolveMcpBindConfig({ MCP_BIND_ADDRESS: '0.0.0.0' }, configured),
+      /MCP_ALLOW_NON_LOOPBACK=true/
+    );
+    assert.deepEqual(resolveMcpBindConfig({
+      MCP_BIND_ADDRESS: '0.0.0.0',
+      MCP_ALLOW_NON_LOOPBACK: 'true',
+    }, configured), {
+      address: '0.0.0.0',
+      loopback: false,
+      explicitlyApproved: true,
+    });
+  });
+
+  it('rejects hostnames and malformed bind addresses', () => {
+    const profile = resolveDeploymentProfile({
+      EGRESSVIEW_DEPLOYMENT_PROFILE: 'private-http',
+    }, {
+      httpEnabled: true,
+      authMode: 'token',
+    });
+    for (const address of ['localhost', 'private.example', '192.168.1.999']) {
+      assert.throws(
+        () => resolveMcpBindConfig({ MCP_BIND_ADDRESS: address }, profile),
+        /must be an IPv4 or IPv6 address/
+      );
+    }
   });
 });
