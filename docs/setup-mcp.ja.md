@@ -9,6 +9,11 @@ MCP SDK v2 serverは1つのtool定義で両方のprotocol eraを提供します�
 statelessな`server/discover`とrequest単位のmetadataを使用します。互換性のため
 legacy fallbackを維持し、sticky sessionは必要ありません。
 
+Transportを選ぶ前に、cloud非依存の[Deployment profile](deployment-profiles.ja.md)
+から`local-stdio`、`private-http`、`private-oauth`、`public-oauth`のいずれかを
+選びます。管理環境では`EGRESSVIEW_DEPLOYMENT_PROFILE`を明示してください。
+Transport/認証との矛盾はendpoint起動前に拒否します。
+
 ## 使い方の例
 
 接続後は自然な言葉で質問するだけです:
@@ -286,6 +291,7 @@ HTTP トランスポートをサポートする MCP クライアント（Anysphe
 
 | 変数 | 必須 | デフォルト | 説明 |
 |---|---|---|---|
+| `EGRESSVIEW_DEPLOYMENT_PROFILE` | 推奨 | 推定 | `local-stdio`、`private-http`、`private-oauth`、`public-oauth`。deployment profile matrix参照 |
 | `EGRESSVIEW_URL` | ✅ | `http://localhost:3000` | EgressView サーバーのベース URL |
 | `EGRESSVIEW_TOKEN` | ✅ | — | API/admin トークン（EgressView 初回起動時にコンソールへ表示。ブラウザ用ログインパスワードではありません） |
 | `MCP_PORT` | HTTP モード | — | MCP HTTP サーバーのローカルポート（例: `3010`）。stdio モードの場合は不要 |

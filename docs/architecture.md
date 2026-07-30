@@ -4,6 +4,10 @@
 
 This document describes the production architecture and the boundaries that preserve router isolation, observation attribution, database safety, and API security.
 
+The application core is cloud-neutral. See [Deployment profiles](deployment-profiles.md)
+for the local stdio, private HTTP, private OAuth, and public OAuth boundaries,
+including the planned air-gapped profile.
+
 ## System view
 
 ```mermaid
@@ -73,7 +77,9 @@ Schema v5 stores router ownership only in `connection_observations`; the legacy 
   factory serves the legacy `2025-11-25` initialize flow and the stateless
   `2026-07-28` discover flow without tool drift. Public OAuth staging is
   protected by a fail-closed dual-era publication gate that does not modify
-  DNS or infrastructure; see the [MCP setup guide](setup-mcp.md).
+  DNS or infrastructure; see the [MCP setup guide](setup-mcp.md). The selected
+  runtime boundary is validated by `src/deployment-profile.js`; AWS is one
+  public-profile adapter rather than a core dependency.
 - **Exports:** bounded streaming CSV/JSON output to avoid loading an unbounded history into memory.
 - **Notifications:** optional Slack delivery; detections remain in the local notification log even when Slack is disabled.
 
