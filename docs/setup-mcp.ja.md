@@ -129,7 +129,9 @@ ChatGPT Apps として公開・共有する場合は、利用者ごとの認証�
 # 環境ファイルをコピーして編集:
 cp .env.mcp.example .env.mcp
 # MCP_PORT=3010、MCP_TOKEN=<専用のランダムtoken>、
-# EGRESSVIEW_URL=http://localhost:3000、EGRESSVIEW_TOKEN=... を設定
+# MCP_SERVICE_TOKEN=<scoped egv_... identity>、
+# MCP_AUDIT_HMAC_KEY=<専用の32文字以上のsecret>、
+# EGRESSVIEW_URL=http://localhost:3000 を設定
 # EgressView をリバースプロキシ背後の別ポートで動かしている場合は、
 # そのローカルURLを指定してください（例: http://localhost:3002）。
 chmod 600 .env.mcp
@@ -140,12 +142,11 @@ node mcp-server.js
 # → [egressview-mcp] HTTP transport listening on 127.0.0.1:3010/mcp
 ```
 
-HTTP tokenモードでは`MCP_TOKEN`の明示設定が必須となり、
-`EGRESSVIEW_TOKEN`へフォールバックしなくなりました。これによりMCP
-endpoint tokenが漏えいしても、EgressView管理APIの全権限へ直結しません。
-旧fallbackを利用していたHTTP環境は、更新前に別のtokenを生成して
-`MCP_TOKEN`へ設定してください。stdioモードは変更なく、`MCP_TOKEN`を
-使用しません。
+HTTP tokenモードは3つの異なるcredentialを必要とします。`MCP_TOKEN`はMCP
+clientを認証し、`MCP_SERVICE_TOKEN`は`network.read`と`notes.write`だけを
+持つ`egv_...` API identity、`MCP_AUDIT_HMAC_KEY`はappend-only監査を
+仮名化します。これらと`EGRESSVIEW_TOKEN`を同じ値にしません。HTTP runtimeは
+browser/admin tokenをAPI呼び出しへ使用しません。stdioモードは変更ありません。
 
 ### 段階導入中のOAuth Resource Serverモード
 
@@ -166,8 +167,8 @@ access tokenでは`set_device_note`をtool一覧へ表示せず、直接呼び�
 `403 insufficient_scope`で拒否します。scope昇格時に既存のread scopeを
 失わないよう、write challengeには両方のscopeを含めます。
 
-`network.read`と`notes.write`だけを持つ専用API identityを作り、作成時に
-一度だけ返る平文tokenを`MCP_SERVICE_TOKEN`へ設定します:
+HTTP token/OAuthの両modeで、`network.read`と`notes.write`だけを持つ専用API
+identityを作り、作成時に一度だけ返る平文tokenを`MCP_SERVICE_TOKEN`へ設定します:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:3002/api/auth/api-identities \
@@ -293,31 +294,36 @@ HTTP トランスポートをサポートする MCP クライアント（Anysphe
 |---|---|---|---|
 | `EGRESSVIEW_DEPLOYMENT_PROFILE` | 推奨 | 推定 | `local-stdio`、`private-http`、`private-oauth`、`public-oauth`。deployment profile matrix参照 |
 | `EGRESSVIEW_URL` | ✅ | `http://localhost:3000` | EgressView サーバーのベース URL |
-| `EGRESSVIEW_TOKEN` | ✅ | — | API/admin トークン（EgressView 初回起動時にコンソールへ表示。ブラウザ用ログインパスワードではありません） |
+| `EGRESSVIEW_TOKEN` | stdio/setup | — | stdio互換またはHTTP service identity作成時に使うAPI/admin token。HTTP runtime呼び出しは`MCP_SERVICE_TOKEN`を使用 |
 | `MCP_PORT` | HTTP モード | — | MCP HTTP サーバーのローカルポート（例: `3010`）。stdio モードの場合は不要 |
+| `MCP_BIND_ADDRESS` | HTTPモード | `127.0.0.1` | bindするIPv4/IPv6 literal。hostnameは拒否 |
+| `MCP_ALLOW_NON_LOOPBACK` | 非loopback bind | `false` | 明示deployment profileと併せて正確に`true`を設定した場合だけLAN/container/all-interface bindを許可 |
 | `MCP_AUTH_MODE` | HTTP モード | `token` | HTTP endpointの認証モード。`token`または段階導入中の`oauth` |
 | `MCP_TOKEN` | HTTP tokenモード | — | private HTTP endpoint専用token。明示設定し、`EGRESSVIEW_TOKEN`と別の値にする |
 | `MCP_OAUTH_ISSUER` | HTTP OAuthモード | — | Authorization Serverの正確なHTTPS issuer URL。loopback HTTPは試験時だけ許可 |
 | `MCP_OAUTH_RESOURCE` | HTTP OAuthモード | — | JWT audienceの完全一致検証に使うcanonical public MCP resource URL |
 | `MCP_OAUTH_READ_SCOPE` | HTTP OAuthモード | — | 内部`network.read` permissionへmappingするprovider scope |
 | `MCP_OAUTH_NOTES_WRITE_SCOPE` | HTTP OAuthモード | — | 内部`notes.write` permissionへmappingするprovider scope |
-| `MCP_SERVICE_TOKEN` | HTTP OAuthモード | — | `network.read`と`notes.write`だけを持つ専用`egv_...` API identity token |
-| `MCP_AUDIT_HMAC_KEY` | HTTP OAuthモード | — | 監査subject/clientの仮名化だけに使う32文字以上の安定した秘密鍵 |
+| `MCP_SERVICE_TOKEN` | HTTPモード | — | `network.read`と`notes.write`だけを持つ専用`egv_...` API identity token |
+| `MCP_AUDIT_HMAC_KEY` | HTTPモード | — | 監査subject/clientの仮名化だけに使う32文字以上の安定した秘密鍵 |
 
 ---
 
 ## セキュリティについて
 
-- MCP HTTP サーバーは `127.0.0.1` のみをリッスンします。リバースプロキシなしでは外部から到達できません
+- MCP HTTP serverは既定で`127.0.0.1`だけをlistenします。非loopback literal IPは明示profileと`MCP_ALLOW_NON_LOOPBACK=true`の両方を必要とし、TLSとnetwork policyで保護します
 - private tokenモードは専用`MCP_TOKEN`を`X-Admin-Token`または`Authorization: Bearer`で受け取り、EgressView管理tokenへfallbackしません
+- 全HTTP modeでfail-closed監査、rate/同時実行上限、body上限、deadline、最小権限service identityを共通適用します
 - ほとんどのツールは読み取り専用です。`set_device_note` のみ端末メモの書き込みが可能です（`.egressview.notes.json` への保存。メインDBへの書き込みはありません）
 - `.env.mcp` には非公開API credentialが含まれるため、`chmod 600` で保護してください
 
 ---
 
-## 公開MCP: 上限・監査・失効
+## HTTP MCP: 上限・監査・失効
 
-OAuthモード（`MCP_AUTH_MODE=oauth`）にのみ適用されます。private tokenモードとstdioモードは本節の影響を受けません。
+Runtimeのlimitと監査はprivate token/OAuthの両HTTP modeへ適用します。stdioは
+対象外です。OAuthは利用者/client単位、private tokenは共有private credential
+単位で記録・制限します。
 
 ### リクエスト上限
 
@@ -343,7 +349,7 @@ OAuthモード（`MCP_AUTH_MODE=oauth`）にのみ適用されます。private t
 
 ### 監査
 
-公開endpointへの全リクエストを専用ストア（`MCP_AUDIT_DB_PATH`、既定`.egressview-mcp-audit.db`）へ追記します。EgressView本体の監査とは**意図的に分離**しています。MCPプロセスはscoped API identityで動作しており、本体の監査への書き込み権限を与えると、MCPが侵害された場合に本体の記録を偽造・改竄できてしまうためです。
+全HTTP requestを専用ストア（`MCP_AUDIT_DB_PATH`、既定`.egressview-mcp-audit.db`）へ追記します。このstoreの書込検証に失敗した場合、HTTP endpointは起動しません。EgressView本体の監査とは**意図的に分離**しています。MCPプロセスはscoped API identityで動作しており、本体の監査への書き込み権限を与えると、MCPが侵害された場合に本体の記録を偽造・改竄できてしまうためです。
 
 記録するもの: 仮名化したOAuth subjectとclient ID、tool名、付与scope、成否、理由コード、request ID、処理時間。
 

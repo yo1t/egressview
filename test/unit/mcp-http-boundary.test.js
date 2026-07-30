@@ -39,6 +39,16 @@ function authConfig(overrides = {}) {
   };
 }
 
+function privateAuthConfig(overrides = {}) {
+  return {
+    mode: 'token',
+    token: 'private-http-endpoint-token',
+    serviceToken: SERVICE_TOKEN,
+    auditHashKey: AUDIT_HASH_KEY,
+    ...overrides,
+  };
+}
+
 /**
  * Start the real chain against a fake issuer.
  *
@@ -111,6 +121,31 @@ async function start({ limits = {}, env = {} } = {}) {
   }
 
   server = await mcpServer._startHttp(0, authConfig({ fetchImpl: issuerFetch }));
+  baseUrl = `http://127.0.0.1:${server.address().port}`;
+  return () => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+}
+
+async function startPrivate({ limits = {}, env = {} } = {}) {
+  const previous = {};
+  const applied = {
+    MCP_RATE_LIMIT_GLOBAL: String(limits.global ?? 1000),
+    MCP_RATE_LIMIT_SUBJECT: String(limits.subject ?? 1000),
+    MCP_RATE_LIMIT_CLIENT: String(limits.client ?? 1000),
+    MCP_MAX_CONCURRENT: String(limits.concurrent ?? 50),
+    MCP_AUDIT_DB_PATH: path.join(dir, 'audit.db'),
+    ...env,
+  };
+  for (const [key, value] of Object.entries(applied)) {
+    previous[key] = process.env[key];
+    process.env[key] = value;
+  }
+
+  server = await mcpServer._startHttp(0, privateAuthConfig());
   baseUrl = `http://127.0.0.1:${server.address().port}`;
   return () => {
     for (const [key, value] of Object.entries(previous)) {
@@ -204,6 +239,82 @@ describe('MCP HTTP boundary: per-identity limits', () => {
       assert.notEqual((await call(token)).status, 429, 'two requests must fit a budget of two');
       assert.equal((await call(token)).status, 429);
     } finally { restore(); }
+  });
+});
+
+describe('MCP private HTTP boundary', () => {
+  it('applies global and credential limits to token-authenticated requests', async () => {
+    const restore = await startPrivate({ limits: { global: 10, subject: 1, client: 10 } });
+    try {
+      const token = privateAuthConfig().token;
+      assert.notEqual((await call(token)).status, 429);
+      const second = await call(token);
+      assert.equal(second.status, 429);
+      assert.ok(second.headers.get('Retry-After'));
+    } finally { restore(); }
+  });
+
+  it('audits the private credential without storing its token', async () => {
+    const restore = await startPrivate();
+    try {
+      const token = privateAuthConfig().token;
+      await call(token, undefined, { 'X-Request-Id': 'private-probe-1' });
+      await new Promise(r => setTimeout(r, 120));
+      const row = mcpAudit.list().find(r => r.requestId === 'private-probe-1');
+      assert.ok(row);
+      assert.match(row.subjectHash, /^[0-9a-f]{64}$/);
+      assert.match(row.clientIdHash, /^[0-9a-f]{64}$/);
+      assert.equal(JSON.stringify(mcpAudit.list()).includes(token), false);
+    } finally { restore(); }
+  });
+
+  it('uses only the scoped service identity for private internal API calls', async () => {
+    const restore = await startPrivate();
+    const realFetch = global.fetch;
+    const presentedTokens = [];
+    global.fetch = (url, options = {}) => {
+      if (!String(url).startsWith('http://localhost:3000/api/')) {
+        return realFetch(url, options);
+      }
+      presentedTokens.push(options.headers?.['X-Admin-Token']);
+      const body = String(url).endsWith('/api/auth/api-identities/self')
+        ? { identity: { permissions: ['network.read', 'notes.write'] } }
+        : { devices: [] };
+      return Promise.resolve(new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    };
+    try {
+      const response = await call(privateAuthConfig().token, {
+        jsonrpc: '2.0',
+        id: 7,
+        method: 'tools/call',
+        params: { name: 'get_devices', arguments: {} },
+      });
+      await response.text();
+      assert.ok(presentedTokens.length >= 2);
+      assert.ok(presentedTokens.every(token => token === SERVICE_TOKEN));
+      assert.equal(presentedTokens.includes(process.env.EGRESSVIEW_TOKEN), false);
+    } finally {
+      global.fetch = realFetch;
+      restore();
+    }
+  });
+
+  it('fails closed when the private audit store is unavailable', async () => {
+    mcpAudit.closeDb();
+    const previous = process.env.MCP_AUDIT_DB_PATH;
+    process.env.MCP_AUDIT_DB_PATH = path.join(dir, 'missing', 'audit.db');
+    try {
+      await assert.rejects(
+        () => mcpServer._startHttp(0, privateAuthConfig()),
+        'private HTTP must not run without its audit trail'
+      );
+    } finally {
+      if (previous === undefined) delete process.env.MCP_AUDIT_DB_PATH;
+      else process.env.MCP_AUDIT_DB_PATH = previous;
+    }
   });
 });
 

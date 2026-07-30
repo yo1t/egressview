@@ -38,7 +38,10 @@ const { permissionForMcpTool } = require('./src/permission-matrix');
 const { isApiIdentityToken } = require('./src/api-identities');
 const { createMcpScopeMapping } = require('./src/mcp-scope-mapping');
 const { createOAuthResourceServer } = require('./src/mcp-oauth');
-const { resolveDeploymentProfile } = require('./src/deployment-profile');
+const {
+  resolveDeploymentProfile,
+  resolveMcpBindConfig,
+} = require('./src/deployment-profile');
 const crypto = require('node:crypto');
 const mcpAudit = require('./src/mcp-audit');
 const { createMcpRateLimiter, rateLimitOptionsFromEnv } = require('./src/mcp-rate-limit');
@@ -51,16 +54,35 @@ const TOKEN     = process.env.EGRESSVIEW_TOKEN || '';
 function resolveHttpAuthConfig(env = process.env) {
   const mode = String(env.MCP_AUTH_MODE || 'token').trim().toLowerCase();
   if (mode === 'token') {
-    if (!env.MCP_TOKEN) {
+    const token = String(env.MCP_TOKEN || '').trim();
+    const serviceToken = String(env.MCP_SERVICE_TOKEN || '').trim();
+    const auditHashKey = String(env.MCP_AUDIT_HMAC_KEY || '').trim();
+    if (!token) {
       throw new Error(
         'MCP_TOKEN must be set explicitly in HTTP token mode; '
         + 'it no longer defaults to EGRESSVIEW_TOKEN'
       );
     }
-    if (env.EGRESSVIEW_TOKEN && env.MCP_TOKEN === env.EGRESSVIEW_TOKEN) {
+    if (env.EGRESSVIEW_TOKEN && token === env.EGRESSVIEW_TOKEN) {
       throw new Error('MCP_TOKEN must differ from EGRESSVIEW_TOKEN in HTTP token mode');
     }
-    return Object.freeze({ mode, token: env.MCP_TOKEN });
+    if (!isApiIdentityToken(serviceToken)) {
+      throw new Error(
+        'MCP_SERVICE_TOKEN must be a scoped EgressView API identity token in HTTP token mode'
+      );
+    }
+    if (serviceToken === token || (env.EGRESSVIEW_TOKEN && serviceToken === env.EGRESSVIEW_TOKEN)) {
+      throw new Error('MCP_SERVICE_TOKEN must differ from MCP_TOKEN and EGRESSVIEW_TOKEN');
+    }
+    if (auditHashKey.length < 32) {
+      throw new Error('MCP_AUDIT_HMAC_KEY must contain at least 32 characters');
+    }
+    if (auditHashKey === token
+        || auditHashKey === serviceToken
+        || auditHashKey === env.EGRESSVIEW_TOKEN) {
+      throw new Error('MCP_AUDIT_HMAC_KEY must be dedicated to MCP audit pseudonyms');
+    }
+    return Object.freeze({ mode, token, serviceToken, auditHashKey });
   }
   if (mode === 'oauth') {
     const issuer = String(env.MCP_OAUTH_ISSUER || '').trim();
@@ -563,6 +585,11 @@ function createAuthMiddleware(token) {
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
+    req.mcpAuth = Object.freeze({
+      subject: 'private-token',
+      clientId: 'private-http',
+      scopes: MCP_SERVICE_PERMISSIONS,
+    });
     next();
   };
 }
@@ -698,39 +725,47 @@ function createAuditMiddleware() {
   };
 }
 
-async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
+function initializeMcpAudit(authConfig) {
+  mcpAudit.initDb(process.env.MCP_AUDIT_DB_PATH || undefined, {
+    hashKey: authConfig.auditHashKey,
+  });
+  mcpAudit.assertWritable();
+  mcpAudit.prune();
+  mcpAudit.setWriteFailureHandler((error, total) => {
+    if (total === 1 || total % 100 === 0) {
+      process.stderr.write(
+        `[egressview-mcp] AUDIT WRITE FAILED (${total} total): ${error.message}\n`
+      );
+    }
+  });
+}
+
+async function startHttp(
+  port,
+  authConfig = resolveHttpAuthConfig(),
+  { bindAddress = '127.0.0.1' } = {}
+) {
   const app = express();
   const MAX_BODY = process.env.MCP_MAX_BODY || '256kb';
   const limiter = createMcpRateLimiter(rateLimitOptionsFromEnv());
 
   let oauth = null;
   let scopeMapping = null;
-  let internalApiClient = defaultApiClient;
+  let internalApiClient = createMcpServiceApiClient({ token: authConfig.serviceToken });
+  initializeMcpAudit(authConfig);
+
+  // Every HTTP profile receives the same pre-auth flood protection, audit,
+  // bounded parser, and request deadline. OAuth adds verified user/client
+  // identity; private token mode records a stable credential identity.
+  app.use('/mcp', createRequestContextMiddleware());
+  app.use('/mcp', createAuditMiddleware());
+  app.use('/mcp', createRateLimitMiddleware(limiter, { stage: 'pre-auth' }));
+
   if (authConfig.mode === 'oauth') {
     oauth = createOAuthResourceServer(authConfig);
     scopeMapping = createMcpScopeMapping({
       readScope: authConfig.readScope || authConfig.requiredScope,
       notesWriteScope: authConfig.notesWriteScope,
-    });
-    internalApiClient = createMcpServiceApiClient({ token: authConfig.serviceToken });
-    // Fail closed. An internet-facing endpoint that cannot record who called
-    // it should not accept calls. This costs nothing elsewhere: the MCP server
-    // is a separate process, so refusing to start here leaves EgressView's
-    // router collection, browser UI, stdio clients and private HTTP mode
-    // running untouched.
-    mcpAudit.initDb(process.env.MCP_AUDIT_DB_PATH || undefined, {
-      hashKey: authConfig.auditHashKey,
-    });
-    mcpAudit.assertWritable();
-    mcpAudit.prune();
-    mcpAudit.setWriteFailureHandler((error, total) => {
-      // Report the first failure and then every hundredth, so a persistent
-      // fault stays visible without flooding the log.
-      if (total === 1 || total % 100 === 0) {
-        process.stderr.write(
-          `[egressview-mcp] AUDIT WRITE FAILED (${total} total): ${error.message}\n`
-        );
-      }
     });
     const sendMetadata = (_req, res) => res.json(oauth.metadata);
     const metadataPaths = new Set([
@@ -750,21 +785,14 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
     //   oauth    -> establishes the verified identity
     //   limit    -> per-subject and per-client, now that identity exists
     //   scope    -> per-tool authorization
-    app.use('/mcp', createRequestContextMiddleware());
-    app.use('/mcp', createAuditMiddleware());
-    app.use('/mcp', createRateLimitMiddleware(limiter, { stage: 'pre-auth' }));
     app.use('/mcp', express.json({ limit: MAX_BODY }));
     app.use('/mcp', oauth.middleware());
     app.use('/mcp', createRateLimitMiddleware(limiter, { stage: 'post-auth' }));
     app.use('/mcp', createToolScopeMiddleware(scopeMapping, oauth));
   } else {
-    if (!TOKEN) {
-      process.stderr.write(
-        '[egressview-mcp] WARNING: EGRESSVIEW_TOKEN is not set — API calls will fail\n'
-      );
-    }
     // Private token mode accepts the dedicated token in either supported header.
     app.use('/mcp', createAuthMiddleware(authConfig.token));
+    app.use('/mcp', createRateLimitMiddleware(limiter, { stage: 'post-auth' }));
     app.use('/mcp', express.json({ limit: MAX_BODY }));
   }
 
@@ -859,23 +887,23 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
   app.delete('/mcp', handleMcp);
 
   return new Promise((resolve, reject) => {
-    const httpServer = app.listen(port, '127.0.0.1', (error) => {
+    const httpServer = app.listen(port, bindAddress, (error) => {
       if (error) {
         reject(error);
         return;
       }
       const actualPort = httpServer.address().port;
-      process.stderr.write(`[egressview-mcp] HTTP transport listening on 127.0.0.1:${actualPort}/mcp\n`);
+      process.stderr.write(
+        `[egressview-mcp] HTTP transport listening on ${bindAddress}:${actualPort}/mcp\n`
+      );
       process.stderr.write(`[egressview-mcp] HTTP authentication mode: ${authConfig.mode}\n`);
       process.stderr.write(`[egressview-mcp] Proxying API calls to ${BASE}\n`);
-      if (authConfig.mode === 'oauth') {
-        const limits = limiter.config;
-        process.stderr.write(
-          `[egressview-mcp] Limits: ${limits.globalPerMinute}/min global, `
-          + `${limits.perSubjectPerMinute}/min subject, ${limits.perClientPerMinute}/min client, `
-          + `${limits.maxConcurrent} concurrent\n`
-        );
-      }
+      const limits = limiter.config;
+      process.stderr.write(
+        `[egressview-mcp] Limits: ${limits.globalPerMinute}/min global, `
+        + `${limits.perSubjectPerMinute}/min credential, ${limits.perClientPerMinute}/min client, `
+        + `${limits.maxConcurrent} concurrent\n`
+      );
       httpServer.once('close', () => {
         mcpHandler.close().catch(() => {});
       });
@@ -892,6 +920,7 @@ if (require.main === module) {
     let port;
     let authConfig;
     let deploymentProfile;
+    let bindConfig;
     try {
       port = resolveMcpPort(process.env.MCP_PORT);
       authConfig = resolveHttpAuthConfig();
@@ -899,6 +928,7 @@ if (require.main === module) {
         httpEnabled: true,
         authMode: authConfig.mode,
       });
+      bindConfig = resolveMcpBindConfig(process.env, deploymentProfile);
     } catch (err) {
       process.stderr.write(`[egressview-mcp] ${err.message}\n`);
       process.exit(1);
@@ -907,7 +937,7 @@ if (require.main === module) {
       `[egressview-mcp] Deployment profile: ${deploymentProfile.id}`
       + `${deploymentProfile.configured ? '' : ' (inferred)'}\n`
     );
-    startHttp(port, authConfig).catch(err => {
+    startHttp(port, authConfig, { bindAddress: bindConfig.address }).catch(err => {
       process.stderr.write(`[egressview-mcp] ${err.message}\n`);
       process.exit(1);
     });

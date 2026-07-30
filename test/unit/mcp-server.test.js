@@ -128,8 +128,15 @@ describe('mcp-server: HTTP auth configuration', () => {
       MCP_AUTH_MODE: 'token',
       EGRESSVIEW_TOKEN: 'admin-token',
       MCP_TOKEN: 'mcp-token',
+      MCP_SERVICE_TOKEN: SERVICE_TOKEN,
+      MCP_AUDIT_HMAC_KEY: AUDIT_HASH_KEY,
     });
-    assert.deepEqual(config, { mode: 'token', token: 'mcp-token' });
+    assert.deepEqual(config, {
+      mode: 'token',
+      token: 'mcp-token',
+      serviceToken: SERVICE_TOKEN,
+      auditHashKey: AUDIT_HASH_KEY,
+    });
   });
 
   it('rejects an explicit MCP_TOKEN that equals the admin API token', () => {
@@ -138,8 +145,38 @@ describe('mcp-server: HTTP auth configuration', () => {
         MCP_AUTH_MODE: 'token',
         EGRESSVIEW_TOKEN: 'shared-token',
         MCP_TOKEN: 'shared-token',
+        MCP_SERVICE_TOKEN: SERVICE_TOKEN,
+        MCP_AUDIT_HMAC_KEY: AUDIT_HASH_KEY,
       }),
       /must differ from EGRESSVIEW_TOKEN/
+    );
+  });
+
+  it('requires a scoped service identity and audit key in private token mode', () => {
+    const base = {
+      MCP_AUTH_MODE: 'token',
+      MCP_TOKEN: 'private-endpoint-token',
+      EGRESSVIEW_TOKEN: 'admin-token',
+    };
+    assert.throws(
+      () => _resolveHttpAuthConfig(base),
+      /MCP_SERVICE_TOKEN/
+    );
+    assert.throws(
+      () => _resolveHttpAuthConfig({
+        ...base,
+        MCP_SERVICE_TOKEN: 'legacy-admin-token',
+        MCP_AUDIT_HMAC_KEY: AUDIT_HASH_KEY,
+      }),
+      /scoped EgressView API identity/
+    );
+    assert.throws(
+      () => _resolveHttpAuthConfig({
+        ...base,
+        MCP_SERVICE_TOKEN: SERVICE_TOKEN,
+        MCP_AUDIT_HMAC_KEY: 'too-short',
+      }),
+      /at least 32 characters/
     );
   });
 
@@ -252,6 +289,8 @@ describe('mcp-server: HTTP auth configuration', () => {
         MCP_AUTH_MODE: 'token',
         EGRESSVIEW_TOKEN: 'legacy-admin-token',
         MCP_TOKEN: '',
+        MCP_SERVICE_TOKEN: SERVICE_TOKEN,
+        MCP_AUDIT_HMAC_KEY: AUDIT_HASH_KEY,
       },
     });
     assert.equal(result.status, 1);

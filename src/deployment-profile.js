@@ -1,5 +1,7 @@
 'use strict';
 
+const net = require('node:net');
+
 const PROFILE_IDS = Object.freeze([
   'local-stdio',
   'private-http',
@@ -81,9 +83,50 @@ function resolveDeploymentProfile(env = process.env, { httpEnabled, authMode = n
   });
 }
 
+function isLoopbackAddress(address) {
+  if (net.isIPv4(address)) return address.split('.')[0] === '127';
+  if (net.isIPv6(address)) {
+    return address === '::1' || address === '0:0:0:0:0:0:0:1';
+  }
+  return false;
+}
+
+function resolveMcpBindConfig(env = process.env, profile) {
+  if (!profile || profile.transport !== 'http') {
+    throw new Error('MCP bind configuration requires an HTTP deployment profile');
+  }
+
+  const address = String(env.MCP_BIND_ADDRESS || '127.0.0.1').trim();
+  if (!net.isIP(address)) {
+    throw new Error('MCP_BIND_ADDRESS must be an IPv4 or IPv6 address');
+  }
+
+  const loopback = isLoopbackAddress(address);
+  if (!loopback) {
+    if (!profile.configured) {
+      throw new Error(
+        'Non-loopback MCP_BIND_ADDRESS requires an explicit EGRESSVIEW_DEPLOYMENT_PROFILE'
+      );
+    }
+    if (String(env.MCP_ALLOW_NON_LOOPBACK || '').trim().toLowerCase() !== 'true') {
+      throw new Error(
+        'Non-loopback MCP_BIND_ADDRESS requires MCP_ALLOW_NON_LOOPBACK=true'
+      );
+    }
+  }
+
+  return Object.freeze({
+    address,
+    loopback,
+    explicitlyApproved: !loopback,
+  });
+}
+
 module.exports = {
   DEPLOYMENT_PROFILES,
   PROFILE_IDS,
   inferDeploymentProfile,
+  isLoopbackAddress,
+  resolveMcpBindConfig,
   resolveDeploymentProfile,
 };

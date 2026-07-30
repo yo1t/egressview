@@ -21,9 +21,17 @@ MCP processの`EGRESSVIEW_DEPLOYMENT_PROFILE`へ上記4値のいずれかを設�
 `private-http`、HTTP OAuth modeを`public-oauth`と推定します。明示profileが
 `MCP_PORT`または`MCP_AUTH_MODE`と矛盾する場合、MCP endpoint起動前に停止します。
 
-Matrixは最終的に必要なcontrolを示します。現在のPhase 0が検証するのはprofile名と
-transport/認証の組み合わせまでです。HTTP待受は引き続き`127.0.0.1`固定で、
-private/container向けbindとprivate最小権限controlの強制はPhase 1です。
+Phase 1でprivate HTTPのcontrolを強制します。HTTPは既定で`127.0.0.1`へbind
+します。非loopbackの`MCP_BIND_ADDRESS`は、deployment profileを明示し、かつ
+`MCP_ALLOW_NON_LOOPBACK=true`を設定した場合だけ許可します。名前解決によって
+公開範囲が変わることを避けるためhostnameは拒否します。全HTTP profileで、
+`network.read`と`notes.write`だけを持つ専用`MCP_SERVICE_TOKEN`、append-only
+監査、rate・同時実行上限、body上限、request/API timeoutを使用します。
+endpoint token、service identity、監査鍵、管理tokenは別々の値にします。
+
+Application自体は平文HTTPを提供するため、非loopback経路はTLS reverse proxy
+または同等の信頼できるprivate transportと、firewall、security group、
+network policyで保護します。bindの明示承認はnetworkの安全性を保証しません。
 外向き通信を保証付きで止めるoffline switchとfrontend assetのself-hostは
 Phase 2です。それらのgate完了前に「air-gapped対応済み」と表記しません。
 
