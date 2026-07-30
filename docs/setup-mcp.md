@@ -9,6 +9,12 @@ The MCP SDK v2 server uses one tool definition for both protocol eras:
 clients use stateless `server/discover` and per-request metadata. The legacy
 fallback is retained for compatibility; no sticky session is required.
 
+Before choosing a transport, select one of the cloud-neutral
+[deployment profiles](deployment-profiles.md): `local-stdio`, `private-http`,
+`private-oauth`, or `public-oauth`. Set `EGRESSVIEW_DEPLOYMENT_PROFILE`
+explicitly in managed environments; a transport/authentication mismatch fails
+before the endpoint starts.
+
 ## Example Conversations
 
 Once connected, just ask in natural language:
@@ -286,6 +292,7 @@ Use `https://` if your reverse proxy terminates TLS (required for Claude Desktop
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
+| `EGRESSVIEW_DEPLOYMENT_PROFILE` | Recommended | Inferred | `local-stdio`, `private-http`, `private-oauth`, or `public-oauth`; see the deployment-profile matrix. |
 | `EGRESSVIEW_URL` | ✅ | `http://localhost:3000` | Base URL of the EgressView server |
 | `EGRESSVIEW_TOKEN` | ✅ | — | API/admin token (shown on first EgressView startup; not the browser login password) |
 | `MCP_PORT` | HTTP mode | — | Local port for the MCP HTTP server (e.g. `3010`). Omit for stdio mode. |

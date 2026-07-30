@@ -38,6 +38,7 @@ const { permissionForMcpTool } = require('./src/permission-matrix');
 const { isApiIdentityToken } = require('./src/api-identities');
 const { createMcpScopeMapping } = require('./src/mcp-scope-mapping');
 const { createOAuthResourceServer } = require('./src/mcp-oauth');
+const { resolveDeploymentProfile } = require('./src/deployment-profile');
 const crypto = require('node:crypto');
 const mcpAudit = require('./src/mcp-audit');
 const { createMcpRateLimiter, rateLimitOptionsFromEnv } = require('./src/mcp-rate-limit');
@@ -886,21 +887,44 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 if (require.main === module) {
-  if (process.env.MCP_PORT !== undefined && process.env.MCP_PORT !== '') {
+  const httpEnabled = process.env.MCP_PORT !== undefined && process.env.MCP_PORT !== '';
+  if (httpEnabled) {
     let port;
     let authConfig;
+    let deploymentProfile;
     try {
       port = resolveMcpPort(process.env.MCP_PORT);
       authConfig = resolveHttpAuthConfig();
+      deploymentProfile = resolveDeploymentProfile(process.env, {
+        httpEnabled: true,
+        authMode: authConfig.mode,
+      });
     } catch (err) {
       process.stderr.write(`[egressview-mcp] ${err.message}\n`);
       process.exit(1);
     }
+    process.stderr.write(
+      `[egressview-mcp] Deployment profile: ${deploymentProfile.id}`
+      + `${deploymentProfile.configured ? '' : ' (inferred)'}\n`
+    );
     startHttp(port, authConfig).catch(err => {
       process.stderr.write(`[egressview-mcp] ${err.message}\n`);
       process.exit(1);
     });
   } else {
+    try {
+      const deploymentProfile = resolveDeploymentProfile(process.env, {
+        httpEnabled: false,
+        authMode: null,
+      });
+      process.stderr.write(
+        `[egressview-mcp] Deployment profile: ${deploymentProfile.id}`
+        + `${deploymentProfile.configured ? '' : ' (inferred)'}\n`
+      );
+    } catch (err) {
+      process.stderr.write(`[egressview-mcp] ${err.message}\n`);
+      process.exit(1);
+    }
     startStdio().catch(err => {
       process.stderr.write(`[egressview-mcp] ${err.message}\n`);
       process.exit(1);

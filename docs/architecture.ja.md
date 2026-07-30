@@ -4,6 +4,10 @@
 
 本書では、router障害の分離、観測元の保持、databaseの安全性、API securityを支える本番アーキテクチャを説明します。
 
+Application coreはcloud非依存です。local stdio、private HTTP、private OAuth、
+public OAuthと将来の完全閉域境界は[Deployment profile](deployment-profiles.ja.md)
+を参照してください。
+
 ## システム全体
 
 ```mermaid
@@ -73,7 +77,9 @@ Schema v5ではrouterの観測情報を`connection_observations`だけに保存�
   1つのfactoryがlegacy `2025-11-25` initialize flowとstateless
   `2026-07-28` discover flowをtool差分なしで提供します。公開OAuth stagingは
   DNSやinfraを変更しないfail-closed dual-era公開gateで保護します。
-  [MCP設定ガイド](setup-mcp.ja.md)を参照してください。
+  [MCP設定ガイド](setup-mcp.ja.md)を参照してください。選択したruntime境界は
+  `src/deployment-profile.js`で検証し、AWSはcore依存ではなくpublic profileの
+  adapterの1つとして扱います。
 - **Export:** 履歴全体をmemoryへ載せない、上限付きstreaming CSV/JSON。
 - **通知:** 任意のSlack送信。Slack無効時も検出結果はlocal notification logへ保存します。
 
