@@ -60,7 +60,7 @@ EgressView answers the question most home users can't ask: *what is each device 
 - **Connection log**: sortable/searchable table of all sessions with threat status badges; **App column** infers the application or service name from port number and destination hostname (APNs, FCM, AirPlay, MQTT/TLS, QUIC, iCloud, YouTube, AWS, Slack, Zoom, Tuya Smart, Gaijin/DCS, and more)
 - **🔔 Detection Log** — persistent history of all threat detections and new-device alerts, with per-column filter, sort, and click-to-detail popup; logged regardless of Slack configuration
 - **📡 Data Sources tab** — configure each data source (dnsmasq / [INSPECT] / [DHCPD]) independently from the settings UI
-- **🤖 AI Agent access (MCP)** — built-in [Model Context Protocol](https://modelcontextprotocol.io/) server exposes 11 tools (traffic summary, threat connections, top destinations, device list, device notes, and more) to AI assistants such as AWS Kiro, Anthropic Claude, and Anysphere Cursor; supports both stdio and HTTP transport
+- **🤖 AI Agent access (MCP)** — built-in [Model Context Protocol](https://modelcontextprotocol.io/) server exposes 11 tools (traffic summary, threat connections, top destinations, device list, device notes, and more) to AI assistants such as AWS Kiro, Anthropic Claude, and Anysphere Cursor; supports stdio/HTTP and both the `2025-11-25` and `2026-07-28` protocol eras
 - Single-page dark-themed UI with **✦ AI Insights** as the leftmost start page, plus Graph Map, Statistics, Connection Log, Devices, Detection Log, and Settings
 
 ## Demo

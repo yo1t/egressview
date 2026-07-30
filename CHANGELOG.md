@@ -27,6 +27,13 @@ All notable changes to EgressView are documented here.
   rejection, read/write scope separation, rate limiting, audit correlation,
   and continuing local router collection. It never publishes DNS or changes
   infrastructure; a pass only permits a separate manual DNS review.
+- Migrated the MCP server to the stable SDK v2 package split. One server
+  factory now supports both the legacy `2025-11-25` initialize flow and the
+  stateless `2026-07-28` discover flow with the same 11 tools.
+- Extended the DNS-unpublished publication gate with dual-era discovery,
+  identical tool-inventory checks, standard modern protocol-error probes, and
+  explicit evidence of modern Claude Code/Copilot CLI plus legacy-client
+  compatibility.
 - Added least-privilege browser roles. Local login remains `admin`, an explicitly
   allowed Google email becomes `operator`, and a domain-only match becomes
   read-only `viewer`. Authentication allowlists no longer imply administrator

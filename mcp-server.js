@@ -29,9 +29,10 @@
 // nginx/Apache snippet:  see docs/setup-mcp.md
 
 const express = require('express');
-const { McpServer }                      = require('@modelcontextprotocol/sdk/server/mcp.js');
-const { StdioServerTransport }           = require('@modelcontextprotocol/sdk/server/stdio.js');
-const { StreamableHTTPServerTransport }  = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
+const { AsyncLocalStorage } = require('node:async_hooks');
+const { McpServer, createMcpHandler } = require('@modelcontextprotocol/server');
+const { serveStdio } = require('@modelcontextprotocol/server/stdio');
+const { toNodeHandler } = require('@modelcontextprotocol/node');
 const { z } = require('zod');
 const { permissionForMcpTool } = require('./src/permission-matrix');
 const { isApiIdentityToken } = require('./src/api-identities');
@@ -247,11 +248,14 @@ function ok(obj)     { return { content: [{ type: 'text', text: JSON.stringify(o
 
 // ─── Tool registration (shared between stdio and HTTP transports) ─────────────
 
-function registerTool(server, name, ...args) {
+function registerTool(server, name, description, inputShape, handler) {
   if (!permissionForMcpTool(name)) {
     throw new Error(`MCP tool is missing a permission classification: ${name}`);
   }
-  server.tool(name, ...args);
+  server.registerTool(name, {
+    description,
+    inputSchema: z.object(inputShape),
+  }, handler);
 }
 
 function buildMcpServer({ includeWriteTools = true, apiClient = defaultApiClient } = {}) {
@@ -541,9 +545,7 @@ async function startStdio() {
       '[egressview-mcp] WARNING: EGRESSVIEW_TOKEN is not set — API calls will fail\n'
     );
   }
-  const server    = buildMcpServer();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  await serveStdio(() => buildMcpServer());
 }
 
 // ─── HTTP transport (for nginx proxy) ────────────────────────────────────────
@@ -768,17 +770,42 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
   // Without a deadline a stalled upstream call holds its concurrency slot for
   // ever; MCP_MAX_CONCURRENT such requests would wedge the endpoint closed.
   const requestTimeoutMs = resolveTimeoutMs(process.env.MCP_REQUEST_TIMEOUT_MS, 30_000);
+  const requestStorage = new AsyncLocalStorage();
 
-  // Streamable HTTP — handles POST (tool calls) and GET (SSE stream)
-  const handleMcp = async (req, res) => {
-    const requestController = new AbortController();
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  // The v2 SDK owns era classification. Its default legacy posture serves
+  // 2025-era initialize traffic statelessly, while the same factory serves
+  // 2026-07-28 server/discover traffic. AsyncLocalStorage carries only
+  // request-local authorization and cancellation state into that shared
+  // factory; no MCP session state is retained.
+  const mcpHandler = createMcpHandler(() => {
+    const requestContext = requestStorage.getStore();
+    if (!requestContext) {
+      throw new Error('MCP request context is unavailable');
+    }
+    const { req, requestController } = requestContext;
     const includeWriteTools = authConfig.mode !== 'oauth'
       || scopeMapping.authorizeTool('set_device_note', req.mcpAuth?.scopes).allowed;
     const apiClient = req.mcpRequestId && typeof internalApiClient.withRequestId === 'function'
       ? internalApiClient.withRequestId(req.mcpRequestId, requestController.signal)
       : internalApiClient;
-    const server = buildMcpServer({ includeWriteTools, apiClient });
+    return buildMcpServer({ includeWriteTools, apiClient });
+  }, {
+    legacy: 'stateless',
+    onerror(error) {
+      process.stderr.write(`[egressview-mcp] ${error.message}\n`);
+    },
+  });
+  const nodeMcpHandler = toNodeHandler(mcpHandler, {
+    onerror(error) {
+      process.stderr.write(`[egressview-mcp] ${error.message}\n`);
+    },
+  });
+
+  // The shared dual-era handler handles modern POST requests and the stateless
+  // legacy POST fallback. Legacy GET/DELETE session operations intentionally
+  // remain unsupported, as they were before this migration.
+  const handleMcp = async (req, res) => {
+    const requestController = new AbortController();
 
     // Record the timeout as a flag rather than writing a row here: the audit
     // middleware still fires on finish, and two writes would leave the trail
@@ -798,10 +825,8 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
     }, requestTimeoutMs);
     deadline.unref?.();
 
-    // Release both the timer and the MCP server exactly once, however the
-    // request ends. Registering the close listener only in `finally` used to
-    // leak the server whenever the response had already closed by then, which
-    // the timeout path makes routine.
+    // Release the timer and upstream API signal exactly once, however the
+    // request ends. The SDK owns each per-request McpServer lifecycle.
     let released = false;
     const release = () => {
       if (released) return;
@@ -810,14 +835,15 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
       if (!requestController.signal.aborted) {
         requestController.abort(new DOMException('MCP response closed', 'AbortError'));
       }
-      server.close().catch(() => {});
     };
     res.on('close', release);
     res.on('finish', release);
 
     try {
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
+      await requestStorage.run(
+        { req, requestController },
+        () => nodeMcpHandler(req, res, req.body)
+      );
     } catch (err) {
       process.stderr.write(`[egressview-mcp] ${err.message}\n`);
       if (!res.headersSent) res.status(500).json({ error: 'internal server error' });
@@ -849,6 +875,9 @@ async function startHttp(port, authConfig = resolveHttpAuthConfig()) {
           + `${limits.maxConcurrent} concurrent\n`
         );
       }
+      httpServer.once('close', () => {
+        mcpHandler.close().catch(() => {});
+      });
       resolve(httpServer);
     });
   });

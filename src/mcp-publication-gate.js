@@ -11,6 +11,11 @@ const { createOAuthResourceServer } = require('./mcp-oauth');
 
 const EVIDENCE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
+const LEGACY_PROTOCOL_VERSION = '2025-11-25';
+const MODERN_PROTOCOL_VERSION = '2026-07-28';
+const PROTOCOL_VERSION_META_KEY = 'io.modelcontextprotocol/protocolVersion';
+const CLIENT_INFO_META_KEY = 'io.modelcontextprotocol/clientInfo';
+const CLIENT_CAPABILITIES_META_KEY = 'io.modelcontextprotocol/clientCapabilities';
 const REQUIRED_EVIDENCE = Object.freeze([
   'directIngress',
   'reverseProxyLimits',
@@ -113,7 +118,7 @@ function validateEvidence(evidence, { deployedCommit, now = Date.now() }) {
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
     return ['evidence must be a JSON object'];
   }
-  if (evidence.schemaVersion !== 1) failures.push('schemaVersion must be 1');
+  if (evidence.schemaVersion !== 2) failures.push('schemaVersion must be 2');
   if (evidence.deployedCommit !== deployedCommit) {
     failures.push('evidence deployedCommit must match MCP_GATE_DEPLOYED_COMMIT');
   }
@@ -149,6 +154,14 @@ function validateEvidence(evidence, { deployedCommit, now = Date.now() }) {
   if (evidence.clientCompatibility?.claudeCode !== true
       || evidence.clientCompatibility?.copilotCli !== true) {
     failures.push('clientCompatibility must include Claude Code and GitHub Copilot CLI');
+  }
+  if (evidence.clientCompatibility?.claudeCodeProtocolVersion !== MODERN_PROTOCOL_VERSION
+      || evidence.clientCompatibility?.copilotCliProtocolVersion !== MODERN_PROTOCOL_VERSION) {
+    failures.push(`Claude Code and GitHub Copilot CLI must select ${MODERN_PROTOCOL_VERSION}`);
+  }
+  if (evidence.clientCompatibility?.legacyClient !== true
+      || evidence.clientCompatibility?.legacyProtocolVersion !== LEGACY_PROTOCOL_VERSION) {
+    failures.push(`clientCompatibility must retain a ${LEGACY_PROTOCOL_VERSION} legacy client`);
   }
   return failures;
 }
@@ -327,6 +340,28 @@ function mcpBody(id, method, params = {}) {
   return JSON.stringify({ jsonrpc: '2.0', id, method, params });
 }
 
+function modernMcpBody(id, method, params = {}, version = MODERN_PROTOCOL_VERSION) {
+  return mcpBody(id, method, {
+    ...params,
+    _meta: {
+      ...params._meta,
+      [PROTOCOL_VERSION_META_KEY]: version,
+      [CLIENT_INFO_META_KEY]: { name: 'egressview-publication-gate', version: '1.0.0' },
+      [CLIENT_CAPABILITIES_META_KEY]: {},
+    },
+  });
+}
+
+function modernBearerHeaders(token, requestId, method, name, version = MODERN_PROTOCOL_VERSION) {
+  const headers = {
+    ...bearerHeaders(token, requestId),
+    'MCP-Protocol-Version': version,
+    'Mcp-Method': method,
+  };
+  if (name) headers['Mcp-Name'] = name;
+  return headers;
+}
+
 function expectStatus(response, expected, label) {
   if (response.status !== expected) {
     throw new Error(`${label} returned HTTP ${response.status}; expected ${expected}`);
@@ -382,10 +417,13 @@ function verifyAuditRows(dbPath, requestIds) {
       revokedExpired: 'invalid_token',
       insufficientScope: 'insufficient_scope',
       rateLimited: 'global_rate_limit',
+      protocolMismatch: null,
+      unsupportedVersion: null,
     };
     for (const [name, reason] of Object.entries(required)) {
       const row = find.get(requestIds[name]);
-      if (!row || row.outcome !== 'failure' || row.reason !== reason) {
+      if (!row || row.outcome !== 'failure'
+          || (reason !== null && row.reason !== reason)) {
         throw new Error(`MCP audit row ${name} is missing or has the wrong outcome`);
       }
     }
@@ -426,6 +464,8 @@ async function runPublicationGate(config, dependencies = {}) {
   const requestIds = Object.fromEntries([
     'read', 'write', 'malformed', 'expired', 'wrongAudience',
     'revokedExpired', 'insufficientScope', 'rateLimited',
+    'legacyInitialize', 'legacyTools', 'modernDiscover', 'modernTools',
+    'protocolMismatch', 'unsupportedVersion',
   ].map((name) => [name, `mcp-gate-${name}-${crypto.randomUUID()}`]));
 
   const call = (pathname, options = {}) => {
@@ -481,18 +521,135 @@ async function runPublicationGate(config, dependencies = {}) {
     }
   }
 
+  const legacyInitializeResponse = await call('/mcp', {
+    method: 'POST',
+    headers: bearerHeaders(config.tokens.write, requestIds.legacyInitialize),
+    body: mcpBody('legacy-initialize', 'initialize', {
+      protocolVersion: LEGACY_PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: { name: 'egressview-publication-gate', version: '1.0.0' },
+    }),
+  });
+  expectStatus(legacyInitializeResponse, 200, 'legacy initialize');
+  const legacyInitialize = parseMcpResponse(legacyInitializeResponse, 'legacy initialize');
+  if (legacyInitialize.result?.protocolVersion !== LEGACY_PROTOCOL_VERSION) {
+    throw new Error(`legacy initialize did not negotiate ${LEGACY_PROTOCOL_VERSION}`);
+  }
+
+  const modernDiscoverResponse = await call('/mcp', {
+    method: 'POST',
+    headers: modernBearerHeaders(
+      config.tokens.write,
+      requestIds.modernDiscover,
+      'server/discover'
+    ),
+    body: modernMcpBody('modern-discover', 'server/discover'),
+  });
+  expectStatus(modernDiscoverResponse, 200, 'modern server discovery');
+  const modernDiscover = parseMcpResponse(modernDiscoverResponse, 'modern server discovery');
+  if (!modernDiscover.result?.supportedVersions?.includes(MODERN_PROTOCOL_VERSION)) {
+    throw new Error(`server/discover did not advertise ${MODERN_PROTOCOL_VERSION}`);
+  }
+
+  const legacyToolsResponse = await call('/mcp', {
+    method: 'POST',
+    headers: bearerHeaders(config.tokens.write, requestIds.legacyTools),
+    body: mcpBody('legacy-tools', 'tools/list'),
+  });
+  expectStatus(legacyToolsResponse, 200, 'legacy tool listing');
+  const legacyTools = parseMcpResponse(legacyToolsResponse, 'legacy tool listing');
+
+  const modernToolsResponse = await call('/mcp', {
+    method: 'POST',
+    headers: modernBearerHeaders(
+      config.tokens.write,
+      requestIds.modernTools,
+      'tools/list'
+    ),
+    body: modernMcpBody('modern-tools', 'tools/list'),
+  });
+  expectStatus(modernToolsResponse, 200, 'modern tool listing');
+  const modernTools = parseMcpResponse(modernToolsResponse, 'modern tool listing');
+  const toolNames = (response) => (response.result?.tools || [])
+    .map((tool) => tool.name)
+    .sort();
+  const legacyToolNames = toolNames(legacyTools);
+  const modernToolNames = toolNames(modernTools);
+  if (legacyToolNames.length !== 11
+      || JSON.stringify(legacyToolNames) !== JSON.stringify(modernToolNames)
+      || !modernToolNames.includes('set_device_note')) {
+    throw new Error('legacy and modern revisions did not expose the same 11 tools');
+  }
+
+  const protocolMismatchResponse = await call('/mcp', {
+    method: 'POST',
+    headers: modernBearerHeaders(
+      config.tokens.read,
+      requestIds.protocolMismatch,
+      'tools/call'
+    ),
+    body: modernMcpBody('protocol-mismatch', 'tools/list'),
+  });
+  expectStatus(protocolMismatchResponse, 400, 'modern header/body mismatch');
+  const protocolMismatch = parseJsonResponse(
+    protocolMismatchResponse,
+    'modern header/body mismatch'
+  );
+  if (protocolMismatch.error?.code !== -32020) {
+    throw new Error('modern header/body mismatch did not return error -32020');
+  }
+
+  const unsupportedVersion = '2099-01-01';
+  const unsupportedVersionResponse = await call('/mcp', {
+    method: 'POST',
+    headers: modernBearerHeaders(
+      config.tokens.read,
+      requestIds.unsupportedVersion,
+      'server/discover',
+      null,
+      unsupportedVersion
+    ),
+    body: modernMcpBody(
+      'unsupported-version',
+      'server/discover',
+      {},
+      unsupportedVersion
+    ),
+  });
+  expectStatus(unsupportedVersionResponse, 400, 'unsupported modern protocol version');
+  const unsupported = parseJsonResponse(
+    unsupportedVersionResponse,
+    'unsupported modern protocol version'
+  );
+  if (unsupported.error?.code !== -32022) {
+    throw new Error('unsupported modern protocol version did not return error -32022');
+  }
+
   const readResponse = await call('/mcp', {
     method: 'POST',
-    headers: bearerHeaders(config.tokens.read, requestIds.read),
-    body: mcpBody('read', 'tools/call', { name: 'get_devices', arguments: {} }),
+    headers: modernBearerHeaders(
+      config.tokens.read,
+      requestIds.read,
+      'tools/call',
+      'get_devices'
+    ),
+    body: modernMcpBody('read', 'tools/call', {
+      name: 'get_devices',
+      arguments: {},
+    }),
   });
   expectStatus(readResponse, 200, 'read tool');
   parseMcpResponse(readResponse, 'read tool');
 
   const insufficient = await call('/mcp', {
     method: 'POST',
-    headers: bearerHeaders(config.tokens.read, requestIds.insufficientScope),
-    body: mcpBody('scope', 'tools/call', {
+    headers: modernBearerHeaders(
+      config.tokens.read,
+      requestIds.insufficientScope,
+      'tools/call',
+      'set_device_note'
+    ),
+    body: modernMcpBody('scope', 'tools/call', {
       name: 'set_device_note',
       arguments: { src: '192.0.2.1', note: 'gate probe must not run' },
     }),
@@ -504,8 +661,12 @@ async function runPublicationGate(config, dependencies = {}) {
 
   const writeResponse = await call('/mcp', {
     method: 'POST',
-    headers: bearerHeaders(config.tokens.write, requestIds.write),
-    body: mcpBody('write', 'tools/list'),
+    headers: modernBearerHeaders(
+      config.tokens.write,
+      requestIds.write,
+      'tools/list'
+    ),
+    body: modernMcpBody('write', 'tools/list'),
   });
   expectStatus(writeResponse, 200, 'write-scoped tool listing');
   const toolList = parseMcpResponse(writeResponse, 'write-scoped tool listing');
@@ -540,7 +701,7 @@ async function runPublicationGate(config, dependencies = {}) {
   auditVerifier(config.auditDbPath, requestIds);
 
   return Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: 2,
     status: 'ready_for_manual_dns_review',
     checkedAt: new Date(now()).toISOString(),
     deployedCommit: config.deployedCommit,
@@ -556,6 +717,11 @@ async function runPublicationGate(config, dependencies = {}) {
       rateLimit: 'pass',
       audit: 'pass',
       localCollection: 'pass',
+      protocolRevisions: Object.freeze({
+        [LEGACY_PROTOCOL_VERSION]: 'pass',
+        [MODERN_PROTOCOL_VERSION]: 'pass',
+      }),
+      protocolErrors: 'pass',
     }),
   });
 }
@@ -570,6 +736,8 @@ function writeReport(filePath, report) {
 
 module.exports = {
   EVIDENCE_MAX_AGE_MS,
+  LEGACY_PROTOCOL_VERSION,
+  MODERN_PROTOCOL_VERSION,
   REQUIRED_EVIDENCE,
   loadGateConfig,
   loadEvidence,
