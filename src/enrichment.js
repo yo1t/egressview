@@ -6,17 +6,18 @@ const logger = require('./logger');
 // public internet. DNS PTR may be served by an internal resolver, so it is
 // allowed only when the operator has opted in.
 let _offline = null;
-function setOfflinePolicy(policy) { _offline = policy; }
+function applyOfflinePolicy(policy) { _offline = policy; }
 
 const http = require('http');
 const https = require('https');
-const dns = require('dns').promises;
+const dns = require('node:dns').promises;
 const Database = require('better-sqlite3');
 const path = require('path');
 
 const DB_PATH = path.join(__dirname, '..', '.egressview.db');
 
 let db            = null;
+let ptrResolver   = dns;
 let _dbPath       = DB_PATH;
 let stmtUpsertRdap = null;
 let stmtUpsertGeo  = null;
@@ -433,7 +434,7 @@ async function reverseDns(ip) {
   if (cached && cached.source === 'dnsmasq') return cached.host;
   if (cached && now < cached.expires) return cached.host;
   try {
-    const [host] = await dns.reverse(ip);
+    const [host] = await ptrResolver.reverse(ip);
     dnsCache.set(ip, { host, expires: now + DNS_TTL_MS, source: 'ptr' });
     recordApiOk('ptr');
     return host;
@@ -456,6 +457,8 @@ function _initForTest() {
   geoPendingIps.clear();
   geoFlushPromise = null;
   geoBackoffUntil = 0;
+  _offline = null;
+  ptrResolver = dns;
   initDb(':memory:');
 }
 
@@ -470,8 +473,21 @@ function getDnsCache() { return dnsCache; }
 function getRdapCache() { return rdapCache; }
 function getGeoCache() { return geoCache; }
 
+function configurePtrResolver(server, Resolver = dns.Resolver) {
+  if (!server) {
+    ptrResolver = dns;
+    return;
+  }
+  const resolver = new Resolver();
+  resolver.setServers([server]);
+  ptrResolver = resolver;
+}
+
 module.exports = {
-  setOfflinePolicy,
+  setOfflinePolicy(policy) {
+    applyOfflinePolicy(policy);
+    configurePtrResolver(policy?.offline ? policy.endpointFor('dns-ptr') : null);
+  },
   initDb,
   reopen,
   closeDb,
@@ -488,4 +504,5 @@ module.exports = {
   _setGeoFlushMsForTest,
   _setGeoBackoffUntilForTest,
   _getGeoBackoffUntilForTest,
+  _configurePtrResolverForTest: configurePtrResolver,
 };

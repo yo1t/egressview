@@ -122,11 +122,12 @@ private HTTP MCP. These are local by definition.
 |---|---|
 | Internal DNS / PTR | `EGRESSVIEW_INTERNAL_DNS` |
 | Self-hosted Ollama | `EGRESSVIEW_OLLAMA_URL` |
-| Internal OIDC issuer | `EGRESSVIEW_INTERNAL_OIDC_ISSUER` |
 
 These can be reachable inside an isolated network, but they stay off until you
-point them somewhere. "Internal" is a claim about your network that EgressView
-cannot verify, so it is never assumed.
+point them at a loopback or private IP address. Hostnames are rejected in
+offline mode so DNS cannot redirect an approved endpoint outside the isolated
+network. Private OAuth for MCP is configured separately with the MCP OAuth
+settings described in the [MCP setup guide](setup-mcp.md).
 
 ### What you lose
 
@@ -135,7 +136,7 @@ what is already cached, and unknown MAC prefixes have no vendor name. Existing
 cached data keeps working; it simply stops being refreshed.
 
 The startup log lists exactly which features were disabled, and `GET
-/api/config/status` reports the same state so the UI can explain a disabled
+/api/status` reports the same state so the UI can explain a disabled
 panel instead of leaving it blank.
 
 ### Front-end assets

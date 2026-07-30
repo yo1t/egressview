@@ -522,31 +522,33 @@ const HOST = process.env.HOST || undefined;
 server.listen(PORT, HOST, () => {
   runtimeProfiler.start({ logger });
   logger.info(`EgressView: ${tlsOptions ? 'https' : 'http'}://${HOST || 'localhost'}:${PORT}`);
-  // Decide outbound capability before any collector, provider or feed starts.
-  // Internal-capable features are enabled only where the operator pointed them
-  // at something; nothing is inferred from reachability.
-  const offlinePolicy = createOfflinePolicy({
-    internalEndpoints: {
-      'dns-ptr': Boolean(process.env.EGRESSVIEW_INTERNAL_DNS),
-      'ai-ollama': Boolean(appState.aiConfig?.ollamaUrl || process.env.EGRESSVIEW_OLLAMA_URL),
-      'internal-oidc': Boolean(process.env.EGRESSVIEW_INTERNAL_OIDC_ISSUER),
-    },
-  });
-  appState.offlinePolicy = offlinePolicy;
-  enrichment.setOfflinePolicy(offlinePolicy);
-  threatIntel.setOfflinePolicy(offlinePolicy);
-  deviceId.setOfflinePolicy(offlinePolicy);
-  manualThreatModule.setOfflinePolicy(offlinePolicy);
-  aiProviderModule.setOfflinePolicy(offlinePolicy);
-  oidcModule.setOfflinePolicy(offlinePolicy);
-  if (offlinePolicy.offline) {
-    const disabled = Object.entries(offlinePolicy.features)
-      .filter(([, status]) => !status.enabled).map(([name]) => name);
-    logger.info(`[offline] Offline mode is on. Disabled before startup: ${disabled.join(', ')}`);
-  }
-
   try {
     loadConfig();
+    const configuredAi = aiProvider.getPublicConfig();
+    if (process.env.EGRESSVIEW_OLLAMA_URL) {
+      aiProvider.configure({ ollamaEndpoint: process.env.EGRESSVIEW_OLLAMA_URL });
+    }
+    // Config loading is local-only. Decide outbound capability after it so a
+    // saved Ollama endpoint is validated before any collector or feed starts.
+    const offlinePolicy = createOfflinePolicy({
+      internalEndpoints: {
+        'dns-ptr': process.env.EGRESSVIEW_INTERNAL_DNS || '',
+        'ai-ollama': process.env.EGRESSVIEW_OLLAMA_URL
+          || (configuredAi.provider === 'ollama' ? configuredAi.ollamaEndpoint : ''),
+      },
+    });
+    appState.offlinePolicy = offlinePolicy;
+    enrichment.setOfflinePolicy(offlinePolicy);
+    threatIntel.setOfflinePolicy(offlinePolicy);
+    deviceId.setOfflinePolicy(offlinePolicy);
+    manualThreatModule.setOfflinePolicy(offlinePolicy);
+    aiProviderModule.setOfflinePolicy(offlinePolicy);
+    oidcModule.setOfflinePolicy(offlinePolicy);
+    if (offlinePolicy.offline) {
+      const disabled = Object.entries(offlinePolicy.features)
+        .filter(([, status]) => !status.enabled).map(([name]) => name);
+      logger.info(`[offline] Offline mode is on. Disabled before startup: ${disabled.join(', ')}`);
+    }
   } catch (err) {
     logger.error('[startup] Failed to load config; refusing to continue:', err.message);
     server.close(() => process.exit(1));
