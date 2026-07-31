@@ -171,9 +171,9 @@ Health endpointは意図的に未認証ですが、`no-store`付きの固定live
 | 信頼性 | 9 | migration/restore/config/notes fail-closed、health、cancel、request ID、ASUS再接続、rate limiting | 組み込みservice supervisorなし |
 | Security | 10 | OIDC/PKCE、RBAC、deny-by-default permission、CSRF、HttpOnly cookie、API identity hash-only storage、MCP OAuth/JWKS、audit trail、rate limit | -- |
 | 保守性 | 9 | 104 module、強いtest、route/poller/query分離、permission matrix | 690-891行のorchestration moduleが残る |
-| 移植性 | 7 | Pure Node runtime、環境設定 | 正式OCI image/systemd unitなし |
+| 移植性 | 9 | Cloud非依存profile、署名付きportable source、offline runtime gate、version管理rollback | 正式OCI image/systemd unitなし |
 
-**平均: 8.8/10。**
+**平均: 9.0/10。**
 
 ---
 
@@ -188,7 +188,7 @@ Health endpointは意図的に未認証ですが、`no-store`付きの固定live
 - ESLint、V8 coverage、Node 22/24、Playwright、ASH、secret scan、dependency auditをPR gateにしています。
 - 認証ロジックは専用module（auth-middleware、auth-cookies、auth-audit、oidc-google）に分離し、single-responsibilityを遵守しています。
 
-Default hardware integration CI、process manager/container成果物、OpenAPI、continuous fuzzingがないため満点とはしません。
+Default hardware integration CI、正式process manager/OCI成果物、OpenAPI、continuous fuzzingがないため満点とはしません。
 
 ---
 

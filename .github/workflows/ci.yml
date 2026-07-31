@@ -94,6 +94,60 @@ jobs:
             --network none \
             egressview-portability
 
+  offline-distribution:
+    name: Signed offline-runtime distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install build dependencies
+        run: npm ci
+
+      - name: Build and sign an isolated test artifact
+        run: |
+          openssl genpkey -algorithm ED25519 -out /tmp/egressview-offline-test.key
+          npm run offline:bundle -- \
+            --output dist/offline \
+            --private-key /tmp/egressview-offline-test.key
+
+      - name: Verify signature, checksum, manifest, and content policy
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          ARTIFACT="dist/offline/egressview-offline-${VERSION}.tar.gz"
+          npm run offline:verify -- \
+            --artifact "$ARTIFACT" \
+            --checksum "${ARTIFACT}.sha256" \
+            --signature "${ARTIFACT}.sig" \
+            --public-key "${ARTIFACT}.pub.pem"
+
+      - name: Reject a modified signed artifact
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          ARTIFACT="dist/offline/egressview-offline-${VERSION}.tar.gz"
+          cp "$ARTIFACT" "${ARTIFACT}.pristine"
+          printf 'tampered' >> "$ARTIFACT"
+          if npm run offline:verify -- \
+            --artifact "$ARTIFACT" \
+            --checksum "${ARTIFACT}.sha256" \
+            --signature "${ARTIFACT}.sig" \
+            --public-key "${ARTIFACT}.pub.pem"; then
+            echo "Modified artifact was accepted" >&2
+            exit 1
+          fi
+          mv "${ARTIFACT}.pristine" "$ARTIFACT"
+
+      - name: Install dependencies and verify offline runtime startup
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          ARTIFACT="dist/offline/egressview-offline-${VERSION}.tar.gz"
+          node scripts/check-offline-artifact.js --artifact "$ARTIFACT"
+
   ash:
     name: ASH security scan
     runs-on: ubuntu-latest
