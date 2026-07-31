@@ -86,6 +86,7 @@ local-media/
 redacted-media/
 .pages-source/
 _site/
+dist/
 
 # Playwright test output
 test-results/

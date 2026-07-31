@@ -171,9 +171,9 @@ The health endpoints are intentionally unauthenticated but return only fixed liv
 | Reliability | 9 | Fail-closed migration/restore/config/notes, health/readiness, cancellation, request IDs, ASUS auto-reconnect, rate limiting | No built-in service supervisor |
 | Security | 10 | OIDC/PKCE, RBAC, deny-by-default permissions, CSRF, HttpOnly cookies, API identity hash-only storage, MCP OAuth/JWKS, audit trail, rate limits | -- |
 | Maintainability | 9 | 104 modules, strong tests, split route/poller/query boundaries, permission matrix | Several 690-891-line orchestration modules remain |
-| Portability | 7 | Pure Node runtime and environment configuration | No supported OCI image/systemd unit |
+| Portability | 9 | Cloud-neutral profiles, signed portable source bundle, offline runtime gate, versioned rollback | No supported OCI image/systemd unit |
 
-**Average: 8.8/10.**
+**Average: 9.0/10.**
 
 ---
 
@@ -188,7 +188,7 @@ The health endpoints are intentionally unauthenticated but return only fixed liv
 - ESLint, V8 coverage, Node 22/24, Playwright, ASH, secret scanning, and dependency audit run as PR gates.
 - Authentication logic is separated into dedicated modules (auth-middleware, auth-cookies, auth-audit, oidc-google) following single-responsibility.
 
-Points are withheld for no default hardware integration CI, no process manager/container artifact, no OpenAPI contract, and no continuous fuzzing.
+Points are withheld for no default hardware integration CI, no supported process-manager/OCI artifact, no OpenAPI contract, and no continuous fuzzing.
 
 ---
 

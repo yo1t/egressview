@@ -24,6 +24,10 @@ All notable changes to EgressView are documented here.
   Debian container. It denies and audits external DNS/socket attempts while
   exercising Web startup/restart, Cisco and conntrack fixtures, SQLite
   backup/restore, stdio MCP, authenticated private HTTP MCP, and MCP audit.
+- Added a signed portable source distribution with a CycloneDX SBOM, exact
+  dependency lock, per-file manifest, SHA-256 checksum, Ed25519 signature,
+  credential/runtime-data exclusion gate, and atomic install/upgrade/rollback.
+  Install and upgrade may use the npm registry; runtime remains offline.
 
 - Added a staged OAuth Resource Server mode for remote MCP testing:
   RFC 9728 metadata and challenges, authorization-server discovery, RS256
