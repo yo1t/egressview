@@ -69,7 +69,7 @@ must also prove its firewall, security-group, network-policy, or proxy boundary.
 | Browser OIDC | Google in the current optional implementation | Local administrator or future generic internal OIDC | Local administrator |
 | MCP OAuth | Issuer-dependent, not cloud-specific | Self-hosted OIDC and internal CA | Private OAuth if all issuer/JWKS endpoints are internal |
 | AI Insights | Ollama or cloud provider | Ollama/private compatible endpoint | Local model only |
-| Package/image updates | Package registry or image registry | Internal mirror | Signed offline bundle, checksum, lock file, and SBOM in Phase 4 |
+| Package updates | npm registry during install/upgrade | Internal npm mirror | Signed source bundle; runtime is offline after locked dependencies are installed |
 
 Cloud agents such as Claude Code and GitHub Copilot require their own Internet
 connectivity even when the MCP endpoint is private. A fully offline deployment
@@ -143,6 +143,12 @@ panel instead of leaving it blank.
 D3, TopoJSON and the world atlas are served from this origin at pinned versions,
 and the CSP allows no external origin. A page load in offline mode makes no
 third-party request.
+
+Installation and upgrade are separate from runtime isolation. The signed
+portable source bundle requires temporary npm-registry access on the target so
+native dependencies match its OS and CPU. See the
+[signed distribution guide](offline-distribution.md). After installation,
+enable offline mode and remove outbound access before starting the service.
 
 ## Portability gate
 

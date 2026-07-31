@@ -28,6 +28,14 @@ EgressView monitors your LAN passively and can be accessed remotely when HTTPS i
 
 For internet-facing deployments, terminate HTTPS at a trusted reverse proxy, set `EGRESSVIEW_PUBLIC_URL`, and configure an exact `EGRESSVIEW_TRUST_PROXY` IP/CIDR allowlist. Never trust forwarded headers from every source. Use a strong unique login password, keep EgressView updated, and avoid sharing access with untrusted users. Security reports for internet-accessible deployments are in scope.
 
+Signed portable releases use an Ed25519 signature over the archive checksum,
+plus a CycloneDX SBOM and per-file manifest. The public key distributed beside
+an archive must be matched to a fingerprint obtained through a separate trusted
+release channel. CI's ephemeral signing key proves the mechanism only and is
+not an official release identity. Installation requires temporary npm-registry
+access; runtime Internet access can then be disabled with
+`EGRESSVIEW_OFFLINE_MODE=true`.
+
 ## Out of scope
 
 - Vulnerabilities in the monitored routers' firmware (report those to the vendor)
