@@ -202,6 +202,7 @@ Start with the smallest path that matches your network, then add sources later f
 | ☐ | (Optional) AI assistant access via MCP (AWS Kiro, Anthropic Claude, Anysphere Cursor…) | [Setup guide →](docs/setup-mcp.md) |
 | ☐ | Choose local, private, public, or air-gapped deployment boundaries | [Deployment profiles →](docs/deployment-profiles.md) |
 | ☐ | Run with no internet access at all (`EGRESSVIEW_OFFLINE_MODE=true`) | [Offline mode →](docs/deployment-profiles.md#offline-mode) |
+| ☐ | Install a signed portable release, then run it offline | [Signed distribution →](docs/offline-distribution.md) |
 
 ### Step 2 — Install and launch
 

@@ -201,6 +201,7 @@ DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start
 | ☐ | （任意）AI アシスタント連携（AWS Kiro・Anthropic Claude・Anysphere Cursor 等） | [設定ガイド →](docs/setup-mcp.ja.md) |
 | ☐ | local、private、public、完全閉域の境界を選択 | [Deployment profile →](docs/deployment-profiles.ja.md) |
 | ☐ | インターネット非接続で運用（`EGRESSVIEW_OFFLINE_MODE=true`） | [オフラインモード →](docs/deployment-profiles.ja.md#オフラインモード) |
+| ☐ | 署名済みportable releaseをinstall後、オフライン運用 | [署名付きdistribution →](docs/offline-distribution.ja.md) |
 
 ### Step 2 — インストールと起動
 

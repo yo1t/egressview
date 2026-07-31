@@ -64,7 +64,7 @@ Private networkも既定では信頼しません。private HTTPでbrowser管理t
 | Browser OIDC | 現行の任意機能はGoogle | local管理者、将来の汎用内部OIDC | local管理者 |
 | MCP OAuth | issuer依存でCSP非依存 | self-host OIDC + 内部CA | issuer/JWKSが全て内部ならprivate OAuth |
 | AI Insights | Ollamaまたはcloud provider | Ollama/private互換endpoint | local modelのみ |
-| Package/image更新 | package/image registry | 内部mirror | Phase 4で署名済みbundle、checksum、lock、SBOM |
+| Package更新 | install/upgrade時のnpm registry | 内部npm mirror | 署名済みsource bundle。lock済み依存のinstall後はoffline稼働 |
 
 Claude CodeやGitHub Copilot等のcloud agentは、MCP endpointがprivateでもagent自身の
 Internet接続を必要とします。完全閉域ではMCP対応local agentとOllama等のlocal
@@ -118,6 +118,11 @@ RDAP、GeoIP、脅威フィード、WiresharkのOUIベンダーデータベー�
 ### フロントエンドのasset
 
 D3、TopoJSON、world atlasは固定版を同一オリジンから配信し、CSPは外部オリジンを一切許可しません。オフラインモードでのページ読み込みで外部リクエストは発生しません。
+
+Install/upgradeとruntime隔離は別の境界です。署名付きportable source bundleは、
+native依存を導入先OS/CPUへ合わせるため、一時的にnpm registryへ接続します。
+[署名付きdistribution guide](offline-distribution.ja.md)を参照してください。
+Install完了後、service起動前にoffline modeを有効化して外向き接続を遮断します。
 
 ## Portability gate
 
