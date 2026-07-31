@@ -71,6 +71,8 @@ SNS/
 *.key
 id_rsa*
 id_ed25519*
+# Only reviewed release public keys may be tracked; private key patterns stay ignored.
+!release-signing/*.pub.pem
 # ASH セキュリティスキャン: 出力はローカル専用だが、設定（suppression 込み）は
 # CI ゲートで再現するためにトラッキングする。
 # 親ディレクトリごと除外すると negation が効かないため .ash/* で中身を除外する。

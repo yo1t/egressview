@@ -80,6 +80,32 @@ describe('AI notification scheduling helpers', () => {
       ['danger', 'new-destination', 'increase']);
   });
 
+  it('runs only the independently enabled threat rules', () => {
+    const facts = {
+      current: { danger: 2, warn: 4 },
+      previous: { danger: 0, warn: 1 },
+    };
+    const config = {
+      rules: { danger: false, newDestination: true, increase: false },
+      threat: { dangerThreshold: 1, newDestinationsThreshold: 1, increaseThreshold: 3 },
+    };
+    assert.deepEqual(threatCauses(facts, ['bad.example'], [], config), ['new-destination']);
+  });
+
+  it('expands legacy threat.enabled into all three threat rules', () => {
+    const legacy = service().instance;
+    const config = legacy.configure({
+      frequency: 'daily',
+      threat: { enabled: true },
+    });
+    assert.deepEqual(config.rules, {
+      scheduled: true,
+      danger: true,
+      newDestination: true,
+      increase: true,
+    });
+  });
+
   it('uses exact local-day bounds across daylight-saving changes', () => {
     const spring = dayBounds(Date.parse('2026-03-08T16:00:00Z'), 'America/New_York');
     assert.equal(spring.from, Date.parse('2026-03-08T05:00:00Z'));

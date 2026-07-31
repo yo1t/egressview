@@ -815,6 +815,7 @@ test('AI event notification settings load and a test event appears in history', 
     timezone: 'Asia/Tokyo',
     rangeHours: 168,
     destinations: { ui: true, slack: false },
+    rules: { scheduled: true, danger: true, newDestination: true, increase: true },
     threat: {
       enabled: true,
       dangerThreshold: 1,
@@ -862,11 +863,17 @@ test('AI event notification settings load and a test event appears in history', 
   await authPage(page);
   await page.click('#btn-ai');
   await page.click('#ai-notification-open-btn');
-  await expect(page.locator('#ai-notification-modal')).not.toHaveClass(/is-hidden/);
+  await expect(page.locator('#settings-overlay')).toBeVisible();
+  await expect(page.locator('#pane-notifications')).toHaveClass(/active/);
   await expect(page.locator('#ai-notification-frequency')).toHaveValue('weekly');
   await expect(page.locator('#ai-notification-weekday')).toHaveValue('1');
   await expect(page.locator('#ai-notification-time')).toHaveValue('09:30');
-  await expect(page.locator('#ai-notification-threat-enabled')).toBeChecked();
+  await expect(page.locator('#ai-notification-rule-scheduled')).toBeChecked();
+  await expect(page.locator('#ai-notification-rule-danger')).toBeChecked();
+  await expect(page.locator('#ai-notification-rule-new-destination')).toBeChecked();
+  await expect(page.locator('#ai-notification-rule-increase')).toBeChecked();
+
+  await page.locator('#ai-notification-rule-new-destination').uncheck();
 
   await page.locator('#ai-notification-limit').fill('4');
   await page.click('#ai-notification-save-btn');
@@ -875,18 +882,54 @@ test('AI event notification settings load and a test event appears in history', 
   expect(configSaveRequests).toBe(0);
   await page.click('#ai-notification-confirm-btn');
   await expect(page.locator('#ai-notification-confirm-modal')).toHaveClass(/is-hidden/);
-  await expect(page.locator('#ai-notification-modal')).toHaveClass(/is-hidden/);
   expect(configSaveRequests).toBe(1);
+  expect(config.rules.newDestination).toBe(false);
+  await expect(page.locator('#ai-notification-status')).toContainText(/保存|Saved/);
 
-  await page.click('#ai-notification-open-btn');
   await expect(page.locator('#ai-notification-limit')).toHaveValue('4');
+  await expect(page.locator('#ai-notification-rule-new-destination')).not.toBeChecked();
   await page.click('#ai-notification-test-btn');
   await expect(page.locator('#ai-notification-events .ai-notification-event')).toHaveCount(1);
   await expect(page.locator('#ai-notification-events')).toContainText('<script>notification test</script>');
   await expect(page.locator('#ai-notification-events script')).toHaveCount(0);
-  await page.click('#ai-notification-close-btn');
-  await expect(page.locator('#ai-notification-modal')).toHaveClass(/is-hidden/);
+  await page.click('#settings-close');
+  await expect(page.locator('#settings-overlay')).toBeHidden();
   expect(fatalErrors(errors), `AI notification errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
+});
+
+test('mobile notification settings keep all event rules inside the viewport', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route(/\/api\/ai\/notification-config$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      config: {
+        frequency: 'daily', weekday: 1, time: '09:30', timezone: 'Asia/Tokyo', rangeHours: 24,
+        destinations: { ui: true, slack: false },
+        rules: { scheduled: true, danger: true, newDestination: false, increase: true },
+        threat: { enabled: true, dangerThreshold: 1, newDestinationsThreshold: 2, increaseThreshold: 3 },
+        dailyLimit: 3, cooldownMinutes: 60, automationConsent: false,
+      },
+      status: { provider: 'ollama' },
+    }),
+  }));
+  await page.route(/\/api\/ai\/notification-events(?:\?|$)/, route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ events: [] }),
+  }));
+  await authPage(page);
+  await page.click('#btn-ai');
+  await page.click('#ai-notification-open-btn');
+
+  await expect(page.locator('#pane-notifications')).toHaveClass(/active/);
+  for (const id of ['ai-notification-rule-scheduled', 'ai-notification-rule-danger',
+    'ai-notification-rule-new-destination', 'ai-notification-rule-increase']) {
+    await expect(page.locator(`#${id}`)).toBeVisible();
+  }
+  expect(await page.locator('#pane-notifications').evaluate(element => (
+    element.scrollWidth <= element.clientWidth
+  ))).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test('AI chat keeps a persisted question visible when provider inference fails', async ({ page }) => {
@@ -1497,6 +1540,8 @@ test('settings tabs save and connection buttons work without console errors', as
   await expect(page.locator('#general-status')).toBeVisible();
   await expect(page.locator('#general-status')).toContainText(/保存|Saved|✓/);
 
+  await page.click('.settings-tab[data-tab="notifications"]');
+  await expect(page.locator('#pane-notifications')).toHaveClass(/active/);
   await expect(page.locator('#s-slack-enabled')).toBeChecked();
   await expect(page.locator('#s-slack-token')).toHaveAttribute('placeholder', /保存済み|Saved/);
   await expect(page.locator('#s-slack-username')).toHaveValue('Saved User');

@@ -135,7 +135,7 @@ async function loadSlackSettings() {
   }
 }
 
-document.querySelector('.settings-tab[data-tab="general"]')?.addEventListener('click', loadSlackSettings);
+document.querySelector('.settings-tab[data-tab="notifications"]')?.addEventListener('click', loadSlackSettings);
 loadSlackSettings();
 
 return { loadSlackSettings };

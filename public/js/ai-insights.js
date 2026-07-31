@@ -4,6 +4,7 @@ import { getTimeRange } from './connections-panel.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 import { switchView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { setLogThreatFilter } from './log.js?v=__ASSET_VERSION__';
+import { openSettings } from './settings.js?v=__ASSET_VERSION__';
 
 const REFRESH_MS = 15_000;
 const METRICS = ['connections', 'devices', 'destinations', 'warn', 'danger'];
@@ -446,19 +447,73 @@ function setNotificationStatus(message, failed = false) {
   status.classList.toggle('error', failed);
 }
 
+function nextScheduledRun(config, reference = new Date()) {
+  if (!config.rules?.scheduled || config.frequency === 'off') return null;
+  const [hour, minute] = config.time.split(':').map(Number);
+  const candidate = new Date(reference);
+  candidate.setSeconds(0, 0);
+  candidate.setHours(hour, minute, 0, 0);
+  if (config.frequency === 'daily' && candidate <= reference) candidate.setDate(candidate.getDate() + 1);
+  if (config.frequency === 'weekly') {
+    let days = (config.weekday - candidate.getDay() + 7) % 7;
+    if (days === 0 && candidate <= reference) days = 7;
+    candidate.setDate(candidate.getDate() + days);
+  }
+  return candidate;
+}
+
+function renderNotificationBrief(config, events = []) {
+  const brief = document.getElementById('ai-notification-brief');
+  const enabled = Object.values(config.rules || {}).filter(Boolean).length;
+  const nextRun = nextScheduledRun(config);
+  const last = events[0];
+  brief.textContent = tVars('ai.notification.brief', {
+    enabled,
+    next: nextRun ? nextRun.toLocaleString() : t('ai.notification.summary.none'),
+    last: last ? t(`ai.notification.status.${last.status}`) : t('ai.notification.summary.none'),
+  });
+}
+
 function updateNotificationFrequencyFields() {
-  const weekly = document.getElementById('ai-notification-frequency').value === 'weekly';
+  const scheduled = document.getElementById('ai-notification-rule-scheduled').checked;
+  const frequency = document.getElementById('ai-notification-frequency');
+  frequency.disabled = !scheduled;
+  if (scheduled && frequency.value === 'off') frequency.value = 'daily';
+  const weekly = scheduled && frequency.value === 'weekly';
   document.getElementById('ai-notification-weekday-group').classList.toggle('is-hidden', !weekly);
+  document.getElementById('ai-notification-weekday').disabled = !weekly;
+  document.getElementById('ai-notification-time').disabled = !scheduled;
+}
+
+function updateNotificationRuleFields() {
+  updateNotificationFrequencyFields();
+  const mappings = [
+    ['ai-notification-rule-danger', 'ai-notification-danger'],
+    ['ai-notification-rule-new-destination', 'ai-notification-new-dst'],
+    ['ai-notification-rule-increase', 'ai-notification-increase'],
+  ];
+  for (const [ruleId, inputId] of mappings) {
+    document.getElementById(inputId).disabled = !document.getElementById(ruleId).checked;
+  }
 }
 
 function fillNotificationConfig(config) {
+  const rules = config.rules || {
+    scheduled: config.frequency !== 'off',
+    danger: config.threat.enabled,
+    newDestination: config.threat.enabled,
+    increase: config.threat.enabled,
+  };
   document.getElementById('ai-notification-frequency').value = config.frequency;
   document.getElementById('ai-notification-weekday').value = String(config.weekday);
   document.getElementById('ai-notification-time').value = config.time;
   document.getElementById('ai-notification-range').value = String(config.rangeHours);
   document.getElementById('ai-notification-ui').checked = config.destinations.ui;
   document.getElementById('ai-notification-slack').checked = config.destinations.slack;
-  document.getElementById('ai-notification-threat-enabled').checked = config.threat.enabled;
+  document.getElementById('ai-notification-rule-scheduled').checked = rules.scheduled;
+  document.getElementById('ai-notification-rule-danger').checked = rules.danger;
+  document.getElementById('ai-notification-rule-new-destination').checked = rules.newDestination;
+  document.getElementById('ai-notification-rule-increase').checked = rules.increase;
   document.getElementById('ai-notification-danger').value = String(config.threat.dangerThreshold);
   document.getElementById('ai-notification-new-dst').value = String(config.threat.newDestinationsThreshold);
   document.getElementById('ai-notification-increase').value = String(config.threat.increaseThreshold);
@@ -468,10 +523,16 @@ function fillNotificationConfig(config) {
   document.getElementById('ai-notification-timezone').textContent = tVars('ai.notification.timezone', {
     timezone: config.timezone,
   });
-  updateNotificationFrequencyFields();
+  updateNotificationRuleFields();
 }
 
 function notificationConfigFromForm() {
+  const rules = {
+    scheduled: document.getElementById('ai-notification-rule-scheduled').checked,
+    danger: document.getElementById('ai-notification-rule-danger').checked,
+    newDestination: document.getElementById('ai-notification-rule-new-destination').checked,
+    increase: document.getElementById('ai-notification-rule-increase').checked,
+  };
   return {
     frequency: document.getElementById('ai-notification-frequency').value,
     weekday: Number(document.getElementById('ai-notification-weekday').value),
@@ -482,8 +543,9 @@ function notificationConfigFromForm() {
       ui: document.getElementById('ai-notification-ui').checked,
       slack: document.getElementById('ai-notification-slack').checked,
     },
+    rules,
     threat: {
-      enabled: document.getElementById('ai-notification-threat-enabled').checked,
+      enabled: rules.danger || rules.newDestination || rules.increase,
       dangerThreshold: Number(document.getElementById('ai-notification-danger').value),
       newDestinationsThreshold: Number(document.getElementById('ai-notification-new-dst').value),
       increaseThreshold: Number(document.getElementById('ai-notification-increase').value),
@@ -502,10 +564,19 @@ function notificationSummaryRows(config) {
   const rows = [
     {
       label: t('ai.notification.summary.schedule'),
-      value: t(`ai.notification.frequency.${config.frequency}`),
+      value: t(config.rules.scheduled
+        ? `ai.notification.frequency.${config.frequency}`
+        : 'ai.notification.summary.disabled'),
     },
   ];
-  if (config.frequency !== 'off') {
+  const enabledRules = [
+    config.rules.scheduled ? t('ai.notification.rule.scheduled') : '',
+    config.rules.danger ? t('ai.notification.rule.danger') : '',
+    config.rules.newDestination ? t('ai.notification.rule.newDestination') : '',
+    config.rules.increase ? t('ai.notification.rule.increase') : '',
+  ].filter(Boolean).join(', ') || t('ai.notification.summary.none');
+  rows.unshift({ label: t('ai.notification.summary.events'), value: enabledRules });
+  if (config.rules.scheduled && config.frequency !== 'off') {
     if (config.frequency === 'weekly') {
       rows.push({
         label: t('ai.notification.weekday'),
@@ -525,12 +596,12 @@ function notificationSummaryRows(config) {
     { label: t('ai.notification.summary.destinations'), value: destinations },
     {
       label: t('ai.notification.summary.threat'),
-      value: t(config.threat.enabled
+      value: t((config.rules.danger || config.rules.newDestination || config.rules.increase)
         ? 'ai.notification.summary.enabled'
         : 'ai.notification.summary.disabled'),
     },
   );
-  if (config.threat.enabled) {
+  if (config.rules.danger || config.rules.newDestination || config.rules.increase) {
     rows.push({
       label: t('ai.notification.summary.thresholds'),
       value: tVars('ai.notification.summary.thresholdValues', {
@@ -624,9 +695,7 @@ async function loadNotificationEvents() {
   renderNotificationEvents(body.events || []);
 }
 
-async function openNotificationModal() {
-  const modal = document.getElementById('ai-notification-modal');
-  modal.classList.remove('is-hidden');
+async function loadNotificationSettings() {
   setNotificationStatus('');
   try {
     const response = await apiFetch(`${_BASE}/api/ai/notification-config`);
@@ -634,10 +703,21 @@ async function openNotificationModal() {
     if (!response.ok) throw new Error(body.error || t('ai.notification.loadFailed'));
     aiNotificationProvider = body.status?.provider || 'disabled';
     fillNotificationConfig(body.config);
-    await loadNotificationEvents();
+    const eventsResponse = await apiFetch(`${_BASE}/api/ai/notification-events?limit=10`);
+    const eventsBody = await eventsResponse.json().catch(() => ({}));
+    if (!eventsResponse.ok) throw new Error(eventsBody.error || t('ai.notification.loadFailed'));
+    const events = eventsBody.events || [];
+    renderNotificationEvents(events);
+    renderNotificationBrief(body.config, events);
   } catch (cause) {
     setNotificationStatus(cause.message || t('ai.notification.loadFailed'), true);
   }
+}
+
+async function openNotificationSettings() {
+  openSettings('notifications');
+  await loadNotificationSettings();
+  document.getElementById('ai-notification-settings').focus?.();
 }
 
 function saveNotificationConfig() {
@@ -665,9 +745,14 @@ async function confirmNotificationConfig() {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || t('ai.notification.saveFailed'));
-    fillNotificationConfig(body.config);
+    const verifyResponse = await apiFetch(`${_BASE}/api/ai/notification-config`);
+    const verified = await verifyResponse.json().catch(() => ({}));
+    if (!verifyResponse.ok || !verified.config) {
+      throw new Error(verified.error || t('ai.notification.saveFailed'));
+    }
+    fillNotificationConfig(verified.config);
     closeNotificationConfirmation();
-    document.getElementById('ai-notification-modal').classList.add('is-hidden');
+    setNotificationStatus(t('ai.notification.saved'));
   } catch (cause) {
     status.textContent = cause.message || t('ai.notification.saveFailed');
     status.className = 'settings-status is-visible err';
@@ -711,6 +796,7 @@ function startAiInsights() {
   refreshAiInsights();
   updateProviderLabel();
   loadConversations().catch(() => {});
+  loadNotificationSettings().catch(() => {});
   if (!refreshTimer) refreshTimer = setInterval(refreshAiInsights, REFRESH_MS);
 }
 
@@ -725,12 +811,14 @@ function initAiInsights() {
   document.getElementById('ai-analyze-btn').addEventListener('click', analyzeCurrentRange);
   document.getElementById('ai-cancel-btn').addEventListener('click', () => analysisController?.abort());
   document.getElementById('ai-chat-send-btn').addEventListener('click', sendChatMessage);
-  document.getElementById('ai-notification-open-btn').addEventListener('click', openNotificationModal);
-  document.getElementById('ai-notification-close-btn').addEventListener('click', () => {
-    closeNotificationConfirmation();
-    document.getElementById('ai-notification-modal').classList.add('is-hidden');
-  });
+  document.getElementById('ai-notification-open-btn').addEventListener('click', openNotificationSettings);
+  document.querySelector('.settings-tab[data-tab="notifications"]')
+    ?.addEventListener('click', loadNotificationSettings);
   document.getElementById('ai-notification-frequency').addEventListener('change', updateNotificationFrequencyFields);
+  for (const id of ['ai-notification-rule-scheduled', 'ai-notification-rule-danger',
+    'ai-notification-rule-new-destination', 'ai-notification-rule-increase']) {
+    document.getElementById(id).addEventListener('change', updateNotificationRuleFields);
+  }
   document.getElementById('ai-notification-save-btn').addEventListener('click', saveNotificationConfig);
   document.getElementById('ai-notification-confirm-btn').addEventListener('click', confirmNotificationConfig);
   document.getElementById('ai-notification-confirm-cancel-btn').addEventListener('click', closeNotificationConfirmation);
@@ -767,11 +855,12 @@ export {
   deltaSummary,
   fillNotificationConfig,
   loadConversations,
-  openNotificationModal,
+  openNotificationSettings,
   renderAiUsage,
   renderChatMessages,
   renderFacts,
   renderNotificationEvents,
+  renderNotificationBrief,
   renderNotificationSummary,
   refreshAiInsights,
   refreshAiUsage,

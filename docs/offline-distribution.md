@@ -33,6 +33,8 @@ openssl pkey -pubin -in egressview-offline-VERSION.tar.gz.pub.pem \
 
 CI uses an ephemeral key only to test the signing path. An official release
 must use the protected project release key and publish its pinned fingerprint.
+See the [release signing key procedure](release-signing.md) for key generation,
+storage, publication, rotation, and compromise response.
 
 ## Verify before extraction
 

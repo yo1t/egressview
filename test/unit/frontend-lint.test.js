@@ -376,19 +376,27 @@ describe('Frontend TDZ lint', () => {
       'general, password, session, token, and Slack settings should use CSS classes');
   });
 
-  it('shows General as the first and default settings tab with Slack inside it', () => {
+  it('shows General first and keeps Slack in the dedicated notification tab', () => {
     const navStart = html.indexOf('<nav class="settings-tabs">');
     const navEnd = html.indexOf('</nav>', navStart);
     const nav = html.slice(navStart, navEnd);
-    assert.ok(nav.indexOf('data-tab="general"') < nav.indexOf('data-tab="l3l4"'));
+    assert.ok(nav.indexOf('data-tab="general"') < nav.indexOf('data-tab="notifications"'));
+    assert.ok(nav.indexOf('data-tab="notifications"') < nav.indexOf('data-tab="l3l4"'));
     assert.match(nav, /class="settings-tab active" data-tab="general"/);
 
     const generalStart = html.indexOf('<div class="settings-pane active" id="pane-general">');
+    const notificationStart = html.indexOf('<div class="settings-pane" id="pane-notifications">');
     const threatStart = html.indexOf('<div class="settings-pane" id="pane-threat">');
-    const general = html.slice(generalStart, threatStart);
+    const general = html.slice(generalStart, notificationStart);
+    const notifications = html.slice(notificationStart, threatStart);
     const threatEnd = html.indexOf('<!-- AI provider settings -->', threatStart);
     const threat = html.slice(threatStart, threatEnd);
-    assert.match(general, /id="slack-save-btn"/);
+    assert.doesNotMatch(general, /id="slack-save-btn"/);
+    assert.match(notifications, /id="slack-save-btn"/);
+    assert.match(notifications, /id="ai-notification-rule-scheduled"/);
+    assert.match(notifications, /id="ai-notification-rule-danger"/);
+    assert.match(notifications, /id="ai-notification-rule-new-destination"/);
+    assert.match(notifications, /id="ai-notification-rule-increase"/);
     assert.doesNotMatch(threat, /id="slack-save-btn"/);
   });
 
