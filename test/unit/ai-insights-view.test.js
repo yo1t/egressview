@@ -197,6 +197,7 @@ describe('AI insights view', () => {
       timezone: 'Asia/Tokyo',
       rangeHours: 168,
       destinations: { ui: true, slack: true },
+      rules: { scheduled: true, danger: true, newDestination: false, increase: true },
       threat: {
         enabled: true,
         dangerThreshold: 1,
@@ -213,7 +214,6 @@ describe('AI insights view', () => {
         return { ok: true, json: async () => ({ config }) };
       },
     });
-    get('ai-notification-modal').classList.remove('is-hidden');
     get('ai-notification-confirm-modal').classList.add('is-hidden');
     context.fillNotificationConfig(config);
 
@@ -221,16 +221,17 @@ describe('AI insights view', () => {
 
     assert.equal(calls.length, 0);
     assert.equal(get('ai-notification-confirm-modal').classList.contains('is-hidden'), false);
-    assert.equal(get('ai-notification-summary').children.length, 9);
-    assert.match(get('ai-notification-summary').children[0].children[1].textContent, /weekly/);
+    assert.equal(get('ai-notification-summary').children.length, 10);
+    assert.match(get('ai-notification-summary').children[0].children[1].textContent, /scheduled/);
 
     await context.confirmNotificationConfig();
 
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 2);
     assert.equal(calls[0].url, '/api/ai/notification-config');
     assert.equal(calls[0].options.method, 'POST');
+    assert.equal(calls[1].url, '/api/ai/notification-config');
     assert.equal(get('ai-notification-confirm-modal').classList.contains('is-hidden'), true);
-    assert.equal(get('ai-notification-modal').classList.contains('is-hidden'), true);
+    assert.equal(get('ai-notification-status').textContent, 'ai.notification.saved');
   });
 
   it('keeps the AI notification confirmation open when persistence fails', async () => {
@@ -241,6 +242,7 @@ describe('AI insights view', () => {
       timezone: 'UTC',
       rangeHours: 24,
       destinations: { ui: true, slack: false },
+      rules: { scheduled: false, danger: false, newDestination: false, increase: false },
       threat: {
         enabled: false,
         dangerThreshold: 1,
@@ -257,7 +259,6 @@ describe('AI insights view', () => {
         json: async () => ({ error: 'disk full' }),
       }),
     });
-    get('ai-notification-modal').classList.remove('is-hidden');
     get('ai-notification-confirm-modal').classList.add('is-hidden');
     context.fillNotificationConfig(config);
     context.saveNotificationConfig();
@@ -265,7 +266,6 @@ describe('AI insights view', () => {
     await context.confirmNotificationConfig();
 
     assert.equal(get('ai-notification-confirm-modal').classList.contains('is-hidden'), false);
-    assert.equal(get('ai-notification-modal').classList.contains('is-hidden'), false);
     assert.equal(get('ai-notification-confirm-status').textContent, 'disk full');
     assert.equal(get('ai-notification-confirm-status').classList.contains('err'), true);
   });

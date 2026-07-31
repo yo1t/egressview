@@ -15,6 +15,12 @@ const configSchema = z.object({
     ui: z.boolean(),
     slack: z.boolean(),
   }).strict().refine(value => value.ui || value.slack, 'At least one destination is required'),
+  rules: z.object({
+    scheduled: z.boolean(),
+    danger: z.boolean(),
+    newDestination: z.boolean(),
+    increase: z.boolean(),
+  }).strict().optional(),
   threat: z.object({
     enabled: z.boolean(),
     dangerThreshold: z.number().int().min(1).max(1000),
@@ -54,8 +60,18 @@ module.exports = function aiNotificationRoutes({ requireAdmin, aiNotificationSer
     const parsed = parseRequest(configSchema, req.body, res);
     if (!parsed.ok) return;
     const previous = aiNotificationService.exportConfig();
-    const provider = aiNotificationService.publicStatus().provider;
-    const automated = parsed.data.frequency !== 'off' || parsed.data.threat.enabled;
+    const serviceStatus = aiNotificationService.publicStatus();
+    const provider = serviceStatus.provider;
+    const rules = parsed.data.rules || {
+      scheduled: parsed.data.frequency !== 'off',
+      danger: parsed.data.threat.enabled,
+      newDestination: parsed.data.threat.enabled,
+      increase: parsed.data.threat.enabled,
+    };
+    const automated = Object.values(rules).some(Boolean);
+    if (parsed.data.destinations.slack && serviceStatus.slackReady === false) {
+      return res.status(400).json({ error: 'Slack notification settings are incomplete' });
+    }
     if (automated && ['anthropic', 'openai', 'bedrock'].includes(provider)
       && !parsed.data.automationConsent) {
       return res.status(400).json({ error: 'Cloud AI automation consent is required' });
