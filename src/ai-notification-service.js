@@ -13,6 +13,12 @@ const DEFAULT_CONFIG = Object.freeze({
   timezone: 'Asia/Tokyo',
   rangeHours: 168,
   destinations: { ui: true, slack: false },
+  rules: {
+    scheduled: false,
+    danger: false,
+    newDestination: false,
+    increase: false,
+  },
   threat: {
     enabled: false,
     dangerThreshold: 1,
@@ -27,7 +33,18 @@ const DEFAULT_CONFIG = Object.freeze({
 
 function normalizeConfig(input = {}) {
   const destinations = { ...DEFAULT_CONFIG.destinations, ...(input.destinations || {}) };
-  const threat = { ...DEFAULT_CONFIG.threat, ...(input.threat || {}) };
+  const legacyThreatEnabled = input.threat?.enabled ?? DEFAULT_CONFIG.threat.enabled;
+  const rules = {
+    scheduled: input.rules?.scheduled ?? ((input.frequency ?? DEFAULT_CONFIG.frequency) !== 'off'),
+    danger: input.rules?.danger ?? legacyThreatEnabled,
+    newDestination: input.rules?.newDestination ?? legacyThreatEnabled,
+    increase: input.rules?.increase ?? legacyThreatEnabled,
+  };
+  const threat = {
+    ...DEFAULT_CONFIG.threat,
+    ...(input.threat || {}),
+    enabled: rules.danger || rules.newDestination || rules.increase,
+  };
   const normalized = {
     frequency: input.frequency ?? DEFAULT_CONFIG.frequency,
     weekday: input.weekday ?? DEFAULT_CONFIG.weekday,
@@ -35,6 +52,7 @@ function normalizeConfig(input = {}) {
     timezone: input.timezone ?? DEFAULT_CONFIG.timezone,
     rangeHours: input.rangeHours ?? DEFAULT_CONFIG.rangeHours,
     destinations,
+    rules,
     threat,
     dailyLimit: input.dailyLimit ?? DEFAULT_CONFIG.dailyLimit,
     cooldownMinutes: input.cooldownMinutes ?? DEFAULT_CONFIG.cooldownMinutes,
@@ -42,6 +60,12 @@ function normalizeConfig(input = {}) {
     automationProvider: input.automationProvider ?? DEFAULT_CONFIG.automationProvider,
   };
   if (!['off', 'daily', 'weekly'].includes(normalized.frequency)) throw new Error('Invalid notification frequency');
+  if (rules.scheduled && normalized.frequency === 'off') {
+    throw new Error('Scheduled notification frequency is required');
+  }
+  if (Object.values(rules).some(value => typeof value !== 'boolean')) {
+    throw new Error('Invalid notification rule');
+  }
   if (!Number.isInteger(normalized.weekday) || normalized.weekday < 0 || normalized.weekday > 6) {
     throw new Error('Invalid notification weekday');
   }
@@ -128,13 +152,16 @@ function scheduleKey(config, now) {
 
 function threatCauses(facts, currentThreatDestinations, previousThreatDestinations, config) {
   const causes = [];
-  if (facts.current.danger >= config.threat.dangerThreshold) causes.push('danger');
+  if (config.rules?.danger !== false
+    && facts.current.danger >= config.threat.dangerThreshold) causes.push('danger');
   const previous = new Set(previousThreatDestinations);
   const newCount = currentThreatDestinations.filter(dst => !previous.has(dst)).length;
-  if (newCount >= config.threat.newDestinationsThreshold) causes.push('new-destination');
+  if (config.rules?.newDestination !== false
+    && newCount >= config.threat.newDestinationsThreshold) causes.push('new-destination');
   const currentTotal = facts.current.warn + facts.current.danger;
   const previousTotal = facts.previous.warn + facts.previous.danger;
-  if (currentTotal - previousTotal >= config.threat.increaseThreshold) causes.push('increase');
+  if (config.rules?.increase !== false
+    && currentTotal - previousTotal >= config.threat.increaseThreshold) causes.push('increase');
   return causes;
 }
 
@@ -150,7 +177,14 @@ function createAiNotificationService(deps) {
   let threatCheckQueued = false;
 
   function configure(next = {}) {
-    const merged = normalizeConfig({ ...config, ...next });
+    const mergedInput = { ...config, ...next };
+    // A persisted pre-P2-62 config has no rules object. Let normalizeConfig
+    // deterministically expand frequency/threat.enabled instead of inheriting defaults.
+    if (!Object.hasOwn(next, 'rules')
+      && (Object.hasOwn(next, 'frequency') || Object.hasOwn(next, 'threat'))) {
+      delete mergedInput.rules;
+    }
+    const merged = normalizeConfig(mergedInput);
     // Throws for invalid IANA timezone names.
     localParts(now(), merged.timezone);
     config = merged;
@@ -168,10 +202,12 @@ function createAiNotificationService(deps) {
   }
 
   function publicStatus() {
+    const slack = notifier?.getConfig?.() || {};
     return {
       running,
       provider: aiProvider.getPublicConfig().provider,
       automationReady: automationAllowed(),
+      slackReady: !!(slack.enabled && slack.tokenSet && slack.userId),
     };
   }
 
@@ -327,6 +363,7 @@ function createAiNotificationService(deps) {
   }
 
   async function tick() {
+    if (!config.rules.scheduled) return;
     const key = scheduleKey(config, now());
     if (!key || running || !automationAllowed() || history.hasAiNotificationTriggerKey(key)) return;
     await run({ triggerType: 'scheduled', triggerKey: key, cause: config.frequency });

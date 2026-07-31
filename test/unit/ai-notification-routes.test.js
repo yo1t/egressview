@@ -81,6 +81,7 @@ describe('AI notification routes', () => {
       timezone: 'Asia/Tokyo',
       rangeHours: 168,
       destinations: { ui: true, slack: false },
+      rules: { scheduled: true, danger: true, newDestination: false, increase: true },
       threat: {
         enabled: true,
         dangerThreshold: 1,
@@ -94,6 +95,7 @@ describe('AI notification routes', () => {
     const result = await request(makeApp(), 'POST', '/api/ai/notification-config', payload);
     assert.equal(result.status, 200);
     assert.equal(result.body.config.frequency, 'weekly');
+    assert.equal(result.body.config.rules.newDestination, false);
   });
 
   it('rejects unknown fields and missing destinations', async () => {
@@ -110,6 +112,17 @@ describe('AI notification routes', () => {
     const result = await request(app, 'POST', '/api/ai/notification-config', current);
     assert.equal(result.status, 400);
     assert.match(result.body.error, /consent/i);
+  });
+
+  it('rejects Slack delivery when the saved channel is incomplete', async () => {
+    const app = makeApp({ service: {
+      publicStatus: () => ({ running: false, provider: 'ollama', slackReady: false }),
+    } });
+    const current = (await request(app, 'GET', '/api/ai/notification-config')).body.config;
+    current.destinations = { ui: true, slack: true };
+    const result = await request(app, 'POST', '/api/ai/notification-config', current);
+    assert.equal(result.status, 400);
+    assert.match(result.body.error, /Slack notification settings are incomplete/);
   });
 
   it('does not expose or reuse consent bound to another provider', async () => {

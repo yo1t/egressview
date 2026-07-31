@@ -30,7 +30,8 @@ openssl pkey -pubin -in egressview-offline-VERSION.tar.gz.pub.pem \
 ```
 
 CIの鍵は署名経路の試験専用で毎回破棄します。正式releaseは保護したproject release
-鍵を使い、固定fingerprintを別経路でも公開する必要があります。
+鍵を使い、固定fingerprintを別経路でも公開する必要があります。鍵生成、保管、公開、
+rotation、漏えい対応は[release署名鍵の運用手順](release-signing.ja.md)に従います。
 
 ## 展開前の検証
 

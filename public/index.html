@@ -36,6 +36,10 @@
           <span class="tab-badge" data-i18n="settings.tab.general">一般</span>
           <span class="tab-name">General</span>
         </button>
+        <button class="settings-tab" data-tab="notifications">
+          <span class="tab-badge">🔔</span>
+          <span class="tab-name" data-i18n="settings.tab.notifications">通知</span>
+        </button>
         <button class="settings-tab" data-tab="l3l4">
           <span class="tab-badge">L3/L4</span>
           <span class="tab-name" data-i18n="settings.tab.l3l4">ルーター</span>
@@ -297,52 +301,142 @@
           <button class="connect-btn settings-inline-button token-regenerate-btn" id="token-regen-btn" data-i18n="settings.token.regen">トークンを再生成</button>
           <div class="settings-status" id="token-status"></div>
 
+        </div>
+        <!-- Notification settings -->
+        <div class="settings-pane" id="pane-notifications">
+          <div class="pane-title pane-title-static" data-i18n="settings.notifications.section">🔔 通知</div>
+          <p class="settings-copy settings-copy-section" data-i18n="settings.notifications.desc">
+            通知チャネルと、生成AIを実行するイベントルールを一か所で管理します。
+          </p>
+
+          <section aria-labelledby="slack-settings-title">
+            <div id="slack-settings-title" class="pane-title settings-subsection-title settings-subsection-title-wide" data-i18n="settings.slack.section">Slack通知</div>
+            <p class="settings-copy settings-copy-section" data-i18n="settings.slack.desc">
+              脅威検出とAIイベントをSlack DMで受け取ります。
+            </p>
+            <div class="form-group">
+              <label class="settings-check-label">
+                <input type="checkbox" id="s-slack-enabled" class="settings-checkbox-accent">
+                <span data-i18n="settings.slack.enable">Slack通知を有効化</span>
+              </label>
+            </div>
+            <div class="form-group settings-form-top-10">
+              <label class="form-label" data-i18n="settings.slack.token">Bot Token</label>
+              <input type="password" id="s-slack-token" class="form-input" placeholder="xoxb-..." autocomplete="off">
+              <button class="connect-btn slack-small-button slack-verify-button" id="slack-verify-btn" data-i18n="settings.slack.verify">接続確認</button>
+              <div id="slack-workspace-info" class="slack-info"></div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="settings.slack.username">通知先ユーザー名</label>
+              <div class="slack-user-row">
+                <input type="text" id="s-slack-username" class="form-input slack-user-input" placeholder="@username" autocomplete="off">
+                <button class="connect-btn slack-small-button slack-lookup-button" id="slack-lookup-btn" data-i18n="settings.slack.lookup">検索</button>
+              </div>
+              <div id="slack-user-info" class="slack-info"></div>
+              <input type="hidden" id="s-slack-userid">
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="settings.slack.cooldown">同一宛先の再通知間隔</label>
+              <select id="s-slack-cooldown" class="form-input">
+                <option value="15" data-i18n="settings.slack.cooldown.15m">15分</option>
+                <option value="30" data-i18n="settings.slack.cooldown.30m">30分</option>
+                <option value="60" selected data-i18n="settings.slack.cooldown.1h">1時間</option>
+                <option value="180" data-i18n="settings.slack.cooldown.3h">3時間</option>
+                <option value="360" data-i18n="settings.slack.cooldown.6h">6時間</option>
+              </select>
+            </div>
+            <div class="slack-create-wrap">
+              <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener noreferrer"
+                 class="slack-create-link" data-i18n="settings.slack.create">Slack Appを作成する</a>
+            </div>
+            <div class="slack-actions">
+              <button class="connect-btn" id="slack-save-btn" data-i18n="settings.btn.save">保存</button>
+              <button class="connect-btn slack-test-button" id="slack-test-btn" data-i18n="settings.slack.test">テスト送信</button>
+            </div>
+            <div class="settings-status" id="slack-status"></div>
+          </section>
+
           <hr class="settings-divider">
 
-          <div class="pane-title settings-subsection-title settings-subsection-title-wide" data-i18n="settings.slack.section">🔔 Slack通知</div>
-          <p class="settings-copy settings-copy-section" data-i18n="settings.slack.desc">
-            脅威検出時に Slack DM で通知します。
-          </p>
-          <div class="form-group">
-            <label class="settings-check-label">
-              <input type="checkbox" id="s-slack-enabled" class="settings-checkbox-accent">
-              <span data-i18n="settings.slack.enable">Slack通知を有効化</span>
-            </label>
-          </div>
-          <div class="form-group settings-form-top-10">
-            <label class="form-label" data-i18n="settings.slack.token">Bot Token</label>
-            <input type="password" id="s-slack-token" class="form-input" placeholder="xoxb-..." autocomplete="off">
-            <button class="connect-btn slack-small-button slack-verify-button" id="slack-verify-btn" data-i18n="settings.slack.verify">接続確認</button>
-            <div id="slack-workspace-info" class="slack-info"></div>
-          </div>
-          <div class="form-group">
-            <label class="form-label" data-i18n="settings.slack.username">通知先ユーザー名</label>
-            <div class="slack-user-row">
-              <input type="text" id="s-slack-username" class="form-input slack-user-input" placeholder="@username" autocomplete="off">
-              <button class="connect-btn slack-small-button slack-lookup-button" id="slack-lookup-btn" data-i18n="settings.slack.lookup">検索</button>
+          <section id="ai-notification-settings" class="notification-settings-card" tabindex="-1" aria-labelledby="ai-notification-title">
+            <div class="ai-notification-head">
+              <div>
+                <h3 id="ai-notification-title" data-i18n="ai.notification.title">AIイベント通知</h3>
+                <p data-i18n="ai.notification.desc">定期レポートと脅威変化時の分析を、UI履歴またはSlackへ通知します。</p>
+              </div>
             </div>
-            <div id="slack-user-info" class="slack-info"></div>
-            <input type="hidden" id="s-slack-userid">
-          </div>
-          <div class="form-group">
-            <label class="form-label" data-i18n="settings.slack.cooldown">同一宛先の再通知間隔</label>
-            <select id="s-slack-cooldown" class="form-input">
-              <option value="15" data-i18n="settings.slack.cooldown.15m">15分</option>
-              <option value="30" data-i18n="settings.slack.cooldown.30m">30分</option>
-              <option value="60" selected data-i18n="settings.slack.cooldown.1h">1時間</option>
-              <option value="180" data-i18n="settings.slack.cooldown.3h">3時間</option>
-              <option value="360" data-i18n="settings.slack.cooldown.6h">6時間</option>
-            </select>
-          </div>
-          <div class="slack-create-wrap">
-            <a href="https://api.slack.com/apps?new_app=1" target="_blank" rel="noopener noreferrer"
-               class="slack-create-link" data-i18n="settings.slack.create">🔗 Slack Appを作成する（chat:write, users:read スコープ必要）</a>
-          </div>
-          <div class="slack-actions">
-            <button class="connect-btn" id="slack-save-btn" data-i18n="settings.btn.save">保存</button>
-            <button class="connect-btn slack-test-button" id="slack-test-btn" data-i18n="settings.slack.test">テスト送信</button>
-          </div>
-          <div class="settings-status" id="slack-status"></div>
+            <fieldset class="ai-notification-fieldset notification-rules">
+              <legend data-i18n="ai.notification.rules">通知するイベント</legend>
+              <label><input id="ai-notification-rule-scheduled" type="checkbox"> <span data-i18n="ai.notification.rule.scheduled">定期AIレポート</span></label>
+              <label><input id="ai-notification-rule-danger" type="checkbox"> <span data-i18n="ai.notification.rule.danger">danger検出</span></label>
+              <label><input id="ai-notification-rule-new-destination" type="checkbox"> <span data-i18n="ai.notification.rule.newDestination">新規脅威宛先</span></label>
+              <label><input id="ai-notification-rule-increase" type="checkbox"> <span data-i18n="ai.notification.rule.increase">warn + danger増加</span></label>
+            </fieldset>
+            <div class="ai-notification-grid">
+              <label>
+                <span data-i18n="ai.notification.frequency">定期レポート</span>
+                <select id="ai-notification-frequency" class="form-input">
+                  <option value="off" data-i18n="ai.notification.frequency.off">OFF</option>
+                  <option value="daily" data-i18n="ai.notification.frequency.daily">毎日</option>
+                  <option value="weekly" data-i18n="ai.notification.frequency.weekly">毎週</option>
+                </select>
+              </label>
+              <label id="ai-notification-weekday-group">
+                <span data-i18n="ai.notification.weekday">実行曜日</span>
+                <select id="ai-notification-weekday" class="form-input">
+                  <option value="0" data-i18n="ai.notification.weekday.sun">日曜日</option>
+                  <option value="1" data-i18n="ai.notification.weekday.mon">月曜日</option>
+                  <option value="2" data-i18n="ai.notification.weekday.tue">火曜日</option>
+                  <option value="3" data-i18n="ai.notification.weekday.wed">水曜日</option>
+                  <option value="4" data-i18n="ai.notification.weekday.thu">木曜日</option>
+                  <option value="5" data-i18n="ai.notification.weekday.fri">金曜日</option>
+                  <option value="6" data-i18n="ai.notification.weekday.sat">土曜日</option>
+                </select>
+              </label>
+              <label>
+                <span data-i18n="ai.notification.time">実行時刻</span>
+                <input id="ai-notification-time" class="form-input" type="time">
+              </label>
+              <label>
+                <span data-i18n="ai.notification.range">分析対象</span>
+                <select id="ai-notification-range" class="form-input">
+                  <option value="1" data-i18n="ai.notification.range.1h">直近1時間</option>
+                  <option value="24" data-i18n="ai.notification.range.24h">直近24時間</option>
+                  <option value="168" data-i18n="ai.notification.range.7d">直近7日</option>
+                </select>
+              </label>
+            </div>
+            <p id="ai-notification-timezone" class="ai-analysis-meta"></p>
+            <fieldset class="ai-notification-fieldset">
+              <legend data-i18n="ai.notification.destinations">通知先</legend>
+              <label><input id="ai-notification-ui" type="checkbox"> <span data-i18n="ai.notification.destination.ui">UI履歴</span></label>
+              <label><input id="ai-notification-slack" type="checkbox"> <span data-i18n="ai.notification.destination.slack">Slack</span></label>
+            </fieldset>
+            <fieldset class="ai-notification-fieldset">
+              <legend data-i18n="ai.notification.thresholds">脅威ルールの条件</legend>
+              <div class="ai-notification-grid">
+                <label><span data-i18n="ai.notification.danger">danger件数</span><input id="ai-notification-danger" class="form-input" type="number" min="1" max="1000"></label>
+                <label><span data-i18n="ai.notification.newDestinations">新規脅威宛先</span><input id="ai-notification-new-dst" class="form-input" type="number" min="1" max="1000"></label>
+                <label><span data-i18n="ai.notification.increase">warn+danger増加</span><input id="ai-notification-increase" class="form-input" type="number" min="1" max="1000"></label>
+                <label><span data-i18n="ai.notification.dailyLimit">1日上限</span><input id="ai-notification-limit" class="form-input" type="number" min="1" max="6"></label>
+                <label><span data-i18n="ai.notification.cooldown">クールダウン（分）</span><input id="ai-notification-cooldown" class="form-input" type="number" min="15" max="1440"></label>
+              </div>
+            </fieldset>
+            <label class="ai-notification-consent">
+              <input id="ai-notification-consent" type="checkbox">
+              <span data-i18n="ai.notification.consent">自動実行時に、匿名化されたネットワーク情報を設定済みクラウドAIへ送信することに同意します。</span>
+            </label>
+            <div id="ai-notification-status" class="settings-status"></div>
+            <div class="ai-notification-actions">
+              <button id="ai-notification-save-btn" class="ai-refresh" type="button" data-i18n="settings.btn.save">保存</button>
+              <button id="ai-notification-test-btn" class="ai-analysis-cancel" type="button" data-i18n="ai.notification.test">通知テスト</button>
+              <button id="ai-notification-run-btn" class="ai-analysis-cancel" type="button" data-i18n="ai.notification.run">今すぐ分析</button>
+            </div>
+            <div class="ai-notification-history">
+              <h4 data-i18n="ai.notification.history">最近のイベント</h4>
+              <div id="ai-notification-events"></div>
+            </div>
+          </section>
         </div>
         <!-- Threat Intel settings -->
         <div class="settings-pane" id="pane-threat">
@@ -836,6 +930,7 @@
         <div id="ai-period" class="ai-period"></div>
       </div>
       <div class="ai-hero-actions">
+        <span id="ai-notification-brief" class="ai-notification-brief" data-i18n="ai.notification.brief.loading">通知状態を確認中</span>
         <button id="ai-notification-open-btn" class="ai-refresh" type="button" data-i18n="ai.notification.open">イベント通知</button>
         <button id="ai-refresh-btn" class="ai-refresh" type="button" data-i18n="ai.refresh">更新</button>
       </div>
@@ -938,84 +1033,6 @@
       </div>
       <p id="ai-usage-caveat" class="ai-usage-caveat"></p>
     </section>
-    <div id="ai-notification-modal" class="ai-notification-modal is-hidden" role="dialog"
-         aria-modal="true" aria-labelledby="ai-notification-title">
-      <div class="ai-notification-card">
-        <div class="ai-notification-head">
-          <div>
-            <h3 id="ai-notification-title" data-i18n="ai.notification.title">AIイベント通知</h3>
-            <p data-i18n="ai.notification.desc">定期レポートと脅威変化時の分析を、UI履歴またはSlackへ通知します。</p>
-          </div>
-          <button id="ai-notification-close-btn" class="ai-notification-close" type="button"
-                  data-i18n-title="ai.notification.close" title="閉じる">×</button>
-        </div>
-        <div class="ai-notification-grid">
-          <label>
-            <span data-i18n="ai.notification.frequency">定期レポート</span>
-            <select id="ai-notification-frequency" class="form-input">
-              <option value="off" data-i18n="ai.notification.frequency.off">OFF</option>
-              <option value="daily" data-i18n="ai.notification.frequency.daily">毎日</option>
-              <option value="weekly" data-i18n="ai.notification.frequency.weekly">毎週</option>
-            </select>
-          </label>
-          <label id="ai-notification-weekday-group">
-            <span data-i18n="ai.notification.weekday">実行曜日</span>
-            <select id="ai-notification-weekday" class="form-input">
-              <option value="0" data-i18n="ai.notification.weekday.sun">日曜日</option>
-              <option value="1" data-i18n="ai.notification.weekday.mon">月曜日</option>
-              <option value="2" data-i18n="ai.notification.weekday.tue">火曜日</option>
-              <option value="3" data-i18n="ai.notification.weekday.wed">水曜日</option>
-              <option value="4" data-i18n="ai.notification.weekday.thu">木曜日</option>
-              <option value="5" data-i18n="ai.notification.weekday.fri">金曜日</option>
-              <option value="6" data-i18n="ai.notification.weekday.sat">土曜日</option>
-            </select>
-          </label>
-          <label>
-            <span data-i18n="ai.notification.time">実行時刻</span>
-            <input id="ai-notification-time" class="form-input" type="time">
-          </label>
-          <label>
-            <span data-i18n="ai.notification.range">分析対象</span>
-            <select id="ai-notification-range" class="form-input">
-              <option value="1" data-i18n="ai.notification.range.1h">直近1時間</option>
-              <option value="24" data-i18n="ai.notification.range.24h">直近24時間</option>
-              <option value="168" data-i18n="ai.notification.range.7d">直近7日</option>
-            </select>
-          </label>
-        </div>
-        <p id="ai-notification-timezone" class="ai-analysis-meta"></p>
-        <fieldset class="ai-notification-fieldset">
-          <legend data-i18n="ai.notification.destinations">通知先</legend>
-          <label><input id="ai-notification-ui" type="checkbox"> <span data-i18n="ai.notification.destination.ui">UI履歴</span></label>
-          <label><input id="ai-notification-slack" type="checkbox"> <span data-i18n="ai.notification.destination.slack">Slack</span></label>
-        </fieldset>
-        <fieldset class="ai-notification-fieldset">
-          <legend data-i18n="ai.notification.threat">脅威急増時のAI分析</legend>
-          <label><input id="ai-notification-threat-enabled" type="checkbox"> <span data-i18n="ai.notification.threat.enable">有効化</span></label>
-          <div class="ai-notification-grid">
-            <label><span data-i18n="ai.notification.danger">danger件数</span><input id="ai-notification-danger" class="form-input" type="number" min="1" max="1000"></label>
-            <label><span data-i18n="ai.notification.newDestinations">新規脅威宛先</span><input id="ai-notification-new-dst" class="form-input" type="number" min="1" max="1000"></label>
-            <label><span data-i18n="ai.notification.increase">warn+danger増加</span><input id="ai-notification-increase" class="form-input" type="number" min="1" max="1000"></label>
-            <label><span data-i18n="ai.notification.dailyLimit">1日上限</span><input id="ai-notification-limit" class="form-input" type="number" min="1" max="6"></label>
-            <label><span data-i18n="ai.notification.cooldown">クールダウン（分）</span><input id="ai-notification-cooldown" class="form-input" type="number" min="15" max="1440"></label>
-          </div>
-        </fieldset>
-        <label class="ai-notification-consent">
-          <input id="ai-notification-consent" type="checkbox">
-          <span data-i18n="ai.notification.consent">自動実行時に、匿名化されたネットワーク情報を設定済みクラウドAIへ送信することに同意します。</span>
-        </label>
-        <div id="ai-notification-status" class="settings-status"></div>
-        <div class="ai-notification-actions">
-          <button id="ai-notification-save-btn" class="ai-refresh" type="button" data-i18n="settings.btn.save">保存</button>
-          <button id="ai-notification-test-btn" class="ai-analysis-cancel" type="button" data-i18n="ai.notification.test">通知テスト</button>
-          <button id="ai-notification-run-btn" class="ai-analysis-cancel" type="button" data-i18n="ai.notification.run">今すぐ分析</button>
-        </div>
-        <div class="ai-notification-history">
-          <h4 data-i18n="ai.notification.history">最近のイベント</h4>
-          <div id="ai-notification-events"></div>
-        </div>
-      </div>
-    </div>
     <div id="ai-notification-confirm-modal"
          class="ai-notification-modal ai-notification-confirm-modal is-hidden"
          role="dialog" aria-modal="true" aria-labelledby="ai-notification-confirm-title">
