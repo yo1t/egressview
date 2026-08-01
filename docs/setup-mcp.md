@@ -414,8 +414,8 @@ environment file and remove them immediately after the run. The evidence JSON
 and generated report contain no token values, tool arguments, network
 observations, IP/MAC addresses, or credentials.
 
-The dual-era gate requires evidence schema v2. Replace an older schema-v1
-template rather than editing its version number alone; the v2 client protocol
+The dual-era gate requires evidence schema v3. Replace an older template rather
+than editing its version number alone; the client protocol and compatibility
 fields are mandatory and must come from actual client runs.
 
 ### Required evidence
@@ -440,9 +440,12 @@ Every evidence item must be successful, refer to the exact deployed
   current refresh token was then rejected (`revoke-family`);
 - the access-token lifetime was recorded and was no more than 15 minutes, which
   bounds a token minted before family revocation takes effect;
-- Claude Code and GitHub Copilot CLI completed read-tool and refresh tests
-  against the staged endpoint and each recorded `2026-07-28` as the selected
-  protocol version;
+- Claude Code completed read-tool and refresh tests against the staged endpoint
+  and recorded either supported protocol revision. The active gate probes both
+  `2025-11-25` and `2026-07-28` independently of product release timing;
+- GitHub Copilot CLI completed the same tests in strict mode. Cognito mode may
+  instead record `unsupported-random-loopback-port` when the tested release
+  cannot use a fixed callback accepted by Cognito;
 - one retained legacy client completed the same tool-discovery check with
   `2025-11-25`.
 
@@ -450,9 +453,12 @@ With `MCP_GATE_OAUTH_COMPATIBILITY_PROFILE=cognito`, the gate additionally
 requires `cognitoCompatibility` evidence matching the configured issuer and
 resource. It must record PKCE `S256`, `resource` in both authorization and
 token requests, the access-token audience and refreshed audience, exact
-callback matching, old-refresh-token and post-revocation rejection, and the
-tested Inspector, Claude Code, and Copilot CLI versions. The Keycloak database
-restore entry is not required in this profile.
+callback matching for tested compatible clients, old-refresh-token and
+post-revocation rejection, and the tested Inspector, Claude Code, and Copilot
+CLI versions. A Cognito callback
+limitation must be recorded explicitly and does not claim Copilot
+compatibility. The Keycloak database restore entry is not required in this
+profile.
 
 The JWKS outage test must use a cold MCP process. A running process may
 legitimately continue validating signatures with a still-valid cached JWKS;

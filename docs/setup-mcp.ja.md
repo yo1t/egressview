@@ -410,8 +410,8 @@ mode `0600`の環境ファイルだけに置き、試験直後に削除してく
 証跡JSONと生成レポートにはtoken、tool引数、通信観測、IP/MAC、credentialを
 記録しません。
 
-dual-era gateは証跡schema v2を要求します。旧schema v1はversion番号だけを
-書き換えず、新しいtemplateへ置き換えてください。v2のclient protocol fieldは
+dual-era gateは証跡schema v3を要求します。旧templateはversion番号だけを
+書き換えず、新しいtemplateへ置き換えてください。client protocolと互換性fieldは
 実際のclient試験結果から記録する必須項目です。
 
 ### 必須証跡
@@ -432,15 +432,21 @@ dual-era gateは証跡schema v2を要求します。旧schema v1はversion番号
   replay検知後にfamily全体を失効して現行refresh tokenも拒否する`revoke-family`
 - family失効前に発行され得るtokenの影響を限定するため、access token寿命を記録し
   15分以下にした
-- Claude CodeとGitHub Copilot CLIがstaging endpointでread toolとrefreshを
-  完了し、それぞれ選択したprotocol versionが`2026-07-28`であることを記録した
+- Claude Codeがstaging endpointでread toolとrefreshを完了し、対応済みの
+  protocol revisionを記録した。製品releaseとは独立してactive gateが
+  `2025-11-25`と`2026-07-28`の両方を検査する
+- strict modeではGitHub Copilot CLIも同じ試験を完了する。Cognito modeでは、
+  固定callbackを使えないreleaseに限り`unsupported-random-loopback-port`を
+  明示記録できる
 - 保持したlegacy clientが`2025-11-25`で同じtool discoveryを完了した
 
 `MCP_GATE_OAUTH_COMPATIBILITY_PROFILE=cognito`の場合、設定したissuer/resourceと
 一致する`cognitoCompatibility`証跡も必須です。PKCE `S256`、authorization/token
-両requestの`resource`、access tokenとrefresh後のaudience、完全一致callback、
-旧refresh tokenとrevoke後tokenの拒否、試験したInspector・Claude Code・Copilot
-CLI versionを記録します。このprofileではKeycloak DB restore証跡は不要です。
+両requestの`resource`、access tokenとrefresh後のaudience、対応確認済みclientの
+完全一致callback、旧refresh tokenとrevoke後tokenの拒否、試験した
+Inspector・Claude Code・Copilot CLI versionを記録します。Cognito callback制約は
+明示し、Copilot対応済みとは
+表記しません。このprofileではKeycloak DB restore証跡は不要です。
 
 JWKS障害試験ではMCP processをcold startしてください。起動済みprocessが
 有効なcached JWKSで署名検証を継続するのは正常であり、discoveryの

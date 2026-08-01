@@ -55,8 +55,10 @@ All notable changes to EgressView are documented here.
   stateless `2026-07-28` discover flow with the same 11 tools.
 - Extended the DNS-unpublished publication gate with dual-era discovery,
   identical tool-inventory checks, standard modern protocol-error probes, and
-  explicit evidence of modern Claude Code/Copilot CLI plus legacy-client
-  compatibility.
+  versioned real-client evidence. Server-side probes still require both
+  protocol revisions; client releases may use either supported revision.
+  Cognito evidence can record Copilot's random-loopback callback limitation
+  without claiming that client is compatible.
 - Made refresh replay evidence provider-neutral: the gate accepts either
   immediate replay rejection with family continuity or replay-triggered family
   revocation, while requiring access tokens to expire within 15 minutes.
