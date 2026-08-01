@@ -10,17 +10,19 @@ const {
   createIndexHtmlBase,
   injectIndexBootstrap,
   registerHealthRoutes,
+  setSecurityHeaders,
   serializeI18nModule,
 } = require('../../src/http-app');
+const { createTrustProxy } = require('../../src/proxy-trust');
 const { createHealthState } = require('../../src/health-state');
 const express = require('express');
 
-function request(app, url) {
+function request(app, url, { headers = {}, remoteAddress } = {}) {
   return new Promise((resolve, reject) => {
     const req = new Readable({ read() { this.push(null); } });
     req.method = 'GET';
     req.url = url;
-    req.headers = {};
+    req.headers = headers;
     const res = new http.ServerResponse(req);
     const chunks = [];
     const socket = new Writable({
@@ -30,6 +32,9 @@ function request(app, url) {
     socket.uncork = () => {};
     socket.setTimeout = () => {};
     socket.destroy = () => {};
+    if (remoteAddress) socket.remoteAddress = remoteAddress;
+    req.socket = socket;
+    req.connection = socket;
     res.assignSocket(socket);
     res.on('finish', () => {
       const raw = Buffer.concat(chunks).toString();
@@ -85,6 +90,35 @@ describe('buildCspHeader', () => {
   it('omits HSTS for plain HTTP mode', () => {
     const csp = buildCspHeader('abc', false);
     assert.equal(csp.hsts, null);
+  });
+});
+
+describe('setSecurityHeaders', () => {
+  function makeApp({ tlsEnabled = false } = {}) {
+    const app = express();
+    app.set('trust proxy', createTrustProxy('10.41.0.0/24'));
+    app.use((req, res, next) => {
+      setSecurityHeaders(req, res, tlsEnabled);
+      next();
+    });
+    app.get('/', (_req, res) => res.json({ ok: true }));
+    return app;
+  }
+
+  it('sets HSTS for HTTPS forwarded by a trusted proxy', async () => {
+    const response = await request(makeApp(), '/', {
+      headers: { 'x-forwarded-proto': 'https' },
+      remoteAddress: '10.41.0.10',
+    });
+    assert.match(response.headers, /strict-transport-security: max-age=31536000; includesubdomains/);
+  });
+
+  it('does not trust forwarded HTTPS from an untrusted peer', async () => {
+    const response = await request(makeApp(), '/', {
+      headers: { 'x-forwarded-proto': 'https' },
+      remoteAddress: '192.0.2.10',
+    });
+    assert.doesNotMatch(response.headers, /strict-transport-security/);
   });
 });
 
