@@ -59,6 +59,16 @@ function buildCspHeader(cspNonce, tlsEnabled) {
   return { value: parts.join('; ') + ';', hsts: tlsEnabled ? 'max-age=31536000; includeSubDomains' : null };
 }
 
+function setSecurityHeaders(req, res, tlsEnabled) {
+  res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  const csp = buildCspHeader(res.locals.cspNonce, tlsEnabled || req.secure);
+  if (csp.hsts) res.setHeader('Strict-Transport-Security', csp.hsts);
+  res.setHeader('Content-Security-Policy', csp.value);
+}
+
 function registerHealthRoutes(app, healthState) {
   app.get('/healthz', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -94,13 +104,7 @@ function configureHttpApp(app, {
   app.use(createGlobalRateLimit());
 
   app.use((req, res, next) => {
-    res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Referrer-Policy', 'same-origin');
-    const csp = buildCspHeader(res.locals.cspNonce, tlsEnabled);
-    if (csp.hsts) res.setHeader('Strict-Transport-Security', csp.hsts);
-    res.setHeader('Content-Security-Policy', csp.value);
+    setSecurityHeaders(req, res, tlsEnabled);
     next();
   });
 
@@ -207,5 +211,6 @@ module.exports = {
   createIndexHtmlBase,
   injectIndexBootstrap,
   registerHealthRoutes,
+  setSecurityHeaders,
   serializeI18nModule,
 };
