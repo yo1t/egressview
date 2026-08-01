@@ -198,6 +198,7 @@ describe('mcp-server: HTTP auth configuration', () => {
       mode: 'oauth',
       issuer: 'https://idp.example.test/realms/egressview',
       resource: 'https://monitor.example.test/mcp',
+      compatibilityProfile: 'strict',
       requiredScope: 'egressview:read',
       readScope: 'egressview:read',
       notesWriteScope: 'egressview:notes.write',
@@ -205,6 +206,30 @@ describe('mcp-server: HTTP auth configuration', () => {
       serviceToken: SERVICE_TOKEN,
       auditHashKey: AUDIT_HASH_KEY,
     });
+  });
+
+  it('enables Cognito compatibility only for an exact regional pool issuer', () => {
+    const base = {
+      MCP_AUTH_MODE: 'oauth',
+      MCP_OAUTH_RESOURCE: 'https://monitor.example.test/mcp',
+      MCP_OAUTH_READ_SCOPE: 'https://monitor.example.test/mcp/read',
+      MCP_OAUTH_NOTES_WRITE_SCOPE: 'https://monitor.example.test/mcp/notes.write',
+      MCP_SERVICE_TOKEN: SERVICE_TOKEN,
+      MCP_AUDIT_HMAC_KEY: AUDIT_HASH_KEY,
+      MCP_OAUTH_COMPATIBILITY_PROFILE: 'cognito',
+    };
+    const config = _resolveHttpAuthConfig({
+      ...base,
+      MCP_OAUTH_ISSUER: 'https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_TestPool123',
+    });
+    assert.equal(config.compatibilityProfile, 'cognito');
+    assert.throws(
+      () => _resolveHttpAuthConfig({
+        ...base,
+        MCP_OAUTH_ISSUER: 'https://idp.example.test/realms/egressview',
+      }),
+      /exact AWS Cognito regional user-pool issuer/
+    );
   });
 
   it('requires a scoped API identity for OAuth internal API calls', () => {
