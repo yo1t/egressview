@@ -23,6 +23,23 @@
     "passed": false,
     "testedAt": "2026-01-01T00:00:00.000Z"
   },
+  "cognitoCompatibility": {
+    "passed": false,
+    "testedAt": "2026-01-01T00:00:00.000Z",
+    "issuer": "https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_EXAMPLE",
+    "resource": "https://mcp.example.com/mcp",
+    "pkceMethod": "S256",
+    "authorizationRequestResource": false,
+    "tokenRequestResource": false,
+    "accessTokenAudienceMatched": false,
+    "refreshAudiencePreserved": false,
+    "exactCallbackMatched": false,
+    "oldRefreshRejected": false,
+    "revokedRefreshRejected": false,
+    "inspectorVersion": "",
+    "claudeCodeVersion": "",
+    "copilotCliVersion": ""
+  },
   "jwksOutage": {
     "passed": false,
     "testedAt": "2026-01-01T00:00:00.000Z",

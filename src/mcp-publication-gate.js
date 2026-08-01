@@ -7,7 +7,13 @@ const https = require('node:https');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const Database = require('better-sqlite3');
-const { createOAuthResourceServer } = require('./mcp-oauth');
+const {
+  createOAuthResourceServer,
+  normalizeCompatibilityProfile,
+  normalizeIssuer,
+  assertCognitoIssuer,
+  OAUTH_COMPATIBILITY_PROFILES,
+} = require('./mcp-oauth');
 
 const EVIDENCE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
@@ -30,6 +36,10 @@ const REQUIRED_EVIDENCE = Object.freeze([
   'jwksOutage',
   'refreshRevocation',
   'clientCompatibility',
+]);
+const COGNITO_REQUIRED_EVIDENCE = Object.freeze([
+  ...REQUIRED_EVIDENCE.filter((name) => name !== 'keycloakBackupRestore'),
+  'cognitoCompatibility',
 ]);
 
 function envText(env, name, { required = true } = {}) {
@@ -72,6 +82,12 @@ function loadGateConfig(env = process.env) {
     throw new Error('MCP_GATE_RESOURCE must exactly match MCP_GATE_ENDPOINT');
   }
   const issuer = safeUrl(envText(env, 'MCP_GATE_ISSUER'), 'MCP_GATE_ISSUER');
+  const compatibilityProfile = normalizeCompatibilityProfile(
+    env.MCP_GATE_OAUTH_COMPATIBILITY_PROFILE
+  );
+  if (compatibilityProfile === OAUTH_COMPATIBILITY_PROFILES.COGNITO) {
+    assertCognitoIssuer(normalizeIssuer(issuer.toString()));
+  }
   const localBase = safeUrl(
     envText(env, 'MCP_GATE_EGRESSVIEW_URL'),
     'MCP_GATE_EGRESSVIEW_URL',
@@ -86,6 +102,7 @@ function loadGateConfig(env = process.env) {
     endpoint,
     resource: resource.toString(),
     issuer: issuer.toString().replace(/\/$/, ''),
+    compatibilityProfile,
     connectAddress: envText(env, 'MCP_GATE_CONNECT_ADDRESS'),
     readScope: envText(env, 'MCP_GATE_READ_SCOPE'),
     writeScope: envText(env, 'MCP_GATE_WRITE_SCOPE'),
@@ -118,7 +135,13 @@ function loadEvidence(filePath) {
   return evidence;
 }
 
-function validateEvidence(evidence, { deployedCommit, now = Date.now() }) {
+function validateEvidence(evidence, {
+  deployedCommit,
+  now = Date.now(),
+  compatibilityProfile = OAUTH_COMPATIBILITY_PROFILES.STRICT,
+  issuer = null,
+  resource = null,
+}) {
   const failures = [];
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
     return ['evidence must be a JSON object'];
@@ -131,7 +154,10 @@ function validateEvidence(evidence, { deployedCommit, now = Date.now() }) {
     failures.push('publishDns must remain false during the pre-publication gate');
   }
 
-  for (const name of REQUIRED_EVIDENCE) {
+  const requiredEvidence = compatibilityProfile === OAUTH_COMPATIBILITY_PROFILES.COGNITO
+    ? COGNITO_REQUIRED_EVIDENCE
+    : REQUIRED_EVIDENCE;
+  for (const name of requiredEvidence) {
     const entry = evidence[name];
     if (!entry || entry.passed !== true) {
       failures.push(`${name}.passed must be true`);
@@ -188,6 +214,30 @@ function validateEvidence(evidence, { deployedCommit, now = Date.now() }) {
   if (evidence.clientCompatibility?.legacyClient !== true
       || evidence.clientCompatibility?.legacyProtocolVersion !== LEGACY_PROTOCOL_VERSION) {
     failures.push(`clientCompatibility must retain a ${LEGACY_PROTOCOL_VERSION} legacy client`);
+  }
+  if (compatibilityProfile === OAUTH_COMPATIBILITY_PROFILES.COGNITO) {
+    const cognito = evidence.cognitoCompatibility;
+    if (cognito?.issuer !== issuer || cognito?.resource !== resource) {
+      failures.push('cognitoCompatibility issuer and resource must match the gate configuration');
+    }
+    if (cognito?.pkceMethod !== 'S256'
+        || cognito?.authorizationRequestResource !== true
+        || cognito?.tokenRequestResource !== true
+        || cognito?.accessTokenAudienceMatched !== true
+        || cognito?.refreshAudiencePreserved !== true
+        || cognito?.exactCallbackMatched !== true
+        || cognito?.oldRefreshRejected !== true
+        || cognito?.revokedRefreshRejected !== true) {
+      failures.push(
+        'cognitoCompatibility must prove PKCE S256, both resource parameters, audience, '
+        + 'exact callback, refresh rotation, replay rejection, and revocation'
+      );
+    }
+    for (const name of ['inspectorVersion', 'claudeCodeVersion', 'copilotCliVersion']) {
+      if (typeof cognito?.[name] !== 'string' || !cognito[name].trim()) {
+        failures.push(`cognitoCompatibility.${name} must record the tested client version`);
+      }
+    }
   }
   return failures;
 }
@@ -246,6 +296,7 @@ async function verifyFixtureSignatures(config) {
     resource: config.resource,
     requiredScope: config.readScope,
     scopesSupported: [config.readScope, config.writeScope],
+    compatibilityProfile: config.compatibilityProfile,
     timeoutMs: config.timeoutMs,
   });
   await verifier.verifyToken(config.tokens.read);
@@ -475,6 +526,9 @@ async function runPublicationGate(config, dependencies = {}) {
   const evidenceFailures = validateEvidence(evidence, {
     deployedCommit: config.deployedCommit,
     now: now(),
+    compatibilityProfile: config.compatibilityProfile,
+    issuer: config.issuer,
+    resource: config.resource,
   });
   if (evidenceFailures.length) {
     throw new Error(`publication evidence failed:\n- ${evidenceFailures.join('\n- ')}`);
@@ -731,6 +785,7 @@ async function runPublicationGate(config, dependencies = {}) {
     status: 'ready_for_manual_dns_review',
     checkedAt: new Date(now()).toISOString(),
     deployedCommit: config.deployedCommit,
+    oauthCompatibilityProfile: config.compatibilityProfile,
     endpointHost: config.endpoint.hostname,
     dnsPublished: false,
     enabledRouters: local.enabledRouters,
@@ -748,6 +803,9 @@ async function runPublicationGate(config, dependencies = {}) {
         [MODERN_PROTOCOL_VERSION]: 'pass',
       }),
       protocolErrors: 'pass',
+      authorizationCompatibility: config.compatibilityProfile === OAUTH_COMPATIBILITY_PROFILES.COGNITO
+        ? 'cognito-evidence-pass'
+        : 'strict-metadata-pass',
     }),
   });
 }
@@ -767,6 +825,7 @@ module.exports = {
   MODERN_PROTOCOL_VERSION,
   REFRESH_REPLAY_MODES,
   REQUIRED_EVIDENCE,
+  COGNITO_REQUIRED_EVIDENCE,
   loadGateConfig,
   loadEvidence,
   validateEvidence,

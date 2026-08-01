@@ -8,6 +8,10 @@ const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_TOKEN_BYTES = 16 * 1024;
 const CLOCK_SKEW_SECONDS = 30;
 const UNKNOWN_KID_REFRESH_INTERVAL_MS = 10_000;
+const OAUTH_COMPATIBILITY_PROFILES = Object.freeze({
+  STRICT: 'strict',
+  COGNITO: 'cognito',
+});
 
 class OAuthError extends Error {
   constructor(code, message, status = 401) {
@@ -56,6 +60,31 @@ function normalizeIssuer(value) {
 function normalizeResource(value) {
   const url = safeUrl(value, 'MCP_OAUTH_RESOURCE');
   return url.toString();
+}
+
+function normalizeCompatibilityProfile(value = OAUTH_COMPATIBILITY_PROFILES.STRICT) {
+  const profile = String(value || OAUTH_COMPATIBILITY_PROFILES.STRICT).trim().toLowerCase();
+  if (!Object.values(OAUTH_COMPATIBILITY_PROFILES).includes(profile)) {
+    throw new Error('MCP_OAUTH_COMPATIBILITY_PROFILE must be "strict" or "cognito"');
+  }
+  return profile;
+}
+
+function assertCognitoIssuer(issuer) {
+  const url = new URL(issuer);
+  const pool = /^\/([a-z0-9-]+)_[A-Za-z0-9]+$/.exec(url.pathname);
+  const host = /^cognito-idp\.([a-z0-9-]+)\.(amazonaws\.com(?:\.cn)?)$/.exec(url.hostname);
+  if (!pool || !host || pool[1] !== host[1]) {
+    throw new Error(
+      'Cognito compatibility requires an exact AWS Cognito regional user-pool issuer'
+    );
+  }
+}
+
+function resolveCompatibilityProfile(value, issuer) {
+  const profile = normalizeCompatibilityProfile(value);
+  if (profile === OAUTH_COMPATIBILITY_PROFILES.COGNITO) assertCognitoIssuer(issuer);
+  return profile;
 }
 
 function resourceMetadataUrl(resource) {
@@ -133,6 +162,10 @@ async function readJson(response, label) {
 function createOAuthResourceServer(options) {
   const issuer = normalizeIssuer(options.issuer);
   const resource = normalizeResource(options.resource);
+  const compatibilityProfile = resolveCompatibilityProfile(
+    options.compatibilityProfile,
+    issuer
+  );
   const requiredScope = String(options.requiredScope || '').trim();
   const scopesSupported = [...new Set((options.scopesSupported || []).map(String).filter(Boolean))];
   const scopeToken = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
@@ -172,8 +205,12 @@ function createOAuthResourceServer(options) {
       if (document.issuer !== issuer) {
         throw new Error('Authorization Server Metadata issuer mismatch');
       }
-      if (!Array.isArray(document.code_challenge_methods_supported)
-          || !document.code_challenge_methods_supported.includes('S256')) {
+      const hasPkceMetadata = Object.hasOwn(document, 'code_challenge_methods_supported');
+      const supportsS256 = Array.isArray(document.code_challenge_methods_supported)
+        && document.code_challenge_methods_supported.includes('S256');
+      const cognitoOmission = compatibilityProfile === OAUTH_COMPATIBILITY_PROFILES.COGNITO
+        && !hasPkceMetadata;
+      if (!supportsS256 && !cognitoOmission) {
         throw new Error('Authorization Server Metadata does not advertise PKCE S256');
       }
       const jwksUrl = safeUrl(document.jwks_uri, 'Authorization Server jwks_uri');
@@ -328,6 +365,7 @@ function createOAuthResourceServer(options) {
     issuer,
     resource,
     requiredScope,
+    compatibilityProfile,
     metadata,
     protectedResourceMetadataUrl,
     challenge,
@@ -338,7 +376,10 @@ function createOAuthResourceServer(options) {
 
 module.exports = {
   OAuthError,
+  OAUTH_COMPATIBILITY_PROFILES,
+  assertCognitoIssuer,
   createOAuthResourceServer,
+  normalizeCompatibilityProfile,
   normalizeIssuer,
   normalizeResource,
   resourceMetadataUrl,

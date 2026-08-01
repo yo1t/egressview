@@ -162,6 +162,15 @@ signatures through the issuer's discovery/JWKS endpoints, and fails closed on
 issuer, expiry, audience, or scope mismatches. The issuer must advertise PKCE
 S256. HTTPS is required except for loopback-only testing.
 
+The default `MCP_OAUTH_COMPATIBILITY_PROFILE=strict` keeps that metadata check.
+For an exact AWS Cognito regional user-pool issuer only, setting the profile to
+`cognito` permits an omitted `code_challenge_methods_supported` field. It does
+not permit contradictory metadata and does not relax signature, issuer,
+expiry, single-audience, or scope checks. Do not enable this profile until the
+pre-publication evidence proves PKCE S256 on the wire, both RFC 8707 resource
+parameters, the exact callback, refresh rotation, and revocation with each
+supported client version.
+
 External provider scopes map to EgressView's shared permissions:
 `MCP_OAUTH_READ_SCOPE` grants `network.read`, while
 `MCP_OAUTH_NOTES_WRITE_SCOPE` grants `notes.write`. A read-only access token
@@ -304,6 +313,7 @@ Use `https://` if your reverse proxy terminates TLS (required for Claude Desktop
 | `MCP_AUTH_MODE` | HTTP mode | `token` | HTTP endpoint authentication mode: `token` or staged `oauth`. |
 | `MCP_TOKEN` | HTTP token mode | — | Dedicated private HTTP endpoint token. It must be set explicitly and must differ from `EGRESSVIEW_TOKEN`. |
 | `MCP_OAUTH_ISSUER` | HTTP OAuth mode | — | Exact HTTPS authorization-server issuer URL. Loopback HTTP is allowed only for testing. |
+| `MCP_OAUTH_COMPATIBILITY_PROFILE` | HTTP OAuth mode | `strict` | `strict`, or `cognito` for an exact AWS Cognito regional user-pool issuer with completed compatibility evidence. |
 | `MCP_OAUTH_RESOURCE` | HTTP OAuth mode | — | Canonical public MCP resource URL used for exact JWT audience validation. |
 | `MCP_OAUTH_READ_SCOPE` | HTTP OAuth mode | — | Provider scope mapped to the internal `network.read` permission. |
 | `MCP_OAUTH_NOTES_WRITE_SCOPE` | HTTP OAuth mode | — | Provider scope mapped to the internal `notes.write` permission. |
@@ -418,7 +428,9 @@ Every evidence item must be successful, refer to the exact deployed
 - reverse-proxy body, request-rate, concurrency, and timeout limits were
   exercised;
 - staged application rollback and MCP service-identity rotation were tested;
-- the Keycloak database backup was restored into a disposable environment;
+- provider recovery evidence passed: restore the Keycloak database into a
+  disposable environment in strict mode; Cognito mode instead requires the
+  provider-specific compatibility evidence below;
 - with Keycloak/JWKS unavailable and the MCP JWKS cache cold, public MCP failed
   closed while `/healthz`, `/readyz`, and current router collection remained
   healthy;
@@ -433,6 +445,14 @@ Every evidence item must be successful, refer to the exact deployed
   protocol version;
 - one retained legacy client completed the same tool-discovery check with
   `2025-11-25`.
+
+With `MCP_GATE_OAUTH_COMPATIBILITY_PROFILE=cognito`, the gate additionally
+requires `cognitoCompatibility` evidence matching the configured issuer and
+resource. It must record PKCE `S256`, `resource` in both authorization and
+token requests, the access-token audience and refreshed audience, exact
+callback matching, old-refresh-token and post-revocation rejection, and the
+tested Inspector, Claude Code, and Copilot CLI versions. The Keycloak database
+restore entry is not required in this profile.
 
 The JWKS outage test must use a cold MCP process. A running process may
 legitimately continue validating signatures with a still-valid cached JWKS;
