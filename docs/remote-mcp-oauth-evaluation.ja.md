@@ -7,9 +7,9 @@
 
 以下の認可サーバー比較は、当初のMCP Authorization `2025-11-25`に対する
 判断記録であり、OAuth profileとして引き続き有効である。EgressViewのtransportは
-現在`2025-11-25`と`2026-07-28`の両方を提供し、公開gateでは最新Claude Code /
-Copilot CLIのmodern接続証跡と、明示的なlegacy client互換結果を要求する。
-この更新によってendpointを公開することはない。
+現在`2025-11-25`と`2026-07-28`の両方を提供し、公開gateのactive probeで
+両revisionを必須にする。実clientは現在のreleaseが対応するrevisionを記録し、
+modern対応版の公開後に追加回帰する。この更新によってendpointを公開することはない。
 
 AWS固有の判定は、Kiroに設定済みのAWS Documentation MCP serverでも二重確認した。
 このserverはAWS一次資料を検索するものであり、AWS accountへの接続やCognito

@@ -9,9 +9,9 @@ public MCP endpoint or change application code.
 The authorization-server comparison below records the original
 MCP Authorization `2025-11-25` decision and remains relevant to the OAuth
 profile. The EgressView transport now serves both `2025-11-25` and
-`2026-07-28`; its publication gate requires modern Claude Code and Copilot CLI
-evidence plus an explicit legacy-client compatibility result. This update does
-not publish the endpoint.
+`2026-07-28`; active publication probes require both revisions. Real clients
+record the supported revision in their current release, and are retested when
+modern support ships. This update does not publish the endpoint.
 
 The AWS-specific findings were checked a second time with the AWS
 Documentation MCP server configured in Kiro. That server searches AWS primary

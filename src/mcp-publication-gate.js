@@ -19,6 +19,11 @@ const EVIDENCE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const LEGACY_PROTOCOL_VERSION = '2025-11-25';
 const MODERN_PROTOCOL_VERSION = '2026-07-28';
+const CLIENT_PROTOCOL_VERSIONS = new Set([
+  LEGACY_PROTOCOL_VERSION,
+  MODERN_PROTOCOL_VERSION,
+]);
+const COGNITO_COPILOT_UNSUPPORTED_STATUS = 'unsupported-random-loopback-port';
 const PROTOCOL_VERSION_META_KEY = 'io.modelcontextprotocol/protocolVersion';
 const CLIENT_INFO_META_KEY = 'io.modelcontextprotocol/clientInfo';
 const CLIENT_CAPABILITIES_META_KEY = 'io.modelcontextprotocol/clientCapabilities';
@@ -146,7 +151,7 @@ function validateEvidence(evidence, {
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
     return ['evidence must be a JSON object'];
   }
-  if (evidence.schemaVersion !== 2) failures.push('schemaVersion must be 2');
+  if (evidence.schemaVersion !== 3) failures.push('schemaVersion must be 3');
   if (evidence.deployedCommit !== deployedCommit) {
     failures.push('evidence deployedCommit must match MCP_GATE_DEPLOYED_COMMIT');
   }
@@ -203,16 +208,28 @@ function validateEvidence(evidence, {
   } else {
     failures.push('refreshRevocation.mode must be reject-replay or revoke-family');
   }
-  if (evidence.clientCompatibility?.claudeCode !== true
-      || evidence.clientCompatibility?.copilotCli !== true) {
-    failures.push('clientCompatibility must include Claude Code and GitHub Copilot CLI');
+  const clients = evidence.clientCompatibility;
+  if (clients?.claudeCode !== true) {
+    failures.push('clientCompatibility must include a successful Claude Code test');
   }
-  if (evidence.clientCompatibility?.claudeCodeProtocolVersion !== MODERN_PROTOCOL_VERSION
-      || evidence.clientCompatibility?.copilotCliProtocolVersion !== MODERN_PROTOCOL_VERSION) {
-    failures.push(`Claude Code and GitHub Copilot CLI must select ${MODERN_PROTOCOL_VERSION}`);
+  if (!CLIENT_PROTOCOL_VERSIONS.has(clients?.claudeCodeProtocolVersion)) {
+    failures.push('Claude Code must select a supported protocol version');
   }
-  if (evidence.clientCompatibility?.legacyClient !== true
-      || evidence.clientCompatibility?.legacyProtocolVersion !== LEGACY_PROTOCOL_VERSION) {
+  if (clients?.copilotCli === true) {
+    if (!CLIENT_PROTOCOL_VERSIONS.has(clients.copilotCliProtocolVersion)) {
+      failures.push('GitHub Copilot CLI must select a supported protocol version');
+    }
+  } else if (compatibilityProfile === OAUTH_COMPATIBILITY_PROFILES.COGNITO) {
+    if (clients?.copilotCliStatus !== COGNITO_COPILOT_UNSUPPORTED_STATUS) {
+      failures.push(
+        `Cognito evidence must record Copilot as ${COGNITO_COPILOT_UNSUPPORTED_STATUS}`
+      );
+    }
+  } else {
+    failures.push('clientCompatibility must include a successful GitHub Copilot CLI test');
+  }
+  if (clients?.legacyClient !== true
+      || clients?.legacyProtocolVersion !== LEGACY_PROTOCOL_VERSION) {
     failures.push(`clientCompatibility must retain a ${LEGACY_PROTOCOL_VERSION} legacy client`);
   }
   if (compatibilityProfile === OAUTH_COMPATIBILITY_PROFILES.COGNITO) {
@@ -225,12 +242,23 @@ function validateEvidence(evidence, {
         || cognito?.tokenRequestResource !== true
         || cognito?.accessTokenAudienceMatched !== true
         || cognito?.refreshAudiencePreserved !== true
-        || cognito?.exactCallbackMatched !== true
+        || cognito?.testedClientCallbacksMatched !== true
         || cognito?.oldRefreshRejected !== true
         || cognito?.revokedRefreshRejected !== true) {
       failures.push(
         'cognitoCompatibility must prove PKCE S256, both resource parameters, audience, '
-        + 'exact callback, refresh rotation, replay rejection, and revocation'
+        + 'tested-client callbacks, refresh rotation, replay rejection, and revocation'
+      );
+    }
+    if (clients?.copilotCli === true) {
+      if (cognito?.copilotCallbackCompatible !== true) {
+        failures.push('Cognito evidence must confirm the successful Copilot callback');
+      }
+    } else if (cognito?.copilotCallbackCompatible !== false
+        || cognito?.copilotCallbackStatus !== COGNITO_COPILOT_UNSUPPORTED_STATUS) {
+      failures.push(
+        `Cognito evidence must preserve Copilot callback status `
+        + COGNITO_COPILOT_UNSUPPORTED_STATUS
       );
     }
     for (const name of ['inspectorVersion', 'claudeCodeVersion', 'copilotCliVersion']) {
@@ -781,7 +809,7 @@ async function runPublicationGate(config, dependencies = {}) {
   auditVerifier(config.auditDbPath, requestIds);
 
   return Object.freeze({
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: 'ready_for_manual_dns_review',
     checkedAt: new Date(now()).toISOString(),
     deployedCommit: config.deployedCommit,
@@ -826,6 +854,7 @@ module.exports = {
   REFRESH_REPLAY_MODES,
   REQUIRED_EVIDENCE,
   COGNITO_REQUIRED_EVIDENCE,
+  COGNITO_COPILOT_UNSUPPORTED_STATUS,
   loadGateConfig,
   loadEvidence,
   validateEvidence,
