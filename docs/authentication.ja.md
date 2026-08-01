@@ -52,6 +52,12 @@ EGRESSVIEW_SECURE_COOKIES=true
 
 `EGRESSVIEW_TRUST_PROXY`はカンマ区切りのexact IPまたはIPv4 CIDRです。全proxyを信用する設定は禁止です。forwarded client/protocol headerはrate limit、監査用pseudonym、Secure cookie判定に影響します。
 
+reverse proxyが設定済みの`SUBPATH`を除去してapplicationへ転送する場合は、
+同じ値を`X-Forwarded-Prefix`でも送信してください。たとえば
+`/egressview/`を公開し、applicationのrootへ転送するproxyは
+`X-Forwarded-Prefix: /egressview`を送ります。これにより、同一processで
+公開専用hostの`/`とprivateなsubpath accessを両立できます。
+
 既定値はclientごとに1分間600 API read、120 API mutationです。通常trafficを観測した上で、必要な場合だけ`EGRESSVIEW_RATE_LIMIT_READS`と`EGRESSVIEW_RATE_LIMIT_WRITES`を変更してください。
 
 ## 監査

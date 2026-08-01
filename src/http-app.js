@@ -40,6 +40,12 @@ function createIndexHtmlBase(indexHtml, subpath, assetVersion, htmlEscape) {
     .replace(/__ASSET_VERSION__/g, htmlEscape(assetVersion));
 }
 
+function resolveIndexBasePath(requestPath, subpath, forwardedPrefix) {
+  if (!subpath) return '';
+  if (requestPath.startsWith(`${subpath}/`)) return subpath;
+  return forwardedPrefix === subpath ? subpath : '';
+}
+
 function injectIndexBootstrap(indexHtmlBase, subpath, demoMode, nonce, htmlEscape) {
   const baseScript = `<script nonce="${nonce}">window.BASE_URL = '${htmlEscape(subpath)}'; window._DEMO_MODE = ${demoMode};</script>`;
   return indexHtmlBase.replace('</head>', baseScript + '\n</head>');
@@ -117,18 +123,20 @@ function configureHttpApp(app, {
   const indexRoutes = ['/', '/index.html'];
   if (subpath) indexRoutes.push(`${subpath}/`, `${subpath}/index.html`);
 
-  const indexHtmlBase = createIndexHtmlBase(
-    fs.readFileSync(path.join(appRoot, 'public', 'index.html'), 'utf8'),
-    subpath,
-    assetVersion,
-    htmlEscape
-  );
+  const indexHtml = fs.readFileSync(path.join(appRoot, 'public', 'index.html'), 'utf8');
+  const indexHtmlBases = new Map([
+    ['', createIndexHtmlBase(indexHtml, '', assetVersion, htmlEscape)],
+  ]);
+  if (subpath) {
+    indexHtmlBases.set(subpath, createIndexHtmlBase(indexHtml, subpath, assetVersion, htmlEscape));
+  }
   const i18nModule = serializeI18nModule(i18nCatalog);
 
   app.get(indexRoutes, (req, res) => {
+    const basePath = resolveIndexBasePath(req.path, subpath, req.get('x-forwarded-prefix'));
     res.type('html').send(injectIndexBootstrap(
-      indexHtmlBase,
-      subpath,
+      indexHtmlBases.get(basePath),
+      basePath,
       demoMode,
       res.locals.cspNonce,
       htmlEscape
@@ -211,6 +219,7 @@ module.exports = {
   createIndexHtmlBase,
   injectIndexBootstrap,
   registerHealthRoutes,
+  resolveIndexBasePath,
   setSecurityHeaders,
   serializeI18nModule,
 };
