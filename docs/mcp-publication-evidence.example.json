@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "deployedCommit": "0000000000000000000000000000000000000000",
   "publishDns": false,
   "directIngress": {
@@ -33,7 +33,9 @@
     "tokenRequestResource": false,
     "accessTokenAudienceMatched": false,
     "refreshAudiencePreserved": false,
-    "exactCallbackMatched": false,
+    "testedClientCallbacksMatched": false,
+    "copilotCallbackCompatible": false,
+    "copilotCallbackStatus": "",
     "oldRefreshRejected": false,
     "revokedRefreshRejected": false,
     "inspectorVersion": "",
@@ -62,6 +64,7 @@
     "copilotCli": false,
     "claudeCodeProtocolVersion": "",
     "copilotCliProtocolVersion": "",
+    "copilotCliStatus": "",
     "legacyClient": false,
     "legacyProtocolVersion": ""
   }

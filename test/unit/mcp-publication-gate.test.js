@@ -65,7 +65,7 @@ function tokens() {
 function evidence(overrides = {}) {
   const entry = { passed: true, testedAt: '2026-07-28T00:00:00.000Z' };
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     deployedCommit: COMMIT,
     publishDns: false,
     directIngress: { ...entry, portsClosed: true },
@@ -90,8 +90,8 @@ function evidence(overrides = {}) {
       ...entry,
       claudeCode: true,
       copilotCli: true,
-      claudeCodeProtocolVersion: '2026-07-28',
-      copilotCliProtocolVersion: '2026-07-28',
+      claudeCodeProtocolVersion: '2025-11-25',
+      copilotCliProtocolVersion: '2025-11-25',
       legacyClient: true,
       legacyProtocolVersion: '2025-11-25',
     },
@@ -111,7 +111,9 @@ function cognitoEvidence(overrides = {}) {
       tokenRequestResource: true,
       accessTokenAudienceMatched: true,
       refreshAudiencePreserved: true,
-      exactCallbackMatched: true,
+      testedClientCallbacksMatched: true,
+      copilotCallbackCompatible: true,
+      copilotCallbackStatus: 'passed',
       oldRefreshRejected: true,
       revokedRefreshRejected: true,
       inspectorVersion: '2.0.0',
@@ -226,20 +228,56 @@ describe('MCP publication gate evidence', () => {
     assert.ok(failures.some((item) => item.includes('rollback.testedAt')));
   });
 
-  it('requires explicit modern clients and a retained legacy client', () => {
+  it('accepts released client revisions and retains a legacy client probe', () => {
+    assert.deepEqual(validateEvidence(evidence(), { deployedCommit: COMMIT, now: NOW }), []);
     const failures = validateEvidence(evidence({
       clientCompatibility: {
         passed: true,
         testedAt: '2026-07-28T00:00:00.000Z',
         claudeCode: true,
         copilotCli: true,
-        claudeCodeProtocolVersion: '2025-11-25',
-        copilotCliProtocolVersion: '2026-07-28',
+        claudeCodeProtocolVersion: 'unsupported',
+        copilotCliProtocolVersion: 'unsupported',
         legacyClient: false,
       },
     }), { deployedCommit: COMMIT, now: NOW });
-    assert.ok(failures.some((item) => item.includes('must select 2026-07-28')));
+    assert.ok(failures.some((item) => item.includes('Claude Code must select')));
+    assert.ok(failures.some((item) => item.includes('Copilot CLI must select')));
     assert.ok(failures.some((item) => item.includes('retain a 2025-11-25')));
+  });
+
+  it('allows the documented Cognito Copilot callback limitation only in Cognito mode', () => {
+    const unsupportedCopilot = cognitoEvidence({
+      clientCompatibility: {
+        passed: true,
+        testedAt: '2026-07-28T00:00:00.000Z',
+        claudeCode: true,
+        copilotCli: false,
+        claudeCodeProtocolVersion: '2025-11-25',
+        copilotCliProtocolVersion: '',
+        copilotCliStatus: 'unsupported-random-loopback-port',
+        legacyClient: true,
+        legacyProtocolVersion: '2025-11-25',
+      },
+      cognitoCompatibility: {
+        ...cognitoEvidence().cognitoCompatibility,
+        copilotCallbackCompatible: false,
+        copilotCallbackStatus: 'unsupported-random-loopback-port',
+      },
+    });
+    const cognitoOptions = {
+      deployedCommit: COMMIT,
+      now: NOW,
+      compatibilityProfile: 'cognito',
+      issuer: COGNITO_ISSUER,
+      resource: RESOURCE,
+    };
+    assert.deepEqual(validateEvidence(unsupportedCopilot, cognitoOptions), []);
+    const strictFailures = validateEvidence(unsupportedCopilot, {
+      deployedCommit: COMMIT,
+      now: NOW,
+    });
+    assert.ok(strictFailures.some((item) => item.includes('successful GitHub Copilot CLI')));
   });
 
   it('accepts both safe refresh replay modes and rejects ambiguous evidence', () => {
