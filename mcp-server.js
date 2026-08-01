@@ -37,7 +37,13 @@ const { z } = require('zod');
 const { permissionForMcpTool } = require('./src/permission-matrix');
 const { isApiIdentityToken } = require('./src/api-identities');
 const { createMcpScopeMapping } = require('./src/mcp-scope-mapping');
-const { createOAuthResourceServer } = require('./src/mcp-oauth');
+const {
+  createOAuthResourceServer,
+  normalizeCompatibilityProfile,
+  normalizeIssuer,
+  assertCognitoIssuer,
+  OAUTH_COMPATIBILITY_PROFILES,
+} = require('./src/mcp-oauth');
 const {
   resolveDeploymentProfile,
   resolveMcpBindConfig,
@@ -110,11 +116,18 @@ function resolveHttpAuthConfig(env = process.env) {
     if (auditHashKey === serviceToken || auditHashKey === env.EGRESSVIEW_TOKEN) {
       throw new Error('MCP_AUDIT_HMAC_KEY must be dedicated to MCP audit pseudonyms');
     }
+    const compatibilityProfile = normalizeCompatibilityProfile(
+      env.MCP_OAUTH_COMPATIBILITY_PROFILE
+    );
+    if (compatibilityProfile === OAUTH_COMPATIBILITY_PROFILES.COGNITO) {
+      assertCognitoIssuer(normalizeIssuer(issuer));
+    }
     const scopeMapping = createMcpScopeMapping({ readScope, notesWriteScope });
     return Object.freeze({
       mode,
       issuer,
       resource,
+      compatibilityProfile,
       requiredScope: readScope,
       readScope,
       notesWriteScope,
@@ -763,6 +776,12 @@ async function startHttp(
 
   if (authConfig.mode === 'oauth') {
     oauth = createOAuthResourceServer(authConfig);
+    if (oauth.compatibilityProfile === OAUTH_COMPATIBILITY_PROFILES.COGNITO) {
+      process.stderr.write(
+        '[egressview-mcp] Cognito compatibility profile enabled; '
+        + 'PKCE S256 wire evidence is required before publication\n'
+      );
+    }
     scopeMapping = createMcpScopeMapping({
       readScope: authConfig.readScope || authConfig.requiredScope,
       notesWriteScope: authConfig.notesWriteScope,

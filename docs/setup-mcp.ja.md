@@ -160,6 +160,14 @@ issuer、有効期限、audience、scopeの不一致をfail-closedで拒否し�
 issuerはPKCE S256をmetadataへ公開する必要があります。loopback限定試験を
 除きHTTPSが必須です。
 
+既定の`MCP_OAUTH_COMPATIBILITY_PROFILE=strict`はこのmetadata検証を維持します。
+AWS Cognito regional user-pool issuerとの完全一致時だけ`cognito`を指定でき、
+`code_challenge_methods_supported` fieldの欠落だけを許容します。S256以外を
+明示したmetadataや、署名、issuer、有効期限、単一audience、scope検証は緩和
+しません。対応client versionごとにPKCE S256のwire trace、両requestのRFC 8707
+resource、完全一致callback、refresh rotation、失効を公開前証跡で確認するまで
+有効化しないでください。
+
 外部provider scopeはEgressViewの共通permissionへ変換します。
 `MCP_OAUTH_READ_SCOPE`は`network.read`、
 `MCP_OAUTH_NOTES_WRITE_SCOPE`は`notes.write`を付与します。read-onlyの
@@ -301,6 +309,7 @@ HTTP トランスポートをサポートする MCP クライアント（Anysphe
 | `MCP_AUTH_MODE` | HTTP モード | `token` | HTTP endpointの認証モード。`token`または段階導入中の`oauth` |
 | `MCP_TOKEN` | HTTP tokenモード | — | private HTTP endpoint専用token。明示設定し、`EGRESSVIEW_TOKEN`と別の値にする |
 | `MCP_OAUTH_ISSUER` | HTTP OAuthモード | — | Authorization Serverの正確なHTTPS issuer URL。loopback HTTPは試験時だけ許可 |
+| `MCP_OAUTH_COMPATIBILITY_PROFILE` | HTTP OAuthモード | `strict` | `strict`、または互換性証跡が完成したAWS Cognito regional user-pool issuerだけ`cognito` |
 | `MCP_OAUTH_RESOURCE` | HTTP OAuthモード | — | JWT audienceの完全一致検証に使うcanonical public MCP resource URL |
 | `MCP_OAUTH_READ_SCOPE` | HTTP OAuthモード | — | 内部`network.read` permissionへmappingするprovider scope |
 | `MCP_OAUTH_NOTES_WRITE_SCOPE` | HTTP OAuthモード | — | 内部`notes.write` permissionへmappingするprovider scope |
@@ -414,7 +423,8 @@ dual-era gateは証跡schema v2を要求します。旧schema v1はversion番号
   ingressできない
 - reverse proxyのbody、request rate、同時実行、timeout上限を実測した
 - stagingでapplication rollbackとMCP service identity rotationを試験した
-- Keycloak DB backupを使い捨て環境へrestoreした
+- provider復旧証跡が成功した。strict modeではKeycloak DB backupを使い捨て
+  環境へrestoreし、Cognito modeでは代わりに下記provider固有証跡を要求する
 - Keycloak/JWKSを到達不能にしMCPのJWKS cacheを空にした状態で、公開MCPだけが
   fail-closedとなり、`/healthz`、`/readyz`、全有効routerの収集が継続した
 - refresh token replay対策が、次のどちらかの記録済み方式で成功した:
@@ -425,6 +435,12 @@ dual-era gateは証跡schema v2を要求します。旧schema v1はversion番号
 - Claude CodeとGitHub Copilot CLIがstaging endpointでread toolとrefreshを
   完了し、それぞれ選択したprotocol versionが`2026-07-28`であることを記録した
 - 保持したlegacy clientが`2025-11-25`で同じtool discoveryを完了した
+
+`MCP_GATE_OAUTH_COMPATIBILITY_PROFILE=cognito`の場合、設定したissuer/resourceと
+一致する`cognitoCompatibility`証跡も必須です。PKCE `S256`、authorization/token
+両requestの`resource`、access tokenとrefresh後のaudience、完全一致callback、
+旧refresh tokenとrevoke後tokenの拒否、試験したInspector・Claude Code・Copilot
+CLI versionを記録します。このprofileではKeycloak DB restore証跡は不要です。
 
 JWKS障害試験ではMCP processをcold startしてください。起動済みprocessが
 有効なcached JWKSで署名検証を継続するのは正常であり、discoveryの
