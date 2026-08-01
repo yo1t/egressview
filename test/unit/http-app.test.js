@@ -10,6 +10,7 @@ const {
   createIndexHtmlBase,
   injectIndexBootstrap,
   registerHealthRoutes,
+  resolveIndexBasePath,
   setSecurityHeaders,
   serializeI18nModule,
 } = require('../../src/http-app');
@@ -65,6 +66,20 @@ describe('createIndexHtmlBase', () => {
     const html = '<base href="__BASE__/"><script src="/app.js?v=__ASSET_VERSION__"></script>';
     const base = createIndexHtmlBase(html, '/demo', '42', (v) => v);
     assert.equal(base, '<base href="/demo/"><script src="/app.js?v=42"></script>');
+  });
+});
+
+describe('resolveIndexBasePath', () => {
+  it('uses the root base for the public root routes', () => {
+    assert.equal(resolveIndexBasePath('/', '/egressview'), '');
+    assert.equal(resolveIndexBasePath('/index.html', '/egressview'), '');
+    assert.equal(resolveIndexBasePath('/', '/egressview', '/untrusted-prefix'), '');
+  });
+
+  it('preserves the configured base for subpath routes', () => {
+    assert.equal(resolveIndexBasePath('/egressview/', '/egressview'), '/egressview');
+    assert.equal(resolveIndexBasePath('/egressview/index.html', '/egressview'), '/egressview');
+    assert.equal(resolveIndexBasePath('/', '/egressview', '/egressview'), '/egressview');
   });
 });
 
