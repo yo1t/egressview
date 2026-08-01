@@ -1,6 +1,6 @@
 # Remote MCP OAuth compatibility evaluation
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-08-01
 
 This document records the P2-60 PR 1 authorization-server and MCP-client
 compatibility evaluation. It is a design decision only. It does not enable a
@@ -19,9 +19,9 @@ documentation; it does not access this AWS account or execute Cognito requests.
 
 ## Decision
 
-No authorization server fully passes the strict profile. **Keycloak is the
-provisional first choice for an interoperability pilot**, with an explicit
-single-resource exception:
+No authorization server fully passes the strict profile. **Cognito Essentials
+is the conditional first choice for production, with Keycloak as the
+standards-oriented fallback.** Both choices retain an explicit exception:
 
 - **Amazon Cognito is not eligible for the strict MCP 2025-11-25 profile
   today.** A live discovery document did not contain
@@ -40,12 +40,13 @@ single-resource exception:
   revocation, but does not document RFC 8707 resource indicators, CIMD, or
   DCR. It can be reconsidered when those capabilities are documented or tested.
 
-Start with Keycloak using one canonical MCP resource, fixed audience mappers,
-pre-registered clients, and exact audience validation. Move to standard RFC
-8707 processing when Keycloak supports it. Keycloak's CIMD support is
-experimental and is not the initial registration method. An MCP-compliant
-authorization facade in front of Cognito would be a separate, more complex
-design and is not selected.
+Start with Cognito in DNS-unpublished staging. Its explicit compatibility
+profile permits only the missing PKCE metadata field for an exact regional
+user-pool issuer; token signature, issuer, expiry, canonical audience, and
+scope validation remain strict. Adopt it only after PKCE S256 wire evidence
+and versioned Inspector, Claude Code, and Copilot CLI tests pass. Use Keycloak
+if any target client is incompatible. Keycloak's CIMD support is experimental,
+and its fixed-audience mapper remains a single-resource RFC 8707 exception.
 
 ## 2026-07-28 private client retest (2026-07-29)
 
@@ -108,7 +109,7 @@ authorization/token `resource` parameter, and access-token `aud`.
 | Exact callback compatibility | Fixed callbacks can be registered; up to 100 callback URLs; no wildcard behavior is documented | Configurable exact redirects | Exact or regex redirects |
 | Refresh / rotation | Supported; rotation grace period is configurable up to 60 seconds | Supported and configurable | Requires `offline_access`; rotation configurable |
 | Revocation endpoint | `/oauth2/revoke` | OIDC revoke endpoint | `/application/o/revoke/` |
-| P2-60 result | **Do not adopt for direct MCP discovery** | **Provisional first choice for a single-resource pilot** | **Unselected; evidence incomplete** |
+| P2-60 result | **Conditional production-first choice; compatibility profile required** | **Standards-oriented fallback with a single-resource exception** | **Unselected; evidence incomplete** |
 
 ## MCP-client matrix
 
@@ -119,19 +120,51 @@ PKCE S256, refresh, and revocation behavior.
 
 | Client | Documented capability | Registration / callback | Cognito result |
 | --- | --- | --- | --- |
-| ChatGPT custom MCP app | OAuth and refresh-token use; `offline_access` must be advertised | Generic static client-ID and callback behavior are not publicly documented | **Do not adopt Cognito:** authorization-server metadata fails first |
-| Claude web / Desktop | OAuth, DCR, custom client ID/secret, expiry and refresh | Fixed `https://claude.ai/api/mcp/auth_callback`; also register the future `https://claude.com/api/mcp/auth_callback` | **Do not adopt Cognito:** authorization-server metadata fails first |
-| Claude Code | Browser OAuth with secure token storage and automatic refresh | Official setup guide lists localhost callbacks, but static-client configuration is not documented | **Do not adopt Cognito:** authorization-server metadata fails first |
-| Cursor | Streamable HTTP/SSE OAuth; static-client OAuth improvements are documented | Callback behavior has changed across releases and is not configurable in the public MCP reference | **Do not adopt Cognito:** authorization-server metadata fails first |
-| Kiro CLI | Browser OAuth, pre-registered public/confidential client, custom scopes, refresh/reauth | Exact loopback URL, port, and path are configurable | **Do not adopt Cognito:** authorization-server metadata fails first |
+| ChatGPT custom MCP app | OAuth and refresh-token use; `offline_access` must be advertised | Generic static client-ID and callback behavior are not publicly documented | **Live compatibility test required** |
+| Claude web / Desktop | OAuth, DCR, custom client ID/secret, expiry and refresh | Fixed `https://claude.ai/api/mcp/auth_callback`; also register the future `https://claude.com/api/mcp/auth_callback` | **Live compatibility test required** |
+| Claude Code | Browser OAuth with secure token storage and automatic refresh | Official setup guide lists localhost callbacks, but static-client configuration is not documented | **Live compatibility test required** |
+| Cursor | Streamable HTTP/SSE OAuth; static-client OAuth improvements are documented | Callback behavior has changed across releases and is not configurable in the public MCP reference | **Live compatibility test required** |
+| Kiro CLI | Browser OAuth, pre-registered public/confidential client, custom scopes, refresh/reauth | Exact loopback URL, port, and path are configurable | **Live compatibility test required** |
 
-Cognito remains unavailable to every client in this table because it fails the
-authorization-server PKCE metadata gate before client-specific behavior is
-considered. Keycloak must be tested with Kiro CLI first and Claude second,
-using pre-registered clients. Its experimental CIMD feature is not enabled for
-the initial pilot.
+Cognito is approved only for clients that tolerate the missing metadata field
+while demonstrably using PKCE S256. Each supported version must pass the
+DNS-unpublished publication gate. If any target client is incompatible,
+Keycloak remains the fallback using pre-registered clients.
 
 ## Cognito live-test result
+
+### Essentials re-evaluation (2026-08-01)
+
+Before provisioning the Keycloak infrastructure, a disposable Cognito
+Essentials pool was evaluated with managed login, Authorization Code + PKCE
+S256, a URL-formatted resource server, a secretless public client, an exact
+localhost callback, five-minute access tokens, refresh-token rotation, and
+token revocation.
+
+- A valid code exchange succeeded and the access-token `aud` exactly matched
+  the canonical MCP resource.
+- URL-formatted custom read/write scopes were included in the access token,
+  and refresh preserved both the audience and scopes.
+- Refresh tokens rotated. Reuse of the old token and use after revocation both
+  failed with `invalid_grant`.
+- The implicit grant failed with `unauthorized_client`, and an unregistered
+  callback port failed with `redirect_mismatch`.
+- The regional issuer's OIDC discovery document still omitted
+  `code_challenge_methods_supported` and `registration_endpoint`, and did not
+  advertise custom scopes in `scopes_supported`. EgressView's production OAuth
+  verifier failed closed with `Authorization Server Metadata does not
+  advertise PKCE S256`.
+
+Token issuance, resource binding, rotation, and revocation meet the functional
+requirements. Cognito is therefore the conditional production-first choice,
+despite not passing the strict MCP metadata profile. EgressView's compatibility
+profile permits only the omitted field for an exact Cognito issuer and requires
+PKCE S256 wire evidence plus versioned client tests before publication. It does
+not add a metadata proxy, disable PKCE, or relax JWT validation. The disposable
+pool and domain were deleted; existing pools, EC2, DNS, ALB, security groups,
+and EgressView configuration were not changed.
+
+### Initial live test (2026-07-26)
 
 The existing unrelated Amplify user pool was not changed or reused. A
 disposable, tagged P2-60 user pool was created with self-registration disabled,
@@ -158,8 +191,8 @@ then deleted after the following tests:
    no longer exists.
 
 MCP Authorization 2025-11-25 requires clients to refuse authorization when the
-PKCE metadata field is absent. The Cognito candidate therefore fails even
-though its remaining security settings can be configured correctly.
+PKCE metadata field is absent. This initial result fails the strict profile;
+the later compatibility profile does not change that standards assessment.
 
 AWS Documentation MCP confirms that AWS documents `resource` at
 `/oauth2/authorize`, while the documented `/oauth2/token` parameter list does
@@ -176,12 +209,11 @@ removed.
 
 ## Operational conclusion
 
-Do not expose port 3010 yet. Proceed with a private Keycloak interoperability
-pilot before P2-60 PR 2 is considered production-ready. The pilot must prove
-PKCE metadata, pre-registered callbacks, fixed audience mapping, scope
-separation, refresh rotation, revocation, and exact `aud` rejection with Kiro
-CLI and then Claude. Record the deployment as partially conformant until
-Keycloak supports RFC 8707.
+Do not expose port 3010 yet. Proceed with Cognito in DNS-unpublished staging and
+require the compatibility evidence described above for every supported client
+version. If those tests pass, Cognito is the production choice. If they fail,
+deploy the private Keycloak fallback and retain its documented single-resource
+RFC 8707 exception. Neither path permits DNS publication before the P2-60 gate.
 
 ## Primary sources
 

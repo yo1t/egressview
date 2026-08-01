@@ -22,6 +22,7 @@ const NOW = Date.parse('2026-07-29T00:00:00.000Z');
 const COMMIT = 'a'.repeat(40);
 const RESOURCE = 'https://mcp.example.test/mcp';
 const ISSUER = 'https://auth.example.test/realms/egressview';
+const COGNITO_ISSUER = 'https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_TestPool123';
 const READ_SCOPE = 'egressview:read';
 const WRITE_SCOPE = 'egressview:notes.write';
 const TOOL_NAMES = [
@@ -98,11 +99,37 @@ function evidence(overrides = {}) {
   };
 }
 
+function cognitoEvidence(overrides = {}) {
+  const value = evidence({
+    cognitoCompatibility: {
+      passed: true,
+      testedAt: '2026-07-28T00:00:00.000Z',
+      issuer: COGNITO_ISSUER,
+      resource: RESOURCE,
+      pkceMethod: 'S256',
+      authorizationRequestResource: true,
+      tokenRequestResource: true,
+      accessTokenAudienceMatched: true,
+      refreshAudiencePreserved: true,
+      exactCallbackMatched: true,
+      oldRefreshRejected: true,
+      revokedRefreshRejected: true,
+      inspectorVersion: '2.0.0',
+      claudeCodeVersion: '2.1.220',
+      copilotCliVersion: '1.0.75',
+    },
+    ...overrides,
+  });
+  delete value.keycloakBackupRestore;
+  return value;
+}
+
 function config(overrides = {}) {
   return {
     endpoint: new URL(RESOURCE),
     resource: RESOURCE,
     issuer: ISSUER,
+    compatibilityProfile: 'strict',
     connectAddress: 'private-alb.example.test',
     readScope: READ_SCOPE,
     writeScope: WRITE_SCOPE,
@@ -143,12 +170,23 @@ describe('MCP publication gate configuration', () => {
     });
     assert.equal(loaded.endpoint.toString(), RESOURCE);
     assert.equal(loaded.rateProbeRequests, 70);
+    assert.equal(loaded.compatibilityProfile, 'strict');
 
     assert.throws(
       () => loadGateConfig({
         MCP_GATE_ENDPOINT: 'http://mcp.example.test/mcp',
       }),
       /must use HTTPS/
+    );
+
+    assert.throws(
+      () => loadGateConfig({
+        MCP_GATE_ENDPOINT: RESOURCE,
+        MCP_GATE_RESOURCE: RESOURCE,
+        MCP_GATE_ISSUER: ISSUER,
+        MCP_GATE_OAUTH_COMPATIBILITY_PROFILE: 'cognito',
+      }),
+      /exact AWS Cognito regional user-pool issuer/
     );
   });
 
@@ -232,6 +270,28 @@ describe('MCP publication gate evidence', () => {
     const failures = validateEvidence(unsafe, { deployedCommit: COMMIT, now: NOW });
     assert.ok(failures.some((item) => item.includes('from 1 to 900')));
     assert.ok(failures.some((item) => item.includes('revoke the complete refresh family')));
+  });
+
+  it('requires Cognito PKCE wire evidence instead of Keycloak backup evidence', () => {
+    const options = {
+      deployedCommit: COMMIT,
+      now: NOW,
+      compatibilityProfile: 'cognito',
+      issuer: COGNITO_ISSUER,
+      resource: RESOURCE,
+    };
+    assert.deepEqual(validateEvidence(cognitoEvidence(), options), []);
+    const failures = validateEvidence(cognitoEvidence({
+      cognitoCompatibility: {
+        passed: true,
+        testedAt: '2026-07-28T00:00:00.000Z',
+        issuer: COGNITO_ISSUER,
+        resource: RESOURCE,
+        pkceMethod: 'plain',
+      },
+    }), options);
+    assert.ok(failures.some((item) => item.includes('prove PKCE S256')));
+    assert.ok(failures.some((item) => item.includes('inspectorVersion')));
   });
 });
 
@@ -384,6 +444,8 @@ describe('MCP publication gate active probes', () => {
     assert.equal(report.status, 'ready_for_manual_dns_review');
     assert.equal(report.dnsPublished, false);
     assert.equal(report.enabledRouters, 2);
+    assert.equal(report.oauthCompatibilityProfile, 'strict');
+    assert.equal(report.checks.authorizationCompatibility, 'strict-metadata-pass');
     assert.deepEqual(report.checks.protocolRevisions, {
       '2025-11-25': 'pass',
       '2026-07-28': 'pass',

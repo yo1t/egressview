@@ -11,6 +11,7 @@ const {
 const ISSUER = 'https://idp.example.test/realms/egressview';
 const RESOURCE = 'https://monitor.example.test/mcp';
 const SCOPE = 'egressview:read';
+const COGNITO_ISSUER = 'https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_TestPool123';
 const NOW_MS = Date.UTC(2026, 6, 26, 14, 0, 0);
 
 let firstKey;
@@ -167,6 +168,29 @@ describe('mcp-oauth configuration and metadata', () => {
       scopes_supported: [SCOPE],
     });
   });
+
+  it('limits the Cognito compatibility profile to regional user-pool issuers', () => {
+    assert.throws(
+      () => createOAuthResourceServer({
+        issuer: ISSUER,
+        resource: RESOURCE,
+        requiredScope: SCOPE,
+        scopesSupported: [SCOPE],
+        compatibilityProfile: 'cognito',
+      }),
+      /exact AWS Cognito regional user-pool issuer/
+    );
+    assert.throws(
+      () => createOAuthResourceServer({
+        issuer: COGNITO_ISSUER,
+        resource: RESOURCE,
+        requiredScope: SCOPE,
+        scopesSupported: [SCOPE],
+        compatibilityProfile: 'unknown',
+      }),
+      /must be "strict" or "cognito"/
+    );
+  });
 });
 
 describe('mcp-oauth JWT verification', () => {
@@ -306,6 +330,50 @@ describe('mcp-oauth JWT verification', () => {
     });
     await assert.rejects(
       () => server.verifyToken(jwt(firstKey)),
+      /does not advertise PKCE S256/
+    );
+  });
+
+  it('allows only an omitted PKCE field for the explicit Cognito profile', async () => {
+    const fetchImpl = async (url) => {
+      if (url.endsWith('/.well-known/openid-configuration')) {
+        return jsonResponse({
+          issuer: COGNITO_ISSUER,
+          jwks_uri: `${COGNITO_ISSUER}/.well-known/jwks.json`,
+        });
+      }
+      return jsonResponse({ keys: [firstKey.jwk] });
+    };
+    const server = createOAuthResourceServer({
+      issuer: COGNITO_ISSUER,
+      resource: RESOURCE,
+      requiredScope: SCOPE,
+      scopesSupported: [SCOPE],
+      compatibilityProfile: 'cognito',
+      fetchImpl,
+      now: () => NOW_MS,
+    });
+    const result = await server.verifyToken(jwt(firstKey, { iss: COGNITO_ISSUER }));
+    assert.equal(result.claims.iss, COGNITO_ISSUER);
+    assert.equal(server.compatibilityProfile, 'cognito');
+  });
+
+  it('rejects contradictory PKCE metadata even in the Cognito profile', async () => {
+    const server = createOAuthResourceServer({
+      issuer: COGNITO_ISSUER,
+      resource: RESOURCE,
+      requiredScope: SCOPE,
+      scopesSupported: [SCOPE],
+      compatibilityProfile: 'cognito',
+      fetchImpl: async () => jsonResponse({
+        issuer: COGNITO_ISSUER,
+        jwks_uri: `${COGNITO_ISSUER}/.well-known/jwks.json`,
+        code_challenge_methods_supported: ['plain'],
+      }),
+      now: () => NOW_MS,
+    });
+    await assert.rejects(
+      () => server.verifyToken(jwt(firstKey, { iss: COGNITO_ISSUER })),
       /does not advertise PKCE S256/
     );
   });
