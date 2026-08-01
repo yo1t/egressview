@@ -52,6 +52,12 @@ EGRESSVIEW_SECURE_COOKIES=true
 
 `EGRESSVIEW_TRUST_PROXY` accepts comma-separated exact IPs and IPv4 CIDRs. Do not use a trust-all proxy setting. Forwarded client/protocol headers affect rate limiting, audit pseudonyms, and Secure-cookie decisions.
 
+When a reverse proxy strips the configured `SUBPATH` before forwarding the
+request, also send `X-Forwarded-Prefix` with that exact value. For example, a
+proxy exposing `/egressview/` while forwarding to the application root must
+send `X-Forwarded-Prefix: /egressview`. This lets the same process serve a
+dedicated public host at `/` without breaking private subpath access.
+
 The defaults allow 600 API reads and 120 API mutations per client per minute. Override them with `EGRESSVIEW_RATE_LIMIT_READS` and `EGRESSVIEW_RATE_LIMIT_WRITES` only after observing normal traffic.
 
 ## Audit
