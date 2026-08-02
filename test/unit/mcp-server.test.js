@@ -21,6 +21,7 @@ const {
   _apiPost,
   _createApiClient,
   _createMcpServiceApiClient,
+  _wrapToolHandler,
   _resolveHttpAuthConfig,
   _resolveMcpPort,
   _startHttp,
@@ -29,6 +30,54 @@ const { createMcpScopeMapping } = require('../../src/mcp-scope-mapping');
 
 const SERVICE_TOKEN = `egv_${'a'.repeat(64)}`;
 const AUDIT_HASH_KEY = 'test-audit-hmac-key-that-is-independent';
+
+describe('mcp-server: tool audit boundary', () => {
+  it('audits a successful handler without exposing its arguments or result', async () => {
+    const events = [];
+    const wrapped = _wrapToolHandler(
+      'get_devices',
+      async args => ({ content: [{ type: 'text', text: args.payloadMarker }] }),
+      event => events.push(event)
+    );
+    const result = await wrapped({ payloadMarker: 'must-not-enter-audit' });
+    assert.equal(result.content[0].text, 'must-not-enter-audit');
+    assert.equal(events.length, 1);
+    assert.deepEqual(
+      { ...events[0], durationMs: 0 },
+      {
+        toolName: 'get_devices', outcome: 'success', reason: null, durationMs: 0,
+      }
+    );
+    assert.equal(JSON.stringify(events).includes('must-not-enter-audit'), false);
+  });
+
+  it('records only a fixed reason when a handler throws', async () => {
+    const events = [];
+    const error = new Error('provider returned a sensitive error');
+    const wrapped = _wrapToolHandler(
+      'get_devices',
+      async () => { throw error; },
+      event => events.push(event)
+    );
+    await assert.rejects(() => wrapped({ token: 'secret' }), error);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].outcome, 'failure');
+    assert.equal(events[0].reason, 'tool_error');
+    assert.equal(JSON.stringify(events).includes(error.message), false);
+  });
+
+  it('treats an MCP isError result as a failed tool call', async () => {
+    const events = [];
+    const wrapped = _wrapToolHandler(
+      'get_devices',
+      async () => ({ isError: true, content: [] }),
+      event => events.push(event)
+    );
+    await wrapped({});
+    assert.equal(events[0].outcome, 'failure');
+    assert.equal(events[0].reason, 'tool_error');
+  });
+});
 
 // ─── createAuthMiddleware ─────────────────────────────────────────────────────
 
