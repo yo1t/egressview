@@ -119,13 +119,14 @@ module.exports = function authSecurityRoutes(ctx) {
 
   router.get('/auth/oidc/start', async (req, res) => {
     try {
-      const callback = `${publicBaseUrl(req, subpath)}/api/auth/oidc/callback`;
+      const cookieSubpath = authCookies.resolveCookieSubpath(req, subpath);
+      const callback = `${publicBaseUrl(req, cookieSubpath)}/api/auth/oidc/callback`;
       const authorizationUrl = await oidc.begin(appState.oidcConfig, callback);
       const state = new URL(authorizationUrl).searchParams.get('state');
       res.cookie(OIDC_STATE_COOKIE, state, authCookies.cookieOptions(req, {
         httpOnly: true,
         maxAge: 10 * 60_000,
-        subpath,
+        subpath: cookieSubpath,
       }));
       res.redirect(authorizationUrl);
     } catch (error) {
@@ -143,6 +144,7 @@ module.exports = function authSecurityRoutes(ctx) {
 
   router.get('/auth/oidc/callback', async (req, res) => {
     try {
+      const cookieSubpath = authCookies.resolveCookieSubpath(req, subpath);
       const cookieState = authCookies.parseCookies(req.headers.cookie)[OIDC_STATE_COOKIE] || '';
       const queryState = typeof req.query.state === 'string' ? req.query.state : '';
       const a = Buffer.from(cookieState);
@@ -152,7 +154,7 @@ module.exports = function authSecurityRoutes(ctx) {
       }
       res.clearCookie(OIDC_STATE_COOKIE, authCookies.cookieOptions(req, {
         httpOnly: true,
-        subpath,
+        subpath: cookieSubpath,
       }));
       const identity = await oidc.complete(appState.oidcConfig, req.query);
       // Derived from the server-side allowlist comparison, never from a claim
@@ -166,7 +168,7 @@ module.exports = function authSecurityRoutes(ctx) {
         role,
       });
       if (!session) throw new Error('Session creation failed');
-      authCookies.setSessionCookies(req, res, session, subpath);
+      authCookies.setSessionCookies(req, res, session, cookieSubpath);
       authAudit.append({
         eventType: 'login',
         authMethod: 'oidc',
@@ -176,7 +178,7 @@ module.exports = function authSecurityRoutes(ctx) {
         httpMethod: req.method,
         path: req.originalUrl,
       });
-      res.redirect(`${subpath || '/'}`);
+      res.redirect(cookieSubpath || '/');
     } catch (error) {
       authAudit.append({
         eventType: 'login',

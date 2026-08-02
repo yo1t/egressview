@@ -133,7 +133,8 @@ module.exports = function authSessionRoutes(ctx) {
       { authMethod: 'local', role: ROLES.ADMIN }
     );
     if (!session) return res.status(500).json({ error: t('auth.session-failed') });
-    authCookies?.setSessionCookies(req, res, session, subpath);
+    const cookieSubpath = authCookies?.resolveCookieSubpath(req, subpath) || '';
+    authCookies?.setSessionCookies(req, res, session, cookieSubpath);
     if (configFile && fs) {
       try { fs.unlinkSync(configFile + '.initial-login-password'); } catch {}
     }
@@ -144,7 +145,8 @@ module.exports = function authSessionRoutes(ctx) {
 
   router.post('/auth/logout', requireAdmin, (req, res) => {
     if (req.session) sessions.revokeSession(req.session.id);
-    authCookies?.clearSessionCookies(req, res, subpath);
+    const cookieSubpath = authCookies?.resolveCookieSubpath(req, subpath) || '';
+    authCookies?.clearSessionCookies(req, res, cookieSubpath);
     audit(req, 'logout');
     res.json({ success: true });
   });
