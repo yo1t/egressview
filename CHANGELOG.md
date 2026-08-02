@@ -4,7 +4,7 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
-## [1.7.0] - 2026-08-03
+## [1.7.0] - 2026-08-02
 
 ### Added
 
