@@ -284,6 +284,34 @@ function ok(obj)     { return { content: [{ type: 'text', text: JSON.stringify(o
 
 // ─── Tool registration (shared between stdio and HTTP transports) ─────────────
 
+const TOOL_AUDIT_CALLBACK = Symbol('toolAuditCallback');
+
+function wrapToolHandler(name, handler, audit) {
+  if (!audit) return handler;
+  return async (...args) => {
+    const startedAt = Date.now();
+    try {
+      const result = await handler(...args);
+      const failed = result?.isError === true;
+      audit({
+        toolName: name,
+        outcome: failed ? 'failure' : 'success',
+        reason: failed ? 'tool_error' : null,
+        durationMs: Date.now() - startedAt,
+      });
+      return result;
+    } catch (error) {
+      audit({
+        toolName: name,
+        outcome: 'failure',
+        reason: 'tool_error',
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
+    }
+  };
+}
+
 function registerTool(server, name, description, inputShape, handler) {
   if (!permissionForMcpTool(name)) {
     throw new Error(`MCP tool is missing a permission classification: ${name}`);
@@ -291,14 +319,19 @@ function registerTool(server, name, description, inputShape, handler) {
   server.registerTool(name, {
     description,
     inputSchema: z.object(inputShape),
-  }, handler);
+  }, wrapToolHandler(name, handler, server[TOOL_AUDIT_CALLBACK]));
 }
 
-function buildMcpServer({ includeWriteTools = true, apiClient = defaultApiClient } = {}) {
+function buildMcpServer({
+  includeWriteTools = true,
+  apiClient = defaultApiClient,
+  onToolCall = null,
+} = {}) {
   const server = new McpServer({
     name: 'egressview',
     version: require('./package.json').version,
   });
+  server[TOOL_AUDIT_CALLBACK] = onToolCall;
 
   // ① Threat summary
   registerTool(server,
@@ -716,6 +749,9 @@ function createAuditMiddleware() {
   return (req, res, next) => {
     res.on('finish', () => {
       const toolName = req.body?.method === 'tools/call' ? req.body?.params?.name : null;
+      // Tool handlers write immediately, without waiting for a long-lived
+      // stream to finish. Keep this fallback for calls rejected beforehand.
+      if (toolName && req.mcpToolAuditWritten) return;
       const mcpMethod = typeof req.body?.method === 'string' ? req.body.method : null;
       const status = res.statusCode;
       // A streamed response that blew its deadline still reports 200; the
@@ -846,7 +882,23 @@ async function startHttp(
     const apiClient = req.mcpRequestId && typeof internalApiClient.withRequestId === 'function'
       ? internalApiClient.withRequestId(req.mcpRequestId, requestController.signal)
       : internalApiClient;
-    return buildMcpServer({ includeWriteTools, apiClient });
+    const onToolCall = event => {
+      if (req.mcpToolAuditWritten) return;
+      const timedOut = req.mcpTimedOut === true;
+      const eventId = mcpAudit.append({
+        eventType: 'mcp_tool_call',
+        outcome: timedOut ? 'failure' : event.outcome,
+        reason: timedOut ? 'request_timeout' : event.reason,
+        toolName: event.toolName,
+        mcpMethod: 'tools/call',
+        httpStatus: 200,
+        ...auditContext(req),
+        durationMs: event.durationMs,
+      });
+      // A failed immediate write leaves the response-finish fallback enabled.
+      if (eventId) req.mcpToolAuditWritten = true;
+    };
+    return buildMcpServer({ includeWriteTools, apiClient, onToolCall });
   }, {
     legacy: 'stateless',
     onerror(error) {
@@ -865,10 +917,6 @@ async function startHttp(
   const handleMcp = async (req, res) => {
     const requestController = new AbortController();
 
-    // Record the timeout as a flag rather than writing a row here: the audit
-    // middleware still fires on finish, and two writes would leave the trail
-    // claiming both request_timeout and server_error for one request.
-    //
     // The Streamable HTTP transport sends headers as soon as it starts the SSE
     // stream, so for a streaming response the status can no longer be changed
     // to 504. The deadline still does the work that matters: it marks the
@@ -876,6 +924,20 @@ async function startHttp(
     // stalled calls wedging the endpoint closed.
     const deadline = setTimeout(() => {
       req.mcpTimedOut = true;
+      const toolName = req.body?.method === 'tools/call' ? req.body?.params?.name : null;
+      if (toolName && !req.mcpToolAuditWritten) {
+        const eventId = mcpAudit.append({
+          eventType: 'mcp_tool_call',
+          outcome: 'failure',
+          reason: 'request_timeout',
+          toolName,
+          mcpMethod: 'tools/call',
+          httpStatus: res.headersSent ? 200 : 504,
+          ...auditContext(req),
+          durationMs: Date.now() - req.mcpStartedAt,
+        });
+        if (eventId) req.mcpToolAuditWritten = true;
+      }
       requestController.abort(new DOMException('MCP request timed out', 'TimeoutError'));
       if (res.writableEnded) return;
       if (res.headersSent) res.end();
@@ -998,6 +1060,7 @@ module.exports._apiPost              = apiPost;
 module.exports._createApiClient      = createApiClient;
 module.exports._createMcpServiceApiClient = createMcpServiceApiClient;
 module.exports._createToolScopeMiddleware = createToolScopeMiddleware;
+module.exports._wrapToolHandler        = wrapToolHandler;
 module.exports._resolveHttpAuthConfig = resolveHttpAuthConfig;
 module.exports._resolveMcpPort        = resolveMcpPort;
 module.exports._startHttp             = startHttp;
