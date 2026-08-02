@@ -1,8 +1,8 @@
 # EgressView Code Quality Report
 
-- **Assessment date**: 2026-07-28
-- **Baseline**: `fea7843` (main after PR #140)
-- **Version**: 1.6.0
+- **Assessment date**: 2026-08-02
+- **Baseline**: `fd54a9e` (v1.7.0 release preparation, after PR #157)
+- **Version**: 1.7.0
 - **Node.js**: >=22 (CI: 22 and 24)
 - **Method**: automated tests, V8 coverage, static analysis, dependency/secret scans, browser smoke tests, and manual review
 
@@ -14,55 +14,56 @@
 
 **Overall grade: A**
 
-No critical or high-severity defect was found. Since the previous report (PR #121 baseline), seventeen PRs (#124--#140) landed, delivering AI event notifications, full authentication hardening (Google OIDC with PKCE, HttpOnly cookies, CSRF protection), a deny-by-default permission boundary with three roles and seven permissions, scoped API identities, browser session RBAC, MCP OAuth protection with RFC 9728 metadata, rate limiting, and audit trails. The database schema advanced from v7 to v12. The unit test suite grew from 1,477 to 1,670 tests, and Playwright smoke tests grew from 66 to 69.
+No critical or high-severity defect was found. Since the previous report (v1.6.0, PR #140 baseline), seventeen PRs (#141--#157) landed. This cycle shifted from building the security model to operating it: the remote MCP endpoint gained a publication gate, a Cognito compatibility profile, and audit hardening; offline mode, a portability gate, and a signed offline-runtime distribution completed P2-65; and a series of production fixes corrected HSTS, cookie paths, and root/subpath access behind reverse proxies. The database schema stayed at v12 -- no migration was required. The unit test suite grew from 1,670 to 1,775 tests and Playwright smoke tests from 69 to 70 (1 skipped).
 
-The codebase now enforces a strict security posture suitable for both private-network and authenticated multi-user deployments: 84 of 90 API endpoints require authentication and permission gating, a permission matrix classifies all HTTP routes and MCP tools, deny-by-default middleware rejects unclassified routes, API identities use hash-only storage with independent revocation, and MCP access is protected by RS256 JWT validation via JWKS with per-subject rate limiting.
+The security model established in v1.6.0 is unchanged and now carries operational evidence: 84 of 90 API endpoints require authentication and permission gating, a permission matrix classifies all HTTP routes and MCP tools, deny-by-default middleware rejects unclassified routes, API identities use hash-only storage with independent revocation, and MCP access is protected by RS256 JWT validation via JWKS with per-subject rate limiting and a dedicated append-only audit store.
 
 | Framework | Result | Verdict |
 |---|---:|---|
 | OWASP ASVS Level 1 | 14/14 areas satisfied or mitigated | Fully compliant |
-| OpenSSF Scorecard | ~8.6/10 estimated | Strong repository hygiene |
-| ISO/IEC 25010 | 8.8/10 average | High quality |
+| OpenSSF Scorecard | ~8.7/10 estimated | Strong repository hygiene |
+| ISO/IEC 25010 | 9.1/10 average | High quality |
 | Node.js Best Practices | 46/50 | Excellent |
 | SonarQube-equivalent gate | Passed; coverage rating B | No high-severity blocker |
 
 ## Review Findings
 
-### Changes since previous report (PR #121 baseline)
+### Changes since previous report (PR #140 baseline)
 
 | PR | Title | Category |
 |---:|---|---|
-| #125 | AI event notifications | Feature |
-| #126 | Move Slack settings to General tab | UX |
-| #127 | Confirm AI notification settings before saving | UX |
-| #128 | Authentication hardening + audit logging (OIDC, PKCE, HttpOnly cookies, CSRF, rate limits, schema v9) | Security |
-| #129 | Fix default database path for auth audit | Bug fix |
-| #130 | OIDC domain allowlist warning + v1.6.0 release (schema stays v9) | Security |
-| #131 | Deny-by-default permission boundary (7 permissions, permission-matrix) | Security |
-| #132 | OAuth authorization server evaluation docs | Documentation |
-| #133 | Scoped API identities (schema v10) | Security |
-| #134 | Browser session RBAC (viewer/operator/admin, schema v11) | Security |
-| #135 | Stable audit principalHash (schema v12) | Security |
-| #136 | Session role display in settings | UX |
-| #137 | OAuth protection for remote MCP (JWKS, RFC 9728) | Security |
-| #138 | Dependabot actions (checkout 7.0.1, setup-python 7.0.0) | Dependency |
-| #139 | MCP scope-to-service-identity mapping | Security |
-| #140 | MCP audit + rate limiting (rate limits, audit trail, concurrency cap) | Security |
+| #141 | P2-60 PR 5: remote MCP publication gate | Security |
+| #142 | Quality report refresh for v1.6.0 | Documentation |
+| #143 | Dual-era MCP and portable deployment profiles | Portability |
+| #144 | Harden private MCP deployment | Security |
+| #145 | P2-65 Phase 2: offline mode and self-hosted map assets | Portability |
+| #146 | P2-65 Phase 3: offline portability gate | Portability |
+| #147 | P2-65 Phase 4: signed offline-runtime distribution | Supply chain |
+| #148 | P2-62: consolidate notification settings, prepare release signing | UX / Supply chain |
+| #149 | Cognito MCP compatibility profile | Interoperability |
+| #150 | Fix MCP publication gate client release policy | Bug fix |
+| #151 | Fix HSTS behind trusted reverse proxies | Security |
+| #152 | Fix root and subpath web access behind proxies | Bug fix |
+| #153 | Fix browser cookie paths for root and subpath access | Bug fix |
+| #154 | Fix authenticated browser startup ordering | Bug fix |
+| #155 | Harden public MCP audit diagnostics | Security |
+| #156 | Audit MCP tools at handler completion | Security |
+| #157 | Record a keyed client address in the public MCP audit | Security |
 
 ### Key improvements
 
-- **Authentication**: Google OIDC with PKCE flow, HttpOnly session cookies, CSRF token protection, per-IP lockout, and a local recovery login (TTY CLI) for account recovery. Versioned KDF migration ensures password hash upgrades without downtime.
-- **Authorization**: deny-by-default permission boundary with 7 defined permissions (network.read, notes.write, ai.run, settings.write, backup.restore, auth.admin, audit.read) and 3 nested roles (viewer, operator, admin). The permission matrix covers 93 entries across HTTP routes and MCP tools; unclassified routes are rejected at startup.
-- **API identities**: scoped, expiring tokens with hash-only storage and independent revocation. Each identity is bound to a specific permission set.
-- **Audit**: append-only audit_events table with pseudonymous actorHash and principalHash, 180-day retention, and a dedicated audit.read permission.
-- **MCP OAuth**: RFC 9728 protected-resource metadata discovery, RS256 JWT validation via JWKS endpoint, scope-to-service-identity mapping, rate limiting (60/min global, 30/min per subject/client, 4 concurrent), and a separate MCP audit store.
-- **Session RBAC**: browser sessions carry a role (viewer/operator/admin) with the role displayed in settings. Permission enforcement applies uniformly to both session and API-identity access.
+- **Offline mode**: `EGRESSVIEW_OFFLINE_MODE` resolves an explicit feature policy before startup, so internet-dependent features are refused with a stated reason instead of attempting a call and timing out. Cloud provider SDK clients are never constructed. D3, TopoJSON, and world-atlas are self-hosted at pinned versions, and the CSP admits no external origin.
+- **Portability**: offline portability gates cover a Linux host and a generic container, and the release path can now produce a signed portable source distribution with a CycloneDX SBOM. The signing mechanism is in place, but no project key is enrolled yet and v1.7.0 itself ships unsigned; see the Signed-releases row in section 2.
+- **MCP audit completeness**: tool calls are audited at handler completion rather than at dispatch, so streaming responses and request-deadline timeouts each produce exactly one accurate outcome row. The audit store records a keyed pseudonym of the client address (`clientIpHash`), which removed the need to enable ALB, WAF, or Cognito-side logging for the same evidence.
+- **MCP publication gate**: remote publication is gated on an explicit operator decision, with client release timing decoupled from the gate so a revoked publication does not strand active clients.
+- **Reverse proxy correctness**: HSTS is emitted correctly behind a trusted proxy, and browser cookies are scoped to the request base path so the same process can serve a dedicated public host at `/` and a private subpath simultaneously.
+- **Interoperability**: a Cognito compatibility profile covers authorization servers that publish no `registration_endpoint`, allowing a pre-registered `client_id` instead of dynamic client registration.
 
 ### Open risks
 
 - **Medium, operational**: the four hardware/external-service integration files are not part of the default CI workflow. Unit and browser smoke tests use fixtures and demo mode; Yamaha, ASUS, Slack, and conntrack integration still require an explicit environment.
-- **Low, maintainability**: `mcp-server.js` (891 lines), `src/history.js` (789 lines), `public/js/ai-insights.js` (783 lines), `public/js/log.js` (715 lines), and `server.js` (690 lines) are the largest change surfaces. Critical paths are well-tested, but continued extraction of helpers is recommended as these modules grow.
-- **Low, ecosystem**: no OpenAPI contract, signed release artifacts, continuous fuzzing, or OCI image is provided. These remain demand-driven tasks rather than release blockers.
+- **Medium, maintainability**: `mcp-server.js` reached 1,076 lines (from 891) and `src/mcp-publication-gate.js` entered the hotspot list at 868 lines. The MCP surface is now the single largest change surface in the repository, and the OAuth, rate-limit, gate, and audit responsibilities inside it warrant extraction before further growth.
+- **Low, ecosystem**: no OpenAPI contract, continuous fuzzing, or OCI image is provided. These remain demand-driven tasks rather than release blockers.
 
 ---
 
@@ -70,29 +71,31 @@ The codebase now enforces a strict security posture suitable for both private-ne
 
 | Check | Result |
 |---|---|
-| Unit tests with coverage | 1,670 passed, 0 failed |
-| V8 coverage | 81.23% lines, 78.27% branches, 77.74% functions |
+| Unit tests with coverage | 1,775 passed, 0 failed (422 suites) |
+| V8 coverage | 82.74% lines, 78.53% branches, 79.77% functions |
 | CI coverage minimums | 70% lines, 75% branches, 65% functions -- passed |
-| Playwright browser smoke | 69 passed |
+| Playwright browser smoke | 70 passed, 1 skipped |
 | ESLint | Passed |
 | Frontend HTML insertion audit | 0 `innerHTML` / `insertAdjacentHTML` assignments |
 | Production dependency audit | 0 vulnerabilities |
 | Secret scan | Passed; no high-signal secrets or environment-specific LAN IPs |
 | ASH (Automated Security Helper) | 0 actionable findings |
-| GitHub Actions SHA pinning | 15/15 pinned, 0 unpinned |
-| GitHub CI on PR #140 | Node 22/24, release safety, ASH, browser smoke, and Pages build passed |
+| GitHub Actions SHA pinning | 19/19 pinned, 0 unpinned |
+| GitHub CI on PR #157 | Node 22/24, release safety, ASH, browser smoke, and Pages build passed |
 
 ### Codebase Metrics
 
+Values in parentheses are the v1.6.0 figures where they changed.
+
 | Metric | Value |
 |---|---:|
-| Source lines (`server`, `mcp`, `src`, `public/js`) | 29,165 |
-| Test lines (unit, integration, smoke) | 26,929 |
-| Test-to-source ratio | 92.3% |
-| Unit test files | 122 |
+| Source lines (`server`, `mcp`, `src`, `public/js`) | 30,984 (29,165) |
+| Test lines (unit, integration, smoke) | 29,347 (26,929) |
+| Test-to-source ratio | 94.7% (92.3%) |
+| Unit test files | 128 (122) |
 | Integration test files | 4 |
-| Browser smoke file | 1 (1,681 lines) |
-| Source modules under `src/` | 104 |
+| Browser smoke file | 1 (1,740 lines) |
+| Source modules under `src/` | 107 (104) |
 | Poller modules | 15 |
 | Route modules | 17 |
 | HTTP endpoints | 92 (90 API + 2 health) |
@@ -104,7 +107,8 @@ The codebase now enforces a strict security posture suitable for both private-ne
 | Defined permissions | 7 |
 | Roles | 3 (viewer, operator, admin) |
 | Production dependencies | 13 |
-| Parameterized SQL preparation sites | 150 |
+| Documentation files under `docs/` | 36 (34) |
+| Parameterized SQL preparation sites | 152 (150) |
 | Server-side `var` | 0 |
 | `eval` / `new Function` | 0 |
 | TODO/FIXME/HACK markers | 0 |
@@ -139,11 +143,11 @@ The health endpoints are intentionally unauthenticated but return only fixed liv
 
 ## 2. OpenSSF Scorecard (Estimated)
 
-**Estimated score: 8.6/10.**
+**Estimated score: 8.7/10.**
 
 | Check | Score | Evidence |
 |---|---:|---|
-| Pinned dependencies | 10 | All 15 GitHub Actions pinned to full commit SHA |
+| Pinned dependencies | 10 | All 19 GitHub Actions pinned to full commit SHA |
 | Token permissions | 10 | Read-only default; Pages widens only the permissions it needs |
 | Dangerous workflow | 10 | No `pull_request_target` |
 | Binary artifacts | 10 | No committed binaries |
@@ -153,10 +157,10 @@ The health endpoints are intentionally unauthenticated but return only fixed liv
 | Vulnerabilities | 10 | Production `npm audit` in CI; 0 findings in this review |
 | Dependency updates | 10 | Weekly Dependabot for npm and Actions with a 7-day cooldown |
 | CI tests | 9 | Unit/coverage and browser smoke on PRs; hardware integration is explicit, not default |
-| Maintained | 10 | Active release and PR history through PR #140 |
+| Maintained | 10 | Active release and PR history through PR #157 (153 merged PRs) |
 | Code review | 8 | PR workflow with required checks; RBAC and permission matrix enforce review standards |
 | Fuzzing | 0 | No continuous fuzzing |
-| Signed releases | 0 | No GPG/Sigstore release signing |
+| Signed releases | 2 | The tooling and a written key procedure exist, and the release path can produce a signed portable source distribution with a CycloneDX SBOM. **No release is actually signed.** `release-signing/trusted-fingerprints.json` holds no enrolled key and v1.7.0 ships unsigned by decision, so no GitHub release carries a signature asset. Credit here is for the mechanism only, not for a signed artifact. The check inspects release assets for `*.sig`, `*.asc`, `*.minisig`, `*.sign`, `*.sigstore`, or `*.intoto.jsonl` -- not git tag signatures -- and the build already emits `<artifact>.sig`, so enrolling any key and attaching that asset reaches the signature band (8). The remaining 2 points require a SLSA provenance file (`*.intoto.jsonl`) on each release, which depends on a provenance-generating build workflow rather than on key custody. |
 
 ---
 
@@ -166,14 +170,14 @@ The health endpoints are intentionally unauthenticated but return only fixed liv
 |---|---:|---|---|
 | Functional suitability | 9 | Multi-router collection, AI insights with notifications, threat investigation, exports, MCP with OAuth | No OpenAPI contract |
 | Performance efficiency | 9 | WAL, batching, bounded summaries, caches, worker-isolated backup, MCP concurrency cap | Heavy backup checks can still create short host-level latency spikes |
-| Compatibility | 8 | Node 22/24, JA/EN, Yamaha/Cisco/ASUS/conntrack paths | Hardware-specific verification remains fixture-dependent in CI |
+| Compatibility | 9 | Node 22/24, JA/EN, Yamaha/Cisco/ASUS/conntrack paths, Cognito compatibility profile for authorization servers without dynamic client registration, correct operation at `/` and at a subpath behind a proxy | Hardware-specific verification remains fixture-dependent in CI |
 | Usability | 9 | Responsive UI, setup guides, auto-detection, health diagnostics, role display, notification settings confirmation | No one-click deployment |
 | Reliability | 9 | Fail-closed migration/restore/config/notes, health/readiness, cancellation, request IDs, ASUS auto-reconnect, rate limiting | No built-in service supervisor |
 | Security | 10 | OIDC/PKCE, RBAC, deny-by-default permissions, CSRF, HttpOnly cookies, API identity hash-only storage, MCP OAuth/JWKS, audit trail, rate limits | -- |
-| Maintainability | 9 | 104 modules, strong tests, split route/poller/query boundaries, permission matrix | Several 690-891-line orchestration modules remain |
-| Portability | 9 | Cloud-neutral profiles, signed portable source bundle, offline runtime gate, versioned rollback | No supported OCI image/systemd unit |
+| Maintainability | 9 | 107 modules, strong tests (94.7% test-to-source ratio), split route/poller/query boundaries, permission matrix | The MCP surface grew faster than it was decomposed; `mcp-server.js` is now 1,076 lines |
+| Portability | 9 | Cloud-neutral profiles, signed portable source bundle, offline mode with a pre-startup feature policy, offline portability gates for host and container, versioned rollback | No supported OCI image/systemd unit |
 
-**Average: 9.0/10.**
+**Average: 9.1/10.**
 
 ---
 
@@ -199,7 +203,7 @@ Points are withheld for no default hardware integration CI, no supported process
 | Reliability | No known critical/high defect | A |
 | Security | No open high-signal secret or dependency finding; full RBAC and audit | A |
 | Maintainability | Large modules are known but bounded by tests and extracted helpers | A |
-| Coverage | 81.23% lines / 78.27% branches / 77.74% functions | B |
+| Coverage | 82.74% lines / 78.53% branches / 79.77% functions | B |
 | Duplication | No material new duplication identified in manual/static review | A (estimated) |
 
 **Quality gate: passed.**
@@ -208,11 +212,12 @@ Points are withheld for no default hardware integration CI, no supported process
 
 | File | Lines | Review note |
 |---|---:|---|
-| `mcp-server.js` | 891 | Grew significantly with OAuth, rate-limit, and audit responsibilities |
+| `mcp-server.js` | 1,076 | Largest file in the repository. OAuth, rate limiting, deadlines, and audit now share one module; extraction is overdue |
+| `public/js/ai-insights.js` | 872 | Notification and insight rendering share one view module |
+| `src/mcp-publication-gate.js` | 868 | New in this cycle; publication decision, client release timing, and diagnostics in one module |
 | `src/history.js` | 789 | Store orchestration remains large after query/cache/bootstrap extraction |
-| `public/js/ai-insights.js` | 783 | Notification and insight rendering share one view module |
+| `server.js` | 725 | Bootstrap and dependency wiring |
 | `public/js/log.js` | 715 | Pagination, filtering, and rendering share one view module |
-| `server.js` | 690 | Bootstrap and dependency wiring |
 | `public/js/graph.js` | 675 | Orchestrates extracted graph helpers/panels/renderer |
 | `src/devices.js` | 665 | Device identity, persistence, and merge lifecycle |
 | `src/pollers/cisco.js` | 645 | Stateful SSH lifecycle around extracted parser/handshake modules |
@@ -226,4 +231,8 @@ These are refactoring candidates, not current release blockers. Changes should r
 
 ## Conclusion
 
-The current main line is suitable for its documented self-hosted deployment model with strong multi-user security controls. Automated quality gates are broad, data-changing operations fail closed, AI provider calls are time-bounded and context-capped, full RBAC with deny-by-default permissions is enforced, MCP access is OAuth-protected with rate limiting and audit, and no critical or high issue remains. Since the previous report, the security posture has advanced substantially with OIDC authentication, session RBAC, scoped API identities, and comprehensive audit logging, while test coverage and count have grown proportionally. OpenAPI, continuous fuzzing, and OCI distribution remain requirement-driven enhancements.
+The current main line is suitable for its documented self-hosted deployment model with strong multi-user security controls. Automated quality gates are broad, data-changing operations fail closed, AI provider calls are time-bounded and context-capped, full RBAC with deny-by-default permissions is enforced, MCP access is OAuth-protected with rate limiting and audit, and no critical or high issue remains.
+
+Where v1.6.0 introduced the security model, v1.7.0 exercised it against a real internet-exposed MCP deployment and closed the gaps that only operation reveals: audit rows that were written twice or not at all, cookie paths that broke when the same process served both a public host and a private subpath, HSTS suppressed behind a trusted proxy, and an authorization server that publishes no `registration_endpoint`. Offline mode and the signed portable distribution completed the portability track. Coverage rose from 81.23% to 82.74% lines while the source grew by 1,819 lines, so testing kept pace with the code.
+
+The clearest remaining debt is structural rather than behavioural: the MCP surface (`mcp-server.js` at 1,076 lines plus an 868-line publication gate) is now the largest concentration of logic in the repository and should be decomposed before the next feature lands on it. OpenAPI, continuous fuzzing, GPG-signed tags, and OCI distribution remain requirement-driven enhancements.
