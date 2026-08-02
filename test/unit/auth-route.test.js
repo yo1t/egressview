@@ -8,6 +8,7 @@ const { PassThrough, Readable, Writable } = require('node:stream');
 const express = require('express');
 
 const authRoutes = require('../../src/routes/auth');
+const browserCookies = require('../../src/auth-cookies');
 
 const requireAdmin = (req, res, next) => next();
 
@@ -73,6 +74,7 @@ function makeApp(overrides = {}) {
     authCookies: {
       cookieOptions: () => ({ path: '/' }),
       parseCookies: () => ({}),
+      resolveCookieSubpath: () => '',
       setSessionCookies: () => {},
     },
     oidc: { test: async () => ({ issuer: 'https://accounts.google.com' }) },
@@ -85,7 +87,7 @@ function makeApp(overrides = {}) {
   return app;
 }
 
-function request(app, method, path, body = null) {
+function request(app, method, path, body = null, headers = {}) {
   return new Promise((resolve, reject) => {
     const payload = body == null ? null : Buffer.from(JSON.stringify(body));
     const req = new Readable({
@@ -96,7 +98,7 @@ function request(app, method, path, body = null) {
     });
     req.method = method;
     req.url = path;
-    req.headers = {};
+    req.headers = { ...headers };
     const reqSocket = new PassThrough();
     reqSocket.remoteAddress = '127.0.0.1';
     req.socket = reqSocket;
@@ -368,6 +370,32 @@ describe('auth route: session lifecycle', () => {
     });
     assert.equal(status, 200);
     assert.deepEqual(body, { success: true, token: 'token-browser', expiresAt: 123 });
+  });
+
+  it('selects the login cookie path from the exact forwarded prefix', async () => {
+    const paths = [];
+    const app = makeApp({
+      subpath: '/egressview',
+      appState: { authPasswordSalt: 'salt', authPasswordHash: 'hash' },
+      authPassword: { verifyPassword: () => true },
+      sessions: {
+        createSession: () => ({ id: 7, token: 'token-browser', expiresAt: 123 }),
+      },
+      authCookies: {
+        ...browserCookies,
+        setSessionCookies: (_req, _res, _session, cookiePath) => paths.push(cookiePath),
+      },
+    });
+
+    await request(app, 'POST', '/api/auth/login', { password: 'password' });
+    await request(app, 'POST', '/api/auth/login', { password: 'password' }, {
+      'x-forwarded-prefix': '/egressview',
+    });
+    await request(app, 'POST', '/api/auth/login', { password: 'password' }, {
+      'x-forwarded-prefix': '/other',
+    });
+
+    assert.deepEqual(paths, ['', '/egressview', '']);
   });
 
   it('rejects invalid and missing session revocation targets', async () => {

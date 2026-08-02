@@ -3,7 +3,8 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  parseCookies, sessionToken, verifyCookieCsrf, SESSION_COOKIE, CSRF_COOKIE,
+  parseCookies, resolveCookieSubpath, sessionToken, verifyCookieCsrf,
+  SESSION_COOKIE, CSRF_COOKIE,
 } = require('../../src/auth-cookies');
 
 describe('browser authentication cookies', () => {
@@ -30,5 +31,13 @@ describe('browser authentication cookies', () => {
     assert.equal(verifyCookieCsrf(req, sessions), false);
     req.authSource = 'header';
     assert.equal(verifyCookieCsrf(req, sessions), true);
+  });
+
+  it('uses the configured cookie path only for an exact forwarded prefix', () => {
+    const req = { get: name => name === 'x-forwarded-prefix' ? '/egressview' : '' };
+    assert.equal(resolveCookieSubpath(req, '/egressview'), '/egressview');
+    req.get = () => '/other';
+    assert.equal(resolveCookieSubpath(req, '/egressview'), '');
+    assert.equal(resolveCookieSubpath(req, ''), '');
   });
 });
