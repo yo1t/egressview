@@ -160,7 +160,7 @@ The health endpoints are intentionally unauthenticated but return only fixed liv
 | Maintained | 10 | Active release and PR history through PR #157 (153 merged PRs) |
 | Code review | 8 | PR workflow with required checks; RBAC and permission matrix enforce review standards |
 | Fuzzing | 0 | No continuous fuzzing |
-| Signed releases | 2 | The tooling and a written key procedure exist, and the release path can produce a signed portable source distribution with a CycloneDX SBOM. **No release is actually signed.** `release-signing/trusted-fingerprints.json` holds no enrolled key, v1.7.0 ships unsigned by decision, git tags are not GPG-signed, and there is no Sigstore/`cosign` attestation. Credit here is for the mechanism only, not for a signed artifact. |
+| Signed releases | 2 | The tooling and a written key procedure exist, and the release path can produce a signed portable source distribution with a CycloneDX SBOM. **No release is actually signed.** `release-signing/trusted-fingerprints.json` holds no enrolled key and v1.7.0 ships unsigned by decision, so no GitHub release carries a signature asset. Credit here is for the mechanism only, not for a signed artifact. The check inspects release assets for `*.sig`, `*.asc`, `*.minisig`, `*.sign`, `*.sigstore`, or `*.intoto.jsonl` -- not git tag signatures -- and the build already emits `<artifact>.sig`, so enrolling any key and attaching that asset reaches the signature band (8). The remaining 2 points require a SLSA provenance file (`*.intoto.jsonl`) on each release, which depends on a provenance-generating build workflow rather than on key custody. |
 
 ---
 

@@ -160,7 +160,7 @@ Health endpointは意図的に未認証ですが、`no-store`付きの固定live
 | Maintained | 10 | PR #157まで継続的にrelease・改善（マージ済みPR 153件） |
 | Code review | 8 | PRと必須checkを運用。RBACとpermission matrixがreview基準を強化 |
 | Fuzzing | 0 | Continuous fuzzingなし |
-| Signed releases | 2 | 仕組みと手順書は存在し、releaseパスはCycloneDX SBOM付きの署名付きportable source distributionを生成できます。**ただし実際に署名されたreleaseは存在しません。** `release-signing/trusted-fingerprints.json`に登録鍵はなく、v1.7.0は決定により未署名で配布し、git tagもGPG署名されておらず、Sigstore/`cosign` attestationもありません。ここでの加点は仕組みに対するものであり、署名済み成果物に対するものではありません。 |
+| Signed releases | 2 | 仕組みと手順書は存在し、releaseパスはCycloneDX SBOM付きの署名付きportable source distributionを生成できます。**ただし実際に署名されたreleaseは存在しません。** `release-signing/trusted-fingerprints.json`に登録鍵はなく、v1.7.0は決定により未署名で配布するため、署名資産を持つGitHub releaseが1件もありません。ここでの加点は仕組みに対するものであり、署名済み成果物に対するものではありません。本checkが判定するのはrelease資産の`*.sig` / `*.asc` / `*.minisig` / `*.sign` / `*.sigstore` / `*.intoto.jsonl`であり、**git tagの署名は対象外**です。buildは既に`<artifact>.sig`を生成しているため、鍵を用意して当該資産を添付すれば署名band（8点）に到達します。残り2点はSLSA provenance（`*.intoto.jsonl`）を各releaseへ添付することが条件で、これは鍵の保管方式ではなくprovenance生成buildワークフローに依存します。 |
 
 ---
 
