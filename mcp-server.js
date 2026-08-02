@@ -700,6 +700,8 @@ function createRateLimitMiddleware(limiter, { stage = 'pre-auth' } = {}) {
       eventType: 'mcp_rate_limited',
       outcome: 'failure',
       reason: verdict.reason,
+      mcpMethod: req.body?.method,
+      httpStatus: 429,
       ...auditContext(req),
       durationMs: Date.now() - req.mcpStartedAt,
     });
@@ -714,6 +716,7 @@ function createAuditMiddleware() {
   return (req, res, next) => {
     res.on('finish', () => {
       const toolName = req.body?.method === 'tools/call' ? req.body?.params?.name : null;
+      const mcpMethod = typeof req.body?.method === 'string' ? req.body.method : null;
       const status = res.statusCode;
       // A streamed response that blew its deadline still reports 200; the
       // deadline flag is the authoritative signal, not the status code.
@@ -724,12 +727,19 @@ function createAuditMiddleware() {
       else if (status === 403) reason = 'insufficient_scope';
       else if (status === 429) return; // already audited by the limiter
       else if (req.mcpTimedOut) reason = 'request_timeout';
+      else if (status === 400) reason = 'bad_request';
+      else if (status === 404) reason = 'not_found';
+      else if (status === 405) reason = 'method_not_allowed';
+      else if (status === 413) reason = 'payload_too_large';
+      else if (status >= 400 && status < 500) reason = 'client_error';
       else if (status >= 500) reason = 'server_error';
       mcpAudit.append({
         eventType: toolName ? 'mcp_tool_call' : 'mcp_request',
         outcome,
         reason,
         toolName,
+        mcpMethod,
+        httpStatus: status,
         ...auditContext(req),
         durationMs: Date.now() - req.mcpStartedAt,
       });
