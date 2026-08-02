@@ -57,6 +57,14 @@ test('generated i18n data module is served safely', async ({ request }) => {
   expect(body).not.toContain('</script>');
 });
 
+test('favicon is declared and served without a fallback 404', async ({ request }) => {
+  const index = await request.get(`${BASE}/`);
+  expect(await index.text()).toContain('/favicon.svg');
+  const icon = await request.get(`${BASE}/favicon.svg`);
+  expect(icon.status()).toBe(200);
+  expect(icon.headers()['content-type']).toMatch(/image\/svg\+xml/);
+});
+
 // (1) All JS files split out in Phase 2 must be served with 200
 const PHASE2_JS_FILES = [
   'utils.js', 'connections-panel.js', 'auth-socket.js', 'graph.js',
@@ -135,11 +143,17 @@ test('no uncaught JS errors on page load', async ({ page }) => {
 });
 
 test('unauthenticated browser shows the local recovery login without storing a token', async ({ page }) => {
+  const unauthorized = [];
+  page.on('response', response => {
+    if (response.status() === 401) unauthorized.push(new URL(response.url()).pathname);
+  });
   await page.goto('/');
   await expect(page.locator('.login-overlay')).toBeVisible();
   await expect(page.locator('.login-primary')).toBeVisible();
   await expect(page.locator('.login-google')).toBeHidden();
+  await page.waitForTimeout(1000);
   expect(await page.evaluate(() => localStorage.getItem('egressview_admin_token'))).toBeNull();
+  expect(unauthorized, `Protected requests ran before login: ${unauthorized.join(', ')}`).toEqual([]);
 });
 
 // ─── Auth-gated UI tests ──────────────────────────────────────────────────────
@@ -527,7 +541,7 @@ test('initial device panel loads when live socket updates are unavailable', asyn
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
 
   await expect.poll(() => summaryRequests).toBeGreaterThan(0);
-  expect(errors, `Startup errors:\n  ${errors.join('\n  ')}`).toHaveLength(0);
+  expect(fatalErrors(errors), `Startup errors:\n  ${errors.join('\n  ')}`).toHaveLength(0);
   await expect(page.locator('#device-list .device-card')).toHaveCount(1);
   await expect(page.locator('#device-list')).toContainText('socket-independent-device');
 });

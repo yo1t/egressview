@@ -1,6 +1,6 @@
 import { t } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, fmtTs } from './utils.js?v=__ASSET_VERSION__';
-import { apiFetch, socket, setRouterList } from './auth-socket.js?v=__ASSET_VERSION__';
+import { apiFetch, authReady, socket, setRouterList } from './auth-socket.js?v=__ASSET_VERSION__';
 
 let routers = [];
 let maxRouters = 10;
@@ -206,4 +206,8 @@ byId('router-save-btn').addEventListener('click', saveRouter);
 byId('router-detect-btn').addEventListener('click', detectRouter);
 socket.on('routers-status', next => { routers = next || []; render(); });
 
-loadRouters();
+authReady.then(loadRouters).catch(error => {
+  byId('router-list').replaceChildren(
+    routerTextElement('div', error.message, { className: 'router-empty' })
+  );
+});

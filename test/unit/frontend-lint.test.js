@@ -199,6 +199,8 @@ describe('Frontend script wiring invariants', () => {
     const publicApis = [
       { file: 'auth-socket.js', name: 'apiFetch', re: /async function apiFetch\(/ },
       { file: 'auth-socket.js', name: 'socket', re: /const socket\s*=\s*io\(/ },
+      { file: 'auth-socket.js', name: 'authReady', re: /const authReady\s*=\s*startAuthenticatedClient\(\)/ },
+      { file: 'auth-socket.js', name: 'connectAuthenticatedSocket', re: /function connectAuthenticatedSocket\(/ },
       { file: 'auth-socket.js', name: 'lookupNote', re: /function lookupNote\(/ },
       { file: 'graph.js', name: 'buildGraphFromConnections', re: /function buildGraphFromConnections\(/ },
       { file: 'stats.js', name: 'updateStats', re: /async function updateStats\(/ },
@@ -212,6 +214,17 @@ describe('Frontend script wiring invariants', () => {
       const source = fs.readFileSync(path.join(jsDir, file), 'utf8');
       assert.match(source, re, `${name} must remain available from ${file}`);
     }
+  });
+
+  it('defers protected startup work until authentication and handles BFCache lifecycle', () => {
+    const authSource = moduleSources['auth-socket.js'];
+    const mainSource = moduleSources['main.js'];
+    assert.match(mainSource, /authReady\.then\(\(\) => \{/);
+    assert.match(mainSource, /return connectAuthenticatedSocket\(\)/);
+    assert.match(authSource, /addEventListener\('pagehide'/);
+    assert.match(authSource, /socket\.disconnect\(\)/);
+    assert.match(authSource, /addEventListener\('pageshow'/);
+    assert.match(authSource, /event\.persisted/);
   });
 
   it('imports module-scoped helpers instead of relying on legacy globals', () => {
