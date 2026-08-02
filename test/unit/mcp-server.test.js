@@ -36,10 +36,10 @@ describe('mcp-server: tool audit boundary', () => {
     const events = [];
     const wrapped = _wrapToolHandler(
       'get_devices',
-      async args => ({ content: [{ type: 'text', text: args.secret }] }),
+      async args => ({ content: [{ type: 'text', text: args.payloadMarker }] }),
       event => events.push(event)
     );
-    const result = await wrapped({ secret: 'must-not-enter-audit' });
+    const result = await wrapped({ payloadMarker: 'must-not-enter-audit' });
     assert.equal(result.content[0].text, 'must-not-enter-audit');
     assert.equal(events.length, 1);
     assert.deepEqual(
