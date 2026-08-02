@@ -10,6 +10,37 @@ let _displayName = '';
 let _cooldownMs = 60 * 60 * 1000; // 1 hour default
 let _language = 'ja';
 
+// Per-detection delivery switches. These cover the two detections this module
+// raises directly; the AI event rules are separate and live in
+// ai-notification-service.js. Note that its `threat.enabled` gates AI analysis,
+// not the plain threat DM below, so the two must not be conflated.
+//
+// Slack and history are independent on purpose: a new device appearing on the
+// network is worth recording even when the operator does not want a DM for it.
+// Defaults are true so that an upgrade never silently drops a notification the
+// operator was already receiving.
+const DETECTION_KINDS = ['threat', 'newDevice'];
+const _detection = {
+  threat:    { slack: true, history: true },
+  newDevice: { slack: true, history: true },
+};
+
+function configureDetection(input = {}) {
+  for (const kind of DETECTION_KINDS) {
+    const next = input?.[kind];
+    if (!next || typeof next !== 'object') continue;
+    if (typeof next.slack === 'boolean') _detection[kind].slack = next.slack;
+    if (typeof next.history === 'boolean') _detection[kind].history = next.history;
+  }
+}
+
+function getDetectionConfig() {
+  return {
+    threat:    { ..._detection.threat },
+    newDevice: { ..._detection.newDevice },
+  };
+}
+
 // cooldown tracking: 'src|dst' → lastNotifiedAt (ms)
 const _cooldown = new Map();
 setInterval(() => {
@@ -115,7 +146,7 @@ async function notify(entry) {
 
   let slackSent = false;
 
-  if (_enabled && _token && _userId) {
+  if (_enabled && _token && _userId && _detection.threat.slack) {
     const key = `${entry.src}|${entry.dst}`;
     const last = _cooldown.get(key);
     if (!last || Date.now() - last >= _cooldownMs) {
@@ -133,7 +164,10 @@ async function notify(entry) {
     }
   }
 
-  if (_logCallback) _logCallback(entry, 'threat', slackSent);
+  // Always call back: the consumer also feeds the AI threat rules from this
+  // hook, and those must keep observing detections even when the operator has
+  // silenced the history entry. `record` says whether to store the row.
+  if (_logCallback) _logCallback(entry, 'threat', slackSent, { record: _detection.threat.history });
   return slackSent;
 }
 
@@ -198,7 +232,7 @@ async function sendAiNotification({ triggerType, text, generatedAt, language } =
 async function notifyNewDevice(entry) {
   let slackSent = false;
 
-  if (_enabled && _token && _userId) {
+  if (_enabled && _token && _userId && _detection.newDevice.slack) {
     const L = _NEW_DEVICE_MSG[_language] || _NEW_DEVICE_MSG.ja;
     const name = entry.srcMdnsName || entry.srcDnsName || entry.src;
     const lines = [
@@ -217,7 +251,9 @@ async function notifyNewDevice(entry) {
     }
   }
 
-  if (_logCallback) _logCallback(entry, 'new_device', slackSent);
+  if (_logCallback) {
+    _logCallback(entry, 'new_device', slackSent, { record: _detection.newDevice.history });
+  }
   return slackSent;
 }
 
@@ -318,6 +354,8 @@ module.exports = {
   getConfig,
   notify,
   notifyNewDevice,
+  configureDetection,
+  getDetectionConfig,
   sendAiNotification,
   setLogCallback,
   test,
