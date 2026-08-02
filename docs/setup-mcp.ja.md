@@ -345,6 +345,7 @@ Runtimeのlimitと監査はprivate token/OAuthの両HTTP modeへ適用します�
 | `MCP_RATE_LIMIT_CLIENT` | 30/分 | 異常な1クライアントも同様 |
 | `MCP_MAX_CONCURRENT` | 4 | 同時tool call数を制限 |
 | `MCP_MAX_BODY` | `256kb` | 解析・認証の前にbodyを制限 |
+| `MCP_TRUST_PROXY` | 未設定 | クライアントアドレスの設定を許可するproxyのexact IP / IPv4 CIDR（カンマ区切り） |
 | `MCP_REQUEST_TIMEOUT_MS` | 30000 | MCP処理1回の締切 |
 | `MCP_API_TIMEOUT_MS` | 15000 | 内部EgressView API呼び出し1回の締切 |
 
@@ -362,7 +363,7 @@ Runtimeのlimitと監査はprivate token/OAuthの両HTTP modeへ適用します�
 
 記録するもの: 仮名化したOAuth subjectとclient ID、tool名、付与scope、成否、理由コード、request ID、処理時間。
 
-**記録しないもの:** tool引数、IP/MACアドレス、端末メモ本文、access token、生のJWT、providerのエラー文言。
+**記録しないもの:** tool引数、MACアドレス、端末メモ本文、access token、生のJWT、providerのエラー文言。クライアントのアドレスは鍵付きハッシュのみを保存し、平文では保存しません。
 
 **2つの監査の突き合わせ。** EgressView本体はMCP service identityが何をしたかを記録し（`actor: api:<id>`）、こちらのストアはそれをどのOAuth subjectが要求したかを記録します。MCPのrequest IDは`X-Request-Id`としてEgressViewへ転送されるため、1つの事象を両者で追跡できます。**保持期間は必ず揃えてください。**片方だけ先に消えると、「何が起きたか」は残るのに「誰が指示したか」が失われます。
 
