@@ -8,7 +8,7 @@ No new hardware. No inline traffic interception. Works via the NAT session table
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
-![Release](https://img.shields.io/badge/release-v1.5.0-3fb950)
+![Release](https://img.shields.io/badge/release-v1.7.0-3fb950)
 
 > 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/egressview/)
 
@@ -18,13 +18,11 @@ No new hardware. No inline traffic interception. Works via the NAT session table
 
 EgressView is production-oriented for home/SOHO networks using Yamaha RTX or Cisco IOS. ASUS AP support and optional data sources are maintained as companion integrations.
 
-### What's new in v1.5.0
+### What's new in v1.7.0
 
-Version 1.5.0 makes AI Insights the start page, with local live metrics, previous-period comparisons, explicit manual analysis/chat through Ollama, Anthropic, OpenAI, or Amazon Bedrock, append-only conversations, and monthly token/cost estimates. It also adds Bedrock model, inference-profile, and Guardrail discovery, runtime CPU diagnostics, and collection-path performance improvements. See the [changelog](CHANGELOG.md) for upgrade details.
+Version 1.7.0 opens EgressView to the internet safely. Browser sessions now carry least-privilege roles (`viewer`, `operator`, `admin`) instead of every authenticated session holding full access, and the single permanent admin token is joined by scoped API identities with an expiry and independent revocation. The MCP server gained an OAuth 2.1 Resource Server mode with per-subject rate limits and its own append-only audit trail, so a remote AI assistant can be reached over the internet without sharing one static token. `EGRESSVIEW_OFFLINE_MODE` covers the opposite case: an air-gapped deployment where every internet-dependent feature is disabled before startup rather than attempted and timed out — the map assets are now self-hosted, so an ordinary page load makes no third-party request either.
 
-Existing databases migrate automatically to schema v8. Startup creates and verifies a complete backup first, and stops without changing the database if free-space, checkpoint, copy, or integrity verification fails. Linux conntrack remains a Docker-validated preview pending physical-router validation.
-
-Existing databases upgrade automatically. Before schema v5 is applied, EgressView creates and verifies a backup and checks observation consistency; startup stops without modifying the database if either check fails. Linux conntrack remains a Docker-validated preview pending physical-router testing.
+Existing databases migrate automatically to schema v12. Startup creates and verifies a complete backup first, and stops without changing the database if free-space, checkpoint, copy, or integrity verification fails. Existing OIDC sessions are revoked once so their role is derived from a newly verified allowlist match; local sessions keep administrator access.
 
 ## For Home / SOHO Security
 
