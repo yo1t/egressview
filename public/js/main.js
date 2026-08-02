@@ -2,7 +2,7 @@
 import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 import { allConnections, mergeConnections, setAllConnections, setDataRangeFrom, setServerTimeOffset, getTimeRange, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
-import { socket, connState, asusActive, setAsusActive, yamahaConfigured, setNotesMap, apiFetch, errorBanner, updateConnBadge, refreshAllNotes, setDevicesDataRef, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
+import { socket, authReady, connectAuthenticatedSocket, connState, asusActive, setAsusActive, yamahaConfigured, setNotesMap, apiFetch, errorBanner, updateConnBadge, refreshAllNotes, setDevicesDataRef, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
 import { statsMode, setViewTabHandlers, switchView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { nodes, selectedMac, buildGraph, buildGraphFromConnections, updateOrgGraph, scheduleGraphAutoFit, fetchGraphSummary, stopGraph, showToast, applyFilter, applyGraphFilter, lastClients, resizeGraph, setGraphDevicesDataRef } from './graph.js?v=__ASSET_VERSION__';
 import { updateStats, stStopSpin, stStopFlatAnim } from './stats.js?v=__ASSET_VERSION__';
@@ -37,11 +37,6 @@ setViewTabHandlers({
   onLeaveAi: stopAiInsights,
   onDeviceSearch: () => { applyFilter(lastClients); applyGraphFilter(); },
 });
-switchView('ai');
-// Populate the shared device panel even when the initial socket snapshot is
-// delayed or unavailable. The graph itself remains deferred while hidden.
-refreshGraphSummary();
-
 // ─── Main socket event handlers ───────────────────────────────────────────────
 
 socket.on('auth-required', () => {
@@ -191,5 +186,15 @@ if (typeof _DEMO_MODE !== 'undefined' && _DEMO_MODE) {
   if (demoBanner) demoBanner.classList.add('is-visible');
 }
 
-// Init
-resizeGraph();
+// Authenticate before any protected API call. Register every socket handler
+// first so the initial server snapshot cannot race module initialization.
+authReady.then(() => {
+  switchView('ai');
+  // Populate the shared device panel even when the initial socket snapshot is
+  // delayed or unavailable. The graph itself remains deferred while hidden.
+  refreshGraphSummary();
+  resizeGraph();
+  return connectAuthenticatedSocket();
+}).catch(error => {
+  console.error('[auth] Client initialization failed:', error);
+});
