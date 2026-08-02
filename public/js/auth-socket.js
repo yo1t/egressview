@@ -176,11 +176,28 @@ async function startAuthenticatedClient() {
   } catch {
     await promptAdminToken();
   }
-  socket.auth = { token: adminToken };
-  socket.connect();
 }
 
-startAuthenticatedClient();
+const authReady = startAuthenticatedClient();
+
+function connectAuthenticatedSocket() {
+  return authReady.then(() => {
+    if (socket.connected || socket.active) return;
+    socket.auth = { token: adminToken };
+    socket.connect();
+  });
+}
+
+let pageSuspended = false;
+window.addEventListener('pagehide', () => {
+  pageSuspended = true;
+  if (socket.connected || socket.active) socket.disconnect();
+});
+window.addEventListener('pageshow', event => {
+  if (!event.persisted || !pageSuspended) return;
+  pageSuspended = false;
+  connectAuthenticatedSocket();
+});
 
 socket.on('connect_error', err => {
   if (String(err.message).toLowerCase().includes('unauth')) {
@@ -546,7 +563,7 @@ document.getElementById('threat-save-btn').addEventListener('click', () => {
   showStatus('threat-status', t('settings.status.saved'), true);
 });
 
-export { socket, connState, asusActive, yamahaConfigured, notesMap, adminToken, openNoteModal, refreshAllNotes, updateConnBadge, lookupNote, apiFetch, errorBanner };
+export { socket, authReady, connectAuthenticatedSocket, connState, asusActive, yamahaConfigured, notesMap, adminToken, openNoteModal, refreshAllNotes, updateConnBadge, lookupNote, apiFetch, errorBanner };
 export function setAsusActive(v) { asusActive = v; }
 export function setNotesMap(v) { notesMap = v; }
 export function setYamahaConfigured(v) { yamahaConfigured = v; }
