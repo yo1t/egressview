@@ -31,6 +31,14 @@ describe('AI provider configuration', () => {
     const endpointWithCredentials = ['http://user', ':', 'pass@localhost:11434'].join('');
     assert.throws(() => normalizeEndpoint(endpointWithCredentials), /credentials/);
     assert.throws(() => normalizeEndpoint('http://localhost:11434?token=x'), /query/);
+    // SSRF guard: link-local / metadata targets are refused in every mode,
+    // including the IPv4-mapped IPv6 spelling the URL parser normalizes to.
+    assert.throws(() => normalizeEndpoint('http://169.254.169.254'), /special-use IP/);
+    assert.throws(() => normalizeEndpoint('http://[::ffff:169.254.169.254]:11434'), /special-use IP/);
+    assert.throws(() => normalizeEndpoint('http://[fd00:ec2::254]'), /special-use IP/);
+    // Loopback and LAN addresses a self-hosted Ollama uses stay allowed.
+    assert.equal(normalizeEndpoint('http://127.0.0.1:11434'), 'http://127.0.0.1:11434');
+    assert.equal(normalizeEndpoint('http://192.168.1.10:11434'), 'http://192.168.1.10:11434');
   });
 });
 

@@ -96,6 +96,16 @@ describe('feature gating', () => {
       () => parseInternalEndpoint('ai-ollama', 'https://ollama.internal'),
       /loopback or private IP/
     );
+    // Link-local metadata (IMDS) is reachable on a cloud instance even offline,
+    // so it must be refused despite matching the private-literal shape.
+    assert.throws(
+      () => parseInternalEndpoint('ai-ollama', 'http://169.254.169.254:11434'),
+      /loopback or private IP/
+    );
+    assert.throws(
+      () => parseInternalEndpoint('dns-ptr', '169.254.169.254'),
+      /EGRESSVIEW_INTERNAL_DNS/
+    );
     assert.throws(
       () => createOfflinePolicy({
         env: { [OFFLINE_ENV]: 'true' },

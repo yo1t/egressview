@@ -18,6 +18,7 @@
 'use strict';
 
 const net = require('node:net');
+const { isBlockedOutboundIpLiteral } = require('./ssrf-guard');
 
 const OFFLINE_ENV = 'EGRESSVIEW_OFFLINE_MODE';
 
@@ -85,7 +86,7 @@ function parseInternalEndpoint(feature, value) {
   const raw = String(value || '').trim();
   if (!raw) return null;
   if (feature === 'dns-ptr') {
-    if (!isPrivateIpLiteral(raw)) {
+    if (!isPrivateIpLiteral(raw) || isBlockedOutboundIpLiteral(raw)) {
       throw new Error('EGRESSVIEW_INTERNAL_DNS must be a loopback or private IP address in offline mode');
     }
     return raw;
@@ -101,7 +102,7 @@ function parseInternalEndpoint(feature, value) {
         || parsed.username || parsed.password || parsed.search || parsed.hash) {
       throw new Error('Ollama endpoint must use HTTP(S) without credentials, query, or fragment');
     }
-    if (!isPrivateIpLiteral(parsed.hostname)) {
+    if (!isPrivateIpLiteral(parsed.hostname) || isBlockedOutboundIpLiteral(parsed.hostname)) {
       throw new Error('Ollama endpoint must use a loopback or private IP address in offline mode');
     }
     return raw;

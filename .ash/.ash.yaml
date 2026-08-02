@@ -10,6 +10,8 @@ global_settings:
       reason: 'Third-party dependencies'
     - path: '.ash/**'
       reason: 'ASH output directory'
+    - path: 'infra/cdk/cdk.out/**'
+      reason: 'Transient CDK synth build output (gitignored, not pushed or deployed with the app). The ALB/WAF/monitoring templates are deployed through a separate reviewed cdk pipeline with its own tests; the specific checkov items (ALB access logs disabled, :80 HTTP->HTTPS redirect listener, SNS topic encryption) are deliberate infra decisions tracked in backlog P2-63.'
 
   suppressions:
     # ── detect-secrets false positives ──────────────────────────────────────
