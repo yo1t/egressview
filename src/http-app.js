@@ -15,6 +15,7 @@ const backupRoutes = require('./routes/backup');
 const configRoutes = require('./routes/config');
 const slackRoutes = require('./routes/slack');
 const notificationLogRoutes = require('./routes/notification-log');
+const detectionNotificationRoutes = require('./routes/detection-notifications');
 const beaconsRoutes = require('./routes/beacons');
 const routerRoutes = require('./routes/routers');
 const manualThreatRoutes = require('./routes/manual-threat');
@@ -192,6 +193,7 @@ function configureHttpApp(app, {
   app.use('/api', configRoutes(routeCtx));
   app.use('/api', slackRoutes(routeCtx));
   app.use('/api', notificationLogRoutes(routeCtx));
+  app.use('/api', detectionNotificationRoutes(routeCtx));
   app.use('/api', beaconsRoutes({
     requireAdmin,
     beacons,

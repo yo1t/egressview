@@ -198,6 +198,7 @@ function loadConfig() {
   }
   applyConfigToAppState(appState, data, { isAllowedLogPath: utils.isAllowedLogPath, logger });
   if (data.slack) notifier.configure({ ...data.slack, language: appState.uiLanguage });
+  if (data.detectionNotifications) notifier.configureDetection(data.detectionNotifications);
   if (data.manualThreat) manualThreatLookup.configure(data.manualThreat);
   if (data.ai) aiProvider.configure(data.ai);
   if (data.aiNotifications) aiNotificationService.configure(data.aiNotifications);
@@ -233,6 +234,7 @@ function saveConfig(sectionOverrides = {}) {
     general: { homeCountry: appState.homeCountry, language: appState.uiLanguage, autoInvestigate: appState.autoInvestigate, retentionDays: appState.retentionDays },
     backup:  backup.getConfig(),
     slack:   { ...notifier.getConfig(), tokenSet: undefined },
+    detectionNotifications: notifier.getDetectionConfig(),
     adminToken: appState.adminToken,
     dnsmasq: { enabled: appState.dnsmasqEnabled, logFile: appState.dnsmasqLogFile },
     inspect: { enabled: appState.inspectEnabled, logFile: appState.inspectLogFile },
@@ -427,8 +429,11 @@ registerSocketHandlers({
 
 // ─── Wire notifier log callback ───────────────────────────────────────────────
 
-notifier.setLogCallback((entry, type, slackSent) => {
-  history.logNotification(entry, type, slackSent);
+notifier.setLogCallback((entry, type, slackSent, options = {}) => {
+  // `record: false` silences the history row only. Threat observation still
+  // runs so the AI event rules keep their input; silencing the log must not
+  // disable a separate feature the operator did not touch.
+  if (options.record !== false) history.logNotification(entry, type, slackSent);
   if (type === 'threat') aiNotificationService.observeThreat(entry);
 });
 
