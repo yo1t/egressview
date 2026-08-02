@@ -796,6 +796,9 @@ function initializeMcpAudit(authConfig) {
   });
   mcpAudit.assertWritable();
   mcpAudit.prune();
+  // Keep enforcing retention for the lifetime of the process, not just at
+  // startup; an unref'd timer will not delay shutdown.
+  mcpAudit.startPruneSchedule();
   mcpAudit.setWriteFailureHandler((error, total) => {
     if (total === 1 || total % 100 === 0) {
       process.stderr.write(
