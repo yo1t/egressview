@@ -72,6 +72,7 @@ function initDb(dbPath, options = {}) {
       reason       TEXT,
       subjectHash  TEXT,
       clientIdHash TEXT,
+      clientIpHash TEXT,
       toolName     TEXT,
       mcpMethod    TEXT,
       httpStatus   INTEGER,
@@ -86,6 +87,7 @@ function initDb(dbPath, options = {}) {
     CREATE INDEX IF NOT EXISTS idx_mcp_audit_subject
       ON mcp_audit_events(subjectHash, createdAt DESC);
   `);
+
   // This store predates the request-level method/status fields and has no
   // user_version migration runner. Expand existing files in place without
   // guessing values for historical rows.
@@ -98,6 +100,13 @@ function initDb(dbPath, options = {}) {
   if (!columns.has('httpStatus')) {
     db.exec('ALTER TABLE mcp_audit_events ADD COLUMN httpStatus INTEGER');
   }
+  if (!columns.has('clientIpHash')) {
+    db.exec('ALTER TABLE mcp_audit_events ADD COLUMN clientIpHash TEXT');
+  }
+  // Indexed because the question this column answers — "is one source
+  // flooding us?" — is always a grouped lookup over recent rows.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_mcp_audit_client_ip
+             ON mcp_audit_events(clientIpHash, createdAt DESC)`);
 }
 
 function closeDb() {
@@ -133,6 +142,11 @@ function append(event = {}) {
     reason: bounded(event.reason, MAX_REASON),
     subjectHash: pseudonym(event.subject),
     clientIdHash: pseudonym(event.clientId),
+    // The only identifier available when a request fails before
+    // authentication: unauthorized and invalid_token rows carry no subject or
+    // client, so without this a flood cannot be told from ordinary retries.
+    // Pseudonymised with the same key, so a raw address is never stored.
+    clientIpHash: pseudonym(event.clientIp),
     toolName: bounded(event.toolName, MAX_TOOL_NAME),
     mcpMethod: bounded(event.mcpMethod, MAX_MCP_METHOD),
     httpStatus: Number.isInteger(event.httpStatus)
@@ -146,10 +160,12 @@ function append(event = {}) {
     db.prepare(`
       INSERT INTO mcp_audit_events
         (eventId, createdAt, eventType, outcome, reason, subjectHash,
-         clientIdHash, toolName, mcpMethod, httpStatus, scopes, requestId, durationMs)
+         clientIdHash, clientIpHash, toolName, mcpMethod, httpStatus, scopes,
+         requestId, durationMs)
       VALUES
         (@eventId, @createdAt, @eventType, @outcome, @reason, @subjectHash,
-         @clientIdHash, @toolName, @mcpMethod, @httpStatus, @scopes, @requestId, @durationMs)
+         @clientIdHash, @clientIpHash, @toolName, @mcpMethod, @httpStatus, @scopes,
+         @requestId, @durationMs)
     `).run(row);
     return row.eventId;
   } catch (error) {
@@ -190,7 +206,8 @@ function list({ limit = 100, before } = {}) {
   const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
   const sql = `
     SELECT seq, eventId, createdAt, eventType, outcome, reason, subjectHash,
-           clientIdHash, toolName, mcpMethod, httpStatus, scopes, requestId, durationMs
+           clientIdHash, clientIpHash, toolName, mcpMethod, httpStatus, scopes,
+           requestId, durationMs
     FROM mcp_audit_events
     ${before ? 'WHERE createdAt < ?' : ''}
     ORDER BY seq DESC LIMIT ?

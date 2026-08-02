@@ -349,6 +349,7 @@ Three independent buckets apply, and all must allow a request. A separate concur
 | `MCP_RATE_LIMIT_CLIENT` | 30/min | One misbehaving client cannot either |
 | `MCP_MAX_CONCURRENT` | 4 | Bounds simultaneous tool calls |
 | `MCP_MAX_BODY` | `256kb` | Body is bounded before parsing or authentication |
+| `MCP_TRUST_PROXY` | unset | Comma-separated exact IPs and IPv4 CIDRs of proxies allowed to set the client address |
 | `MCP_REQUEST_TIMEOUT_MS` | 30000 | Deadline for one MCP exchange |
 | `MCP_API_TIMEOUT_MS` | 15000 | Deadline for one internal EgressView API call |
 
@@ -366,7 +367,7 @@ Every HTTP request is appended to a dedicated store (`MCP_AUDIT_DB_PATH`, defaul
 
 Recorded: pseudonymised OAuth subject and client id, tool name, granted scopes, outcome, a reason code, the request id, and duration.
 
-**Never recorded:** tool arguments, IP or MAC addresses, device note bodies, access tokens, raw JWTs, or provider error text.
+**Never recorded:** tool arguments, MAC addresses, device note bodies, access tokens, raw JWTs, or provider error text. The client address is stored only as a keyed hash, never in the clear.
 
 **Joining the two trails.** EgressView audits what the MCP service identity did (`actor: api:<id>`); this store records which OAuth subject asked for it. The MCP request id is forwarded to EgressView as `X-Request-Id`, so one incident can be followed across both. Keep the two retention windows equal, or the record of *who asked* will expire while the record of *what happened* remains.
 

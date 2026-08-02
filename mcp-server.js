@@ -50,6 +50,7 @@ const {
 } = require('./src/deployment-profile');
 const crypto = require('node:crypto');
 const mcpAudit = require('./src/mcp-audit');
+const { createTrustProxy } = require('./src/proxy-trust');
 const { createMcpRateLimiter, rateLimitOptionsFromEnv } = require('./src/mcp-rate-limit');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -688,6 +689,11 @@ function auditContext(req) {
     clientId: req.mcpAuth?.clientId || null,
     scopes: req.mcpAuth?.scopes || null,
     requestId: req.mcpRequestId,
+    // Present even when authentication fails, which is exactly when subject
+    // and clientId are null. Express resolves this from X-Forwarded-For only
+    // for the proxies named in MCP_TRUST_PROXY; otherwise it is the socket
+    // address, so a caller cannot spoof it by sending its own header.
+    clientIp: req.ip || null,
   };
 }
 
@@ -805,6 +811,10 @@ async function startHttp(
   { bindAddress = '127.0.0.1' } = {}
 ) {
   const app = express();
+  // Only the proxies named here may set the client address. Without this
+  // Express uses the socket address, so an untrusted caller cannot forge
+  // X-Forwarded-For to poison the audit trail or evade a per-source view.
+  app.set('trust proxy', createTrustProxy(process.env.MCP_TRUST_PROXY));
   const MAX_BODY = process.env.MCP_MAX_BODY || '256kb';
   const limiter = createMcpRateLimiter(rateLimitOptionsFromEnv());
 
