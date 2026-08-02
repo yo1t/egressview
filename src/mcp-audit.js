@@ -228,6 +228,30 @@ function summary({ sinceMs = 24 * 60 * 60 * 1000 } = {}) {
   `).all(Date.now() - Number(sinceMs));
 }
 
+// Retention only takes effect while something calls prune(). A single call at
+// startup leaves a long-running MCP process never enforcing it, so the
+// documented window silently stops applying the longer the process stays up.
+// This mirrors the daily schedule the application-side audit already uses.
+const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let pruneTimer = null;
+
+function startPruneSchedule({ intervalMs = PRUNE_INTERVAL_MS, retentionDays } = {}) {
+  stopPruneSchedule();
+  // prune() swallows its own errors, so a failing delete can never take down
+  // the process or stop later audit writes.
+  pruneTimer = setInterval(() => prune({ retentionDays }), intervalMs);
+  // Never hold the event loop open just to wait for the next prune.
+  pruneTimer.unref?.();
+  return pruneTimer;
+}
+
+function stopPruneSchedule() {
+  if (pruneTimer) {
+    clearInterval(pruneTimer);
+    pruneTimer = null;
+  }
+}
+
 function prune({ retentionDays = DEFAULT_RETENTION_DAYS, now } = {}) {
   if (!db) return 0;
   const at = Number.isFinite(now) ? Number(now) : Date.now();
@@ -241,6 +265,7 @@ function prune({ retentionDays = DEFAULT_RETENTION_DAYS, now } = {}) {
 
 module.exports = {
   DEFAULT_RETENTION_DAYS,
+  PRUNE_INTERVAL_MS,
   append,
   assertWritable,
   health,
@@ -249,6 +274,8 @@ module.exports = {
   initDb,
   list,
   prune,
+  startPruneSchedule,
+  stopPruneSchedule,
   setHashKey,
   summary,
   _resetForTest(dbPath = ':memory:', options = {}) {
@@ -259,4 +286,7 @@ module.exports = {
     onWriteFailure = null;
     initDb(dbPath, options.withoutHashKey ? {} : { hashKey: 'test-mcp-audit-key' });
   },
+  // Test-only handle. Retention tests need rows with a chosen createdAt, and
+  // append() deliberately stamps that itself.
+  _dbForTest() { return db; },
 };

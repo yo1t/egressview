@@ -373,7 +373,7 @@ Recorded: pseudonymised OAuth subject and client id, tool name, granted scopes, 
 
 Reason codes: `unauthorized`, `invalid_token`, `insufficient_scope`, `bad_request`, `not_found`, `method_not_allowed`, `payload_too_large`, `client_error`, `tool_error`, `global_rate_limit`, `subject_rate_limit`, `client_rate_limit`, `concurrency_limit`, `request_timeout`, `server_error`. Request-level rows also record the bounded MCP method and HTTP status. Tool calls are recorded when the handler completes rather than when a long-lived response stream closes. Tool arguments, response bodies, and provider error text are never stored. A run of failures is the signal to investigate.
 
-Subjects are pseudonymised with the dedicated `MCP_AUDIT_HMAC_KEY`, so the same person correlates across requests without the identifier being stored. Keep this key stable when rotating `MCP_SERVICE_TOKEN`; changing it intentionally starts a new pseudonym namespace. Entries older than 180 days are pruned at startup, matching EgressView's own audit retention.
+Subjects are pseudonymised with the dedicated `MCP_AUDIT_HMAC_KEY`, so the same person correlates across requests without the identifier being stored. Keep this key stable when rotating `MCP_SERVICE_TOKEN`; changing it intentionally starts a new pseudonym namespace. Entries older than 180 days are pruned at startup and every 24 hours thereafter, matching EgressView's own audit retention, so the window keeps applying however long the process stays up.
 
 ### Revoking access
 
