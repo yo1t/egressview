@@ -291,11 +291,17 @@ describe('MCP private HTTP boundary', () => {
         id: 7,
         method: 'tools/call',
         params: { name: 'get_devices', arguments: {} },
-      });
+      }, { 'X-Request-Id': 'tool-audit-probe' });
       await response.text();
       assert.ok(presentedTokens.length >= 2);
       assert.ok(presentedTokens.every(token => token === SERVICE_TOKEN));
       assert.equal(presentedTokens.includes(process.env.EGRESSVIEW_TOKEN), false);
+      const rows = mcpAudit.list().filter(row => row.requestId === 'tool-audit-probe');
+      assert.equal(rows.length, 1, 'handler and HTTP finish must not double-audit one tool call');
+      assert.equal(rows[0].eventType, 'mcp_tool_call');
+      assert.equal(rows[0].toolName, 'get_devices');
+      assert.equal(rows[0].mcpMethod, 'tools/call');
+      assert.equal(rows[0].outcome, 'success');
     } finally {
       global.fetch = realFetch;
       restore();
