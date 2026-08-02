@@ -4,16 +4,9 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
-### Security and Reliability
+## [1.7.0] - 2026-08-03
 
-- Public MCP audit rows now carry a keyed hash of the client address. It is the
-  only identifier available when a request fails before authentication, where
-  subject and client id are necessarily null, so a flood from one source can
-  finally be told apart from ordinary retries. The raw address is never stored,
-  and `MCP_TRUST_PROXY` names the proxies allowed to set it — otherwise the
-  socket address is used, so a caller cannot forge `X-Forwarded-For` to poison
-  the trail. Existing audit databases gain the column in place; historical rows
-  stay null rather than being backfilled with a guess.
+### Added
 
 - Added `EGRESSVIEW_OFFLINE_MODE` for air-gapped and egress-filtered
   deployments. Internet-dependent features are decided and disabled before
@@ -37,11 +30,30 @@ All notable changes to EgressView are documented here.
   dependency lock, per-file manifest, SHA-256 checksum, Ed25519 signature,
   credential/runtime-data exclusion gate, and atomic install/upgrade/rollback.
   Install and upgrade may use the npm registry; runtime remains offline.
-
 - Added a staged OAuth Resource Server mode for remote MCP testing:
   RFC 9728 metadata and challenges, authorization-server discovery, RS256
   JWKS validation, exact issuer/audience/expiry/scope checks, bounded caches,
   unknown-key refresh, and fail-closed provider errors.
+- Added a fail-closed pre-publication gate for staged MCP deployments. It
+  verifies unpublished DNS, TLS and OAuth metadata, invalid/expired/audience
+  rejection, read/write scope separation, rate limiting, audit correlation,
+  and continuing local router collection. It never publishes DNS or changes
+  infrastructure; a pass only permits a separate manual DNS review.
+- Added a cloud-neutral deployment-profile contract for local stdio, private
+  HTTP, private OAuth, and public OAuth. Conflicting transport/auth settings now
+  fail before MCP startup, with English/Japanese threat, TLS, identity, and
+  outbound-dependency matrices documenting the staged air-gapped path.
+
+### Security and Reliability
+
+- Public MCP audit rows now carry a keyed hash of the client address. It is the
+  only identifier available when a request fails before authentication, where
+  subject and client id are necessarily null, so a flood from one source can
+  finally be told apart from ordinary retries. The raw address is never stored,
+  and `MCP_TRUST_PROXY` names the proxies allowed to set it — otherwise the
+  socket address is used, so a caller cannot forge `X-Forwarded-For` to poison
+  the trail. Existing audit databases gain the column in place; historical rows
+  stay null rather than being backfilled with a guess.
 - HTTP token mode now requires a dedicated `MCP_TOKEN` and no longer falls
   back to the full-access `EGRESSVIEW_TOKEN`. Existing private HTTP users must
   set a separate endpoint token before upgrading; stdio mode is unchanged.
@@ -54,11 +66,6 @@ All notable changes to EgressView are documented here.
 - Public OAuth MCP now applies global, per-subject, and per-client rate limits,
   a concurrency cap, bounded request bodies and deadlines, and a dedicated
   append-only HMAC-pseudonymized audit trail.
-- Added a fail-closed pre-publication gate for staged MCP deployments. It
-  verifies unpublished DNS, TLS and OAuth metadata, invalid/expired/audience
-  rejection, read/write scope separation, rate limiting, audit correlation,
-  and continuing local router collection. It never publishes DNS or changes
-  infrastructure; a pass only permits a separate manual DNS review.
 - Migrated the MCP server to the stable SDK v2 package split. One server
   factory now supports both the legacy `2025-11-25` initialize flow and the
   stateless `2026-07-28` discover flow with the same 11 tools.
@@ -71,10 +78,6 @@ All notable changes to EgressView are documented here.
 - Made refresh replay evidence provider-neutral: the gate accepts either
   immediate replay rejection with family continuity or replay-triggered family
   revocation, while requiring access tokens to expire within 15 minutes.
-- Added a cloud-neutral deployment-profile contract for local stdio, private
-  HTTP, private OAuth, and public OAuth. Conflicting transport/auth settings now
-  fail before MCP startup, with English/Japanese threat, TLS, identity, and
-  outbound-dependency matrices documenting the staged air-gapped path.
 - Hardened private HTTP MCP with the same fail-closed audit, rate/concurrency
   limits, bounded bodies, deadlines, and scoped service identity used by OAuth.
   HTTP remains loopback-only by default; non-loopback bind requires an explicit
