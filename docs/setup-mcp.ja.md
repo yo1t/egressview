@@ -366,7 +366,7 @@ Runtimeのlimitと監査はprivate token/OAuthの両HTTP modeへ適用します�
 
 **2つの監査の突き合わせ。** EgressView本体はMCP service identityが何をしたかを記録し（`actor: api:<id>`）、こちらのストアはそれをどのOAuth subjectが要求したかを記録します。MCPのrequest IDは`X-Request-Id`としてEgressViewへ転送されるため、1つの事象を両者で追跡できます。**保持期間は必ず揃えてください。**片方だけ先に消えると、「何が起きたか」は残るのに「誰が指示したか」が失われます。
 
-理由コード: `unauthorized`、`invalid_token`、`insufficient_scope`、`global_rate_limit`、`subject_rate_limit`、`client_rate_limit`、`concurrency_limit`、`request_timeout`、`server_error`。これらが連続する場合は調査の合図です。
+理由コード: `unauthorized`、`invalid_token`、`insufficient_scope`、`bad_request`、`not_found`、`method_not_allowed`、`payload_too_large`、`client_error`、`global_rate_limit`、`subject_rate_limit`、`client_rate_limit`、`concurrency_limit`、`request_timeout`、`server_error`。request単位の行には長さ制限したMCP methodとHTTP statusも記録しますが、tool引数やresponse bodyは保存しません。失敗が連続する場合は調査の合図です。
 
 subjectは専用`MCP_AUDIT_HMAC_KEY`によるHMACで仮名化するため、識別子を保存せずに同一人物の活動を追跡できます。`MCP_SERVICE_TOKEN`をrotationしてもこの鍵は維持してください。意図的に変更した場合は新しい仮名化namespaceになります。180日より古い記録は起動時に削除します。EgressView本体の監査保持期間と揃えています。
 
