@@ -115,6 +115,7 @@ function makeHarness() {
     t: key => key === 'settings.routers.confirmDelete' ? 'Delete {name}?' : `<${key}>`,
     fmtTs: timestamp => `<time:${timestamp}>`,
     apiFetch: () => new Promise(() => {}),
+    authReady: new Promise(() => {}),
     socket: { on: (event, handler) => socketHandlers.set(event, handler) },
     setRouterList: list => routerLists.push(list),
     confirm: message => { confirms.push(message); return false; },
