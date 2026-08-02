@@ -6,6 +6,15 @@ All notable changes to EgressView are documented here.
 
 ### Security and Reliability
 
+- Public MCP audit rows now carry a keyed hash of the client address. It is the
+  only identifier available when a request fails before authentication, where
+  subject and client id are necessarily null, so a flood from one source can
+  finally be told apart from ordinary retries. The raw address is never stored,
+  and `MCP_TRUST_PROXY` names the proxies allowed to set it — otherwise the
+  socket address is used, so a caller cannot forge `X-Forwarded-For` to poison
+  the trail. Existing audit databases gain the column in place; historical rows
+  stay null rather than being backfilled with a guess.
+
 - Added `EGRESSVIEW_OFFLINE_MODE` for air-gapped and egress-filtered
   deployments. Internet-dependent features are decided and disabled before
   startup rather than attempted and timed out: RDAP, GeoIP, threat feeds, the
