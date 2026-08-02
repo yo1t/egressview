@@ -22,6 +22,7 @@ function offlineBlocksProvider(provider, endpoint) {
 
 const { estimateAiCost, normalizeTokenUsage } = require('./ai-usage');
 const { AI_PRIOR_ANALYSIS_MAX_CHARS } = require('./ai-limits');
+const { isBlockedOutboundIpLiteral } = require('./ssrf-guard');
 
 const PROVIDERS = Object.freeze(['ollama', 'anthropic', 'openai', 'bedrock']);
 // Cloud providers authenticated with a stored API key.
@@ -48,6 +49,11 @@ function normalizeEndpoint(value) {
   }
   if (parsed.username || parsed.password || parsed.search || parsed.hash) {
     throw new Error('Ollama endpoint must not contain credentials, query, or fragment');
+  }
+  if (isBlockedOutboundIpLiteral(parsed.hostname)) {
+    throw new Error(
+      'Ollama endpoint must not target a link-local, metadata, or other special-use IP address'
+    );
   }
   parsed.pathname = parsed.pathname.replace(/\/+$/, '');
   return parsed.toString().replace(/\/$/, '');
