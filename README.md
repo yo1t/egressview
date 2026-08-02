@@ -37,7 +37,7 @@ EgressView answers the question most home users can't ask: *what is each device 
 - **Linux conntrack preview** — collect from Linux-based routers over SSH; Docker integration verified, hardware validation pending ([setup](docs/setup-conntrack.md))
 - **Mobile monitoring view** — check router health, Graph Map, Statistics, Connection Log, Devices, and Detection Log from a phone on your VPN/private network
 - **AI Insights start page** — opens with collection health, connections, devices, destinations, threats, and previous-period comparisons. Manual analysis/chat can use bounded device inventory and ASUS node summaries through Ollama, Anthropic, OpenAI, or Amazon Bedrock, with versioned-catalog monthly tokens/estimated cost, explicit partial totals for unpriced models, and per-answer model/cost metadata. Optional event notifications add off-by-default daily/weekly reports and bounded threat-change analysis to append-only UI history or Slack ([setup guide](docs/setup-ai-insights.md), [Bedrock production setup](docs/setup-bedrock.md))
-- **Instant Slack alerts** — DM the moment any device connects to a known C2 server or malware distribution host
+- **Instant Slack alerts** — DM the moment any device connects to a known C2 server or malware distribution host. Threat detection and new node detection each have independent Slack and UI-history switches under the Notifications settings tab
 - **No hardware changes** — runs on any Mac, PC, or Raspberry Pi alongside your existing Yamaha RTX or Cisco IOS routers
 
 ## What it does

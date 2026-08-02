@@ -19,6 +19,7 @@ const ENDPOINT_MODULES = [
   'manual-threat.js',
   'notes.js',
   'notification-log.js',
+  'detection-notifications.js',
   'router-setup.js',
   'routers.js',
   'slack.js',

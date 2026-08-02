@@ -359,6 +359,32 @@
 
           <hr class="settings-divider">
 
+          <section id="detection-notification-settings" aria-labelledby="detection-notification-title">
+            <div id="detection-notification-title" class="pane-title settings-subsection-title settings-subsection-title-wide" data-i18n="settings.detection.section">検出イベント通知</div>
+            <p class="settings-copy settings-copy-section" data-i18n="settings.detection.desc">
+              脅威検出と新規ノード検出を、どこへ通知するか個別に選べます。生成AIは実行しません。
+            </p>
+            <fieldset class="ai-notification-fieldset notification-rules">
+              <legend data-i18n="settings.detection.threat">脅威検出</legend>
+              <label><input id="detection-threat-slack" type="checkbox"> <span data-i18n="settings.detection.slack">Slackへ通知</span></label>
+              <label><input id="detection-threat-history" type="checkbox"> <span data-i18n="settings.detection.history">UI履歴に記録</span></label>
+            </fieldset>
+            <fieldset class="ai-notification-fieldset notification-rules">
+              <legend data-i18n="settings.detection.newDevice">新規ノード検出</legend>
+              <label><input id="detection-new-device-slack" type="checkbox"> <span data-i18n="settings.detection.slack">Slackへ通知</span></label>
+              <label><input id="detection-new-device-history" type="checkbox"> <span data-i18n="settings.detection.history">UI履歴に記録</span></label>
+            </fieldset>
+            <p class="settings-copy settings-copy-section" data-i18n="settings.detection.note">
+              Slackへの通知は、上のSlack通知が有効な場合にだけ送信されます。UI履歴を無効にしても、AIイベント通知の判定には影響しません。
+            </p>
+            <div class="slack-actions">
+              <button class="connect-btn" id="detection-save-btn" data-i18n="settings.btn.save">保存</button>
+            </div>
+            <div class="settings-status" id="detection-status"></div>
+          </section>
+
+          <hr class="settings-divider">
+
           <section id="ai-notification-settings" class="notification-settings-card" tabindex="-1" aria-labelledby="ai-notification-title">
             <div class="ai-notification-head">
               <div>

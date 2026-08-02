@@ -8,12 +8,14 @@ import { initSessionSettings } from './settings-sessions.js?v=__ASSET_VERSION__'
 import { initSecuritySettings } from './settings-security.js?v=__ASSET_VERSION__';
 import { initBeaconSettings } from './settings-beacons.js?v=__ASSET_VERSION__';
 import { initSlackSettings } from './settings-slack.js?v=__ASSET_VERSION__';
+import { initDetectionSettings } from './settings-detection.js?v=__ASSET_VERSION__';
 import { initManualThreatSettings } from './settings-manual-threat.js?v=__ASSET_VERSION__';
 import { initAiSettings } from './settings-ai.js?v=__ASSET_VERSION__';
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsBtn     = document.getElementById('settings-btn');
 let loadAiConfig = () => {};
 let loadSlackConfig = () => {};
+let loadDetectionConfig = () => {};
 let loadSecurityConfig = () => {};
 
 function openSettings(tab) {
@@ -21,6 +23,7 @@ function openSettings(tab) {
   settingsBtn.classList.remove('alert');
   loadAiConfig();
   loadSlackConfig();
+  loadDetectionConfig();
   loadSecurityConfig();
   if (typeof tab === 'string' && tab) {
     document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
@@ -157,6 +160,7 @@ initSessionSettings(showStatus);
 ({ loadSecurityConfig } = initSecuritySettings(showStatus));
 initBeaconSettings(showStatus);
 ({ loadSlackSettings: loadSlackConfig } = initSlackSettings(showStatus));
+({ loadDetectionSettings: loadDetectionConfig } = initDetectionSettings(showStatus));
 initManualThreatSettings();
 loadAiConfig = initAiSettings();
 

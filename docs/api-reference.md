@@ -223,6 +223,8 @@ All 91 implemented HTTP endpoints are listed below. **Public** means no token is
 | Data sources | `POST /api/config/datasources` | Protected |
 | Slack | `GET /api/config/slack` | Protected |
 | Slack | `POST /api/config/slack` | Protected |
+| Notifications | `GET /api/config/detection-notifications` | Protected |
+| Notifications | `POST /api/config/detection-notifications` | Protected |
 | Manual threat investigation | `GET /api/config/manual-threat` | Protected; returns key-set flags, never key values |
 | Manual threat investigation | `POST /api/config/manual-threat` | Protected; saves API keys, cache, and provider cooldown |
 | Manual threat investigation | `POST /api/threat/manual-lookup` | Protected; explicitly sends one public IP to selected providers |
