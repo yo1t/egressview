@@ -260,3 +260,76 @@ describe('audit correlation between the two stores', () => {
     assert.equal(mcpAudit.list()[0].requestId, 'req-join-1');
   });
 });
+
+describe('client address in the audit trail', () => {
+  it('records a pseudonymised address, never the raw value', () => {
+    mcpAudit.append({
+      eventType: 'mcp_request', outcome: 'failure', reason: 'unauthorized',
+      clientIp: '198.51.100.7',
+    });
+    const row = mcpAudit.list()[0];
+    assert.match(row.clientIpHash, /^[0-9a-f]{64}$/);
+    assert.equal(JSON.stringify(row).includes('198.51.100.7'), false);
+  });
+
+  it('is present exactly when subject and client are not', () => {
+    // The case this column exists for: a pre-authentication failure carries no
+    // identity at all, so without the address a flood is indistinguishable
+    // from ordinary retries.
+    mcpAudit.append({
+      eventType: 'mcp_request', outcome: 'failure', reason: 'unauthorized',
+      clientIp: '198.51.100.7',
+    });
+    const row = mcpAudit.list()[0];
+    assert.equal(row.subjectHash, null);
+    assert.equal(row.clientIdHash, null);
+    assert.ok(row.clientIpHash);
+  });
+
+  it('gives one source a stable hash and separate sources different ones', () => {
+    mcpAudit.append({ eventType: 'mcp_request', outcome: 'failure', clientIp: '198.51.100.7' });
+    mcpAudit.append({ eventType: 'mcp_request', outcome: 'failure', clientIp: '198.51.100.7' });
+    mcpAudit.append({ eventType: 'mcp_request', outcome: 'failure', clientIp: '203.0.113.9' });
+    const rows = mcpAudit.list();
+    const repeated = rows.filter(r => r.clientIpHash === rows[1].clientIpHash);
+    assert.equal(repeated.length, 2, 'the same source must group together');
+    assert.notEqual(rows[0].clientIpHash, rows[1].clientIpHash);
+  });
+
+  it('leaves the column null when no address is supplied', () => {
+    mcpAudit.append({ eventType: 'mcp_audit_startup', outcome: 'success' });
+    assert.equal(mcpAudit.list()[0].clientIpHash, null);
+  });
+
+  it('adds the column to a database created before it existed', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-mcp-audit-upgrade-'));
+    try {
+      const dbPath = path.join(dir, 'audit.db');
+      const legacy = new Database(dbPath);
+      legacy.exec(`
+        CREATE TABLE mcp_audit_events (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT,
+          eventId TEXT NOT NULL UNIQUE,
+          createdAt INTEGER NOT NULL,
+          eventType TEXT NOT NULL,
+          outcome TEXT NOT NULL CHECK(outcome IN ('success','failure')),
+          reason TEXT, subjectHash TEXT, clientIdHash TEXT, toolName TEXT,
+          scopes TEXT, requestId TEXT, durationMs INTEGER
+        );
+      `);
+      legacy.prepare(`INSERT INTO mcp_audit_events
+        (eventId, createdAt, eventType, outcome) VALUES ('old-1', 1000, 'mcp_request', 'success')`).run();
+      legacy.close();
+
+      mcpAudit.initDb(dbPath, { hashKey: 'test-key' });
+      mcpAudit.append({ eventType: 'mcp_request', outcome: 'failure', clientIp: '198.51.100.7' });
+      const rows = mcpAudit.list();
+      const old = rows.find(r => r.eventId === 'old-1');
+      assert.equal(old.clientIpHash, null, 'historical rows are not backfilled with a guess');
+      assert.ok(rows.find(r => r.clientIpHash), 'new rows record the address');
+      mcpAudit.closeDb();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
