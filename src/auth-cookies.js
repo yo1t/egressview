@@ -28,6 +28,13 @@ function cookieOptions(req, { httpOnly, maxAge, subpath = '' } = {}) {
   };
 }
 
+function resolveCookieSubpath(req, configuredSubpath = '') {
+  if (!configuredSubpath) return '';
+  const forwardedPrefix = req.get?.('x-forwarded-prefix') ||
+    req.headers?.['x-forwarded-prefix'] || '';
+  return forwardedPrefix === configuredSubpath ? configuredSubpath : '';
+}
+
 function setSessionCookies(req, res, session, subpath = '') {
   const maxAge = Math.max(0, session.expiresAt - Date.now());
   res.cookie(SESSION_COOKIE, session.token, cookieOptions(req, {
@@ -59,6 +66,7 @@ module.exports = {
   clearSessionCookies,
   cookieOptions,
   parseCookies,
+  resolveCookieSubpath,
   sessionToken,
   setSessionCookies,
   verifyCookieCsrf,
