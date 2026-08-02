@@ -369,7 +369,7 @@ Runtimeのlimitと監査はprivate token/OAuthの両HTTP modeへ適用します�
 
 理由コード: `unauthorized`、`invalid_token`、`insufficient_scope`、`bad_request`、`not_found`、`method_not_allowed`、`payload_too_large`、`client_error`、`tool_error`、`global_rate_limit`、`subject_rate_limit`、`client_rate_limit`、`concurrency_limit`、`request_timeout`、`server_error`。request単位の行には長さ制限したMCP methodとHTTP statusも記録します。tool呼び出しは長寿命response streamの終了時ではなくhandler完了時に記録し、tool引数、response body、providerのerror本文は保存しません。失敗が連続する場合は調査の合図です。
 
-subjectは専用`MCP_AUDIT_HMAC_KEY`によるHMACで仮名化するため、識別子を保存せずに同一人物の活動を追跡できます。`MCP_SERVICE_TOKEN`をrotationしてもこの鍵は維持してください。意図的に変更した場合は新しい仮名化namespaceになります。180日より古い記録は起動時に削除します。EgressView本体の監査保持期間と揃えています。
+subjectは専用`MCP_AUDIT_HMAC_KEY`によるHMACで仮名化するため、識別子を保存せずに同一人物の活動を追跡できます。`MCP_SERVICE_TOKEN`をrotationしてもこの鍵は維持してください。意図的に変更した場合は新しい仮名化namespaceになります。180日より古い記録は起動時と、その後24時間ごとに削除します。プロセスを長期間稼働させても保持期間が効き続けます。EgressView本体の監査保持期間と揃えています。
 
 ### アクセスの失効
 
