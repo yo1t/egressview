@@ -21,7 +21,7 @@ The security model established in v1.6.0 is unchanged and now carries operationa
 | Framework | Result | Verdict |
 |---|---:|---|
 | OWASP ASVS Level 1 | 14/14 areas satisfied or mitigated | Fully compliant |
-| OpenSSF Scorecard | ~8.9/10 estimated | Strong repository hygiene |
+| OpenSSF Scorecard | ~8.7/10 estimated | Strong repository hygiene |
 | ISO/IEC 25010 | 9.1/10 average | High quality |
 | Node.js Best Practices | 46/50 | Excellent |
 | SonarQube-equivalent gate | Passed; coverage rating B | No high-severity blocker |
@@ -53,7 +53,7 @@ The security model established in v1.6.0 is unchanged and now carries operationa
 ### Key improvements
 
 - **Offline mode**: `EGRESSVIEW_OFFLINE_MODE` resolves an explicit feature policy before startup, so internet-dependent features are refused with a stated reason instead of attempting a call and timing out. Cloud provider SDK clients are never constructed. D3, TopoJSON, and world-atlas are self-hosted at pinned versions, and the CSP admits no external origin.
-- **Portability**: offline portability gates cover a Linux host and a generic container, and the release path now produces a signed portable source distribution with a CycloneDX SBOM.
+- **Portability**: offline portability gates cover a Linux host and a generic container, and the release path can now produce a signed portable source distribution with a CycloneDX SBOM. The signing mechanism is in place, but no project key is enrolled yet and v1.7.0 itself ships unsigned; see the Signed-releases row in section 2.
 - **MCP audit completeness**: tool calls are audited at handler completion rather than at dispatch, so streaming responses and request-deadline timeouts each produce exactly one accurate outcome row. The audit store records a keyed pseudonym of the client address (`clientIpHash`), which removed the need to enable ALB, WAF, or Cognito-side logging for the same evidence.
 - **MCP publication gate**: remote publication is gated on an explicit operator decision, with client release timing decoupled from the gate so a revoked publication does not strand active clients.
 - **Reverse proxy correctness**: HSTS is emitted correctly behind a trusted proxy, and browser cookies are scoped to the request base path so the same process can serve a dedicated public host at `/` and a private subpath simultaneously.
@@ -143,7 +143,7 @@ The health endpoints are intentionally unauthenticated but return only fixed liv
 
 ## 2. OpenSSF Scorecard (Estimated)
 
-**Estimated score: 8.9/10.**
+**Estimated score: 8.7/10.**
 
 | Check | Score | Evidence |
 |---|---:|---|
@@ -160,7 +160,7 @@ The health endpoints are intentionally unauthenticated but return only fixed liv
 | Maintained | 10 | Active release and PR history through PR #157 (153 merged PRs) |
 | Code review | 8 | PR workflow with required checks; RBAC and permission matrix enforce review standards |
 | Fuzzing | 0 | No continuous fuzzing |
-| Signed releases | 5 | Partial. The release path produces a signed portable source distribution with a CycloneDX SBOM, but git tags are not GPG-signed and there is no Sigstore/`cosign` attestation, so an official Scorecard run would still not detect this check as satisfied. |
+| Signed releases | 2 | The tooling and a written key procedure exist, and the release path can produce a signed portable source distribution with a CycloneDX SBOM. **No release is actually signed.** `release-signing/trusted-fingerprints.json` holds no enrolled key, v1.7.0 ships unsigned by decision, git tags are not GPG-signed, and there is no Sigstore/`cosign` attestation. Credit here is for the mechanism only, not for a signed artifact. |
 
 ---
 

@@ -21,7 +21,7 @@ v1.6.0で確立したセキュリティモデルは変更されておらず、�
 | 評価軸 | 結果 | 判定 |
 |---|---:|---|
 | OWASP ASVS Level 1 | 14領域中14領域が適合または緩和済み | 完全適合 |
-| OpenSSF Scorecard | 推定約8.9/10 | 強いrepository hygiene |
+| OpenSSF Scorecard | 推定約8.7/10 | 強いrepository hygiene |
 | ISO/IEC 25010 | 平均9.1/10 | 高品質 |
 | Node.js Best Practices | 46/50 | 優秀 |
 | SonarQube相当gate | 合格、coverageはB | High以上のblockerなし |
@@ -53,7 +53,7 @@ v1.6.0で確立したセキュリティモデルは変更されておらず、�
 ### 主な改善点
 
 - **Offline mode**: `EGRESSVIEW_OFFLINE_MODE`が起動前に明示的なfeature policyを解決するため、インターネット依存機能は「実行してtimeout」ではなく理由付きで拒否されます。クラウドproviderのSDK clientも生成しません。D3、TopoJSON、world-atlasは固定バージョンでself-hostされ、CSPは外部originを一切許可しません。
-- **移植性**: offline portability gateがLinux hostと汎用containerを対象にし、releaseパスはCycloneDX SBOM付きの署名付きportable source distributionを生成します。
+- **移植性**: offline portability gateがLinux hostと汎用containerを対象にし、releaseパスはCycloneDX SBOM付きの署名付きportable source distributionを生成できます。署名の仕組みは整備済みですが、プロジェクト鍵は未登録でv1.7.0自体は未署名で配布します（第2節のSigned releases行を参照）。
 - **MCP監査の完全性**: tool呼び出しはdispatch時点ではなくhandler完了時点で監査されるため、streaming responseやrequest deadline timeoutでも正確なoutcome行がちょうど1件記録されます。監査storeはclient addressのkeyed pseudonym（`clientIpHash`）を記録し、これによりALB・WAF・Cognito側のログを有効化しなくても同等の証跡が得られます。
 - **MCP publication gate**: リモート公開は運用者の明示的判断でgateされ、client release timingをgateから分離したため、公開を取り消しても稼働中clientが取り残されません。
 - **Reverse proxy整合性**: 信頼済みproxy配下でもHSTSが正しく付与され、ブラウザcookieはrequest base pathにscopeされるため、同一プロセスで公開ホストの`/`とプライベートsubpathを同時に提供できます。
@@ -143,7 +143,7 @@ Health endpointは意図的に未認証ですが、`no-store`付きの固定live
 
 ## 2. OpenSSF Scorecard（推定）
 
-**推定スコア: 8.9/10。**
+**推定スコア: 8.7/10。**
 
 | Check | Score | 根拠 |
 |---|---:|---|
@@ -160,7 +160,7 @@ Health endpointは意図的に未認証ですが、`no-store`付きの固定live
 | Maintained | 10 | PR #157まで継続的にrelease・改善（マージ済みPR 153件） |
 | Code review | 8 | PRと必須checkを運用。RBACとpermission matrixがreview基準を強化 |
 | Fuzzing | 0 | Continuous fuzzingなし |
-| Signed releases | 5 | 部分達成。releaseパスはCycloneDX SBOM付きの署名付きportable source distributionを生成しますが、git tagはGPG署名されておらずSigstore/`cosign` attestationもないため、公式Scorecardの実行では本checkは充足と判定されません。 |
+| Signed releases | 2 | 仕組みと手順書は存在し、releaseパスはCycloneDX SBOM付きの署名付きportable source distributionを生成できます。**ただし実際に署名されたreleaseは存在しません。** `release-signing/trusted-fingerprints.json`に登録鍵はなく、v1.7.0は決定により未署名で配布し、git tagもGPG署名されておらず、Sigstore/`cosign` attestationもありません。ここでの加点は仕組みに対するものであり、署名済み成果物に対するものではありません。 |
 
 ---
 
