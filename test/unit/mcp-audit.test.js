@@ -3,6 +3,10 @@
 
 const { describe, it, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const Database = require('better-sqlite3');
 
 const mcpAudit = require('../../src/mcp-audit');
 
@@ -17,6 +21,8 @@ describe('MCP audit records', () => {
       subject: 'https://issuer.example|user-1',
       clientId: 'https://client.example/metadata.json',
       toolName: 'get_devices',
+      mcpMethod: 'tools/call',
+      httpStatus: 200,
       scopes: ['egressview:read'],
       requestId: 'req-1',
       durationMs: 42,
@@ -25,6 +31,8 @@ describe('MCP audit records', () => {
     assert.equal(row.eventType, 'mcp_tool_call');
     assert.equal(row.outcome, 'success');
     assert.equal(row.toolName, 'get_devices');
+    assert.equal(row.mcpMethod, 'tools/call');
+    assert.equal(row.httpStatus, 200);
     assert.equal(row.scopes, 'egressview:read');
     assert.equal(row.requestId, 'req-1');
     assert.equal(row.durationMs, 42);
@@ -79,12 +87,16 @@ describe('MCP audit records', () => {
       eventType: 'mcp_tool_call',
       outcome: 'failure',
       toolName: 'x'.repeat(500),
+      mcpMethod: 'm'.repeat(500),
+      httpStatus: 999,
       reason: 'y'.repeat(500),
       requestId: 'z'.repeat(500),
       scopes: Array.from({ length: 200 }, (_, i) => `scope-${i}`),
     });
     const [row] = mcpAudit.list();
     assert.ok(row.toolName.length <= 100);
+    assert.ok(row.mcpMethod.length <= 100);
+    assert.equal(row.httpStatus, null);
     assert.ok(row.reason.length <= 60);
     assert.ok(row.requestId.length <= 100);
     assert.ok(row.scopes.length <= 300);
@@ -124,6 +136,50 @@ describe('MCP audit failure classification', () => {
 });
 
 describe('MCP audit resilience', () => {
+  it('expands a legacy audit database without rewriting historical rows', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-mcp-audit-legacy-'));
+    const file = path.join(dir, 'audit.db');
+    try {
+      mcpAudit.closeDb();
+      const legacy = new Database(file);
+      legacy.exec(`
+        CREATE TABLE mcp_audit_events (
+          seq INTEGER PRIMARY KEY AUTOINCREMENT,
+          eventId TEXT NOT NULL UNIQUE,
+          createdAt INTEGER NOT NULL,
+          eventType TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          reason TEXT,
+          subjectHash TEXT,
+          clientIdHash TEXT,
+          toolName TEXT,
+          scopes TEXT,
+          requestId TEXT,
+          durationMs INTEGER
+        );
+        INSERT INTO mcp_audit_events
+          (eventId, createdAt, eventType, outcome)
+        VALUES ('legacy-event', 1, 'mcp_request', 'success');
+      `);
+      legacy.close();
+
+      mcpAudit._resetForTest(file);
+      const historical = mcpAudit.list().find(row => row.eventId === 'legacy-event');
+      assert.equal(historical.mcpMethod, null);
+      assert.equal(historical.httpStatus, null);
+      mcpAudit.append({
+        eventType: 'mcp_request', outcome: 'failure',
+        mcpMethod: 'initialize', httpStatus: 400,
+      });
+      const latest = mcpAudit.list()[0];
+      assert.equal(latest.mcpMethod, 'initialize');
+      assert.equal(latest.httpStatus, 400);
+    } finally {
+      mcpAudit.closeDb();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('never throws when the store is unavailable', () => {
     mcpAudit.closeDb();
     assert.doesNotThrow(() => mcpAudit.append({ eventType: 'mcp_tool_call', outcome: 'success' }));

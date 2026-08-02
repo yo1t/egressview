@@ -388,6 +388,9 @@ describe('MCP HTTP boundary: body handling runs after the limits', () => {
       const huge = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', pad: 'x'.repeat(5000) });
       const res = await call(mintToken(), huge);
       assert.equal(res.status, 413, 'an oversized body must be refused');
+      await new Promise(r => setTimeout(r, 120));
+      const row = mcpAudit.list().find(r => r.httpStatus === 413);
+      assert.equal(row?.reason, 'payload_too_large');
     } finally { restore(); }
   });
 
@@ -396,7 +399,11 @@ describe('MCP HTTP boundary: body handling runs after the limits', () => {
     try {
       await call(null, '{ broken', { 'X-Request-Id': 'probe-3' });
       await new Promise(r => setTimeout(r, 120));
-      assert.ok(mcpAudit.list().some(r => r.requestId === 'probe-3'));
+      const row = mcpAudit.list().find(r => r.requestId === 'probe-3');
+      assert.ok(row);
+      assert.equal(row.reason, 'bad_request');
+      assert.equal(row.httpStatus, 400);
+      assert.equal(row.mcpMethod, null);
     } finally { restore(); }
   });
 });

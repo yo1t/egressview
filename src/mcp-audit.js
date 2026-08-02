@@ -25,6 +25,7 @@ const DEFAULT_DB_PATH = path.join(__dirname, '..', '.egressview-mcp-audit.db');
 // the record of who asked for it had gone.
 const DEFAULT_RETENTION_DAYS = 180;
 const MAX_TOOL_NAME = 100;
+const MAX_MCP_METHOD = 100;
 const MAX_REASON = 60;
 const MAX_REQUEST_ID = 100;
 const MAX_SCOPES = 300;
@@ -72,6 +73,8 @@ function initDb(dbPath, options = {}) {
       subjectHash  TEXT,
       clientIdHash TEXT,
       toolName     TEXT,
+      mcpMethod    TEXT,
+      httpStatus   INTEGER,
       scopes       TEXT,
       requestId    TEXT,
       durationMs   INTEGER
@@ -83,6 +86,18 @@ function initDb(dbPath, options = {}) {
     CREATE INDEX IF NOT EXISTS idx_mcp_audit_subject
       ON mcp_audit_events(subjectHash, createdAt DESC);
   `);
+  // This store predates the request-level method/status fields and has no
+  // user_version migration runner. Expand existing files in place without
+  // guessing values for historical rows.
+  const columns = new Set(
+    db.prepare('PRAGMA table_info(mcp_audit_events)').all().map(row => row.name)
+  );
+  if (!columns.has('mcpMethod')) {
+    db.exec('ALTER TABLE mcp_audit_events ADD COLUMN mcpMethod TEXT');
+  }
+  if (!columns.has('httpStatus')) {
+    db.exec('ALTER TABLE mcp_audit_events ADD COLUMN httpStatus INTEGER');
+  }
 }
 
 function closeDb() {
@@ -119,6 +134,10 @@ function append(event = {}) {
     subjectHash: pseudonym(event.subject),
     clientIdHash: pseudonym(event.clientId),
     toolName: bounded(event.toolName, MAX_TOOL_NAME),
+    mcpMethod: bounded(event.mcpMethod, MAX_MCP_METHOD),
+    httpStatus: Number.isInteger(event.httpStatus)
+      && event.httpStatus >= 100 && event.httpStatus <= 599
+      ? event.httpStatus : null,
     scopes: normalizeScopes(event.scopes),
     requestId: bounded(event.requestId, MAX_REQUEST_ID),
     durationMs: Number.isFinite(event.durationMs) ? Math.round(event.durationMs) : null,
@@ -127,10 +146,10 @@ function append(event = {}) {
     db.prepare(`
       INSERT INTO mcp_audit_events
         (eventId, createdAt, eventType, outcome, reason, subjectHash,
-         clientIdHash, toolName, scopes, requestId, durationMs)
+         clientIdHash, toolName, mcpMethod, httpStatus, scopes, requestId, durationMs)
       VALUES
         (@eventId, @createdAt, @eventType, @outcome, @reason, @subjectHash,
-         @clientIdHash, @toolName, @scopes, @requestId, @durationMs)
+         @clientIdHash, @toolName, @mcpMethod, @httpStatus, @scopes, @requestId, @durationMs)
     `).run(row);
     return row.eventId;
   } catch (error) {
@@ -171,7 +190,7 @@ function list({ limit = 100, before } = {}) {
   const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
   const sql = `
     SELECT seq, eventId, createdAt, eventType, outcome, reason, subjectHash,
-           clientIdHash, toolName, scopes, requestId, durationMs
+           clientIdHash, toolName, mcpMethod, httpStatus, scopes, requestId, durationMs
     FROM mcp_audit_events
     ${before ? 'WHERE createdAt < ?' : ''}
     ORDER BY seq DESC LIMIT ?
