@@ -45,6 +45,12 @@ jobs:
         if: matrix.node-version != 22
         run: npm test
 
+      # Short campaign only. The long run is `npm run test:fuzz:long`, kept out
+      # of the PR gate so a rare generated input cannot make CI flaky.
+      - name: Run parser fuzz tests
+        if: matrix.node-version == 22
+        run: npm run test:fuzz
+
   security:
     name: Release safety checks
     runs-on: ubuntu-latest
