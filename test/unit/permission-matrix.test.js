@@ -34,7 +34,10 @@ function implementedHttpRoutes() {
 }
 
 function registeredMcpTools() {
-  const source = fs.readFileSync(path.join(root, 'mcp-server.js'), 'utf8');
+  // Tool definitions live in src/mcp-tools.js since P2-68; this scan is the
+  // drift guard between the registered tools and the permission matrix, so it
+  // has to follow them.
+  const source = fs.readFileSync(path.join(root, 'src', 'mcp-tools.js'), 'utf8');
   return [...source.matchAll(/registerTool\(\s*server,\s*['"]([^'"]+)['"]/g)]
     .map(match => match[1])
     .sort();
