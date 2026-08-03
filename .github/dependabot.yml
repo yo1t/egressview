@@ -11,6 +11,17 @@ updates:
     # a compromised/unstable release has time to be caught and yanked.
     cooldown:
       default-days: 7
+    ignore:
+      # better-sqlite3 13 removed prebuild-install from its install script, so
+      # every install compiles from source and needs Python plus a C++
+      # toolchain. That breaks the container portability gate and, more
+      # importantly, raises the bar for the air-gapped and portable deployment
+      # targets this project supports (P2-65). Staying on 12.x keeps the
+      # prebuilt binaries. Revisit if 13.x restores prebuilds, or if we decide
+      # to require a build toolchain everywhere -- that is a product decision,
+      # not a dependency bump.
+      - dependency-name: "better-sqlite3"
+        update-types: ["version-update:semver-major"]
     groups:
       # Batch all non-major updates into one PR to reduce noise.
       # Security updates still get their own PR from GitHub automatically.
