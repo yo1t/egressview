@@ -105,6 +105,24 @@ function issuerFetch(url) {
   });
 }
 
+// The limiter counts into a window keyed on Math.floor(now / 60_000)
+// (src/mcp-rate-limit.js), so the window is aligned to the wall clock, not to
+// a test's first request. Two calls a millisecond apart land in different
+// windows if they straddle a minute boundary, and the second one starts a
+// fresh count -- which makes any "the next call is 429" assertion fail.
+//
+// That is not hypothetical: it broke `accepts Keycloak azp as the client
+// identifier` on main, in a run whose test started at 14:46:59.99.
+//
+// Only start such a test when the current window still has room. The wait is
+// skipped in the common case, and never exceeds the margin.
+const RATE_WINDOW_MS = 60_000;
+async function insideOneRateWindow(marginMs = 5_000) {
+  const remaining = RATE_WINDOW_MS - (Date.now() % RATE_WINDOW_MS);
+  if (remaining >= marginMs) return;
+  await new Promise(resolve => setTimeout(resolve, remaining + 25));
+}
+
 async function start({ limits = {}, env = {} } = {}) {
   const previous = {};
   const applied = {
@@ -181,6 +199,7 @@ afterEach(async () => {
 
 describe('MCP HTTP boundary: per-identity limits', () => {
   it('applies the per-subject limit, which needs the identity the OAuth layer sets', async () => {
+    await insideOneRateWindow();
     const restore = await start({ limits: { subject: 2, global: 1000 } });
     try {
       const token = mintToken({ sub: 'user-1', client_id: 'client-a' });
@@ -193,6 +212,7 @@ describe('MCP HTTP boundary: per-identity limits', () => {
   });
 
   it('limits one subject without affecting another', async () => {
+    await insideOneRateWindow();
     const restore = await start({ limits: { subject: 1, client: 1000, global: 1000 } });
     try {
       const a = mintToken({ sub: 'user-a', client_id: 'c' });
@@ -204,6 +224,7 @@ describe('MCP HTTP boundary: per-identity limits', () => {
   });
 
   it('applies the per-client limit across different subjects', async () => {
+    await insideOneRateWindow();
     const restore = await start({ limits: { client: 2, subject: 1000, global: 1000 } });
     try {
       await call(mintToken({ sub: 'u1', client_id: 'shared' }));
@@ -214,6 +235,7 @@ describe('MCP HTTP boundary: per-identity limits', () => {
   });
 
   it('accepts Keycloak azp as the client identifier', async () => {
+    await insideOneRateWindow();
     const restore = await start({ limits: { client: 1, subject: 1000, global: 1000 } });
     try {
       await call(mintToken({ sub: 'u1', client_id: undefined, azp: 'kc-client' }));
@@ -232,6 +254,7 @@ describe('MCP HTTP boundary: per-identity limits', () => {
   });
 
   it('counts the global budget once per request, not twice', async () => {
+    await insideOneRateWindow();
     const restore = await start({ limits: { global: 2, subject: 1000, client: 1000 } });
     try {
       const token = mintToken({ client_id: 'c' });
@@ -244,6 +267,7 @@ describe('MCP HTTP boundary: per-identity limits', () => {
 
 describe('MCP private HTTP boundary', () => {
   it('applies global and credential limits to token-authenticated requests', async () => {
+    await insideOneRateWindow();
     const restore = await startPrivate({ limits: { global: 10, subject: 1, client: 10 } });
     try {
       const token = privateAuthConfig().token;
@@ -379,6 +403,7 @@ describe('MCP HTTP boundary: audit identity', () => {
 
 describe('MCP HTTP boundary: body handling runs after the limits', () => {
   it('rate limits malformed JSON instead of letting it bypass the limiter', async () => {
+    await insideOneRateWindow();
     const restore = await start({ limits: { global: 2 } });
     try {
       await call(null, '{ this is not json');
