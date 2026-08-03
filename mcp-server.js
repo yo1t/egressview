@@ -54,9 +54,14 @@ const {
   buildMcpServer: buildMcpServerBase,
 } = require('./src/mcp-tools');
 
-// Bind the default API client once so callers keep the previous signature.
+// Bind the default API client so callers keep the previous signature. The
+// original was a default parameter, which also applied when a caller passed
+// apiClient: undefined explicitly; a plain spread would instead overwrite the
+// default with that undefined, so fall back after spreading rather than before.
 function buildMcpServer(options = {}) {
-  return buildMcpServerBase({ apiClient: defaultApiClient, ...options });
+  const merged = { ...options };
+  if (merged.apiClient === undefined) merged.apiClient = defaultApiClient;
+  return buildMcpServerBase(merged);
 }
 const {
   MCP_SERVICE_PERMISSIONS,

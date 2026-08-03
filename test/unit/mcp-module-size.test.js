@@ -52,3 +52,12 @@ describe('MCP モジュール分割の維持', () => {
     );
   });
 });
+
+describe('buildMcpServer の既定 apiClient', () => {
+  it('apiClient: undefined を明示しても既定クライアントへ落ちる', () => {
+    // The pre-split signature used a default parameter, which applied for an
+    // explicit undefined too. A plain spread would have overwritten it.
+    const { _buildMcpServer } = require('../../mcp-server.js');
+    assert.doesNotThrow(() => _buildMcpServer({ apiClient: undefined }));
+  });
+});
