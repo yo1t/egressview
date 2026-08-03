@@ -78,6 +78,8 @@
     "test:integration": "RUN_INTEGRATION=1 node --test test/integration/*.test.js",
     "test:conntrack-docker": "RUN_CONNTRACK_DOCKER=1 node --test test/integration/conntrack-docker.test.js",
     "test:portability": "node --test test/portability/*.test.js",
+    "test:fuzz": "node --test test/fuzz/*.test.js",
+    "test:fuzz:long": "FUZZ_ITERATIONS=50000 node --test test/fuzz/parsers.fuzz.test.js",
     "test:offline-distribution": "node --test test/unit/offline-bundle.test.js",
     "test:smoke": "playwright test",
     "security:audit": "npm audit --omit=dev --audit-level=moderate",

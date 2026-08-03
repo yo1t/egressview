@@ -43,10 +43,17 @@ On first startup, both an API/admin token and an initial login password are prin
 npm test                  # unit tests (no hardware required) — run these before every PR
 npm run test:integration  # opt-in tests against a real router (RUN_INTEGRATION=1)
 npm run test:smoke        # Playwright browser smoke tests (auto-uses demo mode in CI)
+npm run test:fuzz         # short fuzz campaign over the router/syslog parsers
+npm run test:fuzz:long    # 50k-iteration campaign; run when touching a parser
 npm run security:check    # production dependency audit + secret scan before publishing
 ```
 
-CI (GitHub Actions) runs unit tests on Node 22, Playwright smoke tests in demo mode (no hardware needed), and release safety checks (`npm audit --omit=dev` and secret scan). PRs must be green.
+The fuzz tests feed generated and mutated input to every function that parses
+router CLI output, syslog lines or conntrack tables, and assert that it does
+not throw, returns within a time budget, and returns its declared shape. Each
+run prints its seed; reproduce a failure with `FUZZ_SEED=<value> npm run test:fuzz`.
+
+CI (GitHub Actions) runs unit tests on Node 22, the short fuzz campaign, Playwright smoke tests in demo mode (no hardware needed), and release safety checks (`npm audit --omit=dev` and secret scan). PRs must be green.
 
 ## Guidelines
 
