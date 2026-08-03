@@ -130,3 +130,46 @@ describe('MCP limit configuration', () => {
     }
   });
 });
+
+describe('MCP rate limiting: 固定ウィンドウの境界', () => {
+  // The counter is keyed on Math.floor(now / windowMs), so the window is
+  // aligned to the wall clock rather than to a caller's first request. Two
+  // requests a millisecond apart therefore land in different windows if they
+  // straddle a minute boundary, and the second one starts a fresh count.
+  //
+  // This is inherent to a fixed window and is the documented trade-off, but it
+  // is worth pinning: it silently broke a boundary test on main that assumed
+  // two consecutive calls always share a window.
+  it('境界をまたぐと、直後の呼び出しでもカウントがリセットされる', () => {
+    const clock = { value: 59_999 };
+    const limiter = limiterAt(clock, { globalPerMinute: 1, perSubjectPerMinute: 99, perClientPerMinute: 99 });
+    assert.equal(limiter.check({ subject: 's', clientId: 'c' }).allowed, true);
+    assert.equal(limiter.check({ subject: 's', clientId: 'c' }).allowed, false, '同一ウィンドウ内では制限される');
+
+    clock.value = 60_000; // 1 ms later, but a new window
+    assert.equal(
+      limiter.check({ subject: 's', clientId: 'c' }).allowed,
+      true,
+      '1ms後でもウィンドウが変われば許可される'
+    );
+  });
+
+  it('ウィンドウ内に留まる限り境界の影響を受けない', () => {
+    const clock = { value: 60_000 };
+    const limiter = limiterAt(clock, { globalPerMinute: 1, perSubjectPerMinute: 99, perClientPerMinute: 99 });
+    assert.equal(limiter.check({ subject: 's', clientId: 'c' }).allowed, true);
+    clock.value = 119_999; // still the same window
+    assert.equal(limiter.check({ subject: 's', clientId: 'c' }).allowed, false);
+  });
+
+  it('retryAfterSecondsは次の境界までの残り時間を指す', () => {
+    const clock = { value: 60_000 + 15_000 };
+    const limiter = limiterAt(clock, { globalPerMinute: 1, perSubjectPerMinute: 99, perClientPerMinute: 99 });
+    limiter.check({ subject: 's', clientId: 'c' });
+    const denied = limiter.check({ subject: 's', clientId: 'c' });
+    // Callers put this in Retry-After, so it must point at the window reset
+    // rather than at a full window length from now.
+    assert.equal(denied.allowed, false);
+    assert.equal(denied.retryAfterSeconds, 45);
+  });
+});
