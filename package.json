@@ -98,8 +98,8 @@
     "auth:reset": "node scripts/reset-admin-password.js"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock": "^3.1095.0",
-    "@aws-sdk/client-bedrock-runtime": "^3.1095.0",
+    "@aws-sdk/client-bedrock": "^3.1096.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1096.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "axios": "^1.18.1",
