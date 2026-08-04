@@ -53,7 +53,7 @@ router CLI output, syslog lines or conntrack tables, and assert that it does
 not throw, returns within a time budget, and returns its declared shape. Each
 run prints its seed; reproduce a failure with `FUZZ_SEED=<value> npm run test:fuzz`.
 
-CI (GitHub Actions) runs unit tests on Node 22, the short fuzz campaign, Playwright smoke tests in demo mode (no hardware needed), and release safety checks (`npm audit --omit=dev` and secret scan). PRs must be green.
+CI (GitHub Actions) runs unit tests on Node 22, 24 and 26 (Maintenance LTS, Active LTS, and Current), the short fuzz campaign, Playwright smoke tests in demo mode (no hardware needed), and release safety checks (`npm audit --omit=dev` and secret scan). PRs must be green.
 
 ### `npm audit` does not cover bundled C libraries
 
