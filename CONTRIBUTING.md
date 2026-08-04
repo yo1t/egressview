@@ -55,6 +55,39 @@ run prints its seed; reproduce a failure with `FUZZ_SEED=<value> npm run test:fu
 
 CI (GitHub Actions) runs unit tests on Node 22, the short fuzz campaign, Playwright smoke tests in demo mode (no hardware needed), and release safety checks (`npm audit --omit=dev` and secret scan). PRs must be green.
 
+### `npm audit` does not cover bundled C libraries
+
+`better-sqlite3` vendors the SQLite amalgamation into its own source, so SQLite
+is not an npm package from the auditor's point of view. **A SQLite CVE will
+never appear in `npm audit`, `npm run security:check`, or the ASH scan.** The
+same applies to any future dependency that bundles C code.
+
+Check it by hand at release time:
+
+- [SQLite change log](https://www.sqlite.org/changes.html) for the versions between the one shipping and the current release
+- [Debian security tracker for sqlite3](https://security-tracker.debian.org/tracker/source-package/sqlite3) for CVEs and which version fixes each
+
+To see the version actually running, ask the built module rather than the
+package manifest, since the bundled SQLite moves independently of the npm
+version:
+
+```bash
+node -p 'require("better-sqlite3")(":memory:").prepare("select sqlite_version() v").get().v'
+```
+
+On a server, run that with the **same Node binary the service uses**
+(`readlink -f /proc/$(pgrep -f "node .*server.js" | head -1)/exe`). A different
+major version fails with `ERR_DLOPEN_FAILED` on the native module, which looks
+like a broken install but is only an ABI mismatch in the shell you happen to be
+in.
+
+When judging whether a SQLite CVE applies, check whether the affected feature is
+even compiled in — several CVEs are in optional extensions:
+
+```bash
+node -p 'require("better-sqlite3")(":memory:").prepare("pragma compile_options").all().map(r => r.compile_options).join("\n")'
+```
+
 ## Guidelines
 
 - **Add tests for new behavior.** Pure logic lives in `src/` modules with matching files in `test/unit/`. Modules take their dependencies via an `init(deps)` / factory pattern so they can be tested with stubs — follow the existing style (see `src/runtime.js` and `test/unit/runtime.test.js`).
