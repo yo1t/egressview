@@ -7,29 +7,44 @@
 `release-signing/trusted-fingerprints.json`にactiveな鍵が登録されるまでは、正式な
 project鍵で署名済みとは表現しません。
 
-## 鍵生成
+## 署名鍵
 
-1. patch適用済みで管理者が管理するworkstationを使い、不要なnetwork接続を切断して
-   `umask 077`を設定します。
-2. repository外にpassphrase暗号化済みEd25519鍵を生成します。
+リリース鍵はAWS KMSの非対称鍵です。秘密鍵はKMS内で生成され取り出せないため、
+**保管・バックアップ・紛失・漏えいの対象になる鍵ファイルが存在しません**。署名には
+ファイルの所持ではなく、認証されたAWS principalが必要です。
 
-   ```bash
-   umask 077
-   openssl genpkey -algorithm ED25519 -aes-256-cbc \
-     -out /secure/offline/egressview-release-YYYY.key
-   openssl pkey -in /secure/offline/egressview-release-YYYY.key -pubout \
-     -out /tmp/egressview-release-YYYY.pub.pem
-   node scripts/release-key-fingerprint.js \
-     /tmp/egressview-release-YYYY.pub.pem
-   ```
+| | |
+|---|---|
+| エイリアス | `alias/egressview-release` |
+| リージョン | `ap-northeast-1` |
+| 鍵仕様 | `ECC_NIST_EDWARDS25519`、`SIGN_VERIFY` |
+| 署名アルゴリズム | `ED25519_SHA_512`、`MessageType: RAW` |
 
-3. 秘密鍵のprimary copyは暗号化したoffline volumeへ保存します。別の物理場所に、別途
-   暗号化したrecovery copyを1つ保管します。passphraseは両方の鍵とは別に保管し、
-   accessできるrelease maintainerを限定して利用記録を残します。
-4. 秘密鍵をGit、GitHub Actions secret/artifact、CI runner、projectの`.env`、log、
-   chat、ticket、EC2へ保存しません。
-5. fingerprint commandを独立してもう一度実行し、完全な値を照合します。先頭・末尾
-   だけの照合はしません。
+**署名できるのは`EgressViewRelease` permission setだけです。** この制限はIAMではなく
+**キーポリシー**にあります。アカウント管理用のstatementは`kms:Sign`を意図的に含まないため、
+管理者は鍵のrotation・ポリシー変更・削除予約はできても、その鍵でリリースに署名することは
+できません。他のロール、とりわけEC2インスタンスロールへ`kms:Sign`を付与しないでください。
+署名はメンテナのworkstationから行うもので、サーバ側にこの権限は不要です。
+
+リリース前にサインインします。
+
+```bash
+aws sso login --profile egressview-release
+```
+
+公開鍵とfingerprintの取得:
+
+```bash
+aws kms get-public-key --profile egressview-release \
+  --key-id alias/egressview-release --query PublicKey --output text \
+  | base64 -d > /tmp/egressview-release.der
+openssl pkey -pubin -inform DER -in /tmp/egressview-release.der \
+  -out /tmp/egressview-release.pub.pem
+node scripts/release-key-fingerprint.js /tmp/egressview-release.pub.pem
+```
+
+fingerprintの算出は独立してもう一度実行し、**全桁**を比較してください。先頭や末尾だけの
+比較は不可です。
 
 ## Fingerprintの登録・公開
 
@@ -47,29 +62,41 @@ fingerprintと照合します。
 
 ## 署名・公開
 
-信頼済みrelease workstationで署名します。checkoutが意図した署名済みtagで、cleanかつ
-全test通過済みであることを確認し、repository外の秘密鍵pathを指定します。
+署名はメンテナのworkstationで行います。checkoutが意図した署名対象tagであること、
+cleanであること、テストが通っていることを確認してから、KMS鍵でbuildします。
 
 ```bash
-npm run offline:bundle -- \
+aws sso login --profile egressview-release
+AWS_PROFILE=egressview-release npm run offline:bundle -- \
   --output dist/offline \
-  --private-key /secure/offline/egressview-release-YYYY.key
+  --kms-key-id alias/egressview-release \
+  --region ap-northeast-1
 ```
 
-Upload前に生成したarchive、checksum、signature、公開鍵を`npm run offline:verify`で検証し、
-公開鍵fingerprintをactive registry entryと再照合します。uploadするのはarchive、checksum、
-detached signature、公開鍵だけです。秘密鍵や署名workstationの作業dataはuploadしません。
+`--private-key`はローカル鍵ファイルを使う選択肢として残っています。CIが使い捨て鍵で
+仕組みを検証する用途と、独自に配布物を作る利用者向けで、**正式リリースにはなりません**。
+両オプションは排他です。
 
-Release noteにはartifact名、checksum、完全なfingerprint、signing key ID、検証guideへのlinkを
-記載します。可能なら別maintainerがdownload後のfileを検証します。単独maintainerの場合は、
-告知前に別のclean環境からdownloadして検証します。
+アップロード前に`npm run offline:verify`を、生成されたarchive・checksum・署名・公開鍵に
+対して実行します。**このコマンドにAWSアクセスもAWS CLIも不要です** — 署名はchecksum
+ファイルに対する生のEd25519署名で、`openssl`と同梱の`.pub.pem`だけで検証できます。
+公開鍵のfingerprintを再計算し、登録済みactive recordと比較してください。アップロードするのは
+archive・checksum・detached署名・公開鍵だけです。
+
+Releaseノートには成果物名、checksum、完全なfingerprint、署名鍵ID、検証ガイドへのリンクを
+記載します。可能なら別のメンテナがダウンロード物を検証し、単独メンテナの場合は別のclean環境で
+ダウンロードして検証してから公開を告知します。
 
 ## Rotation・漏えい対応
 
 計画rotationでは、旧鍵と新鍵で個別に署名したartifactを1 releaseだけ併記し、両fingerprintを
 独立経路でも告知します。overlap releaseの公開後に旧鍵を`retired`へ変更します。
 
+overlap releaseは旧鍵で署名する必要があるため、**rotation時にKMS鍵の削除を予約しないで
+ください。** 待機期間が過ぎると削除は取り消せません。検証は同梱の公開鍵と`openssl`だけで
+完結し鍵を必要としないので、旧鍵を残すコストは$1/月にすぎず、何かあった時に再度署名できる
+余地を買えます。明確な理由がない限り保持してください。
+
 漏えいの疑いがあればreleaseを直ちに停止します。鍵を`revoked`にし、完全なfingerprintと
-incident日を全公開経路で告知し、activeな署名環境から削除します。clean workstationで新鍵を
-生成し、review済みtagから影響artifactを再構築します。既存GitHub Releaseのartifactを、
+incident日を全公開経路で告知し、KMS鍵を無効化するか、release permission setから`kms:Sign`を外します。新鍵を作成し、review済みtagから影響artifactを再構築します。既存GitHub Releaseのartifactを、
 明示的なincident noticeと新versionなしに差し替えません。
