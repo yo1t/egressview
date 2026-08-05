@@ -21,10 +21,65 @@ function parseArgs(argv) {
     options[key.slice(2)] = argv[++i];
   }
   if (!options.output) throw new Error('--output is required');
-  if (!options['private-key'] && options.unsigned !== 'true') {
-    throw new Error('--private-key is required unless --unsigned true is explicitly used');
+  const signers = ['private-key', 'kms-key-id'].filter(name => options[name]);
+  if (signers.length > 1) {
+    throw new Error('--private-key and --kms-key-id are mutually exclusive');
+  }
+  if (signers.length === 0 && options.unsigned !== 'true') {
+    throw new Error(
+      '--private-key or --kms-key-id is required unless --unsigned true is explicitly used'
+    );
   }
   return options;
+}
+
+// KMS caps a RAW message at 4096 bytes. The checksum file is one line, but
+// check rather than assume: exceeding it fails inside AWS with an error that
+// does not name the cause.
+const KMS_MAX_RAW_MESSAGE_BYTES = 4096;
+
+/**
+ * Sign the checksum file with an asymmetric KMS key and write the detached
+ * signature plus the public key beside the artifact.
+ *
+ * The signature is byte-identical in form to the openssl path: raw Ed25519
+ * over the checksum file. Verification therefore stays `openssl pkeyutl
+ * -verify -rawin -pubin` and needs neither AWS access nor a code change, which
+ * is the reason KMS was chosen over a scheme that changes the verifier.
+ */
+function signWithKms(keyId, region, checksumPath, signaturePath, publicKeyPath) {
+  const size = fs.statSync(checksumPath).size;
+  if (size > KMS_MAX_RAW_MESSAGE_BYTES) {
+    throw new Error(
+      `Checksum file is ${size} bytes, above the KMS RAW limit of ${KMS_MAX_RAW_MESSAGE_BYTES}`
+    );
+  }
+  const regionArgs = region ? ['--region', region] : [];
+
+  const signature = run('aws', [
+    'kms', 'sign', ...regionArgs,
+    '--key-id', keyId,
+    '--message', `fileb://${path.resolve(checksumPath)}`,
+    '--message-type', 'RAW',
+    '--signing-algorithm', 'ED25519_SHA_512',
+    '--query', 'Signature', '--output', 'text',
+  ]).trim();
+  fs.writeFileSync(signaturePath, Buffer.from(signature, 'base64'), { mode: 0o644 });
+
+  // KMS returns SPKI DER; ship PEM so the documented verification command
+  // works unchanged for anyone who does not have the AWS CLI.
+  const publicDer = run('aws', [
+    'kms', 'get-public-key', ...regionArgs,
+    '--key-id', keyId,
+    '--query', 'PublicKey', '--output', 'text',
+  ]).trim();
+  const derPath = `${publicKeyPath}.der`;
+  fs.writeFileSync(derPath, Buffer.from(publicDer, 'base64'), { mode: 0o600 });
+  try {
+    run('openssl', ['pkey', '-pubin', '-inform', 'DER', '-in', derPath, '-out', publicKeyPath]);
+  } finally {
+    fs.rmSync(derPath, { force: true });
+  }
 }
 
 function run(command, args, options = {}) {
@@ -93,10 +148,14 @@ function build(options) {
     fs.writeFileSync(checksum, `${sha256(artifact)}  ${artifactName}\n`, { mode: 0o644 });
 
     const result = { artifact, checksum, signature: null, publicKey: null };
-    if (options['private-key']) {
+    const signature = `${artifact}.sig`;
+    const publicKey = `${artifact}.pub.pem`;
+    if (options['kms-key-id']) {
+      signWithKms(options['kms-key-id'], options.region, checksum, signature, publicKey);
+      result.signature = signature;
+      result.publicKey = publicKey;
+    } else if (options['private-key']) {
       const privateKey = path.resolve(options['private-key']);
-      const signature = `${artifact}.sig`;
-      const publicKey = `${artifact}.pub.pem`;
       run('openssl', ['pkeyutl', '-sign', '-rawin', '-inkey', privateKey, '-in', checksum, '-out', signature]);
       run('openssl', ['pkey', '-in', privateKey, '-pubout', '-out', publicKey]);
       result.signature = signature;
