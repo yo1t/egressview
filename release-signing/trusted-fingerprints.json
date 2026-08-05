@@ -1,4 +1,14 @@
 {
   "schemaVersion": 1,
-  "keys": []
+  "keys": [
+    {
+      "keyId": "egressview-release-2026",
+      "status": "active",
+      "fingerprint": "SHA256:6288265bd746d230a3637e3a520e2335f48dc939a4d76d7b05c44ea5baf3eccc",
+      "algorithm": "Ed25519",
+      "publicKey": "release-signing/egressview-release-2026.pub.pem",
+      "createdAt": "2026-08-05",
+      "custody": "AWS KMS (non-exportable). Signing is restricted to a dedicated release principal by key policy."
+    }
+  ]
 }

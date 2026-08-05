@@ -31,10 +31,24 @@ openssl pkey -pubin -in egressview-offline-VERSION.tar.gz.pub.pem \
   -outform DER | openssl dgst -sha256
 ```
 
-CI uses an ephemeral key only to test the signing path. An official release
-must use the protected project release key and publish its pinned fingerprint.
-See the [release signing key procedure](release-signing.md) for key generation,
-storage, publication, rotation, and compromise response.
+The active release signing key is:
+
+```text
+key id       egressview-release-2026
+algorithm    Ed25519
+fingerprint  SHA256:6288265bd746d230a3637e3a520e2335f48dc939a4d76d7b05c44ea5baf3eccc
+```
+
+Compare the **complete** value. A prefix or suffix match is not a match. The
+enrolled record is in
+[`release-signing/trusted-fingerprints.json`](../release-signing/trusted-fingerprints.json),
+and the same fingerprint is published in `SECURITY.md`, on the project site, and
+through an independently controlled channel — agreement across those is what
+makes it a trust anchor.
+
+CI uses an ephemeral key only to test the signing path; it is not an official
+release identity. See the [release signing procedure](release-signing.md) for
+custody, publication, rotation, and compromise response.
 
 ## Verify before extraction
 

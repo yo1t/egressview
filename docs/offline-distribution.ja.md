@@ -29,9 +29,21 @@ openssl pkey -pubin -in egressview-offline-VERSION.tar.gz.pub.pem \
   -outform DER | openssl dgst -sha256
 ```
 
-CIの鍵は署名経路の試験専用で毎回破棄します。正式releaseは保護したproject release
-鍵を使い、固定fingerprintを別経路でも公開する必要があります。鍵生成、保管、公開、
-rotation、漏えい対応は[release署名鍵の運用手順](release-signing.ja.md)に従います。
+現在有効なrelease署名鍵は次のとおりです。
+
+```text
+key id       egressview-release-2026
+algorithm    Ed25519
+fingerprint  SHA256:6288265bd746d230a3637e3a520e2335f48dc939a4d76d7b05c44ea5baf3eccc
+```
+
+**全桁**を比較してください。先頭や末尾の一致は一致ではありません。登録レコードは
+[`release-signing/trusted-fingerprints.json`](../release-signing/trusted-fingerprints.json)
+にあり、同じfingerprintを`SECURITY.md`、プロジェクトサイト、独立したチャネルでも公開しています。
+**それらが一致することが信頼の起点**です。
+
+CIの鍵は署名経路の試験専用で毎回破棄し、正式なrelease identityではありません。
+保管、公開、rotation、漏えい対応は[release署名の運用手順](release-signing.ja.md)に従います。
 
 ## 展開前の検証
 

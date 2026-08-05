@@ -11,7 +11,12 @@ const FORBIDDEN_NAMES = [
   /(?:^|\/)(?!\.egressview\.demo\.db$)[^/]*\.(?:db|sqlite)(?:-|$)/,
   /(?:^|\/)[^/]*\.log$/,
   /(?:^|\/)(?:id_rsa|id_ed25519)[^/]*$/,
-  /(?:^|\/)[^/]*\.(?:key|pem)$/,
+  // Blocks key material, but not a public key: `*.pub.pem` is the published
+  // release verification key and belongs in the tree. Naming alone is not
+  // trusted -- SECRET_PATTERNS still scans every file for a PRIVATE KEY
+  // header, so a private key renamed to `.pub.pem` is still rejected.
+  /(?:^|\/)[^/]*\.key$/,
+  /(?:^|\/)[^/]*(?<!\.pub)\.pem$/,
   /(?:^|\/)\.egressview-(?:backups|demo-runtime)(?:\/|$)/,
 ];
 
