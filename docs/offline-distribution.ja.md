@@ -93,13 +93,21 @@ releaseを指します。外部の設定、DB、backup、logは変更しませ�
 
 ## Build / sign
 
-Ed25519秘密鍵はrepository外へmode `0600`で保存し、release鍵手順に従ってbackupします。
+公式releaseはメンテナが保有するAWS KMS鍵で署名します（[release署名手順](release-signing.ja.md)）。
+**公式releaseに署名できるのはメンテナだけで、それが署名の意味そのもの**です。
+
+**自分用の配布物**をbuild・署名するのにAWSアカウントは不要です。ローカルのEd25519鍵を
+repository外へmode `0600`で保存して使います。
 
 ```bash
+openssl genpkey -algorithm ED25519 -out /secure/path/egressview-signing.key
 npm run offline:bundle -- \
   --output dist/offline \
-  --private-key /secure/path/egressview-offline-signing.key
+  --private-key /secure/path/egressview-signing.key
 ```
+
+**検証はどちらの場合も同じで、AWSを必要としません。** `openssl`と成果物に同梱される
+`.pub.pem`だけで完結します。
 
 `--unsigned true`はlocal開発専用で、正式releaseとして公開しません。CI gateは一時鍵を
 生成してbundleの構築・検証、lock済み依存のinstall、`better-sqlite3` load、
