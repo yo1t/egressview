@@ -8,6 +8,12 @@ It is not an air-gapped installer: `npm ci --omit=dev` downloads the exact
 production dependencies recorded in `package-lock.json` on the target host.
 This lets native modules such as `better-sqlite3` match the target OS and CPU.
 
+The installer runs that `npm ci` with install scripts disabled, so native
+modules come from the prebuilt binaries in their packages and the target needs
+no compiler. `better-sqlite3` publishes prebuilds for darwin, linux, linuxmusl,
+and win32 on arm64 and x64; installing on any other platform requires Python
+and a C++ toolchain, and `npm ci --omit=dev --ignore-scripts=false` by hand.
+
 ## Release files
 
 Each release consists of four files:

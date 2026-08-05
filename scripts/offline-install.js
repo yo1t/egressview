@@ -74,15 +74,25 @@ function replaceLink(prefix, name, target) {
   fs.renameSync(temporary, destination);
 }
 
+// npm settings for the dependency install on the target host.
+//
+// `npm_config_ignore_scripts` carries the same reason as the repository
+// .npmrc: better-sqlite3 ships a binding.gyp with no install script, which npm
+// turns into an implicit `node-gyp rebuild`, so a target without Python and a
+// C++ toolchain cannot install even though the bundled prebuild would work.
+// It is set here rather than relied upon from .npmrc because `npm pack`
+// excludes .npmrc from the tarball this bundle is built from.
+const DEPENDENCY_INSTALL_ENV = {
+  npm_config_audit: 'false',
+  npm_config_fund: 'false',
+  npm_config_ignore_scripts: 'true',
+};
+
 function installProductionDependencies(releaseDir) {
   execFileSync('npm', ['ci', '--omit=dev'], {
     cwd: releaseDir,
     stdio: 'inherit',
-    env: {
-      ...process.env,
-      npm_config_audit: 'false',
-      npm_config_fund: 'false',
-    },
+    env: { ...process.env, ...DEPENDENCY_INSTALL_ENV },
   });
   execFileSync(process.execPath, [
     '-e',
@@ -174,6 +184,7 @@ if (require.main === module) {
 
 module.exports = {
   assertNodeRequirement,
+  DEPENDENCY_INSTALL_ENV,
   installProductionDependencies,
   installRelease,
   parseArgs,
