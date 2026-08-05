@@ -88,6 +88,55 @@ even compiled in — several CVEs are in optional extensions:
 node -p 'require("better-sqlite3")(":memory:").prepare("pragma compile_options").all().map(r => r.compile_options).join("\n")'
 ```
 
+### A prebuilt native module can pass CI and still not run in production
+
+Native modules ship prebuilt binaries per platform, and each binary is linked
+against the glibc of whatever image built it. glibc symbol versioning is
+backward compatible only: a binary needing `GLIBC_2.38` will not load on a host
+that provides 2.35, and the failure is at `require()` time.
+
+CI runners are x64 while the deployment host is aarch64, so the two do not
+exercise the same binary. better-sqlite3 13.0.2 shipped an arm64 prebuild
+requiring `GLIBC_2.38`; CI was green and the server could not start.
+
+Before accepting a native-module update, compare the prebuild against the host:
+
+```bash
+# What the prebuild demands (match the platform/arch the server runs;
+# layout varies -- better-sqlite3 flattens it to prebuilds/linux-arm64.node)
+find node_modules/<pkg>/prebuilds -path '*linux-arm64*' -name '*.node' \
+  -exec sh -c 'strings "$1" | grep -o "GLIBC_[0-9.]*" | sort -uV | tail -1' _ {} \;
+
+# What the host provides
+ldd --version | head -1
+```
+
+If the first is higher than the second, the update cannot be deployed no matter
+what CI reports.
+
+### Install scripts are disabled
+
+`.npmrc` sets `ignore-scripts=true`, so `npm ci` runs no dependency install
+scripts. This is needed because better-sqlite3 13.x ships a `binding.gyp`
+without an install script, and npm reads a bare `binding.gyp` as an implicit
+`node-gyp rebuild` — it would compile SQLite from source on every install even
+though the package bundles a prebuilt binary for the platform, and a host
+without Python and a C++ toolchain could not install at all. It also stops
+every other dependency from running code at install time.
+
+Two dependencies lose an optional native build as a result, both harmless here:
+`ssh2` falls back to its pure-JS crypto path (router polling is not
+throughput-bound) and `fsevents` is not built, so macOS file watching polls
+during development.
+
+The bundle installer sets the same flag through `npm_config_ignore_scripts`
+rather than relying on `.npmrc`, because `npm pack` strips `.npmrc` from the
+tarball. A unit test pins that.
+
+The consequence to remember: installing now requires a bundled prebuild for the
+host. better-sqlite3 covers darwin, linux, linuxmusl, and win32 on arm64 and
+x64. On anything else, install a toolchain and run `npm ci --ignore-scripts=false`.
+
 ## Guidelines
 
 - **Add tests for new behavior.** Pure logic lives in `src/` modules with matching files in `test/unit/`. Modules take their dependencies via an `init(deps)` / factory pattern so they can be tested with stubs — follow the existing style (see `src/runtime.js` and `test/unit/runtime.test.js`).

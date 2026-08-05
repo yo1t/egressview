@@ -4,6 +4,24 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Upgraded `better-sqlite3` from 12.11.1 to 13.0.3, lifting the pin placed in
+  1.7.0. The pin existed because the 13.0.2 `linux-arm64` prebuild required
+  `GLIBC_2.38`, which the aarch64 deployment host does not provide; 13.0.3
+  builds that prebuild against `GLIBC_2.34`. The bundled SQLite moves from
+  3.53.2 to 3.53.4.
+- Disabled dependency install scripts (`ignore-scripts=true` in `.npmrc`, and
+  `npm_config_ignore_scripts` in the offline installer, which cannot read
+  `.npmrc` because `npm pack` strips it). better-sqlite3 13.x ships a
+  `binding.gyp` with no install script, and npm treats a bare `binding.gyp` as
+  an implicit `node-gyp rebuild` — so it would compile SQLite from source on
+  every install despite bundling a prebuilt binary, and a host without Python
+  and a C++ toolchain could not install at all. Installing now requires a
+  bundled prebuild for the host platform: darwin, linux, linuxmusl, and win32
+  on arm64 and x64. `ssh2` and `fsevents` lose optional native builds and fall
+  back to pure JavaScript.
+
 ## [1.7.0] - 2026-08-02
 
 ### Added
