@@ -99,14 +99,22 @@ starts.
 
 ## Build and sign
 
-Keep the Ed25519 private key outside the repository with mode `0600` and back it
-up through the release-key procedure:
+Official releases are signed with an AWS KMS key held by the maintainer; see
+[the release signing procedure](release-signing.md). You cannot sign an official
+release, and that is the point — it is what the signature attests.
+
+Building and signing your **own** distribution needs no AWS account. Use a local
+Ed25519 key, kept outside the repository with mode `0600`:
 
 ```bash
+openssl genpkey -algorithm ED25519 -out /secure/path/egressview-signing.key
 npm run offline:bundle -- \
   --output dist/offline \
-  --private-key /secure/path/egressview-offline-signing.key
+  --private-key /secure/path/egressview-signing.key
 ```
+
+Verification is the same either way and never needs AWS: `openssl` and the
+`.pub.pem` shipped beside the artifact are enough.
 
 `--unsigned true` exists only for local development and must never be published
 as an official release. The CI distribution gate generates a temporary key,
