@@ -492,6 +492,18 @@ npm start</code></pre>
   </section>
 
   <!-- Links -->
+  <!-- Release signing -->
+  <section id="signing">
+    <h2><span class="icon">🔑</span> Release Signing</h2>
+    <p style="font-size:0.95rem; color:var(--muted);">Portable releases carry an Ed25519 signature over the archive checksum. The public key shipped beside an archive is <strong>not</strong> a trust anchor on its own &mdash; compare its fingerprint with the value published here and in <a href="https://github.com/yo1t/egressview/blob/main/SECURITY.md">SECURITY.md</a>. Agreement across independent channels is what makes it one.</p>
+    <div class="card">
+      <h3>Active signing key</h3>
+      <p style="font-size:0.85rem; color:var(--muted);">key id <code>egressview-release-2026</code> &middot; Ed25519</p>
+      <p style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.8rem; word-break:break-all; line-height:1.6;"><code>SHA256:6288265bd746d230a3637e3a520e2335f48dc939a4d76d7b05c44ea5baf3eccc</code></p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;">Compare the <strong>complete</strong> value; a prefix or suffix match is not a match. The private half is held in AWS KMS and cannot be exported. Verifying a release needs no AWS access &mdash; only <code>openssl</code> and the published public key. See the <a href="https://github.com/yo1t/egressview/blob/main/docs/offline-distribution.md">distribution guide</a> for the verification commands.</p>
+    </div>
+  </section>
+
   <section id="links">
     <h2><span class="icon">⬡</span> Links</h2>
     <div class="card-grid">

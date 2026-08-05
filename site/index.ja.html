@@ -492,6 +492,18 @@ npm start</code></pre>
   </section>
 
   <!-- リンク -->
+  <!-- Release signing -->
+  <section id="signing">
+    <h2><span class="icon">🔑</span> リリース署名</h2>
+    <p style="font-size:0.95rem; color:var(--muted);">portable releaseにはarchiveのchecksumに対するEd25519署名が付きます。archiveに同梱される公開鍵<strong>だけ</strong>では信頼の起点になりません。ここと<a href="https://github.com/yo1t/egressview/blob/main/SECURITY.md">SECURITY.md</a>で公開している値とfingerprintを比較してください。<strong>独立したチャネルで一致すること</strong>が信頼の根拠です。</p>
+    <div class="card">
+      <h3>現在有効な署名鍵</h3>
+      <p style="font-size:0.85rem; color:var(--muted);">key id <code>egressview-release-2026</code> &middot; Ed25519</p>
+      <p style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.8rem; word-break:break-all; line-height:1.6;"><code>SHA256:6288265bd746d230a3637e3a520e2335f48dc939a4d76d7b05c44ea5baf3eccc</code></p>
+      <p style="font-size:0.85rem; color:var(--muted); margin-top:12px;"><strong>全桁</strong>を比較してください。先頭や末尾の一致は一致ではありません。秘密鍵はAWS KMS内にあり取り出せません。検証にAWSは不要で、<code>openssl</code>と公開鍵だけで完結します。検証コマンドは<a href="https://github.com/yo1t/egressview/blob/main/docs/offline-distribution.ja.md">配布ガイド</a>を参照してください。</p>
+    </div>
+  </section>
+
   <section id="links">
     <h2><span class="icon">⬡</span> リンク</h2>
     <div class="card-grid">
