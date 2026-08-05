@@ -105,6 +105,11 @@ docs/github-traffic-last-month.svg
 scripts/render-traffic-report.js
 # Local-only Claude Code guidance (not shared with other contributors)
 CLAUDE.local.md
+
+# Local operational runbooks. These carry account ids, key ARNs and profile
+# names for one specific environment; the published procedure lives in the
+# matching docs/*.md without them.
+docs/*.local.md
 # AWS CDK infrastructure (P2-63 web public exposure; local deploy tooling, not distributed)
 infra/
 

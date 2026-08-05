@@ -32,7 +32,21 @@ Signed portable releases use an Ed25519 signature over the archive checksum,
 plus a CycloneDX SBOM and per-file manifest. The public key distributed beside
 an archive must be matched to a fingerprint obtained through a separate trusted
 release channel. CI's ephemeral signing key proves the mechanism only and is
-not an official release identity. Installation requires temporary npm-registry
+not an official release identity.
+
+The active release signing key is:
+
+```text
+key id       egressview-release-2026
+algorithm    Ed25519
+fingerprint  SHA256:6288265bd746d230a3637e3a520e2335f48dc939a4d76d7b05c44ea5baf3eccc
+```
+
+Compare the **complete** fingerprint, never a prefix or suffix. The private half
+is held in AWS KMS and cannot be exported; signing is restricted to a dedicated
+release principal by key policy. Verifying a release needs no AWS access — only
+`openssl` and the public key shipped beside the archive. The enrolled record is
+in [`release-signing/trusted-fingerprints.json`](release-signing/trusted-fingerprints.json). Installation requires temporary npm-registry
 access; runtime Internet access can then be disabled with
 `EGRESSVIEW_OFFLINE_MODE=true`.
 
