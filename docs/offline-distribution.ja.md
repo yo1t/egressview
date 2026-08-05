@@ -8,6 +8,12 @@
 取得します。これにより`better-sqlite3`等のnative moduleを導入先のOS/CPUへ
 正しく合わせられます。
 
+installerはこの`npm ci`をinstall script無効で実行するため、native moduleは
+各packageに同梱されたprebuilt binaryが使われ、導入先にcompilerは不要です。
+`better-sqlite3`のprebuildはdarwin / linux / linuxmusl / win32のarm64・x64向けに
+提供されています。それ以外のplatformへ導入する場合はPythonとC++ toolchainを用意し、
+`npm ci --omit=dev --ignore-scripts=false`を手動で実行してください。
+
 ## Release file
 
 各releaseは次の4ファイルで構成します。

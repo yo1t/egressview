@@ -13,6 +13,7 @@ const {
 } = require('../../scripts/offline-bundle-lib');
 const {
   assertNodeRequirement,
+  DEPENDENCY_INSTALL_ENV,
   installRelease,
   parseArgs,
   rollback,
@@ -141,5 +142,15 @@ describe('offline atomic installation', () => {
   it('requires an explicit prefix and known command', () => {
     assert.throws(() => parseArgs(['install']), /--prefix is required/);
     assert.throws(() => parseArgs(['remove', '--prefix', '/tmp/example']), /Command must be/);
+  });
+
+  it('依存インストールで install script を実行しない', () => {
+    // better-sqlite3 ships a binding.gyp with no install script, and npm reads
+    // that as an implicit `node-gyp rebuild`. Without this flag a target
+    // without Python and a C++ toolchain cannot install, even though the
+    // bundled prebuild would have worked. The repository .npmrc cannot cover
+    // this: `npm pack` strips .npmrc from the tarball the bundle is built
+    // from, so the setting has to travel with the installer.
+    assert.equal(DEPENDENCY_INSTALL_ENV.npm_config_ignore_scripts, 'true');
   });
 });

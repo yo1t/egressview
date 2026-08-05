@@ -11,26 +11,23 @@ updates:
     # a compromised/unstable release has time to be caught and yanked.
     cooldown:
       default-days: 7
-    ignore:
-      # better-sqlite3 13.0.2 cannot run on the EC2 host. It ships prebuilt
-      # binaries inside the tarball (prebuildify), which is otherwise an
-      # improvement -- 12.x downloads one at install time, so 13.x is the
-      # better shape for air-gapped installs. The problem is the binary
-      # itself: prebuilds/linux-arm64.node requires GLIBC_2.38, and the host
-      # is aarch64 Amazon Linux 2023 with glibc 2.34, so the module fails to
-      # load. Upstream issue #1509 tracks this and is open.
-      #
-      # The x64 prebuild only needs GLIBC_2.34, so CI (x64 runners) passes
-      # while production would break -- the reason this must be pinned rather
-      # than left to a green pipeline.
-      #
-      # 13.0.0 and 13.0.1 were a separate, now-fixed problem: they dropped
-      # prebuild-install and compiled from source on every install.
-      #
-      # Lift this once #1509 is resolved and the arm64 prebuild links against
-      # a glibc the host actually has.
-      - dependency-name: "better-sqlite3"
-        update-types: ["version-update:semver-major"]
+    # better-sqlite3 majors were ignored here between 2026-08-03 and
+    # 2026-08-06. 13.0.2 shipped a prebuilds/linux-arm64.node linked against
+    # GLIBC_2.38 while the EC2 host (aarch64 Amazon Linux 2023, glibc 2.34)
+    # could not load it -- and because the x64 prebuild needed only 2.34, CI
+    # stayed green while production would have broken. Upstream
+    # WiseLibs/better-sqlite3#1509 was the cause: the arm64 prebuild was built
+    # on Ubuntu 24.04. 13.0.3 builds it on ubuntu-22.04-arm and needs 2.34, so
+    # the ignore was lifted.
+    #
+    # Adopting 13.x also required ignore-scripts (see .npmrc): 13.x ships a
+    # binding.gyp with no install script, which npm turns into an implicit
+    # `node-gyp rebuild`. Upstream closed WiseLibs/better-sqlite3#1503 with
+    # `"gypfile": false`, a field npm 8+ ignores.
+    #
+    # A native-module major is still not a green-CI decision. Check the
+    # prebuild against the deployment host, and check that install does not
+    # need a toolchain, before accepting one. See CONTRIBUTING.md.
     groups:
       # Batch all non-major updates into one PR to reduce noise.
       # Security updates still get their own PR from GitHub automatically.
