@@ -14,8 +14,14 @@ RUN groupadd --system egressview && \
 
 WORKDIR /app
 
-# Install production dependencies only
-COPY package.json package-lock.json ./
+# Install production dependencies only.
+#
+# .npmrc has to come along: it sets ignore-scripts, without which npm treats
+# better-sqlite3's bundled binding.gyp as an implicit `node-gyp rebuild` and
+# compiles SQLite from source. This image has no Python or C++ toolchain, so
+# that fails the build outright -- and installing one would be the wrong fix,
+# since the package already ships a prebuilt binary for this platform.
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy application source and the demo database snapshot
