@@ -36,6 +36,12 @@ function request(app, url, { headers = {}, remoteAddress } = {}) {
     if (remoteAddress) socket.remoteAddress = remoteAddress;
     req.socket = socket;
     req.connection = socket;
+    // Express grafts http.IncomingMessage.prototype onto this object, so destroying
+    // the stream would run IncomingMessage._destroy against a request that has none
+    // of the internal fields that method assumes. Since Node 26.7.0 its abort path
+    // detaches a listener from an undefined socket and throws. This is a plain
+    // Readable standing in for a request, so give it a plain teardown.
+    req._destroy = (error, done) => done(error);
     res.assignSocket(socket);
     res.on('finish', () => {
       const raw = Buffer.concat(chunks).toString();

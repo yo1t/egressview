@@ -8,7 +8,7 @@
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
-![Release](https://img.shields.io/badge/release-v1.7.0-3fb950)
+![Release](https://img.shields.io/badge/release-v1.8.0-3fb950)
 [![Live Demo](https://img.shields.io/badge/demo-live-ff69b4)](https://egressview-demo.fly.dev)
 
 > 🇬🇧 [English README](README.md) | 🌐 [プロジェクトページ](https://yo1t.github.io/egressview/index.ja.html)
@@ -19,11 +19,11 @@
 
 EgressView は Yamaha RTX / Cisco IOS を使う家庭・SOHOネットワーク向けに、実運用を意識して開発しています。ASUS AP 連携と任意のデータソースは補助的な連携としてメンテナンスしています。
 
-### v1.7.0の主な変更
+### v1.8.0の主な変更
 
-v1.7.0では、EgressViewを安全にインターネットへ公開できるようにしました。ブラウザのsessionは最小権限のrole（`viewer` / `operator` / `admin`）を持つようになり、認証済みなら全権という状態を解消しています。無期限・単一・全権だったadmin tokenに加えて、有効期限と個別失効を持つscoped API identityを発行できます。MCPサーバーにはOAuth 2.1 Resource Serverモードを追加し、利用者別のrate limitと専用のappend-only監査を備えました。単一の固定tokenを共有せずに、リモートのAIアシスタントから接続できます。逆の要件として`EGRESSVIEW_OFFLINE_MODE`を追加しました。エアギャップ環境では、インターネット依存機能を「実行してタイムアウトさせる」のではなく起動前に無効化します。地図assetも自己ホストしたため、通常のページ読み込みでも外部リクエストは発生しません。
+v1.8.0では、リリース署名を完成させ、依存を現行ラインへ移しました。公式配布物はAWS KMSのEd25519鍵で署名されます。秘密鍵はexport不可である一方、検証側は`openssl`と公開済みの公開鍵だけで完結し、AWSアカウントもネットワークも要りません。脅威検出と新規ノード検出には、Slackと履歴それぞれ独立したスイッチを追加しました。うるさい検出だけを静かにでき、Slack全体を止めたり、アプリ内の記録まで失ったりする必要がなくなります。`better-sqlite3`は13.0.3（SQLite 3.53.4）へ移行し、依存のinstall scriptを無効化してソースビルドではなく同梱prebuiltバイナリを使うようにしました。CIはNode 22 / 24 / 26で実行します。
 
-既存DBは起動時にschema v12へ自動移行されます。適用前に完全バックアップを作成・検証し、空き容量、checkpoint、copy、integrity検査のいずれかが失敗した場合はDBを変更せず起動を停止します。既存のOIDC sessionは一度だけ失効し、再認証時に検証済みのallowlist一致からroleを導出します。ローカルsessionは管理者権限を維持します。
+本リリースはDB schemaを変更しないため、migrationは発生しません。v1.7.0からの更新は再起動のみです。install時の変更点が1つあります。install scriptを無効化したため、`better-sqlite3`の同梱prebuiltバイナリが存在しないplatformではPythonとC++ toolchain、そして`npm ci --ignore-scripts=false`が必要になります。prebuildはdarwin / linux / linuxmusl / win32のarm64・x64向けに提供されています。
 
 ## 家庭・SOHOのセキュリティ対策として
 
