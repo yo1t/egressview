@@ -1,0 +1,52 @@
+# Fly.io deployment configuration for the EgressView public demo.
+#
+# Deploy:
+#   fly deploy
+#
+# The demo uses DEMO_MODE=true which pre-seeds synthetic data, disables
+# real router connections, and uses a fixed read-only token. The database
+# is ephemeral — it resets to the committed snapshot on every deploy.
+#
+# To run your own demo:
+#   1. Install Fly CLI: curl -L https://fly.io/install.sh | sh
+#   2. fly auth login
+#   3. fly apps create <your-app-name>
+#   4. Update the `app` field below
+#   5. fly deploy
+
+app = "egressview-demo"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile.demo"
+
+[env]
+  DEMO_MODE = "true"
+  NODE_ENV = "demo"
+  PORT = "3000"
+  # The demo token is public — this instance is read-only
+  DEMO_ADMIN_TOKEN = "demo-public-readonly"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 50
+    soft_limit = 30
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+[checks]
+  [checks.health]
+    type = "http"
+    port = 3000
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
