@@ -33,10 +33,12 @@ COPY .egressview.demo.db ./
 COPY .env.example ./
 
 # Demo environment
+# DEMO_ADMIN_TOKEN is intentionally not set. Under DEMO_READ_ONLY the app
+# authenticates visitors as an anonymous viewer and randomises its internal
+# token, so a published one would only add an `admin` credential nobody needs.
 ENV DEMO_MODE=true \
     NODE_ENV=demo \
-    PORT=3000 \
-    DEMO_ADMIN_TOKEN=demo-public-readonly
+    PORT=3000
 
 # The demo runtime directory needs to be writable for the DB copy
 RUN mkdir -p .egressview-demo-runtime && \

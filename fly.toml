@@ -27,8 +27,9 @@ primary_region = "nrt"
   DEMO_READ_ONLY = "true"
   NODE_ENV = "demo"
   PORT = "3000"
-  # The demo token is public — this instance is read-only
-  DEMO_ADMIN_TOKEN = "demo-public-readonly"
+  # No admin token is published. With DEMO_READ_ONLY the app authenticates every
+  # visitor as an anonymous viewer, so there is nothing to type in and nothing
+  # to hand out; the internal token is randomised at every start.
 
 [http_service]
   internal_port = 3000

@@ -29,8 +29,13 @@ function publicBaseUrl(req, subpath) {
 module.exports = function authSecurityRoutes(ctx) {
   const {
     requireAdmin, appState, saveConfig, sessions, authAudit, oidc,
-    authCookies, subpath = '',
+    authCookies, subpath = '', demoVisitor = null,
   } = ctx;
+  // The demo authenticates everyone as an anonymous viewer, so there is no
+  // password to enter. Reporting local login as available would put a form on
+  // screen that cannot succeed: the demo's local password is random per start
+  // and never leaves the container.
+  const localLoginEnabled = !demoVisitor;
   const router = Router();
 
   router.get('/auth/status', (req, res) => {
@@ -39,14 +44,15 @@ module.exports = function authSecurityRoutes(ctx) {
       authenticated: Boolean(auth),
       authMethod: auth && auth !== 'admin' ? auth.authMethod : auth ? 'api-token' : null,
       oidcEnabled: appState.oidcConfig?.enabled === true,
-      localLoginEnabled: true,
+      localLoginEnabled,
     });
   });
 
   router.get('/auth/methods', (_req, res) => {
     res.json({
-      local: { enabled: true },
+      local: { enabled: localLoginEnabled },
       google: { enabled: appState.oidcConfig?.enabled === true },
+      ...(demoVisitor ? { demo: { readOnly: true } } : {}),
     });
   });
 
