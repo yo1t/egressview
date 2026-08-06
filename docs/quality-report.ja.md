@@ -45,7 +45,7 @@ CriticalまたはHighの不具合は見つかりませんでした。前回レ�
 - **初の署名付きリリース（v1.8.0）**: 登録済みKMS鍵でビルド・署名し、4つの資産（archive、checksum、detached signature、公開鍵）を公開しました。検証は**ローカルのビルド成果物ではなく、ダウンロードし直した公開物**に対して再実行しています — checksum一致、`openssl pkeyutl -verify`成功、公開鍵のfingerprintがtrust registryと一致。さらに改ざん検出を3通り（archive改ざん、checksumファイル改ざん、別鍵での検証）試し、いずれも**終了コード非0**であることを確認しました。検証器はメッセージではなく終了コードで失敗を通知するため、メッセージだけを読む確認では改ざん物を通してしまいます。
 - **better-sqlite3 13.0.3（PR #179）**: 1.7.0で置いたpinを解除しました。当初のブロッカーは上流で解決済み — arm64 prebuildの要求が`GLIBC_2.38`から`GLIBC_2.34`へ下がり、aarch64のデプロイ先が提供する範囲に収まりました。**移行中に別のブロッカーが判明**しています: 13.xは`binding.gyp`を同梱しながら`install` scriptを持たず、npmは素の`binding.gyp`を暗黙の`node-gyp rebuild`として扱うため、prebuiltがあるのに毎回ソースビルドが走り、PythonとC++ツールチェーンの無いホストでは失敗します。上流は`"gypfile": false`の追加でこれをcloseしていますが、このフィールドはnpm 8以降が無視するため未解決のままです。install scriptの無効化で解消し、副次的に全依存のinstall時コード実行を止めました。`min-release-age=7`も追加し、Dependabotの7日cooldownをinstall時の解決にも適用しています。
 - **Node 26.7.0のテストharness修正（PR #181）**: 12個のルートテストは素の`Readable`をHTTPリクエストとしてExpressへ渡しています。Expressが`http.IncomingMessage.prototype`を継承させるため、Node 26.7.0で`_destroy`が「内部フィールドを持たないオブジェクト」からabort listenerを外そうとして落ち、1ファイルあたり約20件が巻き込まれました。CIの`node-version: 26`はその時点の最新を引くため、**こちら側の変更なしに発生**します。製品コードは本物の`http.Server`下で動くため影響を受けません。
-- **read-onlyの公開デモ（PR #182）**: `DEMO_READ_ONLY`という独立したフラグで書き込み保護を強制します。**書き込み系ルート53本はすべて`/api`配下**にあり、ミドルウェアのマウント位置と一致します。公開扱いの書き込みルートは許可リストの2本のみで、Socket.IOは受信イベントハンドラを登録していないためWebSocket経由の迂回もありません。ミドルウェアはfail-closedで、許可リストに完全一致しないものはすべて拒否します。
+- **read-onlyの公開デモ（PR #182・#184）**: `DEMO_READ_ONLY`という独立したフラグで書き込み保護を強制し、訪問者を固定の匿名`viewer`として認証するためログイン画面も公開すべき資格情報も存在しません。有効化には`DEMO_MODE`も必要です — デモモードこそが「これは本番ではない」ことの保証（`NODE_ENV=production`で起動拒否、DB分離、ルーター収集停止）だからです。**書き込み系ルート53本はすべて`/api`配下**にあり、ミドルウェアのマウント位置と一致します。公開扱いの書き込みルートは許可リストの2本のみで、Socket.IOは受信イベントハンドラを登録していないためWebSocket経由の迂回もありません。ミドルウェアはfail-closedで、許可リストに完全一致しないものはすべて拒否します。
 
 ### 残余リスク
 
@@ -54,7 +54,7 @@ CriticalまたはHighの不具合は見つかりませんでした。前回レ�
 - **低・保守性**: `public/js/ai-insights.js`（872行）と`src/history.js`（789行）が非poller最大のmoduleとして残りますが、今サイクルで成長していません。
 - **低・supply chain**: `npm audit`はbetter-sqlite3のamalgamation内のSQLite CVEを検出できません。盲点は手動検証手順と共に文書化済み。同梱SQLiteは3.53.4で、上流の最新リリースです。
 - **低・install面**: install scriptを無効化したため、installは**ホスト向けの同梱prebuiltバイナリが存在すること**に依存します。better-sqlite3はdarwin / linux / linuxmusl / win32のarm64・x64をカバーし、範囲外はツールチェーンと`--ignore-scripts=false`が必要です。`CONTRIBUTING.md`と日英の配布ガイドに記載済み。
-- **低・デモ公開面**: 公開デモのadmin tokenは設計上`fly.toml`にコミットされており、安全性は`DEMO_READ_ONLY`が設定されていることにのみ依存します。**このフラグを1つ外すと、公開済みtokenで誰でも書き込める公開インスタンスになります。**
+- **低・デモ公開面**: 公開デモは訪問者全員を匿名の`viewer`として認証するため、合成デモデータは誰でも読めます（デモの目的そのもの）。**資格情報は一切公開していません** — 匿名アクセスの有効化には`DEMO_MODE`と`DEMO_READ_ONLY`の両方が必要で、その組み合わせでは内部のadmin tokenを起動ごとにランダム化します。書き込みはviewer権限とread-onlyミドルウェアの二重で拒否されます。
 
 ---
 
