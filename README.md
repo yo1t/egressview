@@ -8,7 +8,7 @@ No new hardware. No inline traffic interception. Works via the NAT session table
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
-![Release](https://img.shields.io/badge/release-v1.7.0-3fb950)
+![Release](https://img.shields.io/badge/release-v1.8.0-3fb950)
 
 > 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/egressview/)
 
@@ -18,11 +18,11 @@ No new hardware. No inline traffic interception. Works via the NAT session table
 
 EgressView is production-oriented for home/SOHO networks using Yamaha RTX or Cisco IOS. ASUS AP support and optional data sources are maintained as companion integrations.
 
-### What's new in v1.7.0
+### What's new in v1.8.0
 
-Version 1.7.0 opens EgressView to the internet safely. Browser sessions now carry least-privilege roles (`viewer`, `operator`, `admin`) instead of every authenticated session holding full access, and the single permanent admin token is joined by scoped API identities with an expiry and independent revocation. The MCP server gained an OAuth 2.1 Resource Server mode with per-subject rate limits and its own append-only audit trail, so a remote AI assistant can be reached over the internet without sharing one static token. `EGRESSVIEW_OFFLINE_MODE` covers the opposite case: an air-gapped deployment where every internet-dependent feature is disabled before startup rather than attempted and timed out — the map assets are now self-hosted, so an ordinary page load makes no third-party request either.
+Version 1.8.0 completes the release-signing story and gets the runtime onto the current dependency line. Official distributions are now signed with an AWS KMS Ed25519 key whose private half cannot be exported, and verification still needs nothing but `openssl` and the published public key — no AWS account, no network. Threat detection and new-node detection each gained independent Slack and history switches, so a noisy detection can be quietened without silencing Slack for everything or losing the in-app record. `better-sqlite3` moves to 13.0.3 (SQLite 3.53.4), dependency install scripts are disabled so installs use bundled prebuilt binaries instead of compiling, and CI now runs on Node 22, 24, and 26.
 
-Existing databases migrate automatically to schema v12. Startup creates and verifies a complete backup first, and stops without changing the database if free-space, checkpoint, copy, or integrity verification fails. Existing OIDC sessions are revoked once so their role is derived from a newly verified allowlist match; local sessions keep administrator access.
+This release changes no database schema and needs no migration; upgrading from 1.7.0 is a restart. One install-time change is worth knowing about: because install scripts are now disabled, a platform without a bundled prebuilt binary for `better-sqlite3` needs Python and a C++ toolchain and `npm ci --ignore-scripts=false`. Prebuilds cover darwin, linux, linuxmusl, and win32 on arm64 and x64.
 
 ## For Home / SOHO Security
 

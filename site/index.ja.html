@@ -202,7 +202,7 @@
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       ソースコード
     </a>
-    <a class="btn release" href="https://github.com/yo1t/egressview/releases/tag/v1.7.0">v1.7.0 リリース</a>
+    <a class="btn release" href="https://github.com/yo1t/egressview/releases/tag/v1.8.0">v1.8.0 リリース</a>
     <a class="btn" href="https://github.com/yo1t/egressview/issues">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/><path fill-rule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z"/></svg>
       Issues
@@ -217,8 +217,8 @@
 <main>
 
   <section id="release">
-    <h2><span class="icon">◆</span> v1.7.0</h2>
-    <p style="font-size:0.95rem; color:var(--muted);">ブラウザsessionが最小権限のroleを持ち、無期限・全権の単一tokenをscoped API identityへ置き換えました。MCPサーバーはOAuth 2.1で公開でき、利用者別のrate limitと専用監査を備えます。逆に<code>EGRESSVIEW_OFFLINE_MODE</code>では、エアギャップ環境向けにインターネット依存機能を起動前に無効化します。</p>
+    <h2><span class="icon">◆</span> v1.8.0</h2>
+    <p style="font-size:0.95rem; color:var(--muted);">v1.8.0では、リリース署名を完成させ、依存を現行ラインへ移しました。公式配布物はAWS KMSのEd25519鍵で署名されます。秘密鍵はexport不可である一方、検証側は<code>openssl</code>と公開済みの公開鍵だけで完結し、AWSアカウントもネットワークも要りません。脅威検出と新規ノード検出には、Slackと履歴それぞれ独立したスイッチを追加しました。うるさい検出だけを静かにでき、Slack全体を止めたり、アプリ内の記録まで失ったりする必要がなくなります。<code>better-sqlite3</code>は13.0.3（SQLite 3.53.4）へ移行し、依存のinstall scriptを無効化してソースビルドではなく同梱prebuiltバイナリを使うようにしました。CIはNode 22 / 24 / 26で実行します。</p>
   </section>
 
   <!-- 家庭・SOHOセキュリティ -->
