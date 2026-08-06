@@ -79,6 +79,7 @@ const CONFIG_FILE       = process.env.EGRESSVIEW_CONFIG_PATH
 // Demo mode: pre-seeds sample data and uses a fixed token so the app can be
 // explored without real router hardware (used in CI for Playwright smoke tests).
 const DEMO_MODE       = process.env.DEMO_MODE === 'true';
+const DEMO_READ_ONLY  = process.env.DEMO_READ_ONLY === 'true';
 const DEMO_ADMIN_TOKEN = process.env.DEMO_ADMIN_TOKEN || 'demo-token-ci';
 const DEMO_DB_PATH         = path.join(__dirname, '.egressview.demo.db');
 const DEMO_RUNTIME_DIR     = path.join(__dirname, '.egressview-demo-runtime');
@@ -396,6 +397,7 @@ configureHttpApp(app, {
   subpath: SUBPATH,
   assetVersion: ASSET_VERSION,
   demoMode: DEMO_MODE,
+  demoReadOnly: DEMO_READ_ONLY,
   appRoot: __dirname,
   htmlEscape,
   tlsEnabled: Boolean(tlsOptions),

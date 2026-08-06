@@ -1,0 +1,46 @@
+# EgressView Demo — lightweight read-only deployment image.
+#
+# This image runs EgressView in DEMO_MODE with synthetic data and
+# write-protected API routes. No real router credentials are needed.
+#
+# Build:  docker build -f Dockerfile.demo -t egressview-demo .
+# Run:    docker run -p 3000:3000 egressview-demo
+
+FROM node:22-bookworm-slim
+
+# Security: run as non-root
+RUN groupadd --system egressview && \
+    useradd --system --gid egressview --create-home egressview
+
+WORKDIR /app
+
+# Install production dependencies only
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+# Copy application source and the demo database snapshot
+COPY server.js mcp-server.js ./
+COPY src/ ./src/
+COPY public/ ./public/
+COPY scripts/demo-seed.js ./scripts/demo-seed.js
+COPY .egressview.demo.db ./
+COPY .env.example ./
+
+# Demo environment
+ENV DEMO_MODE=true \
+    NODE_ENV=demo \
+    PORT=3000 \
+    DEMO_ADMIN_TOKEN=demo-public-readonly
+
+# The demo runtime directory needs to be writable for the DB copy
+RUN mkdir -p .egressview-demo-runtime && \
+    chown -R egressview:egressview /app
+
+USER egressview
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD node -e "fetch('http://localhost:3000/healthz').then(r=>{process.exit(r.ok?0:1)}).catch(()=>process.exit(1))"
+
+CMD ["node", "server.js"]
