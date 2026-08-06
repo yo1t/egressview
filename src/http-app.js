@@ -25,6 +25,7 @@ const { createSlowRequestLogger } = require('./slow-request-log');
 const { createRequestContextMiddleware } = require('./request-context');
 const { createTrustProxy } = require('./proxy-trust');
 const { createGlobalRateLimit } = require('./global-rate-limit');
+const { createDemoReadOnly } = require('./demo-read-only');
 const i18nCatalog = require('./data/i18n.json');
 
 function serializeI18nModule(catalog) {
@@ -92,6 +93,7 @@ function configureHttpApp(app, {
   subpath,
   assetVersion,
   demoMode,
+  demoReadOnly,
   appRoot,
   htmlEscape,
   tlsEnabled,
@@ -120,6 +122,7 @@ function configureHttpApp(app, {
   app.use(compression());
   app.use('/api', express.json({ limit: '64kb' }));
   app.use('/api', enforceApiPermissions);
+  if (demoReadOnly) app.use('/api', createDemoReadOnly());
 
   const indexRoutes = ['/', '/index.html'];
   if (subpath) indexRoutes.push(`${subpath}/`, `${subpath}/index.html`);

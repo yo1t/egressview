@@ -9,6 +9,7 @@
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
 ![Release](https://img.shields.io/badge/release-v1.8.0-3fb950)
+[![Live Demo](https://img.shields.io/badge/demo-live-ff69b4)](https://egressview-demo.fly.dev)
 
 > 🇬🇧 [English README](README.md) | 🌐 [プロジェクトページ](https://yo1t.github.io/egressview/index.ja.html)
 
