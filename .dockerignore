@@ -1,5 +1,6 @@
 .git
 .github
+.ash
 .env
 .env.*
 !.env.example
@@ -21,3 +22,19 @@ test-results
 coverage
 certs
 dist
+test
+docs
+site
+infra
+release-signing
+fly.toml
+Dockerfile.demo
+CHANGELOG.md
+CONTRIBUTING.md
+CLA.md
+ROADMAP.md
+ROADMAP.ja.md
+eslint.config.js
+playwright.config.js
+.npmignore
+.gitattributes
