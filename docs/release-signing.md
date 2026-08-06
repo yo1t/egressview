@@ -56,14 +56,22 @@ Add the public key and an active record to
 key ID, the complete `SHA256:<64 lowercase hex>` fingerprint, creation date, and
 public-key path. Publish the same full fingerprint in all of these locations:
 
-- `SECURITY.md` and the signed-distribution guide;
-- the GitHub release notes that first use the key;
-- the project website;
-- at least one independently controlled channel, such as the maintainer's
-  established Qiita/Zenn account or a DNS TXT record.
+- **In the repository** — `SECURITY.md`, the signed-distribution guide, the
+  project website, and the GitHub release notes that first use the key. These
+  are one control domain, not four: all of them are built from this repository
+  and a single account compromise rewrites them together.
+- **Outside the repository** — at least one channel under separate credentials.
+  This is the part that carries the trust, and it is currently a DNS TXT record
+  at `_egressview-release.egressview.com`, served from a different provider:
 
-The `.pub.pem` file shipped beside a release is not a trust anchor by itself.
-Users must compare it with the pinned fingerprint from another channel.
+  ```console
+  $ dig +short TXT _egressview-release.egressview.com
+  "egressview-release-key=egressview-release-2026; fp=SHA256:6288...eccc; created=2026-08-05"
+  ```
+
+The `.pub.pem` file shipped beside a release is not a trust anchor by itself,
+and neither is the repository. Users must compare it with a fingerprint obtained
+from a channel that a compromise of this repository would not reach.
 
 ## Sign and release
 
