@@ -31,9 +31,15 @@ function createAuthMiddleware({
   authAudit,
   apiIdentities = null,
   resolvePermissions = defaultResolvePermissions,
+  // Shared anonymous viewer for the public read-only demo; null everywhere
+  // else. See src/demo-visitor.js for why this exists and what gates it.
+  demoVisitor = null,
 }) {
   function authenticate(provided) {
-    if (!provided) return null;
+    // The demo has no credential to hand out, so an anonymous caller is the
+    // expected case there. Real credentials are still checked first, so an
+    // admin token or session keeps its own identity and permissions.
+    if (!provided) return demoVisitor;
     const session = sessions.verifySession(provided);
     if (session) return session;
     if (appState.adminToken) {
@@ -66,6 +72,7 @@ function createAuthMiddleware({
       // stops an API credential from being replayed as a browser session.
       if (auth && auth !== 'admin' && !isApiIdentity(auth)) return { auth, source: 'cookie' };
     }
+    if (demoVisitor) return { auth: demoVisitor, source: 'demo' };
     return null;
   }
 

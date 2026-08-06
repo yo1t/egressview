@@ -64,6 +64,7 @@ const { registerSocketHandlers } = require('./src/socket-handlers');
 const { migrateRouterConfigFile, loadRouterConfig, publicRouter } = require('./src/router-config');
 const { createRouterManager } = require('./src/router-manager');
 const { createAuthMiddleware } = require('./src/auth-middleware');
+const { demoVisitorFor } = require('./src/demo-visitor');
 const oidc = createGoogleOidc();
 
 // ─── Environment ──────────────────────────────────────────────────────────────
@@ -314,12 +315,17 @@ function exposeInitialCredential(label, value, suffix) {
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
+// Anonymous viewer for the public read-only demo; null in every other
+// deployment. Requires both demo flags -- see src/demo-visitor.js.
+const demoVisitor = demoVisitorFor({ demoMode: DEMO_MODE, demoReadOnly: DEMO_READ_ONLY });
+
 const authBoundary = createAuthMiddleware({
   appState,
   sessions,
   authCookies,
   authAudit,
   apiIdentities,
+  demoVisitor,
 });
 const {
   authenticate,
@@ -391,6 +397,7 @@ const routeCtx = {
   manualThreat:       manualThreatLookup,
   aiProvider,
   aiNotificationService,
+  demoVisitor,
 };
 
 configureHttpApp(app, {
@@ -598,9 +605,20 @@ server.listen(PORT, HOST, () => {
     // If .egressview.demo.db exists (committed to git), start from that snapshot.
     // Otherwise fall back to a fresh in-memory-style DB at the demo path.
     if (!configuredBackupDir) backup.configure({ backupDir: DEMO_BACKUP_DIR });
-    // Override token with a known value so CI / contributors can authenticate
-    appState.adminToken = DEMO_ADMIN_TOKEN;
-    logger.info(`[demo] DEMO_MODE active — admin token: ${DEMO_ADMIN_TOKEN}`);
+    if (DEMO_READ_ONLY) {
+      // The public demo authenticates every visitor as an anonymous viewer, so
+      // nobody needs the token -- and publishing one would hand out an `admin`
+      // credential. Write protection would still hold, but admin *reads* would
+      // not: the audit trail, security configuration and API identities are all
+      // readable at that role. An unguessable value keeps the "auth
+      // initialised" invariant without granting anything.
+      appState.adminToken = crypto.randomBytes(32).toString('hex');
+      logger.info('[demo] DEMO_READ_ONLY active — visitors authenticate as an anonymous viewer; no admin token is published');
+    } else {
+      // Override token with a known value so CI / contributors can authenticate
+      appState.adminToken = DEMO_ADMIN_TOKEN;
+      logger.info(`[demo] DEMO_MODE active — admin token: ${DEMO_ADMIN_TOKEN}`);
+    }
   } else {
     ensureAdminToken();
   }
