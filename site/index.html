@@ -495,7 +495,8 @@ npm start</code></pre>
   <!-- Release signing -->
   <section id="signing">
     <h2><span class="icon">🔑</span> Release Signing</h2>
-    <p style="font-size:0.95rem; color:var(--muted);">Portable releases carry an Ed25519 signature over the archive checksum. The public key shipped beside an archive is <strong>not</strong> a trust anchor on its own &mdash; compare its fingerprint with the value published here and in <a href="https://github.com/yo1t/egressview/blob/main/SECURITY.md">SECURITY.md</a>. Agreement across independent channels is what makes it one.</p>
+    <p style="font-size:0.95rem; color:var(--muted);">Portable releases carry an Ed25519 signature over the archive checksum. The public key shipped beside an archive is <strong>not</strong> a trust anchor on its own &mdash; compare its fingerprint with the DNS record below. This page and <a href="https://github.com/yo1t/egressview/blob/main/SECURITY.md">SECURITY.md</a> are both built from the repository, so they would change together with it; the DNS record is served under separate credentials, which is what makes the comparison mean anything.</p>
+    <pre style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.78rem; overflow-x:auto; margin-top:12px;"><code>$ dig +short TXT _egressview-release.egressview.com</code></pre>
     <div class="card">
       <h3>Active signing key</h3>
       <p style="font-size:0.85rem; color:var(--muted);">key id <code>egressview-release-2026</code> &middot; Ed25519</p>

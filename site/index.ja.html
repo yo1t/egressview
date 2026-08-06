@@ -495,7 +495,8 @@ npm start</code></pre>
   <!-- Release signing -->
   <section id="signing">
     <h2><span class="icon">🔑</span> リリース署名</h2>
-    <p style="font-size:0.95rem; color:var(--muted);">portable releaseにはarchiveのchecksumに対するEd25519署名が付きます。archiveに同梱される公開鍵<strong>だけ</strong>では信頼の起点になりません。ここと<a href="https://github.com/yo1t/egressview/blob/main/SECURITY.md">SECURITY.md</a>で公開している値とfingerprintを比較してください。<strong>独立したチャネルで一致すること</strong>が信頼の根拠です。</p>
+    <p style="font-size:0.95rem; color:var(--muted);">portable releaseにはarchiveのchecksumに対するEd25519署名が付きます。archiveに同梱される公開鍵<strong>だけ</strong>では信頼の起点になりません。下記のDNSレコードとfingerprintを比較してください。このページと<a href="https://github.com/yo1t/egressview/blob/main/SECURITY.md">SECURITY.md</a>はどちらもリポジトリから生成されるため、リポジトリが書き換われば一緒に変わります。<strong>別の認証情報で配信されるDNSレコードと一致すること</strong>が、比較に意味を持たせます。</p>
+    <pre style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.78rem; overflow-x:auto; margin-top:12px;"><code>$ dig +short TXT _egressview-release.egressview.com</code></pre>
     <div class="card">
       <h3>現在有効な署名鍵</h3>
       <p style="font-size:0.85rem; color:var(--muted);">key id <code>egressview-release-2026</code> &middot; Ed25519</p>

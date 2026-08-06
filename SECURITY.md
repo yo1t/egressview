@@ -42,6 +42,20 @@ algorithm    Ed25519
 fingerprint  SHA256:6288265bd746d230a3637e3a520e2335f48dc939a4d76d7b05c44ea5baf3eccc
 ```
 
+Cross-check that value against DNS, which is the one place holding it that is
+not this repository:
+
+```console
+$ dig +short TXT _egressview-release.egressview.com
+"egressview-release-key=egressview-release-2026; fp=SHA256:6288265bd746d230a3637e3a520e2335f48dc939a4d76d7b05c44ea5baf3eccc; created=2026-08-05"
+```
+
+This matters more than the number of places the fingerprint appears. It is also
+in `release-signing/trusted-fingerprints.json` and on the project website, but
+those are built from this repository and would change together with it. The DNS
+record is served from a separate provider under separate credentials, so anyone
+who rewrote this file could not silently rewrite that too.
+
 Compare the **complete** fingerprint, never a prefix or suffix. The private half
 is held in AWS KMS and cannot be exported; signing is restricted to a dedicated
 release principal by key policy. Verifying a release needs no AWS access — only
