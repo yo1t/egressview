@@ -93,6 +93,7 @@ function configureHttpApp(app, {
   subpath,
   assetVersion,
   demoMode,
+  demoReadOnly,
   appRoot,
   htmlEscape,
   tlsEnabled,
@@ -121,7 +122,7 @@ function configureHttpApp(app, {
   app.use(compression());
   app.use('/api', express.json({ limit: '64kb' }));
   app.use('/api', enforceApiPermissions);
-  if (demoMode) app.use('/api', createDemoReadOnly());
+  if (demoReadOnly) app.use('/api', createDemoReadOnly());
 
   const indexRoutes = ['/', '/index.html'];
   if (subpath) indexRoutes.push(`${subpath}/`, `${subpath}/index.html`);

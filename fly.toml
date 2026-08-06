@@ -22,6 +22,9 @@ primary_region = "nrt"
 
 [env]
   DEMO_MODE = "true"
+  # Enforce read-only write protection for the public demo (separate from
+  # DEMO_MODE, which only seeds data and disables routers).
+  DEMO_READ_ONLY = "true"
   NODE_ENV = "demo"
   PORT = "3000"
   # The demo token is public — this instance is read-only
