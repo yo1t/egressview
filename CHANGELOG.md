@@ -4,6 +4,31 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-08-06
+
+### Added
+
+- Added independent Slack and history switches for threat detection and new
+  node detection. Both were previously raised unconditionally: the Slack send
+  was gated only by the global Slack toggle and the history callback sat
+  outside that gate entirely, so silencing new-node notifications meant turning
+  Slack off for everything and the in-app history could not be silenced at all.
+  Slack and history are separate on purpose — a new device appearing on the
+  network is worth recording even when no direct message is wanted. Settings
+  are persisted under a new `detectionNotifications` config section.
+- Added AWS KMS signing to the offline distribution build
+  (`--kms-key-id`, `--region`). The release key is an asymmetric KMS key
+  (`ECC_NIST_EDWARDS25519`) whose private half cannot be exported, and signing
+  is restricted to a dedicated release principal by key policy. The verifier is
+  unchanged: a raw Ed25519 signature over the checksum file, verifiable with
+  only `openssl` and the published public key, with no AWS account and no
+  network access. The active key's fingerprint is published in `SECURITY.md`,
+  both project site pages, both distribution guides, and a DNS TXT record.
+- Added a dependency-free seeded fuzzing suite over the 19 functions that parse
+  router CLI output, syslog lines, and conntrack tables. Each run prints its
+  seed so a failure can be reproduced with `FUZZ_SEED=<value>`.
+- Added Node 26 to the CI test matrix, alongside 22 and 24.
+
 ### Changed
 
 - Upgraded `better-sqlite3` from 12.11.1 to 13.0.3, lifting the pin placed in
@@ -21,6 +46,25 @@ All notable changes to EgressView are documented here.
   bundled prebuild for the host platform: darwin, linux, linuxmusl, and win32
   on arm64 and x64. `ssh2` and `fsevents` lose optional native builds and fall
   back to pure JavaScript.
+- Set `min-release-age=7` so a version published less than seven days ago is
+  not resolved, matching the existing Dependabot cooldown at install time.
+  `npm ci` against a committed lockfile is unaffected.
+- Split the MCP surface into focused modules: tool definitions, HTTP
+  middleware, and publication constants and evidence now live separately from
+  the server and the publication gate.
+- Raised the coverage gate to 83% lines, 79% branches, and 80% functions to
+  match what the suite actually covers.
+
+### Fixed
+
+- Fixed the MCP audit store never pruning on a schedule. Retention was applied
+  only at startup, so a long-running process kept audit rows past their
+  retention window indefinitely.
+- Pinned patched `hono` (ReDoS) and `socket.io-parser` (memory exhaustion)
+  through `overrides`, since no parent package version carried the fixes.
+- Stopped rate-limit tests straddling a fixed-window boundary. The limiter
+  keys on wall-clock minutes, so two calls either side of a minute edge landed
+  in different windows and failed intermittently in CI.
 
 ## [1.7.0] - 2026-08-02
 
