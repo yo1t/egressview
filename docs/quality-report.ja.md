@@ -43,6 +43,7 @@ CriticalまたはHighの不具合は見つかりませんでした。前回レ�
 ### 主な改善点
 
 - **初の署名付きリリース（v1.8.0）**: 登録済みKMS鍵でビルド・署名し、4つの資産（archive、checksum、detached signature、公開鍵）を公開しました。検証は**ローカルのビルド成果物ではなく、ダウンロードし直した公開物**に対して再実行しています — checksum一致、`openssl pkeyutl -verify`成功、公開鍵のfingerprintがtrust registryと一致。さらに改ざん検出を3通り（archive改ざん、checksumファイル改ざん、別鍵での検証）試し、いずれも**終了コード非0**であることを確認しました。検証器はメッセージではなく終了コードで失敗を通知するため、メッセージだけを読む確認では改ざん物を通してしまいます。
+- **信頼起点の記述を正確化（本サイクル）**: fingerprintは`SECURITY.md`、`trusted-fingerprints.json`、project website、DNS TXTレコードにあります。従来の記述はこれを「4つの独立チャネル」と呼んでいましたが、**うち3つはこのリポジトリから生成される**ため、アカウントを1つ奪われれば同時に書き換わります。文書は、信頼を担う比較対象がDNSレコード（`_egressview-release.egressview.com`、別の認証情報で配信）であることを明示し、取得する`dig`コマンドを併記する形へ改めました。**同一ソースの写しを2つ突き合わせるよう案内することは、何も案内しないより悪い**（検証したつもりになるため）という判断です。
 - **better-sqlite3 13.0.3（PR #179）**: 1.7.0で置いたpinを解除しました。当初のブロッカーは上流で解決済み — arm64 prebuildの要求が`GLIBC_2.38`から`GLIBC_2.34`へ下がり、aarch64のデプロイ先が提供する範囲に収まりました。**移行中に別のブロッカーが判明**しています: 13.xは`binding.gyp`を同梱しながら`install` scriptを持たず、npmは素の`binding.gyp`を暗黙の`node-gyp rebuild`として扱うため、prebuiltがあるのに毎回ソースビルドが走り、PythonとC++ツールチェーンの無いホストでは失敗します。上流は`"gypfile": false`の追加でこれをcloseしていますが、このフィールドはnpm 8以降が無視するため未解決のままです。install scriptの無効化で解消し、副次的に全依存のinstall時コード実行を止めました。`min-release-age=7`も追加し、Dependabotの7日cooldownをinstall時の解決にも適用しています。
 - **Node 26.7.0のテストharness修正（PR #181）**: 12個のルートテストは素の`Readable`をHTTPリクエストとしてExpressへ渡しています。Expressが`http.IncomingMessage.prototype`を継承させるため、Node 26.7.0で`_destroy`が「内部フィールドを持たないオブジェクト」からabort listenerを外そうとして落ち、1ファイルあたり約20件が巻き込まれました。CIの`node-version: 26`はその時点の最新を引くため、**こちら側の変更なしに発生**します。製品コードは本物の`http.Server`下で動くため影響を受けません。
 - **read-onlyの公開デモ（PR #182・#184）**: `DEMO_READ_ONLY`という独立したフラグで書き込み保護を強制し、訪問者を固定の匿名`viewer`として認証するためログイン画面も公開すべき資格情報も存在しません。有効化には`DEMO_MODE`も必要です — デモモードこそが「これは本番ではない」ことの保証（`NODE_ENV=production`で起動拒否、DB分離、ルーター収集停止）だからです。**書き込み系ルート53本はすべて`/api`配下**にあり、ミドルウェアのマウント位置と一致します。公開扱いの書き込みルートは許可リストの2本のみで、Socket.IOは受信イベントハンドラを登録していないためWebSocket経由の迂回もありません。ミドルウェアはfail-closedで、許可リストに完全一致しないものはすべて拒否します。
@@ -189,7 +190,7 @@ CriticalまたはHighの不具合は見つかりませんでした。前回レ�
 - 認証ロジックは専用moduleに分離し、single-responsibilityを遵守しています。
 - 信頼できないデバイスからのparser入力をfuzzし、shape・time-budget assertionで検証しています。
 - SSRF保護がoperator設定のoutbound endpointをlink-local、metadata、multicast、broadcastから遮断します。
-- リリース整合性はKMS管理鍵と登録済みtrust registry・multi-channelフィンガープリント公開で保証します。
+- リリース整合性はKMS管理鍵と登録済みtrust registryで保証し、fingerprintは**リポジトリ外**（別の認証情報で配信されるDNS TXTレコード）にアンカーされています。
 - Native依存のaudit盲点を手動検証手順と共に文書化しています。
 
 Default hardware integration CI、正式process manager/OCI成果物、OpenAPIがないため満点とはしません。

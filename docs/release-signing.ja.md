@@ -52,13 +52,21 @@ fingerprintの算出は独立してもう一度実行し、**全桁**を比較�
 追加します。key ID、完全な`SHA256:<64文字の小文字hex>` fingerprint、生成日、公開鍵
 pathを記録します。同じ完全なfingerprintを次の全経路で公開します。
 
-- `SECURITY.md`と署名付きdistribution guide
-- その鍵を初めて使うGitHub Release note
-- project website
-- maintainerの既存Qiita/Zenn accountまたはDNS TXT record等、独立管理する経路を1つ以上
+- **リポジトリ内** — `SECURITY.md`、署名付きdistribution guide、project website、
+  その鍵を初めて使うGitHub Release note。**これらは4つの経路ではなく1つの管理ドメイン**
+  です。いずれもこのリポジトリから生成されるため、アカウントを1つ奪われれば同時に
+  書き換わります。
+- **リポジトリ外** — 別の認証情報で管理する経路を1つ以上。**信頼を担っているのはここ**
+  で、現在は別プロバイダが配信するDNS TXTレコード
+  `_egressview-release.egressview.com`です。
 
-Releaseに同梱した`.pub.pem`だけでは信頼起点になりません。利用者は別経路で固定した
-fingerprintと照合します。
+  ```console
+  $ dig +short TXT _egressview-release.egressview.com
+  "egressview-release-key=egressview-release-2026; fp=SHA256:6288...eccc; created=2026-08-05"
+  ```
+
+Releaseに同梱した`.pub.pem`だけでは信頼起点になりません。**リポジトリも同様です。**
+利用者は、このリポジトリの侵害が及ばない経路から取得したfingerprintと照合します。
 
 ## 署名・公開
 
