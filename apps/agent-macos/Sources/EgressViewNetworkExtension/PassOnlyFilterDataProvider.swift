@@ -35,6 +35,6 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
     }
 
     open func didObserve(_ observation: ConnectionObservation) {
-        // A later phase will connect this boundary to local storage or opt-in Hub delivery.
+        // The host extension overrides this boundary to persist metadata locally.
     }
 }
