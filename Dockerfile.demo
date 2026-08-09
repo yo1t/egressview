@@ -37,6 +37,7 @@ COPY .env.example ./
 # authenticates visitors as an anonymous viewer and randomises its internal
 # token, so a published one would only add an `admin` credential nobody needs.
 ENV DEMO_MODE=true \
+    DEMO_READ_ONLY=true \
     NODE_ENV=demo \
     PORT=3000
 

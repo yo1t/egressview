@@ -379,7 +379,7 @@ The ASUS device is used as a **WiFi access point (AP mode or AiMesh)**, not as a
 ### Security
 
 - Admin token authentication (timing-safe comparison)
-- SSRF protection (private IP ranges only)
+- SSRF protection with DNS-result validation and connection pinning
 - Socket.IO same-origin enforcement
 - SSH host key fingerprint verification (TOFU)
 - Config files stored with `0600` permissions

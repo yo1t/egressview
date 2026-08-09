@@ -189,7 +189,7 @@ CriticalまたはHighの不具合は見つかりませんでした。前回レ�
 - ESLint、V8 coverage、Node 22/24/26、Playwright、parser fuzz、ASH、secret scan、dependency auditをPR gateにしています。
 - 認証ロジックは専用moduleに分離し、single-responsibilityを遵守しています。
 - 信頼できないデバイスからのparser入力をfuzzし、shape・time-budget assertionで検証しています。
-- SSRF保護がoperator設定のoutbound endpointをlink-local、metadata、multicast、broadcastから遮断します。
+- SSRF保護はoperator設定のoutbound endpointを名前解決し、link-local、metadata、multicast、broadcastの候補をすべて拒否したうえで、検査済みIPへ接続を固定してDNS rebindingを防ぎます。
 - リリース整合性はKMS管理鍵と登録済みtrust registryで保証し、fingerprintは**リポジトリ外**（別の認証情報で配信されるDNS TXTレコード）にアンカーされています。
 - Native依存のaudit盲点を手動検証手順と共に文書化しています。
 

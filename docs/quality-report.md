@@ -189,7 +189,7 @@ Values in parentheses are the previous report's figures where they changed. The 
 - ESLint, V8 coverage, Node 22/24/26, Playwright, parser fuzz, ASH, secret scanning, and dependency audit run as PR gates.
 - Authentication logic is separated into dedicated modules following single-responsibility.
 - Parser inputs from untrusted devices are fuzzed with shape and time-budget assertions.
-- SSRF protection covers operator-configured outbound endpoints against link-local, metadata, multicast, and broadcast addresses.
+- SSRF protection resolves operator-configured outbound endpoint hostnames, rejects any link-local, metadata, multicast, or broadcast result, and pins the checked address for the connection to prevent DNS rebinding.
 - Release integrity uses KMS-managed keys with an enrolled trust registry, and the fingerprint is anchored outside the repository in a DNS TXT record served under separate credentials. v1.8.0 was verified from its published assets rather than the local build.
 - Dependency install scripts are disabled, so no dependency runs code during installation and native modules come from bundled prebuilt binaries.
 - Native dependency audit blind spots are documented with manual verification steps.
