@@ -24,3 +24,29 @@ Activating the full monitoring path requires a Developer ID certificate,
 Network Extension entitlement, an Xcode app/System Extension host, and explicit
 macOS user approval. Do not bypass System Integrity Protection or other macOS
 security controls for development.
+
+## Host app
+
+Open `EgressViewAgent.xcodeproj` in Xcode. The shared `EgressView Agent` scheme
+builds a menu-bar host app and embeds `EgressViewFilter.systemextension` under
+`Contents/Library/SystemExtensions`.
+
+The app starts paused. Choosing Lightweight monitoring first disables the
+Content Filter and waits for that operation to finish before polling sockets.
+Choosing Full monitoring stops lightweight polling before requesting System
+Extension activation. A rejected or incomplete approval never silently falls
+back to lightweight monitoring.
+
+An unsigned compile can verify the project structure:
+
+```sh
+xcodebuild \
+  -project EgressViewAgent.xcodeproj \
+  -scheme 'EgressView Agent' \
+  -destination 'platform=macOS' \
+  CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES build
+```
+
+Unsigned builds cannot activate the System Extension. Before real activation,
+configure a Developer ID team and obtain Apple's Network Extension entitlement
+for both bundle identifiers documented in the Xcode project.

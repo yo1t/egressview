@@ -1,6 +1,7 @@
 #include "CLibProcBridge.h"
 
 #include <arpa/inet.h>
+#include <bsm/libbsm.h>
 #include <errno.h>
 #include <libproc.h>
 #include <stdio.h>
@@ -157,4 +158,21 @@ int32_t egv_list_internet_sockets(EGVSocketRecord *records, int32_t capacity) {
     }
     free(pids);
     return count;
+}
+
+int32_t egv_process_name(int32_t process_id, char *output, int32_t capacity) {
+    if (output == NULL || capacity <= 0 || process_id <= 0) {
+        return 0;
+    }
+    memset(output, 0, (size_t)capacity);
+    return proc_name(process_id, output, (uint32_t)capacity);
+}
+
+int32_t egv_audit_token_pid(const uint8_t *bytes, size_t length) {
+    if (bytes == NULL || length < sizeof(audit_token_t)) {
+        return 0;
+    }
+    audit_token_t token;
+    memcpy(&token, bytes, sizeof(token));
+    return audit_token_to_pid(token);
 }

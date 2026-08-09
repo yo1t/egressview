@@ -1,0 +1,37 @@
+name: macOS agent
+
+on:
+  pull_request:
+    paths:
+      - "apps/agent-macos/**"
+      - ".github/workflows/macos-agent.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/agent-macos/**"
+      - ".github/workflows/macos-agent.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test Swift package
+        working-directory: apps/agent-macos
+        run: swift test
+      - name: Build host app and System Extension without signing
+        working-directory: apps/agent-macos
+        run: >-
+          xcodebuild
+          -project EgressViewAgent.xcodeproj
+          -scheme 'EgressView Agent'
+          -configuration Debug
+          -destination 'platform=macOS'
+          -derivedDataPath "$RUNNER_TEMP/egressview-agent-derived"
+          CODE_SIGNING_ALLOWED=NO
+          ONLY_ACTIVE_ARCH=YES
+          build

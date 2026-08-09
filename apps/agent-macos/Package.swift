@@ -13,7 +13,8 @@ let package = Package(
     targets: [
         .target(
             name: "CLibProcBridge",
-            publicHeadersPath: "include"
+            publicHeadersPath: "include",
+            linkerSettings: [.linkedLibrary("bsm")]
         ),
         .target(
             name: "EgressViewAgentCore",
@@ -21,7 +22,7 @@ let package = Package(
         ),
         .target(
             name: "EgressViewNetworkExtension",
-            dependencies: ["EgressViewAgentCore"]
+            dependencies: ["EgressViewAgentCore", "CLibProcBridge"]
         ),
         .executableTarget(
             name: "EgressViewAgentSpike",
