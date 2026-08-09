@@ -3,7 +3,11 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isBlockedOutboundIpLiteral } = require('../../src/ssrf-guard');
+const {
+  createPinnedEndpointFetch,
+  isBlockedOutboundIpLiteral,
+  resolveSafeAddresses,
+} = require('../../src/ssrf-guard');
 
 describe('isBlockedOutboundIpLiteral', () => {
   it('blocks link-local, metadata, unspecified, broadcast, and multicast IPv4', () => {
@@ -61,6 +65,77 @@ describe('isBlockedOutboundIpLiteral', () => {
   it('does not treat hostnames or empty input as blocked literals', () => {
     for (const value of ['ollama.internal', 'example.com', '', null, undefined, 'not-an-ip']) {
       assert.equal(isBlockedOutboundIpLiteral(value), false, String(value));
+    }
+  });
+});
+
+describe('resolved outbound endpoint protection', () => {
+  it('rejects a hostname when any DNS answer is a blocked address', async () => {
+    const lookup = async () => [
+      { address: '192.168.1.20', family: 4 },
+      { address: '169.254.169.254', family: 4 },
+    ];
+    await assert.rejects(
+      resolveSafeAddresses('ollama.internal', lookup),
+      error => error.code === 'ERR_BLOCKED_OUTBOUND_ADDRESS'
+    );
+  });
+
+  it('returns every vetted address for connection pinning', async () => {
+    const lookup = async () => [
+      { address: '192.168.1.20', family: 4 },
+      { address: 'fd00::20', family: 6 },
+    ];
+    assert.deepEqual(await resolveSafeAddresses('ollama.internal', lookup), [
+      { address: '192.168.1.20', family: 4 },
+      { address: 'fd00::20', family: 6 },
+    ]);
+  });
+
+  it('keeps DNS resolution inside the caller timeout', async () => {
+    const controller = new AbortController();
+    const lookup = () => new Promise(() => {});
+    const pending = resolveSafeAddresses('ollama.internal', lookup, controller.signal);
+    controller.abort(new DOMException('timed out', 'TimeoutError'));
+    await assert.rejects(pending, error => error.name === 'TimeoutError');
+  });
+
+  it('connects to the vetted address while preserving the original Host header', async () => {
+    let receivedHost = '';
+    const server = require('node:http').createServer((req, res) => {
+      receivedHost = req.headers.host;
+      res.setHeader('Content-Type', 'application/json');
+      res.end('{"models":[]}');
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address();
+      const lookup = async () => [{ address: '127.0.0.1', family: 4 }];
+      const fetchEndpoint = createPinnedEndpointFetch({ lookup });
+      const response = await fetchEndpoint(`http://ollama.internal:${port}/api/tags`);
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { models: [] });
+      assert.equal(receivedHost, `ollama.internal:${port}`);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
+
+  it('refuses a redirect instead of following it to another address', async () => {
+    const server = require('node:http').createServer((_req, res) => {
+      res.writeHead(302, { Location: 'http://169.254.169.254/latest/meta-data/' });
+      res.end();
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address();
+      const fetchEndpoint = createPinnedEndpointFetch();
+      await assert.rejects(
+        fetchEndpoint(`http://127.0.0.1:${port}`, { redirect: 'error' }),
+        /redirect was refused/
+      );
+    } finally {
+      await new Promise(resolve => server.close(resolve));
     }
   });
 });

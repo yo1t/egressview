@@ -43,6 +43,20 @@ describe('AI provider configuration', () => {
 });
 
 describe('AI provider model discovery', () => {
+  it('routes Ollama through the pinned endpoint transport', async () => {
+    let pinnedCalls = 0;
+    const provider = createAiProvider({
+      fetchImpl: async () => { throw new Error('generic fetch must not handle Ollama'); },
+      endpointFetchImpl: async () => {
+        pinnedCalls++;
+        return jsonResponse({ models: [{ name: 'qwen3:8b' }] });
+      },
+    });
+    provider.configure({ provider: 'ollama', ollamaEndpoint: 'http://ollama.internal:11434' });
+    assert.deepEqual((await provider.listModels()).models, ['qwen3:8b']);
+    assert.equal(pinnedCalls, 1);
+  });
+
   it('filters specialized OpenAI models while preserving future text models', async () => {
     const provider = createAiProvider({ fetchImpl: async () => jsonResponse({ data: [
       { id: 'gpt-5.6-terra' }, { id: 'future-text-model' }, { id: 'gpt-image-2' },
