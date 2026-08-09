@@ -43,11 +43,23 @@ final class AgentMonitoringController {
     static let systemExtensionIdentifier = "com.egressview.agent.filter"
 
     private let statusHandler: (AgentMonitoringStatus) -> Void
+    private let journal: ObservationJournal?
+    private let observationHandler: ([ConnectionObservation]) -> Void
+    private let storageErrorHandler: (Error) -> Void
     private let extensionController: SystemExtensionController
     private var lightweightCollector: LightweightCollector?
+    private var persistenceSampler = ObservationPersistenceSampler()
 
-    init(statusHandler: @escaping (AgentMonitoringStatus) -> Void) {
+    init(
+        journal: ObservationJournal?,
+        statusHandler: @escaping (AgentMonitoringStatus) -> Void,
+        observationHandler: @escaping ([ConnectionObservation]) -> Void,
+        storageErrorHandler: @escaping (Error) -> Void
+    ) {
+        self.journal = journal
         self.statusHandler = statusHandler
+        self.observationHandler = observationHandler
+        self.storageErrorHandler = storageErrorHandler
         self.extensionController = SystemExtensionController(
             identifier: Self.systemExtensionIdentifier,
             statusHandler: statusHandler
@@ -55,6 +67,7 @@ final class AgentMonitoringController {
     }
 
     func selectLightweightMonitoring() {
+        guard ensureStorageAvailable() else { return }
         lightweightCollector?.stop()
         lightweightCollector = nil
         statusHandler(.deactivating)
@@ -69,6 +82,7 @@ final class AgentMonitoringController {
     }
 
     func selectFullMonitoring() {
+        guard ensureStorageAvailable() else { return }
         lightweightCollector?.stop()
         lightweightCollector = nil
         statusHandler(.fullActivationRequested)
@@ -91,7 +105,17 @@ final class AgentMonitoringController {
 
     private func startLightweightCollector() {
         let collector = LightweightCollector { [weak self] observations in
-            self?.statusHandler(.lightweight(observationCount: observations.count))
+            guard let self else { return }
+            if let journal = self.journal {
+                do {
+                    let sampled = self.persistenceSampler.observationsToPersist(observations)
+                    try journal.append(sampled)
+                } catch {
+                    self.storageErrorHandler(error)
+                }
+            }
+            self.observationHandler(observations)
+            self.statusHandler(.lightweight(observationCount: observations.count))
         }
         lightweightCollector = collector
         do {
@@ -100,6 +124,16 @@ final class AgentMonitoringController {
             lightweightCollector = nil
             statusHandler(.failed(String(describing: error)))
         }
+    }
+
+    private func ensureStorageAvailable() -> Bool {
+        guard journal != nil else {
+            let error = ObservationJournalError.appGroupUnavailable
+            storageErrorHandler(error)
+            statusHandler(.failed(error.localizedDescription))
+            return false
+        }
+        return true
     }
 }
 
