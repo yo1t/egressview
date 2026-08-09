@@ -13,11 +13,11 @@
 // rejects exactly those ranges, in every mode, without touching the loopback
 // and private ranges Ollama depends on.
 //
-// Scope: this classifies IP *literals*. A hostname that resolves to a blocked
-// address (DNS rebinding) is not caught here; that needs connect-time
-// enforcement and is tracked as a separate follow-up.
-
+const dns = require('node:dns');
+const http = require('node:http');
+const https = require('node:https');
 const net = require('node:net');
+const { Readable } = require('node:stream');
 
 function isBlockedOutboundIpv4(address) {
   const parts = address.split('.').map(Number);
@@ -75,4 +75,107 @@ function isBlockedOutboundIpLiteral(address) {
   return false;
 }
 
-module.exports = { isBlockedOutboundIpLiteral };
+function blockedAddressError() {
+  const error = new Error(
+    'Outbound endpoint resolved to a link-local, metadata, or other special-use IP address'
+  );
+  error.code = 'ERR_BLOCKED_OUTBOUND_ADDRESS';
+  return error;
+}
+
+async function resolveSafeAddresses(hostname, lookup = dns.promises.lookup, signal = null) {
+  const normalized = String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
+  const literalFamily = net.isIP(normalized);
+  let addresses;
+  if (literalFamily) {
+    addresses = [{ address: normalized, family: literalFamily }];
+  } else {
+    if (signal?.aborted) throw signal.reason;
+    let removeAbortListener = () => {};
+    try {
+      const aborted = new Promise((_, reject) => {
+        if (!signal) return;
+        const onAbort = () => reject(signal.reason);
+        signal.addEventListener('abort', onAbort, { once: true });
+        removeAbortListener = () => signal.removeEventListener('abort', onAbort);
+      });
+      addresses = await Promise.race([
+        lookup(normalized, { all: true, verbatim: true }),
+        aborted,
+      ]);
+    } finally {
+      removeAbortListener();
+    }
+  }
+
+  if (!Array.isArray(addresses) || addresses.length === 0) {
+    throw new Error('Outbound endpoint did not resolve to an IP address');
+  }
+  if (addresses.some(entry => isBlockedOutboundIpLiteral(entry.address))) {
+    throw blockedAddressError();
+  }
+  return addresses.map(entry => ({ address: entry.address, family: Number(entry.family) }));
+}
+
+function pinnedLookup(addresses) {
+  return (_hostname, options, callback) => {
+    const requestedFamily = Number(options?.family) || 0;
+    const candidates = requestedFamily
+      ? addresses.filter(entry => entry.family === requestedFamily)
+      : addresses;
+    if (candidates.length === 0) {
+      const error = new Error(`Outbound endpoint has no IPv${requestedFamily} address`);
+      error.code = 'ENOTFOUND';
+      callback(error);
+      return;
+    }
+    if (options?.all) callback(null, candidates);
+    else callback(null, candidates[0].address, candidates[0].family);
+  };
+}
+
+/**
+ * Fetch an operator-configured endpoint using only addresses checked before
+ * connect. Keeping the original hostname in the request preserves Host and TLS
+ * SNI/certificate validation while the custom lookup prevents DNS rebinding.
+ */
+function createPinnedEndpointFetch({ lookup = dns.promises.lookup } = {}) {
+  return async function pinnedEndpointFetch(input, options = {}) {
+    const url = new URL(input);
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      throw new Error('Outbound endpoint must use http or https');
+    }
+    const addresses = await resolveSafeAddresses(url.hostname, lookup, options.signal);
+    const transport = url.protocol === 'https:' ? https : http;
+
+    return new Promise((resolve, reject) => {
+      const request = transport.request(url, {
+        method: options.method || 'GET',
+        headers: options.headers,
+        lookup: pinnedLookup(addresses),
+        signal: options.signal,
+      }, response => {
+        const status = response.statusCode || 0;
+        if (options.redirect === 'error' && status >= 300 && status < 400) {
+          response.resume();
+          reject(new Error('Outbound endpoint redirect was refused'));
+          return;
+        }
+        resolve(new Response(Readable.toWeb(response), {
+          status,
+          statusText: response.statusMessage,
+          headers: response.headers,
+        }));
+      });
+      request.on('error', reject);
+      if (options.body != null) request.write(options.body);
+      request.end();
+    });
+  };
+}
+
+module.exports = {
+  createPinnedEndpointFetch,
+  isBlockedOutboundIpLiteral,
+  resolveSafeAddresses,
+};

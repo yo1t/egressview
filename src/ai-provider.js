@@ -22,7 +22,7 @@ function offlineBlocksProvider(provider, endpoint) {
 
 const { estimateAiCost, normalizeTokenUsage } = require('./ai-usage');
 const { AI_PRIOR_ANALYSIS_MAX_CHARS } = require('./ai-limits');
-const { isBlockedOutboundIpLiteral } = require('./ssrf-guard');
+const { createPinnedEndpointFetch, isBlockedOutboundIpLiteral } = require('./ssrf-guard');
 
 const PROVIDERS = Object.freeze(['ollama', 'anthropic', 'openai', 'bedrock']);
 // Cloud providers authenticated with a stored API key.
@@ -263,8 +263,10 @@ function buildPrompt(context, { question = '', conversation = [], priorAnalysis 
   return { prompt };
 }
 
-function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {}) {
+function createAiProvider({ fetchImpl = globalThis.fetch, endpointFetchImpl = null, bedrock = null } = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('fetch implementation is required');
+  const ollamaFetch = endpointFetchImpl
+    || (fetchImpl === globalThis.fetch ? createPinnedEndpointFetch() : fetchImpl);
   let provider = 'disabled';
   let models = { ollama: '', anthropic: '', openai: '', bedrock: '' };
   let keys = { anthropic: '', openai: '' };
@@ -369,7 +371,8 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
     }
     const requestState = { ...state(), provider: selectedProvider, region: selectedRegion };
     const { url, headers } = adapter.listRequest(requestState);
-    const response = await fetchImpl(url, {
+    const requestFetch = selectedProvider === 'ollama' ? ollamaFetch : fetchImpl;
+    const response = await requestFetch(url, {
       method: 'GET',
       headers,
       redirect: 'error',
@@ -498,7 +501,8 @@ function createAiProvider({ fetchImpl = globalThis.fetch, bedrock = null } = {})
         }) || '').trim();
       } else {
         const { url, headers, body } = adapter.generateRequest(state(), prompt);
-        const response = await fetchImpl(url, {
+        const requestFetch = provider === 'ollama' ? ollamaFetch : fetchImpl;
+        const response = await requestFetch(url, {
           method: 'POST',
           headers,
           body: JSON.stringify(body),
