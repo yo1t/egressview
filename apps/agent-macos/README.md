@@ -37,6 +37,19 @@ Choosing Full monitoring stops lightweight polling before requesting System
 Extension activation. A rejected or incomplete approval never silently falls
 back to lightweight monitoring.
 
+Choose **Open connection activity...** from the menu bar to view the latest
+locally stored observations. The host and System Extension share an App Group
+JSON Lines journal with `0700` directory and `0600` file permissions. The
+journal rotates at 10 MiB, keeps one archive, tolerates an isolated malformed
+line, and displays at most 500 deduplicated recent connections. It stores only
+connection metadata; payloads are never collected. Hub delivery remains off
+and is not implemented by this phase.
+
+Unsigned Debug builds cannot access the production App Group container, so the
+host uses its Application Support directory for local UI development. Release
+builds fail closed when App Group access is unavailable; they do not silently
+switch to a different storage location.
+
 An unsigned compile can verify the project structure:
 
 ```sh
