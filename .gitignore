@@ -1,4 +1,5 @@
 node_modules/
+**/.build/
 .env
 .env.local
 .env.*.local
@@ -54,6 +55,7 @@ scripts/deploy-ec2.sh
 scripts/start.sh
 # 個人的なバックログ
 backlog.md
+/backlog/
 # SNS投稿用ドラフト（未公開）
 SNS/
 # 開発ツールのローカル設定（家庭内IP等を含む可能性）
