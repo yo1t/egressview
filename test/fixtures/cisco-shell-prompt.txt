@@ -1,0 +1,3 @@
+Authorized access only.
+Last login from 192.0.2.10
+edge-cisco-01#

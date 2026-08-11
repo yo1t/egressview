@@ -12,6 +12,7 @@ const runtimeProfiler = require('../runtime-profiler');
 const crypto = require('crypto');
 const { Client: SshClient } = require('ssh2');
 const { abortError, attachAbortHandler } = require('./abort-signal');
+const { extractYamahaConsolePrompt } = require('./router-prompt');
 
 const YAMAHA_INITIAL_PROMPT_TIMEOUT_MS = 8_000;
 
@@ -148,9 +149,15 @@ function createTempYamahaShell({ ip, user, pass, expectedHostFp }) {
         });
         try {
           await waitForPromptLocal(YAMAHA_INITIAL_PROMPT_TIMEOUT_MS);
-          await exec('console lines 0');
+          const initialHostName = extractYamahaConsolePrompt(buf);
+          const consoleRaw = await exec('console lines 0');
           settled = true;
-          resolve({ exec, close: cleanup, hostFp });
+          resolve({
+            exec,
+            close: cleanup,
+            hostFp,
+            hostName: extractYamahaConsolePrompt(consoleRaw) || initialHostName,
+          });
         } catch (e) {
           fail(e);
         }
@@ -250,7 +257,7 @@ async function detectYamaha({ ip, user, pass, expectedHostFp, natCandidates } = 
 
   try {
     const result = await collectYamahaDetection(shell.exec, { ip, user, natCandidates });
-    return { ...result, hostFp: shell.hostFp };
+    return { ...result, hostFp: shell.hostFp, hostName: shell.hostName || '' };
   } finally {
     shell.close();
   }
@@ -296,6 +303,7 @@ function createYamahaPoller({ id = '', profiler = runtimeProfiler } = {}) {
   let yamahaPass = '';
   let yamahaEnabled = true;
   let yamahaHostFp = '';
+  let yamahaHostName = '';
   let natDescriptor = '100';
 
   // Callbacks (set externally)
@@ -303,6 +311,7 @@ function createYamahaPoller({ id = '', profiler = runtimeProfiler } = {}) {
   let onSaveConfig = () => {};
 
   function configure(cfg) {
+    if (cfg.ip !== undefined && cfg.ip !== yamahaIp) yamahaHostName = '';
     if (cfg.ip !== undefined) yamahaIp = cfg.ip;
     if (cfg.user !== undefined) yamahaUser = cfg.user;
     if (cfg.pass !== undefined) yamahaPass = cfg.pass;
@@ -431,13 +440,15 @@ function createYamahaPoller({ id = '', profiler = runtimeProfiler } = {}) {
         setTimeout(async () => {
           try {
             await waitForPrompt(YAMAHA_INITIAL_PROMPT_TIMEOUT_MS);
+            yamahaHostName = extractYamahaConsolePrompt(shellBuf) || yamahaHostName;
             shellBuf = '';
             stream.write('console lines 0\n');
             await waitForPrompt(5000);
+            yamahaHostName = extractYamahaConsolePrompt(shellBuf) || yamahaHostName;
             yamahaReady = true;
             yamahaConnecting = false;
             logger.info(`${TAG} Connected to RTX — ready`);
-            onStatus({ ready: true, message: t('yamaha.connected') });
+            onStatus({ ready: true, message: t('yamaha.connected'), hostName: yamahaHostName || undefined });
             if (onReady) onReady();
           } catch (e) {
             yamahaConnecting = false;
@@ -596,6 +607,7 @@ function createYamahaPoller({ id = '', profiler = runtimeProfiler } = {}) {
     hasPass:        () => !!yamahaPass,
     getNat:         () => natDescriptor,
     getHostFp:      () => yamahaHostFp,
+    getHostName:    () => yamahaHostName,
     needsArpRefresh: () => Date.now() - yamahaArpLastRefresh > YAMAHA_ARP_REFRESH_MS,
     needsNdpRefresh: () => Date.now() - yamahaNdpLastRefresh > YAMAHA_NDP_REFRESH_MS,
   };
@@ -611,4 +623,5 @@ module.exports = {
   parseNatDetail,
   parseNatDescriptorCandidates,
   parseLanIp,
+  extractYamahaConsolePrompt,
 };

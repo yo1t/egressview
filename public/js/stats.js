@@ -9,6 +9,7 @@ import { selectedMac, nodes, currentGraphRangeKey } from './graph.js?v=__ASSET_V
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 import { statsTargetRows, appSlicesFromSummary, mapPointsFromSummary } from './stats-helpers.js?v=__ASSET_VERSION__';
 import { drawAppPieChart, drawTimeline, drawBarChart, getChartMode, initChartModeButtons } from './stats-charts.js?v=__ASSET_VERSION__';
+import { appendDisplayScope } from './display-scope.js?v=__ASSET_VERSION__';
 
 function initStats() {
   if (initStats._done) return;
@@ -164,6 +165,7 @@ function buildStatsSummaryParams(selIp) {
   if (to != null) params.set('to', to);
   if (selIp) params.set('src', selIp);
   params.set('buckets', '60');
+  appendDisplayScope(params);
   return params;
 }
 

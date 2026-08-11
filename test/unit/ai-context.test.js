@@ -191,6 +191,43 @@ describe('AI context', () => {
     assert.ok(context.privacy.excluded.includes('nodeManagementAddress'));
   });
 
+  it('does not mix global inventory or ASUS topology into a selected source', () => {
+    const sourceScope = { sourceKind: 'agent', sourceId: 'agent-1' };
+    const history = {
+      groupServiceByTimeRange: (_from, _to, options) => {
+        assert.deepEqual(options.sourceScope, sourceScope);
+        return [];
+      },
+      groupDstByTimeRange: () => [],
+      groupSrcForDstsByTimeRange: () => [],
+      groupSrcByTimeRange: () => [{
+        src: '192.0.2.10', srcMac: 'AA:BB:CC:DD:EE:10', count: 3,
+      }],
+    };
+    const context = buildAiContext({
+      facts: baseFacts,
+      routers: [],
+      from: 100,
+      to: 300,
+      sourceScope,
+      history,
+      devices: { getAll: () => [
+        { ip: '192.0.2.10', mac: 'AA:BB:CC:DD:EE:10', dnsName: 'selected-device' },
+        { ip: '192.0.2.20', mac: 'AA:BB:CC:DD:EE:20', dnsName: 'unrelated-device' },
+      ] },
+      asus: {
+        getClients: () => [{ ip: '192.0.2.20', mac: 'AA:BB:CC:DD:EE:20' }],
+        getMeshNodes: () => [{ mac: '00:11:22:33:44:55', alias: 'global-node' }],
+      },
+    });
+
+    assert.deepEqual(context.sourceScope, sourceScope);
+    assert.deepEqual(context.deviceInventory.devices.map(device => device.name), ['selected-device']);
+    assert.equal(context.networkTopology, null);
+    assert.equal(JSON.stringify(context).includes('unrelated-device'), false);
+    assert.equal(JSON.stringify(context).includes('global-node'), false);
+  });
+
   it('trims duplicated detail to enforce the final serialized byte limit', () => {
     const long = 'x'.repeat(253);
     const destinations = Array.from({ length: 40 }, (_, i) => ({

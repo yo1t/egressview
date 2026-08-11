@@ -9,6 +9,7 @@ import { renderDevicesTable } from './devices.js?v=__ASSET_VERSION__';
 import { renderBeaconBanner } from './beacon.js?v=__ASSET_VERSION__';
 import { updateFilterTabs, lastMeshNodes, lastMainMac, lastClients, setGraphDevicesDataRef } from './graph.js?v=__ASSET_VERSION__';
 import { toggleSection, settingsBtn, showStatus } from './settings.js?v=__ASSET_VERSION__';
+import { getDisplayScope, getRouterSource, updateRouterSources } from './display-scope.js?v=__ASSET_VERSION__';
 
 // ─── Admin token auth (saved in localStorage) ─────────────────────────
 const TOKEN_KEY = 'egressview_admin_token';
@@ -228,6 +229,7 @@ export const routerState = {
 };
 export function setRouterList(routers) {
   routerState.routers = Array.isArray(routers) ? routers : [];
+  updateRouterSources(routerState.routers);
   const health = aggregateRouterHealth(routerState);
   connState.l3l4.enabled = health.enabledCount > 0;
   connState.l3l4.ready = health.readyCount > 0;
@@ -358,7 +360,11 @@ function updateConnBadge(key) {
   const prefix = (key === 'l3l4' ? 'L3/L4 Router' : 'L2 ASUS');
   badge.classList.remove('on', 'off', 'err', 'wait');
   if (key === 'l3l4') {
-    const health = aggregateRouterHealth(routerState);
+    const scope = getDisplayScope();
+    const selectedRouter = scope?.sourceKind === 'router' ? getRouterSource(scope.sourceId) : null;
+    const health = selectedRouter
+      ? { state: selectedRouter.ready ? 'on' : selectedRouter.state === 'connecting' ? 'wait' : 'err', enabledCount: 1, readyCount: selectedRouter.ready ? 1 : 0 }
+      : aggregateRouterHealth(routerState);
     badge.classList.add(health.state);
     badge.title = health.enabledCount === 0
       ? prefix + ' — ' + t('badge.unused')

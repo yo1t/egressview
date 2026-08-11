@@ -36,6 +36,7 @@ function createYamahaAdapter({ id = '' } = {}) {
     hasPass: poller.hasPass,
     getNat: poller.getNat,
     getHostFp: poller.getHostFp,
+    getHostName: poller.getHostName,
 
     exec: poller.yamahaExec,
     detect: poller.detectYamaha,
@@ -62,6 +63,7 @@ module.exports = {
   parseNatDetail: yamaha.parseNatDetail,
   parseNatDescriptorCandidates: yamaha.parseNatDescriptorCandidates,
   parseLanIp: yamaha.parseLanIp,
+  extractYamahaConsolePrompt: yamaha.extractYamahaConsolePrompt,
 
   _legacy: yamaha,
 };

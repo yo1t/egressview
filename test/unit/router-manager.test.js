@@ -20,6 +20,7 @@ function fakeAdapter(record) {
     getIp: () => config.ip || '', getUser: () => config.user || '', hasPass: () => !!config.pass,
     getNat: () => config.natDescriptor || '', getHostFp: () => config.hostFp || '',
     _persistHostFp(fp) { config.hostFp = fp; return config.onSaveConfig(); },
+    _emitStatus(state) { return config.onStatus(state); },
     exec: async () => '', detect: async input => ({ ssh: { ok: true }, input }), detectCurrent: async () => ({}),
   };
 }
@@ -117,6 +118,41 @@ describe('router manager CRUD', () => {
     assert.throws(() => adapter._persistHostFp('new-fingerprint'), /read only/);
     assert.equal(manager.getRecord(record.id).hostFp, '');
     assert.match(manager.list()[0].lastError, /read only/);
+  });
+
+  it('persists a normalized detected host name without changing router identity', () => {
+    const record = {
+      id: 'cisco-12345678', kind: 'cisco', displayName: 'Edge', ip: '192.168.1.2', user: 'admin',
+      pass: 'secret', enablePass: '', enabled: false, hostFp: 'known', createdAt: 1,
+    };
+    const { manager, persisted } = createManager([record]);
+    manager.registry.get(record.id).adapter._emitStatus({
+      ready: true, state: 'ready', hostName: 'edge\nrouter\t01',
+    });
+
+    assert.equal(manager.list()[0].hostName, 'edge router 01');
+    assert.equal(manager.list()[0].id, record.id);
+    assert.equal(persisted.at(-1).next[0].hostName, 'edge router 01');
+  });
+
+  it('keeps the prior display metadata and ready state if host-name persistence fails', () => {
+    const record = {
+      id: 'yamaha-12345678', kind: 'yamaha', displayName: 'Office RTX', hostName: 'saved-prompt',
+      ip: '192.168.1.1', user: 'admin', pass: 'secret', nat: '100', enabled: false, createdAt: 1,
+    };
+    const manager = createRouterManager({
+      records: [record],
+      createAdapter: fakeAdapter,
+      persist: () => { throw new Error('disk full'); },
+      history: { upsertRouterMetadata() {} },
+      io: { emit() {} },
+    });
+
+    manager.registry.get(record.id).adapter._emitStatus({
+      ready: true, state: 'ready', hostName: 'new-prompt',
+    });
+    assert.equal(manager.list()[0].hostName, 'saved-prompt');
+    assert.equal(manager.list()[0].ready, true);
   });
 });
 

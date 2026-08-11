@@ -198,6 +198,28 @@ describe('AI configuration routes', () => {
     assert.deepEqual(ranges, [[1000, 2000], [0, 1000]]);
   });
 
+  it('uses the selected source for AI facts and rejects unavailable IDs', async () => {
+    const scopes = [];
+    const history = {
+      countFactsByTimeRange(_from, _to, options) {
+        scopes.push(options.sourceScope);
+        return { connections: 0, devices: 0, destinations: 0 };
+      },
+      groupDstByTimeRange: () => [],
+    };
+    const routerManager = { list: () => [{ id: 'r1', kind: 'yamaha', enabled: true, ready: true }] };
+    const app = appFor(createAiProvider(), undefined, { history, threatIntel: null, routerManager });
+    const accepted = await request(app, 'GET', '/api/ai/facts?from=1000&to=2000&sourceKind=router&sourceId=r1');
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(scopes, [
+      { sourceKind: 'router', sourceId: 'r1' },
+      { sourceKind: 'router', sourceId: 'r1' },
+    ]);
+    assert.equal((await request(
+      app, 'GET', '/api/ai/facts?from=1000&to=2000&sourceKind=router&sourceId=missing'
+    )).status, 400);
+  });
+
   it('rejects invalid or excessive facts ranges before querying history', async () => {
     let calls = 0;
     const context = {
@@ -345,24 +367,42 @@ describe('AI configuration routes', () => {
     const app = appFor(provider, undefined, {
       history: historyStore,
       threatIntel: null,
-      routerManager: { list: () => [] },
+      routerManager: { list: () => [
+        { id: 'router-1', kind: 'yamaha', enabled: true, ready: true },
+        { id: 'router-2', kind: 'cisco', enabled: true, ready: true },
+      ] },
     });
     const requestId = '11111111-1111-4111-8111-111111111111';
     const sent = await request(app, 'POST', '/api/ai/chat', {
       requestId, message: 'What changed?', from: 1000, to: 2000,
+      sourceKind: 'router', sourceId: 'router-1',
     });
     assert.equal(sent.status, 200);
     const conversationId = sent.body.conversationId;
     const loaded = await request(app, 'GET', `/api/ai/conversations/${conversationId}`);
     assert.deepEqual(loaded.body.messages.map(message => message.body), ['What changed?', 'persisted answer']);
+    assert.deepEqual(loaded.body.messages.map(message => message.sourceId), ['router-1', 'router-1']);
 
     const retried = await request(app, 'POST', '/api/ai/chat', {
       conversationId, requestId, message: 'replacement', from: 1000, to: 2000,
+      sourceKind: 'router', sourceId: 'router-1',
     });
     assert.equal(retried.status, 200);
     const afterRetry = await request(app, 'GET', `/api/ai/conversations/${conversationId}`);
     assert.equal(afterRetry.body.messages.length, 2);
     assert.equal(afterRetry.body.messages[0].body, 'What changed?');
+
+    const switched = await request(app, 'POST', '/api/ai/chat', {
+      conversationId, requestId: randomUUID(), message: 'Use Cisco only', from: 1000, to: 2000,
+      sourceKind: 'router', sourceId: 'router-2',
+    });
+    assert.equal(switched.status, 200);
+    assert.equal(switched.body.startedNewConversation, true);
+    assert.notEqual(switched.body.conversationId, conversationId);
+    assert.deepEqual(
+      historyStore.getMessages(switched.body.conversationId).map(message => message.sourceId),
+      ['router-2', 'router-2']
+    );
     assert.equal((await request(app, 'DELETE', `/api/ai/conversations/${conversationId}`)).status, 200);
     assert.equal((await request(app, 'GET', `/api/ai/conversations/${conversationId}`)).status, 404);
   });

@@ -8,6 +8,8 @@ const { createCiscoAdapter } = require('./pollers/cisco-adapter');
 const { createConntrackAdapter } = require('./pollers/conntrack-adapter');
 const { MAX_ROUTERS, normalizeRouterRecord, publicRouter } = require('./router-config');
 const { isAllowedRouterIp } = require('./utils');
+const { normalizeRouterHostName } = require('./pollers/router-prompt');
+const logger = require('./logger');
 
 function createRouterManager({
   records = [], tombstones = [], persist = () => {}, pollIntervalMs = 60_000,
@@ -127,6 +129,19 @@ function createRouterManager({
       onStatus: state => {
         const current = statuses.get(record.id) || {};
         statuses.set(record.id, { ...current, ...state, ready: !!state.ready, lastError: state.ready ? null : (state.message || current.lastError) });
+        const detectedHostName = normalizeRouterHostName(state.hostName);
+        const stored = configs.get(record.id);
+        if (detectedHostName && stored && detectedHostName !== stored.hostName) {
+          const previousHostName = stored.hostName || '';
+          stored.hostName = detectedHostName;
+          try {
+            persist([...configs.values()], registry.tombstones());
+            history?.upsertRouterMetadata?.(stored);
+          } catch (err) {
+            stored.hostName = previousHostName;
+            logger.warn(`[router:${record.id}] Could not persist detected host name:`, err.message);
+          }
+        }
         emitStatus();
       },
       onSaveConfig: () => {

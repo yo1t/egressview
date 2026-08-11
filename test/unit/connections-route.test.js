@@ -306,12 +306,13 @@ describe('connections route: GET /connections/summary', () => {
     };
   }
 
-  function callSummaryRoute(query = {}) {
+  function callSummaryRoute(query = {}, overrides = {}) {
     lastSummaryArgs = null;
     const connectionsRoutes = require('../../src/routes/connections');
     const router = connectionsRoutes({
       requireAdmin: (_req, _res, next) => next(),
       history: makeHistory(),
+      ...overrides,
     });
     const layer = router.stack.find(l => l.route?.path === '/connections/summary' && l.route?.methods?.get);
     const handler = layer.route.stack[layer.route.stack.length - 1].handle;
@@ -348,6 +349,22 @@ describe('connections route: GET /connections/summary', () => {
   it('returns 400 for invalid buckets', () => {
     const res = callSummaryRoute({ buckets: 'bad' });
     assert.equal(res._status, 400);
+  });
+
+  it('passes a known source scope and rejects unavailable source IDs', () => {
+    const routerManager = { list: () => [{ id: 'router-1', enabled: true }] };
+    const accepted = callSummaryRoute(
+      { sourceKind: 'router', sourceId: 'router-1' },
+      { routerManager }
+    );
+    assert.equal(accepted._status, 200);
+    assert.deepEqual(lastSummaryArgs[2].sourceScope, { sourceKind: 'router', sourceId: 'router-1' });
+
+    const rejected = callSummaryRoute(
+      { sourceKind: 'router', sourceId: "x' OR 1=1 --" },
+      { routerManager }
+    );
+    assert.equal(rejected._status, 400);
   });
 
   it('rejects unknown and structured summary query values', () => {

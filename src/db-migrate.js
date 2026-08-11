@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -515,6 +515,22 @@ const MIGRATIONS = [
           ON connection_agent_observations(agentId, observationId);
         CREATE INDEX IF NOT EXISTS idx_connection_agent_connection
           ON connection_agent_observations(src, dst, dport, proto);
+      `);
+    },
+  },
+  {
+    version: 14,
+    description: 'append-only AI message source scope (P2-85)',
+    up(db) {
+      // Keep message bodies immutable. A missing row represents All sources or
+      // a legacy message created before source filtering was available.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS ai_message_scopes (
+          messageId  TEXT PRIMARY KEY,
+          sourceKind TEXT NOT NULL CHECK(sourceKind IN ('router', 'agent')),
+          sourceId   TEXT NOT NULL CHECK(length(sourceId) BETWEEN 1 AND 128),
+          FOREIGN KEY(messageId) REFERENCES ai_messages(messageId) ON DELETE CASCADE
+        );
       `);
     },
   },

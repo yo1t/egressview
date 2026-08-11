@@ -123,6 +123,7 @@ function makeHarness({ logs = [], apiFetch = null } = {}) {
     console,
     Date,
     RegExp,
+    URLSearchParams,
     localStorage: { getItem: () => '' },
     BASE_URL: '',
     _BASE: '',
@@ -140,6 +141,7 @@ function makeHarness({ logs = [], apiFetch = null } = {}) {
     updateSideHighlight() {},
     t: key => key,
     tVars: (_key, vars) => String(vars.n ?? vars.value ?? ''),
+    appendDisplayScope: params => params,
     apiFetch: apiFetch || (async () => ({ ok: true, json: async () => ({ logs }) })),
   };
 
