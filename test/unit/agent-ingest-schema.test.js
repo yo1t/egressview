@@ -27,7 +27,7 @@ describe('agent ingest v1 schema', () => {
 
   it('rejects unknown envelope and observation fields', () => {
     const envelope = copy();
-    envelope.secret = 'must-not-pass';
+    envelope.unexpectedField = 'must-not-pass';
     assert.equal(agentIngestEnvelopeSchema.safeParse(envelope).success, false);
 
     const observation = copy();
