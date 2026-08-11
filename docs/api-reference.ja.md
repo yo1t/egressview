@@ -10,6 +10,8 @@ Web UIをサブパスで公開している場合も、APIは常に`/api`配下�
 
 scoped API identityは`GET` / `POST /api/auth/api-identities`と`POST /api/auth/api-identities/:id/revoke`で管理し、いずれも`auth.admin`が必要です。作成時はlabel、空でないpermission一覧、1分以上1年以下の`expiresInMs`を指定します。平文の`egv_...` tokenを返すのは`201`作成responseだけで、DBにはSHA-256 hashだけを保存します。identity管理responseには`Cache-Control: no-store`を付けます。
 
+Macおよび将来のendpoint Agentは、browser/API/MCPとは別のcredential境界を使います。管理者が`POST /api/agents/enrollment-tokens`で一回限り・10分有効の登録codeを発行し、AgentがHTTPSの`POST /api/agent/enroll`で交換します。responseで一度だけ返る`egva_...` bearerはmacOS Keychainへ保存し、Hubはpepper付きhashだけを保持します。このcredentialが持つのは`agent.ingest`だけで、browser/admin/MCP routeには使えず、`POST /api/agent/token/rotate`だけが受け付けます。Agent一覧と失効（`GET /api/agents`、`POST /api/agents/:agentId/revoke`）には`auth.admin`が必要です。Agent responseはcacheせず、登録codeは再表示せず、HTTPはloopback開発環境だけで許可します。
+
 `GET /api/auth/api-identities/self`は、現在認証中のscoped identity自身だけを
 返し、`network.read`を要求します。browser sessionと従来のadmin tokenは
 拒否します。remote MCP serverはこのAPIを使い、内部service identityの権限が
@@ -41,7 +43,7 @@ curl --fail-with-body \
 {"success":true,"token":"session-token","expiresAt":1784304000000}
 ```
 
-`POST /api/admin/verify`も公開APIで、request body内のtokenを検証します。認証状態・方式の取得、OIDC redirect/callback、詳細情報を返さない`/healthz`と`/readyz`も公開し、それ以外はすべて認証必須です。
+`POST /api/admin/verify`も公開APIで、request body内のtokenを検証します。認証状態・方式の取得、OIDC redirect/callback、一回限りcodeで保護された`POST /api/agent/enroll`入口、詳細情報を返さない`/healthz`と`/readyz`も公開します。それ以外は文書化したbrowser、API identity、またはAgent credentialが必要です。
 
 ## 共通仕様
 
@@ -158,7 +160,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 
 ## Endpoint一覧
 
-実装済みHTTP endpoint 91本の全一覧です。**公開**以外は従来またはscopedの`X-Admin-Token` credential、もしくはbrowserのHttpOnly session cookieが必要です。cookie認証による更新要求では`X-CSRF-Token`も必要です。
+実装済みHTTP endpoint 99本の全一覧です。**公開**以外は従来またはscopedの`X-Admin-Token` credential、browserのHttpOnly session cookie、または明記されたAgent bearerが必要です。cookie認証による更新要求では`X-CSRF-Token`も必要です。
 
 | 分類 | Methodとpath | Access |
 |---|---|---|
@@ -181,6 +183,11 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | 認証 | `POST /api/auth/api-identities` | 認証必須 |
 | 認証 | `POST /api/auth/api-identities/:id/revoke` | 認証必須 |
 | 認証 | `GET /api/auth/audit-events` | 認証必須 |
+| Agent | `POST /api/agents/enrollment-tokens` | `auth.admin`必須。登録codeを一度だけ返す |
+| Agent | `POST /api/agent/enroll` | 公開。一回限りcodeとHTTPSが必須 |
+| Agent | `GET /api/agents` | `auth.admin`必須。credential hashは返さない |
+| Agent | `POST /api/agents/:agentId/revoke` | `auth.admin`必須 |
+| Agent | `POST /api/agent/token/rotate` | Agent bearerの`agent.ingest`だけ |
 | Router初期設定 | `POST /api/nonce` | 認証必須 |
 | Router初期設定 | `POST /api/yamaha/detect` | 認証必須 |
 | Router初期設定 | `POST /api/cisco/detect` | 認証必須 |

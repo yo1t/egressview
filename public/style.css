@@ -131,6 +131,11 @@
   .settings-session-role-operator { color: var(--cyan); }
   .settings-session-role-unknown { color: var(--red, #ef4444); }
   .settings-session-seen, .settings-session-muted { color: var(--muted); font-size: 10px; }
+  .settings-agent-list { margin-bottom: 8px; font-size: 11px; }
+  .settings-agent-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .settings-agent-details { display: grid; flex: 1; gap: 2px; min-width: 0; }
+  .settings-agent-host { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+  .settings-agent-revoked { color: var(--red); font-size: 10px; }
   .settings-session-revoke-all { width: auto; padding: 5px 14px; margin-top: 8px; font-size: 10px; background: transparent; border: 1px solid var(--border); color: var(--muted); }
   .settings-security-actions { display: flex; gap: 8px; }
   .settings-security-actions .connect-btn { width: auto; min-width: 120px; }

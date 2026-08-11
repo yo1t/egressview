@@ -254,6 +254,16 @@
 
           <hr class="settings-divider">
 
+          <div class="pane-title settings-subsection-title" data-i18n="settings.agents.section">Mac / Agent</div>
+          <p class="settings-copy settings-copy-block" data-i18n="settings.agents.desc">
+            管理している端末をEgressViewへ登録します。登録コードは10分間有効で、一度だけ使用できます。
+          </p>
+          <div id="agents-list" class="settings-agent-list"></div>
+          <button class="connect-btn settings-inline-button" id="agent-enrollment-create-btn" type="button" data-i18n="settings.agents.create">登録コードを発行</button>
+          <div class="settings-status" id="agents-status"></div>
+
+          <hr class="settings-divider">
+
           <div class="pane-title settings-subsection-title" data-i18n="settings.security.section">🛡️ 認証と監査</div>
           <p class="settings-copy settings-copy-block" data-i18n="settings.security.localOnly">
             ログインはローカル管理者パスワードで行います。Google OIDCは任意で追加できます。

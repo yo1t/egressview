@@ -14,12 +14,12 @@
  * @param {{
  *   dbPath: string,
  *   sourceRouterMap?: { yamaha: string, cisco: string },
- *   history, sessions, devices, enrichment, beacons, authAudit, apiIdentities,
+ *   history, sessions, devices, enrichment, beacons, authAudit, apiIdentities, agentIdentities,
  * }} deps
  */
 function runDbBootstrap({
   dbPath, sourceRouterMap, history, sessions, devices, enrichment, beacons, authAudit,
-  apiIdentities,
+  apiIdentities, agentIdentities,
 }) {
   // 1. history first: runs the versioned migrations (with the P2-33
   //    fail-closed backup). Throws on failure — nothing below runs.
@@ -32,6 +32,7 @@ function runDbBootstrap({
   beacons.initDb(dbPath);
   if (authAudit) authAudit.initDb(dbPath);
   if (apiIdentities) apiIdentities.initDb(dbPath);
+  if (agentIdentities) agentIdentities.initDb(dbPath);
   return { staleEnrichmentIps: enrichResult?.staleIps || [] };
 }
 
