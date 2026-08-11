@@ -25,6 +25,7 @@ function makeSpies({ historyThrows = false } = {}) {
     authAudit:  { initDb: p => calls.push({ module: 'authAudit',  dbPath: p }) },
     apiIdentities: { initDb: p => calls.push({ module: 'apiIdentities', dbPath: p }) },
     agentIdentities: { initDb: p => calls.push({ module: 'agentIdentities', dbPath: p }) },
+    agentIngest: { initDb: p => calls.push({ module: 'agentIngest', dbPath: p }) },
   };
 }
 
@@ -37,7 +38,7 @@ describe('db-bootstrap', () => {
       spies.calls.map(c => c.module),
       [
         'history', 'sessions', 'devices', 'enrichment', 'beacons',
-        'authAudit', 'apiIdentities', 'agentIdentities',
+        'authAudit', 'apiIdentities', 'agentIdentities', 'agentIngest',
       ]
     );
     for (const c of spies.calls) assert.equal(c.dbPath, '/tmp/x.db');

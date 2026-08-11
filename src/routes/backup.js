@@ -32,7 +32,7 @@ const backupPruneJobSchema = z.object({ jobId: z.string().uuid() }).strict();
 module.exports = function backupRoutes(ctx) {
   const {
     requireAdmin, backup, history, runtime, devices, enrichment, beacons,
-    sessions, authAudit, apiIdentities, agentIdentities, io, appRoot,
+    sessions, authAudit, apiIdentities, agentIdentities, agentIngest, io, appRoot,
   } = ctx;
   const router = Router();
 
@@ -45,6 +45,7 @@ module.exports = function backupRoutes(ctx) {
     authAudit?.closeDb();
     apiIdentities?.closeDb();
     agentIdentities?.closeDb();
+    agentIngest?.closeDb();
   }
 
   function afterRestore() {
@@ -58,6 +59,7 @@ module.exports = function backupRoutes(ctx) {
     authAudit?.reopen();
     apiIdentities?.reopen();
     agentIdentities?.reopen();
+    agentIngest?.reopen();
     if (io) io.disconnectSockets(true);
   }
 
