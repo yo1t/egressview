@@ -445,6 +445,103 @@ describe('countFactsByTimeRange', () => {
   });
 });
 
+describe('collection source scope', () => {
+  it('shows a shared observation in each router scope but counts it once in All', () => {
+    const now = Date.now();
+    const shared = {
+      src: '192.0.2.40', dst: '198.51.100.40', dport: 443, proto: 'TCP',
+      firstSeen: now, lastSeen: now,
+    };
+    insert({ ...shared, observedBy: ['router-a'] });
+    history.appendHistoryLog({ ...shared, lastSeen: now + 1, observedBy: ['router-b'] });
+
+    assert.equal(history.countByTimeRange(null, null), 1);
+    assert.equal(history.countByTimeRange(null, null, {
+      sourceScope: { sourceKind: 'router', sourceId: 'router-a' },
+    }), 1);
+    assert.equal(history.countByTimeRange(null, null, {
+      sourceScope: { sourceKind: 'router', sourceId: 'router-b' },
+    }), 1);
+    assert.deepEqual(history.queryByTimeRange(null, null)[0].observedBy, ['router-a', 'router-b']);
+
+    const reader = history.createConnectionExportReader(null, null, {
+      sourceScope: { sourceKind: 'router', sourceId: 'router-b' },
+    });
+    try { assert.equal(reader.countByTimeRange(), 1); }
+    finally { reader.close(); }
+  });
+
+  it('filters routers and includes both correlated and agent-only observations', () => {
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const path = require('node:path');
+    const Database = require('better-sqlite3');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-source-scope-'));
+    const dbPath = path.join(dir, 'history.db');
+    const now = Date.now();
+    let writer;
+    try {
+      history._initForTest(dbPath);
+      insert({ src: '192.0.2.10', dst: '198.51.100.10', observedBy: ['router-a'], firstSeen: now, lastSeen: now });
+      insert({ src: '192.0.2.20', dst: '198.51.100.20', observedBy: ['router-b'], firstSeen: now, lastSeen: now });
+
+      writer = new Database(dbPath);
+      writer.prepare(`INSERT INTO agents (
+        agentId, platform, hostName, osVersion, agentVersion, tokenHash,
+        createdAt, updatedAt, lastSeenAt, revokedAt
+      ) VALUES (?, 'macos', 'macbook', '15', '1.0', ?, ?, ?, ?, NULL)`)
+        .run('agent-a', 'token-hash', now, now, now);
+      writer.prepare(`INSERT INTO agent_observations (
+        agentId, observationId, batchId, networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, collector, confidence, receivedAt
+      ) VALUES (?, ?, ?, 'tcp', ?, ?, ?, ?, ?, ?, ?, ?, ?, '10', '20', 'network-extension', 'exact', ?)`)
+        .run('agent-a', 'correlated', 'batch-1', '192.0.2.10', 51000, '198.51.100.10', 443,
+          100, 'Safari', 'com.apple.Safari', now, now, now);
+      writer.prepare(`INSERT INTO connection_agent_observations (
+        src, dst, dport, proto, agentId, observationId, matchKind, matchedAt, timeDeltaMs
+      ) VALUES (?, ?, ?, ?, ?, ?, 'exact-5tuple', ?, 0)`)
+        .run('192.0.2.10', '198.51.100.10', 443, 'TCP', 'agent-a', 'correlated', now);
+      writer.prepare(`INSERT INTO agent_observations (
+        agentId, observationId, batchId, networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, collector, confidence, receivedAt
+      ) VALUES (?, ?, ?, 'udp', ?, ?, ?, ?, ?, ?, ?, ?, ?, '30', '40', 'network-extension', 'exact', ?)`)
+        .run('agent-a', 'agent-only', 'batch-1', '192.0.2.30', 52000, '203.0.113.53', 53,
+          101, 'mDNSResponder', null, now, now, now);
+
+      const routerRows = history.queryByTimeRange(null, null, {
+        sourceScope: { sourceKind: 'router', sourceId: 'router-a' },
+      });
+      assert.deepEqual(routerRows.map(row => row.dst), ['198.51.100.10']);
+
+      const agentScope = { sourceKind: 'agent', sourceId: 'agent-a' };
+      const agentRows = history.queryByTimeRange(null, null, { sourceScope: agentScope });
+      assert.deepEqual(new Set(agentRows.map(row => row.dst)), new Set(['198.51.100.10', '203.0.113.53']));
+      assert.equal(agentRows.find(row => row.dst === '203.0.113.53').process, 'mDNSResponder');
+      assert.equal(history.countByTimeRange(null, null, { sourceScope: agentScope }), 2);
+      assert.equal(history.summarizeByTimeRange(null, null, { sourceScope: agentScope }).total, 2);
+      assert.deepEqual(new Set(history.listSourceDeviceKeys(agentScope).map(row => row.src)),
+        new Set(['192.0.2.10', '192.0.2.30']));
+
+      history.logNotification({ src: '192.0.2.10', dst: '198.51.100.10', dport: 443, proto: 'TCP' }, 'threat', false);
+      history.logNotification({ src: '192.0.2.20', dst: '198.51.100.20', dport: 443, proto: 'TCP' }, 'threat', false);
+      history.logNotification({ src: '192.0.2.30', dst: '203.0.113.53', dport: 53, proto: 'UDP' }, 'threat', false);
+      assert.equal(history.queryNotificationLog(null, null, {
+        sourceScope: { sourceKind: 'router', sourceId: 'router-a' },
+      }).length, 1);
+      assert.equal(history.queryNotificationLog(null, null, { sourceScope: agentScope }).length, 2);
+    } finally {
+      writer?.close();
+      history.closeDb();
+      fs.rmSync(dir, { recursive: true, force: true });
+      history._initForTest();
+    }
+  });
+});
+
 describe('createConnectionExportReader', () => {
   it('holds a stable read snapshot while live history continues accepting writes', () => {
     const fs = require('fs');

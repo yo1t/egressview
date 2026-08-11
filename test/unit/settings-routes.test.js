@@ -567,6 +567,28 @@ describe('device routes', () => {
     assert.equal((await request(app, 'POST', '/api/devices/archive', {})).status, 400);
   });
 
+  it('filters inventory by the selected collection source', async () => {
+    const devices = {
+      getAll: () => [
+        { deviceId: 'dev1', ip: '192.0.2.1', mac: '00:11:22:33:44:55' },
+        { deviceId: 'dev2', ip: '192.0.2.2', mac: '00:11:22:33:44:66' },
+      ],
+    };
+    const app = mount(devicesRoutes({
+      requireAdmin,
+      devices,
+      notes: null,
+      yamaha: { getNdpByMac: () => null },
+      history: { listSourceDeviceKeys: () => [{ src: '192.0.2.2', srcMac: null }] },
+      routerManager: { list: () => [{ id: 'router-1', enabled: true }] },
+    }));
+
+    const inventory = await request(app, 'GET', '/api/devices?sourceKind=router&sourceId=router-1');
+    assert.equal(inventory.status, 200);
+    assert.deepEqual(inventory.body.devices.map(device => device.deviceId), ['dev2']);
+    assert.equal((await request(app, 'GET', '/api/devices?sourceKind=router&sourceId=missing')).status, 400);
+  });
+
   it('rejects unknown, mistyped, and oversized device inputs before mutation', async () => {
     let mutations = 0;
     const devices = {

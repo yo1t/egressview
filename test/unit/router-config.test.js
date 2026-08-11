@@ -83,12 +83,22 @@ describe('normalizeRouterRecord', () => {
   it('keeps saved secrets when edit fields are empty and resets TOFU on IP change', () => {
     const existing = {
       id: 'cisco-12345678', kind: 'cisco', displayName: 'Edge', ip: '192.168.1.2', user: 'u',
-      pass: 'saved', enablePass: 'enable', hostFp: 'fingerprint', enabled: true, createdAt: 1,
+      pass: 'saved', enablePass: 'enable', hostFp: 'fingerprint', hostName: 'old-edge', enabled: true, createdAt: 1,
     };
     const edited = normalizeRouterRecord({ ip: '192.168.1.3', pass: '', enablePass: '' }, { existing });
     assert.equal(edited.pass, 'saved');
     assert.equal(edited.enablePass, 'enable');
     assert.equal(edited.hostFp, '');
+    assert.equal(edited.hostName, '');
     assert.equal(edited.id, existing.id);
+  });
+
+  it('normalizes a stored detected host name without replacing displayName', () => {
+    const record = normalizeRouterRecord({
+      id: 'cisco-12345678', kind: 'cisco', displayName: 'Friendly edge',
+      hostName: 'edge\nrouter\t01', ip: '192.168.1.2', user: 'u', pass: 'p',
+    });
+    assert.equal(record.hostName, 'edge router 01');
+    assert.equal(record.displayName, 'Friendly edge');
   });
 });

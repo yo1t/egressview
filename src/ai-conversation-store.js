@@ -24,17 +24,31 @@ function createAiConversationStore({ getDb }) {
 
   function appendMessage(row) {
     const database = requireDb();
-    database.prepare(`
+    const insertMessage = database.prepare(`
       INSERT OR IGNORE INTO ai_messages
         (messageId, conversationId, requestId, role, body, createdAt,
          provider, model, rangeFrom, rangeTo, status, errorCode)
       VALUES
         (@messageId, @conversationId, @requestId, @role, @body, @createdAt,
          @provider, @model, @rangeFrom, @rangeTo, @status, @errorCode)
-    `).run(row);
-    return database.prepare(
-      'SELECT * FROM ai_messages WHERE requestId = ? AND role = ?'
-    ).get(row.requestId, row.role);
+    `);
+    const insertScope = database.prepare(`
+      INSERT INTO ai_message_scopes (messageId, sourceKind, sourceId)
+      VALUES (?, ?, ?)
+    `);
+    const findMessage = database.prepare(`
+      SELECT m.*, s.sourceKind, s.sourceId
+      FROM ai_messages m
+      LEFT JOIN ai_message_scopes s ON s.messageId = m.messageId
+      WHERE m.requestId = ? AND m.role = ?
+    `);
+    return database.transaction(message => {
+      const inserted = insertMessage.run(message);
+      if (inserted.changes && message.sourceKind && message.sourceId) {
+        insertScope.run(message.messageId, message.sourceKind, message.sourceId);
+      }
+      return findMessage.get(message.requestId, message.role);
+    })(row);
   }
 
   function listConversations(limit = 100) {
@@ -56,12 +70,15 @@ function createAiConversationStore({ getDb }) {
     // UUID and must not decide ordering.
     return requireDb().prepare(`
       SELECT m.*,
+             s.sourceKind,
+             s.sourceId,
              u.inputTokens AS usageInputTokens,
              u.outputTokens AS usageOutputTokens,
              u.totalTokens AS usageTotalTokens,
              u.estimatedCostUsd,
              u.pricingVersion
       FROM ai_messages m
+      LEFT JOIN ai_message_scopes s ON s.messageId = m.messageId
       LEFT JOIN ai_usage u
         ON m.role = 'assistant' AND u.requestId = m.requestId AND u.kind = 'chat'
       WHERE m.conversationId = ?
@@ -72,6 +89,10 @@ function createAiConversationStore({ getDb }) {
   function deleteConversation(conversationId) {
     const database = requireDb();
     return database.transaction(id => {
+      database.prepare(`
+        DELETE FROM ai_message_scopes
+        WHERE messageId IN (SELECT messageId FROM ai_messages WHERE conversationId = ?)
+      `).run(id);
       database.prepare('DELETE FROM ai_messages WHERE conversationId = ?').run(id);
       return database.prepare('DELETE FROM ai_conversations WHERE conversationId = ?').run(id).changes > 0;
     })(conversationId);

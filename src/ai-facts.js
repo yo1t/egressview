@@ -1,10 +1,10 @@
 'use strict';
 
-function countThreats(history, threatIntel, from, to) {
+function countThreats(history, threatIntel, from, to, sourceScope = null) {
   let safe = 0;
   let warn = 0;
   let danger = 0;
-  for (const { dst, dstHost, cnt } of history.groupDstByTimeRange(from, to)) {
+  for (const { dst, dstHost, cnt } of history.groupDstByTimeRange(from, to, { sourceScope })) {
     const threat = threatIntel?.matchThreatIntel(dst, dstHost || dst);
     if (!threat) safe += cnt;
     else if (threat.confidence === 'low') warn += cnt;
@@ -13,10 +13,10 @@ function countThreats(history, threatIntel, from, to) {
   return { safe, warn, danger };
 }
 
-function periodFacts(history, threatIntel, from, to) {
+function periodFacts(history, threatIntel, from, to, sourceScope = null) {
   return {
-    ...history.countFactsByTimeRange(from, to),
-    ...countThreats(history, threatIntel, from, to),
+    ...history.countFactsByTimeRange(from, to, { sourceScope }),
+    ...countThreats(history, threatIntel, from, to, sourceScope),
   };
 }
 
@@ -48,7 +48,7 @@ function collectionFacts(routers) {
   };
 }
 
-function buildAiFacts({ history, threatIntel, routers, from, to, serverTime = Date.now() }) {
+function buildAiFacts({ history, threatIntel, routers, from, to, sourceScope = null, serverTime = Date.now() }) {
   const durationMs = to - from;
   const previousFrom = from - durationMs;
   const previousTo = from;
@@ -57,8 +57,9 @@ function buildAiFacts({ history, threatIntel, routers, from, to, serverTime = Da
     range: { from, to, durationMs },
     previousRange: { from: previousFrom, to: previousTo, durationMs },
     collection: collectionFacts(routers),
-    current: periodFacts(history, threatIntel, from, to),
-    previous: periodFacts(history, threatIntel, previousFrom, previousTo),
+    sourceScope,
+    current: periodFacts(history, threatIntel, from, to, sourceScope),
+    previous: periodFacts(history, threatIntel, previousFrom, previousTo, sourceScope),
   };
 }
 

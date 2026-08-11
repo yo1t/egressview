@@ -97,7 +97,7 @@ class FakeElement {
   }
 }
 
-function makeHarness({ rows = [], apiFetch = null, timeRange = { from: null, to: null } } = {}) {
+function makeHarness({ rows = [], apiFetch = null, timeRange = { from: null, to: null }, sourceScope = null } = {}) {
   const ids = new Map();
   const register = (id, el) => ids.set(id, el);
   const ensureEl = id => {
@@ -158,6 +158,13 @@ function makeHarness({ rows = [], apiFetch = null, timeRange = { from: null, to:
     selectedIp: null,
     selectedMac: null,
     serverTimeOffset: 0,
+    appendDisplayScope(params) {
+      if (sourceScope) {
+        params.set('sourceKind', sourceScope.sourceKind);
+        params.set('sourceId', sourceScope.sourceId);
+      }
+      return params;
+    },
     setServerTimeOffset() {},
     getTimeRange: () => timeRange,
     apiFetch: apiFetch || (async url => {
@@ -209,6 +216,21 @@ describe('Connection Log view behavior', () => {
   it('rejects export when the selected period has no lower bound', () => {
     const h = makeHarness();
     assert.throws(() => h.context.buildConnectionExportUrl('csv'), /log\.export\.period-required/);
+  });
+
+  it('adds the selected collection source to history and export requests', async () => {
+    const h = makeHarness({
+      timeRange: { from: 1000, to: 2000 },
+      sourceScope: { sourceKind: 'agent', sourceId: 'agent-1' },
+    });
+    const exported = new URL(h.context.buildConnectionExportUrl('csv'), 'http://local');
+    assert.equal(exported.searchParams.get('sourceKind'), 'agent');
+    assert.equal(exported.searchParams.get('sourceId'), 'agent-1');
+
+    h.context.updateLogView();
+    await h.settle();
+    assert.equal(h.lastConnectionsParams().get('sourceKind'), 'agent');
+    assert.equal(h.lastConnectionsParams().get('sourceId'), 'agent-1');
   });
 
   it('uses paged API calls by default', async () => {

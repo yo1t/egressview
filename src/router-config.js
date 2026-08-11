@@ -3,6 +3,7 @@
 const fs = require('fs');
 const { MIGRATED_IDS, SUPPORTED_KINDS, generateRouterId, isValidRouterId } = require('./router-id');
 const configIo = require('./config');
+const { normalizeRouterHostName } = require('./pollers/router-prompt');
 
 const MAX_ROUTERS = 10;
 
@@ -19,6 +20,7 @@ function legacyRouter(data, kind) {
     id: MIGRATED_IDS[kind],
     kind,
     displayName: kind === 'yamaha' ? 'Yamaha RTX' : 'Cisco IOS',
+    hostName: '',
     ip: legacy.ip || '',
     user: legacy.user || '',
     pass: legacy.pass || '',
@@ -44,6 +46,7 @@ function normalizeRouterRecord(input, { existing = null, knownIds = [] } = {}) {
   const passInput = typeof input?.pass === 'string' ? input.pass : '';
   const enableInput = typeof input?.enablePass === 'string' ? input.enablePass : '';
   const ipChanged = !!existing && ip !== existing.ip;
+  const hostName = ipChanged ? '' : normalizeRouterHostName(input?.hostName ?? existing?.hostName);
   const nat = kind === 'yamaha' ? String(input?.nat ?? existing?.nat ?? '100').trim() : '';
   if (kind === 'yamaha' && !/^\d{1,6}$/.test(nat)) throw new Error('invalid NAT descriptor');
 
@@ -51,6 +54,7 @@ function normalizeRouterRecord(input, { existing = null, knownIds = [] } = {}) {
     id,
     kind,
     displayName,
+    hostName,
     ip,
     user,
     pass: passInput || existing?.pass || '',
@@ -114,6 +118,7 @@ function publicRouter(record, status = {}) {
     id: record.id,
     kind: record.kind,
     displayName: record.displayName,
+    hostName: record.hostName || '',
     ip: record.ip,
     user: record.user,
     nat: record.kind === 'yamaha' ? record.nat : undefined,

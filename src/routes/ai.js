@@ -9,6 +9,9 @@ const { randomUUID } = require('node:crypto');
 const { monthlyRanges, pricingCoverage, pricingMetadata, pricingStatus } = require('../ai-usage');
 const { AI_PRIOR_ANALYSIS_MAX_CHARS } = require('../ai-limits');
 const logger = require('../logger');
+const {
+  sourceScopeShape, validateSourceScopePair, requireKnownSourceScope,
+} = require('../source-scope');
 
 const providerSchema = z.enum(['disabled', 'ollama', 'anthropic', 'openai', 'bedrock']);
 const cloudProviderSchema = z.enum(['anthropic', 'openai']);
@@ -50,26 +53,32 @@ const configSchema = z.object({
 const emptySchema = z.object({}).strict();
 const bedrockModelDiscoverySchema = z.object({ region: regionSchema }).strict();
 const timestampSchema = z.coerce.number().int().nonnegative();
-const factsQuerySchema = z.object({
+const factsQueryShape = {
   from: timestampSchema,
   to: timestampSchema.optional(),
-}).strict();
+  ...sourceScopeShape,
+};
+const factsQuerySchema = z.object(factsQueryShape).strict().superRefine(validateSourceScopePair);
 const MAX_FACTS_RANGE_MS = 14 * 24 * 60 * 60 * 1000;
 const languageSchema = z.enum(['ja', 'en']);
-const analysisSchema = factsQuerySchema.extend({
+const analysisSchema = z.object({
+  ...factsQueryShape,
   cloudConsentConfirmed: z.boolean().optional(),
   // UI language so the model replies in the language the user selected.
   language: languageSchema.optional(),
-});
+}).strict().superRefine(validateSourceScopePair);
 const idSchema = z.string().uuid();
-const chatSchema = analysisSchema.extend({
+const chatSchema = z.object({
+  ...factsQueryShape,
+  cloudConsentConfirmed: z.boolean().optional(),
+  language: languageSchema.optional(),
   conversationId: idSchema.optional(),
   requestId: idSchema.optional(),
   message: z.string().trim().min(1).max(4000),
   // Optional text of the most recent "analyze current period" result so the
   // chat can reason about the same threats. Bounded to keep the prompt small.
   priorAnalysis: z.string().max(AI_PRIOR_ANALYSIS_MAX_CHARS).optional(),
-});
+}).strict().superRefine(validateSourceScopePair);
 const conversationParamsSchema = z.object({ id: idSchema }).strict();
 const usageQuerySchema = z.object({
   timezoneOffset: z.coerce.number().int().min(-840).max(840).default(0),
@@ -80,9 +89,27 @@ const pricingCheckSchema = z.object({
 }).strict();
 
 module.exports = function aiRoutes({
-  requireAdmin, aiProvider, saveConfig, history, threatIntel, routerManager, devices, asus,
+  requireAdmin, aiProvider, saveConfig, history, threatIntel, routerManager, devices, asus, agentIdentities,
 }) {
   const router = Router();
+  const collectionSources = sourceScope => {
+    const routers = routerManager?.list?.() || [];
+    if (!sourceScope) return routers;
+    if (sourceScope.sourceKind === 'router') {
+      return routers.filter(item => String(item.id) === sourceScope.sourceId);
+    }
+    const agent = agentIdentities?.listAgents?.()
+      .find(item => !item.revokedAt && String(item.agentId) === sourceScope.sourceId);
+    if (!agent) return [];
+    return [{
+      id: agent.agentId,
+      kind: 'agent',
+      displayName: agent.hostName || 'Mac Agent',
+      enabled: true,
+      ready: Number(agent.lastSeenAt) > 0 && Date.now() - Number(agent.lastSeenAt) <= 5 * 60 * 1000,
+      lastPollAt: agent.lastSeenAt || null,
+    }];
+  };
   const warnedUnpricedModels = new Set();
 
   function persistUsage(result, { kind, requestId = randomUUID(), conversationId = null } = {}) {
@@ -227,6 +254,8 @@ module.exports = function aiRoutes({
   router.get('/ai/facts', requireAdmin, (req, res) => {
     const parsed = parseRequest(factsQuerySchema, req.query, res);
     if (!parsed.ok) return;
+    const scoped = requireKnownSourceScope(parsed.data, { routerManager, agentIdentities }, res);
+    if (!scoped.ok) return;
     const to = parsed.data.to ?? Date.now();
     const { from } = parsed.data;
     if (to <= from) return res.status(400).json({ error: '"to" must be later than "from"' });
@@ -237,9 +266,10 @@ module.exports = function aiRoutes({
       res.json(buildAiFacts({
         history,
         threatIntel,
-        routers: routerManager.list(),
+        routers: collectionSources(scoped.scope),
         from,
         to,
+        sourceScope: scoped.scope,
       }));
     } catch (error) {
       res.status(500).json({ error: 'AI facts could not be calculated' });
@@ -288,6 +318,8 @@ module.exports = function aiRoutes({
   router.post('/ai/analyze', requireAdmin, async (req, res) => {
     const parsed = parseRequest(analysisSchema, req.body, res);
     if (!parsed.ok) return;
+    const scoped = requireKnownSourceScope(parsed.data, { routerManager, agentIdentities }, res);
+    if (!scoped.ok) return;
     const to = parsed.data.to ?? Date.now();
     const { from } = parsed.data;
     if (to <= from) return res.status(400).json({ error: '"to" must be later than "from"' });
@@ -297,9 +329,10 @@ module.exports = function aiRoutes({
     const controller = new AbortController();
     req.once('aborted', () => controller.abort());
     try {
-      const routers = routerManager.list();
-      const facts = buildAiFacts({ history, threatIntel, routers, from, to });
-      const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus });
+      const sourceScope = scoped.scope;
+      const routers = collectionSources(sourceScope);
+      const facts = buildAiFacts({ history, threatIntel, routers, from, to, sourceScope });
+      const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus, sourceScope });
       const result = await aiProvider.generateInsight(context, {
         signal: controller.signal,
         cloudConsentConfirmed: parsed.data.cloudConsentConfirmed,
@@ -337,6 +370,8 @@ module.exports = function aiRoutes({
   router.post('/ai/chat', requireAdmin, async (req, res) => {
     const parsed = parseRequest(chatSchema, req.body, res);
     if (!parsed.ok) return;
+    const scoped = requireKnownSourceScope(parsed.data, { routerManager, agentIdentities }, res);
+    if (!scoped.ok) return;
     const to = parsed.data.to ?? Date.now();
     const { from } = parsed.data;
     if (to <= from || to - from > MAX_FACTS_RANGE_MS) {
@@ -344,15 +379,29 @@ module.exports = function aiRoutes({
     }
     const publicConfig = aiProvider.getPublicConfig();
     if (publicConfig.provider === 'disabled') return res.status(400).json({ error: 'AI provider is disabled' });
+    const sourceScope = scoped.scope;
     let conversationId = parsed.data.conversationId || randomUUID();
     const requestId = parsed.data.requestId || randomUUID();
     const model = publicConfig.models[publicConfig.provider] || '';
     const existingConversation = history.getConversation(conversationId);
     let startedNewConversation = false;
-    if (existingConversation && (existingConversation.provider !== publicConfig.provider || existingConversation.model !== model)) {
-      // A provider/model switch must not mix identities inside an append-only
-      // conversation. Preserve the old history and continue the question in a
-      // fresh conversation instead of rejecting an otherwise valid request.
+    const existingMessages = existingConversation ? history.getMessages(conversationId) : [];
+    const previousUserMessage = existingMessages.findLast(message => message.role === 'user');
+    const previousScope = previousUserMessage?.sourceKind && previousUserMessage?.sourceId
+      ? { sourceKind: previousUserMessage.sourceKind, sourceId: previousUserMessage.sourceId }
+      : null;
+    const scopeChanged = !!previousUserMessage && (
+      previousScope?.sourceKind !== sourceScope?.sourceKind
+      || previousScope?.sourceId !== sourceScope?.sourceId
+    );
+    if (existingConversation && (
+      existingConversation.provider !== publicConfig.provider
+      || existingConversation.model !== model
+      || scopeChanged
+    )) {
+      // Provider, model, and source scope are conversation identity. Starting a
+      // fresh conversation prevents prior results from another scope being
+      // resent to the configured AI provider.
       conversationId = randomUUID();
       startedNewConversation = true;
     }
@@ -363,6 +412,7 @@ module.exports = function aiRoutes({
       messageId: randomUUID(), conversationId, requestId, role: 'user', body: parsed.data.message,
       createdAt: Date.now(), provider: publicConfig.provider, model, rangeFrom: from, rangeTo: to,
       status: 'complete', errorCode: null,
+      sourceKind: sourceScope?.sourceKind || null, sourceId: sourceScope?.sourceId || null,
     });
     if (userMessage.conversationId !== conversationId) {
       return res.status(409).json({ error: 'requestId already belongs to another conversation' });
@@ -377,9 +427,9 @@ module.exports = function aiRoutes({
     const controller = new AbortController();
     req.once('aborted', () => controller.abort());
     try {
-      const routers = routerManager.list();
-      const facts = buildAiFacts({ history, threatIntel, routers, from, to });
-      const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus });
+      const routers = collectionSources(sourceScope);
+      const facts = buildAiFacts({ history, threatIntel, routers, from, to, sourceScope });
+      const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus, sourceScope });
       const response = await aiProvider.generateInsight(context, {
         signal: controller.signal,
         cloudConsentConfirmed: parsed.data.cloudConsentConfirmed,
@@ -393,6 +443,7 @@ module.exports = function aiRoutes({
         messageId: randomUUID(), conversationId, requestId, role: 'assistant', body: response.text,
         createdAt: Date.now(), provider: response.provider, model: response.model, rangeFrom: from, rangeTo: to,
         status: 'complete', errorCode: null,
+        sourceKind: sourceScope?.sourceKind || null, sourceId: sourceScope?.sourceId || null,
       });
       persistUsage(response, { kind: 'chat', requestId, conversationId });
       res.json({
@@ -409,6 +460,7 @@ module.exports = function aiRoutes({
         messageId: randomUUID(), conversationId, requestId, role: 'assistant', body: null,
         createdAt: Date.now(), provider: publicConfig.provider, model, rangeFrom: from, rangeTo: to,
         status: 'failed', errorCode: error.code || error.name || 'AI_ERROR',
+        sourceKind: sourceScope?.sourceKind || null, sourceId: sourceScope?.sourceId || null,
       });
       const status = error.code === 'AI_BUSY' ? 409 : error.code === 'AI_CONSENT_REQUIRED' ? 403 : 400;
       res.status(status).json({

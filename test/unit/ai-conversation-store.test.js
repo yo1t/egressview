@@ -23,10 +23,12 @@ describe('append-only AI conversation store', () => {
     store.appendMessage({
       messageId: 'm1', conversationId: 'c1', requestId: 'r1', role: 'user', body: 'question',
       createdAt: 2, provider: 'ollama', model: 'm1', rangeFrom: 0, rangeTo: 1, status: 'complete', errorCode: null,
+      sourceKind: 'router', sourceId: 'router-1',
     });
     store.appendMessage({
       messageId: 'm2', conversationId: 'c1', requestId: 'r1', role: 'assistant', body: 'answer',
       createdAt: 3, provider: 'ollama', model: 'm1', rangeFrom: 0, rangeTo: 1, status: 'complete', errorCode: null,
+      sourceKind: 'router', sourceId: 'router-1',
     });
     db.prepare(`INSERT INTO ai_usage VALUES
       ('u1', 'r1', 'c1', 'chat', 3, 'ollama', 'm1', 10, 4, 14, 0, 'v1', 0, 0)`
@@ -39,6 +41,9 @@ describe('append-only AI conversation store', () => {
     assert.equal(messages[1].usageTotalTokens, 14);
     assert.equal(messages[1].estimatedCostUsd, 0);
     assert.equal(messages[1].pricingVersion, 'v1');
+    assert.deepEqual(messages.map(row => [row.sourceKind, row.sourceId]), [
+      ['router', 'router-1'], ['router', 'router-1'],
+    ]);
     assert.equal(store.listConversations()[0].messageCount, 2);
     assert.deepEqual(store.getStorageStats(), { conversations: 1, messages: 2, bodyBytes: 14 });
     db.close();
@@ -60,6 +65,23 @@ describe('append-only AI conversation store', () => {
     db.close();
   });
 
+  it('keeps the original source scope on an idempotent replay', () => {
+    const { db, store } = storeHarness();
+    store.createConversation({ conversationId: 'c1', createdAt: 1, provider: 'ollama', model: 'm1', rangeFrom: 0, rangeTo: 1 });
+    const base = {
+      messageId: 'm1', conversationId: 'c1', requestId: 'r1', role: 'user', body: 'original',
+      createdAt: 2, provider: 'ollama', model: 'm1', rangeFrom: 0, rangeTo: 1,
+      status: 'complete', errorCode: null, sourceKind: 'router', sourceId: 'router-1',
+    };
+    store.appendMessage(base);
+    const replay = store.appendMessage({
+      ...base, messageId: 'm2', sourceKind: 'agent', sourceId: 'agent-1',
+    });
+    assert.equal(replay.sourceKind, 'router');
+    assert.equal(replay.sourceId, 'router-1');
+    db.close();
+  });
+
   it('restores the append-only history after reopening the database', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-ai-history-'));
     const dbPath = path.join(dir, 'history.db');
@@ -70,11 +92,13 @@ describe('append-only AI conversation store', () => {
     store.appendMessage({
       messageId: 'm1', conversationId: 'c1', requestId: 'r1', role: 'user', body: 'survives restart',
       createdAt: 2, provider: 'ollama', model: 'm1', rangeFrom: 0, rangeTo: 1, status: 'complete', errorCode: null,
+      sourceKind: 'agent', sourceId: 'agent-1',
     });
     db.close();
     db = new Database(dbPath);
     store = createAiConversationStore({ getDb: () => db });
     assert.equal(store.getMessages('c1')[0].body, 'survives restart');
+    assert.equal(store.getMessages('c1')[0].sourceId, 'agent-1');
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
   });
