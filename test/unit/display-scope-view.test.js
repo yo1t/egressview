@@ -18,6 +18,7 @@ function translation(key) {
     'source.group.routers': 'Routers',
     'source.group.agents': 'Mac Agents',
     'source.router.fallback': 'Router',
+    'source.router.idFallback': 'Router {id}',
     'source.agent.fallback': 'Mac Agent {id}',
     'source.online': 'Online',
     'source.offline': 'Offline',
@@ -133,6 +134,12 @@ describe('display source scope', () => {
       'macbook (bbbbbbbb) · Offline',
       'Mac Agent cccccccc · Offline',
     ]);
+    context.routersResult = routers;
+    context.agentsResult = agents;
+    vm.runInContext('routerSources = routersResult; agentSources = agentsResult', context);
+    assert.equal(vm.runInContext("getDisplayScopeLabel({ sourceKind: 'router', sourceId: 'r1' })", context), 'edge-cisco (192.0.2.1)');
+    assert.equal(vm.runInContext("getDisplayScopeLabel({ sourceKind: 'agent', sourceId: 'aaaaaaaa-1' })", context), 'MacBook (aaaaaaaa)');
+    assert.equal(vm.runInContext("getDisplayScopeLabel({ sourceKind: 'router', sourceId: 'deleted-router' })", context), 'Router deleted-');
   });
 
   it('falls back to All only after both complete catalogs confirm removal', async () => {

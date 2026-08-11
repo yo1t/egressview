@@ -379,15 +379,29 @@ module.exports = function aiRoutes({
     }
     const publicConfig = aiProvider.getPublicConfig();
     if (publicConfig.provider === 'disabled') return res.status(400).json({ error: 'AI provider is disabled' });
+    const sourceScope = scoped.scope;
     let conversationId = parsed.data.conversationId || randomUUID();
     const requestId = parsed.data.requestId || randomUUID();
     const model = publicConfig.models[publicConfig.provider] || '';
     const existingConversation = history.getConversation(conversationId);
     let startedNewConversation = false;
-    if (existingConversation && (existingConversation.provider !== publicConfig.provider || existingConversation.model !== model)) {
-      // A provider/model switch must not mix identities inside an append-only
-      // conversation. Preserve the old history and continue the question in a
-      // fresh conversation instead of rejecting an otherwise valid request.
+    const existingMessages = existingConversation ? history.getMessages(conversationId) : [];
+    const previousUserMessage = existingMessages.findLast(message => message.role === 'user');
+    const previousScope = previousUserMessage?.sourceKind && previousUserMessage?.sourceId
+      ? { sourceKind: previousUserMessage.sourceKind, sourceId: previousUserMessage.sourceId }
+      : null;
+    const scopeChanged = !!previousUserMessage && (
+      previousScope?.sourceKind !== sourceScope?.sourceKind
+      || previousScope?.sourceId !== sourceScope?.sourceId
+    );
+    if (existingConversation && (
+      existingConversation.provider !== publicConfig.provider
+      || existingConversation.model !== model
+      || scopeChanged
+    )) {
+      // Provider, model, and source scope are conversation identity. Starting a
+      // fresh conversation prevents prior results from another scope being
+      // resent to the configured AI provider.
       conversationId = randomUUID();
       startedNewConversation = true;
     }
@@ -398,6 +412,7 @@ module.exports = function aiRoutes({
       messageId: randomUUID(), conversationId, requestId, role: 'user', body: parsed.data.message,
       createdAt: Date.now(), provider: publicConfig.provider, model, rangeFrom: from, rangeTo: to,
       status: 'complete', errorCode: null,
+      sourceKind: sourceScope?.sourceKind || null, sourceId: sourceScope?.sourceId || null,
     });
     if (userMessage.conversationId !== conversationId) {
       return res.status(409).json({ error: 'requestId already belongs to another conversation' });
@@ -412,7 +427,6 @@ module.exports = function aiRoutes({
     const controller = new AbortController();
     req.once('aborted', () => controller.abort());
     try {
-      const sourceScope = scoped.scope;
       const routers = collectionSources(sourceScope);
       const facts = buildAiFacts({ history, threatIntel, routers, from, to, sourceScope });
       const context = buildAiContext({ facts, history, routers, from, to, threatIntel, devices, asus, sourceScope });
@@ -429,6 +443,7 @@ module.exports = function aiRoutes({
         messageId: randomUUID(), conversationId, requestId, role: 'assistant', body: response.text,
         createdAt: Date.now(), provider: response.provider, model: response.model, rangeFrom: from, rangeTo: to,
         status: 'complete', errorCode: null,
+        sourceKind: sourceScope?.sourceKind || null, sourceId: sourceScope?.sourceId || null,
       });
       persistUsage(response, { kind: 'chat', requestId, conversationId });
       res.json({
@@ -445,6 +460,7 @@ module.exports = function aiRoutes({
         messageId: randomUUID(), conversationId, requestId, role: 'assistant', body: null,
         createdAt: Date.now(), provider: publicConfig.provider, model, rangeFrom: from, rangeTo: to,
         status: 'failed', errorCode: error.code || error.name || 'AI_ERROR',
+        sourceKind: sourceScope?.sourceKind || null, sourceId: sourceScope?.sourceId || null,
       });
       const status = error.code === 'AI_BUSY' ? 409 : error.code === 'AI_CONSENT_REQUIRED' ? 403 : 400;
       res.status(status).json({

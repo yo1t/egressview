@@ -94,6 +94,18 @@ describe('db-migrate: fresh database', () => {
     db.close();
   });
 
+  it('creates the additive v14 AI message scope table', () => {
+    const db = openDb(':memory:');
+    runMigrations(db, ':memory:');
+    const columns = db.prepare('PRAGMA table_info(ai_message_scopes)').all().map(row => row.name);
+    assert.deepEqual(columns, ['messageId', 'sourceKind', 'sourceId']);
+    assert.throws(() => db.prepare(`
+      INSERT INTO ai_message_scopes (messageId, sourceKind, sourceId)
+      VALUES ('missing', 'unknown', 'source')
+    `).run(), /CHECK constraint failed/);
+    db.close();
+  });
+
   it('does NOT create a backup for a fresh (empty) database', () => {
     const p = tmpDb('fresh-no-backup');
     const db = openDb(p);
@@ -239,8 +251,42 @@ describe('db-migrate: v11 browser roles', () => {
   });
 });
 
-describe('db-migrate: v13 Hub-Agent additive schema', () => {
-  it('preserves v12 data and creates a verified v12-to-v13 backup', () => {
+describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
+  it('preserves v13 AI messages and creates a verified v13-to-v14 backup', () => {
+    const p = tmpDb('v14-ai-scope-upgrade');
+    let db = openDb(p);
+    runMigrations(db, p);
+    db.prepare(`
+      INSERT INTO ai_conversations
+        (conversationId, createdAt, provider, model, rangeFrom, rangeTo)
+      VALUES ('c1', 1, 'ollama', 'm1', 0, 1)
+    `).run();
+    db.prepare(`
+      INSERT INTO ai_messages
+        (messageId, conversationId, requestId, role, body, createdAt,
+         provider, model, rangeFrom, rangeTo, status, errorCode)
+      VALUES ('m1', 'c1', 'r1', 'user', 'keep-me', 2,
+              'ollama', 'm1', 0, 1, 'complete', NULL)
+    `).run();
+    db.exec('DROP TABLE ai_message_scopes');
+    db.pragma('user_version = 13');
+    db.close();
+
+    db = openDb(p);
+    runMigrations(db, p);
+    assert.equal(db.pragma('user_version', { simple: true }), 14);
+    assert.equal(db.prepare(`SELECT body FROM ai_messages WHERE messageId = 'm1'`).get().body, 'keep-me');
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ai_message_scopes').get().count, 0);
+    assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
+    db.close();
+
+    const backups = fs.readdirSync(TMP)
+      .filter(name => name.startsWith('v14-ai-scope-upgrade.db.pre-migration.v13-to-v14'));
+    assert.equal(backups.length, 1);
+    _verifyDbCopy(path.join(TMP, backups[0]));
+  });
+
+  it('preserves v12 data and creates a verified v12-to-v14 backup', () => {
     const p = tmpDb('v13-agent-upgrade');
     const db = openDb(p);
     db.exec(`
@@ -252,16 +298,19 @@ describe('db-migrate: v13 Hub-Agent additive schema', () => {
 
     const upgraded = openDb(p);
     runMigrations(upgraded, p);
-    assert.equal(upgraded.pragma('user_version', { simple: true }), 13);
+    assert.equal(upgraded.pragma('user_version', { simple: true }), 14);
     assert.equal(upgraded.prepare('SELECT value FROM sentinel WHERE id = 1').get().value, 'keep-me');
     assert.ok(upgraded.prepare(
       `SELECT name FROM sqlite_master WHERE type='table' AND name='agent_observations'`
+    ).get());
+    assert.ok(upgraded.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='ai_message_scopes'`
     ).get());
     assert.equal(upgraded.pragma('integrity_check', { simple: true }), 'ok');
     upgraded.close();
 
     const backups = fs.readdirSync(TMP)
-      .filter(name => name.startsWith('v13-agent-upgrade.db.pre-migration.v12-to-v13'));
+      .filter(name => name.startsWith('v13-agent-upgrade.db.pre-migration.v12-to-v14'));
     assert.equal(backups.length, 1);
     const backupPath = path.join(TMP, backups[0]);
     _verifyDbCopy(backupPath);
@@ -270,6 +319,9 @@ describe('db-migrate: v13 Hub-Agent additive schema', () => {
     assert.equal(backup.prepare('SELECT value FROM sentinel WHERE id = 1').get().value, 'keep-me');
     assert.equal(backup.prepare(
       `SELECT name FROM sqlite_master WHERE type='table' AND name='agent_observations'`
+    ).get(), undefined);
+    assert.equal(backup.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='ai_message_scopes'`
     ).get(), undefined);
     backup.close();
   });
