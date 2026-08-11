@@ -48,7 +48,7 @@ function documentedRoutes(source) {
 describe('REST API documentation', () => {
   it('lists every implemented endpoint and no nonexistent endpoint in both languages', () => {
     const implemented = implementedRoutes();
-    assert.equal(implemented.length, 99, 'review the API reference when the route count changes');
+    assert.equal(implemented.length, 101, 'review the API reference when the route count changes');
 
     for (const file of apiDocs) {
       const source = fs.readFileSync(path.join(root, file), 'utf8');
@@ -65,6 +65,7 @@ describe('REST API documentation', () => {
       'GET /api/auth/status',
       'POST /api/admin/verify',
       'POST /api/agent/enroll',
+      'POST /api/agent/ingest',
       'POST /api/agent/token/rotate',
       'POST /api/auth/login',
     ]);

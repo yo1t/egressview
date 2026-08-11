@@ -2,12 +2,20 @@
 
 const { describe, it, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const http = require('node:http');
+const path = require('node:path');
 const { Readable, Writable } = require('node:stream');
 const express = require('express');
 
 const agentRoutes = require('../../src/routes/agents');
 const agentIdentities = require('../../src/agent-identities');
+const agentIngestStore = require('../../src/agent-ingest-store');
+
+const golden = JSON.parse(fs.readFileSync(
+  path.join(__dirname, '../../protocol/agent-ingest/v1/golden.json'),
+  'utf8'
+));
 
 const metadata = {
   hostName: 'route-test-mac',
@@ -16,10 +24,16 @@ const metadata = {
   agentVersion: '0.1.13',
 };
 
-beforeEach(() => agentIdentities._initForTest());
-after(() => agentIdentities.closeDb());
+beforeEach(() => {
+  agentIdentities._initForTest();
+  agentIngestStore._initForTest();
+});
+after(() => {
+  agentIdentities.closeDb();
+  agentIngestStore.closeDb();
+});
 
-function makeApp() {
+function makeApp({ agentIngest = agentIngestStore } = {}) {
   const audits = [];
   const app = express();
   app.use(express.json());
@@ -43,9 +57,19 @@ function makeApp() {
     requireAdmin,
     requireAgent,
     agentIdentities,
+    agentIngest,
     authAudit: { append: event => audits.push(event) },
   }));
   return { app, audits };
+}
+
+function ingestEnvelope() {
+  const envelope = structuredClone(golden);
+  const now = Date.now();
+  envelope.sentAt = new Date(now).toISOString();
+  envelope.observations[0].firstObservedAt = new Date(now - 1000).toISOString();
+  envelope.observations[0].lastObservedAt = new Date(now).toISOString();
+  return envelope;
 }
 
 function request(app, method, url, { body = null, headers = {}, localAddress = '127.0.0.1' } = {}) {
@@ -181,5 +205,143 @@ describe('Agent HTTP credential lifecycle', () => {
     assert.equal(agentIdentities.verifyAgentToken(enrolled.body.token), null);
     assert.equal(agentIdentities.listAgents()[0].agentId, id);
     assert.equal(typeof agentIdentities.listAgents()[0].revokedAt, 'number');
+  });
+});
+
+describe('Agent HTTP ingest', () => {
+  it('stores a valid batch and returns a stable ACK on replay', async () => {
+    const { app, audits } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const envelope = ingestEnvelope();
+    const headers = { Authorization: `Bearer ${enrolled.body.token}` };
+
+    const first = await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.accepted, 1);
+    assert.equal(first.body.duplicate, 0);
+    assert.equal(first.body.replayed, false);
+
+    const replay = await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(
+      { ...replay.body, replayed: false },
+      first.body
+    );
+    assert.equal(replay.body.replayed, true);
+    assert.equal(agentIngestStore._dbForTest()
+      .prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 1);
+
+    const auditJson = JSON.stringify(audits);
+    assert.equal(auditJson.includes(envelope.agent.hostName), false);
+    assert.equal(auditJson.includes(envelope.observations[0].processName), false);
+    assert.equal(auditJson.includes(enrolled.body.token), false);
+  });
+
+  it('ingests in an offline/private profile without making outbound requests', async () => {
+    const originalFetch = global.fetch;
+    let outboundCalls = 0;
+    global.fetch = async () => {
+      outboundCalls += 1;
+      throw new Error('outbound request is prohibited');
+    };
+    try {
+      const { app } = makeApp();
+      const { enrolled } = await enrolledAgent(app);
+      const response = await request(app, 'POST', '/api/agent/ingest', {
+        body: ingestEnvelope(),
+        headers: { Authorization: `Bearer ${enrolled.body.token}` },
+        localAddress: '127.0.0.1',
+      });
+      assert.equal(response.status, 200);
+      assert.equal(outboundCalls, 0);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('rejects unauthenticated, future, and unknown-schema batches without writes', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const envelope = ingestEnvelope();
+
+    const anonymous = await request(app, 'POST', '/api/agent/ingest', { body: envelope });
+    assert.equal(anonymous.status, 401);
+
+    const future = structuredClone(envelope);
+    const futureTime = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString();
+    future.observations[0].firstObservedAt = futureTime;
+    future.observations[0].lastObservedAt = futureTime;
+    const futureResponse = await request(app, 'POST', '/api/agent/ingest', {
+      body: future,
+      headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+    assert.equal(futureResponse.status, 422);
+
+    const unknown = structuredClone(envelope);
+    unknown.schemaVersion = 2;
+    const unknownResponse = await request(app, 'POST', '/api/agent/ingest', {
+      body: unknown,
+      headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+    assert.equal(unknownResponse.status, 400);
+    assert.equal(agentIngestStore._dbForTest()
+      .prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
+  });
+
+  it('limits each Agent to 30 ingest requests per minute and exposes aggregate metrics', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const envelope = ingestEnvelope();
+    const headers = { Authorization: `Bearer ${enrolled.body.token}` };
+    for (let index = 0; index < 30; index += 1) {
+      const response = await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers });
+      assert.equal(response.status, 200);
+    }
+    const limited = await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers });
+    assert.equal(limited.status, 429);
+    assert.match(limited.raw, /Retry-After:/i);
+
+    const metrics = await request(app, 'GET', '/api/agents/ingest-metrics');
+    assert.equal(metrics.status, 200);
+    assert.equal(metrics.body.requests, 31);
+    assert.equal(metrics.body.rateLimited, 1);
+    assert.equal(metrics.body.limits.maxConcurrent, 4);
+    assert.equal(JSON.stringify(metrics.body).includes(envelope.agent.hostName), false);
+  });
+
+  it('limits global ingest concurrency to four without logging payload fields', async () => {
+    const completions = [];
+    const slowStore = {
+      storeBatch(_agentId, envelope) {
+        return new Promise(resolve => completions.push(() => resolve({
+          batchId: envelope.batchId,
+          accepted: envelope.observations.length,
+          duplicate: 0,
+          rejected: 0,
+          receivedAt: Date.now(),
+          replayed: false,
+        })));
+      },
+    };
+    const { app } = makeApp({ agentIngest: slowStore });
+    const { enrolled } = await enrolledAgent(app);
+    const headers = { Authorization: `Bearer ${enrolled.body.token}` };
+    const pending = Array.from({ length: 4 }, (_value, index) => {
+      const envelope = ingestEnvelope();
+      envelope.batchId = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+      return request(app, 'POST', '/api/agent/ingest', { body: envelope, headers });
+    });
+    while (completions.length < 4) await new Promise(resolve => setImmediate(resolve));
+
+    const busy = await request(app, 'POST', '/api/agent/ingest', {
+      body: ingestEnvelope(),
+      headers,
+    });
+    assert.equal(busy.status, 429);
+    assert.equal(busy.body.error, 'Agent ingest is busy');
+
+    completions.forEach(complete => complete());
+    const responses = await Promise.all(pending);
+    assert.deepEqual(responses.map(response => response.status), [200, 200, 200, 200]);
   });
 });

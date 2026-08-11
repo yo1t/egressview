@@ -2,7 +2,11 @@
 
 const { Router } = require('express');
 const { z } = require('zod');
-const { agentMetadataSchema } = require('../agent-ingest-schema');
+const {
+  agentMetadataSchema,
+  agentIngestEnvelopeSchema,
+  validateAgentObservationWindow,
+} = require('../agent-ingest-schema');
 const { parseRequest } = require('../http-validation');
 const { isLoopbackAddress } = require('../deployment-profile');
 const logger = require('../logger');
@@ -15,6 +19,10 @@ const agentIdSchema = z.object({ agentId: z.string().uuid() }).strict();
 const MAX_FAILURE_BUCKETS = 2048;
 const MAX_FAILURES = 5;
 const FAILURE_WINDOW_MS = 5 * 60 * 1000;
+const INGEST_WINDOW_MS = 60 * 1000;
+const INGEST_REQUESTS_PER_WINDOW = 30;
+const INGEST_MAX_CONCURRENCY = 4;
+const MAX_INGEST_BUCKETS = 4096;
 
 function hasSecureAgentTransport(req) {
   return req.secure || isLoopbackAddress(req.socket?.localAddress || '');
@@ -24,10 +32,23 @@ module.exports = function agentRoutes({
   requireAdmin,
   requireAgent,
   agentIdentities,
+  agentIngest = null,
   authAudit,
 }) {
   const router = Router();
   const failedEnrollments = new Map();
+  const ingestWindows = new Map();
+  let activeIngests = 0;
+  const ingestMetrics = {
+    requests: 0,
+    accepted: 0,
+    duplicate: 0,
+    rejected: 0,
+    failures: 0,
+    rateLimited: 0,
+    maxInFlight: 0,
+    lastDurationMs: 0,
+  };
 
   router.use(['/agents', '/agent'], (_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -75,6 +96,25 @@ module.exports = function agentRoutes({
     const failure = { count, expiresAt: now + FAILURE_WINDOW_MS };
     failedEnrollments.set(key, failure);
     return failure;
+  }
+
+  function acquireAgentWindow(agentId, now) {
+    let window = ingestWindows.get(agentId);
+    if (!window || window.resetAt <= now) {
+      if (ingestWindows.size >= MAX_INGEST_BUCKETS && !ingestWindows.has(agentId)) {
+        for (const [candidate, value] of ingestWindows) {
+          if (value.resetAt <= now) ingestWindows.delete(candidate);
+        }
+        if (ingestWindows.size >= MAX_INGEST_BUCKETS) {
+          ingestWindows.delete(ingestWindows.keys().next().value);
+        }
+      }
+      window = { count: 0, resetAt: now + INGEST_WINDOW_MS };
+      ingestWindows.set(agentId, window);
+    }
+    if (window.count >= INGEST_REQUESTS_PER_WINDOW) return window;
+    window.count += 1;
+    return null;
   }
 
   router.use('/agent', (req, res, next) => {
@@ -148,6 +188,17 @@ module.exports = function agentRoutes({
     }
   });
 
+  router.get('/agents/ingest-metrics', requireAdmin, (_req, res) => {
+    res.json({
+      ...ingestMetrics,
+      inFlight: activeIngests,
+      limits: {
+        requestsPerMinutePerAgent: INGEST_REQUESTS_PER_WINDOW,
+        maxConcurrent: INGEST_MAX_CONCURRENCY,
+      },
+    });
+  });
+
   router.post('/agents/:agentId/revoke', requireAdmin, (req, res) => {
     const parsed = parseRequest(agentIdSchema, req.params, res);
     if (!parsed.ok) return;
@@ -181,6 +232,82 @@ module.exports = function agentRoutes({
     });
     if (!rotated) return res.status(401).json({ error: 'Agent credential is not active' });
     return res.json(rotated);
+  });
+
+  router.post('/agent/ingest', requireAgent, async (req, res) => {
+    const startedAt = Date.now();
+    ingestMetrics.requests += 1;
+    const limited = acquireAgentWindow(req.agentIdentity.agentId, startedAt);
+    if (limited) {
+      ingestMetrics.rateLimited += 1;
+      res.setHeader('Retry-After', Math.max(1, Math.ceil((limited.resetAt - startedAt) / 1000)));
+      audit(req, 'agent_ingest', 'failure', { reason: 'rate_limited' });
+      return res.status(429).json({ error: 'Agent ingest rate limit exceeded' });
+    }
+    if (activeIngests >= INGEST_MAX_CONCURRENCY) {
+      ingestMetrics.rateLimited += 1;
+      res.setHeader('Retry-After', '1');
+      audit(req, 'agent_ingest', 'failure', { reason: 'concurrency_limited' });
+      return res.status(429).json({ error: 'Agent ingest is busy' });
+    }
+
+    const parsed = parseRequest(agentIngestEnvelopeSchema, req.body, res);
+    if (!parsed.ok) {
+      ingestMetrics.failures += 1;
+      audit(req, 'agent_ingest', 'failure', { reason: 'invalid_request' });
+      return;
+    }
+    const rejected = validateAgentObservationWindow(parsed.data, { now: startedAt });
+    if (rejected.length > 0) {
+      ingestMetrics.rejected += rejected.length;
+      audit(req, 'agent_ingest', 'failure', {
+        reason: 'invalid_observation_window',
+        rejectedCount: rejected.length,
+      });
+      return res.status(422).json({
+        error: 'Observation window validation failed',
+        rejected,
+        requestId: req.id,
+      });
+    }
+    if (!agentIngest) {
+      ingestMetrics.failures += 1;
+      audit(req, 'agent_ingest', 'failure', { reason: 'storage_unavailable' });
+      return res.status(503).json({ error: 'Agent ingest is unavailable' });
+    }
+
+    activeIngests += 1;
+    ingestMetrics.maxInFlight = Math.max(ingestMetrics.maxInFlight, activeIngests);
+    try {
+      const ack = await Promise.resolve(agentIngest.storeBatch(
+        req.agentIdentity.agentId,
+        parsed.data,
+        { receivedAt: startedAt }
+      ));
+      if (ack.replayed) {
+        ingestMetrics.duplicate += parsed.data.observations.length;
+      } else {
+        ingestMetrics.accepted += ack.accepted;
+        ingestMetrics.duplicate += ack.duplicate;
+      }
+      audit(req, 'agent_ingest', 'success', {
+        batchRef: agentIdentities.auditRef(parsed.data.batchId),
+        observationCount: parsed.data.observations.length,
+        acceptedCount: ack.accepted,
+        duplicateCount: ack.duplicate,
+        replayed: ack.replayed,
+        durationMs: Date.now() - startedAt,
+      });
+      return res.json({ ...ack, requestId: req.id });
+    } catch (error) {
+      ingestMetrics.failures += 1;
+      logger.error('[agents] Ingest storage failed:', error.message);
+      audit(req, 'agent_ingest', 'failure', { reason: 'storage_error' });
+      return res.status(500).json({ error: 'Agent ingest failed', requestId: req.id });
+    } finally {
+      activeIngests -= 1;
+      ingestMetrics.lastDurationMs = Date.now() - startedAt;
+    }
   });
 
   return router;

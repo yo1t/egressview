@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const authRoutes = require('./routes/auth');
 const apiIdentityRoutes = require('./routes/api-identities');
 const agentRoutes = require('./routes/agents');
+const { AGENT_INGEST_MAX_BODY_BYTES } = require('./agent-ingest-schema');
 const notesRoutes = require('./routes/notes');
 const connectionsRoutes = require('./routes/connections');
 const devicesRoutes = require('./routes/devices');
@@ -90,6 +91,24 @@ function registerHealthRoutes(app, healthState) {
   });
 }
 
+const agentJsonParser = express.json({ limit: AGENT_INGEST_MAX_BODY_BYTES, inflate: false });
+
+function agentJsonBoundary(req, res, next) {
+  return agentJsonParser(req, res, (error) => {
+    if (!error) return next();
+    if (error.type === 'entity.too.large') {
+      return res.status(413).json({ error: 'Agent ingest body exceeds 512 KiB' });
+    }
+    if (error.type === 'encoding.unsupported') {
+      return res.status(415).json({ error: 'Compressed Agent ingest bodies are not supported' });
+    }
+    if (error.type === 'entity.parse.failed') {
+      return res.status(400).json({ error: 'Invalid JSON body' });
+    }
+    return next(error);
+  });
+}
+
 function configureHttpApp(app, {
   subpath,
   assetVersion,
@@ -121,7 +140,9 @@ function configureHttpApp(app, {
   registerHealthRoutes(app, healthState);
 
   app.use(compression());
-  app.use('/api', express.json({ limit: '64kb' }));
+  app.use('/api/agent/ingest', agentJsonBoundary);
+  const apiJson = express.json({ limit: '64kb' });
+  app.use('/api', (req, res, next) => (req.body === undefined ? apiJson(req, res, next) : next()));
   app.use('/api', enforceApiPermissions);
   if (demoReadOnly) app.use('/api', createDemoReadOnly());
 
@@ -221,6 +242,7 @@ function configureHttpApp(app, {
 }
 
 module.exports = {
+  agentJsonBoundary,
   buildCspHeader,
   configureHttpApp,
   createIndexHtmlBase,
