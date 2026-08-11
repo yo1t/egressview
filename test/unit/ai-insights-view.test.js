@@ -46,6 +46,8 @@ function harness({ apiFetch = async () => { throw new Error('Unexpected request'
     tVars: (key, values) => `${key}:${JSON.stringify(values)}`,
     apiFetch,
     appendDisplayScope: params => params,
+    getDisplayScope: () => null,
+    getDisplayScopeLabel: scope => scope ? `${scope.sourceKind}:${scope.sourceId}` : 'All sources',
     withDisplayScope: body => ({ ...body }),
     getTimeRange: () => ({ from: 1, to: 2 }),
     crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
@@ -138,10 +140,12 @@ describe('AI insights view', () => {
     assert.equal(children[1].children[0].textContent, '<script>alert(1)</script>');
     assert.equal(children[1].children[1].textContent,
       'ai.chat.responseMeta:{"provider":"Anthropic","model":"claude-sonnet-4-5"} · ' +
-      'ai.chat.usagePriced:{"tokens":"150","cost":"$0.0012"}');
+      'ai.chat.usagePriced:{"tokens":"150","cost":"$0.0012"} · ' +
+      'ai.chat.scopeMeta:{"source":"All sources"}');
     assert.equal(children[2].children[0].textContent, 'ai.chat.failed');
     assert.equal(children[2].children[1].textContent,
-      'ai.chat.responseMeta:{"provider":"OpenAI","model":"gpt-5.4"} · ai.chat.usageUnavailable');
+      'ai.chat.responseMeta:{"provider":"OpenAI","model":"gpt-5.4"} · ai.chat.usageUnavailable · ' +
+      'ai.chat.scopeMeta:{"source":"All sources"}');
     assert.equal(children[2].classList.contains('is-failed'), true);
   });
 

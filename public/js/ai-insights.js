@@ -5,7 +5,12 @@ import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 import { switchView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { setLogThreatFilter } from './log.js?v=__ASSET_VERSION__';
 import { openSettings } from './settings.js?v=__ASSET_VERSION__';
-import { appendDisplayScope, withDisplayScope } from './display-scope.js?v=__ASSET_VERSION__';
+import {
+  appendDisplayScope,
+  getDisplayScope,
+  getDisplayScopeLabel,
+  withDisplayScope,
+} from './display-scope.js?v=__ASSET_VERSION__';
 
 const REFRESH_MS = 15_000;
 const METRICS = ['connections', 'devices', 'destinations', 'warn', 'danger'];
@@ -215,8 +220,15 @@ function renderChatMessages(messages) {
     const body = document.createElement('div');
     body.className = 'ai-chat-message-body';
     body.textContent = message.status === 'failed' ? t('ai.chat.failed') : (message.body || '');
+    const scope = message.sourceKind && message.sourceId
+      ? { sourceKind: message.sourceKind, sourceId: message.sourceId }
+      : null;
+    const scopeMeta = tVars('ai.chat.scopeMeta', { source: getDisplayScopeLabel(scope) });
     if (message.role !== 'assistant') {
-      item.replaceChildren(body);
+      const meta = document.createElement('div');
+      meta.className = 'ai-chat-message-meta';
+      meta.textContent = scopeMeta;
+      item.replaceChildren(body, meta);
       return item;
     }
     const meta = document.createElement('div');
@@ -229,7 +241,7 @@ function renderChatMessages(messages) {
       && Number(message.usageInputTokens) === 0
       && Number(message.usageOutputTokens) === 0
     )) {
-      meta.textContent = `${identity} · ${t('ai.chat.usageUnavailable')}`;
+      meta.textContent = `${identity} · ${t('ai.chat.usageUnavailable')} · ${scopeMeta}`;
     } else {
       const usage = message.estimatedCostUsd == null
         ? tVars('ai.chat.usageUnpriced', { tokens: formatNumber(message.usageTotalTokens) })
@@ -237,7 +249,7 @@ function renderChatMessages(messages) {
           tokens: formatNumber(message.usageTotalTokens),
           cost: formatUsd(message.estimatedCostUsd),
         });
-      meta.textContent = `${identity} · ${usage}`;
+      meta.textContent = `${identity} · ${usage} · ${scopeMeta}`;
     }
     item.replaceChildren(body, meta);
     return item;
@@ -251,7 +263,13 @@ function renderPendingExchange(userText) {
   const container = document.getElementById('ai-chat-messages');
   const user = document.createElement('div');
   user.className = 'ai-chat-message is-user';
-  user.textContent = userText;
+  const userBody = document.createElement('div');
+  userBody.className = 'ai-chat-message-body';
+  userBody.textContent = userText;
+  const userMeta = document.createElement('div');
+  userMeta.className = 'ai-chat-message-meta';
+  userMeta.textContent = tVars('ai.chat.scopeMeta', { source: getDisplayScopeLabel(getDisplayScope()) });
+  user.replaceChildren(userBody, userMeta);
   const pending = document.createElement('div');
   pending.className = 'ai-chat-message is-assistant is-pending';
   pending.textContent = t('ai.chat.thinking');

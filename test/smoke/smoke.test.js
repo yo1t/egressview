@@ -1140,7 +1140,8 @@ test('AI chat keeps a persisted question visible when provider inference fails',
   await page.click('#ai-chat-send-btn');
 
   await expect(page.locator('#ai-error')).toContainText('Provider temporarily unavailable');
-  await expect(page.locator('#ai-chat-messages .is-user')).toHaveText('Which connection should I review?');
+  await expect(page.locator('#ai-chat-messages .is-user .ai-chat-message-body')).toHaveText('Which connection should I review?');
+  await expect(page.locator('#ai-chat-messages .is-user .ai-chat-message-meta')).toContainText('すべて');
   await expect(page.locator('#ai-chat-messages .is-assistant')).toHaveClass(/is-failed/);
   await expect(page.locator('#ai-chat-messages .is-assistant')).not.toHaveClass(/is-pending/);
   await expect(page.locator('#ai-conversation-select')).toHaveValue('conversation-1');

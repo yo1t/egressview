@@ -367,24 +367,42 @@ describe('AI configuration routes', () => {
     const app = appFor(provider, undefined, {
       history: historyStore,
       threatIntel: null,
-      routerManager: { list: () => [] },
+      routerManager: { list: () => [
+        { id: 'router-1', kind: 'yamaha', enabled: true, ready: true },
+        { id: 'router-2', kind: 'cisco', enabled: true, ready: true },
+      ] },
     });
     const requestId = '11111111-1111-4111-8111-111111111111';
     const sent = await request(app, 'POST', '/api/ai/chat', {
       requestId, message: 'What changed?', from: 1000, to: 2000,
+      sourceKind: 'router', sourceId: 'router-1',
     });
     assert.equal(sent.status, 200);
     const conversationId = sent.body.conversationId;
     const loaded = await request(app, 'GET', `/api/ai/conversations/${conversationId}`);
     assert.deepEqual(loaded.body.messages.map(message => message.body), ['What changed?', 'persisted answer']);
+    assert.deepEqual(loaded.body.messages.map(message => message.sourceId), ['router-1', 'router-1']);
 
     const retried = await request(app, 'POST', '/api/ai/chat', {
       conversationId, requestId, message: 'replacement', from: 1000, to: 2000,
+      sourceKind: 'router', sourceId: 'router-1',
     });
     assert.equal(retried.status, 200);
     const afterRetry = await request(app, 'GET', `/api/ai/conversations/${conversationId}`);
     assert.equal(afterRetry.body.messages.length, 2);
     assert.equal(afterRetry.body.messages[0].body, 'What changed?');
+
+    const switched = await request(app, 'POST', '/api/ai/chat', {
+      conversationId, requestId: randomUUID(), message: 'Use Cisco only', from: 1000, to: 2000,
+      sourceKind: 'router', sourceId: 'router-2',
+    });
+    assert.equal(switched.status, 200);
+    assert.equal(switched.body.startedNewConversation, true);
+    assert.notEqual(switched.body.conversationId, conversationId);
+    assert.deepEqual(
+      historyStore.getMessages(switched.body.conversationId).map(message => message.sourceId),
+      ['router-2', 'router-2']
+    );
     assert.equal((await request(app, 'DELETE', `/api/ai/conversations/${conversationId}`)).status, 200);
     assert.equal((await request(app, 'GET', `/api/ai/conversations/${conversationId}`)).status, 404);
   });

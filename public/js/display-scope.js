@@ -83,6 +83,7 @@ function activeRouterSources(routers) {
         sourceKind: 'router',
         sourceId: String(router.id),
         label: managementIp ? `${displayName} (${managementIp})` : displayName,
+        historyLabel: managementIp ? `${displayName} (${managementIp})` : displayName,
         ready: !!router.ready,
         state: router.state || (router.ready ? 'ready' : 'connecting'),
       };
@@ -110,6 +111,7 @@ function activeAgentSources(agents, now = Date.now()) {
       sourceKind: 'agent',
       sourceId: String(agent.agentId),
       label: `${baseLabel} · ${t(online ? 'source.online' : 'source.offline')}`,
+      historyLabel: baseLabel,
       online,
     };
   });
@@ -224,6 +226,17 @@ function getDisplayScope() {
   return displayScope ? { ...displayScope } : null;
 }
 
+function getDisplayScopeLabel(scope = displayScope) {
+  const normalized = normalizeScope(scope);
+  if (!normalized) return t('source.all');
+  const source = findSource(normalized);
+  if (source) return source.historyLabel || source.label;
+  return tVars(
+    normalized.sourceKind === 'router' ? 'source.router.idFallback' : 'source.agent.fallback',
+    { id: shortSourceId(normalized.sourceId) }
+  );
+}
+
 function appendDisplayScope(params) {
   const scope = getDisplayScope();
   if (!scope) return params;
@@ -247,6 +260,7 @@ export {
   activeRouterSources,
   appendDisplayScope,
   getDisplayScope,
+  getDisplayScopeLabel,
   getRouterSource,
   initDisplayScopeSelector,
   loadStoredScope,
