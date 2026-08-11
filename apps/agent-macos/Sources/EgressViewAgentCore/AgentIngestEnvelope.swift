@@ -89,6 +89,43 @@ public struct AgentIngestObservation: Codable, Equatable, Sendable {
         self.collector = collector
         self.confidence = confidence
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case observationId
+        case networkProtocol
+        case localAddress
+        case localPort
+        case remoteAddress
+        case remotePort
+        case processID
+        case processName
+        case bundleID
+        case firstObservedAt
+        case lastObservedAt
+        case bytesIn
+        case bytesOut
+        case collector
+        case confidence
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(observationId, forKey: .observationId)
+        try container.encode(networkProtocol, forKey: .networkProtocol)
+        try container.encode(localAddress, forKey: .localAddress)
+        try container.encode(localPort, forKey: .localPort)
+        try container.encode(remoteAddress, forKey: .remoteAddress)
+        try container.encode(remotePort, forKey: .remotePort)
+        try container.encode(processID, forKey: .processID)
+        try container.encode(processName, forKey: .processName)
+        try container.encode(bundleID, forKey: .bundleID)
+        try container.encode(firstObservedAt, forKey: .firstObservedAt)
+        try container.encode(lastObservedAt, forKey: .lastObservedAt)
+        try container.encode(bytesIn, forKey: .bytesIn)
+        try container.encode(bytesOut, forKey: .bytesOut)
+        try container.encode(collector, forKey: .collector)
+        try container.encode(confidence, forKey: .confidence)
+    }
 }
 
 public struct AgentIngestEnvelope: Codable, Equatable, Sendable {

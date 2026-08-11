@@ -76,6 +76,8 @@ public actor AgentIngestSender {
     private var connected = false
     private var failureCount = 0
     private var sendTask: Task<Void, Never>?
+    private var currentState: AgentIngestSenderState = .off
+    private var authorizationBlocked = false
 
     public init(
         queue: AgentDeliveryQueue,
@@ -119,7 +121,15 @@ public actor AgentIngestSender {
     public func enqueue(_ observations: [ConnectionObservation]) {
         do {
             try queue.enqueue(observations, queuedAt: now())
-            publish(enabled ? (connected ? .idle : .waitingForNetwork) : .off)
+            if !enabled {
+                publish(.off)
+            } else if !connected {
+                publish(.waitingForNetwork)
+            } else if authorizationBlocked {
+                publish(.authorizationRequired)
+            } else {
+                publish(sendTask == nil ? .idle : currentState)
+            }
             triggerSend()
         } catch {
             publish(.failed("Pending observations could not be stored"))
@@ -141,7 +151,7 @@ public actor AgentIngestSender {
     }
 
     public func sendNow() {
-        guard enabled else { return }
+        guard enabled, !authorizationBlocked else { return }
         failureCount = 0
         sendTask?.cancel()
         sendTask = nil
@@ -152,8 +162,17 @@ public actor AgentIngestSender {
         queue.status()
     }
 
+    public func credentialDidChange() {
+        authorizationBlocked = false
+        failureCount = 0
+        if enabled {
+            publish(connected ? .idle : .waitingForNetwork)
+            triggerSend()
+        }
+    }
+
     private func triggerSend() {
-        guard enabled, connected, sendTask == nil else { return }
+        guard enabled, connected, !authorizationBlocked, sendTask == nil else { return }
         sendTask = Task { [weak self] in
             await self?.sendNextBatch()
         }
@@ -167,6 +186,7 @@ public actor AgentIngestSender {
         do {
             guard let credential = try credentialStore.load() else {
                 sendTask = nil
+                authorizationBlocked = true
                 publish(.authorizationRequired)
                 return
             }
@@ -184,6 +204,7 @@ public actor AgentIngestSender {
             }
             if response.statusCode == 401 || response.statusCode == 403 {
                 sendTask = nil
+                authorizationBlocked = true
                 publish(.authorizationRequired)
                 return
             }
@@ -259,6 +280,7 @@ public actor AgentIngestSender {
     }
 
     private func publish(_ state: AgentIngestSenderState) {
+        currentState = state
         statusHandler(state, queue.status())
     }
 }

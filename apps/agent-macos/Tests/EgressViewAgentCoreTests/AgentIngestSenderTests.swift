@@ -113,11 +113,53 @@ final class AgentIngestSenderTests: XCTestCase {
         await sender.setConnectivityAvailable(true)
         await sender.setEnabled(true)
         try await waitUntil { states.value.contains(.authorizationRequired) }
+        await sender.enqueue([observation()])
+        await sender.sendNow()
         try await Task.sleep(for: .milliseconds(50))
 
         let requestCount = await transport.requestCount()
         XCTAssertEqual(requestCount, 1)
-        XCTAssertEqual(queue.status().pendingCount, 1)
+        XCTAssertEqual(queue.status().pendingCount, 2)
+        XCTAssertEqual(states.value.last, .authorizationRequired)
+    }
+
+    func testNewCredentialExplicitlyClearsAuthorizationLatch() async throws {
+        let attempts = LockedValue(0)
+        let transport = SenderTransport { request in
+            attempts.value += 1
+            if attempts.value == 1 {
+                return (Data(), HTTPURLResponse(
+                    url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil
+                )!)
+            }
+            let envelope = try JSONDecoder.iso8601.decode(
+                AgentIngestEnvelope.self,
+                from: XCTUnwrap(request.httpBody)
+            )
+            let data = try JSONEncoder().encode(AgentIngestAcknowledgementFixture(
+                batchId: envelope.batchId,
+                accepted: envelope.observations.count,
+                duplicate: 0,
+                rejected: 0,
+                replayed: false
+            ))
+            return (data, HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
+            )!)
+        }
+        let states = LockedValue<[AgentIngestSenderState]>([])
+        let (sender, _, queue) = try makeSender(transport: transport) { state, _ in
+            states.value.append(state)
+        }
+        await sender.enqueue([observation()])
+        await sender.setConnectivityAvailable(true)
+        await sender.setEnabled(true)
+        try await waitUntil { states.value.contains(.authorizationRequired) }
+
+        await sender.credentialDidChange()
+        try await waitUntil { queue.status().pendingCount == 0 }
+
+        XCTAssertEqual(attempts.value, 2)
     }
 
     func testTransientFailureRetriesTheSamePersistedBatch() async throws {
@@ -151,6 +193,48 @@ final class AgentIngestSenderTests: XCTestCase {
         let batchIDs = await transport.sentBatchIDs()
         XCTAssertEqual(batchIDs.count, 2)
         XCTAssertEqual(Set(batchIDs).count, 1)
+    }
+
+    func testNewObservationsDoNotHideScheduledRetryState() async throws {
+        let transport = SenderTransport { _ in throw URLError(.cannotConnectToHost) }
+        let states = LockedValue<[AgentIngestSenderState]>([])
+        let queue = try AgentDeliveryQueue(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("egressview-retry-state-\(UUID().uuidString).json")
+        )
+        let sender = AgentIngestSender(
+            queue: queue,
+            credentialStore: SenderCredentialStore(AgentCredential(
+                hubURL: URL(string: "https://hub.example")!,
+                agentID: UUID(),
+                token: "egva_" + String(repeating: "a", count: 64)
+            )),
+            transport: transport,
+            metadata: AgentIngestMetadata(
+                hostName: "test-mac",
+                platform: .macOS,
+                osVersion: "26.5.2",
+                agentVersion: "0.1.14"
+            ),
+            retryPolicy: AgentRetryPolicy(initialDelay: 30, maximumDelay: 30),
+            randomUnit: { 1 },
+            statusHandler: { state, _ in states.value.append(state) }
+        )
+        await sender.enqueue([observation()])
+        await sender.setConnectivityAvailable(true)
+        await sender.setEnabled(true)
+        try await waitUntil { states.value.contains { state in
+            if case .retryScheduled = state { return true }
+            return false
+        } }
+
+        await sender.enqueue([observation()])
+
+        guard case .retryScheduled = states.value.last else {
+            return XCTFail("new observations must preserve the scheduled retry state")
+        }
+        let requestCount = await transport.requestCount()
+        XCTAssertEqual(requestCount, 1)
     }
 
     func testRetryPolicyIsBoundedFullJitter() {
