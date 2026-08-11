@@ -50,6 +50,8 @@ const authPassword   = require('./src/auth-password');
 const authAudit      = require('./src/auth-audit');
 const apiIdentities  = require('./src/api-identities');
 const agentIdentities = require('./src/agent-identities');
+const agentIngest    = require('./src/agent-ingest-store');
+const { AGENT_INGEST_DEFAULT_RETENTION_MS } = require('./src/agent-ingest-schema');
 const authCookies    = require('./src/auth-cookies');
 const oidcModule = require('./src/oidc-google');
 const { createGoogleOidc } = oidcModule;
@@ -391,7 +393,7 @@ const routeCtx = {
   dnsmasqLog, inspectSyslog, dhcpdSyslog,
   runtime, notes, io, beacons, sessions, authPassword,
   authAudit, authCookies, oidc, apiIdentities,
-  agentIdentities, requireAgent,
+  agentIdentities, agentIngest, requireAgent,
   authenticateRequest: req => authenticateRequest(req)?.auth || null,
   subpath: SUBPATH,
   saveConfig,
@@ -661,12 +663,17 @@ server.listen(PORT, HOST, () => {
     authAudit,
     apiIdentities,
     agentIdentities,
+    agentIngest,
   });
   setInterval(() => sessions.pruneExpired(), 6 * 60 * 60 * 1000);
   apiIdentities.pruneExpired();
   setInterval(() => apiIdentities.pruneExpired(), 24 * 60 * 60 * 1000).unref();
   agentIdentities.pruneEnrollmentTokens();
   setInterval(() => agentIdentities.pruneEnrollmentTokens(), 24 * 60 * 60 * 1000).unref();
+  agentIngest.pruneObservations({ before: Date.now() - AGENT_INGEST_DEFAULT_RETENTION_MS });
+  setInterval(() => {
+    agentIngest.pruneObservations({ before: Date.now() - AGENT_INGEST_DEFAULT_RETENTION_MS });
+  }, 24 * 60 * 60 * 1000).unref();
   authAudit.prune();
   setInterval(() => authAudit.prune(), 24 * 60 * 60 * 1000).unref();
 
@@ -744,6 +751,7 @@ function shutdown(exitCode = 0) {
   runtimeProfiler.stop();
   try { history.closeDb();         } catch {}
   try { agentIdentities.closeDb(); } catch {}
+  try { agentIngest.closeDb();     } catch {}
   try { dnsmasqLog.stop();         } catch {}
   try { inspectSyslog.stop();      } catch {}
   try { dhcpdSyslog.stop();        } catch {}

@@ -6,6 +6,7 @@ const http = require('node:http');
 const { Readable, Writable } = require('node:stream');
 
 const {
+  agentJsonBoundary,
   buildCspHeader,
   createIndexHtmlBase,
   injectIndexBootstrap,
@@ -14,16 +15,22 @@ const {
   setSecurityHeaders,
   serializeI18nModule,
 } = require('../../src/http-app');
+const { AGENT_INGEST_MAX_BODY_BYTES } = require('../../src/agent-ingest-schema');
 const { createTrustProxy } = require('../../src/proxy-trust');
 const { createHealthState } = require('../../src/health-state');
 const express = require('express');
 
-function request(app, url, { headers = {}, remoteAddress } = {}) {
+function request(app, url, { headers = {}, remoteAddress, method = 'GET', body = null } = {}) {
   return new Promise((resolve, reject) => {
-    const req = new Readable({ read() { this.push(null); } });
-    req.method = 'GET';
+    const payload = body === null ? null : Buffer.from(body);
+    const req = new Readable({ read() { if (payload) this.push(payload); this.push(null); } });
+    req.method = method;
     req.url = url;
-    req.headers = headers;
+    req.headers = { ...headers };
+    if (payload) {
+      req.headers['content-type'] ||= 'application/json';
+      req.headers['content-length'] = String(payload.length);
+    }
     const res = new http.ServerResponse(req);
     const chunks = [];
     const socket = new Writable({
@@ -55,6 +62,39 @@ function request(app, url, { headers = {}, remoteAddress } = {}) {
     app.handle(req, res, reject);
   });
 }
+
+describe('Agent JSON boundary', () => {
+  function makeApp() {
+    const app = express();
+    app.use('/api/agent/ingest', agentJsonBoundary);
+    app.post('/api/agent/ingest', (_req, res) => res.json({ ok: true }));
+    app.use((error, _req, res, _next) => res.status(500).json({ error: error.message }));
+    return app;
+  }
+
+  it('accepts uncompressed JSON within the dedicated limit', async () => {
+    const response = await request(makeApp(), '/api/agent/ingest', {
+      method: 'POST',
+      body: JSON.stringify({ ok: true }),
+    });
+    assert.equal(response.status, 200);
+  });
+
+  it('rejects oversized and compressed bodies before route handling', async () => {
+    const oversized = await request(makeApp(), '/api/agent/ingest', {
+      method: 'POST',
+      body: JSON.stringify({ padding: 'x'.repeat(AGENT_INGEST_MAX_BODY_BYTES) }),
+    });
+    assert.equal(oversized.status, 413);
+
+    const compressed = await request(makeApp(), '/api/agent/ingest', {
+      method: 'POST',
+      headers: { 'content-encoding': 'gzip' },
+      body: JSON.stringify({ ok: true }),
+    });
+    assert.equal(compressed.status, 415);
+  });
+});
 
 describe('serializeI18nModule', () => {
   it('returns an ES module and escapes script-breaking characters', () => {
