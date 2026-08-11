@@ -43,6 +43,7 @@ const APP_SCRIPT_FILES = [
   'connections-panel.js',
   'map-common.js',
   'view-tabs.js',
+  'display-scope.js',
   'auth-socket.js',
   'graph.js',
   'graph-helpers.js',
@@ -68,6 +69,7 @@ const APP_SCRIPT_FILES = [
   'settings-agents.js',
   'settings.js',
   'time-filter.js',
+  'router-settings.js',
   'main.js',
 ];
 

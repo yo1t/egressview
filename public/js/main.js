@@ -14,6 +14,7 @@ import { refreshCurrentTimeFilterView } from './time-filter.js?v=__ASSET_VERSION
 import { loadBeacons } from './beacon.js?v=__ASSET_VERSION__';
 import './router-settings.js?v=__ASSET_VERSION__';
 import { startAiInsights, stopAiInsights, refreshAiInsights } from './ai-insights.js?v=__ASSET_VERSION__';
+import { initDisplayScopeSelector } from './display-scope.js?v=__ASSET_VERSION__';
 
 // ─── Cross-module reference injection ────────────────────────────────────────
 // auth-socket.js and graph.js both need devicesData but can't import from devices.js
@@ -189,6 +190,11 @@ if (typeof _DEMO_MODE !== 'undefined' && _DEMO_MODE) {
 // Authenticate before any protected API call. Register every socket handler
 // first so the initial server snapshot cannot race module initialization.
 authReady.then(() => {
+  initDisplayScopeSelector({
+    request: apiFetch,
+    notify: showToast,
+    onChange: () => updateConnBadge('l3l4'),
+  }).catch(error => console.warn('[source-filter] initialization failed:', error));
   switchView('ai');
   // Populate the shared device panel even when the initial socket snapshot is
   // delayed or unavailable. The graph itself remains deferred while hidden.

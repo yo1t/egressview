@@ -8,9 +8,10 @@ entry point; imports determine evaluation order and cache-busted asset URLs.
 1. `i18n.js`
 2. `utils.js`
 3. `connections-panel.js`
-4. `auth-socket.js`
-5. `graph.js`
-6. `settings.js`
+4. `display-scope.js`
+5. `auth-socket.js`
+6. `graph.js`
+7. `settings.js`
    - `settings-backup.js`
    - `settings-sessions.js`
    - `settings-beacons.js`
@@ -19,19 +20,24 @@ entry point; imports determine evaluation order and cache-busted asset URLs.
    - `settings-manual-threat.js`
    - `settings-ai.js`
    - `settings-agents.js`
-7. `map-common.js`
-8. `stats.js`
-9. `time-filter.js`
-10. `view-tabs.js`
-11. `log.js`
-12. `beacon.js`
-13. `threat-popup.js`
-14. `devices.js`
-15. `notif-log.js`
-16. `ai-insights.js`
-17. `main.js`
+8. `router-settings.js`
+9. `map-common.js`
+10. `stats.js`
+11. `time-filter.js`
+12. `view-tabs.js`
+13. `log.js`
+14. `beacon.js`
+15. `threat-popup.js`
+16. `devices.js`
+17. `notif-log.js`
+18. `ai-insights.js`
+19. `main.js`
 
 `socket.io`, D3, and topojson are loaded before the app scripts.
+
+`display-scope.js` owns the browser-persisted collection-source selection and
+safe router/Agent labels. It does not own collection or storage behavior;
+read APIs consume the selected stable source ID as the filtering work is added.
 
 ## Shared translation catalog (P2-29)
 

@@ -67,7 +67,7 @@ test('favicon is declared and served without a fallback 404', async ({ request }
 
 // (1) All JS files split out in Phase 2 must be served with 200
 const PHASE2_JS_FILES = [
-  'utils.js', 'connections-panel.js', 'auth-socket.js', 'graph.js',
+  'utils.js', 'connections-panel.js', 'display-scope.js', 'auth-socket.js', 'graph.js',
   'graph-helpers.js', 'graph-panels.js', 'graph-render.js',
   'settings.js', 'map-common.js', 'stats.js', 'time-filter.js',
   'stats-helpers.js', 'stats-charts.js', 'stats-map.js',
@@ -535,6 +535,47 @@ test('tab bar renders after auth', async ({ page }) => {
   await expect(page.locator('#btn-ai')).toHaveClass(/active/);
   await expect(page.locator('#ai-container')).toHaveClass(/view-active/);
   await expect(page.locator('#graph-container')).not.toHaveClass(/view-active/);
+});
+
+test('source selector groups routers and Agents, persists selection, and keeps L2 visible on mobile', async ({ page }) => {
+  if (!TOKEN) test.skip(true, 'EGRESSVIEW_TOKEN not set — skipping auth-gated test');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('**/socket.io/**', route => {
+    const isTransportRequest = new URL(route.request().url()).searchParams.has('EIO');
+    return isTransportRequest ? route.abort() : route.continue();
+  });
+  await page.route(/\/api\/routers(?:\?.*)?$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ routers: [
+      { id: 'router-1', kind: 'yamaha', displayName: 'Office RTX', ip: '192.0.2.1', enabled: true, ready: true, state: 'ready' },
+    ] }),
+  }));
+  await page.route(/\/api\/agents(?:\?.*)?$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ agents: [
+      { agentId: 'aaaaaaaa-1111', hostName: 'MacBook', lastSeenAt: Date.now() },
+      { agentId: 'bbbbbbbb-2222', hostName: 'macbook', lastSeenAt: Date.now() - 10 * 60_000 },
+    ] }),
+  }));
+  await authPage(page);
+
+  const selector = page.locator('#source-filter-select');
+  await expect(selector).toBeVisible();
+  await expect(page.locator('#badge-l2')).toBeVisible();
+  await expect(selector.locator('optgroup')).toHaveCount(2);
+  await expect(selector).toContainText('Office RTX (192.0.2.1)');
+  await expect(selector).toContainText('MacBook (aaaaaaaa)');
+  await expect(selector).toContainText('macbook (bbbbbbbb)');
+
+  const selected = JSON.stringify({ sourceKind: 'agent', sourceId: 'aaaaaaaa-1111' });
+  await selector.selectOption(selected);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('egressview_display_scope_v1')))).toEqual({
+    sourceKind: 'agent', sourceId: 'aaaaaaaa-1111',
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(page.locator('#source-filter-select')).toHaveValue(selected);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 async function expectConnectedDevicesAcrossTabs(page, viewportWidth) {
