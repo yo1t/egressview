@@ -671,9 +671,25 @@ server.listen(PORT, HOST, () => {
   agentIdentities.pruneEnrollmentTokens();
   setInterval(() => agentIdentities.pruneEnrollmentTokens(), 24 * 60 * 60 * 1000).unref();
   agentIngest.pruneObservations({ before: Date.now() - AGENT_INGEST_DEFAULT_RETENTION_MS });
+  try {
+    const startupCorrelation = agentIngest.reconcileCorrelations();
+    logger.info(`[agent-correlation] startup ${JSON.stringify(startupCorrelation)}`);
+  } catch (error) {
+    logger.error('[agent-correlation] startup reconcile failed:', error.message);
+  }
   setInterval(() => {
     agentIngest.pruneObservations({ before: Date.now() - AGENT_INGEST_DEFAULT_RETENTION_MS });
   }, 24 * 60 * 60 * 1000).unref();
+  setInterval(() => {
+    try {
+      const result = agentIngest.reconcileCorrelations({ since: Date.now() - 10 * 60 * 1000 });
+      if (result.linked > 0 || result.ambiguous > 0) {
+        logger.info(`[agent-correlation] reconcile ${JSON.stringify(result)}`);
+      }
+    } catch (error) {
+      logger.error('[agent-correlation] periodic reconcile failed:', error.message);
+    }
+  }, 5 * 60 * 1000).unref();
   authAudit.prune();
   setInterval(() => authAudit.prune(), 24 * 60 * 60 * 1000).unref();
 

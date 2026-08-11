@@ -90,10 +90,20 @@ describe('Agent ingest store', () => {
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
   });
 
+  it('keeps an accepted batch durable when derived correlation is temporarily unavailable', () => {
+    const database = store._dbForTest();
+    database.exec('DROP TABLE connection_agent_observations');
+
+    const ack = store.storeBatch(agentId, copy(), { receivedAt });
+
+    assert.equal(ack.accepted, 1);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 1);
+  });
+
   it('prunes expired originals and their orphaned batch receipts', () => {
     store.storeBatch(agentId, copy(), { receivedAt });
     const result = store.pruneObservations({ before: receivedAt + 1 });
-    assert.deepEqual(result, { observations: 1, batches: 1 });
+    assert.deepEqual(result, { correlations: 0, observations: 1, batches: 1 });
     assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
   });
 });
