@@ -8,6 +8,9 @@ const { parseRequest } = require('../http-validation');
 const { parseTimestamp } = require('../utils');
 const { streamConnectionExport } = require('../connection-export');
 const logger = require('../logger');
+const {
+  sourceScopeShape, validateSourceScopePair, requireKnownSourceScope,
+} = require('../source-scope');
 
 // Send helper for compatibility consumers that request an unpaged response
 // (up to 50k rows, 20MB+). The graph uses the bounded summary endpoint.
@@ -54,6 +57,7 @@ const unsignedIntegerQuery = z.union([
   z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 ]).optional();
 const timeQueryShape = { from: timestampQuery, to: timestampQuery };
+const scopedTimeQueryShape = { ...timeQueryShape, ...sourceScopeShape };
 const filterQueryShape = {
   sort: boundedText(32),
   sortDir: boundedText(16),
@@ -73,28 +77,28 @@ const filterQueryShape = {
 };
 const emptyQuerySchema = z.object({}).strict();
 const summaryQuerySchema = z.object({
-  ...timeQueryShape,
+  ...scopedTimeQueryShape,
   buckets: unsignedIntegerQuery,
   src: boundedText(64),
-}).strict();
+}).strict().superRefine(validateSourceScopePair);
 const timeQuerySchema = z.object(timeQueryShape).strict();
 const threatConnectionsQuerySchema = z.object({
-  ...timeQueryShape,
+  ...scopedTimeQueryShape,
   confidence: boundedText(16),
   limit: unsignedIntegerQuery,
-}).strict();
-const threatCountsQuerySchema = z.object({ ...timeQueryShape, ...filterQueryShape }).strict();
+}).strict().superRefine(validateSourceScopePair);
+const threatCountsQuerySchema = z.object({ ...scopedTimeQueryShape, ...filterQueryShape }).strict().superRefine(validateSourceScopePair);
 const exportQuerySchema = z.object({
-  ...timeQueryShape,
+  ...scopedTimeQueryShape,
   format: z.string().max(8),
-}).strict();
+}).strict().superRefine(validateSourceScopePair);
 const connectionsQuerySchema = z.object({
-  ...timeQueryShape,
+  ...scopedTimeQueryShape,
   ...filterQueryShape,
   limit: unsignedIntegerQuery,
   offset: unsignedIntegerQuery,
   fThreat: boundedText(16),
-}).strict();
+}).strict().superRefine(validateSourceScopePair);
 
 function getSummaryCache(key) {
   const hit = summaryCache.get(key);
@@ -202,8 +206,9 @@ function parsePaginationOpts(query) {
  * @param {{ requireAdmin, history, threatIntel? }} ctx
  */
 function connectionsRoutes(ctx) {
-  const { requireAdmin, history, threatIntel } = ctx;
+  const { requireAdmin, history, threatIntel, routerManager, agentIdentities } = ctx;
   const router = Router();
+  const readScope = (query, res) => requireKnownSourceScope(query, { routerManager, agentIdentities }, res);
 
   router.get('/connections/memory', requireAdmin, (req, res) => {
     const parsed = parseRequest(emptyQuerySchema, req.query, res);
@@ -215,6 +220,8 @@ function connectionsRoutes(ctx) {
     const parsed = parseRequest(summaryQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const query = parsed.data;
+    const scoped = readScope(query, res);
+    if (!scoped.ok) return;
     const { ts: from, err: e1 } = parseTimestampParam(query.from, 'from', res);
     if (e1) return;
     const { ts: to, err: e2 } = parseTimestampParam(query.to, 'to', res);
@@ -227,10 +234,15 @@ function connectionsRoutes(ctx) {
       buckets = Math.max(1, Math.min(240, parseInt(bucketsRaw, 10)));
     }
     const src = query.src || null;
-    const cacheKey = JSON.stringify({ from, to, src, buckets });
+    const sourceScope = scoped.scope;
+    const cacheKey = JSON.stringify({ from, to, src, buckets, sourceScope });
     const cached = getSummaryCache(cacheKey);
     if (cached) return res.json({ ...cached, serverTime: Date.now(), cached: true });
-    const summary = history.summarizeByTimeRange(from, to, { src, buckets });
+    const summary = history.summarizeByTimeRange(from, to, {
+      src,
+      buckets,
+      ...(sourceScope ? { sourceScope } : {}),
+    });
     setSummaryCache(cacheKey, summary);
     res.json({ ...summary, serverTime: Date.now(), cached: false });
   });
@@ -250,13 +262,15 @@ function connectionsRoutes(ctx) {
     const parsed = parseRequest(threatConnectionsQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const query = parsed.data;
+    const scoped = readScope(query, res);
+    if (!scoped.ok) return;
     const { ts: from, err: e1 } = parseTimestampParam(query.from, 'from', res);
     if (e1) return;
     const { ts: to, err: e2 } = parseTimestampParam(query.to, 'to', res);
     if (e2) return;
     const confidence = ['low', 'high', 'all'].includes(query.confidence) ? query.confidence : 'all';
     const limit = Math.min(parseInt(query.limit, 10) || 50, 200);
-    const groups = history.groupDstByTimeRange(from, to);
+    const groups = history.groupDstByTimeRange(from, to, { sourceScope: scoped.scope });
     const hits = [];
     for (const { dst, dstHost, cnt } of groups) {
       const t = threatIntel?.matchThreatIntel(dst, dstHost || dst);
@@ -286,12 +300,14 @@ function connectionsRoutes(ctx) {
     const parsed = parseRequest(threatCountsQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const query = parsed.data;
+    const scoped = readScope(query, res);
+    if (!scoped.ok) return;
     const { ts: from, err: e1 } = parseTimestampParam(query.from, 'from', res);
     if (e1) return;
     const { ts: to, err: e2 } = parseTimestampParam(query.to, 'to', res);
     if (e2) return;
     const { filters } = parsePaginationOpts(query);
-    const groups = history.groupDstByTimeRange(from, to, { filters });
+    const groups = history.groupDstByTimeRange(from, to, { filters, sourceScope: scoped.scope });
     let safe = 0, warn = 0, danger = 0;
     for (const { dst, dstHost, cnt } of groups) {
       const threat = threatIntel?.matchThreatIntel(dst, dstHost || dst);
@@ -306,6 +322,8 @@ function connectionsRoutes(ctx) {
     const parsed = parseRequest(exportQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const query = parsed.data;
+    const scoped = readScope(query, res);
+    if (!scoped.ok) return;
     const format = String(query.format || '').toLowerCase();
     if (!['csv', 'json'].includes(format)) {
       return res.status(400).json({ error: 'format must be "csv" or "json"' });
@@ -320,7 +338,8 @@ function connectionsRoutes(ctx) {
 
     let exportReader;
     try {
-      exportReader = history.createConnectionExportReader?.(from, to) || history;
+      const sourceScope = scoped.scope;
+      exportReader = history.createConnectionExportReader?.(from, to, { sourceScope }) || history;
       await streamConnectionExport({ res, history: exportReader, threatIntel, from, to, format });
     } catch (err) {
       logger.error('[connections] Export failed:', err.message);
@@ -335,6 +354,8 @@ function connectionsRoutes(ctx) {
     const parsed = parseRequest(connectionsQuerySchema, req.query, res);
     if (!parsed.ok) return;
     const query = parsed.data;
+    const scoped = readScope(query, res);
+    if (!scoped.ok) return;
     const { ts: from, err: e1 } = parseTimestampParam(query.from, 'from', res);
     if (e1) return;
     const { ts: to, err: e2 } = parseTimestampParam(query.to, 'to', res);
@@ -355,7 +376,7 @@ function connectionsRoutes(ctx) {
       if (!Number.isFinite(offset) || offset < 0)
         return res.status(400).json({ error: 'invalid "offset" parameter' });
       const clampedLimit = Math.min(limit, MAX_LIMIT);
-      const opts = parsePaginationOpts(query);
+      const opts = { ...parsePaginationOpts(query), sourceScope: scoped.scope };
       const fThreat = query.fThreat;
       if (['safe', 'warn', 'danger'].includes(fThreat)) {
         const result = queryThreatFilteredPage(history, threatIntel, from, to, clampedLimit, offset, opts, fThreat);
@@ -367,7 +388,7 @@ function connectionsRoutes(ctx) {
           serverTime: Date.now(),
         });
       }
-      const total = history.countByTimeRange(from, to, { filters: opts.filters });
+      const total = history.countByTimeRange(from, to, { filters: opts.filters, sourceScope: opts.sourceScope });
       const connections = attachThreats(
         history.queryByTimeRangePaged(from, to, clampedLimit, offset, opts), threatIntel
       );
@@ -377,7 +398,7 @@ function connectionsRoutes(ctx) {
     // No-limit compatibility path. Cap at MAX_FULL_FETCH to prevent
     // blocking the event loop with synchronous SQLite + JSON.stringify on
     // large time ranges (100k+ rows freeze heartbeats and router polling).
-    const opts = parsePaginationOpts(query);
+    const opts = { ...parsePaginationOpts(query), sourceScope: scoped.scope };
     const fThreat = query.fThreat;
     if (['safe', 'warn', 'danger'].includes(fThreat)) {
       const result = queryThreatFilteredPage(history, threatIntel, from, to, MAX_FULL_FETCH, 0, opts, fThreat);

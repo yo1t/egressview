@@ -3,6 +3,7 @@ import { t, tVars, currentLang } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 import { selectedMac, selectedIp, updateSideHighlight, clearSelection } from './graph.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
+import { appendDisplayScope } from './display-scope.js?v=__ASSET_VERSION__';
 import { nlMode } from './view-tabs.js?v=__ASSET_VERSION__';
 
 var nlAllRows = [];
@@ -367,7 +368,8 @@ async function loadNotifLog() {
   if (!nlMode) return;
   nlSetLoading(true);
   try {
-    const res = await apiFetch(`${_BASE}/api/notification-log`);
+    const params = appendDisplayScope(new URLSearchParams());
+    const res = await apiFetch(`${_BASE}/api/notification-log${params.size ? `?${params}` : ''}`);
     if (!res.ok) {
       const msg = res.status === 502 || res.status === 503
         ? t('err.serverUnavailable')

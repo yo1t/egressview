@@ -51,13 +51,71 @@ function buildFilterConditions(filters) {
   return { conditions, params };
 }
 
-function buildWhereAndParams(from, to, filterConditions) {
+function sourceScopeCondition(scope, alias = 'connections') {
+  if (!scope) return { condition: null, params: [] };
+  if (scope.sourceKind === 'router') {
+    return {
+      condition: `EXISTS (
+        SELECT 1 FROM connection_observations scoped_o
+        WHERE scoped_o.src = ${alias}.src AND scoped_o.dst = ${alias}.dst
+          AND scoped_o.dport = ${alias}.dport AND scoped_o.proto = ${alias}.proto
+          AND scoped_o.routerId = ?
+      )`,
+      params: [scope.sourceId],
+    };
+  }
+  if (scope.sourceKind === 'agent') return { condition: null, params: [] };
+  throw new TypeError('Unsupported source scope');
+}
+
+function connectionSource(scope, alias = 'c') {
+  if (scope?.sourceKind !== 'agent') {
+    return { cte: '', from: `connections ${alias}`, params: [] };
+  }
+  return {
+    cte: `WITH scoped_connections AS (
+      SELECT c.*
+      FROM connections c
+      WHERE EXISTS (
+        SELECT 1 FROM connection_agent_observations scoped_a
+        WHERE scoped_a.src = c.src AND scoped_a.dst = c.dst
+          AND scoped_a.dport = c.dport AND scoped_a.proto = c.proto
+          AND scoped_a.agentId = ?
+      )
+      UNION ALL
+      SELECT
+        o.localAddress AS src, o.remoteAddress AS dst, o.remotePort AS dport,
+        LOWER(o.networkProtocol) AS proto, o.localPort AS sport,
+        NULL AS ttl, NULL AS srcMac, NULL AS srcVendor,
+        NULL AS srcDnsName, NULL AS srcMdnsName, NULL AS dstHost,
+        NULL AS country, NULL AS org, NULL AS lat, NULL AS lon, NULL AS city,
+        MIN(o.firstObservedAt) AS firstSeen, MAX(o.lastObservedAt) AS lastSeen,
+        MAX(a.hostName) AS agentHost, MAX(o.processName) AS process,
+        MAX(o.processId) AS pid
+      FROM agent_observations o
+      JOIN agents a ON a.agentId = o.agentId
+      WHERE o.agentId = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM connection_agent_observations link
+          WHERE link.agentId = o.agentId AND link.observationId = o.observationId
+        )
+      GROUP BY o.localAddress, o.remoteAddress, o.remotePort, LOWER(o.networkProtocol)
+    )`,
+    from: `scoped_connections ${alias}`,
+    params: [scope.sourceId, scope.sourceId],
+  };
+}
+
+function buildWhereAndParams(from, to, filterConditions, sourceScope = null, alias = 'connections') {
   const conditions = [];
   const params = [];
   if (from != null) { conditions.push('lastSeen >= ?'); params.push(from); }
   if (to != null) { conditions.push('lastSeen <= ?'); params.push(to); }
   conditions.push(...filterConditions.conditions);
   params.push(...filterConditions.params);
+  const scoped = sourceScopeCondition(sourceScope, alias);
+  if (scoped.condition) conditions.push(scoped.condition);
+  params.push(...scoped.params);
   return {
     where: conditions.length ? ' WHERE ' + conditions.join(' AND ') : '',
     params,
@@ -75,44 +133,49 @@ function createHistoryQueries({
   summarizeAppGroups,
   onSummaryTiming = null,
 }) {
-  function queryByTimeRange(from, to) {
+  function queryByTimeRange(from, to, { sourceScope = null } = {}) {
     const db = getDb();
     if (!db) return [];
-    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] });
+    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] }, sourceScope, 'c');
+    const source = connectionSource(sourceScope);
     return hydrateConnectionRows(db.prepare(
-      `SELECT ${connectionReadColumns('c')} FROM connections c${where} ORDER BY c.lastSeen DESC`
-    ).all(...params));
+      `${source.cte} SELECT ${connectionReadColumns('c')} FROM ${source.from}${where} ORDER BY c.lastSeen DESC`
+    ).all(...source.params, ...params));
   }
 
-  function queryByTimeRangePaged(from, to, limit, offset, { sort = 'lastSeen', sortDir = 'desc', filters = {} } = {}) {
+  function queryByTimeRangePaged(from, to, limit, offset, { sort = 'lastSeen', sortDir = 'desc', filters = {}, sourceScope = null } = {}) {
     const db = getDb();
     if (!db) return [];
     const sortSql = SORT_COL_SQL[sort] || 'lastSeen';
     const direction = sortDir === 'asc' ? 'ASC' : 'DESC';
-    const { where, params } = buildWhereAndParams(from, to, buildFilterConditions(filters));
+    const { where, params } = buildWhereAndParams(from, to, buildFilterConditions(filters), sourceScope, 'c');
     const orderClause = sortSql.split(',').map(column => `${column.trim()} ${direction}`).join(', ');
-    const sql = `SELECT ${connectionReadColumns('c')} FROM connections c${where} ORDER BY ${orderClause}`;
-    if (limit == null) return hydrateConnectionRows(db.prepare(sql).all(...params));
-    return hydrateConnectionRows(db.prepare(`${sql} LIMIT ? OFFSET ?`).all(...params, limit, offset));
+    const source = connectionSource(sourceScope);
+    const sql = `${source.cte} SELECT ${connectionReadColumns('c')} FROM ${source.from}${where} ORDER BY ${orderClause}`;
+    if (limit == null) return hydrateConnectionRows(db.prepare(sql).all(...source.params, ...params));
+    return hydrateConnectionRows(db.prepare(`${sql} LIMIT ? OFFSET ?`).all(...source.params, ...params, limit, offset));
   }
 
-  function countByTimeRange(from, to, { filters = {} } = {}) {
+  function countByTimeRange(from, to, { filters = {}, sourceScope = null } = {}) {
     const db = getDb();
     if (!db) return 0;
-    const { where, params } = buildWhereAndParams(from, to, buildFilterConditions(filters));
-    return db.prepare(`SELECT COUNT(*) AS cnt FROM connections${where}`).get(...params)?.cnt || 0;
+    const { where, params } = buildWhereAndParams(from, to, buildFilterConditions(filters), sourceScope, 'c');
+    const source = connectionSource(sourceScope);
+    return db.prepare(`${source.cte} SELECT COUNT(*) AS cnt FROM ${source.from}${where}`)
+      .get(...source.params, ...params)?.cnt || 0;
   }
 
-  function countFactsByTimeRange(from, to) {
+  function countFactsByTimeRange(from, to, { sourceScope = null } = {}) {
     const db = getDb();
     if (!db) return { connections: 0, devices: 0, destinations: 0 };
-    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] });
-    const row = db.prepare(`
+    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] }, sourceScope, 'c');
+    const source = connectionSource(sourceScope);
+    const row = db.prepare(`${source.cte}
       SELECT COUNT(*) AS connections,
              COUNT(DISTINCT COALESCE(NULLIF(srcMac, ''), src)) AS devices,
              COUNT(DISTINCT dst) AS destinations
-      FROM connections${where}
-    `).get(...params) || {};
+      FROM ${source.from}${where}
+    `).get(...source.params, ...params) || {};
     return {
       connections: row.connections || 0,
       devices: row.devices || 0,
@@ -120,14 +183,14 @@ function createHistoryQueries({
     };
   }
 
-  function createConnectionExportReader(from, to) {
+  function createConnectionExportReader(from, to, { sourceScope = null } = {}) {
     const db = getDb();
     const dbPath = getDbPath();
     if (!db || dbPath === ':memory:') {
       return {
-        countByTimeRange: () => countByTimeRange(from, to),
+        countByTimeRange: () => countByTimeRange(from, to, { sourceScope }),
         queryByTimeRangePaged: (_from, _to, limit, offset, opts) =>
-          queryByTimeRangePaged(from, to, limit, offset, opts),
+          queryByTimeRangePaged(from, to, limit, offset, { ...opts, sourceScope }),
         close() {},
       };
     }
@@ -136,17 +199,19 @@ function createHistoryQueries({
     try {
       snapshotDb.pragma('query_only = ON');
       snapshotDb.exec('BEGIN');
-      const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] });
-      const count = snapshotDb.prepare(`SELECT COUNT(*) AS cnt FROM connections${where}`).get(...params)?.cnt || 0;
+      const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] }, sourceScope, 'c');
+      const source = connectionSource(sourceScope);
+      const count = snapshotDb.prepare(`${source.cte} SELECT COUNT(*) AS cnt FROM ${source.from}${where}`)
+        .get(...source.params, ...params)?.cnt || 0;
       const pageStatement = snapshotDb.prepare(
-        `SELECT ${connectionReadColumns('c')} FROM connections c${where}
+        `${source.cte} SELECT ${connectionReadColumns('c')} FROM ${source.from}${where}
          ORDER BY c.lastSeen DESC LIMIT ? OFFSET ?`
       );
       let closed = false;
       return {
         countByTimeRange: () => count,
         queryByTimeRangePaged: (_from, _to, limit, offset) =>
-          hydrateConnectionRows(pageStatement.all(...params, limit, offset)),
+          hydrateConnectionRows(pageStatement.all(...source.params, ...params, limit, offset)),
         close() {
           if (closed) return;
           closed = true;
@@ -161,29 +226,31 @@ function createHistoryQueries({
     }
   }
 
-  function groupDstByTimeRange(from, to, { filters = {} } = {}) {
+  function groupDstByTimeRange(from, to, { filters = {}, sourceScope = null } = {}) {
     const db = getDb();
     if (!db) return [];
-    const { where, params } = buildWhereAndParams(from, to, buildFilterConditions(filters));
+    const { where, params } = buildWhereAndParams(from, to, buildFilterConditions(filters), sourceScope, 'c');
+    const source = connectionSource(sourceScope);
     return db.prepare(
-      `SELECT dst, MAX(dstHost) AS dstHost, COUNT(*) AS cnt FROM connections${where} GROUP BY dst`
-    ).all(...params);
+      `${source.cte} SELECT dst, MAX(dstHost) AS dstHost, COUNT(*) AS cnt FROM ${source.from}${where} GROUP BY dst`
+    ).all(...source.params, ...params);
   }
 
-  function groupServiceByTimeRange(from, to) {
+  function groupServiceByTimeRange(from, to, { sourceScope = null } = {}) {
     const db = getDb();
     if (!db) return [];
-    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] });
+    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] }, sourceScope, 'c');
+    const source = connectionSource(sourceScope);
     return db.prepare(
-      `SELECT dport, proto, COUNT(*) AS count FROM connections${where}
+      `${source.cte} SELECT dport, proto, COUNT(*) AS count FROM ${source.from}${where}
        GROUP BY dport, proto ORDER BY count DESC LIMIT 20`
-    ).all(...params);
+    ).all(...source.params, ...params);
   }
 
   // Which source devices contacted a given (small) set of destination IPs.
   // Used by the AI context to link devices to threat destinations. Bounded by
   // both the destination list size and a hard row cap so it never scans wide.
-  function groupSrcForDstsByTimeRange(from, to, dsts) {
+  function groupSrcForDstsByTimeRange(from, to, dsts, { sourceScope = null } = {}) {
     const db = getDb();
     if (!db || !Array.isArray(dsts) || dsts.length === 0) return [];
     const capped = dsts.slice(0, 50);
@@ -194,27 +261,32 @@ function createHistoryQueries({
     if (to != null) { conditions.push('lastSeen <= ?'); params.push(to); }
     conditions.push(`dst IN (${placeholders})`);
     params.push(...capped);
+    const scoped = sourceScopeCondition(sourceScope, 'c');
+    if (scoped.condition) conditions.push(scoped.condition);
+    params.push(...scoped.params);
     const where = ' WHERE ' + conditions.join(' AND ');
+    const source = connectionSource(sourceScope);
     return db.prepare(
-      `SELECT dst, src,
+      `${source.cte} SELECT dst, src,
               MAX(srcDnsName) AS srcDnsName,
               MAX(srcMdnsName) AS srcMdnsName,
               MAX(srcMac) AS srcMac,
               COUNT(*) AS cnt
-       FROM connections${where}
+       FROM ${source.from}${where}
        GROUP BY dst, src ORDER BY cnt DESC LIMIT 200`
-    ).all(...params);
+    ).all(...source.params, ...params);
   }
 
   // Bounded source-device summary for AI context. Keep this separate from the
   // full graph summary so a manual AI request does not run its heavier queries.
-  function groupSrcByTimeRange(from, to, limit = 30) {
+  function groupSrcByTimeRange(from, to, limit = 30, { sourceScope = null } = {}) {
     const db = getDb();
     if (!db) return [];
     const cappedLimit = Math.max(1, Math.min(100, Number(limit) || 30));
-    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] });
+    const { where, params } = buildWhereAndParams(from, to, { conditions: [], params: [] }, sourceScope, 'c');
+    const source = connectionSource(sourceScope);
     return db.prepare(
-      `SELECT src,
+      `${source.cte} SELECT src,
               MAX(srcMac) AS srcMac,
               MAX(srcVendor) AS srcVendor,
               MAX(srcDnsName) AS srcDnsName,
@@ -222,12 +294,23 @@ function createHistoryQueries({
               COUNT(*) AS count,
               MIN(firstSeen) AS firstSeen,
               MAX(lastSeen) AS lastSeen
-       FROM connections${where}
+       FROM ${source.from}${where}
        GROUP BY src ORDER BY count DESC LIMIT ?`
-    ).all(...params, cappedLimit);
+    ).all(...source.params, ...params, cappedLimit);
   }
 
-  function summarizeByTimeRange(from, to, { src = null, buckets = 60 } = {}) {
+  function listSourceDeviceKeys(sourceScope) {
+    const db = getDb();
+    if (!db || !sourceScope) return [];
+    const source = connectionSource(sourceScope);
+    const scoped = sourceScopeCondition(sourceScope, 'c');
+    const where = scoped.condition ? ` WHERE ${scoped.condition}` : '';
+    return db.prepare(
+      `${source.cte} SELECT DISTINCT c.src, c.srcMac FROM ${source.from}${where}`
+    ).all(...source.params, ...scoped.params);
+  }
+
+  function summarizeByTimeRange(from, to, { src = null, buckets = 60, sourceScope = null } = {}) {
     const startedAt = process.hrtime.bigint();
     const timings = {};
     const timed = (name, operation) => {
@@ -238,17 +321,21 @@ function createHistoryQueries({
     };
     const db = getDb();
     if (!db) return { byDst: [], byDevice: [] };
+    const source = connectionSource(sourceScope, 'connections');
     const conditions = [];
     const params = [];
     if (from != null) { conditions.push('lastSeen >= ?'); params.push(from); }
     if (to != null) { conditions.push('lastSeen <= ?'); params.push(to); }
     if (src != null) { conditions.push('src = ?'); params.push(src); }
+    const scoped = sourceScopeCondition(sourceScope, 'connections');
+    if (scoped.condition) conditions.push(scoped.condition);
+    params.push(...scoped.params);
     const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
     const targetExpr = "COALESCE(NULLIF(org, ''), NULLIF(dstHost, ''), dst)";
     const countRow = timed('range', () => db.prepare(
-      `SELECT COUNT(*) AS total, MIN(lastSeen) AS minLastSeen, MAX(lastSeen) AS maxLastSeen
-       FROM connections${where}`
-    ).get(...params) || {});
+      `${source.cte} SELECT COUNT(*) AS total, MIN(lastSeen) AS minLastSeen, MAX(lastSeen) AS maxLastSeen
+       FROM ${source.from}${where}`
+    ).get(...source.params, ...params) || {});
     const total = countRow.total || 0;
     const rangeFrom = from ?? countRow.minLastSeen ?? Date.now();
     const rangeTo = to ?? countRow.maxLastSeen ?? Date.now();
@@ -256,55 +343,55 @@ function createHistoryQueries({
     const bucketMs = Math.max(1, (Math.max(rangeTo, rangeFrom + 1) - rangeFrom) / bucketCount);
 
     const byDst = timed('destinations', () => db.prepare(
-      `SELECT dst, dstHost, country, org,
+      `${source.cte} SELECT dst, dstHost, country, org,
               COUNT(*) AS count, MIN(firstSeen) AS firstSeen, MAX(lastSeen) AS lastSeen
-       FROM connections${where}
+       FROM ${source.from}${where}
        GROUP BY dst ORDER BY count DESC LIMIT 500`
-    ).all(...params));
+    ).all(...source.params, ...params));
     const byDevice = timed('devices', () => db.prepare(
-      `SELECT src, MAX(srcMac) AS srcMac, MAX(srcVendor) AS srcVendor,
+      `${source.cte} SELECT src, MAX(srcMac) AS srcMac, MAX(srcVendor) AS srcVendor,
               MAX(srcDnsName) AS srcDnsName, MAX(srcMdnsName) AS srcMdnsName,
               COUNT(*) AS count, MIN(firstSeen) AS firstSeen, MAX(lastSeen) AS lastSeen
-       FROM connections${where}
+       FROM ${source.from}${where}
        GROUP BY src ORDER BY count DESC LIMIT 200`
-    ).all(...params));
+    ).all(...source.params, ...params));
     const deviceObservations = timed('observations', () => db.prepare(`
-      WITH filtered_connections AS (SELECT * FROM connections${where})
+      ${source.cte}${source.cte ? ',' : 'WITH'} filtered_connections AS (SELECT * FROM ${source.from}${where})
       SELECT c.src, GROUP_CONCAT(DISTINCT o.routerId) AS observedByCsv
       FROM filtered_connections c
       JOIN connection_observations o
         ON o.src = c.src AND o.dst = c.dst AND o.dport = c.dport AND o.proto = c.proto
       GROUP BY c.src
-    `).all(...params));
+    `).all(...source.params, ...params));
     const observationsByDevice = new Map(deviceObservations.map(row => [row.src, normalizeObservedBy(row.observedByCsv)]));
     for (const row of byDevice) {
       row.observedBy = observationsByDevice.get(row.src) || [];
       row.sources = compatibilitySource(row.observedBy);
     }
     const byTarget = timed('targets', () => db.prepare(
-      `SELECT ${targetExpr} AS key, ${targetExpr} AS label,
+      `${source.cte} SELECT ${targetExpr} AS key, ${targetExpr} AS label,
               COUNT(*) AS count, MIN(firstSeen) AS firstSeen, MAX(lastSeen) AS lastSeen
-       FROM connections${where}
+       FROM ${source.from}${where}
        GROUP BY key ORDER BY count DESC LIMIT 1000`
-    ).all(...params));
+    ).all(...source.params, ...params));
     const byEdge = timed('edges', () => db.prepare(
-      `SELECT src, ${targetExpr} AS key,
+      `${source.cte} SELECT src, ${targetExpr} AS key,
               COUNT(*) AS count, MIN(firstSeen) AS firstSeen, MAX(lastSeen) AS lastSeen
-       FROM connections${where}
+       FROM ${source.from}${where}
        GROUP BY src, key ORDER BY count DESC LIMIT 3000`
-    ).all(...params));
+    ).all(...source.params, ...params));
     const locationLimit = 500;
     const locationFilter = `${where}${where ? ' AND' : ' WHERE'} lat IS NOT NULL AND lon IS NOT NULL`;
     const byLocation = timed('locations', () => db.prepare(
-      `SELECT ${targetExpr} AS key, ${targetExpr} AS org,
+      `${source.cte} SELECT ${targetExpr} AS key, ${targetExpr} AS org,
               country, city, lat, lon,
               COUNT(*) AS totalSessions, COUNT(DISTINCT src) AS srcCount,
               MAX(ttl) AS maxTtl, MIN(firstSeen) AS firstSeen, MAX(lastSeen) AS lastSeen,
               COUNT(*) OVER () AS totalGroups,
               SUM(COUNT(*)) OVER () AS allLocationSessions
-       FROM connections${locationFilter}
+       FROM ${source.from}${locationFilter}
        GROUP BY key, lat, lon ORDER BY totalSessions DESC LIMIT ?`
-    ).all(...params, locationLimit));
+    ).all(...source.params, ...params, locationLimit));
     const locationTotalSessions = byLocation[0]?.allLocationSessions || 0;
     const locationShownSessions = byLocation.reduce((sum, row) => sum + (row.totalSessions || 0), 0);
     const locationTotalGroups = byLocation[0]?.totalGroups || 0;
@@ -313,21 +400,21 @@ function createHistoryQueries({
       delete row.allLocationSessions;
     }
     const appRows = timed('applications', () => db.prepare(
-      `SELECT dport, proto, COALESCE(NULLIF(dstHost, ''), dst) AS dstHost, COUNT(*) AS count
-       FROM connections${where}
+      `${source.cte} SELECT dport, proto, COALESCE(NULLIF(dstHost, ''), dst) AS dstHost, COUNT(*) AS count
+       FROM ${source.from}${where}
        GROUP BY dport, proto, dstHost ORDER BY count DESC`
-    ).all(...params));
+    ).all(...source.params, ...params));
     const timeline = timed('timeline', () => db.prepare(
-      `SELECT ${targetExpr} AS key,
+      `${source.cte} SELECT ${targetExpr} AS key,
               CASE
                 WHEN lastSeen < ? THEN 0
                 WHEN lastSeen >= ? THEN ?
                 ELSE CAST((lastSeen - ?) / ? AS INTEGER)
               END AS bucket,
               COUNT(*) AS count
-       FROM connections${where}
+       FROM ${source.from}${where}
        GROUP BY key, bucket ORDER BY bucket ASC, count DESC`
-    ).all(rangeFrom, rangeTo, bucketCount - 1, rangeFrom, bucketMs, ...params));
+    ).all(...source.params, rangeFrom, rangeTo, bucketCount - 1, rangeFrom, bucketMs, ...params));
     const result = {
       byDst,
       byDevice,
@@ -365,6 +452,7 @@ function createHistoryQueries({
     groupServiceByTimeRange,
     groupSrcForDstsByTimeRange,
     groupSrcByTimeRange,
+    listSourceDeviceKeys,
     summarizeByTimeRange,
   };
 }
@@ -375,4 +463,6 @@ module.exports = {
   buildWhereAndParams,
   escapeLikeValue,
   makeLikePat,
+  connectionSource,
+  sourceScopeCondition,
 };

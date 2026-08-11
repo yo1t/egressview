@@ -45,6 +45,8 @@ function harness({ apiFetch = async () => { throw new Error('Unexpected request'
     t: key => key,
     tVars: (key, values) => `${key}:${JSON.stringify(values)}`,
     apiFetch,
+    appendDisplayScope: params => params,
+    withDisplayScope: body => ({ ...body }),
     getTimeRange: () => ({ from: 1, to: 2 }),
     crypto: { randomUUID: () => '11111111-1111-4111-8111-111111111111' },
     document: {

@@ -224,6 +224,19 @@ function getDisplayScope() {
   return displayScope ? { ...displayScope } : null;
 }
 
+function appendDisplayScope(params) {
+  const scope = getDisplayScope();
+  if (!scope) return params;
+  params.set('sourceKind', scope.sourceKind);
+  params.set('sourceId', scope.sourceId);
+  return params;
+}
+
+function withDisplayScope(body = {}) {
+  const scope = getDisplayScope();
+  return scope ? { ...body, ...scope } : { ...body };
+}
+
 function getRouterSource(sourceId) {
   return routerSources.find(source => source.sourceId === String(sourceId)) || null;
 }
@@ -232,6 +245,7 @@ export {
   STORAGE_KEY,
   activeAgentSources,
   activeRouterSources,
+  appendDisplayScope,
   getDisplayScope,
   getRouterSource,
   initDisplayScopeSelector,
@@ -241,4 +255,5 @@ export {
   setDisplayScope,
   updateAgentSources,
   updateRouterSources,
+  withDisplayScope,
 };

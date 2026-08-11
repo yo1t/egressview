@@ -5,6 +5,7 @@ import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 import { switchView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { setLogThreatFilter } from './log.js?v=__ASSET_VERSION__';
 import { openSettings } from './settings.js?v=__ASSET_VERSION__';
+import { appendDisplayScope, withDisplayScope } from './display-scope.js?v=__ASSET_VERSION__';
 
 const REFRESH_MS = 15_000;
 const METRICS = ['connections', 'devices', 'destinations', 'warn', 'danger'];
@@ -184,6 +185,7 @@ async function refreshAiInsights() {
   error.classList.remove('is-visible');
   try {
     const params = new URLSearchParams({ from: String(from), to: String(to) });
+    appendDisplayScope(params);
     const response = await apiFetch(`${_BASE}/api/ai/facts?${params}`);
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
@@ -325,7 +327,7 @@ async function sendChatMessage() {
     const response = await apiFetch(`${_BASE}/api/ai/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: JSON.stringify(withDisplayScope({
         conversationId: activeConversationId || undefined,
         requestId: randomUuid(),
         message,
@@ -337,7 +339,7 @@ async function sendChatMessage() {
         priorAnalysis: lastAnalysis && lastAnalysis.from === from && lastAnalysis.to === to
           ? lastAnalysis.text
           : undefined,
-      }),
+      })),
       signal: chatController.signal,
     });
     const body = await response.json().catch(() => ({}));
@@ -402,7 +404,7 @@ async function analyzeCurrentRange() {
     const response = await apiFetch(`${_BASE}/api/ai/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, cloudConsentConfirmed: cloud, language: currentLang }),
+      body: JSON.stringify(withDisplayScope({ from, to, cloudConsentConfirmed: cloud, language: currentLang })),
       signal: analysisController.signal,
     });
     const body = await response.json().catch(() => ({}));

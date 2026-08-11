@@ -2,6 +2,7 @@
 import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, fmtTs } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch, notesMap, lookupNote, refreshAllNotes } from './auth-socket.js?v=__ASSET_VERSION__';
+import { appendDisplayScope } from './display-scope.js?v=__ASSET_VERSION__';
 
 var devicesData = [];
 var devicesSortState = { col: 'lastSeen', dir: 'desc' };
@@ -560,7 +561,7 @@ async function loadDevicesView() {
     // Always fetch with includeArchived=1 so status filter works client-side without re-fetching
     const [, res] = await Promise.all([
       loadMergeCandidates(),
-      apiFetch(_BASE+'/api/devices?includeArchived=1'),
+      apiFetch(`${_BASE}/api/devices?${appendDisplayScope(new URLSearchParams({ includeArchived: '1' }))}`),
     ]);
     if (!res.ok) throw new Error(res.statusText);
     const data = await res.json();
