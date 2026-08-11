@@ -2,11 +2,24 @@
 
 const path = require('node:path');
 const Database = require('better-sqlite3');
+const {
+  buildUnifiedReadModel,
+  createAgentCorrelation,
+  DEFAULT_CORRELATION_WINDOW_MS,
+} = require('./agent-correlation');
+const logger = require('./logger');
 
 const DEFAULT_DB_PATH = path.join(__dirname, '..', '.egressview.db');
 
 let db = null;
 let lastDbPath = DEFAULT_DB_PATH;
+const configuredWindowMs = Number(process.env.EGRESSVIEW_AGENT_CORRELATION_WINDOW_MS);
+const correlation = createAgentCorrelation({
+  getDb: () => db,
+  windowMs: Number.isFinite(configuredWindowMs) && configuredWindowMs >= 0
+    ? configuredWindowMs
+    : DEFAULT_CORRELATION_WINDOW_MS,
+});
 
 function initDb(dbPath) {
   lastDbPath = dbPath || DEFAULT_DB_PATH;
@@ -132,13 +145,29 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
     }, false);
   });
 
-  return operation.immediate();
+  const ack = operation.immediate();
+  if (!ack.replayed && ack.accepted > 0) {
+    try {
+      correlation.reconcile({ agentId });
+    } catch (error) {
+      // The durable ingest ACK remains authoritative. Periodic reconciliation
+      // retries this work without making the Agent resend an accepted batch.
+      logger.error('[agent-correlation] post-ingest reconcile failed:', error.message);
+    }
+  }
+  return ack;
 }
 
 function pruneObservations({ before }) {
   const database = requireDb();
   if (!Number.isFinite(before)) throw new TypeError('before must be finite');
   return database.transaction(() => {
+    const correlations = database.prepare(`
+      DELETE FROM connection_agent_observations
+      WHERE (agentId, observationId) IN (
+        SELECT agentId, observationId FROM agent_observations WHERE lastObservedAt < ?
+      )
+    `).run(before).changes;
     const observations = database.prepare(
       'DELETE FROM agent_observations WHERE lastObservedAt < ?'
     ).run(before).changes;
@@ -151,8 +180,24 @@ function pruneObservations({ before }) {
             AND o.batchId = agent_ingest_batches.batchId
         )
     `).run(before).changes;
-    return { observations, batches };
+    return { correlations, observations, batches };
   }).immediate();
+}
+
+function reconcileCorrelations(options) {
+  return correlation.reconcile(options);
+}
+
+function getCorrelationDiagnostics() {
+  return correlation.diagnostics();
+}
+
+function queryCorrelationReadModel(options) {
+  return correlation.queryReadModel(options);
+}
+
+function queryUnifiedReadModel(routerConnections, options) {
+  return buildUnifiedReadModel(routerConnections, correlation.queryReadModel(options));
 }
 
 function _initForTest(dbPath = ':memory:') {
@@ -181,6 +226,17 @@ function _initForTest(dbPath = ':memory:') {
       collector TEXT NOT NULL, confidence TEXT NOT NULL, receivedAt INTEGER NOT NULL,
       PRIMARY KEY (agentId, observationId)
     );
+    CREATE TABLE connections (
+      src TEXT NOT NULL, dst TEXT NOT NULL, dport INTEGER NOT NULL, proto TEXT NOT NULL,
+      sport INTEGER, firstSeen INTEGER NOT NULL, lastSeen INTEGER NOT NULL,
+      PRIMARY KEY (src, dst, dport, proto)
+    );
+    CREATE TABLE connection_agent_observations (
+      src TEXT NOT NULL, dst TEXT NOT NULL, dport INTEGER NOT NULL, proto TEXT NOT NULL,
+      agentId TEXT NOT NULL, observationId TEXT NOT NULL,
+      matchKind TEXT NOT NULL, matchedAt INTEGER NOT NULL, timeDeltaMs INTEGER NOT NULL,
+      PRIMARY KEY (src, dst, dport, proto, agentId, observationId)
+    );
   `);
 }
 
@@ -191,7 +247,11 @@ function _dbForTest() {
 module.exports = {
   closeDb,
   initDb,
+  getCorrelationDiagnostics,
   pruneObservations,
+  queryCorrelationReadModel,
+  queryUnifiedReadModel,
+  reconcileCorrelations,
   reopen,
   storeBatch,
   _dbForTest,
