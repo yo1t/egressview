@@ -88,8 +88,16 @@ describe('HTTP permission matrix', () => {
       'GET /healthz',
       'GET /readyz',
       'POST /api/admin/verify',
+      'POST /api/agent/enroll',
       'POST /api/auth/login',
     ]);
+  });
+
+  it('keeps Agent credentials on their own access class', () => {
+    const policy = classifyHttpRequest('POST', '/api/agent/token/rotate');
+    assert.equal(policy.access, ACCESS.AGENT);
+    assert.deepEqual(policy.permissions, ['agent.ingest']);
+    assert.equal(ALL_PERMISSIONS.includes('agent.ingest'), false);
   });
 
   it('matches parameters, query strings, and an optional deployment subpath', () => {

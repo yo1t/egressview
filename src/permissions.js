@@ -11,7 +11,13 @@ const PERMISSIONS = Object.freeze({
 });
 
 const ALL_PERMISSIONS = Object.freeze(Object.values(PERMISSIONS));
-const KNOWN_PERMISSIONS = new Set(ALL_PERMISSIONS);
+const AGENT_PERMISSIONS = Object.freeze({
+  INGEST: 'agent.ingest',
+});
+const KNOWN_PERMISSIONS = new Set([
+  ...ALL_PERMISSIONS,
+  ...Object.values(AGENT_PERMISSIONS),
+]);
 
 function normalizePermissions(permissions) {
   if (!permissions) return [];
@@ -42,6 +48,7 @@ function checkPermissions(grantedPermissions, requiredPermissions) {
 
 module.exports = {
   PERMISSIONS,
+  AGENT_PERMISSIONS,
   ALL_PERMISSIONS,
   assertKnownPermissions,
   checkPermissions,

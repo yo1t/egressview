@@ -49,6 +49,7 @@ const sessions       = require('./src/sessions');
 const authPassword   = require('./src/auth-password');
 const authAudit      = require('./src/auth-audit');
 const apiIdentities  = require('./src/api-identities');
+const agentIdentities = require('./src/agent-identities');
 const authCookies    = require('./src/auth-cookies');
 const oidcModule = require('./src/oidc-google');
 const { createGoogleOidc } = oidcModule;
@@ -247,6 +248,7 @@ function saveConfig(sectionOverrides = {}) {
       passwordHash: appState.authPasswordHash,
       salt: appState.authPasswordSalt,
       password: appState.authPasswordRecord,
+      agentTokenPepper: appState.agentTokenPepper,
     },
     oidc:    appState.oidcConfig,
     manualThreat: manualThreatLookup.exportConfig(),
@@ -295,6 +297,12 @@ function ensureLoginPassword() {
   }
 }
 
+function ensureAgentTokenPepper() {
+  if (appState.agentTokenPepper) return;
+  appState.agentTokenPepper = crypto.randomBytes(32).toString('hex');
+  saveConfig();
+}
+
 function exposeInitialCredential(label, value, suffix) {
   if (process.stderr.isTTY) {
     process.stderr.write(`\nEgressView ${label} (shown once):\n${value}\n\n`);
@@ -325,6 +333,7 @@ const authBoundary = createAuthMiddleware({
   authCookies,
   authAudit,
   apiIdentities,
+  agentIdentities,
   demoVisitor,
 });
 const {
@@ -332,6 +341,7 @@ const {
   authenticateRequest,
   enforceApiPermissions,
   requireAdmin,
+  requireAgent,
 } = authBoundary;
 
 // ─── Connection enrichment queue ──────────────────────────────────────────────
@@ -381,6 +391,7 @@ const routeCtx = {
   dnsmasqLog, inspectSyslog, dhcpdSyslog,
   runtime, notes, io, beacons, sessions, authPassword,
   authAudit, authCookies, oidc, apiIdentities,
+  agentIdentities, requireAgent,
   authenticateRequest: req => authenticateRequest(req)?.auth || null,
   subpath: SUBPATH,
   saveConfig,
@@ -623,6 +634,7 @@ server.listen(PORT, HOST, () => {
     ensureAdminToken();
   }
   ensureLoginPassword();
+  ensureAgentTokenPepper();
 
   notes.load();
   history.setRetentionDays(appState.retentionDays);
@@ -637,6 +649,7 @@ server.listen(PORT, HOST, () => {
     hasCiscoConfig:  !!(rawCfg.cisco  && (rawCfg.cisco.ip  || rawCfg.cisco.user)),
   });
   authAudit.setHashKey(appState.adminToken);
+  agentIdentities.setPepper(appState.agentTokenPepper);
   const { staleEnrichmentIps } = runDbBootstrap({
     dbPath: runtimeDbPath,
     sourceRouterMap,
@@ -647,10 +660,13 @@ server.listen(PORT, HOST, () => {
     beacons,
     authAudit,
     apiIdentities,
+    agentIdentities,
   });
   setInterval(() => sessions.pruneExpired(), 6 * 60 * 60 * 1000);
   apiIdentities.pruneExpired();
   setInterval(() => apiIdentities.pruneExpired(), 24 * 60 * 60 * 1000).unref();
+  agentIdentities.pruneEnrollmentTokens();
+  setInterval(() => agentIdentities.pruneEnrollmentTokens(), 24 * 60 * 60 * 1000).unref();
   authAudit.prune();
   setInterval(() => authAudit.prune(), 24 * 60 * 60 * 1000).unref();
 
@@ -727,6 +743,7 @@ function shutdown(exitCode = 0) {
   try { runtimeProfiler.measureSync('history.shutdownSnapshot', () => history.snapshotHistory()); } catch {}
   runtimeProfiler.stop();
   try { history.closeDb();         } catch {}
+  try { agentIdentities.closeDb(); } catch {}
   try { dnsmasqLog.stop();         } catch {}
   try { inspectSyslog.stop();      } catch {}
   try { dhcpdSyslog.stop();        } catch {}

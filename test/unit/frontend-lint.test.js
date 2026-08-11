@@ -65,6 +65,7 @@ const APP_SCRIPT_FILES = [
   'settings-slack.js',
   'settings-manual-threat.js',
   'settings-ai.js',
+  'settings-agents.js',
   'settings.js',
   'time-filter.js',
   'main.js',
@@ -472,6 +473,16 @@ describe('Frontend TDZ lint', () => {
     ]) {
       assert.match(html, new RegExp(`class="[^"]*${className}`));
     }
+  });
+
+  it('Agent settings render untrusted host metadata with DOM APIs', () => {
+    const section = moduleSources['settings-agents.js'];
+    assert.ok(section);
+    assert.doesNotMatch(section, /\.innerHTML\s*=/);
+    assert.doesNotMatch(section, /insertAdjacentHTML/);
+    assert.doesNotMatch(section, /\.style\./);
+    assert.match(html, /id="agents-list"/);
+    assert.match(html, /id="agent-enrollment-create-btn"/);
   });
 
   it('graph tooltips use DOM APIs and only runtime position styles', () => {
@@ -974,7 +985,7 @@ describe('Server runtime invariants', () => {
       'server startup should choose one runtime DB path before initializing stores');
     // All long-lived DB connections open through the bootstrap boundary on the
     // selected runtime path (P2-30: history/migrations first, everything after).
-    assert.match(serverJs, /runDbBootstrap\(\{\s*dbPath:\s*runtimeDbPath,[\s\S]*?history,\s*sessions,\s*devices,\s*enrichment,\s*beacons,\s*authAudit,\s*apiIdentities,\s*\}\)/,
+    assert.match(serverJs, /runDbBootstrap\(\{\s*dbPath:\s*runtimeDbPath,[\s\S]*?history,\s*sessions,\s*devices,\s*enrichment,\s*beacons,\s*authAudit,\s*apiIdentities,\s*agentIdentities,\s*\}\)/,
       'server startup should open every SQLite-backed store via runDbBootstrap on the runtime DB path');
     const bootstrapJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'db-bootstrap.js'), 'utf8');
     for (const call of [
@@ -985,6 +996,7 @@ describe('Server runtime invariants', () => {
       'beacons.initDb(dbPath)',
       'authAudit.initDb(dbPath)',
       'apiIdentities.initDb(dbPath)',
+      'agentIdentities.initDb(dbPath)',
     ]) {
       assert.match(bootstrapJs, new RegExp(call.replace(/[().]/g, '\\$&')),
         `db-bootstrap must pass the DB path to ${call.split('.')[0]}`);

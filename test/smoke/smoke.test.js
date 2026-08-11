@@ -73,7 +73,7 @@ const PHASE2_JS_FILES = [
   'stats-helpers.js', 'stats-charts.js', 'stats-map.js',
   'view-tabs.js', 'log.js', 'ai-insights.js', 'beacon.js', 'threat-popup.js',
   'devices.js', 'notif-log.js', 'main.js',
-  'settings-ai.js', 'settings-security.js',
+  'settings-ai.js', 'settings-security.js', 'settings-agents.js',
 ];
 for (const file of PHASE2_JS_FILES) {
   test(`js/${file} is served (200)`, async ({ request }) => {
@@ -215,6 +215,17 @@ async function mockSettingsRoutes(page) {
     { id: 'current', deviceLabel: '<script>Current device</script>', current: true, lastSeenAt: 100 },
     { id: '../other?id=1', deviceLabel: '<img src=x onerror=alert(1)>', current: false, lastSeenAt: 200 },
   ];
+  let mockAgents = [{
+    agentId: '11111111-1111-4111-8111-111111111111',
+    platform: 'macos',
+    hostName: '<img src=x onerror=alert(1)>',
+    osVersion: '26.5.2',
+    agentVersion: '0.1.13',
+    createdAt: 100,
+    updatedAt: 100,
+    lastSeenAt: 200,
+    revokedAt: null,
+  }];
   let aiConfig = {
     provider: 'disabled',
     models: { ollama: '', anthropic: '', openai: '' },
@@ -380,6 +391,38 @@ async function mockSettingsRoutes(page) {
     }
     await route.fulfill({
       status: 200, contentType: 'application/json', body: JSON.stringify({ sessions: mockSessions }),
+    });
+  });
+  await page.route('**/api/agents**', async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'POST' && url.pathname.endsWith('/enrollment-tokens')) {
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          code: `egve_${'a'.repeat(48)}`,
+          expiresAt: Date.now() + 10 * 60_000,
+        }),
+      });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname.endsWith('/revoke')) {
+      const agentId = url.pathname.split('/').at(-2);
+      mockAgents = mockAgents.map(agent => agent.agentId === agentId
+        ? { ...agent, revokedAt: Date.now() }
+        : agent);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: mockAgents }),
     });
   });
   await page.route('**/api/beacons/config', async route => {
@@ -1549,6 +1592,16 @@ test('settings tabs save and connection buttons work without console errors', as
   await expect(page.locator('#sessions-list .settings-session-revoke')).toHaveCount(1);
   await page.locator('#sessions-list .settings-session-revoke').click();
   await expect(sessionRows).toHaveCount(1);
+  await expect(page.locator('#agents-list .settings-agent-row')).toHaveCount(1);
+  await expect(page.locator('#agents-list')).toContainText('<img src=x onerror=alert(1)>');
+  await expect(page.locator('#agents-list img')).toHaveCount(0);
+  page.removeAllListeners('dialog');
+  page.once('dialog', dialog => dialog.accept());
+  await page.click('#agent-enrollment-create-btn');
+  await expect(page.locator('#agents-status')).toContainText(/発行|created/i);
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#agents-list .beacon-dismiss-btn').click();
+  await expect(page.locator('#agents-list .settings-agent-revoked')).toHaveCount(1);
   await page.locator('#s-home-country').selectOption('JP');
   await page.click('#general-save-btn');
   await expect(page.locator('#general-status')).toBeVisible();

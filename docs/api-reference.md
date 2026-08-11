@@ -10,6 +10,8 @@ API paths are rooted at `/api`, even when the web UI is served below a subpath. 
 
 Scoped API identities are managed through `GET` / `POST /api/auth/api-identities` and `POST /api/auth/api-identities/:id/revoke`, all requiring `auth.admin`. Creation requires a label, a non-empty permission list, and `expiresInMs` between one minute and one year. The plaintext `egv_...` token is returned only in the `201` creation response; only its SHA-256 hash is stored. Identity-management responses use `Cache-Control: no-store`.
 
+Mac and future endpoint Agents use a separate credential boundary. An administrator creates a one-time, 10-minute enrollment code with `POST /api/agents/enrollment-tokens`; the Agent exchanges it over HTTPS at `POST /api/agent/enroll`. The `egva_...` bearer returned by that response is stored in the macOS Keychain, while the Hub stores only a peppered hash. It grants only `agent.ingest`, cannot authenticate browser/admin/MCP routes, and is accepted by `POST /api/agent/token/rotate`. Agent inventory and revocation (`GET /api/agents`, `POST /api/agents/:agentId/revoke`) require `auth.admin`. All Agent responses are non-cacheable, enrollment codes are shown once, and HTTP is accepted only on a loopback development listener.
+
 `GET /api/auth/api-identities/self` returns only the currently authenticated
 scoped identity and requires `network.read`; browser sessions and the legacy
 admin token are rejected. The remote MCP server uses it to fail closed unless
@@ -41,7 +43,7 @@ curl --fail-with-body \
 {"success":true,"token":"session-token","expiresAt":1784304000000}
 ```
 
-`POST /api/admin/verify` is also public and verifies a token supplied in the request body. Authentication status/method discovery and the OIDC redirect/callback are public. The detail-free `/healthz` and `/readyz` checks are public; all other endpoints are protected.
+`POST /api/admin/verify` is also public and verifies a token supplied in the request body. Authentication status/method discovery, the OIDC redirect/callback, and the one-time-code-protected `POST /api/agent/enroll` entry point are public. The detail-free `/healthz` and `/readyz` checks are public; all other endpoints require their documented browser, API identity, or Agent credential.
 
 ## Common behavior
 
@@ -158,7 +160,7 @@ Restore is fail-closed: EgressView validates the source, confirms a safety backu
 
 ## Endpoint catalog
 
-All 91 implemented HTTP endpoints are listed below. **Public** means no token is required. Protected endpoints accept the legacy or scoped `X-Admin-Token` credential or the browser's HttpOnly session cookie; cookie-authenticated mutations additionally require `X-CSRF-Token`.
+All 99 implemented HTTP endpoints are listed below. **Public** means no browser or API token is required. Protected endpoints accept the documented legacy/scoped `X-Admin-Token`, browser HttpOnly session cookie, or Agent bearer; cookie-authenticated mutations additionally require `X-CSRF-Token`.
 
 | Area | Method and path | Access |
 |---|---|---|
@@ -181,6 +183,11 @@ All 91 implemented HTTP endpoints are listed below. **Public** means no token is
 | Authentication | `POST /api/auth/api-identities` | Protected |
 | Authentication | `POST /api/auth/api-identities/:id/revoke` | Protected |
 | Authentication | `GET /api/auth/audit-events` | Protected |
+| Agent | `POST /api/agents/enrollment-tokens` | Protected; `auth.admin`, returns the code once |
+| Agent | `POST /api/agent/enroll` | Public; one-time code and HTTPS required |
+| Agent | `GET /api/agents` | Protected; `auth.admin`, never returns credential hashes |
+| Agent | `POST /api/agents/:agentId/revoke` | Protected; `auth.admin` |
+| Agent | `POST /api/agent/token/rotate` | Agent bearer; `agent.ingest` only |
 | Router setup | `POST /api/nonce` | Protected |
 | Router setup | `POST /api/yamaha/detect` | Protected |
 | Router setup | `POST /api/cisco/detect` | Protected |
