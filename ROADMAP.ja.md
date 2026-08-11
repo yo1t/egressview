@@ -15,7 +15,7 @@
 - **プライバシー:** payloadの取得・復号・保存は行いません。Hubへの送信はローカル取得とは分離し、既定OFFの明示opt-inにします。
 - **配布:** Developer ID署名・notarization済みappをDMGとHomebrew Caskで配布する計画です。インストールだけで監視を有効化せず、利用者が監視モードを選択します。
 
-共通観測モデル、軽量collector、重複除去、監視モード状態管理、macOS host app、pass-only System Extension基盤、flow metadata変換、権限限定ローカル保存、接続一覧UIまで実装・CI検証済みです。次にApple署名済みbuildの実機確認と、明示opt-inのHub連携を段階的に実装します。正式リリース日は未定です。
+共通観測モデル、軽量collector、重複除去、監視モード状態管理、署名・公証済みmacOS host app、pass-only System Extension、flow metadata変換、権限限定ローカル履歴、保持期間・確認付き削除、明示opt-inのログイン時起動を実装し、実機で検証済みです。Hubへの登録、既定OFFの送信、再送キュー、ルーター観測との相関も実装済みで、現在は実運用検証を進めています。正式リリース日は未定です。
 
 ### conntrack ルーター対応（OpenWrt / ASUS ルーターモード / Ubiquiti UDM）
 

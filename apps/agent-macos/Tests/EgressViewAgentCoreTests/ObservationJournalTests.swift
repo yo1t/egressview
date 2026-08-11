@@ -99,6 +99,109 @@ final class ObservationJournalTests: XCTestCase {
         XCTAssertEqual(try journals[0].latest(limit: 100).count, 20)
     }
 
+    func testSnapshotReportsStoredHistoryWithoutExposingMalformedRecords() throws {
+        let fileURL = temporaryDirectory.appendingPathComponent("observations.jsonl")
+        let journal = ObservationJournal(fileURL: fileURL, maximumFileSize: 2_048)
+        let oldest = observation(remoteAddress: "203.0.113.50", observedAt: Date(timeIntervalSince1970: 10))
+        let newest = observation(remoteAddress: "203.0.113.51", observedAt: Date(timeIntervalSince1970: 20))
+        try journal.append([oldest, newest])
+        let handle = try FileHandle(forWritingTo: fileURL)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("not-json\n".utf8))
+        try handle.close()
+
+        let snapshot = try journal.snapshot(limit: 1)
+
+        XCTAssertEqual(snapshot.observations, [newest])
+        XCTAssertEqual(snapshot.statistics.recordCount, 2)
+        XCTAssertEqual(snapshot.statistics.oldestObservationAt, oldest.lastObservedAt)
+        XCTAssertEqual(snapshot.statistics.newestObservationAt, newest.lastObservedAt)
+        XCTAssertGreaterThan(snapshot.statistics.storedBytes, 0)
+        XCTAssertEqual(snapshot.statistics.maximumStoredBytes, 4_096)
+    }
+
+    func testRemoveObservationsRetainsCutoffAndUsesPrivatePermissions() throws {
+        let fileURL = temporaryDirectory.appendingPathComponent("observations.jsonl")
+        let journal = ObservationJournal(fileURL: fileURL)
+        let old = observation(remoteAddress: "203.0.113.60", observedAt: Date(timeIntervalSince1970: 10))
+        let cutoff = observation(remoteAddress: "203.0.113.61", observedAt: Date(timeIntervalSince1970: 20))
+        let recent = observation(remoteAddress: "203.0.113.62", observedAt: Date(timeIntervalSince1970: 30))
+        try journal.append([old, cutoff, recent])
+
+        XCTAssertEqual(try journal.removeObservations(before: cutoff.lastObservedAt), 1)
+        XCTAssertEqual(
+            Set(try journal.latest().map(\.remoteAddress)),
+            ["203.0.113.61", "203.0.113.62"]
+        )
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        XCTAssertEqual(attributes[.posixPermissions] as? NSNumber, NSNumber(value: 0o600))
+    }
+
+    func testRemoveAllClearsCurrentAndArchive() throws {
+        let fileURL = temporaryDirectory.appendingPathComponent("observations.jsonl")
+        let journal = ObservationJournal(fileURL: fileURL, maximumFileSize: 1_024)
+        let padding = String(repeating: "x", count: 1_100)
+        try journal.append([observation(
+            remoteAddress: "203.0.113.70",
+            observedAt: Date(timeIntervalSince1970: 10),
+            processName: padding
+        )])
+        try journal.append([observation(
+            remoteAddress: "203.0.113.71",
+            observedAt: Date(timeIntervalSince1970: 20)
+        )])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.appendingPathExtension("1").path))
+
+        XCTAssertEqual(try journal.removeAll(), 2)
+        let snapshot = try journal.snapshot()
+        XCTAssertTrue(snapshot.observations.isEmpty)
+        XCTAssertEqual(snapshot.statistics.recordCount, 0)
+        XCTAssertEqual(snapshot.statistics.storedBytes, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.appendingPathExtension("1").path))
+    }
+
+    func testRetentionCleanupSerializesWithConcurrentAppends() throws {
+        let fileURL = temporaryDirectory.appendingPathComponent("observations.jsonl")
+        let writer = ObservationJournal(fileURL: fileURL)
+        let cleaner = ObservationJournal(fileURL: fileURL)
+        let queue = DispatchQueue(label: "journal-retention-test", attributes: .concurrent)
+        let group = DispatchGroup()
+        let errors = LockedErrors()
+        let recent = (0..<20).map { index in
+            observation(
+                remoteAddress: "203.0.113.\(100 + index)",
+                observedAt: Date(timeIntervalSince1970: TimeInterval(100 + index))
+            )
+        }
+
+        for observation in recent {
+            group.enter()
+            queue.async {
+                defer { group.leave() }
+                do {
+                    try writer.append([observation])
+                } catch {
+                    errors.append(error)
+                }
+            }
+        }
+        for _ in 0..<10 {
+            group.enter()
+            queue.async {
+                defer { group.leave() }
+                do {
+                    try cleaner.removeObservations(before: Date(timeIntervalSince1970: 50))
+                } catch {
+                    errors.append(error)
+                }
+            }
+        }
+        group.wait()
+
+        XCTAssertTrue(errors.values.isEmpty)
+        XCTAssertEqual(Set(try writer.latest(limit: 100).map(\.remoteAddress)), Set(recent.map(\.remoteAddress)))
+    }
+
     private func observation(
         remoteAddress: String,
         observedAt: Date,
