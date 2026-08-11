@@ -446,6 +446,31 @@ describe('countFactsByTimeRange', () => {
 });
 
 describe('collection source scope', () => {
+  it('shows a shared observation in each router scope but counts it once in All', () => {
+    const now = Date.now();
+    const shared = {
+      src: '192.0.2.40', dst: '198.51.100.40', dport: 443, proto: 'TCP',
+      firstSeen: now, lastSeen: now,
+    };
+    insert({ ...shared, observedBy: ['router-a'] });
+    history.appendHistoryLog({ ...shared, lastSeen: now + 1, observedBy: ['router-b'] });
+
+    assert.equal(history.countByTimeRange(null, null), 1);
+    assert.equal(history.countByTimeRange(null, null, {
+      sourceScope: { sourceKind: 'router', sourceId: 'router-a' },
+    }), 1);
+    assert.equal(history.countByTimeRange(null, null, {
+      sourceScope: { sourceKind: 'router', sourceId: 'router-b' },
+    }), 1);
+    assert.deepEqual(history.queryByTimeRange(null, null)[0].observedBy, ['router-a', 'router-b']);
+
+    const reader = history.createConnectionExportReader(null, null, {
+      sourceScope: { sourceKind: 'router', sourceId: 'router-b' },
+    });
+    try { assert.equal(reader.countByTimeRange(), 1); }
+    finally { reader.close(); }
+  });
+
   it('filters routers and includes both correlated and agent-only observations', () => {
     const fs = require('node:fs');
     const os = require('node:os');

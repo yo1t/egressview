@@ -112,7 +112,8 @@ describe('display source scope', () => {
   it('builds safe router labels and stable duplicate/fallback Agent labels', () => {
     const { context } = createHarness();
     context.routers = [
-      { id: 'r1', enabled: true, displayName: 'Core\nRouter', ip: '192.0.2.1', ready: true },
+      { id: 'r1', enabled: true, hostName: 'edge-cisco', displayName: 'Core\nRouter', ip: '192.0.2.1', ready: true },
+      { id: 'r3', enabled: true, displayName: 'Fallback RTX', ip: '192.0.2.3', ready: false },
       { id: 'r2', enabled: false, displayName: 'Disabled', ip: '192.0.2.2' },
     ];
     context.agents = [
@@ -123,7 +124,10 @@ describe('display source scope', () => {
     ];
     const routers = plain(vm.runInContext('activeRouterSources(routers)', context));
     const agents = plain(vm.runInContext('activeAgentSources(agents, 1000)', context));
-    assert.deepEqual(routers.map(item => item.label), ['Core Router (192.0.2.1)']);
+    assert.deepEqual(routers.map(item => item.label), [
+      'edge-cisco (192.0.2.1)',
+      'Fallback RTX (192.0.2.3)',
+    ]);
     assert.deepEqual(agents.map(item => item.label), [
       'MacBook (aaaaaaaa) · Online',
       'macbook (bbbbbbbb) · Offline',

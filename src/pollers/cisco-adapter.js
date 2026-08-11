@@ -36,6 +36,7 @@ function createCiscoAdapter({ id = '' } = {}) {
     hasPass: poller.hasPass,
     getNat: poller.getNat,
     getHostFp: poller.getHostFp,
+    getHostName: poller.getHostName,
 
     exec: poller.ciscoExec,
     detect: poller.detectCisco,
@@ -58,6 +59,7 @@ module.exports = {
   dotMacToColon: cisco.dotMacToColon,
   isCiscoIos: cisco.isCiscoIos,
   isPrivilegeError: cisco.isPrivilegeError,
+  extractCiscoHostName: cisco.extractCiscoHostName,
 
   _legacy: cisco,
 };
