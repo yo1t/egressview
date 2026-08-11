@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "batchId": "018f6b92-6e6c-7a31-8d68-0242ac120002",
+  "sentAt": "2026-08-11T12:00:00Z",
+  "agent": {
+    "hostName": "macbook-air",
+    "platform": "macos",
+    "osVersion": "26.5.2",
+    "agentVersion": "0.1.13"
+  },
+  "observations": [
+    {
+      "observationId": "018f6b92-6e6c-7a31-8d68-0242ac120003",
+      "networkProtocol": "tcp",
+      "localAddress": "192.0.2.10",
+      "localPort": 49152,
+      "remoteAddress": "198.51.100.20",
+      "remotePort": 443,
+      "processID": 42,
+      "processName": "Example",
+      "bundleID": "com.example.app",
+      "firstObservedAt": "2026-08-11T11:59:58Z",
+      "lastObservedAt": "2026-08-11T12:00:00Z",
+      "bytesIn": "9007199254740993",
+      "bytesOut": null,
+      "collector": "network-extension",
+      "confidence": "exact"
+    }
+  ]
+}
