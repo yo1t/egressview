@@ -46,8 +46,26 @@ and signing team, and writes them to the user's App Group JSON Lines journal.
 The journal uses `0700` directory and `0600` file permissions, rotates at 10
 MiB, keeps one archive, tolerates an isolated malformed line, and displays at
 most 500 deduplicated recent connections. It stores only connection metadata;
-payloads are never collected. Hub delivery remains off and is not implemented
-by this phase.
+payloads are never collected.
+
+Choose **Hub delivery...** to enroll this Mac with a Hub. Delivery is opt-in and
+off by default. The confirmation screen shows the exact destination and the
+metadata that will and will not be sent before enrollment or delivery can be
+enabled. The Mac always initiates the connection; the Hub never polls the Mac.
+
+Pending observations are stored locally with private permissions in bounded,
+idempotent batches. A lost acknowledgement or restart resends the same batch
+identifier. When the Mac is away from the Hub network, it waits for macOS to
+report restored connectivity and uses full-jitter exponential backoff capped at
+15 minutes rather than polling aggressively. **Send now** provides a manual
+retry. The window displays pending/dropped counts, the oldest pending time, and
+the last acknowledged time. Transport uses HTTPS with normal platform trust
+validation; plaintext HTTP is accepted only on loopback for development.
+
+The v1 Hub endpoint intentionally rejects compressed request bodies. The Agent
+therefore sends at most 200 observations per request and spaces batches to stay
+within the Hub rate limit. Compression requires an explicit protocol capability
+and is deferred rather than being enabled unilaterally.
 
 Unsigned Debug builds cannot access the production App Group container, so the
 host uses its Application Support directory for local UI development. Release

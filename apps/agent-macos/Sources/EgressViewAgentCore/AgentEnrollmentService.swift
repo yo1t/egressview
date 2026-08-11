@@ -22,12 +22,7 @@ public struct URLSessionAgentEnrollmentTransport: AgentEnrollmentTransport {
     private let session: URLSession
 
     public init(timeout: TimeInterval = 15) {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpCookieStorage = nil
-        configuration.httpShouldSetCookies = false
-        configuration.timeoutIntervalForRequest = timeout
-        configuration.timeoutIntervalForResource = timeout
-        session = URLSession(configuration: configuration)
+        session = makeAgentEphemeralSession(timeout: timeout)
     }
 
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {

@@ -6,12 +6,14 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var journalResult = makeJournal()
     private lazy var journal = try? journalResult.get()
     private lazy var observationWindow = ObservationWindowController(journal: journal)
+    private lazy var hubDelivery = HubDeliveryController()
     private lazy var controller = AgentMonitoringController(
         journal: journal,
         statusHandler: { [weak self] status in
             DispatchQueue.main.async { self?.render(status) }
         },
-        observationHandler: { [weak self] _ in
+        observationHandler: { [weak self] observations in
+            self?.hubDelivery.enqueue(observations)
             DispatchQueue.main.async { self?.observationWindow.noteObservationsAvailable() }
         },
         storageErrorHandler: { [weak self] error in
@@ -21,6 +23,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem.button?.title = "EgressView"
+        _ = hubDelivery
         render(.paused)
         if case .failure(let error) = journalResult {
             observationWindow.showStorageError(error.localizedDescription)
@@ -35,6 +38,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusRow)
         menu.addItem(.separator())
         menu.addItem(item("Open connection activity...", action: #selector(openObservations), key: "o"))
+        menu.addItem(item("Hub delivery...", action: #selector(openHubDelivery)))
         menu.addItem(.separator())
         menu.addItem(item("Full monitoring", action: #selector(selectFull)))
         menu.addItem(item("Lightweight monitoring", action: #selector(selectLightweight)))
@@ -57,6 +61,10 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openObservations() {
         observationWindow.show()
+    }
+
+    @objc private func openHubDelivery() {
+        hubDelivery.show()
     }
 
     @objc private func selectLightweight() {
