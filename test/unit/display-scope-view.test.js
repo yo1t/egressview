@@ -58,6 +58,7 @@ function createHarness(storedScope = null) {
     Map,
     Set,
     Promise,
+    URLSearchParams,
     localStorage: storage,
     t: translation,
     tVars: (key, vars) => Object.entries(vars).reduce(
@@ -95,6 +96,16 @@ describe('display source scope', () => {
     vm.runInContext("setDisplayScope({ sourceKind: 'agent', sourceId: 'agent-1' })", context);
     assert.deepEqual(JSON.parse(values.get('egressview_display_scope_v1')), {
       sourceKind: 'agent', sourceId: 'agent-1',
+    });
+  });
+
+  it('adds a selected scope to query parameters and request bodies', () => {
+    const { context } = createHarness();
+    vm.runInContext("setDisplayScope({ sourceKind: 'router', sourceId: 'router-1' })", context);
+    context.params = new URLSearchParams({ from: '1' });
+    assert.equal(vm.runInContext("appendDisplayScope(params).get('sourceId')", context), 'router-1');
+    assert.deepEqual(plain(vm.runInContext("withDisplayScope({ from: 1 })", context)), {
+      from: 1, sourceKind: 'router', sourceId: 'router-1',
     });
   });
 

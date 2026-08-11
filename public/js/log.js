@@ -6,6 +6,7 @@ import { logMode } from './view-tabs.js?v=__ASSET_VERSION__';
 import { selectedMac, selectedIp, updateSideHighlight, clearSelection, showToast } from './graph.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 import { showThreatDetail } from './threat-popup.js?v=__ASSET_VERSION__';
+import { appendDisplayScope } from './display-scope.js?v=__ASSET_VERSION__';
 
 const logSortState = { col: 'lastSeen', dir: 'desc' };
 const logFilters = {}; // col → { mode, value }
@@ -17,6 +18,7 @@ function buildConnectionExportUrl(format) {
   const params = new URLSearchParams({ format });
   params.set('from', from);
   if (to != null) params.set('to', to);
+  appendDisplayScope(params);
   return `${_BASE}/api/connections/export?${params}`;
 }
 
@@ -162,6 +164,7 @@ async function fetchLogPage() {
   logFetchAllMode = hasClientSideOnlyFilter();
   const { from, to } = getTimeRange();
   const params = new URLSearchParams();
+  appendDisplayScope(params);
   // Paginate only when no client-side-only filters are active
   if (!logFetchAllMode) {
     params.set('limit',  LOG_PAGE_SIZE);
@@ -291,6 +294,7 @@ async function fetchThreatCounts() {
   const gen = logFetchGeneration; // captured — discard if a newer query started
   const { from, to } = getTimeRange();
   const params = new URLSearchParams();
+  appendDisplayScope(params);
 
   // Apply the same time range and filter params as fetchLogPage (no sort/pagination)
   let serverFrom = from;

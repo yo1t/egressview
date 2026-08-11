@@ -48,7 +48,7 @@ function hostOrNull(dst, dstHost) {
 
 // Classify grouped destinations into prioritized threats (danger before warn)
 // and attach the source devices that contacted each threat destination.
-function buildThreats({ dstGroups, threatIntel, history, from, to }) {
+function buildThreats({ dstGroups, threatIntel, history, from, to, sourceScope = null }) {
   if (!threatIntel?.matchThreatIntel) return [];
   const threats = [];
   for (const { dst, dstHost, cnt } of dstGroups) {
@@ -70,7 +70,7 @@ function buildThreats({ dstGroups, threatIntel, history, from, to }) {
   const top = threats.slice(0, MAX_THREATS);
 
   const links = typeof history.groupSrcForDstsByTimeRange === 'function'
-    ? history.groupSrcForDstsByTimeRange(from, to, top.map(threat => threat.ip))
+    ? history.groupSrcForDstsByTimeRange(from, to, top.map(threat => threat.ip), { sourceScope })
     : [];
   const devicesByDst = new Map();
   for (const row of links) {
@@ -98,9 +98,9 @@ function deviceName(row) {
   );
 }
 
-function buildDeviceInventory({ history, devices, from, to }) {
+function buildDeviceInventory({ history, devices, from, to, sourceScope = null }) {
   const activity = typeof history.groupSrcByTimeRange === 'function'
-    ? history.groupSrcByTimeRange(from, to, MAX_DEVICE_INVENTORY)
+    ? history.groupSrcByTimeRange(from, to, MAX_DEVICE_INVENTORY, { sourceScope })
     : [];
   const known = typeof devices?.getAll === 'function' ? devices.getAll() : [];
   const knownByIp = new Map();
@@ -139,7 +139,11 @@ function buildDeviceInventory({ history, devices, from, to }) {
     const knownRow = knownByIp.get(String(row.src || '')) || knownByMac.get(normalizeMac(row.srcMac));
     add(knownRow, row);
   }
-  for (const row of known) add(row);
+  // A selected source may only expose devices backed by that source's
+  // observations. Inventory rows without source provenance stay All-only.
+  if (!sourceScope) {
+    for (const row of known) add(row);
+  }
 
   return {
     totalKnown: known.length,
@@ -230,9 +234,9 @@ function fitContextToByteLimit(context) {
 }
 
 function buildAiContext({
-  facts, history, routers = [], from, to, threatIntel = null, devices = null, asus = null,
+  facts, history, routers = [], from, to, threatIntel = null, devices = null, asus = null, sourceScope = null,
 }) {
-  const services = history.groupServiceByTimeRange(from, to)
+  const services = history.groupServiceByTimeRange(from, to, { sourceScope })
     .slice(0, MAX_SERVICES)
     .map(row => ({
       port: Number(row.dport) || 0,
@@ -240,7 +244,7 @@ function buildAiContext({
       connections: Number(row.count) || 0,
     }));
 
-  const dstGroups = history.groupDstByTimeRange(from, to);
+  const dstGroups = history.groupDstByTimeRange(from, to, { sourceScope });
   const topDestinations = [...dstGroups]
     .sort((a, b) => (Number(b.cnt) || 0) - (Number(a.cnt) || 0))
     .slice(0, MAX_DESTINATIONS)
@@ -250,12 +254,15 @@ function buildAiContext({
       connections: Number(row.cnt) || 0,
     }));
 
-  const threats = buildThreats({ dstGroups, threatIntel, history, from, to });
-  const deviceInventory = buildDeviceInventory({ history, devices, from, to });
-  const networkTopology = buildNetworkTopology(asus);
+  const threats = buildThreats({ dstGroups, threatIntel, history, from, to, sourceScope });
+  const deviceInventory = buildDeviceInventory({ history, devices, from, to, sourceScope });
+  // ASUS topology has no routerId/agentId provenance, so presenting it in a
+  // scoped prompt would mix global devices into the selected source.
+  const networkTopology = sourceScope ? null : buildNetworkTopology(asus);
 
   return fitContextToByteLimit({
     schemaVersion: 3,
+    sourceScope,
     range: facts.range,
     previousRange: facts.previousRange,
     collection: {

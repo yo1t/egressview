@@ -5,6 +5,7 @@ import { getFilteredConnections, getTimeRange, currentTimeFilter, setFetching, u
 import { statsMode, nlMode, logMode, currentView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { apiFetch, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
 import { flagEmoji, meshNodeId, normalizeGraphLinks, currentGraphRangeKey as _rangeKey, routerTargetsFromObservedBy, shouldUseDetailedGraph } from './graph-helpers.js?v=__ASSET_VERSION__';
+import { appendDisplayScope, getDisplayScope } from './display-scope.js?v=__ASSET_VERSION__';
 // Circular imports resolved at runtime (function-body-only calls):
 import { updateStats } from './stats.js?v=__ASSET_VERSION__';
 import { updateLogView } from './log.js?v=__ASSET_VERSION__';
@@ -165,7 +166,9 @@ export function setMaxRate(v) { maxRate = v; }
 export function getMeshColorMap() { return meshColorMap; }
 
 function currentGraphRangeKey(from, to) {
-  return _rangeKey(from, to, currentTimeFilter);
+  const scope = getDisplayScope();
+  const sourceKey = scope ? `${scope.sourceKind}:${scope.sourceId}` : 'all';
+  return `${_rangeKey(from, to, currentTimeFilter)}|${sourceKey}`;
 }
 
 function activeRouterTopology() {
@@ -212,16 +215,17 @@ function graphSummaryNotice(show, summary) {
 
 async function fetchGraphSummary(from, to) {
   const key = currentGraphRangeKey(from, to);
+  const params = new URLSearchParams();
+  if (from != null) params.set('from', from);
+  if (to != null) params.set('to', to);
+  params.set('buckets', '60');
+  appendDisplayScope(params);
   const now = Date.now();
   if (graphSummary && graphSummaryKey === key && now - graphSummaryFetchedAt < GRAPH_SUMMARY_CACHE_MS) {
     return graphSummary;
   }
   if (graphSummaryInflight.has(key)) return graphSummaryInflight.get(key);
   const showLoading = !graphSummary || graphSummaryKey !== key;
-  const params = new URLSearchParams();
-  if (from != null) params.set('from', from);
-  if (to != null) params.set('to', to);
-  params.set('buckets', '60');
   const promise = (async () => {
       const res = await apiFetch(`${_BASE}/api/connections/summary?${params}`);
       if (!res.ok) throw new Error(`graph summary failed: ${res.status}`);
@@ -363,7 +367,7 @@ function buildGraphFromConnections({ resetPositions = false } = {}) {
   if (currentView !== 'graph') return;
   const tr = typeof getTimeRange === 'function' ? getTimeRange() : { from: null, to: null };
   if (graphSummary && graphSummaryKey === currentGraphRangeKey(tr.from, tr.to)) {
-    if (shouldUseDetailedGraph(graphSummary, currentTimeFilter)) {
+    if (!getDisplayScope() && shouldUseDetailedGraph(graphSummary, currentTimeFilter)) {
       buildDetailedGraph(getFilteredConnections(), { resetPositions });
     } else {
       buildGraphFromSummary(graphSummary, { resetPositions });

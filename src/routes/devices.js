@@ -6,9 +6,15 @@ const { z } = require('zod');
 const { parseRequest } = require('../http-validation');
 const { t } = require('../i18n-server');
 const logger = require('../logger');
+const {
+  sourceScopeShape, validateSourceScopePair, requireKnownSourceScope,
+} = require('../source-scope');
 
 const deviceId = z.string().min(1).max(128);
-const devicesQuerySchema = z.object({ includeArchived: z.enum(['0', '1']).optional() }).strict();
+const devicesQuerySchema = z.object({
+  includeArchived: z.enum(['0', '1']).optional(),
+  ...sourceScopeShape,
+}).strict().superRefine(validateSourceScopePair);
 const mergeCandidatesQuerySchema = z.object({
   status: z.enum(['pending', 'approved', 'rejected', 'all']).optional(),
 }).strict();
@@ -29,7 +35,7 @@ const archiveSchema = z.object({ deviceId }).strict();
  * }} ctx
  */
 module.exports = function devicesRoutes(ctx) {
-  const { requireAdmin, devices, notes, yamaha } = ctx;
+  const { requireAdmin, devices, notes, yamaha, history, routerManager, agentIdentities } = ctx;
   const router = Router();
 
   // GET /api/devices[?includeArchived=1]
@@ -37,8 +43,16 @@ module.exports = function devicesRoutes(ctx) {
   router.get('/devices', requireAdmin, (req, res) => {
     const parsed = parseRequest(devicesQuerySchema, req.query, res);
     if (!parsed.ok) return;
+    const scoped = requireKnownSourceScope(parsed.data, { routerManager, agentIdentities }, res);
+    if (!scoped.ok) return;
     const includeArchived = parsed.data.includeArchived === '1';
-    const all = devices.getAll({ includeArchived });
+    let all = devices.getAll({ includeArchived });
+    if (scoped.scope && typeof history?.listSourceDeviceKeys === 'function') {
+      const keys = history.listSourceDeviceKeys(scoped.scope);
+      const ips = new Set(keys.map(row => row.src).filter(Boolean));
+      const macs = new Set(keys.map(row => row.srcMac?.toLowerCase()).filter(Boolean));
+      all = all.filter(device => ips.has(device.ip) || macs.has(device.mac?.toLowerCase()));
+    }
     for (const d of all) {
       d.ipv6Addrs = d.mac ? (yamaha.getNdpByMac(d.mac) || null) : null;
       d.note = notes

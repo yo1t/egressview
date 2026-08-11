@@ -558,6 +558,21 @@ test('source selector groups routers and Agents, persists selection, and keeps L
       { agentId: 'bbbbbbbb-2222', hostName: 'macbook', lastSeenAt: Date.now() - 10 * 60_000 },
     ] }),
   }));
+  await page.route(/\/api\/ai\/facts(?:\?.*)?$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      range: { from: 1, to: 2 }, previousRange: { from: 0, to: 1 },
+      collection: { total: 1, healthy: 1, routers: [], lastUpdatedAt: Date.now() },
+      current: { connections: 0, devices: 0, destinations: 0, warn: 0, danger: 0 },
+      previous: { connections: 0, devices: 0, destinations: 0, warn: 0, danger: 0 },
+    }),
+  }));
+  await page.route(/\/api\/connections\/summary(?:\?.*)?$/, route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      total: 0, byDevice: [], byTarget: [], byService: [], bySource: [], buckets: [],
+    }),
+  }));
   await authPage(page);
 
   const selector = page.locator('#source-filter-select');
@@ -569,7 +584,22 @@ test('source selector groups routers and Agents, persists selection, and keeps L
   await expect(selector).toContainText('macbook (bbbbbbbb)');
 
   const selected = JSON.stringify({ sourceKind: 'agent', sourceId: 'aaaaaaaa-1111' });
+  const scopedRequest = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname.endsWith('/api/ai/facts')
+      && url.searchParams.get('sourceKind') === 'agent'
+      && url.searchParams.get('sourceId') === 'aaaaaaaa-1111';
+  });
   await selector.selectOption(selected);
+  await scopedRequest;
+  const scopedGraphRequest = page.waitForRequest(request => {
+    const url = new URL(request.url());
+    return url.pathname.endsWith('/api/connections/summary')
+      && url.searchParams.get('sourceKind') === 'agent'
+      && url.searchParams.get('sourceId') === 'aaaaaaaa-1111';
+  });
+  await page.click('#btn-graph');
+  await scopedGraphRequest;
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('egressview_display_scope_v1')))).toEqual({
     sourceKind: 'agent', sourceId: 'aaaaaaaa-1111',
   });

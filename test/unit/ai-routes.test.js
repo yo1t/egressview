@@ -198,6 +198,28 @@ describe('AI configuration routes', () => {
     assert.deepEqual(ranges, [[1000, 2000], [0, 1000]]);
   });
 
+  it('uses the selected source for AI facts and rejects unavailable IDs', async () => {
+    const scopes = [];
+    const history = {
+      countFactsByTimeRange(_from, _to, options) {
+        scopes.push(options.sourceScope);
+        return { connections: 0, devices: 0, destinations: 0 };
+      },
+      groupDstByTimeRange: () => [],
+    };
+    const routerManager = { list: () => [{ id: 'r1', kind: 'yamaha', enabled: true, ready: true }] };
+    const app = appFor(createAiProvider(), undefined, { history, threatIntel: null, routerManager });
+    const accepted = await request(app, 'GET', '/api/ai/facts?from=1000&to=2000&sourceKind=router&sourceId=r1');
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(scopes, [
+      { sourceKind: 'router', sourceId: 'r1' },
+      { sourceKind: 'router', sourceId: 'r1' },
+    ]);
+    assert.equal((await request(
+      app, 'GET', '/api/ai/facts?from=1000&to=2000&sourceKind=router&sourceId=missing'
+    )).status, 400);
+  });
+
   it('rejects invalid or excessive facts ranges before querying history', async () => {
     let calls = 0;
     const context = {

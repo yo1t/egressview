@@ -3,7 +3,7 @@ import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE } from './utils.js?v=__ASSET_VERSION__';
 import { allConnections, mergeConnections, setAllConnections, setDataRangeFrom, setServerTimeOffset, getTimeRange, updateConnPanel } from './connections-panel.js?v=__ASSET_VERSION__';
 import { socket, authReady, connectAuthenticatedSocket, connState, asusActive, setAsusActive, yamahaConfigured, setNotesMap, apiFetch, errorBanner, updateConnBadge, refreshAllNotes, setDevicesDataRef, routerState } from './auth-socket.js?v=__ASSET_VERSION__';
-import { statsMode, setViewTabHandlers, switchView } from './view-tabs.js?v=__ASSET_VERSION__';
+import { currentView, statsMode, setViewTabHandlers, switchView } from './view-tabs.js?v=__ASSET_VERSION__';
 import { nodes, selectedMac, buildGraph, buildGraphFromConnections, updateOrgGraph, scheduleGraphAutoFit, fetchGraphSummary, stopGraph, showToast, applyFilter, applyGraphFilter, lastClients, resizeGraph, setGraphDevicesDataRef } from './graph.js?v=__ASSET_VERSION__';
 import { updateStats, stStopSpin, stStopFlatAnim } from './stats.js?v=__ASSET_VERSION__';
 import { openSettings, showStatus } from './settings.js?v=__ASSET_VERSION__';
@@ -14,7 +14,7 @@ import { refreshCurrentTimeFilterView } from './time-filter.js?v=__ASSET_VERSION
 import { loadBeacons } from './beacon.js?v=__ASSET_VERSION__';
 import './router-settings.js?v=__ASSET_VERSION__';
 import { startAiInsights, stopAiInsights, refreshAiInsights } from './ai-insights.js?v=__ASSET_VERSION__';
-import { initDisplayScopeSelector } from './display-scope.js?v=__ASSET_VERSION__';
+import { getDisplayScope, initDisplayScopeSelector } from './display-scope.js?v=__ASSET_VERSION__';
 
 // ─── Cross-module reference injection ────────────────────────────────────────
 // auth-socket.js and graph.js both need devicesData but can't import from devices.js
@@ -25,8 +25,7 @@ setOnDevicesLoaded(data => { setDevicesDataRef(data); setGraphDevicesDataRef(dat
 setViewTabHandlers({
   onGraph: () => {
     resizeGraph({ refreshStats: false });
-    buildGraphFromConnections();
-    scheduleGraphAutoFit();
+    refreshCurrentTimeFilterView();
   },
   onStats: () => refreshCurrentTimeFilterView?.() || updateStats(),
   onLeaveStats: () => { stStopSpin(); stStopFlatAnim(); },
@@ -129,8 +128,11 @@ socket.on('network-update', data => {
   connState.l2.err     = '';
   if (data.routerIp) connState.l2.ip = data.routerIp;
   updateConnBadge('l2');
-  buildGraph(data);
-  updateOrgGraph();
+  if (getDisplayScope()) refreshGraphSummary();
+  else {
+    buildGraph(data);
+    updateOrgGraph();
+  }
 });
 
 function refreshGraphSummary({ delayedData = false } = {}) {
@@ -193,7 +195,12 @@ authReady.then(() => {
   initDisplayScopeSelector({
     request: apiFetch,
     notify: showToast,
-    onChange: () => updateConnBadge('l3l4'),
+    onChange: () => {
+      updateConnBadge('l3l4');
+      if (currentView === 'devices') loadDevicesView();
+      else if (currentView === 'notif-log') loadNotifLog();
+      else refreshCurrentTimeFilterView();
+    },
   }).catch(error => console.warn('[source-filter] initialization failed:', error));
   switchView('ai');
   // Populate the shared device panel even when the initial socket snapshot is
