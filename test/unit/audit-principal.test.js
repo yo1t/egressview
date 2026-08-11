@@ -10,11 +10,11 @@ const Database = require('better-sqlite3');
 
 const authAudit = require('../../src/auth-audit');
 const { principalFor } = require('../../src/roles');
-const { runMigrations } = require('../../src/db-migrate');
+const { runMigrations, SCHEMA_VERSION } = require('../../src/db-migrate');
 
 let dir;
 
-// Use the real migration so the test exercises the shipped v12 schema.
+// Use the real migration so the test exercises v12 within the shipped schema.
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-principal-'));
   const dbPath = path.join(dir, 'audit.db');
@@ -108,8 +108,8 @@ describe('audit principalHash storage', () => {
 
 describe('existing audit rows stay untouched by the v12 migration', () => {
   it('keeps pre-upgrade rows readable with actorHash intact and principalHash NULL', () => {
-    // Build a v11 audit trail, then upgrade to v12 and confirm nothing about
-    // the older rows changed.
+    // Build a v11 audit trail, then run v12 and later additive migrations and
+    // confirm nothing about the older rows changed.
     const upgradeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-audit-upgrade-'));
     try {
       const dbPath = path.join(upgradeDir, 'audit.db');
@@ -137,7 +137,7 @@ describe('existing audit rows stay untouched by the v12 migration', () => {
 
       const upgraded = new Database(dbPath);
       runMigrations(upgraded, dbPath);
-      assert.equal(upgraded.pragma('user_version', { simple: true }), 12);
+      assert.equal(upgraded.pragma('user_version', { simple: true }), SCHEMA_VERSION);
       const row = upgraded.prepare('SELECT * FROM audit_events WHERE eventId = ?').get('legacy-1');
       assert.equal(row.actorHash, 'legacy-actor-hash', 'existing actorHash must not be rewritten');
       assert.equal(row.principalHash, null, 'existing rows must not be backfilled with a guess');

@@ -12,9 +12,11 @@
 		100000000000000000000004 /* EgressViewFilterDataProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* EgressViewFilterDataProvider.swift */; };
 		100000000000000000000005 /* EgressViewAgentCore in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000001 /* EgressViewAgentCore */; };
 		100000000000000000000006 /* EgressViewNetworkExtension in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000002 /* EgressViewNetworkExtension */; };
-		100000000000000000000007 /* EgressViewFilter.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000A /* EgressViewFilter.systemextension */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		100000000000000000000007 /* com.egressview.agent.filter.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000A /* com.egressview.agent.filter.systemextension */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		100000000000000000000008 /* main.swift in Extension Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000B /* Extension main.swift */; };
 		100000000000000000000009 /* ObservationWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* ObservationWindowController.swift */; };
+		10000000000000000000000A /* FullMonitoringCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* FullMonitoringCollector.swift */; };
+		10000000000000000000000B /* FullMonitoringXPCServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* FullMonitoringXPCServer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -33,7 +35,7 @@
 			buildActionMask = 2147483647;
 			dstPath = Contents/Library/SystemExtensions;
 			dstSubfolderSpec = 1;
-			files = (100000000000000000000007 /* EgressViewFilter.systemextension in Embed System Extensions */, );
+			files = (100000000000000000000007 /* com.egressview.agent.filter.systemextension in Embed System Extensions */, );
 			name = "Embed System Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -49,9 +51,11 @@
 		200000000000000000000007 /* Extension Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = SystemExtension/Info.plist; sourceTree = "<group>"; };
 		200000000000000000000008 /* EgressViewFilter.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EgressViewFilter.entitlements; sourceTree = "<group>"; };
 		200000000000000000000009 /* EgressView Agent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "EgressView Agent.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		20000000000000000000000A /* EgressViewFilter.systemextension */ = {isa = PBXFileReference; explicitFileType = wrapper.system-extension; includeInIndex = 0; path = EgressViewFilter.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
+		20000000000000000000000A /* com.egressview.agent.filter.systemextension */ = {isa = PBXFileReference; explicitFileType = wrapper.system-extension; includeInIndex = 0; path = com.egressview.agent.filter.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
 		20000000000000000000000B /* Extension main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = main.swift; path = main.swift; sourceTree = "<group>"; };
 		20000000000000000000000C /* ObservationWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservationWindowController.swift; sourceTree = "<group>"; };
+		20000000000000000000000D /* FullMonitoringCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullMonitoringCollector.swift; sourceTree = "<group>"; };
+		20000000000000000000000E /* FullMonitoringXPCServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullMonitoringXPCServer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -67,19 +71,19 @@
 		};
 		700000000000000000000002 /* Host */ = {
 			isa = PBXGroup;
-			children = (200000000000000000000001 /* main.swift */, 200000000000000000000002 /* AgentAppDelegate.swift */, 200000000000000000000003 /* AgentMonitoringController.swift */, 20000000000000000000000C /* ObservationWindowController.swift */, 200000000000000000000005 /* Host Info.plist */, 200000000000000000000006 /* EgressViewAgent.entitlements */, );
+			children = (200000000000000000000001 /* main.swift */, 200000000000000000000002 /* AgentAppDelegate.swift */, 200000000000000000000003 /* AgentMonitoringController.swift */, 20000000000000000000000D /* FullMonitoringCollector.swift */, 20000000000000000000000C /* ObservationWindowController.swift */, 200000000000000000000005 /* Host Info.plist */, 200000000000000000000006 /* EgressViewAgent.entitlements */, );
 			path = Xcode/Host;
 			sourceTree = "<group>";
 		};
 		700000000000000000000003 /* SystemExtension */ = {
 			isa = PBXGroup;
-			children = (20000000000000000000000B /* Extension main.swift */, 200000000000000000000004 /* EgressViewFilterDataProvider.swift */, 200000000000000000000007 /* Extension Info.plist */, 200000000000000000000008 /* EgressViewFilter.entitlements */, );
+			children = (20000000000000000000000B /* Extension main.swift */, 200000000000000000000004 /* EgressViewFilterDataProvider.swift */, 20000000000000000000000E /* FullMonitoringXPCServer.swift */, 200000000000000000000007 /* Extension Info.plist */, 200000000000000000000008 /* EgressViewFilter.entitlements */, );
 			path = Xcode/SystemExtension;
 			sourceTree = "<group>";
 		};
 		700000000000000000000004 /* Products */ = {
 			isa = PBXGroup;
-			children = (200000000000000000000009 /* EgressView Agent.app */, 20000000000000000000000A /* EgressViewFilter.systemextension */, );
+			children = (200000000000000000000009 /* EgressView Agent.app */, 20000000000000000000000A /* com.egressview.agent.filter.systemextension */, );
 			name = Products;
 			sourceTree = "<group>";
 		};
@@ -107,7 +111,7 @@
 			name = EgressViewFilter;
 			packageProductDependencies = (A00000000000000000000002 /* EgressViewNetworkExtension */, );
 			productName = EgressViewFilter;
-			productReference = 20000000000000000000000A /* EgressViewFilter.systemextension */;
+			productReference = 20000000000000000000000A /* com.egressview.agent.filter.systemextension */;
 			productType = "com.apple.product-type.system-extension";
 		};
 /* End PBXNativeTarget section */
@@ -120,8 +124,8 @@
 				LastSwiftUpdateCheck = 2660;
 				LastUpgradeCheck = 2660;
 				TargetAttributes = {
-					500000000000000000000001 = {CreatedOnToolsVersion = 26.6; SystemCapabilities = {com.apple.SystemExtension = {enabled = 1; }; }; };
-					500000000000000000000002 = {CreatedOnToolsVersion = 26.6; SystemCapabilities = {com.apple.NetworkExtensions = {enabled = 1; }; }; };
+					500000000000000000000001 = {CreatedOnToolsVersion = 26.6; SystemCapabilities = {com.apple.ApplicationGroups = {enabled = 1; }; com.apple.SystemExtension = {enabled = 1; }; }; };
+					500000000000000000000002 = {CreatedOnToolsVersion = 26.6; SystemCapabilities = {com.apple.ApplicationGroups = {enabled = 1; }; com.apple.NetworkExtensions = {enabled = 1; }; }; };
 				};
 			};
 			buildConfigurationList = 800000000000000000000001 /* Build configuration list for PBXProject "EgressViewAgent" */;
@@ -141,8 +145,8 @@
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
-		600000000000000000000001 /* Host Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000001 /* main.swift in Sources */, 100000000000000000000002 /* AgentAppDelegate.swift in Sources */, 100000000000000000000003 /* AgentMonitoringController.swift in Sources */, 100000000000000000000009 /* ObservationWindowController.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
-		600000000000000000000004 /* Extension Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000008 /* main.swift in Extension Sources */, 100000000000000000000004 /* EgressViewFilterDataProvider.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		600000000000000000000001 /* Host Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000001 /* main.swift in Sources */, 100000000000000000000002 /* AgentAppDelegate.swift in Sources */, 100000000000000000000003 /* AgentMonitoringController.swift in Sources */, 10000000000000000000000A /* FullMonitoringCollector.swift in Sources */, 100000000000000000000009 /* ObservationWindowController.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		600000000000000000000004 /* Extension Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000008 /* main.swift in Extension Sources */, 100000000000000000000004 /* EgressViewFilterDataProvider.swift in Sources */, 10000000000000000000000B /* FullMonitoringXPCServer.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -153,9 +157,9 @@
 		C00000000000000000000001 /* Debug project */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 13.0; SDKROOT = macosx; SWIFT_VERSION = 5.0; }; name = Debug; };
 		C00000000000000000000002 /* Release project */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 13.0; SDKROOT = macosx; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O"; SWIFT_VERSION = 5.0; }; name = Release; };
 		C00000000000000000000003 /* Debug host */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Xcode/Host/EgressViewAgent.entitlements; CODE_SIGN_STYLE = Automatic; COMBINE_HIDPI_IMAGES = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Xcode/Host/Info.plist; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", ); PRODUCT_BUNDLE_IDENTIFIER = com.egressview.agent.macos; PRODUCT_NAME = "EgressView Agent"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; }; name = Debug; };
-		C00000000000000000000004 /* Release host */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Xcode/Host/EgressViewAgent.entitlements; CODE_SIGN_STYLE = Automatic; COMBINE_HIDPI_IMAGES = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Xcode/Host/Info.plist; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", ); PRODUCT_BUNDLE_IDENTIFIER = com.egressview.agent.macos; PRODUCT_NAME = "EgressView Agent"; }; name = Release; };
-		C00000000000000000000005 /* Debug extension */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = Xcode/SystemExtension/EgressViewFilter.entitlements; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Xcode/SystemExtension/Info.plist; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@executable_path/../../../../Frameworks", ); PRODUCT_BUNDLE_IDENTIFIER = com.egressview.agent.filter; PRODUCT_NAME = EgressViewFilter; SKIP_INSTALL = YES; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; }; name = Debug; };
-		C00000000000000000000006 /* Release extension */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = Xcode/SystemExtension/EgressViewFilter.entitlements; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Xcode/SystemExtension/Info.plist; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@executable_path/../../../../Frameworks", ); PRODUCT_BUNDLE_IDENTIFIER = com.egressview.agent.filter; PRODUCT_NAME = EgressViewFilter; SKIP_INSTALL = YES; }; name = Release; };
+		C00000000000000000000004 /* Release host */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Xcode/Host/EgressViewAgent.DeveloperID.entitlements; CODE_SIGN_IDENTITY = "$(EGRESSVIEW_SIGN_IDENTITY)"; CODE_SIGN_STYLE = Manual; COMBINE_HIDPI_IMAGES = YES; DEVELOPMENT_TEAM = "$(EGRESSVIEW_DEVELOPMENT_TEAM)"; ENABLE_HARDENED_RUNTIME = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Xcode/Host/Info.plist; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", ); PRODUCT_BUNDLE_IDENTIFIER = com.egressview.agent.macos; PRODUCT_NAME = "EgressView Agent"; PROVISIONING_PROFILE_SPECIFIER = "$(EGRESSVIEW_HOST_PROFILE)"; }; name = Release; };
+		C00000000000000000000005 /* Debug extension */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = Xcode/SystemExtension/EgressViewFilter.entitlements; CODE_SIGN_STYLE = Automatic; EXECUTABLE_NAME = EgressViewFilter; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Xcode/SystemExtension/Info.plist; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@executable_path/../../../../Frameworks", ); PRODUCT_BUNDLE_IDENTIFIER = com.egressview.agent.filter; PRODUCT_MODULE_NAME = EgressViewFilter; PRODUCT_NAME = com.egressview.agent.filter; SKIP_INSTALL = YES; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; }; name = Debug; };
+		C00000000000000000000006 /* Release extension */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = Xcode/SystemExtension/EgressViewFilter.DeveloperID.entitlements; CODE_SIGN_IDENTITY = "$(EGRESSVIEW_SIGN_IDENTITY)"; CODE_SIGN_STYLE = Manual; DEVELOPMENT_TEAM = "$(EGRESSVIEW_DEVELOPMENT_TEAM)"; ENABLE_HARDENED_RUNTIME = YES; EXECUTABLE_NAME = EgressViewFilter; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Xcode/SystemExtension/Info.plist; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@executable_path/../../../../Frameworks", ); PRODUCT_BUNDLE_IDENTIFIER = com.egressview.agent.filter; PRODUCT_MODULE_NAME = EgressViewFilter; PRODUCT_NAME = com.egressview.agent.filter; PROVISIONING_PROFILE_SPECIFIER = "$(EGRESSVIEW_FILTER_PROFILE)"; SKIP_INSTALL = YES; }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
