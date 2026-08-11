@@ -38,6 +38,13 @@ Choosing Full monitoring stops lightweight polling before requesting System
 Extension activation. A rejected or incomplete approval never silently falls
 back to lightweight monitoring.
 
+The **Launch at login** menu option is off by default and is independent of the
+selected monitoring mode. Enabling it registers the signed main app with
+macOS only after an explicit click. If macOS requires renewed consent, the menu
+shows **Approval required** and opens **System Settings > General > Login
+Items** instead of repeatedly attempting registration. Registration errors are
+shown in the menu and do not change or stop monitoring.
+
 Choose **Open connection activity...** from the menu bar to view the latest
 locally stored observations. The System Extension keeps observations in a
 bounded memory queue. The signed host retrieves them over a named XPC endpoint,
@@ -66,6 +73,13 @@ The v1 Hub endpoint intentionally rejects compressed request bodies. The Agent
 therefore sends at most 200 observations per request and spaces batches to stay
 within the Hub rate limit. Compression requires an explicit protocol capability
 and is deferred rather than being enabled unilaterally.
+
+The activity window reports local record count, time range, and storage usage.
+History remains under the existing storage limit by default. Users can opt into
+a 1, 7, 30, or 90 day retention period; selecting a finite period requires
+confirmation before older records are removed. **Delete History...** also
+requires confirmation, deletes only the local journal, and does not stop
+monitoring.
 
 Unsigned Debug builds cannot access the production App Group container, so the
 host uses its Application Support directory for local UI development. Release
