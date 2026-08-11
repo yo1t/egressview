@@ -122,3 +122,8 @@ infra/
 # MCP publication gate: deployment-specific evidence and sanitized local report
 .egressview-mcp-publication-evidence.json
 .egressview-mcp-publication-gate.json
+
+# Local Xcode and SwiftPM workspace state
+apps/agent-macos/.swiftpm/
+apps/agent-macos/EgressViewAgent.xcodeproj/project.xcworkspace/
+apps/agent-macos/EgressViewAgent.xcodeproj/xcuserdata/

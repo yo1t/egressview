@@ -25,6 +25,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         if case .failure(let error) = journalResult {
             observationWindow.showStorageError(error.localizedDescription)
         }
+        controller.restoreMonitoringState()
     }
 
     private func render(_ status: AgentMonitoringStatus) {

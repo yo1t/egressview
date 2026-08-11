@@ -35,3 +35,17 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           ONLY_ACTIVE_ARCH=YES
           build
+      - name: Verify System Extension package identity
+        working-directory: apps/agent-macos
+        run: |
+          extension="$RUNNER_TEMP/egressview-agent-derived/Build/Products/Debug/EgressView Agent.app/Contents/Library/SystemExtensions/com.egressview.agent.filter.systemextension"
+          test -d "$extension"
+          test "$(plutil -extract CFBundleIdentifier raw "$extension/Contents/Info.plist")" = "com.egressview.agent.filter"
+          test -n "$(plutil -extract NSSystemExtensionUsageDescription raw "$extension/Contents/Info.plist")"
+          test "$(plutil -extract NetworkExtension.NEMachServiceName raw "$extension/Contents/Info.plist")" = "group.com.egressview.agent.xpc"
+          ! plutil -extract NEMachServiceName raw "$extension/Contents/Info.plist" >/dev/null 2>&1
+          ! plutil -extract com.apple.security.xpc.mach-service.name raw Xcode/SystemExtension/EgressViewFilter.entitlements >/dev/null 2>&1
+          ! plutil -extract com.apple.security.xpc.mach-service.name raw Xcode/SystemExtension/EgressViewFilter.DeveloperID.entitlements >/dev/null 2>&1
+          grep -Fq 'NEProvider.startSystemExtensionMode()' Xcode/SystemExtension/main.swift
+          grep -Fq 'dispatchMain()' Xcode/SystemExtension/main.swift
+          grep -Fq 'SecCodeCheckValidity' Xcode/SystemExtension/FullMonitoringXPCServer.swift
