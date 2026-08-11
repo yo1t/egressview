@@ -62,6 +62,36 @@ final class AgentIngestEnvelopeTests: XCTestCase {
         XCTAssertNil(row["payload"])
     }
 
+    func testEncoderPreservesRequiredNullableKeys() throws {
+        let observation = ConnectionObservation(
+            networkProtocol: .tcp,
+            localAddress: "192.0.2.10",
+            localPort: 50_000,
+            remoteAddress: "203.0.113.10",
+            remotePort: 443,
+            processID: 42,
+            processName: "Browser",
+            firstObservedAt: Date(timeIntervalSince1970: 100),
+            lastObservedAt: Date(timeIntervalSince1970: 101),
+            collector: .networkExtension,
+            confidence: .exact
+        )
+        let mapped = AgentIngestObservation(
+            observationId: UUID(uuidString: "00000000-0000-4000-8000-000000000001")!,
+            observation: observation
+        )
+
+        let data = try encoder().encode(mapped)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertTrue(json.keys.contains("bundleID"))
+        XCTAssertTrue(json.keys.contains("bytesIn"))
+        XCTAssertTrue(json.keys.contains("bytesOut"))
+        XCTAssertTrue(json["bundleID"] is NSNull)
+        XCTAssertTrue(json["bytesIn"] is NSNull)
+        XCTAssertTrue(json["bytesOut"] is NSNull)
+    }
+
     private func goldenFixtureURL() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
