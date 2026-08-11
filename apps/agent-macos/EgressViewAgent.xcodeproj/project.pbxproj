@@ -17,6 +17,7 @@
 		100000000000000000000009 /* ObservationWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* ObservationWindowController.swift */; };
 		10000000000000000000000A /* FullMonitoringCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* FullMonitoringCollector.swift */; };
 		10000000000000000000000B /* FullMonitoringXPCServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* FullMonitoringXPCServer.swift */; };
+		10000000000000000000000C /* HubDeliveryController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000F /* HubDeliveryController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +57,7 @@
 		20000000000000000000000C /* ObservationWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservationWindowController.swift; sourceTree = "<group>"; };
 		20000000000000000000000D /* FullMonitoringCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullMonitoringCollector.swift; sourceTree = "<group>"; };
 		20000000000000000000000E /* FullMonitoringXPCServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullMonitoringXPCServer.swift; sourceTree = "<group>"; };
+		20000000000000000000000F /* HubDeliveryController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubDeliveryController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -71,7 +73,7 @@
 		};
 		700000000000000000000002 /* Host */ = {
 			isa = PBXGroup;
-			children = (200000000000000000000001 /* main.swift */, 200000000000000000000002 /* AgentAppDelegate.swift */, 200000000000000000000003 /* AgentMonitoringController.swift */, 20000000000000000000000D /* FullMonitoringCollector.swift */, 20000000000000000000000C /* ObservationWindowController.swift */, 200000000000000000000005 /* Host Info.plist */, 200000000000000000000006 /* EgressViewAgent.entitlements */, );
+			children = (200000000000000000000001 /* main.swift */, 200000000000000000000002 /* AgentAppDelegate.swift */, 200000000000000000000003 /* AgentMonitoringController.swift */, 20000000000000000000000D /* FullMonitoringCollector.swift */, 20000000000000000000000C /* ObservationWindowController.swift */, 20000000000000000000000F /* HubDeliveryController.swift */, 200000000000000000000005 /* Host Info.plist */, 200000000000000000000006 /* EgressViewAgent.entitlements */, );
 			path = Xcode/Host;
 			sourceTree = "<group>";
 		};
@@ -145,7 +147,7 @@
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
-		600000000000000000000001 /* Host Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000001 /* main.swift in Sources */, 100000000000000000000002 /* AgentAppDelegate.swift in Sources */, 100000000000000000000003 /* AgentMonitoringController.swift in Sources */, 10000000000000000000000A /* FullMonitoringCollector.swift in Sources */, 100000000000000000000009 /* ObservationWindowController.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		600000000000000000000001 /* Host Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000001 /* main.swift in Sources */, 100000000000000000000002 /* AgentAppDelegate.swift in Sources */, 100000000000000000000003 /* AgentMonitoringController.swift in Sources */, 10000000000000000000000A /* FullMonitoringCollector.swift in Sources */, 100000000000000000000009 /* ObservationWindowController.swift in Sources */, 10000000000000000000000C /* HubDeliveryController.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
 		600000000000000000000004 /* Extension Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000008 /* main.swift in Extension Sources */, 100000000000000000000004 /* EgressViewFilterDataProvider.swift in Sources */, 10000000000000000000000B /* FullMonitoringXPCServer.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
