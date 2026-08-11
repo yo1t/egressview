@@ -98,8 +98,8 @@
     "auth:reset": "node scripts/reset-admin-password.js"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock": "^3.1098.0",
-    "@aws-sdk/client-bedrock-runtime": "^3.1098.0",
+    "@aws-sdk/client-bedrock": "^3.1102.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1102.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "axios": "^1.19.0",
@@ -115,9 +115,9 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@modelcontextprotocol/client": "^2.0.0",
-    "@playwright/test": "^1.62.0",
+    "@playwright/test": "^1.62.1",
     "eslint": "^10.8.0",
-    "globals": "^17.8.0",
+    "globals": "^17.9.0",
     "socket.io-client": "^4.8.3"
   },
   "overrides": {
