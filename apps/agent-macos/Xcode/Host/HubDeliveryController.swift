@@ -159,6 +159,7 @@ final class HubDeliveryController: NSWindowController, NSWindowDelegate {
                     setControlsEnabled(true)
                 }
                 await sender?.setEnabled(false)
+                await sender?.credentialDidChange()
             } catch {
                 await MainActor.run {
                     setControlsEnabled(true)
@@ -187,7 +188,7 @@ final class HubDeliveryController: NSWindowController, NSWindowDelegate {
         senderState = state
         self.queueStatus = queueStatus
         statusLabel.stringValue = label(for: state)
-        pendingLabel.stringValue = "Pending: \(queueStatus.pendingCount) · dropped at local limit: \(queueStatus.droppedCount)"
+        pendingLabel.stringValue = "Pending: \(queueStatus.pendingCount) · dropped locally: \(queueStatus.droppedCount)"
         oldestLabel.stringValue = "Oldest pending: \(format(queueStatus.oldestPendingAt, fallback: "none"))"
         acknowledgedLabel.stringValue = "Last acknowledged: \(format(queueStatus.lastAcknowledgedAt, fallback: "never"))"
     }

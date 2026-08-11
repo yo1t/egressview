@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 public struct AgentDeliveryQueueStatus: Equatable, Sendable {
     public let pendingCount: Int
@@ -53,6 +54,17 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         decoder.dateDecodingStrategy = .iso8601
         if FileManager.default.fileExists(atPath: fileURL.path) {
             state = try decoder.decode(State.self, from: Data(contentsOf: fileURL))
+            let invalidIDs = Set(state.pending.compactMap { entry in
+                Self.isDeliverable(entry.observation) ? nil : entry.observationID
+            })
+            if !invalidIDs.isEmpty {
+                state.pending.removeAll { invalidIDs.contains($0.observationID) }
+                if state.activeBatch?.observationIDs.contains(where: invalidIDs.contains) == true {
+                    state.activeBatch = nil
+                }
+                state.droppedCount += invalidIDs.count
+                try persist()
+            }
         } else {
             state = State()
         }
@@ -70,8 +82,10 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
     public func enqueue(_ observations: [ConnectionObservation], queuedAt: Date = Date()) throws {
         guard !observations.isEmpty else { return }
         try lock.withLock {
+            let deliverable = observations.filter(Self.isDeliverable)
+            state.droppedCount += observations.count - deliverable.count
             let activeIDs = Set(state.activeBatch?.observationIDs ?? [])
-            for observation in observations {
+            for observation in deliverable {
                 if let index = state.pending.lastIndex(where: {
                     !activeIDs.contains($0.observationID) && $0.observation.stableKey == observation.stableKey
                 }) {
@@ -172,6 +186,26 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         let data = try encoder.encode(state)
         try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+    }
+
+    private static func isDeliverable(_ observation: ConnectionObservation) -> Bool {
+        observation.localPort > 0
+            && observation.remotePort > 0
+            && isIPAddress(observation.localAddress)
+            && isIPAddress(observation.remoteAddress)
+            && isSafeText(observation.processName, maximumLength: 256)
+            && observation.bundleID.map { isSafeText($0, maximumLength: 255) } ?? true
+            && observation.firstObservedAt <= observation.lastObservedAt
+    }
+
+    private static func isIPAddress(_ value: String) -> Bool {
+        IPv4Address(value) != nil || IPv6Address(value) != nil
+    }
+
+    private static func isSafeText(_ value: String, maximumLength: Int) -> Bool {
+        !value.isEmpty
+            && value.count <= maximumLength
+            && value.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
     }
 }
 
