@@ -20,6 +20,7 @@ const {
   runEnableHandshake,
 } = require('./cisco-session');
 const { abortError, attachAbortHandler } = require('./abort-signal');
+const { extractCiscoHostName } = require('./router-prompt');
 
 const CISCO_INITIAL_PROMPT_TIMEOUT_MS = 8_000;
 
@@ -258,9 +259,15 @@ function createTempCiscoShell({ ip, user, pass, enablePass, expectedHostFp }) {
             write: (text) => { buf = ''; shell.write(text); },
             waitForPrompt: (matcher, ms) => waitForPromptLocal(ms, matcher),
           });
-          await exec('terminal length 0');
+          const initialHostName = extractCiscoHostName(buf);
+          const terminalRaw = await exec('terminal length 0');
           settled = true;
-          resolve({ exec, close: cleanup, hostFp: capturedFp });
+          resolve({
+            exec,
+            close: cleanup,
+            hostFp: capturedFp,
+            hostName: extractCiscoHostName(terminalRaw) || initialHostName,
+          });
         } catch (e) { fail(e); }
       });
     });
@@ -299,6 +306,7 @@ async function detectCisco({ ip, user, pass, enablePass, expectedHostFp } = {}) 
       ios:  { ok: isIos, version: (versionRaw.match(/Version\s+([\d.()\w]+)/i) || [])[1] || '' },
       suggested: { ciscoIp: ip, ciscoUser: user },
       hostFp: shell.hostFp,
+      hostName: shell.hostName || '',
       diag: { ssh: { ok: true }, isIos, lanIp, natSessions: sessions.length, privilegeError },
     };
   } finally {
@@ -347,6 +355,7 @@ function createCiscoPoller({ id = '' } = {}) {
   let ciscoEnablePass = '';
   let ciscoEnabled = false;
   let ciscoHostFp  = '';
+  let ciscoHostName = '';
   // Whether "show ip nat translations verbose" works on this device; assumed
   // true until a poll proves otherwise, re-assumed when the target changes.
   let ciscoVerboseSupported = true;
@@ -356,7 +365,10 @@ function createCiscoPoller({ id = '' } = {}) {
   let onSaveConfig = () => {};
 
   function configure(cfg) {
-    if (cfg.ip !== undefined && cfg.ip !== ciscoIp) ciscoVerboseSupported = true;
+    if (cfg.ip !== undefined && cfg.ip !== ciscoIp) {
+      ciscoVerboseSupported = true;
+      ciscoHostName = '';
+    }
     if (cfg.ip         !== undefined) ciscoIp         = cfg.ip;
     if (cfg.user       !== undefined) ciscoUser       = cfg.user;
     if (cfg.pass       !== undefined) ciscoPass       = cfg.pass;
@@ -468,13 +480,15 @@ function createCiscoPoller({ id = '' } = {}) {
               write: (text) => { shellBuf = ''; ciscoShell.write(text); },
               waitForPrompt: (matcher, ms) => waitForPrompt(ms, matcher),
             });
+            ciscoHostName = extractCiscoHostName(shellBuf) || ciscoHostName;
             shellBuf = '';
             ciscoShell.write('terminal length 0\n');
             await waitForPrompt(5000);
+            ciscoHostName = extractCiscoHostName(shellBuf) || ciscoHostName;
             ciscoReady = true;
             ciscoConnecting = false;
             logger.info(`${TAG} Connected to IOS — ready`);
-            onStatus({ ready: true, message: t('cisco.connected') });
+            onStatus({ ready: true, message: t('cisco.connected'), hostName: ciscoHostName || undefined });
             if (onReady) onReady();
           } catch (e) {
             ciscoConnecting = false;
@@ -621,6 +635,7 @@ function createCiscoPoller({ id = '' } = {}) {
     hasPass:        () => !!ciscoPass,
     getNat:         () => null, // Cisco uses no descriptor concept
     getHostFp:      () => ciscoHostFp,
+    getHostName:    () => ciscoHostName,
     needsArpRefresh: () => Date.now() - ciscoArpLastRefresh > CISCO_ARP_REFRESH_MS,
     needsNdpRefresh: () => Date.now() - ciscoNdpLastRefresh > CISCO_NDP_REFRESH_MS,
   };
@@ -642,4 +657,5 @@ module.exports = {
   dotMacToColon,
   isCiscoIos,
   isPrivilegeError,
+  extractCiscoHostName,
 };

@@ -548,7 +548,8 @@ test('source selector groups routers and Agents, persists selection, and keeps L
   await page.route(/\/api\/routers(?:\?.*)?$/, route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ routers: [
-      { id: 'router-1', kind: 'yamaha', displayName: 'Office RTX', ip: '192.0.2.1', enabled: true, ready: true, state: 'ready' },
+      { id: 'router-1', kind: 'yamaha', hostName: 'office-rtx', displayName: 'Office RTX', ip: '192.0.2.1', enabled: true, ready: true, state: 'ready' },
+      { id: 'router-2', kind: 'cisco', hostName: 'edge-cisco', displayName: 'Edge IOS', ip: '192.0.2.2', enabled: true, ready: false, state: 'failed' },
     ] }),
   }));
   await page.route(/\/api\/agents(?:\?.*)?$/, route => route.fulfill({
@@ -573,15 +574,32 @@ test('source selector groups routers and Agents, persists selection, and keeps L
       total: 0, byDevice: [], byTarget: [], byService: [], bySource: [], buckets: [],
     }),
   }));
+  await page.route(/\/api\/connections\/threat-counts(?:\?.*)?$/, route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ safe: 0, warn: 0, danger: 0 }),
+  }));
+  await page.route(/\/api\/connections(?:\?.*)?$/, route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ connections: [], total: 0 }),
+  }));
+  await page.route(/\/api\/devices(?:\?.*)?$/, route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ devices: [] }),
+  }));
+  await page.route(/\/api\/notification-log(?:\?.*)?$/, route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ logs: [] }),
+  }));
   await authPage(page);
 
   const selector = page.locator('#source-filter-select');
   await expect(selector).toBeVisible();
   await expect(page.locator('#badge-l2')).toBeVisible();
   await expect(selector.locator('optgroup')).toHaveCount(2);
-  await expect(selector).toContainText('Office RTX (192.0.2.1)');
+  await expect(selector).toContainText('office-rtx (192.0.2.1)');
+  await expect(selector).toContainText('edge-cisco (192.0.2.2)');
   await expect(selector).toContainText('MacBook (aaaaaaaa)');
   await expect(selector).toContainText('macbook (bbbbbbbb)');
+  await expect(page.locator('#badge-l3l4')).toHaveClass(/wait/);
+
+  await selector.selectOption(JSON.stringify({ sourceKind: 'router', sourceId: 'router-2' }));
+  await expect(page.locator('#badge-l3l4')).toHaveClass(/err/);
 
   const selected = JSON.stringify({ sourceKind: 'agent', sourceId: 'aaaaaaaa-1111' });
   const scopedRequest = page.waitForRequest(request => {
@@ -600,6 +618,21 @@ test('source selector groups routers and Agents, persists selection, and keeps L
   });
   await page.click('#btn-graph');
   await scopedGraphRequest;
+
+  const expectScopedRequestAfterClick = async (button, path) => {
+    const pending = page.waitForRequest(request => {
+      const url = new URL(request.url());
+      return url.pathname.endsWith(path)
+        && url.searchParams.get('sourceKind') === 'agent'
+        && url.searchParams.get('sourceId') === 'aaaaaaaa-1111';
+    });
+    await page.click(button);
+    await pending;
+  };
+  await expectScopedRequestAfterClick('#btn-stats', '/api/connections/summary');
+  await expectScopedRequestAfterClick('#btn-log', '/api/connections');
+  await expectScopedRequestAfterClick('#btn-devices', '/api/devices');
+  await expectScopedRequestAfterClick('#btn-notif-log', '/api/notification-log');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('egressview_display_scope_v1')))).toEqual({
     sourceKind: 'agent', sourceId: 'aaaaaaaa-1111',
   });
