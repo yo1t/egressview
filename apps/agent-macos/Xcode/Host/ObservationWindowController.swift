@@ -2,6 +2,12 @@ import AppKit
 import EgressViewAgentCore
 
 final class ObservationWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate {
+    private static let retentionDefaultsKey = "localHistoryRetentionDays"
+
+    static var configuredRetentionDays: Int {
+        UserDefaults.standard.integer(forKey: retentionDefaultsKey)
+    }
+
     private enum Column: String, CaseIterable {
         case observed = "Observed"
         case application = "Application"
@@ -25,9 +31,13 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate, N
     private var observations: [ConnectionObservation] = []
     private var refreshTimer: Timer?
     private var isRefreshing = false
+    private var isMutating = false
     private let tableView = NSTableView()
     private let summaryLabel = NSTextField(labelWithString: "No observations yet")
+    private let storageLabel = NSTextField(labelWithString: "Storage: calculating...")
     private let errorLabel = NSTextField(labelWithString: "")
+    private let retentionPopUp = NSPopUpButton()
+    private lazy var deleteButton = NSButton(title: "Delete History...", target: self, action: #selector(deleteHistory))
     private lazy var dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
@@ -38,7 +48,7 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate, N
     init(journal: ObservationJournal?) {
         self.journal = journal
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 570),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -105,17 +115,18 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate, N
         guard !isRefreshing else { return }
         isRefreshing = true
         loadQueue.async { [weak self] in
-            let result = Result { try journal.latest(limit: 500) }
+            let result = Result { try journal.snapshot(limit: 500) }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.isRefreshing = false
                 switch result {
-                case .success(let observations):
-                    self.observations = observations
+                case .success(let snapshot):
+                    self.observations = snapshot.observations
                     self.tableView.reloadData()
-                    self.summaryLabel.stringValue = observations.isEmpty
+                    self.summaryLabel.stringValue = snapshot.observations.isEmpty
                         ? "No observations yet. Start Lightweight or Full monitoring."
-                        : "\(observations.count) recent connections · newest first"
+                        : "\(snapshot.observations.count) recent connections · newest first"
+                    self.storageLabel.stringValue = self.storageSummary(snapshot.statistics)
                     self.errorLabel.isHidden = true
                 case .failure(let error):
                     self.showStorageError(error.localizedDescription)
@@ -134,13 +145,28 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate, N
         let refreshButton = NSButton(title: "Refresh", target: self, action: #selector(refresh))
         refreshButton.bezelStyle = .rounded
 
-        let heading = NSStackView(views: [title, NSView(), refreshButton])
+        let heading = NSStackView()
         heading.orientation = .horizontal
         heading.alignment = .centerY
         heading.spacing = 12
+        heading.addView(title, in: .leading)
+        heading.addView(refreshButton, in: .trailing)
 
         errorLabel.textColor = .systemRed
         errorLabel.isHidden = true
+        storageLabel.textColor = .secondaryLabelColor
+
+        configureRetentionPopUp()
+        let retentionLabel = NSTextField(labelWithString: "Keep history:")
+        let historyControls = NSStackView()
+        historyControls.orientation = .horizontal
+        historyControls.alignment = .centerY
+        historyControls.spacing = 8
+        historyControls.addView(retentionLabel, in: .leading)
+        historyControls.addView(retentionPopUp, in: .leading)
+        historyControls.addView(deleteButton, in: .trailing)
+        deleteButton.bezelStyle = .rounded
+        deleteButton.toolTip = "Delete local connection metadata without changing monitoring"
 
         for column in Column.allCases {
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.rawValue))
@@ -160,7 +186,7 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate, N
         scrollView.hasVerticalScroller = true
         scrollView.borderType = .bezelBorder
 
-        let stack = NSStackView(views: [heading, privacy, summaryLabel, errorLabel, scrollView])
+        let stack = NSStackView(views: [heading, privacy, historyControls, summaryLabel, storageLabel, errorLabel, scrollView])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -174,6 +200,7 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate, N
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
             stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
             heading.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            historyControls.widthAnchor.constraint(equalTo: stack.widthAnchor),
             scrollView.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
     }
@@ -217,5 +244,115 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate, N
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.refresh()
         }
+    }
+
+    private var retentionDays: Int {
+        Self.configuredRetentionDays
+    }
+
+    private func configureRetentionPopUp() {
+        let choices = [
+            ("Until storage limit", 0),
+            ("1 day", 1),
+            ("7 days", 7),
+            ("30 days", 30),
+            ("90 days", 90),
+        ]
+        for choice in choices {
+            retentionPopUp.addItem(withTitle: choice.0)
+            retentionPopUp.lastItem?.tag = choice.1
+        }
+        retentionPopUp.target = self
+        retentionPopUp.action = #selector(changeRetention)
+        selectRetention(days: retentionDays)
+    }
+
+    @objc private func changeRetention() {
+        let requestedDays = retentionPopUp.selectedTag()
+        let previousDays = retentionDays
+        guard requestedDays != previousDays else { return }
+        guard requestedDays > 0 else {
+            UserDefaults.standard.set(0, forKey: Self.retentionDefaultsKey)
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Keep local history for \(requestedDays) days?"
+        alert.informativeText = "Older connection metadata will be deleted now and on future launches. Monitoring will continue."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Apply and Delete Older History")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            selectRetention(days: previousDays)
+            return
+        }
+
+        runMutation(
+            operation: { [journal] in
+                guard let journal else { return }
+                let cutoff = Calendar.current.date(byAdding: .day, value: -requestedDays, to: Date()) ?? Date()
+                try journal.removeObservations(before: cutoff)
+            },
+            onSuccess: {
+                UserDefaults.standard.set(requestedDays, forKey: Self.retentionDefaultsKey)
+            },
+            onFailure: { [weak self] in self?.selectRetention(days: previousDays) }
+        )
+    }
+
+    @objc private func deleteHistory() {
+        let alert = NSAlert()
+        alert.messageText = "Delete all local connection history?"
+        alert.informativeText = "This cannot be undone. Monitoring will continue and new observations may appear immediately."
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Delete History")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        runMutation(operation: { [journal] in
+            try journal?.removeAll()
+        })
+    }
+
+    private func runMutation(
+        operation: @escaping @Sendable () throws -> Void,
+        onSuccess: @escaping () -> Void = {},
+        onFailure: @escaping () -> Void = {}
+    ) {
+        guard !isMutating else { return }
+        isMutating = true
+        retentionPopUp.isEnabled = false
+        deleteButton.isEnabled = false
+        loadQueue.async { [weak self] in
+            let result = Result { try operation() }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isMutating = false
+                self.retentionPopUp.isEnabled = true
+                self.deleteButton.isEnabled = true
+                switch result {
+                case .success:
+                    onSuccess()
+                    self.refresh()
+                case .failure(let error):
+                    onFailure()
+                    self.showStorageError(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func selectRetention(days: Int) {
+        let index = retentionPopUp.indexOfItem(withTag: days)
+        retentionPopUp.selectItem(at: index >= 0 ? index : 0)
+    }
+
+    private func storageSummary(_ statistics: ObservationJournalStatistics) -> String {
+        let bytes = ByteCountFormatter.string(fromByteCount: Int64(statistics.storedBytes), countStyle: .file)
+        let maximum = ByteCountFormatter.string(fromByteCount: Int64(statistics.maximumStoredBytes), countStyle: .file)
+        guard let oldest = statistics.oldestObservationAt,
+              let newest = statistics.newestObservationAt else {
+            return "Storage: \(bytes) of \(maximum) · 0 records"
+        }
+        return "Storage: \(bytes) of \(maximum) · \(statistics.recordCount) records · \(dateFormatter.string(from: oldest)) – \(dateFormatter.string(from: newest))"
     }
 }

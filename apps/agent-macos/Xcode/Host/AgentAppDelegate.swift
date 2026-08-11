@@ -3,6 +3,10 @@ import EgressViewAgentCore
 
 final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let launchAtLoginController = LaunchAtLoginController()
+    private let historyMaintenanceQueue = DispatchQueue(label: "com.egressview.agent.history-maintenance")
+    private var currentMonitoringStatus = AgentMonitoringStatus.paused
+    private var launchAtLoginError: String?
     private lazy var journalResult = makeJournal()
     private lazy var journal = try? journalResult.get()
     private lazy var observationWindow = ObservationWindowController(journal: journal)
@@ -28,10 +32,12 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         if case .failure(let error) = journalResult {
             observationWindow.showStorageError(error.localizedDescription)
         }
+        applyRetentionPolicy()
         controller.restoreMonitoringState()
     }
 
     private func render(_ status: AgentMonitoringStatus) {
+        currentMonitoringStatus = status
         let menu = NSMenu()
         let statusRow = NSMenuItem(title: status.label, action: nil, keyEquivalent: "")
         statusRow.isEnabled = false
@@ -44,9 +50,24 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item("Lightweight monitoring", action: #selector(selectLightweight)))
         menu.addItem(item("Pause", action: #selector(selectPaused)))
         menu.addItem(.separator())
+        let launchAtLoginItem = item(launchAtLoginTitle, action: #selector(toggleLaunchAtLogin))
+        launchAtLoginItem.state = launchAtLoginController.state == .enabled ? .on : .off
+        menu.addItem(launchAtLoginItem)
+        if let launchAtLoginError {
+            let errorItem = NSMenuItem(title: "Launch at login failed: \(launchAtLoginError)", action: nil, keyEquivalent: "")
+            errorItem.isEnabled = false
+            menu.addItem(errorItem)
+        }
+        menu.addItem(.separator())
         menu.addItem(item("Quit EgressView Agent", action: #selector(quit), key: "q"))
         statusItem.menu = menu
         statusItem.button?.title = status.menuBarLabel
+    }
+
+    private var launchAtLoginTitle: String {
+        launchAtLoginController.state == .requiresApproval
+            ? "Launch at login (Approval required...)"
+            : "Launch at login"
     }
 
     private func item(_ title: String, action: Selector, key: String = "") -> NSMenuItem {
@@ -75,9 +96,34 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         controller.pause()
     }
 
+    @objc private func toggleLaunchAtLogin() {
+        do {
+            try launchAtLoginController.toggle()
+            launchAtLoginError = nil
+        } catch {
+            launchAtLoginError = error.localizedDescription
+        }
+        render(currentMonitoringStatus)
+    }
+
     @objc private func quit() {
         controller.pause()
         NSApplication.shared.terminate(nil)
+    }
+
+    private func applyRetentionPolicy() {
+        let days = ObservationWindowController.configuredRetentionDays
+        guard days > 0, let journal else { return }
+        historyMaintenanceQueue.async { [weak self] in
+            let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+            do {
+                try journal.removeObservations(before: cutoff)
+            } catch {
+                DispatchQueue.main.async {
+                    self?.observationWindow.showStorageError(error.localizedDescription)
+                }
+            }
+        }
     }
 
     private func makeJournal() -> Result<ObservationJournal, Error> {

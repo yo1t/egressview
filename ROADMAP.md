@@ -15,7 +15,7 @@ A desktop client is in development to visualize a Mac's own outbound connections
 - **Privacy:** it will not capture, decrypt, or store payloads. Sending observations to a Hub is separate from local collection, disabled by default, and explicitly opt-in.
 - **Distribution:** the plan is a Developer ID-signed and notarized app distributed as a DMG and Homebrew Cask. Installation alone will not enable monitoring; the user chooses the monitoring mode.
 
-The shared observation model, lightweight collector, deduplication, monitoring-mode state machine, macOS host app, pass-only System Extension foundation, flow metadata mapping, permission-restricted local storage, and connection activity UI are implemented and covered by CI. The next stages are signed-build validation on real hardware and explicit opt-in Hub integration. No release date is committed yet.
+The shared observation model, lightweight collector, deduplication, monitoring-mode state machine, signed and notarized macOS host app, pass-only System Extension, flow metadata mapping, permission-restricted local history, retention controls, confirmed deletion, and opt-in launch at login are implemented and validated on real hardware. Hub enrollment, opt-in delivery, the retry queue, and correlation with router observations are also implemented and are now undergoing live validation. No release date is committed yet.
 
 ### conntrack router support (OpenWrt / ASUS router mode / Ubiquiti UDM)
 
