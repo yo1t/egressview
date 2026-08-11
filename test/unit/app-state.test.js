@@ -33,6 +33,7 @@ describe('applyConfigToAppState', () => {
         passwordHash: 'hash',
         salt: 'salt',
         password: { algorithm: 'scrypt', version: 1 },
+        agentTokenPepper: 'p'.repeat(64),
       },
       oidc: {
         enabled: true,
@@ -65,6 +66,7 @@ describe('applyConfigToAppState', () => {
     assert.equal(state.authPasswordHash, 'hash');
     assert.equal(state.authPasswordSalt, 'salt');
     assert.equal(state.authPasswordRecord.version, 1);
+    assert.equal(state.agentTokenPepper, 'p'.repeat(64));
     assert.equal(state.oidcConfig.enabled, true);
     assert.equal(state.oidcConfig.clientId, 'client-id');
     assert.deepEqual(state.oidcConfig.allowedDomains, ['example.com']);

@@ -12,6 +12,12 @@ function isApiIdentity(auth) {
   return Boolean(auth) && typeof auth === 'object' && auth.kind === 'api-identity';
 }
 
+function bearerToken(req) {
+  const value = req.get?.('Authorization') || '';
+  const match = /^Bearer ([^\s]+)$/.exec(value);
+  return match ? match[1] : '';
+}
+
 function defaultResolvePermissions({ auth }) {
   // Scoped identities carry exactly what was granted at issue time.
   if (isApiIdentity(auth)) return auth.identity.permissions;
@@ -30,6 +36,7 @@ function createAuthMiddleware({
   authCookies,
   authAudit,
   apiIdentities = null,
+  agentIdentities = null,
   resolvePermissions = defaultResolvePermissions,
   // Shared anonymous viewer for the public read-only demo; null everywhere
   // else. See src/demo-visitor.js for why this exists and what gates it.
@@ -89,6 +96,30 @@ function createAuthMiddleware({
       path: req.originalUrl,
       metadata,
     });
+  }
+
+  function authorizeAgentRequest(req, res, next, requiredPermissions) {
+    const identity = agentIdentities?.verifyAgentToken(bearerToken(req));
+    if (!identity) {
+      req.authMethod = 'agent-token';
+      appendAudit(req, 'agent_authentication', 'failure', { reason: 'invalid_credential' });
+      return res.status(401).json({ error: 'Agent authentication failed' });
+    }
+    req.agentIdentity = identity;
+    req.authMethod = 'agent-token';
+    req.actor = `agent:${identity.agentId}`;
+    req.principal = `agent:${identity.agentId}`;
+    req.permissions = identity.permissions;
+    const permissionCheck = checkPermissions(identity.permissions, requiredPermissions);
+    if (!permissionCheck.allowed) {
+      appendAudit(req, 'permission_denied', 'failure', {
+        requiredPermissions,
+        missingPermissions: permissionCheck.missing,
+      });
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+    req.permissionAuthorized = true;
+    next();
   }
 
   function authorizeRequest(req, res, next, requiredPermissions) {
@@ -154,6 +185,9 @@ function createAuthMiddleware({
     }
     req.permissionPolicy = policy;
     if (policy.access === ACCESS.PUBLIC) return next();
+    if (policy.access === ACCESS.AGENT) {
+      return authorizeAgentRequest(req, res, next, policy.permissions);
+    }
     return authorizeRequest(req, res, next, policy.permissions);
   }
 
@@ -166,11 +200,19 @@ function createAuthMiddleware({
     return authorizeRequest(req, res, next, requiredPermissions);
   }
 
+  function requireAgent(req, res, next) {
+    if (req.permissionAuthorized && req.agentIdentity) return next();
+    const policy = classifyHttpRequest(req.method, req.originalUrl);
+    const permissions = policy?.access === ACCESS.AGENT ? policy.permissions : [];
+    return authorizeAgentRequest(req, res, next, permissions);
+  }
+
   return {
     authenticate,
     authenticateRequest,
     enforceApiPermissions,
     requireAdmin,
+    requireAgent,
   };
 }
 

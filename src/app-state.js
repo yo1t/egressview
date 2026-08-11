@@ -19,6 +19,7 @@ function createDefaultAppState() {
     authPasswordHash: '',
     authPasswordSalt: '',
     authPasswordRecord: null,
+    agentTokenPepper: '',
     oidcConfig: {
       enabled: false,
       clientId: '',
@@ -66,6 +67,9 @@ function applyConfigToAppState(appState, data, { isAllowedLogPath, logger }) {
     appState.authPasswordSalt = data.auth.salt || '';
     appState.authPasswordRecord = data.auth.password &&
       typeof data.auth.password === 'object' ? data.auth.password : null;
+    appState.agentTokenPepper = typeof data.auth.agentTokenPepper === 'string'
+      ? data.auth.agentTokenPepper
+      : '';
   }
   if (data.oidc && typeof data.oidc === 'object') {
     appState.oidcConfig = {

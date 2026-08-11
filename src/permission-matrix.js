@@ -1,11 +1,12 @@
 'use strict';
 
-const { PERMISSIONS, assertKnownPermissions } = require('./permissions');
+const { PERMISSIONS, AGENT_PERMISSIONS, assertKnownPermissions } = require('./permissions');
 
 const ACCESS = Object.freeze({
   PUBLIC: 'public',
   AUTHENTICATED: 'authenticated',
   PERMISSION: 'permission',
+  AGENT: 'agent',
 });
 
 function httpRoute(method, path, access, permissions = []) {
@@ -13,10 +14,11 @@ function httpRoute(method, path, access, permissions = []) {
   if (!Object.values(ACCESS).includes(access)) {
     throw new Error(`${method} ${path} has an unknown access classification: ${access}`);
   }
-  if (access === ACCESS.PERMISSION && permissions.length === 0) {
+  const permissionControlled = access === ACCESS.PERMISSION || access === ACCESS.AGENT;
+  if (permissionControlled && permissions.length === 0) {
     throw new Error(`${method} ${path} requires at least one permission`);
   }
-  if (access !== ACCESS.PERMISSION && permissions.length > 0) {
+  if (!permissionControlled && permissions.length > 0) {
     throw new Error(`${method} ${path} cannot mix ${access} access with permissions`);
   }
   return Object.freeze({
@@ -28,6 +30,7 @@ function httpRoute(method, path, access, permissions = []) {
 }
 
 const R = PERMISSIONS;
+const A = AGENT_PERMISSIONS;
 
 const HTTP_ROUTE_MATRIX = Object.freeze([
   httpRoute('GET', '/healthz', ACCESS.PUBLIC),
@@ -36,11 +39,14 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   httpRoute('GET', '/api/auth/status', ACCESS.PUBLIC),
   httpRoute('GET', '/api/auth/methods', ACCESS.PUBLIC),
   httpRoute('POST', '/api/auth/login', ACCESS.PUBLIC),
+  httpRoute('POST', '/api/agent/enroll', ACCESS.PUBLIC),
   httpRoute('POST', '/api/admin/verify', ACCESS.PUBLIC),
   httpRoute('GET', '/api/auth/oidc/start', ACCESS.PUBLIC),
   httpRoute('GET', '/api/auth/oidc/callback', ACCESS.PUBLIC),
 
   httpRoute('POST', '/api/auth/logout', ACCESS.AUTHENTICATED),
+
+  httpRoute('POST', '/api/agent/token/rotate', ACCESS.AGENT, [A.INGEST]),
 
   httpRoute('GET', '/api/status', ACCESS.PERMISSION, [R.NETWORK_READ]),
   httpRoute('GET', '/api/connections', ACCESS.PERMISSION, [R.NETWORK_READ]),
@@ -119,6 +125,9 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   httpRoute('POST', '/api/backup/upload', ACCESS.PERMISSION, [R.BACKUP_RESTORE]),
 
   httpRoute('GET', '/api/auth/api-identities', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  httpRoute('GET', '/api/agents', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  httpRoute('POST', '/api/agents/enrollment-tokens', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  httpRoute('POST', '/api/agents/:agentId/revoke', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/auth/api-identities', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/auth/api-identities/:id/revoke', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('GET', '/api/auth/api-identities/self', ACCESS.PERMISSION, [R.NETWORK_READ]),
