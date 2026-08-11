@@ -879,8 +879,11 @@
     </span>
   </div>
   <div class="conn-badges">
-    <div class="conn-badge off" id="badge-l3l4" title="L3/L4 ルーター（Yamaha / Cisco）">
+    <div class="conn-badge conn-badge-source off" id="badge-l3l4" title="L3/L4 ルーター（Yamaha / Cisco）">
       <span class="badge-layer">L3/L4</span>
+      <select id="source-filter-select" class="source-filter-select" aria-label="表示する収集ソース">
+        <option value="" data-i18n="source.all">すべて</option>
+      </select>
       <span class="badge-dot"></span>
     </div>
     <div class="conn-badge off" id="badge-l2" title="L2 WiFi AP（ASUS）">

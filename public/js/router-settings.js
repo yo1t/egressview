@@ -1,6 +1,7 @@
 import { t } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, fmtTs } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch, authReady, socket, setRouterList } from './auth-socket.js?v=__ASSET_VERSION__';
+import { updateRouterSources } from './display-scope.js?v=__ASSET_VERSION__';
 
 let routers = [];
 let maxRouters = 10;
@@ -139,6 +140,7 @@ async function loadRouters() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || response.statusText);
     routers = data.routers || [];
+    updateRouterSources(routers);
     maxRouters = data.maxRouters || 10;
     render();
   } catch (error) {

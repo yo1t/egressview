@@ -1,6 +1,7 @@
 import { t, tVars } from './i18n.js?v=__ASSET_VERSION__';
 import { _BASE, fmtTs } from './utils.js?v=__ASSET_VERSION__';
 import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
+import { updateAgentSources } from './display-scope.js?v=__ASSET_VERSION__';
 
 function textElement(tag, text, className = '') {
   const element = document.createElement(tag);
@@ -17,6 +18,7 @@ export function initAgentSettings(showStatus) {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || 'Could not load Agents');
       const agents = body.agents || [];
+      updateAgentSources(agents);
       if (!agents.length) {
         box.replaceChildren(textElement('span', t('settings.agents.none'), 'settings-session-muted'));
         return;
