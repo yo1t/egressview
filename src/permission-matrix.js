@@ -47,6 +47,7 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   httpRoute('POST', '/api/auth/logout', ACCESS.AUTHENTICATED),
 
   httpRoute('POST', '/api/agent/token/rotate', ACCESS.AGENT, [A.INGEST]),
+  httpRoute('POST', '/api/agent/ingest', ACCESS.AGENT, [A.INGEST]),
 
   httpRoute('GET', '/api/status', ACCESS.PERMISSION, [R.NETWORK_READ]),
   httpRoute('GET', '/api/connections', ACCESS.PERMISSION, [R.NETWORK_READ]),
@@ -126,6 +127,7 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
 
   httpRoute('GET', '/api/auth/api-identities', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('GET', '/api/agents', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  httpRoute('GET', '/api/agents/ingest-metrics', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/agents/enrollment-tokens', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/agents/:agentId/revoke', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/auth/api-identities', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
