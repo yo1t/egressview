@@ -60,6 +60,40 @@ describe('db-migrate: fresh database', () => {
     db.close();
   });
 
+  it('creates the additive Hub-Agent v13 schema and indexes', () => {
+    const db = openDb(':memory:');
+    runMigrations(db, ':memory:');
+    const tables = new Set(
+      db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all().map(row => row.name)
+    );
+    for (const table of [
+      'agent_enrollment_tokens',
+      'agents',
+      'agent_ingest_batches',
+      'agent_observations',
+      'connection_agent_observations',
+    ]) {
+      assert.ok(tables.has(table), `missing ${table}`);
+    }
+
+    const indexes = new Set(
+      db.prepare(`SELECT name FROM sqlite_master WHERE type='index'`).all().map(row => row.name)
+    );
+    for (const index of [
+      'idx_agent_enrollment_expiry',
+      'idx_agents_active',
+      'idx_agent_batches_received',
+      'idx_agent_observations_time',
+      'idx_agent_observations_flow_time',
+      'idx_agent_observations_batch',
+      'idx_connection_agent_observation',
+      'idx_connection_agent_connection',
+    ]) {
+      assert.ok(indexes.has(index), `missing ${index}`);
+    }
+    db.close();
+  });
+
   it('does NOT create a backup for a fresh (empty) database', () => {
     const p = tmpDb('fresh-no-backup');
     const db = openDb(p);
@@ -201,6 +235,96 @@ describe('db-migrate: v11 browser roles', () => {
     const roleColumn = db.prepare('PRAGMA table_info(sessions)').all()
       .find(column => column.name === 'role');
     assert.equal(roleColumn.dflt_value, "'viewer'");
+    db.close();
+  });
+});
+
+describe('db-migrate: v13 Hub-Agent additive schema', () => {
+  it('preserves v12 data and creates a verified v12-to-v13 backup', () => {
+    const p = tmpDb('v13-agent-upgrade');
+    const db = openDb(p);
+    db.exec(`
+      CREATE TABLE sentinel (id INTEGER PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO sentinel VALUES (1, 'keep-me');
+    `);
+    db.pragma('user_version = 12');
+    db.close();
+
+    const upgraded = openDb(p);
+    runMigrations(upgraded, p);
+    assert.equal(upgraded.pragma('user_version', { simple: true }), 13);
+    assert.equal(upgraded.prepare('SELECT value FROM sentinel WHERE id = 1').get().value, 'keep-me');
+    assert.ok(upgraded.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='agent_observations'`
+    ).get());
+    assert.equal(upgraded.pragma('integrity_check', { simple: true }), 'ok');
+    upgraded.close();
+
+    const backups = fs.readdirSync(TMP)
+      .filter(name => name.startsWith('v13-agent-upgrade.db.pre-migration.v12-to-v13'));
+    assert.equal(backups.length, 1);
+    const backupPath = path.join(TMP, backups[0]);
+    _verifyDbCopy(backupPath);
+    const backup = new Database(backupPath, { readonly: true });
+    assert.equal(backup.pragma('user_version', { simple: true }), 12);
+    assert.equal(backup.prepare('SELECT value FROM sentinel WHERE id = 1').get().value, 'keep-me');
+    assert.equal(backup.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='agent_observations'`
+    ).get(), undefined);
+    backup.close();
+  });
+
+  it('enforces observation provenance and range constraints', () => {
+    const db = openDb(':memory:');
+    runMigrations(db, ':memory:');
+    const insert = db.prepare(`
+      INSERT INTO agent_observations (
+        agentId, observationId, batchId, networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, collector, confidence, receivedAt
+      ) VALUES (
+        @agentId, @observationId, @batchId, @networkProtocol,
+        @localAddress, @localPort, @remoteAddress, @remotePort,
+        @processId, @processName, @bundleId, @firstObservedAt, @lastObservedAt,
+        @bytesIn, @bytesOut, @collector, @confidence, @receivedAt
+      )
+    `);
+    const valid = {
+      agentId: 'agent-1', observationId: 'obs-1', batchId: 'batch-1',
+      networkProtocol: 'tcp', localAddress: '192.0.2.10', localPort: 49152,
+      remoteAddress: '198.51.100.20', remotePort: 443,
+      processId: 42, processName: 'Example', bundleId: 'com.example.app',
+      firstObservedAt: 100, lastObservedAt: 200,
+      bytesIn: '18446744073709551615', bytesOut: null,
+      collector: 'network-extension', confidence: 'exact', receivedAt: 201,
+    };
+    insert.run(valid);
+    assert.throws(() => insert.run({ ...valid, observationId: 'obs-2', localPort: 0 }));
+    assert.throws(() => insert.run({ ...valid, observationId: 'obs-3', lastObservedAt: 99 }));
+    assert.throws(() => insert.run({ ...valid, observationId: 'obs-4', bytesIn: '12x' }));
+    assert.throws(() => insert.run({
+      ...valid,
+      observationId: 'obs-5',
+      bytesIn: '18446744073709551616',
+    }));
+    assert.throws(() => insert.run({ ...valid, observationId: 'obs-6', bytesIn: '01' }));
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 1);
+    db.close();
+  });
+
+  it('rolls back all new v13 objects when an incompatible pre-existing table causes failure', () => {
+    const db = openDb(':memory:');
+    db.exec('CREATE TABLE agents (agentId TEXT PRIMARY KEY)');
+    db.pragma('user_version = 12');
+
+    assert.throws(() => runMigrations(db, ':memory:'));
+    assert.equal(db.pragma('user_version', { simple: true }), 12);
+    assert.equal(db.prepare('PRAGMA table_info(agents)').all().length, 1);
+    assert.equal(db.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='agent_observations'`
+    ).get(), undefined);
+    assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
     db.close();
   });
 });

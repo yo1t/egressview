@@ -13,7 +13,8 @@
 // migration by throwing — the caller (history.js startup) lets the error
 // propagate so the process stops with the DB unmodified.
 //
-// Scope: connections table and notification_log (history.js tables).
+// Scope: connections/history tables plus cross-module schemas that must exist
+// before routes or stores attach, including Hub-Agent ingest identity/storage.
 // devices.js manages its own ad-hoc ALTER TABLE checks independently because
 // it opens the same DB file in a separate connection after history.js has
 // already advanced user_version.
@@ -30,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -399,6 +400,122 @@ const MIGRATIONS = [
         db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_events_principal
                    ON audit_events(principalHash, createdAt DESC)`);
       }
+    },
+  },
+  {
+    version: 13,
+    description: 'Hub-Agent identity, idempotent ingest, observations, and correlation junction (P3-4)',
+    up(db) {
+      // Additive expand phase. Existing compatibility columns and router
+      // observations remain untouched until all read paths use this model.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_enrollment_tokens (
+          tokenId                TEXT PRIMARY KEY,
+          tokenHash              TEXT NOT NULL UNIQUE,
+          createdAt              INTEGER NOT NULL,
+          expiresAt              INTEGER NOT NULL,
+          usedAt                 INTEGER,
+          createdByPrincipalHash TEXT,
+          CHECK(expiresAt > createdAt),
+          CHECK(usedAt IS NULL OR (usedAt >= createdAt AND usedAt <= expiresAt))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_enrollment_expiry
+          ON agent_enrollment_tokens(expiresAt, usedAt);
+
+        CREATE TABLE IF NOT EXISTS agents (
+          agentId      TEXT PRIMARY KEY,
+          platform     TEXT NOT NULL CHECK(platform IN ('macos', 'windows', 'linux')),
+          hostName     TEXT NOT NULL CHECK(length(hostName) BETWEEN 1 AND 255),
+          osVersion    TEXT NOT NULL CHECK(length(osVersion) BETWEEN 1 AND 64),
+          agentVersion TEXT NOT NULL CHECK(length(agentVersion) BETWEEN 1 AND 64),
+          tokenHash    TEXT NOT NULL UNIQUE,
+          createdAt    INTEGER NOT NULL,
+          updatedAt    INTEGER NOT NULL,
+          lastSeenAt   INTEGER,
+          revokedAt    INTEGER,
+          CHECK(updatedAt >= createdAt),
+          CHECK(lastSeenAt IS NULL OR lastSeenAt >= createdAt),
+          CHECK(revokedAt IS NULL OR revokedAt >= createdAt)
+        );
+        CREATE INDEX IF NOT EXISTS idx_agents_active
+          ON agents(revokedAt, lastSeenAt DESC);
+
+        CREATE TABLE IF NOT EXISTS agent_ingest_batches (
+          agentId        TEXT NOT NULL,
+          batchId        TEXT NOT NULL,
+          schemaVersion  INTEGER NOT NULL CHECK(schemaVersion = 1),
+          sentAt         INTEGER NOT NULL,
+          receivedAt     INTEGER NOT NULL,
+          acceptedCount  INTEGER NOT NULL CHECK(acceptedCount >= 0),
+          duplicateCount INTEGER NOT NULL CHECK(duplicateCount >= 0),
+          rejectedCount  INTEGER NOT NULL CHECK(rejectedCount >= 0),
+          status          TEXT NOT NULL CHECK(status IN ('complete')),
+          PRIMARY KEY (agentId, batchId)
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_batches_received
+          ON agent_ingest_batches(agentId, receivedAt DESC);
+
+        CREATE TABLE IF NOT EXISTS agent_observations (
+          agentId          TEXT NOT NULL,
+          observationId    TEXT NOT NULL,
+          batchId          TEXT NOT NULL,
+          networkProtocol  TEXT NOT NULL CHECK(networkProtocol IN ('tcp', 'udp')),
+          localAddress     TEXT NOT NULL CHECK(length(localAddress) BETWEEN 2 AND 45),
+          localPort        INTEGER NOT NULL CHECK(localPort BETWEEN 1 AND 65535),
+          remoteAddress    TEXT NOT NULL CHECK(length(remoteAddress) BETWEEN 2 AND 45),
+          remotePort       INTEGER NOT NULL CHECK(remotePort BETWEEN 1 AND 65535),
+          processId        INTEGER NOT NULL CHECK(processId BETWEEN 0 AND 2147483647),
+          processName      TEXT NOT NULL CHECK(length(processName) BETWEEN 1 AND 256),
+          bundleId         TEXT CHECK(bundleId IS NULL OR length(bundleId) BETWEEN 1 AND 255),
+          firstObservedAt  INTEGER NOT NULL,
+          lastObservedAt   INTEGER NOT NULL,
+          bytesIn          TEXT,
+          bytesOut         TEXT,
+          collector        TEXT NOT NULL CHECK(collector IN ('network-extension', 'libproc')),
+          confidence       TEXT NOT NULL CHECK(confidence IN ('exact', 'sampled')),
+          receivedAt       INTEGER NOT NULL,
+          PRIMARY KEY (agentId, observationId),
+          CHECK(lastObservedAt >= firstObservedAt),
+          CHECK(bytesIn IS NULL OR (
+            length(bytesIn) BETWEEN 1 AND 20
+            AND bytesIn NOT GLOB '*[^0-9]*'
+            AND (bytesIn = '0' OR substr(bytesIn, 1, 1) BETWEEN '1' AND '9')
+            AND (length(bytesIn) < 20 OR bytesIn <= '18446744073709551615')
+          )),
+          CHECK(bytesOut IS NULL OR (
+            length(bytesOut) BETWEEN 1 AND 20
+            AND bytesOut NOT GLOB '*[^0-9]*'
+            AND (bytesOut = '0' OR substr(bytesOut, 1, 1) BETWEEN '1' AND '9')
+            AND (length(bytesOut) < 20 OR bytesOut <= '18446744073709551615')
+          ))
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_observations_time
+          ON agent_observations(agentId, lastObservedAt DESC);
+        CREATE INDEX IF NOT EXISTS idx_agent_observations_flow_time
+          ON agent_observations(
+            localAddress, remoteAddress, remotePort, networkProtocol,
+            localPort, firstObservedAt, lastObservedAt
+          );
+        CREATE INDEX IF NOT EXISTS idx_agent_observations_batch
+          ON agent_observations(agentId, batchId);
+
+        CREATE TABLE IF NOT EXISTS connection_agent_observations (
+          src           TEXT NOT NULL,
+          dst           TEXT NOT NULL,
+          dport         INTEGER NOT NULL,
+          proto         TEXT NOT NULL,
+          agentId       TEXT NOT NULL,
+          observationId TEXT NOT NULL,
+          matchKind     TEXT NOT NULL CHECK(matchKind IN ('exact-5tuple', 'unique-4tuple-time')),
+          matchedAt     INTEGER NOT NULL,
+          timeDeltaMs   INTEGER NOT NULL CHECK(timeDeltaMs >= 0),
+          PRIMARY KEY (src, dst, dport, proto, agentId, observationId)
+        );
+        CREATE INDEX IF NOT EXISTS idx_connection_agent_observation
+          ON connection_agent_observations(agentId, observationId);
+        CREATE INDEX IF NOT EXISTS idx_connection_agent_connection
+          ON connection_agent_observations(src, dst, dport, proto);
+      `);
     },
   },
 ];
