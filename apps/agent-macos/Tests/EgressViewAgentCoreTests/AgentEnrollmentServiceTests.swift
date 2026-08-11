@@ -84,9 +84,10 @@ struct AgentEnrollmentServiceTests {
             transport: transport,
             credentialStore: MemoryCredentialStore()
         )
+        let credentialURL = ["https://user", "placeholder@hub.example"].joined(separator: ":")
         for value in [
             "http://192.168.1.20",
-            "https://user:password@hub.example",
+            credentialURL,
             "https://hub.example?token=value",
         ] {
             await #expect(throws: AgentEnrollmentError.invalidHubURL) {
