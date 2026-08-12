@@ -8,6 +8,18 @@ import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 import { showThreatDetail } from './threat-popup.js?v=__ASSET_VERSION__';
 import { appendDisplayScope } from './display-scope.js?v=__ASSET_VERSION__';
 
+/**
+ * The application behind a connection.
+ *
+ * `guessApp` infers one from the port and destination, which is all a router
+ * can support. When an endpoint agent reported the actual process for this
+ * flow, that is not a guess and it wins — showing "HTTPS" next to a value that
+ * says "Google Chrome Helper" would be discarding the better answer.
+ */
+function appLabel(connection) {
+  return connection.process || guessApp(connection.dport, connection.proto, connection.dstHost || connection.dst);
+}
+
 const logSortState = { col: 'lastSeen', dir: 'desc' };
 const logFilters = {}; // col → { mode, value }
 let logThreatFilter = null; // null | 'safe' | 'warn' | 'danger'
@@ -108,7 +120,7 @@ function getLogCellValue(c, col) {
     }
     case 'dst':     return c.dstHost && c.dstHost !== c.dst ? c.dstHost : c.dst;
     case 'dport':   return String(c.dport);
-    case 'app':     return guessApp(c.dport, c.proto, c.dstHost || c.dst);
+    case 'app':     return appLabel(c);
     case 'proto':   return c.proto;
     case 'country': return c.country || '';
     case 'org':     return c.org || '';
@@ -444,8 +456,11 @@ function createLogRow(connection) {
   appendLogCell(row, dstLabel, { title: connection.dst });
   row.appendChild(createThreatCell(connection, isLowConfidence));
   appendLogCell(row, connection.dport);
-  appendLogCell(row, guessApp(connection.dport, connection.proto, connection.dstHost || connection.dst), {
+  appendLogCell(row, appLabel(connection), {
     className: 'log-app-cell',
+    title: connection.process
+      ? `${connection.process}${connection.pid ? ` (pid ${connection.pid})` : ''}${connection.agentHost ? ` — ${connection.agentHost}` : ''}`
+      : '',
   });
   appendLogCell(row, connection.proto);
   appendLogCell(row, `${flag} ${connection.country || ''}`);

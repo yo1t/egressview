@@ -396,6 +396,10 @@ const routeCtx = {
   runtime, notes, io, beacons, sessions, authPassword,
   authAudit, authCookies, oidc, apiIdentities,
   agentIdentities, agentIngest, requireAgent,
+  // Agent flows go through the same recording path as a router poll, so they
+  // are enriched, threat-matched, and counted as device activity rather than
+  // sitting in a table nothing checks.
+  recordConnections: (sessions, now, source) => runtime.recordConnections(sessions, now, source),
   // Evaluated per request so consent can be withdrawn without a restart.
   isPlaintextAllowed: () => appState.agentAllowPlaintext === true,
   setPlaintextAllowed: value => { appState.agentAllowPlaintext = value === true; saveConfig(); },

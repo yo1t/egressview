@@ -16,9 +16,9 @@ No new hardware. No inline traffic interception. It reads the NAT session tables
 
 ## See it in action
 
-### ▶ [Open the live demo](https://egressview-demo.fly.dev)
+### ▶ Watch it work
 
-The real interface with sample data. Nothing to install, no router required — the fastest way to decide whether this is worth your evening.
+Graph Map and Statistics for the whole network, then Connection Log and Devices to drill into one suspicious destination — the same path you would take during a real investigation. UI language is English or Japanese.
 
 https://github.com/user-attachments/assets/9448d75b-a7fe-4363-8d35-da17abaed0ee
 
@@ -31,7 +31,17 @@ https://github.com/user-attachments/assets/9448d75b-a7fe-4363-8d35-da17abaed0ee
 ![Connection Log drill-down](docs/assets/egressview-connection-log.png)
 *From a suspicion to the individual sessions: filter by time, sort, search per column, then pivot to the device that made them.*
 
-Prefer to run it yourself? `DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start` seeds 160 sample connections locally and marks the header with a **DEMO** badge so you never confuse it with a live install.
+### Try it without a router
+
+You can run the whole interface against sample data before touching any hardware — the fastest way to decide whether this is worth your evening:
+
+```bash
+git clone https://github.com/yo1t/egressview.git
+cd egressview && npm install
+DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start
+```
+
+Open `http://localhost:3000` and enter `my-token`. It seeds 160 realistic connections, every view works, and a **DEMO** badge sits in the header so you can never confuse it with a live install.
 
 ---
 
@@ -65,7 +75,9 @@ Prefer to run it yourself? `DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start` 
 
 ## Does it work with my setup?
 
-**You need a Yamaha RTX or a Cisco IOS router.** There is no packet capture mode and no inline option. If you have neither, nothing below will help — better to know that now.
+**You need a Yamaha RTX or a Cisco IOS router.** There is no packet capture mode and no inline option.
+
+**The macOS agent on its own is not a substitute.** It will run without a router and will show that Mac's outbound connections with the application behind each one — captured as flows happen, so nothing is lost to a polling gap. But **threat matching and destination enrichment only apply to router-observed connections**, so an agent-only install lists traffic without ever telling you any of it is dangerous. The agent is built to add *which application* to what a router already sees, not to replace it.
 
 | | Requirement |
 |--|-------------|
