@@ -1,16 +1,52 @@
-# EgressView macOS Agent Spike
+# EgressView Agent for macOS
 
-This package validates the two macOS collection paths without changing the
-existing EgressView server runtime.
+Your router shows you what leaves the house. It cannot show you **which app on
+your Mac** sent it. This agent fills that gap: it reports the process behind each
+outbound connection to your EgressView Hub, so a connection to an address you do
+not recognise comes with the name of the program that made it.
 
-- `EgressViewAgentCore`: shared observation model, deduplication, libproc
-  collector, and explicit monitoring-mode state machine.
-- `EgressViewNetworkExtension`: pass-only Network Extension provider skeleton.
-- `egressview-agent-spike`: one-shot local socket inventory for development.
+It reads connection metadata only — addresses, ports, process names. **It never
+reads payloads, never decrypts traffic, and never blocks anything.** Byte counts
+are reported as unavailable rather than guessed at.
 
-The lightweight collector reads socket metadata only. It does not read payloads,
-decrypt traffic, or modify network behavior. Byte counts are intentionally
-reported as unavailable rather than zero.
+## Is this for you?
+
+Stop here if any of these is a no. Nothing below will work around them.
+
+| You need | Why |
+|---|---|
+| **macOS 13 or newer** | The System Extension the full mode relies on |
+| **An EgressView Hub you administer, running 1.9.0 or newer** | Enrolment needs a Hub that can approve it. **Hub 1.8.0 and older cannot accept this agent at all** — they have no agent endpoint |
+| **Physical access to that Hub's settings** | Registration is completed by an administrator approving your Mac, not by the Mac itself |
+
+Roughly ten minutes, most of which is macOS asking you to approve things.
+
+## Install
+
+1. Download `egressview-agent-<version>.dmg` from the
+   [releases page](https://github.com/yo1t/egressview/releases) and open it.
+2. Drag **EgressView Agent** onto **Applications**, then launch it from there.
+   It lives in the menu bar and has no window of its own.
+3. Choose **Full monitoring** from its menu. macOS will ask you to allow a
+   System Extension; this opens System Settings, where you approve it once.
+   **Lightweight monitoring** needs no approval but sees less.
+4. In the Hub's settings, under the L3/L4 data source, choose **Issue an
+   enrolment code**. You get six characters.
+5. Back in the agent menu, choose **Hub delivery...**, enter the Hub's address
+   and the six characters, and request access.
+6. Approve the request in the Hub. Your Mac appears once you do — **it does not
+   appear before**, which is the point: a machine cannot add itself.
+
+Sending is off until you complete step 5. The agent shows you the exact
+destination and what will and will not be sent before anything leaves.
+
+If the code is refused, it has probably expired — they last ten minutes. Issue
+another one.
+
+## Building from source
+
+The sections below are for working on the agent itself. **You do not need them
+to use it.**
 
 ## Development
 
@@ -122,6 +158,19 @@ Set `EGRESSVIEW_NOTARY_PROFILE` to a credential profile previously stored with
 `xcrun notarytool store-credentials` to submit, staple, and Gatekeeper-check the
 same package. Without it, the script creates a signed ZIP ready for submission.
 It refuses to overwrite an existing `dist/EgressViewAgent.zip`.
+
+Then package the disk image people actually download:
+
+```sh
+EGRESSVIEW_NOTARY_PROFILE="$NOTARY_PROFILE_NAME" ./scripts/build-agent-dmg.sh
+```
+
+It reads the version from the built app and writes
+`dist/egressview-agent-<version>.dmg`, notarised and stapled in its own right —
+stapling the app alone is not enough, because a first launch from an unstapled
+image asks Apple over the network, and a new user's first impression should not
+depend on their connection. Without a notary profile it still builds an image,
+prints that it is unnotarised, and that one must not be published.
 
 The two profile names are local Apple Developer resources. Do not commit Team
 IDs, downloaded profiles, certificates, private keys, or notarization secrets.

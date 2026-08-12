@@ -59,6 +59,7 @@ EgressViewは、多くの家庭ユーザーが答えを持てていない問い�
 - **通信ログ**: ソート・検索可能なセッション一覧（脅威バッジ・詳細ポップアップ付き）。**アプリ列**でポート番号と宛先ホスト名からサービス名を自動推測（APNs・FCM・AirPlay・MQTT/TLS・QUIC・iCloud・YouTube・AWS・Slack・Zoom・Tuya Smart・Gaijin/DCS など）
 - **🔔 検出ログ** — 脅威検出・新規端末アラートの永続履歴。カラム別フィルター・ソート・クリック詳細ポップアップ付き。Slack設定の有無にかかわらず全検出を記録
 - **📡 データソースタブ** — dnsmasq・[INSPECT]・[DHCPD] の ON/OFF とパスを設定画面から個別に制御
+- **💻 macOS エージェント** — ルーターは「何が外に出たか」は見せますが、「どのアプリが出したか」は見せません。[EgressView Agent for macOS](apps/agent-macos/README.md) は Mac の外向き接続をプロセス名つきで Hub へ送るため、見覚えのない宛先が「どのプログラムが接続したか」とセットで分かります（メタデータのみ。通信内容は読みません。Hub 1.9.0 以降が必要）
 - **🤖 AI エージェント連携（MCP）** — [Model Context Protocol](https://modelcontextprotocol.io/) サーバーを内蔵し、11本のツール（通信サマリー・脅威接続・宛先ランキング・端末一覧・端末メモなど）を AWS Kiro・Anthropic Claude・Anysphere Cursor 等の AI アシスタントに公開。stdio / HTTPと`2025-11-25` / `2026-07-28`の両protocol eraに対応
 - **✦ AI洞察**を先頭・スタートページにした、グラフマップ、統計情報、通信ログ、端末一覧、検出ログ、設定を備えるダークテーマのシングルページUI
 
