@@ -42,6 +42,37 @@ describe('observation consistency diagnostics', () => {
     db.close();
   });
 
+  it('agentだけが観測した接続をmissing扱いにしない', () => {
+    // An agent has no router identity and deliberately records no router
+    // observation. Counting those as missing raised an ERROR on every start
+    // for a database that was correct, and the deploy gate counts ERRORs.
+    const db = makeDb();
+    db.exec(`
+      CREATE TABLE agent_observations (
+        agentId TEXT, localAddress TEXT, remoteAddress TEXT, remotePort INTEGER,
+        networkProtocol TEXT
+      );
+      INSERT INTO connections VALUES ('10.0.0.9', '203.0.113.5', 443, 'tcp', 'agent');
+      INSERT INTO agent_observations VALUES ('agent-1', '10.0.0.9', '203.0.113.5', 443, 'TCP');
+    `);
+    assert.equal(checkObservationConsistency(db, 1).missingObservations, 0);
+    db.close();
+  });
+
+  it('agentも routerも観測していない接続は依然としてmissingになる', () => {
+    // The check still has to catch a connection nothing accounts for.
+    const db = makeDb();
+    db.exec(`
+      CREATE TABLE agent_observations (
+        agentId TEXT, localAddress TEXT, remoteAddress TEXT, remotePort INTEGER,
+        networkProtocol TEXT
+      );
+      INSERT INTO connections VALUES ('10.0.0.9', '203.0.113.5', 443, 'tcp', 'yamaha');
+    `);
+    assert.equal(checkObservationConsistency(db, 1).missingObservations, 1);
+    db.close();
+  });
+
   it('detects two observations of the wrong router kinds', () => {
     const db = makeDb();
     db.exec(`
