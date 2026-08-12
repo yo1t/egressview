@@ -80,6 +80,9 @@ module.exports = function agentRoutes({
   // after the setting moved.
   isPlaintextAllowed = () => false,
   setPlaintextAllowed = () => {},
+  // Injected so the route does not reach into the runtime directly; absent in
+  // the unit tests, which exercise storage rather than the collection pipeline.
+  recordConnections = null,
 }) {
   const router = Router();
   const failedEnrollments = new Map();
@@ -118,6 +121,38 @@ module.exports = function agentRoutes({
 
   function rateKey(req) {
     return req.ip || req.socket?.remoteAddress || 'unknown';
+  }
+
+  /**
+   * Feeds an accepted batch into the same collection pipeline a router poll
+   * uses, so the flows are enriched, matched against the threat feeds, and
+   * counted as device activity. The process name travels with them: it is the
+   * one thing a router can never supply.
+   */
+  function recordAgentFlows(envelope) {
+    if (typeof recordConnections !== 'function') return;
+    const hostName = envelope.agent?.hostName || null;
+    const sessions = envelope.observations.map(observation => ({
+      src: observation.localAddress,
+      sport: observation.localPort,
+      dst: observation.remoteAddress,
+      dport: observation.remotePort,
+      proto: observation.networkProtocol,
+      // The agent saw the flow start, so it knows a first-seen time that is
+      // earlier and more accurate than the moment this request arrived.
+      firstSeenHint: Date.parse(observation.firstObservedAt),
+      agentHost: hostName,
+      process: observation.processName || null,
+      pid: Number.isInteger(observation.processID) ? observation.processID : null,
+    }));
+    try {
+      recordConnections(sessions, Date.now(), 'agent');
+    } catch (error) {
+      // A batch that was stored must still be acknowledged. Losing the
+      // enrichment for it is worse than losing the batch would be, so it is
+      // logged rather than swallowed.
+      logger.error('[agents] Recording agent flows failed:', error.message);
+    }
   }
 
   function currentFailure(key, now) {
@@ -463,6 +498,12 @@ module.exports = function agentRoutes({
       } else {
         ingestMetrics.accepted += ack.accepted;
         ingestMetrics.duplicate += ack.duplicate;
+        // Storing the observation is not enough. Threat matching, destination
+        // enrichment, device tracking and notifications all run over
+        // connections, so an agent flow that never became one was listed
+        // without ever being checked against anything -- indistinguishable, on
+        // screen, from a flow that was checked and found safe.
+        recordAgentFlows(parsed.data);
       }
       audit(req, 'agent_ingest', 'success', {
         batchRef: agentIdentities.auditRef(parsed.data.batchId),
