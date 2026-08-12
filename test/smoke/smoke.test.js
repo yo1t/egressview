@@ -1697,6 +1697,8 @@ test('settings tabs save and connection buttons work without console errors', as
   await expect(page.locator('#sessions-list .settings-session-revoke')).toHaveCount(1);
   await page.locator('#sessions-list .settings-session-revoke').click();
   await expect(sessionRows).toHaveCount(1);
+  // Agents moved to the L3/L4 tab, where the other data sources live.
+  await page.click('.settings-tab[data-tab="l3l4"]');
   await expect(page.locator('#agents-list .settings-agent-row')).toHaveCount(1);
   await expect(page.locator('#agents-list')).toContainText('<img src=x onerror=alert(1)>');
   await expect(page.locator('#agents-list img')).toHaveCount(0);
@@ -1707,6 +1709,7 @@ test('settings tabs save and connection buttons work without console errors', as
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#agents-list .beacon-dismiss-btn').click();
   await expect(page.locator('#agents-list .settings-agent-revoked')).toHaveCount(1);
+  await page.click('.settings-tab[data-tab="general"]');
   await page.locator('#s-home-country').selectOption('JP');
   await page.click('#general-save-btn');
   await expect(page.locator('#general-status')).toBeVisible();

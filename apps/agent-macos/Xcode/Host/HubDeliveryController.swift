@@ -146,12 +146,18 @@ final class HubDeliveryController: NSWindowController, NSWindowDelegate {
             agentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
         )
         Task {
+            let service = AgentEnrollmentService(credentialStore: credentialStore)
             do {
-                let credential = try await AgentEnrollmentService(
-                    credentialStore: credentialStore
-                ).enroll(hubURL: hubURL, code: code, metadata: metadata)
+                let ticket = try await service.apply(hubURL: hubURL, code: code, metadata: metadata)
+                // The wait can be minutes: somebody has to walk to the Hub and
+                // approve this device. Say so, rather than leaving a dead
+                // dialog that looks like a hang.
                 await MainActor.run {
                     codeField.stringValue = ""
+                    destinationLabel.stringValue = "Waiting for approval on \(ticket.hubURL.absoluteString)"
+                }
+                let credential = try await service.waitForApproval(ticket: ticket)
+                await MainActor.run {
                     destinationLabel.stringValue = "Enrolled Hub: \(credential.hubURL.absoluteString)"
                     deliveryCheckbox.isEnabled = true
                     deliveryCheckbox.state = .off
@@ -163,9 +169,32 @@ final class HubDeliveryController: NSWindowController, NSWindowDelegate {
             } catch {
                 await MainActor.run {
                     setControlsEnabled(true)
-                    showError("Enrollment failed. Check the Hub URL and one-time code.")
+                    destinationLabel.stringValue = ""
+                    showError(Self.enrollmentMessage(for: error))
                 }
             }
+        }
+    }
+
+    /// Each failure gets its own sentence, because the fix differs: a declined
+    /// request needs a person, an expired one needs another attempt, and a
+    /// refused transport needs a setting changed on the Hub. A single
+    /// "enrollment failed" would send the operator to re-check the code they
+    /// typed correctly.
+    static func enrollmentMessage(for error: Error) -> String {
+        switch error {
+        case AgentEnrollmentError.declined:
+            return "The Hub administrator declined this device."
+        case AgentEnrollmentError.expired:
+            return "The request expired before it was approved. Ask for a new code and try again."
+        case AgentEnrollmentError.plaintextNotAccepted:
+            return "The Hub refuses unencrypted connections. Enable HTTPS on the Hub, or accept unencrypted agent traffic in its settings."
+        case AgentEnrollmentError.invalidEnrollmentCode:
+            return "That code is not in the expected format. It is six characters, letters and digits."
+        case AgentEnrollmentError.invalidHubURL:
+            return "Enter an https:// address, or http:// only when the Hub runs on this Mac."
+        default:
+            return "Could not reach the Hub. Check the address and try again."
         }
     }
 
@@ -245,12 +274,12 @@ final class HubDeliveryController: NSWindowController, NSWindowDelegate {
         notSent.textColor = .secondaryLabelColor
 
         hubField.placeholderString = "https://hub.example"
-        codeField.placeholderString = "One-time enrollment code"
+        codeField.placeholderString = "Six-character code from the Hub"
         consentCheckbox.target = self
         deliveryCheckbox.target = self
         deliveryCheckbox.action = #selector(toggleDelivery)
 
-        let enrollButton = NSButton(title: "Enroll this Mac", target: self, action: #selector(enroll))
+        let enrollButton = NSButton(title: "Request access", target: self, action: #selector(enroll))
         enrollButton.bezelStyle = .rounded
         let sendButton = NSButton(title: "Send now", target: self, action: #selector(sendNow))
         sendButton.bezelStyle = .rounded

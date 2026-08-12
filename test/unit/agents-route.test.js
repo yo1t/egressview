@@ -33,7 +33,7 @@ after(() => {
   agentIngestStore.closeDb();
 });
 
-function makeApp({ agentIngest = agentIngestStore } = {}) {
+function makeApp({ agentIngest = agentIngestStore, allowPlaintext = false } = {}) {
   const audits = [];
   const app = express();
   app.use(express.json());
@@ -58,6 +58,7 @@ function makeApp({ agentIngest = agentIngestStore } = {}) {
     requireAgent,
     agentIdentities,
     agentIngest,
+    isPlaintextAllowed: () => allowPlaintext,
     authAudit: { append: event => audits.push(event) },
   }));
   return { app, audits };
@@ -109,30 +110,29 @@ function request(app, method, url, { body = null, headers = {}, localAddress = '
   });
 }
 
+/** Issue a code, apply with it, approve, then collect the token. */
 async function enrolledAgent(app) {
   const issued = await request(app, 'POST', '/api/agents/enrollment-tokens');
-  const enrolled = await request(app, 'POST', '/api/agent/enroll', {
+  const applied = await request(app, 'POST', '/api/agent/enrollment-requests', {
     body: { code: issued.body.code, agent: metadata },
   });
-  return { issued, enrolled };
+  await request(app, 'POST', `/api/agents/enrollment-requests/${applied.body.requestId}/approve`, { body: {} });
+  const enrolled = await request(app, 'POST', '/api/agent/enrollment-requests/claim', {
+    body: { requestId: applied.body.requestId, claimSecret: applied.body.claimSecret },
+  });
+  return { issued, applied, enrolled };
 }
 
 describe('Agent HTTP enrollment', () => {
-  it('issues one-time credentials and never lists either plaintext value', async () => {
+  it('三段階で登録が完了し、平文の値をどこにも残さない', async () => {
     const { app, audits } = makeApp();
     const { issued, enrolled } = await enrolledAgent(app);
     assert.equal(issued.status, 201);
+    assert.match(issued.body.code, /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/);
     assert.equal(enrolled.status, 201);
-    assert.match(issued.body.code, /^egve_/);
     assert.match(enrolled.body.token, /^egva_/);
 
-    const reused = await request(app, 'POST', '/api/agent/enroll', {
-      body: { code: issued.body.code, agent: metadata },
-    });
-    assert.equal(reused.status, 401);
-
     const listed = await request(app, 'GET', '/api/agents');
-    assert.equal(listed.status, 200);
     assert.equal(listed.body.agents.length, 1);
     const serialized = JSON.stringify(listed.body);
     assert.equal(serialized.includes(issued.body.code), false);
@@ -145,41 +145,93 @@ describe('Agent HTTP enrollment', () => {
     assert.equal(auditJson.includes(metadata.hostName), false);
   });
 
-  it('rejects unknown fields and prohibited metadata before touching storage', async () => {
+  it('申請だけではagentが作られず、tokenも返らない', async () => {
     const { app } = makeApp();
     const issued = await request(app, 'POST', '/api/agents/enrollment-tokens');
-    const invalid = await request(app, 'POST', '/api/agent/enroll', {
-      body: {
-        code: issued.body.code,
-        agent: { ...metadata, commandLine: 'private-command' },
-      },
+    const applied = await request(app, 'POST', '/api/agent/enrollment-requests', {
+      body: { code: issued.body.code, agent: metadata },
+    });
+    assert.equal(applied.status, 202);
+    assert.equal(applied.body.status, 'pending');
+    assert.equal(Object.hasOwn(applied.body, 'token'), false);
+    // 承認前にagentが生えないことが本方式の核心。
+    assert.deepEqual((await request(app, 'GET', '/api/agents')).body.agents, []);
+  });
+
+  it('承認は管理者しか実行できず、承認応答にtokenを含めない', async () => {
+    const { app } = makeApp();
+    const issued = await request(app, 'POST', '/api/agents/enrollment-tokens');
+    const applied = await request(app, 'POST', '/api/agent/enrollment-requests', {
+      body: { code: issued.body.code, agent: metadata },
+    });
+    const pending = await request(app, 'GET', '/api/agents/enrollment-requests');
+    assert.equal(pending.body.requests.length, 1);
+    assert.equal(pending.body.requests[0].hostName, metadata.hostName);
+
+    const approved = await request(app, 'POST', `/api/agents/enrollment-requests/${applied.body.requestId}/approve`, { body: {} });
+    assert.equal(approved.status, 200);
+    // 承認者の画面に生きたcredentialを置かない。tokenはAgentだけが取りに来る。
+    assert.equal(JSON.stringify(approved.body).includes('egva_'), false);
+  });
+
+  it('却下された申請はtokenを渡さない', async () => {
+    const { app } = makeApp();
+    const issued = await request(app, 'POST', '/api/agents/enrollment-tokens');
+    const applied = await request(app, 'POST', '/api/agent/enrollment-requests', {
+      body: { code: issued.body.code, agent: metadata },
+    });
+    await request(app, 'POST', `/api/agents/enrollment-requests/${applied.body.requestId}/reject`, { body: {} });
+    const claimed = await request(app, 'POST', '/api/agent/enrollment-requests/claim', {
+      body: { requestId: applied.body.requestId, claimSecret: applied.body.claimSecret },
+    });
+    assert.equal(claimed.body.status, 'rejected');
+    assert.deepEqual(agentIdentities.listAgents(), []);
+  });
+
+  it('未知のフィールドや禁止メタデータを保存前に弾く', async () => {
+    const { app } = makeApp();
+    const issued = await request(app, 'POST', '/api/agents/enrollment-tokens');
+    const invalid = await request(app, 'POST', '/api/agent/enrollment-requests', {
+      body: { code: issued.body.code, agent: { ...metadata, commandLine: 'private-command' } },
     });
     assert.equal(invalid.status, 400);
     assert.deepEqual(agentIdentities.listAgents(), []);
   });
 
-  it('rate-limits repeated invalid enrollment attempts', async () => {
+  it('誤ったcodeの連続試行をrate limitで止める', async () => {
     const { app } = makeApp();
     for (let i = 0; i < 5; i++) {
-      const failed = await request(app, 'POST', '/api/agent/enroll', {
-        body: { code: `egve_${String(i).padStart(48, '0')}`, agent: metadata },
+      const failed = await request(app, 'POST', '/api/agent/enrollment-requests', {
+        body: { code: 'ZZZZZ' + String.fromCharCode(50 + i), agent: metadata },
       });
       assert.equal(failed.status, 401);
     }
-    const limited = await request(app, 'POST', '/api/agent/enroll', {
-      body: { code: `egve_${'f'.repeat(48)}`, agent: metadata },
+    const limited = await request(app, 'POST', '/api/agent/enrollment-requests', {
+      body: { code: 'ZZZZZZ', agent: metadata },
     });
     assert.equal(limited.status, 429);
   });
 
-  it('requires HTTPS except on a loopback development listener', async () => {
+  it('承諾していない平文HTTPは、loopback以外で拒否する', async () => {
     const { app } = makeApp();
-    const rejected = await request(app, 'POST', '/api/agent/enroll', {
-      body: { code: `egve_${'f'.repeat(48)}`, agent: metadata },
+    const rejected = await request(app, 'POST', '/api/agent/enrollment-requests', {
+      body: { code: 'ZZZZZZ', agent: metadata },
       localAddress: '192.168.1.20',
     });
     assert.equal(rejected.status, 400);
-    assert.match(rejected.body.error, /HTTPS/);
+    assert.match(rejected.body.error, /Unencrypted/);
+  });
+
+  it('承諾済みなら平文HTTPでも受け付ける', async () => {
+    // 家庭LANでTLSを立てられない運用者のための逃げ道。露出内容を設定画面で
+    // 示したうえで選ばせる、という判断がここに現れている。
+    const { app } = makeApp({ allowPlaintext: true });
+    const issued = await request(app, 'POST', '/api/agents/enrollment-tokens');
+    const applied = await request(app, 'POST', '/api/agent/enrollment-requests', {
+      body: { code: issued.body.code, agent: metadata },
+      localAddress: '192.168.1.20',
+    });
+    assert.equal(applied.status, 202);
   });
 });
 
@@ -199,7 +251,7 @@ describe('Agent HTTP credential lifecycle', () => {
   it('revokes one Agent and denies its bearer without deleting its record', async () => {
     const { app } = makeApp();
     const { enrolled } = await enrolledAgent(app);
-    const id = enrolled.body.agent.agentId;
+    const id = enrolled.body.agentId;
     const revoked = await request(app, 'POST', `/api/agents/${id}/revoke`);
     assert.equal(revoked.status, 200);
     assert.equal(agentIdentities.verifyAgentToken(enrolled.body.token), null);
