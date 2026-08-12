@@ -46,6 +46,11 @@ let routerKinds = new Map();
 const hotCache = createHistoryCache(process.env.EGRESSVIEW_HISTORY_HOT_MAX);
 const connectionHistory = hotCache.map;
 
+// The source tag for a flow an endpoint agent reported. Kept apart from the
+// router source values because an agent observation carries a process name and
+// no router identity.
+const AGENT_SOURCE = 'agent';
+
 const CONNECTION_READ_COLUMNS = [
   'src', 'dst', 'dport', 'proto', 'sport', 'ttl', 'srcMac', 'srcVendor',
   'srcDnsName', 'srcMdnsName', 'dstHost', 'country', 'org', 'lat', 'lon',
@@ -315,8 +320,8 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
   `);
 
   stmtUpsert = db.prepare(`
-    INSERT INTO connections (src, dst, dport, proto, sport, ttl, srcMac, srcVendor, srcDnsName, srcMdnsName, dstHost, country, org, lat, lon, city, firstSeen, lastSeen)
-    VALUES (@src, @dst, @dport, @proto, @sport, @ttl, @srcMac, @srcVendor, @srcDnsName, @srcMdnsName, @dstHost, @country, @org, @lat, @lon, @city, @firstSeen, @lastSeen)
+    INSERT INTO connections (src, dst, dport, proto, sport, ttl, srcMac, srcVendor, srcDnsName, srcMdnsName, dstHost, country, org, lat, lon, city, firstSeen, lastSeen, agentHost, process, pid)
+    VALUES (@src, @dst, @dport, @proto, @sport, @ttl, @srcMac, @srcVendor, @srcDnsName, @srcMdnsName, @dstHost, @country, @org, @lat, @lon, @city, @firstSeen, @lastSeen, @agentHost, @process, @pid)
     ON CONFLICT(src, dst, dport, proto) DO UPDATE SET
       sport = COALESCE(@sport, sport),
       ttl = COALESCE(@ttl, ttl),
@@ -331,7 +336,12 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
       lon = COALESCE(@lon, lon),
       city = COALESCE(@city, city),
       firstSeen = MIN(firstSeen, @firstSeen),
-      lastSeen = MAX(lastSeen, @lastSeen)
+      lastSeen = MAX(lastSeen, @lastSeen),
+      -- Written by whichever side knows: a router poll carries no process name
+      -- and must not erase the one an agent supplied for the same flow.
+      agentHost = COALESCE(@agentHost, agentHost),
+      process = COALESCE(@process, process),
+      pid = COALESCE(@pid, pid)
   `);
 
   stmtSelectAll = db.prepare(`
@@ -360,8 +370,20 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
   // Keep the connection and all router observations atomic. Pollers may still
   // submit a compatibility source value, but only routerIds are persisted.
   const writeEntry = entry => {
-    stmtUpsert.run(entry);
+    // Entries reach this from several places -- pollers, snapshots, replayed
+    // history -- and only agent-fed ones carry these. Defaulted here so a
+    // caller that predates them is not required to know about them.
+    stmtUpsert.run({
+      ...entry,
+      agentHost: entry.agentHost ?? null,
+      process: entry.process ?? null,
+      pid: entry.pid ?? null,
+    });
     const observedBy = normalizeObservedBy(entry.observedBy);
+    // An agent is not a router. Falling through to the source expansion here
+    // would invent a placeholder router row and put a machine into the router
+    // list, so a flow only an agent saw records no router observation at all.
+    if (!observedBy.length && entry.source === AGENT_SOURCE) return;
     const routerIds = observedBy.length
       ? observedBy
       : expandSourceToRouterIds(entry.source, sourceRouterMap);
@@ -425,6 +447,12 @@ function normalizeEntryForWrite(entry, observedBy = normalizeObservedBy(entry.ob
     lastSeen:  entry.lastSeen  ?? Date.now(),
     source: observedBy.length ? compatibilitySource(observedBy) : (entry.source || 'yamaha'),
     observedBy,
+    // Only an endpoint agent supplies these, and this function decides the
+    // shape of everything that reaches SQLite. Leaving them out here silently
+    // discarded the one fact a router can never provide.
+    agentHost: entry.agentHost || null,
+    process: entry.process || null,
+    pid: Number.isInteger(entry.pid) ? entry.pid : null,
   };
 }
 
@@ -807,7 +835,11 @@ module.exports = {
   setRetentionDays,
   closeDb,
   checkObservationConsistency,
-  observationIdsForSource: source => expandSourceToRouterIds(source, sourceRouterMap),
+  // An agent has no router identity, so it contributes no router observation.
+  // Without this it fell through to the legacy placeholder and a machine
+  // appeared in the router list as "legacy-agent".
+  observationIdsForSource: source =>
+    (source === AGENT_SOURCE ? [] : expandSourceToRouterIds(source, sourceRouterMap)),
   HISTORY_TTL_MS,
   DEFAULT_HOT_MAX_ENTRIES,
   _initForTest,

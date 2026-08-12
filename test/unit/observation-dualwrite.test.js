@@ -51,6 +51,42 @@ describe('observation write: source → junction expansion', () => {
     assert.deepEqual(rows.map(r => r.routerId), ['cisco1', 'yamaha1']);
   });
 
+  it('agentが観測した通信はrouter行を作らず、プロセス名を保持する', () => {
+    // An agent is not a router. Before this, the source expansion invented a
+    // "legacy-agent" router row and a Mac appeared in the router list; the
+    // process name -- the one thing a router cannot supply -- was dropped on
+    // the way to SQLite.
+    history.appendHistoryLog({
+      ...ENTRY,
+      source: 'agent',
+      agentHost: 'quartermaster',
+      process: 'Google Chrome Helper',
+      pid: 4242,
+    });
+    const { rows, routers } = readObs();
+    assert.equal(rows.length, 0, 'agent観測はrouter観測を作らない');
+    assert.equal(routers.length, 0, 'router行が捏造されない');
+
+    const d = new Database(dbPath, { readonly: true });
+    const stored = d.prepare('SELECT agentHost, process, pid FROM connections').get();
+    d.close();
+    assert.deepEqual(stored, { agentHost: 'quartermaster', process: 'Google Chrome Helper', pid: 4242 });
+  });
+
+  it('routerの再観測がagentのプロセス名を消さない', () => {
+    // A router poll knows nothing about processes and passes null. Without
+    // COALESCE it would overwrite what the agent reported for the same flow.
+    history.appendHistoryLog({
+      ...ENTRY, source: 'agent', agentHost: 'quartermaster', process: 'Safari', pid: 99,
+    });
+    history.appendHistoryLog({ ...ENTRY, source: 'yamaha', lastSeen: 1_000_060 });
+
+    const d = new Database(dbPath, { readonly: true });
+    const stored = d.prepare('SELECT agentHost, process, pid FROM connections').get();
+    d.close();
+    assert.deepEqual(stored, { agentHost: 'quartermaster', process: 'Safari', pid: 99 });
+  });
+
   it('inspect maps deterministically to the yamaha router', () => {
     history.appendHistoryLog({ ...ENTRY, source: 'inspect' });
     const { rows } = readObs();
