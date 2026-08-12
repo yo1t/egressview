@@ -90,6 +90,7 @@ const pricingCheckSchema = z.object({
 
 module.exports = function aiRoutes({
   requireAdmin, aiProvider, saveConfig, history, threatIntel, routerManager, devices, asus, agentIdentities,
+  agentIngest = null,
 }) {
   const router = Router();
   const collectionSources = sourceScope => {
@@ -101,13 +102,27 @@ module.exports = function aiRoutes({
     const agent = agentIdentities?.listAgents?.()
       .find(item => !item.revokedAt && String(item.agentId) === sourceScope.sourceId);
     if (!agent) return [];
+    let status = { lastReceivedAt: null, observationCount: 0 };
+    try {
+      status = agentIngest?.getAgentCollectionStatus?.(agent.agentId) || status;
+    } catch {
+      // Health display only. A machine that is delivering must not be shown as
+      // down because this lookup failed.
+    }
+    const lastSeenAt = Number(agent.lastSeenAt) || 0;
     return [{
       id: agent.agentId,
       kind: 'agent',
       displayName: agent.hostName || 'Mac Agent',
       enabled: true,
-      ready: Number(agent.lastSeenAt) > 0 && Date.now() - Number(agent.lastSeenAt) <= 5 * 60 * 1000,
-      lastPollAt: agent.lastSeenAt || null,
+      // Fifteen minutes is the sender's maximum backoff, so anything inside it
+      // is a machine that is still delivering rather than one that stopped.
+      ready: lastSeenAt > 0 && Date.now() - lastSeenAt <= 15 * 60 * 1000,
+      // These two names are what collectionFacts() reads. Reporting them as
+      // lastPollAt is why the strip showed a Mac as "0" with no collection
+      // time while its observations were arriving normally.
+      lastSuccessAt: status.lastReceivedAt || lastSeenAt || null,
+      sessionCount: status.observationCount,
     }];
   };
   const warnedUnpricedModels = new Set();
