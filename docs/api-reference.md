@@ -10,7 +10,7 @@ API paths are rooted at `/api`, even when the web UI is served below a subpath. 
 
 Scoped API identities are managed through `GET` / `POST /api/auth/api-identities` and `POST /api/auth/api-identities/:id/revoke`, all requiring `auth.admin`. Creation requires a label, a non-empty permission list, and `expiresInMs` between one minute and one year. The plaintext `egv_...` token is returned only in the `201` creation response; only its SHA-256 hash is stored. Identity-management responses use `Cache-Control: no-store`.
 
-Mac and future endpoint Agents use a separate credential boundary. An administrator creates a one-time, 10-minute enrollment code with `POST /api/agents/enrollment-tokens`; the Agent exchanges it over HTTPS at `POST /api/agent/enroll`. The `egva_...` bearer returned by that response is stored in the macOS Keychain, while the Hub stores only a peppered hash. It grants only `agent.ingest`, cannot authenticate browser/admin/MCP routes, and is accepted by `POST /api/agent/token/rotate` and `POST /api/agent/ingest`. Ingest accepts at most 200 observations in 512 KiB of uncompressed JSON, stores one batch transactionally, and returns the original ACK for retries of the same Agent/batch ID. Each Agent is limited to 30 requests/minute and the Hub to four concurrent ingest operations. Agent inventory, aggregate ingest metrics, and revocation require `auth.admin`. All Agent responses are non-cacheable, enrollment codes are shown once, and HTTP is accepted only on a loopback development listener.
+Mac and future endpoint Agents use a separate credential boundary. Enrolment takes three steps and no single one of them produces a credential. An administrator creates a six-character, 10-minute code with `POST /api/agents/enrollment-tokens`. The Agent applies with it at `POST /api/agent/enrollment-requests`, which returns a claim secret and a *pending request* — not a token. An administrator then approves it with `POST /api/agents/enrollment-requests/:requestId/approve`, after which the Agent collects its `egva_...` bearer exactly once from `POST /api/agent/enrollment-requests/claim`. A code is burned after five failed attempts, and pending requests expire in ten minutes. The bearer is stored in the macOS Keychain, while the Hub stores only a peppered hash. It grants only `agent.ingest`, cannot authenticate browser/admin/MCP routes, and is accepted by `POST /api/agent/token/rotate` and `POST /api/agent/ingest`. Ingest accepts at most 200 observations in 512 KiB of uncompressed JSON, stores one batch transactionally, and returns the original ACK for retries of the same Agent/batch ID. Each Agent is limited to 30 requests/minute and the Hub to four concurrent ingest operations. Agent inventory, aggregate ingest metrics, and revocation require `auth.admin`. All Agent responses are non-cacheable, enrollment codes are shown once, and HTTP is accepted only on a loopback development listener.
 
 `GET /api/auth/api-identities/self` returns only the currently authenticated
 scoped identity and requires `network.read`; browser sessions and the legacy
@@ -43,7 +43,7 @@ curl --fail-with-body \
 {"success":true,"token":"session-token","expiresAt":1784304000000}
 ```
 
-`POST /api/admin/verify` is also public and verifies a token supplied in the request body. Authentication status/method discovery, the OIDC redirect/callback, and the one-time-code-protected `POST /api/agent/enroll` entry point are public. The detail-free `/healthz` and `/readyz` checks are public; all other endpoints require their documented browser, API identity, or Agent credential.
+`POST /api/admin/verify` is also public and verifies a token supplied in the request body. Authentication status/method discovery, the OIDC redirect/callback, and the code-protected `POST /api/agent/enrollment-requests` and `.../claim` entry points are public. The detail-free `/healthz` and `/readyz` checks are public; all other endpoints require their documented browser, API identity, or Agent credential.
 
 ## Common behavior
 
@@ -184,7 +184,13 @@ All 101 implemented HTTP endpoints are listed below. **Public** means no browser
 | Authentication | `POST /api/auth/api-identities/:id/revoke` | Protected |
 | Authentication | `GET /api/auth/audit-events` | Protected |
 | Agent | `POST /api/agents/enrollment-tokens` | Protected; `auth.admin`, returns the code once |
-| Agent | `POST /api/agent/enroll` | Public; one-time code and HTTPS required |
+| Agent | `POST /api/agent/enrollment-requests` | Public; applies with a six-character code. **Returns no token** |
+| Agent | `POST /api/agent/enrollment-requests/claim` | Public; collects the token once, after approval |
+| Agent | `GET /api/agents/transport` | `auth.admin`; reports whether agent traffic is encrypted and what plaintext would expose |
+| Agent | `POST /api/agents/transport` | `auth.admin`; records the operator's acceptance of unencrypted agent traffic |
+| Agent | `GET /api/agents/enrollment-requests` | `auth.admin`; pending requests awaiting a decision |
+| Agent | `POST /api/agents/enrollment-requests/:requestId/approve` | `auth.admin`; approves and mints the token |
+| Agent | `POST /api/agents/enrollment-requests/:requestId/reject` | `auth.admin`; rejects the request |
 | Agent | `GET /api/agents` | Protected; `auth.admin`, never returns credential hashes |
 | Agent | `GET /api/agents/ingest-metrics` | Protected; `auth.admin`, aggregate counters and limits only |
 | Agent | `POST /api/agents/:agentId/revoke` | Protected; `auth.admin` |

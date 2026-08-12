@@ -20,6 +20,9 @@ function createDefaultAppState() {
     authPasswordSalt: '',
     authPasswordRecord: null,
     agentTokenPepper: '',
+    // Opt-in for unencrypted agent traffic over a LAN. Default off: the Hub
+    // refuses it until the operator has seen what it exposes (P3-9).
+    agentAllowPlaintext: false,
     oidcConfig: {
       enabled: false,
       clientId: '',
@@ -67,6 +70,7 @@ function applyConfigToAppState(appState, data, { isAllowedLogPath, logger }) {
     appState.authPasswordSalt = data.auth.salt || '';
     appState.authPasswordRecord = data.auth.password &&
       typeof data.auth.password === 'object' ? data.auth.password : null;
+    appState.agentAllowPlaintext = data.auth.agentAllowPlaintext === true;
     appState.agentTokenPepper = typeof data.auth.agentTokenPepper === 'string'
       ? data.auth.agentTokenPepper
       : '';

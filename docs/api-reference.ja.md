@@ -10,7 +10,7 @@ Web UIをサブパスで公開している場合も、APIは常に`/api`配下�
 
 scoped API identityは`GET` / `POST /api/auth/api-identities`と`POST /api/auth/api-identities/:id/revoke`で管理し、いずれも`auth.admin`が必要です。作成時はlabel、空でないpermission一覧、1分以上1年以下の`expiresInMs`を指定します。平文の`egv_...` tokenを返すのは`201`作成responseだけで、DBにはSHA-256 hashだけを保存します。identity管理responseには`Cache-Control: no-store`を付けます。
 
-Macおよび将来のendpoint Agentは、browser/API/MCPとは別のcredential境界を使います。管理者が`POST /api/agents/enrollment-tokens`で一回限り・10分有効の登録codeを発行し、AgentがHTTPSの`POST /api/agent/enroll`で交換します。responseで一度だけ返る`egva_...` bearerはmacOS Keychainへ保存し、Hubはpepper付きhashだけを保持します。このcredentialが持つのは`agent.ingest`だけで、browser/admin/MCP routeには使えず、`POST /api/agent/token/rotate`と`POST /api/agent/ingest`だけが受け付けます。ingestは非圧縮JSON 512 KiB・最大200観測で、1 batchをtransaction保存し、同じAgent/batch IDの再送には元のACKを返します。上限はAgent単位30 requests/minute、Hub全体で同時4件です。Agent一覧、集約ingest metrics、失効には`auth.admin`が必要です。Agent responseはcacheせず、登録codeは再表示せず、HTTPはloopback開発環境だけで許可します。
+Macおよび将来のendpoint Agentは、browser/API/MCPとは別のcredential境界を使います。登録は3段階で、**どの1段階も単独ではcredentialを生みません**。管理者が`POST /api/agents/enrollment-tokens`で英数字6文字・10分有効のcodeを発行します。Agentは`POST /api/agent/enrollment-requests`で申請し、返るのはclaim secretと**承認待ちの申請**であってtokenではありません。管理者が`POST /api/agents/enrollment-requests/:requestId/approve`で承認した後、Agentは`POST /api/agent/enrollment-requests/claim`から`egva_...` bearerを一度だけ受け取ります。codeは5回失敗で失効し、未承認の申請は10分で失効します。bearerはmacOS Keychainへ保存し、Hubはpepper付きhashだけを保持します。このcredentialが持つのは`agent.ingest`だけで、browser/admin/MCP routeには使えず、`POST /api/agent/token/rotate`と`POST /api/agent/ingest`だけが受け付けます。ingestは非圧縮JSON 512 KiB・最大200観測で、1 batchをtransaction保存し、同じAgent/batch IDの再送には元のACKを返します。上限はAgent単位30 requests/minute、Hub全体で同時4件です。Agent一覧、集約ingest metrics、失効には`auth.admin`が必要です。Agent responseはcacheせず、登録codeは再表示せず、HTTPはloopback開発環境だけで許可します。
 
 `GET /api/auth/api-identities/self`は、現在認証中のscoped identity自身だけを
 返し、`network.read`を要求します。browser sessionと従来のadmin tokenは
@@ -43,7 +43,7 @@ curl --fail-with-body \
 {"success":true,"token":"session-token","expiresAt":1784304000000}
 ```
 
-`POST /api/admin/verify`も公開APIで、request body内のtokenを検証します。認証状態・方式の取得、OIDC redirect/callback、一回限りcodeで保護された`POST /api/agent/enroll`入口、詳細情報を返さない`/healthz`と`/readyz`も公開します。それ以外は文書化したbrowser、API identity、またはAgent credentialが必要です。
+`POST /api/admin/verify`も公開APIで、request body内のtokenを検証します。認証状態・方式の取得、OIDC redirect/callback、codeで保護された`POST /api/agent/enrollment-requests`と`.../claim`入口、詳細情報を返さない`/healthz`と`/readyz`も公開します。それ以外は文書化したbrowser、API identity、またはAgent credentialが必要です。
 
 ## 共通仕様
 
@@ -184,7 +184,13 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | 認証 | `POST /api/auth/api-identities/:id/revoke` | 認証必須 |
 | 認証 | `GET /api/auth/audit-events` | 認証必須 |
 | Agent | `POST /api/agents/enrollment-tokens` | `auth.admin`必須。登録codeを一度だけ返す |
-| Agent | `POST /api/agent/enroll` | 公開。一回限りcodeとHTTPSが必須 |
+| Agent | `POST /api/agent/enrollment-requests` | 公開。6文字codeで申請する。**tokenは返らない** |
+| Agent | `POST /api/agent/enrollment-requests/claim` | 公開。承認後にtokenを一度だけ受け取る |
+| Agent | `GET /api/agents/transport` | `auth.admin`必須。暗号化の有無と、平文の場合に露出する内容を返す |
+| Agent | `POST /api/agents/transport` | `auth.admin`必須。平文通信の承諾を記録する |
+| Agent | `GET /api/agents/enrollment-requests` | `auth.admin`必須。承認待ち一覧 |
+| Agent | `POST /api/agents/enrollment-requests/:requestId/approve` | `auth.admin`必須。承認してtokenを発行する |
+| Agent | `POST /api/agents/enrollment-requests/:requestId/reject` | `auth.admin`必須。申請を却下する |
 | Agent | `GET /api/agents` | `auth.admin`必須。credential hashは返さない |
 | Agent | `GET /api/agents/ingest-metrics` | `auth.admin`必須。集約counterと上限だけを返す |
 | Agent | `POST /api/agents/:agentId/revoke` | `auth.admin`必須 |

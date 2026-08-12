@@ -251,6 +251,7 @@ function saveConfig(sectionOverrides = {}) {
       salt: appState.authPasswordSalt,
       password: appState.authPasswordRecord,
       agentTokenPepper: appState.agentTokenPepper,
+      agentAllowPlaintext: appState.agentAllowPlaintext === true,
     },
     oidc:    appState.oidcConfig,
     manualThreat: manualThreatLookup.exportConfig(),
@@ -394,6 +395,9 @@ const routeCtx = {
   runtime, notes, io, beacons, sessions, authPassword,
   authAudit, authCookies, oidc, apiIdentities,
   agentIdentities, agentIngest, requireAgent,
+  // Evaluated per request so consent can be withdrawn without a restart.
+  isPlaintextAllowed: () => appState.agentAllowPlaintext === true,
+  setPlaintextAllowed: value => { appState.agentAllowPlaintext = value === true; saveConfig(); },
   authenticateRequest: req => authenticateRequest(req)?.auth || null,
   subpath: SUBPATH,
   saveConfig,
