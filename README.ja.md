@@ -2,210 +2,102 @@
 
 **家庭・SOHO向けネットワークセキュリティモニター — LAN内の全デバイスの通信先をリアルタイムに可視化**
 
-スマートTVが見知らぬサーバーと通信していないか？IPカメラやIoT機器、NASが許可していない接続をしていないか？EgressViewは、LAN内の全デバイスが外部と行う通信を**パッシブに監視**し、グラフマップ/統計情報で全体像を把握し、通信ログ/端末一覧で詳細へドリルダウンできます。脅威フィードとの自動照合、Slack通知に対応。
+スマートTVが見知らぬサーバーと通信していないか？IPカメラやIoT機器、NASが許可していない接続をしていないか？EgressViewは、LAN内の全デバイスが外部と行う通信をパッシブに監視し、そのデータを調査のための道具にします。
 
-追加ハードウェア不要。通信の中継・傍受も不要。既存のYamaha RTXとCisco IOSルーターのNATセッションテーブルを読み取るだけで動作します。AWS Kiro・Anthropic Claude・Anysphere Cursor 等の AI アシスタントは、内蔵 MCP サーバーを通じて EgressView に直接アクセスできます — 自然言語でネットワーク状況を問い合わせるだけ。
+追加ハードウェア不要。通信の中継・傍受もしません。既存のYamaha RTXまたはCisco IOSルーターが既に持っているNATセッションテーブルを読むだけなので、**通信経路上に何も置かず、速度も落ちません**。
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
 ![Release](https://img.shields.io/badge/release-v1.8.0-3fb950)
-[![Live Demo](https://img.shields.io/badge/demo-live-ff69b4)](https://egressview-demo.fly.dev)
 
-> 🇬🇧 [English README](README.md) | 🌐 [プロジェクトページ](https://yo1t.github.io/egressview/index.ja.html)
+> 🇬🇧 [English README](README.md) | 🌐 [プロジェクトページ](https://yo1t.github.io/egressview/index.ja.html) | 📋 [変更履歴](CHANGELOG.md) · [リリース](https://github.com/yo1t/egressview/releases)
 
 ---
 
-## プロジェクトの状態
+## 動いているところを見る
 
-EgressView は Yamaha RTX / Cisco IOS を使う家庭・SOHOネットワーク向けに、実運用を意識して開発しています。ASUS AP 連携と任意のデータソースは補助的な連携としてメンテナンスしています。
+### ▶ [ライブデモを開く](https://egressview-demo.fly.dev)
 
-### v1.8.0の主な変更
-
-v1.8.0では、リリース署名を完成させ、依存を現行ラインへ移しました。公式配布物はAWS KMSのEd25519鍵で署名されます。秘密鍵はexport不可である一方、検証側は`openssl`と公開済みの公開鍵だけで完結し、AWSアカウントもネットワークも要りません。脅威検出と新規ノード検出には、Slackと履歴それぞれ独立したスイッチを追加しました。うるさい検出だけを静かにでき、Slack全体を止めたり、アプリ内の記録まで失ったりする必要がなくなります。`better-sqlite3`は13.0.3（SQLite 3.53.4）へ移行し、依存のinstall scriptを無効化してソースビルドではなく同梱prebuiltバイナリを使うようにしました。CIはNode 22 / 24 / 26で実行します。
-
-本リリースはDB schemaを変更しないため、migrationは発生しません。v1.7.0からの更新は再起動のみです。install時の変更点が1つあります。install scriptを無効化したため、`better-sqlite3`の同梱prebuiltバイナリが存在しないplatformではPythonとC++ toolchain、そして`npm ci --ignore-scripts=false`が必要になります。prebuildはdarwin / linux / linuxmusl / win32のarm64・x64向けに提供されています。
-
-## 家庭・SOHOのセキュリティ対策として
-
-現代の家庭やSOHOネットワークには、スマートTV・IPカメラ・NAS・Wi-Fiスピーカー・プリンター・ネットワーク機器・PC・スマートフォンなど、20〜40台以上のデバイスが接続されています。IoT機器の多くはファームウェア更新が不定期で、どこに通信しているか把握されていません。一度侵害されると、C2サーバーへのデータ流出やボットネットへの加担が、ユーザーに気づかれないまま進みます。
-
-EgressViewは、多くの家庭ユーザーが答えを持てていない問いに答えます：**自分のネットワーク上の各デバイスは、今どこと通信しているのか？**
-
-- **パッシブ・ゼロインパクト監視** — ルーターのNATセッションテーブルをSSHで読み取るだけ。通信の中継・傍受なし、スループット低下なし
-- **デバイス単位の可視性** — OUI・mDNS・SSDP・NetBIOSによるデバイス識別で、どの機器が何と通信しているかを把握
-- **自動脅威検出** — Feodo Tracker・ThreatFox・URLhaus・Spamhaus DROPとリアルタイムに全接続を照合
-- **外部サービスによる手動脅威調査** — 明示操作時だけAbuseIPDB・VirusTotal・AlienVault OTXへ問い合わせ（cache/rate limit対応、[ガイド](docs/manual-threat-investigation.ja.md)）
-- **Linux conntrackプレビュー** — Linux系ルーターからSSH収集。Docker統合試験済み、実機確認は未完了（[設定](docs/setup-conntrack.ja.md)）
-- **モバイル監視ビュー** — VPN・プライベートネットワーク内のスマートフォンから、ルーター状態、グラフ、統計、通信ログ、端末一覧、検出ログを確認
-- **AI洞察スタートページ** — 起動直後に収集状態・接続・端末・宛先・脅威と前期間比較を表示。上限付き端末一覧とASUS node要約を使ってOllama / Anthropic / OpenAI / Amazon Bedrockで手動分析・対話でき、版管理料金表による月次token・概算料金、未価格modelがある場合の部分合計、回答ごとのモデル/料金も確認可能。既定OFFのイベント通知では、日次/週次レポートと上限付き脅威変化分析をappend-only UI履歴またはSlackへ送信できます（[設定ガイド](docs/setup-ai-insights.ja.md)、[Bedrock本番設定](docs/setup-bedrock.ja.md)）
-- **即時Slackアラート** — 任意のデバイスが既知のC2サーバーやマルウェア配布元に接続した瞬間にDM通知。脅威検出と新規ノード検出は設定画面の「通知」タブでそれぞれSlack送信とUI履歴記録を個別にON/OFFできます
-- **ハードウェア変更不要** — Mac・PC・Raspberry Piにインストールするだけ。既存のYamaha RTX / Cisco IOSルーターと共存
-
-## 概要
-
-- **Yamaha RTX / Cisco IOS** ルーターにSSH接続し、NATセッションテーブルを60秒ごとに取得
-- Yamaha/Ciscoを任意に組み合わせて**最大10台**登録。障害をルーター単位で分離し、同じ通信は観測ルーターを保持したまま重複排除
-- **[INSPECT] syslog 補完** — Yamaha syslog をリアルタイムで監視し、60秒ポーリングの間に完了した短命 TCP セッションを補完
-- **dnsmasq DNS クエリログ** — EC2/サーバー側の dnsmasq ログを監視し、デバイスごとの DNS 解決結果（例: `example.com`）を宛先ホスト名に反映。逆引き DNS より優先
-- **[DHCPD] syslog 追跡** — Yamaha の DHCP イベント（Allocates/Extends）をリアルタイムで解析し、IP→MAC マッピングを維持
-- **脅威インテリジェンス**: Feodo Tracker、ThreatFox、URLhaus、Spamhaus DROP フィードと全接続を突合（1時間ごと自動更新）
-- **Slack通知**: 脅威検出時に Slack DM で通知（クールダウン設定・言語対応）
-- **OUIベンダー検索**、**mDNS/Bonjour**、**SSDP**、**NetBIOS**、**Appleモデル辞書**でデバイスを自動識別（「iPhone 15 Pro」レベルまで特定）
-- 各接続先IPに対して**逆引きDNS**、**RDAP**（組織名）、**GeoIP**（緯度経度・都市）を自動付与
-- **グラフマップ / 統計情報**で全体像を把握し、**通信ログ / 端末一覧**でセッション・端末単位にドリルダウン
-- オプションで**ASUS WiFi アクセスポイント**（APモード/AiMeshとして使用、ルーターとしてではない）に接続し、WiFiクライアント情報（帯域、信号強度、トラフィック量、AiMeshトポロジー）を取得
-- **接続履歴**を**SQLite**で永続保存（WALモード、クラッシュセーフ、最大2年保持可）
-- 通常・migrationバックアップを統合診断し、次回migrationの容量不足を事前警告。検証済み復元点を保護するdry-runクリーンアップに対応
-- **通信ログ**: ソート・検索可能なセッション一覧（脅威バッジ・詳細ポップアップ付き）。**アプリ列**でポート番号と宛先ホスト名からサービス名を自動推測（APNs・FCM・AirPlay・MQTT/TLS・QUIC・iCloud・YouTube・AWS・Slack・Zoom・Tuya Smart・Gaijin/DCS など）
-- **🔔 検出ログ** — 脅威検出・新規端末アラートの永続履歴。カラム別フィルター・ソート・クリック詳細ポップアップ付き。Slack設定の有無にかかわらず全検出を記録
-- **📡 データソースタブ** — dnsmasq・[INSPECT]・[DHCPD] の ON/OFF とパスを設定画面から個別に制御
-- **💻 macOS エージェント** — ルーターは「何が外に出たか」は見せますが、「どのアプリが出したか」は見せません。[EgressView Agent for macOS](apps/agent-macos/README.md) は Mac の外向き接続をプロセス名つきで Hub へ送るため、見覚えのない宛先が「どのプログラムが接続したか」とセットで分かります（メタデータのみ。通信内容は読みません。Hub 1.9.0 以降が必要）
-- **🤖 AI エージェント連携（MCP）** — [Model Context Protocol](https://modelcontextprotocol.io/) サーバーを内蔵し、11本のツール（通信サマリー・脅威接続・宛先ランキング・端末一覧・端末メモなど）を AWS Kiro・Anthropic Claude・Anysphere Cursor 等の AI アシスタントに公開。stdio / HTTPと`2025-11-25` / `2026-07-28`の両protocol eraに対応
-- **✦ AI洞察**を先頭・スタートページにした、グラフマップ、統計情報、通信ログ、端末一覧、検出ログ、設定を備えるダークテーマのシングルページUI
-
-## デモ
+サンプルデータ入りの実物の画面です。インストール不要、ルーターも不要 — **自分の時間を使う価値があるかを最短で判断できます。**
 
 https://github.com/user-attachments/assets/9448d75b-a7fe-4363-8d35-da17abaed0ee
 
-> UI言語: 英語 / 日本語 切り替え可能
-
-グラフマップと統計情報で、デバイス/宛先の偏り、セッション推移、通信量の多い端末をリアルタイムに俯瞰できます。
-
-通信ログと端末一覧では、気になる宛先、通信の多い端末、ビーコン候補、メモ、端末履歴へドリルダウンできます。「全体を見て、時間で絞り、セッションを確認し、端末へ戻る」調査導線を重視しています。
-
-## スクリーンショット
-
-![AI洞察によるネットワークの現在地](docs/assets/egressview-ai-insights-ja.png)
-![グラフマップによる全体把握](docs/assets/egressview-graph-map.png)
-![統計情報ビュー](docs/assets/egressview-statistics.png)
-![通信ログのドリルダウン](docs/assets/egressview-connection-log.png)
-![端末一覧のドリルダウン](docs/assets/egressview-devices.png)
 ![検出ログの詳細ポップアップ](docs/assets/egressview-detection-log.png)
+*ある端末が既知のC2サーバーへ接続した瞬間。このツールが存在する理由がこれです。Slackを設定していなくても記録は残ります。*
 
-## アーキテクチャ
+![グラフマップ](docs/assets/egressview-graph-map.png)
+*どの端末がどこへ通信したかを一望します。自分が設定した覚えのない塊が、最初に見るべき場所です。*
 
-Component境界、複数routerのdata flow、永続化の安全性、security boundaryは**[アーキテクチャガイド](docs/architecture.ja.md)**、自動化・外部連携は**[REST APIリファレンス](docs/api-reference.ja.md)**を参照してください。
+![通信ログのドリルダウン](docs/assets/egressview-connection-log.png)
+*疑いから個々のセッションへ。期間で絞り、並べ替え、列ごとに検索して、その通信をした端末へ辿れます。*
 
-```
-┌─────────────────┐  SSH(NAT)   ┌──────────────────────┐  WebSocket   ┌──────────────────┐
-│  Yamaha RTX     │◄───────────►│                      │◄────────────►│ ブラウザ          │
-│  [INSPECT] log  │  syslog/UDP │   EgressView Server  │  MCP         ├──────────────────┤
-│  [DHCPD] log    │────────────►│   (Node.js)          │◄────────────►│ AI アシスタント   │
-└─────────────────┘             │                      │  stdio/HTTP  │(Kiro, Claude…)   │
-┌─────────────────┐  SSH(NAT)   │  ポーラー:            │              └──────────────────┘
-│  Cisco IOS      │◄───────────►│  • yamaha (SSH)      │
-│  (正式対応)      │             │  • cisco (SSH)       │
-└─────────────────┘             │  • asus (HTTP)       │
-┌─────────────────┐  HTTP       │  • inspect-syslog    │
-│  ASUS WiFi AP   │◄───────────►│  • dhcpd-syslog      │
-│  (クライアント)   │             │  • dnsmasq-log       │
-└─────────────────┘             │                      │
-┌─────────────────┐  tail -F    │                      │
-│  dnsmasq        │────────────►│                      │
-│  クエリログ      │             └──────────┬───────────┘
-└─────────────────┘                        │
-                       ┌───────────────────┼───────────────┐
-                       │                   │               │
-                 ┌─────┴──────┐  ┌─────────┴───┐  ┌───────┴───┐
-                 │エンリッチ   │  │ 脅威インテル  │  │  SQLite   │
-                 │ • dnsmasq  │  │ • Feodo      │  │  履歴     │
-                 │ • 逆引DNS  │  │ • ThreatFox  │  │  (WAL)    │
-                 │ • RDAP     │  │ • URLhaus    │  └───────────┘
-                 │ • GeoIP    │  │ • DROP       │
-                 │ • OUI      │  └─────────────┘
-                 │ • mDNS     │
-                 └────────────┘
-```
-
-## 動作要件
-
-- **Node.js** 22以上
-- SSHを有効にした対応NATルーターが1台以上: **Yamaha RTX** または **Cisco IOS**
-- （任意）**ASUS WiFi アクセスポイント**（Web管理画面が有効、APモード/AiMeshとして使用）
-
-Cisco IOS対応はC841M-4X-JSEC/K9（IOS 15.5(3)M9）でSSH、enable、NAT/ARP/NDP、verbose、TOFU、自動再接続を実機検証しています。複数ルーター動作はYamaha/Cisco混在のfake router 10台で自動検証し、Cisco実機1台とYamaha実機1台を別routerIdで各2重登録する補足試験も行いました。これは並列収集と重複排除の確認であり、物理冗長化、状態同期、実フェイルオーバーの検証ではありません。機種固有の出力差を見つけた場合はIssueで共有してください。
-
-## AIエージェント連携（MCP）
-
-EgressView は [Model Context Protocol (MCP)](https://modelcontextprotocol.io) サーバーを内蔵しています。Claude Desktop・Claude Code などの AI アシスタントから、自然言語でネットワークデータを直接参照できます。
-
-```
-「過去24時間の脅威サマリーを見せて」
-「今週、新しいデバイスはネットワークに現れた？」
-「192.168.1.50 はどこに接続している？」
-「脅威のある通信はある？」
-「192.168.1.97 にメモを追加して：Roomba、OTA アップデートで GitHub に接続」
-```
-
-**クイックセットアップ**（Claude Desktop、macOS の場合）:  
-`~/Library/Application Support/Claude/claude_desktop_config.json` に追記:
-
-```json
-{
-  "mcpServers": {
-    "egressview": {
-      "command": "node",
-      "args": ["/path/to/egressview/mcp-server.js"],
-      "env": {
-        "EGRESSVIEW_URL":   "http://your-server-ip:3000",
-        "EGRESSVIEW_TOKEN": "your-admin-token"
-      }
-    }
-  }
-}
-```
-
-利用可能なツールは11本: `get_threat_summary`、`get_traffic_summary`、`get_top_destinations`、`get_device_traffic`、`get_new_nodes`、`get_threat_connections`、`get_alerts`、`get_devices`、`query_connections`、`get_device_notes`、`set_device_note`。
-
-`EGRESSVIEW_TOKEN` にはブラウザ用ログインパスワードではなく、API/admin トークンを指定してください。
-
-リモート EgressView への接続や Apache / nginx 経由の HTTP モードを含む詳細な手順は **[MCP 設定ガイド →](docs/setup-mcp.ja.md)** を参照してください。
+自分の環境で試すなら `DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start` で、160件のサンプル接続が入ります。ヘッダーに **DEMO** バッジが出るので、実運用と取り違えることはありません。
 
 ---
 
-## ハードウェアなしで試す
+## 何ができるか
 
-ルーターを用意する前にUIを触ってみたい場合は**デモモード**で起動できます。160件のサンプル接続が自動でシードされ、固定のトークンで認証できます。
+**どの端末が、どこと通信しているかが分かります。** すべての接続が送信元の端末に紐づきます。OUI・mDNS/Bonjour・SSDP・NetBIOS・200機種のApple辞書からベンダー名・機種名・ホスト名を解決するため、**怪しい通信先が「調べないと分からないIP」ではなく「その通信をした機器の名前」とセットで出てきます。**
 
-```bash
-git clone https://github.com/yo1t/egressview.git
-cd egressview
-npm install
-DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start
-```
+**危険と分かっている先へ接続したら警告します。** すべての接続をFeodo Tracker・ThreatFox・URLhaus・Spamhaus DROPと毎時更新のフィードで照合します。結果は 🚨 検出 / ⚠️ 要確認 / ✅ 問題なし の3段階です。マルウェアも置かれているCDNとボットネットの指令サーバーは別物であり、**同じ扱いにすると警告を無視する習慣がつくためです。**
 
-`http://localhost:3000` を開き、プロンプトが出たら `my-token` を入力してください。グラフマップ・統計情報・通信ログ・端末一覧のすべてのタブがサンプルデータで動作します。実環境と区別するためにヘッダーに **DEMO** バッジが表示されます。
+**画面を見ていないときにも届きます。** 既知のC2やマルウェア配布ホストへ接続した瞬間にSlack DMが飛びます。宛先ごとのクールダウンがあるので、1つの騒がしい宛先で埋め尽くされることはありません。脅威検出と新規端末検出は、Slackと画面内履歴のスイッチが独立しています。**片方を静かにしても、もう片方の記録は残せます。**
+
+**証拠が残ります。** 接続はSQLite（WAL・クラッシュ耐性あり・保持期間は最長2年まで設定可）に蓄積され、検出ログには脅威と新規端末の記録が列ごとのフィルタと詳細表示つきで残ります。**「これはいつから起きていたのか」に答えられます。**
+
+**通信先を「アドレス」ではなく「名前」で示します。** 各宛先を逆引きDNS・RDAP（組織名）・GeoIPで補強し、dnsmasqのクエリログがあれば端末が実際に問い合わせたホスト名を使います。Appカラムはポートと宛先からサービス名を推定します（APNs・iCloud・QUIC・MQTT/TLS・AirPlay・YouTube・AWS・Slack・Zoom など）。**通常の通信が自分から名乗るので、異常が浮き上がります。**
+
+**60秒ポーリングの隙間も拾います。** Yamahaの`[INSPECT]`syslogを常時読み、ポーリングの合間に開いて閉じた短命TCPセッションを捕まえます。`[DHCPD]`イベントでIP↔MAC対応をリース変更に追従させます。
+
+**ルーターは1台でなくて構いません。** Yamaha・Ciscoを任意の組み合わせで最大10台。それぞれ独立してポーリングするため、**1台が応答しなくても他は止まりません。** 複数のルーターから見えた接続は1件として保存し、観測したルーターをすべて保持します。
+
+**ルーターからは見えないMacの中身も見えます。** ルーターは「何が外へ出たか」は見せますが「どのアプリが出したか」は見せません。[EgressView Agent for macOS](apps/agent-macos/README.md)が接続元のプロセスを報告します。メタデータのみで、通信内容は読みません。
+
+**自然言語で質問できます。** 内蔵MCPサーバーが11本のツールをAWS Kiro・Anthropic Claude・Anysphere Cursor等へ公開するので、「192.168.1.50 が今週どこへ接続したか」をそのまま聞けます。画面内の **AI Insights** は収集状況・通信量・脅威・前期間比較から始まります。
+
+**スマートフォンからも使えます。** ルーターの状態・グラフマップ・統計情報・通信ログ・端末一覧・検出ログを、VPNや private network 経由で確認できます。
+
+**任意: Wi-Fi端末に名前がつきます。** ASUSアクセスポイント（APモードまたはAiMesh）を繋ぐと、無線端末の周波数帯・電波強度・通信レート・メッシュ構成が加わります。
+
+**任意: 特定のアドレスを明示的に調べられます。** AbuseIPDB・VirusTotal・AlienVault OTXへは、**あなたが明示的に指示したときだけ**問い合わせます。サーバー側キャッシュとレート制限つきです（[ガイド](docs/manual-threat-investigation.ja.md)）。
 
 ---
 
-## クイックスタート
+## 自分の環境で動くか
 
-### セットアップパターン別の最短ルート
+**Yamaha RTXかCisco IOSのルーターが必要です。** パケットキャプチャ方式もインライン方式もありません。どちらもお持ちでなければ、この先を読んでも解決しません。**先にお伝えしておきます。**
 
-まずは自分の環境に合う最小ルートで起動し、必要に応じて設定から追加してください。
+| | 必要なもの |
+|--|-----------|
+| ✅ | **Node.js 22以降** — 常時起動しておけるMac・PC・Raspberry Piのいずれか |
+| ✅ | **Yamaha RTXまたはCisco IOSルーター1台以上**（SSH有効）（[Yamaha](docs/setup-yamaha.ja.md) · [Cisco](docs/setup-cisco.ja.md)） |
+| ☐ | 任意: **ASUSアクセスポイント**（AP/AiMeshモード）— Wi-Fi端末の詳細用（[設定](docs/setup-asus.ja.md)） |
 
-| パターン | 向いている場合 | 最初に設定するもの |
-|---------|---------------|-------------------|
-| 最小構成: Yamaha RTX または Cisco IOS 1台 | 追加機器なしで最短起動したい | 種類、IP、SSH認証情報を入力して **接続して自動検出** |
-| 複数ルーター: 最大10台 | 冗長ルーターや複数回線がある | Yamaha/Ciscoを名前付きの別行として追加 |
-| 任意: + ASUS AP | WiFi端末名、ベンダー、MACも見たい | ルーター設定のあと、ASUS AP の IP と管理ログイン |
-| 詳細構成: + dnsmasq / INSPECT / DHCPD | ホスト名、短命TCPセッション、IP→MACのリアルタイム追跡を強化したい | 推奨構成のあと、データソースを有効化 |
-| 通知構成: + Slack | 脅威検出をDMで受け取りたい | 上記いずれかの構成のあと、Slack通知を有効化 |
+**Yamaha RTX** — SSHとNAT descriptorに対応した機種: RTX1200・RTX1210・RTX1220・RTX1300・RTX810・RTX830・NVR500・NVR510・NVR700W。
 
-### Step 1 — 事前準備チェックリスト
+**Cisco IOS** — C841M-4X-JSEC/K9（IOS 15.5(3)M9）で実機検証済み。SSH・enable・NAT/ARP/NDP・verbose出力・TOFU・自動再接続を含みます。
 
-| | 必要なもの | 設定ガイド |
-|--|-----------|-----------|
-| ✅ | Mac/PC/Raspberry Pi に Node.js 22以上をインストール | [nodejs.org](https://nodejs.org) |
-| ✅ | Yamaha RTX または Cisco IOS ルーターを1台以上SSH有効化 | [Yamaha設定 →](docs/setup-yamaha.ja.md) / [Cisco設定 →](docs/setup-cisco.ja.md) |
-| ☐ | （任意）ASUS WiFi AP の Web 管理画面を有効化 | [設定ガイド →](docs/setup-asus.ja.md) |
-| ☐ | （任意）画面内AI洞察（Ollama / Anthropic / OpenAI / Amazon Bedrock） | [設定ガイド →](docs/setup-ai-insights.ja.md) |
-| ☐ | （任意）AI アシスタント連携（AWS Kiro・Anthropic Claude・Anysphere Cursor 等） | [設定ガイド →](docs/setup-mcp.ja.md) |
-| ☐ | local、private、public、完全閉域の境界を選択 | [Deployment profile →](docs/deployment-profiles.ja.md) |
-| ☐ | インターネット非接続で運用（`EGRESSVIEW_OFFLINE_MODE=true`） | [オフラインモード →](docs/deployment-profiles.ja.md#オフラインモード) |
-| ☐ | 署名済みportable releaseをinstall後、オフライン運用 | [署名付きdistribution →](docs/offline-distribution.ja.md) |
+**Linuxルーター** — SSH経由のconntrack収集はプレビューです。Dockerでの検証は済んでいますが、**実機での検証は未了です**（[設定](docs/setup-conntrack.ja.md)）。
 
-### Step 2 — インストールと起動
+**マルチルーターで実証できていること・できていないこと。** 自動テストでは、10台の混在した擬似ルーターを各1,000セッションで動かし、障害の分離と決定的な重複排除を確認しています。実機では、Cisco 1台とYamaha 1台をそれぞれ別のルーターIDで二重登録して確認しました。**ここまでで実証できるのは並列収集と重複排除です。** HSRP/VRRP、NAT状態の同期、実際のフェイルオーバーは**実証していません**。同一ベンダーの異なる実機を複数台という構成も実機確認していません。機種ごとの出力差はGitHub Issuesでご報告ください。
+
+---
+
+## セットアップ
+
+**所要およそ15分。そのほとんどはルーター側の作業です。** ソフトウェア側は実測7秒でした（clone 0.9秒、`npm install` 4.0秒、起動から準備完了まで2秒）。時間がかかるのは、まだSSHを有効にしていないルーターにログインできるようにする作業です。
+
+自分のネットワークに合う最小の構成から始めてください。データ源は後から設定画面で追加でき、やり直しは発生しません。
+
+| 構成 | こういう場合 |
+|------|-------------|
+| Yamaha RTXかCisco IOSを1台 | まず最短で動かしたい |
+| ルーター最大10台 | 冗長構成や複数回線がある |
+| ＋ ASUS AP | Wi-Fi端末の名前・ベンダー・MACも見たい |
+| ＋ dnsmasq / INSPECT / DHCPD | 実際のホスト名、短命セッション、リアルタイムのIP↔MAC対応が欲しい |
+| ＋ Slack | 検出をDMで受け取りたい |
+
+### 1. インストールして起動する
 
 ```bash
 git clone https://github.com/yo1t/egressview.git
@@ -214,226 +106,70 @@ npm install
 npm start
 ```
 
-### Step 3 — ブラウザを開いてログイン
+### 2. ログインする
 
-初回起動時、対話terminalでは初期**ログインパスワード**を一度だけ表示します。service等の非対話起動では永続logへ出さず、mode `0600`の`.egressview.json.initial-login-password`へ保存します：
+ログインパスワードは、対話端末に**1回だけ**表示されます。サービス起動など非対話の場合は、**永続的なログに残さず**`.egressview.json.initial-login-password`（パーミッション`0600`）へ書き出します。
 
 ```
 ══════════════════════════════════════════════════════════════
   EgressView login password (initial):
   KFpDqntYRfcr...
-  → ブラウザ初回アクセス時にこのパスワードでログインしてください
+  → Log in with this password on first access
 ══════════════════════════════════════════════════════════════
 ```
 
-`http://localhost:3000` を開いてパスワードを入力してください。ブラウザ・端末ごとに個別のログインセッション（30日スライド有効期限）が発行され、設定 → 一般 でセッションの確認・失効・パスワード変更ができます。
+`http://localhost:3000` を開いて入力します。ブラウザごとに個別のセッション（30日スライド式）が作られ、設定 → 一般 で確認・失効できます。ログインできたら、一度きりのパスワードファイルは削除してください。
 
-### Step 4 — ルーターの接続情報を設定
+### 3. ルーターを登録する
 
-設定 → **L3/L4** を開き、ルーターごとに別の行として追加します。Yamaha RTXとCisco IOSを任意に組み合わせ、最大10台まで有効化できます。
+設定 → **L3/L4** で、ルーター1台につき1行を追加します。[Yamaha](docs/setup-yamaha.ja.md)または[Cisco](docs/setup-cisco.ja.md)のガイドで用意したLAN IPとSSHログインを入力し、**接続して自動検出**を押します。
 
-| 項目 | 確認場所 |
-|------|---------|
-| Yamaha RTX の IP アドレス | ルーターの LAN 側 IP（例: `192.168.1.1`） |
-| SSH ユーザー名 / パスワード | [Yamaha 設定ガイド](docs/setup-yamaha.ja.md) で設定したもの |
-| Cisco IOS の IP / ユーザー名 / パスワード | [Cisco 設定ガイド](docs/setup-cisco.ja.md) で設定したもの |
-| ASUS AP の IP / パスワード | AP の LAN 側 IP と管理者パスワード（[ASUS 設定ガイド](docs/setup-asus.ja.md)） |
+自動検出はSSH接続、NAT descriptor（通常`100`）、LANアドレスを調べ、**NATセッションが実際に読めるかまで確認します。保存する前に**です。パスワードが違えば画面を見ているその場で失敗するので、**何も収集していない状態に静かに陥ることがありません。**
 
-各Yamaha RTXは、IP・ユーザー名・パスワードを入力して **接続して自動検出** を押してください。SSH接続確認、NATディスクリプタ番号（通常は `100`）、LAN IP、NAT sessions の取得可否を確認し、保存前に推奨設定をフォームへ反映します。
+### 4. 埋まっていくのを見る
 
-各Cisco IOSも **接続して自動検出** でSSHとNAT取得を確認できます。NAT insideインターフェースを使ってLAN側IPを判定します。全体の同時ポーリングを最大3台に制限しながら各ルーターを独立して扱うため、1台の停止が他の収集を止めません。
+数秒で端末・セッション・統計が現れます。必要な作業はここまでで、以下はすべて任意です。
 
-数秒後にデバイス、セッション、統計情報がUIに表示されはじめます。
+---
 
-> **注意:** パスワードはversion付きscrypt recordだけを保存します。初回ログイン成功後、one-time password fileは削除されます。
+## さらに使う
 
-## 認証
+以下はすべて任意で、それぞれにガイドがあります。
 
-全APIエンドポイントとWebSocket接続は保護されています。ローカル管理者は無効化できず、Google OIDCは任意の追加ログイン方式です。
+| | |
+|---|---|
+| [macOS Agent](apps/agent-macos/README.md) | Macのどのアプリが通信したかまで分かります（Hub 1.9.0以降が必要） |
+| [AIアシスタント連携（MCP）](docs/setup-mcp.ja.md) | Claude・Kiro・Cursorから自然言語で質問できます。11本のツール、stdio / HTTP対応 |
+| [AI Insights](docs/setup-ai-insights.ja.md) · [Bedrock](docs/setup-bedrock.ja.md) | Ollama・Anthropic・OpenAI・Amazon Bedrockによる要約と分析。月次のトークン数と概算コストを記録します |
+| [認証とHTTPS](docs/authentication.ja.md) | セッション・Google OIDC・権限・監査ログ・TLSの有効化。**インターネットへ公開する前に必ず読んでください** |
+| [設定](docs/configuration.ja.md) | ポート・データベースの場所・メモリ上限など、起動前に決まっている必要がある設定 |
+| [アーキテクチャ](docs/architecture.ja.md) · [REST API](docs/api-reference.ja.md) | 構成要素の境界、データの流れ、自動化 |
+| [配備プロファイル](docs/deployment-profiles.ja.md) | ローカル・プライベート・公開・完全オフライン。オフラインモードを含みます |
+| [署名付き配布物](docs/offline-distribution.ja.md) | 署名済みの可搬リリースを`openssl`だけで検証してインストールします |
+| [追加のデータ源](docs/setup-conntrack.ja.md) | dnsmasq・`[INSPECT]`・`[DHCPD]`・Linux conntrack |
 
-| 認証情報 | 用途 | 場所 |
-|---------|------|------|
-| **ログインパスワード** | ブラウザのログイン。端末ごとに失効可能なセッションを発行（30日スライド有効期限） | 初回起動時に表示。変更は 設定 → 一般 |
-| **API トークン** | スクリプト・自動化（`X-Admin-Token` ヘッダー） | `.egressview.json`（`adminToken`）。再生成は 設定 → 一般 |
-| **Google OIDC** | 許可したGoogleアカウント。sessionはEgressView側で失効可能 | 設定 → 一般 → 認証と監査 |
-
-### セッション管理
-
-- 設定 → 一般 にログイン中の全端末が最終アクセス時刻付きで表示されます
-- 端末単位での失効、他の端末の一括ログアウトが可能です
-- パスワード変更時に他セッションを全て失効させるオプションがあります
-
-### パスワードを紛失した場合
-
-```bash
-# 対話TTY専用。全browser sessionを失効
-npm run auth:reset
-# automation用tokenも同時に再生成
-npm run auth:reset -- --regenerate-api-token
-```
-
-### 仕組み
-
-- 新しいパスワードは14文字以上。version付きscrypt recordを使い、旧recordはログイン成功時に移行
-- ログイン失敗時は 500ms の遅延、比較は `crypto.timingSafeEqual` を使用
-- browser sessionはSecure/HttpOnly/SameSite cookieとCSRF保護を使用。既存header tokenはautomation互換として維持
-- login/logout/session失効/token変更/認証済み更新操作を、個人情報を伏せたappend-only監査logへ記録
-- Google OIDCはAuthorization Code + PKCE、state、nonce、JWKS署名、verified email、email/domain allowlistを検証
-
-ブラウザsessionには、サーバー側で最小権限のロールを割り当てます。
-ローカル管理者は常に`admin`、許可メールに明示したGoogleアカウントは
-`operator`、許可ドメインだけに一致したアカウントは閲覧専用の`viewer`
-です。operatorは端末メモを更新できますが、課金が発生し得るAI分析、
-設定・認証情報の変更、バックアップ復元、認証管理は実行できません。
-
-Internet公開前に[認証・reverse proxyガイド](docs/authentication.ja.md)を確認してください。
-
-## HTTPS（オプション）
-
-デフォルトは HTTP です。HTTPS を有効にするには `.egressview.json` に以下を追加して再起動します：
-
-```json
-"https": { "enabled": true }
-```
-
-自己署名証明書（`.egressview-cert.pem` / `.egressview-key.pem`、有効期限10年）が `openssl` CLI で自動生成されます。ブラウザに初回のみ警告が表示されるので許可してください。自前の証明書を使う場合：
-
-```json
-"https": { "enabled": true, "certPath": "/path/to/cert.pem", "keyPath": "/path/to/key.pem" }
-```
-
-複数端末からパスワードでログインする場合は HTTPS の有効化を推奨します。インターネット経由で安全にリモートアクセスする場合は HTTPS を有効化し、他サービスと使い回していない強いログインパスワードを設定して、EgressView を最新に保ってください。
-
-## 設定
-
-設定は `.egressview.json`（自動生成、gitignore対象）に保存されます。環境変数でも指定可能：
-
-| 変数 | デフォルト | 説明 |
-|------|-----------|------|
-| `PORT` | `3000` | HTTPサーバーポート |
-| `POLL_INTERVAL_MS` | `60000` | ASUSポーリング間隔（ミリ秒） |
-| `ROUTER_IP` | `192.168.1.1` | ASUSルーターのデフォルトIP |
-| `YAMAHA_IP` | — | Yamaha RTXのIPアドレス |
-| `YAMAHA_USER` | — | Yamaha SSHユーザー名 |
-| `YAMAHA_PASS` | — | Yamaha SSHパスワード |
-| `YAMAHA_NAT` | `100` | NATディスクリプタ番号 |
-| `SUBPATH` | — | リバースプロキシのサブパス（例: `/egressview`） |
-| `EGRESSVIEW_DB` | `.egressview.db` | SQLite データベースファイルのパス |
-| `EGRESSVIEW_HISTORY_HOT_MAX` | `100000` | メモリに保持する直近通信の上限。保持期間内の全履歴はSQLiteに残る |
-| `LOG_LEVEL` | `info` | ログ詳細度: `error` / `warn` / `info` / `debug` |
-
-認証済み管理者は `GET /api/connections/memory` で、現在のRSS、ヒープ使用量、ホットキャッシュ件数・上限、SQLite永続件数を確認できます。通信内容は返さず、件数とメモリ値だけを返します。
-
-## 機能詳細
-
-### L3/L4: Yamaha RTX（NATセッション監視）
-
-- `show nat descriptor address <N> detail` の出力をパース
-- TCP/UDP/ICMP/GRE セッションを送信元・宛先・ポート・TTL付きで追跡
-- SSHタイムアウト・切断時の自動再接続
-- TOFU（Trust On First Use）によるホスト鍵検証
-
-### L2: ASUS WiFi アクセスポイント（Mesh対応、クライアント監視）
-
-ASUSデバイスは**WiFiアクセスポイント（APモードまたはAiMesh）**として使用します。L3ルーティングとNATはYamaha RTXが担当し、ASUS APはL2のクライアント可視性を提供します：
-
-- SHA256チャレンジレスポンス認証
-- クライアント一覧（接続種別: 有線/2.4G/5G/6G、RSSI、トラフィック量）
-- AiMeshノード検出（マルチAPトポロジー）
-- トークン自動更新
-
-### デバイス識別
-
-- **OUIデータベース**（Wireshark manuf、週次自動ダウンロード）
-- **mDNS/Bonjour** サービス探索（100種類以上のサービスタイプ）
-- **SSDP/UPnP** デバイス検出
-- **NetBIOS** 名前解決
-- **Appleモデル辞書**（200機種以上: iPhone, iPad, Mac, Apple TV, HomePod, Apple Watch）
-- **自動調査モード**: 未知のデバイスをバックグラウンドでスキャン
-
-### 調査ビュー
-
-- **グラフマップ**: デバイス/宛先クラスタの偏りを見つけるための全体トポロジー
-- **統計情報**: 通信傾向を見るための時系列チャート・接続先サマリー
-- **通信ログ**: 全セッションのテーブル表示（カラムごとのソート・検索フィルター対応、脅威行のクリックで詳細ポップアップ）
-- **端末一覧**: 端末識別、メモ、状態、履歴へドリルダウンするためのインベントリビュー
-- **接続パネル**: デバイスごとのアクティブなインターネット接続一覧（組織名・国情報付き）
-- **IPv4/IPv6バッジ**: NDPキャッシュポーリングによるプロトコル検出
-
-### 脅威インテリジェンス（C2/ボットネット検出）
-
-- **Feodo Tracker**: Emotet/Dridex/TrickBot C2サーバーIP
-- **ThreatFox**: マルウェアIOC（IP:port）
-- **URLhaus**: マルウェア配布URL（GitHub等のCDNドメインは低信頼度として区別）
-- **Spamhaus DROP**: ハイジャック済みIP範囲（CIDR）
-- 3段階の信頼度: 🚨 検出（高信頼度） / ⚠️ 要確認（低信頼度 — 正規サービス上） / ✅ 未検出
-- 脅威詳細ポップアップ（信頼度に応じた推奨アクションを表示）
-- フィード自動更新（1時間ごと、設定で変更可能）
-
-### Slack通知
-
-- 脅威検出時に **Slack DM** で即時通知
-- 同一宛先への再通知クールダウン設定（デフォルト1時間）でスパムを防止
-- UI言語設定に連動してメッセージを日本語/英語で送信
-- 設定画面のテスト送信ボタンで設定確認可能
-- Slack Bot TokenとユーザーID（`U01XXXXXXX`）が必要 — 設定 → Generalタブから設定
-
-### セキュリティ
-
-- 管理トークン認証（タイミングセーフ比較）
-- SSRF防止（DNS解決結果の検査と接続先IP固定）
-- Socket.IO 同一オリジン制限
-- SSHホスト鍵フィンガープリント検証（TOFU）
-- 設定ファイルは `0600` パーミッションで保存
-- パスワードはブラウザに送信しない（真偽値フラグのみ）
-
-## 対応ルーター
-
-L3/L4ルーターはYamaha/Ciscoを任意に組み合わせて最大10台まで有効化できます。複数ルーターが同じ通信を観測した場合は、すべての観測元routerIdを保持して1通信に重複排除します。
-
-### Cisco IOS（L3/L4）
-- 実機検証済み: C841M-4X-JSEC/K9、IOS 15.5(3)M9
-- `show ip nat translations verbose`対応機では生成時刻と実測TTLを取得。未対応機は通常出力へ自動フォールバック
-
-### Yamaha RTX（L3/L4）
-SSH接続とNATディスクリプタに対応した全モデル：
-- RTX1200, RTX1210, RTX1220, RTX1300
-- RTX810, RTX830
-- NVR500, NVR510, NVR700W
-
-### 複数ルーター検証の範囲
-- 自動試験: Yamaha/Cisco混在fake router 10台、各1,000セッション、同時接続最大3、障害分離、決定的な重複排除
-- 実機補足試験: Cisco実機1台とYamaha実機1台を、それぞれ異なるrouterIdで2重登録
-- 未実機検証: 同一メーカーの異なる実機複数台、HSRP/VRRP、NAT状態同期、実フェイルオーバー
-
-### ASUS WiFi アクセスポイント（L2、Mesh対応）
-標準Web管理インターフェースを持つ全モデル（APモードまたはAiMeshで使用）：
-- RT-AXシリーズ（AX86U, AX88U, AX92U 等）
-- RT-ACシリーズ
-- ZenWiFi（AiMesh）
+---
 
 ## ライセンス
 
-EgressView はデュアルライセンスです。
+EgressViewはデュアルライセンスです。
 
-- オープンソースライセンス: [GNU Affero General Public License v3.0](LICENSE)
-- 商用ライセンス: プロプライエタリ利用・クローズドソース利用向けに別途提供
+- オープンソース: [GNU Affero General Public License v3.0](LICENSE)
+- 商用: プロプライエタリ／クローズドソース用途向けに別途提供
 
-AGPL-3.0 の条件に従う限り、EgressView を利用・改変・配布できます。EgressView またはその派生物をプロプライエタリ製品に組み込む場合、ソースコードを公開せずに配布する場合、または改変版をネットワークサービスとして提供する場合は、AGPL-3.0 のソースコード提供義務を遵守する必要があります。
-
-AGPL-3.0 に基づく対応するソースコード公開を行わずに、EgressView をプロプライエタリまたはクローズドソースの商用製品で利用したい場合は、著作権者から商用ライセンスを取得する必要があります。
+AGPL-3.0の下で使用・改変・配布できます。EgressViewまたはその派生物をプロプライエタリ製品に組み込む場合、ソースコードなしで配布する場合、改変版をネットワークサービスとして提供する場合は、AGPL-3.0のソースコード提供義務に従う必要があります。対応するソースを公開せずにプロプライエタリ製品で使用するには、著作権者からの商用ライセンスが必要です。
 
 ```
-EgressView — リアルタイムネットワーク接続可視化ツール
+EgressView — Real-time network connection visualizer
 Copyright (C) 2025 Yoichi Takizawa
 
-ソースコード: https://github.com/yo1t/egressview
+Source code: https://github.com/yo1t/egressview
 ```
 
-## 商標について
+## 商標
 
-AWS Kiro、Anthropic Claude、Anysphere Cursor、Cisco、Cisco IOS、Yamaha、ASUS などの製品名は、各社の商標または登録商標です。EgressView はこれらの企業と提携・承認・後援関係にありません。
+AWS Kiro、Anthropic Claude、Anysphere Cursor、Cisco、Cisco IOS、Yamaha、ASUSその他の製品名は、各社の商標または登録商標です。EgressViewはこれらの企業と提携しておらず、推奨・後援も受けていません。
 
-## コントリビュート
+## コントリビューション
 
-Issue や Pull Request を歓迎します。大きな変更の場合は、先に Issue で相談してください。開発環境のセットアップとガイドラインは [CONTRIBUTING.md](CONTRIBUTING.md)、今後の計画は [ROADMAP.ja.md](ROADMAP.ja.md)、脆弱性の非公開報告方法は [SECURITY.md](SECURITY.md) を参照してください。
+IssueとPull Requestを歓迎します。大きな変更はまずIssueを立ててください。開発環境の準備は[CONTRIBUTING.md](CONTRIBUTING.md)、今後の予定は[ROADMAP.md](ROADMAP.md)、脆弱性の非公開報告方法は[SECURITY.md](SECURITY.md)にあります。
