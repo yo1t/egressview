@@ -39,7 +39,11 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   httpRoute('GET', '/api/auth/status', ACCESS.PUBLIC),
   httpRoute('GET', '/api/auth/methods', ACCESS.PUBLIC),
   httpRoute('POST', '/api/auth/login', ACCESS.PUBLIC),
-  httpRoute('POST', '/api/agent/enroll', ACCESS.PUBLIC),
+  // Public because an agent has no credential yet. What it can achieve without
+  // one is limited to creating a pending request that an administrator must
+  // approve; neither route hands back a credential on its own.
+  httpRoute('POST', '/api/agent/enrollment-requests', ACCESS.PUBLIC),
+  httpRoute('POST', '/api/agent/enrollment-requests/claim', ACCESS.PUBLIC),
   httpRoute('POST', '/api/admin/verify', ACCESS.PUBLIC),
   httpRoute('GET', '/api/auth/oidc/start', ACCESS.PUBLIC),
   httpRoute('GET', '/api/auth/oidc/callback', ACCESS.PUBLIC),
@@ -129,6 +133,13 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   httpRoute('GET', '/api/agents', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('GET', '/api/agents/ingest-metrics', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/agents/enrollment-tokens', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  // Approving a request mints a long-lived credential, so it sits at the same
+  // level as the other authentication administration routes.
+  httpRoute('GET', '/api/agents/transport', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  httpRoute('POST', '/api/agents/transport', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  httpRoute('GET', '/api/agents/enrollment-requests', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  httpRoute('POST', '/api/agents/enrollment-requests/:requestId/approve', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
+  httpRoute('POST', '/api/agents/enrollment-requests/:requestId/reject', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/agents/:agentId/revoke', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/auth/api-identities', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
   httpRoute('POST', '/api/auth/api-identities/:id/revoke', ACCESS.PERMISSION, [R.AUTH_ADMIN]),
