@@ -220,6 +220,55 @@ describe('AI configuration routes', () => {
     )).status, 400);
   });
 
+  it('Macを選んだときの収集状況が、routerではなくAgentの実績から出る', async () => {
+    // The strip read lastSuccessAt and sessionCount while the agent supplied
+    // lastPollAt, so a Mac that was delivering normally showed "0" with no
+    // collection time -- the first number a new user sees after installing.
+    const history = {
+      countFactsByTimeRange: () => ({ connections: 0, devices: 0, destinations: 0 }),
+      groupDstByTimeRange: () => [],
+    };
+    const agentId = '11111111-2222-4333-8444-555555555555';
+    const lastSeenAt = Date.now() - 60_000;
+    const agentIdentities = {
+      listAgents: () => [{ agentId, hostName: 'Quartermaster', lastSeenAt, revokedAt: null }],
+    };
+    const agentIngest = {
+      getAgentCollectionStatus: () => ({ lastReceivedAt: lastSeenAt, observationCount: 7 }),
+    };
+    const result = await request(appFor(createAiProvider(), undefined, {
+      history, threatIntel: null, routerManager: { list: () => [] }, agentIdentities, agentIngest,
+    }), 'GET', `/api/ai/facts?from=${Date.now() - 3_600_000}&to=${Date.now()}&sourceKind=agent&sourceId=${agentId}`);
+
+    assert.equal(result.status, 200);
+    assert.equal(result.body.collection.health, 'ok');
+    assert.equal(result.body.collection.reportedSessions, 7);
+    assert.equal(result.body.collection.lastUpdatedAt, lastSeenAt);
+    assert.equal(result.body.collection.routers[0].displayName, 'Quartermaster');
+  });
+
+  it('収集状況の取得が失敗しても、届いているAgentを停止扱いにしない', async () => {
+    const history = {
+      countFactsByTimeRange: () => ({ connections: 0, devices: 0, destinations: 0 }),
+      groupDstByTimeRange: () => [],
+    };
+    const agentId = '11111111-2222-4333-8444-555555555556';
+    const lastSeenAt = Date.now() - 60_000;
+    const result = await request(appFor(createAiProvider(), undefined, {
+      history,
+      threatIntel: null,
+      routerManager: { list: () => [] },
+      agentIdentities: {
+        listAgents: () => [{ agentId, hostName: 'Quartermaster', lastSeenAt, revokedAt: null }],
+      },
+      agentIngest: { getAgentCollectionStatus: () => { throw new Error('database is closed'); } },
+    }), 'GET', `/api/ai/facts?from=${Date.now() - 3_600_000}&to=${Date.now()}&sourceKind=agent&sourceId=${agentId}`);
+
+    assert.equal(result.status, 200);
+    assert.equal(result.body.collection.health, 'ok', '届いているAgentはokのまま');
+    assert.equal(result.body.collection.lastUpdatedAt, lastSeenAt, 'lastSeenAtへ退避する');
+  });
+
   it('rejects invalid or excessive facts ranges before querying history', async () => {
     let calls = 0;
     const context = {
