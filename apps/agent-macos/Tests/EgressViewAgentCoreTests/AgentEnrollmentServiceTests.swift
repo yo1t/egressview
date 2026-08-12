@@ -2,6 +2,10 @@ import Foundation
 import Testing
 @testable import EgressViewAgentCore
 
+// A claim value with the right shape and no meaning. Built from parts and named
+// once so the tests below do not carry anything that reads like a credential.
+private let fixtureClaim = "egvc_" + String(repeating: "c", count: 64)
+
 private final class MemoryCredentialStore: AgentCredentialStoring, @unchecked Sendable {
     private let lock = NSLock()
     private var value: AgentCredential?
@@ -49,7 +53,7 @@ struct AgentEnrollmentServiceTests {
     func applyReturnsTicketOnly() async throws {
         let response = try JSONSerialization.data(withJSONObject: [
             "requestId": UUID().uuidString,
-            "claimSecret": "egvc_" + String(repeating: "c", count: 64),
+            "claimSecret": fixtureClaim,
             "expiresAt": Int(Date().addingTimeInterval(600).timeIntervalSince1970 * 1000),
             "status": "pending",
         ])
@@ -85,7 +89,7 @@ struct AgentEnrollmentServiceTests {
         let ticket = AgentEnrollmentTicket(
             hubURL: URL(string: "https://hub.example")!,
             requestId: UUID().uuidString,
-            claimSecret: "egvc_" + String(repeating: "c", count: 64),
+            claimSecret: fixtureClaim,
             expiresAt: Date().addingTimeInterval(600)
         )
         await #expect(throws: AgentEnrollmentError.declined) {
@@ -110,7 +114,7 @@ struct AgentEnrollmentServiceTests {
         let ticket = AgentEnrollmentTicket(
             hubURL: URL(string: "https://hub.example")!,
             requestId: UUID().uuidString,
-            claimSecret: "egvc_" + String(repeating: "c", count: 64),
+            claimSecret: fixtureClaim,
             expiresAt: Date().addingTimeInterval(600)
         )
 
