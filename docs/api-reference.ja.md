@@ -196,6 +196,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Agent | `POST /api/agents/:agentId/revoke` | `auth.admin`必須 |
 | Agent | `POST /api/agent/token/rotate` | Agent bearerの`agent.ingest`だけ |
 | Agent | `POST /api/agent/ingest` | Agent bearerの`agent.ingest`。最大200観測・非圧縮JSON 512 KiB |
+| Agent | `GET /api/agent/capabilities` | Agent bearerの`agent.ingest`。受理するschema versionとbatch上限を返し、Agentが双方の話せるversionを選べるようにする |
 | Router初期設定 | `POST /api/nonce` | 認証必須 |
 | Router初期設定 | `POST /api/yamaha/detect` | 認証必須 |
 | Router初期設定 | `POST /api/cisco/detect` | 認証必須 |

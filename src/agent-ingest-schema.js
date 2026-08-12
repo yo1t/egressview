@@ -4,6 +4,13 @@ const net = require('node:net');
 const { z } = require('zod');
 
 const AGENT_INGEST_SCHEMA_VERSION = 1;
+
+// Every payload version this Hub accepts, newest last. An agent updates on the
+// user's machine while the Hub updates whenever its operator decides, so the
+// two versions are routinely apart; accepting a range is what keeps a Hub
+// usable while its agents move ahead of it. Adding an optional field is not a
+// new version — versions exist for changes that break the old reader.
+const AGENT_INGEST_SUPPORTED_SCHEMA_VERSIONS = Object.freeze([1]);
 const AGENT_INGEST_MAX_OBSERVATIONS = 200;
 const AGENT_INGEST_MAX_BODY_BYTES = 512 * 1024;
 const AGENT_INGEST_DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -55,8 +62,16 @@ const agentObservationSchema = z.object({
   }
 });
 
+function supportedSchemaVersionSchema() {
+  const options = AGENT_INGEST_SUPPORTED_SCHEMA_VERSIONS.map(version => z.literal(version));
+  return options.length === 1 ? options[0] : z.union(options);
+}
+
 const agentIngestEnvelopeSchema = z.object({
-  schemaVersion: z.literal(AGENT_INGEST_SCHEMA_VERSION),
+  // Accepts any supported version rather than only the newest, so an agent one
+  // release behind keeps delivering instead of failing closed. A union needs
+  // two members, and today there is only one version.
+  schemaVersion: supportedSchemaVersionSchema(),
   batchId: z.string().uuid(),
   sentAt: isoTimestamp,
   agent: agentMetadataSchema,
@@ -87,6 +102,7 @@ function validateAgentObservationWindow(envelope, {
 
 module.exports = {
   AGENT_INGEST_SCHEMA_VERSION,
+  AGENT_INGEST_SUPPORTED_SCHEMA_VERSIONS,
   AGENT_INGEST_MAX_OBSERVATIONS,
   AGENT_INGEST_MAX_BODY_BYTES,
   AGENT_INGEST_DEFAULT_RETENTION_MS,

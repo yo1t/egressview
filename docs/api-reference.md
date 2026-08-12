@@ -196,6 +196,7 @@ All 101 implemented HTTP endpoints are listed below. **Public** means no browser
 | Agent | `POST /api/agents/:agentId/revoke` | Protected; `auth.admin` |
 | Agent | `POST /api/agent/token/rotate` | Agent bearer; `agent.ingest` only |
 | Agent | `POST /api/agent/ingest` | Agent bearer; `agent.ingest`, max 200 observations and 512 KiB uncompressed JSON |
+| Agent | `GET /api/agent/capabilities` | Agent bearer; accepted schema versions and batch limits, so an agent can pick a version both sides speak |
 | Router setup | `POST /api/nonce` | Protected |
 | Router setup | `POST /api/yamaha/detect` | Protected |
 | Router setup | `POST /api/cisco/detect` | Protected |

@@ -52,6 +52,11 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
 
   httpRoute('POST', '/api/agent/token/rotate', ACCESS.AGENT, [A.INGEST]),
   httpRoute('POST', '/api/agent/ingest', ACCESS.AGENT, [A.INGEST]),
+  // Authenticated rather than public: batch limits and accepted versions are
+  // operational detail, and an enrolled agent is the only caller that needs
+  // them. A Hub too old to have this route answers 404, which is the signal an
+  // agent needs before it enrols.
+  httpRoute('GET', '/api/agent/capabilities', ACCESS.AGENT, [A.INGEST]),
 
   httpRoute('GET', '/api/status', ACCESS.PERMISSION, [R.NETWORK_READ]),
   httpRoute('GET', '/api/connections', ACCESS.PERMISSION, [R.NETWORK_READ]),
