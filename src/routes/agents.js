@@ -13,6 +13,9 @@ const {
   agentMetadataSchema,
   agentIngestEnvelopeSchema,
   validateAgentObservationWindow,
+  AGENT_INGEST_SUPPORTED_SCHEMA_VERSIONS,
+  AGENT_INGEST_MAX_OBSERVATIONS,
+  AGENT_INGEST_MAX_BODY_BYTES,
 } = require('../agent-ingest-schema');
 const { parseRequest } = require('../http-validation');
 const { isLoopbackAddress } = require('../deployment-profile');
@@ -443,6 +446,25 @@ module.exports = function agentRoutes({
     return res.json(rotated);
   });
 
+  // What this Hub can accept, so an agent can pick a version they share instead
+  // of discovering the mismatch by having a batch refused.
+  //
+  // A Hub that predates this endpoint answers 404, which is itself the signal
+  // that it is too old — and 401 from a Hub that has it means "new enough, not
+  // enrolled yet". Agents already in the field never call this; they send
+  // version 1 unconditionally and keep working.
+  router.get('/agent/capabilities', requireAgent, (_req, res) => {
+    res.json({
+      schemaVersions: [...AGENT_INGEST_SUPPORTED_SCHEMA_VERSIONS],
+      maxObservationsPerBatch: AGENT_INGEST_MAX_OBSERVATIONS,
+      maxBodyBytes: AGENT_INGEST_MAX_BODY_BYTES,
+      requestsPerMinute: INGEST_REQUESTS_PER_WINDOW,
+      // Declared empty rather than omitted: an agent must not infer that it may
+      // compress because the field is missing.
+      compression: [],
+    });
+  });
+
   router.post('/agent/ingest', requireAgent, async (req, res) => {
     const startedAt = Date.now();
     ingestMetrics.requests += 1;
@@ -458,6 +480,24 @@ module.exports = function agentRoutes({
       res.setHeader('Retry-After', '1');
       audit(req, 'agent_ingest', 'failure', { reason: 'concurrency_limited' });
       return res.status(429).json({ error: 'Agent ingest is busy' });
+    }
+
+    // Checked before the schema so the answer names the problem. A generic
+    // validation failure tells an agent that something in its payload was
+    // wrong; it does not tell it that the Hub is older than the payload it
+    // speaks, which is the one case where retrying is pointless and the user
+    // has something to do about it.
+    const requestedVersion = req.body?.schemaVersion;
+    if (!AGENT_INGEST_SUPPORTED_SCHEMA_VERSIONS.includes(requestedVersion)) {
+      ingestMetrics.failures += 1;
+      audit(req, 'agent_ingest', 'failure', { reason: 'unsupported_schema_version' });
+      return res.status(400).json({
+        error: 'unsupported_schema_version',
+        requested: typeof requestedVersion === 'number' ? requestedVersion : null,
+        supported: [...AGENT_INGEST_SUPPORTED_SCHEMA_VERSIONS],
+        hint: 'Update the EgressView Hub, or use an agent that speaks one of the supported versions.',
+        requestId: req.id,
+      });
     }
 
     const parsed = parseRequest(agentIngestEnvelopeSchema, req.body, res);
