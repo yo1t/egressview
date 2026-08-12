@@ -1,6 +1,11 @@
 'use strict';
 
-require('dotenv').config();
+// quiet suppresses the banner dotenv v17 prints on load, which ends in a
+// randomly chosen advertisement for a third-party product. In the log of a
+// security tool that reads as an injected line -- it was reported as one -- and
+// anything that costs an operator time during an incident does not belong at
+// the top of the startup output.
+require('dotenv').config({ quiet: true });
 // Prefer IPv4 (prevents external HTTPS from stalling on IPv6, e.g. on EC2)
 try { require('dns').setDefaultResultOrder('ipv4first'); } catch {}
 
