@@ -140,10 +140,16 @@ function configureHttpApp(app, {
   registerHealthRoutes(app, healthState);
 
   app.use(compression());
-  app.use('/api/agent/ingest', agentJsonBoundary);
   const apiJson = express.json({ limit: '64kb' });
-  app.use('/api', (req, res, next) => (req.body === undefined ? apiJson(req, res, next) : next()));
+  app.use('/api', (req, res, next) => {
+    // Ingest bodies are read after authentication, below. A batch is 512 KiB,
+    // and reading that much from a caller who turns out to have no credential
+    // is the expensive half of a flood.
+    if (req.path === '/agent/ingest') return next();
+    return req.body === undefined ? apiJson(req, res, next) : next();
+  });
   app.use('/api', enforceApiPermissions);
+  app.use('/api/agent/ingest', agentJsonBoundary);
   if (demoReadOnly) app.use('/api', createDemoReadOnly());
 
   const indexRoutes = ['/', '/index.html'];

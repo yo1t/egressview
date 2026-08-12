@@ -60,6 +60,10 @@ dedicated public host at `/` without breaking private subpath access.
 
 The defaults allow 600 API reads and 120 API mutations per client per minute. Override them with `EGRESSVIEW_RATE_LIMIT_READS` and `EGRESSVIEW_RATE_LIMIT_WRITES` only after observing normal traffic.
 
+Agent ingest is counted separately, at 1500 requests per address per minute (`EGRESSVIEW_AGENT_INGEST_WRITES_PER_IP`). It needs its own budget because agents are not people: one agent may send 30 batches a minute, so sharing the 120 mutation budget would stop the fifth agent arriving from the same address — which is what happens as soon as agents reach the Hub through NAT. Each agent is separately held to 30 requests per minute (`EGRESSVIEW_AGENT_INGEST_REQUESTS_PER_MINUTE`).
+
+Over the limit the Hub answers `429` with `Retry-After`, and the agent backs off and resends, so observations are delayed rather than lost. Delay is still worth avoiding: it shows up as a Hub that looks slightly out of date, with nothing on screen to explain why. `GET /api/agents/ingest-metrics` reports `eventLoopDelayMs`, which is the reading that tells you whether ingest is starting to hold up the web UI.
+
 ## Audit
 
 Settings shows recent login, logout, security change, CSRF rejection, and mutating API events. The append-only rows contain request IDs and keyed hashes rather than raw email addresses or client IPs. Default retention is 180 days.
