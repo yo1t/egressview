@@ -44,6 +44,43 @@ describe('global API rate limit', () => {
     assert.equal(headers['Retry-After'] >= 1, true);
   });
 
+  it('gives agent ingest its own budget so a shared address does not cap agents at four', () => {
+    // The general write budget is sized for a person clicking. An agent may
+    // send 30 batches a minute, so sharing that budget puts a hard ceiling of
+    // four agents on any address -- which is every deployment behind NAT.
+    const middleware = createGlobalRateLimit({
+      windowMs: 60_000,
+      readLimit: 100,
+      writeLimit: 2,
+      agentIngestLimit: 6,
+    });
+    const response = () => ({
+      headers: {},
+      setHeader(name, value) { this.headers[name] = value; },
+      status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; return this; },
+    });
+    const ingest = () => ({ method: 'POST', path: '/api/agent/ingest', ip: '192.0.2.7', socket: {} });
+    const other = () => ({ method: 'POST', path: '/api/config', ip: '192.0.2.7', socket: {} });
+
+    let accepted = 0;
+    for (let i = 0; i < 6; i += 1) middleware(ingest(), response(), () => { accepted += 1; });
+    assert.equal(accepted, 6, 'ingest keeps its own allowance');
+
+    const overIngest = response();
+    middleware(ingest(), overIngest, () => { accepted += 1; });
+    assert.equal(overIngest.statusCode, 429, 'and is still limited at its own ceiling');
+
+    // Ingest traffic must not have spent the budget that protects everything
+    // else on the same address.
+    let writes = 0;
+    for (let i = 0; i < 2; i += 1) middleware(other(), response(), () => { writes += 1; });
+    assert.equal(writes, 2);
+    const overWrite = response();
+    middleware(other(), overWrite, () => { writes += 1; });
+    assert.equal(overWrite.statusCode, 429);
+  });
+
   it('fails closed instead of growing the source bucket map without bound', () => {
     const middleware = createGlobalRateLimit({
       windowMs: 60_000,
