@@ -4,6 +4,98 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-08-13
+
+A router shows what left the house but not which application sent it. This
+release closes that gap: EgressView now accepts observations from an agent
+running on a Mac, so a connection to an address you do not recognise arrives
+with the name of the program that reached for it. It also repairs a defect that
+made the web interface unusable for several minutes at a time.
+
+**Upgrading from 1.8.0 runs database migrations** (schema 12 → 16). They are
+append-only and fail-closed: free space is checked, a verified backup is taken,
+and the resulting database is validated before the process continues. Existing
+history is preserved. Restart is all that is required.
+
+### Added
+
+- **EgressView Agent for macOS**, distributed as a notarised
+  `egressview-agent-0.1.16.dmg` on the release page. It reports the process
+  behind each outbound connection from that Mac — metadata only, never
+  payloads, and it never blocks anything. Full monitoring uses a System
+  Extension; a lightweight mode needs no approval and sees less. Local history
+  has retention controls and a delete action, launch-at-login is off by default,
+  and the menu bar shows state as an icon rather than a text label that occupied
+  70–130 px. **It requires this release or newer; Hub 1.8.0 has no agent
+  endpoint at all.**
+- **Enrolment by approval.** A machine applies with a six-character code and
+  becomes an agent only when an administrator approves it in Settings → L3/L4.
+  Both halves are needed: approval alone would let anyone file a request that
+  looks legitimate, since the host name in an application is claimed by the
+  client and the approval screen says so. Codes are single-use, expire in ten
+  minutes, and are rate limited per address. Duplicate host names can be
+  replaced or added as a separate device.
+- **Agent delivery is idempotent and always outbound.** The Hub never polls a
+  machine, so a laptop away from home needs no inbound path. Re-sending a batch
+  after a lost acknowledgement creates no duplicates, and flows a router and an
+  agent both saw are stored once with both observers preserved.
+- **Plaintext HTTP for agents behind an explicit opt-in.** Refused by default
+  off loopback. The settings screen lists what accepting it exposes — the
+  connection inventory, the credential sent with every batch, and the ability to
+  submit forged observations — and how to turn on HTTPS instead.
+- **A collection source selector** across the views, so you can look at what one
+  router saw, or one Mac, without the others in the way. AI conversations record
+  the scope they were asked under.
+- **Router names detected from SSH prompts**, so a registered router carries the
+  name it calls itself rather than one you have to invent.
+- **`GET /api/agents/ingest-metrics` reports event loop delay**, which is what
+  separates "the Hub is busy" from "the Hub is stuck", and
+  `scripts/benchmark-agent-ingest.js` reproduces the measurement.
+- **[Configuration guide](docs/configuration.md)** for the settings that must be
+  decided before startup.
+
+### Fixed
+
+- **Selecting a Mac in the Detection Log froze the entire web interface.** The
+  agent-scoped query ran a correlated lookup with no supporting index, and
+  SQLite is synchronous: one request held the event loop, so the site returned
+  504s and collection stopped until someone restarted the process. An index on
+  `agent_observations(agentId, localAddress, remoteAddress, remotePort)` takes
+  the same query from over 30 seconds to about 1.1. An event-loop watchdog now
+  restarts the process if anything else ever holds the loop for two minutes.
+- **Flows only an agent saw were never checked against the threat feeds.** They
+  were stored and listed, but threat matching, enrichment, device tracking and
+  notifications all run over connections, which they never became — so the
+  interface listed the traffic and never said any of it was dangerous, which on
+  screen is indistinguishable from having checked and found it safe. Agent
+  batches now enter the same path a router poll uses.
+- **The connection log stops guessing when it does not have to.** It inferred
+  the application from the port number even when the agent had reported the
+  actual process, so a row could read "HTTPS" while the Hub held "Google Chrome
+  Helper". The inference remains for flows no agent saw.
+- **An agent no longer appears in the router list.** Recording an agent flow
+  fell through to a placeholder and created a `legacy-agent` router row.
+- Agents arriving from one address are no longer capped at four. Ingest had to
+  share the general write budget of 120 requests per minute while each agent may
+  send 30, which put a hard ceiling on any deployment behind NAT. It now has its
+  own per-address budget, and authentication runs before the 512 KiB body is
+  read, so a caller without a credential is refused after the headers.
+- The startup log no longer opens with a rotating third-party advertisement.
+  `dotenv` v17 prints one on load; in a security tool's log it read as an
+  injected line and was reported as one.
+
+### Changed
+
+- **The README was rewritten around what the reader gets**, from 438 lines to
+  175. Features are stated as consequences, the material that guides already own
+  is linked rather than restated, and `What's new in vX.Y.Z` is gone — it
+  duplicated this file and needed rewriting every release. HTTPS moved into the
+  authentication guide and the environment variables into a new configuration
+  guide.
+- The architecture document now includes the agent: the ingest path, why agent
+  batches join the same normalization path rather than sitting beside it, and
+  the security boundaries specific to endpoint agents.
+
 ## [1.8.0] - 2026-08-06
 
 ### Added
