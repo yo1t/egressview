@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -531,6 +531,24 @@ const MIGRATIONS = [
           sourceId   TEXT NOT NULL CHECK(length(sourceId) BETWEEN 1 AND 128),
           FOREIGN KEY(messageId) REFERENCES ai_messages(messageId) ON DELETE CASCADE
         );
+      `);
+    },
+  },
+  {
+    version: 15,
+    description: 'index for agent-scoped notification-log lookup (P2-87)',
+    up(db) {
+      // The notification-log agent source scope evaluates a correlated
+      // EXISTS on agent_observations filtered by
+      // (agentId, localAddress[, remoteAddress, remotePort]). Without a
+      // composite index leading with (agentId, localAddress) the planner fell
+      // back to idx_agent_observations_time (agentId only) and scanned every
+      // observation for that agent for each notification_log row —
+      // O(notification_log × agent_observations) — blocking the synchronous
+      // event loop until the whole server froze (ALB 504). See P2-87.
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_agent_observations_agent_flow
+          ON agent_observations(agentId, localAddress, remoteAddress, remotePort);
       `);
     },
   },

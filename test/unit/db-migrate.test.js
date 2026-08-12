@@ -274,14 +274,14 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
 
     db = openDb(p);
     runMigrations(db, p);
-    assert.equal(db.pragma('user_version', { simple: true }), 14);
+    assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     assert.equal(db.prepare(`SELECT body FROM ai_messages WHERE messageId = 'm1'`).get().body, 'keep-me');
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ai_message_scopes').get().count, 0);
     assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
     db.close();
 
     const backups = fs.readdirSync(TMP)
-      .filter(name => name.startsWith('v14-ai-scope-upgrade.db.pre-migration.v13-to-v14'));
+      .filter(name => name.startsWith(`v14-ai-scope-upgrade.db.pre-migration.v13-to-v${SCHEMA_VERSION}`));
     assert.equal(backups.length, 1);
     _verifyDbCopy(path.join(TMP, backups[0]));
   });
@@ -298,7 +298,7 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
 
     const upgraded = openDb(p);
     runMigrations(upgraded, p);
-    assert.equal(upgraded.pragma('user_version', { simple: true }), 14);
+    assert.equal(upgraded.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     assert.equal(upgraded.prepare('SELECT value FROM sentinel WHERE id = 1').get().value, 'keep-me');
     assert.ok(upgraded.prepare(
       `SELECT name FROM sqlite_master WHERE type='table' AND name='agent_observations'`
@@ -310,7 +310,7 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
     upgraded.close();
 
     const backups = fs.readdirSync(TMP)
-      .filter(name => name.startsWith('v13-agent-upgrade.db.pre-migration.v12-to-v14'));
+      .filter(name => name.startsWith(`v13-agent-upgrade.db.pre-migration.v12-to-v${SCHEMA_VERSION}`));
     assert.equal(backups.length, 1);
     const backupPath = path.join(TMP, backups[0]);
     _verifyDbCopy(backupPath);
