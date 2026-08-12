@@ -1,7 +1,14 @@
 'use strict';
 
 const { Router } = require('express');
+const { monitorEventLoopDelay } = require('node:perf_hooks');
 const { z } = require('zod');
+
+// One histogram for the process. It costs nothing while idle and is the only
+// way to tell "the Hub is busy" apart from "the Hub is stuck".
+const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+eventLoopDelay.enable();
+eventLoopDelay.unref?.();
 const {
   agentMetadataSchema,
   agentIngestEnvelopeSchema,
@@ -30,8 +37,19 @@ const MAX_FAILURE_BUCKETS = 2048;
 const MAX_FAILURES = 5;
 const FAILURE_WINDOW_MS = 5 * 60 * 1000;
 const INGEST_WINDOW_MS = 60 * 1000;
-const INGEST_REQUESTS_PER_WINDOW = 30;
-const INGEST_MAX_CONCURRENCY = 4;
+
+// Both were fixed values until 2026-08-12, which meant an operator whose agents
+// send more often than expected had no way to accommodate them short of editing
+// the source. The defaults are unchanged; only the ability to move them is new.
+function boundedEnvInt(name, fallback, min, max) {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value >= min && value <= max ? value : fallback;
+}
+
+const INGEST_REQUESTS_PER_WINDOW =
+  boundedEnvInt('EGRESSVIEW_AGENT_INGEST_REQUESTS_PER_MINUTE', 30, 1, 10_000);
+const INGEST_MAX_CONCURRENCY =
+  boundedEnvInt('EGRESSVIEW_AGENT_INGEST_CONCURRENCY', 4, 1, 64);
 const MAX_INGEST_BUCKETS = 4096;
 
 /**
@@ -332,10 +350,22 @@ module.exports = function agentRoutes({
     }
   });
 
-  router.get('/agents/ingest-metrics', requireAdmin, (_req, res) => {
+  router.get('/agents/ingest-metrics', requireAdmin, (req, res) => {
+    // Ingest writes to SQLite synchronously, on the loop that also answers the
+    // web UI. Throughput therefore says nothing about whether the Hub is still
+    // usable -- P2-87 was fast at storing and completely unusable at the same
+    // time. This delay is the number that tells an operator how close ingest is
+    // to taking the site down with it.
+    const delay = {
+      p50: Math.round(eventLoopDelay.percentile(50) / 1e6),
+      p95: Math.round(eventLoopDelay.percentile(95) / 1e6),
+      max: Math.round(eventLoopDelay.max / 1e6),
+    };
+    if (req.query.resetDelay === '1') eventLoopDelay.reset();
     res.json({
       ...ingestMetrics,
       inFlight: activeIngests,
+      eventLoopDelayMs: delay,
       limits: {
         requestsPerMinutePerAgent: INGEST_REQUESTS_PER_WINDOW,
         maxConcurrent: INGEST_MAX_CONCURRENCY,

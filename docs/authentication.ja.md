@@ -60,6 +60,10 @@ reverse proxyが設定済みの`SUBPATH`を除去してapplicationへ転送す�
 
 既定値はclientごとに1分間600 API read、120 API mutationです。通常trafficを観測した上で、必要な場合だけ`EGRESSVIEW_RATE_LIMIT_READS`と`EGRESSVIEW_RATE_LIMIT_WRITES`を変更してください。
 
+Agentのingestは別枠で、アドレスごとに1分間1500件です（`EGRESSVIEW_AGENT_INGEST_WRITES_PER_IP`）。Agentは人ではなく、1台で1分間に30バッチ送ることがあるため、専用枠が必要です。120のmutation枠を共有すると、同じアドレスから来る5台目のAgentが弾かれます。これはAgentがNAT越しにHubへ到達する構成では即座に起きます。Agent1台あたりは別途1分間30回に制限されます（`EGRESSVIEW_AGENT_INGEST_REQUESTS_PER_MINUTE`）。
+
+上限を超えるとHubは`Retry-After`付きの`429`を返し、Agentはbackoffして再送するため、観測は失われず遅延します。ただし遅延も避けたいものです。画面上は「Hubの表示が少し古い」という形で現れ、理由を示すものが何も出ません。`GET /api/agents/ingest-metrics`は`eventLoopDelayMs`を返します。ingestがWeb UIを待たせ始めているかどうかは、この値で判断してください。
+
 ## 監査
 
 設定画面でlogin、logout、security変更、CSRF拒否、更新APIの最近のeventを確認できます。Append-only rowは生のemail/client IPではなく、request IDとkeyed hashを保存します。既定保持期間は180日です。
