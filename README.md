@@ -2,209 +2,102 @@
 
 **Home / SOHO Network Security Monitor — Real-time visibility into every LAN device's outbound connections**
 
-Is your smart TV phoning home to unexpected servers? Are your IP cameras, IoT appliances, or NAS boxes making connections you never authorised? EgressView answers these questions by passively monitoring every outbound connection from every device on your LAN, then turning that data into an investigation workflow: Graph Map and Statistics for the big picture, Connection Log and Devices for drill-down analysis — with automatic threat detection.
+Is your smart TV phoning home to unexpected servers? Are your IP cameras, IoT appliances, or NAS boxes making connections you never authorised? EgressView answers these questions by passively monitoring every outbound connection from every device on your LAN, then turning that data into an investigation workflow.
 
-No new hardware. No inline traffic interception. Works via the NAT session tables of your existing Yamaha RTX and/or Cisco IOS routers. AI assistants such as AWS Kiro, Anthropic Claude, and Anysphere Cursor can query EgressView directly via the built-in MCP server — just ask in natural language.
+No new hardware. No inline traffic interception. It reads the NAT session tables your existing Yamaha RTX or Cisco IOS router already keeps, so nothing sits in the path of your traffic and nothing slows down.
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
 ![Release](https://img.shields.io/badge/release-v1.8.0-3fb950)
-[![Live Demo](https://img.shields.io/badge/demo-live-ff69b4)](https://egressview-demo.fly.dev)
 
-> 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/egressview/)
+> 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/egressview/) | 📋 [Changelog](CHANGELOG.md) · [Releases](https://github.com/yo1t/egressview/releases)
 
 ---
 
-## Project Status
+## See it in action
 
-EgressView is production-oriented for home/SOHO networks using Yamaha RTX or Cisco IOS. ASUS AP support and optional data sources are maintained as companion integrations.
+### ▶ [Open the live demo](https://egressview-demo.fly.dev)
 
-### What's new in v1.8.0
-
-Version 1.8.0 completes the release-signing story and gets the runtime onto the current dependency line. Official distributions are now signed with an AWS KMS Ed25519 key whose private half cannot be exported, and verification still needs nothing but `openssl` and the published public key — no AWS account, no network. Threat detection and new-node detection each gained independent Slack and history switches, so a noisy detection can be quietened without silencing Slack for everything or losing the in-app record. `better-sqlite3` moves to 13.0.3 (SQLite 3.53.4), dependency install scripts are disabled so installs use bundled prebuilt binaries instead of compiling, and CI now runs on Node 22, 24, and 26.
-
-This release changes no database schema and needs no migration; upgrading from 1.7.0 is a restart. One install-time change is worth knowing about: because install scripts are now disabled, a platform without a bundled prebuilt binary for `better-sqlite3` needs Python and a C++ toolchain and `npm ci --ignore-scripts=false`. Prebuilds cover darwin, linux, linuxmusl, and win32 on arm64 and x64.
-
-## For Home / SOHO Security
-
-Modern home and SOHO networks run 20–40 devices: smart TVs, IP cameras, NAS drives, Wi-Fi speakers, printers, network switches, PCs, and smartphones. Many of these — especially IoT equipment — update infrequently and have unknown outbound behaviors. Any of them can be silently compromised and begin exfiltrating data or relaying traffic for a botnet.
-
-EgressView answers the question most home users can't ask: *what is each device on my network actually connecting to?*
-
-- **Passive, zero-impact monitoring** — reads the router's NAT session table over SSH; no inline tap, no throughput penalty, no latency added
-- **Per-device visibility** — every connection tagged to the source device (vendor, model, hostname) via OUI, mDNS, SSDP, and NetBIOS
-- **Automatic threat detection** — every connection checked in real time against Feodo Tracker, ThreatFox, URLhaus, and Spamhaus DROP
-- **Manual threat investigation** — explicitly query AbuseIPDB, VirusTotal, or AlienVault OTX with server-side caching and rate limits ([guide](docs/manual-threat-investigation.md))
-- **Linux conntrack preview** — collect from Linux-based routers over SSH; Docker integration verified, hardware validation pending ([setup](docs/setup-conntrack.md))
-- **Mobile monitoring view** — check router health, Graph Map, Statistics, Connection Log, Devices, and Detection Log from a phone on your VPN/private network
-- **AI Insights start page** — opens with collection health, connections, devices, destinations, threats, and previous-period comparisons. Manual analysis/chat can use bounded device inventory and ASUS node summaries through Ollama, Anthropic, OpenAI, or Amazon Bedrock, with versioned-catalog monthly tokens/estimated cost, explicit partial totals for unpriced models, and per-answer model/cost metadata. Optional event notifications add off-by-default daily/weekly reports and bounded threat-change analysis to append-only UI history or Slack ([setup guide](docs/setup-ai-insights.md), [Bedrock production setup](docs/setup-bedrock.md))
-- **Instant Slack alerts** — DM the moment any device connects to a known C2 server or malware distribution host. Threat detection and new node detection each have independent Slack and UI-history switches under the Notifications settings tab
-- **No hardware changes** — runs on any Mac, PC, or Raspberry Pi alongside your existing Yamaha RTX or Cisco IOS routers
-
-## What it does
-
-- Connects to **Yamaha RTX and Cisco IOS** routers via SSH and reads their NAT session tables every 60 seconds
-- Registers up to **10 routers in any Yamaha/Cisco mix**, isolates polling failures per router, and deduplicates the same connection while retaining every observing router
-- **[INSPECT] syslog supplement** — tails the Yamaha syslog in real time to capture short-lived TCP sessions that complete within the 60-second polling gap
-- **dnsmasq DNS query log** — tails the EC2/server-side dnsmasq log to resolve destination IPs to meaningful domain names (e.g. `example.com`) per client device; forward DNS names take priority over PTR reverse lookups
-- **[DHCPD] syslog tracking** — tails Yamaha DHCP events (Allocates/Extends) for real-time IP→MAC mapping
-- **Threat intelligence**: matches all connections against Feodo Tracker, ThreatFox, URLhaus, and Spamhaus DROP feeds (auto-refreshed hourly)
-- **Slack notifications**: sends a DM when a threat is detected (configurable cooldown, language-aware)
-- Identifies local devices using **OUI vendor lookup**, **mDNS/Bonjour**, **SSDP**, **NetBIOS**, and an **Apple model dictionary** (resolves down to "iPhone 15 Pro")
-- Enriches each destination IP with **reverse DNS**, **RDAP** (organization name), and **GeoIP** (latitude/longitude/city)
-- Uses **Graph Map** and **Statistics** for whole-network overview, then **Connection Log** and **Devices** for per-session and per-device drill-down
-- Optionally connects to an **ASUS WiFi access point** (used as AP/mesh, not as a router) to get WiFi client details (band, signal strength, traffic rates, AiMesh topology)
-- Keeps a **connection history** in **SQLite** (WAL mode, crash-safe; configurable retention up to 2 years)
-- Inventories normal and pre-migration backups, warns when the next migration lacks disk headroom, and offers dry-run cleanup that preserves verified restore points
-- **Connection log**: sortable/searchable table of all sessions with threat status badges; **App column** infers the application or service name from port number and destination hostname (APNs, FCM, AirPlay, MQTT/TLS, QUIC, iCloud, YouTube, AWS, Slack, Zoom, Tuya Smart, Gaijin/DCS, and more)
-- **🔔 Detection Log** — persistent history of all threat detections and new-device alerts, with per-column filter, sort, and click-to-detail popup; logged regardless of Slack configuration
-- **📡 Data Sources tab** — configure each data source (dnsmasq / [INSPECT] / [DHCPD]) independently from the settings UI
-- **💻 macOS Agent** — a router shows you what left the house but not which app sent it; the [EgressView Agent for macOS](apps/agent-macos/README.md) reports the process behind each outbound connection from your Mac, so an unfamiliar address arrives with the name of the program that reached for it (metadata only, never payloads; requires Hub 1.9.0 or newer)
-- **🤖 AI Agent access (MCP)** — built-in [Model Context Protocol](https://modelcontextprotocol.io/) server exposes 11 tools (traffic summary, threat connections, top destinations, device list, device notes, and more) to AI assistants such as AWS Kiro, Anthropic Claude, and Anysphere Cursor; supports stdio/HTTP and both the `2025-11-25` and `2026-07-28` protocol eras
-- Single-page dark-themed UI with **✦ AI Insights** as the leftmost start page, plus Graph Map, Statistics, Connection Log, Devices, Detection Log, and Settings
-
-## Demo
+The real interface with sample data. Nothing to install, no router required — the fastest way to decide whether this is worth your evening.
 
 https://github.com/user-attachments/assets/9448d75b-a7fe-4363-8d35-da17abaed0ee
 
-> UI language: English / Japanese selectable
-
-Graph Map and Statistics give you the network-wide overview: device/destination patterns, session trends, and noisy endpoints — all updating in real time.
-
-Connection Log and Devices let you drill down into suspicious destinations, noisy devices, beacon candidates, notes, and device history: see the pattern, filter the time range, inspect sessions, then pivot to the device.
-
-## Screenshots
-
-![AI Insights overview](docs/assets/egressview-ai-insights-en.png)
-![Graph Map overview](docs/assets/egressview-graph-map.png)
-![Statistics view](docs/assets/egressview-statistics.png)
-![Connection Log drill-down](docs/assets/egressview-connection-log.png)
-![Devices drill-down](docs/assets/egressview-devices.png)
 ![Detection Log detail popup](docs/assets/egressview-detection-log.png)
+*A device reached a known command-and-control address. This is the moment the tool exists for — the record is kept whether or not you have Slack configured.*
 
-## Architecture
+![Graph Map overview](docs/assets/egressview-graph-map.png)
+*Every device and everywhere it went, at once. Clusters that do not belong to anything you set up are where you start looking.*
 
-For component boundaries, multi-router data flow, persistence safety, and security boundaries, see the **[Architecture Guide](docs/architecture.md)**. For automation and integration, see the **[REST API Reference](docs/api-reference.md)**.
+![Connection Log drill-down](docs/assets/egressview-connection-log.png)
+*From a suspicion to the individual sessions: filter by time, sort, search per column, then pivot to the device that made them.*
 
-```
-┌─────────────────┐  SSH (NAT)  ┌──────────────────────┐  WebSocket   ┌──────────────────┐
-│  Yamaha RTX     │◄───────────►│                      │◄────────────►│ Browser          │
-│  [INSPECT] log  │  syslog/UDP │   EgressView Server  │  MCP         ├──────────────────┤
-│  [DHCPD] log    │────────────►│   (Node.js)          │◄────────────►│ AI Assistant     │
-└─────────────────┘             │                      │  stdio/HTTP  │ (Kiro, Claude…)  │
-┌─────────────────┐  SSH (NAT)  │  Pollers:            │              └──────────────────┘
-│  Cisco IOS      │◄───────────►│  • yamaha (SSH)      │
-│  (supported)    │             │  • cisco (SSH)       │
-└─────────────────┘             │  • asus (HTTP)       │
-┌─────────────────┐  HTTP       │  • inspect-syslog    │
-│  ASUS WiFi AP   │◄───────────►│  • dhcpd-syslog      │
-│  (Client list)  │             │  • dnsmasq-log       │
-└─────────────────┘             │                      │
-┌─────────────────┐  tail -F    │                      │
-│  dnsmasq        │────────────►│                      │
-│  query log      │             └──────────┬───────────┘
-└─────────────────┘                        │
-                       ┌───────────────────┼───────────────┐
-                       │                   │               │
-                 ┌─────┴─────┐  ┌─────────┴───┐  ┌───────┴───┐
-                 │ Enrichment│  │  Threat Intel│  │  SQLite   │
-                 │ • dnsmasq │  │  • Feodo     │  │  History  │
-                 │ • Rev DNS │  │  • ThreatFox │  │  (WAL)    │
-                 │ • RDAP    │  │  • URLhaus   │  └───────────┘
-                 │ • GeoIP   │  │  • DROP      │
-                 │ • OUI     │  └─────────────┘
-                 │ • mDNS    │
-                 └───────────┘
-```
-
-## Requirements
-
-- **Node.js** 22+
-- At least one supported NAT router: **Yamaha RTX** and/or **Cisco IOS**, with SSH access enabled
-- (Optional) **ASUS WiFi access point** with web admin enabled (used as AP/mesh mode, not as a router)
-
-Cisco IOS support is validated on a C841M-4X-JSEC/K9 running IOS 15.5(3)M9, including SSH, enable, NAT/ARP/NDP, verbose output, TOFU, and automatic reconnect. Multi-router behavior is automatically tested with 10 mixed fake routers and was supplementally tested by registering one physical Cisco and one physical Yamaha twice under distinct router IDs. This validates parallel collection and deduplication, not physical HA, state synchronization, or failover. Please report device-specific output differences through GitHub Issues.
-
-## AI Agent Access (MCP)
-
-EgressView exposes a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server so Claude Desktop, Claude Code, and other AI assistants can query your network data directly — just ask in natural language.
-
-```
-"Show me a threat summary for the last 24 hours"
-"Any new devices on the network this week?"
-"What is 192.168.1.50 connecting to?"
-"Are there any threat connections right now?"
-"Add a note to 192.168.1.97: Roomba, connects to GitHub for OTA updates"
-```
-
-**Quick setup** (Claude Desktop, macOS): add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "egressview": {
-      "command": "node",
-      "args": ["/path/to/egressview/mcp-server.js"],
-      "env": {
-        "EGRESSVIEW_URL":   "http://your-server-ip:3000",
-        "EGRESSVIEW_TOKEN": "your-admin-token"
-      }
-    }
-  }
-}
-```
-
-11 tools available: `get_threat_summary`, `get_traffic_summary`, `get_top_destinations`, `get_device_traffic`, `get_new_nodes`, `get_threat_connections`, `get_alerts`, `get_devices`, `query_connections`, `get_device_notes`, `set_device_note`.
-
-Use the API/admin token for `EGRESSVIEW_TOKEN`, not the browser login password.
-
-See the **[MCP setup guide →](docs/setup-mcp.md)** for full instructions including remote EgressView access and HTTP mode behind Apache / nginx.
+Prefer to run it yourself? `DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start` seeds 160 sample connections locally and marks the header with a **DEMO** badge so you never confuse it with a live install.
 
 ---
 
-## Try Without Hardware
+## What it does
 
-Want to explore the UI before setting up a router? Start in **demo mode** — it seeds 160 realistic sample connections and uses a fixed admin token:
+**Tells you which of your devices is talking, and to whom.** Every connection is tagged to its source device by vendor, model, and hostname — resolved through OUI lookup, mDNS/Bonjour, SSDP, NetBIOS, and a 200-model Apple dictionary — so a suspicious destination comes with the name of the thing that reached for it rather than an IP you have to look up.
 
-```bash
-git clone https://github.com/yo1t/egressview.git
-cd egressview
-npm install
-DEMO_MODE=true DEMO_ADMIN_TOKEN=my-token npm start
-```
+**Warns you when a device reaches something known to be dangerous.** Every connection is checked in real time against Feodo Tracker, ThreatFox, URLhaus, and Spamhaus DROP, refreshed hourly. Findings are graded 🚨 Detected / ⚠️ Review / ✅ Clear, because a CDN that also hosts malware is not the same as a botnet controller, and treating them alike trains you to ignore alerts.
 
-Open `http://localhost:3000` and enter `my-token` when prompted. All views — Graph Map, Statistics, Connection Log, Devices — are fully functional with the sample data. A **DEMO** badge appears in the header to distinguish it from a live installation.
+**Reaches you when you are not looking at the screen.** A Slack DM goes out the moment a device connects to a known C2 or malware host, with a per-destination cooldown so one noisy endpoint cannot flood you. Threat detections and new-device alerts have independent switches for Slack and for in-app history, so you can quieten one without losing the record of the other.
+
+**Keeps the evidence.** Connections are stored in SQLite (WAL, crash-safe, retention configurable up to two years), and the Detection Log keeps every threat and new-device alert with per-column filters and click-through detail — so "when did this start?" is a question you can actually answer.
+
+**Names the destination, not just the address.** Each destination is enriched with reverse DNS, RDAP organisation, and GeoIP; the dnsmasq query log, when available, supplies the real hostname a device asked for. The App column infers the service behind a session — APNs, iCloud, QUIC, MQTT/TLS, AirPlay, YouTube, AWS, Slack, Zoom and more — so ordinary traffic identifies itself and the unusual stands out.
+
+**Catches what a 60-second poll would miss.** The Yamaha `[INSPECT]` syslog is tailed live for short TCP sessions that open and close between polls, and `[DHCPD]` events keep IP-to-MAC mapping current as leases move.
+
+**Watches more than one router.** Up to ten Yamaha and Cisco routers in any mix, polled independently so one unreachable router does not stop the others. A connection seen by several routers is stored once, keeping every observer.
+
+**Sees inside your Mac, where a router cannot.** A router shows what left the house but not which application sent it. The [EgressView Agent for macOS](apps/agent-macos/README.md) reports the process behind each outbound connection — metadata only, never payloads.
+
+**Answers questions in plain language.** The built-in MCP server exposes 11 tools to AI assistants such as AWS Kiro, Anthropic Claude, and Anysphere Cursor, so "what did 192.168.1.50 connect to this week?" is something you can simply ask. In-app **AI Insights** opens with collection health, traffic, threats, and period comparisons.
+
+**Works from a phone.** Router health, Graph Map, Statistics, Connection Log, Devices, and Detection Log are usable on a phone over your VPN or private network.
+
+**Optional: names your Wi-Fi clients.** An ASUS access point in AP or AiMesh mode adds band, signal strength, traffic rates, and mesh topology for wireless devices.
+
+**Optional: investigate a specific address on demand.** AbuseIPDB, VirusTotal, or AlienVault OTX are queried only when you explicitly ask, with server-side caching and rate limits ([guide](docs/manual-threat-investigation.md)).
+
+---
+
+## Does it work with my setup?
+
+**You need a Yamaha RTX or a Cisco IOS router.** There is no packet capture mode and no inline option. If you have neither, nothing below will help — better to know that now.
+
+| | Requirement |
+|--|-------------|
+| ✅ | **Node.js 22+** on any Mac, PC, or Raspberry Pi that stays on |
+| ✅ | **At least one Yamaha RTX or Cisco IOS router** with SSH enabled ([Yamaha](docs/setup-yamaha.md) · [Cisco](docs/setup-cisco.md)) |
+| ☐ | Optional: an **ASUS access point** in AP/AiMesh mode, for Wi-Fi client detail ([setup](docs/setup-asus.md)) |
+
+**Yamaha RTX** — any model with SSH and NAT descriptor support: RTX1200, RTX1210, RTX1220, RTX1300, RTX810, RTX830, NVR500, NVR510, NVR700W.
+
+**Cisco IOS** — physically validated on a C841M-4X-JSEC/K9 running IOS 15.5(3)M9, covering SSH, enable, NAT/ARP/NDP, verbose output, TOFU, and automatic reconnect.
+
+**Linux routers** — collection over SSH using conntrack is a preview: verified against Docker, **not yet validated on hardware** ([setup](docs/setup-conntrack.md)).
+
+**What multi-router support has and has not been proven to do.** The automated gate runs 10 mixed fake routers at 1,000 sessions each with failure isolation and deterministic deduplication, and one physical Cisco and one physical Yamaha were each registered twice under different router IDs. That establishes parallel collection and deduplication. It does **not** establish HSRP/VRRP, NAT state synchronisation, or real failover, and multiple distinct units of the same vendor have not been tested physically. Please report device-specific output differences through GitHub Issues.
 
 ---
 
 ## Quick Start
 
-### Choose the shortest setup path
+**About 15 minutes, and most of it is the router.** Getting the software running took 7 seconds when measured on a Mac (clone 0.9 s, `npm install` 4.0 s, first launch to ready 2 s); enabling SSH on a router you have never logged into is what takes the rest.
 
-Start with the smallest path that matches your network, then add sources later from Settings.
+Start with the smallest path that matches your network. You can add sources later from Settings without redoing anything.
 
-| Pattern | Use this when | What to configure first |
-|---------|---------------|-------------------------|
-| Minimal: one Yamaha RTX or Cisco IOS | You want the fastest first run with no extra hardware | Router type, IP, SSH credentials, then **Connect & Auto-detect** |
-| Multiple routers: up to 10 | You have redundant routers or multiple uplinks | Add each Yamaha/Cisco router as a separate named row |
-| Optional: + ASUS AP | You also want WiFi client names, vendors, and MAC visibility | Router setup, then ASUS AP IP and admin login |
-| Detailed: + dnsmasq / INSPECT / DHCPD | You want richer hostnames, short-lived TCP sessions, and live IP-to-MAC mapping | Recommended setup, then enable Data Sources |
-| Notifications: + Slack | You want threat detections delivered by DM | Any setup above, then Slack notifications |
+| Pattern | Use this when |
+|---------|---------------|
+| One Yamaha RTX or Cisco IOS | You want the fastest first run |
+| Up to 10 routers | You have redundant routers or multiple uplinks |
+| + ASUS AP | You also want Wi-Fi client names, vendors, and MAC visibility |
+| + dnsmasq / INSPECT / DHCPD | You want real hostnames, short-lived sessions, and live IP-to-MAC mapping |
+| + Slack | You want detections delivered by DM |
 
-### Step 1 — Prerequisites checklist
-
-| | Requirement | Setup guide |
-|--|-------------|-------------|
-| ✅ | Node.js 22+ installed on your Mac/PC/Raspberry Pi | [nodejs.org](https://nodejs.org) |
-| ✅ | At least one Yamaha RTX or Cisco IOS router with SSH enabled | [Yamaha guide →](docs/setup-yamaha.md) / [Cisco guide →](docs/setup-cisco.md) |
-| ☐ | (Optional) ASUS WiFi AP with web admin enabled | [Setup guide →](docs/setup-asus.md) |
-| ☐ | (Optional) in-app AI Insights (Ollama / Anthropic / OpenAI / Amazon Bedrock) | [Setup guide →](docs/setup-ai-insights.md) |
-| ☐ | (Optional) AI assistant access via MCP (AWS Kiro, Anthropic Claude, Anysphere Cursor…) | [Setup guide →](docs/setup-mcp.md) |
-| ☐ | Choose local, private, public, or air-gapped deployment boundaries | [Deployment profiles →](docs/deployment-profiles.md) |
-| ☐ | Run with no internet access at all (`EGRESSVIEW_OFFLINE_MODE=true`) | [Offline mode →](docs/deployment-profiles.md#offline-mode) |
-| ☐ | Install a signed portable release, then run it offline | [Signed distribution →](docs/offline-distribution.md) |
-
-### Step 2 — Install and launch
+### 1. Install and launch
 
 ```bash
 git clone https://github.com/yo1t/egressview.git
@@ -213,9 +106,9 @@ npm install
 npm start
 ```
 
-### Step 3 — Open the browser and log in
+### 2. Log in
 
-On first startup, an initial **login password** is shown once on an interactive terminal. Service/non-interactive startup writes it to `.egressview.json.initial-login-password` with mode `0600` instead of putting it in a persistent log:
+A login password is printed once, on an interactive terminal. A service or non-interactive start writes it instead to `.egressview.json.initial-login-password` with mode `0600`, rather than leaving it in a log that persists:
 
 ```
 ══════════════════════════════════════════════════════════════
@@ -225,202 +118,46 @@ On first startup, an initial **login password** is shown once on an interactive 
 ══════════════════════════════════════════════════════════════
 ```
 
-Open `http://localhost:3000` and enter the password. Each browser/device gets its own login session (30-day sliding expiry); you can review and revoke them — and change the password — in Settings → General.
+Open `http://localhost:3000` and enter it. Each browser gets its own session with a 30-day sliding expiry, and you can review or revoke them in Settings → General. Delete the one-time password file after you are in.
 
-### Step 4 — Configure your router
+### 3. Add your router
 
-Open Settings → **L3/L4** and add each router as a separate row. Up to 10 enabled Yamaha RTX and Cisco IOS routers can be mixed freely.
+Settings → **L3/L4**, one row per router. Enter the LAN IP and the SSH login from the [Yamaha](docs/setup-yamaha.md) or [Cisco](docs/setup-cisco.md) guide, then click **Connect & Auto-detect**.
 
-| Field | Where to find it |
-|-------|-----------------|
-| Yamaha RTX IP | Your router's LAN IP (e.g. `192.168.1.1`) |
-| SSH username / password | The login you set up in [Yamaha setup guide](docs/setup-yamaha.md) |
-| Cisco IOS IP / username / password | The login you set up in the [Cisco setup guide](docs/setup-cisco.md) |
-| ASUS AP IP / password | The AP's LAN IP and admin password ([ASUS setup guide](docs/setup-asus.md)) |
+Auto-detect checks SSH access, finds the NAT descriptor (usually `100`), locates the LAN address, and confirms that NAT sessions can actually be read — **before you save**, so a wrong password fails while you are still looking at the screen rather than silently collecting nothing.
 
-For each Yamaha RTX, click **Connect & Auto-detect** after entering the IP, username, and password. EgressView checks SSH access, detects the NAT descriptor (usually `100`), finds the LAN IP when available, verifies that NAT sessions can be read, and fills the recommended setting before you save.
+### 4. Watch it fill in
 
-For each Cisco IOS router, **Connect & Auto-detect** verifies SSH and NAT access. The LAN address is selected from the NAT inside interface. Each router is polled independently, with at most three router polls running at once, so one unavailable router does not stop the others.
+Devices, sessions, and statistics start appearing within a few seconds. Nothing else is required; everything below is optional.
 
-Within a few seconds, devices, sessions, and statistics will start appearing in the UI.
+---
 
-> **Note:** The password is stored only as a versioned scrypt record. Remove the one-time password file after the first successful login.
+## Going further
 
-## Authentication
+Each of these is optional and has its own guide.
 
-All API endpoints and the WebSocket connection are protected. Local login can never be disabled; Google OIDC is an optional additional login method.
+| | |
+|---|---|
+| [macOS Agent](apps/agent-macos/README.md) | See which application on a Mac made a connection, not just that the Mac made it (needs Hub 1.9.0+) |
+| [AI assistant access (MCP)](docs/setup-mcp.md) | Ask about your network in plain language from Claude, Kiro, or Cursor — 11 tools, stdio or HTTP |
+| [AI Insights](docs/setup-ai-insights.md) · [Bedrock](docs/setup-bedrock.md) | Summaries and analysis through Ollama, Anthropic, OpenAI, or Amazon Bedrock, with monthly token and cost tracking |
+| [Authentication & HTTPS](docs/authentication.md) | Sessions, Google OIDC, roles, audit log, and turning on TLS. **Read this before exposing EgressView to the internet** |
+| [Configuration](docs/configuration.md) | Port, database path, memory limits — the settings that must exist before startup |
+| [Architecture](docs/architecture.md) · [REST API](docs/api-reference.md) | Component boundaries, data flow, and automation |
+| [Deployment profiles](docs/deployment-profiles.md) | Local, private, public, or fully air-gapped — including offline mode |
+| [Signed distribution](docs/offline-distribution.md) | Install a signed portable release and verify it with nothing but `openssl` |
+| [Additional data sources](docs/setup-conntrack.md) | dnsmasq, `[INSPECT]`, `[DHCPD]`, and Linux conntrack |
 
-| Credential | Purpose | Where |
-|-----------|---------|-------|
-| **Login password** | Browser login. Each device gets its own revocable session (30-day sliding expiry) | Printed on first startup; change it in Settings → General |
-| **API token** | Scripts / automation (`X-Admin-Token` header) | `.egressview.json` (`adminToken`); regenerate in Settings → General |
-| **Google OIDC** | Allowed Google accounts; sessions are revocable locally | Configure in Settings → General → Authentication & Audit |
-
-### Session management
-
-- Settings → General lists every logged-in device with last-activity time
-- Revoke a single device, or log out all other devices at once
-- Changing the password can optionally revoke all other sessions
-
-### If you lose the password
-
-```bash
-# Interactive TTY only; revokes every browser session
-npm run auth:reset
-# Also rotate the automation credential
-npm run auth:reset -- --regenerate-api-token
-```
-
-### How it works
-
-- New passwords require at least 14 characters. Passwords use a versioned scrypt record; successful legacy logins upgrade the record.
-- Failed logins are delayed 500 ms; comparisons use `crypto.timingSafeEqual`
-- Browser sessions use Secure/HttpOnly/SameSite cookies and CSRF protection. Existing header tokens remain supported for automation.
-- Login, logout, session revocation, token changes, and authenticated mutations are recorded in a pseudonymous append-only audit log.
-- Google OIDC uses Authorization Code + PKCE, state, nonce, JWKS signature validation, verified email, and an email/domain allowlist.
-
-Browser sessions use least-privilege roles derived on the server. The local
-administrator is always `admin`; a Google account matched by an explicit email
-entry is `operator`; and one matched only by a domain entry is read-only
-`viewer`. Operators can add device notes but cannot run paid AI analysis,
-change settings or credentials, restore backups, or manage authentication.
-
-See the [authentication and reverse-proxy guide](docs/authentication.md) before enabling internet access.
-
-## HTTPS (optional)
-
-By default EgressView serves plain HTTP. To enable HTTPS, add to `.egressview.json` and restart:
-
-```json
-"https": { "enabled": true }
-```
-
-A self-signed certificate (`.egressview-cert.pem` / `.egressview-key.pem`, 10-year validity) is generated automatically via the `openssl` CLI — your browser will show a one-time warning to accept it. To use your own certificate instead:
-
-```json
-"https": { "enabled": true, "certPath": "/path/to/cert.pem", "keyPath": "/path/to/key.pem" }
-```
-
-HTTPS is recommended if you use the login password from multiple devices, and required for safe remote access over the internet. Use a strong unique login password and keep EgressView updated.
-
-## Configuration
-
-All settings are stored in `.egressview.json` (auto-generated, gitignored). You can also use environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3000` | HTTP server port |
-| `POLL_INTERVAL_MS` | `60000` | ASUS polling interval (ms) |
-| `ROUTER_IP` | `192.168.1.1` | Default ASUS router IP |
-| `YAMAHA_IP` | — | Yamaha RTX IP address |
-| `YAMAHA_USER` | — | Yamaha SSH username |
-| `YAMAHA_PASS` | — | Yamaha SSH password |
-| `YAMAHA_NAT` | `100` | NAT descriptor number |
-| `SUBPATH` | — | Reverse proxy sub-path (e.g. `/egressview`) |
-| `EGRESSVIEW_DB` | `.egressview.db` | Path to the SQLite database file |
-| `EGRESSVIEW_HISTORY_HOT_MAX` | `100000` | Maximum recent connections kept in memory; full retained history remains in SQLite |
-| `LOG_LEVEL` | `info` | Log verbosity: `error` / `warn` / `info` / `debug` |
-
-Authenticated administrators can inspect the current RSS, heap usage, hot-cache size, limit, and persisted row count at `GET /api/connections/memory`. The response contains counts only, not traffic details.
-
-## Features
-
-### L3/L4: Yamaha RTX (NAT Session Monitoring)
-
-- Parses `show nat descriptor address <N> detail` output
-- Tracks TCP/UDP/ICMP/GRE sessions with source, destination, port, TTL
-- Auto-reconnects on SSH timeout or connection loss
-- TOFU (Trust On First Use) host key verification
-
-### L2: ASUS WiFi Access Point (Mesh-capable, Client Monitoring)
-
-The ASUS device is used as a **WiFi access point (AP mode or AiMesh)**, not as a router. Yamaha RTX handles all L3 routing and NAT. The ASUS AP provides L2 client visibility:
-
-- SHA256 challenge-response authentication
-- Client list with connection type (wired/2.4G/5G/6G), RSSI, traffic rates
-- AiMesh node discovery (multi-AP topology)
-- Auto token refresh
-
-### Device Identification
-
-- **OUI database** (Wireshark manuf, auto-downloaded weekly)
-- **mDNS/Bonjour** service discovery (100+ service types)
-- **SSDP/UPnP** device detection
-- **NetBIOS** name resolution
-- **Apple model dictionary** (200+ models: iPhone, iPad, Mac, Apple TV, HomePod, Apple Watch)
-- **Auto-investigation** mode: scans unknown devices in the background
-
-### Investigation Views
-
-- **Graph Map**: Whole-network topology overview for spotting unusual device/destination clusters
-- **Statistics**: Time-series charts and destination summaries for traffic trends
-- **Connection Log**: Full session table with threat indicators, sortable columns, and per-column search filters (text match, regex, date range)
-- **Devices**: Inventory view for drilling into device identity, notes, status, and history
-- **Connection panel**: Per-device list of active internet connections with org/country info
-- **IPv4/IPv6 badges**: Protocol detection per device via NDP cache polling
-
-### Threat Intelligence (C2/Botnet Detection)
-
-- **Feodo Tracker**: Emotet/Dridex/TrickBot C2 server IPs
-- **ThreatFox**: Malware IOC (IP:port)
-- **URLhaus**: Malware distribution URLs (with low-confidence handling for CDN domains like GitHub)
-- **Spamhaus DROP**: Hijacked IP ranges (CIDR)
-- Three confidence levels: 🚨 Detected (high) / ⚠️ Review (low — legitimate service) / ✅ Clear
-- Detailed threat popup with actionable guidance per confidence level
-- Auto-refresh feeds every hour (configurable)
-
-### Slack Notifications
-
-- Sends a **Slack DM** when a threat is detected
-- Configurable per-destination cooldown (default 1 hour) to prevent notification spam
-- Message language follows the UI language setting (English / Japanese)
-- Test-send button in settings to verify configuration
-- Requires a Slack Bot Token and your User ID (`U01XXXXXXX`) — set up via Settings → General
-
-### Security
-
-- Admin token authentication (timing-safe comparison)
-- SSRF protection with DNS-result validation and connection pinning
-- Socket.IO same-origin enforcement
-- SSH host key fingerprint verification (TOFU)
-- Config files stored with `0600` permissions
-- No passwords sent to browser (only boolean flags)
-
-## Supported Routers
-
-EgressView supports up to 10 enabled L3/L4 routers in any Yamaha/Cisco combination. A connection observed by multiple routers is stored once with all observing router IDs.
-
-### Cisco IOS (L3/L4)
-- Physically validated: C841M-4X-JSEC/K9, IOS 15.5(3)M9
-- Uses verbose NAT creation age and remaining TTL when available, with automatic plain-output fallback
-
-### Yamaha RTX (L3/L4)
-Any model with SSH access and NAT descriptor support:
-- RTX1200, RTX1210, RTX1220, RTX1300
-- RTX810, RTX830
-- NVR500, NVR510, NVR700W
-
-### Multi-router validation boundary
-- Automated gate: 10 mixed fake routers, 1,000 sessions each, concurrency capped at 3, failure isolation, and deterministic deduplication
-- Physical supplementary smoke: one Cisco and one Yamaha each registered twice under different router IDs
-- Not yet physically validated: multiple distinct units of the same vendor, HSRP/VRRP, NAT state synchronization, or real failover
-
-### ASUS WiFi AP (L2, Mesh-capable)
-Any model with the standard web admin interface, used in AP mode or AiMesh:
-- RT-AX series (AX86U, AX88U, AX92U, etc.)
-- RT-AC series
-- ZenWiFi (AiMesh)
+---
 
 ## License
 
-EgressView is dual-licensed:
+EgressView is dual-licensed.
 
-- Open source license: [GNU Affero General Public License v3.0](LICENSE)
-- Commercial license: available separately for proprietary or closed-source use
+- Open source: [GNU Affero General Public License v3.0](LICENSE)
+- Commercial: available separately for proprietary or closed-source use
 
-You may use, modify, and distribute EgressView under the AGPL-3.0. If you include EgressView or derivative works in a proprietary product, distribute it without source code, or provide a modified version as a network service, you must comply with the AGPL-3.0 source code obligations.
-
-If you want to use EgressView in a proprietary or closed-source commercial product without releasing the corresponding source code under the AGPL-3.0, you must obtain a commercial license from the copyright holder.
+You may use, modify, and distribute EgressView under the AGPL-3.0. If you include EgressView or derivative works in a proprietary product, distribute it without source code, or provide a modified version as a network service, you must comply with the AGPL-3.0 source code obligations. To use it in a proprietary product without releasing the corresponding source, you need a commercial license from the copyright holder.
 
 ```
 EgressView — Real-time network connection visualizer
@@ -435,4 +172,4 @@ AWS Kiro, Anthropic Claude, Anysphere Cursor, Cisco, Cisco IOS, Yamaha, ASUS, an
 
 ## Contributing
 
-Issues and pull requests are welcome. Please open an issue first for major changes. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines, [ROADMAP.md](ROADMAP.md) for what's planned, and [SECURITY.md](SECURITY.md) for how to report vulnerabilities privately.
+Issues and pull requests are welcome. Please open an issue first for major changes. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, [ROADMAP.md](ROADMAP.md) for what is planned, and [SECURITY.md](SECURITY.md) for how to report vulnerabilities privately.
