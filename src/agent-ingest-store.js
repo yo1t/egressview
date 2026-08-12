@@ -188,6 +188,28 @@ function reconcileCorrelations(options) {
   return correlation.reconcile(options);
 }
 
+/**
+ * What an agent last delivered, for the collection health display.
+ *
+ * A router reports the sessions its most recent poll returned; the equivalent
+ * for an agent is the observations in its most recent batch. Without this the
+ * health strip fell back to the router fields, so a Mac that was delivering
+ * normally was shown as `0` with no collection time — which reads as "the agent
+ * is not working" to someone who has just installed it.
+ */
+function getAgentCollectionStatus(agentId) {
+  const database = requireDb();
+  const batch = database.prepare(`
+    SELECT batchId, receivedAt FROM agent_ingest_batches
+    WHERE agentId = ? ORDER BY receivedAt DESC LIMIT 1
+  `).get(agentId);
+  if (!batch) return { lastReceivedAt: null, observationCount: 0 };
+  const observationCount = database.prepare(
+    'SELECT COUNT(*) AS n FROM agent_observations WHERE agentId = ? AND batchId = ?'
+  ).get(agentId, batch.batchId).n;
+  return { lastReceivedAt: batch.receivedAt, observationCount };
+}
+
 function getCorrelationDiagnostics() {
   return correlation.diagnostics();
 }
@@ -247,6 +269,7 @@ function _dbForTest() {
 module.exports = {
   closeDb,
   initDb,
+  getAgentCollectionStatus,
   getCorrelationDiagnostics,
   pruneObservations,
   queryCorrelationReadModel,
