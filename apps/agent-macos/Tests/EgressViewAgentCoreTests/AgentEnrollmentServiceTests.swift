@@ -45,34 +45,101 @@ struct AgentEnrollmentServiceTests {
         agentVersion: "0.1.13"
     )
 
-    @Test("successful enrollment stores the returned bearer without logging it")
-    func enrollsAndStoresCredential() async throws {
-        let token = "egva_" + String(repeating: "a", count: 64)
-        let agentID = UUID()
+    @Test("applying returns a ticket, never a credential")
+    func applyReturnsTicketOnly() async throws {
         let response = try JSONSerialization.data(withJSONObject: [
-            "token": token,
-            "agent": ["agentId": agentID.uuidString],
+            "requestId": UUID().uuidString,
+            "claimSecret": "egvc_" + String(repeating: "c", count: 64),
+            "expiresAt": Int(Date().addingTimeInterval(600).timeIntervalSince1970 * 1000),
+            "status": "pending",
         ])
         let store = MemoryCredentialStore()
-        let transport = StubEnrollmentTransport(statusCode: 201, data: response) { request in
-            #expect(request.url?.absoluteString == "https://hub.example/api/agent/enroll")
-            #expect(request.httpMethod == "POST")
+        let transport = StubEnrollmentTransport(statusCode: 202, data: response) { request in
+            #expect(request.url?.absoluteString == "https://hub.example/api/agent/enrollment-requests")
             let body = try #require(request.httpBody)
             let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
-            #expect(json["code"] as? String == "egve_" + String(repeating: "b", count: 48))
+            // Normalised before sending: the operator types this once and must
+            // not lose an attempt to their shift key.
+            #expect(json["code"] as? String == "PKJZY3")
         }
         let service = AgentEnrollmentService(transport: transport, credentialStore: store)
 
-        let credential = try await service.enroll(
+        let ticket = try await service.apply(
             hubURL: URL(string: "https://hub.example")!,
-            code: "egve_" + String(repeating: "b", count: 48),
+            code: " pkjzy3 ",
             metadata: metadata
         )
+
+        #expect(ticket.claimSecret.hasPrefix("egvc_"))
+        // Nothing is stored yet. An application is not an enrolment.
+        #expect(store.load() == nil)
+    }
+
+    @Test("a declined request stops instead of polling forever")
+    func declinedRequestStops() async throws {
+        let response = try JSONSerialization.data(withJSONObject: ["status": "rejected"])
+        let service = AgentEnrollmentService(
+            transport: StubEnrollmentTransport(statusCode: 200, data: response) { _ in },
+            credentialStore: MemoryCredentialStore()
+        )
+        let ticket = AgentEnrollmentTicket(
+            hubURL: URL(string: "https://hub.example")!,
+            requestId: UUID().uuidString,
+            claimSecret: "egvc_" + String(repeating: "c", count: 64),
+            expiresAt: Date().addingTimeInterval(600)
+        )
+        await #expect(throws: AgentEnrollmentError.declined) {
+            try await service.waitForApproval(ticket: ticket, pollInterval: 0, sleep: { _ in })
+        }
+    }
+
+    @Test("approval stores the bearer and never logs it")
+    func approvalStoresCredential() async throws {
+        let token = "egva_" + String(repeating: "a", count: 64)
+        let agentID = UUID()
+        let response = try JSONSerialization.data(withJSONObject: [
+            "status": "approved", "token": token, "agentId": agentID.uuidString,
+        ])
+        let store = MemoryCredentialStore()
+        let service = AgentEnrollmentService(
+            transport: StubEnrollmentTransport(statusCode: 201, data: response) { request in
+                #expect(request.url?.absoluteString == "https://hub.example/api/agent/enrollment-requests/claim")
+            },
+            credentialStore: store
+        )
+        let ticket = AgentEnrollmentTicket(
+            hubURL: URL(string: "https://hub.example")!,
+            requestId: UUID().uuidString,
+            claimSecret: "egvc_" + String(repeating: "c", count: 64),
+            expiresAt: Date().addingTimeInterval(600)
+        )
+
+        let credential = try await service.waitForApproval(ticket: ticket, pollInterval: 0, sleep: { _ in })
 
         #expect(credential.agentID == agentID)
         #expect(store.load()?.token == token)
         #expect(!credential.description.contains(token))
         #expect(credential.description.contains("<redacted>"))
+    }
+
+    @Test("a malformed code is refused before it can burn an attempt")
+    func rejectsMalformedCode() async {
+        let service = AgentEnrollmentService(
+            transport: StubEnrollmentTransport(statusCode: 500, data: Data()) { _ in
+                Issue.record("transport must not run for a malformed code")
+            },
+            credentialStore: MemoryCredentialStore()
+        )
+        // 0/O and 1/I are not in the alphabet, so they cannot be a real code.
+        for value in ["ABC12", "ABCDEFG", "PKJZY0", "PKJZYI", ""] {
+            await #expect(throws: AgentEnrollmentError.invalidEnrollmentCode) {
+                try await service.apply(
+                    hubURL: URL(string: "https://hub.example")!,
+                    code: value,
+                    metadata: metadata
+                )
+            }
+        }
     }
 
     @Test("plaintext LAN hubs and credentials embedded in URLs are refused before transport")
@@ -91,9 +158,9 @@ struct AgentEnrollmentServiceTests {
             "https://hub.example?token=value",
         ] {
             await #expect(throws: AgentEnrollmentError.invalidHubURL) {
-                try await service.enroll(
+                try await service.apply(
                     hubURL: URL(string: value)!,
-                    code: "egve_" + String(repeating: "b", count: 48),
+                    code: "PKJZY3",
                     metadata: metadata
                 )
             }
@@ -114,9 +181,9 @@ struct AgentEnrollmentServiceTests {
         let service = AgentEnrollmentService(transport: transport, credentialStore: store)
 
         await #expect(throws: AgentEnrollmentError.rejected(statusCode: 401)) {
-            try await service.enroll(
+            try await service.apply(
                 hubURL: URL(string: "https://hub.example")!,
-                code: "egve_" + String(repeating: "b", count: 48),
+                code: "PKJZY3",
                 metadata: metadata
             )
         }
