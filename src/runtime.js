@@ -156,6 +156,11 @@ function _prepareConnection(session, now, source, routerId, staged = null, sourc
     city:    geo?.city ?? null,
     threat:  _threatIntel.matchThreatIntel(dst, dstHost) || null,
     ttl:     session.ttl ?? 0,
+    // Only an endpoint agent knows these. A router poll leaves them null, and
+    // the upsert keeps whatever an agent supplied earlier for the same flow.
+    agentHost: session.agentHost ?? null,
+    process:   session.process   ?? null,
+    pid:       session.pid       ?? null,
   };
 
   const connectionHistory = _history.getConnectionHistory();
