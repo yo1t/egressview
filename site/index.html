@@ -202,7 +202,7 @@
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       Source Code
     </a>
-    <a class="btn release" href="https://github.com/yo1t/egressview/releases/tag/v1.8.0">v1.8.0 Release</a>
+    <a class="btn release" href="https://github.com/yo1t/egressview/releases/tag/v1.9.0">v1.9.0 Release</a>
     <a class="btn" href="https://github.com/yo1t/egressview/issues">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/><path fill-rule="evenodd" d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z"/></svg>
       Issues
@@ -217,8 +217,8 @@
 <main>
 
   <section id="release">
-    <h2><span class="icon">◆</span> v1.8.0</h2>
-    <p style="font-size:0.95rem; color:var(--muted);">Version 1.8.0 completes the release-signing story and gets the runtime onto the current dependency line. Official distributions are now signed with an AWS KMS Ed25519 key whose private half cannot be exported, and verification still needs nothing but <code>openssl</code> and the published public key — no AWS account, no network. Threat detection and new-node detection each gained independent Slack and history switches, so a noisy detection can be quietened without silencing Slack for everything or losing the in-app record. <code>better-sqlite3</code> moves to 13.0.3 (SQLite 3.53.4), dependency install scripts are disabled so installs use bundled prebuilt binaries instead of compiling, and CI now runs on Node 22, 24, and 26.</p>
+    <h2><span class="icon">◆</span> v1.9.0</h2>
+    <p style="font-size:0.95rem; color:var(--muted);">A router shows what left the house but not which application sent it. v1.9.0 closes that gap: EgressView now accepts observations from an <strong>agent running on a Mac</strong>, distributed as a notarised <code>.dmg</code>, so a connection to an address you do not recognise arrives with the name of the program that reached for it — metadata only, never payloads. A machine becomes an agent only when an administrator approves it, and its flows are checked against the threat feeds like any other. This release also repairs a defect that made the web interface unusable for minutes at a time: selecting a Mac in the Detection Log ran an unindexed correlated query that held the event loop, so the site returned 504s until the process was restarted. The same query now takes about 1.1 seconds instead of over 30, and a watchdog restarts the process if anything else ever holds the loop. Upgrading from 1.8.0 runs database migrations; existing history is preserved.</p>
   </section>
 
   <!-- Why EgressView -->
@@ -312,6 +312,10 @@
       <div class="card">
         <h3>✦ AI Insights Start Page</h3>
         <p>Opens with collection health, connections, devices, destinations, threats, and previous-period comparisons. Local statistics work without AI; only explicit actions send data to Ollama, Anthropic, OpenAI, or Amazon Bedrock for analysis/chat. Shows monthly tokens/estimated cost and the model/cost for each answer. Off-by-default event notifications can deliver daily/weekly reports and bounded threat-change analysis to UI history or Slack. <a href="https://github.com/yo1t/egressview/blob/main/docs/setup-ai-insights.md">Setup guide →</a></p>
+      </div>
+      <div class="card">
+        <h3>💻 macOS Agent</h3>
+        <p>A router shows what left the house but not which application sent it. The agent reports the process behind each outbound connection from a Mac, so an unfamiliar destination arrives with the name of the program that reached for it. Metadata only — never payloads, and it blocks nothing. A machine becomes an agent only when an administrator approves it. Distributed as a notarised <code>.dmg</code>; needs EgressView 1.9.0 or newer. <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.md">Install guide →</a></p>
       </div>
       <div class="card">
         <h3>🤖 AI Agent Access (MCP)</h3>
