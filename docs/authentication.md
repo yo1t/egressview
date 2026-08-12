@@ -4,6 +4,28 @@
 
 EgressView always keeps one emergency local administrator. Google OIDC is an optional additional login method and cannot disable local recovery.
 
+**What you get from this page:** a login you cannot lock yourself out of, and the settings that make it safe to reach EgressView from somewhere other than the machine it runs on.
+
+**You can skip the reverse proxy and HTTPS sections** if you only ever open EgressView on the same machine or across a LAN you trust. The password still applies; nothing is unprotected by default.
+
+## Turning on HTTPS
+
+By default EgressView serves plain HTTP, which is fine on loopback and acceptable on a LAN you trust. It stops being acceptable the moment the login password travels anywhere you do not control — **enable HTTPS before using EgressView from another device, and treat it as required for anything reachable from the internet.**
+
+Add this to `.egressview.json` and restart:
+
+```json
+"https": { "enabled": true }
+```
+
+A self-signed certificate is generated for you (`.egressview-cert.pem` / `.egressview-key.pem`, ten-year validity) using the `openssl` CLI. Your browser will warn once, because nothing has vouched for that certificate; accepting it is the expected step here, not a workaround.
+
+To use a certificate of your own instead:
+
+```json
+"https": { "enabled": true, "certPath": "/path/to/cert.pem", "keyPath": "/path/to/key.pem" }
+```
+
 ## Local administrator
 
 - New passwords require at least 14 characters and are stored as a versioned scrypt record.
