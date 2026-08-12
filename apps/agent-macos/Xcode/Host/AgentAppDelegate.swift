@@ -26,7 +26,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        statusItem.button?.title = "EgressView"
+        applyMenuBarIcon(for: .paused)
         _ = hubDelivery
         render(.paused)
         if case .failure(let error) = journalResult {
@@ -61,7 +61,32 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(item("Quit EgressView Agent", action: #selector(quit), key: "q"))
         statusItem.menu = menu
-        statusItem.button?.title = status.menuBarLabel
+        applyMenuBarIcon(for: status)
+    }
+
+    /// Shows the agent state as an icon rather than a text label.
+    ///
+    /// The label used to sit in the menu bar permanently, costing 70-130pt of a
+    /// bar that every other app also competes for. The state still has to be
+    /// perceivable, so it moves to three template images that differ in shape,
+    /// not colour: a template image is drawn in a single colour that macOS
+    /// inverts for the light and dark menu bar, so colour cannot carry meaning.
+    ///
+    /// The full wording stays reachable: it is the first row of the menu, and
+    /// it is set as the accessibility label so nothing is lost for anyone using
+    /// VoiceOver. Dropping the text without this would remove the state from
+    /// non-visual users entirely.
+    private func applyMenuBarIcon(for status: AgentMonitoringStatus) {
+        guard let button = statusItem.button else { return }
+        let image = NSImage(named: status.menuBarImageName)
+        image?.isTemplate = true
+        button.image = image
+        button.imagePosition = .imageOnly
+        // Fall back to the old label if the asset is missing, so a packaging
+        // mistake degrades to a working menu bar instead of an invisible one.
+        button.title = image == nil ? status.menuBarLabel : ""
+        button.setAccessibilityLabel(status.menuBarLabel)
+        button.toolTip = status.label
     }
 
     private var launchAtLoginTitle: String {

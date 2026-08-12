@@ -1,0 +1,10 @@
+<!-- 一時停止: ドットを中空（リング）にする。塗り面積が減り、18pxでも通常形と区別できる。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="18" height="18" role="img" aria-label="EgressView paused">
+  <g fill="#000">
+    <rect x="86" y="86" width="80" height="340" rx="19"/>
+    <rect x="86" y="86" width="210" height="80" rx="19"/>
+    <rect x="86" y="216" width="130" height="80" rx="19"/>
+    <rect x="86" y="346" width="210" height="80" rx="19"/>
+  </g>
+  <circle cx="386" cy="126" r="34" fill="none" stroke="#000" stroke-width="24"/>
+</svg>
