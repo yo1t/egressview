@@ -336,8 +336,48 @@ describe('Agent HTTP ingest', () => {
       headers: { Authorization: `Bearer ${enrolled.body.token}` },
     });
     assert.equal(unknownResponse.status, 400);
+    // Named, not a generic validation failure: an agent must be able to tell
+    // "this Hub is older than what I speak" from "my payload was malformed",
+    // because only the first one is worth telling the user about.
+    assert.equal(unknownResponse.body.error, 'unsupported_schema_version');
+    assert.equal(unknownResponse.body.requested, 2);
+    assert.deepEqual(unknownResponse.body.supported, [1]);
+    assert.match(unknownResponse.body.hint, /Update the EgressView Hub/);
     assert.equal(agentIngestStore._dbForTest()
       .prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
+  });
+
+  it('capabilityを返し、配布済みAgentの送信を変えない', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const envelope = ingestEnvelope();
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+
+    const capabilities = await request(app, 'GET', '/api/agent/capabilities', { headers: authorization });
+    assert.equal(capabilities.status, 200);
+    assert.deepEqual(capabilities.body.schemaVersions, [1]);
+    assert.equal(capabilities.body.maxObservationsPerBatch, 200);
+    assert.equal(capabilities.body.maxBodyBytes, 512 * 1024);
+    // Declared empty rather than omitted, so an agent cannot read a missing
+    // field as permission to compress.
+    assert.deepEqual(capabilities.body.compression, []);
+
+    // The agents already in the field never call the endpoint above and send
+    // version 1 unconditionally. That has to keep working exactly as before.
+    const accepted = await request(app, 'POST', '/api/agent/ingest', {
+      body: envelope,
+      headers: authorization,
+    });
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.body.accepted, envelope.observations.length);
+  });
+
+  it('capabilityは資格情報を要求する', async () => {
+    // 401 from a Hub that has the route, 404 from one that does not: together
+    // they let an agent tell "not enrolled yet" from "this Hub is too old".
+    const { app } = makeApp();
+    const anonymous = await request(app, 'GET', '/api/agent/capabilities');
+    assert.equal(anonymous.status, 401);
   });
 
   it('limits each Agent to 30 ingest requests per minute and exposes aggregate metrics', async () => {
