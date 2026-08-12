@@ -8,6 +8,7 @@ const {
   PROFILE_IDS,
   resolveMcpBindConfig,
   resolveDeploymentProfile,
+  isLoopbackAddress,
 } = require('../../src/deployment-profile');
 
 describe('deployment profile contract', () => {
@@ -145,5 +146,21 @@ describe('deployment profile contract', () => {
         /must be an IPv4 or IPv6 address/
       );
     }
+  });
+});
+
+describe('loopback detection', () => {
+  it('IPv4-mapped IPv6 のloopbackを同一マシンとして扱う', () => {
+    // デュアルスタックのlistenerは、IPv4のpeerを `::ffff:127.0.0.1` として報告する。
+    // これをremote扱いすると、loopbackを免除するための判定がloopbackで落ちる。
+    assert.equal(isLoopbackAddress('::ffff:127.0.0.1'), true);
+    assert.equal(isLoopbackAddress('127.0.0.1'), true);
+    assert.equal(isLoopbackAddress('::1'), true);
+  });
+
+  it('mapped形式でもLANアドレスはloopbackにしない', () => {
+    assert.equal(isLoopbackAddress('::ffff:192.168.1.20'), false);
+    assert.equal(isLoopbackAddress('192.168.1.20'), false);
+    assert.equal(isLoopbackAddress(''), false);
   });
 });

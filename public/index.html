@@ -126,6 +126,33 @@
             <div class="settings-status" id="router-editor-status"></div>
           </section>
 
+          <hr class="settings-divider">
+
+          <!-- Mac Agent. Same screen as the routers because an operator thinks
+               in terms of "where does my data come from", but a separate block:
+               a router is polled by the Hub, while an agent pushes to it, so the
+               health readings and the setup steps do not mean the same thing. -->
+          <section class="settings-subsection" id="agent-source-section">
+          <div class="pane-title settings-subsection-title" data-i18n="settings.agents.section">Mac / Agent</div>
+          <p class="settings-copy settings-copy-block" data-i18n="settings.agents.desc">
+            Macなどの端末を登録すると、ルーターからは見えないプロセス単位の通信も記録されます。ルーターはEgressViewが取りに行きますが、端末は端末側から送ってくるため、登録した端末が起動していない間は届きません。
+          </p>
+          <p class="settings-field-hint" data-i18n="settings.agents.flowHint">
+            コードを発行して端末へ入力すると、ここへ承認待ちとして表示されます。承認して初めて接続できます。
+          </p>
+          <div id="agent-transport-warning" class="settings-warning" hidden></div>
+
+          <div id="agent-requests-block" hidden>
+            <div class="settings-field-label" data-i18n="settings.agents.pending">承認待ちの端末</div>
+            <p class="settings-field-hint" data-i18n="settings.agents.pendingHint">端末名は申請した側が自称した値です。心当たりのある端末か確認してから承認してください。</p>
+            <div id="agent-requests-list" class="settings-agent-list"></div>
+          </div>
+
+          <div id="agents-list" class="settings-agent-list"></div>
+          <button class="connect-btn settings-inline-button" id="agent-enrollment-create-btn" type="button" data-i18n="settings.agents.create">登録コードを発行</button>
+          <div class="settings-status" id="agents-status"></div>
+          </section>
+
           <!-- Legacy controls remain hidden while old endpoints are supported. -->
           <div class="legacy-router-controls" aria-hidden="true">
             <input type="checkbox" id="enable-yamaha"><div id="yamaha-inputs"></div><input id="s-yamaha-ip"><input id="s-yamaha-user"><input id="s-yamaha-pass"><input id="s-yamaha-nat"><button id="yamaha-detect-btn"></button><button id="yamaha-connect-btn"></button><div id="yamaha-detect-status"></div><div id="yamaha-status"></div>
@@ -252,17 +279,7 @@
           <button class="connect-btn settings-session-revoke-all" id="sessions-revoke-all-btn" data-i18n="settings.sessions.revokeAll">他の端末を全てログアウト</button>
           <div class="settings-status" id="sessions-status"></div>
 
-          <hr class="settings-divider">
 
-          <div class="pane-title settings-subsection-title" data-i18n="settings.agents.section">Mac / Agent</div>
-          <p class="settings-copy settings-copy-block" data-i18n="settings.agents.desc">
-            管理している端末をEgressViewへ登録します。登録コードは10分間有効で、一度だけ使用できます。
-          </p>
-          <div id="agents-list" class="settings-agent-list"></div>
-          <button class="connect-btn settings-inline-button" id="agent-enrollment-create-btn" type="button" data-i18n="settings.agents.create">登録コードを発行</button>
-          <div class="settings-status" id="agents-status"></div>
-
-          <hr class="settings-divider">
 
           <div class="pane-title settings-subsection-title" data-i18n="settings.security.section">🛡️ 認証と監査</div>
           <p class="settings-copy settings-copy-block" data-i18n="settings.security.localOnly">

@@ -9,12 +9,22 @@ const {
 } = require('../agent-ingest-schema');
 const { parseRequest } = require('../http-validation');
 const { isLoopbackAddress } = require('../deployment-profile');
+const { describeAgentTransport, shouldRefusePlaintext } = require('../agent-transport-warning');
 const logger = require('../logger');
 
-const enrollSchema = z.object({
-  code: z.string().regex(/^egve_[0-9a-f]{48}$/),
+const enrollmentRequestSchema = z.object({
+  // Case-insensitive: the operator retypes this once and must not be punished
+  // for using lower case.
+  code: z.string().trim().length(6).regex(/^[0-9A-Za-z]{6}$/),
   agent: agentMetadataSchema,
 }).strict();
+const claimSchema = z.object({
+  requestId: z.string().uuid(),
+  claimSecret: z.string().regex(/^egvc_[0-9a-f]{64}$/),
+}).strict();
+const approveSchema = z.object({ replaceExisting: z.boolean().optional() }).strict();
+const transportConsentSchema = z.object({ allowPlaintext: z.boolean() }).strict();
+const requestIdSchema = z.object({ requestId: z.string().uuid() }).strict();
 const agentIdSchema = z.object({ agentId: z.string().uuid() }).strict();
 const MAX_FAILURE_BUCKETS = 2048;
 const MAX_FAILURES = 5;
@@ -24,8 +34,21 @@ const INGEST_REQUESTS_PER_WINDOW = 30;
 const INGEST_MAX_CONCURRENCY = 4;
 const MAX_INGEST_BUCKETS = 4096;
 
-function hasSecureAgentTransport(req) {
-  return req.secure || isLoopbackAddress(req.socket?.localAddress || '');
+/**
+ * Plaintext is refused unless the operator has accepted it, or the traffic
+ * never leaves the machine.
+ *
+ * Loopback is exempt because nothing reaches a network interface. Everything
+ * else needs the opt-in, which exists so a home operator can run an agent over
+ * a LAN without setting up TLS -- having been shown, in the settings UI, what
+ * that exposes.
+ */
+function agentTransportRefused(req, allowPlaintext) {
+  return shouldRefusePlaintext({
+    httpsEnabled: req.secure === true,
+    allowPlaintext: allowPlaintext === true,
+    isLoopback: isLoopbackAddress(req.socket?.localAddress || ''),
+  });
 }
 
 module.exports = function agentRoutes({
@@ -34,6 +57,11 @@ module.exports = function agentRoutes({
   agentIdentities,
   agentIngest = null,
   authAudit,
+  // Read at request time rather than captured: the operator can change consent
+  // without restarting, and a stale copy would keep refusing (or keep allowing)
+  // after the setting moved.
+  isPlaintextAllowed = () => false,
+  setPlaintextAllowed = () => {},
 }) {
   const router = Router();
   const failedEnrollments = new Map();
@@ -118,9 +146,11 @@ module.exports = function agentRoutes({
   }
 
   router.use('/agent', (req, res, next) => {
-    if (hasSecureAgentTransport(req)) return next();
-    audit(req, 'agent_transport_rejected', 'failure', { reason: 'https_required' });
-    return res.status(400).json({ error: 'Agent endpoints require HTTPS' });
+    if (!agentTransportRefused(req, isPlaintextAllowed())) return next();
+    audit(req, 'agent_transport_rejected', 'failure', { reason: 'plaintext_not_accepted' });
+    return res.status(400).json({
+      error: 'Unencrypted agent traffic is not accepted. Enable HTTPS, or accept the risk in settings.',
+    });
   });
 
   router.post('/agents/enrollment-tokens', requireAdmin, (req, res) => {
@@ -141,42 +171,156 @@ module.exports = function agentRoutes({
     }
   });
 
-  router.post('/agent/enroll', (req, res) => {
+  // Step 2 of three: a valid code produces a *request*, never an agent. The
+  // metadata here is only what the client claims about itself, which is why an
+  // administrator has to look at it before it becomes a credential.
+  router.post('/agent/enrollment-requests', (req, res) => {
     const key = rateKey(req);
     const now = Date.now();
     const failure = currentFailure(key, now);
     if (failure?.count >= MAX_FAILURES) {
       res.setHeader('Retry-After', Math.max(1, Math.ceil((failure.expiresAt - now) / 1000)));
-      audit(req, 'agent_enrolled', 'failure', { reason: 'rate_limited' });
+      audit(req, 'agent_enrollment_requested', 'failure', { reason: 'rate_limited' });
       return res.status(429).json({ error: 'Too many enrollment attempts' });
     }
-    const parsed = parseRequest(enrollSchema, req.body, res);
+    const parsed = parseRequest(enrollmentRequestSchema, req.body, res);
     if (!parsed.ok) {
-      audit(req, 'agent_enrolled', 'failure', { reason: 'invalid_request' });
+      audit(req, 'agent_enrollment_requested', 'failure', { reason: 'invalid_request' });
       return;
     }
-    let enrolled;
+
+    let result;
     try {
-      enrolled = agentIdentities.enroll({
+      result = agentIdentities.requestEnrollment({
         code: parsed.data.code,
         metadata: parsed.data.agent,
+        clientIpHash: req.clientIpHash || null,
       });
     } catch (error) {
-      logger.error('[agents] Enrollment failed:', error.message);
-      audit(req, 'agent_enrolled', 'failure', { reason: 'storage_error' });
-      return res.status(500).json({ error: 'Agent enrollment failed' });
+      logger.error('[agents] Enrollment request failed:', error.message);
+      audit(req, 'agent_enrollment_requested', 'failure', { reason: 'storage_error' });
+      return res.status(500).json({ error: 'Enrollment request failed' });
     }
-    if (!enrolled) {
+
+    if (!result.ok) {
       recordFailure(key, now);
-      audit(req, 'agent_enrolled', 'failure', { reason: 'invalid_or_expired_code' });
-      return res.status(401).json({ error: 'Invalid or expired enrollment code' });
+      // Counted against the code itself so five wrong guesses burn it. The
+      // rate limit alone cannot do this: it is per client, and a six character
+      // code is short enough that a distributed guess would otherwise stay
+      // within every individual limit.
+      const attempt = agentIdentities.recordCodeAttempt(parsed.data.code);
+      audit(req, 'agent_enrollment_requested', 'failure', {
+        reason: result.reason,
+        codeLocked: attempt.locked || undefined,
+      });
+      const status = result.reason === 'too_many_pending' ? 429 : 401;
+      return res.status(status).json({ error: 'Invalid or expired enrollment code' });
     }
+
     failedEnrollments.delete(key);
-    audit(req, 'agent_enrolled', 'success', {
-      agentRef: agentIdentities.auditRef(enrolled.agent.agentId),
-      platform: enrolled.agent.platform,
+    audit(req, 'agent_enrollment_requested', 'success', {
+      requestRef: agentIdentities.auditRef(result.requestId),
+      platform: parsed.data.agent.platform,
     });
-    return res.status(201).json({ token: enrolled.token, agent: enrolled.agent });
+    return res.status(202).json({
+      requestId: result.requestId,
+      claimSecret: result.claimSecret,
+      expiresAt: result.expiresAt,
+      status: 'pending',
+    });
+  });
+
+  // Step 3: the agent polls until an administrator decides. The token is
+  // handed over exactly once and only to the holder of the claim secret.
+  router.post('/agent/enrollment-requests/claim', (req, res) => {
+    const parsed = parseRequest(claimSchema, req.body, res);
+    if (!parsed.ok) return;
+    const outcome = agentIdentities.claimApproved(parsed.data);
+    if (outcome.status !== 'approved') {
+      // Deliberately not distinguishing "unknown request" from "wrong secret":
+      // both mean the caller cannot have this token.
+      return res.status(outcome.status === 'unknown' ? 404 : 200).json({ status: outcome.status });
+    }
+    audit(req, 'agent_enrolled', 'success', { agentRef: agentIdentities.auditRef(outcome.agentId) });
+    return res.status(201).json({ status: 'approved', token: outcome.token, agentId: outcome.agentId });
+  });
+
+  // Reports how agents reach this Hub and, when that is unencrypted, what the
+  // operator is being asked to accept. Returned as keys rather than sentences
+  // so both languages stay in the shared catalogue.
+  router.get('/agents/transport', requireAdmin, (req, res) => {
+    res.json(describeAgentTransport({
+      httpsEnabled: req.secure === true,
+      allowPlaintext: isPlaintextAllowed() === true,
+    }));
+  });
+
+  router.post('/agents/transport', requireAdmin, (req, res) => {
+    const parsed = parseRequest(transportConsentSchema, req.body, res);
+    if (!parsed.ok) return;
+    try {
+      setPlaintextAllowed(parsed.data.allowPlaintext);
+    } catch (error) {
+      logger.error('[agents] Transport consent save failed:', error.message);
+      audit(req, 'agent_transport_consent', 'failure');
+      return res.status(500).json({ error: 'Could not save the setting' });
+    }
+    // Worth an audit line either way: turning it on widens what the Hub
+    // accepts, and turning it off is a security action someone may need to
+    // prove later.
+    audit(req, 'agent_transport_consent', 'success', { allowPlaintext: parsed.data.allowPlaintext });
+    return res.json(describeAgentTransport({
+      httpsEnabled: req.secure === true,
+      allowPlaintext: parsed.data.allowPlaintext,
+    }));
+  });
+
+  router.get('/agents/enrollment-requests', requireAdmin, (_req, res) => {
+    try {
+      agentIdentities.expireStaleRequests();
+      res.json({ requests: agentIdentities.listPendingRequests() });
+    } catch (error) {
+      logger.error('[agents] Pending request listing failed:', error.message);
+      res.status(500).json({ error: 'Pending enrollment listing failed' });
+    }
+  });
+
+  router.post('/agents/enrollment-requests/:requestId/approve', requireAdmin, (req, res) => {
+    const params = parseRequest(requestIdSchema, req.params, res);
+    if (!params.ok) return;
+    const body = parseRequest(approveSchema, req.body ?? {}, res);
+    if (!body.ok) return;
+    let approved;
+    try {
+      approved = agentIdentities.approveRequest(params.data.requestId, {
+        decidedBy: req.principal,
+        replaceExisting: body.data.replaceExisting === true,
+      });
+    } catch (error) {
+      logger.error('[agents] Approval failed:', error.message);
+      audit(req, 'agent_enrollment_approved', 'failure', { reason: 'storage_error' });
+      return res.status(500).json({ error: 'Approval failed' });
+    }
+    if (!approved) {
+      audit(req, 'agent_enrollment_approved', 'failure', { reason: 'not_pending' });
+      return res.status(404).json({ error: 'No pending request with that id' });
+    }
+    audit(req, 'agent_enrollment_approved', 'success', {
+      agentRef: agentIdentities.auditRef(approved.agentId),
+      replacedExisting: body.data.replaceExisting === true || undefined,
+    });
+    // The token is not returned here. It goes to the agent, which proves it is
+    // the same client that applied; putting it in this response would put a
+    // live credential on the approver's screen for no reason.
+    return res.status(200).json({ agent: approved.agent });
+  });
+
+  router.post('/agents/enrollment-requests/:requestId/reject', requireAdmin, (req, res) => {
+    const params = parseRequest(requestIdSchema, req.params, res);
+    if (!params.ok) return;
+    const rejected = agentIdentities.rejectRequest(params.data.requestId, { decidedBy: req.principal });
+    audit(req, 'agent_enrollment_rejected', rejected ? 'success' : 'failure');
+    return res.status(rejected ? 200 : 404).json({ rejected });
   });
 
   router.get('/agents', requireAdmin, (_req, res) => {

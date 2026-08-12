@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 16;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -531,6 +531,53 @@ const MIGRATIONS = [
           sourceId   TEXT NOT NULL CHECK(length(sourceId) BETWEEN 1 AND 128),
           FOREIGN KEY(messageId) REFERENCES ai_messages(messageId) ON DELETE CASCADE
         );
+      `);
+    },
+  },
+  {
+    version: 16,
+    description: 'Agent enrollment by approval: attempt limiting and a pending request queue (P3-9)',
+    up(db) {
+      // The enrollment code shrinks from 48 hex characters to 6 alphanumerics,
+      // so the code alone can no longer carry the security. Two things replace
+      // it: an attempt counter here, and an administrator approval step before
+      // a request becomes an agent. Without the counter a six character code is
+      // guessable inside its ten minute window.
+      const columns = db.prepare('PRAGMA table_info(agent_enrollment_tokens)').all().map(c => c.name);
+      if (!columns.includes('attemptCount')) {
+        db.exec(`ALTER TABLE agent_enrollment_tokens
+                   ADD COLUMN attemptCount INTEGER NOT NULL DEFAULT 0`);
+      }
+      if (!columns.includes('lockedAt')) {
+        db.exec(`ALTER TABLE agent_enrollment_tokens
+                   ADD COLUMN lockedAt INTEGER`);
+      }
+
+      // A request is not an agent. It holds only what the client claimed about
+      // itself, which is why an administrator has to look at it: the host name
+      // is attacker-controlled until someone confirms it belongs to a machine
+      // they actually enrolled.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_enrollment_requests (
+          requestId      TEXT PRIMARY KEY,
+          tokenId        TEXT NOT NULL,
+          platform       TEXT NOT NULL CHECK(platform IN ('macos', 'windows', 'linux')),
+          hostName       TEXT NOT NULL CHECK(length(hostName) BETWEEN 1 AND 255),
+          osVersion      TEXT NOT NULL CHECK(length(osVersion) BETWEEN 1 AND 64),
+          agentVersion   TEXT NOT NULL CHECK(length(agentVersion) BETWEEN 1 AND 64),
+          claimSecretHash TEXT NOT NULL UNIQUE,
+          clientIpHash   TEXT,
+          createdAt      INTEGER NOT NULL,
+          expiresAt      INTEGER NOT NULL,
+          status         TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected', 'expired')),
+          decidedAt      INTEGER,
+          decidedByPrincipalHash TEXT,
+          agentId        TEXT,
+          CHECK(expiresAt > createdAt),
+          CHECK(decidedAt IS NULL OR decidedAt >= createdAt)
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_requests_pending
+          ON agent_enrollment_requests(status, expiresAt);
       `);
     },
   },
