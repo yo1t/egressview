@@ -26,6 +26,18 @@ enum AgentMonitoringStatus: Equatable {
         }
     }
 
+    /// Asset catalog name of the template image for this state.
+    ///
+    /// Three images, not seven: the menu bar is glanced at, not read. What an
+    /// operator has to notice at a glance is whether something needs them.
+    var menuBarImageName: String {
+        switch self {
+        case .paused, .deactivating: return "MenuBarPaused"
+        case .lightweight, .fullActive: return "MenuBar"
+        case .fullActivationRequested, .approvalRequired, .rebootRequired, .failed: return "MenuBarAttention"
+        }
+    }
+
     var menuBarLabel: String {
         switch self {
         case .paused: return "EgressView: Paused"
