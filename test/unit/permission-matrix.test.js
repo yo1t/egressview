@@ -88,7 +88,11 @@ describe('HTTP permission matrix', () => {
       'GET /healthz',
       'GET /readyz',
       'POST /api/admin/verify',
-      'POST /api/agent/enroll',
+      // Public because an agent has no credential yet. Neither route can mint
+      // one on its own: applying only creates a request, and claiming needs a
+      // secret issued to that request plus an administrator's approval.
+      'POST /api/agent/enrollment-requests',
+      'POST /api/agent/enrollment-requests/claim',
       'POST /api/auth/login',
     ]);
   });

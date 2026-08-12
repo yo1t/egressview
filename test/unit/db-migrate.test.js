@@ -274,6 +274,9 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
 
     db = openDb(p);
     runMigrations(db, p);
+    // Asserting the constant, not a literal: this test is about v13 data
+    // surviving an upgrade, and hardcoding the target breaks it every time a
+    // later migration is added.
     assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     assert.equal(db.prepare(`SELECT body FROM ai_messages WHERE messageId = 'm1'`).get().body, 'keep-me');
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM ai_message_scopes').get().count, 0);
@@ -286,7 +289,7 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
     _verifyDbCopy(path.join(TMP, backups[0]));
   });
 
-  it('preserves v12 data and creates a verified v12-to-v14 backup', () => {
+  it('preserves v12 data and creates a verified backup on upgrade', () => {
     const p = tmpDb('v13-agent-upgrade');
     const db = openDb(p);
     db.exec(`

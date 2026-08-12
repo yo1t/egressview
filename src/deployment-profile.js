@@ -86,7 +86,13 @@ function resolveDeploymentProfile(env = process.env, { httpEnabled, authMode = n
 function isLoopbackAddress(address) {
   if (net.isIPv4(address)) return address.split('.')[0] === '127';
   if (net.isIPv6(address)) {
-    return address === '::1' || address === '0:0:0:0:0:0:0:1';
+    if (address === '::1' || address === '0:0:0:0:0:0:0:1') return true;
+    // A dual-stack listener reports IPv4 peers in the mapped form
+    // `::ffff:127.0.0.1`, which is the same machine. Treating it as remote
+    // made loopback traffic fail the check that exists to exempt it.
+    const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address);
+    if (mapped && net.isIPv4(mapped[1])) return mapped[1].split('.')[0] === '127';
+    return false;
   }
   return false;
 }
