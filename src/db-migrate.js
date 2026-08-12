@@ -535,6 +535,24 @@ const MIGRATIONS = [
     },
   },
   {
+    version: 15,
+    description: 'index for agent-scoped notification-log lookup (P2-87)',
+    up(db) {
+      // The notification-log agent source scope evaluates a correlated
+      // EXISTS on agent_observations filtered by
+      // (agentId, localAddress[, remoteAddress, remotePort]). Without a
+      // composite index leading with (agentId, localAddress) the planner fell
+      // back to idx_agent_observations_time (agentId only) and scanned every
+      // observation for that agent for each notification_log row —
+      // O(notification_log × agent_observations) — blocking the synchronous
+      // event loop until the whole server froze (ALB 504). See P2-87.
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_agent_observations_agent_flow
+          ON agent_observations(agentId, localAddress, remoteAddress, remotePort);
+      `);
+    },
+  },
+  {
     version: 16,
     description: 'Agent enrollment by approval: attempt limiting and a pending request queue (P3-9)',
     up(db) {

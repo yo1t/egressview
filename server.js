@@ -56,6 +56,7 @@ const authCookies    = require('./src/auth-cookies');
 const oidcModule = require('./src/oidc-google');
 const { createGoogleOidc } = oidcModule;
 const { createOfflinePolicy } = require('./src/offline-mode');
+const { startEventLoopWatchdog } = require('./src/event-loop-watchdog');
 const { runDbBootstrap }    = require('./src/db-bootstrap');
 const { sourceRouterIdMap } = require('./src/router-id');
 const { createDefaultAppState, applyConfigToAppState } = require('./src/app-state');
@@ -758,6 +759,12 @@ server.listen(PORT, HOST, () => {
 
   backup.startPeriodicBackup();
   healthState.markReady();
+
+  // Defense-in-depth: force a restart if a synchronous operation ever wedges
+  // the event loop, so a single slow query can no longer freeze the server
+  // indefinitely (P2-87). Started after readiness so slow startup/migration
+  // work never trips it.
+  startEventLoopWatchdog();
 });
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
