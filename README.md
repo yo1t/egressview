@@ -77,7 +77,9 @@ Open `http://localhost:3000` and enter `my-token`. It seeds 160 realistic connec
 
 **You need a Yamaha RTX or a Cisco IOS router.** There is no packet capture mode and no inline option.
 
-**The macOS agent on its own is not a substitute.** It will run without a router and will show that Mac's outbound connections with the application behind each one — captured as flows happen, so nothing is lost to a polling gap. But **threat matching and destination enrichment only apply to router-observed connections**, so an agent-only install lists traffic without ever telling you any of it is dangerous. The agent is built to add *which application* to what a router already sees, not to replace it.
+**The macOS agent alone covers one Mac, not your network.** It runs without a router, and everything applies to what it reports — threat matching, destination enrichment, the Detection Log, Slack. Flows are captured as they happen, so nothing is lost to a polling gap, and each one carries the application that made it.
+
+What you do not get is the rest of the house: no other device on the LAN is visible, and neither is anything the Mac is not doing. **The agent tells you everything about one machine; the router is what tells you about the twenty you cannot install software on.**
 
 | | Requirement |
 |--|-------------|
