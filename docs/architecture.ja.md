@@ -17,14 +17,16 @@ flowchart LR
     C[Cisco IOS routers]
     A[任意のASUS AP]
     L[任意のdnsmasq / syslog]
+    M[任意のmacOS Agent<br/>プロセス名つき]
   end
 
   subgraph Server[EgressView Node.js process]
     RM[Router manager / registry]
     PS[Router別のpoll scheduler]
+    IN[Agent ingest<br/>認証 / 冪等 / 相関]
     N[Session正規化 / runtime重複排除]
     EN[DNS / RDAP / GeoIP / threat enrichment]
-    DB[(SQLite WAL\nconnections + observations + devices)]
+    DB[(SQLite WAL\nconnections + observations + devices\n+ agent_observations)]
     HTTP[Express REST API]
     WS[Socket.IO update]
     MCP[MCP stdio / HTTP]
@@ -35,12 +37,17 @@ flowchart LR
   RM --> PS --> N
   A -->|HTTP client data| N
   L -->|log event| N
+  M -->|HTTPS ingest<br/>Agentから発信| IN
+  IN --> N
+  IN --> DB
   N --> DB
   N --> EN --> DB
   DB --> HTTP --> UI[Browser UI]
   N --> WS --> UI
   DB --> MCP --> AI[AI assistant]
 ```
+
+**Agentは同じ正規化経路へ合流します。** これは配線上の都合ではなく必須条件です。脅威照合・宛先の補強・端末追跡・通知はすべて`connections`を対象に動くため、**そこへ入らない観測は照合されないまま一覧に並びます。** 利用者から見ると「脅威が0件」と区別がつきません。Agentの観測を別扱いにしないのはこのためです。
 
 ## 収集とrouter障害の分離
 
@@ -50,13 +57,26 @@ flowchart LR
 
 Runtime上の自然keyは`(src, dst, dport, proto)`です。同じ通信を複数routerが観測した場合、connectionは重複排除し、全観測元を`connection_observations`へ保存して、安定したIDの`observedBy`として公開します。削除したrouter IDはtombstoneとして残るため、過去データの帰属は変わりません。
 
+## 端末Agent
+
+Routerは「何が外へ出たか」を見せますが、**どのアプリケーションが出したかは見せません**。macOS Agentがその1点を埋めます。
+
+- **接続は必ずAgent側から始まります。** Hubは端末をpollしません。端末が家の外にあっても、Hub側にfirewallの穴を開ける必要がありません。
+- **登録は管理者の承認が必要です。** 6文字のcodeで申請し、Web UIで承認して初めて資格情報が渡ります。申請に含まれるホスト名は**クライアントの自称**であり、承認画面はその旨を明示します。
+- **送信は冪等です。** 同じ`batchId`の再送は重複を作りません。ACKを取り逃した端末は同じbatchを送り直します。
+- **相関は5-tupleで行います。** ルーターとAgentの両方が見た通信は1件に畳み、`connection_agent_observations`に対応を残します。どちらが観測したかは失われません。
+- **プロセス名は`connections.process`へ保存します。** Routerが同じ通信を後から観測しても、routerはプロセスを知らないため`NULL`を書き、**既にある値を消しません**。
+
+**Agentは補助であって代替ではありません。** 1台のMacについては取りこぼしが少ない（フロー発生時に受け取るため60秒の隙間が無い）一方、**LAN内の他の機器は一切見えません。**
+
 ## Data flow
 
 1. Router adapterが通常60秒ごとにSSHでNAT sessionとaddress-neighbor情報を取得します。
 2. 任意のINSPECT、DHCPD、dnsmasq、ASUS sourceが短命session、IP/MAC対応、hostname、Wi-Fi metadataを補います。
-3. Runtimeが反復観測を統合し、reverse DNS、RDAP、GeoIP、OUI/端末識別、threat intelligenceの付加処理を開始します。
-4. Connection履歴とrouter観測を同じSQLite transactionで一括保存します。BrowserはSocket.IOで差分を受け取り、RESTで永続履歴を検索します。
-5. 検出、beacon、端末、通知moduleが同じ永続データから上位の情報を生成します。
+3. 任意の端末Agentが、自分が観測したflowをプロセス名つきで送信します（`POST /api/agent/ingest`）。受理したbatchは**routerのpollと同じ正規化経路**へ入ります。
+4. Runtimeが反復観測を統合し、reverse DNS、RDAP、GeoIP、OUI/端末識別、threat intelligenceの付加処理を開始します。
+5. Connection履歴とrouter観測を同じSQLite transactionで一括保存します。BrowserはSocket.IOで差分を受け取り、RESTで永続履歴を検索します。
+6. 検出、beacon、端末、通知moduleが同じ永続データから上位の情報を生成します。**観測元がrouterかAgentかを問いません。**
 
 ## 永続化と起動
 
@@ -89,6 +109,9 @@ Schema v5ではrouterの観測情報を`connection_observations`だけに保存�
 - Router credentialとtokenはlocalのmode `0600`設定ファイルへ保存し、APIは`passSet`/`enablePassSet`だけを返します。
 - Login、token検証、詳細情報を返さないhealth/readiness以外のREST APIは`X-Admin-Token`必須です。Socket.IOも同じ認証方針です。
 - ServerはCSP、clickjacking防止、MIME sniffing防止、referrer制限を設定し、TLS利用時はHSTSも有効にします。
+- **Agentの資格情報はHub側だけが失効させられます。** クライアント側の「無効化」は送信を止めるだけで、トークンは有効なままです。UIはこの区別を明示します。
+- **Agentは既定でHTTPSを要求します。** loopback以外での平文は、露出する内容（接続先一覧・毎回送られる認証トークン・偽データ送信の可能性）を具体的に示したうえで、明示的に承諾した場合にのみ許可します。
+- **Agentのingestは認証後にbody解析します。** 資格情報の無い相手には512 KiBを読む前に401を返します。全体のwrite枠とは別枠で、IP単位の上限が別に効きます。
 - EgressViewはinline装置ではありません。収集失敗はroutingを止めず、1台のrouter障害が他のcollectorを止めません。
 - EgressViewはHTTPSまたは信頼できるVPN内だけで公開し、application、router管理画面、backup fileをInternetへ直接公開しないでください。
 
@@ -102,6 +125,9 @@ Schema v5ではrouterの観測情報を`connection_observations`だけに保存�
 | Poll scheduling | `src/router-poll-scheduler.js` |
 | Vendor adapter | `src/pollers/yamaha-adapter.js`, `src/pollers/cisco-adapter.js` |
 | Runtime正規化・重複排除 | `src/runtime.js` |
+| 端末Agentの登録・承認 | `src/agent-identities.js`, `src/routes/agents.js` |
+| Agent ingestの保存と相関 | `src/agent-ingest-store.js`, `src/agent-correlation.js`, `src/agent-ingest-schema.js` |
+| macOS Agent本体 | `apps/agent-macos/` |
 | 履歴・観測のread/write | `src/history.js` |
 | DB bootstrap / migration | `src/db-bootstrap.js`, `src/db-migrate.js` |
 | Backup inventory・worker job・prune・restore | `src/backup-inventory.js`, `src/backup-prune-runner.js`, `src/backup-prune-worker.js`, `src/backup.js`, `src/routes/backup.js` |
