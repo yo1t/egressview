@@ -16,9 +16,7 @@ const MAX_PENDING_REQUESTS = 20;
 // Six characters a person can read aloud and retype once. 0/O and 1/I are left
 // out because a code that is transcribed wrongly costs the same as a code that
 // was guessed wrongly, and both burn an attempt.
-const CODE_DIGITS = '23456789';
-const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-const CODE_ALPHABET = CODE_DIGITS + CODE_LETTERS;
+const CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const CODE_LENGTH = 6;
 const ENROLLMENT_PATTERN = new RegExp(`^[${CODE_ALPHABET}]{${CODE_LENGTH}}$`);
 
