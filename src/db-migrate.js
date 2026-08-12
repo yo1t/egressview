@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -535,7 +535,7 @@ const MIGRATIONS = [
     },
   },
   {
-    version: 15,
+    version: 16,
     description: 'Agent enrollment by approval: attempt limiting and a pending request queue (P3-9)',
     up(db) {
       // The enrollment code shrinks from 48 hex characters to 6 alphanumerics,
