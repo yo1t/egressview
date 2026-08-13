@@ -4,18 +4,17 @@
 
 For what EgressView does today, see the [README](README.md).
 
+## ✅ Available now
+
+### macOS agent
+
+A signed and notarized macOS agent ships with v1.9.0. It visualizes a Mac's own outbound connections by process instead of relying on a router NAT table, complementing the server rather than replacing it. It offers lightweight monitoring (socket table, no System Extension approval) and full monitoring (a pass-only Network Extension for higher-fidelity flows), never captures payloads, and reports to a Hub only as an explicit, off-by-default opt-in.
+
 ## 🚧 Planned
 
-### macOS client
+### Full-featured macOS agent
 
-A desktop client is in development to visualize a Mac's own outbound connections by process, instead of relying on a router NAT table. It complements rather than replaces the server: the server provides broad network-wide visibility, while the client provides deeper visibility into one endpoint.
-
-- **Lightweight monitoring:** periodically reads the macOS socket table. It requires no System Extension approval, but may miss short-lived connections and cannot provide complete byte counts.
-- **Full monitoring:** uses a pass-only Network Extension to observe new flows. It provides higher-fidelity TCP, UDP/QUIC, IPv4/IPv6, and process metadata, with explicit macOS approval on first use.
-- **Privacy:** it will not capture, decrypt, or store payloads. Sending observations to a Hub is separate from local collection, disabled by default, and explicitly opt-in.
-- **Distribution:** the plan is a Developer ID-signed and notarized app distributed as a DMG and Homebrew Cask. Installation alone will not enable monitoring; the user chooses the monitoring mode.
-
-The shared observation model, lightweight collector, deduplication, monitoring-mode state machine, signed and notarized macOS host app, pass-only System Extension, flow metadata mapping, permission-restricted local history, retention controls, confirmed deletion, and opt-in launch at login are implemented and validated on real hardware. Hub enrollment, opt-in delivery, the retry queue, and correlation with router observations are also implemented and are now undergoing live validation. No release date is committed yet.
+A richer version of the macOS agent is in development — turning it from a collector into a standalone app with its own dashboards and visualizations, on-device threat matching so a Mac is protected even when away from its home network, notifications, and AI insights. Agent-side changes are batched into a single release because each one requires signing, notarization, and reinstall. No release date is committed yet.
 
 ### conntrack router support (OpenWrt / ASUS router mode / Ubiquiti UDM)
 
