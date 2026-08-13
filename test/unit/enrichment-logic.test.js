@@ -175,6 +175,24 @@ describe('lookupGeoBatch coalescing & backoff', () => {
     assert.equal(entry.lat, null);
   });
 
+  it('does not send IPv6 link-local or multicast addresses to GeoIP', async () => {
+    const http = require('node:http');
+    const originalRequest = http.request;
+    let requests = 0;
+    http.request = (...args) => {
+      requests += 1;
+      return originalRequest(...args);
+    };
+    try {
+      await enrichment.lookupGeoBatch(['fe80::1', 'ff02::1']);
+      assert.equal(requests, 0);
+      assert.ok(enrichment.getGeoCache().has('fe80::1'));
+      assert.ok(enrichment.getGeoCache().has('ff02::1'));
+    } finally {
+      http.request = originalRequest;
+    }
+  });
+
   it('coalesces concurrent calls into a single flush cycle (same promise)', () => {
     // Force backoff to suppress the real API call while verifying only the coalescing behavior
     enrichment._setGeoBackoffUntilForTest(Date.now() + 60_000);

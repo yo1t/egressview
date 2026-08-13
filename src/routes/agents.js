@@ -2,6 +2,7 @@
 
 const { Router } = require('express');
 const { monitorEventLoopDelay } = require('node:perf_hooks');
+const net = require('node:net');
 const { z } = require('zod');
 
 // One histogram for the process. It costs nothing while idle and is the only
@@ -19,6 +20,8 @@ const {
 } = require('../agent-ingest-schema');
 const { parseRequest } = require('../http-validation');
 const { isLoopbackAddress } = require('../deployment-profile');
+const { isPrivateIpLiteral } = require('../offline-mode');
+const { isBlockedOutboundIpLiteral } = require('../ssrf-guard');
 const { describeAgentTransport, shouldRefusePlaintext } = require('../agent-transport-warning');
 const logger = require('../logger');
 
@@ -86,6 +89,7 @@ module.exports = function agentRoutes({
   // Injected so the route does not reach into the runtime directly; absent in
   // the unit tests, which exercise storage rather than the collection pipeline.
   recordConnections = null,
+  queueConnectionEnrichment = null,
 }) {
   const router = Router();
   const failedEnrollments = new Map();
@@ -133,7 +137,6 @@ module.exports = function agentRoutes({
    * one thing a router can never supply.
    */
   function recordAgentFlows(envelope) {
-    if (typeof recordConnections !== 'function') return;
     const hostName = envelope.agent?.hostName || null;
     const sessions = envelope.observations.map(observation => ({
       src: observation.localAddress,
@@ -148,13 +151,31 @@ module.exports = function agentRoutes({
       process: observation.processName || null,
       pid: Number.isInteger(observation.processID) ? observation.processID : null,
     }));
-    try {
-      recordConnections(sessions, Date.now(), 'agent');
-    } catch (error) {
-      // A batch that was stored must still be acknowledged. Losing the
-      // enrichment for it is worse than losing the batch would be, so it is
-      // logged rather than swallowed.
-      logger.error('[agents] Recording agent flows failed:', error.message);
+    if (typeof recordConnections === 'function') {
+      try {
+        recordConnections(sessions, Date.now(), 'agent');
+      } catch (error) {
+        // A batch that was stored must still be acknowledged. The durable
+        // observations can be reconciled later, so this side effect is logged.
+        logger.error('[agents] Recording agent flows failed:', error.message);
+      }
+    }
+
+    if (typeof queueConnectionEnrichment === 'function') {
+      const destinations = [...new Set(sessions.map(session => (
+        String(session.dst || '').trim().replace(/^\[|\]$/g, '').toLowerCase()
+      )).filter(normalized => {
+        return net.isIP(normalized) !== 0
+          && !isPrivateIpLiteral(normalized)
+          && !isBlockedOutboundIpLiteral(normalized);
+      }))];
+      if (destinations.length > 0) {
+        try {
+          queueConnectionEnrichment(destinations);
+        } catch (error) {
+          logger.error('[agents] Queuing destination enrichment failed:', error.message);
+        }
+      }
     }
   }
 
