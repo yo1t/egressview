@@ -33,7 +33,12 @@ after(() => {
   agentIngestStore.closeDb();
 });
 
-function makeApp({ agentIngest = agentIngestStore, allowPlaintext = false } = {}) {
+function makeApp({
+  agentIngest = agentIngestStore,
+  allowPlaintext = false,
+  recordConnections = null,
+  queueConnectionEnrichment = null,
+} = {}) {
   const audits = [];
   const app = express();
   app.use(express.json());
@@ -58,6 +63,8 @@ function makeApp({ agentIngest = agentIngestStore, allowPlaintext = false } = {}
     requireAgent,
     agentIdentities,
     agentIngest,
+    recordConnections,
+    queueConnectionEnrichment,
     isPlaintextAllowed: () => allowPlaintext,
     authAudit: { append: event => audits.push(event) },
   }));
@@ -261,6 +268,46 @@ describe('Agent HTTP credential lifecycle', () => {
 });
 
 describe('Agent HTTP ingest', () => {
+  it('queues only public Agent destinations for enrichment once', async () => {
+    const recorded = [];
+    const queued = [];
+    const { app } = makeApp({
+      recordConnections: (...args) => recorded.push(args),
+      queueConnectionEnrichment: destinations => queued.push(destinations),
+    });
+    const { enrolled } = await enrolledAgent(app);
+    const envelope = ingestEnvelope();
+    const template = envelope.observations[0];
+    const destinations = [
+      '8.8.8.8',
+      '2606:4700:4700::1111',
+      '192.168.1.20',
+      '127.0.0.1',
+      '169.254.169.254',
+      'fd12:3456::1',
+      'fe80::1',
+      'ff02::1',
+    ];
+    envelope.observations = destinations.map((remoteAddress, index) => ({
+      ...template,
+      observationId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      remoteAddress,
+    }));
+    const headers = { Authorization: `Bearer ${enrolled.body.token}` };
+
+    const first = await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers });
+    assert.equal(first.status, 200);
+    assert.equal(recorded.length, 1);
+    assert.equal(recorded[0][0].length, destinations.length);
+    assert.deepEqual(queued, [['8.8.8.8', '2606:4700:4700::1111']]);
+
+    const replay = await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers });
+    assert.equal(replay.status, 200);
+    assert.equal(replay.body.replayed, true);
+    assert.equal(recorded.length, 1);
+    assert.equal(queued.length, 1);
+  });
+
   it('stores a valid batch and returns a stable ACK on replay', async () => {
     const { app, audits } = makeApp();
     const { enrolled } = await enrolledAgent(app);

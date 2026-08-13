@@ -13,6 +13,8 @@ const https = require('https');
 const dns = require('node:dns').promises;
 const Database = require('better-sqlite3');
 const path = require('path');
+const { isPrivateIpLiteral } = require('./offline-mode');
+const { isBlockedOutboundIpLiteral } = require('./ssrf-guard');
 
 const DB_PATH = path.join(__dirname, '..', '.egressview.db');
 
@@ -40,9 +42,12 @@ const GEO_TTL_MS       = 30 * 24 * 60 * 60 * 1000; // 30 days
 const GEO_FAIL_TTL     = 60 * 60 * 1000;
 const GEO_PERMANENT_TTL = 100 * 365 * 24 * 60 * 60 * 1000; // ~100 years, for private IPs
 
-// Private / loopback / special-use IPs can't be geo-resolved, so cache them permanently
-const PRIVATE_IP_RE = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1([01]\d|2[0-7]))\.|0\.0\.0\.0$|::1$|[Ff][CcDd])/;
-function isPrivateIp(ip) { return PRIVATE_IP_RE.test(ip); }
+// Private, loopback, link-local, multicast and other non-routable addresses
+// must never be sent to the public GeoIP service. Keep this aligned with the
+// outbound endpoint guards instead of maintaining another partial IP regex.
+function isNonPublicIp(ip) {
+  return isPrivateIpLiteral(ip) || isBlockedOutboundIpLiteral(ip);
+}
 
 // ─── External API observability ───────────────────────────────────────────────
 const apiStats = {
@@ -116,7 +121,7 @@ function initDb(dbPath) {
   const nullGeoRows = db.prepare('SELECT ip FROM geo_cache WHERE lat IS NULL').all();
   let upgraded = 0;
   for (const row of nullGeoRows) {
-    if (isPrivateIp(row.ip)) {
+    if (isNonPublicIp(row.ip)) {
       const entry = { lat: null, lon: null, city: null, countryCode: null, expires: privUpgradeNow + GEO_PERMANENT_TTL };
       geoCache.set(row.ip, entry);
       stmtUpsertGeo.run({ ip: row.ip, lat: null, lon: null, city: null, countryCode: null, expires: entry.expires });
@@ -242,7 +247,7 @@ function lookupGeoBatch(ips) {
 
   // Private/loopback/special-use IPs are cached with a permanent TTL (no API call needed)
   for (const ip of ips) {
-    if (isPrivateIp(ip)) {
+    if (isNonPublicIp(ip)) {
       const entry = { lat: null, lon: null, city: null, countryCode: null, expires: now + GEO_PERMANENT_TTL };
       geoCache.set(ip, entry);
       _persistGeo(ip, entry);
