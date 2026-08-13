@@ -405,6 +405,7 @@ const routeCtx = {
   // are enriched, threat-matched, and counted as device activity rather than
   // sitting in a table nothing checks.
   recordConnections: (sessions, now, source) => runtime.recordConnections(sessions, now, source),
+  queueConnectionEnrichment: enrichmentQueue.queueConnectionEnrichment,
   // Evaluated per request so consent can be withdrawn without a restart.
   isPlaintextAllowed: () => appState.agentAllowPlaintext === true,
   setPlaintextAllowed: value => { appState.agentAllowPlaintext = value === true; saveConfig(); },
