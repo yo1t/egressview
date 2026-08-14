@@ -176,6 +176,12 @@ public final class ObservationStore: @unchecked Sendable {
             """)
             try execute("PRAGMA user_version=2")
         }
+        if version < 3 {
+            // Local only. The name the application asked for is not part of the
+            // ingest contract, so it lives here and nowhere else.
+            try execute("ALTER TABLE observations ADD COLUMN remote_hostname TEXT")
+            try execute("PRAGMA user_version=3")
+        }
     }
 
     // MARK: - Writing
@@ -411,8 +417,8 @@ public final class ObservationStore: @unchecked Sendable {
         INSERT INTO observations (
             network_protocol, local_address, local_port, remote_address, remote_port,
             process_id, process_name, bundle_id, first_observed_at, last_observed_at,
-            bytes_in, bytes_out, collector, confidence
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            bytes_in, bytes_out, collector, confidence, remote_hostname
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
@@ -433,6 +439,7 @@ public final class ObservationStore: @unchecked Sendable {
             bindOptionalInt(statement, 12, observation.bytesOut)
             bindText(statement, 13, observation.collector.rawValue)
             bindText(statement, 14, observation.confidence.rawValue)
+            bindOptionalText(statement, 15, observation.remoteHostname)
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw ObservationStoreError.statement(lastMessage)
             }
@@ -523,7 +530,8 @@ public final class ObservationStore: @unchecked Sendable {
             bytesIn: optionalUInt(11),
             bytesOut: optionalUInt(12),
             collector: CollectorKind(rawValue: text(statement, 13) ?? "libproc") ?? .libproc,
-            confidence: ObservationConfidence(rawValue: text(statement, 14) ?? "exact") ?? .exact
+            confidence: ObservationConfidence(rawValue: text(statement, 14) ?? "exact") ?? .exact,
+            remoteHostname: text(statement, 15)
         )
     }
 }

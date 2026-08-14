@@ -30,6 +30,12 @@ public struct ConnectionObservation: Codable, Equatable, Sendable {
     public let bytesOut: UInt64?
     public let collector: CollectorKind
     public let confidence: ObservationConfidence
+    /// The name the application itself asked for, when the system knows it.
+    ///
+    /// Local only. It is deliberately absent from `AgentIngestObservation`:
+    /// the shipped Hub's ingest schema is `.strict()` and would reject the
+    /// whole batch. Sending it needs P3-7's agent-side negotiation first.
+    public let remoteHostname: String?
 
     public init(
         networkProtocol: InternetProtocol,
@@ -45,7 +51,8 @@ public struct ConnectionObservation: Codable, Equatable, Sendable {
         bytesIn: UInt64? = nil,
         bytesOut: UInt64? = nil,
         collector: CollectorKind,
-        confidence: ObservationConfidence
+        confidence: ObservationConfidence,
+        remoteHostname: String? = nil
     ) {
         self.networkProtocol = networkProtocol
         self.localAddress = localAddress
@@ -61,6 +68,7 @@ public struct ConnectionObservation: Codable, Equatable, Sendable {
         self.bytesOut = bytesOut
         self.collector = collector
         self.confidence = confidence
+        self.remoteHostname = remoteHostname
     }
 
     public var stableKey: String {
@@ -89,7 +97,10 @@ public struct ConnectionObservation: Codable, Equatable, Sendable {
             bytesIn: newer.bytesIn ?? bytesIn,
             bytesOut: newer.bytesOut ?? bytesOut,
             collector: newer.collector,
-            confidence: newer.confidence
+            confidence: newer.confidence,
+            // A later flow that the system could not name must not erase a
+            // name an earlier one carried.
+            remoteHostname: newer.remoteHostname ?? remoteHostname
         )
     }
 }

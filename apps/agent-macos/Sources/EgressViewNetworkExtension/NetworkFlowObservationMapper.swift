@@ -12,6 +12,10 @@ public struct SocketFlowMetadata: Equatable, Sendable {
     public let processID: Int32
     public let processName: String
     public let bundleID: String?
+    /// Non-nil only for flows created through Network.framework or
+    /// NSURLSession. A BSD-socket flow simply has no name to report, and it is
+    /// left absent rather than guessed at.
+    public let remoteHostname: String?
 
     public init(
         networkProtocol: InternetProtocol,
@@ -21,7 +25,8 @@ public struct SocketFlowMetadata: Equatable, Sendable {
         remotePort: UInt16,
         processID: Int32,
         processName: String,
-        bundleID: String? = nil
+        bundleID: String? = nil,
+        remoteHostname: String? = nil
     ) {
         self.networkProtocol = networkProtocol
         self.localAddress = localAddress
@@ -31,6 +36,7 @@ public struct SocketFlowMetadata: Equatable, Sendable {
         self.processID = processID
         self.processName = processName
         self.bundleID = bundleID
+        self.remoteHostname = remoteHostname
     }
 }
 
@@ -52,7 +58,8 @@ public struct NetworkFlowObservationMapper: Sendable {
             bytesIn: nil,
             bytesOut: nil,
             collector: .networkExtension,
-            confidence: .exact
+            confidence: .exact,
+            remoteHostname: metadata.remoteHostname
         )
     }
 }
@@ -77,8 +84,26 @@ public struct NetworkExtensionFlowAdapter {
             remoteAddress: remote.address,
             remotePort: remote.port,
             processID: processID,
-            processName: processName(for: processID)
+            processName: processName(for: processID),
+            remoteHostname: normalizedHostname(flow.remoteHostname)
         )
+    }
+
+    /// Keeps only a plain host name. An empty or oversized value is dropped
+    /// rather than stored: a name nobody can read is not better than the IP
+    /// address the screen already shows.
+    func normalizedHostnameForTesting(_ value: String?) -> String? {
+        normalizedHostname(value)
+    }
+
+    private func normalizedHostname(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty, trimmed.count <= 253,
+              !trimmed.contains(where: { $0.isWhitespace || $0.isNewline })
+        else {
+            return nil
+        }
+        return trimmed
     }
 
     private func endpointParts(_ endpoint: NWEndpoint?) -> (address: String, port: UInt16)? {
