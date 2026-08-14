@@ -23,6 +23,7 @@
 "EgressView: Error" = "EgressView：エラー";
 "Open EgressView..." = "EgressViewを開く...";
 "Settings..." = "設定...";
+"About EgressView Agent" = "EgressView Agentについて";
 "Network monitoring" = "ネットワーク監視";
 "Lightweight monitoring" = "軽量監視";
 "Lightweight monitoring is unavailable in this sandboxed build. The current monitoring mode was not changed; use network monitoring." = "このSandbox版では軽量監視を利用できません。現在の監視モードは変更していません。ネットワーク監視を使用してください。";
