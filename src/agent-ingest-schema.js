@@ -24,6 +24,10 @@ const boundedSafeText = max => z.string().min(1).max(max).refine(
 const nullableBoundedSafeText = max => boundedSafeText(max).nullable();
 const ipLiteral = z.string().max(45).refine(value => net.isIP(value) !== 0, 'must be an IP address');
 const port = z.number().int().min(1).max(65535);
+// Network Extension can report an outbound flow before macOS assigns its
+// ephemeral local port. Zero means "unknown" only on the local side; a remote
+// port is still required for the observation to be useful and safely bounded.
+const localPort = z.number().int().min(0).max(65535);
 const isoTimestamp = z.iso.datetime({ offset: false, local: false }).max(32);
 const uint64Decimal = z.string().regex(/^(?:0|[1-9]\d{0,19})$/).refine(value => (
   BigInt(value) <= 18_446_744_073_709_551_615n
@@ -40,7 +44,7 @@ const agentObservationSchema = z.object({
   observationId: z.string().uuid(),
   networkProtocol: z.enum(['tcp', 'udp']),
   localAddress: ipLiteral,
-  localPort: port,
+  localPort,
   remoteAddress: ipLiteral,
   remotePort: port,
   processID: z.number().int().min(0).max(2_147_483_647),

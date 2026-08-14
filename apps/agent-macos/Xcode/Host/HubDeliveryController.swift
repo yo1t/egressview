@@ -13,7 +13,10 @@ final class HubDeliveryController: ObservableObject {
     @Published private(set) var canEnableDelivery = false
     @Published private(set) var isEnrolling = false
     @Published private(set) var status = L("Delivery is off")
-    @Published private(set) var pending = L("Pending: %lld · dropped locally: %lld", 0, 0)
+    @Published private(set) var pending = L(
+        "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld",
+        0, 0, 0, 0
+    )
     @Published private(set) var oldestPending = L("Oldest pending: %@", L("none"))
     @Published private(set) var lastAcknowledged = L("Last acknowledged: %@", L("never"))
     @Published var errorMessage: String?
@@ -168,7 +171,13 @@ final class HubDeliveryController: ObservableObject {
     private func render(state: AgentIngestSenderState, queueStatus: AgentDeliveryQueueStatus) {
         senderState = state
         status = label(for: state)
-        pending = L("Pending: %lld · dropped locally: %lld", queueStatus.pendingCount, queueStatus.droppedCount)
+        pending = L(
+            "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld",
+            queueStatus.pendingCount,
+            queueStatus.contractRejectedCount,
+            queueStatus.queueOverflowCount,
+            queueStatus.legacyUnclassifiedCount
+        )
         oldestPending = L("Oldest pending: %@", format(queueStatus.oldestPendingAt, fallback: L("none")))
         lastAcknowledged = L("Last acknowledged: %@", format(queueStatus.lastAcknowledgedAt, fallback: L("never")))
     }

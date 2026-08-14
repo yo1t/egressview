@@ -102,8 +102,10 @@ function createAgentCorrelation({ getDb, windowMs = DEFAULT_CORRELATION_WINDOW_M
 
   function classify(observation) {
     const candidates = candidatesFor(observation);
+    const localPortKnown = observation.localPort > 0;
     const exact = candidates.filter(candidate =>
-      candidate.sport === observation.localPort
+      localPortKnown
+      && candidate.sport === observation.localPort
       && intervalDeltaMs(
         candidate.firstSeen, candidate.lastSeen,
         observation.firstObservedAt, observation.lastObservedAt
@@ -111,6 +113,22 @@ function createAgentCorrelation({ getDb, windowMs = DEFAULT_CORRELATION_WINDOW_M
     );
     if (exact.length === 1) return { candidate: exact[0], matchKind: 'exact-5tuple' };
     if (exact.length > 1) return { reason: 'ambiguous' };
+
+    // A pass-only Network Extension can observe a flow before macOS assigns
+    // its ephemeral local port. Correlate that weaker observation only when a
+    // single four-tuple candidate overlaps in time; never guess among multiple
+    // router sessions.
+    if (!localPortKnown) {
+      const overlapping = candidates.filter(candidate => intervalDeltaMs(
+        candidate.firstSeen, candidate.lastSeen,
+        observation.firstObservedAt, observation.lastObservedAt
+      ) === 0);
+      if (overlapping.length === 1) {
+        return { candidate: overlapping[0], matchKind: 'unique-4tuple-time' };
+      }
+      if (overlapping.length > 1) return { reason: 'ambiguous' };
+      return { reason: 'unmatched' };
+    }
 
     // A known, different source port is evidence against a match. The weaker
     // fallback is allowed only when exactly one candidate lacks router sport.
@@ -217,7 +235,7 @@ function createAgentCorrelation({ getDb, windowMs = DEFAULT_CORRELATION_WINDOW_M
       SELECT
         o.agentId AS sourceId, a.hostName AS sourceName, 'agent' AS sourceKind,
         o.observationId, o.networkProtocol AS protocol,
-        o.localAddress AS src, o.localPort AS sport,
+        o.localAddress AS src, NULLIF(o.localPort, 0) AS sport,
         o.remoteAddress AS dst, o.remotePort AS dport,
         o.processId, o.processName, o.bundleId,
         o.firstObservedAt, o.lastObservedAt, o.bytesIn, o.bytesOut,

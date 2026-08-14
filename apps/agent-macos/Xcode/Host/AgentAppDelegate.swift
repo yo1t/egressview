@@ -14,6 +14,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginController = LaunchAtLoginController()
     private let historyMaintenanceQueue = DispatchQueue(label: "com.egressview.agent.history-maintenance")
     private var currentMonitoringStatus = AgentMonitoringStatus.paused
+    private var checkedLaunchAtLoginForActiveMonitoring = false
     private var isPreparedForRemoval = false
     private lazy var storageResult = makeStorage()
     private lazy var store = try? storageResult.get().store
@@ -85,6 +86,14 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     private func render(_ status: AgentMonitoringStatus) {
         currentMonitoringStatus = status
+        if status == .fullActive, !checkedLaunchAtLoginForActiveMonitoring {
+            checkedLaunchAtLoginForActiveMonitoring = true
+            do {
+                try launchAtLoginController.ensureEnabledForMonitoring()
+            } catch {
+                logger.error("Could not enable launch at login: \(error.localizedDescription, privacy: .public)")
+            }
+        }
         observationWindow.updateMonitoringStatus(status)
         settingsWindow.updateMonitoringStatus(status)
         let menu = NSMenu()
@@ -94,6 +103,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(item(L("Open EgressView..."), action: #selector(openObservations), key: "o"))
         menu.addItem(item(L("Settings..."), action: #selector(openSettings), key: ","))
+        menu.addItem(item(L("About EgressView Agent"), action: #selector(openAbout)))
         if let version = updateController.availableVersion {
             menu.addItem(item(L("Update %@ ready...", version), action: #selector(openSettings)))
         }
@@ -164,6 +174,11 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow.show()
     }
 
+    @objc private func openAbout() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        NSApplication.shared.orderFrontStandardAboutPanel(nil)
+    }
+
     @objc private func selectLightweight() {
         guard !isPreparedForRemoval else { return }
         controller.selectLightweightMonitoring()
@@ -216,6 +231,8 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         let mainMenu = NSMenu()
         let applicationItem = NSMenuItem()
         let applicationMenu = NSMenu()
+        applicationMenu.addItem(item(L("About EgressView Agent"), action: #selector(openAbout)))
+        applicationMenu.addItem(.separator())
         applicationMenu.addItem(item(L("Settings..."), action: #selector(openSettings), key: ","))
         applicationMenu.addItem(.separator())
         applicationMenu.addItem(item(L("Quit EgressView Agent"), action: #selector(quit), key: "q"))

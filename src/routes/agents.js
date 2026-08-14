@@ -140,7 +140,9 @@ module.exports = function agentRoutes({
     const hostName = envelope.agent?.hostName || null;
     const sessions = envelope.observations.map(observation => ({
       src: observation.localAddress,
-      sport: observation.localPort,
+      // Zero is the ingest contract's sentinel for an ephemeral local port
+      // that macOS had not assigned yet. Do not overwrite a known router sport.
+      sport: observation.localPort || null,
       dst: observation.remoteAddress,
       dport: observation.remotePort,
       proto: observation.networkProtocol,
