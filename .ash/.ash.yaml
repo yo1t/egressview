@@ -63,6 +63,15 @@ global_settings:
     - path: 'scripts/frontend-innerhtml-allowlist.json'
       rule_id: 'SECRET-HEX-HIGH-ENTROPY-STRING'
       reason: 'SHA-256 fingerprints of reviewed frontend source expressions; deterministic code hashes, not credentials'
+    - path: 'apps/agent-macos/Tests/EgressViewAgentCoreTests/AgentUpdateCheckerTests.swift'
+      rule_id: 'SECRET-BASE64-HIGH-ENTROPY-STRING'
+      reason: 'The detached Ed25519 signature of the published update manifest. A signature is public by construction — it is served to every agent at dl.egressview.com — and it verifies against the public key whose fingerprint is published in DNS. Scoped to this rule so a real credential in this file would still be caught.'
+    - path: 'apps/agent-macos/Tests/EgressViewAgentCoreTests/AgentUpdateCheckerTests.swift'
+      rule_id: 'SECRET-HEX-HIGH-ENTROPY-STRING'
+      reason: 'SHA-256 checksum of the published agent package, asserted against the signed manifest; a published integrity value, not a credential'
+    - path: 'apps/agent-macos/Tests/EgressViewAgentCoreTests/AgentUpdateInstallationTests.swift'
+      rule_id: 'SECRET-HEX-HIGH-ENTROPY-STRING'
+      reason: 'Placeholder Apple Team ID fixtures ("ABCDE12345", "TEAMID1234") for the signing-identity checks; not credentials and not the real team'
 
     # ── dev-only container (not shipped to production) ──────────────────────
     # dev-conntrack/ is a local test router image used only for development;
