@@ -3,6 +3,7 @@ import Foundation
 /// How wide a window the charts are showing.
 public enum TimeScale: String, Equatable, Sendable, CaseIterable {
     case hour
+    case sixHours
     case day
     case week
     case month
@@ -10,6 +11,7 @@ public enum TimeScale: String, Equatable, Sendable, CaseIterable {
     public var duration: TimeInterval {
         switch self {
         case .hour: return 3_600
+        case .sixHours: return 6 * 3_600
         case .day: return 86_400
         case .week: return 7 * 86_400
         case .month: return 30 * 86_400
@@ -18,7 +20,7 @@ public enum TimeScale: String, Equatable, Sendable, CaseIterable {
 
     public var retentionDaysRequired: Int {
         switch self {
-        case .hour, .day: return 1
+        case .hour, .sixHours, .day: return 1
         case .week: return 7
         case .month: return 30
         }

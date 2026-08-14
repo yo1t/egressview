@@ -188,3 +188,22 @@
 "Prepare EgressView Agent for removal?" = "EgressView Agentを削除する準備を始めますか？";
 "Stop monitoring and continue" = "監視を停止して続行";
 "Quit EgressView Agent, then move it to Trash in Finder." = "EgressView Agentを終了し、Finderでゴミ箱へ移動してください。";
+
+/* P3-15 / P3-18 charts */
+"Measure" = "指標";
+"Data volume" = "データ量";
+"When traffic happened" = "いつ通信があったか";
+"Stacked by application, %@" = "アプリ別の積み上げ・%@";
+"Which application went where" = "どのアプリがどこへ";
+"Ribbon width is data volume" = "帯の太さはデータ量";
+"Ribbon width is the number of connections" = "帯の太さは接続数";
+"No connections in this period." = "この期間に接続はありません。";
+"No data volume has been measured in this period yet." = "この期間のデータ量はまだ計測されていません。";
+"%lld connections have no byte count yet. Data volume is measured when a connection ends, so anything still open is not included." = "%lld件の接続はデータ量が未計測です。データ量は接続の終了時に確定するため、継続中の接続は含まれません。";
+"Other" = "その他";
+"data volume" = "データ量";
+"connections" = "接続数";
+"%1$lld applications, %2$@ in total." = "アプリ%1$lld件、合計%2$@。";
+"%1$@ accounts for %2$lld percent." = "%1$@が%2$lld％を占めます。";
+"%1$@ of %2$@ across %3$lld applications and %4$lld destinations." = "%2$@%1$@。アプリ%3$lld件、宛先%4$lld件。";
+"%1$@ accounts for %2$lld percent; the busiest destination is %3$@." = "%1$@が%2$lld％を占め、最も多い宛先は%3$@です。";

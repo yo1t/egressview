@@ -10,14 +10,12 @@ private enum AgentMainTab: String, CaseIterable, Identifiable {
     var title: String { self == .status ? L("Status") : L("Analysis") }
 }
 
-private enum AgentHistoryPeriod: String, CaseIterable, Identifiable {
-    case hour
-    case sixHours
-    case day
-    case week
-    case month
-
-    var id: String { rawValue }
+// The period lives in `VisualizationSelection` so the table, the timeline and
+// the sankey cannot drift apart. Three views each holding their own window
+// would make "which app caused that spike, and where was it going"
+// unanswerable.
+extension TimeScale: @retroactive Identifiable {
+    public var id: String { rawValue }
 
     var title: String {
         switch self {
@@ -28,15 +26,13 @@ private enum AgentHistoryPeriod: String, CaseIterable, Identifiable {
         case .month: return L("Last 30 days")
         }
     }
+}
 
-    var duration: TimeInterval {
-        switch self {
-        case .hour: return 3_600
-        case .sixHours: return 6 * 3_600
-        case .day: return 24 * 3_600
-        case .week: return 7 * 86_400
-        case .month: return 30 * 86_400
-        }
+extension TrafficMetric: @retroactive Identifiable {
+    public var id: String { rawValue }
+
+    var title: String {
+        self == .sessions ? L("Connections") : L("Data volume")
     }
 }
 
@@ -54,9 +50,17 @@ private struct AgentObservationRow: Identifiable {
 @MainActor
 private final class AgentMainViewModel: ObservableObject {
     @Published var selectedTab = AgentMainTab.status
-    @Published var period = AgentHistoryPeriod.hour {
+    @Published var scale = TimeScale.hour {
         didSet { refresh() }
     }
+    @Published var metric = TrafficMetric.sessions {
+        didSet { refresh() }
+    }
+    @Published private(set) var availableMetrics: [TrafficMetric] = [.sessions]
+    @Published private(set) var sankey = SankeyAggregator().aggregate([], metric: .sessions)
+    @Published private(set) var timeline = TimelineAggregator().aggregate(
+        [], selection: VisualizationSelection()
+    )
     @Published private(set) var observationRows: [AgentObservationRow] = []
     @Published private(set) var summary = AgentPeriodSummary()
     @Published private(set) var storage: ObservationStoreStatistics?
@@ -100,10 +104,10 @@ private final class AgentMainViewModel: ObservableObject {
         }
         guard !isRefreshing else { return }
         isRefreshing = true
-        let period = period
+        let selection = VisualizationSelection(scale: scale, metric: metric, end: Date())
         loadQueue.async { [weak self] in
-            let to = Date()
-            let from = to.addingTimeInterval(-period.duration)
+            let from = selection.start
+            let to = selection.end
             let result = Result {
                 let observations = try store.observations(since: from, limit: 500)
                 let rollup = try store.hourlyRollup(from: from, to: to)
@@ -112,13 +116,33 @@ private final class AgentMainViewModel: ObservableObject {
                     applicationCount: Set(rollup.map(\.processName)).count,
                     destinationCount: Set(rollup.map(\.remoteAddress)).count
                 )
-                return (observations, summary, try store.statistics())
+                let pairs = try store.appDestinationTotals(from: from, to: to)
+                let buckets = try store.appTimeline(
+                    from: from, to: to, buckets: VisualizationSelection.bucketCount
+                )
+                // The byte view is offered only once something has actually
+                // been measured; otherwise every bar would be empty.
+                let measuredBytes = pairs.contains { $0.bytes > 0 }
+                return (
+                    observations, summary, try store.statistics(),
+                    SankeyAggregator().aggregate(pairs, metric: selection.metric),
+                    TimelineAggregator().aggregate(buckets, selection: selection),
+                    measuredBytes
+                )
             }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.isRefreshing = false
                 switch result {
                 case .success(let value):
+                    self.sankey = value.3
+                    self.timeline = value.4
+                    self.availableMetrics = VisualizationSelection.availableMetrics(
+                        hasMeasuredBytes: value.5
+                    )
+                    if !self.availableMetrics.contains(self.metric) {
+                        self.metric = .sessions
+                    }
                     self.observationRows = value.0.enumerated().map { index, observation in
                         AgentObservationRow(
                             id: "\(observation.stableKey)|\(observation.lastObservedAt.timeIntervalSince1970)|\(index)",
@@ -175,9 +199,9 @@ private struct AgentMainView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(width: 220)
-            Picker(L("Period"), selection: $model.period) {
-                ForEach(AgentHistoryPeriod.allCases) { period in
-                    Text(period.title).tag(period)
+            Picker(L("Period"), selection: $model.scale) {
+                ForEach(TimeScale.allCases) { scale in
+                    Text(scale.title).tag(scale)
                 }
             }
             .frame(width: 150)
@@ -199,7 +223,7 @@ private struct AgentMainView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L("Your network, right now"))
                         .font(.system(size: 34, weight: .bold, design: .rounded))
-                    Text(L("A local summary for %@. Packet payloads are never collected.", model.period.title))
+                    Text(L("A local summary for %@. Packet payloads are never collected.", model.scale.title))
                         .foregroundStyle(.secondary)
                 }
 
@@ -237,6 +261,34 @@ private struct AgentMainView: View {
     }
 
     private var analysisView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                metricPicker
+                AgentTimelineChart(model: model.timeline, scale: model.scale)
+                AgentSankeyChart(model: model.sankey)
+                connectionTable
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 18)
+        }
+    }
+
+    @ViewBuilder
+    private var metricPicker: some View {
+        // Offered only when both views can say something. A picker whose other
+        // option is always blank is worse than no picker.
+        if model.availableMetrics.count > 1 {
+            Picker(L("Measure"), selection: $model.metric) {
+                ForEach(model.availableMetrics) { metric in
+                    Text(metric.title).tag(metric)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 300)
+        }
+    }
+
+    private var connectionTable: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
@@ -306,6 +358,281 @@ private struct AgentMainView: View {
             statistics.rolledUpCount,
             size
         )
+    }
+}
+
+
+// MARK: - Charts
+
+private func formattedMetric(_ value: Double, _ metric: TrafficMetric) -> String {
+    switch metric {
+    case .sessions:
+        return Int(value).formatted()
+    case .bytes:
+        return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary)
+    }
+}
+
+/// Says what the chart cannot show, rather than letting the gaps read as quiet.
+private struct AgentPartialCoverageNote: View {
+    let count: Int
+
+    var body: some View {
+        Label(
+            L("%lld connections have no byte count yet. Data volume is measured when a connection ends, so anything still open is not included.", count),
+            systemImage: "info.circle"
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+}
+
+private struct AgentChartCard<Content: View>: View {
+    let title: String
+    let subtitle: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.title3.weight(.semibold))
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            content
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+    }
+}
+
+private let agentSeriesPalette: [Color] = [
+    .blue, .teal, .indigo, .orange, .pink, .mint, .purple, .brown,
+]
+
+private func agentSeriesColor(_ index: Int, isRemainder: Bool) -> Color {
+    // The remainder is deliberately grey: it is a residue, not a participant,
+    // and colouring it like one invites reading it as a single application.
+    isRemainder ? Color.secondary.opacity(0.45)
+        : agentSeriesPalette[index % agentSeriesPalette.count]
+}
+
+private struct AgentTimelineChart: View {
+    let model: TimelineModel
+    let scale: TimeScale
+
+    var body: some View {
+        AgentChartCard(
+            title: L("When traffic happened"),
+            subtitle: L("Stacked by application, %@", scale.title)
+        ) {
+            if model.isEmpty {
+                AgentEmptyChartNote(
+                    text: model.byteCoverageIsPartial
+                        ? L("No data volume has been measured in this period yet.")
+                        : L("No connections in this period.")
+                )
+            } else {
+                Canvas { context, size in draw(in: &context, size: size) }
+                    .frame(height: 180)
+                    .accessibilityElement()
+                    .accessibilityLabel(summary)
+                AgentSeriesLegend(entries: model.series.enumerated().map {
+                    .init(name: $0.element.name, color: agentSeriesColor($0.offset, isRemainder: $0.element.isRemainder))
+                })
+            }
+            if model.byteCoverageIsPartial {
+                AgentPartialCoverageNote(count: model.observationsWithoutBytes)
+            }
+        }
+    }
+
+    private var summary: String {
+        model.accessibilitySummary(
+            empty: L("No connections in this period."),
+            headline: { count, total, metric in
+                L("%1$lld applications, %2$@ in total.", count, formattedMetric(total, metric))
+            },
+            busiest: { app, share, _ in L("%1$@ accounts for %2$lld percent.", app, share) }
+        )
+    }
+
+    private func draw(in context: inout GraphicsContext, size: CGSize) {
+        let peak = model.bucketTotals.max() ?? 0
+        guard peak > 0, model.bucketStarts.count > 1 else { return }
+        let step = size.width / CGFloat(model.bucketStarts.count)
+        var baselines = [CGFloat](repeating: size.height, count: model.bucketStarts.count)
+
+        for (index, series) in model.series.enumerated() {
+            var path = Path()
+            for bucket in model.bucketStarts.indices {
+                let value = series.values.indices.contains(bucket) ? series.values[bucket] : 0
+                guard value > 0 else { continue }
+                let height = size.height * CGFloat(value / peak)
+                let top = baselines[bucket] - height
+                path.addRect(CGRect(
+                    x: CGFloat(bucket) * step, y: top,
+                    width: max(1, step - 1), height: height
+                ))
+                baselines[bucket] = top
+            }
+            context.fill(path, with: .color(agentSeriesColor(index, isRemainder: series.isRemainder)))
+        }
+    }
+}
+
+private struct AgentSankeyChart: View {
+    let model: SankeyModel
+
+    var body: some View {
+        AgentChartCard(
+            title: L("Which application went where"),
+            subtitle: model.metric == .bytes
+                ? L("Ribbon width is data volume")
+                : L("Ribbon width is the number of connections")
+        ) {
+            if model.isEmpty {
+                AgentEmptyChartNote(
+                    text: model.byteCoverageIsPartial
+                        ? L("No data volume has been measured in this period yet.")
+                        : L("No connections in this period.")
+                )
+            } else {
+                GeometryReader { proxy in
+                    Canvas { context, size in draw(in: &context, size: size) }
+                        .frame(width: proxy.size.width)
+                }
+                .frame(height: 260)
+                .accessibilityElement()
+                .accessibilityLabel(summary)
+                AgentSankeyLabels(model: model)
+            }
+            if model.byteCoverageIsPartial {
+                AgentPartialCoverageNote(count: model.observationsWithoutBytes)
+            }
+        }
+    }
+
+    private var summary: String {
+        model.accessibilitySummary(
+            metricName: { $0 == .bytes ? L("data volume") : L("connections") },
+            formattedValue: formattedMetric,
+            empty: L("No connections in this period."),
+            template: { metric, total, apps, destinations in
+                L("%1$@ of %2$@ across %3$lld applications and %4$lld destinations.",
+                  total, metric, apps, destinations)
+            },
+            leaders: { app, destination, share in
+                L("%1$@ accounts for %2$lld percent; the busiest destination is %3$@.",
+                  app, share, destination)
+            }
+        )
+    }
+
+    private func draw(in context: inout GraphicsContext, size: CGSize) {
+        let inset = CGSize(width: size.width, height: max(0, size.height - 8))
+        let layout = SankeyLayout(nodeWidth: 10, nodeGap: 6).layout(model, in: inset)
+        let appIndex = Dictionary(uniqueKeysWithValues: layout.apps.enumerated().map { ($1.name, $0) })
+
+        for ribbon in layout.ribbons {
+            let colour = agentSeriesColor(
+                appIndex[ribbon.source] ?? 0,
+                isRemainder: ribbon.source == SankeyAggregator().remainderName
+            )
+            var path = Path()
+            let leftX = layout.apps.first?.rect.maxX ?? 0
+            let rightX = layout.destinations.first?.rect.minX ?? size.width
+            let control = (rightX - leftX) * 0.5
+            path.move(to: CGPoint(x: leftX, y: ribbon.sourceRange.lowerBound))
+            path.addCurve(
+                to: CGPoint(x: rightX, y: ribbon.targetRange.lowerBound),
+                control1: CGPoint(x: leftX + control, y: ribbon.sourceRange.lowerBound),
+                control2: CGPoint(x: rightX - control, y: ribbon.targetRange.lowerBound)
+            )
+            path.addLine(to: CGPoint(x: rightX, y: ribbon.targetRange.upperBound))
+            path.addCurve(
+                to: CGPoint(x: leftX, y: ribbon.sourceRange.upperBound),
+                control1: CGPoint(x: rightX - control, y: ribbon.targetRange.upperBound),
+                control2: CGPoint(x: leftX + control, y: ribbon.sourceRange.upperBound)
+            )
+            path.closeSubpath()
+            context.fill(path, with: .color(colour.opacity(0.35)))
+        }
+
+        for (index, node) in layout.apps.enumerated() {
+            context.fill(Path(node.rect), with: .color(agentSeriesColor(index, isRemainder: node.isRemainder)))
+        }
+        for node in layout.destinations {
+            context.fill(Path(node.rect), with: .color(Color.secondary.opacity(0.6)))
+        }
+    }
+}
+
+private struct AgentSankeyLabels: View {
+    let model: SankeyModel
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 24) {
+            column(title: L("Applications"), nodes: model.apps, coloured: true)
+            Spacer(minLength: 0)
+            column(title: L("Destinations"), nodes: model.destinations, coloured: false)
+        }
+        .font(.caption)
+    }
+
+    private func column(title: String, nodes: [SankeyNode], coloured: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).foregroundStyle(.secondary)
+            ForEach(Array(nodes.enumerated()), id: \.element.name) { index, node in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(coloured
+                              ? agentSeriesColor(index, isRemainder: node.isRemainder)
+                              : Color.secondary.opacity(0.6))
+                        .frame(width: 7, height: 7)
+                    Text(node.isRemainder ? L("Other") : node.name)
+                        .lineLimit(1)
+                    Text(formattedMetric(node.value, model.metric))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+private struct AgentSeriesLegend: View {
+    struct Entry: Identifiable {
+        let name: String
+        let color: Color
+        var id: String { name }
+    }
+
+    let entries: [Entry]
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ForEach(entries) { entry in
+                HStack(spacing: 5) {
+                    RoundedRectangle(cornerRadius: 2).fill(entry.color).frame(width: 10, height: 10)
+                    Text(entry.name == "Other" ? L("Other") : entry.name)
+                        .font(.caption)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+}
+
+private struct AgentEmptyChartNote: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 120)
     }
 }
 

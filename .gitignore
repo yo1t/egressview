@@ -125,6 +125,8 @@ infra/
 
 # Local Xcode and SwiftPM workspace state
 apps/agent-macos/.swiftpm/
+# xcodebuild -target writes here; swift build uses .build/
+apps/agent-macos/build/
 apps/agent-macos/EgressViewAgent.xcodeproj/project.xcworkspace/
 apps/agent-macos/EgressViewAgent.xcodeproj/xcuserdata/
 
