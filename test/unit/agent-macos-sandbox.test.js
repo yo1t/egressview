@@ -4,7 +4,6 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 
 const root = path.join(__dirname, '..', '..');
 const entitlementFiles = {
@@ -17,13 +16,12 @@ const hostInfo = 'apps/agent-macos/Xcode/Host/Info.plist';
 const extensionInfo = 'apps/agent-macos/Xcode/SystemExtension/Info.plist';
 
 function entitlement(file, key) {
-  try {
-    return execFileSync('/usr/libexec/PlistBuddy', [
-      '-c', `Print :${key}`, path.join(root, file),
-    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  } catch {
-    return null;
-  }
+  const plist = fs.readFileSync(path.join(root, file), 'utf8');
+  const marker = `<key>${key}</key>`;
+  const index = plist.indexOf(marker);
+  if (index < 0) return null;
+  const value = plist.slice(index + marker.length).match(/^\s*<(true|false)\s*\/>|^\s*<string>([^<]*)<\/string>/);
+  return value ? (value[1] || value[2]) : null;
 }
 
 describe('macOS Agent App Sandbox boundary', () => {
