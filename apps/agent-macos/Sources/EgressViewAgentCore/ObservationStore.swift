@@ -36,6 +36,28 @@ public struct ObservationRetention: Equatable, Sendable {
     }
 }
 
+public struct AppDestinationTotal: Equatable, Sendable {
+    public let processName: String
+    public let destination: String
+    public let sessionCount: Int
+    public let bytes: UInt64
+    public let observationsWithoutBytes: Int
+
+    public init(
+        processName: String,
+        destination: String,
+        sessionCount: Int,
+        bytes: UInt64,
+        observationsWithoutBytes: Int
+    ) {
+        self.processName = processName
+        self.destination = destination
+        self.sessionCount = sessionCount
+        self.bytes = bytes
+        self.observationsWithoutBytes = observationsWithoutBytes
+    }
+}
+
 public struct ObservationStoreStatistics: Equatable, Sendable {
     public let rawCount: Int
     public let rolledUpCount: Int
@@ -301,6 +323,44 @@ public final class ObservationStore: @unchecked Sendable {
                     sessionCount: Int(sqlite3_column_int64(statement, 4)),
                     bytesIn: UInt64(max(0, sqlite3_column_int64(statement, 5))),
                     bytesOut: UInt64(max(0, sqlite3_column_int64(statement, 6)))
+                ))
+            }
+            return rows
+        }
+    }
+
+    /// One application talking to one destination over the selected period.
+    ///
+    /// `bytes` is the total of the flows whose counts are known.
+    /// `observationsWithoutBytes` is reported alongside rather than folded in
+    /// as zero: with byte counts arriving only when a flow closes, treating an
+    /// unknown as zero would draw silence where nothing was measured.
+    public func appDestinationTotals(from: Date, to: Date) throws -> [AppDestinationTotal] {
+        try lock.withLock {
+            let sql = """
+            SELECT process_name,
+                   COALESCE(NULLIF(remote_hostname, ''), remote_address) AS destination,
+                   COUNT(*) AS sessions,
+                   COALESCE(SUM(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)), 0) AS total_bytes,
+                   SUM(CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END) AS unknown
+            FROM observations
+            WHERE last_observed_at >= ? AND last_observed_at < ?
+            GROUP BY process_name, destination
+            ORDER BY sessions DESC
+            """
+            let statement = try prepare(sql)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, from.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 2, to.timeIntervalSince1970)
+
+            var rows: [AppDestinationTotal] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                rows.append(AppDestinationTotal(
+                    processName: text(statement, 0) ?? "",
+                    destination: text(statement, 1) ?? "",
+                    sessionCount: Int(sqlite3_column_int64(statement, 2)),
+                    bytes: UInt64(max(0, sqlite3_column_int64(statement, 3))),
+                    observationsWithoutBytes: Int(sqlite3_column_int64(statement, 4))
                 ))
             }
             return rows
