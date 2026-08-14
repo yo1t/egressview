@@ -63,13 +63,6 @@ public enum AgentCodeIdentity {
         return details[kSecCodeInfoTeamIdentifier as String] as? String
     }
 
-    public static func isAppSandboxEnabled() -> Bool {
-        #if EGRESSVIEW_APP_SANDBOXED
-        true
-        #else
-        false
-        #endif
-    }
 }
 
 /// Checks a downloaded package before it is offered to the user.
