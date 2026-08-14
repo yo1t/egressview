@@ -37,10 +37,10 @@ final class VisualizationSelectionTests: XCTestCase {
         // empty buckets and call it their traffic.
         let oneDay = ObservationRetention(retentionDays: 1, rawDays: 1)
         XCTAssertEqual(
-            VisualizationSelection.availableScales(retention: oneDay), [.hour, .day]
+            VisualizationSelection.availableScales(retention: oneDay), [.hour, .sixHours, .day]
         )
         let ninety = ObservationRetention(retentionDays: 90, rawDays: 14)
-        XCTAssertEqual(VisualizationSelection.availableScales(retention: ninety).count, 4)
+        XCTAssertEqual(VisualizationSelection.availableScales(retention: ninety).count, 5)
     }
 
     func testTheByteViewIsNotOfferedBeforeAnyBytesHaveBeenMeasured() {
