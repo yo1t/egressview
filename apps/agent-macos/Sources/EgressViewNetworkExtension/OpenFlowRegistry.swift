@@ -97,7 +97,8 @@ public struct OpenFlowRegistry: Sendable {
             bytesIn: bytesIn,
             bytesOut: bytesOut,
             collector: .networkExtension,
-            confidence: .exact
+            confidence: .exact,
+            remoteHostname: resolved.remoteHostname
         )
     }
 
