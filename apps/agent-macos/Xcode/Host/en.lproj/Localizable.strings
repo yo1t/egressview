@@ -188,3 +188,22 @@
 "Prepare EgressView Agent for removal?" = "Prepare EgressView Agent for removal?";
 "Stop monitoring and continue" = "Stop monitoring and continue";
 "Quit EgressView Agent, then move it to Trash in Finder." = "Quit EgressView Agent, then move it to Trash in Finder.";
+
+/* P3-15 / P3-18 charts */
+"Measure" = "Measure";
+"Data volume" = "Data volume";
+"When traffic happened" = "When traffic happened";
+"Stacked by application, %@" = "Stacked by application, %@";
+"Which application went where" = "Which application went where";
+"Ribbon width is data volume" = "Ribbon width is data volume";
+"Ribbon width is the number of connections" = "Ribbon width is the number of connections";
+"No connections in this period." = "No connections in this period.";
+"No data volume has been measured in this period yet." = "No data volume has been measured in this period yet.";
+"%lld connections have no byte count yet. Data volume is measured when a connection ends, so anything still open is not included." = "%lld connections have no byte count yet. Data volume is measured when a connection ends, so anything still open is not included.";
+"Other" = "Other";
+"data volume" = "data volume";
+"connections" = "connections";
+"%1$lld applications, %2$@ in total." = "%1$lld applications, %2$@ in total.";
+"%1$@ accounts for %2$lld percent." = "%1$@ accounts for %2$lld percent.";
+"%1$@ of %2$@ across %3$lld applications and %4$lld destinations." = "%1$@ of %2$@ across %3$lld applications and %4$lld destinations.";
+"%1$@ accounts for %2$lld percent; the busiest destination is %3$@." = "%1$@ accounts for %2$lld percent; the busiest destination is %3$@.";
