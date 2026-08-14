@@ -3,7 +3,9 @@ import Network
 
 public struct AgentDeliveryQueueStatus: Equatable, Sendable {
     public let pendingCount: Int
-    public let droppedCount: Int
+    public let contractRejectedCount: Int
+    public let queueOverflowCount: Int
+    public let legacyUnclassifiedCount: Int
     public let oldestPendingAt: Date?
     public let lastAcknowledgedAt: Date?
     /// Set when a saved queue could not be read at startup and was reset.
@@ -13,16 +15,24 @@ public struct AgentDeliveryQueueStatus: Equatable, Sendable {
 
     public init(
         pendingCount: Int,
-        droppedCount: Int,
+        contractRejectedCount: Int,
+        queueOverflowCount: Int,
+        legacyUnclassifiedCount: Int,
         oldestPendingAt: Date?,
         lastAcknowledgedAt: Date?,
         unreadableStateResetAt: Date? = nil
     ) {
         self.pendingCount = pendingCount
-        self.droppedCount = droppedCount
+        self.contractRejectedCount = contractRejectedCount
+        self.queueOverflowCount = queueOverflowCount
+        self.legacyUnclassifiedCount = legacyUnclassifiedCount
         self.oldestPendingAt = oldestPendingAt
         self.lastAcknowledgedAt = lastAcknowledgedAt
         self.unreadableStateResetAt = unreadableStateResetAt
+    }
+
+    public var droppedCount: Int {
+        contractRejectedCount + queueOverflowCount + legacyUnclassifiedCount
     }
 }
 
@@ -41,7 +51,11 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
     private struct State: Codable {
         var pending: [PendingObservation] = []
         var activeBatch: ActiveBatch?
+        // Written by Agent 0.2.0 and earlier. Its two causes cannot be safely
+        // reconstructed, so preserve it as an explicitly unclassified total.
         var droppedCount = 0
+        var contractRejectedCount: Int?
+        var queueOverflowCount: Int?
         var lastAcknowledgedAt: Date?
     }
 
@@ -89,7 +103,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             if state.activeBatch?.observationIDs.contains(where: invalidIDs.contains) == true {
                 state.activeBatch = nil
             }
-            state.droppedCount += invalidIDs.count
+            state.contractRejectedCount = (state.contractRejectedCount ?? 0) + invalidIDs.count
             try persist()
         }
     }
@@ -119,7 +133,8 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         guard !observations.isEmpty else { return }
         try lock.withLock {
             let deliverable = observations.filter(Self.isDeliverable)
-            state.droppedCount += observations.count - deliverable.count
+            state.contractRejectedCount = (state.contractRejectedCount ?? 0)
+                + observations.count - deliverable.count
             let activeIDs = Set(state.activeBatch?.observationIDs ?? [])
             for observation in deliverable {
                 if let index = state.pending.lastIndex(where: {
@@ -190,7 +205,9 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         lock.withLock {
             AgentDeliveryQueueStatus(
                 pendingCount: state.pending.count,
-                droppedCount: state.droppedCount,
+                contractRejectedCount: state.contractRejectedCount ?? 0,
+                queueOverflowCount: state.queueOverflowCount ?? 0,
+                legacyUnclassifiedCount: state.droppedCount,
                 oldestPendingAt: state.pending.map(\.queuedAt).min(),
                 lastAcknowledgedAt: state.lastAcknowledgedAt,
                 unreadableStateResetAt: unreadableStateResetAt
@@ -210,7 +227,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             dropped += 1
             return false
         }
-        state.droppedCount += dropped
+        state.queueOverflowCount = (state.queueOverflowCount ?? 0) + dropped
     }
 
     private func persist() throws {
@@ -230,8 +247,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
     }
 
     private static func isDeliverable(_ observation: ConnectionObservation) -> Bool {
-        observation.localPort > 0
-            && observation.remotePort > 0
+        observation.remotePort > 0
             && isIPAddress(observation.localAddress)
             && isIPAddress(observation.remoteAddress)
             && isSafeText(observation.processName, maximumLength: 256)

@@ -126,4 +126,24 @@ describe('macOS Agent App Sandbox boundary', () => {
     assert.match(settings, /availableMonitoringModes/);
     assert.doesNotMatch(settings, /development builds only/);
   });
+
+  it('uses the standard macOS About panel so the installed version is visible', () => {
+    const appDelegate = fs.readFileSync(
+      path.join(root, 'apps/agent-macos/Xcode/Host/AgentAppDelegate.swift'),
+      'utf8'
+    );
+    const english = fs.readFileSync(
+      path.join(root, 'apps/agent-macos/Xcode/Host/en.lproj/Localizable.strings'),
+      'utf8'
+    );
+    const japanese = fs.readFileSync(
+      path.join(root, 'apps/agent-macos/Xcode/Host/ja.lproj/Localizable.strings'),
+      'utf8'
+    );
+
+    assert.match(appDelegate, /orderFrontStandardAboutPanel/);
+    assert.ok((appDelegate.match(/L\("About EgressView Agent"\)/g) || []).length >= 2);
+    assert.match(english, /"About EgressView Agent" = "About EgressView Agent";/);
+    assert.match(japanese, /"About EgressView Agent" = "EgressView Agentについて";/);
+  });
 });
