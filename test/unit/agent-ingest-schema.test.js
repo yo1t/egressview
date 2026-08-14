@@ -49,10 +49,14 @@ describe('agent ingest v1 schema', () => {
     assert.equal(agentIngestEnvelopeSchema.safeParse(address).success, false);
   });
 
-  it('rejects invalid ports, time order, and uint64 values', () => {
-    const port = copy();
-    port.observations[0].localPort = 0;
-    assert.equal(agentIngestEnvelopeSchema.safeParse(port).success, false);
+  it('accepts an unknown local port but rejects invalid remote ports, time order, and uint64 values', () => {
+    const unknownLocalPort = copy();
+    unknownLocalPort.observations[0].localPort = 0;
+    assert.equal(agentIngestEnvelopeSchema.safeParse(unknownLocalPort).success, true);
+
+    const remotePort = copy();
+    remotePort.observations[0].remotePort = 0;
+    assert.equal(agentIngestEnvelopeSchema.safeParse(remotePort).success, false);
 
     const time = copy();
     time.observations[0].lastObservedAt = '2026-08-11T11:59:57Z';

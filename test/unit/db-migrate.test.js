@@ -355,17 +355,69 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
       collector: 'network-extension', confidence: 'exact', receivedAt: 201,
     };
     insert.run(valid);
-    assert.throws(() => insert.run({ ...valid, observationId: 'obs-2', localPort: 0 }));
-    assert.throws(() => insert.run({ ...valid, observationId: 'obs-3', lastObservedAt: 99 }));
-    assert.throws(() => insert.run({ ...valid, observationId: 'obs-4', bytesIn: '12x' }));
+    insert.run({ ...valid, observationId: 'obs-2', localPort: 0 });
+    assert.throws(() => insert.run({ ...valid, observationId: 'obs-3', remotePort: 0 }));
+    assert.throws(() => insert.run({ ...valid, observationId: 'obs-4', lastObservedAt: 99 }));
+    assert.throws(() => insert.run({ ...valid, observationId: 'obs-5', bytesIn: '12x' }));
     assert.throws(() => insert.run({
       ...valid,
-      observationId: 'obs-5',
+      observationId: 'obs-6',
       bytesIn: '18446744073709551616',
     }));
-    assert.throws(() => insert.run({ ...valid, observationId: 'obs-6', bytesIn: '01' }));
-    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 1);
+    assert.throws(() => insert.run({ ...valid, observationId: 'obs-7', bytesIn: '01' }));
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 2);
     db.close();
+  });
+
+  it('migrates v16 Agent observations to v17 without losing data or indexes', () => {
+    const p = tmpDb('v17-agent-local-port');
+    let db = openDb(p);
+    for (const migration of _MIGRATIONS.filter(item => item.version <= 16)) {
+      db.transaction(() => {
+        migration.up(db, {});
+        db.pragma(`user_version = ${migration.version}`);
+      })();
+    }
+    db.prepare(`
+      INSERT INTO agent_observations (
+        agentId, observationId, batchId, networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, collector, confidence, receivedAt
+      ) VALUES ('agent-1', 'obs-1', 'batch-1', 'tcp',
+        '192.0.2.10', 49152, '198.51.100.20', 443,
+        42, 'Example', NULL, 100, 200, NULL, NULL,
+        'network-extension', 'exact', 201)
+    `).run();
+    db.close();
+
+    db = openDb(p);
+    runMigrations(db, p);
+    assert.equal(db.pragma('user_version', { simple: true }), 17);
+    assert.equal(db.prepare('SELECT localPort FROM agent_observations WHERE observationId = ?').get('obs-1').localPort, 49152);
+    const indexes = new Set(db.prepare(`SELECT name FROM sqlite_master WHERE type='index'`).all().map(row => row.name));
+    for (const name of [
+      'idx_agent_observations_time',
+      'idx_agent_observations_flow_time',
+      'idx_agent_observations_batch',
+      'idx_agent_observations_agent_flow',
+    ]) assert(indexes.has(name), `missing ${name}`);
+    const zeroPort = db.prepare(`
+      INSERT INTO agent_observations
+      SELECT agentId, 'obs-2', batchId, networkProtocol,
+        localAddress, 0, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, collector, confidence, receivedAt
+      FROM agent_observations WHERE observationId = 'obs-1'
+    `).run();
+    assert.equal(zeroPort.changes, 1);
+    assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
+    db.close();
+
+    const backups = fs.readdirSync(TMP)
+      .filter(name => name.startsWith('v17-agent-local-port.db.pre-migration.v16-to-v17'));
+    assert.equal(backups.length, 1);
+    _verifyDbCopy(path.join(TMP, backups[0]));
   });
 
   it('rolls back all new v13 objects when an incompatible pre-existing table causes failure', () => {

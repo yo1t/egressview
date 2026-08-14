@@ -14,6 +14,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginController = LaunchAtLoginController()
     private let historyMaintenanceQueue = DispatchQueue(label: "com.egressview.agent.history-maintenance")
     private var currentMonitoringStatus = AgentMonitoringStatus.paused
+    private var checkedLaunchAtLoginForActiveMonitoring = false
     private var isPreparedForRemoval = false
     private lazy var storageResult = makeStorage()
     private lazy var store = try? storageResult.get().store
@@ -85,6 +86,14 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     private func render(_ status: AgentMonitoringStatus) {
         currentMonitoringStatus = status
+        if status == .fullActive, !checkedLaunchAtLoginForActiveMonitoring {
+            checkedLaunchAtLoginForActiveMonitoring = true
+            do {
+                try launchAtLoginController.ensureEnabledForMonitoring()
+            } catch {
+                logger.error("Could not enable launch at login: \(error.localizedDescription, privacy: .public)")
+            }
+        }
         observationWindow.updateMonitoringStatus(status)
         settingsWindow.updateMonitoringStatus(status)
         let menu = NSMenu()

@@ -86,6 +86,51 @@ describe('Agent/router correlation read model', () => {
     assert.equal(link.timeDeltaMs, 30_000);
   });
 
+  it('uses an overlapping unique four-tuple when the Agent local port is unknown', () => {
+    const database = store._dbForTest();
+    addConnection(database);
+    const envelope = copy();
+    envelope.observations[0].localPort = 0;
+
+    store.storeBatch(agentId, envelope, { receivedAt: observedAt + 1_000 });
+
+    const link = database.prepare('SELECT * FROM connection_agent_observations').get();
+    assert.equal(link.matchKind, 'unique-4tuple-time');
+    assert.equal(store.queryCorrelationReadModel({ agentId })[0].sport, null);
+  });
+
+  it('does not guess between router sessions when the Agent local port is unknown', () => {
+    const database = store._dbForTest();
+    addConnection(database, { sport: 49152 });
+    addConnection(database, { sport: 49153, proto: 'tcp' });
+    const envelope = copy();
+    envelope.observations[0].localPort = 0;
+
+    store.storeBatch(agentId, envelope, { receivedAt: observedAt + 1_000 });
+
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM connection_agent_observations').get().n, 0);
+    assert.equal(store.getCorrelationDiagnostics().ambiguous, 1);
+  });
+
+  it('ignores a non-overlapping candidate when one four-tuple match overlaps', () => {
+    const database = store._dbForTest();
+    addConnection(database, { sport: 49152 });
+    addConnection(database, {
+      sport: 49153,
+      proto: 'tcp',
+      firstSeen: observedAt + 30_000,
+      lastSeen: observedAt + 30_000,
+    });
+    const envelope = copy();
+    envelope.observations[0].localPort = 0;
+
+    store.storeBatch(agentId, envelope, { receivedAt: observedAt + 1_000 });
+
+    const link = database.prepare('SELECT * FROM connection_agent_observations').get();
+    assert.equal(link.matchKind, 'unique-4tuple-time');
+    assert.equal(link.timeDeltaMs, 0);
+  });
+
   it('does not label a same-port candidate exact unless observation periods overlap', () => {
     const database = store._dbForTest();
     addConnection(database, { firstSeen: observedAt + 30_000, lastSeen: observedAt + 30_000 });

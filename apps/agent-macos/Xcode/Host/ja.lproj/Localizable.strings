@@ -117,7 +117,7 @@
 "Sending a bounded batch..." = "上限付きバッチを送信しています...";
 "Hub unavailable; next low-frequency retry %@" = "Hubへ接続できません。次回の低頻度再試行：%@";
 "Hub authorization expired or was revoked" = "Hubの認証が期限切れまたは失効しました";
-"Pending: %lld · dropped locally: %lld" = "送信待ち：%lld件・ローカル破棄：%lld件";
+"Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld" = "送信待ち：%lld件・形式不適合：%lld件・上限超過：%lld件・過去（分類不能）：%lld件";
 "Oldest pending: %@" = "最も古い送信待ち：%@";
 "Last acknowledged: %@" = "最終受理：%@";
 "none" = "なし";
