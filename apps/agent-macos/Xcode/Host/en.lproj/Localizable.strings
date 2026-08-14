@@ -23,6 +23,7 @@
 "EgressView: Error" = "EgressView: Error";
 "Open EgressView..." = "Open EgressView...";
 "Settings..." = "Settings...";
+"About EgressView Agent" = "About EgressView Agent";
 "Network monitoring" = "Network monitoring";
 "Lightweight monitoring" = "Lightweight monitoring";
 "Lightweight monitoring is unavailable in this sandboxed build. The current monitoring mode was not changed; use network monitoring." = "Lightweight monitoring is unavailable in this sandboxed build. The current monitoring mode was not changed; use network monitoring.";
