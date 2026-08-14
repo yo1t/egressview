@@ -1,4 +1,5 @@
 import EgressViewAgentCore
+import Darwin
 import Foundation
 import NetworkExtension
 import SystemExtensions
@@ -11,18 +12,22 @@ enum AgentMonitoringStatus: Equatable {
     case approvalRequired
     case rebootRequired
     case deactivating
+    case removalApprovalRequired
+    case removalRebootRequired
     case failed(String)
 
     var label: String {
         switch self {
-        case .paused: return "Monitoring paused"
-        case .lightweight(let count): return "Lightweight monitoring: \(count) connections"
-        case .fullActivationRequested: return "Requesting Full monitoring approval..."
-        case .fullActive: return "Full monitoring active"
-        case .approvalRequired: return "Approve the System Extension in System Settings"
-        case .rebootRequired: return "Restart macOS to finish enabling Full monitoring"
-        case .deactivating: return "Stopping monitoring..."
-        case .failed(let message): return "Monitoring failed: \(message)"
+        case .paused: return L("Monitoring paused")
+        case .lightweight(let count): return L("Lightweight monitoring: %lld connections", count)
+        case .fullActivationRequested: return L("Requesting network monitoring approval...")
+        case .fullActive: return L("Network monitoring active")
+        case .approvalRequired: return L("Approve the System Extension in System Settings")
+        case .rebootRequired: return L("Restart macOS to finish enabling network monitoring")
+        case .deactivating: return L("Stopping monitoring...")
+        case .removalApprovalRequired: return L("Approve removal of the System Extension in System Settings")
+        case .removalRebootRequired: return L("Restart macOS to finish removing the System Extension")
+        case .failed(let message): return L("Monitoring failed: %@", message)
         }
     }
 
@@ -34,19 +39,21 @@ enum AgentMonitoringStatus: Equatable {
         switch self {
         case .paused, .deactivating: return "MenuBarPaused"
         case .lightweight, .fullActive: return "MenuBar"
-        case .fullActivationRequested, .approvalRequired, .rebootRequired, .failed: return "MenuBarAttention"
+        case .fullActivationRequested, .approvalRequired, .rebootRequired,
+             .removalApprovalRequired, .removalRebootRequired, .failed:
+            return "MenuBarAttention"
         }
     }
 
     var menuBarLabel: String {
         switch self {
-        case .paused: return "EgressView: Paused"
-        case .lightweight: return "EgressView: Light"
-        case .fullActive: return "EgressView: Full"
-        case .fullActivationRequested, .approvalRequired: return "EgressView: Approval"
-        case .rebootRequired: return "EgressView: Restart"
-        case .deactivating: return "EgressView: Stopping"
-        case .failed: return "EgressView: Error"
+        case .paused: return L("EgressView: Paused")
+        case .lightweight: return L("EgressView: Light")
+        case .fullActive: return L("EgressView: Monitoring")
+        case .fullActivationRequested, .approvalRequired, .removalApprovalRequired: return L("EgressView: Approval")
+        case .rebootRequired, .removalRebootRequired: return L("EgressView: Restart")
+        case .deactivating: return L("EgressView: Stopping")
+        case .failed: return L("EgressView: Error")
         }
     }
 }
@@ -54,8 +61,12 @@ enum AgentMonitoringStatus: Equatable {
 final class AgentMonitoringController {
     static let systemExtensionIdentifier = "com.egressview.agent.filter"
 
+    var isLightweightMonitoringAvailable: Bool {
+        !AgentCodeIdentity.isAppSandboxEnabled()
+    }
+
     private let statusHandler: (AgentMonitoringStatus) -> Void
-    private let journal: ObservationJournal?
+    private let store: ObservationStore?
     private let observationHandler: ([ConnectionObservation]) -> Void
     private let storageErrorHandler: (Error) -> Void
     private let extensionController: SystemExtensionController
@@ -64,12 +75,12 @@ final class AgentMonitoringController {
     private var persistenceSampler = ObservationPersistenceSampler()
 
     init(
-        journal: ObservationJournal?,
+        store: ObservationStore?,
         statusHandler: @escaping (AgentMonitoringStatus) -> Void,
         observationHandler: @escaping ([ConnectionObservation]) -> Void,
         storageErrorHandler: @escaping (Error) -> Void
     ) {
-        self.journal = journal
+        self.store = store
         self.statusHandler = statusHandler
         self.observationHandler = observationHandler
         self.storageErrorHandler = storageErrorHandler
@@ -77,9 +88,9 @@ final class AgentMonitoringController {
             identifier: Self.systemExtensionIdentifier,
             statusHandler: statusHandler
         )
-        if let journal {
+        if let store {
             self.fullMonitoringCollector = FullMonitoringCollector(
-                journal: journal,
+                store: store,
                 observationHandler: observationHandler,
                 statusHandler: statusHandler,
                 errorHandler: storageErrorHandler
@@ -89,6 +100,18 @@ final class AgentMonitoringController {
 
     func selectLightweightMonitoring() {
         guard ensureStorageAvailable() else { return }
+        guard isLightweightMonitoringAvailable else {
+            statusHandler(.failed(L(
+                "Lightweight monitoring is unavailable in this sandboxed build. The current monitoring mode was not changed; use network monitoring."
+            )))
+            return
+        }
+        do {
+            _ = try LibProcSocketSnapshotProvider(capacity: 1).snapshot()
+        } catch {
+            statusHandler(.failed(lightweightFailureMessage(error)))
+            return
+        }
         lightweightCollector?.stop()
         lightweightCollector = nil
         fullMonitoringCollector?.stop()
@@ -140,13 +163,23 @@ final class AgentMonitoringController {
         }
     }
 
+    /// Stops both collectors, disables the filter, then asks macOS to unregister
+    /// the System Extension. `true` means removal is accepted but needs reboot.
+    func prepareForUninstall(completion: @escaping (Result<Bool, Error>) -> Void) {
+        lightweightCollector?.stop()
+        lightweightCollector = nil
+        fullMonitoringCollector?.stop()
+        statusHandler(.deactivating)
+        extensionController.deactivate(completion: completion)
+    }
+
     private func startLightweightCollector() {
         let collector = LightweightCollector { [weak self] observations in
             guard let self else { return }
-            if let journal = self.journal {
+            if let store = self.store {
                 do {
                     let sampled = self.persistenceSampler.observationsToPersist(observations)
-                    try journal.append(sampled)
+                    try store.append(sampled)
                 } catch {
                     self.storageErrorHandler(error)
                 }
@@ -175,7 +208,7 @@ final class AgentMonitoringController {
     }
 
     private func ensureStorageAvailable() -> Bool {
-        guard journal != nil else {
+        guard store != nil else {
             let error = ObservationJournalError.appGroupUnavailable
             storageErrorHandler(error)
             statusHandler(.failed(error.localizedDescription))
@@ -183,9 +216,25 @@ final class AgentMonitoringController {
         }
         return true
     }
+
+    private func lightweightFailureMessage(_ error: Error) -> String {
+        if let libProcError = error as? LibProcError,
+           case .collectionFailed(let errorNumber) = libProcError,
+           errorNumber == EPERM {
+            return L(
+                "Lightweight monitoring is unavailable in this sandboxed build. The current monitoring mode was not changed; use network monitoring."
+            )
+        }
+        return error.localizedDescription
+    }
 }
 
 private final class SystemExtensionController: NSObject, OSSystemExtensionRequestDelegate {
+    private enum PendingOperation {
+        case activation
+        case deactivation
+    }
+
     private static let approvalRetryDelay: TimeInterval = 2
     private static let approvalRetryLimit = 60
 
@@ -194,6 +243,8 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
     private var approvalRetryWorkItem: DispatchWorkItem?
     private var approvalRetryCount = 0
     private var activationCompletion: ((Result<Void, Error>) -> Void)?
+    private var deactivationCompletion: ((Result<Bool, Error>) -> Void)?
+    private var pendingOperation: PendingOperation?
 
     init(identifier: String, statusHandler: @escaping (AgentMonitoringStatus) -> Void) {
         self.identifier = identifier
@@ -203,12 +254,56 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
     func activate(completion: @escaping (Result<Void, Error>) -> Void) {
         cancelApprovalRecovery()
         activationCompletion = completion
+        deactivationCompletion = nil
+        pendingOperation = .activation
         let request = OSSystemExtensionRequest.activationRequest(
             forExtensionWithIdentifier: identifier,
             queue: .main
         )
         request.delegate = self
         OSSystemExtensionManager.shared.submitRequest(request)
+    }
+
+    func deactivate(completion: @escaping (Result<Bool, Error>) -> Void) {
+        cancelApprovalRecovery()
+        activationCompletion = nil
+        deactivationCompletion = completion
+        removeFilterConfiguration { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.finishDeactivation(.failure(error))
+            case .success:
+                self.pendingOperation = .deactivation
+                let request = OSSystemExtensionRequest.deactivationRequest(
+                    forExtensionWithIdentifier: self.identifier,
+                    queue: .main
+                )
+                request.delegate = self
+                OSSystemExtensionManager.shared.submitRequest(request)
+            }
+        }
+    }
+
+    private func removeFilterConfiguration(completion: @escaping (Result<Void, Error>) -> Void) {
+        let manager = NEFilterManager.shared()
+        manager.loadFromPreferences { error in
+            if let error {
+                completion(.failure(error))
+                return
+            }
+            guard manager.providerConfiguration != nil || manager.isEnabled else {
+                completion(.success(()))
+                return
+            }
+            manager.removeFromPreferences { error in
+                if let error {
+                    completion(.failure(error))
+                } else {
+                    completion(.success(()))
+                }
+            }
+        }
     }
 
     func disableFilter(completion: @escaping (Result<Void, Error>) -> Void) {
@@ -265,11 +360,28 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
     }
 
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-        statusHandler(.approvalRequired)
-        scheduleApprovalRecovery()
+        if pendingOperation == .deactivation {
+            statusHandler(.removalApprovalRequired)
+        } else {
+            statusHandler(.approvalRequired)
+            scheduleApprovalRecovery()
+        }
     }
 
     func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
+        if pendingOperation == .deactivation {
+            switch result {
+            case .completed:
+                statusHandler(.paused)
+                finishDeactivation(.success(false))
+            case .willCompleteAfterReboot:
+                statusHandler(.removalRebootRequired)
+                finishDeactivation(.success(true))
+            @unknown default:
+                finishDeactivation(.failure(SystemExtensionActivationError.unknownResult))
+            }
+            return
+        }
         switch result {
         case .completed:
             cancelApprovalRecovery()
@@ -286,7 +398,18 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
 
     func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
         cancelApprovalRecovery()
-        finishActivation(.failure(error))
+        if pendingOperation == .deactivation {
+            let nsError = error as NSError
+            if nsError.domain == OSSystemExtensionErrorDomain,
+               nsError.code == OSSystemExtensionError.Code.extensionNotFound.rawValue {
+                statusHandler(.paused)
+                finishDeactivation(.success(false))
+            } else {
+                finishDeactivation(.failure(error))
+            }
+        } else {
+            finishActivation(.failure(error))
+        }
     }
 
     private func enableFilter(completion: @escaping (Result<Void, Error>) -> Void) {
@@ -301,7 +424,7 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
             configuration.filterPackets = false
             configuration.filterDataProviderBundleIdentifier = self?.identifier
             manager.providerConfiguration = configuration
-            manager.localizedDescription = "EgressView outbound connection metadata"
+            manager.localizedDescription = L("EgressView outbound connection metadata")
             manager.isEnabled = true
             manager.saveToPreferences { error in
                 if let error {
@@ -319,7 +442,7 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
     // idempotent configuration save so approval can recover without another click.
     private func scheduleApprovalRecovery() {
         guard approvalRetryCount < Self.approvalRetryLimit else {
-            statusHandler(.failed("System Extension approval was not detected in time"))
+            statusHandler(.failed(L("System Extension approval was not detected in time")))
             return
         }
 
@@ -349,8 +472,16 @@ private final class SystemExtensionController: NSObject, OSSystemExtensionReques
     }
 
     private func finishActivation(_ result: Result<Void, Error>) {
+        pendingOperation = nil
         let completion = activationCompletion
         activationCompletion = nil
+        completion?(result)
+    }
+
+    private func finishDeactivation(_ result: Result<Bool, Error>) {
+        pendingOperation = nil
+        let completion = deactivationCompletion
+        deactivationCompletion = nil
         completion?(result)
     }
 }
@@ -359,6 +490,6 @@ private enum SystemExtensionActivationError: LocalizedError {
     case unknownResult
 
     var errorDescription: String? {
-        "Unknown System Extension activation result"
+        L("Unknown System Extension activation result")
     }
 }

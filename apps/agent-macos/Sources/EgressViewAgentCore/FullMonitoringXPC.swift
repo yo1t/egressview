@@ -5,6 +5,7 @@ import Foundation
 }
 
 public enum FullMonitoringXPC {
+    // NetworkExtension requires this name to begin with an App Group entitlement.
     public static let machServiceName = "group.com.egressview.agent.xpc"
     public static let hostBundleIdentifier = "com.egressview.agent.macos"
 

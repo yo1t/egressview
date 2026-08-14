@@ -1,4 +1,5 @@
 import Darwin
+import CryptoKit
 import Foundation
 
 public struct ObservationJournalStatistics: Equatable, Sendable {
@@ -14,6 +15,28 @@ public struct ObservationJournalSnapshot: Equatable, Sendable {
     public let statistics: ObservationJournalStatistics
 }
 
+public struct LegacyObservationBatch: Equatable, Sendable {
+    public let fingerprint: String
+    public let observations: [ConnectionObservation]
+    public let malformedLineCount: Int
+    public let sourceFileCount: Int
+    public let sourceBytes: UInt64
+}
+
+public struct ObservationJournalMigrationResult: Equatable, Sendable {
+    public let importedCount: Int
+    public let malformedLineCount: Int
+    public let sourceFilesRemoved: Bool
+    public let wasAlreadyImported: Bool
+
+    public static let noLegacyData = ObservationJournalMigrationResult(
+        importedCount: 0,
+        malformedLineCount: 0,
+        sourceFilesRemoved: false,
+        wasAlreadyImported: false
+    )
+}
+
 public final class ObservationJournal: @unchecked Sendable {
     public static let appGroupIdentifier = "group.com.egressview.agent"
 
@@ -24,12 +47,18 @@ public final class ObservationJournal: @unchecked Sendable {
     private let lock = NSLock()
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let managesParentDirectoryPermissions: Bool
 
-    public init(fileURL: URL, maximumFileSize: UInt64 = 10 * 1_024 * 1_024) {
+    public init(
+        fileURL: URL,
+        maximumFileSize: UInt64 = 10 * 1_024 * 1_024,
+        managesParentDirectoryPermissions: Bool = true
+    ) {
         self.fileURL = fileURL
         self.archiveURL = fileURL.appendingPathExtension("1")
         self.lockURL = fileURL.appendingPathExtension("lock")
         self.maximumFileSize = max(1_024, maximumFileSize)
+        self.managesParentDirectoryPermissions = managesParentDirectoryPermissions
         self.encoder = JSONEncoder()
         self.encoder.dateEncodingStrategy = .iso8601
         self.decoder = JSONDecoder()
@@ -42,7 +71,10 @@ public final class ObservationJournal: @unchecked Sendable {
         ) else {
             throw ObservationJournalError.appGroupUnavailable
         }
-        self.init(fileURL: containerURL.appendingPathComponent("observations.jsonl"))
+        self.init(
+            fileURL: containerURL.appendingPathComponent("observations.jsonl"),
+            managesParentDirectoryPermissions: false
+        )
     }
 
     public func append(_ observations: [ConnectionObservation]) throws {
@@ -98,6 +130,32 @@ public final class ObservationJournal: @unchecked Sendable {
         }
     }
 
+    /// Reads both journal generations as one immutable migration snapshot.
+    /// Invalid lines are counted instead of silently disappearing; callers
+    /// retain the source files whenever that count is non-zero.
+    public func migrationBatch() throws -> LegacyObservationBatch? {
+        try lock.withLock {
+            try prepareDirectory()
+            return try withProcessLock { try readMigrationBatch() }
+        }
+    }
+
+    /// Removes the legacy files only when they still match the imported
+    /// snapshot. A concurrent append therefore preserves the changed files for
+    /// the next launch instead of deleting data that was never imported.
+    public func removeMigratedFiles(matching fingerprint: String) throws -> Bool {
+        try lock.withLock {
+            try prepareDirectory()
+            return try withProcessLock {
+                guard try readMigrationBatch()?.fingerprint == fingerprint else { return false }
+                for url in [archiveURL, fileURL] where FileManager.default.fileExists(atPath: url.path) {
+                    try FileManager.default.removeItem(at: url)
+                }
+                return true
+            }
+        }
+    }
+
     @discardableResult
     public func removeObservations(before cutoff: Date) throws -> Int {
         try lock.withLock {
@@ -126,12 +184,16 @@ public final class ObservationJournal: @unchecked Sendable {
 
     private func prepareDirectory() throws {
         let directory = fileURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        try applyPrivatePermissions(to: directory, permissions: 0o700)
+        if !FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+        }
+        if managesParentDirectoryPermissions {
+            try applyPrivatePermissions(to: directory, permissions: 0o700)
+        }
     }
 
     private func openForAppending() throws -> FileHandle {
@@ -167,6 +229,46 @@ public final class ObservationJournal: @unchecked Sendable {
             })
         }
         return observations
+    }
+
+    private func readMigrationBatch() throws -> LegacyObservationBatch? {
+        let sourceURLs = [archiveURL, fileURL].filter {
+            FileManager.default.fileExists(atPath: $0.path)
+        }
+        guard !sourceURLs.isEmpty else { return nil }
+
+        var hasher = SHA256()
+        var observations: [ConnectionObservation] = []
+        var malformedLineCount = 0
+        var sourceBytes = UInt64(0)
+        for url in sourceURLs {
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            sourceBytes += UInt64(data.count)
+            let name = Data(url.lastPathComponent.utf8)
+            hasher.update(data: withLengthPrefix(name))
+            hasher.update(data: withLengthPrefix(data))
+            for line in data.split(separator: 0x0A) {
+                do {
+                    observations.append(try decoder.decode(ConnectionObservation.self, from: Data(line)))
+                } catch {
+                    malformedLineCount += 1
+                }
+            }
+        }
+        return LegacyObservationBatch(
+            fingerprint: hasher.finalize().map { String(format: "%02x", $0) }.joined(),
+            observations: observations,
+            malformedLineCount: malformedLineCount,
+            sourceFileCount: sourceURLs.count,
+            sourceBytes: sourceBytes
+        )
+    }
+
+    private func withLengthPrefix(_ data: Data) -> Data {
+        var length = UInt64(data.count).bigEndian
+        var value = Data(bytes: &length, count: MemoryLayout<UInt64>.size)
+        value.append(data)
+        return value
     }
 
     private func statistics(for observations: [ConnectionObservation]) -> ObservationJournalStatistics {
@@ -259,6 +361,36 @@ public final class ObservationJournal: @unchecked Sendable {
 
     private func applyPrivatePermissions(to url: URL, permissions: Int = 0o600) throws {
         try FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: url.path)
+    }
+}
+
+public enum ObservationJournalMigrator {
+    public static func migrate(
+        journal: ObservationJournal,
+        into store: ObservationStore
+    ) throws -> ObservationJournalMigrationResult {
+        guard let batch = try journal.migrationBatch() else { return .noLegacyData }
+        let result = try store.importLegacyJournal(batch)
+        let canRemoveSources = batch.malformedLineCount == 0
+        let removed = canRemoveSources
+            ? try journal.removeMigratedFiles(matching: batch.fingerprint)
+            : false
+        switch result {
+        case .imported(let count):
+            return ObservationJournalMigrationResult(
+                importedCount: count,
+                malformedLineCount: batch.malformedLineCount,
+                sourceFilesRemoved: removed,
+                wasAlreadyImported: false
+            )
+        case .alreadyImported(let count):
+            return ObservationJournalMigrationResult(
+                importedCount: count,
+                malformedLineCount: batch.malformedLineCount,
+                sourceFilesRemoved: removed,
+                wasAlreadyImported: true
+            )
+        }
     }
 }
 

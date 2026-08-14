@@ -35,6 +35,7 @@ final class AgentUpdateDownloaderTests: XCTestCase {
         let file = try await downloader.download(makePackage(for: payload), userAgent: "test")
         defer { try? FileManager.default.removeItem(at: file) }
         XCTAssertEqual(try Data(contentsOf: file), payload)
+        XCTAssertEqual(file.pathExtension, "dmg")
     }
 
     func testRejectsAndDeletesAPackageWhoseHashDoesNotMatch() async {

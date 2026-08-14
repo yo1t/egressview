@@ -44,6 +44,11 @@ public struct ObservationStoreStatistics: Equatable, Sendable {
     public let fileSizeBytes: Int64
 }
 
+public enum LegacyObservationImportResult: Equatable, Sendable {
+    case imported(Int)
+    case alreadyImported(Int)
+}
+
 /// One hour of traffic for one app to one destination.
 public struct ObservationRollupRow: Equatable, Sendable {
     public let hourStart: Date
@@ -89,6 +94,21 @@ public final class ObservationStore: @unchecked Sendable {
         try migrate()
         try? FileManager.default.setAttributes(
             [.posixPermissions: 0o600], ofItemAtPath: fileURL.path
+        )
+    }
+
+    public convenience init(
+        fileManager: FileManager = .default,
+        retention: ObservationRetention = ObservationRetention()
+    ) throws {
+        guard let containerURL = fileManager.containerURL(
+            forSecurityApplicationGroupIdentifier: ObservationJournal.appGroupIdentifier
+        ) else {
+            throw ObservationStoreError.open("The EgressView App Group container is unavailable")
+        }
+        try self.init(
+            fileURL: containerURL.appendingPathComponent("observations.sqlite"),
+            retention: retention
         )
     }
 
@@ -145,6 +165,17 @@ public final class ObservationStore: @unchecked Sendable {
             )
             try execute("PRAGMA user_version=1")
         }
+        if version < 2 {
+            try execute("""
+            CREATE TABLE IF NOT EXISTS legacy_imports (
+                fingerprint TEXT PRIMARY KEY,
+                imported_at REAL NOT NULL,
+                observation_count INTEGER NOT NULL,
+                malformed_line_count INTEGER NOT NULL
+            )
+            """)
+            try execute("PRAGMA user_version=2")
+        }
     }
 
     // MARK: - Writing
@@ -154,36 +185,45 @@ public final class ObservationStore: @unchecked Sendable {
         try lock.withLock {
             try execute("BEGIN IMMEDIATE")
             do {
-                let sql = """
-                INSERT INTO observations (
-                    network_protocol, local_address, local_port, remote_address, remote_port,
-                    process_id, process_name, bundle_id, first_observed_at, last_observed_at,
-                    bytes_in, bytes_out, collector, confidence
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """
-                let statement = try prepare(sql)
+                try insert(observations)
+                try execute("COMMIT")
+            } catch {
+                try? execute("ROLLBACK")
+                throw error
+            }
+        }
+    }
+
+    /// Imports one immutable snapshot of the legacy journal exactly once.
+    /// The marker and rows commit together, so a crash cannot leave a marker
+    /// without data or duplicate the data on the next launch.
+    public func importLegacyJournal(
+        _ batch: LegacyObservationBatch,
+        importedAt: Date = Date()
+    ) throws -> LegacyObservationImportResult {
+        try lock.withLock {
+            try execute("BEGIN IMMEDIATE")
+            do {
+                if let count = try importedLegacyCount(fingerprint: batch.fingerprint) {
+                    try execute("COMMIT")
+                    return .alreadyImported(count)
+                }
+                try insert(batch.observations)
+                let statement = try prepare("""
+                INSERT INTO legacy_imports (
+                    fingerprint, imported_at, observation_count, malformed_line_count
+                ) VALUES (?, ?, ?, ?)
+                """)
                 defer { sqlite3_finalize(statement) }
-                for observation in observations {
-                    sqlite3_reset(statement)
-                    bindText(statement, 1, observation.networkProtocol.rawValue)
-                    bindText(statement, 2, observation.localAddress)
-                    sqlite3_bind_int64(statement, 3, Int64(observation.localPort))
-                    bindText(statement, 4, observation.remoteAddress)
-                    sqlite3_bind_int64(statement, 5, Int64(observation.remotePort))
-                    sqlite3_bind_int64(statement, 6, Int64(observation.processID))
-                    bindText(statement, 7, observation.processName)
-                    bindOptionalText(statement, 8, observation.bundleID)
-                    sqlite3_bind_double(statement, 9, observation.firstObservedAt.timeIntervalSince1970)
-                    sqlite3_bind_double(statement, 10, observation.lastObservedAt.timeIntervalSince1970)
-                    bindOptionalInt(statement, 11, observation.bytesIn)
-                    bindOptionalInt(statement, 12, observation.bytesOut)
-                    bindText(statement, 13, observation.collector.rawValue)
-                    bindText(statement, 14, observation.confidence.rawValue)
-                    guard sqlite3_step(statement) == SQLITE_DONE else {
-                        throw ObservationStoreError.statement(lastMessage)
-                    }
+                bindText(statement, 1, batch.fingerprint)
+                sqlite3_bind_double(statement, 2, importedAt.timeIntervalSince1970)
+                sqlite3_bind_int64(statement, 3, Int64(batch.observations.count))
+                sqlite3_bind_int64(statement, 4, Int64(batch.malformedLineCount))
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    throw ObservationStoreError.statement(lastMessage)
                 }
                 try execute("COMMIT")
+                return .imported(batch.observations.count)
             } catch {
                 try? execute("ROLLBACK")
                 throw error
@@ -364,6 +404,49 @@ public final class ObservationStore: @unchecked Sendable {
 
     private var lastMessage: String {
         handle.flatMap { sqlite3_errmsg($0) }.map { String(cString: $0) } ?? "unknown SQLite error"
+    }
+
+    private func insert(_ observations: [ConnectionObservation]) throws {
+        let sql = """
+        INSERT INTO observations (
+            network_protocol, local_address, local_port, remote_address, remote_port,
+            process_id, process_name, bundle_id, first_observed_at, last_observed_at,
+            bytes_in, bytes_out, collector, confidence
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """
+        let statement = try prepare(sql)
+        defer { sqlite3_finalize(statement) }
+        for observation in observations {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            bindText(statement, 1, observation.networkProtocol.rawValue)
+            bindText(statement, 2, observation.localAddress)
+            sqlite3_bind_int64(statement, 3, Int64(observation.localPort))
+            bindText(statement, 4, observation.remoteAddress)
+            sqlite3_bind_int64(statement, 5, Int64(observation.remotePort))
+            sqlite3_bind_int64(statement, 6, Int64(observation.processID))
+            bindText(statement, 7, observation.processName)
+            bindOptionalText(statement, 8, observation.bundleID)
+            sqlite3_bind_double(statement, 9, observation.firstObservedAt.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 10, observation.lastObservedAt.timeIntervalSince1970)
+            bindOptionalInt(statement, 11, observation.bytesIn)
+            bindOptionalInt(statement, 12, observation.bytesOut)
+            bindText(statement, 13, observation.collector.rawValue)
+            bindText(statement, 14, observation.confidence.rawValue)
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw ObservationStoreError.statement(lastMessage)
+            }
+        }
+    }
+
+    private func importedLegacyCount(fingerprint: String) throws -> Int? {
+        let statement = try prepare(
+            "SELECT observation_count FROM legacy_imports WHERE fingerprint = ?"
+        )
+        defer { sqlite3_finalize(statement) }
+        bindText(statement, 1, fingerprint)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return Int(sqlite3_column_int64(statement, 0))
     }
 
     private func execute(_ sql: String) throws {
