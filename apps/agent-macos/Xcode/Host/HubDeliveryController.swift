@@ -138,13 +138,16 @@ final class HubDeliveryController: ObservableObject {
     }
 
     private func restore() {
-        let credential = (try? credentialStore.load()) ?? nil
-        let senderAvailable = sender != nil
-        hubAddress = credential?.hubURL.absoluteString ?? hubAddress
-        enrolledHub = credential.map { L("Enrolled Hub: %@", $0.hubURL.absoluteString) } ?? L("Not enrolled")
-        deliveryEnabled = preferences.isEnabled && credential != nil
-        canEnableDelivery = credential != nil && senderAvailable
         Task {
+            let credentialStore = credentialStore
+            let credential = await Task.detached(priority: .utility) {
+                (try? credentialStore.load()) ?? nil
+            }.value
+            let senderAvailable = sender != nil
+            hubAddress = credential?.hubURL.absoluteString ?? hubAddress
+            enrolledHub = credential.map { L("Enrolled Hub: %@", $0.hubURL.absoluteString) } ?? L("Not enrolled")
+            deliveryEnabled = preferences.isEnabled && credential != nil
+            canEnableDelivery = credential != nil && senderAvailable
             if let queueStatus = await sender?.currentQueueStatus() {
                 render(state: senderState, queueStatus: queueStatus)
             }
