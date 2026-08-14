@@ -232,7 +232,7 @@ private final class AgentSettingsViewModel: ObservableObject {
     @Published private(set) var launchAtLoginDetail = ""
     @Published var retentionDays = ObservationWindowController.configuredRetentionDays
     @Published var message: String?
-    let isLightweightMonitoringAvailable = !AgentCodeIdentity.isAppSandboxEnabled()
+    let isLightweightMonitoringAvailable = false
 
     var availableMonitoringModes: [AgentMonitoringMode] {
         isLightweightMonitoringAvailable ? AgentMonitoringMode.allCases : [.full, .paused]
@@ -415,6 +415,7 @@ private struct AgentSettingsView: View {
                 Picker(L("Mode"), selection: monitoringBinding) {
                     ForEach(model.availableMonitoringModes) { mode in Text(mode.title).tag(mode) }
                 }
+                .id(language.language.rawValue)
                 .pickerStyle(.segmented)
                 .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
                 Text(model.monitoringStatus).font(.callout).foregroundStyle(.secondary)
