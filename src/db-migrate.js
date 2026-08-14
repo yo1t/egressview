@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -596,6 +596,69 @@ const MIGRATIONS = [
         );
         CREATE INDEX IF NOT EXISTS idx_agent_requests_pending
           ON agent_enrollment_requests(status, expiresAt);
+      `);
+    },
+  },
+  {
+    version: 17,
+    description: 'preserve Agent observations whose local port is not yet known (P3-27)',
+    up(db) {
+      // SQLite cannot alter a CHECK constraint in place. Rebuild the table in
+      // one migration transaction, preserving every row and recreating every
+      // index added through v15. Zero is reserved for an unknown local port;
+      // remote ports remain 1..65535.
+      db.exec(`
+        ALTER TABLE agent_observations RENAME TO agent_observations_v16;
+
+        CREATE TABLE agent_observations (
+          agentId          TEXT NOT NULL,
+          observationId    TEXT NOT NULL,
+          batchId          TEXT NOT NULL,
+          networkProtocol  TEXT NOT NULL CHECK(networkProtocol IN ('tcp', 'udp')),
+          localAddress     TEXT NOT NULL CHECK(length(localAddress) BETWEEN 2 AND 45),
+          localPort        INTEGER NOT NULL CHECK(localPort BETWEEN 0 AND 65535),
+          remoteAddress    TEXT NOT NULL CHECK(length(remoteAddress) BETWEEN 2 AND 45),
+          remotePort       INTEGER NOT NULL CHECK(remotePort BETWEEN 1 AND 65535),
+          processId        INTEGER NOT NULL CHECK(processId BETWEEN 0 AND 2147483647),
+          processName      TEXT NOT NULL CHECK(length(processName) BETWEEN 1 AND 256),
+          bundleId         TEXT CHECK(bundleId IS NULL OR length(bundleId) BETWEEN 1 AND 255),
+          firstObservedAt  INTEGER NOT NULL,
+          lastObservedAt   INTEGER NOT NULL,
+          bytesIn          TEXT,
+          bytesOut         TEXT,
+          collector        TEXT NOT NULL CHECK(collector IN ('network-extension', 'libproc')),
+          confidence       TEXT NOT NULL CHECK(confidence IN ('exact', 'sampled')),
+          receivedAt       INTEGER NOT NULL,
+          PRIMARY KEY (agentId, observationId),
+          CHECK(lastObservedAt >= firstObservedAt),
+          CHECK(bytesIn IS NULL OR (
+            length(bytesIn) BETWEEN 1 AND 20
+            AND bytesIn NOT GLOB '*[^0-9]*'
+            AND (bytesIn = '0' OR substr(bytesIn, 1, 1) BETWEEN '1' AND '9')
+            AND (length(bytesIn) < 20 OR bytesIn <= '18446744073709551615')
+          )),
+          CHECK(bytesOut IS NULL OR (
+            length(bytesOut) BETWEEN 1 AND 20
+            AND bytesOut NOT GLOB '*[^0-9]*'
+            AND (bytesOut = '0' OR substr(bytesOut, 1, 1) BETWEEN '1' AND '9')
+            AND (length(bytesOut) < 20 OR bytesOut <= '18446744073709551615')
+          ))
+        );
+
+        INSERT INTO agent_observations SELECT * FROM agent_observations_v16;
+        DROP TABLE agent_observations_v16;
+
+        CREATE INDEX idx_agent_observations_time
+          ON agent_observations(agentId, lastObservedAt DESC);
+        CREATE INDEX idx_agent_observations_flow_time
+          ON agent_observations(
+            localAddress, remoteAddress, remotePort, networkProtocol,
+            localPort, firstObservedAt, lastObservedAt
+          );
+        CREATE INDEX idx_agent_observations_batch
+          ON agent_observations(agentId, batchId);
+        CREATE INDEX idx_agent_observations_agent_flow
+          ON agent_observations(agentId, localAddress, remoteAddress, remotePort);
       `);
     },
   },

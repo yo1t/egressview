@@ -85,7 +85,7 @@ function connectionSource(scope, alias = 'c') {
       UNION ALL
       SELECT
         o.localAddress AS src, o.remoteAddress AS dst, o.remotePort AS dport,
-        LOWER(o.networkProtocol) AS proto, o.localPort AS sport,
+        LOWER(o.networkProtocol) AS proto, NULLIF(o.localPort, 0) AS sport,
         NULL AS ttl, NULL AS srcMac, NULL AS srcVendor,
         NULL AS srcDnsName, NULL AS srcMdnsName, NULL AS dstHost,
         NULL AS country, NULL AS org, NULL AS lat, NULL AS lon, NULL AS city,

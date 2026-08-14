@@ -51,6 +51,8 @@ final class AgentDeliveryQueueTests: XCTestCase {
 
         XCTAssertEqual(queue.status().pendingCount, 2)
         XCTAssertEqual(queue.status().droppedCount, 1)
+        XCTAssertEqual(queue.status().queueOverflowCount, 1)
+        XCTAssertEqual(queue.status().contractRejectedCount, 0)
     }
 
     func testQueueDropsObservationsThatCannotSatisfyTheHubContract() throws {
@@ -62,9 +64,10 @@ final class AgentDeliveryQueueTests: XCTestCase {
         ])
 
         let batch = try XCTUnwrap(queue.prepareBatch(limit: 200, sentAt: Date(), metadata: metadata()))
-        XCTAssertEqual(batch.observations.count, 1)
-        XCTAssertEqual(batch.observations[0].localPort, 49_152)
-        XCTAssertEqual(queue.status().droppedCount, 2)
+        XCTAssertEqual(batch.observations.count, 2)
+        XCTAssertEqual(Set(batch.observations.map(\.localPort)), Set([0, 49_152]))
+        XCTAssertEqual(queue.status().contractRejectedCount, 1)
+        XCTAssertEqual(queue.status().queueOverflowCount, 0)
     }
 
     func testRestartRemovesAnInvalidPersistedActiveBatch() throws {
@@ -79,7 +82,7 @@ final class AgentDeliveryQueueTests: XCTestCase {
         var pending = try XCTUnwrap(stored["pending"] as? [[String: Any]])
         var first = pending[0]
         var invalidObservation = try XCTUnwrap(first["observation"] as? [String: Any])
-        invalidObservation["localPort"] = 0
+        invalidObservation["remotePort"] = 0
         first["observation"] = invalidObservation
         pending[0] = first
         stored["pending"] = pending
@@ -88,7 +91,28 @@ final class AgentDeliveryQueueTests: XCTestCase {
         let restarted = try AgentDeliveryQueue(fileURL: url)
         XCTAssertEqual(restarted.status().pendingCount, 0)
         XCTAssertEqual(restarted.status().droppedCount, 1)
+        XCTAssertEqual(restarted.status().contractRejectedCount, 1)
+        XCTAssertEqual(restarted.status().legacyUnclassifiedCount, 0)
         XCTAssertNil(try restarted.prepareBatch(limit: 200, sentAt: Date(), metadata: metadata()))
+    }
+
+    func testLegacyDroppedCountRemainsUnclassifiedAfterUpgrade() throws {
+        let url = temporaryURL()
+        let queue = try AgentDeliveryQueue(fileURL: url)
+        try queue.enqueue([observation(remotePort: 443)])
+        var stored = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        )
+        stored["droppedCount"] = 224
+        stored.removeValue(forKey: "contractRejectedCount")
+        stored.removeValue(forKey: "queueOverflowCount")
+        try JSONSerialization.data(withJSONObject: stored).write(to: url, options: .atomic)
+
+        let restarted = try AgentDeliveryQueue(fileURL: url)
+        XCTAssertEqual(restarted.status().legacyUnclassifiedCount, 224)
+        XCTAssertEqual(restarted.status().contractRejectedCount, 0)
+        XCTAssertEqual(restarted.status().queueOverflowCount, 0)
+        XCTAssertEqual(restarted.status().droppedCount, 224)
     }
 
     func testThePersistedQueueCanActuallyBeReadBack() throws {

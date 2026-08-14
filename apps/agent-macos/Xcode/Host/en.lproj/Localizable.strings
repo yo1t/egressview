@@ -117,7 +117,7 @@
 "Sending a bounded batch..." = "Sending a bounded batch...";
 "Hub unavailable; next low-frequency retry %@" = "Hub unavailable; next low-frequency retry %@";
 "Hub authorization expired or was revoked" = "Hub authorization expired or was revoked";
-"Pending: %lld · dropped locally: %lld" = "Pending: %lld · dropped locally: %lld";
+"Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld" = "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld";
 "Oldest pending: %@" = "Oldest pending: %@";
 "Last acknowledged: %@" = "Last acknowledged: %@";
 "none" = "none";

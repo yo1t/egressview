@@ -307,6 +307,7 @@ describe('Agent HTTP ingest', () => {
       ...template,
       observationId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
       remoteAddress,
+      localPort: index === 0 ? 0 : template.localPort,
     }));
     const headers = { Authorization: `Bearer ${enrolled.body.token}` };
 
@@ -314,6 +315,8 @@ describe('Agent HTTP ingest', () => {
     assert.equal(first.status, 200);
     assert.equal(recorded.length, 1);
     assert.equal(recorded[0][0].length, destinations.length);
+    assert.equal(recorded[0][0][0].sport, null);
+    assert.equal(recorded[0][0][1].sport, template.localPort);
     assert.deepEqual(queued, [['8.8.8.8', '2606:4700:4700::1111']]);
 
     const replay = await request(app, 'POST', '/api/agent/ingest', { body: envelope, headers });
