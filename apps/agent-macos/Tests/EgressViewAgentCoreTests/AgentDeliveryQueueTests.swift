@@ -91,6 +91,37 @@ final class AgentDeliveryQueueTests: XCTestCase {
         XCTAssertNil(try restarted.prepareBatch(limit: 200, sentAt: Date(), metadata: metadata()))
     }
 
+    func testThePersistedQueueCanActuallyBeReadBack() throws {
+        // The property that matters. A protection class that lets the write
+        // succeed but the read fail loses every observation that had not
+        // reached the Hub, and reports nothing.
+        let url = temporaryURL()
+        let queue = try AgentDeliveryQueue(fileURL: url)
+        try queue.enqueue([observation(remotePort: 443)])
+
+        XCTAssertNoThrow(try Data(contentsOf: url))
+        let restarted = try AgentDeliveryQueue(fileURL: url)
+        XCTAssertEqual(restarted.status().pendingCount, 1)
+        XCTAssertNil(restarted.status().unreadableStateResetAt)
+    }
+
+    func testAnUnreadableSavedQueueResetsAndIsReportedRatherThanStoppingTheAgent() throws {
+        let url = temporaryURL()
+        try Data("this is not the saved state".utf8).write(to: url)
+
+        // Refusing to start would turn one lost buffer into an agent that
+        // delivers nothing, and nobody would see an error.
+        let queue = try AgentDeliveryQueue(fileURL: url)
+        XCTAssertEqual(queue.status().pendingCount, 0)
+        XCTAssertNotNil(queue.status().unreadableStateResetAt)
+
+        // Collection continues, and the new state persists normally.
+        try queue.enqueue([observation(remotePort: 443)])
+        let restarted = try AgentDeliveryQueue(fileURL: url)
+        XCTAssertEqual(restarted.status().pendingCount, 1)
+        XCTAssertNil(restarted.status().unreadableStateResetAt)
+    }
+
     private func temporaryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("egressview-agent-queue-\(UUID().uuidString).json")
