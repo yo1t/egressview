@@ -18,7 +18,11 @@ let package = Package(
         ),
         .target(
             name: "EgressViewAgentCore",
-            dependencies: ["CLibProcBridge"]
+            dependencies: ["CLibProcBridge"],
+            // System SQLite. The local history needs indexed range queries and
+            // grouped aggregation, and adding a package dependency for storage
+            // the OS already ships would be a poor trade.
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .target(
             name: "EgressViewNetworkExtension",
