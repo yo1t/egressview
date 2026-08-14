@@ -1,63 +1,342 @@
 import AppKit
 import EgressViewAgentCore
+import SwiftUI
 
-final class ObservationWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate {
-    private static let retentionDefaultsKey = "localHistoryRetentionDays"
+private enum AgentMainTab: String, CaseIterable, Identifiable {
+    case status
+    case analysis
 
-    static var configuredRetentionDays: Int {
-        UserDefaults.standard.integer(forKey: retentionDefaultsKey)
-    }
+    var id: String { rawValue }
+    var title: String { self == .status ? L("Status") : L("Analysis") }
+}
 
-    private enum Column: String, CaseIterable {
-        case observed = "Observed"
-        case application = "Application"
-        case destination = "Destination"
-        case networkProtocol = "Protocol"
-        case collector = "Source"
+private enum AgentHistoryPeriod: String, CaseIterable, Identifiable {
+    case hour
+    case sixHours
+    case day
+    case week
+    case month
 
-        var width: CGFloat {
-            switch self {
-            case .observed: return 145
-            case .application: return 180
-            case .destination: return 285
-            case .networkProtocol: return 80
-            case .collector: return 110
-            }
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .hour: return L("Last hour")
+        case .sixHours: return L("Last 6 hours")
+        case .day: return L("Last 24 hours")
+        case .week: return L("Last 7 days")
+        case .month: return L("Last 30 days")
         }
     }
 
-    private let journal: ObservationJournal?
-    private let loadQueue = DispatchQueue(label: "com.egressview.agent.observation-ui")
-    private var observations: [ConnectionObservation] = []
-    private var refreshTimer: Timer?
-    private var isRefreshing = false
-    private var isMutating = false
-    private let tableView = NSTableView()
-    private let summaryLabel = NSTextField(labelWithString: "No observations yet")
-    private let storageLabel = NSTextField(labelWithString: "Storage: calculating...")
-    private let errorLabel = NSTextField(labelWithString: "")
-    private let retentionPopUp = NSPopUpButton()
-    private lazy var deleteButton = NSButton(title: "Delete History...", target: self, action: #selector(deleteHistory))
-    private lazy var dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .medium
-        return formatter
-    }()
+    var duration: TimeInterval {
+        switch self {
+        case .hour: return 3_600
+        case .sixHours: return 6 * 3_600
+        case .day: return 24 * 3_600
+        case .week: return 7 * 86_400
+        case .month: return 30 * 86_400
+        }
+    }
+}
 
-    init(journal: ObservationJournal?) {
-        self.journal = journal
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 570),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
+private struct AgentPeriodSummary: Equatable {
+    var sessionCount = 0
+    var applicationCount = 0
+    var destinationCount = 0
+}
+
+private struct AgentObservationRow: Identifiable {
+    let id: String
+    let observation: ConnectionObservation
+}
+
+@MainActor
+private final class AgentMainViewModel: ObservableObject {
+    @Published var selectedTab = AgentMainTab.status
+    @Published var period = AgentHistoryPeriod.hour {
+        didSet { refresh() }
+    }
+    @Published private(set) var observationRows: [AgentObservationRow] = []
+    @Published private(set) var summary = AgentPeriodSummary()
+    @Published private(set) var storage: ObservationStoreStatistics?
+    @Published private(set) var monitoringStatus = L("Monitoring paused")
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var isRefreshing = false
+
+    private let store: ObservationStore?
+    private let loadQueue = DispatchQueue(label: "com.egressview.agent.main-window")
+    private var refreshTimer: Timer?
+
+    init(store: ObservationStore?) {
+        self.store = store
+    }
+
+    func start() {
+        refresh()
+        refreshTimer?.invalidate()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        }
+    }
+
+    func stop() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+    }
+
+    func setMonitoringStatus(_ value: String) {
+        monitoringStatus = value
+    }
+
+    func showStorageError(_ message: String) {
+        errorMessage = message
+    }
+
+    func refresh() {
+        guard let store else {
+            errorMessage = L("Local history is unavailable because App Group access failed.")
+            return
+        }
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        let period = period
+        loadQueue.async { [weak self] in
+            let to = Date()
+            let from = to.addingTimeInterval(-period.duration)
+            let result = Result {
+                let observations = try store.observations(since: from, limit: 500)
+                let rollup = try store.hourlyRollup(from: from, to: to)
+                let summary = AgentPeriodSummary(
+                    sessionCount: rollup.reduce(0) { $0 + $1.sessionCount },
+                    applicationCount: Set(rollup.map(\.processName)).count,
+                    destinationCount: Set(rollup.map(\.remoteAddress)).count
+                )
+                return (observations, summary, try store.statistics())
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isRefreshing = false
+                switch result {
+                case .success(let value):
+                    self.observationRows = value.0.enumerated().map { index, observation in
+                        AgentObservationRow(
+                            id: "\(observation.stableKey)|\(observation.lastObservedAt.timeIntervalSince1970)|\(index)",
+                            observation: observation
+                        )
+                    }
+                    self.summary = value.1
+                    self.storage = value.2
+                    self.errorMessage = nil
+                case .failure(let error):
+                    self.errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+}
+
+private struct AgentMainView: View {
+    @ObservedObject var model: AgentMainViewModel
+    @ObservedObject private var language = AgentLanguageSettings.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            Group {
+                if model.selectedTab == .status {
+                    statusView
+                } else {
+                    analysisView
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(minWidth: 760, minHeight: 500)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var header: some View {
+        HStack(spacing: 18) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("EgressView Agent")
+                    .font(.title2.weight(.semibold))
+                Text(L("Outbound connections observed on this Mac"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Picker(L("View"), selection: $model.selectedTab) {
+                ForEach(AgentMainTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 220)
+            Picker(L("Period"), selection: $model.period) {
+                ForEach(AgentHistoryPeriod.allCases) { period in
+                    Text(period.title).tag(period)
+                }
+            }
+            .frame(width: 150)
+            Button {
+                model.refresh()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .help(L("Refresh"))
+            .disabled(model.isRefreshing)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 16)
+    }
+
+    private var statusView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L("Your network, right now"))
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                    Text(L("A local summary for %@. Packet payloads are never collected.", model.period.title))
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 14) {
+                    metricCard(title: L("Connections"), value: model.summary.sessionCount.formatted(), symbol: "point.3.connected.trianglepath.dotted")
+                    metricCard(title: L("Applications"), value: model.summary.applicationCount.formatted(), symbol: "app.dashed")
+                    metricCard(title: L("Destinations"), value: model.summary.destinationCount.formatted(), symbol: "network")
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(L("Collection"), systemImage: "waveform.path.ecg")
+                        .font(.headline)
+                    Text(model.monitoringStatus)
+                        .font(.title3.weight(.medium))
+                    if let storage = model.storage {
+                        Text(storageDescription(storage))
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
+
+                if let error = model.errorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    private var analysisView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L("Connection activity"))
+                        .font(.title2.weight(.semibold))
+                    Text(L("Showing the newest 500 records in the shared period"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(L("%lld shown", model.observationRows.count))
+                    .foregroundStyle(.secondary)
+            }
+            Table(model.observationRows) {
+                TableColumn(L("Observed")) { row in
+                    Text(row.observation.lastObservedAt, style: .time)
+                }
+                .width(min: 90, ideal: 120)
+                TableColumn(L("Application")) { row in
+                    Text(row.observation.processName.isEmpty ? "PID \(row.observation.processID)" : row.observation.processName)
+                }
+                .width(min: 130, ideal: 180)
+                TableColumn(L("Destination")) { row in
+                    Text(destination(row.observation))
+                        .monospaced()
+                }
+                .width(min: 220, ideal: 300)
+                TableColumn(L("Protocol")) { row in
+                    Text(row.observation.networkProtocol.rawValue.uppercased())
+                }
+                .width(70)
+                TableColumn(L("Source")) { row in
+                    Text(row.observation.collector == .networkExtension ? L("Network") : L("Lightweight"))
+                }
+                .width(100)
+            }
+        }
+        .padding(22)
+    }
+
+    private func metricCard(title: String, value: String, symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: symbol)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 30, weight: .semibold, design: .rounded))
+                .contentTransition(.numericText())
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func destination(_ observation: ConnectionObservation) -> String {
+        let address = observation.remoteAddress.contains(":")
+            ? "[\(observation.remoteAddress)]"
+            : observation.remoteAddress
+        return "\(address):\(observation.remotePort)"
+    }
+
+    private func storageDescription(_ statistics: ObservationStoreStatistics) -> String {
+        let size = ByteCountFormatter.string(fromByteCount: statistics.fileSizeBytes, countStyle: .file)
+        return L(
+            "%lld recent records · %lld hourly totals · %@ on disk",
+            statistics.rawCount,
+            statistics.rolledUpCount,
+            size
         )
-        window.title = "EgressView Connection Activity"
-        window.minSize = NSSize(width: 720, height: 380)
+    }
+}
+
+final class ObservationWindowController: NSWindowController, NSWindowDelegate {
+    private static let retentionDefaultsKey = "localHistoryRetentionDays"
+
+    static var configuredRetentionDays: Int {
+        get {
+            let value = UserDefaults.standard.integer(forKey: retentionDefaultsKey)
+            return ObservationRetention.allowedRetentionDays.contains(value) ? value : 30
+        }
+        set {
+            guard ObservationRetention.allowedRetentionDays.contains(newValue) else { return }
+            UserDefaults.standard.set(newValue, forKey: retentionDefaultsKey)
+        }
+    }
+
+    @MainActor private let model: AgentMainViewModel
+
+    @MainActor
+    init(store: ObservationStore?) {
+        let model = AgentMainViewModel(store: store)
+        self.model = model
+        let hostingController = NSHostingController(rootView: AgentMainView(model: model))
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "EgressView Agent"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 940, height: 620))
+        window.minSize = NSSize(width: 760, height: 500)
         super.init(window: window)
         window.delegate = self
-        buildContent()
     }
 
     @available(*, unavailable)
@@ -65,294 +344,33 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate, N
         fatalError("init(coder:) has not been implemented")
     }
 
+    @MainActor
     func show() {
         showWindow(nil)
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
-        refresh()
-        startRefreshTimer()
+        model.start()
     }
 
+    @MainActor
     func noteObservationsAvailable() {
         guard window?.isVisible == true else { return }
-        refresh()
+        model.refresh()
     }
 
+    @MainActor
+    func updateMonitoringStatus(_ status: AgentMonitoringStatus) {
+        model.setMonitoringStatus(status.label)
+    }
+
+    @MainActor
     func showStorageError(_ message: String) {
-        errorLabel.stringValue = "Local history unavailable: \(message)"
-        errorLabel.isHidden = false
+        model.showStorageError(message)
     }
 
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        observations.count
-    }
-
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard row < observations.count,
-              let identifier = tableColumn?.identifier,
-              let column = Column(rawValue: identifier.rawValue) else {
-            return nil
-        }
-        let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView
-            ?? makeCell(identifier: identifier)
-        let observation = observations[row]
-        cell.textField?.stringValue = value(for: column, observation: observation)
-        cell.textField?.toolTip = cell.textField?.stringValue
-        return cell
-    }
-
+    @MainActor
     func windowWillClose(_ notification: Notification) {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
-    }
-
-    @objc private func refresh() {
-        guard let journal else {
-            showStorageError("App Group access is not available")
-            return
-        }
-        guard !isRefreshing else { return }
-        isRefreshing = true
-        loadQueue.async { [weak self] in
-            let result = Result { try journal.snapshot(limit: 500) }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.isRefreshing = false
-                switch result {
-                case .success(let snapshot):
-                    self.observations = snapshot.observations
-                    self.tableView.reloadData()
-                    self.summaryLabel.stringValue = snapshot.observations.isEmpty
-                        ? "No observations yet. Start Lightweight or Full monitoring."
-                        : "\(snapshot.observations.count) recent connections · newest first"
-                    self.storageLabel.stringValue = self.storageSummary(snapshot.statistics)
-                    self.errorLabel.isHidden = true
-                case .failure(let error):
-                    self.showStorageError(error.localizedDescription)
-                }
-            }
-        }
-    }
-
-    private func buildContent() {
-        guard let contentView = window?.contentView else { return }
-
-        let title = NSTextField(labelWithString: "Connection activity")
-        title.font = .systemFont(ofSize: 24, weight: .semibold)
-        let privacy = NSTextField(labelWithString: "Stored locally on this Mac · payloads are never collected")
-        privacy.textColor = .secondaryLabelColor
-        let refreshButton = NSButton(title: "Refresh", target: self, action: #selector(refresh))
-        refreshButton.bezelStyle = .rounded
-
-        let heading = NSStackView()
-        heading.orientation = .horizontal
-        heading.alignment = .centerY
-        heading.spacing = 12
-        heading.addView(title, in: .leading)
-        heading.addView(refreshButton, in: .trailing)
-
-        errorLabel.textColor = .systemRed
-        errorLabel.isHidden = true
-        storageLabel.textColor = .secondaryLabelColor
-
-        configureRetentionPopUp()
-        let retentionLabel = NSTextField(labelWithString: "Keep history:")
-        let historyControls = NSStackView()
-        historyControls.orientation = .horizontal
-        historyControls.alignment = .centerY
-        historyControls.spacing = 8
-        historyControls.addView(retentionLabel, in: .leading)
-        historyControls.addView(retentionPopUp, in: .leading)
-        historyControls.addView(deleteButton, in: .trailing)
-        deleteButton.bezelStyle = .rounded
-        deleteButton.toolTip = "Delete local connection metadata without changing monitoring"
-
-        for column in Column.allCases {
-            let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.rawValue))
-            tableColumn.title = column.rawValue
-            tableColumn.width = column.width
-            tableColumn.minWidth = min(70, column.width)
-            tableView.addTableColumn(tableColumn)
-        }
-        tableView.delegate = self
-        tableView.dataSource = self
-        tableView.usesAlternatingRowBackgroundColors = true
-        tableView.rowHeight = 28
-        tableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-
-        let scrollView = NSScrollView()
-        scrollView.documentView = tableView
-        scrollView.hasVerticalScroller = true
-        scrollView.borderType = .bezelBorder
-
-        let stack = NSStackView(views: [heading, privacy, historyControls, summaryLabel, storageLabel, errorLabel, scrollView])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stack)
-
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 22),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -22),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
-            heading.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            historyControls.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            scrollView.widthAnchor.constraint(equalTo: stack.widthAnchor),
-        ])
-    }
-
-    private func makeCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
-        let cell = NSTableCellView()
-        cell.identifier = identifier
-        let label = NSTextField(labelWithString: "")
-        label.lineBreakMode = .byTruncatingMiddle
-        label.translatesAutoresizingMaskIntoConstraints = false
-        cell.textField = label
-        cell.addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 6),
-            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
-            label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-        ])
-        return cell
-    }
-
-    private func value(for column: Column, observation: ConnectionObservation) -> String {
-        switch column {
-        case .observed:
-            return dateFormatter.string(from: observation.lastObservedAt)
-        case .application:
-            return observation.processName.isEmpty ? "PID \(observation.processID)" : observation.processName
-        case .destination:
-            let address = observation.remoteAddress.contains(":")
-                ? "[\(observation.remoteAddress)]"
-                : observation.remoteAddress
-            return "\(address):\(observation.remotePort)"
-        case .networkProtocol:
-            return observation.networkProtocol.rawValue.uppercased()
-        case .collector:
-            return observation.collector == .networkExtension ? "Full" : "Lightweight"
-        }
-    }
-
-    private func startRefreshTimer() {
-        refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            self?.refresh()
-        }
-    }
-
-    private var retentionDays: Int {
-        Self.configuredRetentionDays
-    }
-
-    private func configureRetentionPopUp() {
-        let choices = [
-            ("Until storage limit", 0),
-            ("1 day", 1),
-            ("7 days", 7),
-            ("30 days", 30),
-            ("90 days", 90),
-        ]
-        for choice in choices {
-            retentionPopUp.addItem(withTitle: choice.0)
-            retentionPopUp.lastItem?.tag = choice.1
-        }
-        retentionPopUp.target = self
-        retentionPopUp.action = #selector(changeRetention)
-        selectRetention(days: retentionDays)
-    }
-
-    @objc private func changeRetention() {
-        let requestedDays = retentionPopUp.selectedTag()
-        let previousDays = retentionDays
-        guard requestedDays != previousDays else { return }
-        guard requestedDays > 0 else {
-            UserDefaults.standard.set(0, forKey: Self.retentionDefaultsKey)
-            return
-        }
-
-        let alert = NSAlert()
-        alert.messageText = "Keep local history for \(requestedDays) days?"
-        alert.informativeText = "Older connection metadata will be deleted now and on future launches. Monitoring will continue."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Apply and Delete Older History")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            selectRetention(days: previousDays)
-            return
-        }
-
-        runMutation(
-            operation: { [journal] in
-                guard let journal else { return }
-                let cutoff = Calendar.current.date(byAdding: .day, value: -requestedDays, to: Date()) ?? Date()
-                try journal.removeObservations(before: cutoff)
-            },
-            onSuccess: {
-                UserDefaults.standard.set(requestedDays, forKey: Self.retentionDefaultsKey)
-            },
-            onFailure: { [weak self] in self?.selectRetention(days: previousDays) }
-        )
-    }
-
-    @objc private func deleteHistory() {
-        let alert = NSAlert()
-        alert.messageText = "Delete all local connection history?"
-        alert.informativeText = "This cannot be undone. Monitoring will continue and new observations may appear immediately."
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: "Delete History")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        runMutation(operation: { [journal] in
-            try journal?.removeAll()
-        })
-    }
-
-    private func runMutation(
-        operation: @escaping @Sendable () throws -> Void,
-        onSuccess: @escaping () -> Void = {},
-        onFailure: @escaping () -> Void = {}
-    ) {
-        guard !isMutating else { return }
-        isMutating = true
-        retentionPopUp.isEnabled = false
-        deleteButton.isEnabled = false
-        loadQueue.async { [weak self] in
-            let result = Result { try operation() }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.isMutating = false
-                self.retentionPopUp.isEnabled = true
-                self.deleteButton.isEnabled = true
-                switch result {
-                case .success:
-                    onSuccess()
-                    self.refresh()
-                case .failure(let error):
-                    onFailure()
-                    self.showStorageError(error.localizedDescription)
-                }
-            }
-        }
-    }
-
-    private func selectRetention(days: Int) {
-        let index = retentionPopUp.indexOfItem(withTag: days)
-        retentionPopUp.selectItem(at: index >= 0 ? index : 0)
-    }
-
-    private func storageSummary(_ statistics: ObservationJournalStatistics) -> String {
-        let bytes = ByteCountFormatter.string(fromByteCount: Int64(statistics.storedBytes), countStyle: .file)
-        let maximum = ByteCountFormatter.string(fromByteCount: Int64(statistics.maximumStoredBytes), countStyle: .file)
-        guard let oldest = statistics.oldestObservationAt,
-              let newest = statistics.newestObservationAt else {
-            return "Storage: \(bytes) of \(maximum) · 0 records"
-        }
-        return "Storage: \(bytes) of \(maximum) · \(statistics.recordCount) records · \(dateFormatter.string(from: oldest)) – \(dateFormatter.string(from: newest))"
+        model.stop()
     }
 }

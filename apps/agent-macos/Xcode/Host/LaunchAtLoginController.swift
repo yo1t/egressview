@@ -33,4 +33,13 @@ final class LaunchAtLoginController {
             SMAppService.openSystemSettingsLoginItems()
         }
     }
+
+    func disable() throws {
+        switch state {
+        case .enabled, .requiresApproval:
+            try service.unregister()
+        case .disabled, .unavailable:
+            break
+        }
+    }
 }

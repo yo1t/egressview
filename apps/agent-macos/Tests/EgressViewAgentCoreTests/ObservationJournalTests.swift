@@ -50,6 +50,24 @@ final class ObservationJournalTests: XCTestCase {
         XCTAssertEqual(attributes[.posixPermissions] as? NSNumber, NSNumber(value: 0o600))
     }
 
+    func testSystemManagedContainerPermissionsAreNotRewritten() throws {
+        let directory = temporaryDirectory.appendingPathComponent("managed", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755]
+        )
+        let journal = ObservationJournal(
+            fileURL: directory.appendingPathComponent("observations.jsonl"),
+            managesParentDirectoryPermissions: false
+        )
+
+        try journal.append([observation(remoteAddress: "203.0.113.31", observedAt: Date())])
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: directory.path)
+        XCTAssertEqual(attributes[.posixPermissions] as? NSNumber, NSNumber(value: 0o755))
+    }
+
     func testRotationKeepsCurrentAndPreviousJournal() throws {
         let fileURL = temporaryDirectory.appendingPathComponent("observations.jsonl")
         let journal = ObservationJournal(fileURL: fileURL, maximumFileSize: 1_024)

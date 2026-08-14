@@ -62,6 +62,18 @@ public enum AgentCodeIdentity {
               let details = information as? [String: Any] else { return nil }
         return details[kSecCodeInfoTeamIdentifier as String] as? String
     }
+
+    public static func isAppSandboxEnabled() -> Bool {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(
+                task,
+                "com.apple.security.app-sandbox" as CFString,
+                nil
+              ) else {
+            return false
+        }
+        return value as? Bool == true
+    }
 }
 
 /// Checks a downloaded package before it is offered to the user.

@@ -1,24 +1,59 @@
 import AppKit
 import EgressViewAgentCore
+import OSLog
 
+@MainActor
 final class AgentAppDelegate: NSObject, NSApplicationDelegate {
+    private let logger = Logger(subsystem: "com.egressview.agent.macos", category: "storage")
+    private struct StorageContext {
+        let store: ObservationStore
+        let migration: ObservationJournalMigrationResult
+    }
+
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let launchAtLoginController = LaunchAtLoginController()
     private let historyMaintenanceQueue = DispatchQueue(label: "com.egressview.agent.history-maintenance")
     private var currentMonitoringStatus = AgentMonitoringStatus.paused
-    private var launchAtLoginError: String?
-    private lazy var journalResult = makeJournal()
-    private lazy var journal = try? journalResult.get()
-    private lazy var observationWindow = ObservationWindowController(journal: journal)
+    private var isPreparedForRemoval = false
+    private lazy var storageResult = makeStorage()
+    private lazy var store = try? storageResult.get().store
+    private lazy var observationWindow = ObservationWindowController(store: store)
     private lazy var hubDelivery = HubDeliveryController()
+    private lazy var updateController = AgentUpdateController(
+        onUpdateReady: { [weak self] version in self?.showUpdateReady(version: version) }
+    )
+    private lazy var uninstallController = AgentUninstallController(
+        store: store,
+        monitoringController: controller,
+        hubDelivery: hubDelivery,
+        launchController: launchAtLoginController,
+        onPreparedForRemoval: { [weak self] in
+            self?.isPreparedForRemoval = true
+            self?.render(.paused)
+        }
+    )
+    private lazy var settingsWindow = SettingsWindowController(
+        store: store,
+        hub: hubDelivery,
+        updates: updateController,
+        uninstall: uninstallController,
+        launchController: launchAtLoginController,
+        onMonitoringMode: { [weak self] mode in self?.selectMonitoringMode(mode) },
+        onRetentionChanged: { [weak self] days in self?.applyRetentionPolicy(days: days) },
+        onLanguageChanged: { [weak self] in self?.refreshLocalization() }
+    )
     private lazy var controller = AgentMonitoringController(
-        journal: journal,
+        store: store,
         statusHandler: { [weak self] status in
             DispatchQueue.main.async { self?.render(status) }
         },
         observationHandler: { [weak self] observations in
-            self?.hubDelivery.enqueue(observations)
-            DispatchQueue.main.async { self?.observationWindow.noteObservationsAvailable() }
+            DispatchQueue.main.async {
+                if self?.isPreparedForRemoval == false {
+                    self?.hubDelivery.enqueue(observations)
+                }
+                self?.observationWindow.noteObservationsAvailable()
+            }
         },
         storageErrorHandler: { [weak self] error in
             DispatchQueue.main.async { self?.observationWindow.showStorageError(error.localizedDescription) }
@@ -28,38 +63,52 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         applyMenuBarIcon(for: .paused)
         _ = hubDelivery
+        installApplicationMenu()
         render(.paused)
-        if case .failure(let error) = journalResult {
+        if case .failure(let error) = storageResult {
             observationWindow.showStorageError(error.localizedDescription)
+        } else if case .success(let context) = storageResult,
+                  context.migration.malformedLineCount > 0 {
+            observationWindow.showStorageError(
+                L(
+                    "Imported %lld legacy records. The old journal was kept because %lld lines need recovery.",
+                    context.migration.importedCount,
+                    context.migration.malformedLineCount
+                )
+            )
         }
         applyRetentionPolicy()
         controller.restoreMonitoringState()
+        showUpdateDisclosureIfNeeded()
+        Task { await updateController.runIfDue() }
     }
 
     private func render(_ status: AgentMonitoringStatus) {
         currentMonitoringStatus = status
+        observationWindow.updateMonitoringStatus(status)
+        settingsWindow.updateMonitoringStatus(status)
         let menu = NSMenu()
         let statusRow = NSMenuItem(title: status.label, action: nil, keyEquivalent: "")
         statusRow.isEnabled = false
         menu.addItem(statusRow)
         menu.addItem(.separator())
-        menu.addItem(item("Open connection activity...", action: #selector(openObservations), key: "o"))
-        menu.addItem(item("Hub delivery...", action: #selector(openHubDelivery)))
-        menu.addItem(.separator())
-        menu.addItem(item("Full monitoring", action: #selector(selectFull)))
-        menu.addItem(item("Lightweight monitoring", action: #selector(selectLightweight)))
-        menu.addItem(item("Pause", action: #selector(selectPaused)))
-        menu.addItem(.separator())
-        let launchAtLoginItem = item(launchAtLoginTitle, action: #selector(toggleLaunchAtLogin))
-        launchAtLoginItem.state = launchAtLoginController.state == .enabled ? .on : .off
-        menu.addItem(launchAtLoginItem)
-        if let launchAtLoginError {
-            let errorItem = NSMenuItem(title: "Launch at login failed: \(launchAtLoginError)", action: nil, keyEquivalent: "")
-            errorItem.isEnabled = false
-            menu.addItem(errorItem)
+        menu.addItem(item(L("Open EgressView..."), action: #selector(openObservations), key: "o"))
+        menu.addItem(item(L("Settings..."), action: #selector(openSettings), key: ","))
+        if let version = updateController.availableVersion {
+            menu.addItem(item(L("Update %@ ready...", version), action: #selector(openSettings)))
         }
         menu.addItem(.separator())
-        menu.addItem(item("Quit EgressView Agent", action: #selector(quit), key: "q"))
+        menu.addItem(monitoringItem(L("Network monitoring"), action: #selector(selectFull), mode: .full))
+        if controller.isLightweightMonitoringAvailable {
+            menu.addItem(monitoringItem(
+                L("Lightweight monitoring"),
+                action: #selector(selectLightweight),
+                mode: .lightweight
+            ))
+        }
+        menu.addItem(monitoringItem(L("Pause"), action: #selector(selectPaused), mode: .paused))
+        menu.addItem(.separator())
+        menu.addItem(item(L("Quit EgressView Agent"), action: #selector(quit), key: "q"))
         statusItem.menu = menu
         applyMenuBarIcon(for: status)
     }
@@ -89,19 +138,21 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         button.toolTip = status.label
     }
 
-    private var launchAtLoginTitle: String {
-        launchAtLoginController.state == .requiresApproval
-            ? "Launch at login (Approval required...)"
-            : "Launch at login"
-    }
-
     private func item(_ title: String, action: Selector, key: String = "") -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.target = self
         return item
     }
 
+    private func monitoringItem(_ title: String, action: Selector, mode: AgentMonitoringMode) -> NSMenuItem {
+        let menuItem = item(title, action: action)
+        menuItem.state = monitoringMode(for: currentMonitoringStatus) == mode ? .on : .off
+        menuItem.isEnabled = !isPreparedForRemoval
+        return menuItem
+    }
+
     @objc private func selectFull() {
+        guard !isPreparedForRemoval else { return }
         controller.selectFullMonitoring()
     }
 
@@ -109,26 +160,18 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         observationWindow.show()
     }
 
-    @objc private func openHubDelivery() {
-        hubDelivery.show()
+    @objc private func openSettings() {
+        settingsWindow.show()
     }
 
     @objc private func selectLightweight() {
+        guard !isPreparedForRemoval else { return }
         controller.selectLightweightMonitoring()
     }
 
     @objc private func selectPaused() {
+        guard !isPreparedForRemoval else { return }
         controller.pause()
-    }
-
-    @objc private func toggleLaunchAtLogin() {
-        do {
-            try launchAtLoginController.toggle()
-            launchAtLoginError = nil
-        } catch {
-            launchAtLoginError = error.localizedDescription
-        }
-        render(currentMonitoringStatus)
     }
 
     @objc private func quit() {
@@ -136,13 +179,13 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.terminate(nil)
     }
 
-    private func applyRetentionPolicy() {
-        let days = ObservationWindowController.configuredRetentionDays
-        guard days > 0, let journal else { return }
+    private func applyRetentionPolicy(days: Int? = nil) {
+        let days = days ?? ObservationWindowController.configuredRetentionDays
+        guard let store else { return }
         historyMaintenanceQueue.async { [weak self] in
-            let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
             do {
-                try journal.removeObservations(before: cutoff)
+                store.setRetention(ObservationRetention(retentionDays: days, rawDays: 14))
+                try store.compact()
             } catch {
                 DispatchQueue.main.async {
                     self?.observationWindow.showStorageError(error.localizedDescription)
@@ -151,15 +194,106 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func makeJournal() -> Result<ObservationJournal, Error> {
+    private func selectMonitoringMode(_ mode: AgentMonitoringMode) {
+        guard !isPreparedForRemoval else { return }
+        switch mode {
+        case .full: controller.selectFullMonitoring()
+        case .lightweight: controller.selectLightweightMonitoring()
+        case .paused: controller.pause()
+        }
+    }
+
+    private func monitoringMode(for status: AgentMonitoringStatus) -> AgentMonitoringMode? {
+        switch status {
+        case .fullActive, .fullActivationRequested, .approvalRequired, .rebootRequired: return .full
+        case .lightweight: return .lightweight
+        case .paused: return .paused
+        case .deactivating, .removalApprovalRequired, .removalRebootRequired, .failed: return nil
+        }
+    }
+
+    private func installApplicationMenu() {
+        let mainMenu = NSMenu()
+        let applicationItem = NSMenuItem()
+        let applicationMenu = NSMenu()
+        applicationMenu.addItem(item(L("Settings..."), action: #selector(openSettings), key: ","))
+        applicationMenu.addItem(.separator())
+        applicationMenu.addItem(item(L("Quit EgressView Agent"), action: #selector(quit), key: "q"))
+        applicationItem.submenu = applicationMenu
+        mainMenu.addItem(applicationItem)
+        NSApplication.shared.mainMenu = mainMenu
+    }
+
+    private func refreshLocalization() {
+        installApplicationMenu()
+        settingsWindow.refreshLocalization()
+        render(currentMonitoringStatus)
+    }
+
+    private func showUpdateDisclosureIfNeeded() {
+        guard updateController.shouldShowDisclosure else { return }
+        updateController.markDisclosureShown()
+        guard updateController.isEnabled else { return }
+        let alert = NSAlert()
+        alert.messageText = L("Automatic update checks are on")
+        alert.informativeText = L(
+            "EgressView checks once per day for a signed release. The request includes the Agent version and macOS version, but no device or installation identifier. Updates are downloaded and verified, then you decide when to open the installer."
+        )
+        alert.addButton(withTitle: L("Keep enabled"))
+        alert.addButton(withTitle: L("Turn off"))
+        if alert.runModal() == .alertSecondButtonReturn {
+            updateController.setEnabled(false)
+        }
+    }
+
+    private func showUpdateReady(version: String) {
+        render(currentMonitoringStatus)
+        let alert = NSAlert()
+        alert.messageText = L("EgressView Agent %@ is ready", version)
+        alert.informativeText = L(
+            "The installer passed the signed manifest, checksum, developer identity and Gatekeeper checks. You choose when to open it because installation temporarily stops monitoring."
+        )
+        alert.addButton(withTitle: L("Open installer"))
+        alert.addButton(withTitle: L("Later"))
+        if alert.runModal() == .alertFirstButtonReturn {
+            updateController.openVerifiedInstaller()
+        }
+    }
+
+    private func makeStorage() -> Result<StorageContext, Error> {
         do {
-            return .success(try ObservationJournal())
+            let retention = ObservationRetention(
+                retentionDays: ObservationWindowController.configuredRetentionDays,
+                rawDays: 14
+            )
+            let journal = try ObservationJournal()
+            let store = try ObservationStore(retention: retention)
+            let migration = try ObservationJournalMigrator.migrate(journal: journal, into: store)
+            return .success(StorageContext(store: store, migration: migration))
         } catch {
+            logger.error("Storage initialization failed: \(error.localizedDescription, privacy: .public)")
 #if DEBUG
-            let fallback = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("EgressView Agent", isDirectory: true)
-                .appendingPathComponent("observations.jsonl")
-            return .success(ObservationJournal(fileURL: fallback))
+            do {
+                let fallback = FileManager.default.urls(
+                    for: .applicationSupportDirectory,
+                    in: .userDomainMask
+                )[0].appendingPathComponent("EgressView Agent", isDirectory: true)
+                let retention = ObservationRetention(
+                    retentionDays: ObservationWindowController.configuredRetentionDays,
+                    rawDays: 14
+                )
+                let journal = ObservationJournal(
+                    fileURL: fallback.appendingPathComponent("observations.jsonl")
+                )
+                let store = try ObservationStore(
+                    fileURL: fallback.appendingPathComponent("observations.sqlite"),
+                    retention: retention
+                )
+                let migration = try ObservationJournalMigrator.migrate(journal: journal, into: store)
+                return .success(StorageContext(store: store, migration: migration))
+            } catch {
+                return .failure(error)
+            }
 #else
             return .failure(error)
 #endif

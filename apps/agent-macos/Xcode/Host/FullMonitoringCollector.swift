@@ -2,7 +2,7 @@ import EgressViewAgentCore
 import Foundation
 
 final class FullMonitoringCollector {
-    private let journal: ObservationJournal
+    private let store: ObservationStore
     private let observationHandler: ([ConnectionObservation]) -> Void
     private let statusHandler: (AgentMonitoringStatus) -> Void
     private let errorHandler: (Error) -> Void
@@ -13,12 +13,12 @@ final class FullMonitoringCollector {
     private var isRunning = false
 
     init(
-        journal: ObservationJournal,
+        store: ObservationStore,
         observationHandler: @escaping ([ConnectionObservation]) -> Void,
         statusHandler: @escaping (AgentMonitoringStatus) -> Void,
         errorHandler: @escaping (Error) -> Void
     ) {
-        self.journal = journal
+        self.store = store
         self.observationHandler = observationHandler
         self.statusHandler = statusHandler
         self.errorHandler = errorHandler
@@ -89,7 +89,7 @@ final class FullMonitoringCollector {
                 ? []
                 : try FullMonitoringXPC.decoder().decode([ConnectionObservation].self, from: data)
             if !observations.isEmpty {
-                try journal.append(observations)
+                try store.append(observations)
                 observationHandler(observations)
             }
             if !reportedActive {

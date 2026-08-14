@@ -265,6 +265,21 @@ describe('Agent HTTP credential lifecycle', () => {
     assert.equal(agentIdentities.listAgents()[0].agentId, id);
     assert.equal(typeof agentIdentities.listAgents()[0].revokedAt, 'number');
   });
+
+  it('lets an Agent revoke only its own registration', async () => {
+    const { app, audits } = makeApp();
+    const first = await enrolledAgent(app);
+    const second = await enrolledAgent(app);
+    const response = await request(app, 'POST', '/api/agent/registration/revoke', {
+      headers: { Authorization: `Bearer ${first.enrolled.body.token}` },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(agentIdentities.verifyAgentToken(first.enrolled.body.token), null);
+    assert.ok(agentIdentities.verifyAgentToken(second.enrolled.body.token));
+    assert.equal(audits.at(-1).eventType, 'agent_self_revoked');
+    assert.equal(audits.at(-1).outcome, 'success');
+  });
 });
 
 describe('Agent HTTP ingest', () => {

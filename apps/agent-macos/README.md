@@ -9,13 +9,19 @@ It reads connection metadata only — addresses, ports, process names. **It neve
 reads payloads, never decrypts traffic, and never blocks anything.** Byte counts
 are reported as unavailable rather than guessed at.
 
+The host app and its Network Extension run inside the macOS App Sandbox. The
+host is allowed to initiate outbound connections for Hub delivery and signed
+update checks; the extension is not given general outbound or inbound network
+access. Both share only the dedicated EgressView App Group storage. No
+filesystem exception grants access to your home directory or AWS CLI files.
+
 ## Is this for you?
 
 Stop here if any of these is a no. Nothing below will work around them.
 
 | You need | Why |
 |---|---|
-| **macOS 13 or newer** | The System Extension the full mode relies on |
+| **macOS 13 or newer** | The System Extension used for network monitoring |
 | **An EgressView Hub you administer, running 1.9.0 or newer** | Enrolment needs a Hub that can approve it. **Hub 1.8.0 and older cannot accept this agent at all** — they have no agent endpoint |
 | **Physical access to that Hub's settings** | Registration is completed by an administrator approving your Mac, not by the Mac itself |
 
@@ -27,9 +33,8 @@ Roughly ten minutes, most of which is macOS asking you to approve things.
    [releases page](https://github.com/yo1t/egressview/releases) and open it.
 2. Drag **EgressView Agent** onto **Applications**, then launch it from there.
    It lives in the menu bar and has no window of its own.
-3. Choose **Full monitoring** from its menu. macOS will ask you to allow a
+3. Choose **Network monitoring** from its menu. macOS will ask you to allow a
    System Extension; this opens System Settings, where you approve it once.
-   **Lightweight monitoring** needs no approval but sees less.
 4. In the Hub's settings, under the L3/L4 data source, choose **Issue an
    enrolment code**. You get six characters.
 5. Back in the agent menu, choose **Hub delivery...**, enter the Hub's address
@@ -42,6 +47,24 @@ destination and what will and will not be sent before anything leaves.
 
 If the code is refused, it has probably expired — they last ten minutes. Issue
 another one.
+
+## Uninstall
+
+Do not move the app to Trash first. Open **Settings > Uninstall** in EgressView
+Agent and review the removal summary. The guided flow:
+
+1. stops Hub delivery and asks the enrolled Hub to revoke this Mac;
+2. removes the network filter configuration and System Extension;
+3. disables launch at login and deletes the Hub credential and pending queue;
+4. optionally deletes local connection history; and
+5. shows the app in Finder so you can quit it and move it to Trash.
+
+Local history is kept unless you explicitly select its deletion. Observations
+already accepted by a Hub are not deleted from that Hub. If the Hub cannot be
+reached, the agent keeps its credential so you can retry. You may continue the
+local removal only after acknowledging that the registration must then be
+revoked manually in the Hub's Agent settings. macOS may require approval or a
+restart to finish removing the System Extension.
 
 ## Building from source
 
@@ -56,7 +79,7 @@ swift test
 swift run egressview-agent-spike --summary
 ```
 
-Activating the full monitoring path requires a Developer ID certificate,
+Activating the network monitoring path requires a Developer ID certificate,
 Network Extension entitlement, an Xcode app/System Extension host, and explicit
 macOS user approval. Do not bypass System Integrity Protection or other macOS
 security controls for development.
@@ -68,11 +91,11 @@ builds a menu-bar host app and embeds
 `com.egressview.agent.filter.systemextension` under
 `Contents/Library/SystemExtensions`.
 
-The app starts paused. Choosing Lightweight monitoring first disables the
-Content Filter and waits for that operation to finish before polling sockets.
-Choosing Full monitoring stops lightweight polling before requesting System
-Extension activation. A rejected or incomplete approval never silently falls
-back to lightweight monitoring.
+The app starts paused. In an official sandboxed build, the user-facing choices
+are Network monitoring and Pause. Network monitoring activates the System
+Extension. The libproc-based lightweight collector remains available only to
+non-sandboxed development builds and is not offered in release UI. A rejected
+or incomplete approval never silently falls back to another collector.
 
 The **Launch at login** menu option is off by default and is independent of the
 selected monitoring mode. Enabling it registers the signed main app with
