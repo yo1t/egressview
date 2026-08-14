@@ -24,7 +24,7 @@ final class FullMonitoringXPCTests: XCTestCase {
         XCTAssertEqual(decoded, [observation])
     }
 
-    func testMachServiceIsScopedUnderTheAppGroup() {
-        XCTAssertTrue(FullMonitoringXPC.machServiceName.hasPrefix("group.com.egressview.agent."))
+    func testMachServiceUsesTheAppGroupPrefixRequiredByNetworkExtension() {
+        XCTAssertEqual(FullMonitoringXPC.machServiceName, "group.com.egressview.agent.xpc")
     }
 }

@@ -92,7 +92,7 @@ public actor AgentUpdateCoordinator {
     }
 
     /// Phrased for someone who has to decide what to do, not for a log reader.
-    static func describe(_ error: any Error) -> String {
+    public static func describe(_ error: any Error) -> String {
         switch error {
         case AgentUpdateError.embeddedKeyNotPublished:
             return "This build does not carry the published EgressView release key, so updates are refused."

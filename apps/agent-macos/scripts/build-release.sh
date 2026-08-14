@@ -57,7 +57,8 @@ xcodebuild -quiet \
 
 [[ -d "$APP_PATH" ]] || { printf 'Host app missing from archive\n' >&2; exit 1; }
 [[ -d "$EXTENSION_PATH" ]] || { printf 'System Extension missing from archive\n' >&2; exit 1; }
-[[ "$(plutil -extract NetworkExtension.NEMachServiceName raw "$EXTENSION_PATH/Contents/Info.plist")" == "group.com.egressview.agent.xpc" ]] || {
+EXPECTED_MACH_SERVICE_NAME="group.com.egressview.agent.xpc"
+[[ "$(plutil -extract NetworkExtension.NEMachServiceName raw "$EXTENSION_PATH/Contents/Info.plist")" == "$EXPECTED_MACH_SERVICE_NAME" ]] || {
   printf 'System Extension XPC service name is invalid\n' >&2
   exit 1
 }
@@ -89,6 +90,9 @@ codesign -d --xml --entitlements "$HOST_ENTITLEMENTS" "$APP_PATH"
 codesign -d --xml --entitlements "$EXTENSION_ENTITLEMENTS" "$EXTENSION_PATH"
 
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.system-extension.install' "$HOST_ENTITLEMENTS")" == true ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$HOST_ENTITLEMENTS")" == true ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.network.client' "$HOST_ENTITLEMENTS")" == true ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$EXTENSION_ENTITLEMENTS")" == true ]]
 /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension' "$HOST_ENTITLEMENTS" | grep -q 'content-filter-provider-systemextension'
 /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension' "$EXTENSION_ENTITLEMENTS" | grep -q 'content-filter-provider-systemextension'
 /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups' "$HOST_ENTITLEMENTS" | grep -q 'group.com.egressview.agent'
@@ -97,6 +101,17 @@ if /usr/libexec/PlistBuddy -c 'Print :com.apple.security.xpc.mach-service.name' 
   printf 'System Extension contains an unsupported explicit Mach service entitlement\n' >&2
   exit 1
 fi
+for forbidden in \
+  com.apple.security.network.server \
+  com.apple.security.temporary-exception.files.absolute-path.read-only \
+  com.apple.security.temporary-exception.files.absolute-path.read-write \
+  com.apple.security.temporary-exception.files.home-relative-path.read-only \
+  com.apple.security.temporary-exception.files.home-relative-path.read-write; do
+  if /usr/libexec/PlistBuddy -c "Print :$forbidden" "$HOST_ENTITLEMENTS" >/dev/null 2>&1; then
+    printf 'Host contains forbidden sandbox entitlement: %s\n' "$forbidden" >&2
+    exit 1
+  fi
+done
 
 ditto -c -k --keepParent "$APP_PATH" "$SUBMISSION_ZIP"
 
@@ -117,7 +132,7 @@ ROUNDTRIP_APP="$ROUNDTRIP_DIR/EgressView Agent.app"
 ROUNDTRIP_EXTENSION="$ROUNDTRIP_APP/Contents/Library/SystemExtensions/com.egressview.agent.filter.systemextension"
 [[ -d "$ROUNDTRIP_APP" ]] || { printf 'Host app missing after ZIP extraction\n' >&2; exit 1; }
 [[ -d "$ROUNDTRIP_EXTENSION" ]] || { printf 'System Extension missing after ZIP extraction\n' >&2; exit 1; }
-[[ "$(plutil -extract NetworkExtension.NEMachServiceName raw "$ROUNDTRIP_EXTENSION/Contents/Info.plist")" == "group.com.egressview.agent.xpc" ]] || {
+[[ "$(plutil -extract NetworkExtension.NEMachServiceName raw "$ROUNDTRIP_EXTENSION/Contents/Info.plist")" == "$EXPECTED_MACH_SERVICE_NAME" ]] || {
   printf 'System Extension XPC service name is invalid after ZIP extraction\n' >&2
   exit 1
 }
@@ -135,6 +150,9 @@ codesign -d --xml --entitlements "$ROUNDTRIP_HOST_ENTITLEMENTS" "$ROUNDTRIP_APP"
 codesign -d --xml --entitlements "$ROUNDTRIP_EXTENSION_ENTITLEMENTS" "$ROUNDTRIP_EXTENSION"
 
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.system-extension.install' "$ROUNDTRIP_HOST_ENTITLEMENTS")" == true ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$ROUNDTRIP_HOST_ENTITLEMENTS")" == true ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.network.client' "$ROUNDTRIP_HOST_ENTITLEMENTS")" == true ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$ROUNDTRIP_EXTENSION_ENTITLEMENTS")" == true ]]
 /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension' "$ROUNDTRIP_HOST_ENTITLEMENTS" | grep -q 'content-filter-provider-systemextension'
 /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.networkextension' "$ROUNDTRIP_EXTENSION_ENTITLEMENTS" | grep -q 'content-filter-provider-systemextension'
 /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups' "$ROUNDTRIP_HOST_ENTITLEMENTS" | grep -q 'group.com.egressview.agent'
@@ -143,6 +161,17 @@ if /usr/libexec/PlistBuddy -c 'Print :com.apple.security.xpc.mach-service.name' 
   printf 'Round-trip System Extension contains an unsupported explicit Mach service entitlement\n' >&2
   exit 1
 fi
+for forbidden in \
+  com.apple.security.network.server \
+  com.apple.security.temporary-exception.files.absolute-path.read-only \
+  com.apple.security.temporary-exception.files.absolute-path.read-write \
+  com.apple.security.temporary-exception.files.home-relative-path.read-only \
+  com.apple.security.temporary-exception.files.home-relative-path.read-write; do
+  if /usr/libexec/PlistBuddy -c "Print :$forbidden" "$ROUNDTRIP_HOST_ENTITLEMENTS" >/dev/null 2>&1; then
+    printf 'Round-trip host contains forbidden sandbox entitlement: %s\n' "$forbidden" >&2
+    exit 1
+  fi
+done
 
 if [[ -n "$NOTARY_PROFILE" ]]; then
   xcrun stapler validate "$ROUNDTRIP_APP"
