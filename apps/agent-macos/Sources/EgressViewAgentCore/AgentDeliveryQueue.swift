@@ -6,17 +6,23 @@ public struct AgentDeliveryQueueStatus: Equatable, Sendable {
     public let droppedCount: Int
     public let oldestPendingAt: Date?
     public let lastAcknowledgedAt: Date?
+    /// Set when a saved queue could not be read at startup and was reset.
+    /// Whatever it held never reached the Hub, so this has to be visible: the
+    /// symptom is otherwise missing data with no error anywhere.
+    public let unreadableStateResetAt: Date?
 
     public init(
         pendingCount: Int,
         droppedCount: Int,
         oldestPendingAt: Date?,
-        lastAcknowledgedAt: Date?
+        lastAcknowledgedAt: Date?,
+        unreadableStateResetAt: Date? = nil
     ) {
         self.pendingCount = pendingCount
         self.droppedCount = droppedCount
         self.oldestPendingAt = oldestPendingAt
         self.lastAcknowledgedAt = lastAcknowledgedAt
+        self.unreadableStateResetAt = unreadableStateResetAt
     }
 }
 
@@ -45,6 +51,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var state: State
+    private var unreadableStateResetAt: Date?
 
     public init(fileURL: URL, maximumPending: Int = 10_000) throws {
         self.fileURL = fileURL
@@ -52,21 +59,38 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         decoder.dateDecodingStrategy = .iso8601
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            state = try decoder.decode(State.self, from: Data(contentsOf: fileURL))
-            let invalidIDs = Set(state.pending.compactMap { entry in
-                Self.isDeliverable(entry.observation) ? nil : entry.observationID
-            })
-            if !invalidIDs.isEmpty {
-                state.pending.removeAll { invalidIDs.contains($0.observationID) }
-                if state.activeBatch?.observationIDs.contains(where: invalidIDs.contains) == true {
-                    state.activeBatch = nil
-                }
-                state.droppedCount += invalidIDs.count
-                try persist()
-            }
-        } else {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
             state = State()
+            return
+        }
+        do {
+            state = try decoder.decode(State.self, from: Data(contentsOf: fileURL))
+        } catch {
+            // A saved queue that cannot be read must not stop the agent from
+            // collecting. Refusing to start would turn one lost buffer into an
+            // agent that delivers nothing until someone notices -- and nobody
+            // notices, because the symptom is missing data rather than an
+            // error. Start empty and report it instead.
+            //
+            // Agents built before 2026-08-14 wrote this file with a protection
+            // class that leaves it unreadable afterwards, so existing installs
+            // reach this path once. Its contents cannot be recovered: changing
+            // the attribute afterwards does not make the bytes readable.
+            state = State()
+            unreadableStateResetAt = Date()
+            try? FileManager.default.removeItem(at: fileURL)
+            return
+        }
+        let invalidIDs = Set(state.pending.compactMap { entry in
+            Self.isDeliverable(entry.observation) ? nil : entry.observationID
+        })
+        if !invalidIDs.isEmpty {
+            state.pending.removeAll { invalidIDs.contains($0.observationID) }
+            if state.activeBatch?.observationIDs.contains(where: invalidIDs.contains) == true {
+                state.activeBatch = nil
+            }
+            state.droppedCount += invalidIDs.count
+            try persist()
         }
     }
 
@@ -156,7 +180,8 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                 pendingCount: state.pending.count,
                 droppedCount: state.droppedCount,
                 oldestPendingAt: state.pending.map(\.queuedAt).min(),
-                lastAcknowledgedAt: state.lastAcknowledgedAt
+                lastAcknowledgedAt: state.lastAcknowledgedAt,
+                unreadableStateResetAt: unreadableStateResetAt
             )
         }
     }
@@ -184,7 +209,11 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             attributes: [.posixPermissions: 0o700]
         )
         let data = try encoder.encode(state)
-        try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+        // The queue must survive a restart, so protection has to allow reading
+        // once the user has logged in. `.completeFileProtectionUnlessOpen`,
+        // used until 2026-08-14, leaves the file unreadable afterwards and
+        // silently discards everything that had not reached the Hub.
+        try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
     }
 
