@@ -62,7 +62,9 @@ final class AgentMonitoringController {
     static let systemExtensionIdentifier = "com.egressview.agent.filter"
 
     var isLightweightMonitoringAvailable: Bool {
-        !AgentCodeIdentity.isAppSandboxEnabled()
+        // Every Xcode Host configuration is sandboxed. The libproc collector
+        // remains available only through the separate command-line spike.
+        false
     }
 
     private let statusHandler: (AgentMonitoringStatus) -> Void
