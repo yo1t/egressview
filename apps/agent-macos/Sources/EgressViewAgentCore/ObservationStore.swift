@@ -58,6 +58,28 @@ public struct AppDestinationTotal: Equatable, Sendable {
     }
 }
 
+public struct AppTimelineTotal: Equatable, Sendable {
+    public let bucketIndex: Int
+    public let processName: String
+    public let sessionCount: Int
+    public let bytes: UInt64
+    public let observationsWithoutBytes: Int
+
+    public init(
+        bucketIndex: Int,
+        processName: String,
+        sessionCount: Int,
+        bytes: UInt64,
+        observationsWithoutBytes: Int
+    ) {
+        self.bucketIndex = bucketIndex
+        self.processName = processName
+        self.sessionCount = sessionCount
+        self.bytes = bytes
+        self.observationsWithoutBytes = observationsWithoutBytes
+    }
+}
+
 public struct ObservationStoreStatistics: Equatable, Sendable {
     public let rawCount: Int
     public let rolledUpCount: Int
@@ -358,6 +380,48 @@ public final class ObservationStore: @unchecked Sendable {
                 rows.append(AppDestinationTotal(
                     processName: text(statement, 0) ?? "",
                     destination: text(statement, 1) ?? "",
+                    sessionCount: Int(sqlite3_column_int64(statement, 2)),
+                    bytes: UInt64(max(0, sqlite3_column_int64(statement, 3))),
+                    observationsWithoutBytes: Int(sqlite3_column_int64(statement, 4))
+                ))
+            }
+            return rows
+        }
+    }
+
+    /// Per-application totals placed into a fixed number of equal buckets.
+    ///
+    /// The bucket count is fixed and the width follows the period, so drawing
+    /// thirty days costs no more than drawing one hour.
+    public func appTimeline(from: Date, to: Date, buckets: Int) throws -> [AppTimelineTotal] {
+        let bucketCount = max(1, min(240, buckets))
+        let span = to.timeIntervalSince(from)
+        guard span > 0 else { return [] }
+        let width = span / Double(bucketCount)
+
+        return try lock.withLock {
+            let sql = """
+            SELECT MIN(CAST((last_observed_at - ?1) / ?3 AS INTEGER), ?4) AS bucket,
+                   process_name,
+                   COUNT(*) AS sessions,
+                   COALESCE(SUM(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)), 0) AS total_bytes,
+                   SUM(CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END) AS unknown
+            FROM observations
+            WHERE last_observed_at >= ?1 AND last_observed_at < ?2
+            GROUP BY bucket, process_name
+            """
+            let statement = try prepare(sql)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, from.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 2, to.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 3, width)
+            sqlite3_bind_int64(statement, 4, Int64(bucketCount - 1))
+
+            var rows: [AppTimelineTotal] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                rows.append(AppTimelineTotal(
+                    bucketIndex: Int(sqlite3_column_int64(statement, 0)),
+                    processName: text(statement, 1) ?? "",
                     sessionCount: Int(sqlite3_column_int64(statement, 2)),
                     bytes: UInt64(max(0, sqlite3_column_int64(statement, 3))),
                     observationsWithoutBytes: Int(sqlite3_column_int64(statement, 4))
