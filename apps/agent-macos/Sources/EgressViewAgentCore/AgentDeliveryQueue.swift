@@ -103,6 +103,18 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         try self.init(fileURL: containerURL.appendingPathComponent("pending-ingest.json"))
     }
 
+    public static func removePersistedQueue(fileManager: FileManager = .default) throws {
+        guard let containerURL = fileManager.containerURL(
+            forSecurityApplicationGroupIdentifier: ObservationJournal.appGroupIdentifier
+        ) else {
+            throw ObservationJournalError.appGroupUnavailable
+        }
+        let fileURL = containerURL.appendingPathComponent("pending-ingest.json")
+        if fileManager.fileExists(atPath: fileURL.path) {
+            try fileManager.removeItem(at: fileURL)
+        }
+    }
+
     public func enqueue(_ observations: [ConnectionObservation], queuedAt: Date = Date()) throws {
         guard !observations.isEmpty else { return }
         try lock.withLock {

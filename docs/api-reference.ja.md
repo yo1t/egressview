@@ -10,7 +10,7 @@ Web UIをサブパスで公開している場合も、APIは常に`/api`配下�
 
 scoped API identityは`GET` / `POST /api/auth/api-identities`と`POST /api/auth/api-identities/:id/revoke`で管理し、いずれも`auth.admin`が必要です。作成時はlabel、空でないpermission一覧、1分以上1年以下の`expiresInMs`を指定します。平文の`egv_...` tokenを返すのは`201`作成responseだけで、DBにはSHA-256 hashだけを保存します。identity管理responseには`Cache-Control: no-store`を付けます。
 
-Macおよび将来のendpoint Agentは、browser/API/MCPとは別のcredential境界を使います。登録は3段階で、**どの1段階も単独ではcredentialを生みません**。管理者が`POST /api/agents/enrollment-tokens`で英数字6文字・10分有効のcodeを発行します。Agentは`POST /api/agent/enrollment-requests`で申請し、返るのはclaim secretと**承認待ちの申請**であってtokenではありません。管理者が`POST /api/agents/enrollment-requests/:requestId/approve`で承認した後、Agentは`POST /api/agent/enrollment-requests/claim`から`egva_...` bearerを一度だけ受け取ります。codeは5回失敗で失効し、未承認の申請は10分で失効します。bearerはmacOS Keychainへ保存し、Hubはpepper付きhashだけを保持します。このcredentialが持つのは`agent.ingest`だけで、browser/admin/MCP routeには使えず、`POST /api/agent/token/rotate`と`POST /api/agent/ingest`だけが受け付けます。ingestは非圧縮JSON 512 KiB・最大200観測で、1 batchをtransaction保存し、同じAgent/batch IDの再送には元のACKを返します。上限はAgent単位30 requests/minute、Hub全体で同時4件です。Agent一覧、集約ingest metrics、失効には`auth.admin`が必要です。Agent responseはcacheせず、登録codeは再表示せず、HTTPはloopback開発環境だけで許可します。
+Macおよび将来のendpoint Agentは、browser/API/MCPとは別のcredential境界を使います。登録は3段階で、**どの1段階も単独ではcredentialを生みません**。管理者が`POST /api/agents/enrollment-tokens`で英数字6文字・10分有効のcodeを発行します。Agentは`POST /api/agent/enrollment-requests`で申請し、返るのはclaim secretと**承認待ちの申請**であってtokenではありません。管理者が`POST /api/agents/enrollment-requests/:requestId/approve`で承認した後、Agentは`POST /api/agent/enrollment-requests/claim`から`egva_...` bearerを一度だけ受け取ります。codeは5回失敗で失効し、未承認の申請は10分で失効します。bearerはmacOS Keychainへ保存し、Hubはpepper付きhashだけを保持します。このcredentialが持つのは`agent.ingest`だけで、browser/admin/MCP routeには使えず、token rotation、ingest、`POST /api/agent/registration/revoke`だけが受け付けます。最後のrouteは、そのbearerで認証されたAgent自身だけを失効でき、別のAgentは指定できません。ingestは非圧縮JSON 512 KiB・最大200観測で、1 batchをtransaction保存し、同じAgent/batch IDの再送には元のACKを返します。上限はAgent単位30 requests/minute、Hub全体で同時4件です。Agent一覧、集約ingest metrics、管理者による失効には`auth.admin`が必要です。Agent responseはcacheせず、登録codeは再表示せず、HTTPはloopback開発環境だけで許可します。
 
 `GET /api/auth/api-identities/self`は、現在認証中のscoped identity自身だけを
 返し、`network.read`を要求します。browser sessionと従来のadmin tokenは
@@ -195,6 +195,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Agent | `GET /api/agents/ingest-metrics` | `auth.admin`必須。集約counterと上限だけを返す |
 | Agent | `POST /api/agents/:agentId/revoke` | `auth.admin`必須 |
 | Agent | `POST /api/agent/token/rotate` | Agent bearerの`agent.ingest`だけ |
+| Agent | `POST /api/agent/registration/revoke` | Agent bearer。認証されたAgent自身だけを失効 |
 | Agent | `POST /api/agent/ingest` | Agent bearerの`agent.ingest`。最大200観測・非圧縮JSON 512 KiB |
 | Agent | `GET /api/agent/capabilities` | Agent bearerの`agent.ingest`。受理するschema versionとbatch上限を返し、Agentが双方の話せるversionを選べるようにする |
 | Router初期設定 | `POST /api/nonce` | 認証必須 |

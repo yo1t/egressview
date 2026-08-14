@@ -51,6 +51,7 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   httpRoute('POST', '/api/auth/logout', ACCESS.AUTHENTICATED),
 
   httpRoute('POST', '/api/agent/token/rotate', ACCESS.AGENT, [A.INGEST]),
+  httpRoute('POST', '/api/agent/registration/revoke', ACCESS.AGENT, [A.INGEST]),
   httpRoute('POST', '/api/agent/ingest', ACCESS.AGENT, [A.INGEST]),
   // Authenticated rather than public: batch limits and accepted versions are
   // operational detail, and an enrolled agent is the only caller that needs

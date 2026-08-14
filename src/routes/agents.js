@@ -467,6 +467,25 @@ module.exports = function agentRoutes({
     return res.json(rotated);
   });
 
+  router.post('/agent/registration/revoke', requireAgent, (req, res) => {
+    const agentId = req.agentIdentity.agentId;
+    let revoked;
+    try {
+      // The bearer may revoke only the identity it authenticated as. Keeping
+      // the agent id out of the URL prevents one agent from targeting another.
+      revoked = agentIdentities.revokeAgent(agentId);
+    } catch (error) {
+      logger.error('[agents] Self-revocation failed:', error.message);
+      audit(req, 'agent_self_revoked', 'failure', { reason: 'storage_error' });
+      return res.status(500).json({ error: 'Agent revocation failed' });
+    }
+    audit(req, 'agent_self_revoked', revoked ? 'success' : 'failure', {
+      agentRef: agentIdentities.auditRef(agentId),
+    });
+    if (!revoked) return res.status(409).json({ error: 'Agent is already revoked' });
+    return res.json({ success: true });
+  });
+
   // What this Hub can accept, so an agent can pick a version they share instead
   // of discovering the mismatch by having a batch refused.
   //
