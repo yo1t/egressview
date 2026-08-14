@@ -92,6 +92,7 @@
     "offline:bundle": "node scripts/build-offline-bundle.js",
     "offline:verify": "node scripts/verify-offline-bundle.js",
     "release:fingerprint": "node scripts/release-key-fingerprint.js",
+    "agent:publish": "node scripts/publish-agent-release.js",
     "gen:demo-db": "node scripts/gen-demo-db.js",
     "benchmark:summary": "node scripts/benchmark-summary.js --generate 100000",
     "benchmark:poll-batch": "node scripts/benchmark-poll-batch.js 600",
