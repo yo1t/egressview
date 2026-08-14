@@ -64,15 +64,11 @@ public enum AgentCodeIdentity {
     }
 
     public static func isAppSandboxEnabled() -> Bool {
-        guard let task = SecTaskCreateFromSelf(nil),
-              let value = SecTaskCopyValueForEntitlement(
-                task,
-                "com.apple.security.app-sandbox" as CFString,
-                nil
-              ) else {
-            return false
-        }
-        return value as? Bool == true
+        #if EGRESSVIEW_APP_SANDBOXED
+        true
+        #else
+        false
+        #endif
     }
 }
 
@@ -90,20 +86,28 @@ public enum AgentCodeIdentity {
 public struct AgentPackageVerifier: Sendable {
     private let runner: any AgentCommandRunning
     private let currentTeamIdentifier: String?
+    private let resolveRunningTeamIdentifier: Bool
 
-    public init(
-        runner: any AgentCommandRunning = AgentProcessCommandRunner(),
-        currentTeamIdentifier: String? = AgentCodeIdentity.currentTeamIdentifier()
-    ) {
+    public init(runner: any AgentCommandRunning = AgentProcessCommandRunner()) {
+        self.runner = runner
+        currentTeamIdentifier = nil
+        resolveRunningTeamIdentifier = true
+    }
+
+    public init(runner: any AgentCommandRunning, currentTeamIdentifier: String?) {
         self.runner = runner
         self.currentTeamIdentifier = currentTeamIdentifier
+        resolveRunningTeamIdentifier = false
     }
 
     public func verify(packageAt url: URL) throws {
         // A development build has no Team ID to compare against. Refusing here
         // is deliberate: silently skipping the check would make the weakest
         // build the one with the least protection.
-        guard let expected = currentTeamIdentifier, !expected.isEmpty else {
+        let expectedTeamIdentifier = resolveRunningTeamIdentifier
+            ? AgentCodeIdentity.currentTeamIdentifier()
+            : currentTeamIdentifier
+        guard let expected = expectedTeamIdentifier, !expected.isEmpty else {
             throw AgentPackageVerificationError.runningBuildIsNotTeamSigned
         }
 
