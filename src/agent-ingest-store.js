@@ -262,12 +262,32 @@ function _initForTest(dbPath = ':memory:') {
   `);
 }
 
+/// Locations for destinations, as stored by enrichment.
+///
+/// The table is created by enrichment at startup rather than by a migration, so
+/// a Hub that has never enriched anything simply has none. That is "nothing to
+/// place", not a failure.
+function listGeoLocations() {
+  const database = requireDb();
+  const hasTable = database
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'geo_cache'")
+    .get();
+  if (!hasTable) return [];
+  return database
+    .prepare(
+      'SELECT ip, lat, lon, countryCode, city FROM geo_cache '
+      + 'WHERE lat IS NOT NULL AND lon IS NOT NULL ORDER BY ip'
+    )
+    .all();
+}
+
 function _dbForTest() {
   return requireDb();
 }
 
 module.exports = {
   closeDb,
+  listGeoLocations,
   initDb,
   getAgentCollectionStatus,
   getCorrelationDiagnostics,

@@ -36,6 +36,18 @@ public struct ObservationRetention: Equatable, Sendable {
     }
 }
 
+/// Which destination the diagram groups by.
+///
+/// This is not a display choice. One name spreads across many addresses and one
+/// address serves many names, so the two settings produce genuinely different
+/// diagrams and answer different questions: what the Mac is talking to, versus
+/// how far that traffic is actually spread.
+public enum DestinationGrouping: String, Equatable, Sendable, CaseIterable {
+    /// The name the application asked for, falling back to the address.
+    case name
+    case address
+}
+
 public struct AppDestinationTotal: Equatable, Sendable {
     public let processName: String
     public let destination: String
@@ -56,6 +68,31 @@ public struct AppDestinationTotal: Equatable, Sendable {
         self.bytes = bytes
         self.observationsWithoutBytes = observationsWithoutBytes
     }
+}
+
+public struct GeoLocation: Equatable, Sendable {
+    public let ip: String
+    public let latitude: Double
+    public let longitude: Double
+    public let countryCode: String?
+    public let city: String?
+
+    public init(ip: String, latitude: Double, longitude: Double, countryCode: String?, city: String?) {
+        self.ip = ip
+        self.latitude = latitude
+        self.longitude = longitude
+        self.countryCode = countryCode
+        self.city = city
+    }
+}
+
+public struct PlacedDestination: Equatable, Sendable {
+    public let latitude: Double
+    public let longitude: Double
+    public let countryCode: String?
+    public let city: String?
+    public let sessionCount: Int
+    public let bytes: UInt64
 }
 
 public struct AppTimelineTotal: Equatable, Sendable {
@@ -226,6 +263,22 @@ public final class ObservationStore: @unchecked Sendable {
             try execute("ALTER TABLE observations ADD COLUMN remote_hostname TEXT")
             try execute("PRAGMA user_version=3")
         }
+        if version < 4 {
+            // Locations for destinations. Received in bulk from the Hub, or
+            // absent entirely when the agent runs on its own -- in which case
+            // the map says so rather than showing an empty world.
+            try execute("""
+            CREATE TABLE IF NOT EXISTS geo_locations (
+                ip TEXT PRIMARY KEY,
+                latitude REAL NOT NULL,
+                longitude REAL NOT NULL,
+                country_code TEXT,
+                city TEXT,
+                received_at REAL NOT NULL
+            )
+            """)
+            try execute("PRAGMA user_version=4")
+        }
     }
 
     // MARK: - Writing
@@ -357,11 +410,18 @@ public final class ObservationStore: @unchecked Sendable {
     /// `observationsWithoutBytes` is reported alongside rather than folded in
     /// as zero: with byte counts arriving only when a flow closes, treating an
     /// unknown as zero would draw silence where nothing was measured.
-    public func appDestinationTotals(from: Date, to: Date) throws -> [AppDestinationTotal] {
+    public func appDestinationTotals(
+        from: Date,
+        to: Date,
+        grouping: DestinationGrouping = .name
+    ) throws -> [AppDestinationTotal] {
         try lock.withLock {
+            let destinationExpression = grouping == .name
+                ? "COALESCE(NULLIF(remote_hostname, ''), remote_address)"
+                : "remote_address"
             let sql = """
             SELECT process_name,
-                   COALESCE(NULLIF(remote_hostname, ''), remote_address) AS destination,
+                   \(destinationExpression) AS destination,
                    COUNT(*) AS sessions,
                    COALESCE(SUM(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)), 0) AS total_bytes,
                    SUM(CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END) AS unknown
@@ -428,6 +488,96 @@ public final class ObservationStore: @unchecked Sendable {
                 ))
             }
             return rows
+        }
+    }
+
+    /// Replaces the stored locations with what the Hub supplied.
+    public func replaceGeoLocations(_ entries: [GeoLocation], receivedAt: Date = Date()) throws {
+        try lock.withLock {
+            try execute("BEGIN IMMEDIATE")
+            do {
+                try execute("DELETE FROM geo_locations")
+                let statement = try prepare("""
+                INSERT OR REPLACE INTO geo_locations
+                    (ip, latitude, longitude, country_code, city, received_at)
+                VALUES (?,?,?,?,?,?)
+                """)
+                defer { sqlite3_finalize(statement) }
+                for entry in entries {
+                    sqlite3_reset(statement)
+                    bindText(statement, 1, entry.ip)
+                    sqlite3_bind_double(statement, 2, entry.latitude)
+                    sqlite3_bind_double(statement, 3, entry.longitude)
+                    bindOptionalText(statement, 4, entry.countryCode)
+                    bindOptionalText(statement, 5, entry.city)
+                    sqlite3_bind_double(statement, 6, receivedAt.timeIntervalSince1970)
+                    guard sqlite3_step(statement) == SQLITE_DONE else {
+                        throw ObservationStoreError.statement(lastMessage)
+                    }
+                }
+                try execute("COMMIT")
+            } catch {
+                try? execute("ROLLBACK")
+                throw error
+            }
+        }
+    }
+
+    public func geoLocationCount() throws -> Int {
+        try lock.withLock { try scalar("SELECT COUNT(*) FROM geo_locations") ?? 0 }
+    }
+
+    /// Traffic per placeable destination for the selected period.
+    ///
+    /// Destinations with no known location are counted separately rather than
+    /// dropped: a map that quietly omits half the traffic is worse than one
+    /// that says how much it cannot place.
+    public func destinationLocations(
+        from: Date,
+        to: Date
+    ) throws -> (placed: [PlacedDestination], unplacedSessions: Int, unplacedBytes: UInt64) {
+        try lock.withLock {
+            let sql = """
+            SELECT g.latitude, g.longitude, g.country_code, g.city,
+                   COUNT(*) AS sessions,
+                   COALESCE(SUM(COALESCE(o.bytes_in,0) + COALESCE(o.bytes_out,0)), 0) AS total
+            FROM observations o
+            JOIN geo_locations g ON g.ip = o.remote_address
+            WHERE o.last_observed_at >= ? AND o.last_observed_at < ?
+            GROUP BY g.latitude, g.longitude, g.country_code, g.city
+            """
+            let statement = try prepare(sql)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, from.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 2, to.timeIntervalSince1970)
+            var placed: [PlacedDestination] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                placed.append(PlacedDestination(
+                    latitude: sqlite3_column_double(statement, 0),
+                    longitude: sqlite3_column_double(statement, 1),
+                    countryCode: text(statement, 2),
+                    city: text(statement, 3),
+                    sessionCount: Int(sqlite3_column_int64(statement, 4)),
+                    bytes: UInt64(max(0, sqlite3_column_int64(statement, 5)))
+                ))
+            }
+
+            let unplaced = try prepare("""
+            SELECT COUNT(*), COALESCE(SUM(COALESCE(bytes_in,0) + COALESCE(bytes_out,0)), 0)
+            FROM observations o
+            WHERE o.last_observed_at >= ? AND o.last_observed_at < ?
+              AND NOT EXISTS (SELECT 1 FROM geo_locations g WHERE g.ip = o.remote_address)
+            """)
+            defer { sqlite3_finalize(unplaced) }
+            sqlite3_bind_double(unplaced, 1, from.timeIntervalSince1970)
+            sqlite3_bind_double(unplaced, 2, to.timeIntervalSince1970)
+            var sessions = 0
+            var bytes: UInt64 = 0
+            if sqlite3_step(unplaced) == SQLITE_ROW {
+                sessions = Int(sqlite3_column_int64(unplaced, 0))
+                bytes = UInt64(max(0, sqlite3_column_int64(unplaced, 1)))
+            }
+            return (placed, sessions, bytes)
         }
     }
 

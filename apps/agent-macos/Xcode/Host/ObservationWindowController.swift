@@ -28,6 +28,14 @@ extension TimeScale: @retroactive Identifiable {
     }
 }
 
+extension DestinationGrouping: @retroactive Identifiable {
+    public var id: String { rawValue }
+
+    var title: String {
+        self == .name ? L("Name") : L("IP address")
+    }
+}
+
 extension TrafficMetric: @retroactive Identifiable {
     public var id: String { rawValue }
 
@@ -54,6 +62,9 @@ private final class AgentMainViewModel: ObservableObject {
         didSet { refresh() }
     }
     @Published var metric = TrafficMetric.sessions {
+        didSet { refresh() }
+    }
+    @Published var destinationGrouping = DestinationGrouping.name {
         didSet { refresh() }
     }
     @Published private(set) var availableMetrics: [TrafficMetric] = [.sessions]
@@ -105,6 +116,7 @@ private final class AgentMainViewModel: ObservableObject {
         guard !isRefreshing else { return }
         isRefreshing = true
         let selection = VisualizationSelection(scale: scale, metric: metric, end: Date())
+        let grouping = destinationGrouping
         loadQueue.async { [weak self] in
             let from = selection.start
             let to = selection.end
@@ -116,7 +128,7 @@ private final class AgentMainViewModel: ObservableObject {
                     applicationCount: Set(rollup.map(\.processName)).count,
                     destinationCount: Set(rollup.map(\.remoteAddress)).count
                 )
-                let pairs = try store.appDestinationTotals(from: from, to: to)
+                let pairs = try store.appDestinationTotals(from: from, to: to, grouping: grouping)
                 let buckets = try store.appTimeline(
                     from: from, to: to, buckets: VisualizationSelection.bucketCount
                 )
@@ -261,15 +273,29 @@ private struct AgentMainView: View {
     }
 
     private var analysisView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                metricPicker
-                AgentTimelineChart(model: model.timeline, scale: model.scale)
-                AgentSankeyChart(model: model.sankey)
-                connectionTable
+        // The table is not inside the ScrollView. A Table brings its own
+        // scrolling, so nesting it leaves it no height at all and the
+        // connection log disappears without any error -- which is exactly what
+        // happened. Keeping them as siblings removes the possibility.
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack(spacing: 16) {
+                        metricPicker
+                        destinationGroupingPicker
+                    }
+                    AgentTimelineChart(model: model.timeline, scale: model.scale)
+                    AgentSankeyChart(model: model.sankey)
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 18)
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
+            .frame(minHeight: 220)
+            Divider()
+            connectionTable
+                .padding(.horizontal, 22)
+                .padding(.vertical, 14)
+                .frame(minHeight: 220)
         }
     }
 
@@ -286,6 +312,17 @@ private struct AgentMainView: View {
             .pickerStyle(.segmented)
             .frame(width: 300)
         }
+    }
+
+    private var destinationGroupingPicker: some View {
+        Picker(L("Destinations by"), selection: $model.destinationGrouping) {
+            ForEach(DestinationGrouping.allCases) { grouping in
+                Text(grouping.title).tag(grouping)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 300)
+        .help(L("A name groups a service together; an address shows how far its traffic is spread."))
     }
 
     private var connectionTable: some View {
@@ -436,7 +473,7 @@ private struct AgentTimelineChart: View {
                 )
             } else {
                 Canvas { context, size in draw(in: &context, size: size) }
-                    .frame(height: 180)
+                    .frame(height: 200)
                     .accessibilityElement()
                     .accessibilityLabel(summary)
                 AgentSeriesLegend(entries: model.series.enumerated().map {
@@ -459,26 +496,66 @@ private struct AgentTimelineChart: View {
         )
     }
 
+    /// Room for the axis labels. Without them the chart shows a shape but no
+    /// magnitude, and "is this a lot?" has no answer.
+    private let yAxisWidth: CGFloat = 56
+    private let xAxisHeight: CGFloat = 18
+
     private func draw(in context: inout GraphicsContext, size: CGSize) {
         let peak = model.bucketTotals.max() ?? 0
         guard peak > 0, model.bucketStarts.count > 1 else { return }
-        let step = size.width / CGFloat(model.bucketStarts.count)
-        var baselines = [CGFloat](repeating: size.height, count: model.bucketStarts.count)
+        let plot = CGRect(
+            x: yAxisWidth, y: 0,
+            width: max(1, size.width - yAxisWidth),
+            height: max(1, size.height - xAxisHeight)
+        )
+        let step = plot.width / CGFloat(model.bucketStarts.count)
+        var baselines = [CGFloat](repeating: plot.maxY, count: model.bucketStarts.count)
+
+        // Gridlines and the values they stand for.
+        for fraction in [0.0, 0.5, 1.0] {
+            let y = plot.maxY - plot.height * fraction
+            var line = Path()
+            line.move(to: CGPoint(x: plot.minX, y: y))
+            line.addLine(to: CGPoint(x: plot.maxX, y: y))
+            context.stroke(line, with: .color(.secondary.opacity(0.18)), lineWidth: 1)
+            let label = Text(formattedMetric(peak * fraction, model.metric))
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+            context.draw(label, at: CGPoint(x: yAxisWidth - 6, y: y), anchor: .trailing)
+        }
 
         for (index, series) in model.series.enumerated() {
             var path = Path()
             for bucket in model.bucketStarts.indices {
                 let value = series.values.indices.contains(bucket) ? series.values[bucket] : 0
                 guard value > 0 else { continue }
-                let height = size.height * CGFloat(value / peak)
+                let height = plot.height * CGFloat(value / peak)
                 let top = baselines[bucket] - height
                 path.addRect(CGRect(
-                    x: CGFloat(bucket) * step, y: top,
+                    x: plot.minX + CGFloat(bucket) * step, y: top,
                     width: max(1, step - 1), height: height
                 ))
                 baselines[bucket] = top
             }
             context.fill(path, with: .color(agentSeriesColor(index, isRemainder: series.isRemainder)))
+        }
+
+        // Times along the bottom. Three is enough to read the span without
+        // crowding the narrow scales.
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.dateFormat = scale == .week || scale == .month ? "M/d" : "H:mm"
+        let last = model.bucketStarts.count - 1
+        for (position, bucket) in [(0, 0), (1, last / 2), (2, last)] {
+            guard model.bucketStarts.indices.contains(bucket) else { continue }
+            let x = plot.minX + step * (CGFloat(bucket) + 0.5)
+            let label = Text(formatter.string(from: model.bucketStarts[bucket]))
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+            let anchor: UnitPoint = position == 0 ? .leading : (position == 2 ? .trailing : .center)
+            let clamped = position == 0 ? plot.minX : (position == 2 ? plot.maxX : x)
+            context.draw(label, at: CGPoint(x: clamped, y: plot.maxY + xAxisHeight / 2), anchor: anchor)
         }
     }
 }

@@ -437,6 +437,67 @@ describe('Agent HTTP ingest', () => {
     assert.equal(accepted.body.accepted, envelope.observations.length);
   });
 
+  it('geoキャッシュを全件返し、Agentに宛先を尋ねさせない', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    const db = agentIngestStore._dbForTest();
+    db.exec('CREATE TABLE IF NOT EXISTS geo_cache (ip TEXT PRIMARY KEY, lat REAL, lon REAL, city TEXT, countryCode TEXT, expires INTEGER)');
+    db.prepare(
+      'INSERT INTO geo_cache (ip, lat, lon, city, countryCode, expires) VALUES (?,?,?,?,?,?)'
+    ).run('203.0.113.5', 35.6, 139.7, 'Tokyo', 'JP', Date.now() + 86_400_000);
+    db.prepare(
+      'INSERT INTO geo_cache (ip, lat, lon, city, countryCode, expires) VALUES (?,?,?,?,?,?)'
+    ).run('198.51.100.9', null, null, null, null, Date.now() + 86_400_000);
+
+    const response = await request(app, 'GET', '/api/agent/geo-cache', { headers: authorization });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.schemaVersion, 1);
+    // Rows without coordinates are left out: they cannot be put on a map, so
+    // sending them is pure transfer.
+    assert.deepEqual(response.body.entries, [['203.0.113.5', 35.6, 139.7, 'JP', 'Tokyo']]);
+  });
+
+  it('geoキャッシュは変化が無ければ304を返す', async () => {
+    // The cache moves by a handful of rows a day. Re-sending megabytes for that
+    // would be the whole cost of the feature.
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+    const geoDb = agentIngestStore._dbForTest();
+    geoDb.exec('CREATE TABLE IF NOT EXISTS geo_cache (ip TEXT PRIMARY KEY, lat REAL, lon REAL, city TEXT, countryCode TEXT, expires INTEGER)');
+    geoDb.prepare(
+      'INSERT INTO geo_cache (ip, lat, lon, city, countryCode, expires) VALUES (?,?,?,?,?,?)'
+    ).run('203.0.113.5', 35.6, 139.7, 'Tokyo', 'JP', Date.now() + 86_400_000);
+
+    const first = await request(app, 'GET', '/api/agent/geo-cache', { headers: authorization });
+    const etag = /^etag: (.+)$/im.exec(first.raw)?.[1]?.trim();
+    assert.ok(etag, 'an ETag is required for the agent to avoid re-downloading');
+
+    const second = await request(app, 'GET', '/api/agent/geo-cache', {
+      headers: { ...authorization, 'If-None-Match': etag },
+    });
+    assert.equal(second.status, 304);
+  });
+
+  it('geoキャッシュの表が無いHubでも500にせず、空として返す', async () => {
+    // enrichmentが一度も動いていないHubには表そのものが無い。**置くものが無い**
+    // のであって障害ではなく、Agent側の地図はその状態を説明できる。
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const response = await request(app, 'GET', '/api/agent/geo-cache', {
+      headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.entries, []);
+  });
+
+  it('geoキャッシュは資格情報を要求する', async () => {
+    const { app } = makeApp();
+    const anonymous = await request(app, 'GET', '/api/agent/geo-cache');
+    assert.equal(anonymous.status, 401);
+  });
+
   it('capabilityは資格情報を要求する', async () => {
     // 401 from a Hub that has the route, 404 from one that does not: together
     // they let an agent tell "not enrolled yet" from "this Hub is too old".

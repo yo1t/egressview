@@ -207,3 +207,7 @@
 "%1$@ accounts for %2$lld percent." = "%1$@ accounts for %2$lld percent.";
 "%1$@ of %2$@ across %3$lld applications and %4$lld destinations." = "%1$@ of %2$@ across %3$lld applications and %4$lld destinations.";
 "%1$@ accounts for %2$lld percent; the busiest destination is %3$@." = "%1$@ accounts for %2$lld percent; the busiest destination is %3$@.";
+"Destinations by" = "Destinations by";
+"Name" = "Name";
+"IP address" = "IP address";
+"A name groups a service together; an address shows how far its traffic is spread." = "A name groups a service together; an address shows how far its traffic is spread.";
