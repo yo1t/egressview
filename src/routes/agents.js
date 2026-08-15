@@ -1,9 +1,14 @@
 'use strict';
 
 const { Router } = require('express');
+
+// Bumped only when the shape changes in a way an older agent cannot ignore.
+const AGENT_GEO_CACHE_SCHEMA_VERSION = 1;
 const { monitorEventLoopDelay } = require('node:perf_hooks');
+const { createHash } = require('node:crypto');
 const net = require('node:net');
 const { z } = require('zod');
+const agentIngestStore = require('../agent-ingest-store');
 
 // One histogram for the process. It costs nothing while idle and is the only
 // way to tell "the Hub is busy" apart from "the Hub is stuck".
@@ -505,6 +510,46 @@ module.exports = function agentRoutes({
       // compress because the field is missing.
       compression: [],
     });
+  });
+
+  // Locations for the destinations an agent observes, so its map can be drawn
+  // without asking anyone else where an address is.
+  //
+  // The whole cache is served rather than a lookup by address. A query would
+  // tell the Hub which destinations the agent is interested in, and for a user
+  // who has turned delivery off that is precisely the information they chose
+  // not to send. Roughly sixty times more rows are transferred than any one
+  // agent needs; that cost is accepted to keep the request free of content.
+  router.get('/agent/geo-cache', requireAgent, (req, res) => {
+    const rows = agentIngestStore.listGeoLocations();
+
+    // Positional entries: repeating five key names across sixty thousand rows
+    // costs more than the coordinates themselves.
+    const entries = rows.map((row) => [
+      row.ip,
+      row.lat,
+      row.lon,
+      row.countryCode || null,
+      row.city || null,
+    ]);
+    const body = {
+      schemaVersion: AGENT_GEO_CACHE_SCHEMA_VERSION,
+      generatedAt: new Date().toISOString(),
+      entries,
+    };
+
+    // The cache changes by a handful of rows a day, so most fetches should cost
+    // a 304 rather than several megabytes.
+    const etag = `W/"geo-${entries.length}-${createHash('sha256')
+      .update(entries.map((entry) => entry.join(',')).join('\n'))
+      .digest('hex')
+      .slice(0, 32)}"`;
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+    return res.json(body);
   });
 
   router.post('/agent/ingest', requireAgent, async (req, res) => {

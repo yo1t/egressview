@@ -217,3 +217,64 @@ final class SankeyStoreQueryTests: XCTestCase {
         XCTAssertEqual(safari.observationsWithoutBytes, 1)
     }
 }
+
+final class DestinationGroupingTests: XCTestCase {
+    private var directory: URL!
+
+    override func setUpWithError() throws {
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("egressview-grouping-\(UUID().uuidString)")
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private func observation(address: String, hostname: String?, at: Date) -> ConnectionObservation {
+        ConnectionObservation(
+            networkProtocol: .tcp, localAddress: "192.0.2.10", localPort: 49_152,
+            remoteAddress: address, remotePort: 443, processID: 501, processName: "Safari",
+            bundleID: nil, firstObservedAt: at, lastObservedAt: at,
+            bytesIn: 1, bytesOut: 1, collector: .networkExtension, confidence: .exact,
+            remoteHostname: hostname
+        )
+    }
+
+    func testOneNameSpreadAcrossAddressesIsOneNodeByNameAndManyByAddress() throws {
+        // A CDN. Grouping by name says "talking to one service"; grouping by
+        // address shows how far that traffic is actually spread, which is the
+        // part a name hides.
+        let store = try ObservationStore(fileURL: directory.appendingPathComponent("h.sqlite"))
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try store.append((0..<4).map {
+            observation(address: "203.0.113.\($0)", hostname: "cdn.example.com",
+                        at: now.addingTimeInterval(Double($0)))
+        })
+        let window = (from: now.addingTimeInterval(-60), to: now.addingTimeInterval(60))
+
+        let byName = try store.appDestinationTotals(from: window.from, to: window.to, grouping: .name)
+        XCTAssertEqual(byName.count, 1)
+        XCTAssertEqual(byName.first?.destination, "cdn.example.com")
+        XCTAssertEqual(byName.first?.sessionCount, 4)
+
+        let byAddress = try store.appDestinationTotals(
+            from: window.from, to: window.to, grouping: .address
+        )
+        XCTAssertEqual(byAddress.count, 4)
+        XCTAssertEqual(byAddress.map(\.sessionCount).reduce(0, +), 4, "no traffic is lost either way")
+    }
+
+    func testAFlowWithNoNameFallsBackToItsAddressInBothModes() throws {
+        let store = try ObservationStore(fileURL: directory.appendingPathComponent("h.sqlite"))
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try store.append([observation(address: "203.0.113.9", hostname: nil, at: now)])
+        let window = (from: now.addingTimeInterval(-60), to: now.addingTimeInterval(60))
+
+        for grouping in DestinationGrouping.allCases {
+            let rows = try store.appDestinationTotals(
+                from: window.from, to: window.to, grouping: grouping
+            )
+            XCTAssertEqual(rows.first?.destination, "203.0.113.9", "\(grouping)")
+        }
+    }
+}

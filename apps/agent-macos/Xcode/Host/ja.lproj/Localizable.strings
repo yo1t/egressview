@@ -207,3 +207,7 @@
 "%1$@ accounts for %2$lld percent." = "%1$@が%2$lld％を占めます。";
 "%1$@ of %2$@ across %3$lld applications and %4$lld destinations." = "%2$@%1$@。アプリ%3$lld件、宛先%4$lld件。";
 "%1$@ accounts for %2$lld percent; the busiest destination is %3$@." = "%1$@が%2$lld％を占め、最も多い宛先は%3$@です。";
+"Destinations by" = "宛先の単位";
+"Name" = "名前";
+"IP address" = "IPアドレス";
+"A name groups a service together; an address shows how far its traffic is spread." = "名前はサービスを1つにまとめ、IPアドレスはその通信がどこまで散っているかを示します。";
