@@ -48,7 +48,7 @@ function documentedRoutes(source) {
 describe('REST API documentation', () => {
   it('lists every implemented endpoint and no nonexistent endpoint in both languages', () => {
     const implemented = implementedRoutes();
-    assert.equal(implemented.length, 109, 'review the API reference when the route count changes');
+    assert.equal(implemented.length, 110, 'review the API reference when the route count changes');
 
     for (const file of apiDocs) {
       const source = fs.readFileSync(path.join(root, file), 'utf8');
@@ -63,6 +63,7 @@ describe('REST API documentation', () => {
       // go through requireAdmin, so that adding one is a decision somebody has
       // to make on purpose.
       'GET /api/agent/capabilities',
+      'GET /api/agent/geo-cache',
       'GET /api/auth/methods',
       'GET /api/auth/oidc/callback',
       'GET /api/auth/oidc/start',
