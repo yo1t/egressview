@@ -246,3 +246,7 @@
 "EgressView: Not recording" = "EgressView: Not recording";
 "EgressView is not recording" = "EgressView is not recording";
 "The update is installed, but macOS is still running the previous version. Restart this Mac to resume monitoring. Traffic during this time is not being recorded." = "The update is installed, but macOS is still running the previous version. Restart this Mac to resume monitoring. Traffic during this time is not being recorded.";
+"Nothing in this period was monitored. The charts below are empty because there is no record, not because there was no traffic." = "Nothing in this period was monitored. The charts below are empty because there is no record, not because there was no traffic.";
+"Only %lld%% of this period was monitored. Anything outside that is missing from the charts below, not absent from the network." = "Only %lld%% of this period was monitored. Anything outside that is missing from the charts below, not absent from the network.";
+"Monitoring started at %@. Connections already open at that moment were never seen." = "Monitoring started at %@. Connections already open at that moment were never seen.";
+"Longest unmonitored stretch: %1$@ from %2$@." = "Longest unmonitored stretch: %1$@ from %2$@.";

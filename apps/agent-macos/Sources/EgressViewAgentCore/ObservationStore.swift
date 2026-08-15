@@ -279,6 +279,88 @@ public final class ObservationStore: @unchecked Sendable {
             """)
             try execute("PRAGMA user_version=4")
         }
+        if version < 5 {
+            // When monitoring was actually running. Without this, a period with
+            // no connections and a period that was never watched look
+            // identical, and every chart quietly presents the second as the
+            // first. `ended_at` is null while a session is open.
+            try execute("""
+            CREATE TABLE IF NOT EXISTS coverage_sessions (
+                id INTEGER PRIMARY KEY,
+                started_at REAL NOT NULL,
+                ended_at REAL
+            )
+            """)
+            try execute(
+                "CREATE INDEX IF NOT EXISTS coverage_sessions_started ON coverage_sessions(started_at)"
+            )
+            // History collected before this table existed has no record of when
+            // monitoring was running, so it is credited with one session
+            // spanning what was observed. That is an inference, and it can
+            // cover a real outage inside the span -- but the alternative is
+            // telling the user that months of data they watched arrive were
+            // never monitored, which is both false and more alarming. Periods
+            // after this upgrade are measured rather than inferred.
+            try execute("""
+            INSERT INTO coverage_sessions (started_at, ended_at)
+            SELECT min(first_observed_at), max(last_observed_at) FROM observations
+            HAVING count(*) > 0
+            """)
+            try execute("PRAGMA user_version=5")
+        }
+    }
+
+    // MARK: - Coverage
+
+    /// Records that monitoring started. Any session left open by a previous run
+    /// is closed first, at the last moment we know data was arriving -- an
+    /// abrupt end is still an end, and leaving it open would claim coverage for
+    /// a period that has none.
+    public func beginCoverageSession(at date: Date) throws {
+        try closeOpenCoverageSessions(fallbackEnd: date)
+        try execute(
+            "INSERT INTO coverage_sessions (started_at, ended_at) VALUES (\(date.timeIntervalSince1970), NULL)"
+        )
+    }
+
+    public func endCoverageSession(at date: Date) throws {
+        try execute("""
+        UPDATE coverage_sessions SET ended_at = \(date.timeIntervalSince1970)
+        WHERE ended_at IS NULL
+        """)
+    }
+
+    private func closeOpenCoverageSessions(fallbackEnd: Date) throws {
+        // The last observation is the last proof of coverage. Falling back to
+        // the session's own start means a crashed run claims nothing.
+        try execute("""
+        UPDATE coverage_sessions
+        SET ended_at = max(
+            started_at,
+            coalesce((SELECT max(last_observed_at) FROM observations), started_at)
+        )
+        WHERE ended_at IS NULL
+        """)
+    }
+
+    public func coverageSessions(from: Date, to: Date) throws -> [CoverageSession] {
+        let statement = try prepare("""
+        SELECT started_at, ended_at FROM coverage_sessions
+        WHERE started_at <= \(to.timeIntervalSince1970)
+          AND coalesce(ended_at, \(Date.distantFuture.timeIntervalSince1970)) >= \(from.timeIntervalSince1970)
+        ORDER BY started_at
+        """)
+        defer { sqlite3_finalize(statement) }
+        var result: [CoverageSession] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let end = sqlite3_column_type(statement, 1) == SQLITE_NULL
+                ? nil : sqlite3_column_double(statement, 1)
+            result.append(CoverageSession(
+                start: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)),
+                end: end.map(Date.init(timeIntervalSince1970:))
+            ))
+        }
+        return result
     }
 
     // MARK: - Writing

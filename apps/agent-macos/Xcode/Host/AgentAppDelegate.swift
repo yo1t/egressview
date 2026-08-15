@@ -67,6 +67,12 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         }
     )
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // Closes the current stretch of coverage. A session left open would
+        // claim the app was watching for however long it was quit.
+        controller.endCoverageForShutdown()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         applyMenuBarIcon(for: .paused)
         _ = hubDelivery

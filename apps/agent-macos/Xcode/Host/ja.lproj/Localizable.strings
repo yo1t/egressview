@@ -246,3 +246,7 @@
 "EgressView: Not recording" = "EgressView: 記録していません";
 "EgressView is not recording" = "EgressViewが記録していません";
 "The update is installed, but macOS is still running the previous version. Restart this Mac to resume monitoring. Traffic during this time is not being recorded." = "更新はインストールされましたが、macOSは以前のバージョンを動かしたままです。監視を再開するには、このMacを再起動してください。この間の通信は記録されません。";
+"Nothing in this period was monitored. The charts below are empty because there is no record, not because there was no traffic." = "この期間は監視されていません。下のグラフが空なのは通信が無かったからではなく、記録が無いためです。";
+"Only %lld%% of this period was monitored. Anything outside that is missing from the charts below, not absent from the network." = "この期間のうち監視されていたのは %lld%% です。それ以外は下のグラフに含まれていないだけで、通信が無かったわけではありません。";
+"Monitoring started at %@. Connections already open at that moment were never seen." = "監視の開始は %@ です。その時点ですでに確立していた接続は観測されていません。";
+"Longest unmonitored stretch: %1$@ from %2$@." = "最長の未監視区間: %2$@ から %1$@。";

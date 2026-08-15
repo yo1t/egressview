@@ -80,10 +80,13 @@ final class AgentMonitoringController {
         false
     }
 
-    /// Set when macOS is not running the extension this app installed. Held in
-    /// its own object so the gate below can be built before `self` exists.
-    private final class UpdateStallFlag {
+    /// State the status gate needs. Held in its own object because the gate is
+    /// built in `init`, before `self` exists.
+    private final class MonitoringGateState {
+        /// macOS is not running the extension this app installed.
         var isStalled = false
+        /// A coverage session is open in the store.
+        var isCoverageOpen = false
     }
 
     private let statusHandler: (AgentMonitoringStatus) -> Void
@@ -91,7 +94,7 @@ final class AgentMonitoringController {
     private let observationHandler: ([ConnectionObservation]) -> Void
     private let storageErrorHandler: (Error) -> Void
     private let extensionController: SystemExtensionController
-    private let stallFlag: UpdateStallFlag
+    private let gateState: MonitoringGateState
     private let healthProbe: SystemExtensionHealthProbe
     private var healthTimer: Timer?
     private var hasReportedStall = false
@@ -110,20 +113,21 @@ final class AgentMonitoringController {
         observationHandler: @escaping ([ConnectionObservation]) -> Void,
         storageErrorHandler: @escaping (Error) -> Void
     ) {
-        let stallFlag = UpdateStallFlag()
+        let gateState = MonitoringGateState()
         // While an update is stalled, nothing is being recorded, so the
         // collectors must not be able to paint over that with "active". The
         // stall is the more important truth and it stays on screen.
         let gatedStatusHandler: (AgentMonitoringStatus) -> Void = { status in
-            if stallFlag.isStalled {
+            var status = status
+            if gateState.isStalled {
                 switch status {
                 case .fullActive, .fullStarting, .fullActivationRequested:
-                    statusHandler(.updateNotRunning)
-                    return
+                    status = .updateNotRunning
                 default:
                     break
                 }
             }
+            Self.recordCoverage(for: status, store: store, state: gateState)
             statusHandler(status)
         }
 
@@ -131,7 +135,7 @@ final class AgentMonitoringController {
         self.statusHandler = gatedStatusHandler
         self.observationHandler = observationHandler
         self.storageErrorHandler = storageErrorHandler
-        self.stallFlag = stallFlag
+        self.gateState = gateState
         self.healthProbe = SystemExtensionHealthProbe(
             identifier: Self.systemExtensionIdentifier,
             appBundleVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
@@ -172,12 +176,46 @@ final class AgentMonitoringController {
         healthTimer = nil
     }
 
+    /// Writes down when monitoring was really running, so the charts can say
+    /// which parts of a period they know nothing about.
+    ///
+    /// Static because the gate that calls it is built before `self` exists.
+    private static func recordCoverage(
+        for status: AgentMonitoringStatus,
+        store: ObservationStore?,
+        state: MonitoringGateState
+    ) {
+        guard let store else { return }
+        switch status {
+        case .fullActive, .lightweight:
+            guard !state.isCoverageOpen else { return }
+            state.isCoverageOpen = true
+            try? store.beginCoverageSession(at: Date())
+        case .paused, .deactivating, .failed, .updateNotRunning, .rebootRequired,
+             .approvalRequired, .removalApprovalRequired, .removalRebootRequired:
+            guard state.isCoverageOpen else { return }
+            state.isCoverageOpen = false
+            try? store.endCoverageSession(at: Date())
+        case .fullActivationRequested, .fullStarting:
+            // Neither started nor stopped. Claiming coverage here would cover a
+            // stretch where nothing was arriving.
+            break
+        }
+    }
+
+    /// Closes the current stretch of coverage when the app goes away.
+    func endCoverageForShutdown() {
+        guard let store, gateState.isCoverageOpen else { return }
+        gateState.isCoverageOpen = false
+        try? store.endCoverageSession(at: Date())
+    }
+
     private func checkHealth() {
         healthProbe.check { [weak self] health in
             guard let self else { return }
             switch health {
             case .rebootRequiredAfterUpdate:
-                self.stallFlag.isStalled = true
+                self.gateState.isStalled = true
                 self.statusHandler(.updateNotRunning)
                 if !self.hasReportedStall {
                     self.hasReportedStall = true
@@ -189,8 +227,8 @@ final class AgentMonitoringController {
             case .healthy, .notInstalled, .awaitingApproval:
                 // `notInstalled` and `awaitingApproval` are already reported by
                 // the activation flow, which knows more than this check does.
-                if self.stallFlag.isStalled {
-                    self.stallFlag.isStalled = false
+                if self.gateState.isStalled {
+                    self.gateState.isStalled = false
                     self.hasReportedStall = false
                 }
             }
