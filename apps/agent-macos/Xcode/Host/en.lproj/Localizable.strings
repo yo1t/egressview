@@ -211,3 +211,10 @@
 "Name" = "Name";
 "IP address" = "IP address";
 "A name groups a service together; an address shows how far its traffic is spread." = "A name groups a service together; an address shows how far its traffic is spread.";
+"Where the traffic went" = "Where the traffic went";
+"Mark size is data volume" = "Mark size is data volume";
+"Mark size is the number of connections" = "Mark size is the number of connections";
+"No location data yet. Connect to a Hub, or enable direct lookups in settings." = "No location data yet. Connect to a Hub, or enable direct lookups in settings.";
+"%lld%% of this period could be placed. The rest has no known location." = "%lld%% of this period could be placed. The rest has no known location.";
+"%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@." = "%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@.";
+"an unnamed place" = "an unnamed place";

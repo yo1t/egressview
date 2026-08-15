@@ -211,3 +211,10 @@
 "Name" = "名前";
 "IP address" = "IPアドレス";
 "A name groups a service together; an address shows how far its traffic is spread." = "名前はサービスを1つにまとめ、IPアドレスはその通信がどこまで散っているかを示します。";
+"Where the traffic went" = "通信の行き先";
+"Mark size is data volume" = "印の大きさはデータ量";
+"Mark size is the number of connections" = "印の大きさは接続数";
+"No location data yet. Connect to a Hub, or enable direct lookups in settings." = "位置情報がまだありません。Hubに接続するか、設定で直接取得を有効にしてください。";
+"%lld%% of this period could be placed. The rest has no known location." = "この期間の%lld%%を地図に配置しました。残りは位置が分かっていません。";
+"%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@." = "%1$lld地点、通信の%2$lld%%を配置。最も多いのは%3$@です。";
+"an unnamed place" = "名前の分からない場所";
