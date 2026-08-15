@@ -69,6 +69,12 @@ private final class AgentMainViewModel: ObservableObject {
     }
     @Published private(set) var availableMetrics: [TrafficMetric] = [.sessions]
     @Published private(set) var sankey = SankeyAggregator().aggregate([], metric: .sessions)
+    @Published private(set) var globe = GlobeAggregator().aggregate(
+        placed: [], unplacedSessions: 0, unplacedBytes: 0, metric: .sessions, hasLocationData: false
+    )
+    /// Loaded once. The outlines never change, and re-reading 100 KB on every
+    /// refresh would spend the user's battery on a constant.
+    let atlas = try? WorldAtlas.bundled()
     @Published private(set) var timeline = TimelineAggregator().aggregate(
         [], selection: VisualizationSelection()
     )
@@ -135,11 +141,19 @@ private final class AgentMainViewModel: ObservableObject {
                 // The byte view is offered only once something has actually
                 // been measured; otherwise every bar would be empty.
                 let measuredBytes = pairs.contains { $0.bytes > 0 }
+                let locations = try store.destinationLocations(from: from, to: to)
+                let globe = GlobeAggregator().aggregate(
+                    placed: locations.placed,
+                    unplacedSessions: locations.unplacedSessions,
+                    unplacedBytes: locations.unplacedBytes,
+                    metric: selection.metric,
+                    hasLocationData: try store.geoLocationCount() > 0
+                )
                 return (
                     observations, summary, try store.statistics(),
                     SankeyAggregator().aggregate(pairs, metric: selection.metric),
                     TimelineAggregator().aggregate(buckets, selection: selection),
-                    measuredBytes
+                    measuredBytes, globe
                 )
             }
             DispatchQueue.main.async {
@@ -149,6 +163,7 @@ private final class AgentMainViewModel: ObservableObject {
                 case .success(let value):
                     self.sankey = value.3
                     self.timeline = value.4
+                    self.globe = value.6
                     self.availableMetrics = VisualizationSelection.availableMetrics(
                         hasMeasuredBytes: value.5
                     )
@@ -286,6 +301,7 @@ private struct AgentMainView: View {
                     }
                     AgentTimelineChart(model: model.timeline, scale: model.scale)
                     AgentSankeyChart(model: model.sankey)
+                    AgentGlobeChart(model: model.globe, atlas: model.atlas)
                 }
                 .padding(.horizontal, 22)
                 .padding(.vertical, 18)
@@ -556,6 +572,111 @@ private struct AgentTimelineChart: View {
             let anchor: UnitPoint = position == 0 ? .leading : (position == 2 ? .trailing : .center)
             let clamped = position == 0 ? plot.minX : (position == 2 ? plot.maxX : x)
             context.draw(label, at: CGPoint(x: clamped, y: plot.maxY + xAxisHeight / 2), anchor: anchor)
+        }
+    }
+}
+
+
+private struct AgentGlobeChart: View {
+    let model: GlobeModel
+    let atlas: WorldAtlas?
+
+    var body: some View {
+        AgentChartCard(
+            title: L("Where the traffic went"),
+            subtitle: model.metric == .bytes
+                ? L("Mark size is data volume")
+                : L("Mark size is the number of connections")
+        ) {
+            if let unavailable = model.unavailable {
+                AgentEmptyChartNote(text: message(for: unavailable))
+            } else {
+                Canvas { context, size in draw(in: &context, size: size) }
+                    .frame(height: 280)
+                    .accessibilityElement()
+                    .accessibilityLabel(summary)
+            }
+            if model.coverageIsPartial {
+                // A map that quietly omits part of the traffic is worse than
+                // one that says how much it cannot place.
+                Label(
+                    L("%lld%% of this period could be placed. The rest has no known location.",
+                      Int((model.placedShare * 100).rounded())),
+                    systemImage: "info.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func message(for reason: GlobeUnavailableReason) -> String {
+        switch reason {
+        case .noLocationData:
+            // Standalone agents land here. "Nothing to place" and "nowhere was
+            // contacted" are different facts and must not look the same.
+            return L("No location data yet. Connect to a Hub, or enable direct lookups in settings.")
+        case .noTrafficInPeriod:
+            return L("No connections in this period.")
+        }
+    }
+
+    private var summary: String {
+        guard let busiest = model.points.last else {
+            return L("No connections in this period.")
+        }
+        let place = busiest.city ?? busiest.countryCode ?? L("an unnamed place")
+        return L("%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@.",
+                 model.points.count, Int((model.placedShare * 100).rounded()), place)
+    }
+
+    private func draw(in context: inout GraphicsContext, size: CGSize) {
+        let side = min(size.width, size.height)
+        let rect = CGRect(
+            x: (size.width - side) / 2, y: (size.height - side) / 2, width: side, height: side
+        )
+        let projection = OrthographicProjection()
+
+        context.fill(Path(ellipseIn: rect), with: .color(.blue.opacity(0.07)))
+        context.stroke(Path(ellipseIn: rect), with: .color(.secondary.opacity(0.35)), lineWidth: 1)
+
+        if let atlas {
+            var land = Path()
+            for ring in atlas.rings {
+                var started = false
+                for point in ring {
+                    // The far side is skipped rather than folded onto the
+                    // visible face, where it would draw a country twice.
+                    guard let projected = projection.project(
+                        latitude: point.latitude, longitude: point.longitude, in: rect
+                    ) else {
+                        started = false
+                        continue
+                    }
+                    if started {
+                        land.addLine(to: projected)
+                    } else {
+                        land.move(to: projected)
+                        started = true
+                    }
+                }
+            }
+            context.stroke(land, with: .color(.secondary.opacity(0.55)), lineWidth: 0.6)
+        }
+
+        for point in model.points {
+            guard let projected = projection.project(
+                latitude: point.latitude, longitude: point.longitude, in: rect
+            ) else { continue }
+            // Area, not radius, follows the share: doubling a radius would
+            // quadruple the ink and overstate the difference.
+            let radius = max(2.0, sqrt(point.weight) * side * 0.16)
+            let mark = CGRect(
+                x: projected.x - radius, y: projected.y - radius,
+                width: radius * 2, height: radius * 2
+            )
+            context.fill(Path(ellipseIn: mark), with: .color(.orange.opacity(0.45)))
+            context.stroke(Path(ellipseIn: mark), with: .color(.orange), lineWidth: 0.8)
         }
     }
 }

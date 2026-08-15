@@ -19,6 +19,11 @@ let package = Package(
         .target(
             name: "EgressViewAgentCore",
             dependencies: ["CLibProcBridge"],
+            // The same country outlines the Web UI uses, so the two look alike.
+            // Carried in the app rather than fetched: MapKit would reach
+            // Apple's tile servers, which an agent that must work offline
+            // cannot rely on.
+            resources: [.copy("Resources/world-atlas-countries-110m.json")],
             // System SQLite. The local history needs indexed range queries and
             // grouped aggregation, and adding a package dependency for storage
             // the OS already ships would be a poor trade.
