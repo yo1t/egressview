@@ -241,6 +241,11 @@ private final class AgentSettingsViewModel: ObservableObject {
     @Published private(set) var launchAtLoginDetail = ""
     @Published var retentionDays = ObservationWindowController.configuredRetentionDays
     @Published var message: String?
+    /// Off unless the user turns it on: this is the one setting that would send
+    /// the destinations the agent is watching to somebody else.
+    @Published var thirdPartyGeoLookupEnabled = GeoCachePreferences().thirdPartyLookupEnabled {
+        didSet { GeoCachePreferences().thirdPartyLookupEnabled = thirdPartyGeoLookupEnabled }
+    }
     let isLightweightMonitoringAvailable = false
 
     var availableMonitoringModes: [AgentMonitoringMode] {
@@ -379,6 +384,7 @@ private struct AgentSettingsView: View {
     @ObservedObject var hub: HubDeliveryController
     @ObservedObject var updates: AgentUpdateController
     @ObservedObject var uninstall: AgentUninstallController
+    @ObservedObject var geo: GeoCacheController
     @ObservedObject private var language = AgentLanguageSettings.shared
     @State private var section = AgentSettingsSection.general
     @State private var confirmHistoryDeletion = false
@@ -496,8 +502,52 @@ private struct AgentSettingsView: View {
                 Button(L("Send now")) { hub.sendNow() }.disabled(!hub.deliveryEnabled)
             }
             .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
+            Divider().padding(.vertical, 4)
+            geoSection
         }
     }
+
+    /// Locations come from the Hub, so they live beside it. The button exists
+    /// because someone who has just enrolled, or who is looking at an empty
+    /// map, should not have to wait for a timer to find out why.
+    @ViewBuilder
+    private var geoSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L("Destination locations")).font(.headline)
+            Text(L("Used to place traffic on the map. Fetched from the Hub once a day; the request contains no destinations."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                Button(L("Fetch now")) {
+                    Task { await geo.refresh() }
+                }
+                .disabled(geo.status == .fetching)
+                Text(geoStatusText).font(.caption).foregroundStyle(.secondary)
+            }
+            Toggle(isOn: $model.thirdPartyGeoLookupEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Look up locations without a Hub"))
+                    // Said plainly: this is the one place the agent would send
+                    // the very destinations it is watching to someone else.
+                    Text(L("Sends destination IP addresses to ip-api.com. Off unless you turn it on."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var geoStatusText: String {
+        switch geo.status {
+        case .idle: return ""
+        case .fetching: return L("Fetching...")
+        case let .updated(count, _): return L("%lld locations", count)
+        case .unchanged: return L("Already up to date")
+        case .unavailableWithoutHub: return L("Not enrolled with a Hub")
+        case let .failed(message): return message
+        }
+    }
+
 
     private var history: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -646,12 +696,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let hub: HubDeliveryController
     private let updates: AgentUpdateController
     private let uninstall: AgentUninstallController
+    private let geo: GeoCacheController
 
     init(
         store: ObservationStore?,
         hub: HubDeliveryController,
         updates: AgentUpdateController,
         uninstall: AgentUninstallController,
+        geo: GeoCacheController,
         launchController: LaunchAtLoginController,
         onMonitoringMode: @escaping (AgentMonitoringMode) -> Void,
         onRetentionChanged: @escaping (Int) -> Void,
@@ -660,6 +712,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.hub = hub
         self.updates = updates
         self.uninstall = uninstall
+        self.geo = geo
         let model = AgentSettingsViewModel(
             store: store,
             launchController: launchController,
@@ -669,7 +722,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         )
         self.model = model
         let hostingController = NSHostingController(
-            rootView: AgentSettingsView(model: model, hub: hub, updates: updates, uninstall: uninstall)
+            rootView: AgentSettingsView(model: model, hub: hub, updates: updates, uninstall: uninstall, geo: geo)
         )
         let window = NSWindow(contentViewController: hostingController)
         window.title = L("EgressView Agent Settings")
@@ -703,5 +756,109 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         hub.refresh()
         updates.refreshLocalization()
         uninstall.refreshLocalization()
+    }
+}
+
+// MARK: - Destination locations
+
+/// Keeps the local location table fed from the Hub the agent is enrolled with.
+///
+/// Runs on launch and once a day. There is no "wait until tomorrow" on a fresh
+/// install: an agent with no locations has an empty map, and making the user
+/// wait a day for their first one would be a strange way to introduce it.
+@MainActor
+final class GeoCacheController: ObservableObject {
+    enum Status: Equatable {
+        case idle
+        case fetching
+        case updated(count: Int, at: Date)
+        case unchanged(at: Date)
+        case unavailableWithoutHub
+        case failed(String)
+    }
+
+    @Published private(set) var status: Status = .idle
+
+    private let store: ObservationStore?
+    private let credentialStore: any AgentCredentialStoring
+    private let preferences = GeoCachePreferences()
+    private let agentVersion: String
+    private var timer: Timer?
+
+    init(store: ObservationStore?, credentialStore: any AgentCredentialStoring, agentVersion: String) {
+        self.store = store
+        self.credentialStore = credentialStore
+        self.agentVersion = agentVersion
+    }
+
+    func start() {
+        Task { await self.refreshIfDue() }
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 3_600, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.refreshIfDue() }
+        }
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func refreshIfDue() async {
+        let credential = (try? credentialStore.load()) ?? nil
+        guard preferences.shouldFetch(now: Date(), hasHub: credential != nil) else { return }
+        await refresh()
+    }
+
+    /// The settings screen calls this directly. Someone who has just enrolled,
+    /// or who wants to know why the map is empty, should not have to wait for a
+    /// timer to find out.
+    func refresh() async {
+        guard let store else { return }
+        guard let credential = (try? credentialStore.load()) ?? nil else {
+            status = .unavailableWithoutHub
+            return
+        }
+        status = .fetching
+        let fetcher = GeoCacheFetcher(
+            hubURL: credential.hubURL,
+            token: credential.token,
+            userAgent: "EgressViewAgent/\(agentVersion)",
+            transport: URLSessionGeoCacheTransport()
+        )
+        do {
+            switch try await fetcher.fetch(knownETag: preferences.etag) {
+            case .unchanged:
+                preferences.lastFetchedAt = Date()
+                status = .unchanged(at: Date())
+            case let .updated(entries, etag):
+                try store.replaceGeoLocations(entries)
+                preferences.etag = etag
+                preferences.lastFetchedAt = Date()
+                status = .updated(count: entries.count, at: Date())
+            }
+        } catch {
+            // The stored tag is kept: a failed fetch is not evidence that what
+            // we already hold is wrong.
+            status = .failed(Self.describe(error))
+        }
+    }
+
+    /// Phrased for someone deciding what to do about it.
+    static func describe(_ error: any Error) -> String {
+        switch error {
+        case GeoCacheFetchError.insecureURL:
+            return L("The Hub address is not HTTPS, so locations were not requested.")
+        case let GeoCacheFetchError.httpStatus(code) where code == 401 || code == 403:
+            return L("The Hub refused the request. Re-enrol this Mac to fetch locations.")
+        case let GeoCacheFetchError.httpStatus(code):
+            return L("The Hub returned HTTP %lld.", code)
+        case let GeoCacheFetchError.unsupportedSchemaVersion(version):
+            return L("This Hub sends location data this agent does not understand (version %lld).", version)
+        case let GeoCacheFetchError.transport(reason):
+            return L("Could not reach the Hub: %@", reason)
+        default:
+            return String(describing: error)
+        }
     }
 }

@@ -218,3 +218,17 @@
 "%lld%% of this period could be placed. The rest has no known location." = "%lld%% of this period could be placed. The rest has no known location.";
 "%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@." = "%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@.";
 "an unnamed place" = "an unnamed place";
+"Destination locations" = "Destination locations";
+"Used to place traffic on the map. Fetched from the Hub once a day; the request contains no destinations." = "Used to place traffic on the map. Fetched from the Hub once a day; the request contains no destinations.";
+"Fetch now" = "Fetch now";
+"Fetching..." = "Fetching...";
+"%lld locations" = "%lld locations";
+"Already up to date" = "Already up to date";
+"Not enrolled with a Hub" = "Not enrolled with a Hub";
+"Look up locations without a Hub" = "Look up locations without a Hub";
+"Sends destination IP addresses to ip-api.com. Off unless you turn it on." = "Sends destination IP addresses to ip-api.com. Off unless you turn it on.";
+"The Hub address is not HTTPS, so locations were not requested." = "The Hub address is not HTTPS, so locations were not requested.";
+"The Hub refused the request. Re-enrol this Mac to fetch locations." = "The Hub refused the request. Re-enrol this Mac to fetch locations.";
+"The Hub returned HTTP %lld." = "The Hub returned HTTP %lld.";
+"This Hub sends location data this agent does not understand (version %lld)." = "This Hub sends location data this agent does not understand (version %lld).";
+"Could not reach the Hub: %@" = "Could not reach the Hub: %@";
