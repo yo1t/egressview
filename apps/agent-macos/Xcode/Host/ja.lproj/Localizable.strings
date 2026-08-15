@@ -240,3 +240,9 @@
 "Speed" = "速度";
 "Stop the globe where it is" = "地球儀をその位置で止めます";
 "Turn the globe so the far side comes round" = "地球儀を回して、裏側を手前に出します";
+"Network monitoring started. Waiting for the first connection." = "ネットワーク監視を開始しました。最初の通信を待っています。";
+"Nothing is being recorded. The update needs a restart of macOS before monitoring resumes." = "記録が行われていません。更新を反映するには macOS の再起動が必要です。";
+"EgressView: Starting" = "EgressView: 開始中";
+"EgressView: Not recording" = "EgressView: 記録していません";
+"EgressView is not recording" = "EgressViewが記録していません";
+"The update is installed, but macOS is still running the previous version. Restart this Mac to resume monitoring. Traffic during this time is not being recorded." = "更新はインストールされましたが、macOSは以前のバージョンを動かしたままです。監視を再開するには、このMacを再起動してください。この間の通信は記録されません。";

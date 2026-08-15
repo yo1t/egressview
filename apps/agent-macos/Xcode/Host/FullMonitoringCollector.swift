@@ -10,6 +10,7 @@ final class FullMonitoringCollector {
     private var connection: NSXPCConnection?
     private var timer: DispatchSourceTimer?
     private var reportedActive = false
+    private var reportedStarting = false
     private var isRunning = false
 
     init(
@@ -49,6 +50,7 @@ final class FullMonitoringCollector {
         connection?.invalidate()
         connection = nil
         reportedActive = false
+        reportedStarting = false
     }
 
     private func poll() {
@@ -92,9 +94,17 @@ final class FullMonitoringCollector {
                 try store.append(observations)
                 observationHandler(observations)
             }
-            if !reportedActive {
+            // "Active" means traffic has actually come through, not that the
+            // XPC service answered. An extension left behind by an update
+            // answers every drain with zero observations, and reporting that as
+            // active told the user monitoring was running while nothing at all
+            // was being recorded.
+            if !reportedActive, !observations.isEmpty {
                 reportedActive = true
                 statusHandler(.fullActive)
+            } else if !reportedActive, !reportedStarting {
+                reportedStarting = true
+                statusHandler(.fullStarting)
             }
         } catch {
             errorHandler(error)
@@ -107,5 +117,6 @@ final class FullMonitoringCollector {
         connection?.invalidate()
         connection = nil
         reportedActive = false
+        reportedStarting = false
     }
 }

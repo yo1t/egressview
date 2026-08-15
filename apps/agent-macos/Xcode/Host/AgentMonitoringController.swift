@@ -8,9 +8,17 @@ enum AgentMonitoringStatus: Equatable {
     case paused
     case lightweight(observationCount: Int)
     case fullActivationRequested
+    /// Started, but nothing has come through yet. Distinct from `fullActive`
+    /// because "the extension answered" and "traffic is being recorded" are not
+    /// the same thing, and an update can leave the first true while the second
+    /// is false.
+    case fullStarting
     case fullActive
     case approvalRequired
     case rebootRequired
+    /// Installed, but macOS is not running this copy, so nothing is collected
+    /// until the machine restarts.
+    case updateNotRunning
     case deactivating
     case removalApprovalRequired
     case removalRebootRequired
@@ -21,9 +29,12 @@ enum AgentMonitoringStatus: Equatable {
         case .paused: return L("Monitoring paused")
         case .lightweight(let count): return L("Lightweight monitoring: %lld connections", count)
         case .fullActivationRequested: return L("Requesting network monitoring approval...")
+        case .fullStarting: return L("Network monitoring started. Waiting for the first connection.")
         case .fullActive: return L("Network monitoring active")
         case .approvalRequired: return L("Approve the System Extension in System Settings")
         case .rebootRequired: return L("Restart macOS to finish enabling network monitoring")
+        case .updateNotRunning:
+            return L("Nothing is being recorded. The update needs a restart of macOS before monitoring resumes.")
         case .deactivating: return L("Stopping monitoring...")
         case .removalApprovalRequired: return L("Approve removal of the System Extension in System Settings")
         case .removalRebootRequired: return L("Restart macOS to finish removing the System Extension")
@@ -39,8 +50,8 @@ enum AgentMonitoringStatus: Equatable {
         switch self {
         case .paused, .deactivating: return "MenuBarPaused"
         case .lightweight, .fullActive: return "MenuBar"
-        case .fullActivationRequested, .approvalRequired, .rebootRequired,
-             .removalApprovalRequired, .removalRebootRequired, .failed:
+        case .fullActivationRequested, .fullStarting, .approvalRequired, .rebootRequired,
+             .updateNotRunning, .removalApprovalRequired, .removalRebootRequired, .failed:
             return "MenuBarAttention"
         }
     }
@@ -50,6 +61,8 @@ enum AgentMonitoringStatus: Equatable {
         case .paused: return L("EgressView: Paused")
         case .lightweight: return L("EgressView: Light")
         case .fullActive: return L("EgressView: Monitoring")
+        case .fullStarting: return L("EgressView: Starting")
+        case .updateNotRunning: return L("EgressView: Not recording")
         case .fullActivationRequested, .approvalRequired, .removalApprovalRequired: return L("EgressView: Approval")
         case .rebootRequired, .removalRebootRequired: return L("EgressView: Restart")
         case .deactivating: return L("EgressView: Stopping")
@@ -67,14 +80,29 @@ final class AgentMonitoringController {
         false
     }
 
+    /// Set when macOS is not running the extension this app installed. Held in
+    /// its own object so the gate below can be built before `self` exists.
+    private final class UpdateStallFlag {
+        var isStalled = false
+    }
+
     private let statusHandler: (AgentMonitoringStatus) -> Void
     private let store: ObservationStore?
     private let observationHandler: ([ConnectionObservation]) -> Void
     private let storageErrorHandler: (Error) -> Void
     private let extensionController: SystemExtensionController
+    private let stallFlag: UpdateStallFlag
+    private let healthProbe: SystemExtensionHealthProbe
+    private var healthTimer: Timer?
+    private var hasReportedStall = false
     private var lightweightCollector: LightweightCollector?
     private var fullMonitoringCollector: FullMonitoringCollector?
     private var persistenceSampler = ObservationPersistenceSampler()
+
+    /// How often the app re-asks macOS whether it is still recording. Cheap
+    /// enough to run while idle, frequent enough that a stalled update is not
+    /// discovered a day later.
+    private static let healthCheckInterval: TimeInterval = 60
 
     init(
         store: ObservationStore?,
@@ -82,21 +110,90 @@ final class AgentMonitoringController {
         observationHandler: @escaping ([ConnectionObservation]) -> Void,
         storageErrorHandler: @escaping (Error) -> Void
     ) {
+        let stallFlag = UpdateStallFlag()
+        // While an update is stalled, nothing is being recorded, so the
+        // collectors must not be able to paint over that with "active". The
+        // stall is the more important truth and it stays on screen.
+        let gatedStatusHandler: (AgentMonitoringStatus) -> Void = { status in
+            if stallFlag.isStalled {
+                switch status {
+                case .fullActive, .fullStarting, .fullActivationRequested:
+                    statusHandler(.updateNotRunning)
+                    return
+                default:
+                    break
+                }
+            }
+            statusHandler(status)
+        }
+
         self.store = store
-        self.statusHandler = statusHandler
+        self.statusHandler = gatedStatusHandler
         self.observationHandler = observationHandler
         self.storageErrorHandler = storageErrorHandler
+        self.stallFlag = stallFlag
+        self.healthProbe = SystemExtensionHealthProbe(
+            identifier: Self.systemExtensionIdentifier,
+            appBundleVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        )
         self.extensionController = SystemExtensionController(
             identifier: Self.systemExtensionIdentifier,
-            statusHandler: statusHandler
+            statusHandler: gatedStatusHandler
         )
         if let store {
             self.fullMonitoringCollector = FullMonitoringCollector(
                 store: store,
                 observationHandler: observationHandler,
-                statusHandler: statusHandler,
+                statusHandler: gatedStatusHandler,
                 errorHandler: storageErrorHandler
             )
+        }
+    }
+
+    /// Starts asking macOS whether monitoring is really running.
+    ///
+    /// Four consecutive updates stopped collection with nothing shown anywhere:
+    /// the extension answered, the status said "Network monitoring active", and
+    /// no data was recorded until the machine was restarted. Being told nothing
+    /// is worse than the outage, because it leaves the user believing there is
+    /// a record of a period that has none.
+    func startHealthChecks() {
+        checkHealth()
+        healthTimer?.invalidate()
+        healthTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.healthCheckInterval, repeats: true
+        ) { [weak self] _ in
+            self?.checkHealth()
+        }
+    }
+
+    func stopHealthChecks() {
+        healthTimer?.invalidate()
+        healthTimer = nil
+    }
+
+    private func checkHealth() {
+        healthProbe.check { [weak self] health in
+            guard let self else { return }
+            switch health {
+            case .rebootRequiredAfterUpdate:
+                self.stallFlag.isStalled = true
+                self.statusHandler(.updateNotRunning)
+                if !self.hasReportedStall {
+                    self.hasReportedStall = true
+                    AgentUserNotifier.shared.notify(
+                        title: L("EgressView is not recording"),
+                        body: L("The update is installed, but macOS is still running the previous version. Restart this Mac to resume monitoring. Traffic during this time is not being recorded.")
+                    )
+                }
+            case .healthy, .notInstalled, .awaitingApproval:
+                // `notInstalled` and `awaitingApproval` are already reported by
+                // the activation flow, which knows more than this check does.
+                if self.stallFlag.isStalled {
+                    self.stallFlag.isStalled = false
+                    self.hasReportedStall = false
+                }
+            }
         }
     }
 

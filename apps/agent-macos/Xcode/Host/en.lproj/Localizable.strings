@@ -240,3 +240,9 @@
 "Speed" = "Speed";
 "Stop the globe where it is" = "Stop the globe where it is";
 "Turn the globe so the far side comes round" = "Turn the globe so the far side comes round";
+"Network monitoring started. Waiting for the first connection." = "Network monitoring started. Waiting for the first connection.";
+"Nothing is being recorded. The update needs a restart of macOS before monitoring resumes." = "Nothing is being recorded. The update needs a restart of macOS before monitoring resumes.";
+"EgressView: Starting" = "EgressView: Starting";
+"EgressView: Not recording" = "EgressView: Not recording";
+"EgressView is not recording" = "EgressView is not recording";
+"The update is installed, but macOS is still running the previous version. Restart this Mac to resume monitoring. Traffic during this time is not being recorded." = "The update is installed, but macOS is still running the previous version. Restart this Mac to resume monitoring. Traffic during this time is not being recorded.";
