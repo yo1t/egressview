@@ -250,3 +250,8 @@
 "Only %lld%% of this period was monitored. Anything outside that is missing from the charts below, not absent from the network." = "Only %lld%% of this period was monitored. Anything outside that is missing from the charts below, not absent from the network.";
 "Monitoring started at %@. Connections already open at that moment were never seen." = "Monitoring started at %@. Connections already open at that moment were never seen.";
 "Longest unmonitored stretch: %1$@ from %2$@." = "Longest unmonitored stretch: %1$@ from %2$@.";
+"Export CSV..." = "Export CSV...";
+"Saves every connection in the selected period as a CSV file" = "Saves every connection in the selected period as a CSV file";
+"Exports every connection recorded in the selected period." = "Exports every connection recorded in the selected period.";
+"This period was only %lld%% monitored. The file contains what was recorded, which is less than everything that happened." = "This period was only %lld%% monitored. The file contains what was recorded, which is less than everything that happened.";
+"Could not write the file: %@" = "Could not write the file: %@";

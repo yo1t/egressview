@@ -250,3 +250,8 @@
 "Only %lld%% of this period was monitored. Anything outside that is missing from the charts below, not absent from the network." = "この期間のうち監視されていたのは %lld%% です。それ以外は下のグラフに含まれていないだけで、通信が無かったわけではありません。";
 "Monitoring started at %@. Connections already open at that moment were never seen." = "監視の開始は %@ です。その時点ですでに確立していた接続は観測されていません。";
 "Longest unmonitored stretch: %1$@ from %2$@." = "最長の未監視区間: %2$@ から %1$@。";
+"Export CSV..." = "CSVを書き出す...";
+"Saves every connection in the selected period as a CSV file" = "選択中の期間のすべての通信をCSVファイルとして保存します";
+"Exports every connection recorded in the selected period." = "選択中の期間に記録されたすべての通信を書き出します。";
+"This period was only %lld%% monitored. The file contains what was recorded, which is less than everything that happened." = "この期間の監視は %lld%% のみです。ファイルには記録された分だけが入り、実際に起きたことの全部ではありません。";
+"Could not write the file: %@" = "ファイルを書き出せませんでした: %@";

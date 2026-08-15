@@ -117,6 +117,40 @@ private final class AgentMainViewModel: ObservableObject {
         errorMessage = message
     }
 
+    /// Writes the selected period to a CSV file the user picks.
+    ///
+    /// Exports the whole period, not the 500 rows the table shows: the table is
+    /// capped so the window stays responsive, and silently exporting only what
+    /// happened to be on screen would produce a file that looks complete and is
+    /// not.
+    func exportCSV() {
+        guard let store else {
+            errorMessage = L("Local history is unavailable because App Group access failed.")
+            return
+        }
+        let selection = VisualizationSelection(scale: scale, metric: metric, end: Date())
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = ObservationCSV.suggestedFileName(
+            from: selection.start, to: selection.end
+        )
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.message = coverage.isComplete
+            ? L("Exports every connection recorded in the selected period.")
+            : L("This period was only %lld%% monitored. The file contains what was recorded, which is less than everything that happened.",
+                Int((coverage.share * 100).rounded()))
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let observations = try store.observations(
+                since: selection.start, limit: Int.max
+            ).filter { $0.lastObservedAt <= selection.end }
+            try ObservationCSV.export(observations)
+                .write(to: url, atomically: true, encoding: .utf8)
+            errorMessage = nil
+        } catch {
+            errorMessage = L("Could not write the file: %@", error.localizedDescription)
+        }
+    }
+
     func refresh() {
         guard let store else {
             errorMessage = L("Local history is unavailable because App Group access failed.")
@@ -305,6 +339,13 @@ private struct AgentMainView: View {
                     HStack(spacing: 16) {
                         metricPicker
                         destinationGroupingPicker
+                        Spacer()
+                        Button {
+                            model.exportCSV()
+                        } label: {
+                            Label(L("Export CSV..."), systemImage: "square.and.arrow.up")
+                        }
+                        .help(L("Saves every connection in the selected period as a CSV file"))
                     }
                     AgentCoverageNote(coverage: model.coverage)
                     AgentTimelineChart(model: model.timeline, scale: model.scale)
