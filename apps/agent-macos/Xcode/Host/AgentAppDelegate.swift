@@ -33,11 +33,17 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
             self?.render(.paused)
         }
     )
+    private lazy var geoCacheController = GeoCacheController(
+        store: store,
+        credentialStore: KeychainAgentCredentialStore(),
+        agentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+    )
     private lazy var settingsWindow = SettingsWindowController(
         store: store,
         hub: hubDelivery,
         updates: updateController,
         uninstall: uninstallController,
+        geo: geoCacheController,
         launchController: launchAtLoginController,
         onMonitoringMode: { [weak self] mode in self?.selectMonitoringMode(mode) },
         onRetentionChanged: { [weak self] days in self?.applyRetentionPolicy(days: days) },
@@ -82,6 +88,9 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         controller.restoreMonitoringState()
         showUpdateDisclosureIfNeeded()
         Task { await updateController.runIfDue() }
+        // Fetches immediately when nothing is stored yet. Making a fresh
+        // install wait a day for its first map would be a strange welcome.
+        geoCacheController.start()
     }
 
     private func render(_ status: AgentMonitoringStatus) {

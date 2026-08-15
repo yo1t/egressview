@@ -218,3 +218,17 @@
 "%lld%% of this period could be placed. The rest has no known location." = "この期間の%lld%%を地図に配置しました。残りは位置が分かっていません。";
 "%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@." = "%1$lld地点、通信の%2$lld%%を配置。最も多いのは%3$@です。";
 "an unnamed place" = "名前の分からない場所";
+"Destination locations" = "宛先の位置情報";
+"Used to place traffic on the map. Fetched from the Hub once a day; the request contains no destinations." = "通信を地図に配置するために使います。1日1回Hubから取得し、リクエストに宛先は含みません。";
+"Fetch now" = "今すぐ取得";
+"Fetching..." = "取得中...";
+"%lld locations" = "%lld件の位置情報";
+"Already up to date" = "最新です";
+"Not enrolled with a Hub" = "Hubに登録されていません";
+"Look up locations without a Hub" = "Hubを使わずに位置情報を取得する";
+"Sends destination IP addresses to ip-api.com. Off unless you turn it on." = "宛先のIPアドレスを ip-api.com へ送信します。有効にしない限り送信しません。";
+"The Hub address is not HTTPS, so locations were not requested." = "HubのアドレスがHTTPSではないため、位置情報を取得しませんでした。";
+"The Hub refused the request. Re-enrol this Mac to fetch locations." = "Hubがリクエストを拒否しました。位置情報を取得するには、このMacを登録し直してください。";
+"The Hub returned HTTP %lld." = "Hubが HTTP %lld を返しました。";
+"This Hub sends location data this agent does not understand (version %lld)." = "このHubは、本Agentが解釈できない形式の位置情報を返しました（version %lld）。";
+"Could not reach the Hub: %@" = "Hubに接続できませんでした: %@";
