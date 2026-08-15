@@ -232,3 +232,11 @@
 "The Hub returned HTTP %lld." = "Hubが HTTP %lld を返しました。";
 "This Hub sends location data this agent does not understand (version %lld)." = "このHubは、本Agentが解釈できない形式の位置情報を返しました（version %lld）。";
 "Could not reach the Hub: %@" = "Hubに接続できませんでした: %@";
+"Slow" = "遅い";
+"Normal" = "標準";
+"Fast" = "速い";
+"Stop" = "停止";
+"Rotate" = "回転";
+"Speed" = "速度";
+"Stop the globe where it is" = "地球儀をその位置で止めます";
+"Turn the globe so the far side comes round" = "地球儀を回して、裏側を手前に出します";

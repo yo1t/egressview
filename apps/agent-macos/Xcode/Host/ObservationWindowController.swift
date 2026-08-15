@@ -581,13 +581,97 @@ private struct AgentGlobeChart: View {
     let model: GlobeModel
     let atlas: WorldAtlas?
 
-    /// Longitude offset. The globe turns so the far side comes round on its
-    /// own, the way the Hub's does; a still globe hides half the destinations
-    /// behind it with no sign that they are there.
-    @State private var spin: Double = 0
+    /// How fast the globe turns, if it turns at all.
+    ///
+    /// A still globe hides half the destinations behind it with no sign that
+    /// they are there, so it turns by default. But rotation also makes a place
+    /// hard to read while it moves, so it can be stopped and slowed.
+    enum SpinSpeed: String, CaseIterable, Identifiable {
+        case slow, normal, fast
+        var id: String { rawValue }
+
+        /// Degrees of longitude per second.
+        var degreesPerSecond: Double {
+            switch self {
+            case .slow: return 2
+            case .normal: return 6
+            case .fast: return 16
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .slow: return L("Slow")
+            case .normal: return L("Normal")
+            case .fast: return L("Fast")
+            }
+        }
+    }
+
+    /// Rotation is a function of time, not something accumulated frame by
+    /// frame. Adding to a `@State` from inside the `Canvas` renderer changes
+    /// state during a view update, which SwiftUI is free to discard -- and did:
+    /// the globe stayed still. `baseSpin` is the angle at `anchor`, and every
+    /// frame derives its angle from the clock instead.
+    @State private var baseSpin: Double = 0
+    @State private var anchor = Date()
+    @State private var speed: SpinSpeed = .normal
+    @State private var isRunning = true
     @State private var tilt: Double = -12
     @State private var isDragging = false
     @State private var resumeAt = Date.distantPast
+
+    private var isTurning: Bool { isRunning && !isDragging }
+
+    private func spin(at date: Date) -> Double {
+        guard isTurning else { return baseSpin }
+        let elapsed = date.timeIntervalSince(max(anchor, resumeAt))
+        return baseSpin + max(0, elapsed) * speed.degreesPerSecond
+    }
+
+    /// Pins the current angle before something changes what "current" means,
+    /// so stopping, starting, changing speed and dragging never make the globe
+    /// jump.
+    private func freeze(at date: Date = Date()) {
+        baseSpin = spin(at: date)
+        anchor = date
+    }
+
+    private var spinControls: some View {
+        HStack(spacing: 10) {
+            Button {
+                freeze()
+                isRunning.toggle()
+                resumeAt = .distantPast
+            } label: {
+                Label(
+                    isRunning ? L("Stop") : L("Rotate"),
+                    systemImage: isRunning ? "pause.fill" : "play.fill"
+                )
+            }
+            .help(isRunning
+                  ? L("Stop the globe where it is")
+                  : L("Turn the globe so the far side comes round"))
+
+            Picker(L("Speed"), selection: Binding(
+                get: { speed },
+                set: { newValue in
+                    freeze()
+                    resumeAt = .distantPast
+                    speed = newValue
+                }
+            )) {
+                ForEach(SpinSpeed.allCases) { value in
+                    Text(value.title).tag(value)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 210)
+            .disabled(!isRunning)
+        }
+        .font(.callout)
+    }
 
     private var home: (latitude: Double, longitude: Double) { HomeLocation.current() }
 
@@ -601,29 +685,33 @@ private struct AgentGlobeChart: View {
             if let unavailable = model.unavailable {
                 AgentEmptyChartNote(text: message(for: unavailable))
             } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: false)) { context in
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isTurning)) { context in
                     Canvas { canvas, size in
-                        advance(to: context.date)
-                        draw(in: &canvas, size: size)
+                        draw(in: &canvas, size: size, spin: spin(at: context.date))
                     }
                 }
                 .frame(height: 300)
                 .gesture(
                     DragGesture()
                         .onChanged { value in
-                            isDragging = true
-                            spin += value.translation.width * 0.02
+                            if !isDragging {
+                                freeze()
+                                isDragging = true
+                            }
+                            baseSpin += value.translation.width * 0.02
                             tilt = max(-80, min(80, tilt - value.translation.height * 0.02))
                         }
                         .onEnded { _ in
                             isDragging = false
+                            anchor = Date()
                             // The same pause the Hub uses: let the user look at
                             // what they turned to before it moves again.
-                            resumeAt = Date().addingTimeInterval(2.5)
+                            resumeAt = anchor.addingTimeInterval(2.5)
                         }
                 )
                 .accessibilityElement()
                 .accessibilityLabel(summary)
+                spinControls
             }
             if model.coverageIsPartial {
                 Label(
@@ -635,11 +723,6 @@ private struct AgentGlobeChart: View {
                 .foregroundStyle(.secondary)
             }
         }
-    }
-
-    private func advance(to date: Date) {
-        guard !isDragging, date >= resumeAt else { return }
-        spin += 0.12
     }
 
     private func message(for reason: GlobeUnavailableReason) -> String {
@@ -660,7 +743,7 @@ private struct AgentGlobeChart: View {
                  model.points.count, Int((model.placedShare * 100).rounded()), place)
     }
 
-    private func draw(in context: inout GraphicsContext, size: CGSize) {
+    private func draw(in context: inout GraphicsContext, size: CGSize, spin: Double) {
         let side = min(size.width, size.height)
         let rect = CGRect(
             x: (size.width - side) / 2, y: (size.height - side) / 2, width: side, height: side

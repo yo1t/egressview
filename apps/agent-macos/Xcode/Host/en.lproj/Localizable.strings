@@ -232,3 +232,11 @@
 "The Hub returned HTTP %lld." = "The Hub returned HTTP %lld.";
 "This Hub sends location data this agent does not understand (version %lld)." = "This Hub sends location data this agent does not understand (version %lld).";
 "Could not reach the Hub: %@" = "Could not reach the Hub: %@";
+"Slow" = "Slow";
+"Normal" = "Normal";
+"Fast" = "Fast";
+"Stop" = "Stop";
+"Rotate" = "Rotate";
+"Speed" = "Speed";
+"Stop the globe where it is" = "Stop the globe where it is";
+"Turn the globe so the far side comes round" = "Turn the globe so the far side comes round";
