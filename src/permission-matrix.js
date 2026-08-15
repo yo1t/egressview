@@ -58,6 +58,7 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   // them. A Hub too old to have this route answers 404, which is the signal an
   // agent needs before it enrols.
   httpRoute('GET', '/api/agent/capabilities', ACCESS.AGENT, [A.INGEST]),
+  httpRoute('GET', '/api/agent/geo-cache', ACCESS.AGENT, [A.INGEST]),
 
   httpRoute('GET', '/api/status', ACCESS.PERMISSION, [R.NETWORK_READ]),
   httpRoute('GET', '/api/connections', ACCESS.PERMISSION, [R.NETWORK_READ]),

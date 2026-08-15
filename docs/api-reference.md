@@ -198,6 +198,7 @@ All 101 implemented HTTP endpoints are listed below. **Public** means no browser
 | Agent | `POST /api/agent/registration/revoke` | Agent bearer; revokes only the authenticated Agent |
 | Agent | `POST /api/agent/ingest` | Agent bearer; `agent.ingest`, max 200 observations and 512 KiB uncompressed JSON |
 | Agent | `GET /api/agent/capabilities` | Agent bearer; accepted schema versions and batch limits, so an agent can pick a version both sides speak |
+| Agent | `GET /api/agent/geo-cache` | Agent bearer; the whole location cache, so an agent can place its own destinations on a map without telling the Hub which ones it cares about. `ETag`/`304` supported |
 | Router setup | `POST /api/nonce` | Protected |
 | Router setup | `POST /api/yamaha/detect` | Protected |
 | Router setup | `POST /api/cisco/detect` | Protected |
