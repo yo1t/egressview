@@ -203,3 +203,68 @@ final class GeoLocationStoreTests: XCTestCase {
         XCTAssertEqual(try store.geoLocationCount(), 0, "standalone agents start with nothing")
     }
 }
+
+final class GreatCircleTests: XCTestCase {
+    func testThePathStartsAndEndsWhereItShould() {
+        let tokyo = (latitude: 35.68, longitude: 139.69)
+        let washington = (latitude: 38.89, longitude: -77.04)
+        let path = GreatCircle.path(from: tokyo, to: washington)
+
+        XCTAssertEqual(path.first?.latitude ?? 0, tokyo.latitude, accuracy: 0.001)
+        XCTAssertEqual(path.last?.longitude ?? 0, washington.longitude, accuracy: 0.001)
+        XCTAssertEqual(path.count, 49)
+    }
+
+    func testTokyoToWashingtonGoesOverTheNorthRatherThanStraightAcross() {
+        // A straight line on the projection would cross the Pacific at mid
+        // latitudes. The real route arcs north, and drawing the straight one
+        // would show traffic passing over countries it never goes near.
+        let path = GreatCircle.path(
+            from: (latitude: 35.68, longitude: 139.69),
+            to: (latitude: 38.89, longitude: -77.04)
+        )
+        let highest = path.map(\.latitude).max() ?? 0
+        XCTAssertGreaterThan(highest, 55, "the great circle rises well north of both ends")
+    }
+
+    func testEveryPointStaysOnTheGlobe() {
+        let path = GreatCircle.path(
+            from: (latitude: -35.28, longitude: 149.13),
+            to: (latitude: 51.50, longitude: -0.12)
+        )
+        for point in path {
+            XCTAssertGreaterThanOrEqual(point.latitude, -90)
+            XCTAssertLessThanOrEqual(point.latitude, 90)
+            XCTAssertGreaterThanOrEqual(point.longitude, -180.001)
+            XCTAssertLessThanOrEqual(point.longitude, 180.001)
+        }
+    }
+
+    func testTwoPointsInTheSamePlaceDoNotDivideByZero() {
+        let here = (latitude: 35.68, longitude: 139.69)
+        let path = GreatCircle.path(from: here, to: here)
+        XCTAssertEqual(path.count, 2)
+        XCTAssertTrue(path.allSatisfy { $0.latitude.isFinite && $0.longitude.isFinite })
+    }
+}
+
+final class HomeLocationTests: XCTestCase {
+    func testTheRegionTheMachineIsSetToDecidesWhereTrafficLeavesFrom() {
+        // A guess about the country, never about the address: nothing is looked
+        // up and nothing is sent.
+        let japan = HomeLocation.current(region: "JP")
+        XCTAssertEqual(japan.latitude, 35.68, accuracy: 0.001)
+        let unitedStates = HomeLocation.current(region: "us")
+        XCTAssertEqual(unitedStates.longitude, -77.04, accuracy: 0.001)
+    }
+
+    func testAnUnknownRegionFallsBackRatherThanLandingAtNullIsland() {
+        // (0, 0) is in the Gulf of Guinea. Traffic drawn from there would be
+        // wrong in a way that looks deliberate.
+        for region in [nil, "ZZ", ""] {
+            let fallback = HomeLocation.current(region: region)
+            XCTAssertNotEqual(fallback.latitude, 0)
+            XCTAssertNotEqual(fallback.longitude, 0)
+        }
+    }
+}

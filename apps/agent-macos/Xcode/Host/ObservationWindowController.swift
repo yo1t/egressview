@@ -581,6 +581,16 @@ private struct AgentGlobeChart: View {
     let model: GlobeModel
     let atlas: WorldAtlas?
 
+    /// Longitude offset. The globe turns so the far side comes round on its
+    /// own, the way the Hub's does; a still globe hides half the destinations
+    /// behind it with no sign that they are there.
+    @State private var spin: Double = 0
+    @State private var tilt: Double = -12
+    @State private var isDragging = false
+    @State private var resumeAt = Date.distantPast
+
+    private var home: (latitude: Double, longitude: Double) { HomeLocation.current() }
+
     var body: some View {
         AgentChartCard(
             title: L("Where the traffic went"),
@@ -591,14 +601,31 @@ private struct AgentGlobeChart: View {
             if let unavailable = model.unavailable {
                 AgentEmptyChartNote(text: message(for: unavailable))
             } else {
-                Canvas { context, size in draw(in: &context, size: size) }
-                    .frame(height: 280)
-                    .accessibilityElement()
-                    .accessibilityLabel(summary)
+                TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: false)) { context in
+                    Canvas { canvas, size in
+                        advance(to: context.date)
+                        draw(in: &canvas, size: size)
+                    }
+                }
+                .frame(height: 300)
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            isDragging = true
+                            spin += value.translation.width * 0.02
+                            tilt = max(-80, min(80, tilt - value.translation.height * 0.02))
+                        }
+                        .onEnded { _ in
+                            isDragging = false
+                            // The same pause the Hub uses: let the user look at
+                            // what they turned to before it moves again.
+                            resumeAt = Date().addingTimeInterval(2.5)
+                        }
+                )
+                .accessibilityElement()
+                .accessibilityLabel(summary)
             }
             if model.coverageIsPartial {
-                // A map that quietly omits part of the traffic is worse than
-                // one that says how much it cannot place.
                 Label(
                     L("%lld%% of this period could be placed. The rest has no known location.",
                       Int((model.placedShare * 100).rounded())),
@@ -610,11 +637,14 @@ private struct AgentGlobeChart: View {
         }
     }
 
+    private func advance(to date: Date) {
+        guard !isDragging, date >= resumeAt else { return }
+        spin += 0.12
+    }
+
     private func message(for reason: GlobeUnavailableReason) -> String {
         switch reason {
         case .noLocationData:
-            // Standalone agents land here. "Nothing to place" and "nowhere was
-            // contacted" are different facts and must not look the same.
             return L("No location data yet. Connect to a Hub, or enable direct lookups in settings.")
         case .noTrafficInPeriod:
             return L("No connections in this period.")
@@ -635,48 +665,96 @@ private struct AgentGlobeChart: View {
         let rect = CGRect(
             x: (size.width - side) / 2, y: (size.height - side) / 2, width: side, height: side
         )
-        let projection = OrthographicProjection()
+        let projection = OrthographicProjection(
+            centerLatitude: tilt, centerLongitude: home.longitude + spin
+        )
 
-        context.fill(Path(ellipseIn: rect), with: .color(.blue.opacity(0.07)))
-        context.stroke(Path(ellipseIn: rect), with: .color(.secondary.opacity(0.35)), lineWidth: 1)
+        context.fill(Path(ellipseIn: rect), with: .color(.blue.opacity(0.10)))
+        context.stroke(Path(ellipseIn: rect), with: .color(.cyan.opacity(0.35)), lineWidth: 1)
 
         if let atlas {
             var land = Path()
             for ring in atlas.rings {
                 var started = false
                 for point in ring {
-                    // The far side is skipped rather than folded onto the
-                    // visible face, where it would draw a country twice.
                     guard let projected = projection.project(
                         latitude: point.latitude, longitude: point.longitude, in: rect
                     ) else {
                         started = false
                         continue
                     }
-                    if started {
-                        land.addLine(to: projected)
-                    } else {
-                        land.move(to: projected)
-                        started = true
+                    if started { land.addLine(to: projected) } else {
+                        land.move(to: projected); started = true
                     }
                 }
             }
-            context.stroke(land, with: .color(.secondary.opacity(0.55)), lineWidth: 0.6)
+            context.stroke(land, with: .color(.cyan.opacity(0.55)), lineWidth: 0.6)
+        }
+
+        // Traffic leaves from here, so every arc starts at the same place and
+        // the picture reads as "this Mac reaching out" rather than scattered
+        // dots.
+        let homePoint = projection.project(
+            latitude: home.latitude, longitude: home.longitude, in: rect
+        )
+
+        for point in model.points {
+            let arc = GreatCircle.path(
+                from: home, to: (latitude: point.latitude, longitude: point.longitude)
+            )
+            var visible = Path()
+            var hidden = Path()
+            var visibleStarted = false
+            var hiddenStarted = false
+            for step in arc {
+                if let projected = projection.project(
+                    latitude: step.latitude, longitude: step.longitude, in: rect
+                ) {
+                    hiddenStarted = false
+                    if visibleStarted { visible.addLine(to: projected) } else {
+                        visible.move(to: projected); visibleStarted = true
+                    }
+                } else {
+                    // Behind the globe. Drawn faintly rather than dropped, so a
+                    // destination on the far side is not mistaken for absent.
+                    visibleStarted = false
+                    let edge = projection.projectClamped(
+                        latitude: step.latitude, longitude: step.longitude, in: rect
+                    )
+                    if hiddenStarted { hidden.addLine(to: edge) } else {
+                        hidden.move(to: edge); hiddenStarted = true
+                    }
+                }
+            }
+            context.stroke(hidden, with: .color(.orange.opacity(0.10)), lineWidth: 0.7)
+            context.stroke(visible, with: .color(.orange.opacity(0.55)), lineWidth: 0.9)
         }
 
         for point in model.points {
-            guard let projected = projection.project(
-                latitude: point.latitude, longitude: point.longitude, in: rect
-            ) else { continue }
             // Area, not radius, follows the share: doubling a radius would
             // quadruple the ink and overstate the difference.
-            let radius = max(2.0, sqrt(point.weight) * side * 0.16)
+            let radius = max(2.0, sqrt(point.weight) * side * 0.14)
+            let front = projection.project(
+                latitude: point.latitude, longitude: point.longitude, in: rect
+            )
+            let position = front ?? projection.projectClamped(
+                latitude: point.latitude, longitude: point.longitude, in: rect
+            )
             let mark = CGRect(
-                x: projected.x - radius, y: projected.y - radius,
+                x: position.x - radius, y: position.y - radius,
                 width: radius * 2, height: radius * 2
             )
-            context.fill(Path(ellipseIn: mark), with: .color(.orange.opacity(0.45)))
-            context.stroke(Path(ellipseIn: mark), with: .color(.orange), lineWidth: 0.8)
+            context.fill(
+                Path(ellipseIn: mark),
+                with: .color(.orange.opacity(front == nil ? 0.18 : 0.85))
+            )
+        }
+
+        if let homePoint {
+            let marker = CGRect(x: homePoint.x - 4, y: homePoint.y - 4, width: 8, height: 8)
+            context.fill(Path(ellipseIn: marker), with: .color(.yellow))
+            context.stroke(Path(ellipseIn: marker.insetBy(dx: -3, dy: -3)),
+                           with: .color(.yellow.opacity(0.5)), lineWidth: 1)
         }
     }
 }
