@@ -87,3 +87,24 @@ public enum AgentUpdateError: Error, Equatable {
     case noPackageForArch(String)
     case insecureURL
 }
+
+/// Whether a package left on disk is still worth offering.
+///
+/// An agent can be updated by other means -- a manual install, or a colleague
+/// with a disk image -- while a verified download from before is still stored.
+/// Offering it then walks the user backwards. The version check refuses to move
+/// backwards when it runs, but nothing re-examined what had already been
+/// stored, so the menu offered a downgrade until the next check happened.
+public enum AgentStoredUpdate {
+    public static func isStillAnUpgrade(
+        storedVersion: String, runningVersion: String
+    ) -> Bool {
+        guard let stored = AgentSemanticVersion(storedVersion),
+              let running = AgentSemanticVersion(runningVersion) else {
+            // Unparseable either way: discard rather than offer something that
+            // cannot be shown to be newer.
+            return false
+        }
+        return stored > running
+    }
+}

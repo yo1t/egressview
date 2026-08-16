@@ -208,3 +208,36 @@ final class AgentPackageVerifierTests: XCTestCase {
         )
     }
 }
+
+final class AgentStoredUpdateTests: XCTestCase {
+    /// Found on a real machine: 0.3.4 was installed by hand while a verified
+    /// 0.3.3 was still on disk, and the menu offered 0.3.3 as an update.
+    func test_インストール済みより古い保存済みパッケージは提示しない() {
+        XCTAssertFalse(
+            AgentStoredUpdate.isStillAnUpgrade(storedVersion: "0.3.3", runningVersion: "0.3.4")
+        )
+    }
+
+    func test_同じバージョンも提示しない() {
+        XCTAssertFalse(
+            AgentStoredUpdate.isStillAnUpgrade(storedVersion: "0.3.4", runningVersion: "0.3.4")
+        )
+    }
+
+    func test_新しければ提示する() {
+        XCTAssertTrue(
+            AgentStoredUpdate.isStillAnUpgrade(storedVersion: "0.3.5", runningVersion: "0.3.4")
+        )
+    }
+
+    /// Unparseable either way: discard rather than offer something that cannot
+    /// be shown to be newer.
+    func test_解釈できないバージョンは提示しない() {
+        XCTAssertFalse(
+            AgentStoredUpdate.isStillAnUpgrade(storedVersion: "nonsense", runningVersion: "0.3.4")
+        )
+        XCTAssertFalse(
+            AgentStoredUpdate.isStillAnUpgrade(storedVersion: "0.3.5", runningVersion: "nonsense")
+        )
+    }
+}

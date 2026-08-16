@@ -21,6 +21,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var store = try? storageResult.get().store
     private lazy var observationWindow = ObservationWindowController(store: store)
     private var threatAvailabilityObserver: AnyCancellable?
+    private var updateAvailabilityObserver: AnyCancellable?
     private lazy var hubDelivery = HubDeliveryController()
     private lazy var updateController = AgentUpdateController(
         onUpdateReady: { [weak self] version in self?.showUpdateReady(version: version) }
@@ -116,6 +117,16 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         threatAvailabilityObserver = threatIntelController.$availability.sink { [weak self] value in
             self?.observationWindow.setThreatAvailability(value)
         }
+        // The menu is built from the monitoring status, so it was only rebuilt
+        // when that changed. An update that appeared -- or was cleared --
+        // stayed on the menu until something unrelated happened to redraw it,
+        // which is how a stale "update available" survived being cleared.
+        updateAvailabilityObserver = updateController.$availableVersion
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                DispatchQueue.main.async { self.render(self.currentMonitoringStatus) }
+            }
     }
 
     private func render(_ status: AgentMonitoringStatus) {
