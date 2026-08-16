@@ -4,6 +4,21 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.3.8
+
+**The agent no longer downloads its own updates.** It could not work: macOS
+marks everything a sandboxed application writes and refuses to launch an app
+taken from it, so the downloaded package produced "the application cannot be
+opened" no matter what it contained.
+
+Checking for updates is unchanged, and the address it offers still comes from a
+manifest signed with the EgressView release key. The download itself now opens
+in the browser, which puts it back on the ordinary path where macOS checks
+notarisation at first launch.
+
+Installing still means quitting the agent and replacing it by hand. That is not
+a finished feature; a proper installer is being considered separately.
+
 ### Agent for Mac 0.3.7
 
 No functional change from 0.3.6. An agent handles an update with the code it is

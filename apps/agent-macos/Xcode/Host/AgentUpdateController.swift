@@ -90,38 +90,28 @@ final class AgentUpdateController: ObservableObject {
         }
     }
 
-    func openVerifiedInstaller() {
-        guard let packageURL, FileManager.default.fileExists(atPath: packageURL.path) else {
-            clearVerifiedPackage(deleteFile: false)
-            status = L("The verified installer is no longer available. Check again to download it.")
+    /// Opens the release in the user's browser.
+    ///
+    /// The agent used to download the package itself and open it. That could
+    /// not work: macOS marks anything a sandboxed application writes, and
+    /// refuses to launch an app dragged out of it. The download belongs on the
+    /// ordinary path, where Gatekeeper checks it at first launch as it does for
+    /// every other download.
+    ///
+    /// What this agent still guarantees is the address: the manifest carrying
+    /// it was signed with the EgressView release key, checked before this
+    /// button appears.
+    func openDownloadPage() {
+        guard let packageURL else {
+            status = L("No download address for this release. Check again.")
             return
         }
-        guard !isOpeningInstaller else { return }
-        isOpeningInstaller = true
-        status = L("Re-verifying the installer before opening...")
-        let verifier = verifier
-        Task {
-            let result = await Task.detached(priority: .userInitiated) {
-                Result { try verifier.verify(packageAt: packageURL) }
-            }.value
-            isOpeningInstaller = false
-            switch result {
-            case .success:
-                if NSWorkspace.shared.open(packageURL) {
-                    status = L("The verified installer was opened. Drag the app to Applications to finish.")
-                    // Finder cannot replace a running application, and the
-                    // error it shows for that ("the item is in use") does not
-                    // say what to do about it. Offering to quit is the only
-                    // way the drag can succeed, so it is offered here rather
-                    // than left for the user to work out after it fails.
-                    promptToQuitForReplacement()
-                } else {
-                    status = L("macOS could not open the verified installer.")
-                }
-            case .failure(let error):
-                status = L("Installer verification failed: %@", AgentUpdateCoordinator.describe(error))
-            }
+        guard NSWorkspace.shared.open(packageURL) else {
+            status = L("Could not open the browser. The download is at %@", packageURL.absoluteString)
+            return
         }
+        status = L("The download opened in your browser. Quit this app before replacing it in Applications.")
+        promptToQuitForReplacement()
     }
 
     /// Asks whether to quit so the installed copy can be replaced.
@@ -159,7 +149,7 @@ final class AgentUpdateController: ObservableObject {
             status = L("Automatic update checks are off. Use Check now whenever you want to look for a release.")
         case .notDue:
             if let availableVersion {
-                status = L("Version %@ is verified and ready to open.", availableVersion)
+                status = L("Version %@ is available. Downloading opens in your browser.", availableVersion)
             } else if let checked = preferences.lastCheckedAt {
                 status = L("Last checked: %@", Self.format(checked))
             } else {
@@ -168,9 +158,9 @@ final class AgentUpdateController: ObservableObject {
         case .upToDate(let checkedAt):
             clearVerifiedPackage(deleteFile: true)
             status = L("Up to date. Checked %@", Self.format(checkedAt))
-        case let .readyToInstall(version, package):
-            rememberVerifiedPackage(version: version, package: package)
-            status = L("Version %@ is verified and ready to open.", version)
+        case let .updateAvailable(version, url):
+            rememberAvailableUpdate(version: version, url: url)
+            status = L("Version %@ is available. Downloading opens in your browser.", version)
         case .failed(let message):
             status = L("Update check failed: %@", message)
         }
@@ -181,8 +171,7 @@ final class AgentUpdateController: ObservableObject {
               let path = defaults.string(forKey: Self.readyPackageKey) else {
             return
         }
-        let package = URL(fileURLWithPath: path)
-        guard FileManager.default.fileExists(atPath: package.path) else {
+        guard let package = URL(string: path), package.scheme == "https" else {
             clearVerifiedPackage(deleteFile: false)
             return
         }
@@ -201,12 +190,12 @@ final class AgentUpdateController: ObservableObject {
         packageURL = package
     }
 
-    private func rememberVerifiedPackage(version: String, package: URL) {
-        if packageURL != package { clearVerifiedPackage(deleteFile: true) }
+    private func rememberAvailableUpdate(version: String, url package: URL) {
+        if packageURL != package { clearVerifiedPackage(deleteFile: false) }
         availableVersion = version
         packageURL = package
         defaults.set(version, forKey: Self.readyVersionKey)
-        defaults.set(package.path, forKey: Self.readyPackageKey)
+        defaults.set(package.absoluteString, forKey: Self.readyPackageKey)
         if defaults.string(forKey: Self.notifiedVersionKey) != version {
             defaults.set(version, forKey: Self.notifiedVersionKey)
             onUpdateReady(version)
