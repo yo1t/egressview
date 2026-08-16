@@ -154,17 +154,32 @@ public struct ThreatCandidate: Equatable, Sendable {
     public let processName: String
     public let sessionCount: Int
     public let lastObservedAt: Date
+    public let firstObservedAt: Date
+    /// Bytes both ways, over the connections that reported any.
+    public let bytes: UInt64
+    /// How many of those connections never reported a byte count, so the
+    /// figure above can be shown as a floor rather than a total.
+    public let observationsWithoutBytes: Int
 
     public init(
         address: String, hostname: String?, processName: String,
-        sessionCount: Int, lastObservedAt: Date
+        sessionCount: Int, lastObservedAt: Date,
+        firstObservedAt: Date = Date(timeIntervalSince1970: 0),
+        bytes: UInt64 = 0, observationsWithoutBytes: Int = 0
     ) {
         self.address = address
         self.hostname = hostname
         self.processName = processName
         self.sessionCount = sessionCount
         self.lastObservedAt = lastObservedAt
+        self.firstObservedAt = firstObservedAt
+        self.bytes = bytes
+        self.observationsWithoutBytes = observationsWithoutBytes
     }
+
+    /// True when some connections never reported bytes, so the total is a
+    /// lower bound. Byte counts arrive when a connection closes.
+    public var bytesArePartial: Bool { observationsWithoutBytes > 0 }
 }
 
 /// One destination in the period that appears in a threat feed.
