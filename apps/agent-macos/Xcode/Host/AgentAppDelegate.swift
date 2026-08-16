@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import EgressViewAgentCore
 import OSLog
 
@@ -19,6 +20,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var storageResult = makeStorage()
     private lazy var store = try? storageResult.get().store
     private lazy var observationWindow = ObservationWindowController(store: store)
+    private var threatAvailabilityObserver: AnyCancellable?
     private lazy var hubDelivery = HubDeliveryController()
     private lazy var updateController = AgentUpdateController(
         onUpdateReady: { [weak self] version in self?.showUpdateReady(version: version) }
@@ -38,12 +40,18 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         credentialStore: KeychainAgentCredentialStore(),
         agentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
     )
+    private lazy var threatIntelController = ThreatIntelController(
+        store: store,
+        credentialStore: KeychainAgentCredentialStore(),
+        agentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+    )
     private lazy var settingsWindow = SettingsWindowController(
         store: store,
         hub: hubDelivery,
         updates: updateController,
         uninstall: uninstallController,
         geo: geoCacheController,
+        threats: threatIntelController,
         launchController: launchAtLoginController,
         onMonitoringMode: { [weak self] mode in self?.selectMonitoringMode(mode) },
         onRetentionChanged: { [weak self] days in self?.applyRetentionPolicy(days: days) },
@@ -101,6 +109,13 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         // Fetches immediately when nothing is stored yet. Making a fresh
         // install wait a day for its first map would be a strange welcome.
         geoCacheController.start()
+        threatIntelController.start()
+        // The window needs to know whether anyone was in a position to look, so
+        // that "found nothing" is never shown for "never checked".
+        observationWindow.setThreatAvailability(threatIntelController.availability)
+        threatAvailabilityObserver = threatIntelController.$availability.sink { [weak self] value in
+            self?.observationWindow.setThreatAvailability(value)
+        }
     }
 
     private func render(_ status: AgentMonitoringStatus) {

@@ -287,6 +287,32 @@ function needsRefresh() {
   return Date.now() - lastFetch > FETCH_INTERVAL_MS;
 }
 
+// Every indicator, for agents to match against locally.
+//
+// Handed over whole, the same way the location cache is: an agent that asks
+// "is this destination on a list?" by sending the destination has told a third
+// party -- or its own Hub -- exactly what it was worried about. The set is
+// about ten thousand entries, six times smaller than the location cache
+// already being distributed, so there is no reason to be cleverer than this.
+function listIndicators() {
+  return {
+    ips: Array.from(threatIps, ([ip, meta]) => [
+      ip, meta.source || null, meta.tag || null,
+    ]),
+    domains: Array.from(threatDomains, ([domain, meta]) => [
+      domain, meta.source || null, meta.tag || null,
+    ]),
+    // Sent as text so the agent parses one thing, not the network/mask pair
+    // this side happens to keep for speed.
+    cidrs: threatCidrs.map((entry) => [
+      `${numToIp(entry.network)}/${entry.prefix}`,
+      entry.source || null,
+      entry.tag || null,
+    ]),
+    lastFetch,
+  };
+}
+
 function getStats() {
   return { ips: threatIps.size, domains: threatDomains.size, cidrs: threatCidrs.length, lastFetch };
 }
@@ -297,6 +323,7 @@ module.exports = {
   matchThreatIntel,
   needsRefresh,
   getStats,
+  listIndicators,
   // Exposed for testing
   parseCsvLine,
   parseFeodoTracker,

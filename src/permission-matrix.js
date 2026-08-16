@@ -59,6 +59,7 @@ const HTTP_ROUTE_MATRIX = Object.freeze([
   // agent needs before it enrols.
   httpRoute('GET', '/api/agent/capabilities', ACCESS.AGENT, [A.INGEST]),
   httpRoute('GET', '/api/agent/geo-cache', ACCESS.AGENT, [A.INGEST]),
+  httpRoute('GET', '/api/agent/threat-intel', ACCESS.AGENT, [A.INGEST]),
 
   httpRoute('GET', '/api/status', ACCESS.PERMISSION, [R.NETWORK_READ]),
   httpRoute('GET', '/api/connections', ACCESS.PERMISSION, [R.NETWORK_READ]),

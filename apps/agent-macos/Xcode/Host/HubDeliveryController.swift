@@ -386,6 +386,7 @@ private struct AgentSettingsView: View {
     @ObservedObject var updates: AgentUpdateController
     @ObservedObject var uninstall: AgentUninstallController
     @ObservedObject var geo: GeoCacheController
+    @ObservedObject var threats: ThreatIntelController
     @ObservedObject private var language = AgentLanguageSettings.shared
     @State private var section = AgentSettingsSection.general
     @State private var confirmHistoryDeletion = false
@@ -505,6 +506,7 @@ private struct AgentSettingsView: View {
             .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
             Divider().padding(.vertical, 4)
             geoSection
+            threatSection
         }
     }
 
@@ -535,6 +537,54 @@ private struct AgentSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    private var threatSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L("Threat information")).font(.headline)
+            Text(L("Destinations are checked against threat feeds on this Mac. The check itself never leaves the machine, whichever source the feeds came from."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                Button(L("Fetch now")) {
+                    Task { await threats.refresh() }
+                }
+                .disabled(threats.status == .fetching)
+                Text(threatStatusText).font(.caption).foregroundStyle(.secondary)
+            }
+            if threats.isDirectDownloadAvailable {
+                // Offered only without a Hub. With one, the indicators already
+                // arrive from it, and downloading them again would contact
+                // third parties for something already in hand.
+                Toggle(isOn: Binding(
+                    get: { threats.isDirectDownloadEnabled },
+                    set: { threats.isDirectDownloadEnabled = $0 }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("Download threat feeds without a Hub"))
+                        Text(L("Downloads public block lists from abuse.ch and spamhaus.org. No destination from this Mac is sent to them; they only learn that this Mac asked. Off unless you turn it on."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                Text(L("Threat information comes from your Hub. This Mac sends no destinations to anyone."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var threatStatusText: String {
+        switch threats.status {
+        case .idle: return ""
+        case .fetching: return L("Fetching...")
+        case let .updated(count, _): return L("%lld indicators", count)
+        case .unchanged: return L("Already up to date")
+        case .hubHasNoFeeds: return L("The Hub is not running threat feeds")
+        case .notEnabled: return L("Not switched on")
+        case let .failed(message): return message
         }
     }
 
@@ -698,6 +748,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let updates: AgentUpdateController
     private let uninstall: AgentUninstallController
     private let geo: GeoCacheController
+    private let threats: ThreatIntelController
 
     init(
         store: ObservationStore?,
@@ -705,6 +756,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         updates: AgentUpdateController,
         uninstall: AgentUninstallController,
         geo: GeoCacheController,
+        threats: ThreatIntelController,
         launchController: LaunchAtLoginController,
         onMonitoringMode: @escaping (AgentMonitoringMode) -> Void,
         onRetentionChanged: @escaping (Int) -> Void,
@@ -714,6 +766,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.updates = updates
         self.uninstall = uninstall
         self.geo = geo
+        self.threats = threats
         let model = AgentSettingsViewModel(
             store: store,
             launchController: launchController,
@@ -723,7 +776,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         )
         self.model = model
         let hostingController = NSHostingController(
-            rootView: AgentSettingsView(model: model, hub: hub, updates: updates, uninstall: uninstall, geo: geo)
+            rootView: AgentSettingsView(model: model, hub: hub, updates: updates, uninstall: uninstall, geo: geo, threats: threats)
         )
         let window = NSWindow(contentViewController: hostingController)
         window.title = L("EgressView Agent Settings")
