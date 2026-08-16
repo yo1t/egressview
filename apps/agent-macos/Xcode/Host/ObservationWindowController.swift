@@ -1003,53 +1003,64 @@ private struct AgentThreatPanel: View {
         }
     }
 
-    @ViewBuilder
+    /// The detail pane.
+    ///
+    /// Both states -- a selected row and the prompt to select one -- are put
+    /// inside the same always-filling frame. Letting each size itself made the
+    /// pane jump smaller the moment a row was clicked, which moves the table
+    /// under the pointer that just clicked it.
     private var detail: some View {
-        if let finding = report.findings.first(where: { $0.id == selection }) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(finding.candidate.hostname ?? finding.candidate.address)
-                        .font(.title3.weight(.semibold))
-                        .monospaced()
-                        .textSelection(.enabled)
-
-                    LazyVGrid(
-                        columns: [GridItem(.fixed(150), alignment: .trailing),
-                                  GridItem(.flexible(), alignment: .leading)],
-                        alignment: .leading, spacing: 7
-                    ) {
-                        field(L("Address"), finding.candidate.address)
-                        if let hostname = finding.candidate.hostname {
-                            field(L("Name the app asked for"), hostname)
-                        }
-                        field(L("Application"), finding.candidate.processName)
-                        // What was on the list, which is not always the
-                        // destination: a parent domain can be the listed thing.
-                        field(L("What was on the list"), finding.match.matchedValue)
-                        field(L("Kind of indicator"), Self.kindName(finding.match.indicator.kind))
-                        field(L("Feed"), finding.match.indicator.source ?? L("Unknown"))
-                        field(L("Why"), finding.match.indicator.tag ?? L("Listed"))
-                        field(L("Connections"), finding.candidate.sessionCount.formatted())
-                        field(L("Data volume"), Self.volume(finding.candidate))
-                        field(L("First seen"), Self.stamp(finding.candidate.firstObservedAt))
-                        field(L("Last seen"), Self.stamp(finding.candidate.lastObservedAt))
-                    }
-                    .font(.callout)
-
-                    Text(L("A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point. What this Mac knows is that %1$@ reached it %2$lld times.",
-                           finding.candidate.processName, finding.candidate.sessionCount))
-                        .font(.caption)
+        ScrollView {
+            Group {
+                if let finding = report.findings.first(where: { $0.id == selection }) {
+                    detailBody(finding)
+                } else {
+                    Text(L("Select a row to see the whole match."))
+                        .font(.callout)
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-        } else {
-            Text(L("Select a row to see the whole match."))
-                .font(.callout)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func detailBody(_ finding: ThreatFinding) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(finding.candidate.hostname ?? finding.candidate.address)
+                .font(.title3.weight(.semibold))
+                .monospaced()
+                .textSelection(.enabled)
+
+            LazyVGrid(
+                columns: [GridItem(.fixed(150), alignment: .trailing),
+                          GridItem(.flexible(), alignment: .leading)],
+                alignment: .leading, spacing: 7
+            ) {
+                field(L("Address"), finding.candidate.address)
+                if let hostname = finding.candidate.hostname {
+                    field(L("Name the app asked for"), hostname)
+                }
+                field(L("Application"), finding.candidate.processName)
+                // What was on the list, which is not always the destination: a
+                // parent domain can be the listed thing.
+                field(L("What was on the list"), finding.match.matchedValue)
+                field(L("Kind of indicator"), Self.kindName(finding.match.indicator.kind))
+                field(L("Feed"), finding.match.indicator.source ?? L("Unknown"))
+                field(L("Why"), finding.match.indicator.tag ?? L("Listed"))
+                field(L("Connections"), finding.candidate.sessionCount.formatted())
+                field(L("Data volume"), Self.volume(finding.candidate))
+                field(L("First seen"), Self.stamp(finding.candidate.firstObservedAt))
+                field(L("Last seen"), Self.stamp(finding.candidate.lastObservedAt))
+            }
+            .font(.callout)
+
+            Text(L("A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point. What this Mac knows is that %1$@ reached it %2$lld times.",
+                   finding.candidate.processName, finding.candidate.sessionCount))
+                .font(.caption)
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
