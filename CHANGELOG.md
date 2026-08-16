@@ -4,6 +4,13 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.3.7
+
+No functional change from 0.3.6. An agent handles an update with the code it is
+already running, so each fix to the update path needs a newer release to be
+tried against. Three faults have come out of following that path on a real
+machine, none of which any test caught.
+
 ### Agent for Mac 0.3.6
 
 **The menu offered an update to an older version.** Two faults, found by
