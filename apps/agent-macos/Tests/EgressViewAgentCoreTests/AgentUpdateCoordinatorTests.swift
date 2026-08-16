@@ -149,17 +149,15 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
             clock: { now }
         )
 
-        guard case let .readyToInstall(version, file) = await coordinator.runNow() else {
-            return XCTFail("expected a verified package")
+        // The agent no longer downloads: macOS refuses to launch an app taken
+        // from anything a sandboxed application wrote. What it carries is the
+        // address, and what makes that address ours is the release-key
+        // signature on the manifest it came from.
+        guard case let .updateAvailable(version, url) = await coordinator.runNow() else {
+            return XCTFail("expected an available update")
         }
-        defer { try? FileManager.default.removeItem(at: file) }
         XCTAssertEqual(version, "0.1.16")
-        // The hash in the signed manifest is what the downloaded bytes were
-        // checked against; nothing here trusts the file name.
-        XCTAssertEqual(
-            try AgentUpdateDownloader.sha256Hex(of: file),
-            "4bfe51311116a909ee3f0b8da706c121db5b01ffced00c5a3678cb449b8d0db2"
-        )
+        XCTAssertEqual(url.scheme, "https")
         XCTAssertEqual(preferences.lastCheckedAt, now)
     }
 
@@ -193,37 +191,34 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
         XCTAssertNil(preferences.lastCheckedAt)
     }
 
-    func testDeletesAPackageThatFailsVerificationRatherThanLeavingItOnDisk() async throws {
-        let package = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("dist/egressview-agent-0.1.16.dmg")
-        try XCTSkipUnless(
-            FileManager.default.fileExists(atPath: package.path),
-            "build dist/egressview-agent-0.1.16.dmg to run the end-to-end update path"
-        )
+    /// The agent must not fetch the package itself. macOS marks everything a
+    /// sandboxed application writes and refuses to launch an app taken from
+    /// it, so a download here produces something that cannot be installed --
+    /// which is exactly what happened on a real machine.
+    func testDoesNotDownloadThePackageItself() async throws {
         let (preferences, defaults, suite) = try makePreferences()
         defer { defaults.removePersistentDomain(forName: suite) }
+        final class CountingTransport: AgentUpdateDownloadTransport, @unchecked Sendable {
+            var calls = 0
+            func download(_ request: URLRequest) async throws -> (URL, HTTPURLResponse) {
+                calls += 1
+                throw AgentUpdateError.transport("the package must not be downloaded")
+            }
+        }
+        let transport = CountingTransport()
         let coordinator = AgentUpdateCoordinator(
             checker: makeChecker(
                 currentVersion: "0.1.15",
                 transport: ManifestTransport(manifest: Fixture.manifest, signature: Fixture.signature)
             ),
-            downloader: AgentUpdateDownloader(
-                transport: PayloadDownloadTransport(payload: try Data(contentsOf: package))
-            ),
-            verifier: AgentPackageVerifier(
-                currentTeamIdentifier: "TEAMID1234",
-                resolvePackageIdentity: { _ in "SOMEONEELSE" }
-            ),
+            downloader: AgentUpdateDownloader(transport: transport),
             preferences: preferences
         )
 
-        let state = await coordinator.runNow()
-        XCTAssertEqual(
-            state,
-            .failed("The update was signed by a different developer (SOMEONEELSE) than the copy already installed (TEAMID1234).")
-        )
-        XCTAssertNil(preferences.lastCheckedAt)
+        guard case .updateAvailable = await coordinator.runNow() else {
+            return XCTFail("expected an available update")
+        }
+        XCTAssertEqual(transport.calls, 0, "パッケージを取得してはならない")
     }
 
     func testDoesNotAdvanceTheDailyClockWhenTheCheckFails() async throws {

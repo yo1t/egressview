@@ -4,9 +4,16 @@ public enum AgentUpdateState: Equatable, Sendable {
     case disabled
     case notDue
     case upToDate(checkedAt: Date)
-    /// Downloaded, hash-checked against the signed manifest, and accepted by
-    /// Gatekeeper. Installing it is a separate, user-visible act.
-    case readyToInstall(version: String, package: URL)
+    /// A newer release exists, and the URL below came from a manifest signed
+    /// with the release key.
+    ///
+    /// **The agent does not download it.** It used to, and the result could not
+    /// be installed: macOS marks anything written by a sandboxed application
+    /// and refuses to launch an app extracted from it ("File created by an
+    /// AppSandbox, exec/open not allowed"). Handing the address to the browser
+    /// puts the download back on the ordinary path, where Gatekeeper checks
+    /// notarisation at first launch as it does for every other download.
+    case updateAvailable(version: String, url: URL)
     case failed(String)
 }
 
@@ -71,17 +78,12 @@ public actor AgentUpdateCoordinator {
                 preferences.lastCheckedAt = now
                 state = .upToDate(checkedAt: now)
             case let .updateAvailable(version, package):
-                let file = try await downloader.download(package, userAgent: checker.userAgent)
-                do {
-                    try verifier.verify(packageAt: file)
-                } catch {
-                    // A package that fails verification is deleted rather than
-                    // left behind for someone to open by hand.
-                    try? FileManager.default.removeItem(at: file)
-                    throw error
-                }
+                // What is verified here is the manifest, not the bytes: the
+                // release-key signature is what makes this URL ours. The bytes
+                // are checked by macOS when the user opens what they
+                // downloaded.
                 preferences.lastCheckedAt = now
-                state = .readyToInstall(version: version, package: file)
+                state = .updateAvailable(version: version, url: package.url)
             }
         } catch {
             // No `lastCheckedAt` on failure: the daily clock only advances when

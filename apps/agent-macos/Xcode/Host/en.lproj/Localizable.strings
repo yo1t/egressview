@@ -330,3 +330,8 @@
 "Not now" = "Not now";
 "Quit EgressView Agent before dragging the new copy to Applications." = "Quit EgressView Agent before dragging the new copy to Applications.";
 "macOS cannot replace an application while it is running, so dragging the new copy to Applications fails until this one quits. Nothing is recorded between quitting and opening the new copy." = "macOS cannot replace an application while it is running, so dragging the new copy to Applications fails until this one quits. Nothing is recorded between quitting and opening the new copy.";
+"Version %@ is available. Downloading opens in your browser." = "Version %@ is available. Downloading opens in your browser.";
+"Download in browser..." = "Download in browser...";
+"No download address for this release. Check again." = "No download address for this release. Check again.";
+"Could not open the browser. The download is at %@" = "Could not open the browser. The download is at %@";
+"The download opened in your browser. Quit this app before replacing it in Applications." = "The download opened in your browser. Quit this app before replacing it in Applications.";

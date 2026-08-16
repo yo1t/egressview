@@ -323,7 +323,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: L("Open installer"))
         alert.addButton(withTitle: L("Later"))
         if alert.runModal() == .alertFirstButtonReturn {
-            updateController.openVerifiedInstaller()
+            updateController.openDownloadPage()
         }
     }
 
