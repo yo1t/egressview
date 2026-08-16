@@ -4,6 +4,16 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.3.1
+
+Two things the threats tab got wrong on the screen.
+
+- **The detail pane shrank when a row was selected**, which moves the table
+  under the pointer that just clicked it, so the next click lands on a
+  different row than the one aimed at.
+- **The measure and destination-unit controls did nothing on that tab** and now
+  say so by being disabled, as they already are on the connection log.
+
 ## [2.0.0] - 2026-08-16
 
 **EgressView 2.0.0 = Hub 1.10.0 + Agent for Mac 0.3.0.** The release number
