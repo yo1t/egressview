@@ -3,8 +3,11 @@ import EgressViewAgentCore
 import SwiftUI
 
 private enum AgentMainTab: String, CaseIterable, Identifiable {
-    case status
-    case analysis
+    /// What is happening on the network, and whether the agent is in a state to
+    /// know. These were two tabs, and separating them meant the charts could be
+    /// read without ever seeing that collection had stopped -- which is exactly
+    /// how an outage went unnoticed for hours.
+    case network
     /// Its own tab. The log wants the whole window -- rows are long and there
     /// are hundreds of them -- and sharing the screen with the charts left both
     /// too short to read.
@@ -14,8 +17,7 @@ private enum AgentMainTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .status: return L("Status")
-        case .analysis: return L("Analysis")
+        case .network: return L("Network status")
         case .log: return L("Connection log")
         }
     }
@@ -68,7 +70,7 @@ private struct AgentObservationRow: Identifiable {
 
 @MainActor
 private final class AgentMainViewModel: ObservableObject {
-    @Published var selectedTab = AgentMainTab.status
+    @Published var selectedTab = AgentMainTab.network
     @Published var scale = TimeScale.hour {
         didSet { refresh() }
     }
@@ -249,8 +251,7 @@ private struct AgentMainView: View {
             Divider()
             Group {
                 switch model.selectedTab {
-                case .status: statusView
-                case .analysis: analysisView
+                case .network: analysisView
                 case .log: logView
                 }
             }
@@ -301,52 +302,10 @@ private struct AgentMainView: View {
         .padding(.vertical, 16)
     }
 
-    private var statusView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L("Your network, right now"))
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                    Text(L("A local summary for %@. Packet payloads are never collected.", model.scale.title))
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 14) {
-                    metricCard(title: L("Connections"), value: model.summary.sessionCount.formatted(), symbol: "point.3.connected.trianglepath.dotted")
-                    metricCard(title: L("Applications"), value: model.summary.applicationCount.formatted(), symbol: "app.dashed")
-                    metricCard(title: L("Destinations"), value: model.summary.destinationCount.formatted(), symbol: "network")
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Label(L("Collection"), systemImage: "waveform.path.ecg")
-                        .font(.headline)
-                    Text(model.monitoringStatus)
-                        .font(.title3.weight(.medium))
-                    if let storage = model.storage {
-                        Text(storageDescription(storage))
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(18)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
-
-                if let error = model.errorMessage {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                }
-            }
-            .padding(24)
-        }
-    }
-
     private var analysisView: some View {
         VStack(spacing: 0) {
             analysisControls
+            errorBanner
             GeometryReader { proxy in
                 let metrics = AnalysisLayout(size: proxy.size)
                 VStack(spacing: 14) {
@@ -383,10 +342,24 @@ private struct AgentMainView: View {
     private var logView: some View {
         VStack(spacing: 0) {
             analysisControls
+            errorBanner
             connectionTable
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var errorBanner: some View {
+        if let error = model.errorMessage {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 20)
+                .padding(.bottom, 10)
         }
     }
 
@@ -506,38 +479,13 @@ private struct AgentMainView: View {
         .agentSection()
     }
 
-    private func metricCard(title: String, value: String, symbol: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(title, systemImage: symbol)
-                .font(.callout.weight(.medium))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(size: 30, weight: .semibold, design: .rounded))
-                .contentTransition(.numericText())
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
-    }
-
     private func destination(_ observation: ConnectionObservation) -> String {
         let address = observation.remoteAddress.contains(":")
             ? "[\(observation.remoteAddress)]"
             : observation.remoteAddress
         return "\(address):\(observation.remotePort)"
     }
-
-    private func storageDescription(_ statistics: ObservationStoreStatistics) -> String {
-        let size = ByteCountFormatter.string(fromByteCount: statistics.fileSizeBytes, countStyle: .file)
-        return L(
-            "%lld recent records · %lld hourly totals · %@ on disk",
-            statistics.rawCount,
-            statistics.rolledUpCount,
-            size
-        )
-    }
 }
-
 
 // MARK: - Charts
 
@@ -690,10 +638,19 @@ private struct AgentOverviewPanel: View {
             Text(L("This period at a glance"))
                 .font(.title3.weight(.semibold))
 
-            Label(monitoringStatus, systemImage: "dot.radiowaves.left.and.right")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
+            // Collection state sits with the numbers it produced. It used to
+            // live on a separate tab, which meant the charts could be read
+            // without ever seeing that collection had stopped.
+            VStack(alignment: .leading, spacing: 4) {
+                Label(monitoringStatus, systemImage: "dot.radiowaves.left.and.right")
+                    .font(.callout.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let storage {
+                    Text(storageDescription(storage))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             // Coverage sits with the counts, not below the charts, because it
             // is what tells the reader whether the counts mean anything.
@@ -716,16 +673,33 @@ private struct AgentOverviewPanel: View {
             // No threat intelligence here on purpose. This agent classifies
             // nothing on its own, and a panel that looked like a verdict would
             // be inventing one.
-            Label(
-                L("Threat classification comes from a Hub. This agent reports what it saw and judges none of it."),
-                systemImage: "info.circle"
-            )
+            VStack(alignment: .leading, spacing: 5) {
+                Label(
+                    L("Packet contents are never collected."),
+                    systemImage: "lock"
+                )
+                Label(
+                    L("Threat classification comes from a Hub. This agent reports what it saw and judges none of it."),
+                    systemImage: "info.circle"
+                )
+            }
             .font(.caption)
             .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .agentSection()
+    }
+
+    private func storageDescription(_ statistics: ObservationStoreStatistics) -> String {
+        let size = ByteCountFormatter.string(fromByteCount: statistics.fileSizeBytes, countStyle: .file)
+        return L(
+            "%lld recent records · %lld hourly totals · %@ on disk",
+            statistics.rawCount,
+            statistics.rolledUpCount,
+            size
+        )
     }
 
     private func tile(_ title: String, _ value: String, _ symbol: String) -> some View {

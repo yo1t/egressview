@@ -261,3 +261,5 @@
 "Source" = "Source";
 "Destination" = "Destination";
 "Connection log" = "Connection log";
+"Network status" = "Network status";
+"Packet contents are never collected." = "Packet contents are never collected.";

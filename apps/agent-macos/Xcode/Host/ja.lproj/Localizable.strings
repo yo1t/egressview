@@ -261,3 +261,5 @@
 "Source" = "通信元";
 "Destination" = "通信先";
 "Connection log" = "通信ログ";
+"Network status" = "ネットワーク状況";
+"Packet contents are never collected." = "パケットの中身は収集しません。";
