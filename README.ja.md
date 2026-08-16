@@ -8,7 +8,7 @@
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
-![Release](https://img.shields.io/badge/release-v1.9.0-3fb950)
+![Release](https://img.shields.io/badge/release-v2.0.0-3fb950)
 
 > 🇬🇧 [English README](README.md) | 🌐 [プロジェクトページ](https://yo1t.github.io/egressview/index.ja.html) | 📋 [変更履歴](CHANGELOG.md) · [リリース](https://github.com/yo1t/egressview/releases)
 
@@ -152,7 +152,7 @@ npm start
 
 | | |
 |---|---|
-| [macOS Agent](apps/agent-macos/README.md) | Macのどのアプリが通信したかまで分かります（Hub 1.9.0以降が必要） |
+| [macOS Agent](apps/agent-macos/README.md) | Macのどのアプリが、どこへ通信したかが地図で分かり、通信先が脅威フィードに載っているかも照合します（Hub 1.9.0以降が必要。脅威フィードはHub 1.10.0以降） |
 | [AIアシスタント連携（MCP）](docs/setup-mcp.ja.md) | Claude・Kiro・Cursorから自然言語で質問できます。11本のツール、stdio / HTTP対応 |
 | [AI Insights](docs/setup-ai-insights.ja.md) · [Bedrock](docs/setup-bedrock.ja.md) | Ollama・Anthropic・OpenAI・Amazon Bedrockによる要約と分析。月次のトークン数と概算コストを記録します |
 | [認証とHTTPS](docs/authentication.ja.md) | セッション・Google OIDC・権限・監査ログ・TLSの有効化。**インターネットへ公開する前に必ず読んでください** |

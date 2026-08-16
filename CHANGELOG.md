@@ -4,6 +4,54 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-16
+
+**EgressView 2.0.0 = Hub 1.10.0 + Agent for Mac 0.3.0.** The release number
+belongs to the pack; each component keeps its own. Nothing about the Hub is a
+breaking change, which is why it is 1.10.0 and not 2.0.0.
+
+The Mac agent stopped being a source of rows and became something you can look
+at. It draws where this Mac's traffic goes, which application sent it, when, and
+whether the destination appears on a threat feed -- and it does the last one
+without telling anyone which addresses it asked about.
+
+**Upgrading the Hub from 1.9.0 requires no migration.** The agent's own database
+migrates on launch (schema 4 → 7), append-only, preserving history.
+
+### Added
+
+- **Threat information for the agent.** New `GET /api/agent/threat-intel` hands
+  the whole indicator set to an enrolled agent, which matches destinations
+  locally. Asking "is this address dangerous?" by sending the address would tell
+  the other end exactly what the user was worried about, so the questions never
+  leave the Mac. Around 9,500 indicators, ~580 KiB, `ETag`/`304`.
+- **Standalone agents may download the same public lists themselves**, opt-in and
+  off by default. These are plain downloads rather than lookup services: no key,
+  and no destination is sent. The choice between Hub and direct download is never
+  made automatically -- a Hub-enrolled agent is not offered the setting, so Hub
+  downtime cannot start contacting third parties on its own.
+- **A map, a flow diagram and a timeline in the agent**, sharing one period.
+  Traffic is drawn as great-circle arcs leaving this Mac; the globe turns, and
+  can be stopped or slowed.
+- **CSV export** of the selected period, and a connection log that sorts and
+  filters by column, with country, data volume and port.
+- **The agent records when it was actually watching**, and says what share of a
+  period it could not see -- and separately how much of that was the Mac asleep,
+  which is not a fault.
+
+### Fixed
+
+- **The agent said "Network monitoring active" while recording nothing.** Four
+  updates in a row stopped collection silently. Status now means traffic has
+  arrived, and the app asks macOS every minute which copy of the extension it is
+  running.
+- **The connection log ignored the name/address setting** and always showed
+  addresses.
+- **Export CSV did nothing when pressed.** An accessory application has nothing
+  to put a modal panel in front of.
+- **The agent used a fifth of a CPU core while its window was open.** It now
+  loads only what the visible tab shows, and refreshes less often.
+
 ## [1.9.0] - 2026-08-13
 
 A router shows what left the house but not which application sent it. This

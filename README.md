@@ -8,7 +8,7 @@ No new hardware. No inline traffic interception. It reads the NAT session tables
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
-![Release](https://img.shields.io/badge/release-v1.9.0-3fb950)
+![Release](https://img.shields.io/badge/release-v2.0.0-3fb950)
 
 > 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/egressview/) | 📋 [Changelog](CHANGELOG.md) · [Releases](https://github.com/yo1t/egressview/releases)
 
@@ -152,7 +152,7 @@ Each of these is optional and has its own guide.
 
 | | |
 |---|---|
-| [macOS Agent](apps/agent-macos/README.md) | See which application on a Mac made a connection, not just that the Mac made it (needs Hub 1.9.0+) |
+| [macOS Agent](apps/agent-macos/README.md) | See which application on a Mac made a connection, where it went on a map, and whether the destination is on a threat feed (needs Hub 1.9.0+; threat feeds need Hub 1.10.0+) |
 | [AI assistant access (MCP)](docs/setup-mcp.md) | Ask about your network in plain language from Claude, Kiro, or Cursor — 11 tools, stdio or HTTP |
 | [AI Insights](docs/setup-ai-insights.md) · [Bedrock](docs/setup-bedrock.md) | Summaries and analysis through Ollama, Anthropic, OpenAI, or Amazon Bedrock, with monthly token and cost tracking |
 | [Authentication & HTTPS](docs/authentication.md) | Sessions, Google OIDC, roles, audit log, and turning on TLS. **Read this before exposing EgressView to the internet** |
