@@ -4,6 +4,19 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-08-16
+
+**EgressView 2.0.1 = Hub 1.10.0 (unchanged) + Agent for Mac 0.3.8.**
+
+Everything here is the Mac agent. Most of it comes from following the in-app
+update path on a real machine for the first time, which broke four times in a
+row -- and every one of those faults had passing tests. The last of them was not
+a bug but a mistaken premise: a sandboxed application cannot hand the user
+something the user is then allowed to launch.
+
+**Nothing needs doing to the Hub.** Agents on 0.3.0 or newer will offer 0.3.8
+when they next check.
+
 ### Agent for Mac 0.3.8
 
 **The agent no longer downloads its own updates.** It could not work: macOS
