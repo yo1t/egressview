@@ -8,7 +8,7 @@ No new hardware. No inline traffic interception. It reads the NAT session tables
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
-![Release](https://img.shields.io/badge/release-v2.0.0-3fb950)
+![Release](https://img.shields.io/badge/release-v2.0.1-3fb950)
 
 > 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/egressview/) | 📋 [Changelog](CHANGELOG.md) · [Releases](https://github.com/yo1t/egressview/releases)
 
