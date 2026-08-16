@@ -12,12 +12,16 @@ private enum AgentMainTab: String, CaseIterable, Identifiable {
     /// are hundreds of them -- and sharing the screen with the charts left both
     /// too short to read.
     case log
+    /// Its own tab rather than a badge somewhere. If a destination on a threat
+    /// feed was reached, that is not a detail of another view.
+    case threats
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .network: return L("Network status")
+        case .threats: return L("Threats")
         case .log: return L("Connection log")
         }
     }
@@ -167,6 +171,9 @@ private final class AgentMainViewModel: ObservableObject {
         share: 1, firstCovered: nil, gaps: [], startedInsidePeriod: false
     )
     @Published private(set) var sleepPeriods: [DateInterval] = []
+    @Published private(set) var threats = ThreatReport(findings: [], availability: .notFetchedYet)
+    /// Set by the app delegate from the controller that fetches indicators.
+    var threatAvailability: ThreatIntelAvailability = .notFetchedYet
     @Published private(set) var storage: ObservationStoreStatistics?
     @Published private(set) var monitoringStatus = L("Monitoring paused")
     @Published private(set) var errorMessage: String?
@@ -299,6 +306,7 @@ private final class AgentMainViewModel: ObservableObject {
         isRefreshing = true
         let selection = VisualizationSelection(scale: scale, metric: metric, end: Date())
         let grouping = destinationGrouping
+        let availability = threatAvailability
         loadQueue.async { [weak self] in
             let from = selection.start
             let to = selection.end
@@ -321,6 +329,11 @@ private final class AgentMainViewModel: ObservableObject {
                 // been measured; otherwise every bar would be empty.
                 let measuredBytes = pairs.contains { $0.bytes > 0 }
                 let sleeps = try store.sleepPeriods(from: from, to: to)
+                let threats = ThreatReport.evaluate(
+                    candidates: try store.destinationsForThreatMatching(from: from, to: to),
+                    matcher: ThreatMatcher(indicators: try store.threatIndicators()),
+                    availability: availability
+                )
                 let coverage = CoverageCalculator.summarize(
                     sessions: try store.coverageSessions(from: from, to: to),
                     sleepPeriods: sleeps,
@@ -338,7 +351,7 @@ private final class AgentMainViewModel: ObservableObject {
                     observations, summary, try store.statistics(),
                     SankeyAggregator().aggregate(pairs, metric: selection.metric),
                     TimelineAggregator().aggregate(buckets, selection: selection),
-                    measuredBytes, globe, coverage, countries, sleeps
+                    measuredBytes, globe, coverage, countries, sleeps, threats
                 )
             }
             DispatchQueue.main.async {
@@ -351,6 +364,7 @@ private final class AgentMainViewModel: ObservableObject {
                     self.globe = value.6
                     self.coverage = value.7
                     self.sleepPeriods = value.9
+                    self.threats = value.10
                     self.availableMetrics = VisualizationSelection.availableMetrics(
                         hasMeasuredBytes: value.5
                     )
@@ -389,6 +403,7 @@ private struct AgentMainView: View {
             Group {
                 switch model.selectedTab {
                 case .network: analysisView
+                case .threats: threatsView
                 case .log: logView
                 }
             }
@@ -453,7 +468,8 @@ private struct AgentMainView: View {
                             summary: model.summary,
                             coverage: model.coverage,
                             monitoringStatus: model.monitoringStatus,
-                            storage: model.storage
+                            storage: model.storage,
+                            threats: model.threats
                         )
                         .frame(maxWidth: .infinity)
                         .frame(height: metrics.topHeight)
@@ -476,6 +492,17 @@ private struct AgentMainView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)
             }
+        }
+    }
+
+    private var threatsView: some View {
+        VStack(spacing: 0) {
+            analysisControls
+            errorBanner
+            AgentThreatPanel(report: model.threats, scale: model.scale)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 18)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -780,6 +807,125 @@ private struct AgentLogFilterBar: View {
     }
 }
 
+/// The threats tab.
+///
+/// Its most important job is the one that shows nothing: saying "nobody
+/// looked" rather than "nothing found". An empty list from a screen that never
+/// had indicators would present an unexamined period as a clean one, which is
+/// the same failure as an empty chart reading as a quiet network.
+private struct AgentThreatPanel: View {
+    let report: ThreatReport
+    let scale: TimeScale
+
+    static func reason(_ availability: ThreatIntelAvailability) -> String {
+        switch availability {
+        case .checked:
+            return ""
+        case .notEnabled:
+            return L("Threat information is not switched on, so nothing was checked. Connect a Hub, or turn on feed downloads in settings.")
+        case .hubHasNoFeeds:
+            return L("The Hub is not running threat feeds, so nothing was checked.")
+        case .notFetchedYet:
+            return L("Threat information has not arrived yet, so nothing was checked.")
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            if !report.wasChecked {
+                AgentEmptyChartNote(text: Self.reason(report.availability))
+                Spacer(minLength: 0)
+            } else if report.findings.isEmpty {
+                AgentEmptyChartNote(
+                    text: L("Nothing in this period matched a threat feed. That covers the feeds this agent holds, and nothing beyond them.")
+                )
+                Spacer(minLength: 0)
+            } else {
+                table
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .agentSection()
+    }
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L("Destinations on a threat feed"))
+                    .font(.title2.weight(.semibold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if report.wasChecked, report.destinationCount > 0 {
+                Label(
+                    L("%lld destinations", report.destinationCount),
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var subtitle: String {
+        guard case let .checked(count, fetchedAt) = report.availability else {
+            return L("Nothing was checked in %@", scale.title)
+        }
+        guard let fetchedAt else {
+            return L("%1$lld indicators, %2$@", count, scale.title)
+        }
+        return L("%1$lld indicators updated %2$@, %3$@",
+                 count,
+                 RelativeDateTimeFormatter().localizedString(for: fetchedAt, relativeTo: Date()),
+                 scale.title)
+    }
+
+    private var table: some View {
+        Table(report.findings) {
+            TableColumn(L("Destination")) { finding in
+                Text(finding.candidate.hostname ?? finding.candidate.address)
+                    .monospaced()
+                    .help(finding.candidate.address)
+            }
+            .width(min: 180, ideal: 260)
+            TableColumn(L("Application")) { finding in
+                Text(finding.candidate.processName)
+            }
+            .width(min: 120, ideal: 160)
+            // What was on the list, which is not always the destination: a
+            // parent domain can be the listed thing.
+            TableColumn(L("Matched")) { finding in
+                Text(finding.match.matchedValue)
+                    .monospaced()
+            }
+            .width(min: 150, ideal: 200)
+            TableColumn(L("Why")) { finding in
+                Text(finding.match.indicator.tag ?? L("Listed"))
+            }
+            .width(min: 150, ideal: 220)
+            TableColumn(L("Feed")) { finding in
+                Text(finding.match.indicator.source ?? L("Unknown"))
+            }
+            .width(100)
+            TableColumn(L("Connections")) { finding in
+                Text(finding.candidate.sessionCount.formatted())
+                    .monospacedDigit()
+            }
+            .width(90)
+            TableColumn(L("Last seen")) { finding in
+                Text(finding.candidate.lastObservedAt, style: .time)
+                    .monospacedDigit()
+            }
+            .width(90)
+        }
+        .frame(maxHeight: .infinity)
+    }
+}
+
 // MARK: - Charts
 
 private func formattedMetric(_ value: Double, _ metric: TrafficMetric) -> String {
@@ -929,6 +1075,7 @@ private struct AgentOverviewPanel: View {
     let coverage: CoverageSummary
     let monitoringStatus: String
     let storage: ObservationStoreStatistics?
+    let threats: ThreatReport
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -963,6 +1110,14 @@ private struct AgentOverviewPanel: View {
                 tile(L("Applications"), summary.applicationCount.formatted(), "app.dashed")
                 tile(L("Destinations"), summary.destinationCount.formatted(), "network")
                 tile(L("Monitored"), "\(Int((coverage.share * 100).rounded()))%", "clock.badge.checkmark")
+                // A dash, not a zero, when nothing checked. Zero is an answer
+                // and this would not be one.
+                tile(
+                    L("Threats"),
+                    threats.wasChecked ? threats.destinationCount.formatted() : "—",
+                    threats.wasChecked && threats.destinationCount > 0
+                        ? "exclamationmark.triangle.fill" : "shield"
+                )
             }
 
             Spacer(minLength: 0)
@@ -975,10 +1130,9 @@ private struct AgentOverviewPanel: View {
                     L("Packet contents are never collected."),
                     systemImage: "lock"
                 )
-                Label(
-                    L("Threat classification comes from a Hub. This agent reports what it saw and judges none of it."),
-                    systemImage: "info.circle"
-                )
+                if !threats.wasChecked {
+                    Label(AgentThreatPanel.reason(threats.availability), systemImage: "info.circle")
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -1741,6 +1895,13 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     @MainActor
     /// Miniaturised counts as not visible. The window is still "loaded", but
     /// querying and redrawing for a dock icon is work spent on nobody.
+    /// Whether anyone was in a position to look for threats. Held on the model
+    /// so a period nobody checked is never presented as a clean one.
+    func setThreatAvailability(_ availability: ThreatIntelAvailability) {
+        model.threatAvailability = availability
+        model.refresh()
+    }
+
     func windowDidMiniaturize(_ notification: Notification) {
         model.isWindowVisible = false
     }

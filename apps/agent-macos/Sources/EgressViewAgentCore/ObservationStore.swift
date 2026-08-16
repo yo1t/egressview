@@ -326,6 +326,21 @@ public final class ObservationStore: @unchecked Sendable {
             )
             try execute("PRAGMA user_version=6")
         }
+        if version < 7 {
+            // Threat indicators, received whole and matched locally. Kept here
+            // rather than in memory so a restart does not leave the screen
+            // unable to say anything until the next fetch.
+            try execute("""
+            CREATE TABLE IF NOT EXISTS threat_indicators (
+                kind TEXT NOT NULL,
+                value TEXT NOT NULL,
+                source TEXT,
+                tag TEXT,
+                PRIMARY KEY (kind, value)
+            )
+            """)
+            try execute("PRAGMA user_version=7")
+        }
     }
 
     // MARK: - Coverage
@@ -424,6 +439,88 @@ public final class ObservationStore: @unchecked Sendable {
             let start = max(from, Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)))
             let end = min(to, Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)))
             if end > start { result.append(DateInterval(start: start, end: end)) }
+        }
+        return result
+    }
+
+    // MARK: - Threat indicators
+
+    /// Replaces the whole indicator set in one transaction.
+    ///
+    /// Whole, not merged: a feed dropping an entry means it is no longer
+    /// considered dangerous, and merging would keep condemning it forever.
+    public func replaceThreatIndicators(_ indicators: [ThreatIndicator]) throws {
+        try execute("BEGIN IMMEDIATE")
+        do {
+            try execute("DELETE FROM threat_indicators")
+            let statement = try prepare("""
+            INSERT OR REPLACE INTO threat_indicators (kind, value, source, tag)
+            VALUES (?, ?, ?, ?)
+            """)
+            defer { sqlite3_finalize(statement) }
+            for indicator in indicators {
+                sqlite3_reset(statement)
+                bindText(statement, 1, indicator.kind.rawValue)
+                bindText(statement, 2, indicator.value)
+                bindOptionalText(statement, 3, indicator.source)
+                bindOptionalText(statement, 4, indicator.tag)
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    throw ObservationStoreError.statement(lastMessage)
+                }
+            }
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    public func threatIndicators() throws -> [ThreatIndicator] {
+        let statement = try prepare("SELECT kind, value, source, tag FROM threat_indicators")
+        defer { sqlite3_finalize(statement) }
+        var result: [ThreatIndicator] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let kindText = text(statement, 0),
+                  let kind = ThreatIndicator.Kind(rawValue: kindText),
+                  let value = text(statement, 1)
+            else { continue }
+            result.append(ThreatIndicator(
+                kind: kind, value: value, source: text(statement, 2), tag: text(statement, 3)
+            ))
+        }
+        return result
+    }
+
+    public func threatIndicatorCount() throws -> Int {
+        try scalar("SELECT count(*) FROM threat_indicators") ?? 0
+    }
+
+    /// Distinct destinations in the period, for matching against the
+    /// indicators. Matching happens in Swift rather than in SQL because the
+    /// parent-domain and CIDR rules are not expressible as a join, and having
+    /// two implementations of the rules is exactly what is being avoided.
+    public func destinationsForThreatMatching(
+        from: Date, to: Date
+    ) throws -> [ThreatCandidate] {
+        let statement = try prepare("""
+        SELECT remote_address, remote_hostname, process_name,
+               count(*), max(last_observed_at)
+        FROM observations
+        WHERE last_observed_at >= \(from.timeIntervalSince1970)
+          AND last_observed_at <= \(to.timeIntervalSince1970)
+        GROUP BY remote_address, remote_hostname, process_name
+        """)
+        defer { sqlite3_finalize(statement) }
+        var result: [ThreatCandidate] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let address = text(statement, 0) else { continue }
+            result.append(ThreatCandidate(
+                address: address,
+                hostname: text(statement, 1),
+                processName: text(statement, 2) ?? "",
+                sessionCount: Int(sqlite3_column_int64(statement, 3)),
+                lastObservedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+            ))
         }
         return result
     }
