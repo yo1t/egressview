@@ -1,0 +1,21 @@
+#!/bin/sh
+# Refuse to commit the backlog into the product repo.
+#
+# `backlog/` is gitignored and lives in its own private repo. It holds
+# operational detail and half-formed judgement that was not written to ship
+# with the code, and `git add -f` is enough to defeat the ignore rule. A rule
+# that says "do not do this" does not stop it happening; this does.
+#
+# If a commit genuinely needs to include it, remove the file from the index
+# rather than disabling the hook.
+# Matches both `backlog/<file>` and a bare `backlog` -- the latter is what
+# `git add -f backlog` produces now that it is its own repository, and a
+# pattern requiring the slash would have let exactly that through. Found by
+# testing the hook rather than by reading it.
+staged=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '^backlog(/|$)' || true)
+if [ -n "$staged" ]; then
+    printf 'Refusing to commit: backlog/ belongs to the private egressview-backlog repo.\n\n' >&2
+    printf '%s\n' "$staged" >&2
+    printf '\nUnstage it with:\n  git restore --staged backlog\n' >&2
+    exit 1
+fi

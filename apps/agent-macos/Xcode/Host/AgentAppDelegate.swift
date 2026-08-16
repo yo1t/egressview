@@ -67,6 +67,12 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         }
     )
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // Closes the current stretch of coverage. A session left open would
+        // claim the app was watching for however long it was quit.
+        controller.endCoverageForShutdown()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         applyMenuBarIcon(for: .paused)
         _ = hubDelivery
@@ -86,6 +92,10 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         }
         applyRetentionPolicy()
         controller.restoreMonitoringState()
+        // Asks macOS whether monitoring is really running, rather than assuming
+        // that installing it was enough.
+        controller.startHealthChecks()
+        controller.startWatchingSleep()
         showUpdateDisclosureIfNeeded()
         Task { await updateController.runIfDue() }
         // Fetches immediately when nothing is stored yet. Making a fresh
@@ -229,7 +239,12 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     private func monitoringMode(for status: AgentMonitoringStatus) -> AgentMonitoringMode? {
         switch status {
-        case .fullActive, .fullActivationRequested, .approvalRequired, .rebootRequired: return .full
+        case .fullActive, .fullStarting, .fullActivationRequested, .approvalRequired,
+             .rebootRequired, .updateNotRunning:
+            // A stalled update is still full monitoring as far as the mode
+            // picker goes; the user chose it, and it is not their setting that
+            // is wrong.
+            return .full
         case .lightweight: return .lightweight
         case .paused: return .paused
         case .deactivating, .removalApprovalRequired, .removalRebootRequired, .failed: return nil

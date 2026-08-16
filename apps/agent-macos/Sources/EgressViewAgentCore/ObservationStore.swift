@@ -279,6 +279,173 @@ public final class ObservationStore: @unchecked Sendable {
             """)
             try execute("PRAGMA user_version=4")
         }
+        if version < 5 {
+            // When monitoring was actually running. Without this, a period with
+            // no connections and a period that was never watched look
+            // identical, and every chart quietly presents the second as the
+            // first. `ended_at` is null while a session is open.
+            try execute("""
+            CREATE TABLE IF NOT EXISTS coverage_sessions (
+                id INTEGER PRIMARY KEY,
+                started_at REAL NOT NULL,
+                ended_at REAL
+            )
+            """)
+            try execute(
+                "CREATE INDEX IF NOT EXISTS coverage_sessions_started ON coverage_sessions(started_at)"
+            )
+            // History collected before this table existed has no record of when
+            // monitoring was running, so it is credited with one session
+            // spanning what was observed. That is an inference, and it can
+            // cover a real outage inside the span -- but the alternative is
+            // telling the user that months of data they watched arrive were
+            // never monitored, which is both false and more alarming. Periods
+            // after this upgrade are measured rather than inferred.
+            try execute("""
+            INSERT INTO coverage_sessions (started_at, ended_at)
+            SELECT min(first_observed_at), max(last_observed_at) FROM observations
+            HAVING count(*) > 0
+            """)
+            try execute("PRAGMA user_version=5")
+        }
+        if version < 6 {
+            // When the Mac was asleep. A sleep and a monitoring failure both
+            // leave a hole in the record, and they mean opposite things: one is
+            // the machine not running, the other is this agent not working.
+            // Without this they are indistinguishable, and a sleep gets read as
+            // a fault -- which is exactly what happened on 2026-08-15.
+            try execute("""
+            CREATE TABLE IF NOT EXISTS sleep_periods (
+                id INTEGER PRIMARY KEY,
+                started_at REAL NOT NULL,
+                ended_at REAL
+            )
+            """)
+            try execute(
+                "CREATE INDEX IF NOT EXISTS sleep_periods_started ON sleep_periods(started_at)"
+            )
+            try execute("PRAGMA user_version=6")
+        }
+    }
+
+    // MARK: - Coverage
+
+    /// Records that monitoring started. Any session left open by a previous run
+    /// is closed first, at the last moment we know data was arriving -- an
+    /// abrupt end is still an end, and leaving it open would claim coverage for
+    /// a period that has none.
+    public func beginCoverageSession(at date: Date) throws {
+        try closeOpenCoverageSessions(fallbackEnd: date)
+        try execute(
+            "INSERT INTO coverage_sessions (started_at, ended_at) VALUES (\(date.timeIntervalSince1970), NULL)"
+        )
+    }
+
+    public func endCoverageSession(at date: Date) throws {
+        try execute("""
+        UPDATE coverage_sessions SET ended_at = \(date.timeIntervalSince1970)
+        WHERE ended_at IS NULL
+        """)
+    }
+
+    private func closeOpenCoverageSessions(fallbackEnd: Date) throws {
+        // The last observation is the last proof of coverage. Falling back to
+        // the session's own start means a crashed run claims nothing.
+        try execute("""
+        UPDATE coverage_sessions
+        SET ended_at = max(
+            started_at,
+            coalesce((SELECT max(last_observed_at) FROM observations), started_at)
+        )
+        WHERE ended_at IS NULL
+        """)
+    }
+
+    /// Country codes for the addresses given, for the ones that are known.
+    ///
+    /// Looked up for the rows on screen rather than by loading the whole cache:
+    /// it holds tens of thousands of entries and the log shows at most a few
+    /// hundred addresses.
+    public func countryCodes(forAddresses addresses: [String]) throws -> [String: String] {
+        let unique = Array(Set(addresses))
+        guard !unique.isEmpty else { return [:] }
+        var result: [String: String] = [:]
+        // Chunked: SQLite has a limit on how many values a statement may bind.
+        for chunk in stride(from: 0, to: unique.count, by: 400).map({
+            Array(unique[$0..<min($0 + 400, unique.count)])
+        }) {
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let statement = try prepare("""
+            SELECT ip, country_code FROM geo_locations
+            WHERE country_code IS NOT NULL AND ip IN (\(placeholders))
+            """)
+            defer { sqlite3_finalize(statement) }
+            for (index, address) in chunk.enumerated() {
+                bindText(statement, Int32(index + 1), address)
+            }
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let ip = text(statement, 0), let code = text(statement, 1) else { continue }
+                result[ip] = code
+            }
+        }
+        return result
+    }
+
+    /// Records that the Mac went to sleep. Any period left open is closed
+    /// first: a sleep that was never woken from is a sleep that ended when the
+    /// machine came back, and leaving it open would swallow everything since.
+    public func beginSleepPeriod(at date: Date) throws {
+        try execute("""
+        UPDATE sleep_periods SET ended_at = \(date.timeIntervalSince1970)
+        WHERE ended_at IS NULL
+        """)
+        try execute(
+            "INSERT INTO sleep_periods (started_at, ended_at) VALUES (\(date.timeIntervalSince1970), NULL)"
+        )
+    }
+
+    public func endSleepPeriod(at date: Date) throws {
+        try execute("""
+        UPDATE sleep_periods SET ended_at = \(date.timeIntervalSince1970)
+        WHERE ended_at IS NULL
+        """)
+    }
+
+    public func sleepPeriods(from: Date, to: Date) throws -> [DateInterval] {
+        let statement = try prepare("""
+        SELECT started_at, coalesce(ended_at, \(to.timeIntervalSince1970)) FROM sleep_periods
+        WHERE started_at <= \(to.timeIntervalSince1970)
+          AND coalesce(ended_at, \(Date.distantFuture.timeIntervalSince1970)) >= \(from.timeIntervalSince1970)
+        ORDER BY started_at
+        """)
+        defer { sqlite3_finalize(statement) }
+        var result: [DateInterval] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let start = max(from, Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)))
+            let end = min(to, Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)))
+            if end > start { result.append(DateInterval(start: start, end: end)) }
+        }
+        return result
+    }
+
+    public func coverageSessions(from: Date, to: Date) throws -> [CoverageSession] {
+        let statement = try prepare("""
+        SELECT started_at, ended_at FROM coverage_sessions
+        WHERE started_at <= \(to.timeIntervalSince1970)
+          AND coalesce(ended_at, \(Date.distantFuture.timeIntervalSince1970)) >= \(from.timeIntervalSince1970)
+        ORDER BY started_at
+        """)
+        defer { sqlite3_finalize(statement) }
+        var result: [CoverageSession] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let end = sqlite3_column_type(statement, 1) == SQLITE_NULL
+                ? nil : sqlite3_column_double(statement, 1)
+            result.append(CoverageSession(
+                start: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)),
+                end: end.map(Date.init(timeIntervalSince1970:))
+            ))
+        }
+        return result
     }
 
     // MARK: - Writing

@@ -282,7 +282,8 @@ private final class AgentSettingsViewModel: ObservableObject {
     func updateMonitoringStatus(_ status: AgentMonitoringStatus) {
         monitoringStatus = status.label
         switch status {
-        case .fullActive, .fullActivationRequested, .approvalRequired, .rebootRequired:
+        case .fullActive, .fullStarting, .fullActivationRequested, .approvalRequired,
+             .rebootRequired, .updateNotRunning:
             monitoringMode = .full
         case .lightweight:
             monitoringMode = .lightweight
