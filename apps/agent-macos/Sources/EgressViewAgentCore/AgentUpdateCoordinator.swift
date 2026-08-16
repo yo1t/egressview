@@ -108,8 +108,14 @@ public actor AgentUpdateCoordinator {
             return "The download was incomplete (\(actual) of \(expected) bytes)."
         case AgentPackageVerificationError.runningBuildIsNotTeamSigned:
             return "This build is not signed with a developer identity, so it cannot verify an update."
-        case let AgentPackageVerificationError.teamIdentifierMismatch(_, actual):
-            return "The downloaded package was signed by a different developer (\(actual))."
+        case let AgentPackageVerificationError.teamIdentifierMismatch(expected, actual):
+            return "The update was signed by a different developer (\(actual)) than the copy already installed (\(expected))."
+        case AgentPackageVerificationError.teamIdentifierMissing:
+            return "The downloaded package is not signed by a developer this Mac can identify."
+        case let AgentPackageVerificationError.signatureInvalid(status):
+            return "The downloaded package's signature did not verify (code \(status))."
+        case AgentPackageVerificationError.packageUnreadable:
+            return "The downloaded package could not be read for verification."
         case let AgentPackageVerificationError.notarisationRejected(reason):
             return "macOS refused the downloaded package: \(reason)"
         default:
