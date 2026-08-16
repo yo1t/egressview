@@ -323,3 +323,4 @@
 "At least this much. %lld of these connections have not reported a byte count yet." = "At least this much. %lld of these connections have not reported a byte count yet.";
 "Measured over connections that have closed." = "Measured over connections that have closed.";
 "A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point. What this Mac knows is that %1$@ reached it %2$lld times." = "A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point. What this Mac knows is that %1$@ reached it %2$lld times.";
+"Threats show the name and the address together, so there is nothing to choose between." = "Threats show the name and the address together, so there is nothing to choose between.";
