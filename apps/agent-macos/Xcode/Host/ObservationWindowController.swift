@@ -251,6 +251,11 @@ private struct AgentMainView: View {
 
     private var header: some View {
         HStack(spacing: 18) {
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 34, height: 34)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("EgressView Agent")
                     .font(.title2.weight(.semibold))
@@ -329,38 +334,85 @@ private struct AgentMainView: View {
     }
 
     private var analysisView: some View {
-        // The table is not inside the ScrollView. A Table brings its own
-        // scrolling, so nesting it leaves it no height at all and the
-        // connection log disappears without any error -- which is exactly what
-        // happened. Keeping them as siblings removes the possibility.
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    HStack(spacing: 16) {
-                        metricPicker
-                        destinationGroupingPicker
-                        Spacer()
-                        Button {
-                            model.exportCSV()
-                        } label: {
-                            Label(L("Export CSV..."), systemImage: "square.and.arrow.up")
-                        }
-                        .help(L("Saves every connection in the selected period as a CSV file"))
-                    }
-                    AgentCoverageNote(coverage: model.coverage)
-                    AgentTimelineChart(model: model.timeline, scale: model.scale)
-                    AgentSankeyChart(model: model.sankey)
-                    AgentGlobeChart(model: model.globe, atlas: model.atlas)
+            HStack(spacing: 16) {
+                metricPicker
+                destinationGroupingPicker
+                Spacer()
+                Button {
+                    model.exportCSV()
+                } label: {
+                    Label(L("Export CSV..."), systemImage: "square.and.arrow.up")
                 }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 18)
+                .help(L("Saves every connection in the selected period as a CSV file"))
             }
-            .frame(minHeight: 220)
-            Divider()
-            connectionTable
-                .padding(.horizontal, 22)
-                .padding(.vertical, 14)
-                .frame(minHeight: 220)
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+
+            GeometryReader { proxy in
+                let metrics = AnalysisLayout(size: proxy.size)
+                VStack(spacing: 14) {
+                    // The globe is square because a sphere drawn into a wide
+                    // box is an ellipse, and an ellipse is a different planet.
+                    HStack(alignment: .top, spacing: 14) {
+                        AgentGlobeChart(model: model.globe, atlas: model.atlas)
+                            .frame(width: metrics.globeSide, height: metrics.topHeight)
+                        AgentOverviewPanel(
+                            summary: model.summary,
+                            coverage: model.coverage,
+                            monitoringStatus: model.monitoringStatus,
+                            storage: model.storage
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: metrics.topHeight)
+                    }
+                    HStack(alignment: .top, spacing: 14) {
+                        AgentSankeyChart(model: model.sankey)
+                            .frame(width: metrics.sankeyWidth, height: metrics.middleHeight)
+                        AgentTimelineChart(model: model.timeline, scale: model.scale)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: metrics.middleHeight)
+                    }
+                    // The table is never nested in a ScrollView. A Table brings
+                    // its own scrolling, so nesting it leaves it no height at
+                    // all and the connection log disappears without any error --
+                    // which is exactly what happened once.
+                    connectionTable
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 18)
+            }
+        }
+    }
+
+    /// Proportions for the analysis tab, derived from the window rather than
+    /// fixed, so the panels grow with it instead of leaving the extra space
+    /// blank or forcing the log off the bottom.
+    private struct AnalysisLayout {
+        let topHeight: CGFloat
+        let middleHeight: CGFloat
+        let globeSide: CGFloat
+        let sankeyWidth: CGFloat
+
+        init(size: CGSize) {
+            let width = max(size.width, 1)
+            // Spacing comes off the top before anything is shared out, so the
+            // three rows can never add up to more than the window holds.
+            let height = max(size.height - 28, 1)
+            // Proportions with no lower bound. A minimum height here would win
+            // an argument it must not win on a short window: the rows above
+            // would keep their size and the connection log would be squeezed to
+            // nothing, which is how it disappeared once before.
+            topHeight = min(height * 0.40, 460)
+            middleHeight = min(height * 0.32, 380)
+            // Square, but never more than half the width: on a narrow window a
+            // square sized from the height would push everything else out.
+            globeSide = min(topHeight, width * 0.5)
+            // Roughly 1:1.5. A sankey needs horizontal room for its ribbons to
+            // read as flows rather than as a knot.
+            sankeyWidth = min(middleHeight * 1.5, width * 0.6)
         }
     }
 
@@ -427,8 +479,10 @@ private struct AgentMainView: View {
                 }
                 .width(100)
             }
+            .frame(maxHeight: .infinity)
         }
-        .padding(22)
+        .padding(16)
+        .agentSection()
     }
 
     private func metricCard(title: String, value: String, symbol: String) -> some View {
@@ -558,6 +612,29 @@ private struct AgentPartialCoverageNote: View {
     }
 }
 
+/// The rounded frame every section sits in.
+///
+/// One shape and one border for all of them: panels that each invent their own
+/// corner and edge read as separate apps stitched together rather than as one
+/// window.
+private struct AgentSectionBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+            )
+    }
+}
+
+private extension View {
+    func agentSection() -> some View { modifier(AgentSectionBackground()) }
+}
+
 private struct AgentChartCard<Content: View>: View {
     let title: String
     let subtitle: String
@@ -570,11 +647,81 @@ private struct AgentChartCard<Content: View>: View {
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
             content
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
+        .agentSection()
+    }
+}
+
+/// The top-right panel: how much was seen, and how much of it can be trusted.
+private struct AgentOverviewPanel: View {
+    let summary: AgentPeriodSummary
+    let coverage: CoverageSummary
+    let monitoringStatus: String
+    let storage: ObservationStoreStatistics?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L("This period at a glance"))
+                .font(.title3.weight(.semibold))
+
+            Label(monitoringStatus, systemImage: "dot.radiowaves.left.and.right")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+
+            // Coverage sits with the counts, not below the charts, because it
+            // is what tells the reader whether the counts mean anything.
+            AgentCoverageNote(coverage: coverage)
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 130), spacing: 10)],
+                alignment: .leading,
+                spacing: 10
+            ) {
+                tile(L("Connections"), summary.sessionCount.formatted(),
+                     "point.3.connected.trianglepath.dotted")
+                tile(L("Applications"), summary.applicationCount.formatted(), "app.dashed")
+                tile(L("Destinations"), summary.destinationCount.formatted(), "network")
+                tile(L("Monitored"), "\(Int((coverage.share * 100).rounded()))%", "clock.badge.checkmark")
+            }
+
+            Spacer(minLength: 0)
+
+            // No threat intelligence here on purpose. This agent classifies
+            // nothing on its own, and a panel that looked like a verdict would
+            // be inventing one.
+            Label(
+                L("Threat classification comes from a Hub. This agent reports what it saw and judges none of it."),
+                systemImage: "info.circle"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .agentSection()
+    }
+
+    private func tile(_ title: String, _ value: String, _ symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(title, systemImage: symbol)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(value)
+                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                .contentTransition(.numericText())
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.05))
         )
     }
 }
@@ -607,7 +754,7 @@ private struct AgentTimelineChart: View {
                 )
             } else {
                 Canvas { context, size in draw(in: &context, size: size) }
-                    .frame(height: 200)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityElement()
                     .accessibilityLabel(summary)
                 AgentSeriesLegend(entries: model.series.enumerated().map {
@@ -808,7 +955,7 @@ private struct AgentGlobeChart: View {
                         draw(in: &canvas, size: size, spin: spin(at: context.date))
                     }
                 }
-                .frame(height: 300)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .gesture(
                     DragGesture()
                         .onChanged { value in
@@ -977,11 +1124,17 @@ private struct AgentSankeyChart: View {
                         : L("No connections in this period.")
                 )
             } else {
+                HStack {
+                    Text(L("Source")).font(.caption.weight(.medium))
+                    Spacer()
+                    Text(L("Destination")).font(.caption.weight(.medium))
+                }
+                .foregroundStyle(.secondary)
                 GeometryReader { proxy in
                     Canvas { context, size in draw(in: &context, size: size) }
                         .frame(width: proxy.size.width)
                 }
-                .frame(height: 260)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityElement()
                 .accessibilityLabel(summary)
                 AgentSankeyLabels(model: model)
@@ -1137,8 +1290,10 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
         let window = NSWindow(contentViewController: hostingController)
         window.title = "EgressView Agent"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 940, height: 620))
-        window.minSize = NSSize(width: 760, height: 500)
+        // Bigger than before: the analysis tab now shows five panels at once,
+        // and the old default made each of them too short to read.
+        window.setContentSize(NSSize(width: 1180, height: 820))
+        window.minSize = NSSize(width: 900, height: 620)
         super.init(window: window)
         window.delegate = self
     }

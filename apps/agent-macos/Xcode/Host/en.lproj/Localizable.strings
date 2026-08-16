@@ -255,3 +255,8 @@
 "Exports every connection recorded in the selected period." = "Exports every connection recorded in the selected period.";
 "This period was only %lld%% monitored. The file contains what was recorded, which is less than everything that happened." = "This period was only %lld%% monitored. The file contains what was recorded, which is less than everything that happened.";
 "Could not write the file: %@" = "Could not write the file: %@";
+"This period at a glance" = "This period at a glance";
+"Monitored" = "Monitored";
+"Threat classification comes from a Hub. This agent reports what it saw and judges none of it." = "Threat classification comes from a Hub. This agent reports what it saw and judges none of it.";
+"Source" = "Source";
+"Destination" = "Destination";

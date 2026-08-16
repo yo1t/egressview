@@ -255,3 +255,8 @@
 "Exports every connection recorded in the selected period." = "選択中の期間に記録されたすべての通信を書き出します。";
 "This period was only %lld%% monitored. The file contains what was recorded, which is less than everything that happened." = "この期間の監視は %lld%% のみです。ファイルには記録された分だけが入り、実際に起きたことの全部ではありません。";
 "Could not write the file: %@" = "ファイルを書き出せませんでした: %@";
+"This period at a glance" = "この期間の概要";
+"Monitored" = "監視できた割合";
+"Threat classification comes from a Hub. This agent reports what it saw and judges none of it." = "脅威の判定はHubが行います。このAgentは観測した事実を報告するだけで、判定は行いません。";
+"Source" = "通信元";
+"Destination" = "通信先";
