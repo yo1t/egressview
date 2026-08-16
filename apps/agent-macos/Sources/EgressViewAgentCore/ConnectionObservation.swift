@@ -1,11 +1,11 @@
 import Foundation
 
-public enum InternetProtocol: String, Codable, Sendable {
+public enum InternetProtocol: String, Codable, Sendable, CaseIterable, Hashable {
     case tcp
     case udp
 }
 
-public enum CollectorKind: String, Codable, Sendable {
+public enum CollectorKind: String, Codable, Sendable, CaseIterable, Hashable {
     case networkExtension = "network-extension"
     case libproc
 }

@@ -203,3 +203,161 @@ final class GeoLocationStoreTests: XCTestCase {
         XCTAssertEqual(try store.geoLocationCount(), 0, "standalone agents start with nothing")
     }
 }
+
+final class GreatCircleTests: XCTestCase {
+    func testThePathStartsAndEndsWhereItShould() {
+        let tokyo = (latitude: 35.68, longitude: 139.69)
+        let washington = (latitude: 38.89, longitude: -77.04)
+        let path = GreatCircle.path(from: tokyo, to: washington)
+
+        XCTAssertEqual(path.first?.latitude ?? 0, tokyo.latitude, accuracy: 0.001)
+        XCTAssertEqual(path.last?.longitude ?? 0, washington.longitude, accuracy: 0.001)
+        XCTAssertEqual(path.count, 49)
+    }
+
+    func testTokyoToWashingtonGoesOverTheNorthRatherThanStraightAcross() {
+        // A straight line on the projection would cross the Pacific at mid
+        // latitudes. The real route arcs north, and drawing the straight one
+        // would show traffic passing over countries it never goes near.
+        let path = GreatCircle.path(
+            from: (latitude: 35.68, longitude: 139.69),
+            to: (latitude: 38.89, longitude: -77.04)
+        )
+        let highest = path.map(\.latitude).max() ?? 0
+        XCTAssertGreaterThan(highest, 55, "the great circle rises well north of both ends")
+    }
+
+    func testEveryPointStaysOnTheGlobe() {
+        let path = GreatCircle.path(
+            from: (latitude: -35.28, longitude: 149.13),
+            to: (latitude: 51.50, longitude: -0.12)
+        )
+        for point in path {
+            XCTAssertGreaterThanOrEqual(point.latitude, -90)
+            XCTAssertLessThanOrEqual(point.latitude, 90)
+            XCTAssertGreaterThanOrEqual(point.longitude, -180.001)
+            XCTAssertLessThanOrEqual(point.longitude, 180.001)
+        }
+    }
+
+    func testTwoPointsInTheSamePlaceDoNotDivideByZero() {
+        let here = (latitude: 35.68, longitude: 139.69)
+        let path = GreatCircle.path(from: here, to: here)
+        XCTAssertEqual(path.count, 2)
+        XCTAssertTrue(path.allSatisfy { $0.latitude.isFinite && $0.longitude.isFinite })
+    }
+}
+
+final class HomeLocationTests: XCTestCase {
+    func testTheRegionTheMachineIsSetToDecidesWhereTrafficLeavesFrom() {
+        // A guess about the country, never about the address: nothing is looked
+        // up and nothing is sent.
+        let japan = HomeLocation.current(region: "JP")
+        XCTAssertEqual(japan.latitude, 35.68, accuracy: 0.001)
+        let unitedStates = HomeLocation.current(region: "us")
+        XCTAssertEqual(unitedStates.longitude, -77.04, accuracy: 0.001)
+    }
+
+    func testAnUnknownRegionFallsBackRatherThanLandingAtNullIsland() {
+        // (0, 0) is in the Gulf of Guinea. Traffic drawn from there would be
+        // wrong in a way that looks deliberate.
+        for region in [nil, "ZZ", ""] {
+            let fallback = HomeLocation.current(region: region)
+            XCTAssertNotEqual(fallback.latitude, 0)
+            XCTAssertNotEqual(fallback.longitude, 0)
+        }
+    }
+}
+
+final class GlobeOrientationTests: XCTestCase {
+    private let rect = CGRect(x: 0, y: 0, width: 200, height: 200)
+
+    /// The Earth turns counter-clockwise seen from above the north pole, which
+    /// on screen means the surface travels to the right. Adding the spin to the
+    /// centre longitude instead of subtracting it ran the planet backwards, and
+    /// nothing in the picture said so.
+    func test_中心経度が減ると地表は右へ動く() throws {
+        let xs = try [10.0, 0.0, -10.0].map { centre -> CGFloat in
+            let projection = OrthographicProjection(centerLatitude: 0, centerLongitude: centre)
+            return try XCTUnwrap(projection.project(latitude: 0, longitude: 0, in: rect)).x
+        }
+        XCTAssertLessThan(xs[0], xs[1])
+        XCTAssertLessThan(xs[1], xs[2])
+    }
+
+    func test_中心緯度0なら赤道は水平な直線になる() throws {
+        let projection = OrthographicProjection(centerLatitude: 0, centerLongitude: 0)
+        let ys = try [-60.0, -20.0, 0.0, 20.0, 60.0].map { longitude in
+            try XCTUnwrap(projection.project(latitude: 0, longitude: longitude, in: rect)).y
+        }
+        for y in ys {
+            XCTAssertEqual(y, rect.midY, accuracy: 0.0001)
+        }
+    }
+
+    /// The equator must not tip as the globe turns, whatever the tilt.
+    func test_回転しても赤道の形は変わらない() throws {
+        func equatorHeights(centerLongitude: Double) throws -> [CGFloat] {
+            let projection = OrthographicProjection(
+                centerLatitude: -12, centerLongitude: centerLongitude
+            )
+            return try [-40.0, 0.0, 40.0].map { offset in
+                try XCTUnwrap(
+                    projection.project(
+                        latitude: 0, longitude: centerLongitude + offset, in: rect
+                    )
+                ).y
+            }
+        }
+        let first = try equatorHeights(centerLongitude: 0)
+        let later = try equatorHeights(centerLongitude: 75)
+        for (a, b) in zip(first, later) {
+            XCTAssertEqual(a, b, accuracy: 0.0001)
+        }
+        XCTAssertEqual(first[0], first[2], accuracy: 0.0001, "赤道は左右対称のまま")
+    }
+
+    func test_極は上下に来る() throws {
+        let projection = OrthographicProjection(centerLatitude: 0, centerLongitude: 0)
+        let north = try XCTUnwrap(projection.project(latitude: 90, longitude: 0, in: rect))
+        let south = try XCTUnwrap(projection.project(latitude: -90, longitude: 0, in: rect))
+        XCTAssertEqual(north.x, rect.midX, accuracy: 0.0001)
+        XCTAssertEqual(south.x, rect.midX, accuracy: 0.0001)
+        XCTAssertLessThan(north.y, south.y, "北が上")
+    }
+}
+
+final class GlobeTiltTests: XCTestCase {
+    /// Home is where every arc starts, so the tilt must open up its hemisphere
+    /// rather than push it towards the rim.
+    func test_北半球なら北へ傾ける() {
+        XCTAssertEqual(HomeLocation.preferredTilt(latitude: 35.68), 12, accuracy: 0.0001)
+    }
+
+    func test_南半球なら南へ傾ける() {
+        XCTAssertEqual(HomeLocation.preferredTilt(latitude: -33.87), -12, accuracy: 0.0001)
+    }
+
+    func test_赤道上でも傾きは決まる() {
+        XCTAssertEqual(HomeLocation.preferredTilt(latitude: 0), 12, accuracy: 0.0001)
+    }
+
+    /// Tipping towards home must actually raise home on screen.
+    func test_傾けると通信元が画面の中心寄りへ来る() throws {
+        let rect = CGRect(x: 0, y: 0, width: 200, height: 200)
+        let home = (latitude: 35.68, longitude: 139.69)
+        func homeY(tilt: Double) throws -> CGFloat {
+            let projection = OrthographicProjection(
+                centerLatitude: tilt, centerLongitude: home.longitude
+            )
+            return try XCTUnwrap(
+                projection.project(latitude: home.latitude, longitude: home.longitude, in: rect)
+            ).y
+        }
+        let level = try homeY(tilt: 0)
+        let tippedToHome = try homeY(tilt: 12)
+        let tippedAway = try homeY(tilt: -12)
+        XCTAssertGreaterThan(tippedToHome, level, "北へ傾けると通信元は中心へ下りてくる")
+        XCTAssertLessThan(tippedAway, level, "南へ傾けると通信元は縁へ押しやられる")
+    }
+}
