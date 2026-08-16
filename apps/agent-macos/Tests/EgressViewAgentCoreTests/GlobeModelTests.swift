@@ -326,3 +326,38 @@ final class GlobeOrientationTests: XCTestCase {
         XCTAssertLessThan(north.y, south.y, "北が上")
     }
 }
+
+final class GlobeTiltTests: XCTestCase {
+    /// Home is where every arc starts, so the tilt must open up its hemisphere
+    /// rather than push it towards the rim.
+    func test_北半球なら北へ傾ける() {
+        XCTAssertEqual(HomeLocation.preferredTilt(latitude: 35.68), 12, accuracy: 0.0001)
+    }
+
+    func test_南半球なら南へ傾ける() {
+        XCTAssertEqual(HomeLocation.preferredTilt(latitude: -33.87), -12, accuracy: 0.0001)
+    }
+
+    func test_赤道上でも傾きは決まる() {
+        XCTAssertEqual(HomeLocation.preferredTilt(latitude: 0), 12, accuracy: 0.0001)
+    }
+
+    /// Tipping towards home must actually raise home on screen.
+    func test_傾けると通信元が画面の中心寄りへ来る() throws {
+        let rect = CGRect(x: 0, y: 0, width: 200, height: 200)
+        let home = (latitude: 35.68, longitude: 139.69)
+        func homeY(tilt: Double) throws -> CGFloat {
+            let projection = OrthographicProjection(
+                centerLatitude: tilt, centerLongitude: home.longitude
+            )
+            return try XCTUnwrap(
+                projection.project(latitude: home.latitude, longitude: home.longitude, in: rect)
+            ).y
+        }
+        let level = try homeY(tilt: 0)
+        let tippedToHome = try homeY(tilt: 12)
+        let tippedAway = try homeY(tilt: -12)
+        XCTAssertGreaterThan(tippedToHome, level, "北へ傾けると通信元は中心へ下りてくる")
+        XCTAssertLessThan(tippedAway, level, "南へ傾けると通信元は縁へ押しやられる")
+    }
+}

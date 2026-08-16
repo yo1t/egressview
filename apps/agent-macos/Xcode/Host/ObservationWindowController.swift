@@ -1098,11 +1098,13 @@ private struct AgentGlobeChart: View {
     @State private var anchor = Date()
     @State private var speed: SpinSpeed = .normal
     @State private var isRunning = true
-    /// Latitude at the centre of the view. Zero puts the poles at the top and
-    /// bottom of the circle and draws the equator as a straight horizontal
-    /// line; the previous 12 degrees drew it as an arc for no reason anyone
-    /// asked for. Dragging up or down still tilts it.
-    @State private var tilt: Double = 0
+    /// Latitude at the centre of the view, tipped towards the hemisphere the
+    /// traffic leaves from. The tilt was previously 12 degrees the wrong way,
+    /// which pushed home -- the point every arc starts at -- towards the rim.
+    /// Dragging up or down still changes it.
+    @State private var tilt: Double = HomeLocation.preferredTilt(
+        latitude: HomeLocation.current().latitude
+    )
     @State private var isDragging = false
     @State private var resumeAt = Date.distantPast
 

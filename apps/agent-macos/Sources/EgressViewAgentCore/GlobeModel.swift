@@ -126,6 +126,21 @@ public enum HomeLocation {
 /// A straight line on a projected globe is not the path between two points on
 /// a sphere, and drawing one would put the route through countries it does not
 /// pass over.
+public extension HomeLocation {
+    /// How far to tip the globe, and which way.
+    ///
+    /// Towards the hemisphere the traffic leaves from. Every arc starts at this
+    /// Mac, so the one place that must never be squashed against the rim is
+    /// home -- tipping the other way hides exactly the point the picture is
+    /// drawn around. The magnitude is small on purpose: enough to open up the
+    /// home hemisphere, not so much that the equator stops reading as level.
+    static func preferredTilt(
+        latitude: Double, magnitude: Double = 12
+    ) -> Double {
+        latitude >= 0 ? magnitude : -magnitude
+    }
+}
+
 public enum GreatCircle {
     public static func path(
         from origin: (latitude: Double, longitude: Double),
