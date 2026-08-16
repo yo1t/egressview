@@ -171,6 +171,10 @@ private final class AgentMainViewModel: ObservableObject {
     @Published private(set) var monitoringStatus = L("Monitoring paused")
     @Published private(set) var errorMessage: String?
     @Published private(set) var isRefreshing = false
+    /// Set after a successful export so the screen can confirm it happened.
+    /// A save that produces no visible change is indistinguishable from one
+    /// that silently failed.
+    @Published var exportedFileURL: URL?
     /// Set by the window controller. A hidden window is not worth querying for.
     var isWindowVisible = true
 
@@ -232,7 +236,26 @@ private final class AgentMainViewModel: ObservableObject {
             ? L("Exports every connection recorded in the selected period.")
             : L("This period was only %lld%% monitored. The file contains what was recorded, which is less than everything that happened.",
                 Int((coverage.share * 100).rounded()))
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        // This app is an accessory (LSUIElement), so it is not the active
+        // application and `runModal()` had nothing to put the panel in front
+        // of: pressing the button did nothing at all, with no error anywhere.
+        // As a sheet on the window the button was pressed in, there is always
+        // something to attach to.
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: \.isVisible) else {
+            errorMessage = L("Could not open the save panel because no window is open.")
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            self.writeCSV(to: url, store: store, selection: selection)
+        }
+    }
+
+    private func writeCSV(
+        to url: URL, store: ObservationStore, selection: VisualizationSelection
+    ) {
         do {
             let observations = try store.observations(
                 since: selection.start, limit: Int.max
@@ -240,7 +263,11 @@ private final class AgentMainViewModel: ObservableObject {
             try ObservationCSV.export(observations)
                 .write(to: url, atomically: true, encoding: .utf8)
             errorMessage = nil
+            exportedFileURL = url
         } catch {
+            // Writing needs the user-selected-file entitlement; without it the
+            // panel appears and the save fails. Saying nothing here would
+            // repeat the original bug one step further along.
             errorMessage = L("Could not write the file: %@", error.localizedDescription)
         }
     }
@@ -491,6 +518,15 @@ private struct AgentMainView: View {
                 Label(L("Export CSV..."), systemImage: "square.and.arrow.up")
             }
             .help(L("Saves every connection in the selected period as a CSV file"))
+            if let url = model.exportedFileURL {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } label: {
+                    Label(L("Saved: %@", url.lastPathComponent), systemImage: "checkmark.circle")
+                }
+                .buttonStyle(.link)
+                .help(L("Show the file in the Finder"))
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 14)

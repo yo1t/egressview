@@ -279,3 +279,6 @@
 "Whether the charts are sized by connection count or by data volume" = "グラフの大きさを接続数で決めるか、データ転送量で決めるか";
 "Shaded: the Mac was asleep. Traffic during sleep is not recorded." = "網掛け: Macがスリープしていた時間。スリープ中の通信は記録されません。";
 "%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring." = "うち %@ はMacがスリープしていた時間で、不具合でも監視の欠落でもありません。";
+"Could not open the save panel because no window is open." = "ウィンドウが開いていないため、保存ダイアログを表示できませんでした。";
+"Saved: %@" = "保存しました: %@";
+"Show the file in the Finder" = "Finderでファイルの場所を開きます";

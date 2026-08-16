@@ -31,26 +31,30 @@ public enum ObservationCSV {
     ) -> String {
         var lines = [columns.joined(separator: ",")]
         for observation in observations {
-            lines.append([
-                formatter.string(from: observation.firstObservedAt),
-                formatter.string(from: observation.lastObservedAt),
-                observation.processName,
-                observation.bundleID ?? "",
-                observation.networkProtocol.rawValue,
-                observation.localAddress,
-                String(observation.localPort),
-                observation.remoteAddress,
-                String(observation.remotePort),
-                observation.remoteHostname ?? "",
-                // Byte counts are measured when a connection ends, so an open
-                // connection has none. Empty says "not measured"; a zero would
-                // say "measured, and it was nothing", which is a different
-                // claim and a false one.
-                observation.bytesIn.map(String.init) ?? "",
-                observation.bytesOut.map(String.init) ?? "",
-                observation.collector.rawValue,
-                observation.confidence.rawValue,
-            ].map(field).joined(separator: ","))
+            // Built up statement by statement rather than as one 14-element
+            // literal. The literal compiled here and defeated the type checker
+            // on CI ("unable to type-check this expression in reasonable
+            // time"), which is a difference in compiler version, not in taste.
+            var row: [String] = []
+            row.append(formatter.string(from: observation.firstObservedAt))
+            row.append(formatter.string(from: observation.lastObservedAt))
+            row.append(observation.processName)
+            row.append(observation.bundleID ?? "")
+            row.append(observation.networkProtocol.rawValue)
+            row.append(observation.localAddress)
+            row.append(String(observation.localPort))
+            row.append(observation.remoteAddress)
+            row.append(String(observation.remotePort))
+            row.append(observation.remoteHostname ?? "")
+            // Byte counts are measured when a connection ends, so an open
+            // connection has none. Empty says "not measured"; a zero would say
+            // "measured, and it was nothing", which is a different claim and a
+            // false one.
+            row.append(observation.bytesIn.map(String.init) ?? "")
+            row.append(observation.bytesOut.map(String.init) ?? "")
+            row.append(observation.collector.rawValue)
+            row.append(observation.confidence.rawValue)
+            lines.append(row.map(field).joined(separator: ","))
         }
         // A trailing newline: POSIX tools treat a file without one as truncated.
         return lines.joined(separator: "\n") + "\n"

@@ -279,3 +279,6 @@
 "Whether the charts are sized by connection count or by data volume" = "Whether the charts are sized by connection count or by data volume";
 "Shaded: the Mac was asleep. Traffic during sleep is not recorded." = "Shaded: the Mac was asleep. Traffic during sleep is not recorded.";
 "%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring." = "%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring.";
+"Could not open the save panel because no window is open." = "Could not open the save panel because no window is open.";
+"Saved: %@" = "Saved: %@";
+"Show the file in the Finder" = "Show the file in the Finder";
