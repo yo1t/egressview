@@ -425,11 +425,10 @@ private struct AgentMainView: View {
             let height = max(size.height - 32, 1)
             topHeight = height * 0.52
             middleHeight = height * 0.48
-            // Landscape rather than square. The globe itself stays circular --
-            // it is drawn from the smaller side -- so the extra width is room
-            // for the arcs reaching out of it, and the taller card makes the
-            // sphere bigger than a square one of the same area would.
-            globeWidth = min(topHeight * 1.3, width * 0.56)
+            // Square. The controls are overlaid on the sphere rather than
+            // stacked under it, so the extra width a landscape card bought is
+            // no longer paying for anything.
+            globeWidth = min(topHeight, width * 0.5)
             // The sankey gets the larger half. Its ribbons need horizontal room
             // to read as flows rather than as a knot, and at the previous width
             // they were unreadable.
@@ -1159,20 +1158,33 @@ private struct AgentSankeyChart: View {
                         : L("No connections in this period.")
                 )
             } else {
-                HStack {
-                    Text(L("Source")).font(.caption.weight(.medium))
-                    Spacer()
-                    Text(L("Destination")).font(.caption.weight(.medium))
+                // Names beside the diagram rather than under it: a flow is read
+                // left to right, and a legend below makes the reader carry a
+                // colour across the card to find out what an end of a ribbon
+                // is.
+                HStack(alignment: .top, spacing: 12) {
+                    AgentSankeyColumn(
+                        title: L("Source"),
+                        nodes: model.apps,
+                        metric: model.metric,
+                        coloured: true,
+                        alignment: .leading
+                    )
+                    GeometryReader { proxy in
+                        Canvas { context, size in draw(in: &context, size: size) }
+                            .frame(width: proxy.size.width)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityElement()
+                    .accessibilityLabel(summary)
+                    AgentSankeyColumn(
+                        title: L("Destination"),
+                        nodes: model.destinations,
+                        metric: model.metric,
+                        coloured: false,
+                        alignment: .trailing
+                    )
                 }
-                .foregroundStyle(.secondary)
-                GeometryReader { proxy in
-                    Canvas { context, size in draw(in: &context, size: size) }
-                        .frame(width: proxy.size.width)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityElement()
-                .accessibilityLabel(summary)
-                AgentSankeyLabels(model: model)
             }
             if model.byteCoverageIsPartial {
                 AgentPartialCoverageNote(count: model.observationsWithoutBytes)
@@ -1235,33 +1247,55 @@ private struct AgentSankeyChart: View {
     }
 }
 
-private struct AgentSankeyLabels: View {
-    let model: SankeyModel
+/// One side of the sankey: the names of the ends of the ribbons, next to them.
+private struct AgentSankeyColumn: View {
+    let title: String
+    let nodes: [SankeyNode]
+    let metric: TrafficMetric
+    let coloured: Bool
+    let alignment: HorizontalAlignment
 
     var body: some View {
-        HStack(alignment: .top, spacing: 24) {
-            column(title: L("Applications"), nodes: model.apps, coloured: true)
+        VStack(alignment: alignment, spacing: 3) {
+            Text(title)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            ForEach(Array(nodes.enumerated()), id: \.element.name) { index, node in
+                row(index: index, node: node)
+            }
             Spacer(minLength: 0)
-            column(title: L("Destinations"), nodes: model.destinations, coloured: false)
         }
         .font(.caption)
+        .frame(width: 150, alignment: alignment == .leading ? .leading : .trailing)
     }
 
-    private func column(title: String, nodes: [SankeyNode], coloured: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).foregroundStyle(.secondary)
-            ForEach(Array(nodes.enumerated()), id: \.element.name) { index, node in
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(coloured
-                              ? agentSeriesColor(index, isRemainder: node.isRemainder)
-                              : Color.secondary.opacity(0.6))
-                        .frame(width: 7, height: 7)
-                    Text(node.isRemainder ? L("Other") : node.name)
-                        .lineLimit(1)
-                    Text(formattedMetric(node.value, model.metric))
-                        .foregroundStyle(.secondary)
-                }
+    @ViewBuilder
+    private func row(index: Int, node: SankeyNode) -> some View {
+        let dot = Circle()
+            .fill(coloured
+                  ? agentSeriesColor(index, isRemainder: node.isRemainder)
+                  : Color.secondary.opacity(0.6))
+            .frame(width: 7, height: 7)
+        let name = Text(node.isRemainder ? L("Other") : node.name)
+            .lineLimit(1)
+            .truncationMode(.middle)
+        let value = Text(formattedMetric(node.value, metric))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+
+        HStack(spacing: 6) {
+            // The dot sits against the diagram on both sides, so each name
+            // reads outward from the ribbon it belongs to.
+            if alignment == .leading {
+                dot
+                name
+                Spacer(minLength: 0)
+                value
+            } else {
+                value
+                Spacer(minLength: 0)
+                name
+                dot
             }
         }
     }
