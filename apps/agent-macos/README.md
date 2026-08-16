@@ -9,6 +9,12 @@ It reads connection metadata only — addresses, ports, process names. **It neve
 reads payloads, never decrypts traffic, and never blocks anything.** Byte counts
 are reported as unavailable rather than guessed at.
 
+It also shows you that traffic: where it went on a globe, which application sent
+it where, when it happened, and whether the destination appears on a threat
+feed. **The threat check happens on your Mac.** Asking a service "is this address
+dangerous?" would tell that service exactly which addresses worry you, so the
+indicators come here and the questions never leave.
+
 The host app and its Network Extension run inside the macOS App Sandbox. The
 host is allowed to initiate outbound connections for Hub delivery and signed
 update checks; the extension is not given general outbound or inbound network
@@ -22,7 +28,7 @@ Stop here if any of these is a no. Nothing below will work around them.
 | You need | Why |
 |---|---|
 | **macOS 13 or newer** | The System Extension used for network monitoring |
-| **An EgressView Hub you administer, running 1.9.0 or newer** | Enrolment needs a Hub that can approve it. **Hub 1.8.0 and older cannot accept this agent at all** — they have no agent endpoint |
+| **An EgressView Hub you administer, running 1.9.0 or newer** | Enrolment needs a Hub that can approve it. **Hub 1.8.0 and older cannot accept this agent at all** — they have no agent endpoint. **Threat information needs Hub 1.10.0 or newer**; without it the screen says so rather than showing "no threats" |
 | **Physical access to that Hub's settings** | Registration is completed by an administrator approving your Mac, not by the Mac itself |
 
 Roughly ten minutes, most of which is macOS asking you to approve things.
@@ -47,6 +53,51 @@ destination and what will and will not be sent before anything leaves.
 
 If the code is refused, it has probably expired — they last ten minutes. Issue
 another one.
+
+## What leaves your Mac, and when
+
+Three things, and nothing else. Each is listed so you can check the claim rather
+than trust it.
+
+| | Goes to | Contains |
+|---|---|---|
+| **Observations** | Your Hub | Addresses, ports, process names. **Not hostnames** — the name your app asked for stays local |
+| **Update checks** | The signed distribution host | The agent's version. Disclosed on first launch |
+| **Threat indicators and locations** | Your Hub | **Nothing about your traffic.** The whole list comes down and the matching happens here |
+
+**No destination you connected to is ever sent anywhere to be looked up.** That
+is a design constraint, not a setting.
+
+### Two things you can turn on, both off by default
+
+Without a Hub the agent has no locations and no threat feeds, so it can offer to
+fetch them itself. Both are off unless you switch them on, in Settings.
+
+- **Location lookups** send destination IP addresses to `ip-api.com`. This is the
+  one place the agent would send the addresses it is watching to someone else,
+  which is why it is off.
+- **Threat feed downloads** fetch public block lists from `abuse.ch` and
+  `spamhaus.org`. These are plain downloads, not lookup services: **no address of
+  yours is sent**. What they learn is that your Mac asked at all.
+
+**With a Hub, neither is offered.** The Hub already supplies both, and having
+both paths would quietly make "nothing leaves this Mac" untrue. The agent also
+never switches to direct downloads on its own — a Hub that goes down for an hour
+must not change what your Mac sends, without you touching anything.
+
+## Reading the screen
+
+- **Network status** — the globe, the flow diagram, the timeline, and how much of
+  the period was actually monitored.
+- **Threats** — destinations that appear on a feed, and which application reached
+  them. When nothing has been checked it says so; **an empty list is never shown
+  as "nothing found"** unless something was actually looked at.
+- **Connection log** — every connection in the period, sortable and filterable by
+  column, exportable as CSV.
+
+**Connections already open when monitoring starts are never seen**, and periods
+the Mac slept through are marked as sleep rather than counted as gaps. The
+screen says what it does not know.
 
 ## Uninstall
 
