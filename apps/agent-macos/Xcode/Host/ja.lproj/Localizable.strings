@@ -325,3 +325,9 @@
 "Measured over connections that have closed." = "終了した接続について計測した値です。";
 "A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point. What this Mac knows is that %1$@ reached it %2$lld times." = "フィードに載っていることは、実害の証明ではありません。誰かが、上記の理由に関連するものとして、ある時点でこの通信先を公開した、という事実です。このMacが知っているのは、%1$@ が %2$lld回この通信先へ接続した、ということだけです。";
 "Threats show the name and the address together, so there is nothing to choose between." = "脅威タブは名前とアドレスを併記するため、選ぶものがありません。";
+"The verified installer was opened. Drag the app to Applications to finish." = "検証済みのインストーラを開きました。アプリケーションフォルダへドラッグすると完了します。";
+"Quit EgressView Agent to replace it?" = "EgressView Agentを終了して置き換えますか？";
+"Quit and replace" = "終了して置き換える";
+"Not now" = "今はしない";
+"Quit EgressView Agent before dragging the new copy to Applications." = "新しい方をアプリケーションフォルダへドラッグする前に、EgressView Agentを終了してください。";
+"macOS cannot replace an application while it is running, so dragging the new copy to Applications fails until this one quits. Nothing is recorded between quitting and opening the new copy." = "macOSは実行中のアプリケーションを置き換えられないため、この状態で新しい方をアプリケーションフォルダへドラッグしても完了しません。終了してから新しい方を開くまでの間は、何も記録されません。";

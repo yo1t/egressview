@@ -104,13 +104,43 @@ final class AgentUpdateController: ObservableObject {
             switch result {
             case .success:
                 if NSWorkspace.shared.open(packageURL) {
-                    status = L("The verified installer was opened. Follow the macOS installer prompts.")
+                    status = L("The verified installer was opened. Drag the app to Applications to finish.")
+                    // Finder cannot replace a running application, and the
+                    // error it shows for that ("the item is in use") does not
+                    // say what to do about it. Offering to quit is the only
+                    // way the drag can succeed, so it is offered here rather
+                    // than left for the user to work out after it fails.
+                    promptToQuitForReplacement()
                 } else {
                     status = L("macOS could not open the verified installer.")
                 }
             case .failure(let error):
                 status = L("Installer verification failed: %@", AgentUpdateCoordinator.describe(error))
             }
+        }
+    }
+
+    /// Asks whether to quit so the installed copy can be replaced.
+    ///
+    /// Quitting stops collection until the new copy is launched. That is said
+    /// plainly: an agent that stops watching without saying so is the fault
+    /// this release spent the most effort removing.
+    private func promptToQuitForReplacement() {
+        let alert = NSAlert()
+        alert.messageText = L("Quit EgressView Agent to replace it?")
+        alert.informativeText = L("macOS cannot replace an application while it is running, so dragging the new copy to Applications fails until this one quits. Nothing is recorded between quitting and opening the new copy.")
+        alert.addButton(withTitle: L("Quit and replace"))
+        alert.addButton(withTitle: L("Not now"))
+        alert.alertStyle = .informational
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            status = L("Quit EgressView Agent before dragging the new copy to Applications.")
+            return
+        }
+        // A moment so the installer window is in front when the app goes away,
+        // rather than the desktop.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            NSApp.terminate(nil)
         }
     }
 
