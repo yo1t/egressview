@@ -308,6 +308,24 @@ public final class ObservationStore: @unchecked Sendable {
             """)
             try execute("PRAGMA user_version=5")
         }
+        if version < 6 {
+            // When the Mac was asleep. A sleep and a monitoring failure both
+            // leave a hole in the record, and they mean opposite things: one is
+            // the machine not running, the other is this agent not working.
+            // Without this they are indistinguishable, and a sleep gets read as
+            // a fault -- which is exactly what happened on 2026-08-15.
+            try execute("""
+            CREATE TABLE IF NOT EXISTS sleep_periods (
+                id INTEGER PRIMARY KEY,
+                started_at REAL NOT NULL,
+                ended_at REAL
+            )
+            """)
+            try execute(
+                "CREATE INDEX IF NOT EXISTS sleep_periods_started ON sleep_periods(started_at)"
+            )
+            try execute("PRAGMA user_version=6")
+        }
     }
 
     // MARK: - Coverage
@@ -369,6 +387,43 @@ public final class ObservationStore: @unchecked Sendable {
                 guard let ip = text(statement, 0), let code = text(statement, 1) else { continue }
                 result[ip] = code
             }
+        }
+        return result
+    }
+
+    /// Records that the Mac went to sleep. Any period left open is closed
+    /// first: a sleep that was never woken from is a sleep that ended when the
+    /// machine came back, and leaving it open would swallow everything since.
+    public func beginSleepPeriod(at date: Date) throws {
+        try execute("""
+        UPDATE sleep_periods SET ended_at = \(date.timeIntervalSince1970)
+        WHERE ended_at IS NULL
+        """)
+        try execute(
+            "INSERT INTO sleep_periods (started_at, ended_at) VALUES (\(date.timeIntervalSince1970), NULL)"
+        )
+    }
+
+    public func endSleepPeriod(at date: Date) throws {
+        try execute("""
+        UPDATE sleep_periods SET ended_at = \(date.timeIntervalSince1970)
+        WHERE ended_at IS NULL
+        """)
+    }
+
+    public func sleepPeriods(from: Date, to: Date) throws -> [DateInterval] {
+        let statement = try prepare("""
+        SELECT started_at, coalesce(ended_at, \(to.timeIntervalSince1970)) FROM sleep_periods
+        WHERE started_at <= \(to.timeIntervalSince1970)
+          AND coalesce(ended_at, \(Date.distantFuture.timeIntervalSince1970)) >= \(from.timeIntervalSince1970)
+        ORDER BY started_at
+        """)
+        defer { sqlite3_finalize(statement) }
+        var result: [DateInterval] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let start = max(from, Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)))
+            let end = min(to, Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)))
+            if end > start { result.append(DateInterval(start: start, end: end)) }
         }
         return result
     }

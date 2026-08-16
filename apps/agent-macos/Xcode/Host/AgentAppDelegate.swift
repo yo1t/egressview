@@ -95,6 +95,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         // Asks macOS whether monitoring is really running, rather than assuming
         // that installing it was enough.
         controller.startHealthChecks()
+        controller.startWatchingSleep()
         showUpdateDisclosureIfNeeded()
         Task { await updateController.runIfDue() }
         // Fetches immediately when nothing is stored yet. Making a fresh

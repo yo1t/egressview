@@ -28,17 +28,26 @@ public struct CoverageSummary: Equatable, Sendable {
     /// True when monitoring started inside the period rather than before it, so
     /// connections already open at that moment were never seen.
     public let startedInsidePeriod: Bool
+    /// How much of the period the Mac was asleep.
+    ///
+    /// Kept apart from the rest of the gap on purpose. A sleeping Mac and a
+    /// broken agent both leave a hole, and they mean opposite things: one is
+    /// the machine not running, the other is this agent not working. Reporting
+    /// them as one number makes an ordinary night look like a fault.
+    public let asleep: TimeInterval
 
     public init(
         share: Double,
         firstCovered: Date?,
         gaps: [DateInterval],
-        startedInsidePeriod: Bool
+        startedInsidePeriod: Bool,
+        asleep: TimeInterval = 0
     ) {
         self.share = share
         self.firstCovered = firstCovered
         self.gaps = gaps
         self.startedInsidePeriod = startedInsidePeriod
+        self.asleep = asleep
     }
 
     public var isComplete: Bool { share >= 0.999 }
@@ -53,6 +62,7 @@ public enum CoverageCalculator {
 
     public static func summarize(
         sessions: [CoverageSession],
+        sleepPeriods: [DateInterval] = [],
         from: Date,
         to: Date,
         now: Date = Date()
@@ -100,13 +110,46 @@ public enum CoverageCalculator {
         // that began inside it missed whatever was already connected.
         let startedInside = sessions.contains { $0.start > from && $0.start <= to }
 
+        // Gaps the Mac slept through are reported as sleep, not as gaps. What
+        // is left is time the machine was awake and nothing was recorded, which
+        // is the only part that indicates a problem.
+        let sleeps = sleepPeriods.compactMap { period -> DateInterval? in
+            let start = max(period.start, from)
+            let end = min(period.end, to)
+            return end > start ? DateInterval(start: start, end: end) : nil
+        }
+        let asleep = sleeps.reduce(0.0) { $0 + $1.duration }
+        let awakeGaps = gaps.flatMap { subtract(sleeps, from: $0) }
+
         return CoverageSummary(
             share: min(1, covered / total),
             firstCovered: merged.first?.start,
-            gaps: gaps
+            gaps: awakeGaps
                 .filter { $0.duration > negligibleGap }
                 .sorted { $0.duration > $1.duration },
-            startedInsidePeriod: startedInside
+            startedInsidePeriod: startedInside,
+            asleep: asleep
         )
+    }
+
+    /// What is left of `interval` once every sleep is taken out of it.
+    private static func subtract(
+        _ sleeps: [DateInterval], from interval: DateInterval
+    ) -> [DateInterval] {
+        var remaining = [interval]
+        for sleep in sleeps {
+            remaining = remaining.flatMap { piece -> [DateInterval] in
+                guard piece.intersects(sleep) else { return [piece] }
+                var parts: [DateInterval] = []
+                if sleep.start > piece.start {
+                    parts.append(DateInterval(start: piece.start, end: sleep.start))
+                }
+                if sleep.end < piece.end {
+                    parts.append(DateInterval(start: sleep.end, end: piece.end))
+                }
+                return parts
+            }
+        }
+        return remaining
     }
 }

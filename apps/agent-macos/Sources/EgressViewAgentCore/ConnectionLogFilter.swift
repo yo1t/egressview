@@ -5,9 +5,9 @@ import Foundation
 /// One value per column, because the questions asked of this table are
 /// per-column ones: what did Safari do, what went to Ireland, what is still
 /// open. A single search box cannot express "UDP to port 443" at all.
-public struct ConnectionLogFilter: Equatable, Sendable {
+public struct ConnectionLogFilter: Equatable, Hashable, Sendable {
     /// Whether a row's data volume was ever measured.
-    public enum Volume: String, CaseIterable, Sendable {
+    public enum Volume: String, CaseIterable, Hashable, Sendable {
         case any
         case measured
         case unmeasured

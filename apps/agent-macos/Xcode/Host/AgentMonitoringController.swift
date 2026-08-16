@@ -1,6 +1,7 @@
 import EgressViewAgentCore
 import Darwin
 import Foundation
+import AppKit
 import NetworkExtension
 import SystemExtensions
 
@@ -151,6 +152,35 @@ final class AgentMonitoringController {
                 statusHandler: gatedStatusHandler,
                 errorHandler: storageErrorHandler
             )
+        }
+    }
+
+    /// Watches for the Mac going to sleep, so a hole in the record can be told
+    /// apart from a fault.
+    ///
+    /// The two look identical in the data and mean opposite things: one is the
+    /// machine not running, the other is this agent not working. Without this,
+    /// an ordinary night reads as an outage -- and on 2026-08-15 an outage was
+    /// investigated as if it were sleep, which is the same confusion running
+    /// the other way.
+    func startWatchingSleep() {
+        let center = NSWorkspace.shared.notificationCenter
+        center.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let store = self?.store else { return }
+            try? store.beginSleepPeriod(at: Date())
+        }
+        center.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let store = self?.store else { return }
+            try? store.endSleepPeriod(at: Date())
+            // Collection resumes on its own after a wake -- measured on
+            // 2026-08-14, twice, with no gap beyond the sleep itself. The check
+            // runs anyway because "it did last time" is not evidence about
+            // this time.
+            self?.checkHealth()
         }
     }
 

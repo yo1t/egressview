@@ -277,3 +277,5 @@
 "Measured" = "Measured";
 "The measure sizes the marks on the charts. The log lists every connection either way." = "The measure sizes the marks on the charts. The log lists every connection either way.";
 "Whether the charts are sized by connection count or by data volume" = "Whether the charts are sized by connection count or by data volume";
+"Shaded: the Mac was asleep. Traffic during sleep is not recorded." = "Shaded: the Mac was asleep. Traffic during sleep is not recorded.";
+"%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring." = "%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring.";

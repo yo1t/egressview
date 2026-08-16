@@ -126,12 +126,32 @@ private final class AgentMainViewModel: ObservableObject {
 
     /// The rows after filtering and sorting, which is what the table shows and
     /// what the count beside it must therefore report.
+    ///
+    /// Cached rather than recomputed. SwiftUI reads this several times per
+    /// layout pass, and filtering then sorting 500 rows on each read is work
+    /// that only changes when the rows, the filter or the sort do.
+    private var cachedVisibleRows: [AgentObservationRow] = []
+    private var visibleRowsKey: Int = -1
+
     var visibleRows: [AgentObservationRow] {
-        observationRows.filter {
+        var hasher = Hasher()
+        hasher.combine(observationRows.count)
+        hasher.combine(observationRows.first?.id)
+        hasher.combine(logFilter)
+        hasher.combine(logSort.map { "\($0.order)" }.joined())
+        let key = hasher.finalize()
+        if key == visibleRowsKey { return cachedVisibleRows }
+        let rows = observationRows.filter {
             logFilter.matches(
                 $0.observation, destinationText: $0.destinationText, countryCode: $0.countryCode
             )
         }.sorted(using: logSort)
+        // Caching inside a getter needs the box to be mutable; the model is
+        // MainActor-isolated, so this is not a race.
+        let model = self
+        model.cachedVisibleRows = rows
+        model.visibleRowsKey = key
+        return rows
     }
 
     /// Countries actually present, so the menu never offers a choice that
@@ -146,10 +166,13 @@ private final class AgentMainViewModel: ObservableObject {
     @Published private(set) var coverage = CoverageSummary(
         share: 1, firstCovered: nil, gaps: [], startedInsidePeriod: false
     )
+    @Published private(set) var sleepPeriods: [DateInterval] = []
     @Published private(set) var storage: ObservationStoreStatistics?
     @Published private(set) var monitoringStatus = L("Monitoring paused")
     @Published private(set) var errorMessage: String?
     @Published private(set) var isRefreshing = false
+    /// Set by the window controller. A hidden window is not worth querying for.
+    var isWindowVisible = true
 
     private let store: ObservationStore?
     private let loadQueue = DispatchQueue(label: "com.egressview.agent.main-window")
@@ -162,8 +185,16 @@ private final class AgentMainViewModel: ObservableObject {
     func start() {
         refresh()
         refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+        // Four seconds, and only while the window is on screen. Eight queries
+        // over a 39 MB database every two seconds, republishing every value the
+        // analysis tab is built from, made the app the busiest process on the
+        // Mac -- while showing numbers that change slowly and, half the time,
+        // to nobody.
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard self?.isWindowVisible == true else { return }
+                self?.refresh()
+            }
         }
     }
 
@@ -262,8 +293,11 @@ private final class AgentMainViewModel: ObservableObject {
                 // The byte view is offered only once something has actually
                 // been measured; otherwise every bar would be empty.
                 let measuredBytes = pairs.contains { $0.bytes > 0 }
+                let sleeps = try store.sleepPeriods(from: from, to: to)
                 let coverage = CoverageCalculator.summarize(
-                    sessions: try store.coverageSessions(from: from, to: to), from: from, to: to
+                    sessions: try store.coverageSessions(from: from, to: to),
+                    sleepPeriods: sleeps,
+                    from: from, to: to
                 )
                 let locations = try store.destinationLocations(from: from, to: to)
                 let globe = GlobeAggregator().aggregate(
@@ -277,7 +311,7 @@ private final class AgentMainViewModel: ObservableObject {
                     observations, summary, try store.statistics(),
                     SankeyAggregator().aggregate(pairs, metric: selection.metric),
                     TimelineAggregator().aggregate(buckets, selection: selection),
-                    measuredBytes, globe, coverage, countries
+                    measuredBytes, globe, coverage, countries, sleeps
                 )
             }
             DispatchQueue.main.async {
@@ -289,6 +323,7 @@ private final class AgentMainViewModel: ObservableObject {
                     self.timeline = value.4
                     self.globe = value.6
                     self.coverage = value.7
+                    self.sleepPeriods = value.9
                     self.availableMetrics = VisualizationSelection.availableMetrics(
                         hasMeasuredBytes: value.5
                     )
@@ -403,7 +438,10 @@ private struct AgentMainView: View {
                     HStack(alignment: .top, spacing: 14) {
                         AgentSankeyChart(model: model.sankey)
                             .frame(width: metrics.sankeyWidth)
-                        AgentTimelineChart(model: model.timeline, scale: model.scale)
+                        AgentTimelineChart(
+                            model: model.timeline, scale: model.scale,
+                            sleepPeriods: model.sleepPeriods
+                        )
                             .frame(maxWidth: .infinity)
                     }
                     .frame(height: metrics.middleHeight)
@@ -773,6 +811,10 @@ private struct AgentCoverageNote: View {
 
     private var detail: String? {
         var parts: [String] = []
+        if coverage.asleep > 60 {
+            parts.append(L("%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring.",
+                           Self.duration(coverage.asleep)))
+        }
         if let first = coverage.firstCovered, coverage.startedInsidePeriod {
             parts.append(L("Monitoring started at %@. Connections already open at that moment were never seen.",
                            Self.clock.string(from: first)))
@@ -956,6 +998,10 @@ private func agentSeriesColor(_ index: Int, isRemainder: Bool) -> Color {
 private struct AgentTimelineChart: View {
     let model: TimelineModel
     let scale: TimeScale
+    /// Shaded behind the bars. Without this a night of sleep is an empty
+    /// stretch of chart, and an empty chart reads as "nothing happened" rather
+    /// than "the Mac was not running".
+    var sleepPeriods: [DateInterval] = []
 
     var body: some View {
         AgentChartCard(
@@ -976,6 +1022,18 @@ private struct AgentTimelineChart: View {
                 AgentSeriesLegend(entries: model.series.enumerated().map {
                     .init(name: $0.element.name, color: agentSeriesColor($0.offset, isRemainder: $0.element.isRemainder))
                 })
+                if !sleepPeriods.isEmpty {
+                    // Says what the shaded band is. An unexplained grey stripe
+                    // is worse than no stripe.
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.secondary.opacity(0.14))
+                            .frame(width: 18, height: 10)
+                        Text(L("Shaded: the Mac was asleep. Traffic during sleep is not recorded."))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
             }
             if model.byteCoverageIsPartial {
                 AgentPartialCoverageNote(count: model.observationsWithoutBytes)
@@ -998,6 +1056,28 @@ private struct AgentTimelineChart: View {
     private let yAxisWidth: CGFloat = 56
     private let xAxisHeight: CGFloat = 18
 
+    private func drawSleep(in context: inout GraphicsContext, plot: CGRect) {
+        guard !sleepPeriods.isEmpty, let first = model.bucketStarts.first,
+              model.bucketDuration > 0, model.bucketStarts.count > 1 else { return }
+        let span = model.bucketDuration * Double(model.bucketStarts.count)
+        guard span > 0 else { return }
+        for period in sleepPeriods {
+            let startX = plot.minX + plot.width * CGFloat(
+                max(0, min(1, period.start.timeIntervalSince(first) / span))
+            )
+            let endX = plot.minX + plot.width * CGFloat(
+                max(0, min(1, period.end.timeIntervalSince(first) / span))
+            )
+            // A sleep too short to draw is still drawn, as a hairline. A period
+            // that vanished would be indistinguishable from one that never
+            // happened.
+            let rect = CGRect(
+                x: startX, y: plot.minY, width: max(1, endX - startX), height: plot.height
+            )
+            context.fill(Path(rect), with: .color(.secondary.opacity(0.14)))
+        }
+    }
+
     private func draw(in context: inout GraphicsContext, size: CGSize) {
         let peak = model.bucketTotals.max() ?? 0
         guard peak > 0, model.bucketStarts.count > 1 else { return }
@@ -1006,6 +1086,9 @@ private struct AgentTimelineChart: View {
             width: max(1, size.width - yAxisWidth),
             height: max(1, size.height - xAxisHeight)
         )
+        // Behind everything else: the sleep is the background the bars sit on,
+        // not a thing drawn over them.
+        drawSleep(in: &context, plot: plot)
         let step = plot.width / CGFloat(model.bucketStarts.count)
         var baselines = [CGFloat](repeating: plot.maxY, count: model.bucketStarts.count)
 
@@ -1108,7 +1191,15 @@ private struct AgentGlobeChart: View {
     @State private var isDragging = false
     @State private var resumeAt = Date.distantPast
 
+    /// Whether the globe should be turning at all.
+    ///
+    /// A globe nobody can see does not need to turn. Spinning behind another
+    /// window or in a hidden tab cost the same CPU as spinning in front of the
+    /// user, which is a bad trade at any frame rate.
+    @Environment(\.controlActiveState) private var controlActiveState
+
     private var isTurning: Bool { isRunning && !isDragging }
+    private var isAnimating: Bool { isTurning && controlActiveState != .inactive }
 
     private func spin(at date: Date) -> Double {
         guard isTurning else { return baseSpin }
@@ -1173,7 +1264,11 @@ private struct AgentGlobeChart: View {
             if let unavailable = model.unavailable {
                 AgentEmptyChartNote(text: message(for: unavailable))
             } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isTurning)) { context in
+                // 15 frames a second, not 30. At six degrees a second the
+                // extra frames are indistinguishable, and each one re-lays out
+                // this whole subtree -- SwiftUI layout, not drawing, was where
+                // the CPU was going.
+                TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: !isAnimating)) { context in
                     Canvas { canvas, size in
                         draw(in: &canvas, size: size, spin: spin(at: context.date))
                     }
@@ -1201,7 +1296,13 @@ private struct AgentGlobeChart: View {
                     // Overlaid rather than stacked below: the globe is drawn
                     // from the smaller side of its box, so every point of
                     // height the controls took came straight off the sphere.
+                    //
+                    // `fixedSize` stops the picker and button from being
+                    // re-measured against a box that changes every frame. They
+                    // were the most expensive part of the animation loop, and
+                    // their size never actually changes.
                     spinControls
+                        .fixedSize()
                         .padding(8)
                         .background(
                             RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -1602,7 +1703,19 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @MainActor
+    /// Miniaturised counts as not visible. The window is still "loaded", but
+    /// querying and redrawing for a dock icon is work spent on nobody.
+    func windowDidMiniaturize(_ notification: Notification) {
+        model.isWindowVisible = false
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        model.isWindowVisible = true
+        model.refresh()
+    }
+
     func windowWillClose(_ notification: Notification) {
+        model.isWindowVisible = false
         model.stop()
     }
 }
