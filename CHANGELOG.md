@@ -4,6 +4,19 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.3.6
+
+**The menu offered an update to an older version.** Two faults, found by
+installing a build by hand while a newer one was already downloaded.
+
+- A verified package downloaded earlier stayed on disk and was offered even
+  after the app had been updated some other way. The version check refuses to
+  move backwards when it runs, but nothing re-examined what had already been
+  stored.
+- The menu is built from the monitoring status, so it was only rebuilt when
+  that changed. An update that appeared, or was cleared, stayed on the menu
+  until something unrelated redrew it.
+
 ### Agent for Mac 0.3.5
 
 No functional change from 0.3.4. An agent handles an update with the code it is

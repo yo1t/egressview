@@ -22,6 +22,9 @@ final class AgentUpdateController: ObservableObject {
     private let verifier: AgentPackageVerifier
     private let onUpdateReady: (String) -> Void
     private var lastState = AgentUpdateState.notDue
+    /// The version running right now, so a package left over from before an
+    /// install is not offered as an upgrade to it.
+    private var runningVersion = "0.0.0"
 
     init(
         preferences: AgentUpdatePreferences = AgentUpdatePreferences(),
@@ -44,6 +47,7 @@ final class AgentUpdateController: ObservableObject {
             verifier: verifier,
             preferences: preferences
         )
+        runningVersion = version
         restoreVerifiedPackage()
         render(.notDue)
     }
@@ -180,6 +184,17 @@ final class AgentUpdateController: ObservableObject {
         let package = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: package.path) else {
             clearVerifiedPackage(deleteFile: false)
+            return
+        }
+        // A package downloaded before the app was updated some other way is
+        // still on disk, and offering it would walk the user backwards. The
+        // check refuses to move backwards when it runs, but nothing was
+        // re-examining what had already been stored -- so the menu offered a
+        // downgrade until the next check happened to run.
+        guard AgentStoredUpdate.isStillAnUpgrade(
+            storedVersion: version, runningVersion: runningVersion
+        ) else {
+            clearVerifiedPackage(deleteFile: true)
             return
         }
         availableVersion = version
