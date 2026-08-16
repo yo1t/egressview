@@ -504,7 +504,9 @@ public final class ObservationStore: @unchecked Sendable {
     ) throws -> [ThreatCandidate] {
         let statement = try prepare("""
         SELECT remote_address, remote_hostname, process_name,
-               count(*), max(last_observed_at)
+               count(*), max(last_observed_at), min(first_observed_at),
+               sum(coalesce(bytes_in, 0) + coalesce(bytes_out, 0)),
+               sum(CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END)
         FROM observations
         WHERE last_observed_at >= \(from.timeIntervalSince1970)
           AND last_observed_at <= \(to.timeIntervalSince1970)
@@ -519,7 +521,10 @@ public final class ObservationStore: @unchecked Sendable {
                 hostname: text(statement, 1),
                 processName: text(statement, 2) ?? "",
                 sessionCount: Int(sqlite3_column_int64(statement, 3)),
-                lastObservedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+                lastObservedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
+                firstObservedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
+                bytes: UInt64(max(0, sqlite3_column_int64(statement, 6))),
+                observationsWithoutBytes: Int(sqlite3_column_int64(statement, 7))
             ))
         }
         return result

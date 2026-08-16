@@ -587,10 +587,10 @@ private struct AgentMainView: View {
     private var analysisControls: some View {
         HStack(spacing: 16) {
             metricPicker
-                .disabled(model.selectedTab == .log)
-                .help(model.selectedTab == .log
-                      ? L("The measure sizes the marks on the charts. The log lists every connection either way.")
-                      : L("Whether the charts are sized by connection count or by data volume"))
+                .disabled(model.selectedTab != .network)
+                .help(model.selectedTab == .network
+                      ? L("Whether the charts are sized by connection count or by data volume")
+                      : L("The measure sizes the marks on the charts. This tab lists every row either way."))
             destinationGroupingPicker
             Spacer()
             Button {
@@ -870,6 +870,7 @@ private struct AgentLogFilterBar: View {
 private struct AgentThreatPanel: View {
     let report: ThreatReport
     let scale: TimeScale
+    @State private var selection: ThreatFinding.ID?
 
     static func reason(_ availability: ThreatIntelAvailability) -> String {
         switch availability {
@@ -939,44 +940,162 @@ private struct AgentThreatPanel: View {
     }
 
     private var table: some View {
-        Table(report.findings) {
-            TableColumn(L("Destination")) { finding in
-                Text(finding.candidate.hostname ?? finding.candidate.address)
-                    .monospaced()
-                    .help(finding.candidate.address)
+        // Split so the detail has somewhere to go. A row in a table can only
+        // say so much before the columns stop being readable, and the things
+        // worth knowing about a threat -- the whole matched value, when it
+        // started, how much moved -- are exactly the things that do not fit.
+        VSplitView {
+            Table(report.findings, selection: $selection) {
+                TableColumn(L("Destination")) { finding in
+                    Text(finding.candidate.hostname ?? finding.candidate.address)
+                        .monospaced()
+                        .help(Self.tooltip(for: finding))
+                }
+                .width(min: 170, ideal: 240)
+                TableColumn(L("Application")) { finding in
+                    Text(finding.candidate.processName)
+                        .help(Self.tooltip(for: finding))
+                }
+                .width(min: 110, ideal: 150)
+                TableColumn(L("Matched")) { finding in
+                    Text(finding.match.matchedValue)
+                        .monospaced()
+                        .help(Self.tooltip(for: finding))
+                }
+                .width(min: 130, ideal: 180)
+                TableColumn(L("Why")) { finding in
+                    Text(finding.match.indicator.tag ?? L("Listed"))
+                        .help(Self.tooltip(for: finding))
+                }
+                .width(min: 130, ideal: 190)
+                TableColumn(L("Feed")) { finding in
+                    Text(finding.match.indicator.source ?? L("Unknown"))
+                }
+                .width(90)
+                TableColumn(L("Connections")) { finding in
+                    Text(finding.candidate.sessionCount.formatted())
+                        .monospacedDigit()
+                }
+                .width(80)
+                TableColumn(L("Data volume")) { finding in
+                    // A floor, not a total, when some connections are still
+                    // open: byte counts arrive when a connection closes, and a
+                    // figure presented as complete would understate quietly.
+                    Text(Self.volume(finding.candidate))
+                        .monospacedDigit()
+                        .foregroundStyle(finding.candidate.bytes == 0 ? .secondary : .primary)
+                        .help(finding.candidate.bytesArePartial
+                              ? L("At least this much. %lld of these connections have not reported a byte count yet.",
+                                  finding.candidate.observationsWithoutBytes)
+                              : L("Measured over connections that have closed."))
+                }
+                .width(min: 90, ideal: 110)
+                TableColumn(L("Last seen")) { finding in
+                    Text(finding.candidate.lastObservedAt, style: .time)
+                        .monospacedDigit()
+                }
+                .width(80)
             }
-            .width(min: 180, ideal: 260)
-            TableColumn(L("Application")) { finding in
-                Text(finding.candidate.processName)
-            }
-            .width(min: 120, ideal: 160)
-            // What was on the list, which is not always the destination: a
-            // parent domain can be the listed thing.
-            TableColumn(L("Matched")) { finding in
-                Text(finding.match.matchedValue)
-                    .monospaced()
-            }
-            .width(min: 150, ideal: 200)
-            TableColumn(L("Why")) { finding in
-                Text(finding.match.indicator.tag ?? L("Listed"))
-            }
-            .width(min: 150, ideal: 220)
-            TableColumn(L("Feed")) { finding in
-                Text(finding.match.indicator.source ?? L("Unknown"))
-            }
-            .width(100)
-            TableColumn(L("Connections")) { finding in
-                Text(finding.candidate.sessionCount.formatted())
-                    .monospacedDigit()
-            }
-            .width(90)
-            TableColumn(L("Last seen")) { finding in
-                Text(finding.candidate.lastObservedAt, style: .time)
-                    .monospacedDigit()
-            }
-            .width(90)
+            .frame(minHeight: 160)
+
+            detail
+                .frame(minHeight: 120)
         }
-        .frame(maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        if let finding = report.findings.first(where: { $0.id == selection }) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(finding.candidate.hostname ?? finding.candidate.address)
+                        .font(.title3.weight(.semibold))
+                        .monospaced()
+                        .textSelection(.enabled)
+
+                    LazyVGrid(
+                        columns: [GridItem(.fixed(150), alignment: .trailing),
+                                  GridItem(.flexible(), alignment: .leading)],
+                        alignment: .leading, spacing: 7
+                    ) {
+                        field(L("Address"), finding.candidate.address)
+                        if let hostname = finding.candidate.hostname {
+                            field(L("Name the app asked for"), hostname)
+                        }
+                        field(L("Application"), finding.candidate.processName)
+                        // What was on the list, which is not always the
+                        // destination: a parent domain can be the listed thing.
+                        field(L("What was on the list"), finding.match.matchedValue)
+                        field(L("Kind of indicator"), Self.kindName(finding.match.indicator.kind))
+                        field(L("Feed"), finding.match.indicator.source ?? L("Unknown"))
+                        field(L("Why"), finding.match.indicator.tag ?? L("Listed"))
+                        field(L("Connections"), finding.candidate.sessionCount.formatted())
+                        field(L("Data volume"), Self.volume(finding.candidate))
+                        field(L("First seen"), Self.stamp(finding.candidate.firstObservedAt))
+                        field(L("Last seen"), Self.stamp(finding.candidate.lastObservedAt))
+                    }
+                    .font(.callout)
+
+                    Text(L("A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point. What this Mac knows is that %1$@ reached it %2$lld times.",
+                           finding.candidate.processName, finding.candidate.sessionCount))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            Text(L("Select a row to see the whole match."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func field(_ label: String, _ value: String) -> some View {
+        Group {
+            Text(label).foregroundStyle(.secondary)
+            Text(value).textSelection(.enabled)
+        }
+    }
+
+    /// Everything the row cannot fit, for people who hover rather than click.
+    static func tooltip(for finding: ThreatFinding) -> String {
+        var lines = [finding.candidate.address]
+        if let hostname = finding.candidate.hostname { lines.append(hostname) }
+        lines.append(L("On the list: %@", finding.match.matchedValue))
+        lines.append(finding.match.indicator.tag ?? L("Listed"))
+        lines.append(L("%1$@ · %2$lld connections · %3$@",
+                       finding.candidate.processName,
+                       finding.candidate.sessionCount,
+                       volume(finding.candidate)))
+        return lines.joined(separator: "\n")
+    }
+
+    static func volume(_ candidate: ThreatCandidate) -> String {
+        guard candidate.bytes > 0 else {
+            return candidate.bytesArePartial ? L("Not measured") : "0 B"
+        }
+        let measured = ByteCountFormatter.string(
+            fromByteCount: Int64(clamping: candidate.bytes), countStyle: .binary
+        )
+        return candidate.bytesArePartial ? L("%@ or more", measured) : measured
+    }
+
+    static func kindName(_ kind: ThreatIndicator.Kind) -> String {
+        switch kind {
+        case .ip: return L("Address")
+        case .domain: return L("Domain")
+        case .cidr: return L("Address range")
+        }
+    }
+
+    static func stamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .medium
+        return formatter.string(from: date)
     }
 }
 
