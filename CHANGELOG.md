@@ -4,6 +4,17 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.3.4
+
+**The last step of an in-app update could not be completed.** The verified
+installer opened, and dragging the app to Applications failed with "the item is
+in use" — macOS will not replace a running application, and the error does not
+say what to do about it.
+
+The agent now offers to quit at the moment the installer opens, saying why the
+drag would otherwise fail and that nothing is recorded between quitting and
+opening the new copy.
+
 ### Agent for Mac 0.3.3
 
 The first release an installed agent can actually update itself to. 0.3.2

@@ -324,3 +324,9 @@
 "Measured over connections that have closed." = "Measured over connections that have closed.";
 "A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point. What this Mac knows is that %1$@ reached it %2$lld times." = "A feed listing is not proof of harm. It means someone published this destination as associated with the reason above, at some point. What this Mac knows is that %1$@ reached it %2$lld times.";
 "Threats show the name and the address together, so there is nothing to choose between." = "Threats show the name and the address together, so there is nothing to choose between.";
+"The verified installer was opened. Drag the app to Applications to finish." = "The verified installer was opened. Drag the app to Applications to finish.";
+"Quit EgressView Agent to replace it?" = "Quit EgressView Agent to replace it?";
+"Quit and replace" = "Quit and replace";
+"Not now" = "Not now";
+"Quit EgressView Agent before dragging the new copy to Applications." = "Quit EgressView Agent before dragging the new copy to Applications.";
+"macOS cannot replace an application while it is running, so dragging the new copy to Applications fails until this one quits. Nothing is recorded between quitting and opening the new copy." = "macOS cannot replace an application while it is running, so dragging the new copy to Applications fails until this one quits. Nothing is recorded between quitting and opening the new copy.";
