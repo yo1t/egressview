@@ -211,7 +211,8 @@ final class AgentMonitoringController {
     }
 
     private func checkHealth() {
-        healthProbe.check { [weak self] health in
+        let lastObservationAt = try? store?.statistics().newestObservedAt
+        healthProbe.check(lastObservationAt: lastObservationAt ?? nil) { [weak self] health in
             guard let self else { return }
             switch health {
             case .rebootRequiredAfterUpdate:

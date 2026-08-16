@@ -13,14 +13,18 @@ final class SystemExtensionHealthProbe: NSObject, OSSystemExtensionRequestDelega
     private let appBundleVersion: String
     private var completion: ((MonitoringHealth) -> Void)?
     private var found: [OSSystemExtensionProperties] = []
+    private var lastObservationAt: Date?
 
     init(identifier: String, appBundleVersion: String) {
         self.identifier = identifier
         self.appBundleVersion = appBundleVersion
     }
 
-    func check(completion: @escaping (MonitoringHealth) -> Void) {
+    /// `lastObservationAt` is what decides the verdict. The installed versions
+    /// say a swap is pending; only the record says whether it stopped anything.
+    func check(lastObservationAt: Date?, completion: @escaping (MonitoringHealth) -> Void) {
         self.completion = completion
+        self.lastObservationAt = lastObservationAt
         found = []
         let request = OSSystemExtensionRequest.propertiesRequest(
             forExtensionWithIdentifier: identifier, queue: .main
@@ -50,7 +54,9 @@ final class SystemExtensionHealthProbe: NSObject, OSSystemExtensionRequestDelega
             )
         }
         finish(MonitoringHealthCheck.evaluate(
-            versions: versions, appBundleVersion: appBundleVersion
+            versions: versions,
+            appBundleVersion: appBundleVersion,
+            lastObservationAt: lastObservationAt
         ))
     }
 
