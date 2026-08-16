@@ -4,6 +4,23 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.3.2
+
+**In-app updates could not be installed at all.** Every attempt failed with
+"macOS refused the downloaded package: internal error in Code Signing
+subsystem".
+
+The agent shelled out to `spctl --assess` to ask Gatekeeper about the
+download. This app is sandboxed, so `spctl` inherited the sandbox and could not
+reach `syspolicyd`. Confirmed by assessing the same file at the same path from
+an unsandboxed shell, where it is accepted.
+
+The check is now done in-process: the package's signature is validated and its
+Team ID compared with the running build's, so an update still has to come from
+whoever signed what is already installed. Notarisation is checked by macOS when
+the image is opened, as it is for any download — asking in advance bought a
+tidier error message at the cost of the feature working at all.
+
 ### Agent for Mac 0.3.1
 
 Two things the threats tab got wrong on the screen.

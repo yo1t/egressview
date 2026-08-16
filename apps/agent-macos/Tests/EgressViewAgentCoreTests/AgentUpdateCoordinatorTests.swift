@@ -142,7 +142,8 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
             ),
             downloader: AgentUpdateDownloader(transport: PayloadDownloadTransport(payload: payload)),
             verifier: AgentPackageVerifier(
-                runner: StubVerifierRunner(), currentTeamIdentifier: "TEAMID1234"
+                currentTeamIdentifier: "TEAMID1234",
+                resolvePackageIdentity: { _ in "TEAMID1234" }
             ),
             preferences: preferences,
             clock: { now }
@@ -178,7 +179,8 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
             ),
             downloader: AgentUpdateDownloader(transport: PayloadDownloadTransport(payload: payload)),
             verifier: AgentPackageVerifier(
-                runner: StubVerifierRunner(), currentTeamIdentifier: "TEAMID1234"
+                currentTeamIdentifier: "TEAMID1234",
+                resolvePackageIdentity: { _ in "TEAMID1234" }
             ),
             preferences: preferences
         )
@@ -191,7 +193,7 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
         XCTAssertNil(preferences.lastCheckedAt)
     }
 
-    func testDeletesAPackageThatFailsGatekeeperRatherThanLeavingItOnDisk() async throws {
+    func testDeletesAPackageThatFailsVerificationRatherThanLeavingItOnDisk() async throws {
         let package = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("dist/egressview-agent-0.1.16.dmg")
@@ -210,7 +212,8 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
                 transport: PayloadDownloadTransport(payload: try Data(contentsOf: package))
             ),
             verifier: AgentPackageVerifier(
-                runner: StubVerifierRunner(accept: false), currentTeamIdentifier: "TEAMID1234"
+                currentTeamIdentifier: "TEAMID1234",
+                resolvePackageIdentity: { _ in "SOMEONEELSE" }
             ),
             preferences: preferences
         )
@@ -218,7 +221,7 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
         let state = await coordinator.runNow()
         XCTAssertEqual(
             state,
-            .failed("macOS refused the downloaded package: source=Unnotarized Developer ID")
+            .failed("The update was signed by a different developer (SOMEONEELSE) than the copy already installed (TEAMID1234).")
         )
         XCTAssertNil(preferences.lastCheckedAt)
     }
@@ -309,7 +312,22 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
                     expected: "AAAA", actual: "BBBB"
                 )
             ),
-            "The downloaded package was signed by a different developer (BBBB)."
+            "The update was signed by a different developer (BBBB) than the copy already installed (AAAA)."
+        )
+        // The sandbox made the old spctl check impossible, so these are the
+        // states the in-process check can now report. Each has to say what
+        // happened, not just which case it was.
+        XCTAssertEqual(
+            AgentUpdateCoordinator.describe(AgentPackageVerificationError.signatureInvalid(-67061)),
+            "The downloaded package's signature did not verify (code -67061)."
+        )
+        XCTAssertEqual(
+            AgentUpdateCoordinator.describe(AgentPackageVerificationError.teamIdentifierMissing),
+            "The downloaded package is not signed by a developer this Mac can identify."
+        )
+        XCTAssertEqual(
+            AgentUpdateCoordinator.describe(AgentPackageVerificationError.packageUnreadable),
+            "The downloaded package could not be read for verification."
         )
         XCTAssertEqual(
             AgentUpdateCoordinator.describe(AgentUpdateError.httpStatus(503)),

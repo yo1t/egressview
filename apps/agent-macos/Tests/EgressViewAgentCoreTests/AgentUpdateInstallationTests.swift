@@ -142,16 +142,16 @@ final class AgentPackageVerifierTests: XCTestCase {
 
     func testAcceptsAPackageSignedByTheSameTeamAsTheRunningBuild() throws {
         let verifier = AgentPackageVerifier(
-            runner: StubRunner(codesign: codesignOutput(team: "TEAMID1234")),
-            currentTeamIdentifier: "TEAMID1234"
+            currentTeamIdentifier: "TEAMID1234",
+            resolvePackageIdentity: { _ in "TEAMID1234" }
         )
         XCTAssertNoThrow(try verifier.verify(packageAt: package))
     }
 
     func testRejectsAPackageSignedByADifferentTeam() {
         let verifier = AgentPackageVerifier(
-            runner: StubRunner(codesign: codesignOutput(team: "SOMEONEELSE")),
-            currentTeamIdentifier: "TEAMID1234"
+            currentTeamIdentifier: "TEAMID1234",
+            resolvePackageIdentity: { _ in "SOMEONEELSE" }
         )
         XCTAssertThrowsError(try verifier.verify(packageAt: package)) { error in
             XCTAssertEqual(
@@ -161,21 +161,29 @@ final class AgentPackageVerifierTests: XCTestCase {
         }
     }
 
-    func testRejectsAPackageGatekeeperWillNotAccept() {
+    /// A package whose signature does not check out is refused before anything
+    /// is offered to the user.
+    func testRejectsAPackageWhoseSignatureDoesNotVerify() {
         let verifier = AgentPackageVerifier(
-            runner: StubRunner(
-                spctl: AgentCommandResult(
-                    exitCode: 3, standardOutput: "", standardError: "source=Unnotarized Developer ID"
-                ),
-                codesign: codesignOutput(team: "TEAMID1234")
-            ),
-            currentTeamIdentifier: "TEAMID1234"
+            currentTeamIdentifier: "TEAMID1234",
+            resolvePackageIdentity: { _ in
+                throw AgentPackageVerificationError.signatureInvalid(-67061)
+            }
         )
         XCTAssertThrowsError(try verifier.verify(packageAt: package)) { error in
-            XCTAssertEqual(
-                error as? AgentPackageVerificationError,
-                .notarisationRejected("source=Unnotarized Developer ID")
-            )
+            XCTAssertEqual(error as? AgentPackageVerificationError, .signatureInvalid(-67061))
+        }
+    }
+
+    /// An unsigned or ad-hoc signed package has no Team ID to match, and must
+    /// not be treated as matching by default.
+    func testRejectsAPackageWithNoTeamIdentifier() {
+        let verifier = AgentPackageVerifier(
+            currentTeamIdentifier: "TEAMID1234",
+            resolvePackageIdentity: { _ in nil }
+        )
+        XCTAssertThrowsError(try verifier.verify(packageAt: package)) { error in
+            XCTAssertEqual(error as? AgentPackageVerificationError, .teamIdentifierMissing)
         }
     }
 
@@ -183,8 +191,8 @@ final class AgentPackageVerifierTests: XCTestCase {
         // A development build must not become the one that installs anything it
         // is handed.
         let verifier = AgentPackageVerifier(
-            runner: StubRunner(codesign: codesignOutput(team: "TEAMID1234")),
-            currentTeamIdentifier: nil
+            currentTeamIdentifier: nil,
+            resolvePackageIdentity: { _ in "TEAMID1234" }
         )
         XCTAssertThrowsError(try verifier.verify(packageAt: package)) { error in
             XCTAssertEqual(error as? AgentPackageVerificationError, .runningBuildIsNotTeamSigned)
