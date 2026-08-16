@@ -204,15 +204,23 @@ private final class AgentMainViewModel: ObservableObject {
         // analysis tab is built from, made the app the busiest process on the
         // Mac -- while showing numbers that change slowly and, half the time,
         // to nobody.
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+        // Fifteen seconds, not five. Measured on this Mac: each grouped scan
+        // over the 358,000-row observations table costs 200-260 ms, and the
+        // network tab needs six of them, so a refresh is over a second of
+        // SQLite work. At five seconds that is a fifth of a core, permanently,
+        // to re-answer questions whose answers barely moved.
+        //
+        // This is a mitigation, not the fix. The fix is to serve long periods
+        // from `hourly_rollup`, which exists for exactly this and is not being
+        // used by the charts.
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.isWindowVisible else { return }
-                // Six times slower when the app is not the one being used. The
-                // numbers move slowly and nobody is reading them; the queries
-                // behind them are the most expensive thing this app does.
+                // Four times slower again when the app is not the one being
+                // used: nobody is reading numbers they cannot see.
                 if !NSApp.isActive {
                     self.ticksSinceRefresh += 1
-                    guard self.ticksSinceRefresh >= 6 else { return }
+                    guard self.ticksSinceRefresh >= 4 else { return }
                 }
                 self.ticksSinceRefresh = 0
                 self.refresh()
