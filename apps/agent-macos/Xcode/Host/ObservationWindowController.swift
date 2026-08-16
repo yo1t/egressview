@@ -67,6 +67,34 @@ private struct AgentObservationRow: Identifiable {
     let id: String
     let observation: ConnectionObservation
     let countryCode: String?
+    /// What the destination column shows. Held rather than recomputed so that
+    /// sorting, filtering and display can never disagree about it.
+    let destinationText: String
+
+    var observedAt: Date { observation.lastObservedAt }
+    var application: String {
+        observation.processName.isEmpty ? "PID \(observation.processID)" : observation.processName
+    }
+    var countryName: String {
+        guard let countryCode else { return L("Unknown") }
+        return Locale.current.localizedString(forRegionCode: countryCode) ?? countryCode
+    }
+    var port: Int { Int(observation.remotePort) }
+    var protocolName: String { observation.networkProtocol.rawValue.uppercased() }
+    var sourceName: String {
+        observation.collector == .networkExtension ? L("Network") : L("Lightweight")
+    }
+    /// Unmeasured sorts as -1 so it groups at one end rather than mixing in
+    /// with connections that really did move no data.
+    var bytesSort: Int64 {
+        guard observation.bytesIn != nil || observation.bytesOut != nil else { return -1 }
+        return Int64(clamping: (observation.bytesIn ?? 0) + (observation.bytesOut ?? 0))
+    }
+    var bytesText: String {
+        bytesSort < 0
+            ? L("Not measured")
+            : ByteCountFormatter.string(fromByteCount: bytesSort, countStyle: .binary)
+    }
 }
 
 @MainActor
@@ -93,6 +121,27 @@ private final class AgentMainViewModel: ObservableObject {
         [], selection: VisualizationSelection()
     )
     @Published private(set) var observationRows: [AgentObservationRow] = []
+    @Published var logFilter = ConnectionLogFilter()
+    @Published var logSort = [KeyPathComparator(\AgentObservationRow.observedAt, order: .reverse)]
+
+    /// The rows after filtering and sorting, which is what the table shows and
+    /// what the count beside it must therefore report.
+    var visibleRows: [AgentObservationRow] {
+        observationRows.filter {
+            logFilter.matches(
+                $0.observation, destinationText: $0.destinationText, countryCode: $0.countryCode
+            )
+        }.sorted(using: logSort)
+    }
+
+    /// Countries actually present, so the menu never offers a choice that
+    /// matches nothing.
+    var availableCountries: [(code: String, name: String)] {
+        let codes = Set(observationRows.compactMap(\.countryCode))
+        return codes.map {
+            (code: $0, name: Locale.current.localizedString(forRegionCode: $0) ?? $0)
+        }.sorted { $0.name < $1.name }
+    }
     @Published private(set) var summary = AgentPeriodSummary()
     @Published private(set) var coverage = CoverageSummary(
         share: 1, firstCovered: nil, gaps: [], startedInsidePeriod: false
@@ -165,6 +214,24 @@ private final class AgentMainViewModel: ObservableObject {
         }
     }
 
+    /// The destination as the user asked to see it.
+    ///
+    /// This ignored the "Destinations by" setting entirely and always printed
+    /// the address, so choosing Name changed every chart and left the log
+    /// looking as though the setting had not worked. Where no name was ever
+    /// recorded the address is still shown: an empty cell would read as missing
+    /// data rather than as a destination that was only ever an address.
+    static func destinationText(
+        _ observation: ConnectionObservation, grouping: DestinationGrouping
+    ) -> String {
+        if grouping == .name, let hostname = observation.remoteHostname, !hostname.isEmpty {
+            return hostname
+        }
+        return observation.remoteAddress.contains(":")
+            ? "[\(observation.remoteAddress)]"
+            : observation.remoteAddress
+    }
+
     func refresh() {
         guard let store else {
             errorMessage = L("Local history is unavailable because App Group access failed.")
@@ -232,7 +299,10 @@ private final class AgentMainViewModel: ObservableObject {
                         AgentObservationRow(
                             id: "\(observation.stableKey)|\(observation.lastObservedAt.timeIntervalSince1970)|\(index)",
                             observation: observation,
-                            countryCode: value.8[observation.remoteAddress]
+                            countryCode: value.8[observation.remoteAddress],
+                            destinationText: Self.destinationText(
+                                observation, grouping: grouping
+                            )
                         )
                     }
                     self.summary = value.1
@@ -371,6 +441,10 @@ private struct AgentMainView: View {
     private var analysisControls: some View {
         HStack(spacing: 16) {
             metricPicker
+                .disabled(model.selectedTab == .log)
+                .help(model.selectedTab == .log
+                      ? L("The measure sizes the marks on the charts. The log lists every connection either way.")
+                      : L("Whether the charts are sized by connection count or by data volume"))
             destinationGroupingPicker
             Spacer()
             Button {
@@ -452,43 +526,56 @@ private struct AgentMainView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(L("%lld shown", model.observationRows.count))
+                // The count reports what is on screen. Reporting the unfiltered
+                // total beside a filtered table would make the filter look
+                // broken.
+                Text(model.logFilter.isActive
+                     ? L("%1$lld of %2$lld shown", model.visibleRows.count, model.observationRows.count)
+                     : L("%lld shown", model.observationRows.count))
                     .foregroundStyle(.secondary)
+                if model.logFilter.isActive {
+                    Button(L("Clear filters")) { model.logFilter = ConnectionLogFilter() }
+                }
             }
-            Table(model.observationRows) {
-                TableColumn(L("Observed")) { row in
-                    Text(Self.observedFormatter.string(from: row.observation.lastObservedAt))
+            AgentLogFilterBar(model: model)
+            Table(model.visibleRows, sortOrder: $model.logSort) {
+                TableColumn(L("Observed"), value: \.observedAt) { row in
+                    Text(Self.observedFormatter.string(from: row.observedAt))
                         .monospacedDigit()
                 }
                 .width(min: 150, ideal: 170)
-                TableColumn(L("Application")) { row in
-                    Text(row.observation.processName.isEmpty ? "PID \(row.observation.processID)" : row.observation.processName)
+                TableColumn(L("Application"), value: \.application) { row in
+                    Text(row.application)
                 }
                 .width(min: 130, ideal: 180)
-                TableColumn(L("Destination")) { row in
-                    Text(destination(row.observation))
+                TableColumn(L("Destination"), value: \.destinationText) { row in
+                    Text(row.destinationText)
                         .monospaced()
-                        .help(row.observation.remoteHostname ?? row.observation.remoteAddress)
+                        .help(row.destinationText)
                 }
-                .width(min: 200, ideal: 300)
-                TableColumn(L("Country")) { row in
-                    Text(Self.countryName(row.countryCode))
+                .width(min: 180, ideal: 280)
+                TableColumn(L("Country"), value: \.countryName) { row in
+                    Text(row.countryName)
                         .foregroundStyle(row.countryCode == nil ? .secondary : .primary)
                 }
                 .width(min: 90, ideal: 120)
-                TableColumn(L("Data volume")) { row in
-                    Text(Self.dataVolume(row.observation))
+                TableColumn(L("Data volume"), value: \.bytesSort) { row in
+                    Text(row.bytesText)
                         .monospacedDigit()
-                        .foregroundStyle(row.observation.bytesIn == nil && row.observation.bytesOut == nil
-                                         ? .secondary : .primary)
+                        .foregroundStyle(row.bytesSort < 0 ? .secondary : .primary)
                 }
                 .width(min: 90, ideal: 110)
-                TableColumn(L("Protocol")) { row in
-                    Text(row.observation.networkProtocol.rawValue.uppercased())
+                TableColumn(L("Protocol"), value: \.protocolName) { row in
+                    Text(row.protocolName)
                 }
                 .width(70)
-                TableColumn(L("Source")) { row in
-                    Text(row.observation.collector == .networkExtension ? L("Network") : L("Lightweight"))
+                TableColumn(L("Port"), value: \.port) { row in
+                    Text(String(row.port))
+                        .monospacedDigit()
+                }
+                .width(60)
+                TableColumn(L("Source"), value: \.sourceName) { row in
+                    Text(row.sourceName)
                 }
                 .width(100)
             }
@@ -498,26 +585,7 @@ private struct AgentMainView: View {
         .agentSection()
     }
 
-    /// The destination as the user asked to see it.
-    ///
-    /// This column ignored the "Destinations by" setting entirely and always
-    /// printed the address, so choosing Name changed the charts and left the
-    /// log looking like it had not worked. Where no name was ever recorded the
-    /// address is shown rather than a blank: about 60% of connections have no
-    /// name, and an empty cell would read as missing data instead of a
-    /// destination that was only ever an address.
-    private func destination(_ observation: ConnectionObservation) -> String {
-        let address = observation.remoteAddress.contains(":")
-            ? "[\(observation.remoteAddress)]"
-            : observation.remoteAddress
-        if model.destinationGrouping == .name, let hostname = observation.remoteHostname,
-           !hostname.isEmpty {
-            return "\(hostname):\(observation.remotePort)"
-        }
-        return "\(address):\(observation.remotePort)"
-    }
-
-    /// Date and time to the second. A time alone made two rows a day apart look
+    /// Date and time to the second. A bare time made two rows a day apart look
     /// like two rows a minute apart.
     private static let observedFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -526,20 +594,115 @@ private struct AgentMainView: View {
         return formatter
     }()
 
-    private static func countryName(_ code: String?) -> String {
-        guard let code else { return L("Unknown") }
-        return Locale.current.localizedString(forRegionCode: code) ?? code
+}
+
+/// A filter per column, because the questions asked of this table are
+/// per-column ones. A single search box cannot express "UDP to port 443".
+///
+/// The observed time has no filter: the period picker above already governs it,
+/// and a second control for the same thing invites the two to disagree.
+private struct AgentLogFilterBar: View {
+    @ObservedObject var model: AgentMainViewModel
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { controls }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) { textFilters }
+                HStack(spacing: 8) { menuFilters }
+            }
+        }
+        .controlSize(.small)
+        .font(.caption)
     }
 
-    /// Both directions together. Empty when neither was measured -- a zero
-    /// would claim the connection moved nothing, which is a different and
-    /// false statement.
-    private static func dataVolume(_ observation: ConnectionObservation) -> String {
-        guard observation.bytesIn != nil || observation.bytesOut != nil else {
-            return L("Not measured")
+    @ViewBuilder
+    private var controls: some View {
+        textFilters
+        menuFilters
+    }
+
+    @ViewBuilder
+    private var textFilters: some View {
+        field(L("Application"), text: $model.logFilter.application, width: 140)
+        field(L("Destination"), text: $model.logFilter.destination, width: 170)
+        field(L("Port"), text: $model.logFilter.port, width: 70)
+    }
+
+    @ViewBuilder
+    private var menuFilters: some View {
+        Picker(L("Country"), selection: countryBinding) {
+            Text(L("Country: any")).tag(CountryChoice.any)
+            Text(L("Unknown")).tag(CountryChoice.unplaced)
+            Divider()
+            ForEach(model.availableCountries, id: \.code) { entry in
+                Text(entry.name).tag(CountryChoice.code(entry.code))
+            }
         }
-        let total = Int64(clamping: (observation.bytesIn ?? 0) + (observation.bytesOut ?? 0))
-        return ByteCountFormatter.string(fromByteCount: total, countStyle: .binary)
+        .labelsHidden()
+        .frame(width: 130)
+
+        Picker(L("Protocol"), selection: $model.logFilter.networkProtocol) {
+            Text(L("Protocol: any")).tag(InternetProtocol?.none)
+            ForEach(InternetProtocol.allCases, id: \.self) { value in
+                Text(value.rawValue.uppercased()).tag(InternetProtocol?.some(value))
+            }
+        }
+        .labelsHidden()
+        .frame(width: 110)
+
+        Picker(L("Data volume"), selection: $model.logFilter.volume) {
+            Text(L("Volume: any")).tag(ConnectionLogFilter.Volume.any)
+            Text(L("Measured")).tag(ConnectionLogFilter.Volume.measured)
+            Text(L("Not measured")).tag(ConnectionLogFilter.Volume.unmeasured)
+        }
+        .labelsHidden()
+        .frame(width: 130)
+
+        Picker(L("Source"), selection: $model.logFilter.collector) {
+            Text(L("Source: any")).tag(CollectorKind?.none)
+            Text(L("Network")).tag(CollectorKind?.some(.networkExtension))
+            Text(L("Lightweight")).tag(CollectorKind?.some(.libproc))
+        }
+        .labelsHidden()
+        .frame(width: 120)
+    }
+
+    private func field(_ placeholder: String, text: Binding<String>, width: CGFloat) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: width)
+    }
+
+    /// "Unknown" is a real answer people look for, so it is a choice rather
+    /// than the absence of one.
+    private enum CountryChoice: Hashable {
+        case any
+        case unplaced
+        case code(String)
+    }
+
+    private var countryBinding: Binding<CountryChoice> {
+        Binding(
+            get: {
+                if model.logFilter.isUnplacedCountryOnly { return .unplaced }
+                if let code = model.logFilter.country { return .code(code) }
+                return .any
+            },
+            set: { choice in
+                switch choice {
+                case .any:
+                    model.logFilter.country = nil
+                    model.logFilter.isUnplacedCountryOnly = false
+                case .unplaced:
+                    model.logFilter.country = nil
+                    model.logFilter.isUnplacedCountryOnly = true
+                case .code(let code):
+                    model.logFilter.country = code
+                    model.logFilter.isUnplacedCountryOnly = false
+                }
+            }
+        )
     }
 }
 

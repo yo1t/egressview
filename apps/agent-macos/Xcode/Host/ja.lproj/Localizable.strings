@@ -267,3 +267,13 @@
 "Data volume" = "データ転送量";
 "Unknown" = "不明";
 "Not measured" = "未計測";
+"Port" = "ポート";
+"Clear filters" = "絞り込みを解除";
+"%1$lld of %2$lld shown" = "%2$lld件中 %1$lld件を表示";
+"Country: any" = "国: すべて";
+"Protocol: any" = "プロトコル: すべて";
+"Volume: any" = "転送量: すべて";
+"Source: any" = "収集元: すべて";
+"Measured" = "計測済み";
+"The measure sizes the marks on the charts. The log lists every connection either way." = "指標はグラフの大きさを決めるものです。通信ログはどちらを選んでも全件を表示します。";
+"Whether the charts are sized by connection count or by data volume" = "グラフの大きさを接続数で決めるか、データ転送量で決めるか";

@@ -267,3 +267,13 @@
 "Data volume" = "Data volume";
 "Unknown" = "Unknown";
 "Not measured" = "Not measured";
+"Port" = "Port";
+"Clear filters" = "Clear filters";
+"%1$lld of %2$lld shown" = "%1$lld of %2$lld shown";
+"Country: any" = "Country: any";
+"Protocol: any" = "Protocol: any";
+"Volume: any" = "Volume: any";
+"Source: any" = "Source: any";
+"Measured" = "Measured";
+"The measure sizes the marks on the charts. The log lists every connection either way." = "The measure sizes the marks on the charts. The log lists every connection either way.";
+"Whether the charts are sized by connection count or by data volume" = "Whether the charts are sized by connection count or by data volume";
