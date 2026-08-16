@@ -592,6 +592,14 @@ private struct AgentMainView: View {
                       ? L("Whether the charts are sized by connection count or by data volume")
                       : L("The measure sizes the marks on the charts. This tab lists every row either way."))
             destinationGroupingPicker
+                // The threats table always shows the name when one was
+                // recorded, and the detail shows the address alongside it, so
+                // there is nothing for this to change. Disabled rather than
+                // hidden, so the controls do not move between tabs.
+                .disabled(model.selectedTab == .threats)
+                .help(model.selectedTab == .threats
+                      ? L("Threats show the name and the address together, so there is nothing to choose between.")
+                      : L("A name groups a service together; an address shows how far its traffic is spread."))
             Spacer()
             Button {
                 model.exportCSV()
@@ -667,7 +675,6 @@ private struct AgentMainView: View {
         }
         .pickerStyle(.segmented)
         .frame(width: 300)
-        .help(L("A name groups a service together; an address shows how far its traffic is spread."))
     }
 
     private var connectionTable: some View {
