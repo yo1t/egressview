@@ -12,12 +12,16 @@ private enum AgentMainTab: String, CaseIterable, Identifiable {
     /// are hundreds of them -- and sharing the screen with the charts left both
     /// too short to read.
     case log
+    /// Its own tab rather than a badge somewhere. If a destination on a threat
+    /// feed was reached, that is not a detail of another view.
+    case threats
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .network: return L("Network status")
+        case .threats: return L("Threats")
         case .log: return L("Connection log")
         }
     }
@@ -99,7 +103,9 @@ private struct AgentObservationRow: Identifiable {
 
 @MainActor
 private final class AgentMainViewModel: ObservableObject {
-    @Published var selectedTab = AgentMainTab.network
+    @Published var selectedTab = AgentMainTab.network {
+        didSet { if oldValue != selectedTab { refresh() } }
+    }
     @Published var scale = TimeScale.hour {
         didSet { refresh() }
     }
@@ -167,6 +173,9 @@ private final class AgentMainViewModel: ObservableObject {
         share: 1, firstCovered: nil, gaps: [], startedInsidePeriod: false
     )
     @Published private(set) var sleepPeriods: [DateInterval] = []
+    @Published private(set) var threats = ThreatReport(findings: [], availability: .notFetchedYet)
+    /// Set by the app delegate from the controller that fetches indicators.
+    var threatAvailability: ThreatIntelAvailability = .notFetchedYet
     @Published private(set) var storage: ObservationStoreStatistics?
     @Published private(set) var monitoringStatus = L("Monitoring paused")
     @Published private(set) var errorMessage: String?
@@ -177,6 +186,7 @@ private final class AgentMainViewModel: ObservableObject {
     @Published var exportedFileURL: URL?
     /// Set by the window controller. A hidden window is not worth querying for.
     var isWindowVisible = true
+    private var ticksSinceRefresh = 0
 
     private let store: ObservationStore?
     private let loadQueue = DispatchQueue(label: "com.egressview.agent.main-window")
@@ -194,10 +204,26 @@ private final class AgentMainViewModel: ObservableObject {
         // analysis tab is built from, made the app the busiest process on the
         // Mac -- while showing numbers that change slowly and, half the time,
         // to nobody.
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+        // Fifteen seconds, not five. Measured on this Mac: each grouped scan
+        // over the 358,000-row observations table costs 200-260 ms, and the
+        // network tab needs six of them, so a refresh is over a second of
+        // SQLite work. At five seconds that is a fifth of a core, permanently,
+        // to re-answer questions whose answers barely moved.
+        //
+        // This is a mitigation, not the fix. The fix is to serve long periods
+        // from `hourly_rollup`, which exists for exactly this and is not being
+        // used by the charts.
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard self?.isWindowVisible == true else { return }
-                self?.refresh()
+                guard let self, self.isWindowVisible else { return }
+                // Four times slower again when the app is not the one being
+                // used: nobody is reading numbers they cannot see.
+                if !NSApp.isActive {
+                    self.ticksSinceRefresh += 1
+                    guard self.ticksSinceRefresh >= 4 else { return }
+                }
+                self.ticksSinceRefresh = 0
+                self.refresh()
             }
         }
     }
@@ -299,76 +325,86 @@ private final class AgentMainViewModel: ObservableObject {
         isRefreshing = true
         let selection = VisualizationSelection(scale: scale, metric: metric, end: Date())
         let grouping = destinationGrouping
+        let availability = threatAvailability
+        // Only what the visible tab shows. Every query here scans a range of a
+        // 55 MB table and sorts it -- profiling put the app's CPU in SQLite,
+        // not in drawing -- and running the log's and the threat tab's queries
+        // while looking at the charts is work for a screen nobody is on.
+        let tab = selectedTab
         loadQueue.async { [weak self] in
             let from = selection.start
             let to = selection.end
-            let result = Result {
-                let observations = try store.observations(since: from, limit: 500)
-                let countries = try store.countryCodes(
-                    forAddresses: observations.map(\.remoteAddress)
-                )
-                let rollup = try store.hourlyRollup(from: from, to: to)
-                let summary = AgentPeriodSummary(
-                    sessionCount: rollup.reduce(0) { $0 + $1.sessionCount },
-                    applicationCount: Set(rollup.map(\.processName)).count,
-                    destinationCount: Set(rollup.map(\.remoteAddress)).count
-                )
-                let pairs = try store.appDestinationTotals(from: from, to: to, grouping: grouping)
-                let buckets = try store.appTimeline(
-                    from: from, to: to, buckets: VisualizationSelection.bucketCount
-                )
-                // The byte view is offered only once something has actually
-                // been measured; otherwise every bar would be empty.
-                let measuredBytes = pairs.contains { $0.bytes > 0 }
-                let sleeps = try store.sleepPeriods(from: from, to: to)
-                let coverage = CoverageCalculator.summarize(
-                    sessions: try store.coverageSessions(from: from, to: to),
-                    sleepPeriods: sleeps,
-                    from: from, to: to
-                )
-                let locations = try store.destinationLocations(from: from, to: to)
-                let globe = GlobeAggregator().aggregate(
-                    placed: locations.placed,
-                    unplacedSessions: locations.unplacedSessions,
-                    unplacedBytes: locations.unplacedBytes,
-                    metric: selection.metric,
-                    hasLocationData: try store.geoLocationCount() > 0
-                )
-                return (
-                    observations, summary, try store.statistics(),
-                    SankeyAggregator().aggregate(pairs, metric: selection.metric),
-                    TimelineAggregator().aggregate(buckets, selection: selection),
-                    measuredBytes, globe, coverage, countries, sleeps
-                )
+            let result = Result { () -> LoadedData in
+                var data = LoadedData()
+                data.storage = try store.statistics()
+
+                if tab == .network {
+                    let rollup = try store.hourlyRollup(from: from, to: to)
+                    data.summary = AgentPeriodSummary(
+                        sessionCount: rollup.reduce(0) { $0 + $1.sessionCount },
+                        applicationCount: Set(rollup.map(\.processName)).count,
+                        destinationCount: Set(rollup.map(\.remoteAddress)).count
+                    )
+                    let pairs = try store.appDestinationTotals(
+                        from: from, to: to, grouping: grouping
+                    )
+                    let buckets = try store.appTimeline(
+                        from: from, to: to, buckets: VisualizationSelection.bucketCount
+                    )
+                    // The byte view is offered only once something has actually
+                    // been measured; otherwise every bar would be empty.
+                    data.measuredBytes = pairs.contains { $0.bytes > 0 }
+                    data.sankey = SankeyAggregator().aggregate(pairs, metric: selection.metric)
+                    data.timeline = TimelineAggregator().aggregate(buckets, selection: selection)
+                    let locations = try store.destinationLocations(from: from, to: to)
+                    data.globe = GlobeAggregator().aggregate(
+                        placed: locations.placed,
+                        unplacedSessions: locations.unplacedSessions,
+                        unplacedBytes: locations.unplacedBytes,
+                        metric: selection.metric,
+                        hasLocationData: try store.geoLocationCount() > 0
+                    )
+                    let sleeps = try store.sleepPeriods(from: from, to: to)
+                    data.sleepPeriods = sleeps
+                    data.coverage = CoverageCalculator.summarize(
+                        sessions: try store.coverageSessions(from: from, to: to),
+                        sleepPeriods: sleeps,
+                        from: from, to: to
+                    )
+                }
+
+                // The threat count appears on the network tab too, so it is
+                // computed for both -- but only there, and never for the log.
+                if tab == .network || tab == .threats {
+                    data.threats = ThreatReport.evaluate(
+                        candidates: try store.destinationsForThreatMatching(from: from, to: to),
+                        matcher: ThreatMatcher(indicators: try store.threatIndicators()),
+                        availability: availability
+                    )
+                }
+
+                if tab == .log {
+                    let observations = try store.observations(since: from, limit: 500)
+                    let countries = try store.countryCodes(
+                        forAddresses: observations.map(\.remoteAddress)
+                    )
+                    data.rows = observations.enumerated().map { index, observation in
+                        AgentObservationRow(
+                            id: "\(observation.stableKey)|\(observation.lastObservedAt.timeIntervalSince1970)|\(index)",
+                            observation: observation,
+                            countryCode: countries[observation.remoteAddress],
+                            destinationText: Self.destinationText(observation, grouping: grouping)
+                        )
+                    }
+                }
+                return data
             }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.isRefreshing = false
                 switch result {
-                case .success(let value):
-                    self.sankey = value.3
-                    self.timeline = value.4
-                    self.globe = value.6
-                    self.coverage = value.7
-                    self.sleepPeriods = value.9
-                    self.availableMetrics = VisualizationSelection.availableMetrics(
-                        hasMeasuredBytes: value.5
-                    )
-                    if !self.availableMetrics.contains(self.metric) {
-                        self.metric = .sessions
-                    }
-                    self.observationRows = value.0.enumerated().map { index, observation in
-                        AgentObservationRow(
-                            id: "\(observation.stableKey)|\(observation.lastObservedAt.timeIntervalSince1970)|\(index)",
-                            observation: observation,
-                            countryCode: value.8[observation.remoteAddress],
-                            destinationText: Self.destinationText(
-                                observation, grouping: grouping
-                            )
-                        )
-                    }
-                    self.summary = value.1
-                    self.storage = value.2
+                case .success(let data):
+                    self.apply(data, tab: tab)
                     self.errorMessage = nil
                 case .failure(let error):
                     self.errorMessage = error.localizedDescription
@@ -376,6 +412,38 @@ private final class AgentMainViewModel: ObservableObject {
             }
         }
     }
+
+    /// Everything a refresh can produce. Only the fields the visible tab needs
+    /// are filled in; the rest keep whatever they already held.
+    private struct LoadedData {
+        var summary: AgentPeriodSummary?
+        var sankey: SankeyModel?
+        var timeline: TimelineModel?
+        var globe: GlobeModel?
+        var coverage: CoverageSummary?
+        var sleepPeriods: [DateInterval]?
+        var threats: ThreatReport?
+        var rows: [AgentObservationRow]?
+        var storage: ObservationStoreStatistics?
+        var measuredBytes: Bool?
+    }
+
+    private func apply(_ data: LoadedData, tab: AgentMainTab) {
+        if let value = data.summary { summary = value }
+        if let value = data.sankey { sankey = value }
+        if let value = data.timeline { timeline = value }
+        if let value = data.globe { globe = value }
+        if let value = data.coverage { coverage = value }
+        if let value = data.sleepPeriods { sleepPeriods = value }
+        if let value = data.threats { threats = value }
+        if let value = data.rows { observationRows = value }
+        if let value = data.storage { storage = value }
+        if let measured = data.measuredBytes {
+            availableMetrics = VisualizationSelection.availableMetrics(hasMeasuredBytes: measured)
+            if !availableMetrics.contains(metric) { metric = .sessions }
+        }
+    }
+
 }
 
 private struct AgentMainView: View {
@@ -389,6 +457,7 @@ private struct AgentMainView: View {
             Group {
                 switch model.selectedTab {
                 case .network: analysisView
+                case .threats: threatsView
                 case .log: logView
                 }
             }
@@ -453,7 +522,8 @@ private struct AgentMainView: View {
                             summary: model.summary,
                             coverage: model.coverage,
                             monitoringStatus: model.monitoringStatus,
-                            storage: model.storage
+                            storage: model.storage,
+                            threats: model.threats
                         )
                         .frame(maxWidth: .infinity)
                         .frame(height: metrics.topHeight)
@@ -476,6 +546,17 @@ private struct AgentMainView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)
             }
+        }
+    }
+
+    private var threatsView: some View {
+        VStack(spacing: 0) {
+            analysisControls
+            errorBanner
+            AgentThreatPanel(report: model.threats, scale: model.scale)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 18)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -780,6 +861,125 @@ private struct AgentLogFilterBar: View {
     }
 }
 
+/// The threats tab.
+///
+/// Its most important job is the one that shows nothing: saying "nobody
+/// looked" rather than "nothing found". An empty list from a screen that never
+/// had indicators would present an unexamined period as a clean one, which is
+/// the same failure as an empty chart reading as a quiet network.
+private struct AgentThreatPanel: View {
+    let report: ThreatReport
+    let scale: TimeScale
+
+    static func reason(_ availability: ThreatIntelAvailability) -> String {
+        switch availability {
+        case .checked:
+            return ""
+        case .notEnabled:
+            return L("Threat information is not switched on, so nothing was checked. Connect a Hub, or turn on feed downloads in settings.")
+        case .hubHasNoFeeds:
+            return L("The Hub is not running threat feeds, so nothing was checked.")
+        case .notFetchedYet:
+            return L("Threat information has not arrived yet, so nothing was checked.")
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            if !report.wasChecked {
+                AgentEmptyChartNote(text: Self.reason(report.availability))
+                Spacer(minLength: 0)
+            } else if report.findings.isEmpty {
+                AgentEmptyChartNote(
+                    text: L("Nothing in this period matched a threat feed. That covers the feeds this agent holds, and nothing beyond them.")
+                )
+                Spacer(minLength: 0)
+            } else {
+                table
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .agentSection()
+    }
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L("Destinations on a threat feed"))
+                    .font(.title2.weight(.semibold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if report.wasChecked, report.destinationCount > 0 {
+                Label(
+                    L("%lld destinations", report.destinationCount),
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var subtitle: String {
+        guard case let .checked(count, fetchedAt) = report.availability else {
+            return L("Nothing was checked in %@", scale.title)
+        }
+        guard let fetchedAt else {
+            return L("%1$lld indicators, %2$@", count, scale.title)
+        }
+        return L("%1$lld indicators updated %2$@, %3$@",
+                 count,
+                 RelativeDateTimeFormatter().localizedString(for: fetchedAt, relativeTo: Date()),
+                 scale.title)
+    }
+
+    private var table: some View {
+        Table(report.findings) {
+            TableColumn(L("Destination")) { finding in
+                Text(finding.candidate.hostname ?? finding.candidate.address)
+                    .monospaced()
+                    .help(finding.candidate.address)
+            }
+            .width(min: 180, ideal: 260)
+            TableColumn(L("Application")) { finding in
+                Text(finding.candidate.processName)
+            }
+            .width(min: 120, ideal: 160)
+            // What was on the list, which is not always the destination: a
+            // parent domain can be the listed thing.
+            TableColumn(L("Matched")) { finding in
+                Text(finding.match.matchedValue)
+                    .monospaced()
+            }
+            .width(min: 150, ideal: 200)
+            TableColumn(L("Why")) { finding in
+                Text(finding.match.indicator.tag ?? L("Listed"))
+            }
+            .width(min: 150, ideal: 220)
+            TableColumn(L("Feed")) { finding in
+                Text(finding.match.indicator.source ?? L("Unknown"))
+            }
+            .width(100)
+            TableColumn(L("Connections")) { finding in
+                Text(finding.candidate.sessionCount.formatted())
+                    .monospacedDigit()
+            }
+            .width(90)
+            TableColumn(L("Last seen")) { finding in
+                Text(finding.candidate.lastObservedAt, style: .time)
+                    .monospacedDigit()
+            }
+            .width(90)
+        }
+        .frame(maxHeight: .infinity)
+    }
+}
+
 // MARK: - Charts
 
 private func formattedMetric(_ value: Double, _ metric: TrafficMetric) -> String {
@@ -929,6 +1129,7 @@ private struct AgentOverviewPanel: View {
     let coverage: CoverageSummary
     let monitoringStatus: String
     let storage: ObservationStoreStatistics?
+    let threats: ThreatReport
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -963,6 +1164,14 @@ private struct AgentOverviewPanel: View {
                 tile(L("Applications"), summary.applicationCount.formatted(), "app.dashed")
                 tile(L("Destinations"), summary.destinationCount.formatted(), "network")
                 tile(L("Monitored"), "\(Int((coverage.share * 100).rounded()))%", "clock.badge.checkmark")
+                // A dash, not a zero, when nothing checked. Zero is an answer
+                // and this would not be one.
+                tile(
+                    L("Threats"),
+                    threats.wasChecked ? threats.destinationCount.formatted() : "—",
+                    threats.wasChecked && threats.destinationCount > 0
+                        ? "exclamationmark.triangle.fill" : "shield"
+                )
             }
 
             Spacer(minLength: 0)
@@ -975,10 +1184,9 @@ private struct AgentOverviewPanel: View {
                     L("Packet contents are never collected."),
                     systemImage: "lock"
                 )
-                Label(
-                    L("Threat classification comes from a Hub. This agent reports what it saw and judges none of it."),
-                    systemImage: "info.circle"
-                )
+                if !threats.wasChecked {
+                    Label(AgentThreatPanel.reason(threats.availability), systemImage: "info.circle")
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -1741,6 +1949,13 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     @MainActor
     /// Miniaturised counts as not visible. The window is still "loaded", but
     /// querying and redrawing for a dock icon is work spent on nobody.
+    /// Whether anyone was in a position to look for threats. Held on the model
+    /// so a period nobody checked is never presented as a clean one.
+    func setThreatAvailability(_ availability: ThreatIntelAvailability) {
+        model.threatAvailability = availability
+        model.refresh()
+    }
+
     func windowDidMiniaturize(_ notification: Notification) {
         model.isWindowVisible = false
     }

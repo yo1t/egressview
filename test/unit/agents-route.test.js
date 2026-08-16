@@ -38,6 +38,7 @@ function makeApp({
   allowPlaintext = false,
   recordConnections = null,
   queueConnectionEnrichment = null,
+  threatIntel = null,
 } = {}) {
   const audits = [];
   const app = express();
@@ -65,6 +66,7 @@ function makeApp({
     agentIngest,
     recordConnections,
     queueConnectionEnrichment,
+    threatIntel,
     isPlaintextAllowed: () => allowPlaintext,
     authAudit: { append: event => audits.push(event) },
   }));
@@ -490,6 +492,76 @@ describe('Agent HTTP ingest', () => {
     });
     assert.equal(response.status, 200);
     assert.deepEqual(response.body.entries, []);
+  });
+
+  it('脅威指標を全件返し、Agentは宛先を1件も送らない', async () => {
+    // 「危ないか」を尋ねるために宛先を送ると、何を気にしているかを相手に伝える
+    // ことになる。**それを避けるためのエンドポイント**なので、requestには
+    // 宛先を入れさせない。
+    const threatIntel = {
+      listIndicators: () => ({
+        ips: [['203.0.113.7', 'feodo', 'Dridex C2']],
+        domains: [['bad.example', 'urlhaus', 'malware download']],
+        cidrs: [['198.51.100.0/24', 'spamhaus', 'Spamhaus DROP (hijacked network)']],
+        lastFetch: 1_700_000_000_000,
+      }),
+    };
+    const { app } = makeApp({ threatIntel });
+    const { enrolled } = await enrolledAgent(app);
+
+    const response = await request(app, 'GET', '/api/agent/threat-intel', {
+      headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.schemaVersion, 1);
+    assert.equal(response.body.available, true);
+    assert.deepEqual(response.body.ips, [['203.0.113.7', 'feodo', 'Dridex C2']]);
+    assert.deepEqual(response.body.domains, [['bad.example', 'urlhaus', 'malware download']]);
+    assert.deepEqual(response.body.cidrs, [
+      ['198.51.100.0/24', 'spamhaus', 'Spamhaus DROP (hijacked network)'],
+    ]);
+  });
+
+  it('脅威指標は変化が無ければ304を返す', async () => {
+    const threatIntel = {
+      listIndicators: () => ({
+        ips: [['203.0.113.7', 'feodo', 'Dridex C2']],
+        domains: [],
+        cidrs: [],
+        lastFetch: 1_700_000_000_000,
+      }),
+    };
+    const { app } = makeApp({ threatIntel });
+    const { enrolled } = await enrolledAgent(app);
+    const authorization = { Authorization: `Bearer ${enrolled.body.token}` };
+
+    const first = await request(app, 'GET', '/api/agent/threat-intel', { headers: authorization });
+    const etag = /^etag: (.+)$/im.exec(first.raw)?.[1]?.trim();
+    assert.ok(etag, '半メガバイトを毎回送り直さないためにETagが要る');
+
+    const second = await request(app, 'GET', '/api/agent/threat-intel', {
+      headers: { ...authorization, 'If-None-Match': etag },
+    });
+    assert.equal(second.status, 304);
+  });
+
+  it('フィードが無いHubは available:false を返し、脅威ゼロとは言わない', async () => {
+    // 「脅威が見つからなかった」と「誰も調べていない」は別の事実である。
+    // 前者として見せると、Agentは調べていない期間を安全な期間として表示する。
+    const { app } = makeApp({ threatIntel: null });
+    const { enrolled } = await enrolledAgent(app);
+    const response = await request(app, 'GET', '/api/agent/threat-intel', {
+      headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.available, false);
+    assert.deepEqual(response.body.ips, []);
+  });
+
+  it('脅威指標は資格情報を要求する', async () => {
+    const { app } = makeApp({ threatIntel: { listIndicators: () => ({ ips: [], domains: [], cidrs: [] }) } });
+    const anonymous = await request(app, 'GET', '/api/agent/threat-intel');
+    assert.equal(anonymous.status, 401);
   });
 
   it('geoキャッシュは資格情報を要求する', async () => {

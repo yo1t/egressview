@@ -199,6 +199,7 @@ All 101 implemented HTTP endpoints are listed below. **Public** means no browser
 | Agent | `POST /api/agent/ingest` | Agent bearer; `agent.ingest`, max 200 observations and 512 KiB uncompressed JSON |
 | Agent | `GET /api/agent/capabilities` | Agent bearer; accepted schema versions and batch limits, so an agent can pick a version both sides speak |
 | Agent | `GET /api/agent/geo-cache` | Agent bearer; the whole location cache, so an agent can place its own destinations on a map without telling the Hub which ones it cares about. `ETag`/`304` supported |
+| Agent | `GET /api/agent/threat-intel` | Agent bearer; every threat indicator, so an agent can match its own destinations locally without telling anyone which ones it is asking about. `available: false` when the Hub runs without feeds, which an agent must not read as "no threats found". `ETag`/`304` supported |
 | Router setup | `POST /api/nonce` | Protected |
 | Router setup | `POST /api/yamaha/detect` | Protected |
 | Router setup | `POST /api/cisco/detect` | Protected |
