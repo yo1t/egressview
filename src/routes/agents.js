@@ -4,6 +4,7 @@ const { Router } = require('express');
 
 // Bumped only when the shape changes in a way an older agent cannot ignore.
 const AGENT_GEO_CACHE_SCHEMA_VERSION = 1;
+const AGENT_THREAT_INTEL_SCHEMA_VERSION = 1;
 const { monitorEventLoopDelay } = require('node:perf_hooks');
 const { createHash } = require('node:crypto');
 const net = require('node:net');
@@ -95,6 +96,10 @@ module.exports = function agentRoutes({
   // the unit tests, which exercise storage rather than the collection pipeline.
   recordConnections = null,
   queueConnectionEnrichment = null,
+  // Injected so the route does not reach into the runtime directly. Absent when
+  // the Hub runs without threat feeds, in which case the endpoint says so
+  // rather than pretending there is nothing to match.
+  threatIntel = null,
 }) {
   const router = Router();
   const failedEnrollments = new Map();
@@ -520,6 +525,52 @@ module.exports = function agentRoutes({
   // who has turned delivery off that is precisely the information they chose
   // not to send. Roughly sixty times more rows are transferred than any one
   // agent needs; that cost is accepted to keep the request free of content.
+  // Every indicator, handed over whole, so the agent can match locally.
+  //
+  // The agent never sends a destination anywhere. Asking "is this address on a
+  // list?" by transmitting the address tells the other end exactly what the
+  // user was worried about -- which is the thing this endpoint exists to
+  // avoid. The set is around ten thousand entries, six times smaller than the
+  // location cache already distributed this way.
+  router.get('/agent/threat-intel', requireAgent, (req, res) => {
+    if (!threatIntel) {
+      // Not an error. A Hub can legitimately run with no feeds, and the agent
+      // needs to tell "no threats found" apart from "nobody looked".
+      return res.json({
+        schemaVersion: AGENT_THREAT_INTEL_SCHEMA_VERSION,
+        generatedAt: new Date().toISOString(),
+        available: false,
+        ips: [],
+        domains: [],
+        cidrs: [],
+      });
+    }
+
+    const indicators = threatIntel.listIndicators();
+    const body = {
+      schemaVersion: AGENT_THREAT_INTEL_SCHEMA_VERSION,
+      generatedAt: new Date().toISOString(),
+      available: true,
+      fetchedAt: indicators.lastFetch ? new Date(indicators.lastFetch).toISOString() : null,
+      ips: indicators.ips,
+      domains: indicators.domains,
+      cidrs: indicators.cidrs,
+    };
+
+    // The feeds refresh a few times a day, so most fetches should cost a 304
+    // rather than half a megabyte.
+    const etag = `W/"threat-${indicators.ips.length}-${indicators.domains.length}-${indicators.cidrs.length}-${createHash('sha256')
+      .update(String(indicators.lastFetch || 0))
+      .digest('hex')
+      .slice(0, 16)}"`;
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+    return res.json(body);
+  });
+
   router.get('/agent/geo-cache', requireAgent, (req, res) => {
     const rows = agentIngestStore.listGeoLocations();
 

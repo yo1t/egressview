@@ -199,6 +199,7 @@ Restoreはfail-closedです。復元元の検査、安全backup成功の確認�
 | Agent | `POST /api/agent/ingest` | Agent bearerの`agent.ingest`。最大200観測・非圧縮JSON 512 KiB |
 | Agent | `GET /api/agent/capabilities` | Agent bearerの`agent.ingest`。受理するschema versionとbatch上限を返し、Agentが双方の話せるversionを選べるようにする |
 | Agent | `GET /api/agent/geo-cache` | Agent bearerの`agent.ingest`。位置キャッシュを全件返す。**Agentは宛先を送らない** — 絞り込みは「どの宛先に関心があるか」を伝えることになるため。`ETag`/`304`に対応 |
+| Agent | `GET /api/agent/threat-intel` | Agent bearerの`agent.ingest`。脅威指標を全件返す。**Agentは宛先を送らない** — 「危ないか」を尋ねるために宛先を送ると、何を気にしているかを相手に伝えることになるため。フィード未設定のHubでは`available: false`を返し、Agentはこれを**「脅威が無い」と読んではならない**。`ETag`/`304`に対応 |
 | Router初期設定 | `POST /api/nonce` | 認証必須 |
 | Router初期設定 | `POST /api/yamaha/detect` | 認証必須 |
 | Router初期設定 | `POST /api/cisco/detect` | 認証必須 |
