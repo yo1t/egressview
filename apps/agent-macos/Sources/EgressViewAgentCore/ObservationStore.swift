@@ -343,6 +343,36 @@ public final class ObservationStore: @unchecked Sendable {
         """)
     }
 
+    /// Country codes for the addresses given, for the ones that are known.
+    ///
+    /// Looked up for the rows on screen rather than by loading the whole cache:
+    /// it holds tens of thousands of entries and the log shows at most a few
+    /// hundred addresses.
+    public func countryCodes(forAddresses addresses: [String]) throws -> [String: String] {
+        let unique = Array(Set(addresses))
+        guard !unique.isEmpty else { return [:] }
+        var result: [String: String] = [:]
+        // Chunked: SQLite has a limit on how many values a statement may bind.
+        for chunk in stride(from: 0, to: unique.count, by: 400).map({
+            Array(unique[$0..<min($0 + 400, unique.count)])
+        }) {
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let statement = try prepare("""
+            SELECT ip, country_code FROM geo_locations
+            WHERE country_code IS NOT NULL AND ip IN (\(placeholders))
+            """)
+            defer { sqlite3_finalize(statement) }
+            for (index, address) in chunk.enumerated() {
+                bindText(statement, Int32(index + 1), address)
+            }
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let ip = text(statement, 0), let code = text(statement, 1) else { continue }
+                result[ip] = code
+            }
+        }
+        return result
+    }
+
     public func coverageSessions(from: Date, to: Date) throws -> [CoverageSession] {
         let statement = try prepare("""
         SELECT started_at, ended_at FROM coverage_sessions

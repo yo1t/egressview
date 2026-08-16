@@ -66,6 +66,7 @@ private struct AgentPeriodSummary: Equatable {
 private struct AgentObservationRow: Identifiable {
     let id: String
     let observation: ConnectionObservation
+    let countryCode: String?
 }
 
 @MainActor
@@ -178,6 +179,9 @@ private final class AgentMainViewModel: ObservableObject {
             let to = selection.end
             let result = Result {
                 let observations = try store.observations(since: from, limit: 500)
+                let countries = try store.countryCodes(
+                    forAddresses: observations.map(\.remoteAddress)
+                )
                 let rollup = try store.hourlyRollup(from: from, to: to)
                 let summary = AgentPeriodSummary(
                     sessionCount: rollup.reduce(0) { $0 + $1.sessionCount },
@@ -206,7 +210,7 @@ private final class AgentMainViewModel: ObservableObject {
                     observations, summary, try store.statistics(),
                     SankeyAggregator().aggregate(pairs, metric: selection.metric),
                     TimelineAggregator().aggregate(buckets, selection: selection),
-                    measuredBytes, globe, coverage
+                    measuredBytes, globe, coverage, countries
                 )
             }
             DispatchQueue.main.async {
@@ -227,7 +231,8 @@ private final class AgentMainViewModel: ObservableObject {
                     self.observationRows = value.0.enumerated().map { index, observation in
                         AgentObservationRow(
                             id: "\(observation.stableKey)|\(observation.lastObservedAt.timeIntervalSince1970)|\(index)",
-                            observation: observation
+                            observation: observation,
+                            countryCode: value.8[observation.remoteAddress]
                         )
                     }
                     self.summary = value.1
@@ -452,9 +457,10 @@ private struct AgentMainView: View {
             }
             Table(model.observationRows) {
                 TableColumn(L("Observed")) { row in
-                    Text(row.observation.lastObservedAt, style: .time)
+                    Text(Self.observedFormatter.string(from: row.observation.lastObservedAt))
+                        .monospacedDigit()
                 }
-                .width(min: 90, ideal: 120)
+                .width(min: 150, ideal: 170)
                 TableColumn(L("Application")) { row in
                     Text(row.observation.processName.isEmpty ? "PID \(row.observation.processID)" : row.observation.processName)
                 }
@@ -462,8 +468,21 @@ private struct AgentMainView: View {
                 TableColumn(L("Destination")) { row in
                     Text(destination(row.observation))
                         .monospaced()
+                        .help(row.observation.remoteHostname ?? row.observation.remoteAddress)
                 }
-                .width(min: 220, ideal: 300)
+                .width(min: 200, ideal: 300)
+                TableColumn(L("Country")) { row in
+                    Text(Self.countryName(row.countryCode))
+                        .foregroundStyle(row.countryCode == nil ? .secondary : .primary)
+                }
+                .width(min: 90, ideal: 120)
+                TableColumn(L("Data volume")) { row in
+                    Text(Self.dataVolume(row.observation))
+                        .monospacedDigit()
+                        .foregroundStyle(row.observation.bytesIn == nil && row.observation.bytesOut == nil
+                                         ? .secondary : .primary)
+                }
+                .width(min: 90, ideal: 110)
                 TableColumn(L("Protocol")) { row in
                     Text(row.observation.networkProtocol.rawValue.uppercased())
                 }
@@ -479,11 +498,48 @@ private struct AgentMainView: View {
         .agentSection()
     }
 
+    /// The destination as the user asked to see it.
+    ///
+    /// This column ignored the "Destinations by" setting entirely and always
+    /// printed the address, so choosing Name changed the charts and left the
+    /// log looking like it had not worked. Where no name was ever recorded the
+    /// address is shown rather than a blank: about 60% of connections have no
+    /// name, and an empty cell would read as missing data instead of a
+    /// destination that was only ever an address.
     private func destination(_ observation: ConnectionObservation) -> String {
         let address = observation.remoteAddress.contains(":")
             ? "[\(observation.remoteAddress)]"
             : observation.remoteAddress
+        if model.destinationGrouping == .name, let hostname = observation.remoteHostname,
+           !hostname.isEmpty {
+            return "\(hostname):\(observation.remotePort)"
+        }
         return "\(address):\(observation.remotePort)"
+    }
+
+    /// Date and time to the second. A time alone made two rows a day apart look
+    /// like two rows a minute apart.
+    private static let observedFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .medium
+        return formatter
+    }()
+
+    private static func countryName(_ code: String?) -> String {
+        guard let code else { return L("Unknown") }
+        return Locale.current.localizedString(forRegionCode: code) ?? code
+    }
+
+    /// Both directions together. Empty when neither was measured -- a zero
+    /// would claim the connection moved nothing, which is a different and
+    /// false statement.
+    private static func dataVolume(_ observation: ConnectionObservation) -> String {
+        guard observation.bytesIn != nil || observation.bytesOut != nil else {
+            return L("Not measured")
+        }
+        let total = Int64(clamping: (observation.bytesIn ?? 0) + (observation.bytesOut ?? 0))
+        return ByteCountFormatter.string(fromByteCount: total, countStyle: .binary)
     }
 }
 

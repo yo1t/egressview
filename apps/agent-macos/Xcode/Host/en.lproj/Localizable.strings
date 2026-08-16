@@ -263,3 +263,7 @@
 "Connection log" = "Connection log";
 "Network status" = "Network status";
 "Packet contents are never collected." = "Packet contents are never collected.";
+"Country" = "Country";
+"Data volume" = "Data volume";
+"Unknown" = "Unknown";
+"Not measured" = "Not measured";

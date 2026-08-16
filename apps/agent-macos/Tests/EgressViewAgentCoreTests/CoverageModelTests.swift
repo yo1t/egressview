@@ -157,3 +157,49 @@ final class CoverageStoreTests: XCTestCase {
         XCTAssertTrue(sessions.isEmpty)
     }
 }
+
+final class CountryLookupTests: XCTestCase {
+    private func makeStore() throws -> (ObservationStore, URL) {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("country-\(UUID().uuidString).sqlite")
+        return (try ObservationStore(fileURL: url), url)
+    }
+
+    func test_既知のアドレスだけ国コードを返す() throws {
+        let (store, url) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try store.replaceGeoLocations([
+            GeoLocation(ip: "198.51.100.1", latitude: 35, longitude: 139, countryCode: "JP", city: "Tokyo"),
+            GeoLocation(ip: "203.0.113.7", latitude: 38, longitude: -77, countryCode: "US", city: nil),
+        ])
+
+        let result = try store.countryCodes(
+            forAddresses: ["198.51.100.1", "203.0.113.7", "192.0.2.99", "198.51.100.1"]
+        )
+        XCTAssertEqual(result["198.51.100.1"], "JP")
+        XCTAssertEqual(result["203.0.113.7"], "US")
+        XCTAssertNil(result["192.0.2.99"], "位置が分からないアドレスは国も返さない")
+        XCTAssertEqual(result.count, 2)
+    }
+
+    func test_アドレスが無ければ空を返す() throws {
+        let (store, url) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertTrue(try store.countryCodes(forAddresses: []).isEmpty)
+    }
+
+    /// SQLite limits how many values one statement may bind, so the lookup is
+    /// chunked. This is the test that the chunking joins back up.
+    func test_バインド上限を超える件数でも全件引ける() throws {
+        let (store, url) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let locations = (0..<1000).map {
+            GeoLocation(ip: "10.0.\($0 / 256).\($0 % 256)", latitude: 0, longitude: 0,
+                        countryCode: "JP", city: nil)
+        }
+        try store.replaceGeoLocations(locations)
+
+        let result = try store.countryCodes(forAddresses: locations.map(\.ip))
+        XCTAssertEqual(result.count, 1000)
+    }
+}
