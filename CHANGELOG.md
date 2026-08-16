@@ -4,6 +4,16 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.3.3
+
+The first release an installed agent can actually update itself to. 0.3.2
+carries the fix that makes verification work from inside the sandbox, but an
+agent verifies with the code it is already running -- so the fix had to be
+installed before it could check anything, and there had to be something newer
+to check.
+
+No functional change from 0.3.2.
+
 ### Agent for Mac 0.3.2
 
 **In-app updates could not be installed at all.** Every attempt failed with
