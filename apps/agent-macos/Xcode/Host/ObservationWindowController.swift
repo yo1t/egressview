@@ -5,9 +5,20 @@ import SwiftUI
 private enum AgentMainTab: String, CaseIterable, Identifiable {
     case status
     case analysis
+    /// Its own tab. The log wants the whole window -- rows are long and there
+    /// are hundreds of them -- and sharing the screen with the charts left both
+    /// too short to read.
+    case log
 
     var id: String { rawValue }
-    var title: String { self == .status ? L("Status") : L("Analysis") }
+
+    var title: String {
+        switch self {
+        case .status: return L("Status")
+        case .analysis: return L("Analysis")
+        case .log: return L("Connection log")
+        }
+    }
 }
 
 // The period lives in `VisualizationSelection` so the table, the timeline and
@@ -237,15 +248,15 @@ private struct AgentMainView: View {
             header
             Divider()
             Group {
-                if model.selectedTab == .status {
-                    statusView
-                } else {
-                    analysisView
+                switch model.selectedTab {
+                case .status: statusView
+                case .analysis: analysisView
+                case .log: logView
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 760, minHeight: 500)
+        .frame(minWidth: 900, minHeight: 620)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -271,7 +282,7 @@ private struct AgentMainView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 220)
+            .frame(width: 320)
             Picker(L("Period"), selection: $model.scale) {
                 ForEach(TimeScale.allCases) { scale in
                     Text(scale.title).tag(scale)
@@ -335,29 +346,13 @@ private struct AgentMainView: View {
 
     private var analysisView: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 16) {
-                metricPicker
-                destinationGroupingPicker
-                Spacer()
-                Button {
-                    model.exportCSV()
-                } label: {
-                    Label(L("Export CSV..."), systemImage: "square.and.arrow.up")
-                }
-                .help(L("Saves every connection in the selected period as a CSV file"))
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 10)
-
+            analysisControls
             GeometryReader { proxy in
                 let metrics = AnalysisLayout(size: proxy.size)
                 VStack(spacing: 14) {
-                    // The globe is square because a sphere drawn into a wide
-                    // box is an ellipse, and an ellipse is a different planet.
                     HStack(alignment: .top, spacing: 14) {
                         AgentGlobeChart(model: model.globe, atlas: model.atlas)
-                            .frame(width: metrics.globeSide, height: metrics.topHeight)
+                            .frame(width: metrics.globeWidth, height: metrics.topHeight)
                         AgentOverviewPanel(
                             summary: model.summary,
                             coverage: model.coverage,
@@ -367,24 +362,49 @@ private struct AgentMainView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: metrics.topHeight)
                     }
+                    // One HStack, one height: the sankey and the timeline line
+                    // up top and bottom at every window size because they are
+                    // given the same box, not because two numbers happen to
+                    // agree.
                     HStack(alignment: .top, spacing: 14) {
                         AgentSankeyChart(model: model.sankey)
-                            .frame(width: metrics.sankeyWidth, height: metrics.middleHeight)
+                            .frame(width: metrics.sankeyWidth)
                         AgentTimelineChart(model: model.timeline, scale: model.scale)
                             .frame(maxWidth: .infinity)
-                            .frame(height: metrics.middleHeight)
                     }
-                    // The table is never nested in a ScrollView. A Table brings
-                    // its own scrolling, so nesting it leaves it no height at
-                    // all and the connection log disappears without any error --
-                    // which is exactly what happened once.
-                    connectionTable
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(height: metrics.middleHeight)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)
             }
         }
+    }
+
+    private var logView: some View {
+        VStack(spacing: 0) {
+            analysisControls
+            connectionTable
+                .padding(.horizontal, 20)
+                .padding(.bottom, 18)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var analysisControls: some View {
+        HStack(spacing: 16) {
+            metricPicker
+            destinationGroupingPicker
+            Spacer()
+            Button {
+                model.exportCSV()
+            } label: {
+                Label(L("Export CSV..."), systemImage: "square.and.arrow.up")
+            }
+            .help(L("Saves every connection in the selected period as a CSV file"))
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 
     /// Proportions for the analysis tab, derived from the window rather than
@@ -393,26 +413,27 @@ private struct AgentMainView: View {
     private struct AnalysisLayout {
         let topHeight: CGFloat
         let middleHeight: CGFloat
-        let globeSide: CGFloat
+        let globeWidth: CGFloat
         let sankeyWidth: CGFloat
 
         init(size: CGSize) {
             let width = max(size.width, 1)
             // Spacing comes off the top before anything is shared out, so the
-            // three rows can never add up to more than the window holds.
-            let height = max(size.height - 28, 1)
-            // Proportions with no lower bound. A minimum height here would win
-            // an argument it must not win on a short window: the rows above
-            // would keep their size and the connection log would be squeezed to
-            // nothing, which is how it disappeared once before.
-            topHeight = min(height * 0.40, 460)
-            middleHeight = min(height * 0.32, 380)
-            // Square, but never more than half the width: on a narrow window a
-            // square sized from the height would push everything else out.
-            globeSide = min(topHeight, width * 0.5)
-            // Roughly 1:1.5. A sankey needs horizontal room for its ribbons to
-            // read as flows rather than as a knot.
-            sankeyWidth = min(middleHeight * 1.5, width * 0.6)
+            // rows can never add up to more than the window holds. Proportions
+            // with no lower bound: a minimum would keep the top row's size on a
+            // short window and squeeze the row below it to nothing.
+            let height = max(size.height - 32, 1)
+            topHeight = height * 0.52
+            middleHeight = height * 0.48
+            // Landscape rather than square. The globe itself stays circular --
+            // it is drawn from the smaller side -- so the extra width is room
+            // for the arcs reaching out of it, and the taller card makes the
+            // sphere bigger than a square one of the same area would.
+            globeWidth = min(topHeight * 1.3, width * 0.56)
+            // The sankey gets the larger half. Its ribbons need horizontal room
+            // to read as flows rather than as a knot, and at the previous width
+            // they were unreadable.
+            sankeyWidth = min(max(width * 0.60, 420), width - 340)
         }
     }
 
@@ -646,8 +667,10 @@ private struct AgentChartCard<Content: View>: View {
                 Text(title).font(.title3.weight(.semibold))
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
+            // No Spacer here. `content` is told to fill the card, and a Spacer
+            // competing for the same space collapsed the sankey canvas to
+            // nothing -- the chart vanished with no error, again.
             content
-            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -932,10 +955,11 @@ private struct AgentGlobeChart: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 210)
+            .frame(width: 170)
             .disabled(!isRunning)
         }
-        .font(.callout)
+        .font(.caption)
+        .controlSize(.small)
     }
 
     private var home: (latitude: Double, longitude: Double) { HomeLocation.current() }
@@ -974,9 +998,20 @@ private struct AgentGlobeChart: View {
                             resumeAt = anchor.addingTimeInterval(2.5)
                         }
                 )
+                .overlay(alignment: .bottomTrailing) {
+                    // Overlaid rather than stacked below: the globe is drawn
+                    // from the smaller side of its box, so every point of
+                    // height the controls took came straight off the sphere.
+                    spinControls
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(.thinMaterial)
+                        )
+                        .padding(6)
+                }
                 .accessibilityElement()
                 .accessibilityLabel(summary)
-                spinControls
             }
             if model.coverageIsPartial {
                 Label(

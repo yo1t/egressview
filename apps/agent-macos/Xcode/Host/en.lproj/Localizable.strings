@@ -260,3 +260,4 @@
 "Threat classification comes from a Hub. This agent reports what it saw and judges none of it." = "Threat classification comes from a Hub. This agent reports what it saw and judges none of it.";
 "Source" = "Source";
 "Destination" = "Destination";
+"Connection log" = "Connection log";

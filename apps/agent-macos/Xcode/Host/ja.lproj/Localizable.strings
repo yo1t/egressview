@@ -260,3 +260,4 @@
 "Threat classification comes from a Hub. This agent reports what it saw and judges none of it." = "脅威の判定はHubが行います。このAgentは観測した事実を報告するだけで、判定は行いません。";
 "Source" = "通信元";
 "Destination" = "通信先";
+"Connection log" = "通信ログ";
