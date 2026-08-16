@@ -429,10 +429,11 @@ private struct AgentMainView: View {
             // stacked under it, so the extra width a landscape card bought is
             // no longer paying for anything.
             globeWidth = min(topHeight, width * 0.5)
-            // The sankey gets the larger half. Its ribbons need horizontal room
-            // to read as flows rather than as a knot, and at the previous width
-            // they were unreadable.
-            sankeyWidth = min(max(width * 0.60, 420), width - 340)
+            // The name columns either side are a fixed width, so narrowing the
+            // card takes width off the diagram and not off the names -- which
+            // is the intent: the ribbons had more room than they needed once
+            // the names moved out of the canvas.
+            sankeyWidth = min(max(width * 0.48, 336), width - 340)
         }
     }
 
