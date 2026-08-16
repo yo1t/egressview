@@ -268,3 +268,61 @@ final class HomeLocationTests: XCTestCase {
         }
     }
 }
+
+final class GlobeOrientationTests: XCTestCase {
+    private let rect = CGRect(x: 0, y: 0, width: 200, height: 200)
+
+    /// The Earth turns counter-clockwise seen from above the north pole, which
+    /// on screen means the surface travels to the right. Adding the spin to the
+    /// centre longitude instead of subtracting it ran the planet backwards, and
+    /// nothing in the picture said so.
+    func test_中心経度が減ると地表は右へ動く() throws {
+        let xs = try [10.0, 0.0, -10.0].map { centre -> CGFloat in
+            let projection = OrthographicProjection(centerLatitude: 0, centerLongitude: centre)
+            return try XCTUnwrap(projection.project(latitude: 0, longitude: 0, in: rect)).x
+        }
+        XCTAssertLessThan(xs[0], xs[1])
+        XCTAssertLessThan(xs[1], xs[2])
+    }
+
+    func test_中心緯度0なら赤道は水平な直線になる() throws {
+        let projection = OrthographicProjection(centerLatitude: 0, centerLongitude: 0)
+        let ys = try [-60.0, -20.0, 0.0, 20.0, 60.0].map { longitude in
+            try XCTUnwrap(projection.project(latitude: 0, longitude: longitude, in: rect)).y
+        }
+        for y in ys {
+            XCTAssertEqual(y, rect.midY, accuracy: 0.0001)
+        }
+    }
+
+    /// The equator must not tip as the globe turns, whatever the tilt.
+    func test_回転しても赤道の形は変わらない() throws {
+        func equatorHeights(centerLongitude: Double) throws -> [CGFloat] {
+            let projection = OrthographicProjection(
+                centerLatitude: -12, centerLongitude: centerLongitude
+            )
+            return try [-40.0, 0.0, 40.0].map { offset in
+                try XCTUnwrap(
+                    projection.project(
+                        latitude: 0, longitude: centerLongitude + offset, in: rect
+                    )
+                ).y
+            }
+        }
+        let first = try equatorHeights(centerLongitude: 0)
+        let later = try equatorHeights(centerLongitude: 75)
+        for (a, b) in zip(first, later) {
+            XCTAssertEqual(a, b, accuracy: 0.0001)
+        }
+        XCTAssertEqual(first[0], first[2], accuracy: 0.0001, "赤道は左右対称のまま")
+    }
+
+    func test_極は上下に来る() throws {
+        let projection = OrthographicProjection(centerLatitude: 0, centerLongitude: 0)
+        let north = try XCTUnwrap(projection.project(latitude: 90, longitude: 0, in: rect))
+        let south = try XCTUnwrap(projection.project(latitude: -90, longitude: 0, in: rect))
+        XCTAssertEqual(north.x, rect.midX, accuracy: 0.0001)
+        XCTAssertEqual(south.x, rect.midX, accuracy: 0.0001)
+        XCTAssertLessThan(north.y, south.y, "北が上")
+    }
+}

@@ -1098,7 +1098,11 @@ private struct AgentGlobeChart: View {
     @State private var anchor = Date()
     @State private var speed: SpinSpeed = .normal
     @State private var isRunning = true
-    @State private var tilt: Double = -12
+    /// Latitude at the centre of the view. Zero puts the poles at the top and
+    /// bottom of the circle and draws the equator as a straight horizontal
+    /// line; the previous 12 degrees drew it as an arc for no reason anyone
+    /// asked for. Dragging up or down still tilts it.
+    @State private var tilt: Double = 0
     @State private var isDragging = false
     @State private var resumeAt = Date.distantPast
 
@@ -1241,8 +1245,12 @@ private struct AgentGlobeChart: View {
         let rect = CGRect(
             x: (size.width - side) / 2, y: (size.height - side) / 2, width: side, height: side
         )
+        // Subtracted, not added. The centre of the view moving west is what
+        // makes the surface travel east across the screen, which is the way the
+        // Earth actually turns: counter-clockwise seen from above the north
+        // pole. Adding it ran the planet backwards.
         let projection = OrthographicProjection(
-            centerLatitude: tilt, centerLongitude: home.longitude + spin
+            centerLatitude: tilt, centerLongitude: home.longitude - spin
         )
 
         context.fill(Path(ellipseIn: rect), with: .color(.blue.opacity(0.10)))
