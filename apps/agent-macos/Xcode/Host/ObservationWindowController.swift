@@ -173,6 +173,9 @@ private final class AgentMainViewModel: ObservableObject {
         share: 1, firstCovered: nil, gaps: [], startedInsidePeriod: false
     )
     @Published private(set) var sleepPeriods: [DateInterval] = []
+    /// True when the period reaches back into hours that were folded into
+    /// totals, which changes what the charts can say about them.
+    @Published private(set) var usesRolledUpHistory = false
     @Published private(set) var threats = ThreatReport(findings: [], availability: .notFetchedYet)
     /// Set by the app delegate from the controller that fetches indicators.
     var threatAvailability: ThreatIntelAvailability = .notFetchedYet
@@ -338,6 +341,7 @@ private final class AgentMainViewModel: ObservableObject {
                 var data = LoadedData()
                 data.storage = try store.statistics()
 
+                data.usesRolledUpHistory = try store.periodUsesRolledUpHistory(from: from, to: to)
                 if tab == .network {
                     let rollup = try store.hourlyRollup(from: from, to: to)
                     data.summary = AgentPeriodSummary(
@@ -426,6 +430,7 @@ private final class AgentMainViewModel: ObservableObject {
         var rows: [AgentObservationRow]?
         var storage: ObservationStoreStatistics?
         var measuredBytes: Bool?
+        var usesRolledUpHistory: Bool?
     }
 
     private func apply(_ data: LoadedData, tab: AgentMainTab) {
@@ -438,6 +443,7 @@ private final class AgentMainViewModel: ObservableObject {
         if let value = data.threats { threats = value }
         if let value = data.rows { observationRows = value }
         if let value = data.storage { storage = value }
+        if let value = data.usesRolledUpHistory { usesRolledUpHistory = value }
         if let measured = data.measuredBytes {
             availableMetrics = VisualizationSelection.availableMetrics(hasMeasuredBytes: measured)
             if !availableMetrics.contains(metric) { metric = .sessions }
@@ -1125,6 +1131,35 @@ private func formattedMetric(_ value: Double, _ metric: TrafficMetric) -> String
         return Int(value).formatted()
     case .bytes:
         return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary)
+    }
+}
+
+/// Says that part of the period survives only as hourly totals.
+///
+/// Not a warning -- the data is there and the numbers are right. It exists
+/// because three things silently change about the older half: destinations can
+/// only be shown as addresses, nothing finer than an hour is distinguishable,
+/// and the count of connections whose data volume was never measured is gone.
+/// A reader comparing last week with last month would otherwise conclude the
+/// names had stopped being recorded.
+private struct AgentRolledUpHistoryNote: View {
+    let applies: Bool
+
+    var body: some View {
+        if applies {
+            Label(
+                L("Part of this period is kept as hourly totals. For that part, destinations are shown as addresses, and nothing shorter than an hour is separated out."),
+                systemImage: "clock.arrow.circlepath"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.secondary.opacity(0.08))
+            )
+        }
     }
 }
 
