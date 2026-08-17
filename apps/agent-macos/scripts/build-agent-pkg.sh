@@ -101,18 +101,28 @@ pkgbuild \
     --version "$VERSION" \
     "$COMPONENT_PKG"
 
-# Says what installing does before it does it, including that monitoring stops.
-# An agent that stops watching without saying so is the fault this release spent
-# the most effort removing, and an install is not an exception to it.
+# Says what installing did, including that monitoring stopped. An agent that
+# stops watching without saying so is the fault this release spent the most
+# effort removing, and an install is not an exception to it.
+#
+# Localised, because the app is. A Japanese user installing a Japanese
+# application should not meet English at the one moment the installer explains
+# that data is missing.
 RESOURCES_DIR="$WORK_DIR/resources"
-mkdir -p "$RESOURCES_DIR"
-cat > "$RESOURCES_DIR/conclusion.txt" <<'CONCLUSION'
+mkdir -p "$RESOURCES_DIR/en.lproj" "$RESOURCES_DIR/ja.lproj"
+cat > "$RESOURCES_DIR/en.lproj/conclusion.txt" <<'CONCLUSION_EN'
 EgressView Agent has been installed and started.
 
 Monitoring stopped while the previous copy was replaced, and nothing was
 recorded during that time. If macOS asks you to approve the network extension
 again, monitoring stays off until you do.
-CONCLUSION
+CONCLUSION_EN
+cat > "$RESOURCES_DIR/ja.lproj/conclusion.txt" <<'CONCLUSION_JA'
+EgressView Agent をインストールし、起動しました。
+
+置き換えの間は監視が止まっており、その間の通信は記録されていません。
+macOS がネットワーク機能拡張の承認を求めた場合、承認するまで監視は止まったままです。
+CONCLUSION_JA
 
 DISTRIBUTION="$WORK_DIR/distribution.xml"
 cat > "$DISTRIBUTION" <<DISTXML
