@@ -36,7 +36,10 @@ const VERIFY_ATTEMPTS = 12;
 const VERIFY_DELAY_MS = 30_000;
 const PLATFORMS = ['macos', 'windows', 'linux'];
 const ARCHES = ['arm64', 'x64'];
-const PACKAGE_TYPES = { '.dmg': 'dmg', '.msi': 'msi', '.exe': 'exe', '.deb': 'deb', '.rpm': 'rpm' };
+// `.pkg` is the macOS installer package. It replaces the app in place rather
+// than asking the user to drag it, which a sandboxed agent cannot make work:
+// macOS refuses to launch an app taken from anything such an agent wrote.
+const PACKAGE_TYPES = { '.pkg': 'pkg', '.dmg': 'dmg', '.msi': 'msi', '.exe': 'exe', '.deb': 'deb', '.rpm': 'rpm' };
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 function sha256(file) {

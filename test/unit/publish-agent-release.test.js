@@ -58,6 +58,17 @@ describe('agent release publication', () => {
     });
   });
 
+  it('macOSのインストーラパッケージを受け付ける', () => {
+    // `.pkg` はドラッグではなくその場で置き換える。Sandbox内のAgentが書いた
+    // ものから取り出したアプリはmacOSが起動を拒否するため、DMGの手順では
+    // 更新が完成しない。
+    withTemp((dir) => {
+      const manifest = buildManifest(parseArgs(baseArgs(fakePackage(dir, 'egressview-agent-0.3.8.pkg'))));
+      assert.equal(manifest.packages[0].packageType, 'pkg');
+      assert.match(manifest.packages[0].url, /\/macos\/egressview-agent-0\.3\.8\.pkg$/);
+    });
+  });
+
   it('不正なplatform・version・アーキテクチャ重複を拒否する', () => {
     withTemp((dir) => {
       const file = fakePackage(dir, 'EgressViewAgent-0.2.0.dmg');
