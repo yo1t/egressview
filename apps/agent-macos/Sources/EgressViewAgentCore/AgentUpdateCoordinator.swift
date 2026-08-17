@@ -4,16 +4,17 @@ public enum AgentUpdateState: Equatable, Sendable {
     case disabled
     case notDue
     case upToDate(checkedAt: Date)
-    /// A newer release exists, and the URL below came from a manifest signed
-    /// with the release key.
+    /// Downloaded and checked, byte for byte, against the hash in a manifest
+    /// signed with the release key. Installing it is a separate, user-visible
+    /// act.
     ///
-    /// **The agent does not download it.** It used to, and the result could not
-    /// be installed: macOS marks anything written by a sandboxed application
-    /// and refuses to launch an app extracted from it ("File created by an
-    /// AppSandbox, exec/open not allowed"). Handing the address to the browser
-    /// puts the download back on the ordinary path, where Gatekeeper checks
-    /// notarisation at first launch as it does for every other download.
-    case updateAvailable(version: String, url: URL)
+    /// **This is an installer package, and the distinction matters.** macOS
+    /// marks everything a sandboxed application writes and refuses to *launch*
+    /// an app taken from it, which is why handing the user a disk image could
+    /// never work. Installing a package is not launching an app -- `installd`
+    /// does it -- and a package carrying the same mark installs normally.
+    /// Measured on a real machine before this was written.
+    case readyToInstall(version: String, package: URL)
     case failed(String)
 }
 
@@ -78,12 +79,14 @@ public actor AgentUpdateCoordinator {
                 preferences.lastCheckedAt = now
                 state = .upToDate(checkedAt: now)
             case let .updateAvailable(version, package):
-                // What is verified here is the manifest, not the bytes: the
-                // release-key signature is what makes this URL ours. The bytes
-                // are checked by macOS when the user opens what they
-                // downloaded.
+                // The downloader checks the bytes against the hash in the
+                // signed manifest, so what arrives is what was published. The
+                // package's own signature and notarisation are checked by
+                // macOS at install time -- in process, by `installd`, which a
+                // sandboxed app cannot do for itself and does not need to.
+                let file = try await downloader.download(package, userAgent: checker.userAgent)
                 preferences.lastCheckedAt = now
-                state = .updateAvailable(version: version, url: package.url)
+                state = .readyToInstall(version: version, package: file)
             }
         } catch {
             // No `lastCheckedAt` on failure: the daily clock only advances when

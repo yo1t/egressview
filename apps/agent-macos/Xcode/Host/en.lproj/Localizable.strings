@@ -335,3 +335,7 @@
 "No download address for this release. Check again." = "No download address for this release. Check again.";
 "Could not open the browser. The download is at %@" = "Could not open the browser. The download is at %@";
 "The download opened in your browser. Quit this app before replacing it in Applications." = "The download opened in your browser. Quit this app before replacing it in Applications.";
+"Version %@ is downloaded and checked. Open the installer to finish." = "Version %@ is downloaded and checked. Open the installer to finish.";
+"The installer is no longer available. Check again to download it." = "The installer is no longer available. Check again to download it.";
+"macOS could not open the installer." = "macOS could not open the installer.";
+"The installer was opened. It stops monitoring, replaces this app, and starts it again." = "The installer was opened. It stops monitoring, replaces this app, and starts it again.";

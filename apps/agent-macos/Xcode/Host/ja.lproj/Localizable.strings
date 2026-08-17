@@ -336,3 +336,8 @@
 "No download address for this release. Check again." = "このリリースのダウンロード先がありません。もう一度確認してください。";
 "Could not open the browser. The download is at %@" = "ブラウザを開けませんでした。ダウンロード先は %@ です";
 "The download opened in your browser. Quit this app before replacing it in Applications." = "ブラウザでダウンロードを開きました。アプリケーションフォルダで置き換える前に、このアプリを終了してください。";
+"Version %@ is downloaded and checked. Open the installer to finish." = "バージョン %@ をダウンロードし、検証しました。インストーラを開くと完了します。";
+"Open installer" = "インストーラを開く";
+"The installer is no longer available. Check again to download it." = "インストーラが見つかりません。もう一度確認してダウンロードしてください。";
+"macOS could not open the installer." = "macOSがインストーラを開けませんでした。";
+"The installer was opened. It stops monitoring, replaces this app, and starts it again." = "インストーラを開きました。監視を停止し、このアプリを置き換えて、起動し直します。";

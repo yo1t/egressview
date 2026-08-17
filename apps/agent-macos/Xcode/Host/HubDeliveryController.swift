@@ -459,8 +459,8 @@ private struct AgentSettingsView: View {
                     }
                     .disabled(updates.isChecking)
                     if updates.availableVersion != nil {
-                        Button(L("Download in browser...")) {
-                            updates.openDownloadPage()
+                        Button(L("Open installer")) {
+                            updates.openInstaller()
                         }
                         .disabled(updates.isOpeningInstaller)
                     }
