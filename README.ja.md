@@ -8,7 +8,7 @@
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
-![Release](https://img.shields.io/badge/release-v2.0.1-3fb950)
+![Release](https://img.shields.io/badge/release-v2.0.2-3fb950)
 
 > 🇬🇧 [English README](README.md) | 🌐 [プロジェクトページ](https://yo1t.github.io/egressview/index.ja.html) | 📋 [変更履歴](CHANGELOG.md) · [リリース](https://github.com/yo1t/egressview/releases)
 
