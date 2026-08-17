@@ -1443,7 +1443,11 @@ private struct AgentTimelineChart: View {
                     // is worse than no stripe.
                     HStack(spacing: 6) {
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.secondary.opacity(0.14))
+                            .fill(Self.sleepColor.opacity(0.22))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 2)
+                                    .strokeBorder(Self.sleepColor.opacity(0.6), lineWidth: 1)
+                            )
                             .frame(width: 18, height: 10)
                         Text(L("Shaded: the Mac was asleep. Traffic during sleep is not recorded."))
                     }
@@ -1472,6 +1476,9 @@ private struct AgentTimelineChart: View {
     private let yAxisWidth: CGFloat = 56
     private let xAxisHeight: CGFloat = 18
 
+    /// Kept in one place so the band and its key cannot drift apart.
+    static let sleepColor = Color.blue
+
     private func drawSleep(in context: inout GraphicsContext, plot: CGRect) {
         guard !sleepPeriods.isEmpty, let first = model.bucketStarts.first,
               model.bucketDuration > 0, model.bucketStarts.count > 1 else { return }
@@ -1490,7 +1497,21 @@ private struct AgentTimelineChart: View {
             let rect = CGRect(
                 x: startX, y: plot.minY, width: max(1, endX - startX), height: plot.height
             )
-            context.fill(Path(rect), with: .color(.secondary.opacity(0.14)))
+            // Blue, not grey. Grey already means the remainder series in this
+            // chart, and two greys meaning different things in one picture is
+            // how the reader ends up unable to tell whether the shading
+            // appeared at all -- which is exactly what happened the first time
+            // this was looked at.
+            //
+            // The band also gets an edge: on a chart whose bars are colourful
+            // and dense, a wash alone does not read as a region.
+            context.fill(Path(rect), with: .color(Self.sleepColor.opacity(0.22)))
+            var edges = Path()
+            edges.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            edges.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            edges.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+            edges.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            context.stroke(edges, with: .color(Self.sleepColor.opacity(0.6)), lineWidth: 1)
         }
     }
 
