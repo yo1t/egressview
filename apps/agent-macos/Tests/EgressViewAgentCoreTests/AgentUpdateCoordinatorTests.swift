@@ -149,15 +149,17 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
             clock: { now }
         )
 
-        // The agent no longer downloads: macOS refuses to launch an app taken
-        // from anything a sandboxed application wrote. What it carries is the
-        // address, and what makes that address ours is the release-key
-        // signature on the manifest it came from.
-        guard case let .updateAvailable(version, url) = await coordinator.runNow() else {
-            return XCTFail("expected an available update")
+        guard case let .readyToInstall(version, file) = await coordinator.runNow() else {
+            return XCTFail("expected a downloaded package")
         }
+        defer { try? FileManager.default.removeItem(at: file) }
         XCTAssertEqual(version, "0.1.16")
-        XCTAssertEqual(url.scheme, "https")
+        // The hash in the signed manifest is what the downloaded bytes were
+        // checked against; nothing here trusts the file name.
+        XCTAssertEqual(
+            try AgentUpdateDownloader.sha256Hex(of: file),
+            "4bfe51311116a909ee3f0b8da706c121db5b01ffced00c5a3678cb449b8d0db2"
+        )
         XCTAssertEqual(preferences.lastCheckedAt, now)
     }
 
@@ -191,11 +193,15 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
         XCTAssertNil(preferences.lastCheckedAt)
     }
 
-    /// The agent must not fetch the package itself. macOS marks everything a
-    /// sandboxed application writes and refuses to launch an app taken from
-    /// it, so a download here produces something that cannot be installed --
-    /// which is exactly what happened on a real machine.
-    func testDoesNotDownloadThePackageItself() async throws {
+    /// The agent downloads the package after all.
+    ///
+    /// Handing the user a disk image could not work: macOS marks everything a
+    /// sandboxed application writes and refuses to *launch* an app taken from
+    /// it. Installing a package is not launching an app -- `installd` does it,
+    /// and a package carrying the same mark installs normally, measured on a
+    /// real machine. So a download failure has to surface as a failure rather
+    /// than be skipped.
+    func testReportsAFailureWhenThePackageCannotBeDownloaded() async throws {
         let (preferences, defaults, suite) = try makePreferences()
         defer { defaults.removePersistentDomain(forName: suite) }
         final class CountingTransport: AgentUpdateDownloadTransport, @unchecked Sendable {
@@ -215,10 +221,12 @@ final class AgentUpdateCoordinatorTests: XCTestCase {
             preferences: preferences
         )
 
-        guard case .updateAvailable = await coordinator.runNow() else {
-            return XCTFail("expected an available update")
+        guard case let .failed(message) = await coordinator.runNow() else {
+            return XCTFail("expected a failure")
         }
-        XCTAssertEqual(transport.calls, 0, "パッケージを取得してはならない")
+        XCTAssertEqual(transport.calls, 1, "パッケージを1回取得しようとする")
+        XCTAssertTrue(message.contains("Could not reach the update service"), message)
+        XCTAssertNil(preferences.lastCheckedAt, "答えが得られていないので日次時計は進めない")
     }
 
     func testDoesNotAdvanceTheDailyClockWhenTheCheckFails() async throws {

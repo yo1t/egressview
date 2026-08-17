@@ -4,6 +4,25 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.4.0
+
+**Updating is one button again**, and this time the path was measured rather
+than reasoned about.
+
+Yesterday's conclusion was that a sandboxed agent cannot hand its user
+something installable. That was true of a disk image and not true in general:
+macOS marks everything such an agent writes and refuses to **launch** an app
+taken from it, but installing a package is not launching an app. `installd`
+does it, and a package carrying the same mark installs normally.
+
+So the agent downloads the update again, checks it byte for byte against the
+hash in a manifest signed with the release key, and opens it. The installer
+stops monitoring, replaces the app and starts it again — the user is not asked
+to quit anything, drag anything, or approve the network extension a second
+time.
+
+The distribution now carries `.pkg`.
+
 ## [2.0.1] - 2026-08-16
 
 **EgressView 2.0.1 = Hub 1.10.0 (unchanged) + Agent for Mac 0.3.8.**

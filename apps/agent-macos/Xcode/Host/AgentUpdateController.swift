@@ -90,52 +90,31 @@ final class AgentUpdateController: ObservableObject {
         }
     }
 
-    /// Opens the release in the user's browser.
+    /// Opens the downloaded installer package.
     ///
-    /// The agent used to download the package itself and open it. That could
-    /// not work: macOS marks anything a sandboxed application writes, and
-    /// refuses to launch an app dragged out of it. The download belongs on the
-    /// ordinary path, where Gatekeeper checks it at first launch as it does for
-    /// every other download.
+    /// The agent downloads it after all. Handing the user a disk image could
+    /// not work -- macOS marks everything a sandboxed application writes and
+    /// refuses to launch an app taken from it -- but installing a package is
+    /// not launching an app. `installd` does it, and a package carrying the
+    /// same mark installs normally; measured on a real machine rather than
+    /// assumed from the disk image's failure.
     ///
-    /// What this agent still guarantees is the address: the manifest carrying
-    /// it was signed with the EgressView release key, checked before this
-    /// button appears.
-    func openDownloadPage() {
-        guard let packageURL else {
-            status = L("No download address for this release. Check again.")
+    /// The bytes were checked against the hash in a manifest signed with the
+    /// release key. The package's own signature and notarisation are checked
+    /// by macOS as it installs.
+    func openInstaller() {
+        guard let packageURL, FileManager.default.fileExists(atPath: packageURL.path) else {
+            clearVerifiedPackage(deleteFile: false)
+            status = L("The installer is no longer available. Check again to download it.")
             return
         }
         guard NSWorkspace.shared.open(packageURL) else {
-            status = L("Could not open the browser. The download is at %@", packageURL.absoluteString)
+            status = L("macOS could not open the installer.")
             return
         }
-        status = L("The download opened in your browser. Quit this app before replacing it in Applications.")
-        promptToQuitForReplacement()
-    }
-
-    /// Asks whether to quit so the installed copy can be replaced.
-    ///
-    /// Quitting stops collection until the new copy is launched. That is said
-    /// plainly: an agent that stops watching without saying so is the fault
-    /// this release spent the most effort removing.
-    private func promptToQuitForReplacement() {
-        let alert = NSAlert()
-        alert.messageText = L("Quit EgressView Agent to replace it?")
-        alert.informativeText = L("macOS cannot replace an application while it is running, so dragging the new copy to Applications fails until this one quits. Nothing is recorded between quitting and opening the new copy.")
-        alert.addButton(withTitle: L("Quit and replace"))
-        alert.addButton(withTitle: L("Not now"))
-        alert.alertStyle = .informational
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            status = L("Quit EgressView Agent before dragging the new copy to Applications.")
-            return
-        }
-        // A moment so the installer window is in front when the app goes away,
-        // rather than the desktop.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            NSApp.terminate(nil)
-        }
+        // No prompt to quit: the package stops the running copy and starts the
+        // new one itself. That was the whole point of building one.
+        status = L("The installer was opened. It stops monitoring, replaces this app, and starts it again.")
     }
 
     func refreshLocalization() {
@@ -149,7 +128,7 @@ final class AgentUpdateController: ObservableObject {
             status = L("Automatic update checks are off. Use Check now whenever you want to look for a release.")
         case .notDue:
             if let availableVersion {
-                status = L("Version %@ is available. Downloading opens in your browser.", availableVersion)
+                status = L("Version %@ is downloaded and checked. Open the installer to finish.", availableVersion)
             } else if let checked = preferences.lastCheckedAt {
                 status = L("Last checked: %@", Self.format(checked))
             } else {
@@ -158,9 +137,9 @@ final class AgentUpdateController: ObservableObject {
         case .upToDate(let checkedAt):
             clearVerifiedPackage(deleteFile: true)
             status = L("Up to date. Checked %@", Self.format(checkedAt))
-        case let .updateAvailable(version, url):
-            rememberAvailableUpdate(version: version, url: url)
-            status = L("Version %@ is available. Downloading opens in your browser.", version)
+        case let .readyToInstall(version, package):
+            rememberAvailableUpdate(version: version, url: package)
+            status = L("Version %@ is downloaded and checked. Open the installer to finish.", version)
         case .failed(let message):
             status = L("Update check failed: %@", message)
         }
@@ -171,7 +150,8 @@ final class AgentUpdateController: ObservableObject {
               let path = defaults.string(forKey: Self.readyPackageKey) else {
             return
         }
-        guard let package = URL(string: path), package.scheme == "https" else {
+        let package = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: package.path) else {
             clearVerifiedPackage(deleteFile: false)
             return
         }
@@ -191,11 +171,11 @@ final class AgentUpdateController: ObservableObject {
     }
 
     private func rememberAvailableUpdate(version: String, url package: URL) {
-        if packageURL != package { clearVerifiedPackage(deleteFile: false) }
+        if packageURL != package { clearVerifiedPackage(deleteFile: true) }
         availableVersion = version
         packageURL = package
         defaults.set(version, forKey: Self.readyVersionKey)
-        defaults.set(package.absoluteString, forKey: Self.readyPackageKey)
+        defaults.set(package.path, forKey: Self.readyPackageKey)
         if defaults.string(forKey: Self.notifiedVersionKey) != version {
             defaults.set(version, forKey: Self.notifiedVersionKey)
             onUpdateReady(version)
