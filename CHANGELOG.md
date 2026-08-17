@@ -4,6 +4,13 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.4.1
+
+No functional change from 0.4.0. It exists so the in-app install can be tried
+against something: an agent handles an update with the code it is already
+running, and 0.4.0 is the first release that installs one itself. The cost of
+this pattern is recorded in P3-32.
+
 ### Agent for Mac 0.4.0
 
 **Updating is one button again**, and this time the path was measured rather
