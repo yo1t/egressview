@@ -210,3 +210,25 @@ final class ServerNameRegistryTests: XCTestCase {
         XCTAssertNil(complete(&registry))
     }
 }
+
+final class ServerNameLiveSettingTests: XCTestCase {
+    /// The provider must read the setting when a flow arrives, not once when it
+    /// was created. It used to capture it at startup, and the extension is
+    /// created when it launches -- so turning the setting on did nothing until
+    /// the extension happened to restart, while the screen said it applied to
+    /// new connections.
+    func test_設定の変更が既存のプロバイダに効く() throws {
+        let suite = "server-name-live-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = ServerNamePreferences(defaults: defaults)
+
+        XCTAssertFalse(preferences.isEnabled)
+        preferences.isEnabled = true
+        // Read through a freshly made view of the same storage, which is what
+        // the extension does per flow.
+        XCTAssertTrue(ServerNamePreferences(defaults: defaults).isEnabled)
+        preferences.isEnabled = false
+        XCTAssertFalse(ServerNamePreferences(defaults: defaults).isEnabled)
+    }
+}

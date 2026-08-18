@@ -555,7 +555,7 @@ private struct AgentSettingsView: View {
                     Text(L("Read the name from the TLS handshake"))
                     // Said plainly, because the honest objection to this setting
                     // is "you told me you never look inside connections".
-                    Text(L("Reads the first message of a connection, in which the client says where it is going before anything is encrypted. Nothing is decrypted, nothing after that message is read, and the name stays on this Mac. Off unless you turn it on; takes effect for connections made after this."))
+                    Text(L("Reads the first message of a connection, in which the client says where it is going before anything is encrypted. Nothing is decrypted, nothing after that message is read, and the name stays on this Mac. Off unless you turn it on. Applies to connections started after the change."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

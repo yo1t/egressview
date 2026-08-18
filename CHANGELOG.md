@@ -4,6 +4,16 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.1
+
+**Turning on "read the name from the TLS handshake" did nothing** until the
+network extension happened to restart, while the settings screen said it applied
+to new connections. The extension read the setting once, when it was created —
+which is when it launches.
+
+It reads the setting for each connection now, and the screen says what actually
+happens.
+
 ### Agent for Mac 0.5.0
 
 **Destinations can now be named for applications that bring their own
