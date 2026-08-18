@@ -4,6 +4,24 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.4.2
+
+**Charts covering more than a fortnight were showing a fortnight.**
+Observations are folded into hourly totals after two weeks and then deleted, so
+the two halves of the history live in different tables — and the sankey, the
+timeline and the globe read only the raw half. A thirty-day chart drew fourteen
+days while the period selector said thirty, with nothing to notice.
+
+Both halves are read now. Three things genuinely change about the older half,
+and the screen says so: destinations exist only as addresses, nothing shorter
+than an hour is distinguishable, and the count of connections whose volume was
+never measured is gone.
+
+The band marking sleep on the timeline was grey, and grey already meant the
+remainder series in the same chart. It is blue now, with an edge, because two
+greys with different meanings left the reader unable to tell whether the band
+had appeared at all.
+
 ## [2.0.2] - 2026-08-18
 
 **EgressView 2.0.2 = Hub 1.10.0 (unchanged) + Agent for Mac 0.4.1.**
