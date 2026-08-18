@@ -23,7 +23,7 @@ public enum FlowReportKind: Equatable, Sendable {
 /// flow's start.
 public struct OpenFlowRegistry: Sendable {
     private struct Entry {
-        let metadata: SocketFlowMetadata
+        var metadata: SocketFlowMetadata
         let startedAt: Date
     }
 
@@ -55,6 +55,30 @@ public struct OpenFlowRegistry: Sendable {
             let oldest = insertionOrder.removeFirst()
             entries.removeValue(forKey: oldest)
         }
+    }
+
+    /// Records the name the connection asked for, read from its TLS
+    /// ClientHello.
+    ///
+    /// Only fills a gap: macOS supplies the name for flows that went through
+    /// its own networking, and that one is authoritative. This covers the
+    /// applications that bring their own stack -- about half the connections on
+    /// a real machine, including every browser measured.
+    public mutating func noteServerName(_ name: String, flowID: UUID) {
+        guard var entry = entries[flowID] else { return }
+        guard entry.metadata.remoteHostname?.isEmpty ?? true else { return }
+        entry.metadata = SocketFlowMetadata(
+            networkProtocol: entry.metadata.networkProtocol,
+            localAddress: entry.metadata.localAddress,
+            localPort: entry.metadata.localPort,
+            remoteAddress: entry.metadata.remoteAddress,
+            remotePort: entry.metadata.remotePort,
+            processID: entry.metadata.processID,
+            processName: entry.metadata.processName,
+            bundleID: entry.metadata.bundleID,
+            remoteHostname: name
+        )
+        entries[flowID] = entry
     }
 
     /// Builds the observation for a report, or returns nil when the report

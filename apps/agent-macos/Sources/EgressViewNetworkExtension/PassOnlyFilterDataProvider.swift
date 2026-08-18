@@ -2,24 +2,47 @@ import EgressViewAgentCore
 import NetworkExtension
 
 public struct PassOnlyFlowPolicy: Sendable {
-    public init() {}
+    /// Whether the user has asked for destination names to be read from the
+    /// TLS handshake. **Off unless they turn it on.**
+    public let readsServerName: Bool
 
+    public init(readsServerName: Bool = false) {
+        self.readsServerName = readsServerName
+    }
+
+    /// Still false when server names are read. The handshake's opening bytes
+    /// are not the payload: the client says where it is going in the clear,
+    /// before there is a key, and nothing here decrypts anything or looks past
+    /// that first message.
     public var readsPayload: Bool { false }
-    public var decision: FlowDecision { .allowAndReportMetadata }
+
+    public var decision: FlowDecision {
+        readsServerName ? .allowAndReadServerName : .allowAndReportMetadata
+    }
 }
 
 public enum FlowDecision: Equatable, Sendable {
     case allowAndReportMetadata
+    /// Peek at the first outbound bytes, take the server name out of the TLS
+    /// ClientHello if it is there, then stop looking at this flow.
+    case allowAndReadServerName
 }
 
 open class PassOnlyFilterDataProvider: NEFilterDataProvider {
-    private let policy = PassOnlyFlowPolicy()
+    private let policy: PassOnlyFlowPolicy
     private let adapter = NetworkExtensionFlowAdapter()
     private let mapper = NetworkFlowObservationMapper()
     private var openFlows = OpenFlowRegistry()
     private let lock = NSLock()
 
     public override init() {
+        policy = PassOnlyFlowPolicy(readsServerName: ServerNamePreferences().isEnabled)
+        super.init()
+    }
+
+    /// For tests, and for a provider that wants to state the policy outright.
+    public init(policy: PassOnlyFlowPolicy) {
+        self.policy = policy
         super.init()
     }
 
@@ -44,7 +67,38 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
             // process: the system counts the bytes, we only receive the totals.
             verdict.shouldReport = true
             return verdict
+        case .allowAndReadServerName:
+            // Outbound only, and only the opening bytes: a ClientHello is a few
+            // hundred bytes and arrives first. Nothing inbound is looked at at
+            // all.
+            let verdict = NEFilterNewFlowVerdict.filterDataVerdict(
+                withFilterInbound: false,
+                peekInboundBytes: 0,
+                filterOutbound: true,
+                peekOutboundBytes: TLSClientHello.maximumInterestingBytes
+            )
+            verdict.shouldReport = true
+            return verdict
         }
+    }
+
+    open override func handleOutboundData(
+        from flow: NEFilterFlow,
+        readBytesStartOffset offset: Int,
+        readBytes: Data
+    ) -> NEFilterDataVerdict {
+        guard let socketFlow = flow as? NEFilterSocketFlow else {
+            return .allow()
+        }
+        if let name = TLSClientHello.serverName(in: readBytes) {
+            lock.withLock {
+                openFlows.noteServerName(name, flowID: socketFlow.identifier)
+            }
+        }
+        // Either way this flow is done being looked at. The name is in the
+        // first message or it is not there, and holding a flow open in the hope
+        // of a second one would delay the user's traffic for nothing.
+        return .allow()
     }
 
     /// Receives the counts the system kept for a flow.

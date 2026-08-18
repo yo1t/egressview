@@ -4,6 +4,25 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.0
+
+**Destinations can now be named for applications that bring their own
+networking** — about half of all connections on a real machine, including every
+browser measured. macOS supplies the name only for applications that use its
+networking; the rest showed as addresses, so choosing "Destinations by: Name"
+appeared not to work.
+
+**Off unless you turn it on.** With it on, the agent reads the first message of
+a connection — the one in which the client says where it is going, in the clear,
+before there is a key. Nothing is decrypted, nothing after that message is read,
+and the name stays on this Mac. The name macOS supplies is never overwritten.
+
+**Charts are served from an hourly aggregate.** A thirty-day diagram went from
+473 ms to 31 ms on this machine's history. Periods do not line up with hours, so
+the aggregate answers only for whole hours strictly inside the period and the
+raw records answer for the ragged ends — otherwise the count would be wrong by
+up to an hour at each edge.
+
 ## [2.0.2] - 2026-08-18
 
 **EgressView 2.0.2 = Hub 1.10.0 (unchanged) + Agent for Mac 0.4.2.**
