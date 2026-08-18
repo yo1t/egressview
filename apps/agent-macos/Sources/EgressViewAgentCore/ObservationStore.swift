@@ -688,14 +688,36 @@ public final class ObservationStore: @unchecked Sendable {
             let destinationExpression = grouping == .name
                 ? "COALESCE(NULLIF(remote_hostname, ''), remote_address)"
                 : "remote_address"
+            // Both halves of the history. Individual observations are folded
+            // into hourly totals after `rawDays` and then **deleted**, so a
+            // period longer than that window is only half present in the raw
+            // table -- reading it alone made a 30-day chart quietly show 14
+            // days. The rolled-up half has no hostname, so it can only ever be
+            // grouped by address; `hasRolledUpData` tells the screen to say so.
             let sql = """
-            SELECT process_name,
-                   \(destinationExpression) AS destination,
-                   COUNT(*) AS sessions,
-                   COALESCE(SUM(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)), 0) AS total_bytes,
-                   SUM(CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END) AS unknown
-            FROM observations
-            WHERE last_observed_at >= ? AND last_observed_at < ?
+            SELECT process_name, destination,
+                   SUM(sessions) AS sessions,
+                   SUM(total_bytes) AS total_bytes,
+                   SUM(unknown) AS unknown
+            FROM (
+                SELECT process_name,
+                       \(destinationExpression) AS destination,
+                       COUNT(*) AS sessions,
+                       COALESCE(SUM(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)), 0) AS total_bytes,
+                       SUM(CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END) AS unknown
+                FROM observations
+                WHERE last_observed_at >= ? AND last_observed_at < ?
+                GROUP BY process_name, destination
+                UNION ALL
+                SELECT process_name,
+                       remote_address AS destination,
+                       SUM(session_count) AS sessions,
+                       SUM(bytes_in + bytes_out) AS total_bytes,
+                       0 AS unknown
+                FROM hourly_rollup
+                WHERE hour_start >= ? AND hour_start < ?
+                GROUP BY process_name, destination
+            )
             GROUP BY process_name, destination
             ORDER BY sessions DESC
             """
@@ -703,6 +725,8 @@ public final class ObservationStore: @unchecked Sendable {
             defer { sqlite3_finalize(statement) }
             sqlite3_bind_double(statement, 1, from.timeIntervalSince1970)
             sqlite3_bind_double(statement, 2, to.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 3, from.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 4, to.timeIntervalSince1970)
 
             var rows: [AppDestinationTotal] = []
             while sqlite3_step(statement) == SQLITE_ROW {
@@ -722,6 +746,59 @@ public final class ObservationStore: @unchecked Sendable {
     ///
     /// The bucket count is fixed and the width follows the period, so drawing
     /// thirty days costs no more than drawing one hour.
+    /// Writes an hourly total directly, for tests that need history older than
+    /// the raw window without waiting `rawDays` for it.
+    ///
+    /// Exposed rather than reached around, so the tests exercise the same table
+    /// the retention job writes.
+    public func insertRolledUpHourForTesting(
+        hourStart: Date, processName: String, bundleID: String? = nil,
+        remoteAddress: String, sessionCount: Int, bytesIn: Int, bytesOut: Int
+    ) throws {
+        try lock.withLock {
+            let statement = try prepare("""
+            INSERT OR REPLACE INTO hourly_rollup
+                (hour_start, process_name, bundle_id, remote_address,
+                 session_count, bytes_in, bytes_out)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, hourStart.timeIntervalSince1970)
+            bindText(statement, 2, processName)
+            bindOptionalText(statement, 3, bundleID)
+            bindText(statement, 4, remoteAddress)
+            sqlite3_bind_int64(statement, 5, Int64(sessionCount))
+            sqlite3_bind_int64(statement, 6, Int64(bytesIn))
+            sqlite3_bind_int64(statement, 7, Int64(bytesOut))
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw ObservationStoreError.statement(lastMessage)
+            }
+        }
+    }
+
+    /// The moment before which individual observations no longer exist: older
+    /// history survives only as hourly totals.
+    public func rawHistoryCutoff(now: Date = Date()) -> Date {
+        now.addingTimeInterval(-Double(retention.rawDays) * 86_400)
+    }
+
+    /// True when the period reaches back into hours that were folded up, so the
+    /// screen can say what changes about them: no hostnames, no byte-coverage
+    /// counts, and no resolution finer than an hour.
+    public func periodUsesRolledUpHistory(from: Date, to: Date, now: Date = Date()) throws -> Bool {
+        guard from < rawHistoryCutoff(now: now) else { return false }
+        return try lock.withLock {
+            let statement = try prepare("""
+            SELECT 1 FROM hourly_rollup
+            WHERE hour_start >= \(from.timeIntervalSince1970)
+              AND hour_start < \(to.timeIntervalSince1970)
+            LIMIT 1
+            """)
+            defer { sqlite3_finalize(statement) }
+            return sqlite3_step(statement) == SQLITE_ROW
+        }
+    }
+
     public func appTimeline(from: Date, to: Date, buckets: Int) throws -> [AppTimelineTotal] {
         let bucketCount = max(1, min(240, buckets))
         let span = to.timeIntervalSince(from)
@@ -729,14 +806,34 @@ public final class ObservationStore: @unchecked Sendable {
         let width = span / Double(bucketCount)
 
         return try lock.withLock {
+            // Rolled-up hours are placed in the bucket their hour starts in.
+            // For any period that reaches back past the raw window the buckets
+            // are wider than an hour anyway, so nothing is smeared; a narrower
+            // bucket would be, which is why `timelineBucketFloor` exists.
             let sql = """
-            SELECT MIN(CAST((last_observed_at - ?1) / ?3 AS INTEGER), ?4) AS bucket,
-                   process_name,
-                   COUNT(*) AS sessions,
-                   COALESCE(SUM(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)), 0) AS total_bytes,
-                   SUM(CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END) AS unknown
-            FROM observations
-            WHERE last_observed_at >= ?1 AND last_observed_at < ?2
+            SELECT bucket, process_name,
+                   SUM(sessions) AS sessions,
+                   SUM(total_bytes) AS total_bytes,
+                   SUM(unknown) AS unknown
+            FROM (
+                SELECT MIN(CAST((last_observed_at - ?1) / ?3 AS INTEGER), ?4) AS bucket,
+                       process_name,
+                       COUNT(*) AS sessions,
+                       COALESCE(SUM(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)), 0) AS total_bytes,
+                       SUM(CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END) AS unknown
+                FROM observations
+                WHERE last_observed_at >= ?1 AND last_observed_at < ?2
+                GROUP BY bucket, process_name
+                UNION ALL
+                SELECT MIN(CAST((hour_start - ?1) / ?3 AS INTEGER), ?4) AS bucket,
+                       process_name,
+                       SUM(session_count) AS sessions,
+                       SUM(bytes_in + bytes_out) AS total_bytes,
+                       0 AS unknown
+                FROM hourly_rollup
+                WHERE hour_start >= ?1 AND hour_start < ?2
+                GROUP BY bucket, process_name
+            )
             GROUP BY bucket, process_name
             """
             let statement = try prepare(sql)
@@ -806,14 +903,30 @@ public final class ObservationStore: @unchecked Sendable {
         to: Date
     ) throws -> (placed: [PlacedDestination], unplacedSessions: Int, unplacedBytes: UInt64) {
         try lock.withLock {
+            // Rolled-up hours keep the address, so they can still be placed
+            // on the map. Without this half, a month on the globe showed only
+            // the days still held as individual observations.
             let sql = """
-            SELECT g.latitude, g.longitude, g.country_code, g.city,
-                   COUNT(*) AS sessions,
-                   COALESCE(SUM(COALESCE(o.bytes_in,0) + COALESCE(o.bytes_out,0)), 0) AS total
-            FROM observations o
-            JOIN geo_locations g ON g.ip = o.remote_address
-            WHERE o.last_observed_at >= ? AND o.last_observed_at < ?
-            GROUP BY g.latitude, g.longitude, g.country_code, g.city
+            SELECT latitude, longitude, country_code, city,
+                   SUM(sessions) AS sessions, SUM(total) AS total
+            FROM (
+                SELECT g.latitude, g.longitude, g.country_code, g.city,
+                       COUNT(*) AS sessions,
+                       COALESCE(SUM(COALESCE(o.bytes_in,0) + COALESCE(o.bytes_out,0)), 0) AS total
+                FROM observations o
+                JOIN geo_locations g ON g.ip = o.remote_address
+                WHERE o.last_observed_at >= ?1 AND o.last_observed_at < ?2
+                GROUP BY g.latitude, g.longitude, g.country_code, g.city
+                UNION ALL
+                SELECT g.latitude, g.longitude, g.country_code, g.city,
+                       SUM(r.session_count) AS sessions,
+                       SUM(r.bytes_in + r.bytes_out) AS total
+                FROM hourly_rollup r
+                JOIN geo_locations g ON g.ip = r.remote_address
+                WHERE r.hour_start >= ?1 AND r.hour_start < ?2
+                GROUP BY g.latitude, g.longitude, g.country_code, g.city
+            )
+            GROUP BY latitude, longitude, country_code, city
             """
             let statement = try prepare(sql)
             defer { sqlite3_finalize(statement) }
@@ -832,10 +945,19 @@ public final class ObservationStore: @unchecked Sendable {
             }
 
             let unplaced = try prepare("""
-            SELECT COUNT(*), COALESCE(SUM(COALESCE(bytes_in,0) + COALESCE(bytes_out,0)), 0)
-            FROM observations o
-            WHERE o.last_observed_at >= ? AND o.last_observed_at < ?
-              AND NOT EXISTS (SELECT 1 FROM geo_locations g WHERE g.ip = o.remote_address)
+            SELECT SUM(sessions), SUM(total) FROM (
+                SELECT COUNT(*) AS sessions,
+                       COALESCE(SUM(COALESCE(bytes_in,0) + COALESCE(bytes_out,0)), 0) AS total
+                FROM observations o
+                WHERE o.last_observed_at >= ?1 AND o.last_observed_at < ?2
+                  AND NOT EXISTS (SELECT 1 FROM geo_locations g WHERE g.ip = o.remote_address)
+                UNION ALL
+                SELECT COALESCE(SUM(r.session_count), 0) AS sessions,
+                       COALESCE(SUM(r.bytes_in + r.bytes_out), 0) AS total
+                FROM hourly_rollup r
+                WHERE r.hour_start >= ?1 AND r.hour_start < ?2
+                  AND NOT EXISTS (SELECT 1 FROM geo_locations g WHERE g.ip = r.remote_address)
+            )
             """)
             defer { sqlite3_finalize(unplaced) }
             sqlite3_bind_double(unplaced, 1, from.timeIntervalSince1970)

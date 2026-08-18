@@ -341,3 +341,4 @@
 "The installer is no longer available. Check again to download it." = "インストーラが見つかりません。もう一度確認してダウンロードしてください。";
 "macOS could not open the installer." = "macOSがインストーラを開けませんでした。";
 "The installer was opened. It stops monitoring, replaces this app, and starts it again." = "インストーラを開きました。監視を停止し、このアプリを置き換えて、起動し直します。";
+"Part of this period is kept as hourly totals. For that part, destinations are shown as addresses, and nothing shorter than an hour is separated out." = "この期間の一部は、1時間ごとの集計として保存されています。その範囲では通信先はアドレスで表示され、1時間より短い区別はできません。";

@@ -173,6 +173,9 @@ private final class AgentMainViewModel: ObservableObject {
         share: 1, firstCovered: nil, gaps: [], startedInsidePeriod: false
     )
     @Published private(set) var sleepPeriods: [DateInterval] = []
+    /// True when the period reaches back into hours that were folded into
+    /// totals, which changes what the charts can say about them.
+    @Published private(set) var usesRolledUpHistory = false
     @Published private(set) var threats = ThreatReport(findings: [], availability: .notFetchedYet)
     /// Set by the app delegate from the controller that fetches indicators.
     var threatAvailability: ThreatIntelAvailability = .notFetchedYet
@@ -338,6 +341,7 @@ private final class AgentMainViewModel: ObservableObject {
                 var data = LoadedData()
                 data.storage = try store.statistics()
 
+                data.usesRolledUpHistory = try store.periodUsesRolledUpHistory(from: from, to: to)
                 if tab == .network {
                     let rollup = try store.hourlyRollup(from: from, to: to)
                     data.summary = AgentPeriodSummary(
@@ -426,6 +430,7 @@ private final class AgentMainViewModel: ObservableObject {
         var rows: [AgentObservationRow]?
         var storage: ObservationStoreStatistics?
         var measuredBytes: Bool?
+        var usesRolledUpHistory: Bool?
     }
 
     private func apply(_ data: LoadedData, tab: AgentMainTab) {
@@ -438,6 +443,7 @@ private final class AgentMainViewModel: ObservableObject {
         if let value = data.threats { threats = value }
         if let value = data.rows { observationRows = value }
         if let value = data.storage { storage = value }
+        if let value = data.usesRolledUpHistory { usesRolledUpHistory = value }
         if let measured = data.measuredBytes {
             availableMetrics = VisualizationSelection.availableMetrics(hasMeasuredBytes: measured)
             if !availableMetrics.contains(metric) { metric = .sessions }
@@ -1128,6 +1134,35 @@ private func formattedMetric(_ value: Double, _ metric: TrafficMetric) -> String
     }
 }
 
+/// Says that part of the period survives only as hourly totals.
+///
+/// Not a warning -- the data is there and the numbers are right. It exists
+/// because three things silently change about the older half: destinations can
+/// only be shown as addresses, nothing finer than an hour is distinguishable,
+/// and the count of connections whose data volume was never measured is gone.
+/// A reader comparing last week with last month would otherwise conclude the
+/// names had stopped being recorded.
+private struct AgentRolledUpHistoryNote: View {
+    let applies: Bool
+
+    var body: some View {
+        if applies {
+            Label(
+                L("Part of this period is kept as hourly totals. For that part, destinations are shown as addresses, and nothing shorter than an hour is separated out."),
+                systemImage: "clock.arrow.circlepath"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.secondary.opacity(0.08))
+            )
+        }
+    }
+}
+
 /// Says which parts of the period nobody was watching.
 ///
 /// Without this, the charts below present an unwatched hour and a quiet hour
@@ -1408,7 +1443,11 @@ private struct AgentTimelineChart: View {
                     // is worse than no stripe.
                     HStack(spacing: 6) {
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.secondary.opacity(0.14))
+                            .fill(Self.sleepColor.opacity(0.22))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 2)
+                                    .strokeBorder(Self.sleepColor.opacity(0.6), lineWidth: 1)
+                            )
                             .frame(width: 18, height: 10)
                         Text(L("Shaded: the Mac was asleep. Traffic during sleep is not recorded."))
                     }
@@ -1437,6 +1476,9 @@ private struct AgentTimelineChart: View {
     private let yAxisWidth: CGFloat = 56
     private let xAxisHeight: CGFloat = 18
 
+    /// Kept in one place so the band and its key cannot drift apart.
+    static let sleepColor = Color.blue
+
     private func drawSleep(in context: inout GraphicsContext, plot: CGRect) {
         guard !sleepPeriods.isEmpty, let first = model.bucketStarts.first,
               model.bucketDuration > 0, model.bucketStarts.count > 1 else { return }
@@ -1455,7 +1497,21 @@ private struct AgentTimelineChart: View {
             let rect = CGRect(
                 x: startX, y: plot.minY, width: max(1, endX - startX), height: plot.height
             )
-            context.fill(Path(rect), with: .color(.secondary.opacity(0.14)))
+            // Blue, not grey. Grey already means the remainder series in this
+            // chart, and two greys meaning different things in one picture is
+            // how the reader ends up unable to tell whether the shading
+            // appeared at all -- which is exactly what happened the first time
+            // this was looked at.
+            //
+            // The band also gets an edge: on a chart whose bars are colourful
+            // and dense, a wash alone does not read as a region.
+            context.fill(Path(rect), with: .color(Self.sleepColor.opacity(0.22)))
+            var edges = Path()
+            edges.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            edges.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            edges.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+            edges.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            context.stroke(edges, with: .color(Self.sleepColor.opacity(0.6)), lineWidth: 1)
         }
     }
 
