@@ -346,3 +346,8 @@
 "macOS supplies the name for applications that use its own networking. About half of connections come from applications that do not, including every browser measured — those show as addresses." = "macOSが名前を教えてくれるのは、macOS自身のネットワーク機能を使うアプリの通信だけです。実測では約半数がそれ以外で、ブラウザは全滅でした。それらはアドレスで表示されます。";
 "Read the name from the TLS handshake" = "TLSハンドシェイクから名前を読み取る";
 "Reads the first message of a connection, in which the client says where it is going before anything is encrypted. Nothing is decrypted, nothing after that message is read, and the name stays on this Mac. Off unless you turn it on. Applies to connections started after the change." = "接続の最初のメッセージだけを読みます。そこには、暗号化が始まる前に「どこへ接続するか」が平文で書かれています。復号は行わず、その先は読まず、読み取った名前はこのMacの中に留まります。有効にしない限り読み取りません。有効化以降の接続から適用されます。";
+
+/* Monitoring stopped with no update to blame */
+"Nothing is being recorded. Monitoring reports that it is running, but no connection has arrived. Quit and reopen EgressView Agent to restart it." = "記録されていません。監視は動作中と報告していますが、通信が1件も届いていません。EgressView Agent を終了して開き直すと再開します。";
+"Nothing has been recorded since %@. Monitoring reports that it is running. Quit and reopen EgressView Agent to restart it." = "%@ 以降、何も記録されていません。監視は動作中と報告しています。EgressView Agent を終了して開き直すと再開します。";
+"Monitoring reports that it is running, but nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time is not being recorded." = "監視は動作中と報告していますが、30分間まったく記録されていません。EgressView Agent を終了して開き直すと再開します。この間の通信は記録されません。";

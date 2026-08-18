@@ -217,10 +217,14 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         let image = NSImage(named: status.menuBarImageName)
         image?.isTemplate = true
         button.image = image
-        button.imagePosition = .imageOnly
-        // Fall back to the old label if the asset is missing, so a packaging
-        // mistake degrades to a working menu bar instead of an invisible one.
-        button.title = image == nil ? status.menuBarLabel : ""
+        // Spelled out while nothing is being recorded, and only then. Fall back
+        // to the label too if the asset is missing, so a packaging mistake
+        // degrades to a working menu bar instead of an invisible one.
+        let showsLabel = status.menuBarShowsLabel || image == nil
+        button.imagePosition = showsLabel
+            ? (image == nil ? .noImage : .imageLeading)
+            : .imageOnly
+        button.title = showsLabel ? status.menuBarLabel : ""
         button.setAccessibilityLabel(status.menuBarLabel)
         button.toolTip = status.label
     }
@@ -298,7 +302,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private func monitoringMode(for status: AgentMonitoringStatus) -> AgentMonitoringMode? {
         switch status {
         case .fullActive, .fullStarting, .fullActivationRequested, .approvalRequired,
-             .rebootRequired, .updateNotRunning:
+             .rebootRequired, .updateNotRunning, .notRecording:
             // A stalled update is still full monitoring as far as the mode
             // picker goes; the user chose it, and it is not their setting that
             // is wrong.
