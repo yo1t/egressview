@@ -150,7 +150,12 @@ final class AgentMonitoringController {
                 store: store,
                 observationHandler: observationHandler,
                 statusHandler: gatedStatusHandler,
-                errorHandler: storageErrorHandler
+                errorHandler: storageErrorHandler,
+                coverageHandler: { [weak gateState] in
+                    guard let gateState, !gateState.isCoverageOpen else { return }
+                    gateState.isCoverageOpen = true
+                    try? store.beginCoverageSession(at: Date())
+                }
             )
         }
     }
@@ -210,6 +215,23 @@ final class AgentMonitoringController {
     /// which parts of a period they know nothing about.
     ///
     /// Static because the gate that calls it is built before `self` exists.
+    /// Opens a coverage session because data is arriving, whatever the status
+    /// last said.
+    ///
+    /// Coverage used to open only on the collector's first `.fullActive`, so
+    /// anything that closed a session closed it for good: the agent went on
+    /// collecting and the screen reported the period as unmonitored. Measured
+    /// on a real machine -- thirteen hours recorded as unwatched, with not one
+    /// gap longer than twenty seconds in the observations themselves.
+    ///
+    /// Arriving data is the only evidence that actually bears on the question,
+    /// so it is what opens the session.
+    func noteObservationsRecorded() {
+        guard let store, !gateState.isCoverageOpen else { return }
+        gateState.isCoverageOpen = true
+        try? store.beginCoverageSession(at: Date())
+    }
+
     private static func recordCoverage(
         for status: AgentMonitoringStatus,
         store: ObservationStore?,

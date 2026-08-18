@@ -4,6 +4,23 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.2
+
+Two faults introduced by 0.5.0, both found by looking at the screen.
+
+**The timeline showed spikes with nothing between them.** The hourly aggregate
+was being read into six-minute buckets, putting a whole hour into one of them
+and leaving the other nine empty — a chart that looked like the Mac had stopped
+talking. Below an hour a bucket is now filled from the individual records, which
+are always kept for periods that short.
+
+**"Monitored 8%" was wrong.** A coverage session opened only when the collector
+first reported activity, so anything that closed one closed it for good: the
+agent went on collecting and the screen reported thirteen hours as unwatched,
+with not one gap longer than twenty seconds in the records themselves. Arriving
+data is what opens a session now, because it is the only evidence that bears on
+the question.
+
 ### Agent for Mac 0.5.1
 
 **Turning on "read the name from the TLS handshake" did nothing** until the
