@@ -157,3 +157,57 @@ final class ChartAggregateTests: XCTestCase {
         )
     }
 }
+
+final class TimelineBucketWidthTests: XCTestCase {
+    private var store: ObservationStore!
+    private var url: URL!
+    private let hour = Date(timeIntervalSince1970: 1_699_999_200)
+
+    override func setUpWithError() throws {
+        url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("bucket-\(UUID().uuidString).sqlite")
+        store = try ObservationStore(fileURL: url)
+    }
+
+    override func tearDownWithError() throws {
+        store = nil
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    private func observe(at date: Date) throws {
+        try store.append([ConnectionObservation(
+            networkProtocol: .tcp, localAddress: "192.0.2.5", localPort: 1,
+            remoteAddress: "203.0.113.7", remotePort: 443, processID: 1,
+            processName: "curl", bundleID: nil,
+            firstObservedAt: date, lastObservedAt: date,
+            bytesIn: 1, bytesOut: 1, collector: .networkExtension,
+            confidence: .exact, remoteHostname: nil
+        )])
+    }
+
+    /// An hourly aggregate read into six-minute buckets puts a whole hour into
+    /// one of them and leaves the rest empty. On screen that is a row of spikes
+    /// with nothing between them, which reads as a Mac that stopped talking.
+    func test_バケットが1時間より狭いときは生データで描く() throws {
+        // Ten observations spread across one hour, ten minutes apart.
+        for i in 0..<6 { try observe(at: hour.addingTimeInterval(Double(i) * 600)) }
+        let now = hour.addingTimeInterval(3600)
+        try store.foldCompletedHoursForCharts(now: now)
+
+        // Ten buckets of six minutes each.
+        let buckets = try store.appTimeline(from: hour, to: now, buckets: 10)
+        let occupied = Set(buckets.map(\.bucketIndex))
+        XCTAssertEqual(occupied.count, 6, "6分バケットに散らばるべき: \(occupied.sorted())")
+        XCTAssertEqual(buckets.reduce(0) { $0 + $1.sessionCount }, 6)
+    }
+
+    func test_バケットが1時間以上なら集計表を使っても同じ合計になる() throws {
+        for i in 0..<6 { try observe(at: hour.addingTimeInterval(Double(i) * 600)) }
+        let now = hour.addingTimeInterval(3600 * 6)
+        try store.foldCompletedHoursForCharts(now: now)
+
+        // Six buckets of one hour each.
+        let buckets = try store.appTimeline(from: hour, to: now, buckets: 6)
+        XCTAssertEqual(buckets.reduce(0) { $0 + $1.sessionCount }, 6)
+    }
+}

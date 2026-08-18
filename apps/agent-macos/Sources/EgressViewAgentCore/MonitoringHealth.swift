@@ -35,6 +35,14 @@ public enum MonitoringHealth: Equatable, Sendable {
     /// The update is installed but is not the copy macOS is running, so nothing
     /// is being collected until the machine restarts.
     case rebootRequiredAfterUpdate(installed: String, running: String?)
+    /// Everything macOS reports looks correct, the Mac has been awake and in
+    /// use, and still nothing is arriving.
+    ///
+    /// This is the state that cost a user thirteen and a half hours of record
+    /// on 2026-08-18 with no warning of any kind: the extension versions
+    /// matched, so no swap was pending, so the check below returned `healthy`
+    /// for every one of the 800 times it ran during the outage.
+    case silentWhileActive(since: Date?)
 }
 
 /// Answers "is this Mac still being watched?" from what macOS reports about the
@@ -58,10 +66,21 @@ public enum MonitoringHealthCheck {
     /// warning while 342 connections were recorded in three minutes.
     public static let silenceThreshold: TimeInterval = 180
 
+    /// How long a working Mac may record nothing before that is treated as a
+    /// fault in its own right, with no pending update to blame.
+    ///
+    /// Deliberately much longer than `silenceThreshold`. That one is read only
+    /// when a swap is already known to be pending, so it may be impatient. This
+    /// one has nothing corroborating it and must not fire on a Mac that is
+    /// merely quiet -- so it waits half an hour, and only counts time the
+    /// machine was actually awake.
+    public static let unexplainedSilenceThreshold: TimeInterval = 1800
+
     public static func evaluate(
         versions: [SystemExtensionVersion],
         appBundleVersion: String,
         lastObservationAt: Date? = nil,
+        awakeSince: Date? = nil,
         now: Date = Date()
     ) -> MonitoringHealth {
         guard !versions.isEmpty else { return .notInstalled }
@@ -75,7 +94,11 @@ public enum MonitoringHealthCheck {
             || running == nil
             || running?.bundleVersion != appBundleVersion
 
-        guard swapPending else { return .healthy }
+        guard swapPending else {
+            return unexplainedSilence(
+                lastObservationAt: lastObservationAt, awakeSince: awakeSince, now: now
+            )
+        }
 
         // A pending swap is only a problem if it actually stopped the
         // recording. Warning on the pending state alone cries wolf on every
@@ -87,5 +110,34 @@ public enum MonitoringHealthCheck {
         return .rebootRequiredAfterUpdate(
             installed: appBundleVersion, running: running?.bundleVersion
         )
+    }
+
+    /// Nothing is arriving and there is no update to explain it.
+    ///
+    /// Two guards keep this from crying wolf, and both are needed. The Mac must
+    /// have been awake for the whole window, because the last observation is
+    /// always old for a moment after waking and a sleeping Mac records nothing
+    /// by design. And an agent that has only just started has no silence to
+    /// measure yet -- `awakeSince` is set when monitoring starts, so its own
+    /// first half hour is covered by the same guard.
+    static func unexplainedSilence(
+        lastObservationAt: Date?, awakeSince: Date?, now: Date
+    ) -> MonitoringHealth {
+        guard let awakeSince,
+              now.timeIntervalSince(awakeSince) >= unexplainedSilenceThreshold
+        else { return .healthy }
+
+        guard let lastObservationAt else {
+            // Never recorded anything, and has been running long enough that it
+            // should have. Reported against the time it started watching.
+            return .silentWhileActive(since: awakeSince)
+        }
+        // Silence is only counted from the later of the two: an observation
+        // from before the Mac went to sleep says nothing about now.
+        let silentSince = max(lastObservationAt, awakeSince)
+        guard now.timeIntervalSince(silentSince) >= unexplainedSilenceThreshold else {
+            return .healthy
+        }
+        return .silentWhileActive(since: lastObservationAt)
     }
 }

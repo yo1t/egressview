@@ -100,4 +100,115 @@ final class MonitoringHealthTests: XCTestCase {
             .notInstalled
         )
     }
+
+    // MARK: - Silence with no update to blame
+    //
+    // The state that actually happened: on 2026-08-18 this Mac recorded nothing
+    // between 09:28 and 22:55 -- confirmed absent on the Hub too, so collection
+    // stopped rather than storage failing -- while the extension versions
+    // matched and every check returned `healthy`.
+
+    private var longAwake: Date { now.addingTimeInterval(-7200) }
+
+    func test_起きたまま30分以上何も記録していなければ異常() {
+        let result = MonitoringHealthCheck.evaluate(
+            versions: [version("30")],
+            appBundleVersion: "30",
+            lastObservationAt: now.addingTimeInterval(-3600),
+            awakeSince: longAwake,
+            now: now
+        )
+        XCTAssertEqual(result, .silentWhileActive(since: now.addingTimeInterval(-3600)))
+    }
+
+    func test_直近に記録があれば健全() {
+        let result = MonitoringHealthCheck.evaluate(
+            versions: [version("30")],
+            appBundleVersion: "30",
+            lastObservationAt: recording,
+            awakeSince: longAwake,
+            now: now
+        )
+        XCTAssertEqual(result, .healthy)
+    }
+
+    /// A sleeping Mac records nothing by design, and the last observation is
+    /// always old for a moment after waking. Counting that as a fault would
+    /// fire an alarm every single morning.
+    func test_復帰直後は古い観測でも異常としない() {
+        let result = MonitoringHealthCheck.evaluate(
+            versions: [version("30")],
+            appBundleVersion: "30",
+            lastObservationAt: now.addingTimeInterval(-28800),
+            awakeSince: now.addingTimeInterval(-120),
+            now: now
+        )
+        XCTAssertEqual(result, .healthy)
+    }
+
+    /// Awake for hours, but the last observation is from before the sleep.
+    /// Silence is counted from the wake, so this is still an outage.
+    func test_復帰から30分経てばスリープ前の観測では健全と言わない() {
+        let result = MonitoringHealthCheck.evaluate(
+            versions: [version("30")],
+            appBundleVersion: "30",
+            lastObservationAt: now.addingTimeInterval(-28800),
+            awakeSince: now.addingTimeInterval(-3600),
+            now: now
+        )
+        XCTAssertEqual(result, .silentWhileActive(since: now.addingTimeInterval(-28800)))
+    }
+
+    /// Nothing ever recorded, and running long enough that something should
+    /// have been.
+    func test_一度も記録がなければ監視開始時刻を沈黙の起点にする() {
+        let result = MonitoringHealthCheck.evaluate(
+            versions: [version("30")],
+            appBundleVersion: "30",
+            lastObservationAt: nil,
+            awakeSince: longAwake,
+            now: now
+        )
+        XCTAssertEqual(result, .silentWhileActive(since: longAwake))
+    }
+
+    /// The agent's own first half hour is covered by the same guard: it has no
+    /// silence to measure yet.
+    func test_起動直後は沈黙を測らない() {
+        let result = MonitoringHealthCheck.evaluate(
+            versions: [version("30")],
+            appBundleVersion: "30",
+            lastObservationAt: nil,
+            awakeSince: now.addingTimeInterval(-60),
+            now: now
+        )
+        XCTAssertEqual(result, .healthy)
+    }
+
+    /// `awakeSince` is only known once monitoring has started. Without it there
+    /// is nothing to measure against, and guessing would report every launch as
+    /// an outage.
+    func test_稼働開始時刻が不明なら沈黙を判定しない() {
+        let result = MonitoringHealthCheck.evaluate(
+            versions: [version("30")],
+            appBundleVersion: "30",
+            lastObservationAt: now.addingTimeInterval(-86400),
+            awakeSince: nil,
+            now: now
+        )
+        XCTAssertEqual(result, .healthy)
+    }
+
+    /// A pending swap is the better explanation and keeps its own wording. This
+    /// pins the order so the vaguer verdict cannot take over the specific one.
+    func test_入れ替え待ちが優先され再起動として報告される() {
+        let result = MonitoringHealthCheck.evaluate(
+            versions: [version("29", uninstalling: true), version("30", enabled: false)],
+            appBundleVersion: "30",
+            lastObservationAt: now.addingTimeInterval(-3600),
+            awakeSince: longAwake,
+            now: now
+        )
+        XCTAssertEqual(result, .rebootRequiredAfterUpdate(installed: "30", running: nil))
+    }
 }

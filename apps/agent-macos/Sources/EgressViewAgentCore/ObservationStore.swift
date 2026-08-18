@@ -956,7 +956,16 @@ public final class ObservationStore: @unchecked Sendable {
             // period that reaches back past the fold watermark has buckets an
             // hour or wider, so nothing is smeared across a bucket it did not
             // belong to.
-            let watermark = (try scalarDouble("SELECT folded_through FROM chart_hourly_state") ?? 0)
+            // The aggregate is hourly, so it can only be read into buckets an
+            // hour or wider. Reading it into six-minute buckets put a whole
+            // hour into one of them and left the other nine empty -- a chart of
+            // spikes and gaps that looked like the Mac had stopped talking.
+            // Below that width the raw rows answer for the whole period, which
+            // they can: anything finer than an hour is well inside the window
+            // where individual observations are still kept.
+            let watermark = width >= 3600
+                ? (try scalarDouble("SELECT folded_through FROM chart_hourly_state") ?? 0)
+                : 0
             let ranges = chartRanges(from: from, to: to, watermark: watermark)
             let sql = """
             SELECT bucket, process_name,

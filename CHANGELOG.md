@@ -4,6 +4,57 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.3
+
+**The agent could stop recording for hours without saying so.** On 2026-08-18 a
+Mac recorded nothing for 13 hours 27 minutes. The health check ran about 800
+times during it and reported "healthy" every time, because it only ever asked
+whether an update was waiting for a restart — and no update was.
+
+It now also reports the case where macOS says everything is correct and nothing
+arrives anyway. It waits half an hour and counts only time the Mac was awake, so
+an ordinary night and the minute after a wake do not trip it. While nothing is
+being recorded, the menu bar spells that out instead of relying on an icon it
+shares with "awaiting approval" and "starting".
+
+The notification itself had never worked: the agent had no entry in Notification
+Center at all, so permission had never once been requested. It now tells "never
+asked" from "refused" and reports whether the message will be seen.
+
+**Not yet verified on a real machine.** Neither the notification nor the menu
+bar text has fired, because nothing has been silent for half an hour since. This
+is the same path that failed silently before, so treat it as untested.
+
+### Agent for Mac 0.5.2
+
+Two faults introduced by 0.5.0, both found by looking at the screen.
+
+**The timeline showed spikes with nothing between them.** The hourly aggregate
+was being read into six-minute buckets, putting a whole hour into one of them
+and leaving the other nine empty — a chart that looked like the Mac had stopped
+talking. Below an hour a bucket is now filled from the individual records, which
+are always kept for periods that short.
+
+**A coverage session could stay closed while the agent was still collecting.**
+It opened only when the collector first reported activity, so anything that
+closed one closed it for good, and the screen would report a monitored period
+as unwatched. Arriving data is what opens a session now, because it is the only
+evidence that bears on the question.
+
+The "monitored 8%" reading that prompted this was investigated and turned out to
+be **correct** — nothing had been recorded — so this is a fault found while
+looking, not the cause of that reading. See Agent for Mac 0.5.3.
+
+### Agent for Mac 0.5.1
+
+**Turning on "read the name from the TLS handshake" did nothing** until the
+network extension happened to restart, while the settings screen said it applied
+to new connections. The extension read the setting once, when it was created —
+which is when it launches.
+
+It reads the setting for each connection now, and the screen says what actually
+happens.
+
 ### Agent for Mac 0.5.0
 
 **Destinations can now be named for applications that bring their own

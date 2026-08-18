@@ -20,6 +20,9 @@ enum AgentMonitoringStatus: Equatable {
     /// Installed, but macOS is not running this copy, so nothing is collected
     /// until the machine restarts.
     case updateNotRunning
+    /// Monitoring says it is running, macOS agrees, and nothing is arriving.
+    /// Nothing is being recorded and no update explains it.
+    case notRecording(silentSince: Date?)
     case deactivating
     case removalApprovalRequired
     case removalRebootRequired
@@ -36,6 +39,17 @@ enum AgentMonitoringStatus: Equatable {
         case .rebootRequired: return L("Restart macOS to finish enabling network monitoring")
         case .updateNotRunning:
             return L("Nothing is being recorded. The update needs a restart of macOS before monitoring resumes.")
+        case .notRecording(let since):
+            guard let since else {
+                return L("Nothing is being recorded. Monitoring reports that it is running, but no connection has arrived. Quit and reopen EgressView Agent to restart it.")
+            }
+            let formatter = DateFormatter()
+            formatter.dateStyle = .short
+            formatter.timeStyle = .short
+            return L(
+                "Nothing has been recorded since %@. Monitoring reports that it is running. Quit and reopen EgressView Agent to restart it.",
+                formatter.string(from: since)
+            )
         case .deactivating: return L("Stopping monitoring...")
         case .removalApprovalRequired: return L("Approve removal of the System Extension in System Settings")
         case .removalRebootRequired: return L("Restart macOS to finish removing the System Extension")
@@ -52,8 +66,25 @@ enum AgentMonitoringStatus: Equatable {
         case .paused, .deactivating: return "MenuBarPaused"
         case .lightweight, .fullActive: return "MenuBar"
         case .fullActivationRequested, .fullStarting, .approvalRequired, .rebootRequired,
-             .updateNotRunning, .removalApprovalRequired, .removalRebootRequired, .failed:
+             .updateNotRunning, .notRecording, .removalApprovalRequired, .removalRebootRequired,
+             .failed:
             return "MenuBarAttention"
+        }
+    }
+
+    /// Whether the menu bar spells the state out instead of relying on the
+    /// icon alone.
+    ///
+    /// Normally false, because the label costs 70-130pt of a bar every other
+    /// app competes for. It is true for exactly the states where nothing is
+    /// being recorded: an icon that is one of three shapes is easy to stop
+    /// noticing, and this is the one state the user has to notice -- the
+    /// alternative is believing there is a record of a period that has none.
+    /// A wider menu bar for the duration of an outage is a fair price.
+    var menuBarShowsLabel: Bool {
+        switch self {
+        case .updateNotRunning, .notRecording: return true
+        default: return false
         }
     }
 
@@ -63,7 +94,7 @@ enum AgentMonitoringStatus: Equatable {
         case .lightweight: return L("EgressView: Light")
         case .fullActive: return L("EgressView: Monitoring")
         case .fullStarting: return L("EgressView: Starting")
-        case .updateNotRunning: return L("EgressView: Not recording")
+        case .updateNotRunning, .notRecording: return L("EgressView: Not recording")
         case .fullActivationRequested, .approvalRequired, .removalApprovalRequired: return L("EgressView: Approval")
         case .rebootRequired, .removalRebootRequired: return L("EgressView: Restart")
         case .deactivating: return L("EgressView: Stopping")
@@ -84,8 +115,11 @@ final class AgentMonitoringController {
     /// State the status gate needs. Held in its own object because the gate is
     /// built in `init`, before `self` exists.
     private final class MonitoringGateState {
-        /// macOS is not running the extension this app installed.
-        var isStalled = false
+        /// Why nothing is being recorded, when that is the case. Held as the
+        /// status itself rather than a flag because there are now two reasons
+        /// -- an update macOS has not switched to, and a monitor that stopped
+        /// delivering with nothing to blame -- and they need different words.
+        var stall: AgentMonitoringStatus?
         /// A coverage session is open in the store.
         var isCoverageOpen = false
     }
@@ -99,6 +133,11 @@ final class AgentMonitoringController {
     private let healthProbe: SystemExtensionHealthProbe
     private var healthTimer: Timer?
     private var hasReportedStall = false
+    /// When this Mac last became able to record: the later of monitoring
+    /// starting and the machine waking. Silence is only counted from here,
+    /// because a sleeping Mac records nothing by design and an agent that just
+    /// started has nothing to be silent about yet.
+    private var awakeSince: Date?
     private var lightweightCollector: LightweightCollector?
     private var fullMonitoringCollector: FullMonitoringCollector?
     private var persistenceSampler = ObservationPersistenceSampler()
@@ -120,10 +159,10 @@ final class AgentMonitoringController {
         // stall is the more important truth and it stays on screen.
         let gatedStatusHandler: (AgentMonitoringStatus) -> Void = { status in
             var status = status
-            if gateState.isStalled {
+            if let stall = gateState.stall {
                 switch status {
                 case .fullActive, .fullStarting, .fullActivationRequested:
-                    status = .updateNotRunning
+                    status = stall
                 default:
                     break
                 }
@@ -150,7 +189,12 @@ final class AgentMonitoringController {
                 store: store,
                 observationHandler: observationHandler,
                 statusHandler: gatedStatusHandler,
-                errorHandler: storageErrorHandler
+                errorHandler: storageErrorHandler,
+                coverageHandler: { [weak gateState] in
+                    guard let gateState, !gateState.isCoverageOpen else { return }
+                    gateState.isCoverageOpen = true
+                    try? store.beginCoverageSession(at: Date())
+                }
             )
         }
     }
@@ -176,6 +220,7 @@ final class AgentMonitoringController {
         ) { [weak self] _ in
             guard let store = self?.store else { return }
             try? store.endSleepPeriod(at: Date())
+            self?.awakeSince = Date()
             // Collection resumes on its own after a wake -- measured on
             // 2026-08-14, twice, with no gap beyond the sleep itself. The check
             // runs anyway because "it did last time" is not evidence about
@@ -192,6 +237,7 @@ final class AgentMonitoringController {
     /// is worse than the outage, because it leaves the user believing there is
     /// a record of a period that has none.
     func startHealthChecks() {
+        if awakeSince == nil { awakeSince = Date() }
         checkHealth()
         healthTimer?.invalidate()
         healthTimer = Timer.scheduledTimer(
@@ -210,6 +256,21 @@ final class AgentMonitoringController {
     /// which parts of a period they know nothing about.
     ///
     /// Static because the gate that calls it is built before `self` exists.
+    /// Opens a coverage session because data is arriving, whatever the status
+    /// last said.
+    ///
+    /// Coverage used to open only on the collector's first `.fullActive`, so
+    /// anything that closed a session closed it for good: the agent could go on
+    /// collecting while the screen reported the period as unmonitored.
+    ///
+    /// Arriving data is the only evidence that actually bears on the question,
+    /// so it is what opens the session.
+    func noteObservationsRecorded() {
+        guard let store, !gateState.isCoverageOpen else { return }
+        gateState.isCoverageOpen = true
+        try? store.beginCoverageSession(at: Date())
+    }
+
     private static func recordCoverage(
         for status: AgentMonitoringStatus,
         store: ObservationStore?,
@@ -221,7 +282,7 @@ final class AgentMonitoringController {
             guard !state.isCoverageOpen else { return }
             state.isCoverageOpen = true
             try? store.beginCoverageSession(at: Date())
-        case .paused, .deactivating, .failed, .updateNotRunning, .rebootRequired,
+        case .paused, .deactivating, .failed, .updateNotRunning, .notRecording, .rebootRequired,
              .approvalRequired, .removalApprovalRequired, .removalRebootRequired:
             guard state.isCoverageOpen else { return }
             state.isCoverageOpen = false
@@ -242,28 +303,48 @@ final class AgentMonitoringController {
 
     private func checkHealth() {
         let lastObservationAt = try? store?.statistics().newestObservedAt
-        healthProbe.check(lastObservationAt: lastObservationAt ?? nil) { [weak self] health in
+        healthProbe.check(
+            lastObservationAt: lastObservationAt ?? nil,
+            awakeSince: awakeSince
+        ) { [weak self] health in
             guard let self else { return }
             switch health {
             case .rebootRequiredAfterUpdate:
-                self.gateState.isStalled = true
-                self.statusHandler(.updateNotRunning)
-                if !self.hasReportedStall {
-                    self.hasReportedStall = true
-                    AgentUserNotifier.shared.notify(
-                        title: L("EgressView is not recording"),
-                        body: L("The update is installed, but macOS is still running the previous version. Restart this Mac to resume monitoring. Traffic during this time is not being recorded.")
-                    )
-                }
+                self.reportStall(
+                    .updateNotRunning,
+                    title: L("EgressView is not recording"),
+                    body: L("The update is installed, but macOS is still running the previous version. Restart this Mac to resume monitoring. Traffic during this time is not being recorded.")
+                )
+            case .silentWhileActive(let since):
+                self.reportStall(
+                    .notRecording(silentSince: since),
+                    title: L("EgressView is not recording"),
+                    body: L("Monitoring reports that it is running, but nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time is not being recorded.")
+                )
             case .healthy, .notInstalled, .awaitingApproval:
                 // `notInstalled` and `awaitingApproval` are already reported by
                 // the activation flow, which knows more than this check does.
-                if self.gateState.isStalled {
-                    self.gateState.isStalled = false
+                if self.gateState.stall != nil {
+                    self.gateState.stall = nil
                     self.hasReportedStall = false
                 }
             }
         }
+    }
+
+    /// Puts the agent into a "not recording" state and says so once.
+    ///
+    /// Once, not once per check: this runs every minute, and thirty notifications
+    /// an hour is how a warning stops being read. The menu bar carries it from
+    /// then on, which is the part that does not need permission from anyone.
+    private func reportStall(
+        _ status: AgentMonitoringStatus, title: String, body: String
+    ) {
+        gateState.stall = status
+        statusHandler(status)
+        guard !hasReportedStall else { return }
+        hasReportedStall = true
+        AgentUserNotifier.shared.notify(title: title, body: body)
     }
 
     func selectLightweightMonitoring() {

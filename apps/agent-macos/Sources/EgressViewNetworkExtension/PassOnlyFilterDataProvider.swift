@@ -29,20 +29,33 @@ public enum FlowDecision: Equatable, Sendable {
 }
 
 open class PassOnlyFilterDataProvider: NEFilterDataProvider {
-    private let policy: PassOnlyFlowPolicy
+    /// Read per flow, not once at startup.
+    ///
+    /// It used to be captured in `init()`, and the extension is created when it
+    /// launches -- so turning the setting on did nothing at all until the
+    /// extension happened to restart, while the settings screen said it applied
+    /// to new connections. Measured: the setting was written one minute after
+    /// the extension started, and not one name was read in the five minutes
+    /// after that.
+    private let fixedPolicy: PassOnlyFlowPolicy?
+    private let preferences = ServerNamePreferences()
+
+    private var policy: PassOnlyFlowPolicy {
+        fixedPolicy ?? PassOnlyFlowPolicy(readsServerName: preferences.isEnabled)
+    }
     private let adapter = NetworkExtensionFlowAdapter()
     private let mapper = NetworkFlowObservationMapper()
     private var openFlows = OpenFlowRegistry()
     private let lock = NSLock()
 
     public override init() {
-        policy = PassOnlyFlowPolicy(readsServerName: ServerNamePreferences().isEnabled)
+        fixedPolicy = nil
         super.init()
     }
 
     /// For tests, and for a provider that wants to state the policy outright.
     public init(policy: PassOnlyFlowPolicy) {
-        self.policy = policy
+        fixedPolicy = policy
         super.init()
     }
 
