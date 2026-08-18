@@ -22,6 +22,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var observationWindow = ObservationWindowController(store: store)
     private var threatAvailabilityObserver: AnyCancellable?
     private var updateAvailabilityObserver: AnyCancellable?
+    private var chartFoldTimer: Timer?
     private lazy var hubDelivery = HubDeliveryController()
     private lazy var updateController = AgentUpdateController(
         onUpdateReady: { [weak self] version in self?.showUpdateReady(version: version) }
@@ -76,6 +77,36 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         }
     )
 
+    /// Folds each completed hour into the aggregate the charts read.
+    ///
+    /// On a timer rather than on every observation: folding an hour costs about
+    /// 20 ms here, and doing that work as rows arrive would put it in the path
+    /// of collection, which must not be slowed for the sake of a chart. Once at
+    /// launch so a database that has been closed for a while catches up.
+    private func startChartFolding() {
+        foldCharts()
+        chartFoldTimer?.invalidate()
+        chartFoldTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            self?.foldCharts()
+        }
+    }
+
+    private func foldCharts() {
+        guard let store else { return }
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                try store.foldCompletedHoursForCharts()
+            } catch {
+                // A fold that fails leaves the watermark where it was, so the
+                // charts fall back to the raw rows for those hours: slower, and
+                // still correct.
+                self.logger.error(
+                    "Could not fold hours for the charts: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // Closes the current stretch of coverage. A session left open would
         // claim the app was watching for however long it was quit.
@@ -105,6 +136,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         // that installing it was enough.
         controller.startHealthChecks()
         controller.startWatchingSleep()
+        startChartFolding()
         showUpdateDisclosureIfNeeded()
         Task { await updateController.runIfDue() }
         // Fetches immediately when nothing is stored yet. Making a fresh
