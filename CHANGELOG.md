@@ -4,6 +4,21 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-08-18
+
+**EgressView 2.0.2 = Hub 1.10.0 (unchanged) + Agent for Mac 0.4.2.**
+
+Updating the Mac agent works, and charts covering more than a fortnight show
+more than a fortnight. Both were meant to be true in 2.0.0 and were not, which
+is why this is a patch release: nothing here is a new capability.
+
+The agent is distributed as an installer package now. Updating means pressing
+Check now, then Open installer — the package stops monitoring, replaces the app
+and starts it again. Nothing is dragged, nothing is quit by hand, and the
+network extension is not approved a second time.
+
+**Nothing needs doing to the Hub.**
+
 ### Agent for Mac 0.4.2
 
 **Charts covering more than a fortnight were showing a fortnight.**
@@ -21,23 +36,6 @@ The band marking sleep on the timeline was grey, and grey already meant the
 remainder series in the same chart. It is blue now, with an edge, because two
 greys with different meanings left the reader unable to tell whether the band
 had appeared at all.
-
-## [2.0.2] - 2026-08-18
-
-**EgressView 2.0.2 = Hub 1.10.0 (unchanged) + Agent for Mac 0.4.1.**
-
-Updating the Mac agent works. It was meant to in 2.0.0, and did not: the path
-broke five separate times, and every one of those faults had passing tests.
-Nothing here is a new capability, which is why this is a patch release.
-
-The agent is now distributed as an installer package rather than a disk image.
-Updating means pressing Check now, then Open installer — the package stops
-monitoring, replaces the app and starts it again. Nothing is dragged, nothing is
-quit by hand, and the network extension is not approved a second time.
-
-**Nothing needs doing to the Hub.** Agents on 0.3.0 or newer will offer 0.4.1
-when they next check; agents on 0.3.8 will hand the download to a browser, and
-installing that package by hand gets them onto the new path.
 
 ### Agent for Mac 0.4.1
 
