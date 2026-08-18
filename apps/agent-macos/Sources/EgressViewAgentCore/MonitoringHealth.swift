@@ -43,6 +43,12 @@ public enum MonitoringHealth: Equatable, Sendable {
     /// matched, so no swap was pending, so the check below returned `healthy`
     /// for every one of the 800 times it ran during the outage.
     case silentWhileActive(since: Date?)
+    /// macOS was asked whether the extension is running and did not answer.
+    ///
+    /// Not a verdict about monitoring -- it is the absence of one, and it is
+    /// reported rather than swallowed. An unanswered question used to leave the
+    /// check silent, which the rest of the app could only read as "fine".
+    case unanswered
 }
 
 /// Answers "is this Mac still being watched?" from what macOS reports about the

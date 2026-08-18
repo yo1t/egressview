@@ -31,7 +31,7 @@ final class ThreatIntelController: ObservableObject {
     private let credentialStore: any AgentCredentialStoring
     private let agentVersion: String
     private let preferences = ThreatIntelPreferences()
-    private var timer: Timer?
+    private let timer = PeriodicWork()
 
     /// Refreshed hourly. The feeds move a few times a day, so an hourly check
     /// is mostly 304s, and a longer interval would leave a newly enrolled Mac
@@ -74,16 +74,13 @@ final class ThreatIntelController: ObservableObject {
     func start() {
         loadAvailabilityFromStore()
         Task { await refresh() }
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) {
-            [weak self] _ in
+        timer.start(every: Self.refreshInterval) { [weak self] in
             Task { @MainActor in await self?.refresh() }
         }
     }
 
     func stop() {
-        timer?.invalidate()
-        timer = nil
+        timer.stop()
     }
 
     private func loadAvailabilityFromStore() {

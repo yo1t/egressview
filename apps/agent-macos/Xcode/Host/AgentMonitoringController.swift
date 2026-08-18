@@ -131,7 +131,7 @@ final class AgentMonitoringController {
     private let extensionController: SystemExtensionController
     private let gateState: MonitoringGateState
     private let healthProbe: SystemExtensionHealthProbe
-    private var healthTimer: Timer?
+    private let healthTimer = PeriodicWork()
     private var hasReportedStall = false
     /// When this Mac last became able to record: the later of monitoring
     /// starting and the machine waking. Silence is only counted from here,
@@ -239,17 +239,14 @@ final class AgentMonitoringController {
     func startHealthChecks() {
         if awakeSince == nil { awakeSince = Date() }
         checkHealth()
-        healthTimer?.invalidate()
-        healthTimer = Timer.scheduledTimer(
-            withTimeInterval: Self.healthCheckInterval, repeats: true
-        ) { [weak self] _ in
+        // A dispatch source, not a run-loop `Timer`: see `PeriodicWork`.
+        healthTimer.start(every: Self.healthCheckInterval) { [weak self] in
             self?.checkHealth()
         }
     }
 
     func stopHealthChecks() {
-        healthTimer?.invalidate()
-        healthTimer = nil
+        healthTimer.stop()
     }
 
     /// Writes down when monitoring was really running, so the charts can say
@@ -302,10 +299,18 @@ final class AgentMonitoringController {
     }
 
     private func checkHealth() {
-        let lastObservationAt = try? store?.statistics().newestObservedAt
+        // A rehearsal answers the real question the real way: the times are
+        // replaced, and everything downstream -- the verdict, the status, the
+        // menu bar, the notification -- runs exactly as it would in an outage.
+        // Short-circuiting straight to the notification would test the
+        // notification and nothing else.
+        let forced = AgentDiagnostics.forcesNotRecording
+        let lastObservationAt = forced
+            ? Date(timeIntervalSince1970: 0)
+            : (try? store?.statistics().newestObservedAt) ?? nil
         healthProbe.check(
-            lastObservationAt: lastObservationAt ?? nil,
-            awakeSince: awakeSince
+            lastObservationAt: lastObservationAt,
+            awakeSince: forced ? Date(timeIntervalSince1970: 0) : awakeSince
         ) { [weak self] health in
             guard let self else { return }
             switch health {
@@ -321,6 +326,11 @@ final class AgentMonitoringController {
                     title: L("EgressView is not recording"),
                     body: L("Monitoring reports that it is running, but nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time is not being recorded.")
                 )
+            case .unanswered:
+                // macOS did not answer. Nothing is claimed about monitoring
+                // either way -- but a stall already being reported stays
+                // reported, because no answer is not an all-clear.
+                break
             case .healthy, .notInstalled, .awaitingApproval:
                 // `notInstalled` and `awaitingApproval` are already reported by
                 // the activation flow, which knows more than this check does.

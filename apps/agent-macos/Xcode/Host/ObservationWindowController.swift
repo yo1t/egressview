@@ -193,7 +193,7 @@ private final class AgentMainViewModel: ObservableObject {
 
     private let store: ObservationStore?
     private let loadQueue = DispatchQueue(label: "com.egressview.agent.main-window")
-    private var refreshTimer: Timer?
+    private let refreshTimer = PeriodicWork()
 
     init(store: ObservationStore?) {
         self.store = store
@@ -201,7 +201,6 @@ private final class AgentMainViewModel: ObservableObject {
 
     func start() {
         refresh()
-        refreshTimer?.invalidate()
         // Four seconds, and only while the window is on screen. Eight queries
         // over a 39 MB database every two seconds, republishing every value the
         // analysis tab is built from, made the app the busiest process on the
@@ -213,10 +212,11 @@ private final class AgentMainViewModel: ObservableObject {
         // SQLite work. At five seconds that is a fifth of a core, permanently,
         // to re-answer questions whose answers barely moved.
         //
-        // This is a mitigation, not the fix. The fix is to serve long periods
-        // from `hourly_rollup`, which exists for exactly this and is not being
-        // used by the charts.
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+        // This was a mitigation. The fix -- `chart_hourly`, updated as
+        // observations arrive -- shipped in 0.5.0 and took the query from
+        // 473ms to 31ms. The interval stays because there is nothing to gain
+        // from redrawing faster than the eye reads.
+        refreshTimer.start(every: 15) { [weak self] in
             Task { @MainActor in
                 guard let self, self.isWindowVisible else { return }
                 // Four times slower again when the app is not the one being
@@ -232,8 +232,7 @@ private final class AgentMainViewModel: ObservableObject {
     }
 
     func stop() {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
+        refreshTimer.stop()
     }
 
     func setMonitoringStatus(_ value: String) {
