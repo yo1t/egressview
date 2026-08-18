@@ -246,6 +246,9 @@ private final class AgentSettingsViewModel: ObservableObject {
     @Published var thirdPartyGeoLookupEnabled = GeoCachePreferences().thirdPartyLookupEnabled {
         didSet { GeoCachePreferences().thirdPartyLookupEnabled = thirdPartyGeoLookupEnabled }
     }
+    @Published var readsServerName = ServerNamePreferences().isEnabled {
+        didSet { ServerNamePreferences().isEnabled = readsServerName }
+    }
     let isLightweightMonitoringAvailable = false
 
     var availableMonitoringModes: [AgentMonitoringMode] {
@@ -506,6 +509,7 @@ private struct AgentSettingsView: View {
             .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
             Divider().padding(.vertical, 4)
             geoSection
+            serverNameSection
             threatSection
         }
     }
@@ -533,6 +537,25 @@ private struct AgentSettingsView: View {
                     // Said plainly: this is the one place the agent would send
                     // the very destinations it is watching to someone else.
                     Text(L("Sends destination IP addresses to ip-api.com. Off unless you turn it on."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var serverNameSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L("Destination names")).font(.headline)
+            Text(L("macOS supplies the name for applications that use its own networking. About half of connections come from applications that do not, including every browser measured — those show as addresses."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Toggle(isOn: $model.readsServerName) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Read the name from the TLS handshake"))
+                    // Said plainly, because the honest objection to this setting
+                    // is "you told me you never look inside connections".
+                    Text(L("Reads the first message of a connection, in which the client says where it is going before anything is encrypted. Nothing is decrypted, nothing after that message is read, and the name stays on this Mac. Off unless you turn it on; takes effect for connections made after this."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
