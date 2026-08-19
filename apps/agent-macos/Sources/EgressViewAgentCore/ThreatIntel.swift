@@ -240,3 +240,36 @@ public struct ThreatReport: Equatable, Sendable {
         return ThreatReport(findings: findings, availability: availability)
     }
 }
+
+/// Where the indicators come from, and the one rule that decides it.
+///
+/// The rule takes **enrolment**, never reachability. That distinction is the
+/// whole point of this type existing: if an unreachable Hub fell back to
+/// downloading the feeds directly, an hour of Hub downtime would silently start
+/// contacting third parties. The traffic leaving the Mac would change with
+/// nobody having touched anything, which is exactly what a tool that watches
+/// outbound traffic must never do to its own user.
+///
+/// Pulled out of the controller so it can be stated once and pinned by tests.
+/// It was correct before this existed, but only by reading it.
+public enum ThreatIntelSource: Equatable, Sendable {
+    /// Enrolled with a Hub: the Hub is the only source, always.
+    case hub
+    /// No Hub, and the user turned direct downloads on.
+    case directDownload
+    /// No Hub and no opt-in. Nothing is fetched, and the screen must say that
+    /// nobody looked rather than that nothing was found.
+    case none
+
+    /// - Parameters:
+    ///   - isEnrolledWithHub: whether a credential is stored. **Not** whether
+    ///     the Hub answered.
+    ///   - isDirectDownloadEnabled: the user's opt-in, which is only offered
+    ///     when there is no Hub.
+    public static func decide(
+        isEnrolledWithHub: Bool, isDirectDownloadEnabled: Bool
+    ) -> ThreatIntelSource {
+        if isEnrolledWithHub { return .hub }
+        return isDirectDownloadEnabled ? .directDownload : .none
+    }
+}

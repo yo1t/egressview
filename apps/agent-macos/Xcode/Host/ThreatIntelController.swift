@@ -55,6 +55,16 @@ final class ThreatIntelController: ObservableObject {
     /// destination leaves this Mac would quietly stop being true.
     var isDirectDownloadAvailable: Bool { !hasHub }
 
+    /// The one rule that picks a source, stated in `ThreatIntelSource` and
+    /// pinned by tests there. Read from enrolment, never from whether the Hub
+    /// answered.
+    private var source: ThreatIntelSource {
+        ThreatIntelSource.decide(
+            isEnrolledWithHub: hasHub,
+            isDirectDownloadEnabled: preferences.isDirectDownloadEnabled
+        )
+    }
+
     var isDirectDownloadEnabled: Bool {
         get { preferences.isDirectDownloadEnabled }
         set {
@@ -90,16 +100,20 @@ final class ThreatIntelController: ObservableObject {
 
     func refresh() async {
         guard let store else { return }
-        guard let credential = (try? credentialStore.load()) ?? nil else {
-            guard preferences.isDirectDownloadEnabled else {
-                availability = .notEnabled
-                status = .notEnabled
-                return
-            }
+        switch source {
+        case .hub:
+            // A missing credential here would mean it disappeared between the
+            // decision and now. Nothing is fetched, and in particular the
+            // third-party path is not reached: an unreadable keychain must not
+            // look like "no Hub".
+            guard let credential = (try? credentialStore.load()) ?? nil else { return }
+            await refreshFromHub(store: store, credential: credential)
+        case .directDownload:
             await refreshFromFeeds(store: store)
-            return
+        case .none:
+            availability = .notEnabled
+            status = .notEnabled
         }
-        await refreshFromHub(store: store, credential: credential)
     }
 
     private func refreshFromHub(store: ObservationStore, credential: AgentCredential) async {
