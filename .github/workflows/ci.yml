@@ -16,6 +16,7 @@ permissions:
 jobs:
   test:
     name: Unit tests (Node ${{ matrix.node-version }})
+    timeout-minutes: 15
     runs-on: ubuntu-latest
 
     strategy:
@@ -58,6 +59,7 @@ jobs:
 
   security:
     name: Release safety checks
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,6 +81,7 @@ jobs:
 
   portability:
     name: Offline portability (${{ matrix.runtime }})
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -107,6 +110,7 @@ jobs:
 
   offline-distribution:
     name: Signed offline-runtime distribution
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -161,6 +165,7 @@ jobs:
 
   ash:
     name: ASH security scan
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -192,6 +197,7 @@ jobs:
 
   smoke:
     name: Browser smoke tests
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     # Run on schedule, manual dispatch, and on every push/PR (uses demo mode so no hardware needed)
     steps:
@@ -206,8 +212,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # `--with-deps` runs apt-get, which is where this hung for six hours on
+      # 2026-08-19: no output, no failure, just a job that never ended while
+      # the pull request sat unmergeable. Bounded and retried, so a slow
+      # package mirror costs a minute instead of an afternoon.
       - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+        run: |
+          for attempt in 1 2 3; do
+            if timeout 300 npx playwright install --with-deps chromium; then
+              exit 0
+            fi
+            echo "playwright install attempt $attempt failed or timed out"
+            sleep 10
+          done
+          exit 1
 
       - name: Start EgressView (demo mode)
         run: |
