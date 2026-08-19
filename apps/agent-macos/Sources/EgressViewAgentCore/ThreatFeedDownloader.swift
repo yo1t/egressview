@@ -30,14 +30,35 @@ public struct ThreatFeedDownloader: Sendable {
         case allFeedsFailed
     }
 
+    /// What came back, including which feeds did not.
+    ///
+    /// The count alone is not enough to judge by. Three of the four feeds
+    /// returned nothing for the whole life of this code and the screen went on
+    /// showing a total, because a feed that yields no rows looks exactly like a
+    /// feed with nothing to report. Whoever turned this on could not tell.
+    public struct DownloadResult: Sendable, Equatable {
+        public let indicators: [ThreatIndicator]
+        /// Feeds that failed outright, or returned something that parsed to
+        /// nothing. Named so they can be said out loud.
+        public let missingSources: [String]
+
+        public init(indicators: [ThreatIndicator], missingSources: [String]) {
+            self.indicators = indicators
+            self.missingSources = missingSources
+        }
+
+        public var isComplete: Bool { missingSources.isEmpty }
+    }
+
     private let transport: any GeoCacheTransport
 
     public init(transport: any GeoCacheTransport = URLSessionGeoCacheTransport(timeout: 60)) {
         self.transport = transport
     }
 
-    public func download() async throws -> [ThreatIndicator] {
+    public func download() async throws -> DownloadResult {
         var indicators: [ThreatIndicator] = []
+        var missing: [String] = []
         var anySucceeded = false
         for feed in Self.feeds {
             var request = URLRequest(url: feed.url)
@@ -47,16 +68,33 @@ public struct ThreatFeedDownloader: Sendable {
                   response.statusCode == 200,
                   let text = String(data: data, encoding: .utf8)
             else {
-                // One feed being down is ordinary. Failing the whole refresh
-                // for it would throw away three working lists.
+                // One feed being down is ordinary, so the refresh continues --
+                // but it is recorded rather than shrugged off.
+                missing.append(feed.source)
                 continue
             }
             anySucceeded = true
-            indicators.append(contentsOf: Self.parse(text, kind: feed.kind, source: feed.source))
+            let parsed = Self.parse(text, kind: feed.kind, source: feed.source)
+            if parsed.isEmpty, !Self.publishesEmptyLists.contains(feed.source) {
+                // Downloaded and understood nothing. That is a parser or a
+                // changed format, not a quiet day, and it is the exact failure
+                // that went unnoticed for the life of this code.
+                missing.append(feed.source)
+                continue
+            }
+            indicators.append(contentsOf: parsed)
         }
         guard anySucceeded else { throw DownloadError.allFeedsFailed }
-        return indicators
+        return DownloadResult(indicators: indicators, missingSources: missing)
     }
+
+    /// Feeds that legitimately publish nothing for long stretches, so an empty
+    /// result from them is a fact rather than a fault.
+    ///
+    /// Feodo Tracker's blocklist has been empty since 2026-03-04. Treating that
+    /// as a broken feed would put a warning on screen that never clears, and a
+    /// warning that never clears is one nobody reads.
+    static let publishesEmptyLists: Set<String> = ["feodo"]
 
     public static func parse(
         _ text: String, kind: FeedKind, source: String
@@ -71,7 +109,7 @@ public struct ThreatFeedDownloader: Sendable {
 
     /// `first_seen_utc,dst_ip,dst_port,…,malware`
     static func parseFeodo(_ text: String, source: String) -> [ThreatIndicator] {
-        text.split(separator: "\n").compactMap { line in
+        lines(text).compactMap { line in
             guard !line.hasPrefix("#") else { return nil }
             let fields = csvFields(String(line))
             guard fields.count > 1, isPlausibleIPv4(fields[1]) else { return nil }
@@ -85,7 +123,7 @@ public struct ThreatFeedDownloader: Sendable {
 
     /// `first_seen_utc,ioc_id,ioc_value(ip:port),ioc_type,threat_type,…,malware`
     static func parseThreatFox(_ text: String, source: String) -> [ThreatIndicator] {
-        text.split(separator: "\n").compactMap { line in
+        lines(text).compactMap { line in
             guard !line.hasPrefix("#") else { return nil }
             let fields = csvFields(String(line))
             guard fields.count > 2 else { return nil }
@@ -103,7 +141,7 @@ public struct ThreatFeedDownloader: Sendable {
 
     /// `id,dateadded,url,url_status,…,threat,…`
     static func parseURLhaus(_ text: String, source: String) -> [ThreatIndicator] {
-        text.split(separator: "\n").compactMap { line in
+        lines(text).compactMap { line in
             guard !line.hasPrefix("#") else { return nil }
             let fields = csvFields(String(line))
             guard fields.count > 2, let host = URL(string: fields[2])?.host, !host.isEmpty else {
@@ -121,7 +159,7 @@ public struct ThreatFeedDownloader: Sendable {
 
     /// `1.2.3.0/24 ; SBL123456`
     static func parseSpamhausDrop(_ text: String, source: String) -> [ThreatIndicator] {
-        text.split(separator: "\n").compactMap { line in
+        lines(text).compactMap { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty, !trimmed.hasPrefix(";"), !trimmed.hasPrefix("#") else {
                 return nil
@@ -134,6 +172,22 @@ public struct ThreatFeedDownloader: Sendable {
                 tag: "Spamhaus DROP (hijacked network)"
             )
         }
+    }
+
+    /// Splits a feed into lines, whatever it ends them with.
+    ///
+    /// `split(separator: "\n")` looks like it does this and does not. Swift
+    /// treats `"\r\n"` as a **single** `Character`, so a CRLF file contains no
+    /// `"\n"` character at all: the whole download comes back as one line,
+    /// that line starts with `#`, and every parser here drops it as a comment.
+    ///
+    /// Three of the four feeds ship CRLF. They returned **zero indicators from
+    /// the day this was written until 2026-08-20**, with no error anywhere --
+    /// a failed feed is skipped by design, and a feed that parses to nothing is
+    /// indistinguishable from one that had nothing to report. Only Spamhaus,
+    /// which ships LF, ever worked.
+    static func lines(_ text: String) -> [Substring] {
+        text.split(whereSeparator: \.isNewline)
     }
 
     /// Minimal RFC 4180 reader: enough for feeds that quote fields containing

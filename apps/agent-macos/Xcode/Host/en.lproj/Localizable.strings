@@ -351,3 +351,8 @@
 "Monitoring reports that it is running, but nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time is not being recorded." = "Monitoring reports that it is running, but nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time is not being recorded.";
 "macOS did not answer the monitoring health check, and nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time may not be recorded." = "macOS did not answer the monitoring health check, and nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time may not be recorded.";
 "Network monitoring System Extension is not installed." = "Network monitoring System Extension is not installed.";
+
+/* Standalone threat feeds: partial results and terms */
+"%lld indicators, but %@ could not be read. Destinations are checked against the rest." = "%lld indicators, but %@ could not be read. Destinations are checked against the rest.";
+"abuse.ch terms" = "abuse.ch terms";
+"Spamhaus terms" = "Spamhaus terms";

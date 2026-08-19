@@ -22,6 +22,9 @@ final class ThreatIntelController: ObservableObject {
         case hubHasNoFeeds
         case notEnabled
         case failed(String)
+        /// Fetched, but not from everywhere. The count is real and incomplete,
+        /// and saying only the count would hide that.
+        case partial(count: Int, missing: [String], at: Date)
     }
 
     @Published private(set) var status: Status = .idle
@@ -48,12 +51,46 @@ final class ThreatIntelController: ObservableObject {
         self.agentVersion = agentVersion
     }
 
-    var hasHub: Bool { ((try? credentialStore.load()) ?? nil) != nil }
+    /// Whether a Hub credential is stored.
+    ///
+    /// Cached. This is read from SwiftUI `body`, which re-evaluates freely, and
+    /// the underlying call is a **synchronous keychain read**. On 2026-08-19 the
+    /// agent's main thread was seen wedged inside exactly that call, waiting on
+    /// `securityd` in every sample. A settings screen must not be able to hang
+    /// the app by being redrawn.
+    ///
+    /// Enrolment changes rarely and never behind the app's back, so re-reading
+    /// per redraw bought nothing. `refresh()` picks up a change on its next run;
+    /// `forgetHubState()` makes it immediate when enrolment is what changed.
+    private var cachedHasHub: Bool?
+
+    var hasHub: Bool {
+        if let cachedHasHub { return cachedHasHub }
+        let value = ((try? credentialStore.load()) ?? nil) != nil
+        cachedHasHub = value
+        return value
+    }
+
+    /// Call when the agent enrols or un-enrols, so the next look is fresh.
+    func forgetHubState() {
+        cachedHasHub = nil
+        Task { await refresh() }
+    }
 
     /// Only offered without a Hub. Offering both would mean contacting third
     /// parties for something already in hand, and the promise that no
     /// destination leaves this Mac would quietly stop being true.
     var isDirectDownloadAvailable: Bool { !hasHub }
+
+    /// The one rule that picks a source, stated in `ThreatIntelSource` and
+    /// pinned by tests there. Read from enrolment, never from whether the Hub
+    /// answered.
+    private var source: ThreatIntelSource {
+        ThreatIntelSource.decide(
+            isEnrolledWithHub: hasHub,
+            isDirectDownloadEnabled: preferences.isDirectDownloadEnabled
+        )
+    }
 
     var isDirectDownloadEnabled: Bool {
         get { preferences.isDirectDownloadEnabled }
@@ -90,16 +127,28 @@ final class ThreatIntelController: ObservableObject {
 
     func refresh() async {
         guard let store else { return }
-        guard let credential = (try? credentialStore.load()) ?? nil else {
-            guard preferences.isDirectDownloadEnabled else {
-                availability = .notEnabled
-                status = .notEnabled
-                return
-            }
+        switch source {
+        case .hub:
+            // A missing credential here would mean it disappeared between the
+            // decision and now. Nothing is fetched, and in particular the
+            // third-party path is not reached: an unreadable keychain must not
+            // look like "no Hub".
+            guard let credential = (try? credentialStore.load()) ?? nil else { return }
+            await refreshFromHub(store: store, credential: credential)
+        case .directDownload:
             await refreshFromFeeds(store: store)
-            return
+        case .none:
+            // Nothing is fetching them, so nothing should still be matched
+            // against them. Leaving the last Hub's indicators in place while
+            // the screen says "not switched on" makes the two disagree, and
+            // findings would be attributed to a source no longer in use.
+            if (try? store.threatIndicatorCount()).map({ $0 > 0 }) ?? false {
+                try? store.replaceThreatIndicators([])
+                preferences.etag = nil
+            }
+            availability = .notEnabled
+            status = .notEnabled
         }
-        await refreshFromHub(store: store, credential: credential)
     }
 
     private func refreshFromHub(store: ObservationStore, credential: AgentCredential) async {
@@ -142,11 +191,17 @@ final class ThreatIntelController: ObservableObject {
     private func refreshFromFeeds(store: ObservationStore) async {
         status = .fetching
         do {
-            let indicators = try await ThreatFeedDownloader().download()
-            try store.replaceThreatIndicators(indicators)
+            let result = try await ThreatFeedDownloader().download()
+            try store.replaceThreatIndicators(result.indicators)
             preferences.lastFetch = Date()
-            availability = .checked(indicatorCount: indicators.count, fetchedAt: Date())
-            status = .updated(count: indicators.count, at: Date())
+            availability = .checked(indicatorCount: result.indicators.count, fetchedAt: Date())
+            status = result.isComplete
+                ? .updated(count: result.indicators.count, at: Date())
+                : .partial(
+                    count: result.indicators.count,
+                    missing: result.missingSources,
+                    at: Date()
+                )
         } catch {
             status = .failed(Self.describe(error))
             loadAvailabilityFromStore()

@@ -589,6 +589,15 @@ private struct AgentSettingsView: View {
                         Text(L("Downloads public block lists from abuse.ch and spamhaus.org. No destination from this Mac is sent to them; they only learn that this Mac asked. Off unless you turn it on."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        // Downloaded by this Mac, under its own terms, not
+                        // relayed by us. Whoever switches it on is the one
+                        // agreeing, so they get the links.
+                        HStack(spacing: 6) {
+                            Link(L("abuse.ch terms"), destination: URL(string: "https://abuse.ch/terms-of-service/")!)
+                            Text("·").foregroundStyle(.secondary)
+                            Link(L("Spamhaus terms"), destination: URL(string: "https://www.spamhaus.org/legal/")!)
+                        }
+                        .font(.caption)
                     }
                 }
             } else {
@@ -604,6 +613,15 @@ private struct AgentSettingsView: View {
         case .idle: return ""
         case .fetching: return L("Fetching...")
         case let .updated(count, _): return L("%lld indicators", count)
+        case let .partial(count, missing, _):
+            // The count on its own would read as success. Which lists are
+            // missing is the part that lets someone judge what the check is
+            // worth right now.
+            return L(
+                "%lld indicators, but %@ could not be read. Destinations are checked against the rest.",
+                count,
+                missing.joined(separator: ", ")
+            )
         case .unchanged: return L("Already up to date")
         case .hubHasNoFeeds: return L("The Hub is not running threat feeds")
         case .notEnabled: return L("Not switched on")
