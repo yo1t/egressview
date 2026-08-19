@@ -4,7 +4,7 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
-### Agent for Mac 0.5.3
+### Agent for Mac 0.5.6
 
 **The agent could stop recording for hours without saying so.** On 2026-08-18 a
 Mac recorded nothing for 13 hours 27 minutes. The health check ran about 800
@@ -17,13 +17,19 @@ an ordinary night and the minute after a wake do not trip it. While nothing is
 being recorded, the menu bar spells that out instead of relying on an icon it
 shares with "awaiting approval" and "starting".
 
-The notification itself had never worked: the agent had no entry in Notification
-Center at all, so permission had never once been requested. It now tells "never
+The notification itself had never been reached: the health check produced no
+verdict, so nothing ever asked for one to be shown. It now tells "never
 asked" from "refused" and reports whether the message will be seen.
 
-**Not yet verified on a real machine.** Neither the notification nor the menu
-bar text has fired, because nothing has been silent for half an hour since. This
-is the same path that failed silently before, so treat it as untested.
+**Verified on a real machine in 0.5.6.** The notification appears, the menu bar
+spells the state out, nothing is reported while monitoring is paused, and the
+warning clears when observations resume.
+
+Getting there found two further faults, both real: macOS does not always answer
+the request that asks which extension is running -- four attempts in a row
+produced no reply at all, and the check waited forever and said nothing -- and
+a warning could be cancelled by data arriving a second later. Both are fixed in
+0.5.5 and 0.5.6.
 
 ### Agent for Mac 0.5.2
 
