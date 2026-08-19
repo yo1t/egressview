@@ -220,6 +220,13 @@ final class AgentMonitoringController {
                 },
                 recoveryHandler: { [weak gateState] in
                     DispatchQueue.main.async {
+                        // A rehearsal is not cleared by the data still
+                        // arriving. Forcing the alarm only pretends the record
+                        // is silent -- observations keep landing a second
+                        // later, and without this they cancel the very state
+                        // being rehearsed before it can be looked at. A real
+                        // outage has no arriving data to cancel it.
+                        guard !AgentDiagnostics.forcesNotRecording else { return }
                         guard let gateState, gateState.stall != nil else { return }
                         gateState.stall = nil
                         gateState.hasReportedStall = false
@@ -356,7 +363,7 @@ final class AgentMonitoringController {
             let latestObservationAt = forced
                 ? lastObservationAt
                 : ((try? self.store?.statistics().newestObservedAt) ?? nil)
-            if let latestObservationAt,
+            if !forced, let latestObservationAt,
                Date().timeIntervalSince(latestObservationAt)
                     < MonitoringHealthCheck.silenceThreshold {
                 if self.gateState.stall != nil {
