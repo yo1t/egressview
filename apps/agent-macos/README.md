@@ -35,10 +35,10 @@ Roughly ten minutes, most of which is macOS asking you to approve things.
 
 ## Install
 
-1. Download `egressview-agent-<version>.dmg` from the
+1. Download `egressview-agent-<version>.pkg` from the
    [releases page](https://github.com/yo1t/egressview/releases) and open it.
-2. Drag **EgressView Agent** onto **Applications**, then launch it from there.
-   It lives in the menu bar and has no window of its own.
+2. Follow the installer. It puts the agent in **Applications** and starts it for
+   you. The agent lives in the menu bar and has no window of its own.
 3. Choose **Network monitoring** from its menu. macOS will ask you to allow a
    System Extension; this opens System Settings, where you approve it once.
 4. In the Hub's settings, under the L3/L4 data source, choose **Issue an
@@ -53,6 +53,9 @@ destination and what will and will not be sent before anything leaves.
 
 If the code is refused, it has probably expired — they last ten minutes. Issue
 another one.
+
+Once installed, the agent updates itself: it offers the new version and runs the
+installer for you. The System Extension does not need approving again.
 
 ## What leaves your Mac, and when
 
@@ -78,12 +81,38 @@ fetch them itself. Both are off unless you switch them on, in Settings.
   which is why it is off.
 - **Threat feed downloads** fetch public block lists from `abuse.ch` and
   `spamhaus.org`. These are plain downloads, not lookup services: **no address of
-  yours is sent**. What they learn is that your Mac asked at all.
+  yours is sent**. What they learn is that your Mac asked at all. You download
+  from them directly, so their terms are linked next to the setting — you are
+  the one agreeing to them.
 
 **With a Hub, neither is offered.** The Hub already supplies both, and having
-both paths would quietly make "nothing leaves this Mac" untrue. The agent also
-never switches to direct downloads on its own — a Hub that goes down for an hour
-must not change what your Mac sends, without you touching anything.
+both paths would quietly make "nothing leaves this Mac" untrue.
+
+**The agent never switches to direct downloads on its own.** A Hub that goes
+down for an hour must not change what your Mac sends while you are not looking.
+This was measured rather than asserted: the Hub was stopped for three and a half
+minutes and the agent restarted, forcing a threat-intel fetch that failed. It
+contacted no feed operator. The rule that decides the source is given whether
+you are enrolled and whether you opted in, and **is not given whether the Hub
+answered** — so no amount of downtime can change its answer.
+
+### If a feed cannot be read, the screen says which
+
+Turning threat feeds on and seeing a number is not the same as being protected.
+Four lists are fetched, and if any of them cannot be read — the site is down, or
+its format changed — the settings screen names them:
+
+> 22,329 indicators, but threatfox, urlhaus could not be read. Destinations are
+> checked against the rest.
+
+This exists because the opposite happened. Until August 2026 three of the four
+feeds silently produced nothing, and the screen showed a total as though all was
+well: destinations were being checked against a quarter of the list, and the
+agent said it had checked. A quiet feed and a broken one must not look alike.
+
+Feodo Tracker is excluded from that warning. It has published an empty list
+since March 2026, which is a fact about the world rather than a fault, and a
+warning that never clears is one nobody reads.
 
 ## Reading the screen
 
@@ -233,18 +262,26 @@ Set `EGRESSVIEW_NOTARY_PROFILE` to a credential profile previously stored with
 same package. Without it, the script creates a signed ZIP ready for submission.
 It refuses to overwrite an existing `dist/EgressViewAgent.zip`.
 
-Then package the disk image people actually download:
+Then package the installer people actually download:
 
 ```sh
-EGRESSVIEW_NOTARY_PROFILE="$NOTARY_PROFILE_NAME" ./scripts/build-agent-dmg.sh
+EGRESSVIEW_NOTARY_PROFILE="$NOTARY_PROFILE_NAME" \
+EGRESSVIEW_INSTALLER_IDENTITY="$INSTALLER_IDENTITY" ./scripts/build-agent-pkg.sh
 ```
 
 It reads the version from the built app and writes
-`dist/egressview-agent-<version>.dmg`, notarised and stapled in its own right —
-stapling the app alone is not enough, because a first launch from an unstapled
-image asks Apple over the network, and a new user's first impression should not
-depend on their connection. Without a notary profile it still builds an image,
-prints that it is unnotarised, and that one must not be published.
+`dist/egressview-agent-<version>.pkg`, notarised and stapled in its own right —
+stapling the app alone is not enough, because a first install from an unstapled
+package asks Apple over the network, and a new user's first impression should
+not depend on their connection. Without a notary profile or an installer
+identity it still builds a package, prints that it must not be published, and
+means it.
+
+A package, not a disk image, because a disk image cannot work here: macOS marks
+everything a sandboxed application writes and refuses to launch an app taken
+from it, so an agent that hands its user a disk image is handing over something
+that cannot be opened. `installd` performs a package install, and nothing the
+agent wrote is involved. `build-agent-dmg.sh` remains for reference only.
 
 The two profile names are local Apple Developer resources. Do not commit Team
 IDs, downloaded profiles, certificates, private keys, or notarization secrets.
