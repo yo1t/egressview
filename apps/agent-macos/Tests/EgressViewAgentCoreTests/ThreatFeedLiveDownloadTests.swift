@@ -18,8 +18,13 @@ final class ThreatFeedLiveDownloadTests: XCTestCase {
             "第三者へ実際に接続するため、明示的に有効化したときだけ実行する"
         )
 
-        let indicators = try await ThreatFeedDownloader().download()
+        let result = try await ThreatFeedDownloader().download()
+        let indicators = result.indicators
         XCTAssertFalse(indicators.isEmpty, "1件も取れないなら経路か解析が壊れている")
+        // Feodo publishes an empty list for long stretches and is excluded from
+        // this by the downloader, so a complete result really should be
+        // complete.
+        XCTAssertTrue(result.isComplete, "取得できなかったフィード: \(result.missingSources)")
 
         // Asserted, not just printed. The first run of this test returned
         // 1,693 indicators and passed, and every one of them came from a single

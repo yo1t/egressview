@@ -30,14 +30,35 @@ public struct ThreatFeedDownloader: Sendable {
         case allFeedsFailed
     }
 
+    /// What came back, including which feeds did not.
+    ///
+    /// The count alone is not enough to judge by. Three of the four feeds
+    /// returned nothing for the whole life of this code and the screen went on
+    /// showing a total, because a feed that yields no rows looks exactly like a
+    /// feed with nothing to report. Whoever turned this on could not tell.
+    public struct DownloadResult: Sendable, Equatable {
+        public let indicators: [ThreatIndicator]
+        /// Feeds that failed outright, or returned something that parsed to
+        /// nothing. Named so they can be said out loud.
+        public let missingSources: [String]
+
+        public init(indicators: [ThreatIndicator], missingSources: [String]) {
+            self.indicators = indicators
+            self.missingSources = missingSources
+        }
+
+        public var isComplete: Bool { missingSources.isEmpty }
+    }
+
     private let transport: any GeoCacheTransport
 
     public init(transport: any GeoCacheTransport = URLSessionGeoCacheTransport(timeout: 60)) {
         self.transport = transport
     }
 
-    public func download() async throws -> [ThreatIndicator] {
+    public func download() async throws -> DownloadResult {
         var indicators: [ThreatIndicator] = []
+        var missing: [String] = []
         var anySucceeded = false
         for feed in Self.feeds {
             var request = URLRequest(url: feed.url)
@@ -47,16 +68,33 @@ public struct ThreatFeedDownloader: Sendable {
                   response.statusCode == 200,
                   let text = String(data: data, encoding: .utf8)
             else {
-                // One feed being down is ordinary. Failing the whole refresh
-                // for it would throw away three working lists.
+                // One feed being down is ordinary, so the refresh continues --
+                // but it is recorded rather than shrugged off.
+                missing.append(feed.source)
                 continue
             }
             anySucceeded = true
-            indicators.append(contentsOf: Self.parse(text, kind: feed.kind, source: feed.source))
+            let parsed = Self.parse(text, kind: feed.kind, source: feed.source)
+            if parsed.isEmpty, !Self.publishesEmptyLists.contains(feed.source) {
+                // Downloaded and understood nothing. That is a parser or a
+                // changed format, not a quiet day, and it is the exact failure
+                // that went unnoticed for the life of this code.
+                missing.append(feed.source)
+                continue
+            }
+            indicators.append(contentsOf: parsed)
         }
         guard anySucceeded else { throw DownloadError.allFeedsFailed }
-        return indicators
+        return DownloadResult(indicators: indicators, missingSources: missing)
     }
+
+    /// Feeds that legitimately publish nothing for long stretches, so an empty
+    /// result from them is a fact rather than a fault.
+    ///
+    /// Feodo Tracker's blocklist has been empty since 2026-03-04. Treating that
+    /// as a broken feed would put a warning on screen that never clears, and a
+    /// warning that never clears is one nobody reads.
+    static let publishesEmptyLists: Set<String> = ["feodo"]
 
     public static func parse(
         _ text: String, kind: FeedKind, source: String
