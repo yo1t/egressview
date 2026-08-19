@@ -31,7 +31,7 @@ describe('macOS Agent App Sandbox boundary', () => {
     const hostBuild = entitlement(hostInfo, 'CFBundleVersion');
     const extensionBuild = entitlement(extensionInfo, 'CFBundleVersion');
 
-    assert.equal(hostVersion, '0.5.3');
+    assert.equal(hostVersion, '0.5.6');
     assert.equal(extensionVersion, hostVersion);
     assert.equal(extensionBuild, hostBuild);
   });

@@ -22,7 +22,8 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private lazy var observationWindow = ObservationWindowController(store: store)
     private var threatAvailabilityObserver: AnyCancellable?
     private var updateAvailabilityObserver: AnyCancellable?
-    private var chartFoldTimer: Timer?
+    private let chartFoldTimer = PeriodicWork()
+    private var activity: NSObjectProtocol?
     private lazy var hubDelivery = HubDeliveryController()
     private lazy var updateController = AgentUpdateController(
         onUpdateReady: { [weak self] version in self?.showUpdateReady(version: version) }
@@ -83,12 +84,28 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     /// 20 ms here, and doing that work as rows arrive would put it in the path
     /// of collection, which must not be slowed for the sake of a chart. Once at
     /// launch so a database that has been closed for a while catches up.
+    /// Asks macOS not to put the agent to sleep while the Mac is awake.
+    ///
+    /// A background accessory app with no windows is what App Nap exists to
+    /// throttle, and being throttled stops the very work this app is for:
+    /// checking that monitoring is alive, folding the hourly aggregate,
+    /// refreshing threat indicators. Measured on 2026-08-19 -- a 60-second
+    /// timer fired zero times in 200 seconds.
+    ///
+    /// `...AllowingIdleSystemSleep` on purpose. The agent should keep working
+    /// while the Mac is awake and must not be the reason it stays awake; a
+    /// monitoring tool that quietly drains a battery would be uninstalled, and
+    /// deservedly.
+    private func keepRunningWhileAwake() {
+        activity = ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep,
+            reason: "Watching network activity and checking that monitoring is alive"
+        )
+    }
+
     private func startChartFolding() {
         foldCharts()
-        chartFoldTimer?.invalidate()
-        chartFoldTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
-            self?.foldCharts()
-        }
+        chartFoldTimer.start(every: 300) { [weak self] in self?.foldCharts() }
     }
 
     private func foldCharts() {
@@ -134,6 +151,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         controller.restoreMonitoringState()
         // Asks macOS whether monitoring is really running, rather than assuming
         // that installing it was enough.
+        keepRunningWhileAwake()
         controller.startHealthChecks()
         controller.startWatchingSleep()
         startChartFolding()

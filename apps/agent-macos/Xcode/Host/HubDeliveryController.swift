@@ -860,7 +860,7 @@ final class GeoCacheController: ObservableObject {
     private let credentialStore: any AgentCredentialStoring
     private let preferences = GeoCachePreferences()
     private let agentVersion: String
-    private var timer: Timer?
+    private let timer = PeriodicWork()
 
     init(store: ObservationStore?, credentialStore: any AgentCredentialStoring, agentVersion: String) {
         self.store = store
@@ -870,15 +870,13 @@ final class GeoCacheController: ObservableObject {
 
     func start() {
         Task { await self.refreshIfDue() }
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 3_600, repeats: true) { [weak self] _ in
+        timer.start(every: 3_600) { [weak self] in
             Task { @MainActor in await self?.refreshIfDue() }
         }
     }
 
     func stop() {
-        timer?.invalidate()
-        timer = nil
+        timer.stop()
     }
 
     private func refreshIfDue() async {

@@ -19,16 +19,22 @@ public enum TLSClientHello {
     public static let maximumInterestingBytes = 4096
 
     public static func serverName(in data: Data) -> String? {
-        var reader = Reader(data)
+        var outer = Reader(data)
 
         // Record header: handshake (0x16), version, length.
-        guard reader.byte() == 0x16 else { return nil }
-        guard reader.skip(2) else { return nil }
-        guard let recordLength = reader.uint16(), recordLength > 0 else { return nil }
+        guard outer.byte() == 0x16 else { return nil }
+        guard outer.skip(2) else { return nil }
+        guard let recordLength = outer.uint16(), recordLength > 0,
+              let record = outer.take(Int(recordLength))
+        else { return nil }
+        var recordReader = Reader(record)
 
         // Handshake header: ClientHello (0x01) and a 24-bit length.
-        guard reader.byte() == 0x01 else { return nil }
-        guard reader.skip(3) else { return nil }
+        guard recordReader.byte() == 0x01,
+              let handshakeLength = recordReader.uint24(),
+              let handshake = recordReader.take(handshakeLength)
+        else { return nil }
+        var reader = Reader(handshake)
 
         // Client version, then 32 bytes of random.
         guard reader.skip(2 + 32) else { return nil }
@@ -68,7 +74,8 @@ public enum TLSClientHello {
     /// defined. The first one is the answer; nothing has ever sent two.
     private static func serverName(inExtension reader: inout Reader, end: Int) -> String? {
         guard let listLength = reader.uint16() else { return nil }
-        let listEnd = min(reader.offset + Int(listLength), end)
+        let listEnd = reader.offset + Int(listLength)
+        guard listEnd <= end else { return nil }
         while reader.offset + 3 <= listEnd {
             guard let nameType = reader.byte(), let nameLength = reader.uint16() else { return nil }
             let nameEnd = reader.offset + Int(nameLength)
@@ -91,8 +98,15 @@ public enum TLSClientHello {
     static func isPlausibleHostname(_ name: String) -> Bool {
         guard !name.isEmpty, name.count <= 253, name.contains(".") else { return false }
         guard !name.hasPrefix("."), !name.hasSuffix(".") else { return false }
-        return name.allSatisfy { character in
-            character.isLetter || character.isNumber || character == "." || character == "-"
+        guard name.utf8.allSatisfy({ byte in
+            (byte >= 0x61 && byte <= 0x7A)
+                || (byte >= 0x41 && byte <= 0x5A)
+                || (byte >= 0x30 && byte <= 0x39)
+                || byte == 0x2E || byte == 0x2D
+        }) else { return false }
+        return name.split(separator: ".", omittingEmptySubsequences: false).allSatisfy { label in
+            !label.isEmpty && label.utf8.count <= 63
+                && label.first != "-" && label.last != "-"
         }
     }
 
@@ -115,6 +129,14 @@ public enum TLSClientHello {
             guard offset + 1 < data.endIndex else { return nil }
             defer { offset += 2 }
             return UInt16(data[offset]) << 8 | UInt16(data[offset + 1])
+        }
+
+        mutating func uint24() -> Int? {
+            guard offset + 2 < data.endIndex else { return nil }
+            defer { offset += 3 }
+            return Int(data[offset]) << 16
+                | Int(data[offset + 1]) << 8
+                | Int(data[offset + 2])
         }
 
         mutating func skip(_ count: Int) -> Bool {

@@ -7,6 +7,7 @@ final class FullMonitoringCollector {
     private let statusHandler: (AgentMonitoringStatus) -> Void
     private let errorHandler: (Error) -> Void
     private let coverageHandler: () -> Void
+    private let recoveryHandler: () -> Void
     private let queue = DispatchQueue(label: "com.egressview.agent.full-monitoring")
     private var connection: NSXPCConnection?
     private var timer: DispatchSourceTimer?
@@ -19,13 +20,15 @@ final class FullMonitoringCollector {
         observationHandler: @escaping ([ConnectionObservation]) -> Void,
         statusHandler: @escaping (AgentMonitoringStatus) -> Void,
         errorHandler: @escaping (Error) -> Void,
-        coverageHandler: @escaping () -> Void = {}
+        coverageHandler: @escaping () -> Void = {},
+        recoveryHandler: @escaping () -> Void = {}
     ) {
         self.store = store
         self.observationHandler = observationHandler
         self.statusHandler = statusHandler
         self.errorHandler = errorHandler
         self.coverageHandler = coverageHandler
+        self.recoveryHandler = recoveryHandler
     }
 
     func start() {
@@ -100,6 +103,7 @@ final class FullMonitoringCollector {
                 // is what opens a coverage session. Relying on a status change
                 // meant a session closed by anything never reopened.
                 coverageHandler()
+                recoveryHandler()
             }
             // "Active" means traffic has actually come through, not that the
             // XPC service answered. An extension left behind by an update

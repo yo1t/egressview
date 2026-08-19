@@ -12,6 +12,15 @@ final class SystemExtensionHealthProbe: NSObject, OSSystemExtensionRequestDelega
     private let identifier: String
     private let appBundleVersion: String
     private var completion: ((MonitoringHealth) -> Void)?
+    /// The request in flight.
+    ///
+    /// Held because nothing else does. `submitRequest` does not keep the
+    /// request alive, and a request that is released before macOS answers is
+    /// never answered at all -- no `didFinishWithResult`, no `didFailWithError`,
+    /// no callback of any kind. Measured on 2026-08-19: zero delegate calls in
+    /// 200 seconds.
+    private var request: OSSystemExtensionRequest?
+    private var timeout: DispatchWorkItem?
     private var found: [OSSystemExtensionProperties] = []
     private var lastObservationAt: Date?
     private var awakeSince: Date?
@@ -23,11 +32,27 @@ final class SystemExtensionHealthProbe: NSObject, OSSystemExtensionRequestDelega
 
     /// `lastObservationAt` is what decides the verdict. The installed versions
     /// say a swap is pending; only the record says whether it stopped anything.
+    /// How long macOS is given to answer.
+    ///
+    /// It has to be given a limit, because it does not always answer at all.
+    /// Measured on 2026-08-19: four consecutive property requests produced no
+    /// `didFinishWithResult`, no `didFailWithError`, and no
+    /// `requestNeedsUserApproval` -- nothing. A question that is never answered
+    /// left this check silent, and silence read as health. That is the same
+    /// shape as the fault the check exists to catch.
+    static let answerTimeout: TimeInterval = 20
+
     func check(
         lastObservationAt: Date?,
         awakeSince: Date?,
         completion: @escaping (MonitoringHealth) -> Void
     ) {
+        // A wake notification can race the periodic check. Finish the older
+        // question before replacing its request-scoped state; any late callback
+        // from it is ignored by the identity guards below.
+        if let request {
+            finish(.unanswered, for: request)
+        }
         self.completion = completion
         self.lastObservationAt = lastObservationAt
         self.awakeSince = awakeSince
@@ -36,13 +61,23 @@ final class SystemExtensionHealthProbe: NSObject, OSSystemExtensionRequestDelega
             forExtensionWithIdentifier: identifier, queue: .main
         )
         request.delegate = self
+        self.request = request
         OSSystemExtensionManager.shared.submitRequest(request)
+
+        // An unanswered question is reported as unanswered, not as nothing.
+        let timeout = DispatchWorkItem { [weak self, weak request] in
+            guard let request else { return }
+            self?.finish(.unanswered, for: request)
+        }
+        self.timeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.answerTimeout, execute: timeout)
     }
 
     func request(
         _ request: OSSystemExtensionRequest,
         foundProperties properties: [OSSystemExtensionProperties]
     ) {
+        guard self.request === request else { return }
         found = properties
     }
 
@@ -50,6 +85,7 @@ final class SystemExtensionHealthProbe: NSObject, OSSystemExtensionRequestDelega
         _ request: OSSystemExtensionRequest,
         didFinishWithResult result: OSSystemExtensionRequest.Result
     ) {
+        guard self.request === request else { return }
         let versions = found.map {
             SystemExtensionVersion(
                 shortVersion: $0.bundleShortVersion,
@@ -64,19 +100,22 @@ final class SystemExtensionHealthProbe: NSObject, OSSystemExtensionRequestDelega
             appBundleVersion: appBundleVersion,
             lastObservationAt: lastObservationAt,
             awakeSince: awakeSince
-        ))
+        ), for: request)
     }
 
     func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
-        // A failed question is not a failed answer. Saying "not installed"
-        // here would replace a real status with a guess, so the caller is told
-        // nothing and keeps whatever it already knew.
-        completion = nil
+        guard self.request === request else { return }
+        // A failed question is not a failed answer: it must not become
+        // "not installed", which would replace a real status with a guess. But
+        // it must not vanish either -- the caller needs to know the question
+        // went unanswered, so it can say so rather than implying health.
+        finish(.unanswered, for: request)
         found = []
     }
 
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-        finish(.awaitingApproval)
+        guard self.request === request else { return }
+        finish(.awaitingApproval, for: request)
     }
 
     func request(
@@ -89,9 +128,13 @@ final class SystemExtensionHealthProbe: NSObject, OSSystemExtensionRequestDelega
         .cancel
     }
 
-    private func finish(_ health: MonitoringHealth) {
+    private func finish(_ health: MonitoringHealth, for request: OSSystemExtensionRequest) {
+        guard self.request === request else { return }
+        timeout?.cancel()
+        timeout = nil
         let completion = self.completion
         self.completion = nil
+        self.request = nil
         completion?(health)
     }
 }

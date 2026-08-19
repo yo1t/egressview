@@ -120,6 +120,14 @@ final class AgentMonitoringController {
         /// -- an update macOS has not switched to, and a monitor that stopped
         /// delivering with nothing to blame -- and they need different words.
         var stall: AgentMonitoringStatus?
+        /// Collector/activation state hidden behind a health warning. Replayed
+        /// when real observations prove collection has recovered.
+        var underlyingStatus: AgentMonitoringStatus = .paused
+        /// Silence only means failure while the user expects collection.
+        var monitoringExpected = false
+        /// Later of monitoring start and the most recent wake.
+        var monitoringSince: Date?
+        var hasReportedStall = false
         /// A coverage session is open in the store.
         var isCoverageOpen = false
     }
@@ -131,13 +139,7 @@ final class AgentMonitoringController {
     private let extensionController: SystemExtensionController
     private let gateState: MonitoringGateState
     private let healthProbe: SystemExtensionHealthProbe
-    private var healthTimer: Timer?
-    private var hasReportedStall = false
-    /// When this Mac last became able to record: the later of monitoring
-    /// starting and the machine waking. Silence is only counted from here,
-    /// because a sleeping Mac records nothing by design and an agent that just
-    /// started has nothing to be silent about yet.
-    private var awakeSince: Date?
+    private let healthTimer = PeriodicWork()
     private var lightweightCollector: LightweightCollector?
     private var fullMonitoringCollector: FullMonitoringCollector?
     private var persistenceSampler = ObservationPersistenceSampler()
@@ -159,6 +161,27 @@ final class AgentMonitoringController {
         // stall is the more important truth and it stays on screen.
         let gatedStatusHandler: (AgentMonitoringStatus) -> Void = { status in
             var status = status
+            switch status {
+            case .fullStarting, .fullActive:
+                if !gateState.monitoringExpected {
+                    gateState.monitoringSince = Date()
+                }
+                gateState.monitoringExpected = true
+                gateState.underlyingStatus = status
+            case .updateNotRunning, .notRecording:
+                // Health warnings overlay the collector's last real state.
+                break
+            case .fullActivationRequested:
+                gateState.monitoringExpected = false
+                gateState.monitoringSince = nil
+                gateState.underlyingStatus = status
+            default:
+                gateState.monitoringExpected = false
+                gateState.monitoringSince = nil
+                gateState.stall = nil
+                gateState.hasReportedStall = false
+                gateState.underlyingStatus = status
+            }
             if let stall = gateState.stall {
                 switch status {
                 case .fullActive, .fullStarting, .fullActivationRequested:
@@ -194,6 +217,24 @@ final class AgentMonitoringController {
                     guard let gateState, !gateState.isCoverageOpen else { return }
                     gateState.isCoverageOpen = true
                     try? store.beginCoverageSession(at: Date())
+                },
+                recoveryHandler: { [weak gateState] in
+                    DispatchQueue.main.async {
+                        // A rehearsal is not cleared by the data still
+                        // arriving. Forcing the alarm only pretends the record
+                        // is silent -- observations keep landing a second
+                        // later, and without this they cancel the very state
+                        // being rehearsed before it can be looked at. A real
+                        // outage has no arriving data to cancel it.
+                        guard !AgentDiagnostics.forcesNotRecording else { return }
+                        guard let gateState, gateState.stall != nil else { return }
+                        gateState.stall = nil
+                        gateState.hasReportedStall = false
+                        gateState.monitoringExpected = true
+                        gateState.monitoringSince = Date()
+                        gateState.underlyingStatus = .fullActive
+                        statusHandler(.fullActive)
+                    }
                 }
             )
         }
@@ -220,7 +261,9 @@ final class AgentMonitoringController {
         ) { [weak self] _ in
             guard let store = self?.store else { return }
             try? store.endSleepPeriod(at: Date())
-            self?.awakeSince = Date()
+            if self?.gateState.monitoringExpected == true {
+                self?.gateState.monitoringSince = Date()
+            }
             // Collection resumes on its own after a wake -- measured on
             // 2026-08-14, twice, with no gap beyond the sleep itself. The check
             // runs anyway because "it did last time" is not evidence about
@@ -237,19 +280,15 @@ final class AgentMonitoringController {
     /// is worse than the outage, because it leaves the user believing there is
     /// a record of a period that has none.
     func startHealthChecks() {
-        if awakeSince == nil { awakeSince = Date() }
         checkHealth()
-        healthTimer?.invalidate()
-        healthTimer = Timer.scheduledTimer(
-            withTimeInterval: Self.healthCheckInterval, repeats: true
-        ) { [weak self] _ in
+        // A dispatch source, not a run-loop `Timer`: see `PeriodicWork`.
+        healthTimer.start(every: Self.healthCheckInterval) { [weak self] in
             self?.checkHealth()
         }
     }
 
     func stopHealthChecks() {
-        healthTimer?.invalidate()
-        healthTimer = nil
+        healthTimer.stop()
     }
 
     /// Writes down when monitoring was really running, so the charts can say
@@ -302,12 +341,38 @@ final class AgentMonitoringController {
     }
 
     private func checkHealth() {
-        let lastObservationAt = try? store?.statistics().newestObservedAt
+        guard gateState.monitoringExpected else { return }
+        // A rehearsal answers the real question the real way: the times are
+        // replaced, and everything downstream -- the verdict, the status, the
+        // menu bar, the notification -- runs exactly as it would in an outage.
+        // Short-circuiting straight to the notification would test the
+        // notification and nothing else.
+        let forced = AgentDiagnostics.forcesNotRecording
+        let lastObservationAt = forced
+            ? Date(timeIntervalSince1970: 0)
+            : (try? store?.statistics().newestObservedAt) ?? nil
         healthProbe.check(
-            lastObservationAt: lastObservationAt ?? nil,
-            awakeSince: awakeSince
+            lastObservationAt: lastObservationAt,
+            awakeSince: forced ? Date(timeIntervalSince1970: 0) : gateState.monitoringSince
         ) { [weak self] health in
             guard let self else { return }
+            // The user may pause while the asynchronous request is in flight.
+            guard self.gateState.monitoringExpected else { return }
+            // A properties request may take twenty seconds. Data arriving in
+            // that window is newer and stronger evidence than its old snapshot.
+            let latestObservationAt = forced
+                ? lastObservationAt
+                : ((try? self.store?.statistics().newestObservedAt) ?? nil)
+            if !forced, let latestObservationAt,
+               Date().timeIntervalSince(latestObservationAt)
+                    < MonitoringHealthCheck.silenceThreshold {
+                if self.gateState.stall != nil {
+                    self.gateState.stall = nil
+                    self.gateState.hasReportedStall = false
+                    self.statusHandler(self.gateState.underlyingStatus)
+                }
+                return
+            }
             switch health {
             case .rebootRequiredAfterUpdate:
                 self.reportStall(
@@ -321,13 +386,30 @@ final class AgentMonitoringController {
                     title: L("EgressView is not recording"),
                     body: L("Monitoring reports that it is running, but nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time is not being recorded.")
                 )
-            case .healthy, .notInstalled, .awaitingApproval:
-                // `notInstalled` and `awaitingApproval` are already reported by
-                // the activation flow, which knows more than this check does.
+            case .unanswered:
+                let fallback = MonitoringHealthCheck.evaluateSilenceWithoutExtensionState(
+                    lastObservationAt: latestObservationAt,
+                    monitoringSince: forced
+                        ? Date(timeIntervalSince1970: 0)
+                        : self.gateState.monitoringSince
+                )
+                if case .silentWhileActive(let since) = fallback {
+                    self.reportStall(
+                        .notRecording(silentSince: since),
+                        title: L("EgressView is not recording"),
+                        body: L("macOS did not answer the monitoring health check, and nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time may not be recorded.")
+                    )
+                }
+            case .healthy:
                 if self.gateState.stall != nil {
                     self.gateState.stall = nil
-                    self.hasReportedStall = false
+                    self.gateState.hasReportedStall = false
+                    self.statusHandler(self.gateState.underlyingStatus)
                 }
+            case .notInstalled:
+                self.statusHandler(.failed(L("Network monitoring System Extension is not installed.")))
+            case .awaitingApproval:
+                self.statusHandler(.approvalRequired)
             }
         }
     }
@@ -342,8 +424,8 @@ final class AgentMonitoringController {
     ) {
         gateState.stall = status
         statusHandler(status)
-        guard !hasReportedStall else { return }
-        hasReportedStall = true
+        guard !gateState.hasReportedStall else { return }
+        gateState.hasReportedStall = true
         AgentUserNotifier.shared.notify(title: title, body: body)
     }
 

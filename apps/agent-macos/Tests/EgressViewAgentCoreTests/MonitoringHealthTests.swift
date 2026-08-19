@@ -211,4 +211,31 @@ final class MonitoringHealthTests: XCTestCase {
         )
         XCTAssertEqual(result, .rebootRequiredAfterUpdate(installed: "30", running: nil))
     }
+
+    func test_macOSが応答しなくても長時間無記録なら異常() {
+        let result = MonitoringHealthCheck.evaluateSilenceWithoutExtensionState(
+            lastObservationAt: now.addingTimeInterval(-3600),
+            monitoringSince: longAwake,
+            now: now
+        )
+        XCTAssertEqual(result, .silentWhileActive(since: now.addingTimeInterval(-3600)))
+    }
+
+    func test_macOSが応答しなくても直近の観測があれば健全() {
+        let result = MonitoringHealthCheck.evaluateSilenceWithoutExtensionState(
+            lastObservationAt: recording,
+            monitoringSince: longAwake,
+            now: now
+        )
+        XCTAssertEqual(result, .healthy)
+    }
+
+    func test_macOSが応答せず監視開始直後でも誤報しない() {
+        let result = MonitoringHealthCheck.evaluateSilenceWithoutExtensionState(
+            lastObservationAt: nil,
+            monitoringSince: now.addingTimeInterval(-60),
+            now: now
+        )
+        XCTAssertEqual(result, .healthy)
+    }
 }
