@@ -86,4 +86,33 @@ final class ThreatFeedParsingTests: XCTestCase {
             XCTAssertEqual(feed.url.scheme, "https")
         }
     }
+
+    // MARK: - Line endings
+    //
+    // Every existing fixture above uses LF, which is why this went unnoticed:
+    // three of the four real feeds ship CRLF, and Swift treats "\r\n" as a
+    // single Character, so `split(separator: "\n")` found no separator at all
+    // and returned the whole download as one comment line. Zero indicators,
+    // no error, from the day it was written.
+
+    func test_CRLFのフィードを解析できる() {
+        let text = "# comment\r\n\"2026-01-01 00:00:00\", \"1\", \"203.0.113.7:443\", \"ip:port\", \"botnet_cc\", \"win.remus\"\r\n"
+        let result = ThreatFeedDownloader.parse(text, kind: .threatfox, source: "threatfox")
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.first?.value, "203.0.113.7")
+    }
+
+    func test_CRのみのフィードも解析できる() {
+        let text = "# comment\r203.0.113.0/24 ; SBL1\r198.51.100.0/24 ; SBL2\r"
+        let result = ThreatFeedDownloader.parse(text, kind: .spamhausDrop, source: "spamhaus")
+        XCTAssertEqual(result.count, 2)
+    }
+
+    /// A CRLF file must not come back as one line. Pinned directly, because
+    /// the symptom of the bug was "everything is a comment".
+    func test_CRLFで行が分割される() {
+        XCTAssertEqual(ThreatFeedDownloader.lines("a\r\nb\r\nc").count, 3)
+        XCTAssertEqual(ThreatFeedDownloader.lines("a\nb\nc").count, 3)
+        XCTAssertEqual(ThreatFeedDownloader.lines("a\rb\rc").count, 3)
+    }
 }
