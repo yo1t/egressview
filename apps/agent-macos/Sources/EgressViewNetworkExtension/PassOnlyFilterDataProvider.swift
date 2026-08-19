@@ -10,11 +10,9 @@ public struct PassOnlyFlowPolicy: Sendable {
         self.readsServerName = readsServerName
     }
 
-    /// Still false when server names are read. The handshake's opening bytes
-    /// are not the payload: the client says where it is going in the clear,
-    /// before there is a key, and nothing here decrypts anything or looks past
-    /// that first message.
-    public var readsPayload: Bool { false }
+    /// Still false when server names are read. The opt-in path reads protocol
+    /// metadata in the opening handshake, never encrypted application content.
+    public var readsApplicationContent: Bool { false }
 
     public var decision: FlowDecision {
         readsServerName ? .allowAndReadServerName : .allowAndReportMetadata

@@ -118,6 +118,19 @@ public enum MonitoringHealthCheck {
         )
     }
 
+    /// Evaluates silence when macOS does not answer the extension-properties
+    /// request. Recent observations prove collection is working; prolonged
+    /// silence must still be reported instead of hidden by the failed query.
+    public static func evaluateSilenceWithoutExtensionState(
+        lastObservationAt: Date?, monitoringSince: Date?, now: Date = Date()
+    ) -> MonitoringHealth {
+        unexplainedSilence(
+            lastObservationAt: lastObservationAt,
+            awakeSince: monitoringSince,
+            now: now
+        )
+    }
+
     /// Nothing is arriving and there is no update to explain it.
     ///
     /// Two guards keep this from crying wolf, and both are needed. The Mac must

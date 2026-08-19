@@ -2,10 +2,10 @@ import EgressViewNetworkExtension
 import XCTest
 
 final class PassOnlyFlowPolicyTests: XCTestCase {
-    func testPolicyNeverReadsPayloadAndAlwaysAllowsFlow() {
+    func testPolicyNeverReadsApplicationContentAndAlwaysAllowsFlow() {
         let policy = PassOnlyFlowPolicy()
 
-        XCTAssertFalse(policy.readsPayload)
+        XCTAssertFalse(policy.readsApplicationContent)
         XCTAssertEqual(policy.decision, .allowAndReportMetadata)
     }
 }

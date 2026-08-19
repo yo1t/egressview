@@ -120,6 +120,28 @@ final class TLSClientHelloTests: XCTestCase {
         XCTAssertNil(TLSClientHello.serverName(in: Data(repeating: 0x16, count: 512)))
     }
 
+    func test_レコード宣言長の外側から名前を読まない() {
+        var record = clientHello(serverName: "example.com")
+        record[record.startIndex + 3] = 0
+        record[record.startIndex + 4] = 4
+        XCTAssertNil(TLSClientHello.serverName(in: record))
+    }
+
+    func test_ハンドシェイク宣言長の外側から名前を読まない() {
+        var record = clientHello(serverName: "example.com")
+        record[record.startIndex + 6] = 0
+        record[record.startIndex + 7] = 0
+        record[record.startIndex + 8] = 1
+        XCTAssertNil(TLSClientHello.serverName(in: record))
+    }
+
+    func test_実データより長い宣言長は受け付けない() {
+        var record = clientHello(serverName: "example.com")
+        record[record.startIndex + 3] = 0x7F
+        record[record.startIndex + 4] = 0xFF
+        XCTAssertNil(TLSClientHello.serverName(in: record))
+    }
+
     /// A name that came off the wire is not automatically a name.
     func test_名前として不自然なものは受け付けない() {
         XCTAssertFalse(TLSClientHello.isPlausibleHostname(""))
@@ -128,6 +150,10 @@ final class TLSClientHelloTests: XCTestCase {
         XCTAssertFalse(TLSClientHello.isPlausibleHostname("trailing.dot."))
         XCTAssertFalse(TLSClientHello.isPlausibleHostname("has space.example"))
         XCTAssertFalse(TLSClientHello.isPlausibleHostname("semi;colon.example"))
+        XCTAssertFalse(TLSClientHello.isPlausibleHostname("日本語.example"))
+        XCTAssertFalse(TLSClientHello.isPlausibleHostname("-leading.example"))
+        XCTAssertFalse(TLSClientHello.isPlausibleHostname("trailing-.example"))
+        XCTAssertFalse(TLSClientHello.isPlausibleHostname(String(repeating: "a", count: 64) + ".example"))
         XCTAssertFalse(TLSClientHello.isPlausibleHostname(String(repeating: "a", count: 300) + ".example"))
         XCTAssertTrue(TLSClientHello.isPlausibleHostname("a-b.example.com"))
     }
@@ -151,12 +177,10 @@ final class ServerNamePolicyTests: XCTestCase {
         XCTAssertEqual(policy.decision, .allowAndReadServerName)
     }
 
-    /// Still false when enabled. The opening bytes of a handshake are not the
-    /// payload: they are sent in the clear, before there is a key, and nothing
-    /// past them is read.
-    func test_有効にしてもペイロードを読むことにはならない() {
-        XCTAssertFalse(PassOnlyFlowPolicy(readsServerName: true).readsPayload)
-        XCTAssertFalse(PassOnlyFlowPolicy(readsServerName: false).readsPayload)
+    /// The opt-in path reads protocol metadata, not encrypted application data.
+    func test_有効にしてもアプリケーション内容は読まない() {
+        XCTAssertFalse(PassOnlyFlowPolicy(readsServerName: true).readsApplicationContent)
+        XCTAssertFalse(PassOnlyFlowPolicy(readsServerName: false).readsApplicationContent)
     }
 
     func test_設定は既定でOFF() throws {
