@@ -11,6 +11,16 @@ final class FullMonitoringCollector {
     private let queue = DispatchQueue(label: "com.egressview.agent.full-monitoring")
     private var connection: NSXPCConnection?
     private var timer: DispatchSourceTimer?
+    /// True while a drain request is out. Guards against stacking requests on
+    /// an extension that has stopped answering.
+    private var isDraining = false
+
+    /// How long a drain may go unanswered before the connection is replaced.
+    ///
+    /// Ten polls' worth. Long enough that a busy extension is not torn down for
+    /// being slow, short enough that a dead one is noticed within seconds
+    /// rather than never.
+    private static let drainTimeout: TimeInterval = 10
     private var reportedActive = false
     private var reportedStarting = false
     private var isRunning = false
@@ -51,6 +61,7 @@ final class FullMonitoringCollector {
 
     private func stopOnQueue() {
         isRunning = false
+        isDraining = false
         timer?.cancel()
         timer = nil
         connection?.invalidate()
@@ -61,15 +72,41 @@ final class FullMonitoringCollector {
 
     private func poll() {
         guard isRunning else { return }
+        // One question at a time.
+        //
+        // The timer fires every second regardless of whether the last request
+        // came back. If the extension ever stops replying, that produces a new
+        // request and a retained reply block every second -- eighty thousand of
+        // them in a day -- and nothing here would notice or say so.
+        //
+        // Not the cause of the CPU measured on 2026-08-20, and worth fixing on
+        // its own: an unanswered request currently waits for ever.
+        guard !isDraining else { return }
+        isDraining = true
+        let deadline = DispatchTime.now() + Self.drainTimeout
+        queue.asyncAfter(deadline: deadline) { [weak self] in
+            guard let self, self.isDraining else { return }
+            // The reply never came. Drop the connection so the next tick starts
+            // a fresh one rather than queueing behind a dead one.
+            self.isDraining = false
+            self.resetConnection()
+        }
         let connection = connection ?? makeConnection()
         guard let proxy = connection.remoteObjectProxyWithErrorHandler({ [weak self] _ in
-            self?.queue.async { self?.resetConnection() }
+            self?.queue.async {
+                self?.isDraining = false
+                self?.resetConnection()
+            }
         }) as? FullMonitoringXPCProtocol else {
+            isDraining = false
             resetConnection()
             return
         }
         proxy.drainObservations { [weak self] data in
-            self?.queue.async { self?.consume(data) }
+            self?.queue.async {
+                self?.isDraining = false
+                self?.consume(data)
+            }
         }
     }
 
