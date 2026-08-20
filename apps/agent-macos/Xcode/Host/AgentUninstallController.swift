@@ -69,9 +69,9 @@ final class AgentUninstallController: ObservableObject {
             if !allowManualHubRevocation {
                 status = L("Revoking this Mac at the Hub...")
                 do {
-                    if try !hasRecordedHubRevocation() {
+                    if try await !hasRecordedHubRevocation() {
                         let revoked = try await uninstallService.revokeHubRegistration()
-                        if revoked, let credential = try credentialStore.load() {
+                        if revoked, let credential = try await credentialStore.loadDetachedThrowing() {
                             defaults.set(credential.agentID.uuidString, forKey: hubRevocationMarkerKey)
                         }
                     }
@@ -113,8 +113,8 @@ final class AgentUninstallController: ObservableObject {
         }
     }
 
-    private func hasRecordedHubRevocation() throws -> Bool {
-        guard let credential = try credentialStore.load() else { return true }
+    private func hasRecordedHubRevocation() async throws -> Bool {
+        guard let credential = try await credentialStore.loadDetachedThrowing() else { return true }
         return defaults.string(forKey: hubRevocationMarkerKey) == credential.agentID.uuidString
     }
 

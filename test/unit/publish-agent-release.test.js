@@ -175,4 +175,37 @@ describe('agent release publication', () => {
       assert.ok(Buffer.byteLength(first) < 4096);
     });
   });
+
+  // `publish` is not exported -- it shells out to aws and uploads -- so these
+  // read the source. What they protect is small and was got wrong: the comment
+  // said an invalidation failure is "a delay, not a failure" while the code
+  // threw, so every publication with a signing role that lacks
+  // cloudfront:CreateInvalidation ended in "publication failed" after the
+  // upload had already succeeded. A release process that cannot tell success
+  // from failure is how a bad release ships.
+  it('invalidationの失敗で公開を失敗扱いにしない', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'scripts', 'publish-agent-release.js'), 'utf8'
+    );
+    const block = source.slice(
+      source.indexOf('if (config.distributionId) {'),
+      source.indexOf('await verifyPublished(')
+    );
+    assert.ok(block.length > 0, 'invalidation block not found');
+    assert.match(block, /try \{/);
+    assert.match(block, /\} catch \(error\) \{/);
+    assert.match(block, /continuing/);
+  });
+
+  it('読み戻し検証はinvalidationの後に必ず実行される', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'scripts', 'publish-agent-release.js'), 'utf8'
+    );
+    const invalidation = source.indexOf('create-invalidation');
+    const verify = source.indexOf('await verifyPublished(');
+    assert.ok(invalidation > 0 && verify > invalidation, '検証がinvalidationより前にある');
+    // Not inside the branch: it runs whether or not the cache was invalidated.
+    const between = source.slice(invalidation, verify);
+    assert.doesNotMatch(between, /process\.exit|throw /);
+  });
 });

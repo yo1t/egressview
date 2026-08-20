@@ -285,13 +285,29 @@ async function publish(config, io = {}) {
   // Without an invalidation the new manifest still appears, but only after the
   // cached copy expires. That is a delay, not a failure, so a signing
   // principal without CloudFront rights can still publish.
+  //
+  // The comment above said this before the code did. `EgressViewRelease` has
+  // no `cloudfront:CreateInvalidation`, so every publication ended with
+  // "Agent release publication failed" -- after the upload had succeeded, and
+  // before the read-back check that decides whether it really worked. Twice on
+  // 2026-08-19 that left a successful release looking like a failed one, with
+  // the verification done by hand afterwards.
+  //
+  // A release process that cannot tell success from failure is how a bad
+  // release ships. The invalidation is a convenience; the read-back below is
+  // the verdict.
   if (config.distributionId) {
-    run('aws', awsArgs(config, [
-      'cloudfront', 'create-invalidation',
-      '--distribution-id', config.distributionId,
-      '--paths', `/${config.platform}/manifest.json`, `/${config.platform}/manifest.json.sig`,
-      '--query', 'Invalidation.Id', '--output', 'text',
-    ]));
+    try {
+      run('aws', awsArgs(config, [
+        'cloudfront', 'create-invalidation',
+        '--distribution-id', config.distributionId,
+        '--paths', `/${config.platform}/manifest.json`, `/${config.platform}/manifest.json.sig`,
+        '--query', 'Invalidation.Id', '--output', 'text',
+      ]));
+    } catch (error) {
+      log(`Invalidation failed, continuing: ${error.message.split('\n')[0]}`);
+      log('The manifest appears when its 5-minute cache expires. Verification below is what decides.');
+    }
   } else {
     log('No --distribution-id: skipping invalidation, waiting for the manifest TTL instead');
   }

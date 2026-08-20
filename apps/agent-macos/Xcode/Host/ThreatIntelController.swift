@@ -62,19 +62,32 @@ final class ThreatIntelController: ObservableObject {
     /// Enrolment changes rarely and never behind the app's back, so re-reading
     /// per redraw bought nothing. `refresh()` picks up a change on its next run;
     /// `forgetHubState()` makes it immediate when enrolment is what changed.
-    private var cachedHasHub: Bool?
+    /// **Assumed true until the keychain has actually been read.**
+    ///
+    /// The unknown state has to fall somewhere, and it falls on the side that
+    /// offers the user less: while this is a guess, the direct-download setting
+    /// stays hidden. Guessing the other way would put a third-party download
+    /// switch in front of someone whose Hub supplies the same data, on no
+    /// evidence at all.
+    ///
+    /// Published rather than read on demand, because `body` re-evaluates freely
+    /// and reading it means a **synchronous keychain call**. The agent's main
+    /// thread was found wedged inside one on 2026-08-19, in every frame of a
+    /// three-second profile. A settings screen must not be able to hang the app
+    /// by being redrawn.
+    @Published private(set) var hasHub = true
 
-    var hasHub: Bool {
-        if let cachedHasHub { return cachedHasHub }
-        let value = ((try? credentialStore.load()) ?? nil) != nil
-        cachedHasHub = value
-        return value
+    /// Reads enrolment off the main thread and publishes it.
+    func refreshHubState() async {
+        hasHub = await credentialStore.loadDetached() != nil
     }
 
     /// Call when the agent enrols or un-enrols, so the next look is fresh.
     func forgetHubState() {
-        cachedHasHub = nil
-        Task { await refresh() }
+        Task {
+            await refreshHubState()
+            await refresh()
+        }
     }
 
     /// Only offered without a Hub. Offering both would mean contacting third
@@ -110,7 +123,12 @@ final class ThreatIntelController: ObservableObject {
 
     func start() {
         loadAvailabilityFromStore()
-        Task { await refresh() }
+        Task {
+            // Before anything reads it, so the settings screen never sees the
+            // assumed value for longer than it takes to answer.
+            await refreshHubState()
+            await refresh()
+        }
         timer.start(every: Self.refreshInterval) { [weak self] in
             Task { @MainActor in await self?.refresh() }
         }
@@ -133,7 +151,7 @@ final class ThreatIntelController: ObservableObject {
             // decision and now. Nothing is fetched, and in particular the
             // third-party path is not reached: an unreadable keychain must not
             // look like "no Hub".
-            guard let credential = (try? credentialStore.load()) ?? nil else { return }
+            guard let credential = await credentialStore.loadDetached() else { return }
             await refreshFromHub(store: store, credential: credential)
         case .directDownload:
             await refreshFromFeeds(store: store)

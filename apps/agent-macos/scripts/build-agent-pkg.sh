@@ -36,6 +36,17 @@ fail() { printf '%s\n' "$1" >&2; exit 1; }
 
 [[ -f "$SOURCE_ZIP" ]] || fail "No signed build at $SOURCE_ZIP. Run ./scripts/build-release.sh first."
 
+# Checked before the build, not after it. The notarisation profile has gone
+# missing five times, and finding out at the end costs the whole build --
+# twice on 2026-08-19. Its cause is not worth chasing; the wait is.
+if [[ -n "$NOTARY_PROFILE" ]]; then
+  if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+    printf 'Notarisation profile "%s" is not usable. Register it and run this again:\n' "$NOTARY_PROFILE" >&2
+    printf '  xcrun notarytool store-credentials %s --apple-id <apple-id> --team-id <team-id>\n' "$NOTARY_PROFILE" >&2
+    exit 2
+  fi
+fi
+
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/egressview-agent-pkg.XXXXXX")
 trap 'rm -rf "$WORK_DIR"' EXIT
 

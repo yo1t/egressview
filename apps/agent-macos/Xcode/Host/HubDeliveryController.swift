@@ -143,9 +143,7 @@ final class HubDeliveryController: ObservableObject {
     private func restore() {
         Task {
             let credentialStore = credentialStore
-            let credential = await Task.detached(priority: .utility) {
-                (try? credentialStore.load()) ?? nil
-            }.value
+            let credential = await credentialStore.loadDetached()
             let senderAvailable = sender != nil
             hubAddress = credential?.hubURL.absoluteString ?? hubAddress
             enrolledHub = credential.map { L("Enrolled Hub: %@", $0.hubURL.absoluteString) } ?? L("Not enrolled")
@@ -898,7 +896,7 @@ final class GeoCacheController: ObservableObject {
     }
 
     private func refreshIfDue() async {
-        let credential = (try? credentialStore.load()) ?? nil
+        let credential = await credentialStore.loadDetached()
         guard preferences.shouldFetch(now: Date(), hasHub: credential != nil) else { return }
         await refresh()
     }
@@ -908,7 +906,7 @@ final class GeoCacheController: ObservableObject {
     /// timer to find out.
     func refresh() async {
         guard let store else { return }
-        guard let credential = (try? credentialStore.load()) ?? nil else {
+        guard let credential = await credentialStore.loadDetached() else {
             status = .unavailableWithoutHub
             return
         }

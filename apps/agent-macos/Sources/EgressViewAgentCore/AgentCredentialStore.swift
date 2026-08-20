@@ -25,6 +25,37 @@ public protocol AgentCredentialStoring: Sendable {
     func delete() throws
 }
 
+public extension AgentCredentialStoring {
+    /// Reads the credential without occupying the caller's thread.
+    ///
+    /// `load()` is a synchronous keychain call, and a keychain call is a round
+    /// trip to `securityd` that can take arbitrarily long -- or not return. On
+    /// 2026-08-19 the agent's main thread was found wedged inside one, in every
+    /// frame of a three-second profile, which stops the window, the menu bar,
+    /// and the check that notices monitoring has died.
+    ///
+    /// So anything on the main actor asks for it this way. The work happens on
+    /// a detached task and the caller resumes when the answer arrives.
+    func loadDetached() async -> AgentCredential? {
+        await Task.detached(priority: .utility) { [self] in
+            (try? load()) ?? nil
+        }.value
+    }
+
+    /// The same, keeping the error.
+    ///
+    /// For callers where "the keychain could not be read" and "there is no
+    /// credential" must stay different answers. Uninstall is one: treating an
+    /// unreadable keychain as "already revoked" would skip telling the Hub this
+    /// Mac is going away, and the Hub would keep a registration for a machine
+    /// that no longer exists.
+    func loadDetachedThrowing() async throws -> AgentCredential? {
+        try await Task.detached(priority: .utility) { [self] in
+            try load()
+        }.value
+    }
+}
+
 public enum AgentCredentialStoreError: Error, Equatable {
     case encodingFailed
     case decodingFailed
