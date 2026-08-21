@@ -67,6 +67,12 @@
 "Launch at login is unavailable for this build." = "このビルドではログイン時起動を利用できません。";
 "Language" = "言語";
 "Display language" = "表示言語";
+"Globe animation" = "地球儀のアニメーション";
+"Frame rate" = "更新頻度";
+"Energy saver (3 fps)" = "省電力（3 fps）";
+"Standard (5 fps)" = "標準（5 fps）";
+"Smooth (15 fps)" = "滑らか（15 fps）";
+"A lower frame rate uses less CPU. Rotation continues while the globe is visible." = "更新頻度を下げるとCPU使用率を抑えられます。地球儀が表示されている間は回転を続けます。";
 "EgressView Agent Settings" = "EgressView Agent 設定";
 "Updates" = "アップデート";
 "Check automatically once per day" = "1日1回、自動的に確認";

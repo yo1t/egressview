@@ -21,7 +21,7 @@ describe('macOS Agent idle cost', () => {
     // controlActiveState reports whether the *application* is active, not
     // whether this window is on screen, so it never stopped on close.
     assert.match(window, /let isOnScreen: Bool/);
-    assert.match(window, /isAnimating: Bool \{\s*\n?\s*isOnScreen && isTurning/);
+    assert.match(window, /isAnimating: Bool \{\s*\n?\s*isOnScreen && isRunning/);
     assert.match(window, /isOnScreen: model\.isWindowVisible && model\.selectedTab == \.network/);
   });
 
@@ -61,5 +61,18 @@ describe('macOS Agent idle cost', () => {
       const close = source.slice(source.lastIndexOf('func windowWillClose'));
       assert.match(close, /DispatchQueue\.main\.async \{ \[onClose\] in onClose\(\) \}/, name);
     }
+  });
+
+  it('地球儀は設定可能な専用NSViewで非同期描画する', () => {
+    assert.doesNotMatch(window, /TimelineView\(\.animation/);
+    assert.match(window, /private struct AgentGlobeNativeView: NSViewRepresentable/);
+    assert.match(window, /private final class AgentGlobeDrawingView: NSView/);
+    assert.match(window, /layer\?\.drawsAsynchronously = true/);
+    assert.match(window, /case energySaver = 3/);
+    assert.match(window, /case standard = 5/);
+    assert.match(window, /case smooth = 15/);
+    assert.match(window, /Timer\(timeInterval: interval, repeats: true\)/);
+    assert.match(settings, /@AppStorage\(AgentGlobeFrameRate\.defaultsKey\)/);
+    assert.match(settings, /Picker\(L\("Frame rate"\), selection: \$globeFrameRateRaw\)/);
   });
 });

@@ -67,6 +67,12 @@
 "Launch at login is unavailable for this build." = "Launch at login is unavailable for this build.";
 "Language" = "Language";
 "Display language" = "Display language";
+"Globe animation" = "Globe animation";
+"Frame rate" = "Frame rate";
+"Energy saver (3 fps)" = "Energy saver (3 fps)";
+"Standard (5 fps)" = "Standard (5 fps)";
+"Smooth (15 fps)" = "Smooth (15 fps)";
+"A lower frame rate uses less CPU. Rotation continues while the globe is visible." = "A lower frame rate uses less CPU. Rotation continues while the globe is visible.";
 "EgressView Agent Settings" = "EgressView Agent Settings";
 "Updates" = "Updates";
 "Check automatically once per day" = "Check automatically once per day";

@@ -389,6 +389,8 @@ private struct AgentSettingsView: View {
     @ObservedObject var geo: GeoCacheController
     @ObservedObject var threats: ThreatIntelController
     @ObservedObject private var language = AgentLanguageSettings.shared
+    @AppStorage(AgentGlobeFrameRate.defaultsKey)
+    private var globeFrameRateRaw = AgentGlobeFrameRate.defaultValue.rawValue
     @State private var section = AgentSettingsSection.general
     @State private var confirmHistoryDeletion = false
     @State private var confirmUninstall = false
@@ -447,6 +449,17 @@ private struct AgentSettingsView: View {
                     ForEach(AgentLanguage.allCases) { option in Text(option.title).tag(option) }
                 }
                 .frame(width: 240)
+            }
+            settingsGroup(L("Globe animation")) {
+                Picker(L("Frame rate"), selection: $globeFrameRateRaw) {
+                    ForEach(AgentGlobeFrameRate.allCases) { option in
+                        Text(option.title).tag(option.rawValue)
+                    }
+                }
+                .frame(width: 240)
+                Text(L("A lower frame rate uses less CPU. Rotation continues while the globe is visible."))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             settingsGroup(L("Updates")) {
                 Toggle(L("Check automatically once per day"), isOn: updateCheckBinding)
