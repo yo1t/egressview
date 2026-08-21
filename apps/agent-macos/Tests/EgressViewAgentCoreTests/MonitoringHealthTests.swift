@@ -21,6 +21,19 @@ final class MonitoringHealthTests: XCTestCase {
     private var silent: Date { now.addingTimeInterval(-600) }
     private var recording: Date { now.addingTimeInterval(-5) }
 
+    func test_直近の観測はExtension問い合わせを不要にする() {
+        XCTAssertTrue(MonitoringHealthCheck.hasRecentObservation(recording, now: now))
+    }
+
+    func test_閾値に達した観測はExtension問い合わせが必要() {
+        let boundary = now.addingTimeInterval(-MonitoringHealthCheck.silenceThreshold)
+        XCTAssertFalse(MonitoringHealthCheck.hasRecentObservation(boundary, now: now))
+    }
+
+    func test_観測が無ければExtension問い合わせが必要() {
+        XCTAssertFalse(MonitoringHealthCheck.hasRecentObservation(nil, now: now))
+    }
+
     func test_単一の有効なExtensionがアプリと一致すれば健全() {
         XCTAssertEqual(
             MonitoringHealthCheck.evaluate(versions: [version("30")], appBundleVersion: "30"),

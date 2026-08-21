@@ -82,6 +82,19 @@ public enum MonitoringHealthCheck {
     /// machine was actually awake.
     public static let unexplainedSilenceThreshold: TimeInterval = 1800
 
+    /// Recent traffic is stronger evidence than the extension inventory.
+    ///
+    /// `evaluate` returns `.healthy` for every pending-swap state while this is
+    /// true, so asking macOS for properties cannot change the answer. Keeping
+    /// this rule beside `evaluate` prevents the caller's optimization from
+    /// drifting away from the verdict it is optimizing.
+    public static func hasRecentObservation(
+        _ lastObservationAt: Date?, now: Date = Date()
+    ) -> Bool {
+        guard let lastObservationAt else { return false }
+        return now.timeIntervalSince(lastObservationAt) < silenceThreshold
+    }
+
     public static func evaluate(
         versions: [SystemExtensionVersion],
         appBundleVersion: String,
@@ -110,8 +123,7 @@ public enum MonitoringHealthCheck {
         // recording. Warning on the pending state alone cries wolf on every
         // update that worked, and a warning the user learns to ignore is worth
         // less than none -- this one has to be believed the time it is true.
-        let silent = lastObservationAt.map { now.timeIntervalSince($0) >= silenceThreshold } ?? true
-        guard silent else { return .healthy }
+        guard !hasRecentObservation(lastObservationAt, now: now) else { return .healthy }
 
         return .rebootRequiredAfterUpdate(
             installed: appBundleVersion, running: running?.bundleVersion

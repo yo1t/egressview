@@ -128,6 +128,10 @@ final class AgentMonitoringController {
         /// Later of monitoring start and the most recent wake.
         var monitoringSince: Date?
         var hasReportedStall = false
+        /// The extension inventory is requested once per continuous stretch of
+        /// silence. macOS retains each one-shot properties request internally,
+        /// so polling it every minute grows the process for no new information.
+        var hasProbedCurrentSilence = false
         /// A coverage session is open in the store.
         var isCoverageOpen = false
     }
@@ -174,10 +178,12 @@ final class AgentMonitoringController {
             case .fullActivationRequested:
                 gateState.monitoringExpected = false
                 gateState.monitoringSince = nil
+                gateState.hasProbedCurrentSilence = false
                 gateState.underlyingStatus = status
             default:
                 gateState.monitoringExpected = false
                 gateState.monitoringSince = nil
+                gateState.hasProbedCurrentSilence = false
                 gateState.stall = nil
                 gateState.hasReportedStall = false
                 gateState.underlyingStatus = status
@@ -227,7 +233,9 @@ final class AgentMonitoringController {
                         // being rehearsed before it can be looked at. A real
                         // outage has no arriving data to cancel it.
                         guard !AgentDiagnostics.forcesNotRecording else { return }
-                        guard let gateState, gateState.stall != nil else { return }
+                        guard let gateState else { return }
+                        gateState.hasProbedCurrentSilence = false
+                        guard gateState.stall != nil else { return }
                         gateState.stall = nil
                         gateState.hasReportedStall = false
                         gateState.monitoringExpected = true
@@ -263,6 +271,7 @@ final class AgentMonitoringController {
             try? store.endSleepPeriod(at: Date())
             if self?.gateState.monitoringExpected == true {
                 self?.gateState.monitoringSince = Date()
+                self?.gateState.hasProbedCurrentSilence = false
             }
             // Collection resumes on its own after a wake -- measured on
             // 2026-08-14, twice, with no gap beyond the sleep itself. The check
@@ -351,6 +360,28 @@ final class AgentMonitoringController {
         let lastObservationAt = forced
             ? Date(timeIntervalSince1970: 0)
             : (try? store?.statistics().newestObservedAt) ?? nil
+
+        // Recent observations force `MonitoringHealthCheck.evaluate` to
+        // `.healthy`, even when an extension swap is pending. A properties
+        // request cannot change that answer, and macOS retains substantial
+        // request/XPC/Observation state for every one submitted.
+        if !forced, MonitoringHealthCheck.hasRecentObservation(lastObservationAt) {
+            gateState.hasProbedCurrentSilence = false
+            clearStallAfterRecoveryIfNeeded()
+            return
+        }
+
+        // Ask macOS once when a new stretch of silence begins. If silence
+        // continues, the local timestamps still reach the thirty-minute
+        // fallback below; repeating the same inventory query adds no evidence.
+        guard !gateState.hasProbedCurrentSilence else {
+            reportUnexplainedSilenceIfNeeded(
+                lastObservationAt: lastObservationAt,
+                monitoringSince: forced ? Date(timeIntervalSince1970: 0) : gateState.monitoringSince
+            )
+            return
+        }
+        gateState.hasProbedCurrentSilence = true
         healthProbe.check(
             lastObservationAt: lastObservationAt,
             awakeSince: forced ? Date(timeIntervalSince1970: 0) : gateState.monitoringSince
@@ -387,31 +418,47 @@ final class AgentMonitoringController {
                     body: L("Monitoring reports that it is running, but nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time is not being recorded.")
                 )
             case .unanswered:
-                let fallback = MonitoringHealthCheck.evaluateSilenceWithoutExtensionState(
+                self.reportUnexplainedSilenceIfNeeded(
                     lastObservationAt: latestObservationAt,
                     monitoringSince: forced
                         ? Date(timeIntervalSince1970: 0)
-                        : self.gateState.monitoringSince
+                        : self.gateState.monitoringSince,
+                    macOSUnanswered: true
                 )
-                if case .silentWhileActive(let since) = fallback {
-                    self.reportStall(
-                        .notRecording(silentSince: since),
-                        title: L("EgressView is not recording"),
-                        body: L("macOS did not answer the monitoring health check, and nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time may not be recorded.")
-                    )
-                }
             case .healthy:
-                if self.gateState.stall != nil {
-                    self.gateState.stall = nil
-                    self.gateState.hasReportedStall = false
-                    self.statusHandler(self.gateState.underlyingStatus)
-                }
+                self.clearStallAfterRecoveryIfNeeded()
             case .notInstalled:
                 self.statusHandler(.failed(L("Network monitoring System Extension is not installed.")))
             case .awaitingApproval:
                 self.statusHandler(.approvalRequired)
             }
         }
+    }
+
+    private func clearStallAfterRecoveryIfNeeded() {
+        guard gateState.stall != nil else { return }
+        gateState.stall = nil
+        gateState.hasReportedStall = false
+        statusHandler(gateState.underlyingStatus)
+    }
+
+    private func reportUnexplainedSilenceIfNeeded(
+        lastObservationAt: Date?,
+        monitoringSince: Date?,
+        macOSUnanswered: Bool = false
+    ) {
+        let fallback = MonitoringHealthCheck.evaluateSilenceWithoutExtensionState(
+            lastObservationAt: lastObservationAt,
+            monitoringSince: monitoringSince
+        )
+        guard case .silentWhileActive(let since) = fallback else { return }
+        reportStall(
+            .notRecording(silentSince: since),
+            title: L("EgressView is not recording"),
+            body: macOSUnanswered
+                ? L("macOS did not answer the monitoring health check, and nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time may not be recorded.")
+                : L("Monitoring reports that it is running, but nothing has been recorded for half an hour. Quit and reopen EgressView Agent to restart it. Traffic during this time is not being recorded.")
+        )
     }
 
     /// Puts the agent into a "not recording" state and says so once.

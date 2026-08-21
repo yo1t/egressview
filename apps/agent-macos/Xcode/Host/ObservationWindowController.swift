@@ -188,7 +188,11 @@ private final class AgentMainViewModel: ObservableObject {
     /// that silently failed.
     @Published var exportedFileURL: URL?
     /// Set by the window controller. A hidden window is not worth querying for.
-    var isWindowVisible = true
+    ///
+    /// Published because the globe reads it to decide whether to keep turning.
+    /// As a plain property the change reached the query throttle but never the
+    /// view, so the animation carried on behind a closed window.
+    @Published var isWindowVisible = true
     private var ticksSinceRefresh = 0
 
     private let store: ObservationStore?
@@ -521,7 +525,11 @@ private struct AgentMainView: View {
                 let metrics = AnalysisLayout(size: proxy.size)
                 VStack(spacing: 14) {
                     HStack(alignment: .top, spacing: 14) {
-                        AgentGlobeChart(model: model.globe, atlas: model.atlas)
+                        AgentGlobeChart(
+                            model: model.globe,
+                            atlas: model.atlas,
+                            isOnScreen: model.isWindowVisible && model.selectedTab == .network
+                        )
                             .frame(width: metrics.globeWidth, height: metrics.topHeight)
                         AgentOverviewPanel(
                             summary: model.summary,
@@ -1632,10 +1640,22 @@ private struct AgentGlobeChart: View {
     /// A globe nobody can see does not need to turn. Spinning behind another
     /// window or in a hidden tab cost the same CPU as spinning in front of the
     /// user, which is a bad trade at any frame rate.
+    ///
+    /// `controlActiveState` alone did not carry that intent. It reports whether
+    /// the **application** is active, not whether this window is on screen, so
+    /// closing the window left the globe turning at fifteen frames a second
+    /// behind nothing at all. The view is never torn down -- the hosting
+    /// controller is held for the life of the app -- so nothing else stopped
+    /// it either, and each frame re-lays out this whole subtree.
     @Environment(\.controlActiveState) private var controlActiveState
 
+    /// Whether the window is on screen and this globe's tab is the one showing.
+    let isOnScreen: Bool
+
     private var isTurning: Bool { isRunning && !isDragging }
-    private var isAnimating: Bool { isTurning && controlActiveState != .inactive }
+    private var isAnimating: Bool {
+        isOnScreen && isTurning && controlActiveState != .inactive
+    }
 
     private func spin(at date: Date) -> Double {
         guard isTurning else { return baseSpin }
@@ -2119,6 +2139,11 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        // Closing the window set this false and nothing set it back, so a
+        // window opened a second time never saw a new connection arrive: every
+        // `noteObservationsAvailable` returned at the guard, and only the
+        // fifteen-second timer still refreshed.
+        model.isWindowVisible = true
         model.start()
     }
 
