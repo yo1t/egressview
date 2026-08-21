@@ -788,6 +788,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let uninstall: AgentUninstallController
     private let geo: GeoCacheController
     private let threats: ThreatIntelController
+    private let onClose: () -> Void
 
     init(
         store: ObservationStore?,
@@ -799,13 +800,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         launchController: LaunchAtLoginController,
         onMonitoringMode: @escaping (AgentMonitoringMode) -> Void,
         onRetentionChanged: @escaping (Int) -> Void,
-        onLanguageChanged: @escaping () -> Void
+        onLanguageChanged: @escaping () -> Void,
+        onClose: @escaping () -> Void = {}
     ) {
         self.hub = hub
         self.updates = updates
         self.uninstall = uninstall
         self.geo = geo
         self.threats = threats
+        self.onClose = onClose
         let model = AgentSettingsViewModel(
             store: store,
             launchController: launchController,
@@ -849,6 +852,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         hub.refresh()
         updates.refreshLocalization()
         uninstall.refreshLocalization()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        onClose()
     }
 }
 

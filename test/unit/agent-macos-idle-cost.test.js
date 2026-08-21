@@ -9,6 +9,8 @@ const hostDir = path.join(__dirname, '..', '..', 'apps/agent-macos/Xcode/Host');
 const read = (f) => fs.readFileSync(path.join(hostDir, f), 'utf8');
 const window = read('ObservationWindowController.swift');
 const collector = read('FullMonitoringCollector.swift');
+const appDelegate = read('AgentAppDelegate.swift');
+const settings = read('HubDeliveryController.swift');
 
 // Measured 2026-08-20: 41% CPU and 325 MB after a day, with no window open,
 // back to 2% and 162 MB on restart. The hosting controller is held for the life
@@ -39,5 +41,15 @@ describe('macOS Agent idle cost', () => {
     assert.match(collector, /drainTimeout/);
     // Every exit from a drain must clear the flag, or polling stops for good.
     assert.ok((collector.match(/isDraining = false/g) || []).length >= 4);
+  });
+
+  it('SwiftUIウィンドウは表示まで生成せず閉じたら解放する', () => {
+    assert.match(appDelegate, /private var observationWindow: ObservationWindowController\?/);
+    assert.match(appDelegate, /private var settingsWindow: SettingsWindowController\?/);
+    assert.doesNotMatch(appDelegate, /private lazy var (observationWindow|settingsWindow)/);
+    assert.match(appDelegate, /self\?\.observationWindow = nil/);
+    assert.match(appDelegate, /self\?\.settingsWindow = nil/);
+    assert.match(window, /func windowWillClose[\s\S]*?onClose\(\)/);
+    assert.match(settings, /func windowWillClose[\s\S]*?onClose\(\)/);
   });
 });

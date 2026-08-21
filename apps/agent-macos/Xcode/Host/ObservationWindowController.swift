@@ -2111,11 +2111,13 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @MainActor private let model: AgentMainViewModel
+    private let onClose: () -> Void
 
     @MainActor
-    init(store: ObservationStore?) {
+    init(store: ObservationStore?, onClose: @escaping () -> Void = {}) {
         let model = AgentMainViewModel(store: store)
         self.model = model
+        self.onClose = onClose
         let hostingController = NSHostingController(rootView: AgentMainView(model: model))
         let window = NSWindow(contentViewController: hostingController)
         window.title = "EgressView Agent"
@@ -2185,5 +2187,6 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         model.isWindowVisible = false
         model.stop()
+        onClose()
     }
 }
