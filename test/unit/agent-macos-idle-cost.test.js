@@ -75,4 +75,30 @@ describe('macOS Agent idle cost', () => {
     assert.match(settings, /@AppStorage\(AgentGlobeFrameRate\.defaultsKey\)/);
     assert.match(settings, /Picker\(L\("Frame rate"\), selection: \$globeFrameRateRaw\)/);
   });
+
+  it('長期表示は概要の重複走査をせず脅威候補を短時間キャッシュする', () => {
+    assert.doesNotMatch(window, /let rollup = try store\.hourlyRollup/);
+    assert.match(window, /sessionCount: pairs\.reduce/);
+    assert.match(window, /threatCandidateCache\.candidates\(scale: selection\.scale\)/);
+    assert.match(window, /if selectedTab == \.threats \{ threatCandidateCache\.invalidate\(\) \}/);
+  });
+
+  // Two behaviours users can see, fixed here so they are decisions rather than
+  // side effects of a performance change.
+  it('宛先数は「宛先の単位」設定に追従する', () => {
+    // Counted from the same rows the sankey is drawn from, so the number beside
+    // the diagram and the diagram itself cannot disagree. Switching the picker
+    // between name and address changes this number, and that is intended: one
+    // screen must not use "destination" in two senses.
+    assert.match(window, /destinationCount: Set\(pairs\.map\(\\.destination\)\)\.count/);
+    assert.doesNotMatch(window, /destinationCount: Set\(rollup\.map/);
+  });
+
+  it('脅威タブを開いたら候補キャッシュを捨てて集計し直す', () => {
+    // The seven- and thirty-day threat count on the network tab can lag by up
+    // to five minutes: the cache holds the observed destinations, not just the
+    // indicators, so a newly seen dangerous destination waits for the TTL.
+    // Opening the threat tab is an explicit request for current results.
+    assert.match(window, /selectedTab == \.threats \{ threatCandidateCache\.invalidate\(\) \}/);
+  });
 });

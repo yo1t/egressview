@@ -124,7 +124,13 @@ private struct AgentObservationRow: Identifiable {
 @MainActor
 private final class AgentMainViewModel: ObservableObject {
     @Published var selectedTab = AgentMainTab.network {
-        didSet { if oldValue != selectedTab { refresh() } }
+        didSet {
+            guard oldValue != selectedTab else { return }
+            // Opening the dedicated threat screen is an explicit request for
+            // current results, so it bypasses the long-window screen cache.
+            if selectedTab == .threats { threatCandidateCache.invalidate() }
+            refresh()
+        }
     }
     @Published var scale = TimeScale.hour {
         didSet { refresh() }
@@ -218,6 +224,7 @@ private final class AgentMainViewModel: ObservableObject {
     private let store: ObservationStore?
     private let loadQueue = DispatchQueue(label: "com.egressview.agent.main-window")
     private let refreshTimer = PeriodicWork()
+    private let threatCandidateCache = ThreatCandidateRefreshCache()
 
     init(store: ObservationStore?) {
         self.store = store
@@ -352,6 +359,7 @@ private final class AgentMainViewModel: ObservableObject {
         let selection = VisualizationSelection(scale: scale, metric: metric, end: Date())
         let grouping = destinationGrouping
         let availability = threatAvailability
+        let threatCandidateCache = threatCandidateCache
         // Only what the visible tab shows. Every query here scans a range of a
         // 55 MB table and sorts it -- profiling put the app's CPU in SQLite,
         // not in drawing -- and running the log's and the threat tab's queries
@@ -366,14 +374,17 @@ private final class AgentMainViewModel: ObservableObject {
 
                 data.usesRolledUpHistory = try store.periodUsesRolledUpHistory(from: from, to: to)
                 if tab == .network {
-                    let rollup = try store.hourlyRollup(from: from, to: to)
-                    data.summary = AgentPeriodSummary(
-                        sessionCount: rollup.reduce(0) { $0 + $1.sessionCount },
-                        applicationCount: Set(rollup.map(\.processName)).count,
-                        destinationCount: Set(rollup.map(\.remoteAddress)).count
-                    )
                     let pairs = try store.appDestinationTotals(
                         from: from, to: to, grouping: grouping
+                    )
+                    // `pairs` already combines chart_hourly, the current
+                    // partial hour and legacy rollups. Running hourlyRollup()
+                    // as well scanned and sorted the same seven-day raw range
+                    // only to derive these three numbers.
+                    data.summary = AgentPeriodSummary(
+                        sessionCount: pairs.reduce(0) { $0 + $1.sessionCount },
+                        applicationCount: Set(pairs.map(\.processName)).count,
+                        destinationCount: Set(pairs.map(\.destination)).count
                     )
                     let buckets = try store.appTimeline(
                         from: from, to: to, buckets: VisualizationSelection.bucketCount
@@ -403,8 +414,11 @@ private final class AgentMainViewModel: ObservableObject {
                 // The threat count appears on the network tab too, so it is
                 // computed for both -- but only there, and never for the log.
                 if tab == .network || tab == .threats {
+                    let candidates = try threatCandidateCache.candidates(scale: selection.scale) {
+                        try store.destinationsForThreatMatching(from: from, to: to)
+                    }
                     data.threats = ThreatReport.evaluate(
-                        candidates: try store.destinationsForThreatMatching(from: from, to: to),
+                        candidates: candidates,
                         matcher: ThreatMatcher(indicators: try store.threatIndicators()),
                         availability: availability
                     )
