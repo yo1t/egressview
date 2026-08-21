@@ -21,13 +21,33 @@ describe('macOS Agent monitoring health wiring', () => {
     assert.match(controller, /guard self\.gateState\.monitoringExpected else \{ return \}/);
   });
 
+  it('does not poll extension properties while observations prove health', () => {
+    const recentGuard = controller.indexOf('MonitoringHealthCheck.hasRecentObservation(lastObservationAt)');
+    const probeCall = controller.indexOf('healthProbe.check(', recentGuard);
+    assert.ok(recentGuard >= 0);
+    assert.ok(probeCall > recentGuard);
+    assert.match(controller.slice(recentGuard, probeCall), /hasProbedCurrentSilence = false/);
+    assert.match(controller.slice(recentGuard, probeCall), /return/);
+  });
+
+  it('submits at most one properties request per continuous silence period', () => {
+    assert.match(controller, /guard !gateState\.hasProbedCurrentSilence else \{/);
+    assert.match(controller, /gateState\.hasProbedCurrentSilence = true\s*healthProbe\.check/);
+    assert.match(controller, /didWakeNotification[\s\S]*?hasProbedCurrentSilence = false/);
+  });
+
   it('falls back to observation silence when macOS does not answer', () => {
     const unanswered = controller.slice(
       controller.indexOf('case .unanswered:'),
       controller.indexOf('case .healthy:')
     );
-    assert.match(unanswered, /evaluateSilenceWithoutExtensionState/);
-    assert.match(unanswered, /reportStall/);
+    const fallback = controller.slice(
+      controller.indexOf('private func reportUnexplainedSilenceIfNeeded'),
+      controller.indexOf('private func reportStall')
+    );
+    assert.match(unanswered, /reportUnexplainedSilenceIfNeeded/);
+    assert.match(fallback, /evaluateSilenceWithoutExtensionState/);
+    assert.match(fallback, /reportStall/);
   });
 
   it('clears a stall when real observations resume', () => {
