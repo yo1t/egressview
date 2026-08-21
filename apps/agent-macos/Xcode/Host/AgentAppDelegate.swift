@@ -19,7 +19,11 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private var isPreparedForRemoval = false
     private lazy var storageResult = makeStorage()
     private lazy var store = try? storageResult.get().store
-    private lazy var observationWindow = ObservationWindowController(store: store)
+    /// SwiftUI windows are expensive even while hidden. Create them only when
+    /// requested and release their hosting trees when they close.
+    private var observationWindow: ObservationWindowController?
+    private var settingsWindow: SettingsWindowController?
+    private var pendingStorageError: String?
     private var threatAvailabilityObserver: AnyCancellable?
     private var updateAvailabilityObserver: AnyCancellable?
     private let chartFoldTimer = PeriodicWork()
@@ -48,18 +52,6 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         credentialStore: KeychainAgentCredentialStore(),
         agentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
     )
-    private lazy var settingsWindow = SettingsWindowController(
-        store: store,
-        hub: hubDelivery,
-        updates: updateController,
-        uninstall: uninstallController,
-        geo: geoCacheController,
-        threats: threatIntelController,
-        launchController: launchAtLoginController,
-        onMonitoringMode: { [weak self] mode in self?.selectMonitoringMode(mode) },
-        onRetentionChanged: { [weak self] days in self?.applyRetentionPolicy(days: days) },
-        onLanguageChanged: { [weak self] in self?.refreshLocalization() }
-    )
     private lazy var controller = AgentMonitoringController(
         store: store,
         statusHandler: { [weak self] status in
@@ -70,11 +62,11 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
                 if self?.isPreparedForRemoval == false {
                     self?.hubDelivery.enqueue(observations)
                 }
-                self?.observationWindow.noteObservationsAvailable()
+                self?.observationWindow?.noteObservationsAvailable()
             }
         },
         storageErrorHandler: { [weak self] error in
-            DispatchQueue.main.async { self?.observationWindow.showStorageError(error.localizedDescription) }
+            DispatchQueue.main.async { self?.recordStorageError(error.localizedDescription) }
         }
     )
 
@@ -136,10 +128,10 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         installApplicationMenu()
         render(.paused)
         if case .failure(let error) = storageResult {
-            observationWindow.showStorageError(error.localizedDescription)
+            recordStorageError(error.localizedDescription)
         } else if case .success(let context) = storageResult,
                   context.migration.malformedLineCount > 0 {
-            observationWindow.showStorageError(
+            recordStorageError(
                 L(
                     "Imported %lld legacy records. The old journal was kept because %lld lines need recovery.",
                     context.migration.importedCount,
@@ -163,9 +155,8 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         threatIntelController.start()
         // The window needs to know whether anyone was in a position to look, so
         // that "found nothing" is never shown for "never checked".
-        observationWindow.setThreatAvailability(threatIntelController.availability)
         threatAvailabilityObserver = threatIntelController.$availability.sink { [weak self] value in
-            self?.observationWindow.setThreatAvailability(value)
+            self?.observationWindow?.setThreatAvailability(value)
         }
         // The menu is built from the monitoring status, so it was only rebuilt
         // when that changed. An update that appeared -- or was cleared --
@@ -189,8 +180,8 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
                 logger.error("Could not enable launch at login: \(error.localizedDescription, privacy: .public)")
             }
         }
-        observationWindow.updateMonitoringStatus(status)
-        settingsWindow.updateMonitoringStatus(status)
+        observationWindow?.updateMonitoringStatus(status)
+        settingsWindow?.updateMonitoringStatus(status)
         let menu = NSMenu()
         let statusRow = NSMenuItem(title: status.label, action: nil, keyEquivalent: "")
         statusRow.isEnabled = false
@@ -253,6 +244,46 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
+    private func observationWindowController() -> ObservationWindowController {
+        if let observationWindow { return observationWindow }
+        let controller = ObservationWindowController(store: store) { [weak self] in
+            self?.observationWindow = nil
+        }
+        controller.updateMonitoringStatus(currentMonitoringStatus)
+        controller.setThreatAvailability(threatIntelController.availability)
+        if let pendingStorageError {
+            controller.showStorageError(pendingStorageError)
+            self.pendingStorageError = nil
+        }
+        observationWindow = controller
+        return controller
+    }
+
+    private func settingsWindowController() -> SettingsWindowController {
+        if let settingsWindow { return settingsWindow }
+        let controller = SettingsWindowController(
+            store: store,
+            hub: hubDelivery,
+            updates: updateController,
+            uninstall: uninstallController,
+            geo: geoCacheController,
+            threats: threatIntelController,
+            launchController: launchAtLoginController,
+            onMonitoringMode: { [weak self] mode in self?.selectMonitoringMode(mode) },
+            onRetentionChanged: { [weak self] days in self?.applyRetentionPolicy(days: days) },
+            onLanguageChanged: { [weak self] in self?.refreshLocalization() },
+            onClose: { [weak self] in self?.settingsWindow = nil }
+        )
+        controller.updateMonitoringStatus(currentMonitoringStatus)
+        settingsWindow = controller
+        return controller
+    }
+
+    private func recordStorageError(_ message: String) {
+        pendingStorageError = message
+        observationWindow?.showStorageError(message)
+    }
+
     private func monitoringItem(_ title: String, action: Selector, mode: AgentMonitoringMode) -> NSMenuItem {
         let menuItem = item(title, action: action)
         menuItem.state = monitoringMode(for: currentMonitoringStatus) == mode ? .on : .off
@@ -266,11 +297,11 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openObservations() {
-        observationWindow.show()
+        observationWindowController().show()
     }
 
     @objc private func openSettings() {
-        settingsWindow.show()
+        settingsWindowController().show()
     }
 
     @objc private func openAbout() {
@@ -302,7 +333,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
                 try store.compact()
             } catch {
                 DispatchQueue.main.async {
-                    self?.observationWindow.showStorageError(error.localizedDescription)
+                    self?.recordStorageError(error.localizedDescription)
                 }
             }
         }
@@ -347,7 +378,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshLocalization() {
         installApplicationMenu()
-        settingsWindow.refreshLocalization()
+        settingsWindow?.refreshLocalization()
         render(currentMonitoringStatus)
     }
 

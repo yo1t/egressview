@@ -389,6 +389,8 @@ private struct AgentSettingsView: View {
     @ObservedObject var geo: GeoCacheController
     @ObservedObject var threats: ThreatIntelController
     @ObservedObject private var language = AgentLanguageSettings.shared
+    @AppStorage(AgentGlobeFrameRate.defaultsKey)
+    private var globeFrameRateRaw = AgentGlobeFrameRate.defaultValue.rawValue
     @State private var section = AgentSettingsSection.general
     @State private var confirmHistoryDeletion = false
     @State private var confirmUninstall = false
@@ -447,6 +449,17 @@ private struct AgentSettingsView: View {
                     ForEach(AgentLanguage.allCases) { option in Text(option.title).tag(option) }
                 }
                 .frame(width: 240)
+            }
+            settingsGroup(L("Globe animation")) {
+                Picker(L("Frame rate"), selection: $globeFrameRateRaw) {
+                    ForEach(AgentGlobeFrameRate.allCases) { option in
+                        Text(option.title).tag(option.rawValue)
+                    }
+                }
+                .frame(width: 240)
+                Text(L("A lower frame rate uses less CPU. Rotation continues while the globe is visible."))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             settingsGroup(L("Updates")) {
                 Toggle(L("Check automatically once per day"), isOn: updateCheckBinding)
@@ -788,6 +801,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let uninstall: AgentUninstallController
     private let geo: GeoCacheController
     private let threats: ThreatIntelController
+    private let onClose: () -> Void
 
     init(
         store: ObservationStore?,
@@ -799,13 +813,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         launchController: LaunchAtLoginController,
         onMonitoringMode: @escaping (AgentMonitoringMode) -> Void,
         onRetentionChanged: @escaping (Int) -> Void,
-        onLanguageChanged: @escaping () -> Void
+        onLanguageChanged: @escaping () -> Void,
+        onClose: @escaping () -> Void = {}
     ) {
         self.hub = hub
         self.updates = updates
         self.uninstall = uninstall
         self.geo = geo
         self.threats = threats
+        self.onClose = onClose
         let model = AgentSettingsViewModel(
             store: store,
             launchController: launchController,
@@ -849,6 +865,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         hub.refresh()
         updates.refreshLocalization()
         uninstall.refreshLocalization()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        // Released a turn later, not here. AppKit is still closing this window
+        // when `windowWillClose` runs, and the callback drops the last
+        // reference to the controller that owns it.
+        DispatchQueue.main.async { [onClose] in onClose() }
     }
 }
 

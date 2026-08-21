@@ -2,6 +2,26 @@ import AppKit
 import EgressViewAgentCore
 import SwiftUI
 
+enum AgentGlobeFrameRate: Int, CaseIterable, Identifiable {
+    case energySaver = 3
+    case standard = 5
+    case smooth = 15
+
+    static let defaultsKey = "agentGlobeFrameRate"
+    static let defaultValue = AgentGlobeFrameRate.standard
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .energySaver: return L("Energy saver (3 fps)")
+        case .standard: return L("Standard (5 fps)")
+        case .smooth: return L("Smooth (15 fps)")
+        }
+    }
+
+}
+
 private enum AgentMainTab: String, CaseIterable, Identifiable {
     /// What is happening on the network, and whether the agent is in a state to
     /// know. These were two tabs, and separating them meant the charts could be
@@ -104,7 +124,13 @@ private struct AgentObservationRow: Identifiable {
 @MainActor
 private final class AgentMainViewModel: ObservableObject {
     @Published var selectedTab = AgentMainTab.network {
-        didSet { if oldValue != selectedTab { refresh() } }
+        didSet {
+            guard oldValue != selectedTab else { return }
+            // Opening the dedicated threat screen is an explicit request for
+            // current results, so it bypasses the long-window screen cache.
+            if selectedTab == .threats { threatCandidateCache.invalidate() }
+            refresh()
+        }
     }
     @Published var scale = TimeScale.hour {
         didSet { refresh() }
@@ -198,6 +224,7 @@ private final class AgentMainViewModel: ObservableObject {
     private let store: ObservationStore?
     private let loadQueue = DispatchQueue(label: "com.egressview.agent.main-window")
     private let refreshTimer = PeriodicWork()
+    private let threatCandidateCache = ThreatCandidateRefreshCache()
 
     init(store: ObservationStore?) {
         self.store = store
@@ -332,6 +359,7 @@ private final class AgentMainViewModel: ObservableObject {
         let selection = VisualizationSelection(scale: scale, metric: metric, end: Date())
         let grouping = destinationGrouping
         let availability = threatAvailability
+        let threatCandidateCache = threatCandidateCache
         // Only what the visible tab shows. Every query here scans a range of a
         // 55 MB table and sorts it -- profiling put the app's CPU in SQLite,
         // not in drawing -- and running the log's and the threat tab's queries
@@ -346,14 +374,17 @@ private final class AgentMainViewModel: ObservableObject {
 
                 data.usesRolledUpHistory = try store.periodUsesRolledUpHistory(from: from, to: to)
                 if tab == .network {
-                    let rollup = try store.hourlyRollup(from: from, to: to)
-                    data.summary = AgentPeriodSummary(
-                        sessionCount: rollup.reduce(0) { $0 + $1.sessionCount },
-                        applicationCount: Set(rollup.map(\.processName)).count,
-                        destinationCount: Set(rollup.map(\.remoteAddress)).count
-                    )
                     let pairs = try store.appDestinationTotals(
                         from: from, to: to, grouping: grouping
+                    )
+                    // `pairs` already combines chart_hourly, the current
+                    // partial hour and legacy rollups. Running hourlyRollup()
+                    // as well scanned and sorted the same seven-day raw range
+                    // only to derive these three numbers.
+                    data.summary = AgentPeriodSummary(
+                        sessionCount: pairs.reduce(0) { $0 + $1.sessionCount },
+                        applicationCount: Set(pairs.map(\.processName)).count,
+                        destinationCount: Set(pairs.map(\.destination)).count
                     )
                     let buckets = try store.appTimeline(
                         from: from, to: to, buckets: VisualizationSelection.bucketCount
@@ -383,8 +414,11 @@ private final class AgentMainViewModel: ObservableObject {
                 // The threat count appears on the network tab too, so it is
                 // computed for both -- but only there, and never for the log.
                 if tab == .network || tab == .threats {
+                    let candidates = try threatCandidateCache.candidates(scale: selection.scale) {
+                        try store.destinationsForThreatMatching(from: from, to: to)
+                    }
                     data.threats = ThreatReport.evaluate(
-                        candidates: try store.destinationsForThreatMatching(from: from, to: to),
+                        candidates: candidates,
                         matcher: ThreatMatcher(indicators: try store.threatIndicators()),
                         availability: availability
                     )
@@ -1616,24 +1650,10 @@ private struct AgentGlobeChart: View {
         }
     }
 
-    /// Rotation is a function of time, not something accumulated frame by
-    /// frame. Adding to a `@State` from inside the `Canvas` renderer changes
-    /// state during a view update, which SwiftUI is free to discard -- and did:
-    /// the globe stayed still. `baseSpin` is the angle at `anchor`, and every
-    /// frame derives its angle from the clock instead.
-    @State private var baseSpin: Double = 0
-    @State private var anchor = Date()
     @State private var speed: SpinSpeed = .normal
     @State private var isRunning = true
-    /// Latitude at the centre of the view, tipped towards the hemisphere the
-    /// traffic leaves from. The tilt was previously 12 degrees the wrong way,
-    /// which pushed home -- the point every arc starts at -- towards the rim.
-    /// Dragging up or down still changes it.
-    @State private var tilt: Double = HomeLocation.preferredTilt(
-        latitude: HomeLocation.current().latitude
-    )
-    @State private var isDragging = false
-    @State private var resumeAt = Date.distantPast
+    @AppStorage(AgentGlobeFrameRate.defaultsKey)
+    private var frameRateRaw = AgentGlobeFrameRate.defaultValue.rawValue
 
     /// Whether the globe should be turning at all.
     ///
@@ -1652,31 +1672,18 @@ private struct AgentGlobeChart: View {
     /// Whether the window is on screen and this globe's tab is the one showing.
     let isOnScreen: Bool
 
-    private var isTurning: Bool { isRunning && !isDragging }
     private var isAnimating: Bool {
-        isOnScreen && isTurning && controlActiveState != .inactive
+        isOnScreen && isRunning && controlActiveState != .inactive
     }
 
-    private func spin(at date: Date) -> Double {
-        guard isTurning else { return baseSpin }
-        let elapsed = date.timeIntervalSince(max(anchor, resumeAt))
-        return baseSpin + max(0, elapsed) * speed.degreesPerSecond
-    }
-
-    /// Pins the current angle before something changes what "current" means,
-    /// so stopping, starting, changing speed and dragging never make the globe
-    /// jump.
-    private func freeze(at date: Date = Date()) {
-        baseSpin = spin(at: date)
-        anchor = date
+    private var frameRate: AgentGlobeFrameRate {
+        AgentGlobeFrameRate(rawValue: frameRateRaw) ?? .defaultValue
     }
 
     private var spinControls: some View {
         HStack(spacing: 10) {
             Button {
-                freeze()
                 isRunning.toggle()
-                resumeAt = .distantPast
             } label: {
                 Label(
                     isRunning ? L("Stop") : L("Rotate"),
@@ -1689,11 +1696,7 @@ private struct AgentGlobeChart: View {
 
             Picker(L("Speed"), selection: Binding(
                 get: { speed },
-                set: { newValue in
-                    freeze()
-                    resumeAt = .distantPast
-                    speed = newValue
-                }
+                set: { speed = $0 }
             )) {
                 ForEach(SpinSpeed.allCases) { value in
                     Text(value.title).tag(value)
@@ -1708,8 +1711,6 @@ private struct AgentGlobeChart: View {
         .controlSize(.small)
     }
 
-    private var home: (latitude: Double, longitude: Double) { HomeLocation.current() }
-
     var body: some View {
         AgentChartCard(
             title: L("Where the traffic went"),
@@ -1720,43 +1721,22 @@ private struct AgentGlobeChart: View {
             if let unavailable = model.unavailable {
                 AgentEmptyChartNote(text: message(for: unavailable))
             } else {
-                // 15 frames a second, not 30. At six degrees a second the
-                // extra frames are indistinguishable, and each one re-lays out
-                // this whole subtree -- SwiftUI layout, not drawing, was where
-                // the CPU was going.
-                TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: !isAnimating)) { context in
-                    Canvas { canvas, size in
-                        draw(in: &canvas, size: size, spin: spin(at: context.date))
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .gesture(
-                    DragGesture()
-                        .onChanged { value in
-                            if !isDragging {
-                                freeze()
-                                isDragging = true
-                            }
-                            baseSpin += value.translation.width * 0.02
-                            tilt = max(-80, min(80, tilt - value.translation.height * 0.02))
-                        }
-                        .onEnded { _ in
-                            isDragging = false
-                            anchor = Date()
-                            // The same pause the Hub uses: let the user look at
-                            // what they turned to before it moves again.
-                            resumeAt = anchor.addingTimeInterval(2.5)
-                        }
+                AgentGlobeNativeView(
+                    model: model,
+                    atlas: atlas,
+                    degreesPerSecond: speed.degreesPerSecond,
+                    framesPerSecond: frameRate.rawValue,
+                    isRotating: isRunning,
+                    isAnimating: isAnimating
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(alignment: .bottomTrailing) {
                     // Overlaid rather than stacked below: the globe is drawn
                     // from the smaller side of its box, so every point of
                     // height the controls took came straight off the sphere.
                     //
-                    // `fixedSize` stops the picker and button from being
-                    // re-measured against a box that changes every frame. They
-                    // were the most expensive part of the animation loop, and
-                    // their size never actually changes.
+                    // The native view redraws independently, but fixed sizing
+                    // also keeps these controls stable while the card resizes.
                     spinControls
                         .fixedSize()
                         .padding(8)
@@ -1799,105 +1779,284 @@ private struct AgentGlobeChart: View {
                  model.points.count, Int((model.placedShare * 100).rounded()), place)
     }
 
-    private func draw(in context: inout GraphicsContext, size: CGSize, spin: Double) {
+}
+
+/// Runs the globe clock and renderer outside SwiftUI. A frame invalidates only
+/// this native view instead of re-evaluating the chart card and its controls.
+private struct AgentGlobeNativeView: NSViewRepresentable {
+    let model: GlobeModel
+    let atlas: WorldAtlas?
+    let degreesPerSecond: Double
+    let framesPerSecond: Int
+    let isRotating: Bool
+    let isAnimating: Bool
+
+    func makeNSView(context: Context) -> AgentGlobeDrawingView {
+        AgentGlobeDrawingView()
+    }
+
+    func updateNSView(_ view: AgentGlobeDrawingView, context: Context) {
+        view.configure(
+            model: model,
+            atlas: atlas,
+            degreesPerSecond: degreesPerSecond,
+            framesPerSecond: framesPerSecond,
+            isRotating: isRotating,
+            isAnimating: isAnimating
+        )
+    }
+}
+
+private final class AgentGlobeDrawingView: NSView {
+    private var model: GlobeModel?
+    private var atlas: WorldAtlas?
+    private var home = HomeLocation.current()
+    private var tilt = HomeLocation.preferredTilt(latitude: HomeLocation.current().latitude)
+    private var baseSpin = 0.0
+    private var anchor = Date()
+    private var resumeAt = Date.distantPast
+    private var degreesPerSecond = 6.0
+    private var framesPerSecond = AgentGlobeFrameRate.defaultValue.rawValue
+    private var isRotating = true
+    private var isAnimating = false
+    private var isDragging = false
+    private var timer: Timer?
+
+    override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        // Core Animation may prepare this layer away from the main display
+        // pass. The animation clock still runs on the main run loop.
+        layer?.drawsAsynchronously = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        timer?.invalidate()
+    }
+
+    func configure(
+        model: GlobeModel,
+        atlas: WorldAtlas?,
+        degreesPerSecond: Double,
+        framesPerSecond: Int,
+        isRotating: Bool,
+        isAnimating: Bool
+    ) {
+        let contentChanged = self.model != model
+        let speedChanged = self.degreesPerSecond != degreesPerSecond
+        let rotationChanged = self.isRotating != isRotating
+        if speedChanged || rotationChanged { freeze() }
+        self.model = model
+        self.atlas = atlas
+        self.degreesPerSecond = degreesPerSecond
+        self.framesPerSecond = framesPerSecond
+        self.isRotating = isRotating
+        self.isAnimating = isAnimating
+        if rotationChanged { anchor = Date() }
+        reconcileTimer()
+        if contentChanged || speedChanged || rotationChanged || !isAnimating {
+            needsDisplay = true
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        reconcileTimer()
+    }
+
+    private func reconcileTimer() {
+        let shouldRun = isAnimating && window != nil
+        if !shouldRun {
+            timer?.invalidate()
+            timer = nil
+            return
+        }
+        let interval = 1.0 / Double(max(1, framesPerSecond))
+        if let timer, abs(timer.timeInterval - interval) < 0.0001 { return }
+        timer?.invalidate()
+        let next = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            self?.needsDisplay = true
+        }
+        timer = next
+        RunLoop.main.add(next, forMode: .common)
+    }
+
+    private func spin(at date: Date = Date()) -> Double {
+        guard isRotating, !isDragging else { return baseSpin }
+        let elapsed = date.timeIntervalSince(max(anchor, resumeAt))
+        return baseSpin + max(0, elapsed) * degreesPerSecond
+    }
+
+    private func freeze(at date: Date = Date()) {
+        baseSpin = spin(at: date)
+        anchor = date
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        freeze()
+        isDragging = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        baseSpin += event.deltaX * 0.4
+        tilt = max(-80, min(80, tilt + event.deltaY * 0.4))
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        isDragging = false
+        anchor = Date()
+        // Let the user inspect the place they turned to before rotation resumes.
+        resumeAt = anchor.addingTimeInterval(2.5)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let model, let context = NSGraphicsContext.current?.cgContext else { return }
+        draw(model: model, atlas: atlas, in: context, size: bounds.size, spin: spin())
+    }
+
+    private func draw(
+        model: GlobeModel,
+        atlas: WorldAtlas?,
+        in context: CGContext,
+        size: CGSize,
+        spin: Double
+    ) {
         let side = min(size.width, size.height)
         let rect = CGRect(
-            x: (size.width - side) / 2, y: (size.height - side) / 2, width: side, height: side
+            x: (size.width - side) / 2,
+            y: (size.height - side) / 2,
+            width: side,
+            height: side
         )
-        // Subtracted, not added. The centre of the view moving west is what
-        // makes the surface travel east across the screen, which is the way the
-        // Earth actually turns: counter-clockwise seen from above the north
-        // pole. Adding it ran the planet backwards.
         let projection = OrthographicProjection(
-            centerLatitude: tilt, centerLongitude: home.longitude - spin
+            centerLatitude: tilt,
+            centerLongitude: home.longitude - spin
         )
 
-        context.fill(Path(ellipseIn: rect), with: .color(.blue.opacity(0.10)))
-        context.stroke(Path(ellipseIn: rect), with: .color(.cyan.opacity(0.35)), lineWidth: 1)
+        context.setFillColor(NSColor.systemBlue.withAlphaComponent(0.10).cgColor)
+        context.fillEllipse(in: rect)
+        context.setStrokeColor(NSColor.cyan.withAlphaComponent(0.35).cgColor)
+        context.setLineWidth(1)
+        context.strokeEllipse(in: rect)
 
         if let atlas {
-            var land = Path()
+            let land = CGMutablePath()
             for ring in atlas.rings {
                 var started = false
                 for point in ring {
                     guard let projected = projection.project(
-                        latitude: point.latitude, longitude: point.longitude, in: rect
+                        latitude: point.latitude,
+                        longitude: point.longitude,
+                        in: rect
                     ) else {
                         started = false
                         continue
                     }
-                    if started { land.addLine(to: projected) } else {
-                        land.move(to: projected); started = true
+                    if started {
+                        land.addLine(to: projected)
+                    } else {
+                        land.move(to: projected)
+                        started = true
                     }
                 }
             }
-            context.stroke(land, with: .color(.cyan.opacity(0.55)), lineWidth: 0.6)
+            context.addPath(land)
+            context.setStrokeColor(NSColor.cyan.withAlphaComponent(0.55).cgColor)
+            context.setLineWidth(0.6)
+            context.strokePath()
         }
 
-        // Traffic leaves from here, so every arc starts at the same place and
-        // the picture reads as "this Mac reaching out" rather than scattered
-        // dots.
         let homePoint = projection.project(
-            latitude: home.latitude, longitude: home.longitude, in: rect
+            latitude: home.latitude,
+            longitude: home.longitude,
+            in: rect
         )
 
         for point in model.points {
             let arc = GreatCircle.path(
-                from: home, to: (latitude: point.latitude, longitude: point.longitude)
+                from: home,
+                to: (latitude: point.latitude, longitude: point.longitude)
             )
-            var visible = Path()
-            var hidden = Path()
+            let visible = CGMutablePath()
+            let hidden = CGMutablePath()
             var visibleStarted = false
             var hiddenStarted = false
             for step in arc {
                 if let projected = projection.project(
-                    latitude: step.latitude, longitude: step.longitude, in: rect
+                    latitude: step.latitude,
+                    longitude: step.longitude,
+                    in: rect
                 ) {
                     hiddenStarted = false
                     if visibleStarted { visible.addLine(to: projected) } else {
-                        visible.move(to: projected); visibleStarted = true
+                        visible.move(to: projected)
+                        visibleStarted = true
                     }
                 } else {
-                    // Behind the globe. Drawn faintly rather than dropped, so a
-                    // destination on the far side is not mistaken for absent.
                     visibleStarted = false
                     let edge = projection.projectClamped(
-                        latitude: step.latitude, longitude: step.longitude, in: rect
+                        latitude: step.latitude,
+                        longitude: step.longitude,
+                        in: rect
                     )
                     if hiddenStarted { hidden.addLine(to: edge) } else {
-                        hidden.move(to: edge); hiddenStarted = true
+                        hidden.move(to: edge)
+                        hiddenStarted = true
                     }
                 }
             }
-            context.stroke(hidden, with: .color(.orange.opacity(0.10)), lineWidth: 0.7)
-            context.stroke(visible, with: .color(.orange.opacity(0.55)), lineWidth: 0.9)
+            context.addPath(hidden)
+            context.setStrokeColor(NSColor.systemOrange.withAlphaComponent(0.10).cgColor)
+            context.setLineWidth(0.7)
+            context.strokePath()
+            context.addPath(visible)
+            context.setStrokeColor(NSColor.systemOrange.withAlphaComponent(0.55).cgColor)
+            context.setLineWidth(0.9)
+            context.strokePath()
         }
 
         for point in model.points {
-            // Area, not radius, follows the share: doubling a radius would
-            // quadruple the ink and overstate the difference.
             let radius = max(2.0, sqrt(point.weight) * side * 0.14)
             let front = projection.project(
-                latitude: point.latitude, longitude: point.longitude, in: rect
+                latitude: point.latitude,
+                longitude: point.longitude,
+                in: rect
             )
             let position = front ?? projection.projectClamped(
-                latitude: point.latitude, longitude: point.longitude, in: rect
+                latitude: point.latitude,
+                longitude: point.longitude,
+                in: rect
             )
             let mark = CGRect(
-                x: position.x - radius, y: position.y - radius,
-                width: radius * 2, height: radius * 2
+                x: position.x - radius,
+                y: position.y - radius,
+                width: radius * 2,
+                height: radius * 2
             )
-            context.fill(
-                Path(ellipseIn: mark),
-                with: .color(.orange.opacity(front == nil ? 0.18 : 0.85))
+            context.setFillColor(
+                NSColor.systemOrange.withAlphaComponent(front == nil ? 0.18 : 0.85).cgColor
             )
+            context.fillEllipse(in: mark)
         }
 
         if let homePoint {
             let marker = CGRect(x: homePoint.x - 4, y: homePoint.y - 4, width: 8, height: 8)
-            context.fill(Path(ellipseIn: marker), with: .color(.yellow))
-            context.stroke(Path(ellipseIn: marker.insetBy(dx: -3, dy: -3)),
-                           with: .color(.yellow.opacity(0.5)), lineWidth: 1)
+            context.setFillColor(NSColor.systemYellow.cgColor)
+            context.fillEllipse(in: marker)
+            context.setStrokeColor(NSColor.systemYellow.withAlphaComponent(0.5).cgColor)
+            context.setLineWidth(1)
+            context.strokeEllipse(in: marker.insetBy(dx: -3, dy: -3))
         }
     }
 }
@@ -2111,11 +2270,13 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @MainActor private let model: AgentMainViewModel
+    private let onClose: () -> Void
 
     @MainActor
-    init(store: ObservationStore?) {
+    init(store: ObservationStore?, onClose: @escaping () -> Void = {}) {
         let model = AgentMainViewModel(store: store)
         self.model = model
+        self.onClose = onClose
         let hostingController = NSHostingController(rootView: AgentMainView(model: model))
         let window = NSWindow(contentViewController: hostingController)
         window.title = "EgressView Agent"
@@ -2185,5 +2346,9 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         model.isWindowVisible = false
         model.stop()
+        // Released a turn later, not here. AppKit is still closing this window
+        // when `windowWillClose` runs, and the callback drops the last
+        // reference to the controller that owns it.
+        DispatchQueue.main.async { [onClose] in onClose() }
     }
 }
