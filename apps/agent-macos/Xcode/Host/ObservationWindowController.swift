@@ -2187,6 +2187,9 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         model.isWindowVisible = false
         model.stop()
-        onClose()
+        // Released a turn later, not here. AppKit is still closing this window
+        // when `windowWillClose` runs, and the callback drops the last
+        // reference to the controller that owns it.
+        DispatchQueue.main.async { [onClose] in onClose() }
     }
 }

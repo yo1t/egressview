@@ -52,4 +52,14 @@ describe('macOS Agent idle cost', () => {
     assert.match(window, /func windowWillClose[\s\S]*?onClose\(\)/);
     assert.match(settings, /func windowWillClose[\s\S]*?onClose\(\)/);
   });
+
+  it('ウィンドウを閉じる処理の中でコントローラを解放しない', () => {
+    // AppKit is still closing the window when windowWillClose runs, and the
+    // callback drops the last reference to the controller that owns it.
+    const settings = read('HubDeliveryController.swift');
+    for (const [name, source] of [['observation', window], ['settings', settings]]) {
+      const close = source.slice(source.lastIndexOf('func windowWillClose'));
+      assert.match(close, /DispatchQueue\.main\.async \{ \[onClose\] in onClose\(\) \}/, name);
+    }
+  });
 });
