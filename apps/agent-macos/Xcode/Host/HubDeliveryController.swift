@@ -521,6 +521,7 @@ private struct AgentSettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .id(language.language.rawValue)
         .frame(minWidth: 760, minHeight: 540)
         .environment(\.locale, language.language.locale)
         .alert("EgressView Agent", isPresented: messagePresented) {

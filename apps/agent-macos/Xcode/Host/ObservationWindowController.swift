@@ -507,6 +507,7 @@ private struct AgentMainView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+                .id(language.language.rawValue)
             Divider()
             Group {
                 switch model.selectedTab {
@@ -516,6 +517,7 @@ private struct AgentMainView: View {
                 case .notifications: notificationHistoryView
                 }
             }
+            .id(language.language.rawValue)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 900, minHeight: 620)

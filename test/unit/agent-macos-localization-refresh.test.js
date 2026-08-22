@@ -23,9 +23,24 @@ describe('macOS Agent live localization', () => {
     const environment = /\.environment\(\\\.locale, language\.language\.locale\)/;
     assert.match(mainWindow, environment);
     assert.match(settings, environment);
+    assert.match(mainWindow, /header\s*\n\s*\.id\(language\.language\.rawValue\)/);
+    assert.match(
+      mainWindow,
+      /switch model\.selectedTab[\s\S]*?\.id\(language\.language\.rawValue\)/
+    );
+    assert.match(
+      settings,
+      /NavigationSplitView[\s\S]*?\.id\(language\.language\.rawValue\)/
+    );
   });
 
-  it('does not rely on recreating one picker to refresh its labels', () => {
-    assert.doesNotMatch(settings, /\.id\(language\.language\.rawValue\)/);
+  it('does not rely on recreating only the monitoring-mode picker', () => {
+    const pickerStart = settings.indexOf('Picker(L("Mode")');
+    const pickerEnd = settings.indexOf('.pickerStyle(.segmented)', pickerStart);
+    assert.ok(pickerStart >= 0 && pickerEnd > pickerStart);
+    assert.doesNotMatch(
+      settings.slice(pickerStart, pickerEnd),
+      /\.id\(language\.language\.rawValue\)/
+    );
   });
 });
