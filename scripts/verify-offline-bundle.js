@@ -5,6 +5,7 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const zlib = require('node:zlib');
 const {
   assertSafeBundle,
   assertSafeRelativePath,
@@ -24,6 +25,54 @@ function parseArgs(argv) {
     if (!options[required]) throw new Error(`--${required} is required`);
   }
   return options;
+}
+
+/**
+ * The payloads of pax extended headers ('x' local, 'g' global), which is where
+ * a tar records extended attributes. Walking the 512-byte block structure is
+ * exact where a text search over the whole archive is not.
+ */
+function paxHeaderRecords(raw) {
+  const BLOCK = 512;
+  const records = [];
+  for (let offset = 0; offset + BLOCK <= raw.length; offset += BLOCK) {
+    const size = parseInt(raw.toString('ascii', offset + 124, offset + 135).replace(/\0.*$/, '').trim(), 8);
+    if (!Number.isFinite(size)) break;
+    const typeflag = String.fromCharCode(raw[offset + 156]);
+    const dataBlocks = Math.ceil((size || 0) / BLOCK);
+    if (typeflag === 'x' || typeflag === 'g') {
+      records.push(raw.toString('utf8', offset + BLOCK, offset + BLOCK + size));
+    }
+    offset += dataBlocks * BLOCK;
+  }
+  return records;
+}
+
+/**
+ * A bundle built on a Mac can carry macOS extended attributes, which GNU tar
+ * rejects on extraction -- so it fails to unpack on exactly the Linux hosts it
+ * is built for. The build strips them; this refuses an artifact where that did
+ * not happen, so the property does not depend on who ran the build.
+ */
+function assertPortableArchive(artifact) {
+  // Read the archive rather than asking tar: bsdtar does not name the
+  // attributes in its listing and GNU tar only warns, so neither reports this
+  // the same way on both platforms.
+  //
+  // Only pax extended headers are inspected. Scanning the whole decompressed
+  // stream for the keyword matches this file's own source, which ships inside
+  // the bundle -- a mistake worth naming, because it makes the check report
+  // every bundle as broken.
+  const raw = zlib.gunzipSync(fs.readFileSync(artifact));
+  const marker = paxHeaderRecords(raw).some(
+    (record) => record.includes('SCHILY.xattr') || record.includes('LIBARCHIVE.xattr')
+  );
+  if (marker) {
+    throw new Error(
+      'Artifact carries extended attributes; rebuild it with tar --no-xattrs '
+      + 'so it extracts on Linux, where GNU tar exits non-zero on them'
+    );
+  }
 }
 
 function verify(options) {
@@ -53,6 +102,7 @@ function verify(options) {
   }
   const roots = new Set(listing.map((entry) => entry.split('/')[0]).filter(Boolean));
   if (roots.size !== 1) throw new Error('Artifact must contain exactly one root directory');
+  assertPortableArchive(options.artifact);
 
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-offline-verify-'));
   try {
