@@ -22,6 +22,10 @@ const mainWindow = fs.readFileSync(
   path.join(root, 'apps/agent-macos/Xcode/Host/ObservationWindowController.swift'),
   'utf8'
 );
+const diagnostics = fs.readFileSync(
+  path.join(root, 'apps/agent-macos/Xcode/Host/AgentDiagnostics.swift'),
+  'utf8'
+);
 
 describe('macOS Agent monitoring health wiring', () => {
   it('does not diagnose silence while monitoring is paused', () => {
@@ -61,6 +65,16 @@ describe('macOS Agent monitoring health wiring', () => {
   it('clears a stall when real observations resume', () => {
     assert.match(controller, /recoveryHandler:[\s\S]*?gateState\.stall = nil/);
     assert.match(controller, /recoveryHandler:[\s\S]*?statusHandler\(\.fullActive\)/);
+  });
+
+  it('consumes a forced outage once and returns to real health automatically', () => {
+    assert.match(diagnostics, /static func consumeForceNotRecording\(\) -> Bool/);
+    assert.match(diagnostics, /removeObject\(forKey: forceNotRecordingKey\)/);
+    assert.match(controller, /AgentDiagnostics\.consumeForceNotRecording\(\)/);
+    assert.match(controller, /diagnosticRehearsalActive = true/);
+    assert.match(controller, /finishDiagnosticRehearsalAfterDisplay\(generation:/);
+    assert.match(controller, /MonitoringHealthCheck\.hasRecentObservation\(latestObservationAt\)/);
+    assert.doesNotMatch(controller, /AgentDiagnostics\.forcesNotRecording/);
   });
 
   it('shows the first-connection wait only before monitoring has ever produced data', () => {

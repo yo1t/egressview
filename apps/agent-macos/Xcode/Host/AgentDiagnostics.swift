@@ -23,11 +23,15 @@ enum AgentDiagnostics {
     /// defaults write com.egressview.agent.macos diagnosticsForceNotRecording -bool YES
     /// ```
     ///
-    /// Unset it to go back to the real answer. Monitoring itself is untouched
-    /// either way: collection continues, and the record stays complete.
+    /// The agent consumes and removes this trigger when the next health check
+    /// begins. Monitoring itself is untouched: collection continues, and the
+    /// record stays complete. Set it again to run another rehearsal.
     static let forceNotRecordingKey = "diagnosticsForceNotRecording"
 
-    static var forcesNotRecording: Bool {
-        UserDefaults.standard.bool(forKey: forceNotRecordingKey)
+    static func consumeForceNotRecording() -> Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: forceNotRecordingKey) else { return false }
+        defaults.removeObject(forKey: forceNotRecordingKey)
+        return true
     }
 }
