@@ -93,6 +93,7 @@
 "Unlimited" = "Unlimited";
 "%lld per day" = "%lld per day";
 "The same cause is notified at most once per hour. New threat matches are grouped." = "The same cause is notified at most once per hour. New threat matches are grouped.";
+"Network monitoring problems do not use the daily limit, but their one-hour duplicate suppression still applies." = "Network monitoring problems do not use the daily limit, but their one-hour duplicate suppression still applies.";
 "Today: %lld attempted · %lld suppressed by the daily limit" = "Today: %lld attempted · %lld suppressed by the daily limit";
 "macOS Notification Center" = "macOS Notification Center";
 "Permission will be requested when the first notification needs to be shown." = "Permission will be requested when the first notification needs to be shown.";
@@ -351,6 +352,8 @@
 "Stop the globe where it is" = "Stop the globe where it is";
 "Turn the globe so the far side comes round" = "Turn the globe so the far side comes round";
 "Network monitoring started. Waiting for the first connection." = "Network monitoring started. Waiting for the first connection.";
+"Network monitoring started" = "Network monitoring started";
+"Monitoring started: %@" = "Monitoring started: %@";
 "Nothing is being recorded. The update needs a restart of macOS before monitoring resumes." = "Nothing is being recorded. The update needs a restart of macOS before monitoring resumes.";
 "EgressView: Starting" = "EgressView: Starting";
 "EgressView: Not recording" = "EgressView: Not recording";

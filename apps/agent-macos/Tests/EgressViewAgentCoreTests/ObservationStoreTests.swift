@@ -74,6 +74,38 @@ final class ObservationStoreTests: XCTestCase {
         XCTAssertEqual(rows.map(\.countryCode), ["JP"], "normal retention does not erase visited countries")
     }
 
+    func testMonitoringStartIsTheFirstCoverageSessionAndDoesNotFollowTheSelectedPeriod() throws {
+        let store = try makeStore()
+        let first = Date(timeIntervalSince1970: 1_800_000_000)
+        try store.beginCoverageSession(at: first)
+        try store.endCoverageSession(at: first.addingTimeInterval(60))
+        try store.beginCoverageSession(at: first.addingTimeInterval(3_600))
+
+        XCTAssertEqual(try store.monitoringStartedAt(), first)
+        XCTAssertEqual(try store.statistics().monitoringStartedAt, first)
+    }
+
+    func testCountryHistoryIsOrderedByConnectionCountThenRecency() throws {
+        let store = try makeStore()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try store.replaceGeoLocations([
+            GeoLocation(ip: "203.0.113.5", latitude: 35, longitude: 139,
+                        countryCode: "JP", city: "Tokyo"),
+            GeoLocation(ip: "198.51.100.8", latitude: 37, longitude: -122,
+                        countryCode: "US", city: "California"),
+        ])
+        try store.append([
+            observation(remote: "203.0.113.5", at: now),
+            observation(remote: "203.0.113.5", at: now.addingTimeInterval(1)),
+            observation(remote: "203.0.113.5", at: now.addingTimeInterval(2)),
+            observation(remote: "198.51.100.8", at: now.addingTimeInterval(10)),
+        ])
+
+        let rows = try store.countryVisitSummaries()
+        XCTAssertEqual(rows.map(\.countryCode), ["JP", "US"])
+        XCTAssertEqual(rows.map(\.connectionCount), [3, 1])
+    }
+
     func testKnownCountryUpdatesWaitForFlushButANewCountryDoesNot() throws {
         let url = directory.appendingPathComponent("history.sqlite")
         let store = try ObservationStore(fileURL: url, countrySummaryFlushInterval: 3_600)

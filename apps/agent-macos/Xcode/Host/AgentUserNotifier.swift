@@ -83,7 +83,10 @@ final class AgentUserNotifier: ObservableObject {
     ) -> Bool {
         guard bypassPreference || isEnabled(kind) else { return false }
         if !bypassLimits {
-            guard limiter.consume(key: key, cooldown: cooldown, dailyLimit: dailyLimit) else {
+            guard limiter.consume(
+                key: key, cooldown: cooldown, dailyLimit: dailyLimit,
+                countsTowardDailyLimit: kind != .monitoring
+            ) else {
                 publishLimiterState()
                 return false
             }

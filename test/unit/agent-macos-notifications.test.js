@@ -66,6 +66,8 @@ describe('macOS Agent notifications', () => {
     assert.match(policy, /case twentyFive = 25/);
     assert.match(policy, /case unlimited = 0/);
     assert.match(settings, /suppressedToday/);
+    assert.match(notifier, /countsTowardDailyLimit: kind != \.monitoring/);
+    assert.match(policy, /dailyLimitCountToday/);
   });
 
   it('does not notify historical threats or duplicate Hub notifications', () => {

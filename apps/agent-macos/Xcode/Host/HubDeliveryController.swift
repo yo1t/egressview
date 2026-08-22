@@ -636,6 +636,9 @@ private struct AgentSettingsView: View {
                 Text(L("The same cause is notified at most once per hour. New threat matches are grouped."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Text(L("Network monitoring problems do not use the daily limit, but their one-hour duplicate suppression still applies."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text(L(
                     "Today: %lld attempted · %lld suppressed by the daily limit",
                     notifications.sentToday,

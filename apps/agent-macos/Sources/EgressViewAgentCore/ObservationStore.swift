@@ -122,6 +122,7 @@ public struct ObservationStoreStatistics: Equatable, Sendable {
     public let rolledUpCount: Int
     public let oldestObservedAt: Date?
     public let newestObservedAt: Date?
+    public let monitoringStartedAt: Date?
     public let fileSizeBytes: Int64
 }
 
@@ -684,6 +685,18 @@ public final class ObservationStore: @unchecked Sendable {
         return result
     }
 
+    /// The first time this database has proof that monitoring was active.
+    /// Unlike a selected period's coverage, this does not move when the user
+    /// changes the chart range or when observation retention removes old rows.
+    public func monitoringStartedAt() throws -> Date? {
+        try lock.withLock { try monitoringStartedAtLocked() }
+    }
+
+    private func monitoringStartedAtLocked() throws -> Date? {
+        try scalarDouble("SELECT MIN(started_at) FROM coverage_sessions")
+            .map { Date(timeIntervalSince1970: $0) }
+    }
+
     // MARK: - Writing
 
     public func append(_ observations: [ConnectionObservation]) throws {
@@ -1195,7 +1208,7 @@ public final class ObservationStore: @unchecked Sendable {
             SELECT country_code, first_observed_at, last_observed_at,
                    last_site_name, last_process_name, connection_count
             FROM country_visit_summary
-            ORDER BY last_observed_at DESC
+            ORDER BY connection_count DESC, last_observed_at DESC
             """)
             defer { sqlite3_finalize(statement) }
             var rows: [CountryVisitSummary] = []
@@ -1372,6 +1385,7 @@ public final class ObservationStore: @unchecked Sendable {
                 rolledUpCount: try scalar("SELECT COUNT(*) FROM hourly_rollup") ?? 0,
                 oldestObservedAt: oldest.map { Date(timeIntervalSince1970: $0) },
                 newestObservedAt: newest.map { Date(timeIntervalSince1970: $0) },
+                monitoringStartedAt: try monitoringStartedAtLocked(),
                 fileSizeBytes: size
             )
         }

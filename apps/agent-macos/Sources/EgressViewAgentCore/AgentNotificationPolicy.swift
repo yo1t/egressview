@@ -20,30 +20,39 @@ public enum AgentNotificationDailyLimit: Int, CaseIterable, Codable, Sendable {
 
 public struct AgentNotificationLimiterState: Codable, Equatable, Sendable {
     public var dayStartedAt: Date
+    /// All notifications accepted today, including monitoring alerts that do
+    /// not consume the configurable daily budget.
     public var sentToday: Int
+    /// Notifications that count toward the configurable daily budget.
+    public var dailyLimitCountToday: Int
     public var suppressedToday: Int
     public var lastSentByKey: [String: Date]
 
     public init(
         dayStartedAt: Date = Date(timeIntervalSince1970: 0),
         sentToday: Int = 0,
+        dailyLimitCountToday: Int? = nil,
         suppressedToday: Int = 0,
         lastSentByKey: [String: Date] = [:]
     ) {
         self.dayStartedAt = dayStartedAt
         self.sentToday = sentToday
+        self.dailyLimitCountToday = dailyLimitCountToday ?? sentToday
         self.suppressedToday = suppressedToday
         self.lastSentByKey = lastSentByKey
     }
 
     private enum CodingKeys: String, CodingKey {
-        case dayStartedAt, sentToday, suppressedToday, lastSentByKey
+        case dayStartedAt, sentToday, dailyLimitCountToday, suppressedToday, lastSentByKey
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         dayStartedAt = try values.decode(Date.self, forKey: .dayStartedAt)
         sentToday = try values.decode(Int.self, forKey: .sentToday)
+        dailyLimitCountToday = try values.decodeIfPresent(
+            Int.self, forKey: .dailyLimitCountToday
+        ) ?? sentToday
         suppressedToday = try values.decodeIfPresent(Int.self, forKey: .suppressedToday) ?? 0
         lastSentByKey = try values.decode([String: Date].self, forKey: .lastSentByKey)
     }
@@ -63,22 +72,26 @@ public struct AgentNotificationLimiter: Sendable {
         key: String,
         now: Date = Date(),
         cooldown: TimeInterval = defaultCooldown,
-        dailyLimit: AgentNotificationDailyLimit = .defaultValue
+        dailyLimit: AgentNotificationDailyLimit = .defaultValue,
+        countsTowardDailyLimit: Bool = true
     ) -> Bool {
         if !Calendar.current.isDate(now, inSameDayAs: state.dayStartedAt)
             || now < state.dayStartedAt {
             state.dayStartedAt = now
             state.sentToday = 0
+            state.dailyLimitCountToday = 0
             state.suppressedToday = 0
         }
         if let last = state.lastSentByKey[key], now.timeIntervalSince(last) < cooldown {
             return false
         }
-        if dailyLimit != .unlimited, state.sentToday >= dailyLimit.rawValue {
+        if countsTowardDailyLimit, dailyLimit != .unlimited,
+           state.dailyLimitCountToday >= dailyLimit.rawValue {
             state.suppressedToday += 1
             return false
         }
         state.sentToday += 1
+        if countsTowardDailyLimit { state.dailyLimitCountToday += 1 }
         state.lastSentByKey[key] = now
         state.lastSentByKey = state.lastSentByKey.filter {
             now.timeIntervalSince($0.value) < 7 * 24 * 60 * 60

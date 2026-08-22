@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>SYSX</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.5.23</string>
+	<string>0.5.24</string>
 	<key>CFBundleVersion</key>
-	<string>83</string>
+	<string>84</string>
 	<key>NSSystemExtensionUsageDescription</key>
 	<string>EgressView monitors outbound connection metadata without reading application content or blocking traffic.</string>
 	<key>NetworkExtension</key>

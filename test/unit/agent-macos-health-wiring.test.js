@@ -14,6 +14,14 @@ const probe = fs.readFileSync(
   path.join(root, 'apps/agent-macos/Xcode/Host/SystemExtensionHealthProbe.swift'),
   'utf8'
 );
+const collector = fs.readFileSync(
+  path.join(root, 'apps/agent-macos/Xcode/Host/FullMonitoringCollector.swift'),
+  'utf8'
+);
+const mainWindow = fs.readFileSync(
+  path.join(root, 'apps/agent-macos/Xcode/Host/ObservationWindowController.swift'),
+  'utf8'
+);
 
 describe('macOS Agent monitoring health wiring', () => {
   it('does not diagnose silence while monitoring is paused', () => {
@@ -53,6 +61,18 @@ describe('macOS Agent monitoring health wiring', () => {
   it('clears a stall when real observations resume', () => {
     assert.match(controller, /recoveryHandler:[\s\S]*?gateState\.stall = nil/);
     assert.match(controller, /recoveryHandler:[\s\S]*?statusHandler\(\.fullActive\)/);
+  });
+
+  it('shows the first-connection wait only before monitoring has ever produced data', () => {
+    assert.match(controller, /fullStarting\(waitingForFirstConnection: Bool\)/);
+    assert.match(collector, /waitingForFirstConnection: try store\.monitoringStartedAt\(\) == nil/);
+    assert.match(controller, /waitingForFirstConnection[\s\S]*Waiting for the first connection/);
+  });
+
+  it('shows the durable monitoring start beside storage without the coverage paragraph', () => {
+    assert.match(mainWindow, /storage\.monitoringStartedAt/);
+    assert.match(mainWindow, /Monitoring started: %@/);
+    assert.doesNotMatch(mainWindow, /AgentCoverageNote\(coverage:/);
   });
 
   it('ignores callbacks from an older properties request', () => {

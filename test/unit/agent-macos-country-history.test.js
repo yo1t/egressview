@@ -57,4 +57,9 @@ describe('macOS Agent all-time country history', () => {
     assert.match(globe, /row\.lastProcessName/);
     assert.match(globe, /row\.connectionCount/);
   });
+
+  it('orders destination countries by access count and keeps globe controls translucent', () => {
+    assert.match(store, /ORDER BY connection_count DESC, last_observed_at DESC/);
+    assert.match(globe, /controlBackgroundColor\)\.opacity\(0\.45\)/);
+  });
 });

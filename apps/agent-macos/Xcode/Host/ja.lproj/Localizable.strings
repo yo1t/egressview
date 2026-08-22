@@ -93,6 +93,7 @@
 "Unlimited" = "無制限";
 "%lld per day" = "1日%lld件";
 "The same cause is notified at most once per hour. New threat matches are grouped." = "同じ原因は1時間に1回まで通知します。新しい脅威の一致はまとめて通知します。";
+"Network monitoring problems do not use the daily limit, but their one-hour duplicate suppression still applies." = "ネットワーク監視の問題は日次上限の対象外ですが、同じ原因の1時間重複抑制は適用されます。";
 "Today: %lld attempted · %lld suppressed by the daily limit" = "今日: %lld件試行・日次上限により%lld件抑制";
 "macOS Notification Center" = "macOS通知センター";
 "Permission will be requested when the first notification needs to be shown." = "最初の通知が必要になった時点で許可を求めます。";
@@ -351,6 +352,8 @@
 "Stop the globe where it is" = "地球儀をその位置で止めます";
 "Turn the globe so the far side comes round" = "地球儀を回して、裏側を手前に出します";
 "Network monitoring started. Waiting for the first connection." = "ネットワーク監視を開始しました。最初の通信を待っています。";
+"Network monitoring started" = "ネットワーク監視を開始しました";
+"Monitoring started: %@" = "監視の開始日時：%@";
 "Nothing is being recorded. The update needs a restart of macOS before monitoring resumes." = "記録が行われていません。更新を反映するには macOS の再起動が必要です。";
 "EgressView: Starting" = "EgressView: 開始中";
 "EgressView: Not recording" = "EgressView: 記録していません";

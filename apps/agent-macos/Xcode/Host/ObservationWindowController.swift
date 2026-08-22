@@ -1405,79 +1405,6 @@ private struct AgentRolledUpHistoryNote: View {
     }
 }
 
-/// Says which parts of the period nobody was watching.
-///
-/// Without this, the charts below present an unwatched hour and a quiet hour
-/// identically, and the reader takes the empty chart as evidence that nothing
-/// happened -- the one conclusion the data cannot support.
-private struct AgentCoverageNote: View {
-    let coverage: CoverageSummary
-
-    private static let clock: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter
-    }()
-
-    private static func duration(_ seconds: TimeInterval) -> String {
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = seconds >= 3600 ? [.hour, .minute] : [.minute]
-        formatter.unitsStyle = .short
-        formatter.maximumUnitCount = 2
-        return formatter.string(from: max(60, seconds)) ?? ""
-    }
-
-    var body: some View {
-        if !coverage.isComplete {
-            Label {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(headline).fontWeight(.medium)
-                    if let detail {
-                        Text(detail)
-                    }
-                }
-            } icon: {
-                Image(systemName: coverage.isEmpty ? "exclamationmark.triangle" : "clock.badge.questionmark")
-            }
-            .font(.callout)
-            .foregroundStyle(coverage.isEmpty ? Color.orange : Color.secondary)
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.orange.opacity(coverage.isEmpty ? 0.12 : 0.07))
-            )
-        }
-    }
-
-    private var headline: String {
-        if coverage.isEmpty {
-            return L("Nothing in this period was monitored. The charts below are empty because there is no record, not because there was no traffic.")
-        }
-        return L("Only %lld%% of this period was monitored. Anything outside that is missing from the charts below, not absent from the network.",
-                 Int((coverage.share * 100).rounded()))
-    }
-
-    private var detail: String? {
-        var parts: [String] = []
-        if coverage.asleep > 60 {
-            parts.append(L("%@ of it the Mac was asleep, which is not a fault and not a gap in monitoring.",
-                           Self.duration(coverage.asleep)))
-        }
-        if let first = coverage.firstCovered, coverage.startedInsidePeriod {
-            parts.append(L("Monitoring started at %@. Connections already open at that moment were never seen.",
-                           Self.clock.string(from: first)))
-        }
-        if let longest = coverage.gaps.first {
-            parts.append(L("Longest unmonitored stretch: %1$@ from %2$@.",
-                           Self.duration(longest.duration),
-                           Self.clock.string(from: longest.start)))
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " ")
-    }
-}
-
 /// Says what the chart cannot show, rather than letting the gaps read as quiet.
 private struct AgentPartialCoverageNote: View {
     let count: Int
@@ -1561,12 +1488,16 @@ private struct AgentOverviewPanel: View {
                     Text(storageDescription(storage))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if let startedAt = storage.monitoringStartedAt {
+                        Text(L(
+                            "Monitoring started: %@",
+                            Self.monitoringStartFormatter.string(from: startedAt)
+                        ))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
                 }
             }
-
-            // Coverage sits with the counts, not below the charts, because it
-            // is what tells the reader whether the counts mean anything.
-            AgentCoverageNote(coverage: coverage)
 
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 130), spacing: 10)],
@@ -1620,6 +1551,13 @@ private struct AgentOverviewPanel: View {
             size
         )
     }
+
+    private static let monitoringStartFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy/MM/dd HH:mm"
+        return formatter
+    }()
 
     private func tile(_ title: String, _ value: String, _ symbol: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1975,8 +1913,12 @@ private struct AgentGlobeChart: View {
                             .padding(8)
                             .background(
                                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .fill(.thinMaterial)
+                                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.45))
                             )
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+                            }
                             .padding(6)
                     }
                     .accessibilityElement()

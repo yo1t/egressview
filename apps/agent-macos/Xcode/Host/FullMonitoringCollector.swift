@@ -253,7 +253,9 @@ final class FullMonitoringCollector {
                 statusHandler(.fullActive)
             } else if !reportedActive, !reportedStarting {
                 reportedStarting = true
-                statusHandler(.fullStarting)
+                statusHandler(.fullStarting(
+                    waitingForFirstConnection: try store.monitoringStartedAt() == nil
+                ))
             }
         } catch {
             errorHandler(error)
