@@ -1,105 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 
-  <!-- English landing page -->
+  <!-- One document carries both languages, so there is one URL to list.
+       index.ja.html is a redirect and is deliberately not listed. -->
   <url>
-    <loc>https://yo1t.github.io/egressview/</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/"/>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/index.ja.html"/>
-    <lastmod>2026-06-14</lastmod>
+    <loc>https://www.egressview.com/</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
 
-  <!-- Japanese landing page -->
+  <!-- Downloads live on the distribution host, which serves its own page. -->
   <url>
-    <loc>https://yo1t.github.io/egressview/index.ja.html</loc>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/index.ja.html"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/"/>
-    <lastmod>2026-06-14</lastmod>
+    <loc>https://dl.egressview.com/</loc>
     <changefreq>weekly</changefreq>
-    <priority>0.9</priority>
-  </url>
-
-  <!-- Yamaha RTX setup guide (English) -->
-  <url>
-    <loc>https://yo1t.github.io/egressview/docs/setup-yamaha</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/setup-yamaha"/>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/setup-yamaha.ja"/>
-    <lastmod>2026-06-07</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-
-  <!-- Yamaha RTX setup guide (Japanese) -->
-  <url>
-    <loc>https://yo1t.github.io/egressview/docs/setup-yamaha.ja</loc>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/setup-yamaha.ja"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/setup-yamaha"/>
-    <lastmod>2026-06-07</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-
-  <!-- ASUS router setup guide (English) -->
-  <url>
-    <loc>https://yo1t.github.io/egressview/docs/setup-asus</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/setup-asus"/>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/setup-asus.ja"/>
-    <lastmod>2026-06-06</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-
-  <!-- ASUS router setup guide (Japanese) -->
-  <url>
-    <loc>https://yo1t.github.io/egressview/docs/setup-asus.ja</loc>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/setup-asus.ja"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/setup-asus"/>
-    <lastmod>2026-06-06</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-
-  <!-- REST API reference (English) -->
-  <url>
-    <loc>https://yo1t.github.io/egressview/docs/api-reference</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/api-reference"/>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/api-reference.ja"/>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-  </url>
-
-  <!-- REST API reference (Japanese) -->
-  <url>
-    <loc>https://yo1t.github.io/egressview/docs/api-reference.ja</loc>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/api-reference.ja"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/api-reference"/>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-  </url>
-
-  <!-- Architecture guide (English) -->
-  <url>
-    <loc>https://yo1t.github.io/egressview/docs/architecture</loc>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/architecture"/>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/architecture.ja"/>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-  </url>
-
-  <!-- Architecture guide (Japanese) -->
-  <url>
-    <loc>https://yo1t.github.io/egressview/docs/architecture.ja</loc>
-    <xhtml:link rel="alternate" hreflang="ja" href="https://yo1t.github.io/egressview/docs/architecture.ja"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yo1t.github.io/egressview/docs/architecture"/>
-    <lastmod>2026-07-18</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.8</priority>
   </url>
 
 </urlset>
