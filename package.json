@@ -92,6 +92,8 @@
     "mcp:publication-gate": "node scripts/check-mcp-publication-gate.js",
     "offline:bundle": "node scripts/build-offline-bundle.js",
     "offline:verify": "node scripts/verify-offline-bundle.js",
+    "release:publish": "node scripts/publish-signed-release.js",
+    "release:verify-published": "node scripts/verify-published-release.js",
     "release:fingerprint": "node scripts/release-key-fingerprint.js",
     "agent:publish": "node scripts/publish-agent-release.js",
     "gen:demo-db": "node scripts/gen-demo-db.js",
