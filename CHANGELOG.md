@@ -4,6 +4,23 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.29
+
+**When an update fails to restart the agent, that now leaves a trace.** On
+2026-08-18 a Mac recorded nothing for thirteen and a half hours; the outage
+began at an install and ended at the next one, and the installer's relaunch
+failing is the most likely reason — but the script discarded the result, so
+there was nothing to examine afterwards.
+
+The installer now writes to `/var/log/egressview-agent-install.log`: which user
+it tried to launch as, what the launch returned, and whether the expected build
+is running two seconds and ten seconds later. One check cannot tell "never
+started" from "started and died at once"; two can.
+
+**A failed relaunch still does not fail the install.** The app is in
+Applications and opening it by hand works, and turning a fixable state into an
+unfixable one helps nobody.
+
 ### Agent for Mac 0.5.28
 
 **The rehearsal switch fires once and clears itself.** Asking for the

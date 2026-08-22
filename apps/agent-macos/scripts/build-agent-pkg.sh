@@ -59,8 +59,17 @@ VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_P
 
 # The file name carries the agent's own version, never the Hub's. They are
 # separate release lines.
+#
+# The name uses the short version, so rebuilding the same short version with a
+# higher build collides here. That is a naming collision and nothing more:
+# `installd` refuses a package whose **CFBundleVersion** matches what is already
+# installed, and does not care about the short version. Measured 2026-08-22 --
+# 0.5.29 build 91 installed cleanly over 0.5.29 build 90.
+#
+# So for a trip to the machine, bump the build and delete the previous file.
+# A user-facing version does not have to be spent on every look.
 PKG_PATH="$DIST_DIR/egressview-agent-$VERSION.pkg"
-[[ -e "$PKG_PATH" ]] && fail "$PKG_PATH already exists. Remove it or bump the version."
+[[ -e "$PKG_PATH" ]] && fail "$PKG_PATH already exists. Remove it, or bump CFBundleVersion and remove it."
 
 # The payload is the app alone, installed into /Applications.
 PAYLOAD_DIR="$WORK_DIR/payload"
@@ -91,13 +100,72 @@ PREINSTALL
 
 # Started as the user who is installing, not as root: an agent running as root
 # would have a different container and no menu bar.
+#
+# And the result is written down. On 2026-08-18 a Mac recorded nothing for
+# thirteen and a half hours; the outage began at a `.pkg` install and ended at
+# the next one, and this relaunch failing is the most likely reason. `|| true`
+# left nothing to check afterwards, so the next occurrence would have produced
+# the same empty hands.
+#
+# Recording only. A failed relaunch must not fail the install: the app is in
+# /Applications and opening it by hand works, and turning a fixable state into
+# an unfixable one helps nobody.
 cat > "$SCRIPTS_DIR/postinstall" <<'POSTINSTALL'
 #!/bin/bash
-CONSOLE_USER=$(/usr/bin/stat -f '%Su' /dev/console)
-if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
-    CONSOLE_UID=$(/usr/bin/id -u "$CONSOLE_USER")
-    /bin/launchctl asuser "$CONSOLE_UID" /usr/bin/open -a '/Applications/EgressView Agent.app' || true
+# Never fail the install because of what is below.
+set +e
+
+LOG=/var/log/egressview-agent-install.log
+APP='/Applications/EgressView Agent.app'
+EXECUTABLE="$APP/Contents/MacOS/EgressView Agent"
+EXPECTED_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist" 2>/dev/null)
+
+note() { printf '%s postinstall %s\n' "$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >> "$LOG" 2>/dev/null; }
+
+# Any agent process, wherever it was launched from -- then the path is compared.
+# Matching only the expected path would hide the case that matters: a copy
+# running from somewhere else reads as "nothing is running" when the truth is
+# "the wrong version is running", and that distinction is what the 2026-08-18
+# outage turned on.
+probe() {
+    local when=$1 pid path build found=0
+    for pid in $(/usr/bin/pgrep -f 'EgressView Agent.app/Contents/MacOS/EgressView Agent' 2>/dev/null); do
+        found=1
+        path=$(/bin/ps -o comm= -p "$pid" 2>/dev/null)
+        if [ "$path" = "$EXECUTABLE" ]; then
+            build="$EXPECTED_BUILD"
+            note "probe=${when}s pid=$pid build=$build path=expected"
+        else
+            # Its own bundle decides its build, not the one just installed.
+            build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
+                "${path%/Contents/MacOS/*}/Contents/Info.plist" 2>/dev/null)
+            note "probe=${when}s pid=$pid build=${build:-unknown} expected=$EXPECTED_BUILD path=$path UNEXPECTED_PATH"
+        fi
+    done
+    [ "$found" = 0 ] && note "probe=${when}s pid=none"
+    return 0
+}
+
+note "begin expected_build=${EXPECTED_BUILD:-unknown}"
+
+CONSOLE_USER=$(/usr/bin/stat -f '%Su' /dev/console 2>/dev/null)
+CONSOLE_UID=$(/usr/bin/id -u "$CONSOLE_USER" 2>/dev/null)
+note "console_user=${CONSOLE_USER:-none} console_uid=${CONSOLE_UID:-none}"
+
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ] && [ -n "$CONSOLE_UID" ]; then
+    /bin/launchctl asuser "$CONSOLE_UID" /usr/bin/open -a "$APP"
+    note "open exit=$?"
+else
+    note "open skipped: no usable console user"
 fi
+
+# Twice, because one probe cannot tell "never launched" from "launched and died
+# at once": absent at 2s and 10s means it never started, present then absent
+# means it crashed immediately, and the middle case is the easy one to miss.
+sleep 2;  probe 2
+sleep 8;  probe 10
+
+note "end"
 exit 0
 POSTINSTALL
 
