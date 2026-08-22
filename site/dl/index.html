@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EgressView Agent for macOS — Downloads</title>
+<meta name="description" content="Download the EgressView Agent for macOS. Signed, notarised, and verifiable against a published checksum.">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='114' fill='%230b1424'/%3E%3Cg fill='%234d94ff'%3E%3Crect x='86' y='86' width='80' height='340' rx='19'/%3E%3Crect x='86' y='86' width='210' height='80' rx='19'/%3E%3Crect x='86' y='216' width='130' height='80' rx='19'/%3E%3Crect x='86' y='346' width='210' height='80' rx='19'/%3E%3C/g%3E%3Ccircle cx='386' cy='126' r='40' fill='%2324d6a2'/%3E%3Ccircle cx='386' cy='256' r='25' fill='%234d94ff'/%3E%3Ccircle cx='386' cy='386' r='25' fill='%234d94ff'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0d1117; --surface:#161b22; --surface-2:#1c2230; --border:#30363d;
+    --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --accent-hover:#79c0ff;
+    --green:#3fb950; --mark:#4d94ff; --dot:#24d6a2;
+    --radius:14px; --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,
+      "Hiragino Sans","Noto Sans JP",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent); text-decoration:none}
+  a:hover{color:var(--accent-hover); text-decoration:underline}
+  .wrap{max-width:880px; margin:0 auto; padding:0 24px}
+
+  /* Aurora: two soft washes, no animation. A download page should feel
+     still -- movement here would be decoration competing with the one
+     button that matters. */
+  .hero{position:relative; overflow:hidden; border-bottom:1px solid var(--border)}
+  .hero::before,.hero::after{
+    content:""; position:absolute; border-radius:50%; filter:blur(90px);
+    opacity:.28; pointer-events:none;
+  }
+  .hero::before{width:520px;height:520px;top:-220px;left:-140px;background:#1f6feb}
+  .hero::after{width:420px;height:420px;top:-160px;right:-120px;background:#1d9c78}
+  .hero .wrap{position:relative; padding:72px 24px 60px}
+
+  .brand{display:flex; align-items:center; gap:14px; margin-bottom:40px}
+  .brand svg{width:40px;height:40px;border-radius:11px;display:block;
+    box-shadow:0 2px 14px rgba(0,0,0,.5)}
+  .brand b{font-size:1.05rem; font-weight:600; letter-spacing:.2px}
+  .brand span{color:var(--muted); font-size:1.05rem}
+
+  h1{font-size:clamp(2rem,5.5vw,2.9rem); line-height:1.15; margin:0 0 14px;
+     letter-spacing:-.02em; font-weight:650}
+  .lede{font-size:1.12rem; color:var(--muted); margin:0 0 36px; max-width:56ch}
+  .lede strong{color:var(--text); font-weight:600}
+
+  .cta{display:flex; flex-wrap:wrap; gap:14px; align-items:center}
+  .btn{
+    display:inline-flex; align-items:center; gap:10px;
+    background:var(--accent); color:#06101f; font-weight:650; font-size:1.02rem;
+    padding:14px 26px; border-radius:var(--radius); border:1px solid transparent;
+    transition:transform .12s ease, background .12s ease;
+  }
+  .btn:hover{background:var(--accent-hover); color:#06101f; text-decoration:none;
+    transform:translateY(-1px)}
+  .btn:active{transform:translateY(0)}
+  .btn svg{width:18px;height:18px;flex:none}
+  .btn-meta{color:var(--muted); font-size:.9rem}
+  .btn-meta code{font-family:var(--mono); color:var(--text)}
+
+  section{padding:56px 0}
+  section+section{border-top:1px solid var(--border)}
+  h2{font-size:1.32rem; margin:0 0 20px; font-weight:620; letter-spacing:-.01em}
+
+  .grid{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+  .card{background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); padding:20px 22px}
+  .card h3{margin:0 0 8px; font-size:1rem; font-weight:620}
+  .card p{margin:0; color:var(--muted); font-size:.93rem}
+
+  .verify{background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); overflow:hidden}
+  .verify-head{padding:16px 20px; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; gap:9px; font-size:.93rem; color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--green);flex:none}
+  pre{margin:0; padding:20px; overflow-x:auto; font-family:var(--mono);
+    font-size:.86rem; line-height:1.75; color:var(--text); background:var(--surface-2)}
+  pre .c{color:var(--muted)}
+
+  ol.steps{margin:0; padding-left:1.25rem; color:var(--muted)}
+  ol.steps li{margin-bottom:10px}
+  ol.steps strong{color:var(--text); font-weight:600}
+
+  footer{border-top:1px solid var(--border); padding:34px 0 56px;
+    color:var(--muted); font-size:.9rem}
+  footer .wrap{display:flex; flex-wrap:wrap; gap:10px 22px; align-items:center}
+
+  @media (max-width:560px){
+    .hero .wrap{padding:52px 24px 44px}
+    .btn{width:100%; justify-content:center}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="brand">
+      <svg viewBox="0 0 512 512" role="img" aria-label="EgressView">
+        <rect width="512" height="512" rx="114" fill="#0b1424"/>
+        <g fill="#4d94ff">
+          <rect x="86" y="86" width="80" height="340" rx="19"/>
+          <rect x="86" y="86" width="210" height="80" rx="19"/>
+          <rect x="86" y="216" width="130" height="80" rx="19"/>
+          <rect x="86" y="346" width="210" height="80" rx="19"/>
+        </g>
+        <circle cx="386" cy="126" r="40" fill="#24d6a2"/>
+        <circle cx="386" cy="256" r="25" fill="#4d94ff"/>
+        <circle cx="386" cy="386" r="25" fill="#4d94ff"/>
+      </svg>
+      <b>EgressView</b><span>Agent for macOS</span>
+    </div>
+
+    <h1>Which app just talked<br>to the internet?</h1>
+    <p class="lede">Your router shows what left the house. It cannot show which
+      program sent it. The agent reports the process behind every outbound
+      connection from your Mac — <strong>metadata only, never payloads, and it
+      blocks nothing.</strong></p>
+
+    <div class="cta">
+      <a class="btn" id="download" href="/macos/manifest.json">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M4 21h16"/>
+        </svg>
+        <span id="download-label">Download for macOS</span>
+      </a>
+      <span class="btn-meta" id="meta">Apple silicon · macOS 13 or later</span>
+    </div>
+  </div>
+</header>
+
+<main>
+<section class="wrap">
+  <h2>What you get</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>The name behind the address</h3>
+      <p>An unfamiliar destination arrives with the program that reached for it,
+        not just an IP.</p>
+    </div>
+    <div class="card">
+      <h3>It says what it does not know</h3>
+      <p>Gaps in monitoring are shown as gaps. An empty threat list is never
+        presented as "nothing found" unless something was actually checked.</p>
+    </div>
+    <div class="card">
+      <h3>Nothing is sent to be looked up</h3>
+      <p>Threat lists and locations come to your Mac and the matching happens
+        here. No destination of yours is sent anywhere to be identified.</p>
+    </div>
+    <div class="card">
+      <h3>Works on its own</h3>
+      <p>An EgressView Hub adds fleet-wide history and threat feeds, but the
+        agent is useful without one.</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>Verify it before you trust it</h2>
+  <div class="verify">
+    <div class="verify-head"><span class="dot"></span>
+      Signed by Developer ID, notarised by Apple, and stapled.</div>
+<pre><span class="c"># the checksum published in the update manifest</span>
+curl -s https://dl.egressview.com/macos/manifest.json
+
+<span class="c"># the file you actually downloaded — the two must match</span>
+shasum -a 256 ~/Downloads/egressview-agent-<span id="v">VERSION</span>.pkg
+
+<span class="c"># and what macOS itself thinks of it</span>
+spctl --assess --type install --verbose=4 ~/Downloads/egressview-agent-<span id="v2">VERSION</span>.pkg</pre>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>Installing</h2>
+  <ol class="steps">
+    <li>Open the <strong>.pkg</strong> and follow the installer. It places the
+      agent in Applications and starts it.</li>
+    <li>Choose <strong>Network monitoring</strong> from the menu bar icon. macOS
+      asks you to approve a System Extension — once.</li>
+    <li>Optional: enrol with an EgressView Hub. <strong>Sending is off until you
+      complete that</strong>, and the agent shows the destination and exactly
+      what will and will not be sent first.</li>
+  </ol>
+  <p style="color:var(--muted); margin:22px 0 0">Updates are offered by the agent
+    itself and install the same way. Approving the System Extension again is not
+    required. Full instructions are in the
+    <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.md">install
+    guide</a>.</p>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>EgressView</span>
+    <a href="https://github.com/yo1t/egressview">Source</a>
+    <a href="https://github.com/yo1t/egressview/releases">Release notes</a>
+    <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.md">Install guide</a>
+    <a href="https://egressview.com/">egressview.com</a>
+  </div>
+</footer>
+
+<script>
+// The version, size and link come from the manifest the agent itself polls, so
+// this page cannot drift from what is actually being served.
+fetch('/macos/manifest.json', {cache: 'no-store'})
+  .then(r => r.ok ? r.json() : Promise.reject(r.status))
+  .then(m => {
+    const pkg = (m.packages || []).find(p => p.arch === 'arm64') || (m.packages || [])[0];
+    if (!pkg) return;
+    const a = document.getElementById('download');
+    a.href = pkg.url;
+    document.getElementById('download-label').textContent =
+      'Download ' + m.version + ' for macOS';
+    const mb = (pkg.sizeBytes / 1048576).toFixed(1);
+    document.getElementById('meta').textContent =
+      'Apple silicon · macOS 13 or later · ' + mb + ' MB';
+    document.getElementById('v').textContent = m.version;
+    document.getElementById('v2').textContent = m.version;
+  })
+  .catch(() => {
+    // Leave the fallback text. A page that invents a version number when it
+    // cannot reach the manifest would be worse than one that says nothing.
+  });
+</script>
+</body>
+</html>
