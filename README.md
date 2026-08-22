@@ -4,13 +4,19 @@
 
 Is your smart TV phoning home to unexpected servers? Are your IP cameras, IoT appliances, or NAS boxes making connections you never authorised? EgressView answers these questions by passively monitoring every outbound connection from every device on your LAN, then turning that data into an investigation workflow.
 
-No new hardware. No inline traffic interception. It reads the NAT session tables your existing Yamaha RTX or Cisco IOS router already keeps, so nothing sits in the path of your traffic and nothing slows down.
+**There are two ways in, and either works on its own.**
+
+**From your router.** No new hardware, no inline traffic interception: it reads the NAT session tables your existing Yamaha RTX or Cisco IOS router already keeps, so nothing sits in the path of your traffic and nothing slows down. This is how you see every device on the LAN, including the ones that cannot run software.
+
+**From a Mac.** The [EgressView Agent for macOS](apps/agent-macos/README.md) is a signed, notarised app that watches that Mac's own outbound connections and names **which application** made each one — something a router cannot tell you. **It needs no router and no server**: run it alone and it keeps its record on that Mac.
+
+Together they make one record of the whole network. **If you have no supported router, the agent alone is still worth your evening.**
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
-![Release](https://img.shields.io/badge/release-v2.0.2-3fb950)
+![Release](https://img.shields.io/badge/release-v2.0.3-3fb950)
 
-> 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [Project Page](https://yo1t.github.io/egressview/) | 📋 [Changelog](CHANGELOG.md) · [Releases](https://github.com/yo1t/egressview/releases)
+> 🇯🇵 [日本語版 README はこちら](README.ja.md) | 🌐 [egressview.com](https://www.egressview.com/) | ⬇️ [Download the Mac agent](https://dl.egressview.com/) | 📋 [Changelog](CHANGELOG.md) · [Releases](https://github.com/yo1t/egressview/releases)
 
 ---
 

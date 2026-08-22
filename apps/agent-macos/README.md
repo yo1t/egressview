@@ -23,24 +23,55 @@ filesystem exception grants access to your home directory or AWS CLI files.
 
 ## Is this for you?
 
-Stop here if any of these is a no. Nothing below will work around them.
+**One requirement, and it is the only one that can stop you.**
 
 | You need | Why |
 |---|---|
 | **macOS 13 or newer** | The System Extension used for network monitoring |
-| **An EgressView Hub you administer, running 1.9.0 or newer** | Enrolment needs a Hub that can approve it. **Hub 1.8.0 and older cannot accept this agent at all** — they have no agent endpoint. **Threat information needs Hub 1.10.0 or newer**; without it the screen says so rather than showing "no threats" |
-| **Physical access to that Hub's settings** | Registration is completed by an administrator approving your Mac, not by the Mac itself |
 
-Roughly ten minutes, most of which is macOS asking you to approve things.
+**A Hub is not required.** Run the agent alone and it watches this Mac's
+outbound connections, names the application behind each one, draws them, and
+keeps the record on this Mac. Sending anything to a Hub is off until you turn
+it on.
+
+Roughly five minutes on your own, most of which is macOS asking you to approve
+things.
+
+### What a Hub adds, if you have one
+
+Everything here is optional. Skip this section entirely if you only want to
+watch one Mac.
+
+| If you want | You need |
+|---|---|
+| This Mac's observations stored alongside your router's, as one record | **A Hub you administer, running 1.9.0 or newer.** **Hub 1.8.0 and older cannot accept this agent at all** — they have no agent endpoint |
+| Threat information supplied by the Hub | **Hub 1.10.0 or newer.** Without it the screen says so rather than showing "no threats" |
+| To enrol this Mac at all | **Access to that Hub's settings.** Registration is completed by an administrator approving your Mac, not by the Mac itself |
+
+**Without a Hub you can still have threat information**: there is a standalone
+setting that downloads the same public lists directly. It is off by default and
+described under [What leaves your Mac, and when](#what-leaves-your-mac-and-when) below, including what
+the feed operators learn.
 
 ## Install
 
-1. Download `egressview-agent-<version>.pkg` from the
-   [releases page](https://github.com/yo1t/egressview/releases) and open it.
+1. Download `egressview-agent-<version>.pkg` from
+   [dl.egressview.com](https://dl.egressview.com/) and open it.
 2. Follow the installer. It puts the agent in **Applications** and starts it for
    you. The agent lives in the menu bar and has no window of its own.
 3. Choose **Network monitoring** from its menu. macOS will ask you to allow a
    System Extension; this opens System Settings, where you approve it once.
+
+**That is the whole installation.** The agent is now recording this Mac's
+outbound connections and keeping them here. Open its window from the menu to
+watch.
+
+### Connecting it to a Hub, if you have one
+
+Only if you want this Mac's observations stored alongside the rest of your
+network. Nothing has left the Mac up to this point, and nothing will until you
+finish this.
+
 4. In the Hub's settings, under the L3/L4 data source, choose **Issue an
    enrolment code**. You get six characters.
 5. Back in the agent menu, choose **Hub delivery...**, enter the Hub's address
