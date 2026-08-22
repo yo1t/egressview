@@ -96,11 +96,10 @@
   .fit-card ul{margin:0;padding-left:1.1rem;color:var(--muted);font-size:.93rem}
   .fit-card li{margin-bottom:6px}
 
-  .shots{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
-  .shots figure{margin:0}
-  .shots img{display:block;width:100%;height:auto;border-radius:10px;border:1px solid var(--border);
-    background:var(--surface);box-shadow:0 14px 34px rgba(0,0,0,.5)}
-  .shots figcaption{margin-top:9px;color:var(--muted);font-size:.85rem}
+  .inline-shot{margin:26px 0 0}
+  .inline-shot img{display:block;width:100%;height:auto;border-radius:10px;border:1px solid var(--border);
+    background:var(--surface);box-shadow:0 16px 40px rgba(0,0,0,.5)}
+  .inline-shot figcaption{margin-top:10px;color:var(--muted);font-size:.87rem;max-width:66ch}
   ol.steps{margin:0;padding-left:1.25rem;color:var(--muted)}
   ol.steps li{margin-bottom:9px}
   ol.steps b{color:var(--text);font-weight:620}
@@ -145,35 +144,6 @@
 </header>
 
 <main>
-<section class="wrap">
-  <h2 data-ja="実物">What it looks like</h2>
-  <p class="sub" data-ja="左がMacのAgent、右がネットワーク全体のHub。">The agent on a Mac; the Hub across a whole network.</p>
-  <div class="shots">
-    <figure><img id="shot-agent" src="assets/shot-agent-en.png" data-en="assets/shot-agent-en.png" data-ja="assets/shot-agent-ja.png" loading="lazy" decoding="async" alt="EgressView Agent: a globe of destinations, which application went where, and when traffic happened">
-      <figcaption data-ja="Agent — どのアプリがどこへ、いつ">Agent — which app went where, and when</figcaption></figure>
-    <figure><img src="assets/shot-hub-graph-map.png" loading="lazy" decoding="async" alt="EgressView Hub graph map: every device on the network and the destinations they reached">
-      <figcaption data-ja="Hub — 全端末と、その通信先">Hub — every device and what it reached</figcaption></figure>
-    <figure><img src="assets/shot-hub-detection-log.png" loading="lazy" decoding="async" alt="EgressView Hub detection log listing destinations that appear on threat feeds">
-      <figcaption data-ja="Hub — 脅威フィードに載った通信先">Hub — destinations found on threat feeds</figcaption></figure>
-    <figure><img src="assets/shot-hub-devices.png" loading="lazy" decoding="async" alt="EgressView Hub device list including devices that cannot run an agent">
-      <figcaption data-ja="Hub — Agentを入れられない機器も含めて">Hub — including devices that cannot run an agent</figcaption></figure>
-  </div>
-</section>
-
-<section class="wrap">
-  <h2 data-ja="始める">Getting started</h2>
-  <p class="sub" data-ja="Agentだけなら数分です。Hubは後からでも足せます。">The agent alone takes a few minutes. The Hub can come later, or never.</p>
-  <ol class="steps">
-    <li data-ja="&lt;b&gt;ダウンロードして開く。&lt;/b&gt;署名・公証済みのインストーラです。"><b>Download and open it.</b> A signed, notarised installer.</li>
-    <li data-ja="&lt;b&gt;ネットワーク監視を承認する。&lt;/b&gt;macOSが一度だけ確認します。"><b>Approve network monitoring.</b> macOS asks once.</li>
-    <li data-ja="&lt;b&gt;それだけです。&lt;/b&gt;記録はこのMacに残り、どこへも送信しません。"><b>That is all.</b> The record stays on that Mac and is sent nowhere.</li>
-  </ol>
-  <div class="cta" style="margin-top:26px">
-    <a class="btn" href="https://dl.egressview.com/"><span data-ja="Mac用Agentを入手">Get the Mac agent</span></a>
-    <a class="btn ghost" href="https://github.com/yo1t/egressview#readme"><span data-ja="Hubを建てる">Set up the Hub</span></a>
-  </div>
-</section>
-
 <section class="wrap">
   <h2 data-ja="前提を変える">Start from a different premise</h2>
   <p class="sub" data-ja="「入らせない」だけを前提にすると、入られた瞬間に打つ手がなくなります。">If your plan is only to keep attackers out, you have no plan for the day one gets in.</p>
@@ -220,6 +190,11 @@
       </tr>
     </table>
   </div>
+  <figure class="inline-shot">
+    <img id="shot-agent" src="assets/shot-agent-en.png" data-en="assets/shot-agent-en.png" data-ja="assets/shot-agent-ja.png"
+         loading="lazy" decoding="async" alt="EgressView Agent showing which application reached which destination">
+    <figcaption data-ja="Agentの「どのアプリがどこへ」。帯の太さが接続数で、左が通信元のアプリ、右が通信先。">The agent's own answer: applications on the left, destinations on the right, ribbon width the number of connections.</figcaption>
+  </figure>
 </section>
 
 <section class="wrap">
@@ -249,6 +224,12 @@
       <div class="opt" data-ja="Yamaha RTX または Cisco IOS のルーターが必要です。">Needs a Yamaha RTX or Cisco IOS router.</div>
     </div>
   </div>
+  <figure class="inline-shot wide">
+    <img src="assets/shot-hub-graph-map.png" loading="lazy" decoding="async"
+         alt="EgressView Hub graph map: every device on the network and the destinations each reached">
+    <figcaption data-ja="Hubから見たネットワーク全体。中央が端末、外側が通信先。Agentを入れられない機器もここに出ます。">The Hub's view of a whole network: devices at the centre, destinations around them — including the ones that cannot run an agent.</figcaption>
+  </figure>
+  </div>
 </section>
 
 <section class="wrap">
@@ -268,6 +249,11 @@
       <b data-ja="分からないことを、分かったふりで表示しない">It does not present a guess as a finding</b>
       <span data-ja="照合していなければ「照合していない」と表示します。空のリストを「脅威なし」とは呼びません。">If nothing was checked, it says so. An empty list is never labelled "no threats".</span></div></div>
   </div>
+  <figure class="inline-shot wide">
+    <img src="assets/shot-hub-detection-log.png" loading="lazy" decoding="async"
+         alt="EgressView Hub detection log: destinations that appear on a threat feed, with the device that reached them">
+    <figcaption data-ja="脅威フィードに載った通信先は、到達した端末とセットで出ます。照合はあなたの機器の中で行われます。">A destination on a threat feed arrives with the device that reached it — and the matching happened on your own hardware.</figcaption>
+  </figure>
 </section>
 
 <section class="wrap">
@@ -291,6 +277,20 @@
         <li data-ja="運用を任せられるクラウドサービスが欲しい">You want a hosted service someone else operates</li>
       </ul>
     </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2 data-ja="始める">Getting started</h2>
+  <p class="sub" data-ja="Agentだけなら数分です。Hubは後からでも足せます。">The agent alone takes a few minutes. The Hub can come later, or never.</p>
+  <ol class="steps">
+    <li data-ja="&lt;b&gt;ダウンロードして開く。&lt;/b&gt;署名・公証済みのインストーラです。"><b>Download and open it.</b> A signed, notarised installer.</li>
+    <li data-ja="&lt;b&gt;ネットワーク監視を承認する。&lt;/b&gt;macOSが一度だけ確認します。"><b>Approve network monitoring.</b> macOS asks once.</li>
+    <li data-ja="&lt;b&gt;それだけです。&lt;/b&gt;記録はこのMacに残り、どこへも送信しません。"><b>That is all.</b> The record stays on that Mac and is sent nowhere.</li>
+  </ol>
+  <div class="cta" style="margin-top:26px">
+    <a class="btn" href="https://dl.egressview.com/"><span data-ja="Mac用Agentを入手">Get the Mac agent</span></a>
+    <a class="btn ghost" href="https://github.com/yo1t/egressview#readme"><span data-ja="Hubを建てる">Set up the Hub</span></a>
   </div>
 </section>
 
