@@ -32,7 +32,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-gate-${{ github.event.release.tag_name || inputs.tag || 'latest' }}
+  group: release-gate-${{ github.event.release.tag_name || inputs.tag || github.event_name }}
   cancel-in-progress: false
 
 jobs:
@@ -54,13 +54,18 @@ jobs:
           node-version: 22
 
       - name: Verify the published release
+        # A tag name reaches this job from an event, and anyone who can create a
+        # release chooses it. Interpolating it into the script would run it;
+        # through the environment it stays a value.
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ -n "${{ github.event.release.tag_name }}" ]; then
-            node scripts/verify-published-release.js --tag '${{ github.event.release.tag_name }}'
-          elif [ -n "${{ inputs.tag }}" ]; then
-            node scripts/verify-published-release.js --tag '${{ inputs.tag }}'
+          set -euo pipefail
+          TAG="${RELEASE_TAG:-${INPUT_TAG:-}}"
+          if [ -n "$TAG" ]; then
+            node scripts/verify-published-release.js --tag "$TAG"
           else
             # The scheduled sweep looks further back, so a release that was fine
             # at publication and was changed afterwards still gets noticed.

@@ -59,6 +59,34 @@ describe('release signature gate', () => {
     assert.ok(verifyAt < publishAt, 'the release must be verified before it is published');
   });
 
+  it('イベント由来のタグをシェルへ展開しない', () => {
+    // Anyone who can create a release chooses the tag name. Interpolated into
+    // a run: block it would be executed; through the environment it stays a
+    // value.
+    const yaml = fs.readFileSync(workflow, 'utf8');
+    const runBlocks = yaml.split(/^\s{6}- name:/m).filter((block) => block.includes('run: |'));
+    for (const block of runBlocks) {
+      const script = block.slice(block.indexOf('run: |'));
+      assert.equal(
+        /\$\{\{\s*(github\.event|inputs)\./.test(script), false,
+        'an event value is interpolated directly into a run: script'
+      );
+    }
+    assert.match(yaml, /RELEASE_TAG:\s*\$\{\{\s*github\.event\.release\.tag_name\s*\}\}/);
+  });
+
+  it('タグは引数として渡り、シェル語にならない', () => {
+    // execFileSync with an argv array, never a shell string, so a tag
+    // containing shell metacharacters is data.
+    for (const file of ['scripts/verify-published-release.js', 'scripts/publish-signed-release.js']) {
+      const source = fs.readFileSync(path.join(root, file), 'utf8');
+      assert.equal(/\bexecSync\b/.test(source), false, `${file} uses execSync`);
+      assert.equal(/shell:\s*true/.test(source), false, `${file} spawns a shell`);
+    }
+    const { parseArgs } = require('../../scripts/verify-published-release.js');
+    assert.equal(parseArgs(['--tag', 'v1.0.0; rm -rf /']).tag, 'v1.0.0; rm -rf /');
+  });
+
   it('タグと一致しない作業ツリーからは公開しない', () => {
     const { assertReleasableCheckout } = require('../../scripts/publish-signed-release.js');
     assert.throws(
