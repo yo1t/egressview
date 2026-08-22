@@ -196,6 +196,14 @@ restart to finish removing the System Extension.
 The sections below are for working on the agent itself. **You do not need them
 to use it.**
 
+**A build of your own still checks `dl.egressview.com` for updates.** The origin
+is compiled in, not a setting, and pointing an agent elsewhere means editing
+`AgentUpdateChecker.defaultOrigin` and rebuilding. That is deliberate: a
+settable update origin is a settable way to be handed a different binary, and
+this agent watches its own outbound traffic — where it phones home has to be
+something anyone can read off the source. The distribution CDK stack takes the
+domain as context, so hosting your own is otherwise supported.
+
 ## Development
 
 ```sh
