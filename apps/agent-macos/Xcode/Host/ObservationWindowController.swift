@@ -1928,20 +1928,27 @@ private struct AgentGlobeChart: View {
     }
 
     var body: some View {
-        AgentChartCard(
-            title: L("Where the traffic went"),
-            subtitle: model.metric == .bytes
-                ? L("Mark size is data volume")
-                : L("Mark size is the number of connections")
-        ) {
-            Picker(L("Country view"), selection: $countryView) {
-                ForEach(CountryView.allCases) { view in
-                    Text(view.title).tag(view)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L("Where the traffic went"))
+                        .font(.title3.weight(.semibold))
+                    Text(model.metric == .bytes
+                         ? L("Mark size is data volume")
+                         : L("Mark size is the number of connections"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 8)
+                Picker(L("Country view"), selection: $countryView) {
+                    ForEach(CountryView.allCases) { view in
+                        Text(view.title).tag(view)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 180)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 250)
 
             if countryView == .globe {
                 if let unavailable = model.unavailable {
@@ -1975,15 +1982,6 @@ private struct AgentGlobeChart: View {
                     .accessibilityElement()
                     .accessibilityLabel(summary)
                 }
-                if model.coverageIsPartial {
-                    Label(
-                        L("%lld%% of this period could be placed. The rest has no known location.",
-                          Int((model.placedShare * 100).rounded())),
-                        systemImage: "info.circle"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
                 if !model.visitedCountryCodes.isEmpty {
                     Button {
                         countryView = .destinations
@@ -2006,6 +2004,9 @@ private struct AgentGlobeChart: View {
                 AgentCountryHistoryList(rows: model.countryHistory)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .agentSection()
     }
 
     private func message(for reason: GlobeUnavailableReason) -> String {
