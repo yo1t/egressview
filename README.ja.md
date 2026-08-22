@@ -4,13 +4,19 @@
 
 スマートTVが見知らぬサーバーと通信していないか？IPカメラやIoT機器、NASが許可していない接続をしていないか？EgressViewは、LAN内の全デバイスが外部と行う通信をパッシブに監視し、そのデータを調査のための道具にします。
 
-追加ハードウェア不要。通信の中継・傍受もしません。既存のYamaha RTXまたはCisco IOSルーターが既に持っているNATセッションテーブルを読むだけなので、**通信経路上に何も置かず、速度も落ちません**。
+**入口は2つあり、片方だけでも使えます。**
+
+**ルーターから。** 追加ハードウェア不要、通信の中継・傍受もしません。既存のYamaha RTXまたはCisco IOSルーターが既に持っているNATセッションテーブルを読むだけなので、**通信経路上に何も置かず、速度も落ちません**。LAN内の全デバイス——ソフトウェアを動かせない機器も含めて——を見るのはこちらです。
+
+**Macから。** [EgressView Agent for macOS](apps/agent-macos/README.ja.md)は、署名・notarize済みのアプリで、そのMac自身の外向き通信を監視し、**どのアプリケーションが**行ったのかまで示します。ルーターには分からないことです。**ルーターもサーバーも不要で**、単体で動かせば記録はそのMacに残ります。
+
+両方あれば、ネットワーク全体が1つの記録になります。**対応ルーターが無くても、Agent単体で一晩を費やす価値があります。**
 
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-green)
-![Release](https://img.shields.io/badge/release-v2.0.2-3fb950)
+![Release](https://img.shields.io/badge/release-v2.0.3-3fb950)
 
-> 🇬🇧 [English README](README.md) | 🌐 [プロジェクトページ](https://yo1t.github.io/egressview/index.ja.html) | 📋 [変更履歴](CHANGELOG.md) · [リリース](https://github.com/yo1t/egressview/releases)
+> 🇬🇧 [English README](README.md) | 🌐 [egressview.com](https://www.egressview.com/) | ⬇️ [Mac用Agentを入手](https://dl.egressview.com/) | 📋 [変更履歴](CHANGELOG.md) · [リリース](https://github.com/yo1t/egressview/releases)
 
 ---
 
