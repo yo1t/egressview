@@ -491,7 +491,8 @@ final class AgentMonitoringController {
         }
         DispatchQueue.main.async {
             AgentUserNotifier.shared.notify(
-                kind: .monitoring, key: notificationKey, title: title, body: body
+                kind: .monitoring, key: notificationKey, title: title,
+                body: notificationExplanation(reason: body)
             )
         }
     }

@@ -42,6 +42,15 @@ describe('macOS Agent notifications', () => {
     assert.match(mainWindow, /case \.notifications: notificationHistoryView/);
     assert.match(mainWindow, /ForEach\(notifications\.history\)/);
     assert.match(mainWindow, /Sent to macOS/);
+    assert.match(mainWindow, /L\("Notifications today"\)/);
+  });
+
+  it('records an explicit reason in notification messages', () => {
+    assert.match(notifier, /func notificationExplanation\(reason:/);
+    assert.match(notifier, /L\("Why: %@\\n%@"/);
+    assert.match(notifier, /Network monitoring has not started because macOS approval/);
+    assert.match(notifier, /Delivery to the configured Hub failed/);
+    assert.match(notifier, /latest scan found %lld previously unnotified destinations/);
   });
 
   it('does not run connection-history queries for the notification tab', () => {
@@ -67,7 +76,7 @@ describe('macOS Agent notifications', () => {
 
   it('keeps lock-screen threat notifications aggregate-only', () => {
     const scan = notifier.slice(notifier.indexOf('private func handleThreatReport'));
-    assert.match(scan, /new destinations matched threat information/);
+    assert.match(scan, /previously unnotified destinations that matched threat information/);
     assert.doesNotMatch(scan, /candidate\.address[^\n]*body:/);
     assert.doesNotMatch(scan, /candidate\.hostname[^\n]*body:/);
   });

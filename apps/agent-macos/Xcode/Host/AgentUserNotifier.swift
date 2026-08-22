@@ -3,6 +3,14 @@ import EgressViewAgentCore
 import Foundation
 @preconcurrency import UserNotifications
 
+/// Keeps every notification explicit about the event that caused it.
+/// An action alone (for example, "open Settings") does not tell the user why
+/// the Agent interrupted them, especially when it is read later in History.
+func notificationExplanation(reason: String, action: String? = nil) -> String {
+    guard let action, !action.isEmpty else { return L("Why: %@", reason) }
+    return L("Why: %@\n%@", reason, action)
+}
+
 struct AgentNotificationHistoryEntry: Codable, Identifiable, Equatable {
     let id: UUID
     let date: Date
@@ -127,7 +135,10 @@ final class AgentUserNotifier: ObservableObject {
         _ = notify(
             kind: .monitoring, key: "test-\(UUID().uuidString)",
             title: L("EgressView Agent test notification"),
-            body: L("Notifications are configured for this Mac."),
+            body: notificationExplanation(
+                reason: L("You selected Send test notification."),
+                action: L("Notifications are configured for this Mac.")
+            ),
             cooldown: 0, bypassPreference: true, bypassLimits: true
         )
     }
@@ -242,20 +253,41 @@ final class AgentNotificationCoordinator {
         let issue: (String, String)?
         switch status {
         case .approvalRequired:
-            issue = (L("Network monitoring needs approval"), L("Open EgressView Agent and approve network monitoring in System Settings."))
+            issue = (
+                L("Network monitoring needs approval"),
+                notificationExplanation(
+                    reason: L("Network monitoring has not started because macOS approval is still pending."),
+                    action: L("Open EgressView Agent and approve network monitoring in System Settings.")
+                )
+            )
         case .rebootRequired:
-            issue = (L("Restart required for monitoring"), L("Restart this Mac to finish enabling network monitoring."))
+            issue = (
+                L("Restart required for monitoring"),
+                notificationExplanation(
+                    reason: L("macOS requires a restart before the approved network extension can monitor connections."),
+                    action: L("Restart this Mac to finish enabling network monitoring.")
+                )
+            )
         case .updateNotRunning, .notRecording:
             return
         case .failed:
-            issue = (L("Network monitoring needs attention"), L("Open EgressView Agent to review the monitoring error."))
+            issue = (
+                L("Network monitoring needs attention"),
+                notificationExplanation(
+                    reason: L("Network monitoring entered a failed state and may not be recording connections."),
+                    action: L("Open EgressView Agent to review the monitoring error.")
+                )
+            )
         case .fullActive, .lightweight:
             if monitoringNeedsAttention {
                 monitoringNeedsAttention = false
                 _ = notifier.notify(
                     kind: .recovery, key: "monitoring-recovered",
                     title: L("Network monitoring recovered"),
-                    body: L("EgressView Agent is recording connections again.")
+                    body: notificationExplanation(
+                        reason: L("Network monitoring previously needed attention and is now active again."),
+                        action: L("EgressView Agent is recording connections again.")
+                    )
                 )
             }
             return
@@ -275,20 +307,47 @@ final class AgentNotificationCoordinator {
         let issue: (String, String, String)?
         switch state {
         case .unavailable:
-            issue = ("unavailable", L("Hub delivery is delayed"), L("Observations remain on this Mac and will be retried at low frequency."))
+            issue = (
+                "unavailable", L("Hub delivery is delayed"),
+                notificationExplanation(
+                    reason: L("Delivery to the configured Hub failed and a retry was scheduled."),
+                    action: L("Observations remain on this Mac and will be retried at low frequency.")
+                )
+            )
         case .authorizationRequired:
-            issue = ("authorization", L("Hub authorization is required"), L("Open EgressView Agent and enroll this Mac with the Hub again."))
+            issue = (
+                "authorization", L("Hub authorization is required"),
+                notificationExplanation(
+                    reason: L("The Hub authorization expired or was revoked, so queued observations cannot be sent."),
+                    action: L("Open EgressView Agent and enroll this Mac with the Hub again.")
+                )
+            )
         case .dataDropped:
-            issue = ("dropped", L("Some Hub observations were not queued"), L("Open EgressView Agent to review the Hub delivery counters."))
+            issue = (
+                "dropped", L("Some Hub observations were not queued"),
+                notificationExplanation(
+                    reason: L("The queue overflow or contract-rejection counter increased, so some observations were not retained for Hub delivery."),
+                    action: L("Open EgressView Agent to review the Hub delivery counters.")
+                )
+            )
         case .failed:
-            issue = ("failed", L("Hub delivery needs attention"), L("Open EgressView Agent to review the delivery error."))
+            issue = (
+                "failed", L("Hub delivery needs attention"),
+                notificationExplanation(
+                    reason: L("The Hub sender entered a failed state and queued observations are not being delivered."),
+                    action: L("Open EgressView Agent to review the delivery error.")
+                )
+            )
         case .healthy:
             if hubNeedsAttention {
                 hubNeedsAttention = false
                 _ = notifier.notify(
                     kind: .recovery, key: "hub-recovered",
                     title: L("Hub delivery recovered"),
-                    body: L("Queued observations can be delivered again.")
+                    body: notificationExplanation(
+                        reason: L("Hub delivery previously needed attention and is now healthy again."),
+                        action: L("Queued observations can be delivered again.")
+                    )
                 )
             }
             return
@@ -306,10 +365,14 @@ final class AgentNotificationCoordinator {
     private func handleThreatIntelStatus(_ status: ThreatIntelController.Status) {
         let message: String?
         switch status {
-        case .updated: message = L("Threat information was updated.")
-        case .partial: message = L("Threat information was updated, but one or more sources could not be read.")
-        case .hubHasNoFeeds: message = L("The Hub is not providing threat information.")
-        case .failed: message = L("Threat information could not be updated.")
+        case .updated:
+            message = notificationExplanation(reason: L("The locally held threat information was updated."))
+        case .partial:
+            message = notificationExplanation(reason: L("Threat information changed, but one or more sources could not be read."))
+        case .hubHasNoFeeds:
+            message = notificationExplanation(reason: L("The connected Hub stopped providing threat information."))
+        case .failed:
+            message = notificationExplanation(reason: L("The latest threat-information update failed."))
         default: message = nil
         }
         guard let message else { return }
@@ -353,7 +416,10 @@ final class AgentNotificationCoordinator {
         let accepted = notifier.notify(
             kind: .threat, key: "threat-scan-\(Int(now.timeIntervalSince1970 / 60))",
             title: L("New threat match detected"),
-            body: L("%lld new destinations matched threat information. Open the Threats tab to review them.", addresses.count),
+            body: notificationExplanation(
+                reason: L("The latest scan found %lld previously unnotified destinations that matched threat information.", addresses.count),
+                action: L("Open the Threats tab to review them. Addresses and host names stay inside EgressView.")
+            ),
             cooldown: 0
         )
         if accepted { for address in addresses { seenThreats[address] = now } }

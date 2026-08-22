@@ -650,7 +650,7 @@ private struct AgentMainView: View {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .top, spacing: 14) {
                     notificationSummaryCard(
-                        L("Attempted today"),
+                        L("Notifications today"),
                         value: "\(notifications.sentToday)",
                         detail: L("After category and cooldown checks"),
                         tint: .blue
