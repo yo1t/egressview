@@ -1,0 +1,8 @@
+# Served from dl.egressview.com, which is its own host. A sitemap entry on
+# another host is ignored unless ownership of both is verified, so the
+# distribution page points at its own sitemap rather than relying on the
+# product site to list it.
+User-agent: *
+Allow: /
+
+Sitemap: https://dl.egressview.com/sitemap.xml

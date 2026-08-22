@@ -1,0 +1,15 @@
+# The product site's own Jekyll configuration.
+#
+# site/_config.yml describes the GitHub Pages copy, which lives under a path
+# on a shared host and therefore needs a baseurl. Building www from that file
+# leaks the baseurl into every generated link -- /egressview/docs/... , which
+# does not exist here -- and points every canonical at yo1t.github.io, telling
+# search engines this site is the duplicate.
+#
+# The deploy workflow copies this over _config.yml before building, so each
+# host is generated with the URLs it actually serves.
+url: "https://www.egressview.com"
+baseurl: ""
+
+plugins:
+  - jekyll-sitemap

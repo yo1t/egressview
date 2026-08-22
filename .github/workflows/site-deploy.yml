@@ -43,6 +43,12 @@ jobs:
       - name: Prepare Pages source
         run: node scripts/prepare-pages-source.js
 
+      - name: Build for this site's host, not the Pages path
+        # One Jekyll source serves two hosts. Without this the build inherits
+        # the Pages baseurl and canonical host, which makes every docs link
+        # here a 404 and hands the canonical to the other copy.
+        run: cp site/_config.www.yml .pages-source/_config.yml
+
       - name: Build with Jekyll
         uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1
         with:
@@ -55,8 +61,48 @@ jobs:
         run: |
           set -euo pipefail
           for page in index.html index.ja.html 404.html robots.txt \
-                      sitemap.xml docs/architecture.html; do
+                      sitemap.xml docs/architecture.html \
+                      docs/agent-privacy.html docs/agent-privacy.ja.html; do
             test -s "_site/$page" || { echo "missing or empty: $page" >&2; exit 1; }
+          done
+
+      - name: Check the links belong to this site
+        # The failure this catches shipped once: every docs page linked to
+        # /egressview/... , which is the path on the other host, and every
+        # canonical named that host as the original.
+        run: |
+          set -euo pipefail
+          if grep -rlE 'href="/egressview/' _site --include='*.html' | head -5 | grep .; then
+            echo 'links carry the GitHub Pages baseurl; _config.www.yml was not applied' >&2
+            exit 1
+          fi
+          if grep -rl 'rel="canonical" href="https://yo1t.github.io' _site --include='*.html' \
+             | head -5 | grep .; then
+            echo 'canonical points at the GitHub Pages copy' >&2
+            exit 1
+          fi
+
+      - name: Check the sitemap lists this site, and only this site
+        # It was hand-written and listed two URLs while the site served over
+        # forty, so every documentation page was invisible to search engines --
+        # and one of the two was on another host, where a sitemap entry is
+        # ignored anyway.
+        run: |
+          set -euo pipefail
+          test -s _site/sitemap.xml || { echo 'no sitemap was generated' >&2; exit 1; }
+          count=$(grep -c '<loc>' _site/sitemap.xml || true)
+          [ "$count" -ge 20 ] || {
+            echo "sitemap lists only $count URLs; the docs are missing" >&2; exit 1; }
+          for required in 'https://www.egressview.com/' \
+                          'https://www.egressview.com/docs/agent-privacy.html' \
+                          'https://www.egressview.com/docs/agent-privacy.ja.html'; do
+            grep -q "<loc>$required</loc>" _site/sitemap.xml || {
+              echo "sitemap is missing $required" >&2; exit 1; }
+          done
+          for forbidden in 'dl.egressview.com' 'yo1t.github.io' '/404.html' '/index.ja.html'; do
+            if grep -q "$forbidden" _site/sitemap.xml; then
+              echo "sitemap should not list $forbidden" >&2; exit 1
+            fi
           done
 
       - name: Assume the publishing role
