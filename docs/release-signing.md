@@ -120,7 +120,9 @@ on GitHub.
 
 `.github/workflows/release-gate.yml` runs `npm run release:verify-published`
 when a release is published **or edited**, and weekly over the most recent
-releases. It downloads what the release page serves and verifies that, so it
+releases. It takes no manual input: a gate whose operator chooses what gets
+checked is not a gate. To check one older tag, run
+`npm run release:verify-published -- --tag <tag>` locally. It downloads what the release page serves and verifies that, so it
 catches a release created another way — from the GitHub web interface, say —
 and catches assets removed or replaced after publication. It needs no AWS
 access.

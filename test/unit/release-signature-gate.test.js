@@ -75,6 +75,14 @@ describe('release signature gate', () => {
     assert.match(yaml, /RELEASE_TAG:\s*\$\{\{\s*github\.event\.release\.tag_name\s*\}\}/);
   });
 
+  it('手動実行に検査対象を選ばせない', () => {
+    // A gate whose operator picks what gets checked is not a gate. A manual run
+    // sweeps the most recent releases, same as the schedule.
+    const yaml = fs.readFileSync(workflow, 'utf8');
+    assert.match(yaml, /workflow_dispatch:\s*$/m);
+    assert.equal(/workflow_dispatch:\s*\n\s+inputs:/.test(yaml), false);
+  });
+
   it('タグは引数として渡り、シェル語にならない', () => {
     // execFileSync with an argv array, never a shell string, so a tag
     // containing shell metacharacters is data.

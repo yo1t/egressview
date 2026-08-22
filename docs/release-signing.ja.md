@@ -99,7 +99,7 @@ AWS_PROFILE=egressview-release npm run release:publish -- --tag v2.0.3
 
 ### その後ろのゲート
 
-`.github/workflows/release-gate.yml` が、リリースの**公開時と編集時**、および週次で `npm run release:verify-published` を実行します。リリースページが配信するものをダウンロードして検証するので、**GitHubのWeb画面など別経路で作られたリリース**も、**公開後に資産が削除・差し替えられた場合**も捕まえます。AWSアクセスは不要です。
+`.github/workflows/release-gate.yml` が、リリースの**公開時と編集時**、および週次で `npm run release:verify-published` を実行します。**手動実行に検査対象を選ばせません** — 実行する人が何を検査するか選べるものはゲートではないからです。古いタグを1つ調べたいときは、手元で `npm run release:verify-published -- --tag <tag>` を実行します。リリースページが配信するものをダウンロードして検証するので、**GitHubのWeb画面など別経路で作られたリリース**も、**公開後に資産が削除・差し替えられた場合**も捕まえます。AWSアクセスは不要です。
 
 この手順より前に公開され署名されなかったリリースは、理由付きで `release-signing/unsigned-releases.json` に記録してあり、ゲートは永久に失敗するのではなく既知の事実として報告します。**常に失敗するゲートは、人が無視することを学ぶゲートです。** 方針の発効日以降に公開されたリリースの登録はテストが拒否するため、**このリストが新しい失敗を黙らせる抜け道になることはありません。**
 

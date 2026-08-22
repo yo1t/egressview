@@ -22,17 +22,17 @@ on:
     # Weekly, so a release whose assets are deleted or swapped later does not
     # stay broken until the next release goes out.
     - cron: '17 4 * * 1'
+  # No inputs. A parameter here would let the person running it choose what
+  # gets checked, which is the opposite of what a gate is for; a manual run
+  # sweeps the most recent releases, same as the schedule. To check one older
+  # tag, run `npm run release:verify-published -- --tag <tag>` locally.
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Release tag to check (default: the most recent Hub release)'
-        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-gate-${{ github.event.release.tag_name || inputs.tag || github.event_name }}
+  group: release-gate-${{ github.event.release.tag_name || github.event_name }}
   cancel-in-progress: false
 
 jobs:
@@ -60,14 +60,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          TAG="${RELEASE_TAG:-${INPUT_TAG:-}}"
-          if [ -n "$TAG" ]; then
-            node scripts/verify-published-release.js --tag "$TAG"
+          if [ -n "${RELEASE_TAG:-}" ]; then
+            node scripts/verify-published-release.js --tag "$RELEASE_TAG"
           else
-            # The scheduled sweep looks further back, so a release that was fine
-            # at publication and was changed afterwards still gets noticed.
+            # The sweep looks further back, so a release that was fine at
+            # publication and was changed afterwards still gets noticed.
             node scripts/verify-published-release.js --limit 3
           fi
