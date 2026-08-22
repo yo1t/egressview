@@ -1,121 +1,136 @@
 # EgressView コード品質レポート
 
-- **評価日**: 2026-08-12
-- **評価基準**: `30e7bce`（前回レポート）。本サイクルは `e5835a4` までを評価
-- **バージョン**: 1.9.0
+- **評価日**: 2026-08-22
+- **評価基準**: `e5835a4`（前回レポート）。本サイクルは `5468afb` までを評価
+- **バージョン**: Hub 1.10.0、製品リリース 2.0.2、Agent for Mac 0.5.29（build 91）
 - **Node.js**: >=22（CI: 22 / 24 / 26）
-- **評価方法**: 自動テスト、V8 coverage、静的解析、依存・secret scan、browser smoke、parser fuzzing、手動コードレビュー
+- **評価方法**: 自動テスト、V8 coverage、静的解析、依存・secret scan、browser smoke、parser fuzzing、Swift unit test、実機にインストール済みの署名・notarize済みエージェントの実測、手動コードレビュー
 
-> 本レポートは現在のmainを評価します。SonarQubeとOpenSSFのスコアはリポジトリ内容からの推定で、公式scannerは実行していません。penetration testも対象外です。
+> 本レポートは現在のmainを評価します。SonarQubeとOpenSSFのスコアはリポジトリ内容からの推定で、公式scannerは実行していません。penetration testも対象外です。macOSエージェントの実行コストは**1台での実測**であり、その旨を明示しています。
 
 ---
 
 ## 総合評価
 
-**総合グレード: A**
+**総合グレード: A−**（前回: A）
 
-CriticalまたはHighの不具合は見つかりませんでした。今回は大きなサイクルで、27件のPR（#186--#212）がマージされ、**v1.9.0が署名付きで公開されました**。目玉は新しい収集経路 — **macOS Hub-Agent** です。エンドポイント上でプロセス単位の外向き接続を観測し、認証付きの取り込み（ingest）APIでHubへ送信し、Hub側で冪等に保存・ルーター観測との相関付け・同じ脅威フィードとの照合を行います。周辺では、**共有の収集ソース選択**が全ビューを特定のルーター/エージェントにスコープするようになり、サーバ全体をフリーズさせ得た**通知ログのフリーズ**を根本原因（インデックス）で修正したうえでevent-loop watchdogで二重化し、macOSエージェントが**インストール可能な署名済み成果物**になりました。
+コードにCritical/Highの不具合は見つかりませんでした。グレードが1段下がった理由は1つで、コードの欠陥ではなく**プロセスの後退**です。**直近3つの製品リリースに、署名済み資産が1つも付いていません。** v1.9.0には4点セット（アーカイブ、チェックサム、detached signature、公開鍵）が揃っています。v2.0.0・v2.0.1・v2.0.2には何も付いていません。署名パイプラインは存在し、文書化され、**わずか1サイクル前に独立検証も済ませています**。単に実行されなかっただけです。これは前回・前々回のレポートが揃って「このプロジェクトで最も強いサプライチェーン特性」と呼んだ項目なので、はっきり書きます。**リリースページから2.0.xをダウンロードした人にとって、その特性は存在しませんでした。**
 
-このingest表面は最もセキュリティに関わる変更ですが、システムの他部分と同じ流儀で作られています — permission matrix上の独立した`agent`アクセス種別として扱い、専用の`agent.ingest`権限でgateします。各エージェントはbearer secretで認証し、その値はpepper付きHMAC-SHA256の**ハッシュのみ**で保存されるため、DBのコピーからは使える資格情報を得られません。enrollmentはセルフサービスの識別子ではなく**管理者承認を要する「申請」**を生成し、短い可読コードには試行回数制限を設けています。観測は二重に検証され — 入口でZod、SQLite側でCHECK制約 — さらに`(agentId, observationId)`で重複排除されるため、バッチを再送しても状態は変わりません。
+それ以外は前進しています。過去最大のサイクルで、58件のPR（#213--#270）がマージされ、製品は2.0.0を経て2.0.2へ、macOSエージェントは0.2.x台から**8回の公開リリースを経て0.5.29**へ進みました。エージェントは「動く試作」から「起動したまま放置できるもの」になりました — ローカルで照合する脅威インテリジェンス、時間集計から描く地球儀・sankey・タイムライン、インストール前にパッケージを検証する更新経路、収集が止まったら止まったと言う自己監視、そして2度のプロファイリングを経て、**常時起動を利用者が悩まなくて済む程度の待機コスト**です。
 
-**前回レポートからの実質的な変更が1点あります: coverageを単一スコープで報告します。** 前回はCI gateとの不一致を訂正する目的で、ツリー全体の数値と、より高い`src/`のみの数値を併記していました。しかし`src/`のみの数値は`npm run test:coverage`が出力する値でもgateが検査する値でもないため、是正したはずの問題を再導入していました。本レポートではコマンドが出力しgateが強制する唯一の数値を示します: **line 84.95%、branch 80.07%、function 81.70%**（計測対象は計装されたサーバサイドツリー）、CI gateは83/79/80です。この差の小ささは意図的で、実態を良く見せるのではなく実態に追随させるためのものです。Test対source比率は100.3%。permission matrixはエージェント表面の追加で119件（HTTP route 108 + MCP tool 11）へ増えました。
+**本サイクルの中心はエージェントの信頼性の作業です。** 無人で動くことが目的のエージェントが、実環境で1日後に**CPUコアの41%と325MB**を消費していました。原因は個別に切り分け可能で、個別に修正しました — windowを持たないaccessory appでmacOSのApp Nappがrun-loopの`Timer`を絞ること、`SwiftUI TimelineView`が毎フレーム配下全体を再レイアウトすること、`OSSystemExtensionRequest`が保持されず応答が返らないこと、windowがcloseしても解放されないこと。本レポート執筆時点の実測で、ホストプロセスは**2時間2分経過で0.0% CPU・126MB**、システム拡張は**3時間37分経過で1.7%・18MB**で待機しています。
+
+**本レポートには新しい節を追加しました: §6「Macアプリケーションとしてのエージェント評価」**です。Swiftのソースとしてではなく、利用者がインストールし、システム拡張を許可し、起動しっぱなしにするアプリケーションとして評価します。カーネルに近い拡張を入れてもらうプライバシーツールは、Apple自身の基準 — notarization、sandbox、最小権限のentitlement、正直なプライバシー表明、アクセシビリティ、ローカライズ、電力 — で信頼を得る必要があります。結果は良好ですが、明確な欠落が1つあります。**プライバシーマニフェストがありません。**
 
 | 評価軸 | 結果 | 判定 |
 |---|---:|---|
 | OWASP ASVS Level 1 | 14領域中14領域が適合または緩和済み | 完全適合 |
-| OpenSSF Scorecard | 推定約9.4/10 | 署名付き資産の公開によりSigned-Releasesを充足 |
+| OpenSSF Scorecard | 推定約8.9/10（前回 約9.4） | **Signed-Releasesが後退。直近3リリースに署名資産なし** |
 | ISO/IEC 25010 | 平均9.1/10 | 高品質 |
 | Node.js Best Practices | 47/50 | 優秀 |
 | SonarQube相当gate | 合格、coverageはA | High以上のblockerなし |
-
-## レビュー結果
-
-### 前回レポート（`30e7bce`基準）以降の変更
-
-27件のPR（#186--#212）がマージされました。平坦な一覧ではなく、いくつかのテーマに整理できます:
-
-| テーマ | 内容 | PR |
-|---|---|---|
-| macOS Hub-Agent | 収集spike、host + system extension、接続履歴UI、secure enrollment identity、冪等ingest storage、opt-in Hub sender、live配信のhardening、エージェント/ルーター相関、エージェント報告フローの脅威照合、アドレス単位のcapacity、capability negotiation | #187--#197, #204, #207, #210--#212 |
-| 承認によるenrollment | 短い可読コードが、長いtokenの書き写しではなく管理者承認付きの申請を生成 | #201 |
-| 収集ソースscope | 全ビューへ適用する共有ソース選択、AI会話のソースscope保持、SSH promptからのルーター名検出 | #198 |
-| 信頼性 | 通知ログのagent-scopeフリーズをcomposite indexで修正し、event-loop watchdogで二重化 | #202 |
-| macOSエージェント配布 | インストール可能な署名済みDMG化、履歴コントロール、launch-at-login、メニューバーアイコン | #199, #200, #203, #205 |
-| リリース・依存 | v1.9.0を署名付き資産で公開、Dependabot minor-and-patch、demo/outbound安全性のhardening | #186, #191, #209 |
-| ドキュメント | README再構成、エージェントを含むアーキテクチャ文書、dotenvの抑制、エージェント単独導入の範囲を訂正 | #206, #208 |
-
-### 主な改善点
-
-- **新しい収集経路を、システムの他部分と同じように守る。** macOSエージェントは新しい`agent`アクセス種別の3ルート（ingest、token rotation、capability discovery）を追加します。いずれもsessionやAPI identityからは到達できません。エージェントは`egva_`接頭辞の256bit bearer secretで認証し、その値はpepper付きHMAC-SHA256の**ハッシュのみ**で保存されるため、DBのコピーからは使える資格情報を得られません。ingestは冪等で、バッチと観測はクライアント生成のIDを持ち、再送されたバッチは重複として数えられ再挿入されません。全フィールドはルートでZod、SQLiteのCHECK制約で再度検証され、64bitのバイトカウンタも十進文字列として範囲検査されるため、入口検証をすり抜けて範囲外の値を紛れ込ませることはできません。
-- **書き写しではなく、承認によるenrollment。** enrollmentコードは長い書き写しtokenから可読6文字へ縮小され、それ単体では10分の有効窓内で推測可能です。**これは意図的に最後の防衛線ではありません** — 正しいコードは「保留中の申請」を生成し、それを起票していない管理者が承認して初めてエージェントになり、その間は試行カウンタが窓を閉じます。オンボーディングにもdeny-by-defaultを適用した形です。
-- **通知ログのフリーズを根本原因で修正し、柵で囲う。** agent-scopeの通知ログクエリは`(agentId, localAddress, ...)`で絞った`agent_observations`に対し相関`EXISTS`を実行していました。先頭にそれらの列を持つcomposite indexが無いと、プランナはagentIdのみのindexへ退避し、通知行ごとにそのエージェントの全観測を再走査します — 同期的かつ非有界のスキャンで、event loopをブロックし`/healthz`が応答を止め、proxyが504を返すまで固まります。`(agentId, localAddress, remoteAddress, remotePort)`のindexにより、この参照はseekになります。`better-sqlite3`は同期的なので単一の病的クエリがプロセス全体のリスクになります。そこで**event-loop watchdog**を追加しました: worker threadがメインスレッドの毎tickの心拍を監視し、しきい値（既定120秒、`EGRESSVIEW_WATCHDOG_STALL_MS`）を超えて停滞したらプロセスを強制終了（ブロック不能なSIGKILL）します。service managerが数秒で再起動します。watchdogは完全にunref済みで、タイマー1本と軽量スレッド1本を足すだけです。
-- **収集ソースscopeを製品全体へ。** 共有selectorにより、運用者は全ビュー（devices、connections、history、AI会話）を1つのルーターまたは1つのエージェントにスコープできます。scopeはペア（kindとidは同時に来る）として検証され、有効なルーターと失効していないエージェントの実集合と突き合わされるため、古い・偽装されたsource idはクエリを黙って広げるのではなく400で拒否されます。AIメッセージはソースscopeをappend-onlyの別表に保持し、メッセージ本文を不変に保ちつつ会話の対象を記憶します。
-- **引き継がれた署名パイプライン。** v1.8.0は本プロジェクト初の署名付きリリースで、**ダウンロードし直した公開物**で検証されました — checksum、`openssl pkeyutl -verify`、trust registryとのfingerprint一致、そして改ざん3ケースがいずれも終了コード非0。このパイプラインはv1.9.0へ引き継がれ、同じ4資産（archive、checksum、detached signature、公開鍵）とインストール可能なmacOSエージェントと共に公開されています。信頼起点は依然としてDNS TXTレコード`_egressview-release.egressview.com`（リポジトリとは別の認証情報で配信）で、これこそ信頼を担う比較対象です — `SECURITY.md`・`trusted-fingerprints.json`・websiteの写しはアカウントを1つ奪われれば同時に書き換わります。
-
-### 残余リスク
-
-- **低・新規攻撃面**: エージェントのingest APIは新しい認証付き書き込み経路です。permission gate、二重検証、冪等、global limiterによるrate制限を備えますが、エージェントがHubへ到達するネットワークに露出するため、APIの他部分と同じ transport 保護の内側に置くべきです。
-- **低・運用**: hardware/external service依存のintegration test 4ファイルはdefault CI workflowに含まれません。
-- **低・信頼性の監督**: event-loop watchdogは固まったプロセスを強制終了しますが、復帰は外部のservice manager（`Restart=on-failure`）に依存します。リポジトリ内に正式なservice unitはまだありません。
-- **低・ecosystem**: OpenAPI契約はなく、正式な本番向けOCI imageもありません（唯一追跡されるDockerfileはread-onlyデモ用）。
-- **低・保守性**: エージェント作業でいくつかのmoduleが成長しました（hotspot参照）。`public/js/ai-insights.js`（892行）と`src/history.js`（847行）が最大で、`src/db-migrate.js`はmigration v1--v16を抱えて755行になりました。
-- **低・supply chain**: `npm audit`はbetter-sqlite3のamalgamation内のSQLite CVEを検出できません。盲点は手動検証手順と共に文書化済み。同梱SQLiteは上流の最新リリースに追随します。install scriptは無効のままで、installはホスト向けの同梱prebuiltバイナリの存在に依存します。
-- **低・デモ公開面**: 公開デモは訪問者全員を匿名の`viewer`として認証します（デモの目的そのもの）。資格情報は一切公開していません — 匿名アクセスには`DEMO_MODE`と`DEMO_READ_ONLY`の両方が必要で、その組み合わせでは内部のadmin tokenを起動ごとにランダム化し、書き込みはviewer権限とread-onlyミドルウェアの二重で拒否されます。
+| **macOSアプリ品質（§6、新規）** | **41/50** | **良好。プライバシーマニフェストと診断情報が欠落** |
 
 ---
 
-## 実測結果
+## レビュー所見
 
-| 検査 | 結果 |
+### 前回レポート（`e5835a4`）以降の変更
+
+58件のPR（#213--#270）がマージされました。計測コミット以降に#271が加わっています。PRを経ずにmainへ入ったコミットが1件あります。テーマ別に整理します。
+
+| テーマ | 内容 | PR |
+|---|---|---|
+| エージェントの可視化 | アプリ別sankey、共有期間上のアプリ別タイムライン、位置情報と通信の弧を描く地球儀、それらと並ぶ接続ログの復帰 | #227--#233 |
+| エージェントの履歴とコスト | 生ウィンドウ＋時間単位の畳み込みによるSQLite履歴。チャートは生行ではなくその集計から描画 | #219, #253, #251 |
+| エージェントの脅威インテリジェンス | フィードをローカルで照合、行選択時に一致内容の全体を表示、2つのフォールバックモードを実測して文書化 | #234, #236, #237, #257, #258 |
+| エージェントの更新 | 署名付きリリース情報の確認、検証済みパッケージで停止する定期チェック、sandbox下で更新を**そもそもインストール可能にする**ための4件の修正 | #216, #217, #239--#248 |
+| エージェントの自己監視 | 記録が止まったことを検知して通知。その後、検知が実際に発火するよう修正し、実機で確認 | #255, #256 |
+| **エージェントの実行コスト** | **監視対象のMac上で最も重いプロセスであることをやめた。常時起動も、開いて眺めることも軽い。keychain読み取りをメインスレッドから外した** | #259--#262 |
+| 宛先の名前 | アプリケーションが要求した名前をローカル限定で保持、要求時にTLS SNIを読む、エージェント観測の宛先を補強 | #226, #254, #215 |
+| データの忠実性 | 終了したフローの実バイト数、ローカルポート不明の観測の保全、再起動後も読める送信待ちキュー | #225, #223, #218 |
+| 配布 | インストーラパッケージとしてのビルドと公開、`dl.egressview.com`の入口、`www.egressview.com`の製品サイト | #247, #263--#265, #268--#270 |
+
+### 主な改善
+
+- **エージェントが「起動しっぱなしでよい」ものになった。診断の内容自体が記録に値します。** 独立した4つの原因に、それぞれ異なる修正を当てました。windowを持たないaccessory appではApp Nappがrun-loopの`Timer`を絞るため、定期処理は`ProcessInfo.beginActivity`のスコープ内でバックグラウンドキュー上の`DispatchSourceTimer`に変更。`TimelineView`は毎フレーム配下全体を再レイアウトするため、地球儀は独自のクロックを持つ`NSView`にし、3/5/15 fpsから選べるようにしました。`OSSystemExtensionRequest.propertiesRequest`は**応答が返らないことがあり、フレームワークはrequestを保持しない**ため、ヘルスプローブ側で保持し20秒で諦めるようにしました。windowは一度作って持ち続けていたので、必要時に作りcloseで解放するようにしました。**メモリが「増えなくなる」のではなく「戻る」のは、最後の1つによるものです。**
+- **収集が止まったことをエージェントが伝える。** 沈黙は、受動的な観測者が「静か」と区別できない障害形態です。実際に13時間の欠落が気づかれずに残りました。判定は「通信がない」と「記録していない」を分離し、閾値を超えた沈黙を未説明として扱い、システム拡張へのプローブを**毎tickではなく沈黙1区間につき1回**行い、メニューバーと通知に状態を出します。unit testからの推測ではなく、実機で確認しました。
+- **更新はインストール前に検証される。sandbox内から。** sandbox下のアプリから`spctl --assess`は使えません（`spctl`がsandboxを継承して失敗する）。**これが数バージョンにわたり「アプリ内更新が一切インストールできなかった」原因です。** 現在の検証器は`codesign`の出力から署名チームIDを読み、実行中のアプリのチームと一致しないパッケージを拒否します。notarizationはインストール時にインストーラ側が独立して強制します。「更新がある」から「インストールされた」までの経路を正しくするのに**4回の是正リリース**を要しました。各失敗は均さずに記録しています。
+- **脅威インテリジェンスの2つのフォールバックモードを実測した。** 通常動作、短時間のフィード障害、24時間より古いキャッシュ、手動更新の4条件を実機で確認しました。「観測記録に第三者接続が0件」という以前の主張は**撤回しました** — エージェントはフィードのホストに接続しており、0件に見えたのは単に誤ったクエリだったためです。**検証したという主張が誤りだった場合、それは主張しないことより悪いので、本レポートに残します。**
+- **条件を先に述べる配布・製品サイト。** `dl.egressview.com`と`www.egressview.com`はいずれも、origin access control配下の非公開S3バケットをCloudFrontで配信し、セキュリティヘッダを付け、第三者アセットを一切持ちません。製品サイトは必要な条件（対応ルーターかMac）をREADMEの奥ではなく最初に示します。
+
+### 残存リスク
+
+- **Medium・サプライチェーン・新規**: **v2.0.0・v2.0.1・v2.0.2は署名済み資産なしで公開されました。** 署名パイプライン、trust registry、DNSに固定したfingerprintはいずれも健在でテストもされていますが、**それを使わないリリースは、ダウンロードする側に検証する手段を何も与えません。** エージェントの`.pkg`はAppleによりnotarize・stapleされており、これは実在し独立に検証できる署名ですが、プロジェクト自身のチェックサムやdetached signatureは付いていません。
+- **Low・新しい攻撃面**: エージェントのingest APIは引き続き新しい認証付き書き込み経路です。権限gate、二重検証、冪等、レート制限がありますが、APIの他部分と同じ経路上の保護下に置くべきです。
+- **Low・エージェントのプライバシー表明**: エージェントは**`PrivacyInfo.xcprivacy`を同梱していません**。Developer ID配布では必須ではないので壊れてはいません。ただし「メタデータのみ、内容は読まない」を中心的な主張とする製品にとって、**まさにそれを機械可読で宣言する手段**であり、最も安価な裏付けです。§6を参照。
+- **Low・エージェントの診断**: クラッシュレポートも、構造化された診断バンドルもありません。利用者のマシン上で不調が起きたとき、復旧手順は「人が肩越しにログを読む」ことになります。
+- **Low・運用**: ハードウェア／外部サービス連携の4ファイルは既定のCIワークフローに含まれていません。
+- **Low・信頼性の監督**: event-loop watchdogは固まったHubプロセスを強制終了しますが、復帰は外部のサービスマネージャに依存します。リポジトリ内にサポート対象のservice unitはまだありません。
+- **Low・エコシステム**: OpenAPI契約なし、サポート対象の本番OCIイメージなし。
+- **Low・保守性**: `public/js/ai-insights.js`（892行）と`src/history.js`（847行）が最大のまま。`src/db-migrate.js`は818行、`src/routes/agents.js`は707行に増加。
+- **Low・サプライチェーン**: `npm audit`は`better-sqlite3`のamalgamation内部のSQLite CVEを見られません。この盲点は手動確認手順とともに文書化済みです。
+- **Low・デモの露出**: 公開デモは全訪問者を匿名の`viewer`として認証します。これはデモの趣旨どおりで、資格情報は公開されず、書き込みは二重に拒否されます。
+
+---
+
+## 実測した証拠
+
+| 確認項目 | 結果 |
 |---|---|
-| Coverage付きunit test | 2,088件成功、失敗0（485 suite） |
-| V8 coverage（`npm run test:coverage`、計装されたサーバサイドツリー） | line 84.95%、branch 80.07%、function 81.70% |
-| CI coverage下限 | line 83%、branch 79%、function 80% — 合格 |
-| Parser fuzz test | 30件成功（3 suite） |
+| Hub unit test（coverage付き） | 2,188件成功、0件失敗（497 suite） |
+| V8 coverage（`npm run test:coverage`、計装対象のサーバサイドツリー） | **line 84.62% / branch 80.00% / function 81.47%** |
+| CIのcoverage下限 | line 83% / branch 79% / function 80% — 合格 |
+| macOSエージェントのSwiftテスト | **XCTest 409件（2件skip）＋ swift-testing 10件、失敗0** |
+| parser fuzz | 30件成功（3 suite） |
 | Playwright browser smoke | CI gate合格（単一spec、1,901行） |
 | ESLint | 合格 |
-| Frontend HTML挿入監査 | `innerHTML` / `insertAdjacentHTML` 0件 |
-| Production依存監査 | 脆弱性0件 |
-| Secret scan | 高確度secret・環境固有LAN IPなし |
-| ASH（Automated Security Helper） | actionable finding 0件（suppressed 36、tool 3.5.7） |
-| GitHub Actions SHA pinning | 20/20 pinned、0 unpinned |
-| 公開リリースの検証 | v1.9.0はdetached signature資産付きで公開。ダウンロード検証手順（改ざん3ケース含む）はv1.8.0資産で実施済み |
+| フロントエンドHTML挿入監査 | `innerHTML` / `insertAdjacentHTML` 代入 0件 |
+| 本番依存のaudit | 脆弱性0件（本番依存 175件） |
+| secret scan | 合格。高シグナルのsecretも環境固有のLAN IPも検出なし |
+| ASH（Automated Security Helper） | **5 scannerで actionable 0件**（bandit / checkov / detect-secrets / npm-audit / semgrep）。suppressed 37件。tool 3.5.7 |
+| GitHub ActionsのSHA固定 | **23/23 固定、未固定 0** |
+| インストール済みエージェント: Gatekeeper | `spctl` **accepted、source = Notarized Developer ID** |
+| インストール済みエージェント: hardened runtime | `CodeDirectory flags=0x10000(runtime)`、secure timestampあり |
+| インストール済みエージェント: notarizationチケット | `stapler validate` 成功 |
+| **公開リリースの検証** | **v1.9.0はアーカイブ＋チェックサム＋detached signature＋公開鍵を保持。v2.0.0・v2.0.1・v2.0.2は資産が1つもない。** エージェントの`.pkg`リリースはnotarize済みパッケージのみ |
 
-### コードベースメトリクス
+### コードベース指標
 
-| メトリクス | 値 |
+| 指標 | 値 |
 |---|---:|
-| Source行数（server、mcp、src、public/js） | 34,890（31,482） |
-| Test行数（unit、integration、smoke、fuzz、portability） | 35,011（32,450） |
-| Test対source比率 | 100.3%（103.1%） |
-| Unit test file | 151（141） |
-| Integration test file | 4 |
-| Fuzz test file | 2（3）、3 suite |
-| Browser smoke | 1 file（1,901行） |
-| Portability test file | 1 |
-| `src/` module | 124（114） |
-| Poller module | 16（15） |
-| Route module | 19（18） |
-| HTTP route（permission matrix） | 108（94） |
+| Hubのソース行数（`src`, `public/js`, `server.js`, `mcp-server.js`） | 33,787（34,890） |
+| Hubのテスト行数（unit / integration / smoke / fuzz / portability） | 36,411（35,011） |
+| Test対source比率 | **107.8%**（100.3%） |
+| **macOSエージェントのSwiftソース行数** | **23,058行 / 115ファイル** |
+| **macOSエージェントのSwiftテスト行数** | **7,013行 / 44ファイル** |
+| unit testファイル | 163（151） |
+| integration testファイル | 4 |
+| fuzz testファイル | 3（2）、3 suite |
+| browser smokeファイル | 1（1,901行） |
+| portability testファイル | 1（323行） |
+| `src/`配下のソースモジュール | 124（124） |
+| pollerモジュール | 16（16） |
+| routeモジュール | 19（19） |
+| permission matrix上のHTTP route | **111**（108） |
 | MCP tool | 11 |
-| Permission matrix entries | 119（105） |
-| ルートのaccess内訳 | permission 94、authenticated 1、agent 3、public 10 |
-| Agent認証ルート | ingest、token rotation、capability discovery |
-| 書き込み系ルート | `/api`配下（demo read-onlyミドルウェアのマウント位置） |
-| 定義済みpermission | 8（7） |
-| ロール | 3（viewer、operator、admin） |
-| Production依存package | 13 |
-| `docs/`配下のドキュメント | 47（37） |
-| DB schemaバージョン | 16（12） |
-| Parameterized SQL preparation | 196（152） |
-| Server-side `var` | 0 |
+| permission matrixのエントリ | **122**（119） |
+| routeのアクセス種別内訳 | permission 94 / authenticated 1 / **agent 6** / public 10 |
+| 定義済み権限 | 8（運用権限7 ＋ `agent.ingest`） |
+| ロール | 3（viewer / operator / admin） |
+| 本番依存 | 直接13、解決後175 |
+| `docs/`配下の文書 | 39（47） |
+| DBスキーマバージョン | 16（16） |
+| パラメータ化SQLのprepare箇所 | 198（196） |
+| サーバサイドの`var` | 0 |
 | `eval` / `new Function` | 0 |
-| TODO/FIXME/HACK | 0 |
+| TODO/FIXME/HACKマーカー | 0 |
 | `innerHTML` / `insertAdjacentHTML` | 0 |
-| CI Node.jsバージョン | 22、24、26 |
-| リリース署名鍵 | 1（KMS Ed25519）。v1.8.0・v1.9.0を署名・公開 |
+| CIワークフロー | 4（CI / macOS agent / GitHub Pages / Product site） |
+| CIのNode.jsバージョン | 22 / 24 / 26 |
+| リリース署名鍵 | 1本（KMS Ed25519）。**最後に使用したのはv1.9.0** |
 
-括弧内は前回レポートの値です（変化があった項目のみ）。
+括弧内は前回レポートの値（変化があったもののみ）。`docs/`の件数減は`.ja.md`の統合によるもので、文書が削除されたわけではありません。
 
 ---
 
@@ -123,60 +138,62 @@ CriticalまたはHighの不具合は見つかりませんでした。今回は�
 
 **判定: 完全適合（14領域中14領域が適合または緩和済み）。**
 
-| 領域 | 状況 | 根拠 |
+| 領域 | 状態 | 根拠 |
 |---|---|---|
-| 認証 | 合格 | scrypt（versioned KDF migration）、timing-safe比較、256bit session token、失敗遅延、IP単位lockout、Google OIDC + PKCE。エージェントのbearer secretはpepper付きHMAC-SHA256でハッシュ化 |
-| Session管理 | 合格 | token hash保存、sliding expiry、revoke、password変更処理、定期prune、ロール付きsession |
-| Access control | 合格 | HTTP route 108件のうち94件がpermission gate、1件がauthenticated、3件がagent認証、公開は10件（`/healthz`・`/readyz`含む）。deny-by-default権限境界。WebSocket handshakeも同じ境界。permission matrix 119件。エージェントenrollmentは管理者承認が必要 |
-| 入力検証 | 合格 | JSON 64KB、endpoint moduleのstrict Zod、未知key拒否、文字列・範囲上限、outbound endpoint向けSSRF guard。エージェント観測はZodとSQLite CHECK制約で二重検証（64bitバイトカウンタの十進文字列範囲検査を含む） |
-| 暗号 | 合格 | secret/correlationの`randomBytes`/UUID、session/TOFU/principalHashのSHA-256、エージェント資格情報のHMAC-SHA256、timing-safe equality、MCPのRS256 JWT検証、リリース署名のKMS Ed25519 |
-| Error処理 | 合格 | 汎用500、stack非公開、request ID付きserver log |
-| Data保護 | 合格 | config/backup/TLS keyは0600、公開config/logからsecret除外、API identityとエージェント資格情報はhash-only保存 |
-| 通信 | 合格 | HTTPS/HSTS対応。OIDC callbackはsecure redirectを強制。MCP OAuthはHTTPS JWKS経由 |
-| 悪意コード | 合格 | evalなし、frontend HTML挿入監査をCIで強制 |
-| File処理 | 合格 | upload上限、backup名検証、traversal防止、restore/migration fail-closed |
-| API security | 合格 | method別route、strict schema、response size/time上限、認証付きexport、MCP rate limiting、冪等なエージェントingest |
-| Configuration | 合格 | hard-coded credentialなし、example設定、secret scan、production demo拒否 |
-| Business logic | 合格 | HttpOnly cookie + CSRF保護、API identity用explicit permission token、試行制限付きの管理者承認enrollment、deny-by-default enforcement |
-| 監査・ログ | 合格 | append-only audit_events（pseudonymous actorHash/principalHash）、24時間scheduleで180日retention適用、MCP専用audit store（keyed client address付き） |
+| 認証 | Pass | 版付きKDF移行を伴うscrypt、timing-safe比較、256bitセッショントークン、遅延失敗、IP単位のロックアウト、PKCE付きGoogle OIDC。エージェントのbearer secretはpepper付きHMAC-SHA256でハッシュ化 |
+| セッション管理 | Pass | ハッシュ化トークン、スライディング期限、失効、パスワード変更時の処理、定期整理、ロール束縛セッション |
+| アクセス制御 | Pass | HTTP route 111件のうち、94件が権限gate、1件が認証のみ、6件がエージェント認証、10件が公開。deny-by-defaultの境界をWebSocketハンドシェイクにも同一に適用。permission matrixは122件。エージェント登録は管理者承認が必須 |
+| 入力検証 | Pass | JSON 64KB上限、endpointモジュールでの厳格なZod、未知キーの拒否、文字列・範囲の上限、外向きendpointへのSSRF guard。エージェント観測はZodとSQLite CHECK制約で二重検証（64bitバイトカウンタは十進文字列として範囲検査） |
+| 暗号 | Pass | secretと相関IDに`randomBytes`/UUID、session/TOFU/principalHashにSHA-256、エージェント資格情報にHMAC-SHA256、timing-safe比較、MCPのJWT検証にRS256、リリース署名にKMS Ed25519 |
+| エラー処理 | Pass | 汎用500応答、スタック非露出、リクエスト相関付きサーバログ |
+| データ保護 | Pass | 設定・バックアップ・TLS鍵はmode 0600。公開設定とログからsecretを除外。API identityとエージェント資格情報はハッシュのみ保存。エンドポイント側ではHub資格情報をkeychainに置き、**メインスレッド外**で読む |
+| 通信 | Pass | HTTPS/HSTS対応、OIDCコールバックはsecure redirectを強制、MCP OAuthはHTTPS JWKS。公開Webプロパティは2つともHTTPS専用かつHSTS付き |
+| 悪意あるコード | Pass | evalなし。フロントエンドのHTML挿入監査をCIで強制 |
+| ファイル処理 | Pass | アップロード上限、バックアップ名の検証、traversal検査、fail-closedなrestore/migration。ダウンロードした更新パッケージは実行中アプリの署名チームと照合してからインストール |
+| API | Pass | メソッド別route、厳格スキーマ、応答サイズ・時間の上限、認証付きエクスポート、MCPレート制限、冪等なエージェントingest |
+| 設定 | Pass | 資格情報のハードコードなし、設定例、secret scan、本番でのデモモード拒否 |
+| ビジネスロジック | Pass | CSRF保護付きHttpOnly cookie、API identityの明示的権限トークン、試行回数制限付きの管理者承認エージェント登録、deny-by-defaultの強制 |
+| 監査とログ | Pass | 追記専用のaudit_events（仮名化されたactorHash/principalHash）、24時間周期で強制する180日保持、クライアントアドレスをkey化したMCP独立の監査ストア |
 
 ---
 
 ## 2. OpenSSF Scorecard（推定）
 
-**推定スコア: 9.4/10。**
+**推定スコア: 8.9/10**（前回: 約9.4）。
 
-| Check | Score | 根拠 |
+| チェック | スコア | 根拠 |
 |---|---:|---|
-| Pinned dependencies | 10 | 全20 GitHub Actionをfull commit SHAへ固定 |
-| Token permissions | 10 | 既定read-only。Pagesだけ必要権限を追加 |
-| Dangerous workflow | 10 | `pull_request_target`なし |
-| Binary artifacts | 10 | commit済みbinaryなし |
-| Security policy | 10 | `SECURITY.md`とprivate vulnerability reporting |
+| Pinned dependencies | 10 | 4ワークフロー全体で、GitHub Actions参照23件すべてを完全commit SHAに固定 |
+| Token permissions | 10 | 既定はread-only。Pagesと製品サイトのデプロイが必要分のみ拡張（OIDC用の`id-token: write`、`contents: write`なし） |
+| Dangerous workflow | 10 | `pull_request_target`なし。デプロイジョブは、mainに限定したenvironmentを介して`main`でのみ動作 |
+| Binary artifacts | 10 | コミット済みバイナリなし |
+| Security policy | 10 | `SECURITY.md`と非公開の脆弱性報告 |
 | License | 10 | AGPL-3.0-only |
-| SAST | 10 | ASH、secret scan、ESLint、frontend挿入監査、npm audit |
-| Vulnerabilities | 10 | production `npm audit`をCI実行。本レビュー0件 |
-| Dependency updates | 10 | npm/Actionsのweekly Dependabot、7日cooldown |
-| CI tests | 10 | PRでunit/coverage、parser fuzz、browser smoke。Node 22/24/26 matrix。macOSエージェント専用workflowも有り |
-| Maintained | 10 | PR #212まで継続的にrelease・改善 |
-| Code review | 8 | PRと必須checkを運用。RBACとpermission matrixがreview基準を強化 |
-| Fuzzing | 5 | 信頼できないデバイス入力を読む関数をparser fuzzingで検証。time-budgetとshape assertion付き。依存なし、CI実行。ただしOSS-Fuzz等の継続fuzzing serviceには未登録 |
-| Signed releases | 8 | **v1.8.0・v1.9.0をdetached signature資産付きで公開済み。** このcheckが見るのはリリース資産の拡張子（`.sig` / `.asc` / `.minisig` / `.sigstore` / `.intoto.jsonl`）であり、gitタグ署名ではない。KMS Ed25519鍵はmulti-channelフィンガープリント公開とtrust registryテスト付きで登録済み。残り2点はSLSA provenance |
+| SAST | 10 | ASH（5 scanner）、secret scan、ESLint、フロントエンド挿入監査、npm audit |
+| Vulnerabilities | 10 | CIで本番`npm audit`。本レビューでは0件 |
+| Dependency updates | 10 | npmとActionsに週次Dependabot、7日のcooldown付き |
+| CI tests | 10 | PRでunit/coverage、parser fuzz、browser smoke、offline portability。Node 22/24/26マトリクス。`swift test`と未署名ビルドを行う独立のmacOSエージェントワークフロー |
+| Maintained | 10 | 本サイクルで58 PRと11リリース |
+| Code review | 8 | 必須チェック付きのPRワークフロー。本サイクルで1コミットがPRを経ずにmainへ到達 |
+| Fuzzing | 5 | 信頼できない機器入力を読む関数をparser fuzzでカバー（時間予算と形状のアサーション付き）。継続fuzzingサービスではない |
+| **Signed releases** | **2** | **8から後退。** このチェックは直近リリースの資産を拡張子で検査します。v1.9.0には存在しますが、**v2.0.0・v2.0.1・v2.0.2には資産が1つもありません**。KMS Ed25519鍵、trust registry、DNSに固定したfingerprintはいずれも健在でテスト済みです — 2.x でパイプラインが実行されなかっただけです |
+
+**現時点でこのプロジェクトが取れる最も価値の高い行動は、現行リリースに署名済み資産を公開することです。** 必要なものはすべて既に存在し検証済みで、欠けているのは飛ばされた手順1つです。
 
 ---
 
 ## 3. ISO/IEC 25010
 
-| 品質特性 | Score | 強み | 残るgap |
+| 特性 | スコア | 強み | 残る課題 |
 |---|---:|---|---|
-| 機能適合性 | 9 | 複数router収集、プロセス単位で帰属できるmacOSエンドポイントエージェント、エージェント/ルーター相関、AI洞察（notification付き）、脅威調査、export、MCP + OAuth | OpenAPIなし |
-| 性能効率性 | 9 | WAL、batch、bounded summary、cache、worker分離backup、MCP concurrency cap、indexされたagent-scope参照 | 重いbackup検証中はhost-levelの短い遅延が残り得る |
-| 互換性 | 9 | Node 22/24/26、JA/EN、Yamaha/Cisco/ASUS/conntrackとmacOSエージェント、Cognito compatibility profile、proxy配下の`/`とsubpath双方での正常動作 | CIのhardware確認はfixture中心 |
-| 使用性 | 9 | Responsive UI、setup guide、自動検出、health診断、ロール表示、検知別通知スイッチ、共有の収集ソース選択、インストール可能なmacOSエージェント、read-only公開デモ | router側設定（SSHユーザ、syslog転送）が依然として実際のオンボーディングコスト |
-| 信頼性 | 9 | migration/restore/config/notes fail-closed、health、cancel、request ID、ASUS再接続、rate limiting、scheduled audit retention、同期停滞に対するevent-loop watchdog | watchdogの復帰は外部service managerに依存 |
-| Security | 10 | OIDC/PKCE、RBAC、独立したagent種別を含むdeny-by-default permission、CSRF、HttpOnly cookie、hash-onlyのAPI identity・エージェント資格情報、管理者承認enrollment、MCP OAuth/JWKS、audit trail、rate limit、SSRF guard、署名され独立検証されたリリース、install script無効化 | -- |
-| 保守性 | 9 | 124 module、強いtest（test対source比率100.3%）、route/poller/query分離、permission matrix、MCP責務分割済み、parser fuzz、native-dep盲点文書化 | エージェント作業で複数moduleが成長。`public/js/ai-insights.js`と`src/history.js`が大きいまま |
-| 移植性 | 9 | Cloud非依存profile、KMS署名付きportable source、起動前feature policyを持つoffline mode、offline portability gate、version管理rollback、Node 22/24/26 CI | 正式な本番OCI image/systemd unitなし |
+| 機能適合性 | 9 | 複数ルーター収集、プロセス単位の帰属とローカル脅威照合を持つmacOSエージェント、エージェント／ルーター相関、AI insights、エクスポート、OAuth付きMCP | OpenAPI契約なし |
+| 性能効率性 | **9** | WAL、バッチ、上限付きサマリ、エージェントスコープのインデックス、エージェントのチャート背後の時間集計、そして**約1桁削減した**エージェント実行コスト | バックアップ検査は依然として短時間のホストレベル遅延を生み得る |
+| 互換性 | 9 | Node 22/24/26、全面的なJA/EN、Yamaha/Cisco/ASUS/conntrack経路、macOS 13+のエージェント、`/`直下でもプロキシ配下のサブパスでも正しく動作 | ハードウェア固有の検証はCI上でfixture依存のまま |
+| 使用性 | 9 | レスポンシブUI、セットアップガイド、自動検出、ヘルス診断、公開read-onlyデモ、停止したら停止と言うnotarize済みエージェント、ダウンロード前に要件を示す製品サイト | ルーター側の設定が依然として実際の導入コスト |
+| 信頼性 | 9 | fail-closedなmigration/restore/config、health/readiness、キャンセル、レート制限、event-loop watchdog、「通信がない」と「記録していない」を区別するエージェント自己監視 | watchdogの復帰は外部サービスマネージャに依存 |
+| セキュリティ | 10 | OIDC/PKCE、RBAC、独立したagent種別を含むdeny-by-default権限、CSRF、ハッシュのみの資格情報、管理者承認の登録、MCP OAuth/JWKS、監査証跡、SSRF guard、最小権限のentitlementを持つsandbox化・notarize済みエージェント | -- |
+| 保守性 | 9 | Hub 124モジュールに加え、23k行のSwiftエージェントが自前の7k行のテストを持つ。Hubのtest対source比率107.8%、permission matrix、parser fuzz | 700行超のモジュールが4つ |
+| 移植性 | 9 | クラウド中立プロファイル、KMS署名済みの可搬ソースバンドル、オフラインモード、版付きロールバック、Node 22/24/26 CI | サポート対象の本番OCIイメージ／service unitなし |
 
 **平均: 9.1/10。**
 
@@ -184,67 +201,89 @@ CriticalまたはHighの不具合は見つかりませんでした。今回は�
 
 ## 4. Node.js Best Practices
 
-**準拠率: 47/50（94%）。**
+**適合度: 47/50（94%）。** 実質的な内容は前回から変化していません。今回の新材料はSwift側にあり、§6で評価します。
 
-- Domain、route、poller adapter、エージェントのingest/相関module、DB bootstrap、auth middleware、browser renderingの責務を分離しています。
-- 外部async処理にtimeout/AbortSignal上限があり、backup pruneはworkerとsingle-flight jobで隔離され、ASUSポーリングはoverlapping cycleをcoalesceし、MCP requestはconcurrency capを適用しています。
-- 同期的なDB呼び出しはプロセス全体をブロックし得るため、worker thread上のevent-loop watchdogが固まったプロセスを強制再起動し、そのきっかけとなった病的クエリはindexレベルで修正しました。
-- Loggerは`AsyncLocalStorage`で安全な`X-Request-Id`を付け、query stringは記録しません。
-- Graceful shutdown、readiness、schema migration、config rollback、永続化失敗、permission enforcementをtestしています。
-- ESLint、V8 coverage、Node 22/24/26、Playwright、parser fuzz、ASH、secret scan、dependency auditをPR gateにし、macOSエージェントは専用workflowを持ちます。
-- 認証ロジックとエージェントidentityロジックは専用moduleに分離し、single-responsibilityを遵守しています。
-- 信頼できない入力を多層で検証します: エージェント観測は入口でZod、保存時にSQLite CHECK制約を通り、信頼できないデバイスからのparser入力はshape・time-budget assertionでfuzzします。
-- SSRF保護はoperator設定のoutbound endpointを名前解決し、link-local、metadata、multicast、broadcastの候補をすべて拒否したうえで、検査済みIPへ接続を固定してDNS rebindingを防ぎます。
-- リリース整合性はKMS管理鍵と登録済みtrust registryで保証し、fingerprintは**リポジトリ外**（別の認証情報で配信されるDNS TXTレコード）にアンカーされています。
-- 依存のinstall scriptを無効化しているため、installでコードを実行する依存はなく、ネイティブモジュールは同梱prebuiltバイナリから供給されます。native依存のaudit盲点は手動検証手順と共に文書化しています。
+- ドメインモジュール、routeモジュール、pollerアダプタ、エージェントのingest/相関、DB初期化、認証ミドルウェア、描画の責務が分離されています。
+- 非同期の外部呼び出しにはタイムアウト/AbortSignalの上限があり、バックアップ整理はworkerとsingle-flightのジョブ状態を使い、MCPリクエストは並行数を制限しています。
+- 同期的なDB呼び出しはプロセス全体を止め得るため、workerスレッド上のevent-loop watchdogが固まったプロセスを強制再起動します。
+- ロガーは`AsyncLocalStorage`で上限付きの`X-Request-Id`コンテキストを付与し、クエリ文字列はログに出しません。
+- 信頼できない入力は多層で検証します。エージェント観測は入口でZod、保存時にSQLite CHECK制約を通り、機器由来のparser入力は形状と時間予算のアサーション付きでfuzzされます。
+- SSRF保護は運用者が設定したホスト名を解決し、link-local/metadata/multicast/broadcastの結果を拒否し、DNS rebindingを防ぐため検査したアドレスを接続に固定します。
+- 依存のinstall scriptは無効化されています。ネイティブ依存のaudit盲点は手動確認手順とともに文書化済みです。
 
-Default hardware integration CI、正式process manager/OCI成果物、OpenAPIがないため満点とはしません。
+減点は、既定のハードウェア連携CIがないこと、サポート対象のプロセスマネージャ／OCI成果物がないこと、OpenAPI契約がないことによります。
 
 ---
 
-## 5. SonarQube相当Quality Gate
+## 5. SonarQube相当のgate
 
-| Metric | 結果 | Rating |
+| 指標 | 結果 | 評価 |
 |---|---:|---|
-| Reliability | Critical/Highの既知不具合なし。通知ログのフリーズは修正・二重化済み | A |
-| Security | 高確度secret・dependency findingなし。独立したagent種別を含む完全なRBAC、監査、SSRF保護、KMSリリース署名 | A |
-| Maintainability | エージェント機能で複数moduleが成長したが、いずれもtestで境界化 | A |
-| Coverage | line 84.95% / branch 80.07% / function 81.70%（CI gateが検査するスコープ） | A |
-| Duplication | 手動・静的reviewで重大な新規重複なし | A（推定） |
+| 信頼性 | 既知のCritical/High不具合なし。エージェントの実行コストと収集停止の不具合は修正済みで実機確認済み | A |
+| セキュリティ | 未解決の高シグナルsecretや依存の指摘なし。完全なRBAC、監査、SSRF保護、sandbox化・notarize済みエージェント | A |
+| 保守性 | 700行超のモジュールが4つ。いずれもテストで囲まれている | A |
+| Coverage | line 84.62% / branch 80.00% / function 81.47%（CI gateが検査するスコープ） | A |
+| 重複 | 手動・静的レビューで実質的な新規重複は検出せず | A（推定） |
 
-**Quality gate: 合格。**
+**品質gate: 合格。** ただしこのgateが測るのはコードであり、**リリースが正しく公開されたかは測りません**。本サイクルの後退はまさにそこにあります。
 
-### 主な保守性hotspot
+### 主な保守性ホットスポット
 
-| File | 行数 | 評価 |
+| ファイル | 行数 | 所見 |
 |---|---:|---|
-| `public/js/ai-insights.js` | 892 | notification/insight renderingが同居 |
-| `src/history.js` | 847 | query/cache/bootstrap抽出後もstore orchestrationが大きい |
-| `server.js` | 811 | bootstrapとdependency wiring。エージェント・watchdog起動で成長 |
-| `src/db-migrate.js` | 755 | schema migration v1--v16 |
-| `public/js/log.js` | 734 | pagination、filter、renderが同居 |
-| `public/js/graph.js` | 679 | 抽出済みhelper/panel/rendererのorchestration |
-| `src/devices.js` | 665 | device identity、persistence、merge lifecycle |
-| `src/pollers/cisco.js` | 661 | parser/handshake抽出後のstateful SSH lifecycle |
-| `src/mcp-publication-gate.js` | 639 | 公開判断、client release timing、diagnostics |
-| `src/pollers/yamaha.js` | 627 | adapter parser周辺のstateful SSH lifecycle |
-| `public/js/devices.js` | 594 | device UI orchestration |
-| `public/js/auth-socket.js` | 575 | auth対応のsocket bootstrapと再接続 |
-| `mcp-server.js` | 570 | transport bootstrapとOAuth wiring |
-| `src/routes/agents.js` | 569 | エージェントのenrollment、承認、ingest、capabilityルート |
-| `src/ai-provider.js` | 563 | multi-provider AI client（SSRF guard付き） |
-| `src/device-identify.js` | 559 | device fingerprintingヒューリスティクス |
+| `public/js/ai-insights.js` | 892 | 通知とinsightの描画が1つのビューモジュールを共有 |
+| `src/history.js` | 847 | query/cache/bootstrapを抽出した後もストア調整が大きい |
+| `src/db-migrate.js` | 818 | スキーマ移行 v1--v16 |
+| `server.js` | 812 | 初期化と依存の結線 |
+| `public/js/log.js` | 734 | ページング・絞り込み・描画が1つのビューモジュールを共有 |
+| `src/routes/agents.js` | 707 | エージェントの登録・承認・ingest・capability route。**本サイクルで24%増加** |
+| `public/js/graph.js` | 679 | 抽出済みのgraphヘルパ／パネル／レンダラを調整 |
+| `src/devices.js` | 665 | デバイス識別・永続化・マージのライフサイクル |
+| `src/pollers/cisco.js` | 661 | 抽出済みparser/handshakeモジュール周りの状態付きSSHライフサイクル |
+| `src/mcp-publication-gate.js` | 639 | 公開判定、クライアントのリリースタイミング、診断 |
+| `src/pollers/yamaha.js` | 627 | アダプタparser周りの状態付きSSHライフサイクル |
+| `public/js/devices.js` | 594 | デバイスUIの調整 |
+| `public/js/auth-socket.js` | 575 | 認証対応ソケットの初期化と再接続 |
+| `mcp-server.js` | 570 | トランスポート初期化とOAuth結線 |
+| `src/ai-provider.js` | 563 | SSRF guard付きのマルチプロバイダAIクライアント |
 
-今サイクルの成長はHub-Agentが触れたmodule — `db-migrate.js`（新規migration 4件）、`history.js`、`server.js`、新規の`routes/agents.js` — に集中しています。いずれも手に負えない域には達しておらず、それぞれのtest coverageの範囲内に留まっています。
+Swift側では`Xcode/Host/ObservationWindowController.swift`がエージェント内で群を抜いて最大のファイルで、現在は接続ログ、sankey、タイムライン、地球儀、そしてそれらが共有する期間選択を抱えています。**エージェントにおける`ai-insights.js`相当であり、分割の第一候補です。**
+
+---
+
+## 6. macOSアプリケーションとしての品質（本サイクルで新設）
+
+エージェントはSwiftのソースであるだけでなく、利用者がインストールし、システム拡張を許可し、起動しっぱなしにするアプリケーションです。本節ではそれとして評価します。基準はAppleのプラットフォーム要件（notarization、hardened runtime、App Sandbox、entitlement、プライバシーマニフェスト）、macOS Human Interface Guidelines、アクセシビリティとローカライズ、電力挙動です。
+
+**スコア: 41/50。**
+
+| 領域 | スコア | 根拠 | 欠落 |
+|---|---:|---|---|
+| **Gatekeeperとnotarization** | 5/5 | インストール済みの0.5.29 build 91に対し、`spctl -a -t install`は**accepted、source = Notarized Developer ID**。`stapler validate`も成功するため、ネットワーク往復なしで起動する。ビルドスクリプトはパッケージング工程でnotarizeとstapleを行う | -- |
+| **hardened runtimeと署名** | 5/5 | `CodeDirectory flags=0x10000(runtime)`とsecure timestamp。ホストとシステム拡張は`--options runtime`で個別に署名し、署名後とパッケージング往復後の両方で`--strict`検証 | -- |
+| **App Sandboxと最小権限** | 5/5 | ホストと拡張の両方がsandbox化。ホストが持つentitlementはちょうど5つ — app group、network client、user-selectedファイルの読み書き、system-extensionインストール、network-extensionのcontent filter。**`com.apple.security.files.all`も、temporary-exception系のentitlementも一切ない** | -- |
+| **プライバシー表明** | **1/5** | `NSSystemExtensionUsageDescription`の文言は正確かつ具体的（メタデータのみ、内容を読まない、ブロックしない）。データ最小化は実体を伴っており、ペイロードは読まない | **`PrivacyInfo.xcprivacy`がない。** Developer ID配布では必須ではないので壊れてはいない。しかし「メタデータのみ」を全面的な主張とする製品にとって、収集データ種別とrequired-reason APIの使用を機械可読で宣言するマニフェストは**最も安価な裏付け**であり、その不在は目立つ |
+| **ローカライズ** | 5/5 | `en.lproj`と`ja.lproj`がそれぞれ**491キーで完全一致** — 片方にしか存在しないキーはゼロ。UI言語は起動時固定ではなく利用者が選べるロケールに従う | -- |
+| **アクセシビリティ** | 4/5 | 単純な件数から受ける印象より良い。独自描画の3つの可視化（地球儀・sankey・タイムライン）はいずれも、描かれている内容を要約した`accessibilityLabel`を計算して公開し、装飾画像は`accessibilityHidden`、メニューバーボタンは状態をアクセシビリティラベルとして持つ。キーボードショートカット／ヘルプの修飾子が13箇所 | VoiceOver自体での監査記録がない。要約はunit testで確認しているが、スクリーンリーダーでは確認していない |
+| **電力とリソース挙動** | 5/5 | 本機での実測: ホスト**2時間2分で0.0% CPU / 126MB RSS**、拡張**3時間37分で1.7% / 18MB**。定期処理はApp Nappが絞るrun-loopタイマーではなく`beginActivity`スコープ内のdispatch sourceタイマー。地球儀は3/5/15 fpsから選べる再描画。windowはcloseで解放されるためメモリが戻る | 1台・1標本 |
+| **HIG適合** | 4/5 | メニューバー常駐のみ（`LSUIElement`）で、バックグラウンド観測者として正しい形。windowは必要時に生成。ログイン項目はレガシーヘルパではなく`SMAppService`で管理。最小macOSは13.0 | 現行HIGに対するレビュー記録がない。ウィンドウ状態の復元は未実装 |
+| **更新とアンインストール** | 4/5 | 署名付きリリース情報に対するアプリ内更新チェック。ダウンロードしたパッケージの**署名チームIDを実行中アプリと照合してからインストール**し、notarizationはインストーラが独立に強制。Hub登録を失効させる一級のアンインストール経路があり、Hubに到達できない場合は資格情報を保全する | `.pkg`リリースにプロジェクト自身のチェックサムやdetached signatureがない（§2）。sandbox下でアプリ内更新を成立させるのに4回の是正リリースを要した |
+| **診断** | **3/5** | インストール時に、再起動が実際に何をしたかを記録する計装済みログを書き出す。Swiftテストは419件、失敗0 | **クラッシュレポートも、利用者がエクスポートできる診断バンドルもない。** 他人のMac上で不調が起きたとき、送ってもらえる成果物が存在しない |
+
+**このスコアを最も動かす3つの行動（優先順）:**
+
+1. **`PrivacyInfo.xcprivacy`を同梱する。** ファイル1つのコストで、製品の中心的な約束を直接裏付けられます。
+2. **診断のエクスポートを追加する。** ボタン1つで秘匿処理済みのバンドルを生成する。これがない限り、現場からの報告は毎回「添付」ではなく「会話」になります。
+3. **VoiceOverでの確認を1回行い、結果を記録する。** 既に行われているアクセシビリティ対応を、推測ではなく検証済みにするためです。
 
 ---
 
 ## 結論
 
-現在のmainは、文書化されたself-hostedデプロイモデルに対して十分な多人数運用向けセキュリティ制御を備えています。自動品質ゲートは広く、データ変更操作はfail-closed、AI provider呼び出しは時間とcontextで制限され、deny-by-defaultのRBACが全面適用され、MCPはOAuth保護・rate limit・監査付きで、Critical/Highの問題は残っていません。
+コードは良好な状態にあり、macOSエージェントは大きく成熟しました。起動しっぱなしのコストがほぼ無くなり、止まったら止まったと言い、自分の更新を検証し、Appleのプラットフォーム要件 — notarize、staple、hardened、sandbox、そして実際に使うentitlementだけを保持 — を満たしています。ローカライズはキー単位で完全であり、独自描画の可視化は不透明な絵として放置されず、アクセシビリティの要約を与えられました。**サイドロードされるユーティリティの通常水準ではありません。**
 
-今サイクルを定義づけたのはmacOS Hub-Agentであり、注目すべきは**セキュリティモデルを緩めずに新しいingest表面を追加した**ことです。エージェントは使い回しのsessionではなく独自のアクセス種別を持ち、資格情報はhash-only保存、enrollmentはセルフサービスtokenではなく管理者承認で終わり、観測は二重検証・冪等保存されます。新しい認証付き書き込み経路は往々にして手を抜きがちな箇所ですが、ここは抜いていません。
+実行コストの作業には1文を割く価値があります。この失敗は特定の、示唆的な種類のものだったからです。**CPUコアの41%を消費するエージェントは、性能問題ではなく信頼の問題です。** マシンが外へ何を送っているかを見るためにシステム拡張を許可してくれと頼むツールが、同時にそのマシン上で最も重いプロセスであってはなりません。4つの無関係な原因はいずれも、ポーリング間隔を延ばして覆い隠すのではなく個別に診断して修正され、結果は推測ではなく実機で確認されました。
 
-信頼性はもう1つの筋です。単一のagent-scopeクエリが同期的なDBドライバを十分長くブロックすると、504の背後でプロセス全体が固まり得ます — 遅いページというより障害に見える種類の失敗です。これはあるべき場所（スキャンをseekに変えるindex）で修正し、さらにevent-loop watchdogで囲うことで、将来の病的クエリがハングではなく高速な再起動に劣化するようにしました。watchdogは復帰を外部service managerに依存しており、それが単一プロセス設計の正直な限界です。
+**後退はコードではなくリリース公開にあります。** 3つの製品リリースが署名済み資産なしで公開されました。前回・前々回のレポートが揃って「署名され独立に検証可能なリリース」を最強のサプライチェーン特性として挙げてきたプロジェクトで、です。失われたものも侵害されたものもなく、パイプラインは存在しテストにも通ります。しかし、**人が実際にダウンロードするバージョンで守られない検証の約束は、検証の約束ではありません。** 現行リリースへの署名済み資産の公開が、いま取れる最も価値の高い行動であり、新しい仕組みは何も要りません。
 
-CoverageはA評価を維持し、コマンドが出力しgateが強制する単一スコープで報告することで、前回レポートが抱えていた二重数値の曖昧さを解消しました。保守性は大型機能として想定どおりの方向へ動きました — 複数moduleが成長し、いずれも過度ではなく、成長は新機能のある場所に集中しています。残る改善余地は種類として不変で、SLSA provenance（Signed-Releasesの残り2点）、OSS-Fuzzによる継続fuzzing、OpenAPI契約、正式なOCI/serviceの成果物 — いずれもリリースのblockerではなく需要駆動の拡張です。
+改善リストの残りは種類として変わりません — エージェントのプライバシーマニフェスト、利用者がエクスポートできる診断、Signed-Releasesの残点を埋めるSLSA provenance、継続fuzzing、OpenAPI契約、サポート対象のservice成果物。いずれもリリースのblockerではありません。このリストで唯一「単なる追加改善」ではないのが署名済みリリースであり、それは**既に動く手順を実行するかどうかの問題**です。
