@@ -888,10 +888,10 @@ private struct AgentMainView: View {
             let height = max(size.height - 32, 1)
             topHeight = height * 0.52
             middleHeight = height * 0.48
-            // Square. The controls are overlaid on the sphere rather than
-            // stacked under it, so the extra width a landscape card bought is
-            // no longer paying for anything.
-            globeWidth = min(topHeight, width * 0.5)
+            // Almost square. One Japanese character of extra width keeps the
+            // metric subtitle on one line without materially shrinking the
+            // overview panel beside it.
+            globeWidth = min(topHeight + 14, width * 0.5)
             // The name columns either side are a fixed width, so narrowing the
             // card takes width off the diagram and not off the names -- which
             // is the intent: the ribbons had more room than they needed once
@@ -1485,17 +1485,24 @@ private struct AgentOverviewPanel: View {
                     .font(.callout.weight(.medium))
                     .fixedSize(horizontal: false, vertical: true)
                 if let storage {
-                    Text(storageDescription(storage))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if let startedAt = storage.monitoringStartedAt {
-                        Text(L(
-                            "Monitoring started: %@",
-                            Self.monitoringStartFormatter.string(from: startedAt)
-                        ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(storageDescription(storage))
+                            Spacer(minLength: 8)
+                            if let startedAt = storage.monitoringStartedAt {
+                                Text(monitoringStartDescription(startedAt))
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(storageDescription(storage))
+                            if let startedAt = storage.monitoringStartedAt {
+                                Text(monitoringStartDescription(startedAt))
+                            }
+                        }
                     }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
             }
 
@@ -1558,6 +1565,10 @@ private struct AgentOverviewPanel: View {
         formatter.dateFormat = "yyyy/MM/dd HH:mm"
         return formatter
     }()
+
+    private func monitoringStartDescription(_ date: Date) -> String {
+        L("Monitoring started: %@", Self.monitoringStartFormatter.string(from: date))
+    }
 
     private func tile(_ title: String, _ value: String, _ symbol: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1867,25 +1878,28 @@ private struct AgentGlobeChart: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .center, spacing: 12) {
                     Text(L("Where the traffic went"))
                         .font(.title3.weight(.semibold))
-                    Text(model.metric == .bytes
-                         ? L("Mark size is data volume")
-                         : L("Mark size is the number of connections"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                Picker(L("Country view"), selection: $countryView) {
-                    ForEach(CountryView.allCases) { view in
-                        Text(view.title).tag(view)
+                    Spacer(minLength: 8)
+                    Picker(L("Country view"), selection: $countryView) {
+                        ForEach(CountryView.allCases) { view in
+                            Text(view.title).tag(view)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 180)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 180)
+                Text(model.metric == .bytes
+                     ? L("Mark size is data volume")
+                     : L("Mark size is the number of connections"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.90)
+                    .allowsTightening(true)
             }
 
             if countryView == .globe {
