@@ -1,0 +1,101 @@
+name: Product site
+
+# Publishes www.egressview.com. The same Jekyll build that GitHub Pages runs,
+# uploaded to the site's own bucket, so the two hosts cannot show different
+# content from the same commit.
+#
+# There is no stored AWS key: the job exchanges a short-lived GitHub OIDC token
+# for a role that may write to the site bucket and invalidate the site
+# distribution, and nothing else. The role trusts refs/heads/main only.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'docs/**'
+      - 'scripts/prepare-pages-source.js'
+      - '.github/workflows/site-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: product-site
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Skipped rather than failed when the deployment inputs are not configured,
+    # so a fork does not report a red run it cannot fix.
+    if: vars.AWS_SITE_BUCKET != ''
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    environment:
+      name: product-site
+      url: https://www.egressview.com/
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Prepare Pages source
+        run: node scripts/prepare-pages-source.js
+
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1
+        with:
+          source: ./.pages-source
+          destination: ./_site
+
+      - name: Check the build produced the pages we publish
+        # A Jekyll change that stops converting docs would otherwise be
+        # published as a site full of 404s.
+        run: |
+          set -euo pipefail
+          for page in index.html index.ja.html 404.html robots.txt \
+                      sitemap.xml docs/architecture.html; do
+            test -s "_site/$page" || { echo "missing or empty: $page" >&2; exit 1; }
+          done
+
+      - name: Assume the publishing role
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ secrets.AWS_SITE_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_SITE_REGION }}
+          role-session-name: site-deploy-${{ github.run_id }}
+
+      - name: Upload the site
+        # Short TTLs because the site is small and republished as a whole;
+        # correctness after a deploy matters more than shaving requests.
+        run: |
+          aws s3 sync ./_site "s3://${{ vars.AWS_SITE_BUCKET }}/" \
+            --delete --no-progress \
+            --exclude '*.md' \
+            --cache-control 'public, max-age=300'
+
+      - name: Invalidate the cache
+        run: |
+          set -euo pipefail
+          id=$(aws cloudfront create-invalidation \
+            --distribution-id "${{ vars.AWS_SITE_DISTRIBUTION_ID }}" \
+            --paths '/*' --query 'Invalidation.Id' --output text)
+          echo "invalidation $id"
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "${{ vars.AWS_SITE_DISTRIBUTION_ID }}" --id "$id"
+
+      - name: Verify what is actually being served
+        # Reporting success without checking is how a broken deploy stays
+        # unnoticed until someone visits.
+        run: |
+          set -euo pipefail
+          base=https://www.egressview.com
+          check() {
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$base$1")
+            echo "$1 -> $code"
+            [ "$code" = "$2" ] || exit 1
+          }
+          check / 200
+          check /docs/architecture.html 200
+          check /this-path-does-not-exist 404
