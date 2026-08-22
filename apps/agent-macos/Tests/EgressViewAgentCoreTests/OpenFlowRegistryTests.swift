@@ -35,6 +35,24 @@ final class OpenFlowRegistryTests: XCTestCase {
         XCTAssertEqual(observation.firstObservedAt, start)
         XCTAssertEqual(observation.lastObservedAt, start.addingTimeInterval(90))
         XCTAssertEqual(observation.collector, .networkExtension)
+        XCTAssertEqual(observation.flowID, id)
+    }
+
+    func testOpeningObservationCarriesSNIAndIsEmittedOnlyOnce() throws {
+        var registry = OpenFlowRegistry()
+        let id = UUID()
+        registry.register(flowID: id, metadata: metadata(), startedAt: start)
+        registry.noteServerName("api.example.com", flowID: id)
+
+        let opening = try XCTUnwrap(registry.openingObservation(
+            flowID: id, observedAt: start.addingTimeInterval(0.1)
+        ))
+        XCTAssertEqual(opening.flowID, id)
+        XCTAssertEqual(opening.remoteHostname, "api.example.com")
+        XCTAssertNil(opening.bytesIn)
+        XCTAssertNil(registry.openingObservation(
+            flowID: id, observedAt: start.addingTimeInterval(0.2)
+        ))
     }
 
     func testStatisticsReportsProduceNothing() {

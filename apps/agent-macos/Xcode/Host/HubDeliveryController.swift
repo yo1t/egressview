@@ -327,7 +327,7 @@ private final class AgentSettingsViewModel: ObservableObject {
         monitoringStatus = status.label
         switch status {
         case .fullActive, .fullStarting, .fullActivationRequested, .approvalRequired,
-             .rebootRequired, .updateNotRunning, .notRecording:
+             .rebootRequired, .updateNotRunning, .notRecording, .diagnosticNotRecording:
             monitoringMode = .full
         case .lightweight:
             monitoringMode = .lightweight

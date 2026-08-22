@@ -1,11 +1,15 @@
 import Foundation
+import SQLite3
 import XCTest
 @testable import EgressViewAgentCore
 @testable import EgressViewNetworkExtension
 
 private func observation(
     remoteHostname: String?,
-    at: Date = Date(timeIntervalSince1970: 1_800_000_000)
+    at: Date = Date(timeIntervalSince1970: 1_800_000_000),
+    flowID: UUID? = nil,
+    bytesIn: UInt64? = 10,
+    bytesOut: UInt64? = 20
 ) -> ConnectionObservation {
     ConnectionObservation(
         networkProtocol: .tcp,
@@ -18,11 +22,12 @@ private func observation(
         bundleID: "com.apple.Safari",
         firstObservedAt: at,
         lastObservedAt: at,
-        bytesIn: 10,
-        bytesOut: 20,
+        bytesIn: bytesIn,
+        bytesOut: bytesOut,
         collector: .networkExtension,
         confidence: .exact,
-        remoteHostname: remoteHostname
+        remoteHostname: remoteHostname,
+        flowID: flowID
     )
 }
 
@@ -33,13 +38,15 @@ final class RemoteHostnameIngestBoundaryTests: XCTestCase {
     /// negotiation first.
     func testTheHostnameIsNeverPutIntoAnIngestPayload() throws {
         let payload = AgentIngestObservation(
-            observationId: UUID(), observation: observation(remoteHostname: "example.com")
+            observationId: UUID(),
+            observation: observation(remoteHostname: "example.com", flowID: UUID())
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let json = try XCTUnwrap(String(data: try encoder.encode(payload), encoding: .utf8))
 
         XCTAssertFalse(json.contains("remoteHostname"), "the strict Hub schema would reject the batch")
+        XCTAssertFalse(json.contains("flowID"), "the local flow identity must never cross the Hub boundary")
         XCTAssertFalse(json.contains("example.com"))
         // The rest of the contract is unchanged.
         XCTAssertTrue(json.contains("\"remoteAddress\":\"203.0.113.5\""))
@@ -94,6 +101,52 @@ final class RemoteHostnameStoreTests: XCTestCase {
         XCTAssertNil(try store.observations().first?.remoteHostname)
     }
 
+    func testClosingReportEnrichesTheOpeningRowInsteadOfDuplicatingTheFlow() throws {
+        let store = try ObservationStore(fileURL: directory.appendingPathComponent("h.sqlite"))
+        let flowID = UUID()
+        let started = Date(timeIntervalSince1970: 1_800_000_000)
+        try store.append([observation(
+            remoteHostname: nil, at: started, flowID: flowID,
+            bytesIn: nil, bytesOut: nil
+        )])
+        try store.append([observation(
+            remoteHostname: "api.example.com", at: started.addingTimeInterval(30),
+            flowID: flowID, bytesIn: 1_200, bytesOut: 340
+        )])
+
+        XCTAssertEqual(try store.statistics().rawCount, 1)
+        let row = try XCTUnwrap(try store.observations().first)
+        XCTAssertEqual(row.flowID, flowID)
+        XCTAssertEqual(row.remoteHostname, "api.example.com")
+        XCTAssertEqual(row.bytesIn, 1_200)
+        XCTAssertEqual(row.bytesOut, 340)
+        XCTAssertEqual(row.firstObservedAt, started)
+        XCTAssertEqual(row.lastObservedAt, started.addingTimeInterval(30))
+    }
+
+    func testFlowUpdateDoesNotDoubleCountAllTimeCountryHistory() throws {
+        let store = try ObservationStore(fileURL: directory.appendingPathComponent("h.sqlite"))
+        try store.replaceGeoLocations([
+            GeoLocation(
+                ip: "203.0.113.5", latitude: 35, longitude: 139,
+                countryCode: "JP", city: "Tokyo"
+            ),
+        ])
+        let flowID = UUID()
+        let started = Date(timeIntervalSince1970: 1_800_000_000)
+        try store.append([observation(
+            remoteHostname: "api.example.com", at: started,
+            flowID: flowID, bytesIn: nil, bytesOut: nil
+        )])
+        try store.append([observation(
+            remoteHostname: "api.example.com", at: started.addingTimeInterval(30),
+            flowID: flowID, bytesIn: 1_200, bytesOut: 340
+        )])
+        try store.flushCountryVisitSummary()
+
+        XCTAssertEqual(try store.countryVisitSummaries().first?.connectionCount, 1)
+    }
+
     func testAnExistingDatabaseGainsTheColumnWithoutLosingRows() throws {
         // Agents updating from 0.2.1 already have history. The migration must
         // add the column, not start over.
@@ -108,6 +161,43 @@ final class RemoteHostnameStoreTests: XCTestCase {
                                          at: Date(timeIntervalSince1970: 1_800_000_100))])
         XCTAssertEqual(try reopened.statistics().rawCount, 2)
         XCTAssertEqual(try reopened.observations().first?.remoteHostname, "example.com")
+    }
+
+    func testVersionNineDatabaseGainsFlowIdentityWithoutLosingHistory() throws {
+        let url = directory.appendingPathComponent("history.sqlite")
+        do {
+            let store = try ObservationStore(fileURL: url)
+            try store.append([observation(remoteHostname: "existing.example")])
+        }
+
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &database), SQLITE_OK)
+        defer {
+            if let database { sqlite3_close(database) }
+        }
+        let downgrade = """
+        DROP INDEX observations_flow_id;
+        ALTER TABLE observations DROP COLUMN flow_id;
+        PRAGMA user_version=9;
+        """
+        var errorMessage: UnsafeMutablePointer<CChar>?
+        let result = sqlite3_exec(database, downgrade, nil, nil, &errorMessage)
+        let message = errorMessage.map { String(cString: $0) } ?? ""
+        sqlite3_free(errorMessage)
+        XCTAssertEqual(result, SQLITE_OK, message)
+        sqlite3_close(database)
+        database = nil
+
+        let reopened = try ObservationStore(fileURL: url)
+        XCTAssertEqual(try reopened.statistics().rawCount, 1)
+        XCTAssertEqual(try reopened.observations().first?.remoteHostname, "existing.example")
+        let flowID = UUID()
+        try reopened.append([observation(
+            remoteHostname: "new.example",
+            at: Date(timeIntervalSince1970: 1_800_000_100),
+            flowID: flowID
+        )])
+        XCTAssertEqual(try reopened.observations().first?.flowID, flowID)
     }
 }
 

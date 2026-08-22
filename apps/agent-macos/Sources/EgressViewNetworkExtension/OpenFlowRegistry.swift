@@ -25,6 +25,7 @@ public struct OpenFlowRegistry: Sendable {
     private struct Entry {
         var metadata: SocketFlowMetadata
         let startedAt: Date
+        var hasReportedOpening = false
     }
 
     /// Flows that never produce a close report would otherwise accumulate for
@@ -81,6 +82,26 @@ public struct OpenFlowRegistry: Sendable {
         entries[flowID] = entry
     }
 
+    /// Emits the opening observation once, after the first outbound bytes have
+    /// given the TLS parser its chance to attach SNI. The closing report later
+    /// carries the same flow ID and updates this row with final byte counts.
+    public mutating func openingObservation(
+        flowID: UUID,
+        observedAt: Date
+    ) -> ConnectionObservation? {
+        guard var entry = entries[flowID], !entry.hasReportedOpening else { return nil }
+        entry.hasReportedOpening = true
+        entries[flowID] = entry
+        return observation(
+            flowID: flowID,
+            metadata: entry.metadata,
+            firstObservedAt: entry.startedAt,
+            lastObservedAt: observedAt,
+            bytesIn: nil,
+            bytesOut: nil
+        )
+    }
+
     /// Builds the observation for a report, or returns nil when the report
     /// carries nothing worth recording.
     ///
@@ -107,22 +128,41 @@ public struct OpenFlowRegistry: Sendable {
         // never saw, or whose entry was evicted.
         guard let resolved = entry?.metadata ?? metadata else { return nil }
 
-        return ConnectionObservation(
-            networkProtocol: resolved.networkProtocol,
-            localAddress: resolved.localAddress,
-            localPort: resolved.localPort,
-            remoteAddress: resolved.remoteAddress,
-            remotePort: resolved.remotePort,
-            processID: resolved.processID,
-            processName: resolved.processName,
-            bundleID: resolved.bundleID,
+        return observation(
+            flowID: flowID,
+            metadata: resolved,
             firstObservedAt: entry?.startedAt ?? reportedAt,
             lastObservedAt: reportedAt,
+            bytesIn: bytesIn,
+            bytesOut: bytesOut
+        )
+    }
+
+    private func observation(
+        flowID: UUID,
+        metadata: SocketFlowMetadata,
+        firstObservedAt: Date,
+        lastObservedAt: Date,
+        bytesIn: UInt64?,
+        bytesOut: UInt64?
+    ) -> ConnectionObservation {
+        ConnectionObservation(
+            networkProtocol: metadata.networkProtocol,
+            localAddress: metadata.localAddress,
+            localPort: metadata.localPort,
+            remoteAddress: metadata.remoteAddress,
+            remotePort: metadata.remotePort,
+            processID: metadata.processID,
+            processName: metadata.processName,
+            bundleID: metadata.bundleID,
+            firstObservedAt: firstObservedAt,
+            lastObservedAt: lastObservedAt,
             bytesIn: bytesIn,
             bytesOut: bytesOut,
             collector: .networkExtension,
             confidence: .exact,
-            remoteHostname: resolved.remoteHostname
+            remoteHostname: metadata.remoteHostname,
+            flowID: flowID
         )
     }
 
