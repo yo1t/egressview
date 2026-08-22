@@ -1,5 +1,5 @@
-url: "https://www.egressview.com"
-baseurl: ""
+url: "https://yo1t.github.io"
+baseurl: "/egressview"
 
 plugins:
   - jekyll-sitemap

@@ -1,0 +1,7 @@
+# Written by hand so the sitemap points at the site's own host. Left to
+# jekyll-sitemap, this file names the GitHub Pages URL the source is built
+# from, which is not where the site is served.
+User-agent: *
+Allow: /
+
+Sitemap: https://www.egressview.com/sitemap.xml
