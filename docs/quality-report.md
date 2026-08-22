@@ -4,7 +4,7 @@
 - **Baseline**: `e5835a4` (previous report); this cycle evaluates through `5468afb`
 - **Version**: Hub 1.10.0, product release 2.0.2, Agent for Mac 0.5.29 (build 91)
 - **Node.js**: >=22 (CI: 22, 24, and 26)
-- **Method**: automated tests, V8 coverage, static analysis, dependency/secret scans, browser smoke tests, parser fuzzing, Swift unit tests, live inspection of the signed and notarised agent installed on a real Mac, and manual review
+- **Method**: automated tests, V8 coverage, static analysis, dependency/secret scans, browser smoke tests, parser fuzzing, Swift unit tests, live inspection of the signed and notarised agent installed on a real Mac, verification of the published release from its downloaded assets, and manual review
 
 > This report evaluates the current main line. SonarQube and OpenSSF scores are repository-based estimates; neither official scanner was run. No penetration test was performed. Figures for the macOS agent's runtime cost come from one machine and are labelled as such.
 
@@ -12,9 +12,13 @@
 
 ## Executive Summary
 
-**Overall grade: A−** (previous cycle: A)
+**Overall grade: A** (previous cycle: A)
 
-No critical or high-severity defect was found in the code. The grade moves down a step for one reason, and it is a process regression rather than a code defect: **the last three product releases were published with no signed assets at all.** v1.9.0 carries the full four-asset set — archive, checksum, detached signature, public key. v2.0.0, v2.0.1, and v2.0.2 carry nothing. The signing pipeline exists, is documented, and was independently re-verified only one cycle ago; it simply was not run. This is the check that the previous two reports called the project's strongest supply-chain property, so it is worth saying plainly: **for anyone who downloaded 2.0.x from the releases page, that property was not there.**
+No critical or high-severity defect was found in the code.
+
+**This report was first published grading the cycle A−, for a process regression: v2.0.0, v2.0.1 and v2.0.2 had all been published with no signed assets at all.** The signing pipeline existed, was documented, and had been independently re-verified one cycle earlier; it simply had not been run, in a project whose previous two reports both called signed releases its strongest supply-chain property.
+
+**That has been corrected.** v2.0.2 now carries the full four-asset set — archive, checksum, detached signature, public key — built from the `v2.0.2` tag with the same KMS key and the same procedure, and verified from the *downloaded* assets rather than the local ones. The grade returns to A. The gap is recorded here rather than edited out: **anyone who downloaded 2.0.x before 2026-08-22 had nothing to verify**, and that is a fact about what shipped, not about what the pipeline is capable of. v2.0.0 and v2.0.1 remain without assets; they are superseded by 2.0.2.
 
 Everything else moved forward. This was the largest cycle yet: 58 PRs (#213--#270) landed, the product went to 2.0.0 and on to 2.0.2, and the macOS agent went from 0.2.x to **0.5.29 across eight public releases**. The agent grew from a working prototype into something that can be left running: threat intelligence checked against local feeds, a globe and sankey and timeline drawn from an hourly aggregate, an in-app update path that verifies the package before installing it, self-monitoring that says so when collection stops, and — after two rounds of profiling — a resting cost small enough that leaving it on is not a decision the user has to think about.
 
@@ -25,7 +29,7 @@ Everything else moved forward. This was the largest cycle yet: 58 PRs (#213--#27
 | Framework | Result | Verdict |
 |---|---:|---|
 | OWASP ASVS Level 1 | 14/14 areas satisfied or mitigated | Fully compliant |
-| OpenSSF Scorecard | ~8.9/10 estimated (was ~9.4) | **Signed-Releases regressed: the three most recent product releases have no signature asset** |
+| OpenSSF Scorecard | ~9.4/10 estimated | Signed-Releases restored: v2.0.2 carries a signature asset, verified from the download |
 | ISO/IEC 25010 | 9.1/10 average | High quality |
 | Node.js Best Practices | 47/50 | Excellent |
 | SonarQube-equivalent gate | Passed; coverage rating A | No high-severity blocker |
@@ -61,7 +65,7 @@ Fifty-eight PRs merged (#213--#270), plus #271 after the measurement commit. One
 
 ### Open risks
 
-- **Medium, supply chain, new**: **v2.0.0, v2.0.1, and v2.0.2 were published with no signed assets.** The signing pipeline, trust registry, and DNS-anchored fingerprint all still exist and are tested, but a release that does not use them offers a downloader nothing to verify. The agent `.pkg` releases are notarised and stapled by Apple, which is a real and independently checkable signature, but they carry no checksum or detached signature of the project's own.
+- **Low, supply chain**: **the release step is manual and was skipped three times running.** v2.0.2 has been signed and published since, but v2.0.0 and v2.0.1 remain without assets, and nothing yet prevents the next release from going out the same way. The agent `.pkg` releases are notarised and stapled by Apple, which is a real and independently checkable signature, but they carry no checksum or detached signature of the project's own. **A CI gate that fails a release lacking a signature asset is the obvious fix and does not exist.**
 - **Low, new attack surface**: the agent ingest API remains a new authenticated write path — permission-gated, doubly validated, idempotent, rate-limited — and should stay behind the same transport protections as the rest of the API.
 - **Low, agent diagnostics**: there is no crash reporting and no structured diagnostic bundle. When the agent misbehaves on a user's machine, the recovery procedure is a person reading logs over the user's shoulder.
 - **Low, operational**: the four hardware/external-service integration files are still not part of the default CI workflow.
@@ -92,7 +96,7 @@ Fifty-eight PRs merged (#213--#270), plus #271 after the measurement commit. One
 | Installed agent, Gatekeeper | `spctl` **accepted, source = Notarized Developer ID** |
 | Installed agent, hardened runtime | `CodeDirectory flags=0x10000(runtime)`, secure timestamp present |
 | Installed agent, notarisation ticket | `stapler validate` succeeded |
-| **Published release verification** | **v1.9.0 carries archive + checksum + detached signature + public key. v2.0.0, v2.0.1 and v2.0.2 carry no assets at all.** Agent `.pkg` releases carry the notarised package only |
+| **Published release verification** | **v2.0.2 carries archive + checksum + detached signature + public key.** Signed from the `v2.0.2` tag with KMS `egressview-release-2026`; **the four assets were downloaded from the release page and verified there**: `shasum -c` OK, `openssl pkeyutl -verify` Signature Verified Successfully, and the downloaded public key's fingerprint matches the DNS TXT trust anchor served under separate credentials. Three tamper cases (archive, checksum, signature) each exit non-zero. v2.0.0 and v2.0.1 remain without assets. Agent `.pkg` releases carry the notarised package only |
 
 ### Codebase Metrics
 
@@ -127,7 +131,7 @@ Fifty-eight PRs merged (#213--#270), plus #271 after the measurement commit. One
 | `innerHTML` / `insertAdjacentHTML` | 0 |
 | CI workflows | 4 (CI, macOS agent, GitHub Pages, Product site) |
 | CI Node.js versions | 22, 24, 26 |
-| Release signing key | 1 active (KMS Ed25519); **last used for v1.9.0** |
+| Release signing key | 1 active (KMS Ed25519); last used for **v2.0.2** |
 
 Values in parentheses are the previous report's figures where they changed. The `docs/` count fell because `.ja.md` counterparts were consolidated, not because documentation was removed.
 
@@ -175,9 +179,9 @@ Values in parentheses are the previous report's figures where they changed. The 
 | Maintained | 10 | 58 PRs and eleven releases this cycle |
 | Code review | 8 | PR workflow with required checks; one commit this cycle reached main without a PR |
 | Fuzzing | 5 | Parser fuzzing covers functions reading untrusted device input, with time-budget and shape assertions; not a continuous-fuzzing service |
-| **Signed releases** | **2** | **Regressed from 8.** This check inspects recent releases for a signature asset by extension. v1.9.0 has one; **v2.0.0, v2.0.1 and v2.0.2 have no assets at all**. The KMS Ed25519 key, the trust registry, and the DNS-anchored fingerprint are all still in place and tested — the pipeline was simply not run for 2.x |
+| Signed releases | 8 | This check inspects recent releases for a signature asset by extension. **v2.0.2 now carries one**, alongside the checksum and public key, and was verified from the downloaded files. The KMS Ed25519 key is enrolled with multi-channel fingerprint publication and trust-registry tests. The remaining 2 points require SLSA provenance |
 
-**The single highest-value action available to this project right now is to publish signed assets for the current release.** Everything needed already exists and is verified; the gap is a step that was skipped.
+**This check was scored 2 when the report was first published, because the three most recent releases carried nothing.** It is scored 8 now because that was fixed, not because the assessment was softened. **The step remains manual, and nothing in CI would stop it being skipped again** — see Open risks.
 
 ---
 
@@ -284,6 +288,8 @@ The code is in good shape and the macOS agent matured substantially: it now cost
 
 The runtime-cost work deserves a sentence of its own, because the failure was of a specific and instructive kind: an agent that costs 41% of a CPU core is not a performance problem, it is a **credibility problem**. A tool that asks for a system extension in order to watch what your machine sends outward cannot also be the heaviest thing running on it. Four unrelated causes were each diagnosed and fixed rather than papered over with a longer polling interval, and the result was verified on hardware rather than inferred.
 
-**The regression is in release publication, not in code.** Three product releases went out with no signed assets, in a project whose previous two reports both singled out signed, independently verifiable releases as its strongest supply-chain property. Nothing was lost or compromised; the pipeline exists and still passes its tests. But a verification promise that is not kept for the version people actually download is not a verification promise. Publishing signed assets for the current release is the single highest-value action available, and it requires no new machinery.
+**The one regression this cycle was in release publication, not in code, and it has been closed.** Three product releases went out with no signed assets, in a project whose previous two reports both singled out signed, independently verifiable releases as its strongest supply-chain property. **A verification promise that is not kept for the version people actually download is not a verification promise.** v2.0.2 is now signed with the same key and the same procedure, and — importantly — was verified from the files as downloaded from the release page, against a fingerprint served by DNS under separate credentials, with three tamper cases each failing closed. That is the property the earlier reports described, restored rather than merely asserted.
 
-The rest of the improvement list is unchanged in kind: a privacy manifest for the agent, diagnostics the user can export, SLSA provenance for the last points of Signed-Releases, continuous fuzzing, an OpenAPI contract, and a supported service artefact. None is a release blocker. The one thing on this list that is not merely an enhancement is the signed release, and that is a matter of running a step that already works.
+**What remains is not the missing signature but the reason it was missing.** Signing is a step a person has to remember, and three releases in a row are evidence that remembering is not a control. The pipeline has never failed; the discipline around it did. A CI gate that refuses to treat a release as published while it carries no signature asset would turn this from something to remember into something that cannot be forgotten, and that gate does not exist yet.
+
+The rest of the improvement list is unchanged in kind: diagnostics the user can export, SLSA provenance for the last points of Signed-Releases, continuous fuzzing, an OpenAPI contract, and a supported service artefact. None is a release blocker.
