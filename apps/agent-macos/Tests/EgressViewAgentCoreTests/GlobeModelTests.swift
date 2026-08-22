@@ -34,6 +34,17 @@ final class GlobeAggregatorTests: XCTestCase {
         XCTAssertEqual(model.unavailable, .noTrafficInPeriod)
     }
 
+    func testAllTimeCountriesRemainVisibleWhenTheSelectedPeriodIsEmpty() {
+        let model = GlobeAggregator().aggregate(
+            placed: [], unplacedSessions: 0, unplacedBytes: 0,
+            metric: .sessions, hasLocationData: true,
+            visitedCountryCodes: ["JP", "US"]
+        )
+        XCTAssertNil(model.unavailable, "the globe still has period-independent history to show")
+        XCTAssertEqual(model.visitedCountryCodes, ["JP", "US"])
+        XCTAssertTrue(model.points.isEmpty, "period points do not leak in from all-time history")
+    }
+
     func testTrafficThatCannotBePlacedIsReportedRatherThanDropped() {
         // A map that quietly omits half the traffic is worse than one that says
         // how much it cannot place.

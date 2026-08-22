@@ -18,6 +18,12 @@ final class WorldAtlasTests: XCTestCase {
             XCTAssertLessThanOrEqual(point.latitude, 90.5)
         }
         XCTAssertTrue(atlas.rings.allSatisfy { $0.count >= 3 }, "a ring needs three points to enclose anything")
+        XCTAssertGreaterThanOrEqual(
+            atlas.countries.compactMap(\.code).count, 170,
+            "almost every Natural Earth geometry must map to an ISO country code"
+        )
+        XCTAssertNotNil(atlas.countries.first { $0.code == "JP" })
+        XCTAssertNotNil(atlas.countries.first { $0.code == "US" })
     }
 
     func testLandExistsWhereItShould() throws {

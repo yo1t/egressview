@@ -131,6 +131,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         // Closes the current stretch of coverage. A session left open would
         // claim the app was watching for however long it was quit.
         controller.endCoverageForShutdown()
+        try? store?.flushCountryVisitSummary()
         notificationCoordinator.stop()
     }
 

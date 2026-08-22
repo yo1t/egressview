@@ -1195,6 +1195,11 @@ final class GeoCacheController: ObservableObject {
     }
 
     func start() {
+        if let store {
+            Task.detached(priority: .utility) {
+                try? store.backfillCountryVisitsFromRetainedHistory()
+            }
+        }
         Task { await self.refreshIfDue() }
         timer.start(every: 3_600) { [weak self] in
             Task { @MainActor in await self?.refreshIfDue() }

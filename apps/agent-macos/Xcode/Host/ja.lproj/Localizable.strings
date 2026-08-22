@@ -460,3 +460,6 @@
 "%lld indicators, but %@ could not be read. Destinations are checked against the rest." = "指標 %lld 件。ただし %@ は取得できませんでした。通信先は残りの指標とだけ照合しています。";
 "abuse.ch terms" = "abuse.ch 利用条件";
 "Spamhaus terms" = "Spamhaus 利用条件";
+"%lld countries are shaded from all-time local history." = "ローカルの全期間履歴にある%lldか国を薄く表示しています。";
+"No connections in this period. %lld countries are retained in local history." = "この期間の接続はありません。ローカル履歴には%lldか国が記録されています。";
+"%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@. %4$lld countries are retained in local history." = "%1$lld地点、通信の%2$lld%%を地図に配置しました。最多は%3$@です。ローカル履歴には%4$lldか国が記録されています。";

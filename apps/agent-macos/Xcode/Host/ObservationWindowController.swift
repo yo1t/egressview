@@ -403,12 +403,16 @@ private final class AgentMainViewModel: ObservableObject {
                     data.sankey = SankeyAggregator().aggregate(pairs, metric: selection.metric)
                     data.timeline = TimelineAggregator().aggregate(buckets, selection: selection)
                     let locations = try store.destinationLocations(from: from, to: to)
+                    let visitedCountries = Set(
+                        try store.countryVisitSummaries().map(\.countryCode)
+                    )
                     data.globe = GlobeAggregator().aggregate(
                         placed: locations.placed,
                         unplacedSessions: locations.unplacedSessions,
                         unplacedBytes: locations.unplacedBytes,
                         metric: selection.metric,
-                        hasLocationData: try store.geoLocationCount() > 0
+                        hasLocationData: try store.geoLocationCount() > 0,
+                        visitedCountryCodes: visitedCountries
                     )
                     let sleeps = try store.sleepPeriods(from: from, to: to)
                     data.sleepPeriods = sleeps
@@ -650,17 +654,20 @@ private struct AgentMainView: View {
                     notificationSummaryCard(
                         L("Attempted today"),
                         value: "\(notifications.sentToday)",
-                        detail: L("After category and cooldown checks")
+                        detail: L("After category and cooldown checks"),
+                        tint: .blue
                     )
                     notificationSummaryCard(
                         L("Suppressed today"),
                         value: "\(notifications.suppressedToday)",
-                        detail: L("Daily limit only; duplicates are not counted")
+                        detail: L("Daily limit only; duplicates are not counted"),
+                        tint: notifications.suppressedToday > 0 ? .orange : .teal
                     )
                     notificationSummaryCard(
                         L("macOS permission"),
                         value: notificationPermissionTitle,
-                        detail: notificationPermissionDetail
+                        detail: notificationPermissionDetail,
+                        tint: notificationPermissionColor
                     )
                 }
 
@@ -689,7 +696,11 @@ private struct AgentMainView: View {
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, minHeight: 260)
-                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
+                    .background(Color.teal.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.teal.opacity(0.16), lineWidth: 1)
+                    }
                 } else {
                     LazyVStack(spacing: 10) {
                         ForEach(notifications.history) { entry in
@@ -703,16 +714,20 @@ private struct AgentMainView: View {
     }
 
     private func notificationSummaryCard(
-        _ title: String, value: String, detail: String
+        _ title: String, value: String, detail: String, tint: Color
     ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title2.bold())
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(tint)
+            Text(value).font(.title2.bold()).foregroundStyle(.primary)
             Text(detail).font(.caption2).foregroundStyle(.secondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(tint.opacity(0.20), lineWidth: 1)
+        }
     }
 
     private func notificationHistoryRow(_ entry: AgentNotificationHistoryEntry) -> some View {
@@ -745,7 +760,11 @@ private struct AgentMainView: View {
             }
         }
         .padding(15)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+        .background(notificationColor(entry.kind).opacity(0.065), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(notificationColor(entry.kind).opacity(0.16), lineWidth: 1)
+        }
     }
 
     private var notificationPermissionTitle: String {
@@ -761,6 +780,14 @@ private struct AgentMainView: View {
         case .unknown: return L("Requested only when needed")
         case .allowed: return L("Focus may still delay display")
         case .denied: return L("Enable it in System Settings")
+        }
+    }
+
+    private var notificationPermissionColor: Color {
+        switch notifications.permissionState {
+        case .unknown: return .blue
+        case .allowed: return .green
+        case .denied: return .orange
         }
     }
 
@@ -1934,6 +1961,15 @@ private struct AgentGlobeChart: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+            if !model.visitedCountryCodes.isEmpty {
+                Label(
+                    L("%lld countries are shaded from all-time local history.",
+                      model.visitedCountryCodes.count),
+                    systemImage: "paintbrush.pointed"
+                )
+                .font(.caption)
+                .foregroundStyle(.teal)
+            }
         }
     }
 
@@ -1948,11 +1984,13 @@ private struct AgentGlobeChart: View {
 
     private var summary: String {
         guard let busiest = model.points.last else {
-            return L("No connections in this period.")
+            return L("No connections in this period. %lld countries are retained in local history.",
+                     model.visitedCountryCodes.count)
         }
         let place = busiest.city ?? busiest.countryCode ?? L("an unnamed place")
-        return L("%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@.",
-                 model.points.count, Int((model.placedShare * 100).rounded()), place)
+        return L("%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@. %4$lld countries are retained in local history.",
+                 model.points.count, Int((model.placedShare * 100).rounded()), place,
+                 model.visitedCountryCodes.count)
     }
 
 }
@@ -2128,25 +2166,50 @@ private final class AgentGlobeDrawingView: NSView {
 
         if let atlas {
             let land = CGMutablePath()
-            for ring in atlas.rings {
-                var started = false
-                for point in ring {
-                    guard let projected = projection.project(
-                        latitude: point.latitude,
-                        longitude: point.longitude,
-                        in: rect
-                    ) else {
-                        started = false
-                        continue
+            let visitedLand = CGMutablePath()
+            for country in atlas.countries {
+                let isVisited = country.code.map(model.visitedCountryCodes.contains) ?? false
+                for ring in country.rings {
+                    var started = false
+                    var visitedSegmentOpen = false
+                    for point in ring {
+                        guard let projected = projection.project(
+                            latitude: point.latitude,
+                            longitude: point.longitude,
+                            in: rect
+                        ) else {
+                            started = false
+                            if visitedSegmentOpen {
+                                visitedLand.closeSubpath()
+                                visitedSegmentOpen = false
+                            }
+                            continue
+                        }
+                        if started {
+                            land.addLine(to: projected)
+                        } else {
+                            land.move(to: projected)
+                            started = true
+                        }
+                        if isVisited {
+                            if visitedSegmentOpen {
+                                visitedLand.addLine(to: projected)
+                            } else {
+                                visitedLand.move(to: projected)
+                                visitedSegmentOpen = true
+                            }
+                        }
                     }
-                    if started {
-                        land.addLine(to: projected)
-                    } else {
-                        land.move(to: projected)
-                        started = true
-                    }
+                    if visitedSegmentOpen { visitedLand.closeSubpath() }
                 }
             }
+            context.saveGState()
+            context.addEllipse(in: rect)
+            context.clip()
+            context.addPath(visitedLand)
+            context.setFillColor(NSColor.systemTeal.withAlphaComponent(0.18).cgColor)
+            context.drawPath(using: .eoFill)
+            context.restoreGState()
             context.addPath(land)
             context.setStrokeColor(NSColor.cyan.withAlphaComponent(0.55).cgColor)
             context.setLineWidth(0.6)

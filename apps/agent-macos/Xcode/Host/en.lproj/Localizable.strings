@@ -458,3 +458,6 @@
 "%lld indicators, but %@ could not be read. Destinations are checked against the rest." = "%lld indicators, but %@ could not be read. Destinations are checked against the rest.";
 "abuse.ch terms" = "abuse.ch terms";
 "Spamhaus terms" = "Spamhaus terms";
+"%lld countries are shaded from all-time local history." = "%lld countries are shaded from all-time local history.";
+"No connections in this period. %lld countries are retained in local history." = "No connections in this period. %lld countries are retained in local history.";
+"%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@. %4$lld countries are retained in local history." = "%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@. %4$lld countries are retained in local history.";
