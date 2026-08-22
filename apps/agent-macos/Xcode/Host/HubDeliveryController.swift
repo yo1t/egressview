@@ -651,16 +651,28 @@ private struct AgentSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack(spacing: 10) {
-                Button(L("Fetch now")) {
+                Button(threats.hasHub ? L("Retry Hub") : L("Fetch now")) {
                     Task { await threats.refresh() }
                 }
                 .disabled(threats.status == .fetching)
                 Text(threatStatusText).font(.caption).foregroundStyle(.secondary)
             }
+            Text(threatSourceText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let lastUpdatedAt = threats.lastUpdatedAt {
+                Text(L(
+                    "Last successful update: %@",
+                    DateFormatter.localizedString(
+                        from: lastUpdatedAt,
+                        dateStyle: .medium,
+                        timeStyle: .short
+                    )
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
             if threats.isDirectDownloadAvailable {
-                // Offered only without a Hub. With one, the indicators already
-                // arrive from it, and downloading them again would contact
-                // third parties for something already in hand.
                 Toggle(isOn: Binding(
                     get: { threats.isDirectDownloadEnabled },
                     set: { threats.isDirectDownloadEnabled = $0 }
@@ -670,22 +682,51 @@ private struct AgentSettingsView: View {
                         Text(L("Downloads public block lists from abuse.ch and spamhaus.org. No destination from this Mac is sent to them; they only learn that this Mac asked. Off unless you turn it on."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        // Downloaded by this Mac, under its own terms, not
-                        // relayed by us. Whoever switches it on is the one
-                        // agreeing, so they get the links.
-                        HStack(spacing: 6) {
-                            Link(L("abuse.ch terms"), destination: URL(string: "https://abuse.ch/terms-of-service/")!)
-                            Text("·").foregroundStyle(.secondary)
-                            Link(L("Spamhaus terms"), destination: URL(string: "https://www.spamhaus.org/legal/")!)
-                        }
-                        .font(.caption)
+                        threatFeedTerms
                     }
                 }
             } else {
-                Text(L("Threat information comes from your Hub. This Mac sends no destinations to anyone."))
+                Button(L("Fetch once from public feeds")) {
+                    Task { await threats.fetchDirectlyOnce() }
+                }
+                .disabled(threats.status == .fetching)
+                Toggle(isOn: Binding(
+                    get: { threats.isHubFallbackEnabled },
+                    set: { threats.isHubFallbackEnabled = $0 }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("Use public feeds when the Hub is unavailable"))
+                        Text(L("The Hub is always tried first. Automatic fallback starts only when the cached threat information is at least 24 hours old."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(L("Public-feed downloads send no destinations, but the feed operators can see that this Mac connected. Automatic fallback is off unless you turn it on."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                threatFeedTerms
             }
+        }
+    }
+
+    private var threatFeedTerms: some View {
+        HStack(spacing: 6) {
+            Link(L("abuse.ch terms"), destination: URL(string: "https://abuse.ch/terms-of-service/")!)
+            Text("·").foregroundStyle(.secondary)
+            Link(L("Spamhaus terms"), destination: URL(string: "https://www.spamhaus.org/legal/")!)
+        }
+        .font(.caption)
+    }
+
+    private var threatSourceText: String {
+        switch threats.activeSource {
+        case .none: return L("Current source: none")
+        case .cache: return L("Current source: saved cache")
+        case .hub: return L("Current source: Hub")
+        case .publicFeeds:
+            return threats.hasHub
+                ? L("Current source: public feeds (Hub unavailable)")
+                : L("Current source: public feeds")
         }
     }
 

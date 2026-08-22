@@ -47,6 +47,14 @@ describe('macOS Agent settings structure', () => {
     assert.doesNotMatch(enrichment, /serverNameSection/);
   });
 
+  it('offers explicit Hub fallback controls with feed disclosure', () => {
+    const threats = section('private var threatSection:', 'private var threatFeedTerms:');
+    assert.match(threats, /Fetch once from public feeds/);
+    assert.match(threats, /isHubFallbackEnabled/);
+    assert.match(threats, /at least 24 hours old/);
+    assert.match(threats, /feed operators can see that this Mac connected/);
+  });
+
   it('keeps QUIC counters in a dedicated diagnostics screen', () => {
     assert.match(source, /case diagnostics/);
     assert.match(source, /case \.diagnostics: diagnosticsSettings/);

@@ -300,6 +300,17 @@
 "Show the file in the Finder" = "Finderでファイルの場所を開きます";
 "Threats" = "脅威";
 "Threat information" = "脅威情報";
+"Retry Hub" = "Hubへ再接続";
+"Last successful update: %@" = "最終更新：%@";
+"Fetch once from public feeds" = "今回だけ公開フィードから取得";
+"Use public feeds when the Hub is unavailable" = "Hubへ接続できないとき、公開フィードから自動取得";
+"The Hub is always tried first. Automatic fallback starts only when the cached threat information is at least 24 hours old." = "常にHubを先に試します。自動取得は保存済みの脅威情報が24時間以上古い場合だけ実行します。";
+"Public-feed downloads send no destinations, but the feed operators can see that this Mac connected. Automatic fallback is off unless you turn it on." = "公開フィードへ宛先は送信しませんが、運営者にはこのMacが接続したことが伝わります。自動取得は有効にしない限り実行しません。";
+"Current source: none" = "現在の取得元：なし";
+"Current source: saved cache" = "現在の取得元：保存済みキャッシュ";
+"Current source: Hub" = "現在の取得元：Hub";
+"Current source: public feeds" = "現在の取得元：公開フィード";
+"Current source: public feeds (Hub unavailable)" = "現在の取得元：公開フィード（Hubへ接続できません）";
 "Destinations are checked against threat feeds on this Mac. The check itself never leaves the machine, whichever source the feeds came from." = "通信先の照合は、このMacの中で行われます。フィードの入手元にかかわらず、照合そのものがMacの外へ出ることはありません。";
 "Download threat feeds without a Hub" = "Hubを使わずに脅威フィードを取得する";
 "Downloads public block lists from abuse.ch and spamhaus.org. No destination from this Mac is sent to them; they only learn that this Mac asked. Off unless you turn it on." = "abuse.ch と spamhaus.org の公開ブロックリストをダウンロードします。このMacの通信先は一切送信されません（このMacが取得したことだけが相手に伝わります）。有効にしない限り取得しません。";

@@ -1,13 +1,10 @@
 import XCTest
 @testable import EgressViewAgentCore
 
-/// The property this file exists for: **a Hub-enrolled agent never contacts a
-/// third party for threat data, whatever the Hub is doing.**
-///
-/// Written after noticing it had been declared the most important thing to
-/// protect and then never measured.
+/// Protects the source boundary: Hub is always primary when enrolled, and a
+/// public-feed fallback requires explicit permission plus a stale cache.
 final class ThreatIntelSourceTests: XCTestCase {
-    func test_Hub登録済みならHubが唯一の取得元() {
+    func test_Hub登録済みならHubが常に第一取得元() {
         XCTAssertEqual(
             ThreatIntelSource.decide(isEnrolledWithHub: true, isDirectDownloadEnabled: false),
             .hub
@@ -16,7 +13,7 @@ final class ThreatIntelSourceTests: XCTestCase {
 
     /// The opt-in is not offered while enrolled, but a value left over from
     /// before enrolment must not resurrect the third-party path.
-    func test_Hub登録済みなら単独取得の設定が残っていてもHub() {
+    func test_Hub登録済みならstandalone設定が残っていても第一取得元はHub() {
         XCTAssertEqual(
             ThreatIntelSource.decide(isEnrolledWithHub: true, isDirectDownloadEnabled: true),
             .hub
@@ -56,5 +53,72 @@ final class ThreatIntelSourceTests: XCTestCase {
                 if hub { XCTAssertEqual(first, .hub) }
             }
         }
+    }
+
+    func test_Hub_fallbackは明示許可がなければ実行しない() {
+        XCTAssertFalse(
+            ThreatIntelFallbackPolicy.shouldDownload(
+                isEnabled: false,
+                hasCachedIndicators: false,
+                lastSuccessfulFetch: nil
+            )
+        )
+    }
+
+    func test_Hub_fallbackは新しいcacheがあれば待つ() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        XCTAssertFalse(
+            ThreatIntelFallbackPolicy.shouldDownload(
+                isEnabled: true,
+                hasCachedIndicators: true,
+                lastSuccessfulFetch: now.addingTimeInterval(-3_600),
+                now: now
+            )
+        )
+    }
+
+    func test_Hub_fallbackはcacheが一日古ければ許可する() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        XCTAssertTrue(
+            ThreatIntelFallbackPolicy.shouldDownload(
+                isEnabled: true,
+                hasCachedIndicators: true,
+                lastSuccessfulFetch: now.addingTimeInterval(-ThreatIntelFallbackPolicy.cacheMaxAge),
+                now: now
+            )
+        )
+        XCTAssertTrue(
+            ThreatIntelFallbackPolicy.shouldDownload(
+                isEnabled: true,
+                hasCachedIndicators: false,
+                lastSuccessfulFetch: nil,
+                now: now
+            )
+        )
+    }
+
+    func test_Hub_fallbackは時刻が新しくてもcacheが空なら許可する() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        XCTAssertTrue(
+            ThreatIntelFallbackPolicy.shouldDownload(
+                isEnabled: true,
+                hasCachedIndicators: false,
+                lastSuccessfulFetch: now,
+                now: now
+            )
+        )
+    }
+
+    func test_Hub_fallback設定は既定OFFで明示的な選択だけを保存する() {
+        let suite = "ThreatIntelSourceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = ThreatIntelPreferences(defaults: defaults)
+
+        XCTAssertFalse(preferences.isHubFallbackEnabled)
+        preferences.isHubFallbackEnabled = true
+        XCTAssertTrue(ThreatIntelPreferences(defaults: defaults).isHubFallbackEnabled)
+        preferences.isHubFallbackEnabled = false
+        XCTAssertFalse(ThreatIntelPreferences(defaults: defaults).isHubFallbackEnabled)
     }
 }

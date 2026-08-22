@@ -133,6 +133,7 @@ public struct ThreatIntelPreferences: @unchecked Sendable {
     public static let etagKey = "threatIntelETag"
     public static let lastFetchKey = "threatIntelLastFetch"
     public static let directDownloadKey = "threatIntelDirectDownloadEnabled"
+    public static let hubFallbackKey = "threatIntelHubFallbackEnabled"
 
     private let defaults: UserDefaults
 
@@ -162,5 +163,12 @@ public struct ThreatIntelPreferences: @unchecked Sendable {
     public var isDirectDownloadEnabled: Bool {
         get { defaults.bool(forKey: Self.directDownloadKey) }
         nonmutating set { defaults.set(newValue, forKey: Self.directDownloadKey) }
+    }
+
+    /// Explicit permission to contact public feed operators when an enrolled
+    /// Hub is unavailable and the cached indicators are at least one day old.
+    public var isHubFallbackEnabled: Bool {
+        get { defaults.bool(forKey: Self.hubFallbackKey) }
+        nonmutating set { defaults.set(newValue, forKey: Self.hubFallbackKey) }
     }
 }

@@ -3,17 +3,18 @@ import Foundation
 
 /// Keeps the local threat indicator set up to date.
 ///
-/// Two sources, and the choice between them is never made automatically. A Hub
-/// supplies the indicators when there is one; without a Hub the agent can
-/// download the same public feeds itself, but only if the user turned that on.
-///
-/// Deriving the source from whether the Hub is reachable would mean an hour of
-/// Hub downtime silently starts contacting third parties -- the traffic leaving
-/// this Mac would change with nobody touching anything. So a Hub-enrolled agent
-/// uses its Hub and says the data is stale when it cannot; it does not fall
-/// back.
+/// A Hub is always tried first when enrolled. Public feeds are contacted only
+/// after an explicit one-time action, or after the user has approved automatic
+/// fallback and the cached indicators are at least one day old.
 @MainActor
 final class ThreatIntelController: ObservableObject {
+    enum ActiveSource: Equatable {
+        case none
+        case cache
+        case hub
+        case publicFeeds
+    }
+
     enum Status: Equatable {
         case idle
         case fetching
@@ -29,12 +30,15 @@ final class ThreatIntelController: ObservableObject {
 
     @Published private(set) var status: Status = .idle
     @Published private(set) var availability: ThreatIntelAvailability = .notFetchedYet
+    @Published private(set) var activeSource: ActiveSource = .none
+    @Published private(set) var lastUpdatedAt: Date?
 
     private let store: ObservationStore?
     private let credentialStore: any AgentCredentialStoring
     private let agentVersion: String
     private let preferences = ThreatIntelPreferences()
     private let timer = PeriodicWork()
+    private var isRefreshing = false
 
     /// Refreshed hourly. The feeds move a few times a day, so an hourly check
     /// is mostly 304s, and a longer interval would leave a newly enrolled Mac
@@ -90,9 +94,8 @@ final class ThreatIntelController: ObservableObject {
         }
     }
 
-    /// Only offered without a Hub. Offering both would mean contacting third
-    /// parties for something already in hand, and the promise that no
-    /// destination leaves this Mac would quietly stop being true.
+    /// Standalone download is a separate mode. Hub-enrolled agents instead get
+    /// explicit one-time and stale-cache fallback controls.
     var isDirectDownloadAvailable: Bool { !hasHub }
 
     /// The one rule that picks a source, stated in `ThreatIntelSource` and
@@ -121,6 +124,14 @@ final class ThreatIntelController: ObservableObject {
         }
     }
 
+    var isHubFallbackEnabled: Bool {
+        get { preferences.isHubFallbackEnabled }
+        set {
+            preferences.isHubFallbackEnabled = newValue
+            Task { await refresh() }
+        }
+    }
+
     func start() {
         loadAvailabilityFromStore()
         Task {
@@ -141,10 +152,25 @@ final class ThreatIntelController: ObservableObject {
     private func loadAvailabilityFromStore() {
         guard let store, let count = try? store.threatIndicatorCount(), count > 0 else { return }
         availability = .checked(indicatorCount: count, fetchedAt: preferences.lastFetch)
+        lastUpdatedAt = preferences.lastFetch
+        activeSource = .cache
+    }
+
+    /// A deliberate one-time exception to Hub-first delivery. The button and
+    /// feed terms are shown together, so this action itself is the opt-in.
+    func fetchDirectlyOnce() async {
+        guard let store else { return }
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        await refreshFromFeeds(store: store)
     }
 
     func refresh() async {
         guard let store else { return }
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
         switch source {
         case .hub:
             // A missing credential here would mean it disappeared between the
@@ -152,7 +178,15 @@ final class ThreatIntelController: ObservableObject {
             // third-party path is not reached: an unreadable keychain must not
             // look like "no Hub".
             guard let credential = await credentialStore.loadDetached() else { return }
-            await refreshFromHub(store: store, credential: credential)
+            let hubSucceeded = await refreshFromHub(store: store, credential: credential)
+            if !hubSucceeded,
+               ThreatIntelFallbackPolicy.shouldDownload(
+                   isEnabled: preferences.isHubFallbackEnabled,
+                   hasCachedIndicators: ((try? store.threatIndicatorCount()) ?? 0) > 0,
+                   lastSuccessfulFetch: preferences.lastFetch
+               ) {
+                await refreshFromFeeds(store: store)
+            }
         case .directDownload:
             await refreshFromFeeds(store: store)
         case .none:
@@ -165,11 +199,17 @@ final class ThreatIntelController: ObservableObject {
                 preferences.etag = nil
             }
             availability = .notEnabled
+            activeSource = .none
+            lastUpdatedAt = nil
             status = .notEnabled
         }
     }
 
-    private func refreshFromHub(store: ObservationStore, credential: AgentCredential) async {
+    @discardableResult
+    private func refreshFromHub(
+        store: ObservationStore,
+        credential: AgentCredential
+    ) async -> Bool {
         status = .fetching
         let fetcher = ThreatIntelFetcher(
             hubURL: credential.hubURL,
@@ -180,29 +220,36 @@ final class ThreatIntelController: ObservableObject {
             switch try await fetcher.fetch(knownETag: preferences.etag) {
             case .unchanged:
                 preferences.lastFetch = Date()
+                lastUpdatedAt = preferences.lastFetch
                 status = .unchanged(at: Date())
                 loadAvailabilityFromStore()
+                activeSource = .hub
             case .hubHasNoFeeds:
                 // Not an error, and not "no threats". The Hub is simply not
                 // running feeds, and the screen has to say which.
                 try store.replaceThreatIndicators([])
                 availability = .hubHasNoFeeds
+                activeSource = .hub
                 status = .hubHasNoFeeds
             case let .updated(indicators, etag, fetchedAt):
                 try store.replaceThreatIndicators(indicators)
                 preferences.etag = etag
                 preferences.lastFetch = Date()
+                lastUpdatedAt = preferences.lastFetch
+                activeSource = .hub
                 availability = .checked(
                     indicatorCount: indicators.count, fetchedAt: fetchedAt ?? Date()
                 )
                 status = .updated(count: indicators.count, at: Date())
             }
+            return true
         } catch {
             // What is already stored is kept. A failed fetch is not evidence
             // that the indicators in hand are wrong, and dropping them would
             // turn a network blip into "no threats found".
             status = .failed(Self.describe(error))
             loadAvailabilityFromStore()
+            return false
         }
     }
 
@@ -211,7 +258,12 @@ final class ThreatIntelController: ObservableObject {
         do {
             let result = try await ThreatFeedDownloader().download()
             try store.replaceThreatIndicators(result.indicators)
+            // Force a full Hub response after reconnection. A Hub 304 must not
+            // leave a public-feed snapshot labelled as Hub data.
+            preferences.etag = nil
             preferences.lastFetch = Date()
+            lastUpdatedAt = preferences.lastFetch
+            activeSource = .publicFeeds
             availability = .checked(indicatorCount: result.indicators.count, fetchedAt: Date())
             status = result.isComplete
                 ? .updated(count: result.indicators.count, at: Date())

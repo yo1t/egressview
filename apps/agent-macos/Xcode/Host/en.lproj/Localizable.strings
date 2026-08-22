@@ -300,6 +300,17 @@
 "Show the file in the Finder" = "Show the file in the Finder";
 "Threats" = "Threats";
 "Threat information" = "Threat information";
+"Retry Hub" = "Retry Hub";
+"Last successful update: %@" = "Last successful update: %@";
+"Fetch once from public feeds" = "Fetch once from public feeds";
+"Use public feeds when the Hub is unavailable" = "Use public feeds when the Hub is unavailable";
+"The Hub is always tried first. Automatic fallback starts only when the cached threat information is at least 24 hours old." = "The Hub is always tried first. Automatic fallback starts only when the cached threat information is at least 24 hours old.";
+"Public-feed downloads send no destinations, but the feed operators can see that this Mac connected. Automatic fallback is off unless you turn it on." = "Public-feed downloads send no destinations, but the feed operators can see that this Mac connected. Automatic fallback is off unless you turn it on.";
+"Current source: none" = "Current source: none";
+"Current source: saved cache" = "Current source: saved cache";
+"Current source: Hub" = "Current source: Hub";
+"Current source: public feeds" = "Current source: public feeds";
+"Current source: public feeds (Hub unavailable)" = "Current source: public feeds (Hub unavailable)";
 "Destinations are checked against threat feeds on this Mac. The check itself never leaves the machine, whichever source the feeds came from." = "Destinations are checked against threat feeds on this Mac. The check itself never leaves the machine, whichever source the feeds came from.";
 "Download threat feeds without a Hub" = "Download threat feeds without a Hub";
 "Downloads public block lists from abuse.ch and spamhaus.org. No destination from this Mac is sent to them; they only learn that this Mac asked. Off unless you turn it on." = "Downloads public block lists from abuse.ch and spamhaus.org. No destination from this Mac is sent to them; they only learn that this Mac asked. Off unless you turn it on.";
