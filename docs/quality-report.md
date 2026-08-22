@@ -1,66 +1,76 @@
 # EgressView Code Quality Report
 
-- **Assessment date**: 2026-08-12
-- **Baseline**: `30e7bce` (previous report); this cycle evaluates through `e5835a4`
-- **Version**: 1.9.0
+- **Assessment date**: 2026-08-22
+- **Baseline**: `e5835a4` (previous report); this cycle evaluates through `5468afb`
+- **Version**: Hub 1.10.0, product release 2.0.2, Agent for Mac 0.5.29 (build 91)
 - **Node.js**: >=22 (CI: 22, 24, and 26)
-- **Method**: automated tests, V8 coverage, static analysis, dependency/secret scans, browser smoke tests, parser fuzzing, and manual review
+- **Method**: automated tests, V8 coverage, static analysis, dependency/secret scans, browser smoke tests, parser fuzzing, Swift unit tests, live inspection of the signed and notarised agent installed on a real Mac, and manual review
 
-> This report evaluates the current main line. SonarQube and OpenSSF scores are repository-based estimates; neither official scanner was run. No penetration test was performed.
+> This report evaluates the current main line. SonarQube and OpenSSF scores are repository-based estimates; neither official scanner was run. No penetration test was performed. Figures for the macOS agent's runtime cost come from one machine and are labelled as such.
 
 ---
 
 ## Executive Summary
 
-**Overall grade: A**
+**Overall grade: A−** (previous cycle: A)
 
-No critical or high-severity defect was found. This was a large cycle: 27 PRs (#186--#212) landed and **v1.9.0 shipped**, also signed and published. The headline is a new collection path — a **macOS Hub-Agent** that observes per-process outbound connections on an endpoint and reports them to the Hub over an authenticated ingest API, where they are stored idempotently, correlated with router observations, and matched against the same threat feeds. Around it, a **shared collection source selector** now scopes every view to a chosen router or agent, the **notification-log freeze** that could wedge the whole server was fixed at its root and backed by an event-loop watchdog, and the macOS agent became an installable, signed artifact.
+No critical or high-severity defect was found in the code. The grade moves down a step for one reason, and it is a process regression rather than a code defect: **the last three product releases were published with no signed assets at all.** v1.9.0 carries the full four-asset set — archive, checksum, detached signature, public key. v2.0.0, v2.0.1, and v2.0.2 carry nothing. The signing pipeline exists, is documented, and was independently re-verified only one cycle ago; it simply was not run. This is the check that the previous two reports called the project's strongest supply-chain property, so it is worth saying plainly: **for anyone who downloaded 2.0.x from the releases page, that property was not there.**
 
-The new ingest surface is the most security-relevant change, and it is built the way the rest of the system is: it is a distinct `agent` access class in the permission matrix, gated by a dedicated `agent.ingest` permission; every agent authenticates with a bearer secret stored only as an HMAC-SHA256 hash under a pepper; enrollment produces an administrator-approved *request* rather than a self-serve identity, with attempt limiting on the short human-readable code; and every observation is validated twice — by Zod at the edge and by table CHECK constraints in SQLite — then deduplicated by `(agentId, observationId)` so a replayed batch changes nothing.
+Everything else moved forward. This was the largest cycle yet: 58 PRs (#213--#270) landed, the product went to 2.0.0 and on to 2.0.2, and the macOS agent went from 0.2.x to **0.5.29 across eight public releases**. The agent grew from a working prototype into something that can be left running: threat intelligence checked against local feeds, a globe and sankey and timeline drawn from an hourly aggregate, an in-app update path that verifies the package before installing it, self-monitoring that says so when collection stops, and — after two rounds of profiling — a resting cost small enough that leaving it on is not a decision the user has to think about.
 
-**One change of substance from the previous report: coverage is now reported in a single scope.** The prior report printed two coverage figures — a whole-tree number and a higher `src/`-only number — to correct an earlier mismatch against the CI gate. But the `src/`-only figure is not what `npm run test:coverage` prints and is not what the gate checks, so it reintroduced the same problem it was meant to fix. This report gives the one number the command emits and the gate enforces: **84.95% lines, 80.07% branches, 81.70% functions**, measured across the instrumented server-side tree, against the CI gate of 83/79/80 — a deliberately narrow margin that tracks reality rather than flattering it. The test-to-source ratio is 100.3%. The permission matrix grew with the agent surface to 119 entries (108 HTTP routes + 11 MCP tools).
+**The reliability work on the agent is the story of this cycle.** An agent whose whole purpose is to run unattended was, in the field, consuming 41% of a CPU core and 325 MB after a day. The causes were separately diagnosable and separately fixed: a run-loop `Timer` that macOS App Nap throttles in a windowless accessory app, a `SwiftUI TimelineView` re-laying out its whole subtree every frame, an `OSSystemExtensionRequest` that was never retained and so never answered, and windows that were never released after closing. Measured on this machine at the time of writing, the host process rests at **0.0% CPU and 126 MB after two hours**, and the system extension at **1.7% and 18 MB after three and a half hours**.
+
+**A new section has been added to this report: §6, the macOS agent evaluated as a Mac application** rather than as Swift source. A privacy tool that a user installs a kernel-adjacent system extension for has to earn that on Apple's own terms — notarisation, sandbox, least-privilege entitlements, an honest privacy story, accessibility, localisation, energy, and a way out. It scores well; the one clear gap is that it ships **no privacy manifest**.
 
 | Framework | Result | Verdict |
 |---|---:|---|
 | OWASP ASVS Level 1 | 14/14 areas satisfied or mitigated | Fully compliant |
-| OpenSSF Scorecard | ~9.4/10 estimated | Signed-Releases satisfied by a published signed asset |
+| OpenSSF Scorecard | ~8.9/10 estimated (was ~9.4) | **Signed-Releases regressed: the three most recent product releases have no signature asset** |
 | ISO/IEC 25010 | 9.1/10 average | High quality |
 | Node.js Best Practices | 47/50 | Excellent |
 | SonarQube-equivalent gate | Passed; coverage rating A | No high-severity blocker |
+| **macOS application quality (§6, new)** | **41/50** | **Strong; no privacy manifest, no crash diagnostics** |
+
+---
 
 ## Review Findings
 
-### Changes since previous report (`30e7bce` baseline)
+### Changes since previous report (`e5835a4` baseline)
 
-Twenty-seven PRs merged (#186--#212). The work clusters into a few themes rather than a flat list:
+Fifty-eight PRs merged (#213--#270), plus #271 after the measurement commit. One commit reached main without a pull request. The work clusters into themes:
 
 | Theme | What landed | PRs |
 |---|---|---|
-| macOS Hub-Agent | Collection spike, host + system extension, connection-activity UI, secure enrollment identities, idempotent ingest storage, opt-in Hub sender, live-delivery hardening, agent/router correlation, threat-matching of agent flows, per-address capacity, capability negotiation | #187--#197, #204, #207, #210--#212 |
-| Enrollment by approval | Short human-readable code produces an administrator-approved request instead of a transcribed long token | #201 |
-| Collection source scope | Shared source selector applied across views; AI conversation source scope preserved; router names detected from SSH prompts | #198 |
-| Reliability | Notification-log agent-scope freeze fixed with a composite index, plus an event-loop watchdog as defense-in-depth | #202 |
-| macOS agent distribution | Packaged as an installable signed DMG; history controls, launch-at-login, menu-bar icon | #199, #200, #203, #205 |
-| Release & deps | v1.9.0 prepared and published with signed assets; Dependabot minor-and-patch group; demo/outbound-safety hardening | #186, #191, #209 |
-| Documentation | README restructure, architecture doc with the agent in it, quieter dotenv, agent-install scope corrected | #206, #208 |
+| Agent visualisation | Per-app sankey, per-app timeline over a shared period, a globe with location lookup and traffic arcs, the connection log restored alongside them | #227--#233 |
+| Agent history and cost | SQLite history with a raw window and an hourly fold; the charts served from that aggregate instead of raw rows | #219, #253, #251 |
+| Agent threat intelligence | Feeds matched locally, the whole match shown when a row is selected, both fallback modes verified and documented | #234, #236, #237, #257, #258 |
+| Agent updates | Signed release checking, a scheduled check that stops at a verified package, and four fixes to make an update installable at all from a sandboxed app | #216, #217, #239--#248 |
+| Agent self-monitoring | Notices and reports when it stops recording; the stop detection then made to actually fire, and proved on a real Mac | #255, #256 |
+| **Agent runtime cost** | **Stops being the heaviest thing on the Mac it watches; cheap to leave running and cheap to look at; keychain reads off the main thread** | #259--#262 |
+| Destination naming | The name the application asked for, kept locally; TLS SNI read on request; agent-observed destinations enriched | #226, #254, #215 |
+| Data fidelity | Real byte counts for closed flows; observations with unknown local ports preserved; the pending-delivery queue readable after a restart | #225, #223, #218 |
+| Distribution | Built and published as an installer package; a front door at `dl.egressview.com`; a product site at `www.egressview.com` | #247, #263--#265, #268--#270 |
 
 ### Key improvements
 
-- **A new collection path, guarded like the rest of the system.** The macOS agent adds three routes under a new `agent` access class — ingest, token rotation, and capability discovery — none of which are reachable by a session or an API identity. An agent authenticates with an `egva_`-prefixed 256-bit bearer secret that is stored only as an HMAC-SHA256 hash under a pepper, so a database copy does not yield a usable credential. Ingest is idempotent: batches and observations carry client-generated IDs and a replayed batch is counted as duplicates, not re-inserted. Every field is validated by Zod at the route and again by SQLite CHECK constraints, including the 64-bit byte counters, which are range-checked as decimal strings so a hostile payload cannot smuggle an out-of-range value past the edge validator.
-- **Enrollment by approval, not by transcription.** The enrollment code shrank from a long transcribed token to six human-readable characters, which on its own would be guessable inside its ten-minute window. It is deliberately not the last line of defence: a correct code produces a *pending request*, an administrator who did not initiate it must approve that request before it becomes an agent, and an attempt counter closes the window in the meantime. This is the same deny-by-default posture applied to onboarding.
-- **The notification-log freeze fixed at the root, then fenced.** An agent-scoped notification-log query ran a correlated `EXISTS` over `agent_observations` filtered by `(agentId, localAddress, ...)`. Without a composite index leading on those columns the planner fell back to an agent-only index and rescanned every observation for that agent per notification row — a synchronous, unbounded scan that blocked the event loop until `/healthz` stopped answering and the proxy returned 504. A `(agentId, localAddress, remoteAddress, remotePort)` index makes the lookup a seek. Because `better-sqlite3` is synchronous, a single pathological query is a whole-process risk, so an **event-loop watchdog** was added: a worker thread watches a heartbeat the main thread bumps each tick and force-kills the process (unblockable SIGKILL) if it goes stale past a threshold (default 120s, `EGRESSVIEW_WATCHDOG_STALL_MS`); the service manager restarts it within seconds. The watchdog is fully unref'd and adds one timer and one lightweight thread.
-- **Collection source scope across the product.** A shared selector lets an operator scope every view — devices, connections, history, AI conversation — to one router or one agent. The scope is validated as a pair (kind and id must arrive together) and checked against the live set of enabled routers and non-revoked agents, so a stale or forged source id is rejected with a 400 rather than silently widening the query. AI messages persist their source scope in an append-only side table, keeping message bodies immutable while remembering what a conversation was about.
-- **A signing pipeline that carried forward.** v1.8.0 was the project's first signed release and was verified from its *downloaded* assets — checksum, `openssl pkeyutl -verify`, and a fingerprint match against the trust registry — with three tamper cases each exiting non-zero. That pipeline carried into v1.9.0, which is published with the same four-asset set (archive, checksum, detached signature, public key) alongside the installable macOS agent. The trust anchor remains the DNS TXT record at `_egressview-release.egressview.com`, served under separate credentials from the repository, which is the comparison that actually carries the trust — the copies in `SECURITY.md`, `trusted-fingerprints.json`, and the website would all change together under a single account compromise.
+- **The agent became cheap to leave running, and the diagnosis is worth recording.** Four independent causes, each with a different fix. macOS App Nap throttles a run-loop `Timer` in a windowless accessory app, so periodic work now uses a `DispatchSourceTimer` on a background queue inside a `ProcessInfo.beginActivity` scope. `TimelineView` re-lays out its entire subtree on every frame, so the globe became an `NSView` with its own clock and a selectable 3/5/15 fps rate. `OSSystemExtensionRequest.propertiesRequest` can simply never call back and the framework does not retain the request, so the health probe now retains it and gives up after 20 seconds. Windows were created once and kept, so they are now created on demand and released on close. **The last one is why memory returns rather than merely stops growing.**
+- **The agent tells you when it has stopped collecting.** Silence is the failure mode a passive observer cannot distinguish from quiet, and a 13-hour gap in the field had gone unnoticed. The gate now separates "no traffic" from "not recording": it treats silence as unexplained past a threshold, probes the system extension once per silence stretch rather than on every tick, and surfaces the state in the menu bar and in a notification. It was verified on a real Mac rather than assumed from unit tests.
+- **Updates are verified before they are installed, from inside a sandbox.** Checking with `spctl --assess` does not work from a sandboxed app — `spctl` inherits the sandbox and fails, which is why in-app updates could not be installed at all for several versions. The verifier now reads the signing team identifier out of `codesign` output and refuses a package that does not match the running app's team; notarisation is still enforced independently by the installer at install time. The path from "an update exists" to "it is installed" took four corrective releases to get right, and each failure is recorded rather than smoothed over.
+- **Threat intelligence with both fallback modes actually measured.** Four conditions were exercised on a real machine: normal operation, a short feed outage, a cache older than 24 hours, and a manual refresh. An earlier claim that "the observation record shows zero third-party connections" was withdrawn: the agent had contacted the feed host, and the query that appeared to show otherwise was simply the wrong query. **That correction is in this report because a verification claim that turns out to be false is worse than no claim.**
+- **A distribution and product site that state the conditions up front.** `dl.egressview.com` and `www.egressview.com` are both served from private S3 buckets behind CloudFront with origin access control, security headers, and no third-party assets. The product site names what is required — a supported router or a Mac — early rather than in a README appendix.
 
 ### Open risks
 
-- **Low, new attack surface**: the agent ingest API is a new authenticated write path. It is permission-gated, doubly validated, idempotent, and rate-limited by the global limiter, but it is exposed to whatever network the agent reaches the Hub over and should be kept behind the same transport protections as the rest of the API.
-- **Low, operational**: the four hardware/external-service integration files are not part of the default CI workflow.
-- **Low, reliability supervision**: the event-loop watchdog force-kills a wedged process but depends on an external service manager (`Restart=on-failure`) to bring it back; there is still no in-repo supported service unit.
-- **Low, ecosystem**: no OpenAPI contract, and no supported production OCI image (the only tracked Dockerfile builds the read-only demo).
-- **Low, maintainability**: several modules grew with the agent work (see hotspots). `public/js/ai-insights.js` (892 lines) and `src/history.js` (847 lines) remain the largest, and `src/db-migrate.js` grew to 755 lines carrying migrations v1--v16.
-- **Low, supply chain**: `npm audit` cannot see SQLite CVEs inside the `better-sqlite3` amalgamation; the blind spot is documented with manual verification steps. The bundled SQLite tracks upstream's current release. Install scripts remain disabled, so installation depends on a bundled prebuilt binary existing for the host.
-- **Low, demo exposure**: the public demo authenticates every visitor as an anonymous `viewer`, which is the point of a demo. No credential is published: anonymous access requires both `DEMO_MODE` and `DEMO_READ_ONLY`, the internal admin token is randomised at every start under that combination, and writes are refused by the viewer permission set and again by the read-only middleware.
+- **Medium, supply chain, new**: **v2.0.0, v2.0.1, and v2.0.2 were published with no signed assets.** The signing pipeline, trust registry, and DNS-anchored fingerprint all still exist and are tested, but a release that does not use them offers a downloader nothing to verify. The agent `.pkg` releases are notarised and stapled by Apple, which is a real and independently checkable signature, but they carry no checksum or detached signature of the project's own.
+- **Low, new attack surface**: the agent ingest API remains a new authenticated write path — permission-gated, doubly validated, idempotent, rate-limited — and should stay behind the same transport protections as the rest of the API.
+- **Low, agent privacy posture**: the agent ships **no `PrivacyInfo.xcprivacy`**. For Developer ID distribution Apple does not require one, so nothing is broken; but for a product whose central claim is "metadata only, never content", a machine-readable declaration of exactly that is the cheapest available proof. See §6.
+- **Low, agent diagnostics**: there is no crash reporting and no structured diagnostic bundle. When the agent misbehaves on a user's machine, the recovery procedure is a person reading logs over the user's shoulder.
+- **Low, operational**: the four hardware/external-service integration files are still not part of the default CI workflow.
+- **Low, reliability supervision**: the event-loop watchdog force-kills a wedged Hub process but depends on an external service manager to bring it back; there is still no in-repo supported service unit.
+- **Low, ecosystem**: no OpenAPI contract, and no supported production OCI image.
+- **Low, maintainability**: `public/js/ai-insights.js` (892) and `src/history.js` (847) remain the largest modules; `src/db-migrate.js` grew to 818 lines and `src/routes/agents.js` to 707.
+- **Low, supply chain**: `npm audit` cannot see SQLite CVEs inside the `better-sqlite3` amalgamation; the blind spot is documented with manual verification steps.
+- **Low, demo exposure**: the public demo authenticates every visitor as an anonymous `viewer`, which is the point of a demo; no credential is published and writes are refused twice over.
 
 ---
 
@@ -68,54 +78,59 @@ Twenty-seven PRs merged (#186--#212). The work clusters into a few themes rather
 
 | Check | Result |
 |---|---|
-| Unit tests with coverage | 2,088 passed, 0 failed (485 suites) |
-| V8 coverage (`npm run test:coverage`, instrumented server-side tree) | 84.95% lines, 80.07% branches, 81.70% functions |
+| Hub unit tests with coverage | 2,188 passed, 0 failed (497 suites) |
+| V8 coverage (`npm run test:coverage`, instrumented server-side tree) | **84.62% lines, 80.00% branches, 81.47% functions** |
 | CI coverage minimums | 83% lines, 79% branches, 80% functions -- passed |
+| macOS agent Swift tests | **409 XCTest (2 skipped) + 10 swift-testing, 0 failed** |
 | Parser fuzz tests | 30 passed (3 suites) |
 | Playwright browser smoke | Passing CI gate (single spec, 1,901 lines) |
 | ESLint | Passed |
 | Frontend HTML insertion audit | 0 `innerHTML` / `insertAdjacentHTML` assignments |
-| Production dependency audit | 0 vulnerabilities |
+| Production dependency audit | 0 vulnerabilities (175 production dependencies) |
 | Secret scan | Passed; no high-signal secrets or environment-specific LAN IPs |
-| ASH (Automated Security Helper) | 0 actionable findings (36 suppressed, tool 3.5.7) |
-| GitHub Actions SHA pinning | 20/20 pinned, 0 unpinned |
-| Published release verification | v1.9.0 published with a detached signature asset; the download-and-verify procedure, including three tamper cases, was exercised on the v1.8.0 assets |
+| ASH (Automated Security Helper) | **0 actionable findings across 5 scanners** (bandit, checkov, detect-secrets, npm-audit, semgrep); 37 suppressed; tool 3.5.7 |
+| GitHub Actions SHA pinning | **23/23 pinned, 0 unpinned** |
+| Installed agent, Gatekeeper | `spctl` **accepted, source = Notarized Developer ID** |
+| Installed agent, hardened runtime | `CodeDirectory flags=0x10000(runtime)`, secure timestamp present |
+| Installed agent, notarisation ticket | `stapler validate` succeeded |
+| **Published release verification** | **v1.9.0 carries archive + checksum + detached signature + public key. v2.0.0, v2.0.1 and v2.0.2 carry no assets at all.** Agent `.pkg` releases carry the notarised package only |
 
 ### Codebase Metrics
 
 | Metric | Value |
 |---|---:|
-| Source lines (`server`, `mcp`, `src`, `public/js`) | 34,890 (31,482) |
-| Test lines (unit, integration, smoke, fuzz, portability) | 35,011 (32,450) |
-| Test-to-source ratio | 100.3% (103.1%) |
-| Unit test files | 151 (141) |
+| Hub source lines (`src`, `public/js`, `server.js`, `mcp-server.js`) | 33,787 (34,890) |
+| Hub test lines (unit, integration, smoke, fuzz, portability) | 36,411 (35,011) |
+| Test-to-source ratio | **107.8%** (100.3%) |
+| **macOS agent Swift source lines** | **23,058 across 115 files** |
+| **macOS agent Swift test lines** | **7,013 across 44 files** |
+| Unit test files | 163 (151) |
 | Integration test files | 4 |
-| Fuzz test files | 2 (3), 3 suites |
+| Fuzz test files | 3 (2), 3 suites |
 | Browser smoke file | 1 (1,901 lines) |
-| Portability test file | 1 |
-| Source modules under `src/` | 124 (114) |
-| Poller modules | 16 (15) |
-| Route modules | 19 (18) |
-| HTTP routes in permission matrix | 108 (94) |
+| Portability test file | 1 (323 lines) |
+| Source modules under `src/` | 124 (124) |
+| Poller modules | 16 (16) |
+| Route modules | 19 (19) |
+| HTTP routes in permission matrix | **111** (108) |
 | MCP tools | 11 |
-| Permission matrix entries | 119 (105) |
-| Route access split | 94 permission-gated, 1 authenticated, 3 agent, 10 public |
-| Agent-authenticated routes | ingest, token rotation, capability discovery |
-| State-changing routes | under `/api`, where the demo read-only middleware mounts |
-| Defined permissions | 8 (7) |
+| Permission matrix entries | **122** (119) |
+| Route access split | 94 permission-gated, 1 authenticated, **6 agent**, 10 public |
+| Defined permissions | 8 (7 operator permissions + `agent.ingest`) |
 | Roles | 3 (viewer, operator, admin) |
-| Production dependencies | 13 |
-| Documentation files under `docs/` | 47 (37) |
-| Database schema version | 16 (12) |
-| Parameterized SQL preparation sites | 196 (152) |
+| Production dependencies | 13 direct, 175 resolved |
+| Documentation files under `docs/` | 39 (47) |
+| Database schema version | 16 (16) |
+| Parameterized SQL preparation sites | 198 (196) |
 | Server-side `var` | 0 |
 | `eval` / `new Function` | 0 |
 | TODO/FIXME/HACK markers | 0 |
 | `innerHTML` / `insertAdjacentHTML` | 0 |
+| CI workflows | 4 (CI, macOS agent, GitHub Pages, Product site) |
 | CI Node.js versions | 22, 24, 26 |
-| Release signing key | 1 active (KMS Ed25519); v1.8.0 and v1.9.0 signed and published |
+| Release signing key | 1 active (KMS Ed25519); **last used for v1.9.0** |
 
-Values in parentheses are the previous report's figures where they changed.
+Values in parentheses are the previous report's figures where they changed. The `docs/` count fell because `.ja.md` counterparts were consolidated, not because documentation was removed.
 
 ---
 
@@ -127,41 +142,43 @@ Values in parentheses are the previous report's figures where they changed.
 |---|---|---|
 | Authentication | Pass | scrypt with versioned KDF migration, timing-safe comparisons, 256-bit session tokens, delayed failures, per-IP lockout, Google OIDC with PKCE; agent bearer secrets hashed with HMAC-SHA256 under a pepper |
 | Session management | Pass | Hashed tokens, sliding expiry, revocation, password-change handling, periodic pruning, role-bound sessions |
-| Access control | Pass | Of 108 HTTP routes, 94 are permission-gated, 1 is authentication-only, 3 are agent-authenticated, and 10 are public (including `/healthz` and `/readyz`). Deny-by-default boundary, applied identically to the WebSocket handshake. Permission matrix holds 119 entries. Agent enrollment requires administrator approval |
+| Access control | Pass | Of 111 HTTP routes, 94 are permission-gated, 1 is authentication-only, 6 are agent-authenticated, and 10 are public. Deny-by-default boundary applied identically to the WebSocket handshake. Permission matrix holds 122 entries. Agent enrollment requires administrator approval |
 | Input validation | Pass | 64 KB JSON limit, strict Zod on endpoint modules, unknown-key rejection, bounded strings/ranges, SSRF guard for outbound endpoints; agent observations validated by Zod and again by SQLite CHECK constraints, including decimal-string range checks on 64-bit byte counters |
 | Cryptography | Pass | `randomBytes`/UUID for secrets and correlation, SHA-256 for session/TOFU/principalHash, HMAC-SHA256 for agent credentials, timing-safe equality, RS256 JWT verification for MCP, KMS Ed25519 for release signing |
 | Error handling | Pass | Generic 500 responses, no stack exposure, request-correlated server logs |
-| Data protection | Pass | Config, backup, and TLS key mode 0600; secrets excluded from public config and logs; API identity and agent credentials stored hash-only |
-| Communications | Pass | HTTPS/HSTS supported; OIDC callback enforces secure redirect; MCP OAuth via HTTPS JWKS |
-| Malicious code | Pass | No eval; frontend HTML insertion audit is enforced in CI |
-| File handling | Pass | Bounded uploads, validated backup names, traversal checks, fail-closed restore/migration |
+| Data protection | Pass | Config, backup, and TLS key mode 0600; secrets excluded from public config and logs; API identity and agent credentials stored hash-only. On the endpoint, the agent's Hub credential lives in the keychain and is read off the main thread |
+| Communications | Pass | HTTPS/HSTS supported; OIDC callback enforces secure redirect; MCP OAuth via HTTPS JWKS; both public web properties are HTTPS-only with HSTS |
+| Malicious code | Pass | No eval; frontend HTML insertion audit enforced in CI |
+| File handling | Pass | Bounded uploads, validated backup names, traversal checks, fail-closed restore/migration; downloaded update packages are verified against the running app's signing team before installation |
 | API security | Pass | Method-specific routes, strict schemas, response-size/time bounds, authenticated exports, MCP rate limiting; idempotent agent ingest |
 | Configuration | Pass | No hard-coded credentials, example configuration, secret scan, production demo-mode refusal |
 | Business logic | Pass | HttpOnly cookies with CSRF protection; explicit permission tokens for API identities; administrator-approved agent enrollment with attempt limiting; deny-by-default enforcement |
-| Audit and logging | Pass | Append-only audit_events with pseudonymous actorHash/principalHash, 180-day retention enforced on a 24-hour schedule, MCP-separate audit store with keyed client address |
+| Audit and logging | Pass | Append-only audit_events with pseudonymous actorHash/principalHash, 180-day retention on a 24-hour schedule, MCP-separate audit store with keyed client address |
 
 ---
 
 ## 2. OpenSSF Scorecard (Estimated)
 
-**Estimated score: 9.4/10.**
+**Estimated score: 8.9/10** (previous cycle: ~9.4).
 
 | Check | Score | Evidence |
 |---|---:|---|
-| Pinned dependencies | 10 | All 20 GitHub Actions pinned to full commit SHA |
-| Token permissions | 10 | Read-only default; Pages widens only the permissions it needs |
-| Dangerous workflow | 10 | No `pull_request_target` |
+| Pinned dependencies | 10 | All 23 GitHub Actions references pinned to a full commit SHA across four workflows |
+| Token permissions | 10 | Read-only default; Pages and the product-site deploy each widen only what they need (`id-token: write` for OIDC, no `contents: write`) |
+| Dangerous workflow | 10 | No `pull_request_target`; the deploy job runs only on `main` through an environment restricted to that branch |
 | Binary artifacts | 10 | No committed binaries |
 | Security policy | 10 | `SECURITY.md` and private vulnerability reporting |
 | License | 10 | AGPL-3.0-only |
-| SAST | 10 | ASH, secret scan, ESLint, frontend insertion audit, npm audit |
+| SAST | 10 | ASH (5 scanners), secret scan, ESLint, frontend insertion audit, npm audit |
 | Vulnerabilities | 10 | Production `npm audit` in CI; 0 findings in this review |
 | Dependency updates | 10 | Weekly Dependabot for npm and Actions with a 7-day cooldown |
-| CI tests | 10 | Unit/coverage, parser fuzz, and browser smoke on PRs; Node 22/24/26 matrix; separate macOS agent workflow |
-| Maintained | 10 | Active release and PR history through PR #212 |
-| Code review | 8 | PR workflow with required checks; RBAC and permission matrix enforce review standards |
-| Fuzzing | 5 | Parser fuzzing covers functions that read untrusted device input, with time-budget and shape assertions; dependency-free, runs in CI. Not yet a continuous-fuzzing service |
-| Signed releases | 8 | **v1.8.0 and v1.9.0 are published with detached signature assets**, which is what this check inspects — it reads release assets by extension (`.sig`, `.asc`, `.minisig`, `.sigstore`, `.intoto.jsonl`), not git tag signatures. The KMS Ed25519 key is enrolled with multi-channel fingerprint publication and trust-registry tests. The remaining 2 points require SLSA provenance |
+| CI tests | 10 | Unit/coverage, parser fuzz, browser smoke, offline portability on PRs; Node 22/24/26 matrix; a separate macOS agent workflow running `swift test` and an unsigned build |
+| Maintained | 10 | 58 PRs and eleven releases this cycle |
+| Code review | 8 | PR workflow with required checks; one commit this cycle reached main without a PR |
+| Fuzzing | 5 | Parser fuzzing covers functions reading untrusted device input, with time-budget and shape assertions; not a continuous-fuzzing service |
+| **Signed releases** | **2** | **Regressed from 8.** This check inspects recent releases for a signature asset by extension. v1.9.0 has one; **v2.0.0, v2.0.1 and v2.0.2 have no assets at all**. The KMS Ed25519 key, the trust registry, and the DNS-anchored fingerprint are all still in place and tested — the pipeline was simply not run for 2.x |
+
+**The single highest-value action available to this project right now is to publish signed assets for the current release.** Everything needed already exists and is verified; the gap is a step that was skipped.
 
 ---
 
@@ -169,14 +186,14 @@ Values in parentheses are the previous report's figures where they changed.
 
 | Characteristic | Score | Strengths | Remaining gap |
 |---|---:|---|---|
-| Functional suitability | 9 | Multi-router collection, a macOS endpoint agent with per-process attribution, agent/router correlation, AI insights with notifications, threat investigation, exports, MCP with OAuth | No OpenAPI contract |
-| Performance efficiency | 9 | WAL, batching, bounded summaries, caches, worker-isolated backup, MCP concurrency cap, indexed agent-scoped lookups | Heavy backup checks can still create short host-level latency spikes |
-| Compatibility | 9 | Node 22/24/26, JA/EN, Yamaha/Cisco/ASUS/conntrack paths and a macOS agent, Cognito compatibility profile, correct operation at `/` and at a subpath behind a proxy | Hardware-specific verification remains fixture-dependent in CI |
-| Usability | 9 | Responsive UI, setup guides, auto-detection, health diagnostics, role display, per-detection notification switches, a shared collection source selector, an installable macOS agent, public read-only demo | Router-side setup (SSH user, syslog forwarding) is still the real onboarding cost |
-| Reliability | 9 | Fail-closed migration/restore/config/notes, health/readiness, cancellation, request IDs, ASUS auto-reconnect, rate limiting, scheduled audit retention, an event-loop watchdog against synchronous stalls | The watchdog depends on an external service manager to restart |
-| Security | 10 | OIDC/PKCE, RBAC, deny-by-default permissions including a separate agent class, CSRF, HttpOnly cookies, hash-only API identity and agent credentials, administrator-approved enrollment, MCP OAuth/JWKS, audit trail, rate limits, SSRF guard, a signed and independently re-verified release, install scripts disabled | -- |
-| Maintainability | 9 | 124 modules, strong tests (100.3% test-to-source ratio), split route/poller/query boundaries, permission matrix, MCP decomposed, parser fuzz, native-dep blind spot documented | Several modules grew with the agent work; `public/js/ai-insights.js` and `src/history.js` remain large |
-| Portability | 9 | Cloud-neutral profiles, a published KMS-signed portable source bundle, offline mode with pre-startup feature policy, offline portability gates, versioned rollback, Node 22/24/26 CI | No supported production OCI image/systemd unit |
+| Functional suitability | 9 | Multi-router collection, a macOS endpoint agent with per-process attribution and local threat matching, agent/router correlation, AI insights, exports, MCP with OAuth | No OpenAPI contract |
+| Performance efficiency | **9** | WAL, batching, bounded summaries, indexed agent-scoped lookups, an hourly aggregate behind the agent's charts, and an agent runtime cost cut by roughly an order of magnitude | Backup checks can still create short host-level latency spikes |
+| Compatibility | 9 | Node 22/24/26, JA/EN throughout, Yamaha/Cisco/ASUS/conntrack paths, macOS 13+ agent, correct operation at `/` and behind a proxy subpath | Hardware-specific verification remains fixture-dependent in CI |
+| Usability | 9 | Responsive UI, setup guides, auto-detection, health diagnostics, a public read-only demo, an installable notarised agent that says when it has stopped, and a product site that states the requirements before the download | Router-side setup is still the real onboarding cost |
+| Reliability | 9 | Fail-closed migration/restore/config, health/readiness, cancellation, rate limiting, an event-loop watchdog, and agent self-monitoring that distinguishes "no traffic" from "not recording" | The watchdog depends on an external service manager to restart |
+| Security | 10 | OIDC/PKCE, RBAC, deny-by-default permissions including a separate agent class, CSRF, hash-only credentials, administrator-approved enrollment, MCP OAuth/JWKS, audit trail, SSRF guard, sandboxed and notarised agent with least-privilege entitlements | -- |
+| Maintainability | 9 | 124 Hub modules plus a 23k-line Swift agent with 7k lines of its own tests; 107.8% Hub test-to-source ratio; permission matrix; parser fuzz | Four modules above 700 lines |
+| Portability | 9 | Cloud-neutral profiles, a KMS-signed portable source bundle, offline mode, versioned rollback, Node 22/24/26 CI | No supported production OCI image or service unit |
 
 **Average: 9.1/10.**
 
@@ -184,19 +201,15 @@ Values in parentheses are the previous report's figures where they changed.
 
 ## 4. Node.js Best Practices
 
-**Adherence: 47/50 (94%).**
+**Adherence: 47/50 (94%).** Unchanged in substance from the previous cycle; the new material this time is on the Swift side and is assessed in §6.
 
-- Domain modules, route modules, poller adapters, the agent ingest/correlation modules, DB bootstrap, auth middleware, and browser rendering responsibilities are separated.
-- Async external calls have timeouts/AbortSignal bounds; backup pruning uses a worker and single-flight job state; ASUS polling coalesces overlapping cycles; MCP requests are concurrency-capped.
-- A synchronous database call can block the whole process, so an event-loop watchdog on a worker thread force-restarts a wedged process, and the pathological query that motivated it was fixed at the index level.
+- Domain modules, route modules, poller adapters, agent ingest/correlation, DB bootstrap, auth middleware, and rendering responsibilities are separated.
+- Async external calls have timeouts/AbortSignal bounds; backup pruning uses a worker and single-flight job state; MCP requests are concurrency-capped.
+- A synchronous database call can block the whole process, so an event-loop watchdog on a worker thread force-restarts a wedged process.
 - The logger adds a bounded `X-Request-Id` context through `AsyncLocalStorage` without logging query strings.
-- Graceful shutdown, readiness, schema migration, config rollback, persistence failure, and permission enforcement tests cover lifecycle boundaries.
-- ESLint, V8 coverage, Node 22/24/26, Playwright, parser fuzz, ASH, secret scanning, and dependency audit run as PR gates; the macOS agent has its own workflow.
-- Authentication and agent-identity logic are separated into dedicated modules following single-responsibility.
-- Untrusted input is validated in depth: agent observations pass Zod at the edge and SQLite CHECK constraints at rest, and parser inputs from untrusted devices are fuzzed with shape and time-budget assertions.
-- SSRF protection resolves operator-configured outbound endpoint hostnames, rejects any link-local, metadata, multicast, or broadcast result, and pins the checked address for the connection to prevent DNS rebinding.
-- Release integrity uses KMS-managed keys with an enrolled trust registry, and the fingerprint is anchored outside the repository in a DNS TXT record served under separate credentials.
-- Dependency install scripts are disabled, so no dependency runs code during installation and native modules come from bundled prebuilt binaries; the native-dependency audit blind spot is documented with manual verification steps.
+- Untrusted input is validated in depth: agent observations pass Zod at the edge and SQLite CHECK constraints at rest; parser inputs from untrusted devices are fuzzed with shape and time-budget assertions.
+- SSRF protection resolves operator-configured hostnames, rejects link-local/metadata/multicast/broadcast results, and pins the checked address to prevent DNS rebinding.
+- Dependency install scripts are disabled; the native-dependency audit blind spot is documented with manual verification steps.
 
 Points are withheld for no default hardware integration CI, no supported process-manager/OCI artifact, and no OpenAPI contract.
 
@@ -206,13 +219,13 @@ Points are withheld for no default hardware integration CI, no supported process
 
 | Metric | Result | Rating |
 |---|---:|---|
-| Reliability | No known critical/high defect; the notification-log freeze is fixed and fenced | A |
-| Security | No open high-signal secret or dependency finding; full RBAC with a separate agent class, audit, SSRF protection, and KMS release signing | A |
-| Maintainability | Several modules grew with the agent feature but remain bounded by tests | A |
-| Coverage | 84.95% lines / 80.07% branches / 81.70% functions, the scope the CI gate checks | A |
+| Reliability | No known critical/high defect; the agent's runtime-cost and stopped-collection faults are fixed and verified on hardware | A |
+| Security | No open high-signal secret or dependency finding; full RBAC, audit, SSRF protection, sandboxed notarised agent | A |
+| Maintainability | Four modules above 700 lines; all bounded by tests | A |
+| Coverage | 84.62% lines / 80.00% branches / 81.47% functions, the scope the CI gate checks | A |
 | Duplication | No material new duplication identified in manual/static review | A (estimated) |
 
-**Quality gate: passed.**
+**Quality gate: passed.** Note that this gate measures the code; it does not measure whether a release was published correctly, which is where this cycle's regression sits.
 
 ### Primary Maintainability Hotspots
 
@@ -220,9 +233,10 @@ Points are withheld for no default hardware integration CI, no supported process
 |---|---:|---|
 | `public/js/ai-insights.js` | 892 | Notification and insight rendering share one view module |
 | `src/history.js` | 847 | Store orchestration remains large after query/cache/bootstrap extraction |
-| `server.js` | 811 | Bootstrap and dependency wiring; grew with agent and watchdog startup |
-| `src/db-migrate.js` | 755 | Schema migrations v1--v16 |
+| `src/db-migrate.js` | 818 | Schema migrations v1--v16 |
+| `server.js` | 812 | Bootstrap and dependency wiring |
 | `public/js/log.js` | 734 | Pagination, filtering, and rendering share one view module |
+| `src/routes/agents.js` | 707 | Agent enrollment, approval, ingest, and capability routes; **grew 24% this cycle** |
 | `public/js/graph.js` | 679 | Orchestrates extracted graph helpers/panels/renderer |
 | `src/devices.js` | 665 | Device identity, persistence, and merge lifecycle |
 | `src/pollers/cisco.js` | 661 | Stateful SSH lifecycle around extracted parser/handshake modules |
@@ -231,20 +245,45 @@ Points are withheld for no default hardware integration CI, no supported process
 | `public/js/devices.js` | 594 | Device UI orchestration |
 | `public/js/auth-socket.js` | 575 | Auth-aware socket bootstrap and reconnection |
 | `mcp-server.js` | 570 | Transport bootstrap and OAuth wiring |
-| `src/routes/agents.js` | 569 | Agent enrollment, approval, ingest, and capability routes |
 | `src/ai-provider.js` | 563 | Multi-provider AI client with SSRF guard |
-| `src/device-identify.js` | 559 | Device fingerprinting heuristics |
 
-Growth this cycle is concentrated in the modules the Hub-Agent touched — `db-migrate.js` (four new migrations), `history.js`, `server.js`, and the new `routes/agents.js`. None crossed into unmanageable territory, and each stayed within its test coverage.
+On the Swift side, `Xcode/Host/ObservationWindowController.swift` is by a wide margin the largest file in the agent and now carries the connection log, the sankey, the timeline, the globe, and their shared period selection. **It is the agent's equivalent of `ai-insights.js` and is the first candidate for extraction.**
+
+---
+
+## 6. macOS Application Quality (new this cycle)
+
+The agent is not only Swift source; it is an application a user installs, grants a system extension to, and leaves running. This section evaluates it as such, against Apple's platform requirements (notarisation, hardened runtime, App Sandbox, entitlements, privacy manifest), the macOS Human Interface Guidelines, accessibility and localisation expectations, and energy behaviour.
+
+**Score: 41/50.**
+
+| Area | Score | Evidence | Gap |
+|---|---:|---|---|
+| **Gatekeeper and notarisation** | 5/5 | On the installed 0.5.29 build 91: `spctl -a -t install` returns **accepted, source = Notarized Developer ID**; `stapler validate` succeeds, so it launches without a network round trip. The build script notarises and staples as part of packaging | -- |
+| **Hardened runtime and signing** | 5/5 | `CodeDirectory flags=0x10000(runtime)` with a secure timestamp; host and system extension are signed separately with `--options runtime` and verified with `--strict` after signing and again after a packaging round trip | -- |
+| **App Sandbox and least privilege** | 5/5 | Both host and extension are sandboxed. The host holds exactly five entitlements — app group, network client, user-selected files read/write, system-extension install, and the network-extension content filter. **There is no `com.apple.security.files.all` and no temporary-exception entitlement anywhere** | -- |
+| **Privacy declaration** | **1/5** | The `NSSystemExtensionUsageDescription` string is accurate and specific: metadata only, no content, no blocking. Data minimisation is real — the product does not read payloads | **No `PrivacyInfo.xcprivacy`.** Developer ID distribution does not require one, so nothing is broken; but for a product whose entire claim is "metadata only", a machine-readable privacy manifest declaring collected data types and required-reason API use is the cheapest proof available, and its absence is conspicuous |
+| **Localisation** | 5/5 | `en.lproj` and `ja.lproj` each hold **491 keys with exact parity** — no key exists in one and not the other. UI language follows a user-selectable locale rather than being fixed at launch | -- |
+| **Accessibility** | 4/5 | Better than a naive count suggests. The three custom-drawn visualisations — globe, sankey, timeline — each expose a computed `accessibilityLabel` summarising what is drawn, decorative images are `accessibilityHidden`, and the menu-bar button carries its status as an accessibility label. 13 keyboard-shortcut and help modifiers | No audit against VoiceOver itself has been recorded. The summaries are asserted by unit tests, not by a screen reader |
+| **Energy and resource behaviour** | 5/5 | Measured on this machine: host **0.0% CPU / 126 MB RSS after 2h02m**; extension **1.7% / 18 MB after 3h37m**. Periodic work uses a dispatch-source timer inside a `beginActivity` scope rather than a run-loop timer App Nap throttles; the globe redraws at a selectable 3/5/15 fps; windows are released on close so memory returns | Single machine, single sample |
+| **HIG conformance** | 4/5 | A menu-bar-only app (`LSUIElement`), which is the right shape for a background observer; windows created on demand; login item managed through `SMAppService` rather than a legacy helper; minimum macOS 13.0 | No documented review against the current HIG; window state restoration is not implemented |
+| **Update and uninstall** | 4/5 | In-app update checking against signed release metadata, with the downloaded package's signing **team identifier verified against the running app before install** — notarisation is then enforced independently by the installer. A first-class uninstall path exists and revokes the Hub registration, preserving the credential if the Hub cannot be reached | The `.pkg` releases carry no checksum or detached signature of the project's own (see §2). Four corrective releases were needed to make in-app update work from a sandbox |
+| **Diagnostics** | **3/5** | Installation writes a instrumented log recording what the relaunch actually did. Swift tests: 419, 0 failing | **No crash reporting and no user-exportable diagnostic bundle.** When the agent misbehaves on someone else's Mac, there is no artefact to ask for |
+
+**The three actions that would move this score most, in order:**
+
+1. **Ship a `PrivacyInfo.xcprivacy`.** It costs one file and directly substantiates the product's central promise.
+2. **Add a diagnostics export** — a single button producing a redacted bundle. Without it, every field report is a conversation instead of an attachment.
+3. **Run a VoiceOver pass** and record the result, so the accessibility work already done is verified rather than assumed.
 
 ---
 
 ## Conclusion
 
-The current main line is suitable for its documented self-hosted deployment model with strong multi-user security controls. Automated quality gates are broad, data-changing operations fail closed, AI provider calls are time-bounded and context-capped, full RBAC with deny-by-default permissions is enforced, MCP access is OAuth-protected with rate limiting and audit, and no critical or high issue remains.
+The code is in good shape and the macOS agent matured substantially: it now costs almost nothing to leave running, says so when it stops working, verifies its own updates, and passes Apple's platform requirements — notarised, stapled, hardened, sandboxed, and holding only the entitlements it actually uses. The localisation is complete to the key, and the custom visualisations were given accessibility summaries rather than left as opaque drawings. That is not the usual standard for a side-loaded utility.
 
-The defining work this cycle was the macOS Hub-Agent, and the notable thing about it is that a whole new ingest surface was added without loosening the security model. The agent is its own access class rather than a reused session, credentials are stored hash-only, enrollment ends in an administrator approval rather than a self-serve token, and observations are validated twice and stored idempotently. A new authenticated write path is exactly where a project tends to cut a corner, and this one did not.
+The runtime-cost work deserves a sentence of its own, because the failure was of a specific and instructive kind: an agent that costs 41% of a CPU core is not a performance problem, it is a **credibility problem**. A tool that asks for a system extension in order to watch what your machine sends outward cannot also be the heaviest thing running on it. Four unrelated causes were each diagnosed and fixed rather than papered over with a longer polling interval, and the result was verified on hardware rather than inferred.
 
-The reliability story is the second thread. A single agent-scoped query could block the synchronous database driver long enough to freeze the whole process behind a 504 — the kind of failure that looks like an outage rather than a slow page. It was fixed where it belonged, with an index that turns the scan into a seek, and then fenced with an event-loop watchdog so that a future pathological query degrades into a fast restart instead of a hang. The watchdog still leans on an external service manager to bring the process back, which is the honest limit of a single-process design.
+**The regression is in release publication, not in code.** Three product releases went out with no signed assets, in a project whose previous two reports both singled out signed, independently verifiable releases as its strongest supply-chain property. Nothing was lost or compromised; the pipeline exists and still passes its tests. But a verification promise that is not kept for the version people actually download is not a verification promise. Publishing signed assets for the current release is the single highest-value action available, and it requires no new machinery.
 
-Coverage holds at the A rating, now reported in the single scope the command emits and the gate enforces, which removes the two-figure ambiguity the previous report carried. Maintainability moved in the expected direction for a large feature: several modules grew, none alarmingly, and the growth is where the new capability lives. The clearest remaining improvements are unchanged in kind — SLSA provenance for the last 2 points of Signed-Releases, continuous fuzzing via OSS-Fuzz, an OpenAPI contract, and a supported OCI/service artifact — all requirement-driven enhancements rather than release blockers.
+The rest of the improvement list is unchanged in kind: a privacy manifest for the agent, diagnostics the user can export, SLSA provenance for the last points of Signed-Releases, continuous fuzzing, an OpenAPI contract, and a supported service artefact. None is a release blocker. The one thing on this list that is not merely an enhancement is the signed release, and that is a matter of running a step that already works.
