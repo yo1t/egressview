@@ -35,6 +35,9 @@ private enum AgentMainTab: String, CaseIterable, Identifiable {
     /// Its own tab rather than a badge somewhere. If a destination on a threat
     /// feed was reached, that is not a detail of another view.
     case threats
+    /// A local audit of what the agent tried to bring to the user's attention.
+    /// Settings control delivery; this tab answers "what changed?".
+    case notifications
 
     var id: String { rawValue }
 
@@ -43,6 +46,7 @@ private enum AgentMainTab: String, CaseIterable, Identifiable {
         case .network: return L("Network status")
         case .threats: return L("Threats")
         case .log: return L("Connection log")
+        case .notifications: return L("Notification history")
         }
     }
 }
@@ -350,6 +354,10 @@ private final class AgentMainViewModel: ObservableObject {
     }
 
     func refresh() {
+        // Notification history is held by AgentUserNotifier and publishes its
+        // own changes. Do not scan SQLite every fifteen seconds for a tab that
+        // does not use the selected connection period.
+        guard selectedTab != .notifications else { return }
         guard let store else {
             errorMessage = L("Local history is unavailable because App Group access failed.")
             return
@@ -492,6 +500,7 @@ private final class AgentMainViewModel: ObservableObject {
 private struct AgentMainView: View {
     @ObservedObject var model: AgentMainViewModel
     @ObservedObject private var language = AgentLanguageSettings.shared
+    @ObservedObject private var notifications = AgentUserNotifier.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -502,6 +511,7 @@ private struct AgentMainView: View {
                 case .network: analysisView
                 case .threats: threatsView
                 case .log: logView
+                case .notifications: notificationHistoryView
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -511,20 +521,48 @@ private struct AgentMainView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 18) {
-            Image(nsImage: NSApplication.shared.applicationIconImage)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 34, height: 34)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("EgressView Agent")
-                    .font(.title2.weight(.semibold))
-                Text(L("Outbound connections observed on this Mac"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 12) {
+            HStack(spacing: 18) {
+                Image(nsImage: NSApplication.shared.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 34, height: 34)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("EgressView Agent")
+                        .font(.title2.weight(.semibold))
+                    Text(L("Outbound connections observed on this Mac"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Group {
+                    if model.selectedTab == .notifications {
+                        Text(L("All local notification history"))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 190, alignment: .trailing)
+                    } else {
+                        Picker(L("Period"), selection: $model.scale) {
+                            ForEach(TimeScale.allCases) { scale in
+                                Text(scale.title).tag(scale)
+                            }
+                        }
+                        .frame(width: 150)
+                    }
+                }
+                Button {
+                    if model.selectedTab == .notifications {
+                        notifications.refreshAuthorizationStatus()
+                    } else {
+                        model.refresh()
+                    }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help(L("Refresh"))
+                .disabled(model.isRefreshing)
             }
-            Spacer()
+
             Picker(L("View"), selection: $model.selectedTab) {
                 ForEach(AgentMainTab.allCases) { tab in
                     Text(tab.title).tag(tab)
@@ -532,23 +570,10 @@ private struct AgentMainView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 320)
-            Picker(L("Period"), selection: $model.scale) {
-                ForEach(TimeScale.allCases) { scale in
-                    Text(scale.title).tag(scale)
-                }
-            }
-            .frame(width: 150)
-            Button {
-                model.refresh()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .help(L("Refresh"))
-            .disabled(model.isRefreshing)
+            .frame(maxWidth: 620)
         }
         .padding(.horizontal, 22)
-        .padding(.vertical, 16)
+        .padding(.vertical, 14)
     }
 
     private var analysisView: some View {
@@ -615,6 +640,157 @@ private struct AgentMainView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var notificationHistoryView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top, spacing: 14) {
+                    notificationSummaryCard(
+                        L("Attempted today"),
+                        value: "\(notifications.sentToday)",
+                        detail: L("After category and cooldown checks")
+                    )
+                    notificationSummaryCard(
+                        L("Suppressed today"),
+                        value: "\(notifications.suppressedToday)",
+                        detail: L("Daily limit only; duplicates are not counted")
+                    )
+                    notificationSummaryCard(
+                        L("macOS permission"),
+                        value: notificationPermissionTitle,
+                        detail: notificationPermissionDetail
+                    )
+                }
+
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L("Notification history")).font(.title2.bold())
+                        Text(L("Notification choices and the daily limit can be changed in Settings > Notifications."))
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(L("Newest first · up to 100 local entries"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if notifications.history.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "bell.slash")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.secondary)
+                        Text(L("No notifications have been attempted yet."))
+                            .font(.headline)
+                        Text(L("Events disabled in Settings and events suppressed by cooldown are not added here."))
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 260)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
+                } else {
+                    LazyVStack(spacing: 10) {
+                        ForEach(notifications.history) { entry in
+                            notificationHistoryRow(entry)
+                        }
+                    }
+                }
+            }
+            .padding(20)
+        }
+    }
+
+    private func notificationSummaryCard(
+        _ title: String, value: String, detail: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.title2.bold())
+            Text(detail).font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func notificationHistoryRow(_ entry: AgentNotificationHistoryEntry) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: notificationSymbol(entry.kind))
+                .font(.title3)
+                .foregroundStyle(notificationColor(entry.kind))
+                .frame(width: 28, height: 28)
+                .background(notificationColor(entry.kind).opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text(notificationKindTitle(entry.kind))
+                        .font(.caption.bold())
+                        .foregroundStyle(notificationColor(entry.kind))
+                    Text(entry.title).font(.headline)
+                    Spacer()
+                    Text(DateFormatter.localizedString(
+                        from: entry.date, dateStyle: .short, timeStyle: .medium
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Text(entry.body).font(.callout).textSelection(.enabled)
+                Label(
+                    entry.delivered ? L("Sent to macOS") : L("Not sent to macOS"),
+                    systemImage: entry.delivered ? "checkmark.circle" : "exclamationmark.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(entry.delivered ? Color.secondary : Color.orange)
+            }
+        }
+        .padding(15)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var notificationPermissionTitle: String {
+        switch notifications.permissionState {
+        case .unknown: return L("Not requested")
+        case .allowed: return L("Allowed")
+        case .denied: return L("Disabled")
+        }
+    }
+
+    private var notificationPermissionDetail: String {
+        switch notifications.permissionState {
+        case .unknown: return L("Requested only when needed")
+        case .allowed: return L("Focus may still delay display")
+        case .denied: return L("Enable it in System Settings")
+        }
+    }
+
+    private func notificationKindTitle(_ kind: AgentNotificationKind) -> String {
+        switch kind {
+        case .threat: return L("Threat")
+        case .monitoring: return L("Monitoring")
+        case .hubDelivery: return L("Hub delivery")
+        case .threatIntelChange: return L("Threat information")
+        case .recovery: return L("Recovery")
+        }
+    }
+
+    private func notificationSymbol(_ kind: AgentNotificationKind) -> String {
+        switch kind {
+        case .threat: return "exclamationmark.shield"
+        case .monitoring: return "waveform.path.ecg"
+        case .hubDelivery: return "arrow.up.circle"
+        case .threatIntelChange: return "shield.lefthalf.filled"
+        case .recovery: return "checkmark.circle"
+        }
+    }
+
+    private func notificationColor(_ kind: AgentNotificationKind) -> Color {
+        switch kind {
+        case .threat: return .red
+        case .monitoring: return .orange
+        case .hubDelivery: return .blue
+        case .threatIntelChange: return .teal
+        case .recovery: return .green
         }
     }
 

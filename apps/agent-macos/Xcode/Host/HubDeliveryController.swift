@@ -5,6 +5,15 @@ import SwiftUI
 
 @MainActor
 final class HubDeliveryController: ObservableObject {
+    enum NotificationState: Equatable {
+        case inactive
+        case healthy
+        case unavailable
+        case authorizationRequired
+        case dataDropped
+        case failed
+    }
+
     @Published var hubAddress = ""
     @Published var enrollmentCode = ""
     @Published var consentConfirmed = false
@@ -20,6 +29,7 @@ final class HubDeliveryController: ObservableObject {
     @Published private(set) var oldestPending = L("Oldest pending: %@", L("none"))
     @Published private(set) var lastAcknowledged = L("Last acknowledged: %@", L("never"))
     @Published var errorMessage: String?
+    @Published private(set) var notificationState: NotificationState = .inactive
 
     private let credentialStore = KeychainAgentCredentialStore()
     private let preferences = AgentDeliveryPreferences()
@@ -28,6 +38,7 @@ final class HubDeliveryController: ObservableObject {
     private var deliverySampler = ObservationPersistenceSampler(refreshInterval: 60)
     private lazy var sender: AgentIngestSender? = makeSender()
     private var senderState: AgentIngestSenderState = .off
+    private var lastRejectedOrOverflowCount: Int?
 
     init() {
         _ = sender
@@ -169,6 +180,28 @@ final class HubDeliveryController: ObservableObject {
     private func render(state: AgentIngestSenderState, queueStatus: AgentDeliveryQueueStatus) {
         senderState = state
         status = label(for: state)
+        let rejectedOrOverflow = queueStatus.queueOverflowCount + queueStatus.contractRejectedCount
+        let newlyDropped = lastRejectedOrOverflowCount.map { rejectedOrOverflow > $0 } ?? false
+        lastRejectedOrOverflowCount = rejectedOrOverflow
+        if newlyDropped {
+            notificationState = .dataDropped
+        } else {
+            switch state {
+            case .idle where deliveryEnabled,
+                 .sending where deliveryEnabled:
+                notificationState = .healthy
+            case .retryScheduled:
+                notificationState = .unavailable
+            case .authorizationRequired:
+                notificationState = .authorizationRequired
+            case .failed:
+                notificationState = .failed
+            case .off, .paused, .waitingForNetwork, .idle, .sending:
+                // A laptop moving between networks is normal. Do not turn
+                // temporary lack of a path into an alarm.
+                notificationState = .inactive
+            }
+        }
         pending = L(
             "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld",
             queueStatus.pendingCount,
@@ -376,6 +409,7 @@ private final class AgentSettingsViewModel: ObservableObject {
 
 private enum AgentSettingsSection: String, CaseIterable, Identifiable {
     case general
+    case notifications
     case hub
     case enrichment
     case history
@@ -386,6 +420,7 @@ private enum AgentSettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: return L("General")
+        case .notifications: return L("Notifications")
         case .hub: return L("Hub")
         case .enrichment: return L("Data Enrichment")
         case .history: return L("History")
@@ -396,11 +431,52 @@ private enum AgentSettingsSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: return "gearshape"
+        case .notifications: return "bell"
         case .hub: return "network"
         case .enrichment: return "sparkles"
         case .history: return "clock.arrow.circlepath"
         case .diagnostics: return "stethoscope"
         case .uninstall: return "trash"
+        }
+    }
+}
+
+private struct AgentNotificationHistoryView: View {
+    let entries: [AgentNotificationHistoryEntry]
+    let onClear: () -> Void
+
+    var body: some View {
+        if entries.isEmpty {
+            Text(L("No notifications have been attempted yet."))
+                .foregroundStyle(.secondary)
+        } else {
+            SwiftUI.ForEach<[AgentNotificationHistoryEntry], UUID, AgentNotificationHistoryRow>(
+                entries, id: \.id
+            ) { entry in
+                AgentNotificationHistoryRow(entry: entry)
+            }
+            Button(L("Clear notification history"), role: .destructive, action: onClear)
+        }
+    }
+}
+
+private struct AgentNotificationHistoryRow: View {
+    let entry: AgentNotificationHistoryEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(entry.title).font(.callout.bold())
+                Spacer()
+                Text(entry.delivered ? L("Sent to macOS") : L("Not sent to macOS"))
+                    .font(.caption)
+                    .foregroundStyle(entry.delivered ? Color.secondary : Color.orange)
+            }
+            Text(entry.body).font(.caption).foregroundStyle(.secondary)
+            Text(DateFormatter.localizedString(
+                from: entry.date, dateStyle: .short, timeStyle: .short
+            )).font(.caption2).foregroundStyle(.tertiary)
+            Divider()
         }
     }
 }
@@ -412,6 +488,7 @@ private struct AgentSettingsView: View {
     @ObservedObject var uninstall: AgentUninstallController
     @ObservedObject var geo: GeoCacheController
     @ObservedObject var threats: ThreatIntelController
+    @ObservedObject private var notifications = AgentUserNotifier.shared
     @ObservedObject private var language = AgentLanguageSettings.shared
     @AppStorage(AgentGlobeFrameRate.defaultsKey)
     private var globeFrameRateRaw = AgentGlobeFrameRate.defaultValue.rawValue
@@ -431,6 +508,7 @@ private struct AgentSettingsView: View {
                 Group {
                     switch section {
                     case .general: general
+                    case .notifications: notificationSettings
                     case .hub: hubSettings
                     case .enrichment: enrichmentSettings
                     case .history: history
@@ -512,6 +590,96 @@ private struct AgentSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    private var notificationSettings: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            settingsTitle(
+                L("Notifications"),
+                subtitle: L("Choose which changes need your attention on this Mac.")
+            )
+            settingsGroup(L("Notify me about")) {
+                notificationToggle(
+                    L("New threat matches"),
+                    L("New matches are grouped into one notification. Addresses and host names are shown only inside EgressView."),
+                    $notifications.threatDetectionsEnabled
+                )
+                notificationToggle(
+                    L("Network monitoring problems"),
+                    L("Approval, restart, stopped recording, and other monitoring failures."),
+                    $notifications.monitoringEnabled
+                )
+                notificationToggle(
+                    L("Hub delivery problems"),
+                    L("Authorization, delivery failure, or observations that could not be queued."),
+                    $notifications.hubDeliveryEnabled
+                )
+                notificationToggle(
+                    L("Threat information changes"),
+                    L("Feed updates and source failures. Off by default because these usually require no action."),
+                    $notifications.threatIntelChangesEnabled
+                )
+                notificationToggle(
+                    L("Recovery"),
+                    L("Monitoring or Hub delivery returning to normal. Off by default."),
+                    $notifications.recoveryEnabled
+                )
+            }
+            settingsGroup(L("Frequency")) {
+                Picker(L("Maximum per day"), selection: $notifications.dailyLimit) {
+                    ForEach(AgentNotificationDailyLimit.allCases, id: \.rawValue) { limit in
+                        Text(notificationLimitTitle(limit)).tag(limit)
+                    }
+                }
+                .frame(width: 240)
+                Text(L("The same cause is notified at most once per hour. New threat matches are grouped."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L(
+                    "Today: %lld attempted · %lld suppressed by the daily limit",
+                    notifications.sentToday,
+                    notifications.suppressedToday
+                ))
+                .font(.callout)
+            }
+            settingsGroup(L("macOS Notification Center")) {
+                Text(notificationPermissionText)
+                    .font(.callout)
+                    .foregroundStyle(
+                        notifications.permissionState == .denied ? Color.orange : Color.secondary
+                    )
+                Button(L("Send test notification")) { notifications.sendTest() }
+            }
+            settingsGroup(L("Recent notification history")) {
+                AgentNotificationHistoryView(
+                    entries: Swift.Array(notifications.history.prefix(10)),
+                    onClear: notifications.clearHistory
+                )
+            }
+        }
+    }
+
+    private func notificationToggle(
+        _ title: String, _ detail: String, _ binding: Binding<Bool>
+    ) -> some View {
+        Toggle(isOn: binding) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func notificationLimitTitle(_ limit: AgentNotificationDailyLimit) -> String {
+        limit == .unlimited ? L("Unlimited") : L("%lld per day", limit.rawValue)
+    }
+
+    private var notificationPermissionText: String {
+        switch notifications.permissionState {
+        case .unknown: return L("Permission will be requested when the first notification needs to be shown.")
+        case .allowed: return L("Notifications are allowed in macOS.")
+        case .denied: return L("Notifications are disabled in macOS System Settings.")
         }
     }
 

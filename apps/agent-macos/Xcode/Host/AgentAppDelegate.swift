@@ -53,6 +53,10 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         credentialStore: KeychainAgentCredentialStore(),
         agentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
     )
+    private lazy var notificationCoordinator = AgentNotificationCoordinator(
+        store: store, hub: hubDelivery, threats: threatIntelController,
+        notifier: AgentUserNotifier.shared
+    )
     private lazy var controller = AgentMonitoringController(
         store: store,
         statusHandler: { [weak self] status in
@@ -127,6 +131,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         // Closes the current stretch of coverage. A session left open would
         // claim the app was watching for however long it was quit.
         controller.endCoverageForShutdown()
+        notificationCoordinator.stop()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -160,6 +165,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         // install wait a day for its first map would be a strange welcome.
         geoCacheController.start()
         threatIntelController.start()
+        notificationCoordinator.start()
         // The window needs to know whether anyone was in a position to look, so
         // that "found nothing" is never shown for "never checked".
         threatAvailabilityObserver = threatIntelController.$availability.sink { [weak self] value in
@@ -179,6 +185,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     private func render(_ status: AgentMonitoringStatus) {
         currentMonitoringStatus = status
+        notificationCoordinator.handleMonitoringStatus(status)
         if status == .fullActive, !checkedLaunchAtLoginForActiveMonitoring {
             checkedLaunchAtLoginForActiveMonitoring = true
             do {

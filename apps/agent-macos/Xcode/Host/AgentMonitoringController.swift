@@ -484,7 +484,16 @@ final class AgentMonitoringController {
         statusHandler(status)
         guard !gateState.hasReportedStall else { return }
         gateState.hasReportedStall = true
-        AgentUserNotifier.shared.notify(title: title, body: body)
+        let notificationKey: String
+        switch status {
+        case .updateNotRunning: notificationKey = "monitoring-update-not-running"
+        default: notificationKey = "monitoring-not-recording"
+        }
+        DispatchQueue.main.async {
+            AgentUserNotifier.shared.notify(
+                kind: .monitoring, key: notificationKey, title: title, body: body
+            )
+        }
     }
 
     func selectLightweightMonitoring() {

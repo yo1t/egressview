@@ -20,6 +20,12 @@ function section(start, end) {
 }
 
 describe('macOS Agent settings structure', () => {
+  it('provides a dedicated Notifications destination', () => {
+    assert.match(source, /case notifications/);
+    assert.match(source, /case \.notifications: return L\("Notifications"\)/);
+    assert.match(source, /case \.notifications: notificationSettings/);
+  });
+
   it('provides a dedicated Data Enrichment destination', () => {
     assert.match(source, /case enrichment/);
     assert.match(source, /case \.enrichment: return L\("Data Enrichment"\)/);
