@@ -4,6 +4,54 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-08-22
+
+**EgressView 2.0.3 = Hub 1.10.0 (unchanged) + Agent for Mac 0.5.29.**
+
+### The offline bundle now extracts on Linux
+
+**Every signed bundle this project has published fails to unpack on the Linux
+hosts it is built for.** The bundles were created on a Mac, and bsdtar wrote
+macOS extended attributes into every member — 268 of them in 2.0.2, 269 in
+1.9.0. GNU tar exits non-zero on those, so `tar -xzf` fails on the machine
+where the Hub is meant to be installed.
+
+Nothing was compromised and no content was wrong; the archive was written in a
+form the target platform refuses. It went unnoticed because **no published
+bundle had ever been verified on Linux** — the offline-distribution test in CI
+builds its own bundle on Linux and verifies that, which never exercised an
+artifact built on a Mac.
+
+The build strips extended attributes, and the verifier now refuses an artifact
+that carries them, so the property no longer depends on who ran the build.
+**Use 2.0.3 rather than 2.0.2 or 1.9.0 for an offline install.**
+
+### Releasing and signing are one act
+
+2.0.0, 2.0.1 and 2.0.2 were published with no signed assets at all. The signing
+pipeline never failed — it was never run, because releasing and signing were two
+separate things a person had to remember to do in order.
+
+`npm run release:publish` is the release now. It refuses to start unless the
+checkout is the tag and the tree is clean, proves three tamper cases fail,
+checks the key fingerprint against the DNS anchor as well as the registry,
+uploads to a **draft**, verifies the assets **as downloaded from the release
+page**, and only then publishes. A failure anywhere leaves a draft rather than
+a public release with nothing to verify.
+
+A workflow checks published releases on publish, on edit, and weekly, so a
+release made another way or altered afterwards is caught too. It found the
+extended-attribute defect above on its first real run.
+
+### The Mac agent declares its privacy promise in a form a machine can read
+
+The app and its system extension both ship a `PrivacyInfo.xcprivacy`: no
+tracking, no tracking domains, and an **empty collected-data list** — accurate
+rather than merely short, because nothing is transmitted anywhere the developer
+can reach. [What the agent sends, and where](docs/agent-privacy.md) lists every
+host it contacts, including the fact that reaching `dl.egressview.com` reveals
+the client IP to a CDN that keeps access logs.
+
 ### Agent for Mac 0.5.29
 
 **When an update fails to restart the agent, that now leaves a trace.** On
@@ -148,6 +196,14 @@ and the name stays on this Mac. The name macOS supplies is never overwritten.
 the aggregate answers only for whole hours strictly inside the period and the
 raw records answer for the ragged ends — otherwise the count would be wrong by
 up to an hour at each edge.
+
+### Also
+
+- Third-party notices for the vendored browser assets are served at
+  `/THIRD_PARTY_NOTICES.txt` and linked from the interface.
+- The product site is published at `www.egressview.com`, and the bare domain
+  redirects to it.
+
 
 ## [2.0.2] - 2026-08-18
 
