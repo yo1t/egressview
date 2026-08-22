@@ -146,6 +146,33 @@ warning that never clears is one nobody reads.
 the Mac slept through are marked as sleep rather than counted as gaps. The
 screen says what it does not know.
 
+The globe also keeps a record of which countries this Mac has reached, so a
+first-time destination is visible as one.
+
+### The globe's frame rate is yours to choose
+
+3, 5 or 15 frames a second, starting at 5. Six degrees a second does not need
+fifteen frames to read as motion, and the difference is battery. It stops
+entirely when the window is closed or another tab is showing — a globe nobody
+can see does not need to turn.
+
+## Being told when something is wrong
+
+The agent can notify you, and each kind is a separate switch: a destination on a
+threat feed, monitoring stopping, delivery to the Hub failing, the threat
+information changing, and recovery. There is a **test notification**, so you can
+check the path works without waiting for something to break.
+
+Two things keep notifications from becoming noise you learn to ignore:
+
+- **An hour's cooldown per event**, so nothing repeats itself at you.
+- **A daily budget** — five, twelve, twenty-five, or unlimited — defaulting to
+  twelve.
+
+**Monitoring alerts are exempt from that budget.** "Nothing is being recorded"
+is the one message this agent exists to send, and it must not be crowded out by
+a busy day of threat notifications. The hourly cooldown still applies to it.
+
 ## Uninstall
 
 Do not move the app to Trash first. Open **Settings > Uninstall** in EgressView
