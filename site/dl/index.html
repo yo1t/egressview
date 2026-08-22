@@ -95,6 +95,15 @@
   ol.steps li{margin-bottom:10px}
   ol.steps strong{color:var(--text); font-weight:600}
 
+  .shot-wrap{padding-top:44px; padding-bottom:8px}
+  .shot{margin:0}
+  .shot img{
+    display:block; width:100%; height:auto; border-radius:var(--radius);
+    background:var(--surface); box-shadow:0 30px 70px rgba(0,0,0,.6);
+    aspect-ratio:1760/1317;
+  }
+  .shot figcaption{margin-top:12px; color:var(--muted); font-size:.87rem; text-align:center}
+
   footer{border-top:1px solid var(--border); padding:34px 0 56px;
     color:var(--muted); font-size:.9rem}
   footer .wrap{display:flex; flex-wrap:wrap; gap:10px 22px; align-items:center}
@@ -129,11 +138,10 @@
       </div>
     </div>
 
-    <h1 data-ja="そのMac、どのアプリが<br>外と話しましたか？">Which app just talked<br>to the internet?</h1>
-    <p class="lede" data-ja="ルーターは「何が外へ出たか」を見せますが、「どのアプリが出したか」は見せません。Agentは、このMacの外向き接続すべてについて、その裏にいるプロセスを報告します。&lt;strong&gt;メタデータのみ。通信内容は読まず、遮断もしません。&lt;/strong&gt;">Your router shows what left the house. It cannot show which
-      program sent it. The agent reports the process behind every outbound
-      connection from your Mac — <strong>metadata only, never payloads, and it
-      blocks nothing.</strong></p>
+    <h1 data-ja="あなたの使っているアプリは<br>誰と通信していますか？">The apps you use —<br>who are they talking to?</h1>
+    <p class="lede" data-ja="あなたの使っているMacにEgressView Agentをインストールすると、外向きの接続先をすべて記録します。&lt;strong&gt;メタデータのみ。通信内容は読みません。&lt;/strong&gt;そして、&lt;strong&gt;その記録はあなた自身が管理します。&lt;/strong&gt;">Install EgressView Agent on your Mac and it records every outbound
+      destination. <strong>Metadata only — it never reads what you send.</strong>
+      And <strong>the record stays yours to keep.</strong></p>
 
     <div class="cta">
       <a class="btn" id="download" href="/macos/manifest.json">
@@ -149,12 +157,21 @@
 </header>
 
 <main>
+<section class="wrap shot-wrap">
+  <figure class="shot">
+    <img id="shot" src="assets/screenshot-en.png" alt="EgressView Agent showing the globe, a sankey of which application went where, and a timeline of when traffic happened"
+         data-en="assets/screenshot-en.png" data-ja="assets/screenshot-ja.png"
+         loading="lazy" decoding="async">
+    <figcaption data-ja="ネットワーク状況タブ。地球儀、どのアプリがどこへ、いつ通信があったか。">Network status: the globe, which application went where, and when traffic happened.</figcaption>
+  </figure>
+</section>
+
 <section class="wrap">
   <h2 data-ja="できること">What you get</h2>
   <div class="grid">
     <div class="card">
-      <h3 data-ja="アドレスの裏にある名前">The name behind the address</h3>
-      <p data-ja="見覚えのない宛先が、IPだけでなく「接続したプログラム」とセットで届きます。">An unfamiliar destination arrives with the program that reached for it, not just an IP.</p>
+      <h3 data-ja="どのアプリがどこと通信したか">Which app went where</h3>
+      <p data-ja="アクセスした国名、ドメイン名、IPアドレスが分かります。見覚えのない宛先は、IPだけでなく「接続したプログラム」とセットで表示されます。">Country, domain and IP address — and an unfamiliar destination arrives with the program that reached for it, not just an address.</p>
     </div>
     <div class="card">
       <h3 data-ja="分からないことは分からないと言います">It says what it does not know</h3>
@@ -172,7 +189,20 @@
 </section>
 
 <section class="wrap">
-  <h2 data-ja="信用する前に、検証してください">Verify it before you trust it</h2>
+  <h2 data-ja="インストール">Installing</h2>
+  <ol class="steps">
+    <li data-ja="&lt;strong&gt;.pkg&lt;/strong&gt;を開き、インストーラに従ってください。アプリケーションへ配置され、そのまま起動します。">Open the <strong>.pkg</strong> and follow the installer. It places the agent in Applications and starts it.</li>
+    <li data-ja="メニューバーのアイコンから&lt;strong&gt;ネットワーク監視&lt;/strong&gt;を選びます。macOSがSystem Extensionの承認を求めます（初回のみ）。">Choose <strong>Network monitoring</strong> from the menu bar icon. macOS asks you to approve a System Extension — once.</li>
+    <li data-ja="任意: EgressView Hubへ登録します。&lt;strong&gt;登録を終えるまで送信は無効&lt;/strong&gt;で、送信先と「何を送り、何を送らないか」を先に画面で示します。">Optional: enrol with an EgressView Hub. <strong>Sending is off until you complete that</strong>, and the agent shows the destination and exactly what will and will not be sent first.</li>
+  </ol>
+  <p style="color:var(--muted); margin:22px 0 0" data-ja="更新はAgent自身が提示し、同じ手順で入ります。System Extensionの再承認は不要です。詳しい手順は&lt;a href=&quot;https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.ja.md&quot;&gt;導入ガイド&lt;/a&gt;にあります。">Updates are offered by the agent
+    itself and install the same way. Approving the System Extension again is not
+    required. Full instructions are in the
+    <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.md">install
+    guide</a>.</p>
+</section>
+<section class="wrap">
+  <h2 data-ja="このアプリの検証方法">How to verify this app</h2>
   <div class="verify">
     <div class="verify-head"><span class="dot"></span>
       <span data-ja="Developer IDで署名し、Appleの公証を受け、staple済みです。">Signed by Developer ID, notarised by Apple, and stapled.</span></div>
@@ -187,19 +217,6 @@ spctl --assess --type install --verbose=4 ~/Downloads/egressview-agent-<span id=
   </div>
 </section>
 
-<section class="wrap">
-  <h2 data-ja="インストール">Installing</h2>
-  <ol class="steps">
-    <li data-ja="&lt;strong&gt;.pkg&lt;/strong&gt;を開き、インストーラに従ってください。アプリケーションへ配置され、そのまま起動します。">Open the <strong>.pkg</strong> and follow the installer. It places the agent in Applications and starts it.</li>
-    <li data-ja="メニューバーのアイコンから&lt;strong&gt;ネットワーク監視&lt;/strong&gt;を選びます。macOSがSystem Extensionの承認を求めます（初回のみ）。">Choose <strong>Network monitoring</strong> from the menu bar icon. macOS asks you to approve a System Extension — once.</li>
-    <li data-ja="任意: EgressView Hubへ登録します。&lt;strong&gt;登録を終えるまで送信は無効&lt;/strong&gt;で、送信先と「何を送り、何を送らないか」を先に画面で示します。">Optional: enrol with an EgressView Hub. <strong>Sending is off until you complete that</strong>, and the agent shows the destination and exactly what will and will not be sent first.</li>
-  </ol>
-  <p style="color:var(--muted); margin:22px 0 0" data-ja="更新はAgent自身が提示し、同じ手順で入ります。System Extensionの再承認は不要です。詳しい手順は&lt;a href=&quot;https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.ja.md&quot;&gt;導入ガイド&lt;/a&gt;にあります。">Updates are offered by the agent
-    itself and install the same way. Approving the System Extension again is not
-    required. Full instructions are in the
-    <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.md">install
-    guide</a>.</p>
-</section>
 </main>
 
 <footer>
@@ -216,12 +233,18 @@ spctl --assess --type install --verbose=4 ~/Downloads/egressview-agent-<span id=
 // English as the markup itself, so the page is readable with scripting off and
 // there is no second copy of the document to drift out of step.
 (function () {
-  const nodes = Array.from(document.querySelectorAll('[data-ja]'));
+  // Text nodes only. The screenshot also carries `data-ja`, and treating it as
+  // text overwrote its `data-en` with an empty string, so switching to English
+  // blanked the image.
+  const nodes = Array.from(document.querySelectorAll('[data-ja]:not(img)'));
   nodes.forEach(n => n.dataset.en = n.innerHTML);
   const buttons = Array.from(document.querySelectorAll('.lang button'));
 
+  const shot = document.getElementById('shot');
+
   function apply(lang) {
     nodes.forEach(n => n.innerHTML = lang === 'ja' ? n.dataset.ja : n.dataset.en);
+    if (shot) shot.src = lang === 'ja' ? shot.dataset.ja : shot.dataset.en;
     buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
     document.documentElement.lang = lang;
     document.title = lang === 'ja'
