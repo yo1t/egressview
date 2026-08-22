@@ -43,6 +43,12 @@ jobs:
       - name: Prepare Pages source
         run: node scripts/prepare-pages-source.js
 
+      - name: Build for this site's host, not the Pages path
+        # One Jekyll source serves two hosts. Without this the build inherits
+        # the Pages baseurl and canonical host, which makes every docs link
+        # here a 404 and hands the canonical to the other copy.
+        run: cp site/_config.www.yml .pages-source/_config.yml
+
       - name: Build with Jekyll
         uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1
         with:
@@ -55,9 +61,26 @@ jobs:
         run: |
           set -euo pipefail
           for page in index.html index.ja.html 404.html robots.txt \
-                      sitemap.xml docs/architecture.html; do
+                      sitemap.xml docs/architecture.html \
+                      docs/agent-privacy.html docs/agent-privacy.ja.html; do
             test -s "_site/$page" || { echo "missing or empty: $page" >&2; exit 1; }
           done
+
+      - name: Check the links belong to this site
+        # The failure this catches shipped once: every docs page linked to
+        # /egressview/... , which is the path on the other host, and every
+        # canonical named that host as the original.
+        run: |
+          set -euo pipefail
+          if grep -rlE 'href="/egressview/' _site --include='*.html' | head -5 | grep .; then
+            echo 'links carry the GitHub Pages baseurl; _config.www.yml was not applied' >&2
+            exit 1
+          fi
+          if grep -rl 'rel="canonical" href="https://yo1t.github.io' _site --include='*.html' \
+             | head -5 | grep .; then
+            echo 'canonical points at the GitHub Pages copy' >&2
+            exit 1
+          fi
 
       - name: Assume the publishing role
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
