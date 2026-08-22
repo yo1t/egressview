@@ -463,3 +463,14 @@
 "%lld countries are shaded from all-time local history." = "ローカルの全期間履歴にある%lldか国を薄く表示しています。";
 "No connections in this period. %lld countries are retained in local history." = "この期間の接続はありません。ローカル履歴には%lldか国が記録されています。";
 "%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@. %4$lld countries are retained in local history." = "%1$lld地点、通信の%2$lld%%を地図に配置しました。最多は%3$@です。ローカル履歴には%4$lldか国が記録されています。";
+"Globe" = "地球儀";
+"Destination countries" = "アクセス先の国";
+"Country view" = "国の表示";
+"Show destination countries" = "アクセス先の国を表示";
+"This list is local and independent of the selected period." = "この一覧はローカルに保存され、選択中の期間には左右されません。";
+"No destination countries have been recorded yet." = "アクセス先の国はまだ記録されていません。";
+"First accessed" = "初回アクセス";
+"Last accessed" = "最終アクセス";
+"Latest application" = "直近のアプリ";
+"Times" = "回数";
+"%lld times" = "%lld回";

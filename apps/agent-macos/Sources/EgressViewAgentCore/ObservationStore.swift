@@ -129,13 +129,31 @@ public struct ObservationStoreStatistics: Equatable, Sendable {
 ///
 /// One row represents one country, not one destination. This keeps the table
 /// bounded by the number of ISO regions even when the Mac runs for years.
-public struct CountryVisitSummary: Equatable, Sendable {
+public struct CountryVisitSummary: Equatable, Sendable, Identifiable {
     public let countryCode: String
     public let firstObservedAt: Date
     public let lastObservedAt: Date
     public let lastSiteName: String
     public let lastProcessName: String
     public let connectionCount: Int
+
+    public var id: String { countryCode }
+
+    public init(
+        countryCode: String,
+        firstObservedAt: Date,
+        lastObservedAt: Date,
+        lastSiteName: String,
+        lastProcessName: String,
+        connectionCount: Int
+    ) {
+        self.countryCode = countryCode
+        self.firstObservedAt = firstObservedAt
+        self.lastObservedAt = lastObservedAt
+        self.lastSiteName = lastSiteName
+        self.lastProcessName = lastProcessName
+        self.connectionCount = connectionCount
+    }
 }
 
 public enum LegacyObservationImportResult: Equatable, Sendable {

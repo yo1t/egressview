@@ -43,6 +43,18 @@ describe('macOS Agent all-time country history', () => {
     assert.match(atlas, /public struct Country: Sendable/);
     assert.match(atlas, /public let code: String\?/);
     assert.match(globe, /model\.visitedCountryCodes\.contains/);
-    assert.match(globe, /systemTeal\.withAlphaComponent\(0\.18\)/);
+    assert.match(globe, /systemTeal\.withAlphaComponent\(0\.26\)/);
+  });
+
+  it('switches from the globe to a local all-time destination-country list', () => {
+    assert.match(globe, /case destinations/);
+    assert.match(globe, /L\("Destination countries"\)/);
+    assert.match(globe, /countryView = \.destinations/);
+    assert.match(globe, /AgentCountryHistoryList\(rows: model\.countryHistory\)/);
+    assert.match(globe, /LazyVStack/);
+    assert.match(globe, /L\("First accessed"\)/);
+    assert.match(globe, /L\("Last accessed"\)/);
+    assert.match(globe, /row\.lastProcessName/);
+    assert.match(globe, /row\.connectionCount/);
   });
 });

@@ -35,10 +35,17 @@ final class GlobeAggregatorTests: XCTestCase {
     }
 
     func testAllTimeCountriesRemainVisibleWhenTheSelectedPeriodIsEmpty() {
+        let now = Date()
         let model = GlobeAggregator().aggregate(
             placed: [], unplacedSessions: 0, unplacedBytes: 0,
             metric: .sessions, hasLocationData: true,
-            visitedCountryCodes: ["JP", "US"]
+            countryHistory: ["JP", "US"].map {
+                CountryVisitSummary(
+                    countryCode: $0, firstObservedAt: now, lastObservedAt: now,
+                    lastSiteName: "example.com", lastProcessName: "Safari",
+                    connectionCount: 1
+                )
+            }
         )
         XCTAssertNil(model.unavailable, "the globe still has period-independent history to show")
         XCTAssertEqual(model.visitedCountryCodes, ["JP", "US"])

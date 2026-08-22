@@ -403,16 +403,14 @@ private final class AgentMainViewModel: ObservableObject {
                     data.sankey = SankeyAggregator().aggregate(pairs, metric: selection.metric)
                     data.timeline = TimelineAggregator().aggregate(buckets, selection: selection)
                     let locations = try store.destinationLocations(from: from, to: to)
-                    let visitedCountries = Set(
-                        try store.countryVisitSummaries().map(\.countryCode)
-                    )
+                    let countryHistory = try store.countryVisitSummaries()
                     data.globe = GlobeAggregator().aggregate(
                         placed: locations.placed,
                         unplacedSessions: locations.unplacedSessions,
                         unplacedBytes: locations.unplacedBytes,
                         metric: selection.metric,
                         hasLocationData: try store.geoLocationCount() > 0,
-                        visitedCountryCodes: visitedCountries
+                        countryHistory: countryHistory
                     )
                     let sleeps = try store.sleepPeriods(from: from, to: to)
                     data.sleepPeriods = sleeps
@@ -1826,6 +1824,20 @@ private struct AgentGlobeChart: View {
     let model: GlobeModel
     let atlas: WorldAtlas?
 
+    private enum CountryView: String, CaseIterable, Identifiable {
+        case globe
+        case destinations
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .globe: return L("Globe")
+            case .destinations: return L("Destination countries")
+            }
+        }
+    }
+
     /// How fast the globe turns, if it turns at all.
     ///
     /// A still globe hides half the destinations behind it with no sign that
@@ -1855,6 +1867,7 @@ private struct AgentGlobeChart: View {
 
     @State private var speed: SpinSpeed = .normal
     @State private var isRunning = true
+    @State private var countryView: CountryView = .globe
     @AppStorage(AgentGlobeFrameRate.defaultsKey)
     private var frameRateRaw = AgentGlobeFrameRate.defaultValue.rawValue
 
@@ -1921,54 +1934,76 @@ private struct AgentGlobeChart: View {
                 ? L("Mark size is data volume")
                 : L("Mark size is the number of connections")
         ) {
-            if let unavailable = model.unavailable {
-                AgentEmptyChartNote(text: message(for: unavailable))
-            } else {
-                AgentGlobeNativeView(
-                    model: model,
-                    atlas: atlas,
-                    degreesPerSecond: speed.degreesPerSecond,
-                    framesPerSecond: frameRate.rawValue,
-                    isRotating: isRunning,
-                    isAnimating: isAnimating
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .bottomTrailing) {
-                    // Overlaid rather than stacked below: the globe is drawn
-                    // from the smaller side of its box, so every point of
-                    // height the controls took came straight off the sphere.
-                    //
-                    // The native view redraws independently, but fixed sizing
-                    // also keeps these controls stable while the card resizes.
-                    spinControls
-                        .fixedSize()
-                        .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(.thinMaterial)
-                        )
-                        .padding(6)
+            Picker(L("Country view"), selection: $countryView) {
+                ForEach(CountryView.allCases) { view in
+                    Text(view.title).tag(view)
                 }
-                .accessibilityElement()
-                .accessibilityLabel(summary)
             }
-            if model.coverageIsPartial {
-                Label(
-                    L("%lld%% of this period could be placed. The rest has no known location.",
-                      Int((model.placedShare * 100).rounded())),
-                    systemImage: "info.circle"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            if !model.visitedCountryCodes.isEmpty {
-                Label(
-                    L("%lld countries are shaded from all-time local history.",
-                      model.visitedCountryCodes.count),
-                    systemImage: "paintbrush.pointed"
-                )
-                .font(.caption)
-                .foregroundStyle(.teal)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 250)
+
+            if countryView == .globe {
+                if let unavailable = model.unavailable {
+                    AgentEmptyChartNote(text: message(for: unavailable))
+                } else {
+                    AgentGlobeNativeView(
+                        model: model,
+                        atlas: atlas,
+                        degreesPerSecond: speed.degreesPerSecond,
+                        framesPerSecond: frameRate.rawValue,
+                        isRotating: isRunning,
+                        isAnimating: isAnimating
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .bottomTrailing) {
+                        // Overlaid rather than stacked below: the globe is drawn
+                        // from the smaller side of its box, so every point of
+                        // height the controls took came straight off the sphere.
+                        //
+                        // The native view redraws independently, but fixed sizing
+                        // also keeps these controls stable while the card resizes.
+                        spinControls
+                            .fixedSize()
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(.thinMaterial)
+                            )
+                            .padding(6)
+                    }
+                    .accessibilityElement()
+                    .accessibilityLabel(summary)
+                }
+                if model.coverageIsPartial {
+                    Label(
+                        L("%lld%% of this period could be placed. The rest has no known location.",
+                          Int((model.placedShare * 100).rounded())),
+                        systemImage: "info.circle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                if !model.visitedCountryCodes.isEmpty {
+                    Button {
+                        countryView = .destinations
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "paintbrush.pointed")
+                            Text(L("%lld countries are shaded from all-time local history.",
+                                   model.visitedCountryCodes.count))
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.teal)
+                    .help(L("Show destination countries"))
+                }
+            } else {
+                AgentCountryHistoryList(rows: model.countryHistory)
             }
         }
     }
@@ -1993,6 +2028,97 @@ private struct AgentGlobeChart: View {
                  model.visitedCountryCodes.count)
     }
 
+}
+
+private struct AgentCountryHistoryList: View {
+    let rows: [CountryVisitSummary]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L("Destination countries"))
+                    .font(.title3.bold())
+                Text(L("This list is local and independent of the selected period."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if rows.isEmpty {
+                AgentEmptyChartNote(text: L("No destination countries have been recorded yet."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(rows) { row in
+                            HStack(alignment: .top, spacing: 10) {
+                                Text(Self.flag(for: row.countryCode))
+                                    .font(.title2)
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text(Self.countryName(for: row.countryCode))
+                                            .font(.headline)
+                                        Spacer(minLength: 8)
+                                        Text(L("%lld times", row.connectionCount))
+                                            .font(.caption.weight(.semibold))
+                                            .monospacedDigit()
+                                            .foregroundStyle(.teal)
+                                    }
+                                    countryHistoryField(
+                                        L("First accessed"),
+                                        date: row.firstObservedAt
+                                    )
+                                    countryHistoryField(
+                                        L("Last accessed"),
+                                        date: row.lastObservedAt
+                                    )
+                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                        Text(L("Latest application"))
+                                            .foregroundStyle(.secondary)
+                                        Text(row.lastProcessName.isEmpty
+                                             ? L("Unknown") : row.lastProcessName)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                    .font(.caption)
+                                }
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(Color.teal.opacity(0.07))
+                            )
+                        }
+                    }
+                    .padding(.trailing, 4)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private static func countryName(for code: String) -> String {
+        Locale.current.localizedString(forRegionCode: code) ?? code
+    }
+
+    private func countryHistoryField(_ label: String, date: Date) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Text(date, format: .dateTime.year().month().day().hour().minute())
+                .monospacedDigit()
+        }
+        .font(.caption)
+    }
+
+    private static func flag(for code: String) -> String {
+        let scalars = code.uppercased().unicodeScalars.compactMap { scalar -> UnicodeScalar? in
+            guard scalar.value >= 65, scalar.value <= 90 else { return nil }
+            return UnicodeScalar(127_397 + scalar.value)
+        }
+        return scalars.count == 2 ? String(String.UnicodeScalarView(scalars)) : ""
+    }
 }
 
 /// Runs the globe clock and renderer outside SwiftUI. A frame invalidates only
@@ -2207,7 +2333,7 @@ private final class AgentGlobeDrawingView: NSView {
             context.addEllipse(in: rect)
             context.clip()
             context.addPath(visitedLand)
-            context.setFillColor(NSColor.systemTeal.withAlphaComponent(0.18).cgColor)
+            context.setFillColor(NSColor.systemTeal.withAlphaComponent(0.26).cgColor)
             context.drawPath(using: .eoFill)
             context.restoreGState()
             context.addPath(land)

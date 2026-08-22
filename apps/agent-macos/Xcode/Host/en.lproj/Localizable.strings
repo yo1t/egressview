@@ -461,3 +461,14 @@
 "%lld countries are shaded from all-time local history." = "%lld countries are shaded from all-time local history.";
 "No connections in this period. %lld countries are retained in local history." = "No connections in this period. %lld countries are retained in local history.";
 "%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@. %4$lld countries are retained in local history." = "%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@. %4$lld countries are retained in local history.";
+"Globe" = "Globe";
+"Destination countries" = "Destination countries";
+"Country view" = "Country view";
+"Show destination countries" = "Show destination countries";
+"This list is local and independent of the selected period." = "This list is local and independent of the selected period.";
+"No destination countries have been recorded yet." = "No destination countries have been recorded yet.";
+"First accessed" = "First accessed";
+"Last accessed" = "Last accessed";
+"Latest application" = "Latest application";
+"Times" = "Times";
+"%lld times" = "%lld times";

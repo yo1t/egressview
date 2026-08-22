@@ -26,6 +26,7 @@ public struct GlobeModel: Equatable, Sendable {
     public let placedTotal: Double
     /// Traffic that could not be put anywhere.
     public let unplacedTotal: Double
+    public let countryHistory: [CountryVisitSummary]
     /// Countries reached at any time since this history was enabled. This is
     /// independent of the selected period and is used only for the pale fill.
     public let visitedCountryCodes: Set<String>
@@ -51,8 +52,9 @@ public struct GlobeAggregator: Sendable {
         unplacedBytes: UInt64,
         metric: TrafficMetric,
         hasLocationData: Bool,
-        visitedCountryCodes: Set<String> = []
+        countryHistory: [CountryVisitSummary] = []
     ) -> GlobeModel {
+        let visitedCountryCodes = Set(countryHistory.map(\.countryCode))
         let value: (PlacedDestination) -> Double = { destination in
             metric == .sessions ? Double(destination.sessionCount) : Double(destination.bytes)
         }
@@ -65,6 +67,7 @@ public struct GlobeAggregator: Sendable {
             // Those are different things and the screen should not confuse them.
             return GlobeModel(
                 metric: metric, points: [], placedTotal: 0, unplacedTotal: unplaced,
+                countryHistory: countryHistory,
                 visitedCountryCodes: visitedCountryCodes,
                 unavailable: .noLocationData
             )
@@ -72,6 +75,7 @@ public struct GlobeAggregator: Sendable {
         guard total > 0 else {
             return GlobeModel(
                 metric: metric, points: [], placedTotal: 0, unplacedTotal: unplaced,
+                countryHistory: countryHistory,
                 visitedCountryCodes: visitedCountryCodes,
                 unavailable: visitedCountryCodes.isEmpty ? .noTrafficInPeriod : nil
             )
@@ -93,7 +97,8 @@ public struct GlobeAggregator: Sendable {
 
         return GlobeModel(
             metric: metric, points: points, placedTotal: total,
-            unplacedTotal: unplaced, visitedCountryCodes: visitedCountryCodes,
+            unplacedTotal: unplaced, countryHistory: countryHistory,
+            visitedCountryCodes: visitedCountryCodes,
             unavailable: nil
         )
     }
