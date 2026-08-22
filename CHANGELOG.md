@@ -6,6 +6,15 @@ All notable changes to EgressView are documented here.
 
 ### Agent for Mac 0.5.28
 
+**The rehearsal switch fires once and clears itself.** Asking for the
+"nothing is being recorded" warning used to leave a flag set until someone
+remembered to remove it, and a forgotten flag means the warning is on screen
+during work that has nothing to do with it — it was still showing in the first
+screenshots taken for the download page. The trigger is now consumed by the
+health check that acts on it. Collection is never affected either way: the
+rehearsal makes the agent claim it has stopped when it has not, so it errs
+towards warning you rather than reassuring you.
+
 **You can be told when something is wrong, and choose what counts as wrong.**
 Notifications gain kinds — a destination on a threat feed, monitoring stopping,
 delivery to the Hub failing, threat information changing, recovery — each a

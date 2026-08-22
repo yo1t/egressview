@@ -173,6 +173,24 @@ Two things keep notifications from becoming noise you learn to ignore:
 is the one message this agent exists to send, and it must not be crowded out by
 a busy day of threat notifications. The hourly cooldown still applies to it.
 
+### Rehearsing the alarm
+
+The message that matters most is the hardest to see working, because producing
+it honestly means stopping collection and waiting half an hour — which costs you
+the record the alarm exists to protect. So you can ask for it directly:
+
+```sh
+defaults write ~/Library/Containers/com.egressview.agent.macos/Data/Library/Preferences/com.egressview.agent.macos \
+  diagnosticsForceNotRecording -bool YES
+```
+
+The next health check picks it up, shows the warning, and **clears the trigger**
+— it fires once and cannot be left switched on by accident. Collection is never
+affected: the rehearsal makes the agent claim it has stopped recording when it
+has not, so it errs towards warning you, never towards reassuring you.
+
+This exists because the alarm shipped once without ever having fired.
+
 ## Uninstall
 
 Do not move the app to Trash first. Open **Settings > Uninstall** in EgressView
