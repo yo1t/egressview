@@ -218,7 +218,7 @@
 
   <section id="release">
     <h2><span class="icon">◆</span> v1.9.0</h2>
-    <p style="font-size:0.95rem; color:var(--muted);">A router shows what left the house but not which application sent it. v1.9.0 closes that gap: EgressView now accepts observations from an <strong>agent running on a Mac</strong>, distributed as a notarised <code>.dmg</code>, so a connection to an address you do not recognise arrives with the name of the program that reached for it — metadata only, never payloads. A machine becomes an agent only when an administrator approves it, and its flows are checked against the threat feeds like any other. This release also repairs a defect that made the web interface unusable for minutes at a time: selecting a Mac in the Detection Log ran an unindexed correlated query that held the event loop, so the site returned 504s until the process was restarted. The same query now takes about 1.1 seconds instead of over 30, and a watchdog restarts the process if anything else ever holds the loop. Upgrading from 1.8.0 runs database migrations; existing history is preserved.</p>
+    <p style="font-size:0.95rem; color:var(--muted);">A router shows what left the house but not which application sent it. v1.9.0 closes that gap: EgressView now accepts observations from an <strong>agent running on a Mac</strong>, distributed as a notarised installer, so a connection to an address you do not recognise arrives with the name of the program that reached for it — metadata only, never payloads. A machine becomes an agent only when an administrator approves it, and its flows are checked against the threat feeds like any other. This release also repairs a defect that made the web interface unusable for minutes at a time: selecting a Mac in the Detection Log ran an unindexed correlated query that held the event loop, so the site returned 504s until the process was restarted. The same query now takes about 1.1 seconds instead of over 30, and a watchdog restarts the process if anything else ever holds the loop. Upgrading from 1.8.0 runs database migrations; existing history is preserved.</p>
   </section>
 
   <!-- Why EgressView -->
@@ -315,7 +315,7 @@
       </div>
       <div class="card">
         <h3>💻 macOS Agent</h3>
-        <p>A router shows what left the house but not which application sent it. The agent reports the process behind each outbound connection from a Mac, so an unfamiliar destination arrives with the name of the program that reached for it. Metadata only — never payloads, and it blocks nothing. A machine becomes an agent only when an administrator approves it. Distributed as a notarised <code>.dmg</code>; needs EgressView 1.9.0 or newer. <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.md">Install guide →</a></p>
+        <p>A router shows what left the house but not which application sent it. The agent reports the process behind each outbound connection from a Mac, so an unfamiliar destination arrives with the name of the program that reached for it. Metadata only — never payloads, and it blocks nothing. A machine becomes an agent only when an administrator approves it. Distributed as a notarised <code>.pkg</code> installer that updates itself; needs EgressView 1.9.0 or newer. <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.md">Install guide →</a></p>
       </div>
       <div class="card">
         <h3>🤖 AI Agent Access (MCP)</h3>
