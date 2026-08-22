@@ -1882,6 +1882,10 @@ private struct AgentGlobeChart: View {
                 HStack(alignment: .center, spacing: 12) {
                     Text(L("Where the traffic went"))
                         .font(.title3.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .allowsTightening(true)
+                        .layoutPriority(1)
                     Spacer(minLength: 8)
                     Picker(L("Country view"), selection: $countryView) {
                         ForEach(CountryView.allCases) { view in
@@ -1890,7 +1894,7 @@ private struct AgentGlobeChart: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(width: 180)
+                    .frame(width: 165)
                 }
                 Text(model.metric == .bytes
                      ? L("Mark size is data volume")
@@ -1900,7 +1904,9 @@ private struct AgentGlobeChart: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.90)
                     .allowsTightening(true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if countryView == .globe {
                 if let unavailable = model.unavailable {
