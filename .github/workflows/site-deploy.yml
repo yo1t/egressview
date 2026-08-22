@@ -82,6 +82,29 @@ jobs:
             exit 1
           fi
 
+      - name: Check the sitemap lists this site, and only this site
+        # It was hand-written and listed two URLs while the site served over
+        # forty, so every documentation page was invisible to search engines --
+        # and one of the two was on another host, where a sitemap entry is
+        # ignored anyway.
+        run: |
+          set -euo pipefail
+          test -s _site/sitemap.xml || { echo 'no sitemap was generated' >&2; exit 1; }
+          count=$(grep -c '<loc>' _site/sitemap.xml || true)
+          [ "$count" -ge 20 ] || {
+            echo "sitemap lists only $count URLs; the docs are missing" >&2; exit 1; }
+          for required in 'https://www.egressview.com/' \
+                          'https://www.egressview.com/docs/agent-privacy.html' \
+                          'https://www.egressview.com/docs/agent-privacy.ja.html'; do
+            grep -q "<loc>$required</loc>" _site/sitemap.xml || {
+              echo "sitemap is missing $required" >&2; exit 1; }
+          done
+          for forbidden in 'dl.egressview.com' 'yo1t.github.io' '/404.html' '/index.ja.html'; do
+            if grep -q "$forbidden" _site/sitemap.xml; then
+              echo "sitemap should not list $forbidden" >&2; exit 1
+            fi
+          done
+
       - name: Assume the publishing role
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:

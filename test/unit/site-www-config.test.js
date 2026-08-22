@@ -50,6 +50,46 @@ describe('product site Jekyll configuration', () => {
     assert.ok(checkAt > 0 && uploadAt > 0 && checkAt < uploadAt, 'the check must run before the upload');
   });
 
+  it('sitemapは手書きせずjekyll-sitemapに生成させる', () => {
+    // The hand-written file listed two URLs while the site served more than
+    // forty, so every documentation page was invisible to search engines. A
+    // file that has to be edited whenever a page is added will go stale again.
+    assert.equal(
+      fs.existsSync(path.join(root, 'site', 'sitemap.xml')), false,
+      'a hand-written sitemap overrides the generated one'
+    );
+    for (const config of [wwwConfig, pagesConfig]) {
+      assert.match(fs.readFileSync(config, 'utf8'), /jekyll-sitemap/);
+    }
+  });
+
+  it('索引しないページはsitemapから外す', () => {
+    // A redirect, an error page and a verification token are not content.
+    for (const page of ['index.ja.html', '404.html', 'google87ed3f363a004a20.html']) {
+      const file = path.join(root, 'site', page);
+      if (!fs.existsSync(file)) continue;
+      assert.match(fs.readFileSync(file, 'utf8').slice(0, 400), /^---[\s\S]*sitemap: false/,
+        `${page} is not excluded from the sitemap`);
+    }
+  });
+
+  it('配布ホストは自分のsitemapを持つ', () => {
+    // A sitemap entry on another host is ignored unless ownership of both is
+    // verified, so dl cannot rely on the product site listing it.
+    const sitemap = fs.readFileSync(path.join(root, 'site', 'dl', 'sitemap.xml'), 'utf8');
+    assert.match(sitemap, /<loc>https:\/\/dl\.egressview\.com\/<\/loc>/);
+    const robots = fs.readFileSync(path.join(root, 'site', 'dl', 'robots.txt'), 'utf8');
+    assert.match(robots, /Sitemap: https:\/\/dl\.egressview\.com\/sitemap\.xml/);
+  });
+
+  it('sitemapの中身を公開前に検査する', () => {
+    const yaml = fs.readFileSync(workflow, 'utf8');
+    const checkAt = yaml.indexOf('Check the sitemap lists this site');
+    const uploadAt = yaml.indexOf('Upload the site');
+    assert.ok(checkAt > 0 && checkAt < uploadAt, 'the sitemap check must run before the upload');
+    assert.match(yaml, /count.*-ge 20/);
+  });
+
   it('両方の言語のページを公開対象として確認する', () => {
     const yaml = fs.readFileSync(workflow, 'utf8');
     assert.match(yaml, /docs\/agent-privacy\.html/);
