@@ -108,7 +108,10 @@ function checkRelease(tag, repo) {
         '--signature', paths.signature, '--public-key', paths.publicKey,
       ]));
     } catch (error) {
-      return [`${tag}: the published assets do not verify (${String(error.message).split('\n')[0]})`];
+      // The verifier's own message is the useful part. Reporting only "command
+      // failed" hides why, which is exactly what a gate must not do.
+      const detail = String(error.stderr || error.stdout || error.message).trim();
+      return [`${tag}: the published assets do not verify\n  ${detail.split('\n').join('\n  ')}`];
     }
     if (!verified?.verified) return [`${tag}: the published assets do not verify`];
 
