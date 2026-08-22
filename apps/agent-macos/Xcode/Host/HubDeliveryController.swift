@@ -522,6 +522,7 @@ private struct AgentSettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(minWidth: 760, minHeight: 540)
+        .environment(\.locale, language.language.locale)
         .alert("EgressView Agent", isPresented: messagePresented) {
             Button(L("OK"), role: .cancel) {
                 model.message = nil
@@ -539,7 +540,6 @@ private struct AgentSettingsView: View {
                 Picker(L("Mode"), selection: monitoringBinding) {
                     ForEach(model.availableMonitoringModes) { mode in Text(mode.title).tag(mode) }
                 }
-                .id(language.language.rawValue)
                 .pickerStyle(.segmented)
                 .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
                 Text(model.monitoringStatus).font(.callout).foregroundStyle(.secondary)

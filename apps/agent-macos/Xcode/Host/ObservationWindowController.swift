@@ -520,6 +520,7 @@ private struct AgentMainView: View {
         }
         .frame(minWidth: 900, minHeight: 620)
         .background(Color(nsColor: .windowBackgroundColor))
+        .environment(\.locale, language.language.locale)
     }
 
     private var header: some View {

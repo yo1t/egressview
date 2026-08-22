@@ -31,7 +31,7 @@ describe('macOS Agent App Sandbox boundary', () => {
     const hostBuild = entitlement(hostInfo, 'CFBundleVersion');
     const extensionBuild = entitlement(extensionInfo, 'CFBundleVersion');
 
-    assert.equal(hostVersion, '0.5.26');
+    assert.equal(hostVersion, '0.5.27');
     assert.equal(extensionVersion, hostVersion);
     assert.equal(extensionBuild, hostBuild);
   });
@@ -120,7 +120,6 @@ describe('macOS Agent App Sandbox boundary', () => {
 
     assert.match(controller, /isLightweightMonitoringAvailable: Bool \{\s*\/\/[\s\S]*?false\s*\}/);
     assert.match(settings, /isLightweightMonitoringAvailable = false/);
-    assert.match(settings, /Picker\(L\("Mode"\)[\s\S]*?\.id\(language\.language\.rawValue\)/);
     assert.doesNotMatch(identity, /SecTaskCopyValueForEntitlement/);
     assert.match(appDelegate, /if controller\.isLightweightMonitoringAvailable/);
     assert.match(settings, /availableMonitoringModes/);

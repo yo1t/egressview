@@ -24,6 +24,16 @@ enum AgentLanguage: String, CaseIterable, Identifiable {
         case .japanese: return "ja"
         }
     }
+
+    var effectiveLanguageCode: String {
+        if let languageCode { return languageCode }
+        let preferred = Locale.preferredLanguages.first ?? "en"
+        return preferred.lowercased().hasPrefix("ja") ? "ja" : "en"
+    }
+
+    var locale: Locale {
+        Locale(identifier: effectiveLanguageCode)
+    }
 }
 
 enum AgentStrings {
@@ -46,13 +56,11 @@ enum AgentStrings {
     }
 
     private static var effectiveLanguageCode: String {
-        if let explicit = selectedLanguage.languageCode { return explicit }
-        let preferred = Locale.preferredLanguages.first ?? "en"
-        return preferred.lowercased().hasPrefix("ja") ? "ja" : "en"
+        selectedLanguage.effectiveLanguageCode
     }
 
     private static var effectiveLocale: Locale {
-        Locale(identifier: effectiveLanguageCode)
+        selectedLanguage.locale
     }
 
     private static var localizationBundle: Bundle {
