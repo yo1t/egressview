@@ -157,7 +157,8 @@ final class AgentMonitoringController {
         store: ObservationStore?,
         statusHandler: @escaping (AgentMonitoringStatus) -> Void,
         observationHandler: @escaping ([ConnectionObservation]) -> Void,
-        storageErrorHandler: @escaping (Error) -> Void
+        storageErrorHandler: @escaping (Error) -> Void,
+        diagnosticsHandler: @escaping (QUICFeasibilityDiagnostics) -> Void = { _ in }
     ) {
         let gateState = MonitoringGateState()
         // While an update is stalled, nothing is being recorded, so the
@@ -243,7 +244,9 @@ final class AgentMonitoringController {
                         gateState.underlyingStatus = .fullActive
                         statusHandler(.fullActive)
                     }
-                }
+                },
+                readsServerName: ServerNamePreferences().isEnabled,
+                diagnosticsHandler: diagnosticsHandler
             )
         }
     }
@@ -298,6 +301,14 @@ final class AgentMonitoringController {
 
     func stopHealthChecks() {
         healthTimer.stop()
+    }
+
+    func requestQUICDiagnostics() {
+        fullMonitoringCollector?.requestQUICDiagnostics()
+    }
+
+    func setReadsServerName(_ enabled: Bool) {
+        fullMonitoringCollector?.setReadsServerName(enabled)
     }
 
     /// Writes down when monitoring was really running, so the charts can say

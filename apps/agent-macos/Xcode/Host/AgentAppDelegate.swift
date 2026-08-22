@@ -15,6 +15,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginController = LaunchAtLoginController()
     private let historyMaintenanceQueue = DispatchQueue(label: "com.egressview.agent.history-maintenance")
     private var currentMonitoringStatus = AgentMonitoringStatus.paused
+    private var currentQUICDiagnostics: QUICFeasibilityDiagnostics?
     private var checkedLaunchAtLoginForActiveMonitoring = false
     private var isPreparedForRemoval = false
     private lazy var storageResult = makeStorage()
@@ -67,6 +68,12 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         },
         storageErrorHandler: { [weak self] error in
             DispatchQueue.main.async { self?.recordStorageError(error.localizedDescription) }
+        },
+        diagnosticsHandler: { [weak self] diagnostics in
+            DispatchQueue.main.async {
+                self?.currentQUICDiagnostics = diagnostics
+                self?.settingsWindow?.updateQUICDiagnostics(diagnostics)
+            }
         }
     )
 
@@ -272,9 +279,14 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
             onMonitoringMode: { [weak self] mode in self?.selectMonitoringMode(mode) },
             onRetentionChanged: { [weak self] days in self?.applyRetentionPolicy(days: days) },
             onLanguageChanged: { [weak self] in self?.refreshLocalization() },
+            onServerNameChanged: { [weak self] enabled in
+                self?.controller.setReadsServerName(enabled)
+            },
+            onRefreshQUICDiagnostics: { [weak self] in self?.controller.requestQUICDiagnostics() },
             onClose: { [weak self] in self?.settingsWindow = nil }
         )
         controller.updateMonitoringStatus(currentMonitoringStatus)
+        controller.updateQUICDiagnostics(currentQUICDiagnostics)
         settingsWindow = controller
         return controller
     }

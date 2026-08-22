@@ -245,8 +245,12 @@ private final class AgentSettingsViewModel: ObservableObject {
         didSet { GeoCachePreferences().thirdPartyLookupEnabled = thirdPartyGeoLookupEnabled }
     }
     @Published var readsServerName = ServerNamePreferences().isEnabled {
-        didSet { ServerNamePreferences().isEnabled = readsServerName }
+        didSet {
+            ServerNamePreferences().isEnabled = readsServerName
+            onServerNameChanged(readsServerName)
+        }
     }
+    @Published private(set) var quicDiagnostics: QUICFeasibilityDiagnostics?
     let isLightweightMonitoringAvailable = false
 
     var availableMonitoringModes: [AgentMonitoringMode] {
@@ -258,6 +262,8 @@ private final class AgentSettingsViewModel: ObservableObject {
     private let onMonitoringMode: (AgentMonitoringMode) -> Void
     private let onRetentionChanged: (Int) -> Void
     private let onLanguageChanged: () -> Void
+    private let onRefreshQUICDiagnostics: () -> Void
+    private let onServerNameChanged: (Bool) -> Void
     private let maintenanceQueue = DispatchQueue(label: "com.egressview.agent.settings-maintenance")
 
     init(
@@ -265,13 +271,17 @@ private final class AgentSettingsViewModel: ObservableObject {
         launchController: LaunchAtLoginController,
         onMonitoringMode: @escaping (AgentMonitoringMode) -> Void,
         onRetentionChanged: @escaping (Int) -> Void,
-        onLanguageChanged: @escaping () -> Void
+        onLanguageChanged: @escaping () -> Void,
+        onServerNameChanged: @escaping (Bool) -> Void,
+        onRefreshQUICDiagnostics: @escaping () -> Void
     ) {
         self.store = store
         self.launchController = launchController
         self.onMonitoringMode = onMonitoringMode
         self.onRetentionChanged = onRetentionChanged
         self.onLanguageChanged = onLanguageChanged
+        self.onServerNameChanged = onServerNameChanged
+        self.onRefreshQUICDiagnostics = onRefreshQUICDiagnostics
         refreshLaunchAtLogin()
     }
 
@@ -293,6 +303,14 @@ private final class AgentSettingsViewModel: ObservableObject {
         case .deactivating, .removalApprovalRequired, .removalRebootRequired, .failed:
             break
         }
+    }
+
+    func updateQUICDiagnostics(_ diagnostics: QUICFeasibilityDiagnostics?) {
+        quicDiagnostics = diagnostics
+    }
+
+    func refreshQUICDiagnostics() {
+        onRefreshQUICDiagnostics()
     }
 
     func toggleLaunchAtLogin() {
@@ -359,7 +377,9 @@ private final class AgentSettingsViewModel: ObservableObject {
 private enum AgentSettingsSection: String, CaseIterable, Identifiable {
     case general
     case hub
+    case enrichment
     case history
+    case diagnostics
     case uninstall
 
     var id: String { rawValue }
@@ -367,7 +387,9 @@ private enum AgentSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return L("General")
         case .hub: return L("Hub")
+        case .enrichment: return L("Data Enrichment")
         case .history: return L("History")
+        case .diagnostics: return L("Diagnostics")
         case .uninstall: return L("Uninstall")
         }
     }
@@ -375,7 +397,9 @@ private enum AgentSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape"
         case .hub: return "network"
+        case .enrichment: return "sparkles"
         case .history: return "clock.arrow.circlepath"
+        case .diagnostics: return "stethoscope"
         case .uninstall: return "trash"
         }
     }
@@ -408,7 +432,9 @@ private struct AgentSettingsView: View {
                     switch section {
                     case .general: general
                     case .hub: hubSettings
+                    case .enrichment: enrichmentSettings
                     case .history: history
+                    case .diagnostics: diagnosticsSettings
                     case .uninstall: uninstallSettings
                     }
                 }
@@ -440,6 +466,7 @@ private struct AgentSettingsView: View {
                 .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
                 Text(model.monitoringStatus).font(.callout).foregroundStyle(.secondary)
             }
+            serverNameSection
             settingsGroup(L("Startup")) {
                 Toggle(L("Launch EgressView Agent at login"), isOn: launchBinding)
                 Text(model.launchAtLoginDetail).font(.callout).foregroundStyle(.secondary)
@@ -518,20 +545,23 @@ private struct AgentSettingsView: View {
                 Button(L("Send now")) { hub.sendNow() }.disabled(!hub.deliveryEnabled)
             }
             .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
-            Divider().padding(.vertical, 4)
+        }
+    }
+
+    private var enrichmentSettings: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            settingsTitle(
+                L("Data Enrichment"),
+                subtitle: L("Add location and threat context to observed destinations.")
+            )
             geoSection
-            serverNameSection
             threatSection
         }
     }
 
-    /// Locations come from the Hub, so they live beside it. The button exists
-    /// because someone who has just enrolled, or who is looking at an empty
-    /// map, should not have to wait for a timer to find out why.
     @ViewBuilder
     private var geoSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L("Destination locations")).font(.headline)
+        settingsGroup(L("Destination locations")) {
             Text(L("Used to place traffic on the map. Fetched from the Hub once a day; the request contains no destinations."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -556,8 +586,7 @@ private struct AgentSettingsView: View {
     }
 
     private var serverNameSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L("Destination names")).font(.headline)
+        settingsGroup(L("Destination names")) {
             Text(L("macOS supplies the name for applications that use its own networking. About half of connections come from applications that do not, including every browser measured — those show as addresses."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -574,9 +603,50 @@ private struct AgentSettingsView: View {
         }
     }
 
+    private var diagnosticsSettings: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            settingsTitle(
+                L("Diagnostics"),
+                subtitle: L("Technical counters for troubleshooting network monitoring.")
+            )
+            settingsGroup(L("QUIC destination-name diagnostics")) {
+                Text(L("These aggregate counters help determine whether QUIC Initial packets reach the network extension. They do not retain packet content, IP addresses, host names, or application identity."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if model.readsServerName {
+                    if let diagnostics = model.quicDiagnostics {
+                        Text(L(
+                            "QUIC check since extension start: UDP/443 flows %lld · data callbacks %lld (offset 0: %lld) · inspected bytes %lld · Initial candidates %lld (v1 %lld / v2 %lld) · other long headers %lld. No packet content or identity is retained.",
+                            diagnostics.udp443Flows,
+                            diagnostics.outboundCallbacks,
+                            diagnostics.zeroOffsetCallbacks,
+                            diagnostics.inspectedBytes,
+                            diagnostics.initialCandidates,
+                            diagnostics.version1InitialCandidates,
+                            diagnostics.version2InitialCandidates,
+                            diagnostics.unsupportedVersionLongHeaders
+                        ))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    } else {
+                        Text(L("Press Refresh to read aggregate QUIC counters from network monitoring."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button(L("Refresh QUIC check counters")) {
+                        model.refreshQUICDiagnostics()
+                    }
+                } else {
+                    Text(L("Enable destination-name reading in General settings to collect QUIC diagnostic counters."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     private var threatSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L("Threat information")).font(.headline)
+        settingsGroup(L("Threat information")) {
             Text(L("Destinations are checked against threat feeds on this Mac. The check itself never leaves the machine, whichever source the feeds came from."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -814,6 +884,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         onMonitoringMode: @escaping (AgentMonitoringMode) -> Void,
         onRetentionChanged: @escaping (Int) -> Void,
         onLanguageChanged: @escaping () -> Void,
+        onServerNameChanged: @escaping (Bool) -> Void,
+        onRefreshQUICDiagnostics: @escaping () -> Void,
         onClose: @escaping () -> Void = {}
     ) {
         self.hub = hub
@@ -827,7 +899,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             launchController: launchController,
             onMonitoringMode: onMonitoringMode,
             onRetentionChanged: onRetentionChanged,
-            onLanguageChanged: onLanguageChanged
+            onLanguageChanged: onLanguageChanged,
+            onServerNameChanged: onServerNameChanged,
+            onRefreshQUICDiagnostics: onRefreshQUICDiagnostics
         )
         self.model = model
         let hostingController = NSHostingController(
@@ -857,6 +931,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func updateMonitoringStatus(_ status: AgentMonitoringStatus) {
         model.updateMonitoringStatus(status)
+    }
+
+    func updateQUICDiagnostics(_ diagnostics: QUICFeasibilityDiagnostics?) {
+        model.updateQUICDiagnostics(diagnostics)
     }
 
     func refreshLocalization() {

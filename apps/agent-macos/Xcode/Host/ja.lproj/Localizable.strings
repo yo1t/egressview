@@ -55,8 +55,15 @@
 "%lld recent records · %lld hourly totals · %@ on disk" = "直近の記録 %lld件・時間集計 %lld件・ディスク使用量 %@";
 "General" = "一般";
 "Hub" = "Hub";
+"Data Enrichment" = "データ補完";
 "History" = "履歴";
+"Diagnostics" = "診断";
 "Collection and startup behavior for this Mac." = "このMacでの収集方法と起動方法を設定します。";
+"Add location and threat context to observed destinations." = "観測した宛先に位置情報と脅威情報を補います。";
+"Technical counters for troubleshooting network monitoring." = "ネットワーク監視の問題調査に使う技術情報です。";
+"QUIC destination-name diagnostics" = "QUIC通信先名の診断";
+"These aggregate counters help determine whether QUIC Initial packets reach the network extension. They do not retain packet content, IP addresses, host names, or application identity." = "QUIC InitialパケットがNetwork Extensionへ届いているかを確認するための集計値です。パケット内容、IPアドレス、ホスト名、アプリの識別情報は保持しません。";
+"Enable destination-name reading in General settings to collect QUIC diagnostic counters." = "QUIC診断値を収集するには、一般設定で通信先名の読み取りを有効にしてください。";
 "Monitoring" = "監視";
 "Mode" = "モード";
 "Startup" = "起動";
@@ -108,6 +115,9 @@
 "Six-character enrollment code" = "6文字の登録コード";
 "Sent metadata summary" = "送信する情報：ホスト名、ローカル/宛先アドレスとポート、プロトコル、プロセス名とID、bundle ID、時刻、バイト数、収集方式、信頼度。";
 "Not sent metadata summary" = "送信しない情報：パケット内容、認証情報、コマンドライン、アカウント名、ファイルパス、ブラウザURL、閲覧履歴。";
+"QUIC check since extension start: UDP/443 flows %lld · data callbacks %lld (offset 0: %lld) · inspected bytes %lld · Initial candidates %lld (v1 %lld / v2 %lld) · other long headers %lld. No packet content or identity is retained." = "Extension起動後のQUIC確認：UDP/443フロー %lld・データcallback %lld（offset 0：%lld）・検査byte %lld・Initial候補 %lld（v1 %lld / v2 %lld）・その他long header %lld。packet内容や識別情報は保持しません。";
+"Press Refresh to read aggregate QUIC counters from network monitoring." = "「更新」を押すとネットワーク監視からQUIC集計値を取得します。";
+"Refresh QUIC check counters" = "QUIC確認カウンタを更新";
 "Confirm metadata delivery" = "上記の情報をこのMacから送信することを確認しました";
 "Waiting for Hub approval..." = "Hubの承認を待っています...";
 "Request access" = "登録を申請";

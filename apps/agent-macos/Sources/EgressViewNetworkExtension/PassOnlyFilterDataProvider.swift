@@ -26,6 +26,17 @@ public enum FlowDecision: Equatable, Sendable {
     case allowAndReadServerName
 }
 
+/// Aggregate-only events used to decide whether QUIC Initial decoding is worth
+/// implementing. The event intentionally cannot carry packet bytes or identity.
+public enum QUICFeasibilityEvent: Equatable, Sendable {
+    case udp443Flow
+    case outboundCallback(
+        offset: Int,
+        byteCount: Int,
+        classification: QUICInitialCandidate
+    )
+}
+
 open class PassOnlyFilterDataProvider: NEFilterDataProvider {
     /// Read per flow, not once at startup.
     ///
@@ -38,8 +49,10 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
     private let fixedPolicy: PassOnlyFlowPolicy?
     private let preferences = ServerNamePreferences()
 
+    open var readsServerName: Bool { preferences.isEnabled }
+
     private var policy: PassOnlyFlowPolicy {
-        fixedPolicy ?? PassOnlyFlowPolicy(readsServerName: preferences.isEnabled)
+        fixedPolicy ?? PassOnlyFlowPolicy(readsServerName: readsServerName)
     }
     private let adapter = NetworkExtensionFlowAdapter()
     private let mapper = NetworkFlowObservationMapper()
@@ -58,6 +71,7 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
     }
 
     open override func handleNewFlow(_ flow: NEFilterFlow) -> NEFilterNewFlowVerdict {
+        let decision = policy.decision
         if let socketFlow = flow as? NEFilterSocketFlow,
            let metadata = adapter.metadata(from: socketFlow) {
             let observedAt = Date()
@@ -69,8 +83,12 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
                 )
             }
             didObserve(mapper.map(metadata, observedAt: observedAt))
+            if decision == .allowAndReadServerName,
+               metadata.networkProtocol == .udp, metadata.remotePort == 443 {
+                didObserveQUICFeasibility(.udp443Flow)
+            }
         }
-        switch policy.decision {
+        switch decision {
         case .allowAndReportMetadata:
             let verdict = NEFilterNewFlowVerdict.allow()
             // Asking for reports is what makes the closing byte counts arrive.
@@ -100,6 +118,14 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
     ) -> NEFilterDataVerdict {
         guard let socketFlow = flow as? NEFilterSocketFlow else {
             return .allow()
+        }
+        if let metadata = adapter.metadata(from: socketFlow),
+           metadata.networkProtocol == .udp, metadata.remotePort == 443 {
+            didObserveQUICFeasibility(.outboundCallback(
+                offset: offset,
+                byteCount: readBytes.count,
+                classification: QUICInitialProbe.classify(readBytes)
+            ))
         }
         if let name = TLSClientHello.serverName(in: readBytes) {
             lock.withLock {
@@ -137,6 +163,10 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
 
     open func didObserve(_ observation: ConnectionObservation) {
         // The host extension overrides this boundary to persist metadata locally.
+    }
+
+    open func didObserveQUICFeasibility(_ event: QUICFeasibilityEvent) {
+        // The host extension overrides this with aggregate counters only.
     }
 }
 
