@@ -87,7 +87,11 @@ function run(command, args, options = {}) {
     cwd: ROOT,
     encoding: options.encoding || 'utf8',
     stdio: options.stdio || ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, npm_config_audit: 'false', npm_config_fund: 'false' },
+    env: {
+      ...(options.env || process.env),
+      npm_config_audit: 'false',
+      npm_config_fund: 'false',
+    },
   });
 }
 
@@ -143,7 +147,15 @@ function build(options) {
 
     const artifactName = `${rootName}.tar.gz`;
     const artifact = path.join(outputDir, artifactName);
-    run('tar', ['-czf', artifact, '-C', work, rootName]);
+    // Built on whatever host a maintainer happens to use, extracted on the
+    // Linux host that will run the Hub. macOS stores extended attributes that
+    // bsdtar writes into the archive and GNU tar refuses, exiting non-zero on
+    // extraction -- so a bundle built on a Mac fails to unpack where it is
+    // meant to be installed. Neither the xattrs nor AppleDouble sidecars are
+    // part of what is being distributed.
+    run('tar', ['--no-xattrs', '-czf', artifact, '-C', work, rootName], {
+      env: { ...process.env, COPYFILE_DISABLE: '1' },
+    });
     const checksum = path.join(outputDir, `${artifactName}.sha256`);
     fs.writeFileSync(checksum, `${sha256(artifact)}  ${artifactName}\n`, { mode: 0o644 });
 
