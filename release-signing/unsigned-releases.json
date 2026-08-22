@@ -1,0 +1,19 @@
+{
+  "//": "Releases published without signed assets, recorded rather than hidden. The release signature gate fails for any unlisted release that cannot be verified; adding an entry here is a deliberate, reviewable act, not a way to quiet a new failure. Nothing may be added for a release published after the date the one-command publisher landed.",
+  "schemaVersion": 1,
+  "policyEffectiveFrom": "2026-08-22",
+  "releases": [
+    {
+      "tag": "v2.0.0",
+      "publishedAt": "2026-08-16",
+      "reason": "Published before the release step was a single command. The signing pipeline existed and was tested; it was not run. Superseded by v2.0.2, which is signed.",
+      "recordedAt": "2026-08-22"
+    },
+    {
+      "tag": "v2.0.1",
+      "publishedAt": "2026-08-17",
+      "reason": "Same cause as v2.0.0. Superseded by v2.0.2, which is signed.",
+      "recordedAt": "2026-08-22"
+    }
+  ]
+}

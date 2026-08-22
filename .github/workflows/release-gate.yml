@@ -1,0 +1,68 @@
+name: Release signature gate
+
+# Catches a release that carries nothing to verify.
+#
+# 2.0.0, 2.0.1 and 2.0.2 were all published with no signed assets. The signing
+# pipeline never failed; it was never run, because releasing and signing were
+# two separate things a person had to remember to do in order.
+#
+# `npm run release:publish` is the fix for that -- it uploads to a draft,
+# verifies what the release page actually serves, and only then publishes. This
+# workflow is the gate behind it: it catches a release made another way, and it
+# catches assets removed or replaced after publication.
+#
+# It needs no AWS access. The signature is a raw Ed25519 signature over the
+# checksum file, and the key is checked against a DNS record served under
+# separate credentials from this repository.
+
+on:
+  release:
+    types: [published, edited]
+  schedule:
+    # Weekly, so a release whose assets are deleted or swapped later does not
+    # stay broken until the next release goes out.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to check (default: the most recent Hub release)'
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.event.release.tag_name || inputs.tag || 'latest' }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    # Agent releases carry a notarised .pkg signed by Apple rather than an
+    # offline source bundle, and are checked by their own publication path.
+    if: >-
+      github.event_name != 'release'
+      || !startsWith(github.event.release.tag_name, 'agent-v')
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Verify the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${{ github.event.release.tag_name }}" ]; then
+            node scripts/verify-published-release.js --tag '${{ github.event.release.tag_name }}'
+          elif [ -n "${{ inputs.tag }}" ]; then
+            node scripts/verify-published-release.js --tag '${{ inputs.tag }}'
+          else
+            # The scheduled sweep looks further back, so a release that was fine
+            # at publication and was changed afterwards still gets noticed.
+            node scripts/verify-published-release.js --limit 3
+          fi
