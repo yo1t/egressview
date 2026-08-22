@@ -137,6 +137,11 @@ final class AgentMonitoringController {
         var hasProbedCurrentSilence = false
         /// A coverage session is open in the store.
         var isCoverageOpen = false
+        /// Keeps real observations from clearing a forced warning before the
+        /// operator has had time to see it. This is memory-only; the persisted
+        /// trigger is consumed before the health probe starts.
+        var diagnosticRehearsalActive = false
+        var diagnosticRehearsalGeneration: UInt64 = 0
     }
 
     private let statusHandler: (AgentMonitoringStatus) -> Void
@@ -190,6 +195,7 @@ final class AgentMonitoringController {
                 gateState.hasProbedCurrentSilence = false
                 gateState.stall = nil
                 gateState.hasReportedStall = false
+                gateState.diagnosticRehearsalActive = false
                 gateState.underlyingStatus = status
             }
             if let stall = gateState.stall {
@@ -236,8 +242,8 @@ final class AgentMonitoringController {
                         // later, and without this they cancel the very state
                         // being rehearsed before it can be looked at. A real
                         // outage has no arriving data to cancel it.
-                        guard !AgentDiagnostics.forcesNotRecording else { return }
                         guard let gateState else { return }
+                        guard !gateState.diagnosticRehearsalActive else { return }
                         gateState.hasProbedCurrentSilence = false
                         guard gateState.stall != nil else { return }
                         gateState.stall = nil
@@ -370,7 +376,15 @@ final class AgentMonitoringController {
         // menu bar, the notification -- runs exactly as it would in an outage.
         // Short-circuiting straight to the notification would test the
         // notification and nothing else.
-        let forced = AgentDiagnostics.forcesNotRecording
+        let forced = AgentDiagnostics.consumeForceNotRecording()
+        let rehearsalGeneration: UInt64?
+        if forced {
+            gateState.diagnosticRehearsalActive = true
+            gateState.diagnosticRehearsalGeneration &+= 1
+            rehearsalGeneration = gateState.diagnosticRehearsalGeneration
+        } else {
+            rehearsalGeneration = nil
+        }
         let lastObservationAt = forced
             ? Date(timeIntervalSince1970: 0)
             : (try? store?.statistics().newestObservedAt) ?? nil
@@ -446,6 +460,31 @@ final class AgentMonitoringController {
             case .awaitingApproval:
                 self.statusHandler(.approvalRequired)
             }
+            if let rehearsalGeneration {
+                self.finishDiagnosticRehearsalAfterDisplay(generation: rehearsalGeneration)
+            }
+        }
+    }
+
+    /// A diagnostic warning must be visible long enough to inspect, but it must
+    /// never survive a forgotten defaults flag or an app restart. After the
+    /// short display window, real observations decide whether recovery is safe.
+    private func finishDiagnosticRehearsalAfterDisplay(generation: UInt64) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            guard let self,
+                  self.gateState.diagnosticRehearsalActive,
+                  self.gateState.diagnosticRehearsalGeneration == generation
+            else { return }
+            self.gateState.diagnosticRehearsalActive = false
+            guard self.gateState.monitoringExpected else { return }
+            let latestObservationAt = (try? self.store?.statistics().newestObservedAt) ?? nil
+            guard MonitoringHealthCheck.hasRecentObservation(latestObservationAt) else {
+                // This may be a real outage discovered during the rehearsal.
+                // Keep the warning and let the normal health path own it.
+                return
+            }
+            self.gateState.hasProbedCurrentSilence = false
+            self.clearStallAfterRecoveryIfNeeded()
         }
     }
 
