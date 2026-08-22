@@ -26,9 +26,12 @@
 		10000000000000000000000D /* LaunchAtLoginController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* LaunchAtLoginController.swift */; };
 		10000000000000000000000E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* Assets.xcassets */; };
 		10000000000000000000000F /* AgentLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* AgentLocalization.swift */; };
+		100000000000000000000020 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000020 /* Host PrivacyInfo.xcprivacy */; };
+		100000000000000000000021 /* PrivacyInfo.xcprivacy in Extension Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000021 /* Extension PrivacyInfo.xcprivacy */; };
 		100000000000000000000010 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 210000000000000000000001 /* Localizable.strings */; };
 		100000000000000000000011 /* AgentUpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000015 /* AgentUpdateController.swift */; };
 		100000000000000000000012 /* AgentUninstallController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000016 /* AgentUninstallController.swift */; };
+		10000000000000000000001C /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001C /* ThirdPartyNotices.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -77,10 +80,13 @@
 		200000000000000000000010 /* LaunchAtLoginController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginController.swift; sourceTree = "<group>"; };
 		200000000000000000000011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		200000000000000000000012 /* AgentLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLocalization.swift; sourceTree = "<group>"; };
+		200000000000000000000020 /* Host PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = "Host PrivacyInfo.xcprivacy"; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		200000000000000000000021 /* Extension PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = "Extension PrivacyInfo.xcprivacy"; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		200000000000000000000013 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		200000000000000000000014 /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/Localizable.strings; sourceTree = "<group>"; };
 		200000000000000000000015 /* AgentUpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentUpdateController.swift; sourceTree = "<group>"; };
 		200000000000000000000016 /* AgentUninstallController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentUninstallController.swift; sourceTree = "<group>"; };
+		20000000000000000000001C /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -96,13 +102,13 @@
 		};
 		700000000000000000000002 /* Host */ = {
 			isa = PBXGroup;
-			children = (200000000000000000000001 /* main.swift */, 200000000000000000000002 /* AgentAppDelegate.swift */, 200000000000000000000012 /* AgentLocalization.swift */, 200000000000000000000015 /* AgentUpdateController.swift */, 200000000000000000000016 /* AgentUninstallController.swift */, 200000000000000000000003 /* AgentMonitoringController.swift */, 200000000000000000000010 /* LaunchAtLoginController.swift */, 20000000000000000000000D /* FullMonitoringCollector.swift */, 200000000000000000000019 /* ThreatIntelController.swift */, 200000000000000000000018 /* AgentUserNotifier.swift */, 20000000000000000000001A /* AgentDiagnostics.swift */, 20000000000000000000001B /* PeriodicWork.swift */, 200000000000000000000017 /* SystemExtensionHealthProbe.swift */, 20000000000000000000000C /* ObservationWindowController.swift */, 20000000000000000000000F /* HubDeliveryController.swift */, 210000000000000000000001 /* Localizable.strings */, 200000000000000000000005 /* Host Info.plist */, 200000000000000000000006 /* EgressViewAgent.entitlements */,  200000000000000000000011 /* Assets.xcassets */,);
+			children = (200000000000000000000001 /* main.swift */, 200000000000000000000002 /* AgentAppDelegate.swift */, 200000000000000000000012 /* AgentLocalization.swift */, 200000000000000000000015 /* AgentUpdateController.swift */, 200000000000000000000016 /* AgentUninstallController.swift */, 200000000000000000000003 /* AgentMonitoringController.swift */, 200000000000000000000010 /* LaunchAtLoginController.swift */, 20000000000000000000000D /* FullMonitoringCollector.swift */, 200000000000000000000019 /* ThreatIntelController.swift */, 200000000000000000000018 /* AgentUserNotifier.swift */, 20000000000000000000001A /* AgentDiagnostics.swift */, 20000000000000000000001B /* PeriodicWork.swift */, 200000000000000000000017 /* SystemExtensionHealthProbe.swift */, 20000000000000000000000C /* ObservationWindowController.swift */, 20000000000000000000000F /* HubDeliveryController.swift */, 210000000000000000000001 /* Localizable.strings */, 20000000000000000000001C /* ThirdPartyNotices.txt */, 200000000000000000000005 /* Host Info.plist */, 200000000000000000000006 /* EgressViewAgent.entitlements */,  200000000000000000000011 /* Assets.xcassets */, 200000000000000000000020 /* Host PrivacyInfo.xcprivacy */,);
 			path = Xcode/Host;
 			sourceTree = "<group>";
 		};
 		700000000000000000000003 /* SystemExtension */ = {
 			isa = PBXGroup;
-			children = (20000000000000000000000B /* Extension main.swift */, 200000000000000000000004 /* EgressViewFilterDataProvider.swift */, 20000000000000000000000E /* FullMonitoringXPCServer.swift */, 200000000000000000000007 /* Extension Info.plist */, 200000000000000000000008 /* EgressViewFilter.entitlements */, );
+			children = (20000000000000000000000B /* Extension main.swift */, 200000000000000000000004 /* EgressViewFilterDataProvider.swift */, 20000000000000000000000E /* FullMonitoringXPCServer.swift */, 200000000000000000000007 /* Extension Info.plist */, 200000000000000000000008 /* EgressViewFilter.entitlements */, 200000000000000000000021 /* Extension PrivacyInfo.xcprivacy */, );
 			path = Xcode/SystemExtension;
 			sourceTree = "<group>";
 		};
@@ -139,7 +145,7 @@
 		500000000000000000000002 /* EgressViewFilter */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 800000000000000000000003 /* Build configuration list for PBXNativeTarget "EgressViewFilter" */;
-			buildPhases = (600000000000000000000004 /* Extension Sources */, 600000000000000000000005 /* Extension Frameworks */, );
+			buildPhases = (600000000000000000000004 /* Extension Sources */, 600000000000000000000005 /* Extension Frameworks */, 600000000000000000000008 /* Extension Resources */, );
 			buildRules = ();
 			dependencies = ();
 			name = EgressViewFilter;
@@ -179,7 +185,8 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		600000000000000000000006 /* Host Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (10000000000000000000000E /* Assets.xcassets in Resources */, 100000000000000000000010 /* Localizable.strings in Resources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		600000000000000000000006 /* Host Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (10000000000000000000000E /* Assets.xcassets in Resources */, 100000000000000000000010 /* Localizable.strings in Resources */, 10000000000000000000001C /* ThirdPartyNotices.txt in Resources */, 100000000000000000000020 /* PrivacyInfo.xcprivacy in Resources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		600000000000000000000008 /* Extension Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000021 /* PrivacyInfo.xcprivacy in Extension Resources */, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */

@@ -61,7 +61,7 @@ Open `http://localhost:3000` and enter `my-token`. It seeds 160 realistic connec
 
 **Watches more than one router.** Up to ten Yamaha and Cisco routers in any mix, polled independently so one unreachable router does not stop the others. A connection seen by several routers is stored once, keeping every observer.
 
-**Sees inside your Mac, where a router cannot.** A router shows what left the house but not which application sent it. The [EgressView Agent for macOS](apps/agent-macos/README.md) reports the process behind each outbound connection — metadata only, never payloads.
+**Sees inside your Mac, where a router cannot.** A router shows what left the house but not which application sent it. The [EgressView Agent for macOS](apps/agent-macos/README.md) reports the process behind each outbound connection — metadata only, never payloads. [What the agent itself sends, and where](docs/agent-privacy.md) lists every host it contacts.
 
 **Answers questions in plain language.** The built-in MCP server exposes 11 tools to AI assistants such as AWS Kiro, Anthropic Claude, and Anysphere Cursor, so "what did 192.168.1.50 connect to this week?" is something you can simply ask. In-app **AI Insights** opens with collection health, traffic, threats, and period comparisons.
 
@@ -170,6 +170,7 @@ EgressView is dual-licensed.
 
 - Open source: [GNU Affero General Public License v3.0](LICENSE)
 - Commercial: available separately for proprietary or closed-source use
+- Bundled components: [third-party notices](THIRD_PARTY_NOTICES.md)
 
 You may use, modify, and distribute EgressView under the AGPL-3.0. If you include EgressView or derivative works in a proprietary product, distribute it without source code, or provide a modified version as a network service, you must comply with the AGPL-3.0 source code obligations. To use it in a proprietary product without releasing the corresponding source, you need a commercial license from the copyright holder.
 

@@ -65,6 +65,7 @@
     "SECURITY.md",
     "CONTRIBUTING.md",
     "CLA.md",
+    "THIRD_PARTY_NOTICES.md",
     "LICENSE"
   ],
   "scripts": {

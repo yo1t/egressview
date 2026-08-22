@@ -326,7 +326,12 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openAbout() {
         NSApplication.shared.activate(ignoringOtherApps: true)
-        NSApplication.shared.orderFrontStandardAboutPanel(nil)
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [:]
+        if let url = Bundle.main.url(forResource: "ThirdPartyNotices", withExtension: "txt"),
+           let notices = try? String(contentsOf: url, encoding: .utf8) {
+            options[.credits] = NSAttributedString(string: notices)
+        }
+        NSApplication.shared.orderFrontStandardAboutPanel(options: options)
     }
 
     @objc private func selectLightweight() {
