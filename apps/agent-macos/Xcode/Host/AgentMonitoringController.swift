@@ -13,7 +13,7 @@ enum AgentMonitoringStatus: Equatable {
     /// because "the extension answered" and "traffic is being recorded" are not
     /// the same thing, and an update can leave the first true while the second
     /// is false.
-    case fullStarting
+    case fullStarting(waitingForFirstConnection: Bool)
     case fullActive
     case approvalRequired
     case rebootRequired
@@ -33,7 +33,10 @@ enum AgentMonitoringStatus: Equatable {
         case .paused: return L("Monitoring paused")
         case .lightweight(let count): return L("Lightweight monitoring: %lld connections", count)
         case .fullActivationRequested: return L("Requesting network monitoring approval...")
-        case .fullStarting: return L("Network monitoring started. Waiting for the first connection.")
+        case .fullStarting(let waitingForFirstConnection):
+            return waitingForFirstConnection
+                ? L("Network monitoring started. Waiting for the first connection.")
+                : L("Network monitoring started")
         case .fullActive: return L("Network monitoring active")
         case .approvalRequired: return L("Approve the System Extension in System Settings")
         case .rebootRequired: return L("Restart macOS to finish enabling network monitoring")
@@ -157,7 +160,8 @@ final class AgentMonitoringController {
         store: ObservationStore?,
         statusHandler: @escaping (AgentMonitoringStatus) -> Void,
         observationHandler: @escaping ([ConnectionObservation]) -> Void,
-        storageErrorHandler: @escaping (Error) -> Void
+        storageErrorHandler: @escaping (Error) -> Void,
+        diagnosticsHandler: @escaping (QUICFeasibilityDiagnostics) -> Void = { _ in }
     ) {
         let gateState = MonitoringGateState()
         // While an update is stalled, nothing is being recorded, so the
@@ -243,7 +247,9 @@ final class AgentMonitoringController {
                         gateState.underlyingStatus = .fullActive
                         statusHandler(.fullActive)
                     }
-                }
+                },
+                readsServerName: ServerNamePreferences().isEnabled,
+                diagnosticsHandler: diagnosticsHandler
             )
         }
     }
@@ -298,6 +304,14 @@ final class AgentMonitoringController {
 
     func stopHealthChecks() {
         healthTimer.stop()
+    }
+
+    func requestQUICDiagnostics() {
+        fullMonitoringCollector?.requestQUICDiagnostics()
+    }
+
+    func setReadsServerName(_ enabled: Bool) {
+        fullMonitoringCollector?.setReadsServerName(enabled)
     }
 
     /// Writes down when monitoring was really running, so the charts can say
@@ -473,7 +487,17 @@ final class AgentMonitoringController {
         statusHandler(status)
         guard !gateState.hasReportedStall else { return }
         gateState.hasReportedStall = true
-        AgentUserNotifier.shared.notify(title: title, body: body)
+        let notificationKey: String
+        switch status {
+        case .updateNotRunning: notificationKey = "monitoring-update-not-running"
+        default: notificationKey = "monitoring-not-recording"
+        }
+        DispatchQueue.main.async {
+            AgentUserNotifier.shared.notify(
+                kind: .monitoring, key: notificationKey, title: title,
+                body: notificationExplanation(reason: body)
+            )
+        }
     }
 
     func selectLightweightMonitoring() {

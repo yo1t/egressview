@@ -25,7 +25,8 @@ final class ObservationStoreTests: XCTestCase {
         remote: String = "203.0.113.5",
         at: Date,
         bytesIn: UInt64? = 100,
-        bytesOut: UInt64? = 200
+        bytesOut: UInt64? = 200,
+        hostname: String? = nil
     ) -> ConnectionObservation {
         ConnectionObservation(
             networkProtocol: .tcp,
@@ -41,7 +42,154 @@ final class ObservationStoreTests: XCTestCase {
             bytesIn: bytesIn,
             bytesOut: bytesOut,
             collector: .networkExtension,
-            confidence: .exact
+            confidence: .exact,
+            remoteHostname: hostname
+        )
+    }
+
+    func testCountryHistoryIsBoundedByCountryAndSurvivesRetention() throws {
+        let store = try makeStore(retention: ObservationRetention(retentionDays: 1, rawDays: 1))
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try store.replaceGeoLocations((1...100).map {
+            GeoLocation(
+                ip: "203.0.113.\($0)", latitude: 35, longitude: 139,
+                countryCode: "JP", city: "Tokyo"
+            )
+        })
+        try store.append((1...100).map {
+            observation(
+                process: $0.isMultiple(of: 2) ? "Safari" : "Mail",
+                remote: "203.0.113.\($0)", at: now.addingTimeInterval(Double($0)),
+                hostname: "site-\($0).example"
+            )
+        })
+
+        var rows = try store.countryVisitSummaries()
+        XCTAssertEqual(rows.count, 1, "one hundred destinations in one country remain one row")
+        XCTAssertEqual(rows[0].countryCode, "JP")
+        XCTAssertEqual(rows[0].connectionCount, 100)
+
+        try store.compact(now: now.addingTimeInterval(3 * 86_400))
+        rows = try store.countryVisitSummaries()
+        XCTAssertEqual(rows.map(\.countryCode), ["JP"], "normal retention does not erase visited countries")
+    }
+
+    func testMonitoringStartIsTheFirstCoverageSessionAndDoesNotFollowTheSelectedPeriod() throws {
+        let store = try makeStore()
+        let first = Date(timeIntervalSince1970: 1_800_000_000)
+        try store.beginCoverageSession(at: first)
+        try store.endCoverageSession(at: first.addingTimeInterval(60))
+        try store.beginCoverageSession(at: first.addingTimeInterval(3_600))
+
+        XCTAssertEqual(try store.monitoringStartedAt(), first)
+        XCTAssertEqual(try store.statistics().monitoringStartedAt, first)
+    }
+
+    func testCountryHistoryIsOrderedByConnectionCountThenRecency() throws {
+        let store = try makeStore()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try store.replaceGeoLocations([
+            GeoLocation(ip: "203.0.113.5", latitude: 35, longitude: 139,
+                        countryCode: "JP", city: "Tokyo"),
+            GeoLocation(ip: "198.51.100.8", latitude: 37, longitude: -122,
+                        countryCode: "US", city: "California"),
+        ])
+        try store.append([
+            observation(remote: "203.0.113.5", at: now),
+            observation(remote: "203.0.113.5", at: now.addingTimeInterval(1)),
+            observation(remote: "203.0.113.5", at: now.addingTimeInterval(2)),
+            observation(remote: "198.51.100.8", at: now.addingTimeInterval(10)),
+        ])
+
+        let rows = try store.countryVisitSummaries()
+        XCTAssertEqual(rows.map(\.countryCode), ["JP", "US"])
+        XCTAssertEqual(rows.map(\.connectionCount), [3, 1])
+    }
+
+    func testKnownCountryUpdatesWaitForFlushButANewCountryDoesNot() throws {
+        let url = directory.appendingPathComponent("history.sqlite")
+        let store = try ObservationStore(fileURL: url, countrySummaryFlushInterval: 3_600)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try store.replaceGeoLocations([
+            GeoLocation(ip: "203.0.113.5", latitude: 35, longitude: 139,
+                        countryCode: "JP", city: "Tokyo"),
+        ])
+        try store.append([observation(remote: "203.0.113.5", at: now, hostname: "first.example")])
+        XCTAssertEqual(try store.countryVisitSummaries().first?.connectionCount, 1)
+
+        try store.append([observation(
+            process: "Mail", remote: "203.0.113.5", at: now.addingTimeInterval(10),
+            hostname: "latest.example"
+        )])
+        XCTAssertEqual(
+            try store.countryVisitSummaries().first?.connectionCount, 1,
+            "an already-known country is aggregated in memory instead of written every second"
+        )
+
+        try store.flushCountryVisitSummary()
+        let row = try XCTUnwrap(try store.countryVisitSummaries().first)
+        XCTAssertEqual(row.connectionCount, 2)
+        XCTAssertEqual(row.lastSiteName, "latest.example")
+        XCTAssertEqual(row.lastProcessName, "Mail")
+    }
+
+    func testGeoRefreshResolvesAPreviouslyUnknownDestination() throws {
+        let store = try makeStore()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try store.append([observation(
+            remote: "198.51.100.8", at: now, hostname: "delayed.example"
+        )])
+        XCTAssertTrue(try store.countryVisitSummaries().isEmpty)
+
+        try store.replaceGeoLocations([
+            GeoLocation(ip: "198.51.100.8", latitude: 37, longitude: -122,
+                        countryCode: "US", city: "California"),
+        ])
+        let row = try XCTUnwrap(try store.countryVisitSummaries().first)
+        XCTAssertEqual(row.countryCode, "US")
+        XCTAssertEqual(row.lastSiteName, "delayed.example")
+        XCTAssertEqual(row.lastProcessName, "Safari")
+    }
+
+    func testDeletingAllHistoryAlsoDeletesTheAllTimeCountryMemory() throws {
+        let store = try makeStore()
+        try store.replaceGeoLocations([
+            GeoLocation(ip: "203.0.113.5", latitude: 35, longitude: 139,
+                        countryCode: "JP", city: "Tokyo"),
+        ])
+        try store.append([observation(remote: "203.0.113.5", at: Date())])
+        XCTAssertFalse(try store.countryVisitSummaries().isEmpty)
+
+        try store.removeAll()
+        XCTAssertTrue(try store.countryVisitSummaries().isEmpty)
+    }
+
+    func testAThousandObservationsAddOnlyBoundedCountryWork() throws {
+        let store = try makeStore()
+        let now = Date()
+        let locations = (0..<1_000).map { index in
+            let address = "198.\(index / 254).\((index / 16) % 254).\(index % 254)"
+            return GeoLocation(
+                ip: address, latitude: 35, longitude: 139,
+                countryCode: index.isMultiple(of: 2) ? "JP" : "US", city: nil
+            )
+        }
+        try store.replaceGeoLocations(locations)
+        let observations = locations.enumerated().map { index, location in
+            observation(
+                process: index.isMultiple(of: 3) ? "Safari" : "Mail",
+                remote: location.ip, at: now.addingTimeInterval(Double(index) / 1_000)
+            )
+        }
+
+        let started = ContinuousClock.now
+        try store.append(observations)
+        let elapsed = ContinuousClock.now - started
+
+        XCTAssertEqual(try store.countryVisitSummaries().count, 2)
+        XCTAssertLessThan(
+            elapsed, .seconds(1),
+            "country aggregation must remain small beside the observation inserts"
         )
     }
 

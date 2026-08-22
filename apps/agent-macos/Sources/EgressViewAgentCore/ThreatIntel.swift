@@ -243,17 +243,15 @@ public struct ThreatReport: Equatable, Sendable {
 
 /// Where the indicators come from, and the one rule that decides it.
 ///
-/// The rule takes **enrolment**, never reachability. That distinction is the
-/// whole point of this type existing: if an unreachable Hub fell back to
-/// downloading the feeds directly, an hour of Hub downtime would silently start
-/// contacting third parties. The traffic leaving the Mac would change with
-/// nobody having touched anything, which is exactly what a tool that watches
-/// outbound traffic must never do to its own user.
+/// This rule picks the primary source from **enrolment**, never reachability.
+/// An explicitly approved fallback is evaluated separately by
+/// `ThreatIntelFallbackPolicy`; keeping those decisions separate prevents Hub
+/// downtime alone from silently starting third-party traffic.
 ///
 /// Pulled out of the controller so it can be stated once and pinned by tests.
 /// It was correct before this existed, but only by reading it.
 public enum ThreatIntelSource: Equatable, Sendable {
-    /// Enrolled with a Hub: the Hub is the only source, always.
+    /// Enrolled with a Hub: always try the Hub first.
     case hub
     /// No Hub, and the user turned direct downloads on.
     case directDownload
@@ -264,12 +262,30 @@ public enum ThreatIntelSource: Equatable, Sendable {
     /// - Parameters:
     ///   - isEnrolledWithHub: whether a credential is stored. **Not** whether
     ///     the Hub answered.
-    ///   - isDirectDownloadEnabled: the user's opt-in, which is only offered
-    ///     when there is no Hub.
+    ///   - isDirectDownloadEnabled: the standalone-mode opt-in. Hub fallback
+    ///     has its own persisted permission and stale-cache gate.
     public static func decide(
         isEnrolledWithHub: Bool, isDirectDownloadEnabled: Bool
     ) -> ThreatIntelSource {
         if isEnrolledWithHub { return .hub }
         return isDirectDownloadEnabled ? .directDownload : .none
+    }
+}
+
+/// Decides whether an explicitly approved Hub fallback may contact public
+/// feed operators. A fresh cache wins over a network fallback: Hub downtime
+/// must not create unnecessary third-party traffic.
+public enum ThreatIntelFallbackPolicy {
+    public static let cacheMaxAge: TimeInterval = 24 * 60 * 60
+
+    public static func shouldDownload(
+        isEnabled: Bool,
+        hasCachedIndicators: Bool,
+        lastSuccessfulFetch: Date?,
+        now: Date = Date()
+    ) -> Bool {
+        guard isEnabled else { return false }
+        guard hasCachedIndicators, let lastSuccessfulFetch else { return true }
+        return now.timeIntervalSince(lastSuccessfulFetch) >= cacheMaxAge
     }
 }

@@ -26,6 +26,10 @@ public struct GlobeModel: Equatable, Sendable {
     public let placedTotal: Double
     /// Traffic that could not be put anywhere.
     public let unplacedTotal: Double
+    public let countryHistory: [CountryVisitSummary]
+    /// Countries reached at any time since this history was enabled. This is
+    /// independent of the selected period and is used only for the pale fill.
+    public let visitedCountryCodes: Set<String>
     public let unavailable: GlobeUnavailableReason?
 
     public var isEmpty: Bool { points.isEmpty }
@@ -47,8 +51,10 @@ public struct GlobeAggregator: Sendable {
         unplacedSessions: Int,
         unplacedBytes: UInt64,
         metric: TrafficMetric,
-        hasLocationData: Bool
+        hasLocationData: Bool,
+        countryHistory: [CountryVisitSummary] = []
     ) -> GlobeModel {
+        let visitedCountryCodes = Set(countryHistory.map(\.countryCode))
         let value: (PlacedDestination) -> Double = { destination in
             metric == .sessions ? Double(destination.sessionCount) : Double(destination.bytes)
         }
@@ -61,13 +67,17 @@ public struct GlobeAggregator: Sendable {
             // Those are different things and the screen should not confuse them.
             return GlobeModel(
                 metric: metric, points: [], placedTotal: 0, unplacedTotal: unplaced,
+                countryHistory: countryHistory,
+                visitedCountryCodes: visitedCountryCodes,
                 unavailable: .noLocationData
             )
         }
         guard total > 0 else {
             return GlobeModel(
                 metric: metric, points: [], placedTotal: 0, unplacedTotal: unplaced,
-                unavailable: .noTrafficInPeriod
+                countryHistory: countryHistory,
+                visitedCountryCodes: visitedCountryCodes,
+                unavailable: visitedCountryCodes.isEmpty ? .noTrafficInPeriod : nil
             )
         }
 
@@ -87,7 +97,9 @@ public struct GlobeAggregator: Sendable {
 
         return GlobeModel(
             metric: metric, points: points, placedTotal: total,
-            unplacedTotal: unplaced, unavailable: nil
+            unplacedTotal: unplaced, countryHistory: countryHistory,
+            visitedCountryCodes: visitedCountryCodes,
+            unavailable: nil
         )
     }
 }

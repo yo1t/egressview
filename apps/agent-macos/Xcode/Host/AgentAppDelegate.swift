@@ -15,6 +15,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginController = LaunchAtLoginController()
     private let historyMaintenanceQueue = DispatchQueue(label: "com.egressview.agent.history-maintenance")
     private var currentMonitoringStatus = AgentMonitoringStatus.paused
+    private var currentQUICDiagnostics: QUICFeasibilityDiagnostics?
     private var checkedLaunchAtLoginForActiveMonitoring = false
     private var isPreparedForRemoval = false
     private lazy var storageResult = makeStorage()
@@ -52,6 +53,10 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         credentialStore: KeychainAgentCredentialStore(),
         agentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
     )
+    private lazy var notificationCoordinator = AgentNotificationCoordinator(
+        store: store, hub: hubDelivery, threats: threatIntelController,
+        notifier: AgentUserNotifier.shared
+    )
     private lazy var controller = AgentMonitoringController(
         store: store,
         statusHandler: { [weak self] status in
@@ -67,6 +72,12 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         },
         storageErrorHandler: { [weak self] error in
             DispatchQueue.main.async { self?.recordStorageError(error.localizedDescription) }
+        },
+        diagnosticsHandler: { [weak self] diagnostics in
+            DispatchQueue.main.async {
+                self?.currentQUICDiagnostics = diagnostics
+                self?.settingsWindow?.updateQUICDiagnostics(diagnostics)
+            }
         }
     )
 
@@ -120,6 +131,8 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         // Closes the current stretch of coverage. A session left open would
         // claim the app was watching for however long it was quit.
         controller.endCoverageForShutdown()
+        try? store?.flushCountryVisitSummary()
+        notificationCoordinator.stop()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -153,6 +166,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         // install wait a day for its first map would be a strange welcome.
         geoCacheController.start()
         threatIntelController.start()
+        notificationCoordinator.start()
         // The window needs to know whether anyone was in a position to look, so
         // that "found nothing" is never shown for "never checked".
         threatAvailabilityObserver = threatIntelController.$availability.sink { [weak self] value in
@@ -172,6 +186,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     private func render(_ status: AgentMonitoringStatus) {
         currentMonitoringStatus = status
+        notificationCoordinator.handleMonitoringStatus(status)
         if status == .fullActive, !checkedLaunchAtLoginForActiveMonitoring {
             checkedLaunchAtLoginForActiveMonitoring = true
             do {
@@ -272,9 +287,14 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
             onMonitoringMode: { [weak self] mode in self?.selectMonitoringMode(mode) },
             onRetentionChanged: { [weak self] days in self?.applyRetentionPolicy(days: days) },
             onLanguageChanged: { [weak self] in self?.refreshLocalization() },
+            onServerNameChanged: { [weak self] enabled in
+                self?.controller.setReadsServerName(enabled)
+            },
+            onRefreshQUICDiagnostics: { [weak self] in self?.controller.requestQUICDiagnostics() },
             onClose: { [weak self] in self?.settingsWindow = nil }
         )
         controller.updateMonitoringStatus(currentMonitoringStatus)
+        controller.updateQUICDiagnostics(currentQUICDiagnostics)
         settingsWindow = controller
         return controller
     }

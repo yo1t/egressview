@@ -122,7 +122,39 @@ public struct ObservationStoreStatistics: Equatable, Sendable {
     public let rolledUpCount: Int
     public let oldestObservedAt: Date?
     public let newestObservedAt: Date?
+    public let monitoringStartedAt: Date?
     public let fileSizeBytes: Int64
+}
+
+/// The durable, period-independent record used to shade countries on the globe.
+///
+/// One row represents one country, not one destination. This keeps the table
+/// bounded by the number of ISO regions even when the Mac runs for years.
+public struct CountryVisitSummary: Equatable, Sendable, Identifiable {
+    public let countryCode: String
+    public let firstObservedAt: Date
+    public let lastObservedAt: Date
+    public let lastSiteName: String
+    public let lastProcessName: String
+    public let connectionCount: Int
+
+    public var id: String { countryCode }
+
+    public init(
+        countryCode: String,
+        firstObservedAt: Date,
+        lastObservedAt: Date,
+        lastSiteName: String,
+        lastProcessName: String,
+        connectionCount: Int
+    ) {
+        self.countryCode = countryCode
+        self.firstObservedAt = firstObservedAt
+        self.lastObservedAt = lastObservedAt
+        self.lastSiteName = lastSiteName
+        self.lastProcessName = lastProcessName
+        self.connectionCount = connectionCount
+    }
 }
 
 public enum LegacyObservationImportResult: Equatable, Sendable {
@@ -152,10 +184,39 @@ public final class ObservationStore: @unchecked Sendable {
     private let lock = NSLock()
     private let fileURL: URL
     public private(set) var retention: ObservationRetention
+    private let countrySummaryFlushInterval: TimeInterval
+    private var knownVisitedCountries: Set<String> = []
+    private var pendingCountryUpdates: [String: CountryVisitAccumulator] = [:]
+    private var countryByAddressCache: [String: String] = [:]
+    private var unresolvedCountryAddresses: Set<String> = []
+    private var lastCountrySummaryFlush = Date()
 
-    public init(fileURL: URL, retention: ObservationRetention = ObservationRetention()) throws {
+    private struct CountryVisitAccumulator {
+        var firstObservedAt: Date
+        var lastObservedAt: Date
+        var lastSiteName: String
+        var lastProcessName: String
+        var connectionCount: Int
+
+        mutating func merge(_ other: CountryVisitAccumulator) {
+            firstObservedAt = min(firstObservedAt, other.firstObservedAt)
+            connectionCount += other.connectionCount
+            if other.lastObservedAt >= lastObservedAt {
+                lastObservedAt = other.lastObservedAt
+                if !other.lastSiteName.isEmpty { lastSiteName = other.lastSiteName }
+                lastProcessName = other.lastProcessName
+            }
+        }
+    }
+
+    public init(
+        fileURL: URL,
+        retention: ObservationRetention = ObservationRetention(),
+        countrySummaryFlushInterval: TimeInterval = 60
+    ) throws {
         self.fileURL = fileURL
         self.retention = retention
+        self.countrySummaryFlushInterval = max(0, countrySummaryFlushInterval)
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true,
@@ -173,6 +234,7 @@ public final class ObservationStore: @unchecked Sendable {
         try execute("PRAGMA synchronous=NORMAL")
         try execute("PRAGMA foreign_keys=ON")
         try migrate()
+        knownVisitedCountries = try loadVisitedCountryCodes()
         try? FileManager.default.setAttributes(
             [.posixPermissions: 0o600], ofItemAtPath: fileURL.path
         )
@@ -377,6 +439,42 @@ public final class ObservationStore: @unchecked Sendable {
             )
             """)
             try execute("PRAGMA user_version=8")
+        }
+        if version < 9 {
+            // A bounded, period-independent memory of countries reached. The
+            // normal observation tables obey retention and cannot answer
+            // "have I ever connected there?" after their rows age out.
+            try execute("""
+            CREATE TABLE IF NOT EXISTS country_visit_summary (
+                country_code TEXT PRIMARY KEY,
+                first_observed_at REAL NOT NULL,
+                last_observed_at REAL NOT NULL,
+                last_site_name TEXT NOT NULL DEFAULT '',
+                last_process_name TEXT NOT NULL,
+                connection_count INTEGER NOT NULL
+            )
+            """)
+            try execute("""
+            CREATE TABLE IF NOT EXISTS pending_destination_country (
+                remote_address TEXT PRIMARY KEY,
+                last_site_name TEXT NOT NULL DEFAULT '',
+                last_process_name TEXT NOT NULL,
+                first_observed_at REAL NOT NULL,
+                last_observed_at REAL NOT NULL,
+                connection_count INTEGER NOT NULL
+            )
+            """)
+            try execute(
+                "CREATE INDEX IF NOT EXISTS pending_destination_country_last "
+                + "ON pending_destination_country(last_observed_at)"
+            )
+            try execute("""
+            CREATE TABLE IF NOT EXISTS country_visit_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                retained_history_backfilled_at REAL
+            )
+            """)
+            try execute("PRAGMA user_version=9")
         }
     }
 
@@ -587,17 +685,36 @@ public final class ObservationStore: @unchecked Sendable {
         return result
     }
 
+    /// The first time this database has proof that monitoring was active.
+    /// Unlike a selected period's coverage, this does not move when the user
+    /// changes the chart range or when observation retention removes old rows.
+    public func monitoringStartedAt() throws -> Date? {
+        try lock.withLock { try monitoringStartedAtLocked() }
+    }
+
+    private func monitoringStartedAtLocked() throws -> Date? {
+        try scalarDouble("SELECT MIN(started_at) FROM coverage_sessions")
+            .map { Date(timeIntervalSince1970: $0) }
+    }
+
     // MARK: - Writing
 
     public func append(_ observations: [ConnectionObservation]) throws {
         guard !observations.isEmpty else { return }
         try lock.withLock {
+            let countriesBefore = knownVisitedCountries
+            let updatesBefore = pendingCountryUpdates
+            let flushBefore = lastCountrySummaryFlush
             try execute("BEGIN IMMEDIATE")
             do {
                 try insert(observations)
+                try recordCountryVisitsLocked(observations, now: Date())
                 try execute("COMMIT")
             } catch {
                 try? execute("ROLLBACK")
+                knownVisitedCountries = countriesBefore
+                pendingCountryUpdates = updatesBefore
+                lastCountrySummaryFlush = flushBefore
                 throw error
             }
         }
@@ -1030,6 +1147,8 @@ public final class ObservationStore: @unchecked Sendable {
     /// Replaces the stored locations with what the Hub supplied.
     public func replaceGeoLocations(_ entries: [GeoLocation], receivedAt: Date = Date()) throws {
         try lock.withLock {
+            let countriesBefore = knownVisitedCountries
+            let updatesBefore = pendingCountryUpdates
             try execute("BEGIN IMMEDIATE")
             do {
                 try execute("DELETE FROM geo_locations")
@@ -1051,9 +1170,28 @@ public final class ObservationStore: @unchecked Sendable {
                         throw ObservationStoreError.statement(lastMessage)
                     }
                 }
+                countryByAddressCache.removeAll(keepingCapacity: true)
+                unresolvedCountryAddresses.removeAll(keepingCapacity: true)
+                if try backfillCountryVisitsLocked(now: receivedAt) {
+                    // Every retained observation was included in the one-time
+                    // backfill, so resolving these rows again would double its
+                    // connection count.
+                    try execute("""
+                    DELETE FROM pending_destination_country
+                    WHERE EXISTS (
+                        SELECT 1 FROM geo_locations g
+                        WHERE g.ip = pending_destination_country.remote_address
+                          AND g.country_code IS NOT NULL
+                    )
+                    """)
+                } else {
+                    try resolvePendingCountriesLocked()
+                }
                 try execute("COMMIT")
             } catch {
                 try? execute("ROLLBACK")
+                knownVisitedCountries = countriesBefore
+                pendingCountryUpdates = updatesBefore
                 throw error
             }
         }
@@ -1061,6 +1199,74 @@ public final class ObservationStore: @unchecked Sendable {
 
     public func geoLocationCount() throws -> Int {
         try lock.withLock { try scalar("SELECT COUNT(*) FROM geo_locations") ?? 0 }
+    }
+
+    /// All countries ever observed, independent of the normal retention window.
+    public func countryVisitSummaries() throws -> [CountryVisitSummary] {
+        try lock.withLock {
+            let statement = try prepare("""
+            SELECT country_code, first_observed_at, last_observed_at,
+                   last_site_name, last_process_name, connection_count
+            FROM country_visit_summary
+            ORDER BY connection_count DESC, last_observed_at DESC
+            """)
+            defer { sqlite3_finalize(statement) }
+            var rows: [CountryVisitSummary] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let code = text(statement, 0) else { continue }
+                rows.append(CountryVisitSummary(
+                    countryCode: code,
+                    firstObservedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)),
+                    lastObservedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
+                    lastSiteName: text(statement, 3) ?? "",
+                    lastProcessName: text(statement, 4) ?? "",
+                    connectionCount: Int(sqlite3_column_int64(statement, 5))
+                ))
+            }
+            return rows
+        }
+    }
+
+    /// Persists the at-most-one-minute aggregate before a clean shutdown.
+    public func flushCountryVisitSummary() throws {
+        try lock.withLock {
+            guard !pendingCountryUpdates.isEmpty else { return }
+            let updatesBefore = pendingCountryUpdates
+            let flushBefore = lastCountrySummaryFlush
+            try execute("BEGIN IMMEDIATE")
+            do {
+                try flushCountryUpdatesLocked()
+                try execute("COMMIT")
+            } catch {
+                try? execute("ROLLBACK")
+                pendingCountryUpdates = updatesBefore
+                lastCountrySummaryFlush = flushBefore
+                throw error
+            }
+        }
+    }
+
+    /// Seeds the all-time country memory from retained chart history once.
+    ///
+    /// Completed hours come from `chart_hourly`; only the not-yet-folded tail
+    /// is read from raw observations. This avoids scanning the same 14 days of
+    /// raw rows twice on an established database.
+    @discardableResult
+    public func backfillCountryVisitsFromRetainedHistory() throws -> Bool {
+        try lock.withLock {
+            guard try scalar("SELECT COUNT(*) FROM geo_locations") ?? 0 > 0 else { return false }
+            let countriesBefore = knownVisitedCountries
+            try execute("BEGIN IMMEDIATE")
+            do {
+                let performed = try backfillCountryVisitsLocked(now: Date())
+                try execute("COMMIT")
+                return performed
+            } catch {
+                try? execute("ROLLBACK")
+                knownVisitedCountries = countriesBefore
+                throw error
+            }
+        }
     }
 
     /// Traffic per placeable destination for the selected period.
@@ -1179,6 +1385,7 @@ public final class ObservationStore: @unchecked Sendable {
                 rolledUpCount: try scalar("SELECT COUNT(*) FROM hourly_rollup") ?? 0,
                 oldestObservedAt: oldest.map { Date(timeIntervalSince1970: $0) },
                 newestObservedAt: newest.map { Date(timeIntervalSince1970: $0) },
+                monitoringStartedAt: try monitoringStartedAtLocked(),
                 fileSizeBytes: size
             )
         }
@@ -1260,8 +1467,329 @@ public final class ObservationStore: @unchecked Sendable {
             let removed = try scalar("SELECT COUNT(*) FROM observations") ?? 0
             try execute("DELETE FROM observations")
             try execute("DELETE FROM hourly_rollup")
+            try execute("DELETE FROM chart_hourly")
+            try execute("DELETE FROM chart_hourly_state")
+            try execute("DELETE FROM country_visit_summary")
+            try execute("DELETE FROM pending_destination_country")
+            try execute("DELETE FROM country_visit_state")
+            knownVisitedCountries.removeAll()
+            pendingCountryUpdates.removeAll()
+            countryByAddressCache.removeAll()
+            unresolvedCountryAddresses.removeAll()
             try execute("VACUUM")
             return removed
+        }
+    }
+
+    // MARK: - Period-independent country history
+
+    private func loadVisitedCountryCodes() throws -> Set<String> {
+        let statement = try prepare("SELECT country_code FROM country_visit_summary")
+        defer { sqlite3_finalize(statement) }
+        var result: Set<String> = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let code = text(statement, 0) { result.insert(code) }
+        }
+        return result
+    }
+
+    private func recordCountryVisitsLocked(
+        _ observations: [ConnectionObservation], now: Date
+    ) throws {
+        var byAddress: [String: CountryVisitAccumulator] = [:]
+        for observation in observations {
+            let item = CountryVisitAccumulator(
+                firstObservedAt: observation.firstObservedAt,
+                lastObservedAt: observation.lastObservedAt,
+                lastSiteName: observation.remoteHostname ?? "",
+                lastProcessName: observation.processName,
+                connectionCount: 1
+            )
+            if var current = byAddress[observation.remoteAddress] {
+                current.merge(item)
+                byAddress[observation.remoteAddress] = current
+            } else {
+                byAddress[observation.remoteAddress] = item
+            }
+        }
+
+        let countryCodes = try countryCodesForAddressesLocked(Array(byAddress.keys))
+        var byCountry: [String: CountryVisitAccumulator] = [:]
+        var unresolved: [String: CountryVisitAccumulator] = [:]
+        for (address, item) in byAddress {
+            guard let code = countryCodes[address] else {
+                unresolved[address] = item
+                continue
+            }
+            if var current = byCountry[code] {
+                current.merge(item)
+                byCountry[code] = current
+            } else {
+                byCountry[code] = item
+            }
+        }
+
+        if !unresolved.isEmpty { try upsertPendingDestinationsLocked(unresolved) }
+
+        var immediate: [String: CountryVisitAccumulator] = [:]
+        for (code, item) in byCountry {
+            if !knownVisitedCountries.contains(code) {
+                immediate[code] = item
+            } else if var current = pendingCountryUpdates[code] {
+                current.merge(item)
+                pendingCountryUpdates[code] = current
+            } else {
+                pendingCountryUpdates[code] = item
+            }
+        }
+        if !immediate.isEmpty {
+            try upsertCountryRowsLocked(immediate)
+            knownVisitedCountries.formUnion(immediate.keys)
+        }
+
+        if now.timeIntervalSince(lastCountrySummaryFlush) >= countrySummaryFlushInterval {
+            try flushCountryUpdatesLocked(now: now)
+        }
+    }
+
+    private func countryCodesForAddressesLocked(_ addresses: [String]) throws -> [String: String] {
+        if countryByAddressCache.count + unresolvedCountryAddresses.count > 4_096 {
+            countryByAddressCache.removeAll(keepingCapacity: true)
+            unresolvedCountryAddresses.removeAll(keepingCapacity: true)
+        }
+        var result: [String: String] = [:]
+        var missing: [String] = []
+        for address in Set(addresses) {
+            if let code = countryByAddressCache[address] {
+                result[address] = code
+            } else if !unresolvedCountryAddresses.contains(address) {
+                missing.append(address)
+            }
+        }
+
+        for start in stride(from: 0, to: missing.count, by: 400) {
+            let chunk = Array(missing[start..<min(start + 400, missing.count)])
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let statement = try prepare("""
+            SELECT ip, country_code FROM geo_locations
+            WHERE country_code IS NOT NULL AND ip IN (\(placeholders))
+            """)
+            defer { sqlite3_finalize(statement) }
+            for (index, address) in chunk.enumerated() {
+                bindText(statement, Int32(index + 1), address)
+            }
+            var resolved: Set<String> = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let address = text(statement, 0),
+                      let rawCode = text(statement, 1) else { continue }
+                let code = rawCode.uppercased()
+                guard code.count == 2, code.allSatisfy({ $0.isASCII && $0.isLetter }) else { continue }
+                resolved.insert(address)
+                result[address] = code
+                countryByAddressCache[address] = code
+            }
+            for address in chunk where !resolved.contains(address) {
+                unresolvedCountryAddresses.insert(address)
+            }
+        }
+        return result
+    }
+
+    private func upsertCountryRowsLocked(_ rows: [String: CountryVisitAccumulator]) throws {
+        guard !rows.isEmpty else { return }
+        let statement = try prepare("""
+        INSERT INTO country_visit_summary (
+            country_code, first_observed_at, last_observed_at,
+            last_site_name, last_process_name, connection_count
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(country_code) DO UPDATE SET
+            first_observed_at = min(first_observed_at, excluded.first_observed_at),
+            last_site_name = CASE
+                WHEN excluded.last_observed_at >= last_observed_at
+                 AND excluded.last_site_name <> '' THEN excluded.last_site_name
+                ELSE last_site_name END,
+            last_process_name = CASE
+                WHEN excluded.last_observed_at >= last_observed_at
+                THEN excluded.last_process_name ELSE last_process_name END,
+            last_observed_at = max(last_observed_at, excluded.last_observed_at),
+            connection_count = connection_count + excluded.connection_count
+        """)
+        defer { sqlite3_finalize(statement) }
+        for (code, item) in rows {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            bindText(statement, 1, code)
+            sqlite3_bind_double(statement, 2, item.firstObservedAt.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 3, item.lastObservedAt.timeIntervalSince1970)
+            bindText(statement, 4, item.lastSiteName)
+            bindText(statement, 5, item.lastProcessName)
+            sqlite3_bind_int64(statement, 6, Int64(item.connectionCount))
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw ObservationStoreError.statement(lastMessage)
+            }
+        }
+    }
+
+    private func flushCountryUpdatesLocked(now: Date = Date()) throws {
+        if !pendingCountryUpdates.isEmpty {
+            try upsertCountryRowsLocked(pendingCountryUpdates)
+            pendingCountryUpdates.removeAll(keepingCapacity: true)
+        }
+        lastCountrySummaryFlush = now
+        let cutoff = now.addingTimeInterval(-90 * 86_400).timeIntervalSince1970
+        try execute("DELETE FROM pending_destination_country WHERE last_observed_at < \(cutoff)")
+        try execute("""
+        DELETE FROM pending_destination_country
+        WHERE remote_address IN (
+            SELECT remote_address FROM pending_destination_country
+            ORDER BY last_observed_at DESC LIMIT -1 OFFSET 50000
+        )
+        """)
+    }
+
+    private func upsertPendingDestinationsLocked(
+        _ rows: [String: CountryVisitAccumulator]
+    ) throws {
+        let statement = try prepare("""
+        INSERT INTO pending_destination_country (
+            remote_address, last_site_name, last_process_name,
+            first_observed_at, last_observed_at, connection_count
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(remote_address) DO UPDATE SET
+            first_observed_at = min(first_observed_at, excluded.first_observed_at),
+            last_site_name = CASE
+                WHEN excluded.last_observed_at >= last_observed_at
+                 AND excluded.last_site_name <> '' THEN excluded.last_site_name
+                ELSE last_site_name END,
+            last_process_name = CASE
+                WHEN excluded.last_observed_at >= last_observed_at
+                THEN excluded.last_process_name ELSE last_process_name END,
+            last_observed_at = max(last_observed_at, excluded.last_observed_at),
+            connection_count = connection_count + excluded.connection_count
+        """)
+        defer { sqlite3_finalize(statement) }
+        for (address, item) in rows {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            bindText(statement, 1, address)
+            bindText(statement, 2, item.lastSiteName)
+            bindText(statement, 3, item.lastProcessName)
+            sqlite3_bind_double(statement, 4, item.firstObservedAt.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 5, item.lastObservedAt.timeIntervalSince1970)
+            sqlite3_bind_int64(statement, 6, Int64(item.connectionCount))
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw ObservationStoreError.statement(lastMessage)
+            }
+        }
+    }
+
+    private func backfillCountryVisitsLocked(now: Date) throws -> Bool {
+        guard (try scalar("""
+            SELECT COUNT(*) FROM country_visit_state
+            WHERE id = 1 AND retained_history_backfilled_at IS NOT NULL
+            """) ?? 0) == 0 else { return false }
+        guard (try scalar("SELECT COUNT(*) FROM geo_locations") ?? 0) > 0 else { return false }
+
+        // `INSERT OR IGNORE` matters if collection starts while this utility
+        // task is waiting for the store lock. A newly written country is more
+        // current than the historical seed and must not have its count doubled.
+        try execute("""
+        WITH watermark AS (
+            SELECT COALESCE((SELECT folded_through FROM chart_hourly_state WHERE id = 1), 0)
+                   AS folded_through
+        ), history AS (
+            SELECT upper(g.country_code) AS country_code,
+                   c.hour_start AS first_seen,
+                   c.hour_start + 3599 AS last_seen,
+                   c.remote_hostname AS site_name,
+                   c.process_name AS process_name,
+                   c.session_count AS connection_count
+            FROM chart_hourly c
+            JOIN geo_locations g ON g.ip = c.remote_address
+            CROSS JOIN watermark w
+            WHERE g.country_code IS NOT NULL AND c.hour_start < w.folded_through
+            UNION ALL
+            SELECT upper(g.country_code), o.first_observed_at, o.last_observed_at,
+                   COALESCE(o.remote_hostname, ''), o.process_name, 1
+            FROM observations o
+            JOIN geo_locations g ON g.ip = o.remote_address
+            CROSS JOIN watermark w
+            WHERE g.country_code IS NOT NULL AND o.last_observed_at >= w.folded_through
+        ), ranked AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY country_code ORDER BY last_seen DESC
+            ) AS recency
+            FROM history
+            WHERE length(country_code) = 2
+        )
+        INSERT OR IGNORE INTO country_visit_summary (
+            country_code, first_observed_at, last_observed_at,
+            last_site_name, last_process_name, connection_count
+        )
+        SELECT country_code, MIN(first_seen), MAX(last_seen),
+               COALESCE(MAX(CASE WHEN recency = 1 THEN site_name END), ''),
+               COALESCE(MAX(CASE WHEN recency = 1 THEN process_name END), ''),
+               SUM(connection_count)
+        FROM ranked
+        GROUP BY country_code
+        """)
+        try execute("""
+        INSERT INTO country_visit_state (id, retained_history_backfilled_at)
+        VALUES (1, \(now.timeIntervalSince1970))
+        ON CONFLICT(id) DO UPDATE SET
+            retained_history_backfilled_at = excluded.retained_history_backfilled_at
+        """)
+        knownVisitedCountries = try loadVisitedCountryCodes()
+        return true
+    }
+
+    private func resolvePendingCountriesLocked() throws {
+        let statement = try prepare("""
+        SELECT p.remote_address, p.last_site_name, p.last_process_name,
+               p.first_observed_at, p.last_observed_at, p.connection_count,
+               upper(g.country_code)
+        FROM pending_destination_country p
+        JOIN geo_locations g ON g.ip = p.remote_address
+        WHERE g.country_code IS NOT NULL
+        """)
+        defer { sqlite3_finalize(statement) }
+        var byCountry: [String: CountryVisitAccumulator] = [:]
+        var resolvedAddresses: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let address = text(statement, 0), let code = text(statement, 6),
+                  code.count == 2 else { continue }
+            resolvedAddresses.append(address)
+            let item = CountryVisitAccumulator(
+                firstObservedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3)),
+                lastObservedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
+                lastSiteName: text(statement, 1) ?? "",
+                lastProcessName: text(statement, 2) ?? "",
+                connectionCount: Int(sqlite3_column_int64(statement, 5))
+            )
+            if var current = byCountry[code] {
+                current.merge(item)
+                byCountry[code] = current
+            } else {
+                byCountry[code] = item
+            }
+        }
+        try upsertCountryRowsLocked(byCountry)
+        knownVisitedCountries.formUnion(byCountry.keys)
+        guard !resolvedAddresses.isEmpty else { return }
+        for start in stride(from: 0, to: resolvedAddresses.count, by: 400) {
+            let chunk = Array(resolvedAddresses[start..<min(start + 400, resolvedAddresses.count)])
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let deletion = try prepare(
+                "DELETE FROM pending_destination_country WHERE remote_address IN (\(placeholders))"
+            )
+            for (index, address) in chunk.enumerated() {
+                bindText(deletion, Int32(index + 1), address)
+            }
+            guard sqlite3_step(deletion) == SQLITE_DONE else {
+                sqlite3_finalize(deletion)
+                throw ObservationStoreError.statement(lastMessage)
+            }
+            sqlite3_finalize(deletion)
         }
     }
 

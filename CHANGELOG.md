@@ -4,6 +4,49 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.28
+
+**You can be told when something is wrong, and choose what counts as wrong.**
+Notifications gain kinds — a destination on a threat feed, monitoring stopping,
+delivery to the Hub failing, threat information changing, recovery — each a
+separate switch, with an hour's cooldown per event and a daily budget defaulting
+to twelve. A test notification checks the path works without waiting for
+something to break.
+
+**Monitoring alerts do not consume that budget.** "Nothing is being recorded" is
+the message this agent exists to send, and a busy day of threat notifications
+must not crowd it out. That would be the same ending as the outage the alarm was
+written for, reached another way.
+
+**A Hub that stays down no longer leaves you stuck with old indicators.** An
+explicit fallback to the public feeds can be switched on. It is deliberately
+awkward to trigger: off unless you turn it on, the Hub tried first every time,
+and automatic use only once the stored indicators are at least 24 hours old — so
+a brief outage uses what is already here and contacts nobody. The settings
+screen names the source in use: Hub, saved cache, or public feeds.
+
+This revises a decision in P3-30, which said the standalone setting is never
+shown to a Hub-enrolled agent. The reason for that decision — an hour of
+downtime must not silently change what leaves the Mac — is unchanged, and is
+what the three conditions protect. Both READMEs said "with a Hub, neither is
+offered"; they now describe what is actually there.
+
+**The globe's frame rate is a setting** — 3, 5 or 15 fps, starting at 5 — and it
+keeps a record of which countries this Mac has reached, so a first-time
+destination is visible as one.
+
+**Whether QUIC could give up destination names is now being counted rather than
+guessed.** Reading the TLS handshake added seven names and left Chrome, Slack
+and Codex at zero, because their unnamed traffic is udp/443. Instead of writing
+a decoder to find out whether one would help, the agent classifies those
+callbacks structurally and keeps counters. No packet bytes, addresses or process
+identity leave the callback, nothing is decrypted, and nothing new is read — the
+counting happens only where the handshake opt-in already delivers bytes.
+
+**Changing the interface language no longer depends on rebuilding one picker.**
+Both windows take a locale from the language choice, which is what SwiftUI
+already uses to decide what to re-render.
+
 ### Agent for Mac 0.5.6
 
 **The agent could stop recording for hours without saying so.** On 2026-08-18 a

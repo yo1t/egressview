@@ -192,6 +192,7 @@ final class ServerNamePolicyTests: XCTestCase {
         preferences.isEnabled = true
         XCTAssertTrue(ServerNamePreferences(defaults: defaults).isEnabled)
     }
+
 }
 
 final class ServerNameRegistryTests: XCTestCase {

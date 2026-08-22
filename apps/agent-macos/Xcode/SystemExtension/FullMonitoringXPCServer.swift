@@ -1,4 +1,5 @@
 import EgressViewAgentCore
+import EgressViewNetworkExtension
 import Foundation
 import OSLog
 import Security
@@ -10,6 +11,8 @@ final class FullMonitoringXPCServer: NSObject, NSXPCListenerDelegate, FullMonito
     private let lock = NSLock()
     private let maximumBufferedObservations = 10_000
     private var observations: [ConnectionObservation] = []
+    private var quicDiagnostics = QUICFeasibilityDiagnostics()
+    private var readsServerName = false
     private lazy var listener = NSXPCListener(machServiceName: FullMonitoringXPC.machServiceName)
 
     func start() {
@@ -37,6 +40,40 @@ final class FullMonitoringXPCServer: NSObject, NSXPCListenerDelegate, FullMonito
             logger.error("Could not encode observations: \(error.localizedDescription, privacy: .public)")
             reply(Data())
         }
+    }
+
+    func record(_ event: QUICFeasibilityEvent) {
+        lock.withLock {
+            switch event {
+            case .udp443Flow:
+                quicDiagnostics.recordUDP443Flow()
+            case let .outboundCallback(offset, byteCount, classification):
+                quicDiagnostics.recordOutboundCallback(
+                    offset: offset,
+                    byteCount: byteCount,
+                    classification: classification
+                )
+            }
+        }
+    }
+
+    func readQUICFeasibilityDiagnostics(withReply reply: @escaping (Data) -> Void) {
+        let snapshot = lock.withLock { quicDiagnostics }
+        do {
+            reply(try FullMonitoringXPC.encoder().encode(snapshot))
+        } catch {
+            logger.error("Could not encode QUIC feasibility diagnostics: \(error.localizedDescription, privacy: .public)")
+            reply(Data())
+        }
+    }
+
+    func setReadsServerName(_ enabled: Bool, withReply reply: @escaping () -> Void) {
+        lock.withLock { readsServerName = enabled }
+        reply()
+    }
+
+    var isServerNameReadingEnabled: Bool {
+        lock.withLock { readsServerName }
     }
 
     func listener(

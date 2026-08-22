@@ -5,6 +5,15 @@ import SwiftUI
 
 @MainActor
 final class HubDeliveryController: ObservableObject {
+    enum NotificationState: Equatable {
+        case inactive
+        case healthy
+        case unavailable
+        case authorizationRequired
+        case dataDropped
+        case failed
+    }
+
     @Published var hubAddress = ""
     @Published var enrollmentCode = ""
     @Published var consentConfirmed = false
@@ -20,6 +29,7 @@ final class HubDeliveryController: ObservableObject {
     @Published private(set) var oldestPending = L("Oldest pending: %@", L("none"))
     @Published private(set) var lastAcknowledged = L("Last acknowledged: %@", L("never"))
     @Published var errorMessage: String?
+    @Published private(set) var notificationState: NotificationState = .inactive
 
     private let credentialStore = KeychainAgentCredentialStore()
     private let preferences = AgentDeliveryPreferences()
@@ -28,6 +38,7 @@ final class HubDeliveryController: ObservableObject {
     private var deliverySampler = ObservationPersistenceSampler(refreshInterval: 60)
     private lazy var sender: AgentIngestSender? = makeSender()
     private var senderState: AgentIngestSenderState = .off
+    private var lastRejectedOrOverflowCount: Int?
 
     init() {
         _ = sender
@@ -169,6 +180,28 @@ final class HubDeliveryController: ObservableObject {
     private func render(state: AgentIngestSenderState, queueStatus: AgentDeliveryQueueStatus) {
         senderState = state
         status = label(for: state)
+        let rejectedOrOverflow = queueStatus.queueOverflowCount + queueStatus.contractRejectedCount
+        let newlyDropped = lastRejectedOrOverflowCount.map { rejectedOrOverflow > $0 } ?? false
+        lastRejectedOrOverflowCount = rejectedOrOverflow
+        if newlyDropped {
+            notificationState = .dataDropped
+        } else {
+            switch state {
+            case .idle where deliveryEnabled,
+                 .sending where deliveryEnabled:
+                notificationState = .healthy
+            case .retryScheduled:
+                notificationState = .unavailable
+            case .authorizationRequired:
+                notificationState = .authorizationRequired
+            case .failed:
+                notificationState = .failed
+            case .off, .paused, .waitingForNetwork, .idle, .sending:
+                // A laptop moving between networks is normal. Do not turn
+                // temporary lack of a path into an alarm.
+                notificationState = .inactive
+            }
+        }
         pending = L(
             "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld",
             queueStatus.pendingCount,
@@ -245,8 +278,12 @@ private final class AgentSettingsViewModel: ObservableObject {
         didSet { GeoCachePreferences().thirdPartyLookupEnabled = thirdPartyGeoLookupEnabled }
     }
     @Published var readsServerName = ServerNamePreferences().isEnabled {
-        didSet { ServerNamePreferences().isEnabled = readsServerName }
+        didSet {
+            ServerNamePreferences().isEnabled = readsServerName
+            onServerNameChanged(readsServerName)
+        }
     }
+    @Published private(set) var quicDiagnostics: QUICFeasibilityDiagnostics?
     let isLightweightMonitoringAvailable = false
 
     var availableMonitoringModes: [AgentMonitoringMode] {
@@ -258,6 +295,8 @@ private final class AgentSettingsViewModel: ObservableObject {
     private let onMonitoringMode: (AgentMonitoringMode) -> Void
     private let onRetentionChanged: (Int) -> Void
     private let onLanguageChanged: () -> Void
+    private let onRefreshQUICDiagnostics: () -> Void
+    private let onServerNameChanged: (Bool) -> Void
     private let maintenanceQueue = DispatchQueue(label: "com.egressview.agent.settings-maintenance")
 
     init(
@@ -265,13 +304,17 @@ private final class AgentSettingsViewModel: ObservableObject {
         launchController: LaunchAtLoginController,
         onMonitoringMode: @escaping (AgentMonitoringMode) -> Void,
         onRetentionChanged: @escaping (Int) -> Void,
-        onLanguageChanged: @escaping () -> Void
+        onLanguageChanged: @escaping () -> Void,
+        onServerNameChanged: @escaping (Bool) -> Void,
+        onRefreshQUICDiagnostics: @escaping () -> Void
     ) {
         self.store = store
         self.launchController = launchController
         self.onMonitoringMode = onMonitoringMode
         self.onRetentionChanged = onRetentionChanged
         self.onLanguageChanged = onLanguageChanged
+        self.onServerNameChanged = onServerNameChanged
+        self.onRefreshQUICDiagnostics = onRefreshQUICDiagnostics
         refreshLaunchAtLogin()
     }
 
@@ -293,6 +336,14 @@ private final class AgentSettingsViewModel: ObservableObject {
         case .deactivating, .removalApprovalRequired, .removalRebootRequired, .failed:
             break
         }
+    }
+
+    func updateQUICDiagnostics(_ diagnostics: QUICFeasibilityDiagnostics?) {
+        quicDiagnostics = diagnostics
+    }
+
+    func refreshQUICDiagnostics() {
+        onRefreshQUICDiagnostics()
     }
 
     func toggleLaunchAtLogin() {
@@ -358,25 +409,74 @@ private final class AgentSettingsViewModel: ObservableObject {
 
 private enum AgentSettingsSection: String, CaseIterable, Identifiable {
     case general
+    case notifications
     case hub
+    case enrichment
     case history
+    case diagnostics
     case uninstall
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: return L("General")
+        case .notifications: return L("Notifications")
         case .hub: return L("Hub")
+        case .enrichment: return L("Data Enrichment")
         case .history: return L("History")
+        case .diagnostics: return L("Diagnostics")
         case .uninstall: return L("Uninstall")
         }
     }
     var symbol: String {
         switch self {
         case .general: return "gearshape"
+        case .notifications: return "bell"
         case .hub: return "network"
+        case .enrichment: return "sparkles"
         case .history: return "clock.arrow.circlepath"
+        case .diagnostics: return "stethoscope"
         case .uninstall: return "trash"
+        }
+    }
+}
+
+private struct AgentNotificationHistoryView: View {
+    let entries: [AgentNotificationHistoryEntry]
+    let onClear: () -> Void
+
+    var body: some View {
+        if entries.isEmpty {
+            Text(L("No notifications have been attempted yet."))
+                .foregroundStyle(.secondary)
+        } else {
+            SwiftUI.ForEach<[AgentNotificationHistoryEntry], UUID, AgentNotificationHistoryRow>(
+                entries, id: \.id
+            ) { entry in
+                AgentNotificationHistoryRow(entry: entry)
+            }
+            Button(L("Clear notification history"), role: .destructive, action: onClear)
+        }
+    }
+}
+
+private struct AgentNotificationHistoryRow: View {
+    let entry: AgentNotificationHistoryEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(entry.title).font(.callout.bold())
+                Spacer()
+                Text(entry.delivered ? L("Sent to macOS") : L("Not sent to macOS"))
+                    .font(.caption)
+                    .foregroundStyle(entry.delivered ? Color.secondary : Color.orange)
+            }
+            Text(entry.body).font(.caption).foregroundStyle(.secondary)
+            Text(DateFormatter.localizedString(
+                from: entry.date, dateStyle: .short, timeStyle: .short
+            )).font(.caption2).foregroundStyle(.tertiary)
+            Divider()
         }
     }
 }
@@ -388,6 +488,7 @@ private struct AgentSettingsView: View {
     @ObservedObject var uninstall: AgentUninstallController
     @ObservedObject var geo: GeoCacheController
     @ObservedObject var threats: ThreatIntelController
+    @ObservedObject private var notifications = AgentUserNotifier.shared
     @ObservedObject private var language = AgentLanguageSettings.shared
     @AppStorage(AgentGlobeFrameRate.defaultsKey)
     private var globeFrameRateRaw = AgentGlobeFrameRate.defaultValue.rawValue
@@ -407,8 +508,11 @@ private struct AgentSettingsView: View {
                 Group {
                     switch section {
                     case .general: general
+                    case .notifications: notificationSettings
                     case .hub: hubSettings
+                    case .enrichment: enrichmentSettings
                     case .history: history
+                    case .diagnostics: diagnosticsSettings
                     case .uninstall: uninstallSettings
                     }
                 }
@@ -417,7 +521,9 @@ private struct AgentSettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .id(language.language.rawValue)
         .frame(minWidth: 760, minHeight: 540)
+        .environment(\.locale, language.language.locale)
         .alert("EgressView Agent", isPresented: messagePresented) {
             Button(L("OK"), role: .cancel) {
                 model.message = nil
@@ -435,11 +541,11 @@ private struct AgentSettingsView: View {
                 Picker(L("Mode"), selection: monitoringBinding) {
                     ForEach(model.availableMonitoringModes) { mode in Text(mode.title).tag(mode) }
                 }
-                .id(language.language.rawValue)
                 .pickerStyle(.segmented)
                 .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
                 Text(model.monitoringStatus).font(.callout).foregroundStyle(.secondary)
             }
+            serverNameSection
             settingsGroup(L("Startup")) {
                 Toggle(L("Launch EgressView Agent at login"), isOn: launchBinding)
                 Text(model.launchAtLoginDetail).font(.callout).foregroundStyle(.secondary)
@@ -488,6 +594,99 @@ private struct AgentSettingsView: View {
         }
     }
 
+    private var notificationSettings: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            settingsTitle(
+                L("Notifications"),
+                subtitle: L("Choose which changes need your attention on this Mac.")
+            )
+            settingsGroup(L("Notify me about")) {
+                notificationToggle(
+                    L("New threat matches"),
+                    L("New matches are grouped into one notification. Addresses and host names are shown only inside EgressView."),
+                    $notifications.threatDetectionsEnabled
+                )
+                notificationToggle(
+                    L("Network monitoring problems"),
+                    L("Approval, restart, stopped recording, and other monitoring failures."),
+                    $notifications.monitoringEnabled
+                )
+                notificationToggle(
+                    L("Hub delivery problems"),
+                    L("Authorization, delivery failure, or observations that could not be queued."),
+                    $notifications.hubDeliveryEnabled
+                )
+                notificationToggle(
+                    L("Threat information changes"),
+                    L("Feed updates and source failures. Off by default because these usually require no action."),
+                    $notifications.threatIntelChangesEnabled
+                )
+                notificationToggle(
+                    L("Recovery"),
+                    L("Monitoring or Hub delivery returning to normal. Off by default."),
+                    $notifications.recoveryEnabled
+                )
+            }
+            settingsGroup(L("Frequency")) {
+                Picker(L("Maximum per day"), selection: $notifications.dailyLimit) {
+                    ForEach(AgentNotificationDailyLimit.allCases, id: \.rawValue) { limit in
+                        Text(notificationLimitTitle(limit)).tag(limit)
+                    }
+                }
+                .frame(width: 240)
+                Text(L("The same cause is notified at most once per hour. New threat matches are grouped."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L("Network monitoring problems do not use the daily limit, but their one-hour duplicate suppression still applies."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L(
+                    "Today: %lld attempted · %lld suppressed by the daily limit",
+                    notifications.sentToday,
+                    notifications.suppressedToday
+                ))
+                .font(.callout)
+            }
+            settingsGroup(L("macOS Notification Center")) {
+                Text(notificationPermissionText)
+                    .font(.callout)
+                    .foregroundStyle(
+                        notifications.permissionState == .denied ? Color.orange : Color.secondary
+                    )
+                Button(L("Send test notification")) { notifications.sendTest() }
+            }
+            settingsGroup(L("Recent notification history")) {
+                AgentNotificationHistoryView(
+                    entries: Swift.Array(notifications.history.prefix(10)),
+                    onClear: notifications.clearHistory
+                )
+            }
+        }
+    }
+
+    private func notificationToggle(
+        _ title: String, _ detail: String, _ binding: Binding<Bool>
+    ) -> some View {
+        Toggle(isOn: binding) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func notificationLimitTitle(_ limit: AgentNotificationDailyLimit) -> String {
+        limit == .unlimited ? L("Unlimited") : L("%lld per day", limit.rawValue)
+    }
+
+    private var notificationPermissionText: String {
+        switch notifications.permissionState {
+        case .unknown: return L("Permission will be requested when the first notification needs to be shown.")
+        case .allowed: return L("Notifications are allowed in macOS.")
+        case .denied: return L("Notifications are disabled in macOS System Settings.")
+        }
+    }
+
     private var hubSettings: some View {
         VStack(alignment: .leading, spacing: 22) {
             settingsTitle(L("Hub delivery"), subtitle: L("This Mac pushes only to the Hub you choose. The Hub never polls this Mac."))
@@ -518,20 +717,23 @@ private struct AgentSettingsView: View {
                 Button(L("Send now")) { hub.sendNow() }.disabled(!hub.deliveryEnabled)
             }
             .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
-            Divider().padding(.vertical, 4)
+        }
+    }
+
+    private var enrichmentSettings: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            settingsTitle(
+                L("Data Enrichment"),
+                subtitle: L("Add location and threat context to observed destinations.")
+            )
             geoSection
-            serverNameSection
             threatSection
         }
     }
 
-    /// Locations come from the Hub, so they live beside it. The button exists
-    /// because someone who has just enrolled, or who is looking at an empty
-    /// map, should not have to wait for a timer to find out why.
     @ViewBuilder
     private var geoSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L("Destination locations")).font(.headline)
+        settingsGroup(L("Destination locations")) {
             Text(L("Used to place traffic on the map. Fetched from the Hub once a day; the request contains no destinations."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -556,8 +758,7 @@ private struct AgentSettingsView: View {
     }
 
     private var serverNameSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L("Destination names")).font(.headline)
+        settingsGroup(L("Destination names")) {
             Text(L("macOS supplies the name for applications that use its own networking. About half of connections come from applications that do not, including every browser measured — those show as addresses."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -574,23 +775,76 @@ private struct AgentSettingsView: View {
         }
     }
 
+    private var diagnosticsSettings: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            settingsTitle(
+                L("Diagnostics"),
+                subtitle: L("Technical counters for troubleshooting network monitoring.")
+            )
+            settingsGroup(L("QUIC destination-name diagnostics")) {
+                Text(L("These aggregate counters help determine whether QUIC Initial packets reach the network extension. They do not retain packet content, IP addresses, host names, or application identity."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if model.readsServerName {
+                    if let diagnostics = model.quicDiagnostics {
+                        Text(L(
+                            "QUIC check since extension start: UDP/443 flows %lld · data callbacks %lld (offset 0: %lld) · inspected bytes %lld · Initial candidates %lld (v1 %lld / v2 %lld) · other long headers %lld. No packet content or identity is retained.",
+                            diagnostics.udp443Flows,
+                            diagnostics.outboundCallbacks,
+                            diagnostics.zeroOffsetCallbacks,
+                            diagnostics.inspectedBytes,
+                            diagnostics.initialCandidates,
+                            diagnostics.version1InitialCandidates,
+                            diagnostics.version2InitialCandidates,
+                            diagnostics.unsupportedVersionLongHeaders
+                        ))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    } else {
+                        Text(L("Press Refresh to read aggregate QUIC counters from network monitoring."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button(L("Refresh QUIC check counters")) {
+                        model.refreshQUICDiagnostics()
+                    }
+                } else {
+                    Text(L("Enable destination-name reading in General settings to collect QUIC diagnostic counters."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     private var threatSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L("Threat information")).font(.headline)
+        settingsGroup(L("Threat information")) {
             Text(L("Destinations are checked against threat feeds on this Mac. The check itself never leaves the machine, whichever source the feeds came from."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack(spacing: 10) {
-                Button(L("Fetch now")) {
+                Button(threats.hasHub ? L("Retry Hub") : L("Fetch now")) {
                     Task { await threats.refresh() }
                 }
                 .disabled(threats.status == .fetching)
                 Text(threatStatusText).font(.caption).foregroundStyle(.secondary)
             }
+            Text(threatSourceText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let lastUpdatedAt = threats.lastUpdatedAt {
+                Text(L(
+                    "Last successful update: %@",
+                    DateFormatter.localizedString(
+                        from: lastUpdatedAt,
+                        dateStyle: .medium,
+                        timeStyle: .short
+                    )
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
             if threats.isDirectDownloadAvailable {
-                // Offered only without a Hub. With one, the indicators already
-                // arrive from it, and downloading them again would contact
-                // third parties for something already in hand.
                 Toggle(isOn: Binding(
                     get: { threats.isDirectDownloadEnabled },
                     set: { threats.isDirectDownloadEnabled = $0 }
@@ -600,22 +854,51 @@ private struct AgentSettingsView: View {
                         Text(L("Downloads public block lists from abuse.ch and spamhaus.org. No destination from this Mac is sent to them; they only learn that this Mac asked. Off unless you turn it on."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        // Downloaded by this Mac, under its own terms, not
-                        // relayed by us. Whoever switches it on is the one
-                        // agreeing, so they get the links.
-                        HStack(spacing: 6) {
-                            Link(L("abuse.ch terms"), destination: URL(string: "https://abuse.ch/terms-of-service/")!)
-                            Text("·").foregroundStyle(.secondary)
-                            Link(L("Spamhaus terms"), destination: URL(string: "https://www.spamhaus.org/legal/")!)
-                        }
-                        .font(.caption)
+                        threatFeedTerms
                     }
                 }
             } else {
-                Text(L("Threat information comes from your Hub. This Mac sends no destinations to anyone."))
+                Button(L("Fetch once from public feeds")) {
+                    Task { await threats.fetchDirectlyOnce() }
+                }
+                .disabled(threats.status == .fetching)
+                Toggle(isOn: Binding(
+                    get: { threats.isHubFallbackEnabled },
+                    set: { threats.isHubFallbackEnabled = $0 }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("Use public feeds when the Hub is unavailable"))
+                        Text(L("The Hub is always tried first. Automatic fallback starts only when the cached threat information is at least 24 hours old."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(L("Public-feed downloads send no destinations, but the feed operators can see that this Mac connected. Automatic fallback is off unless you turn it on."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                threatFeedTerms
             }
+        }
+    }
+
+    private var threatFeedTerms: some View {
+        HStack(spacing: 6) {
+            Link(L("abuse.ch terms"), destination: URL(string: "https://abuse.ch/terms-of-service/")!)
+            Text("·").foregroundStyle(.secondary)
+            Link(L("Spamhaus terms"), destination: URL(string: "https://www.spamhaus.org/legal/")!)
+        }
+        .font(.caption)
+    }
+
+    private var threatSourceText: String {
+        switch threats.activeSource {
+        case .none: return L("Current source: none")
+        case .cache: return L("Current source: saved cache")
+        case .hub: return L("Current source: Hub")
+        case .publicFeeds:
+            return threats.hasHub
+                ? L("Current source: public feeds (Hub unavailable)")
+                : L("Current source: public feeds")
         }
     }
 
@@ -814,6 +1097,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         onMonitoringMode: @escaping (AgentMonitoringMode) -> Void,
         onRetentionChanged: @escaping (Int) -> Void,
         onLanguageChanged: @escaping () -> Void,
+        onServerNameChanged: @escaping (Bool) -> Void,
+        onRefreshQUICDiagnostics: @escaping () -> Void,
         onClose: @escaping () -> Void = {}
     ) {
         self.hub = hub
@@ -827,7 +1112,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             launchController: launchController,
             onMonitoringMode: onMonitoringMode,
             onRetentionChanged: onRetentionChanged,
-            onLanguageChanged: onLanguageChanged
+            onLanguageChanged: onLanguageChanged,
+            onServerNameChanged: onServerNameChanged,
+            onRefreshQUICDiagnostics: onRefreshQUICDiagnostics
         )
         self.model = model
         let hostingController = NSHostingController(
@@ -857,6 +1144,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func updateMonitoringStatus(_ status: AgentMonitoringStatus) {
         model.updateMonitoringStatus(status)
+    }
+
+    func updateQUICDiagnostics(_ diagnostics: QUICFeasibilityDiagnostics?) {
+        model.updateQUICDiagnostics(diagnostics)
     }
 
     func refreshLocalization() {
@@ -908,6 +1199,11 @@ final class GeoCacheController: ObservableObject {
     }
 
     func start() {
+        if let store {
+            Task.detached(priority: .utility) {
+                try? store.backfillCountryVisitsFromRetainedHistory()
+            }
+        }
         Task { await self.refreshIfDue() }
         timer.start(every: 3_600) { [weak self] in
             Task { @MainActor in await self?.refreshIfDue() }

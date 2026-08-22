@@ -8,12 +8,18 @@ final class FullMonitoringCollector {
     private let errorHandler: (Error) -> Void
     private let coverageHandler: () -> Void
     private let recoveryHandler: () -> Void
+    private let diagnosticsHandler: (QUICFeasibilityDiagnostics) -> Void
     private let queue = DispatchQueue(label: "com.egressview.agent.full-monitoring")
     private var connection: NSXPCConnection?
+    private var diagnosticsConnection: NSXPCConnection?
     private var timer: DispatchSourceTimer?
     /// True while a drain request is out. Guards against stacking requests on
     /// an extension that has stopped answering.
     private var isDraining = false
+    private var isReadingDiagnostics = false
+    private var diagnosticsRequestGeneration: UInt64 = 0
+    private var readsServerName: Bool
+    private var needsServerNamePolicySync = true
 
     /// How long a drain may go unanswered before the connection is replaced.
     ///
@@ -31,7 +37,9 @@ final class FullMonitoringCollector {
         statusHandler: @escaping (AgentMonitoringStatus) -> Void,
         errorHandler: @escaping (Error) -> Void,
         coverageHandler: @escaping () -> Void = {},
-        recoveryHandler: @escaping () -> Void = {}
+        recoveryHandler: @escaping () -> Void = {},
+        readsServerName: Bool = false,
+        diagnosticsHandler: @escaping (QUICFeasibilityDiagnostics) -> Void = { _ in }
     ) {
         self.store = store
         self.observationHandler = observationHandler
@@ -39,6 +47,8 @@ final class FullMonitoringCollector {
         self.errorHandler = errorHandler
         self.coverageHandler = coverageHandler
         self.recoveryHandler = recoveryHandler
+        self.readsServerName = readsServerName
+        self.diagnosticsHandler = diagnosticsHandler
     }
 
     func start() {
@@ -47,6 +57,19 @@ final class FullMonitoringCollector {
 
     func stop() {
         queue.async { [weak self] in self?.stopOnQueue() }
+    }
+
+    func setReadsServerName(_ enabled: Bool) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.readsServerName = enabled
+            self.needsServerNamePolicySync = true
+            guard let connection = self.connection,
+                  let proxy = connection.remoteObjectProxyWithErrorHandler({ [weak self] _ in
+                      self?.queue.async { self?.resetConnection() }
+                  }) as? FullMonitoringXPCProtocol else { return }
+            self.syncServerNamePolicyIfNeeded(proxy)
+        }
     }
 
     private func startOnQueue() {
@@ -62,10 +85,12 @@ final class FullMonitoringCollector {
     private func stopOnQueue() {
         isRunning = false
         isDraining = false
+        isReadingDiagnostics = false
         timer?.cancel()
         timer = nil
         connection?.invalidate()
         connection = nil
+        finishDiagnosticsRequest()
         reportedActive = false
         reportedStarting = false
     }
@@ -102,12 +127,87 @@ final class FullMonitoringCollector {
             resetConnection()
             return
         }
+        syncServerNamePolicyIfNeeded(proxy)
         proxy.drainObservations { [weak self] data in
             self?.queue.async {
                 self?.isDraining = false
                 self?.consume(data)
             }
         }
+    }
+
+    private func syncServerNamePolicyIfNeeded(_ proxy: FullMonitoringXPCProtocol) {
+        guard needsServerNamePolicySync else { return }
+        needsServerNamePolicySync = false
+        // Calls on one XPC connection are ordered, so the extension applies the
+        // policy before the following drain. An older extension simply ignores
+        // this optional method and remains fail-closed.
+        _ = proxy.setReadsServerName?(readsServerName, withReply: {})
+    }
+
+    func requestQUICDiagnostics() {
+        queue.async { [weak self] in self?.requestQUICDiagnosticsOnQueue() }
+    }
+
+    private func requestQUICDiagnosticsOnQueue() {
+        guard isRunning else { return }
+        guard !isReadingDiagnostics else { return }
+        isReadingDiagnostics = true
+        diagnosticsRequestGeneration &+= 1
+        let generation = diagnosticsRequestGeneration
+        let connection = NSXPCConnection(
+            machServiceName: FullMonitoringXPC.machServiceName,
+            options: .privileged
+        )
+        connection.remoteObjectInterface = NSXPCInterface(with: FullMonitoringXPCProtocol.self)
+        connection.interruptionHandler = { [weak self] in
+            self?.queue.async { self?.finishDiagnosticsRequest(generation: generation) }
+        }
+        connection.invalidationHandler = { [weak self] in
+            self?.queue.async { self?.finishDiagnosticsRequest(generation: generation) }
+        }
+        connection.resume()
+        diagnosticsConnection = connection
+        guard let proxy = connection.remoteObjectProxyWithErrorHandler({ [weak self] _ in
+            self?.queue.async { self?.finishDiagnosticsRequest(generation: generation) }
+        }) as? FullMonitoringXPCProtocol else {
+            finishDiagnosticsRequest(generation: generation)
+            return
+        }
+        let request: Void? = proxy.readQUICFeasibilityDiagnostics?(withReply: { [weak self] data in
+            self?.queue.async {
+                guard let self else { return }
+                guard generation == self.diagnosticsRequestGeneration else { return }
+                defer { self.finishDiagnosticsRequest(generation: generation) }
+                guard self.isRunning, !data.isEmpty else { return }
+                do {
+                    let diagnostics = try FullMonitoringXPC.decoder().decode(
+                        QUICFeasibilityDiagnostics.self,
+                        from: data
+                    )
+                    self.diagnosticsHandler(diagnostics)
+                } catch {
+                    self.errorHandler(error)
+                }
+            }
+        })
+        if request == nil {
+            finishDiagnosticsRequest(generation: generation)
+        }
+        queue.asyncAfter(deadline: .now() + 5) { [weak self] in
+            // Diagnostics must never stack or affect observation collection if
+            // an older extension does not implement the optional method.
+            self?.finishDiagnosticsRequest(generation: generation)
+        }
+    }
+
+    private func finishDiagnosticsRequest(generation: UInt64? = nil) {
+        if let generation, generation != diagnosticsRequestGeneration { return }
+        isReadingDiagnostics = false
+        diagnosticsConnection?.interruptionHandler = nil
+        diagnosticsConnection?.invalidationHandler = nil
+        diagnosticsConnection?.invalidate()
+        diagnosticsConnection = nil
     }
 
     private func makeConnection() -> NSXPCConnection {
@@ -124,6 +224,7 @@ final class FullMonitoringCollector {
         }
         connection.resume()
         self.connection = connection
+        needsServerNamePolicySync = true
         return connection
     }
 
@@ -152,7 +253,9 @@ final class FullMonitoringCollector {
                 statusHandler(.fullActive)
             } else if !reportedActive, !reportedStarting {
                 reportedStarting = true
-                statusHandler(.fullStarting)
+                statusHandler(.fullStarting(
+                    waitingForFirstConnection: try store.monitoringStartedAt() == nil
+                ))
             }
         } catch {
             errorHandler(error)

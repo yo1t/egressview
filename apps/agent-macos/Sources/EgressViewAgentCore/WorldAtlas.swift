@@ -9,10 +9,17 @@ public struct WorldAtlas: Sendable {
     /// One closed ring in degrees, longitude first.
     public typealias Ring = [(longitude: Double, latitude: Double)]
 
-    public let rings: [Ring]
+    public struct Country: Sendable {
+        public let code: String?
+        public let name: String
+        public let rings: [Ring]
+    }
+
+    public let countries: [Country]
+    public var rings: [Ring] { countries.flatMap(\.rings) }
 
     public init(rings: [Ring]) {
-        self.rings = rings
+        countries = [Country(code: nil, name: "", rings: rings)]
     }
 
     public static func bundled() throws -> WorldAtlas {
@@ -39,8 +46,8 @@ public struct WorldAtlas: Sendable {
               let translate = transform["translate"] as? [Double], translate.count == 2,
               let rawArcs = root["arcs"] as? [[[Double]]],
               let objects = root["objects"] as? [String: Any],
-              let countries = objects["countries"] as? [String: Any],
-              let geometries = countries["geometries"] as? [[String: Any]]
+              let countryObject = objects["countries"] as? [String: Any],
+              let geometries = countryObject["geometries"] as? [[String: Any]]
         else {
             throw AtlasError.malformed
         }
@@ -74,21 +81,49 @@ public struct WorldAtlas: Sendable {
             return result
         }
 
-        var collected: [Ring] = []
+        let english = Locale(identifier: "en_US")
+        var codesByEnglishName: [String: String] = [:]
+        for region in Locale.Region.isoRegions {
+            guard let name = english.localizedString(forRegionCode: region.identifier) else { continue }
+            if codesByEnglishName[name] == nil { codesByEnglishName[name] = region.identifier }
+        }
+        // Natural Earth's display names differ from CLDR for these regions.
+        // Keep the exceptions explicit; guessing by a similar name could fill
+        // the wrong country and would be worse than leaving one unfilled.
+        let aliases: [String: String] = [
+            "W. Sahara": "EH", "United States of America": "US",
+            "Dem. Rep. Congo": "CD", "Dominican Rep.": "DO",
+            "Falkland Is.": "FK", "Fr. S. Antarctic Lands": "TF",
+            "Côte d'Ivoire": "CI", "Central African Rep.": "CF",
+            "Congo": "CG", "Eq. Guinea": "GQ", "eSwatini": "SZ",
+            "Palestine": "PS", "Myanmar": "MM", "Turkey": "TR",
+            "Solomon Is.": "SB", "China": "CN", "Bosnia and Herz.": "BA",
+            "Macedonia": "MK", "Trinidad and Tobago": "TT", "S. Sudan": "SS",
+        ]
+
+        var decodedCountries: [Country] = []
         for geometry in geometries {
+            let properties = geometry["properties"] as? [String: Any]
+            let name = properties?["name"] as? String ?? ""
+            let code = aliases[name] ?? codesByEnglishName[name]
+            var countryRings: [Ring] = []
             switch geometry["type"] as? String {
             case "Polygon":
                 guard let polygon = geometry["arcs"] as? [[Int]] else { continue }
-                collected.append(contentsOf: polygon.map(ring(for:)))
+                countryRings.append(contentsOf: polygon.map(ring(for:)))
             case "MultiPolygon":
                 guard let multi = geometry["arcs"] as? [[[Int]]] else { continue }
                 for polygon in multi {
-                    collected.append(contentsOf: polygon.map(ring(for:)))
+                    countryRings.append(contentsOf: polygon.map(ring(for:)))
                 }
             default:
                 continue
             }
+            countryRings = countryRings.filter { $0.count >= 3 }
+            if !countryRings.isEmpty {
+                decodedCountries.append(Country(code: code, name: name, rings: countryRings))
+            }
         }
-        rings = collected.filter { $0.count >= 3 }
+        countries = decodedCountries
     }
 }

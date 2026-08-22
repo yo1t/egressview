@@ -85,16 +85,34 @@ fetch them itself. Both are off unless you switch them on, in Settings.
   from them directly, so their terms are linked next to the setting — you are
   the one agreeing to them.
 
-**With a Hub, neither is offered.** The Hub already supplies both, and having
-both paths would quietly make "nothing leaves this Mac" untrue.
+**With a Hub, the standalone setting is not offered.** The Hub already supplies
+both, and having two paths running would quietly make "nothing leaves this Mac"
+untrue.
 
-**The agent never switches to direct downloads on its own.** A Hub that goes
-down for an hour must not change what your Mac sends while you are not looking.
-This was measured rather than asserted: the Hub was stopped for three and a half
-minutes and the agent restarted, forcing a threat-intel fetch that failed. It
-contacted no feed operator. The rule that decides the source is given whether
-you are enrolled and whether you opted in, and **is not given whether the Hub
-answered** — so no amount of downtime can change its answer.
+**The agent never switches to public feeds on its own.** A Hub that goes down
+for an hour must not change what your Mac sends while you are not looking. The
+rule that picks the source is given whether you are enrolled and whether you
+opted in, and **is not given whether the Hub answered** — measured, not
+asserted: the Hub was stopped for three and a half minutes with the agent
+restarted, forcing a fetch that failed, and it contacted no feed operator.
+
+### If your Hub stays down, you can allow a fallback — and only you can
+
+Threat information that is weeks old is not much use, so there is a way out of a
+long Hub outage. It is off unless you turn it on, and it is deliberately hard to
+trigger by accident:
+
+- **The Hub is always tried first**, every time.
+- Automatic fallback runs only when the stored indicators are **at least 24
+  hours old**. A brief outage uses what is already on your Mac and contacts
+  nobody.
+- There is also a **"fetch once from public feeds"** button, for when you want
+  it now and nothing else.
+- The settings screen names **the source currently in use** — Hub, saved cache,
+  or public feeds — so you can always see which one you are on.
+
+As with the standalone setting: no destination of yours is sent, and what the
+feed operators learn is that your Mac connected.
 
 ### If a feed cannot be read, the screen says which
 
@@ -127,6 +145,33 @@ warning that never clears is one nobody reads.
 **Connections already open when monitoring starts are never seen**, and periods
 the Mac slept through are marked as sleep rather than counted as gaps. The
 screen says what it does not know.
+
+The globe also keeps a record of which countries this Mac has reached, so a
+first-time destination is visible as one.
+
+### The globe's frame rate is yours to choose
+
+3, 5 or 15 frames a second, starting at 5. Six degrees a second does not need
+fifteen frames to read as motion, and the difference is battery. It stops
+entirely when the window is closed or another tab is showing — a globe nobody
+can see does not need to turn.
+
+## Being told when something is wrong
+
+The agent can notify you, and each kind is a separate switch: a destination on a
+threat feed, monitoring stopping, delivery to the Hub failing, the threat
+information changing, and recovery. There is a **test notification**, so you can
+check the path works without waiting for something to break.
+
+Two things keep notifications from becoming noise you learn to ignore:
+
+- **An hour's cooldown per event**, so nothing repeats itself at you.
+- **A daily budget** — five, twelve, twenty-five, or unlimited — defaulting to
+  twelve.
+
+**Monitoring alerts are exempt from that budget.** "Nothing is being recorded"
+is the one message this agent exists to send, and it must not be crowded out by
+a busy day of threat notifications. The hourly cooldown still applies to it.
 
 ## Uninstall
 
