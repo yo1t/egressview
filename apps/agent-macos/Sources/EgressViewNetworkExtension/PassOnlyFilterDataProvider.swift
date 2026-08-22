@@ -82,7 +82,11 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
                     startedAt: observedAt
                 )
             }
-            didObserve(mapper.map(metadata, observedAt: observedAt))
+            if decision == .allowAndReportMetadata {
+                didObserve(mapper.map(
+                    metadata, observedAt: observedAt, flowID: socketFlow.identifier
+                ))
+            }
             if decision == .allowAndReadServerName,
                metadata.networkProtocol == .udp, metadata.remotePort == 443 {
                 didObserveQUICFeasibility(.udp443Flow)
@@ -132,6 +136,13 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
                 openFlows.noteServerName(name, flowID: socketFlow.identifier)
             }
         }
+        let opening = lock.withLock {
+            openFlows.openingObservation(
+                flowID: socketFlow.identifier,
+                observedAt: Date()
+            )
+        }
+        if let opening { didObserve(opening) }
         // Either way this flow is done being looked at. The name is in the
         // first message or it is not there, and holding a flow open in the hope
         // of a second one would delay the user's traffic for nothing.

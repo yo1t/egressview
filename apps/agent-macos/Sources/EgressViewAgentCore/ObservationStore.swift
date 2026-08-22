@@ -476,6 +476,19 @@ public final class ObservationStore: @unchecked Sendable {
             """)
             try execute("PRAGMA user_version=9")
         }
+        if version < 10 {
+            // Network Extension reports the same flow when it opens and when
+            // it closes. The second report may add SNI and byte counts; it is
+            // an update, not another connection. Existing history has no
+            // trustworthy flow identity and remains nullable rather than being
+            // guessed from an address that may be shared by many hostnames.
+            try execute("ALTER TABLE observations ADD COLUMN flow_id TEXT")
+            try execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS observations_flow_id "
+                + "ON observations(flow_id) WHERE flow_id IS NOT NULL"
+            )
+            try execute("PRAGMA user_version=10")
+        }
     }
 
     // MARK: - Coverage
@@ -707,8 +720,9 @@ public final class ObservationStore: @unchecked Sendable {
             let flushBefore = lastCountrySummaryFlush
             try execute("BEGIN IMMEDIATE")
             do {
+                let countryVisitInputs = try newFlowObservationsForCountryHistory(observations)
                 try insert(observations)
-                try recordCountryVisitsLocked(observations, now: Date())
+                try recordCountryVisitsLocked(countryVisitInputs, now: Date())
                 try execute("COMMIT")
             } catch {
                 try? execute("ROLLBACK")
@@ -1804,8 +1818,18 @@ public final class ObservationStore: @unchecked Sendable {
         INSERT INTO observations (
             network_protocol, local_address, local_port, remote_address, remote_port,
             process_id, process_name, bundle_id, first_observed_at, last_observed_at,
-            bytes_in, bytes_out, collector, confidence, remote_hostname
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            bytes_in, bytes_out, collector, confidence, remote_hostname, flow_id
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(flow_id) WHERE flow_id IS NOT NULL DO UPDATE SET
+            process_name = excluded.process_name,
+            bundle_id = coalesce(excluded.bundle_id, observations.bundle_id),
+            first_observed_at = min(observations.first_observed_at, excluded.first_observed_at),
+            last_observed_at = max(observations.last_observed_at, excluded.last_observed_at),
+            bytes_in = coalesce(excluded.bytes_in, observations.bytes_in),
+            bytes_out = coalesce(excluded.bytes_out, observations.bytes_out),
+            collector = excluded.collector,
+            confidence = excluded.confidence,
+            remote_hostname = coalesce(excluded.remote_hostname, observations.remote_hostname)
         """
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
@@ -1827,10 +1851,56 @@ public final class ObservationStore: @unchecked Sendable {
             bindText(statement, 13, observation.collector.rawValue)
             bindText(statement, 14, observation.confidence.rawValue)
             bindOptionalText(statement, 15, observation.remoteHostname)
+            bindOptionalText(statement, 16, observation.flowID?.uuidString)
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw ObservationStoreError.statement(lastMessage)
             }
         }
+    }
+
+    /// Country history counts connections, not opening/closing reports. Merge
+    /// duplicate reports in this batch and exclude flows already present in
+    /// SQLite before updating the period-independent country counters.
+    private func newFlowObservationsForCountryHistory(
+        _ observations: [ConnectionObservation]
+    ) throws -> [ConnectionObservation] {
+        var withoutFlowID: [ConnectionObservation] = []
+        var byFlowID: [UUID: ConnectionObservation] = [:]
+        for observation in observations {
+            guard let flowID = observation.flowID else {
+                withoutFlowID.append(observation)
+                continue
+            }
+            byFlowID[flowID] = byFlowID[flowID].map { $0.merging(observation) } ?? observation
+        }
+        guard !byFlowID.isEmpty else { return withoutFlowID }
+        let existing = try existingFlowIDs(Set(byFlowID.keys))
+        withoutFlowID.append(contentsOf: byFlowID.compactMap { flowID, observation in
+            existing.contains(flowID) ? nil : observation
+        })
+        return withoutFlowID
+    }
+
+    private func existingFlowIDs(_ flowIDs: Set<UUID>) throws -> Set<UUID> {
+        var result: Set<UUID> = []
+        let values = Array(flowIDs)
+        for start in stride(from: 0, to: values.count, by: 400) {
+            let chunk = Array(values[start..<min(start + 400, values.count)])
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let statement = try prepare(
+                "SELECT flow_id FROM observations WHERE flow_id IN (\(placeholders))"
+            )
+            for (index, flowID) in chunk.enumerated() {
+                bindText(statement, Int32(index + 1), flowID.uuidString)
+            }
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if let value = text(statement, 0), let flowID = UUID(uuidString: value) {
+                    result.insert(flowID)
+                }
+            }
+            sqlite3_finalize(statement)
+        }
+        return result
     }
 
     private func importedLegacyCount(fingerprint: String) throws -> Int? {
@@ -1918,7 +1988,8 @@ public final class ObservationStore: @unchecked Sendable {
             bytesOut: optionalUInt(12),
             collector: CollectorKind(rawValue: text(statement, 13) ?? "libproc") ?? .libproc,
             confidence: ObservationConfidence(rawValue: text(statement, 14) ?? "exact") ?? .exact,
-            remoteHostname: text(statement, 15)
+            remoteHostname: text(statement, 15),
+            flowID: text(statement, 16).flatMap(UUID.init(uuidString:))
         )
     }
 }

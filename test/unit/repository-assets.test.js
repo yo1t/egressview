@@ -36,7 +36,11 @@ function rawGitHubImageReferences(file) {
 
 function resolveLocalImage(file, reference) {
   const cleanReference = decodeURIComponent(reference.split(/[?#]/, 1)[0]);
-  if (file.startsWith('site/')) return path.resolve(root, cleanReference);
+  // Pages serves `site/` as the web root, so a reference like `docs/x.png` in
+  // site/index.html means site/docs/x.png -- resolved from the file, exactly as
+  // the browser resolves it. This used to resolve from the repository root,
+  // which only worked because the page happened to reference paths that existed
+  // in both places. It reported a missing image for a file that was there.
   return path.resolve(root, path.dirname(file), cleanReference);
 }
 

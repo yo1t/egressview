@@ -271,7 +271,7 @@ final class AgentNotificationCoordinator {
                     action: L("Restart this Mac to finish enabling network monitoring.")
                 )
             )
-        case .updateNotRunning, .notRecording:
+        case .updateNotRunning, .notRecording, .diagnosticNotRecording:
             return
         case .failed:
             issue = (
@@ -436,6 +436,7 @@ private extension AgentMonitoringStatus {
         case .rebootRequired: return "reboot"
         case .updateNotRunning: return "update"
         case .notRecording: return "not-recording"
+        case .diagnosticNotRecording: return "diagnostic-not-recording"
         case .failed: return "failed"
         default: return "state"
         }

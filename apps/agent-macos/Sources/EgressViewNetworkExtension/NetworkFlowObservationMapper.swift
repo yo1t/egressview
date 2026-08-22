@@ -43,7 +43,11 @@ public struct SocketFlowMetadata: Equatable, Sendable {
 public struct NetworkFlowObservationMapper: Sendable {
     public init() {}
 
-    public func map(_ metadata: SocketFlowMetadata, observedAt: Date = Date()) -> ConnectionObservation {
+    public func map(
+        _ metadata: SocketFlowMetadata,
+        observedAt: Date = Date(),
+        flowID: UUID? = nil
+    ) -> ConnectionObservation {
         ConnectionObservation(
             networkProtocol: metadata.networkProtocol,
             localAddress: metadata.localAddress,
@@ -59,7 +63,8 @@ public struct NetworkFlowObservationMapper: Sendable {
             bytesOut: nil,
             collector: .networkExtension,
             confidence: .exact,
-            remoteHostname: metadata.remoteHostname
+            remoteHostname: metadata.remoteHostname,
+            flowID: flowID
         )
     }
 }

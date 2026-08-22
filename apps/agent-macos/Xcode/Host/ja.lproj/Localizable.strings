@@ -357,6 +357,10 @@
 "Nothing is being recorded. The update needs a restart of macOS before monitoring resumes." = "記録が行われていません。更新を反映するには macOS の再起動が必要です。";
 "EgressView: Starting" = "EgressView: 開始中";
 "EgressView: Not recording" = "EgressView: 記録していません";
+"EgressView: Diagnostic test" = "EgressView: 診断テスト";
+"EgressView diagnostic test" = "EgressView 診断テスト";
+"Diagnostic test: showing the recording-interruption warning. Monitoring continues normally." = "診断テスト中：記録停止警告を表示しています。監視は通常どおり継続しています。";
+"This is a diagnostic test of the recording-interruption warning. Monitoring continues normally." = "これは記録停止警告の診断テストです。監視は通常どおり継続しています。";
 "EgressView is not recording" = "EgressViewが記録していません";
 "The update is installed, but macOS is still running the previous version. Restart this Mac to resume monitoring. Traffic during this time is not being recorded." = "更新はインストールされましたが、macOSは以前のバージョンを動かしたままです。監視を再開するには、このMacを再起動してください。この間の通信は記録されません。";
 "Nothing in this period was monitored. The charts below are empty because there is no record, not because there was no traffic." = "この期間は監視されていません。下のグラフが空なのは通信が無かったからではなく、記録が無いためです。";

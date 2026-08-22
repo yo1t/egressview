@@ -30,6 +30,9 @@ public struct ConnectionObservation: Codable, Equatable, Sendable {
     public let bytesOut: UInt64?
     public let collector: CollectorKind
     public let confidence: ObservationConfidence
+    /// Identifies one Network Extension flow from its opening observation to
+    /// its closing byte-count report. Local-only and never sent to the Hub.
+    public let flowID: UUID?
     /// The name the application itself asked for, when the system knows it.
     ///
     /// Local only. It is deliberately absent from `AgentIngestObservation`:
@@ -52,7 +55,8 @@ public struct ConnectionObservation: Codable, Equatable, Sendable {
         bytesOut: UInt64? = nil,
         collector: CollectorKind,
         confidence: ObservationConfidence,
-        remoteHostname: String? = nil
+        remoteHostname: String? = nil,
+        flowID: UUID? = nil
     ) {
         self.networkProtocol = networkProtocol
         self.localAddress = localAddress
@@ -69,6 +73,7 @@ public struct ConnectionObservation: Codable, Equatable, Sendable {
         self.collector = collector
         self.confidence = confidence
         self.remoteHostname = remoteHostname
+        self.flowID = flowID
     }
 
     public var stableKey: String {
@@ -100,7 +105,8 @@ public struct ConnectionObservation: Codable, Equatable, Sendable {
             confidence: newer.confidence,
             // A later flow that the system could not name must not erase a
             // name an earlier one carried.
-            remoteHostname: newer.remoteHostname ?? remoteHostname
+            remoteHostname: newer.remoteHostname ?? remoteHostname,
+            flowID: newer.flowID ?? flowID
         )
     }
 }

@@ -4,6 +4,7 @@ import XCTest
 
 final class FullMonitoringXPCTests: XCTestCase {
     func testObservationRoundTripsAcrossXPCPayload() throws {
+        let flowID = UUID()
         let observation = ConnectionObservation(
             networkProtocol: .tcp,
             localAddress: "192.0.2.10",
@@ -15,13 +16,15 @@ final class FullMonitoringXPCTests: XCTestCase {
             firstObservedAt: Date(timeIntervalSince1970: 1_700_000_000),
             lastObservedAt: Date(timeIntervalSince1970: 1_700_000_001),
             collector: .networkExtension,
-            confidence: .exact
+            confidence: .exact,
+            flowID: flowID
         )
 
         let payload = try FullMonitoringXPC.encoder().encode([observation])
         let decoded = try FullMonitoringXPC.decoder().decode([ConnectionObservation].self, from: payload)
 
         XCTAssertEqual(decoded, [observation])
+        XCTAssertEqual(decoded.first?.flowID, flowID)
     }
 
     func testMachServiceUsesTheAppGroupPrefixRequiredByNetworkExtension() {

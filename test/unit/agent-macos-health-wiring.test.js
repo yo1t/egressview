@@ -73,7 +73,10 @@ describe('macOS Agent monitoring health wiring', () => {
     assert.match(controller, /AgentDiagnostics\.consumeForceNotRecording\(\)/);
     assert.match(controller, /diagnosticRehearsalActive = true/);
     assert.match(controller, /finishDiagnosticRehearsalAfterDisplay\(generation:/);
-    assert.match(controller, /MonitoringHealthCheck\.hasRecentObservation\(latestObservationAt\)/);
+    assert.match(controller, /\.diagnosticNotRecording/);
+    assert.match(controller, /self\.checkHealth\(\)/);
+    assert.match(controller, /case \.diagnosticNotRecording:[\s\S]*?coverage history/);
+    assert.doesNotMatch(controller, /Date\(timeIntervalSince1970: 0\)/);
     assert.doesNotMatch(controller, /AgentDiagnostics\.forcesNotRecording/);
   });
 

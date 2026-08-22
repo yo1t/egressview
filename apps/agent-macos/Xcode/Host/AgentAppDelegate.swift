@@ -371,7 +371,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private func monitoringMode(for status: AgentMonitoringStatus) -> AgentMonitoringMode? {
         switch status {
         case .fullActive, .fullStarting, .fullActivationRequested, .approvalRequired,
-             .rebootRequired, .updateNotRunning, .notRecording:
+             .rebootRequired, .updateNotRunning, .notRecording, .diagnosticNotRecording:
             // A stalled update is still full monitoring as far as the mode
             // picker goes; the user chose it, and it is not their setting that
             // is wrong.

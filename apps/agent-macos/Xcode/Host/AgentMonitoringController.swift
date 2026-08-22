@@ -23,6 +23,9 @@ enum AgentMonitoringStatus: Equatable {
     /// Monitoring says it is running, macOS agrees, and nothing is arriving.
     /// Nothing is being recorded and no update explains it.
     case notRecording(silentSince: Date?)
+    /// A short, explicit rehearsal of the warning UI and notification path.
+    /// Collection continues and coverage must remain open while this is shown.
+    case diagnosticNotRecording
     case deactivating
     case removalApprovalRequired
     case removalRebootRequired
@@ -53,6 +56,8 @@ enum AgentMonitoringStatus: Equatable {
                 "Nothing has been recorded since %@. Monitoring reports that it is running. Quit and reopen EgressView Agent to restart it.",
                 formatter.string(from: since)
             )
+        case .diagnosticNotRecording:
+            return L("Diagnostic test: showing the recording-interruption warning. Monitoring continues normally.")
         case .deactivating: return L("Stopping monitoring...")
         case .removalApprovalRequired: return L("Approve removal of the System Extension in System Settings")
         case .removalRebootRequired: return L("Restart macOS to finish removing the System Extension")
@@ -69,7 +74,8 @@ enum AgentMonitoringStatus: Equatable {
         case .paused, .deactivating: return "MenuBarPaused"
         case .lightweight, .fullActive: return "MenuBar"
         case .fullActivationRequested, .fullStarting, .approvalRequired, .rebootRequired,
-             .updateNotRunning, .notRecording, .removalApprovalRequired, .removalRebootRequired,
+             .updateNotRunning, .notRecording, .diagnosticNotRecording,
+             .removalApprovalRequired, .removalRebootRequired,
              .failed:
             return "MenuBarAttention"
         }
@@ -86,7 +92,7 @@ enum AgentMonitoringStatus: Equatable {
     /// A wider menu bar for the duration of an outage is a fair price.
     var menuBarShowsLabel: Bool {
         switch self {
-        case .updateNotRunning, .notRecording: return true
+        case .updateNotRunning, .notRecording, .diagnosticNotRecording: return true
         default: return false
         }
     }
@@ -98,6 +104,7 @@ enum AgentMonitoringStatus: Equatable {
         case .fullActive: return L("EgressView: Monitoring")
         case .fullStarting: return L("EgressView: Starting")
         case .updateNotRunning, .notRecording: return L("EgressView: Not recording")
+        case .diagnosticNotRecording: return L("EgressView: Diagnostic test")
         case .fullActivationRequested, .approvalRequired, .removalApprovalRequired: return L("EgressView: Approval")
         case .rebootRequired, .removalRebootRequired: return L("EgressView: Restart")
         case .deactivating: return L("EgressView: Stopping")
@@ -181,7 +188,7 @@ final class AgentMonitoringController {
                 }
                 gateState.monitoringExpected = true
                 gateState.underlyingStatus = status
-            case .updateNotRunning, .notRecording:
+            case .updateNotRunning, .notRecording, .diagnosticNotRecording:
                 // Health warnings overlay the collector's last real state.
                 break
             case .fullActivationRequested:
@@ -350,6 +357,10 @@ final class AgentMonitoringController {
             guard !state.isCoverageOpen else { return }
             state.isCoverageOpen = true
             try? store.beginCoverageSession(at: Date())
+        case .diagnosticNotRecording:
+            // A rehearsal does not stop collection and must not create a gap
+            // in the measured coverage history.
+            break
         case .paused, .deactivating, .failed, .updateNotRunning, .notRecording, .rebootRequired,
              .approvalRequired, .removalApprovalRequired, .removalRebootRequired:
             guard state.isCoverageOpen else { return }
@@ -371,29 +382,31 @@ final class AgentMonitoringController {
 
     private func checkHealth() {
         guard gateState.monitoringExpected else { return }
-        // A rehearsal answers the real question the real way: the times are
-        // replaced, and everything downstream -- the verdict, the status, the
-        // menu bar, the notification -- runs exactly as it would in an outage.
-        // Short-circuiting straight to the notification would test the
-        // notification and nothing else.
+        // Rehearse the user-facing warning explicitly. Feeding an epoch into
+        // the real health evaluator made the UI claim that a real outage began
+        // in 1970, and waiting for an asynchronous probe could leave that lie
+        // on screen indefinitely if macOS did not answer.
         let forced = AgentDiagnostics.consumeForceNotRecording()
-        let rehearsalGeneration: UInt64?
         if forced {
             gateState.diagnosticRehearsalActive = true
             gateState.diagnosticRehearsalGeneration &+= 1
-            rehearsalGeneration = gateState.diagnosticRehearsalGeneration
-        } else {
-            rehearsalGeneration = nil
+            reportStall(
+                .diagnosticNotRecording,
+                title: L("EgressView diagnostic test"),
+                body: L("This is a diagnostic test of the recording-interruption warning. Monitoring continues normally.")
+            )
+            finishDiagnosticRehearsalAfterDisplay(
+                generation: gateState.diagnosticRehearsalGeneration
+            )
+            return
         }
-        let lastObservationAt = forced
-            ? Date(timeIntervalSince1970: 0)
-            : (try? store?.statistics().newestObservedAt) ?? nil
+        let lastObservationAt = (try? store?.statistics().newestObservedAt) ?? nil
 
         // Recent observations force `MonitoringHealthCheck.evaluate` to
         // `.healthy`, even when an extension swap is pending. A properties
         // request cannot change that answer, and macOS retains substantial
         // request/XPC/Observation state for every one submitted.
-        if !forced, MonitoringHealthCheck.hasRecentObservation(lastObservationAt) {
+        if MonitoringHealthCheck.hasRecentObservation(lastObservationAt) {
             gateState.hasProbedCurrentSilence = false
             clearStallAfterRecoveryIfNeeded()
             return
@@ -405,24 +418,22 @@ final class AgentMonitoringController {
         guard !gateState.hasProbedCurrentSilence else {
             reportUnexplainedSilenceIfNeeded(
                 lastObservationAt: lastObservationAt,
-                monitoringSince: forced ? Date(timeIntervalSince1970: 0) : gateState.monitoringSince
+                monitoringSince: gateState.monitoringSince
             )
             return
         }
         gateState.hasProbedCurrentSilence = true
         healthProbe.check(
             lastObservationAt: lastObservationAt,
-            awakeSince: forced ? Date(timeIntervalSince1970: 0) : gateState.monitoringSince
+            awakeSince: gateState.monitoringSince
         ) { [weak self] health in
             guard let self else { return }
             // The user may pause while the asynchronous request is in flight.
             guard self.gateState.monitoringExpected else { return }
             // A properties request may take twenty seconds. Data arriving in
             // that window is newer and stronger evidence than its old snapshot.
-            let latestObservationAt = forced
-                ? lastObservationAt
-                : ((try? self.store?.statistics().newestObservedAt) ?? nil)
-            if !forced, let latestObservationAt,
+            let latestObservationAt = (try? self.store?.statistics().newestObservedAt) ?? nil
+            if let latestObservationAt,
                Date().timeIntervalSince(latestObservationAt)
                     < MonitoringHealthCheck.silenceThreshold {
                 if self.gateState.stall != nil {
@@ -448,9 +459,7 @@ final class AgentMonitoringController {
             case .unanswered:
                 self.reportUnexplainedSilenceIfNeeded(
                     lastObservationAt: latestObservationAt,
-                    monitoringSince: forced
-                        ? Date(timeIntervalSince1970: 0)
-                        : self.gateState.monitoringSince,
+                    monitoringSince: self.gateState.monitoringSince,
                     macOSUnanswered: true
                 )
             case .healthy:
@@ -459,9 +468,6 @@ final class AgentMonitoringController {
                 self.statusHandler(.failed(L("Network monitoring System Extension is not installed.")))
             case .awaitingApproval:
                 self.statusHandler(.approvalRequired)
-            }
-            if let rehearsalGeneration {
-                self.finishDiagnosticRehearsalAfterDisplay(generation: rehearsalGeneration)
             }
         }
     }
@@ -477,14 +483,16 @@ final class AgentMonitoringController {
             else { return }
             self.gateState.diagnosticRehearsalActive = false
             guard self.gateState.monitoringExpected else { return }
-            let latestObservationAt = (try? self.store?.statistics().newestObservedAt) ?? nil
-            guard MonitoringHealthCheck.hasRecentObservation(latestObservationAt) else {
-                // This may be a real outage discovered during the rehearsal.
-                // Keep the warning and let the normal health path own it.
-                return
+            if self.gateState.stall == .diagnosticNotRecording {
+                self.gateState.stall = nil
+                self.gateState.hasReportedStall = false
+                self.statusHandler(self.gateState.underlyingStatus)
             }
             self.gateState.hasProbedCurrentSilence = false
-            self.clearStallAfterRecoveryIfNeeded()
+            // Re-evaluate real timestamps immediately. A real outage remains
+            // eligible for the normal warning; the rehearsal itself cannot
+            // survive a missing System Extension callback.
+            self.checkHealth()
         }
     }
 
@@ -529,6 +537,7 @@ final class AgentMonitoringController {
         let notificationKey: String
         switch status {
         case .updateNotRunning: notificationKey = "monitoring-update-not-running"
+        case .diagnosticNotRecording: notificationKey = "monitoring-diagnostic-test"
         default: notificationKey = "monitoring-not-recording"
         }
         DispatchQueue.main.async {
