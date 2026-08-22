@@ -29,7 +29,7 @@ Everything else moved forward. This was the largest cycle yet: 58 PRs (#213--#27
 | ISO/IEC 25010 | 9.1/10 average | High quality |
 | Node.js Best Practices | 47/50 | Excellent |
 | SonarQube-equivalent gate | Passed; coverage rating A | No high-severity blocker |
-| **macOS application quality (§6, new)** | **41/50** | **Strong; no privacy manifest, no crash diagnostics** |
+| **macOS application quality (§6, new)** | **45/50** | **Strong; no crash diagnostics** |
 
 ---
 
@@ -63,7 +63,6 @@ Fifty-eight PRs merged (#213--#270), plus #271 after the measurement commit. One
 
 - **Medium, supply chain, new**: **v2.0.0, v2.0.1, and v2.0.2 were published with no signed assets.** The signing pipeline, trust registry, and DNS-anchored fingerprint all still exist and are tested, but a release that does not use them offers a downloader nothing to verify. The agent `.pkg` releases are notarised and stapled by Apple, which is a real and independently checkable signature, but they carry no checksum or detached signature of the project's own.
 - **Low, new attack surface**: the agent ingest API remains a new authenticated write path — permission-gated, doubly validated, idempotent, rate-limited — and should stay behind the same transport protections as the rest of the API.
-- **Low, agent privacy posture**: the agent ships **no `PrivacyInfo.xcprivacy`**. For Developer ID distribution Apple does not require one, so nothing is broken; but for a product whose central claim is "metadata only, never content", a machine-readable declaration of exactly that is the cheapest available proof. See §6.
 - **Low, agent diagnostics**: there is no crash reporting and no structured diagnostic bundle. When the agent misbehaves on a user's machine, the recovery procedure is a person reading logs over the user's shoulder.
 - **Low, operational**: the four hardware/external-service integration files are still not part of the default CI workflow.
 - **Low, reliability supervision**: the event-loop watchdog force-kills a wedged Hub process but depends on an external service manager to bring it back; there is still no in-repo supported service unit.
@@ -255,14 +254,14 @@ On the Swift side, `Xcode/Host/ObservationWindowController.swift` is by a wide m
 
 The agent is not only Swift source; it is an application a user installs, grants a system extension to, and leaves running. This section evaluates it as such, against Apple's platform requirements (notarisation, hardened runtime, App Sandbox, entitlements, privacy manifest), the macOS Human Interface Guidelines, accessibility and localisation expectations, and energy behaviour.
 
-**Score: 41/50.**
+**Score: 45/50.**
 
 | Area | Score | Evidence | Gap |
 |---|---:|---|---|
 | **Gatekeeper and notarisation** | 5/5 | On the installed 0.5.29 build 91: `spctl -a -t install` returns **accepted, source = Notarized Developer ID**; `stapler validate` succeeds, so it launches without a network round trip. The build script notarises and staples as part of packaging | -- |
 | **Hardened runtime and signing** | 5/5 | `CodeDirectory flags=0x10000(runtime)` with a secure timestamp; host and system extension are signed separately with `--options runtime` and verified with `--strict` after signing and again after a packaging round trip | -- |
 | **App Sandbox and least privilege** | 5/5 | Both host and extension are sandboxed. The host holds exactly five entitlements — app group, network client, user-selected files read/write, system-extension install, and the network-extension content filter. **There is no `com.apple.security.files.all` and no temporary-exception entitlement anywhere** | -- |
-| **Privacy declaration** | **1/5** | The `NSSystemExtensionUsageDescription` string is accurate and specific: metadata only, no content, no blocking. Data minimisation is real — the product does not read payloads | **No `PrivacyInfo.xcprivacy`.** Developer ID distribution does not require one, so nothing is broken; but for a product whose entire claim is "metadata only", a machine-readable privacy manifest declaring collected data types and required-reason API use is the cheapest proof available, and its absence is conspicuous |
+| **Privacy declaration** | **5/5** | **Both the app and the system extension now ship a `PrivacyInfo.xcprivacy`**, verified present in the built bundles rather than only in the repository. Each declares `NSPrivacyTracking: false`, no tracking domains, an **empty `NSPrivacyCollectedDataTypes`** — accurate, because nothing is transmitted where the developer can reach it — and reasons for the two required-reason categories the agent actually uses: user defaults (`CA92.1`, `1C8F.1`) and file timestamp (`C617.1`, reading the size of files it wrote itself). `NSSystemExtensionUsageDescription` remains accurate and specific. [`docs/agent-privacy.md`](agent-privacy.md) lists every host the agent contacts, what is sent, and what comes back — **including that reaching `dl.egressview.com` reveals the client IP to a CDN that keeps access logs**, which a privacy page listing only flattering facts would omit. A repository test fails the build if a call into an undeclared required-reason category appears in the source | -- |
 | **Localisation** | 5/5 | `en.lproj` and `ja.lproj` each hold **491 keys with exact parity** — no key exists in one and not the other. UI language follows a user-selectable locale rather than being fixed at launch | -- |
 | **Accessibility** | 4/5 | Better than a naive count suggests. The three custom-drawn visualisations — globe, sankey, timeline — each expose a computed `accessibilityLabel` summarising what is drawn, decorative images are `accessibilityHidden`, and the menu-bar button carries its status as an accessibility label. 13 keyboard-shortcut and help modifiers | No audit against VoiceOver itself has been recorded. The summaries are asserted by unit tests, not by a screen reader |
 | **Energy and resource behaviour** | 5/5 | Measured on this machine: host **0.0% CPU / 126 MB RSS after 2h02m**; extension **1.7% / 18 MB after 3h37m**. Periodic work uses a dispatch-source timer inside a `beginActivity` scope rather than a run-loop timer App Nap throttles; the globe redraws at a selectable 3/5/15 fps; windows are released on close so memory returns | Single machine, single sample |
@@ -270,11 +269,12 @@ The agent is not only Swift source; it is an application a user installs, grants
 | **Update and uninstall** | 4/5 | In-app update checking against signed release metadata, with the downloaded package's signing **team identifier verified against the running app before install** — notarisation is then enforced independently by the installer. A first-class uninstall path exists and revokes the Hub registration, preserving the credential if the Hub cannot be reached | The `.pkg` releases carry no checksum or detached signature of the project's own (see §2). Four corrective releases were needed to make in-app update work from a sandbox |
 | **Diagnostics** | **3/5** | Installation writes a instrumented log recording what the relaunch actually did. Swift tests: 419, 0 failing | **No crash reporting and no user-exportable diagnostic bundle.** When the agent misbehaves on someone else's Mac, there is no artefact to ask for |
 
-**The three actions that would move this score most, in order:**
+**The two actions that would move this score most, in order:**
 
-1. **Ship a `PrivacyInfo.xcprivacy`.** It costs one file and directly substantiates the product's central promise.
-2. **Add a diagnostics export** — a single button producing a redacted bundle. Without it, every field report is a conversation instead of an attachment.
-3. **Run a VoiceOver pass** and record the result, so the accessibility work already done is verified rather than assumed.
+1. **Add a diagnostics export** — a single button producing a redacted bundle. Without it, every field report is a conversation instead of an attachment.
+2. **Run a VoiceOver pass** and record the result, so the accessibility work already done is verified rather than assumed.
+
+The privacy manifest that this section previously identified as the clearest gap has been shipped, and the declaration is held to the source by a test rather than by intention.
 
 ---
 

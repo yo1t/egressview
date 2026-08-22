@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- EgressView observes outbound connection metadata and keeps it on the
+	     user's own hardware. Nothing is sent to the developer. When the user
+	     enrols the agent with a Hub, observations go to that Hub, which the
+	     user runs themselves; the developer has no access to it.
+
+	     Apple's definition of collection is transmitting data off the device
+	     where the developer or a third party can access it. By that
+	     definition this app collects nothing, which is why the list below is
+	     empty rather than merely short. See docs/agent-privacy.md for what
+	     each outbound connection the app makes is for. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!-- Reading and writing the app's own settings, and the settings
+			     shared with the system extension through the app group. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+				<string>1C8F.1</string>
+			</array>
+		</dict>
+		<dict>
+			<!-- File metadata is read only to size files the app itself wrote:
+			     the observation journal and store in the app group container,
+			     and a downloaded update package in the app's own temporary
+			     directory. No file outside those containers is inspected. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

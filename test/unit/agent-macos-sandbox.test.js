@@ -141,8 +141,20 @@ describe('macOS Agent App Sandbox boundary', () => {
     );
 
     assert.match(appDelegate, /orderFrontStandardAboutPanel/);
+    assert.match(appDelegate, /url\(forResource: "ThirdPartyNotices", withExtension: "txt"\)/);
     assert.ok((appDelegate.match(/L\("About EgressView Agent"\)/g) || []).length >= 2);
     assert.match(english, /"About EgressView Agent" = "About EgressView Agent";/);
     assert.match(japanese, /"About EgressView Agent" = "EgressView Agentについて";/);
+
+    const project = fs.readFileSync(
+      path.join(root, 'apps/agent-macos/EgressViewAgent.xcodeproj/project.pbxproj'),
+      'utf8'
+    );
+    const notices = fs.readFileSync(
+      path.join(root, 'apps/agent-macos/Xcode/Host/ThirdPartyNotices.txt'),
+      'utf8'
+    );
+    assert.match(project, /ThirdPartyNotices\.txt in Resources/);
+    assert.match(notices, /Natural Earth/);
   });
 });

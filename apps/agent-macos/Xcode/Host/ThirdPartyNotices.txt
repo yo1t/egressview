@@ -1,0 +1,13 @@
+Third-Party Notices
+===================
+
+World Atlas 2.0.2 / Natural Earth
+---------------------------------
+
+The world map bundled with EgressView Agent is derived from Natural Earth data.
+Natural Earth states that all versions of its raster, vector, and thematic map
+data are in the public domain. No permission is needed to use the data.
+
+Sources:
+https://github.com/topojson/world-atlas
+https://www.naturalearthdata.com/about/terms-of-use/
