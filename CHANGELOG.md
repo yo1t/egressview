@@ -4,6 +4,43 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.30
+
+**You can now hand over what is needed to explain a fault.** Until now, when
+the agent misbehaved on your Mac the recovery procedure was somebody reading
+logs over your shoulder. **Save diagnostics...** — in the menu bar, and in
+Settings under Diagnostics — writes a file with which build is running,
+whether the extension answered, when the last observation actually landed,
+and what the installer did.
+
+It writes rather than sends: a send would add a destination to the short list
+of things this agent promises about. **It contains no destination address, no
+process name and no host name**, and it is plain text so you can read all of
+it before passing it on.
+
+Four things in it were wrong when it was first tried on a real Mac, and all
+four are fixed here. It reported the extension build as unknown on every
+healthy machine, because it asked a probe that only runs once collection has
+gone quiet. It said the installer log was absent when the log existed and the
+agent simply cannot read `/var/log` from inside its sandbox — **"could not be
+read" and "there is nothing" send a reader to different places.** It reported
+no folded hours on a Mac holding eighty-two thousand of them, by merging two
+different aggregates into one figure.
+
+**The charts can be read by VoiceOver.** The globe already could; the
+application-to-destination diagram and the timeline could not, and no unit
+test could have told us — the labels were there, and VoiceOver still had
+nothing to land on. Verified on a real Mac this time.
+
+**Lighter to leave open.** The screen used to re-aggregate every time a
+connection arrived. It now refreshes on the same fifteen-second beat it always
+had, and nothing about what is recorded changes.
+
+**It says what it does and does not collect, in a form a machine can read.**
+The app and its system extension both carry a privacy manifest: no tracking,
+no tracking domains, and an empty collected-data list — accurate rather than
+merely short, because nothing is transmitted anywhere we can reach.
+
 ## [2.0.3] - 2026-08-22
 
 **EgressView 2.0.3 = Hub 1.10.0 (unchanged) + Agent for Mac 0.5.29.**
