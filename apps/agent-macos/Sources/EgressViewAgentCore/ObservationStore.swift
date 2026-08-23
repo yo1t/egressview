@@ -1561,6 +1561,23 @@ public final class ObservationStore: @unchecked Sendable {
         _ = try backfillCountryVisitsLocked(now: now)
     }
 
+    /// The raw rows a deletion with this cutoff would remove.
+    ///
+    /// Exists so that "save a copy before deleting" can offer a copy of
+    /// exactly what is about to go, rather than of whatever period a chart
+    /// happened to be showing. `nil` means the whole store, which is what the
+    /// delete-everything button removes.
+    ///
+    /// Raw rows only: hours already reduced to totals have no individual
+    /// records left to write, and the caller has to say so rather than hand
+    /// over a file that looks complete.
+    public func observations(before cutoff: Date?, limit: Int = Int.max) throws
+        -> [ConnectionObservation] {
+        guard let cutoff else { return try observations(since: nil, limit: limit) }
+        return try observations(since: nil, limit: limit)
+            .filter { $0.lastObservedAt < cutoff }
+    }
+
     /// "Delete history before this date", which the JSON Lines journal could
     /// not do -- it could only delete everything.
     @discardableResult

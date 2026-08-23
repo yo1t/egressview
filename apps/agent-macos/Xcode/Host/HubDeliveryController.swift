@@ -387,6 +387,115 @@ private final class AgentSettingsViewModel: ObservableObject {
         refreshLaunchAtLogin()
     }
 
+    /// Writes the records a deletion is about to remove, so a person can keep
+    /// a copy of exactly that -- not of whatever period a chart happened to be
+    /// showing. `nil` is the delete-everything case.
+    func exportHistoryBeforeDeleting(before cutoff: Date?) {
+        guard let store else {
+            message = L("Local history is unavailable.")
+            return
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        let panel = NSSavePanel()
+        panel.title = L("Save a copy before deleting")
+        panel.nameFieldStringValue = ObservationCSV.suggestedFileName(
+            from: Date(timeIntervalSince1970: 0), to: cutoff ?? Date()
+        )
+        panel.allowedContentTypes = [.commaSeparatedText]
+        // Rolled-up hours have no individual records left to write. A file
+        // that quietly omits them would look complete and would not be.
+        panel.message = L("Individual records only. Hours already reduced to totals cannot be written out as records, and are not in this file.")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let rows = try store.observations(before: cutoff)
+            try ObservationCSV.export(rows).write(to: url, atomically: true, encoding: .utf8)
+            message = L("Saved %lld records to %@.", rows.count, url.lastPathComponent)
+        } catch {
+            message = L("Could not write the file: %@", error.localizedDescription)
+        }
+    }
+
+    func removeHistory(before cutoff: Date) {
+        guard let store else {
+            message = L("Local history is unavailable.")
+            return
+        }
+        maintenanceQueue.async { [weak self] in
+            let result = Result { try store.removeObservations(before: cutoff) }
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let count): self?.message = L("Deleted %lld local records.", count)
+                case .failure(let error): self?.message = L("Could not delete local history: %@", error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    /// The settings this Mac would hand to another one. Not a backup: see
+    /// `AgentSettingsFile` for what is deliberately not in it.
+    func currentSettingsFile() -> AgentSettingsFile {
+        AgentSettingsFile(
+            retentionDays: retentionDays,
+            hubDeliveryEnabled: AgentDeliveryPreferences().isEnabled,
+            readServerNameFromHandshake: readsServerName,
+            automaticUpdateChecks: AgentUpdatePreferences().isEnabled,
+            language: AgentLanguageSettings.shared.language.rawValue
+        )
+    }
+
+    func exportSettings() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        let panel = NSSavePanel()
+        panel.title = L("Save EgressView Agent settings")
+        panel.nameFieldStringValue = AgentSettingsFile.suggestedFileName()
+        panel.allowedContentTypes = [.json]
+        panel.message = L("Preferences only. It contains no Hub credential, no Hub address, and nothing that identifies this Mac -- open it and read it before you pass it on.")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try currentSettingsFile().encoded().write(to: url, options: .atomic)
+            message = L("Saved settings to %@.", url.lastPathComponent)
+        } catch {
+            message = L("Could not write the file: %@", error.localizedDescription)
+        }
+    }
+
+    func importSettings() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.title = L("Import EgressView Agent settings")
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let (settings, ignored) = try AgentSettingsFile.decode(Data(contentsOf: url)).validated()
+            apply(settings)
+            // Naming what was skipped matters more than naming what worked: a
+            // value silently dropped is a setting the user believes is applied.
+            message = ignored.isEmpty
+                ? L("Applied %lld settings.", settings.presentFields.count)
+                : L("Applied %lld settings. Ignored: %@.",
+                    settings.presentFields.count,
+                    ignored.map(\.rawValue).joined(separator: ", "))
+        } catch {
+            message = L("Could not read the settings file: %@", error.localizedDescription)
+        }
+    }
+
+    private func apply(_ settings: AgentSettingsFile) {
+        if let days = settings.retentionDays { setRetentionDays(days) }
+        if let enabled = settings.hubDeliveryEnabled {
+            AgentDeliveryPreferences().isEnabled = enabled
+        }
+        if let enabled = settings.readServerNameFromHandshake { readsServerName = enabled }
+        if let enabled = settings.automaticUpdateChecks {
+            AgentUpdatePreferences().isEnabled = enabled
+        }
+        if let language = settings.language,
+           let value = AgentLanguage(rawValue: language) {
+            setLanguage(value)
+        }
+    }
+
     func removeAllHistory() {
         guard let store else {
             message = L("Local history is unavailable.")
@@ -508,6 +617,10 @@ private struct AgentSettingsView: View {
     private var globeFrameRateRaw = AgentGlobeFrameRate.defaultValue.rawValue
     @State private var section = AgentSettingsSection.general
     @State private var confirmHistoryDeletion = false
+    @State private var confirmDatedHistoryDeletion = false
+    @State private var deleteHistoryBefore = Calendar.current.startOfDay(
+        for: Date().addingTimeInterval(-7 * 86_400)
+    )
     @State private var confirmUninstall = false
     @State private var confirmLocalOnlyUninstall = false
 
@@ -603,6 +716,14 @@ private struct AgentSettingsView: View {
                     Text(L("Installing temporarily stops monitoring and macOS may ask you to approve the System Extension again."))
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                }
+            }
+            settingsGroup(L("Settings file")) {
+                Text(L("Carries your preferences to another Mac. It holds no Hub credential, no Hub address, and nothing that identifies this Mac, so you can read it before passing it on. Launching at login and third-party lookups are left out: a file should not be able to make those changes for you."))
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack {
+                    Button(L("Export settings...")) { model.exportSettings() }
+                    Button(L("Import settings...")) { model.importSettings() }
                 }
             }
         }
@@ -981,12 +1102,43 @@ private struct AgentSettingsView: View {
             settingsGroup(L("Delete")) {
                 Text(L("This permanently deletes local history. It does not delete observations already accepted by a Hub."))
                     .font(.callout).foregroundStyle(.secondary)
+                // Deleting everything used to be the only option offered, which
+                // made "I want last month gone" cost this year as well.
+                HStack {
+                    DatePicker(
+                        L("Delete records from before"),
+                        selection: $deleteHistoryBefore,
+                        in: ...Date(),
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.compact)
+                    Button(L("Delete")) { confirmDatedHistoryDeletion = true }
+                }
+                .confirmationDialog(
+                    L("Delete records from before this date?"),
+                    isPresented: $confirmDatedHistoryDeletion
+                ) {
+                    Button(L("Save a copy first...")) {
+                        model.exportHistoryBeforeDeleting(before: deleteHistoryBefore)
+                    }
+                    Button(L("Delete"), role: .destructive) {
+                        model.removeHistory(before: deleteHistoryBefore)
+                    }
+                    Button(L("Cancel"), role: .cancel) {}
+                } message: {
+                    Text(L("This cannot be undone. Saving a copy writes the records to a file and does not delete anything."))
+                }
                 Button(L("Delete all local history"), role: .destructive) {
                     confirmHistoryDeletion = true
                 }
                 .confirmationDialog(L("Delete all local history?"), isPresented: $confirmHistoryDeletion) {
+                    Button(L("Save a copy first...")) {
+                        model.exportHistoryBeforeDeleting(before: nil)
+                    }
                     Button(L("Delete history"), role: .destructive) { model.removeAllHistory() }
                     Button(L("Cancel"), role: .cancel) {}
+                } message: {
+                    Text(L("This cannot be undone. Saving a copy writes the records to a file and does not delete anything."))
                 }
             }
         }
