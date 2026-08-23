@@ -48,10 +48,12 @@ function paxKeywords(artifact) {
 
 describe('offline bundle portability', () => {
   it('バンドル作成は拡張属性を書き込まない', () => {
-    // A bundle built on a Mac and extracted on the Linux host that will run
-    // the Hub must not fail there: GNU tar exits non-zero on macOS extended
-    // attributes, so a bundle carrying them does not unpack where it is meant
-    // to be installed.
+    // A bundle built on a Mac carries macOS extended attributes that the Linux
+    // host running the Hub has no use for. Measured 2026-08-23 on Ubuntu with
+    // GNU tar 1.35: it extracts them anyway, exit status 0, warning once per
+    // file. The reason to strip them is the noise in front of whoever is
+    // installing offline -- not a failure, which is what this comment and the
+    // verifier's error message both used to claim without measuring.
     const source = fs.readFileSync(builder, 'utf8');
     assert.match(source, /'--no-xattrs'/);
   });

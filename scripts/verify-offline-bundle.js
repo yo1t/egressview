@@ -49,10 +49,19 @@ function paxHeaderRecords(raw) {
 }
 
 /**
- * A bundle built on a Mac can carry macOS extended attributes, which GNU tar
- * rejects on extraction -- so it fails to unpack on exactly the Linux hosts it
- * is built for. The build strips them; this refuses an artifact where that did
- * not happen, so the property does not depend on who ran the build.
+ * A bundle built on a Mac can carry macOS extended attributes, which the Linux
+ * host it is built for has no use for. The build strips them; this refuses an
+ * artifact where that did not happen, so the property does not depend on who
+ * ran the build.
+ *
+ * What it does *not* do is fail to extract. Measured 2026-08-23 on Ubuntu with
+ * GNU tar 1.35, against the published v2.0.2 and v1.9.0 bundles, which carry
+ * `LIBARCHIVE.xattr.com.apple.provenance`: both extracted with **exit status
+ * 0** and all files present (523 and 525), printing
+ * `tar: Ignoring unknown extended header keyword` for each one. This file used
+ * to claim the opposite in its error message while saying "GNU tar only warns"
+ * in the comment three lines above it -- a claim nobody had measured, in a
+ * message people would act on.
  */
 function assertPortableArchive(artifact) {
   // Read the archive rather than asking tar: bsdtar does not name the
@@ -69,8 +78,9 @@ function assertPortableArchive(artifact) {
   );
   if (marker) {
     throw new Error(
-      'Artifact carries extended attributes; rebuild it with tar --no-xattrs '
-      + 'so it extracts on Linux, where GNU tar exits non-zero on them'
+      'Artifact carries extended attributes; rebuild it with tar --no-xattrs. '
+      + 'GNU tar still extracts it, warning once per file, which is noise in '
+      + 'front of whoever is installing offline and has nothing to do with them'
     );
   }
 }
