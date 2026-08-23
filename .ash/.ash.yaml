@@ -14,6 +14,16 @@ global_settings:
       reason: 'Transient CDK synth build output (gitignored, not pushed or deployed with the app). The ALB/WAF/monitoring templates are deployed through a separate reviewed cdk pipeline with its own tests; the specific checkov items (ALB access logs disabled, :80 HTTP->HTTPS redirect listener, SNS topic encryption) are deliberate infra decisions tracked in backlog P2-63.'
 
   suppressions:
+    # ── RFC test vectors ────────────────────────────────────────────────────
+    # RFC 9001 Appendix A, copied from the RFC text. These are the published
+    # sample keys and the sample packet everyone implementing QUIC pins
+    # against; treating them as secrets would mean the test could not exist,
+    # and the alternative -- a vector written from memory -- would pin the
+    # wrong behaviour. Nothing here protects anything.
+    - path: 'apps/agent-macos/Tests/EgressViewAgentCoreTests/QUICInitialTests.swift'
+      rule_id: 'SECRET-HEX-HIGH-ENTROPY-STRING'
+      reason: 'RFC 9001 Appendix A published test vectors, not credentials'
+
     # ── OpenAPI ─────────────────────────────────────────────────────────────
     # CKV_OPENAPI_5 fires on an operation whose `security` is an empty list.
     # That is not a missing declaration: with a protected-by-default global
