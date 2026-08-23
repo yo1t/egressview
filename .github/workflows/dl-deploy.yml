@@ -95,10 +95,16 @@ jobs:
             echo "$path -> $code"
             [ "$code" = "200" ] || exit 1
           done
-          curl -sS --max-time 30 "$base/" | grep -q "/macos/manifest.json" || {
+          # Downloaded to files and then read, rather than piped into an
+          # interpreter. Nothing fetched here is ever executed, but a pipe into
+          # python3 is the shape of the pattern that would be, and --fail means
+          # an error page is a failure instead of something to parse.
+          curl -sS --fail --max-time 30 "$base/" -o served-page.html
+          grep -q "/macos/manifest.json" served-page.html || {
             echo 'the served page no longer reads the manifest' >&2; exit 1; }
-          url=$(curl -sS --max-time 30 "$base/macos/manifest.json" \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["url"])')
+
+          curl -sS --fail --max-time 30 "$base/macos/manifest.json" -o served-manifest.json
+          url=$(python3 -c 'import json; print(json.load(open("served-manifest.json"))["packages"][0]["url"])')
           echo "manifest offers $url"
           code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 60 -r 0-0 "$url")
           [ "$code" = "206" ] || [ "$code" = "200" ] || {

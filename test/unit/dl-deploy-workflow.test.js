@@ -56,7 +56,26 @@ describe('distribution page deploy', () => {
     );
     // What it checks instead: the page still asks the manifest, and what the
     // manifest offers can actually be downloaded.
-    assert.match(workflow, /grep -q "\/macos\/manifest\.json"/);
+    assert.match(workflow, /grep -q "\/macos\/manifest\.json" served-page\.html/);
     assert.match(workflow, /packages"\]\[0\]\["url"\]/);
+  });
+
+  it('取得したものを解釈器へ流し込まない', () => {
+    // Nothing fetched here is executed, but piping a download into an
+    // interpreter is the shape of the pattern that would be. Files, then read.
+    assert.equal(
+      /curl[^\n|]*\|\s*(python3|sh|bash|node)/.test(executable), false,
+      'a download is piped into an interpreter'
+    );
+    // Without --fail an error page is something to parse rather than a
+    // failure. Only where the body is kept: the status-code checks write to
+    // /dev/null on purpose and must not fail, since reading the code is the
+    // whole point of them.
+    const keepsBody = executable.split('\n')
+      .filter((l) => /curl/.test(l) && /-o \S+/.test(l) && !/-o \/dev\/null/.test(l));
+    assert.ok(keepsBody.length >= 2, 'expected the page and the manifest to be downloaded');
+    for (const line of keepsBody) {
+      assert.match(line, /--fail/, `curl without --fail: ${line.trim()}`);
+    }
   });
 });
