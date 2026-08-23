@@ -27,6 +27,16 @@ public enum TLSClientHello {
         guard let recordLength = outer.uint16(), recordLength > 0,
               let record = outer.take(Int(recordLength))
         else { return nil }
+        return serverName(inHandshake: record)
+    }
+
+    /// The same ClientHello without a TLS record around it.
+    ///
+    /// QUIC carries the handshake in CRYPTO frames and has no record layer, so
+    /// what comes out of a decrypted Initial starts at the handshake header.
+    /// Splitting the parse here rather than synthesising a record keeps one
+    /// implementation of the part where the name actually is.
+    public static func serverName(inHandshake record: Data) -> String? {
         var recordReader = Reader(record)
 
         // Handshake header: ClientHello (0x01) and a 24-bit length.
@@ -56,7 +66,12 @@ public enum TLSClientHello {
         // ordinary.
         guard let extensionsLength = reader.uint16() else { return nil }
         let extensionsEnd = reader.offset + Int(extensionsLength)
-        guard extensionsEnd <= data.count else { return nil }
+        // Bounded by the handshake, not by the whole input: the declared
+        // extensions length is attacker-controlled and must not reach past the
+        // message that declared it. `endIndex`, not `count` -- Reader works in
+        // absolute indices and `handshake` is a slice, so comparing an index
+        // against a length rejects every real ClientHello.
+        guard extensionsEnd <= handshake.endIndex else { return nil }
 
         while reader.offset + 4 <= extensionsEnd {
             guard let type = reader.uint16(), let length = reader.uint16() else { return nil }
