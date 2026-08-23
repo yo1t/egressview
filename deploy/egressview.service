@@ -1,0 +1,63 @@
+# EgressView Hub — supported systemd unit (P2-90).
+#
+# The Hub runs an event-loop watchdog on a worker thread. When the main thread
+# stops answering past the stall threshold, the watchdog sends the process an
+# unblockable SIGKILL, on the reasoning that a fast restart beats a hang that
+# looks like an outage.
+#
+# That reasoning only holds if something restarts it. Everything in [Service]
+# below marked "the watchdog depends on this" is not a preference: without it
+# the watchdog turns a slow page into a stopped service.
+#
+# Install:
+#   sudo install -m 0644 deploy/egressview.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now egressview
+#
+# Paths and the user are placeholders. Adjust them to the deployment; nothing
+# environment-specific is committed here.
+
+[Unit]
+Description=EgressView Hub
+Documentation=https://www.egressview.com/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=egressview
+Group=egressview
+WorkingDirectory=/opt/egressview
+EnvironmentFile=-/opt/egressview/.env
+ExecStart=/usr/bin/node /opt/egressview/server.js
+
+# The watchdog depends on this. `on-failure` alone would not cover a SIGKILL
+# on some versions' reading of "clean exit", and there is no exit code the Hub
+# uses to mean "do not come back".
+Restart=always
+RestartSec=5
+
+# The watchdog depends on this. systemd's defaults give up after 5 restarts in
+# 10 seconds and leave the unit failed -- which is precisely what a persistent
+# pathological query would produce, converting a repeating stall into a
+# permanent outage. Restarting slowly for ever is the better failure: the
+# service keeps answering between restarts, and the log says why.
+StartLimitIntervalSec=0
+
+# A stall is not a shutdown problem, but a wedged process will not answer
+# SIGTERM either; do not wait five minutes to find that out.
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+# The database is opened synchronously and a torn write is worse than a slow
+# start, so the process is not asked to run with a read-only filesystem.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

@@ -57,6 +57,55 @@ jobs:
         if: matrix.node-version == 22
         run: npm run test:fuzz
 
+  production-image:
+    name: Production image
+    # An untested Dockerfile in the repository is the claim of a supported
+    # artifact without the support. This builds it and checks the container
+    # actually comes up and reports itself ready.
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the image
+        run: docker build -t egressview:ci .
+
+      - name: Start it the way the file says to
+        run: |
+          set -euo pipefail
+          docker run -d --name egressview-ci --init \
+            --restart=on-failure:10 -p 3000:3000 -v egressview-ci-data:/data \
+            egressview:ci
+
+      - name: Wait for it to report ready
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if curl -sf --max-time 5 http://localhost:3000/readyz >/dev/null; then
+              echo "ready after ${attempt} attempts"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'the container never reported ready' >&2
+          docker logs egressview-ci
+          exit 1
+
+      - name: Check the state is on the volume, not in the image
+        # An image that could hold the database would carry one machine's
+        # traffic record into every copy of it.
+        run: |
+          set -euo pipefail
+          docker exec egressview-ci sh -c 'test -f /data/egressview.db' \
+            || { echo 'the database is not on the volume' >&2; exit 1; }
+          docker run --rm egressview:ci sh -c 'ls /data' | grep . \
+            && { echo 'the image ships state under /data' >&2; exit 1; }
+          echo 'state is on the volume only'
+
+      - name: Stop it
+        if: always()
+        run: docker rm -f egressview-ci || true
+
   security:
     name: Release safety checks
     timeout-minutes: 10
