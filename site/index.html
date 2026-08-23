@@ -23,7 +23,11 @@
   }
   a{color:var(--accent);text-decoration:none} a:hover{color:var(--accent-hover);text-decoration:underline}
   .wrap{max-width:920px;margin:0 auto;padding:0 24px}
-  section{padding:64px 0} section+section{border-top:1px solid var(--border)}
+  /* Every section on this page also carries .wrap, and .wrap sets padding on
+     all four sides -- so a bare `section` selector loses and the vertical
+     padding never applied. The dividing line ended up hard against the text
+     above and below it. */
+  section.wrap{padding:64px 24px} section+section{border-top:1px solid var(--border)}
   h2{font-size:1.45rem;margin:0 0 10px;font-weight:640;letter-spacing:-.01em}
   .sub{color:var(--muted);margin:0 0 30px;max-width:62ch}
 
@@ -70,6 +74,16 @@
   .lang button+button{border-left:1px solid var(--border)}
   .lang button[aria-pressed="true"]{background:var(--surface-2);color:var(--text)}
   h1{font-size:clamp(2rem,5.4vw,3rem);line-height:1.14;margin:0 0 18px;letter-spacing:-.022em;font-weight:660}
+
+  /* Japanese has no spaces, so a line may break between any two characters --
+     including through the middle of a word, and leaving a single character
+     stranded on its own line. Reported from a phone: the heading ended
+     "見え / る。" and the lede split メタデータ down the middle. auto-phrase
+     breaks at phrase boundaries instead; a browser that does not know the
+     value is no worse off than before.
+     Set on the body so it reaches every element -- word-break inherits, and
+     the copy on this page lives in spans and divs as often as in p. */
+  html[lang="ja"] body{word-break:auto-phrase;line-break:strict}
   .lede{font-size:1.14rem;color:var(--muted);margin:0 0 34px;max-width:44ch}
   .lede strong{color:var(--text);font-weight:600}
   .cta{display:flex;flex-wrap:wrap;gap:13px;align-items:center}
@@ -135,7 +149,15 @@
 
   footer{border-top:1px solid var(--border);padding:34px 0 60px;color:var(--muted);font-size:.9rem}
   footer .wrap{display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center}
-  @media (max-width:560px){ .btn{width:100%;justify-content:center} }
+  @media (max-width:560px){
+    section.wrap{padding:44px 24px}
+    .btn{width:100%;justify-content:center}
+    /* The break in the heading is placed for a wide line. At this width the
+       second clause does not fit either, so keeping it only guarantees a
+       third line with one character on it. */
+    html[lang="ja"] h1 br{display:none}
+    h1{font-size:1.85rem}
+  }
 </style>
 </head>
 <body>
