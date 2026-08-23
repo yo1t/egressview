@@ -91,16 +91,21 @@ jobs:
           docker logs egressview-ci
           exit 1
 
-      - name: Check the state is on the volume, not in the image
+      - name: Check the database is on the volume, not in the image
         # An image that could hold the database would carry one machine's
-        # traffic record into every copy of it.
+        # traffic record into every copy of it. The check is for a database
+        # file specifically: an empty directory is not state, and the first
+        # version of this step failed on one.
         run: |
           set -euo pipefail
           docker exec egressview-ci sh -c 'test -f /data/egressview.db' \
-            || { echo 'the database is not on the volume' >&2; exit 1; }
-          docker run --rm egressview:ci sh -c 'ls /data' | grep . \
-            && { echo 'the image ships state under /data' >&2; exit 1; }
-          echo 'state is on the volume only'
+            || { echo 'the running container did not put its database on /data' >&2; exit 1; }
+          if docker run --rm --entrypoint sh egressview:ci \
+               -c 'find / -xdev -name "*.db" -not -path "/proc/*" | grep .'; then
+            echo 'the image ships a database' >&2
+            exit 1
+          fi
+          echo 'the image ships no database'
 
       - name: Stop it
         if: always()

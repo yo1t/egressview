@@ -39,7 +39,11 @@ ENV NODE_ENV=production \
     EGRESSVIEW_DB_PATH=/data/egressview.db \
     EGRESSVIEW_BACKUP_DIR=/data/backups \
     EGRESSVIEW_CONFIG_PATH=/data/config.json
-RUN mkdir -p /data/backups && chown -R egressview:egressview /app /data
+# The mount point only. The backup directory is created by the application on
+# first use, and pre-creating it here would put an image layer under a volume
+# -- which behaves differently for a named volume than for a bind mount, and
+# is the kind of difference that is discovered during an incident.
+RUN mkdir -p /data && chown -R egressview:egressview /app /data
 VOLUME ["/data"]
 
 USER egressview
