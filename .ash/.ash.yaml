@@ -14,6 +14,17 @@ global_settings:
       reason: 'Transient CDK synth build output (gitignored, not pushed or deployed with the app). The ALB/WAF/monitoring templates are deployed through a separate reviewed cdk pipeline with its own tests; the specific checkov items (ALB access logs disabled, :80 HTTP->HTTPS redirect listener, SNS topic encryption) are deliberate infra decisions tracked in backlog P2-63.'
 
   suppressions:
+    # ── OpenAPI ─────────────────────────────────────────────────────────────
+    # CKV_OPENAPI_5 fires on an operation whose `security` is an empty list.
+    # That is not a missing declaration: with a protected-by-default global
+    # `security` block, an empty list is the only way OpenAPI has to say "this
+    # route really is open", and ten routes really are (/healthz, /readyz and
+    # the login surface). Removing it would make them inherit the default and
+    # describe them as protected, which would be a false contract. A test
+    # asserts that exactly the public routes carry it.
+    - path: 'docs/openapi.json'
+      rule_id: 'CKV_OPENAPI_5'
+      reason: 'Empty security is the explicit declaration that a route is public; only public routes carry it, enforced by test/unit/openapi-contract.test.js'
     # ── detect-secrets false positives ──────────────────────────────────────
     # These are the literal word "password"/"secret" appearing in translation
     # strings, npm script names, variable names and a token-alphabet constant —

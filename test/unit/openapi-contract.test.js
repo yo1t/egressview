@@ -65,6 +65,32 @@ describe('OpenAPI contract', () => {
     }
   });
 
+  it('既定で保護され、公開routeだけが自ら開いていると宣言する', () => {
+    // A route added without a security block inherits protection rather than
+    // being described as open. The empty list on the public ten is the only
+    // way OpenAPI has to override that, which is why ASH's rule against empty
+    // security is suppressed for this file -- and this test is what makes the
+    // suppression safe.
+    assert.deepEqual(document.security, [{ sessionCookie: [] }, { apiToken: [] }]);
+    const open = Object.entries(document.paths)
+      .flatMap(([p, item]) => Object.entries(item)
+        .filter(([, op]) => op.security.length === 0)
+        .map(([m]) => `${m.toUpperCase()} ${p}`))
+      .sort();
+    const expected = HTTP_ROUTE_MATRIX
+      .filter((r) => r.access === ACCESS.PUBLIC)
+      .map((r) => `${r.method} ${r.path}`)
+      .sort();
+    assert.deepEqual(open, expected);
+  });
+
+  it('資格情報がTLS越しに運ばれると書く', () => {
+    // Every credential here is a bearer secret. Describing them without
+    // saying so would describe a worse system than the one that exists.
+    assert.equal(document.servers.length, 1);
+    assert.match(document.servers[0].url, /^https:/);
+  });
+
   it('記述していない範囲を明示する', () => {
     // A contract that silently describes half of what it claims is worse than
     // one that says which half.
