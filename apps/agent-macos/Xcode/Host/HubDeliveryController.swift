@@ -778,10 +778,14 @@ private struct AgentSettingsView: View {
                 .foregroundStyle(.secondary)
             Toggle(isOn: $model.readsServerName) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(L("Read the name from the TLS handshake"))
-                    // Said plainly, because the honest objection to this setting
-                    // is "you told me you never look inside connections".
-                    Text(L("Reads the first message of a connection, in which the client says where it is going before anything is encrypted. Nothing is decrypted, nothing after that message is read, and the name stays on this Mac. Off unless you turn it on. Applies to connections started after the change."))
+                    Text(L("Read the name from the handshake"))
+                    // Said plainly, because the honest objection to this
+                    // setting is "you told me you never look inside
+                    // connections" -- and since QUIC, part of the answer is
+                    // that one packet is decrypted. Claiming otherwise would
+                    // be false, and the claim is the whole reason anyone
+                    // trusts the setting.
+                    Text(L("Reads the first message of a connection, in which the client says where it is going. Over TLS that message is in the clear. Over QUIC it is encrypted with keys derived from the connection ID, which is not — so that one packet is decrypted, exactly as any observer of the network could. Nothing after the first message is read, no later packet can be read at all, and the name stays on this Mac. Off unless you turn it on. Applies to connections started after the change."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

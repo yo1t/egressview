@@ -50,6 +50,25 @@ not worth reading.
 Nothing in that request identifies you beyond the request itself: there is no
 installation ID, no account, and no observation data attached.
 
+## Reading the destination name, and the one thing that is decrypted
+
+Off unless you turn it on, and it changes nothing about what leaves this Mac —
+the name it recovers **stays here**; the Hub is never sent a host name.
+
+Over TLS, the client says where it is going in the clear, before any key is
+agreed. Nothing is decrypted to read that.
+
+**Over QUIC that message is encrypted, and this decrypts it.** Saying otherwise
+would be false, and the claim is the whole reason the setting is worth
+trusting. What makes it possible is that the keys for a QUIC *Initial* packet
+are derived from the connection ID, which travels in the clear, by a procedure
+published in RFC 9001 — **anyone watching the network can do this.** It reveals
+nothing that was protected from an observer.
+
+It reaches exactly one packet. Every later packet is protected with keys
+derived from the TLS handshake, which an observer does not have. **The agent
+cannot read a QUIC conversation and never will be able to.**
+
 ## Threat matching happens on your Mac
 
 The agent does not ask anybody whether an address is malicious. It downloads
