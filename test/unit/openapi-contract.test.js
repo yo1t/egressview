@@ -3,6 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 
 const { build, render, OUTPUT } = require('../../scripts/generate-openapi');
 const { ACCESS, HTTP_ROUTE_MATRIX } = require('../../src/permission-matrix');
@@ -91,9 +92,109 @@ describe('OpenAPI contract', () => {
     assert.match(document.servers[0].url, /^https:/);
   });
 
+  it('リクエストボディはサーバが実際に検証したものから来る', () => {
+    // Not written by hand: a list tying routes to schemas would go stale the
+    // first time a route changed, which is the failure this contract exists
+    // to avoid.
+    const captured = JSON.parse(
+      fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'request-schemas.json'), 'utf8')
+    ).bodies;
+    for (const [route, schema] of Object.entries(captured)) {
+      const [method, ...rest] = route.split(' ');
+      const operation = document.paths[rest.join(' ')]?.[method.toLowerCase()];
+      assert.ok(operation, `${route} is captured but absent from the contract`);
+      assert.deepEqual(
+        operation.requestBody.content['application/json'].schema, schema
+      );
+    }
+  });
+
+  it('ボディを書いていないoperationはそう言う', () => {
+    // Silence would read as "this route takes nothing", which is a different
+    // and false claim.
+    for (const [p, item] of Object.entries(document.paths)) {
+      for (const [method, operation] of Object.entries(item)) {
+        if (operation.requestBody) continue;
+        assert.match(
+          operation.description, /The request body is not described here\./,
+          `${method.toUpperCase()} ${p} is silent about its body`
+        );
+      }
+    }
+  });
+
+  it('ボディの記述が減らない', () => {
+    // A ratchet. Coverage comes from what the tests exercise, so it can only
+    // fall if a test stops calling a route -- which is worth noticing.
+    const described = Object.values(document.paths)
+      .flatMap((item) => Object.values(item))
+      .filter((operation) => operation.requestBody).length;
+    assert.ok(
+      described >= 43,
+      `only ${described} operations describe a body; it was 43 when this was written`
+    );
+  });
+
+  it('レスポンスは観測であって保証ではないと、すべての箇所で言う', () => {
+    // Nothing validates a response on the way out. A reader who takes an
+    // observation for a guarantee has been misled by this document rather
+    // than helped by it, so the marking is not optional.
+    let marked = 0;
+    for (const [p, item] of Object.entries(document.paths)) {
+      for (const [method, operation] of Object.entries(item)) {
+        for (const [status, response] of Object.entries(operation.responses)) {
+          if (!response.content) continue;
+          marked += 1;
+          assert.equal(
+            response.content['application/json'].schema['x-observed'], true,
+            `${method.toUpperCase()} ${p} ${status} is not marked as observed`
+          );
+          assert.match(response.description, /not a guarantee/);
+        }
+      }
+    }
+    assert.ok(marked > 50, `only ${marked} responses carry a shape`);
+    assert.match(document.info.description, /observed.*not enforced/s);
+  });
+
+  it('毎回は返らなかったフィールドをrequiredにしない', () => {
+    // The merge is what keeps one lucky example from becoming a promise.
+    const { merge, shapeOf } = require('../../src/request-schema-capture');
+    const merged = merge(shapeOf({ a: 1, b: 'x' }), shapeOf({ a: 2 }));
+    assert.deepEqual(merged.required, ['a']);
+    assert.ok('b' in merged.properties);
+  });
+
+  it('リクエストの配列には必ず上限がある', () => {
+    // What makes the CKV_OPENAPI_21 suppression safe: the rule guards against
+    // accepting an unbounded array, and that is a request-side concern. If a
+    // request array ever loses its bound, the suppression stops being
+    // justified and this fails.
+    const uncapped = [];
+    const walk = (schema, where) => {
+      if (!schema || typeof schema !== 'object') return;
+      if (schema.type === 'array' && schema.maxItems == null) uncapped.push(where);
+      for (const value of Object.values(schema)) {
+        if (value && typeof value === 'object') walk(value, where);
+      }
+    };
+    for (const [p, item] of Object.entries(document.paths)) {
+      for (const [method, operation] of Object.entries(item)) {
+        if (operation.requestBody) walk(operation.requestBody, `${method.toUpperCase()} ${p}`);
+      }
+    }
+    assert.deepEqual(uncapped, [], 'a request body accepts an array with no maximum');
+  });
+
   it('記述していない範囲を明示する', () => {
     // A contract that silently describes half of what it claims is worse than
     // one that says which half.
-    assert.match(document.info.description, /access surface, not the payloads/);
+    // The document has to keep saying which parts are enforced and which are
+    // only observed. Losing that line would turn descriptions into promises.
+    assert.match(document.info.description, /Request bodies are described for the routes/);
+    assert.ok(
+      document.info.description.includes('documentation of behaviour, not as a promise'),
+      'the document stopped saying that observed shapes are not promises'
+    );
   });
 });

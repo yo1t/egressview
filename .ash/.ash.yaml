@@ -35,6 +35,16 @@ global_settings:
     # the login surface). Removing it would make them inherit the default and
     # describe them as protected, which would be a false contract. A test
     # asserts that exactly the public routes carry it.
+    # CKV_OPENAPI_21 wants every array to declare a maximum. The rule guards
+    # against accepting an unbounded array, which is a request-side concern --
+    # and every array in a request body here already carries one, taken from
+    # the Zod schema the server enforces (9 of 9), on top of a 64 KB body
+    # limit. The 44 uncapped arrays are all in *response* shapes, which are
+    # observations of what a route returned; inventing a maximum for them
+    # would state a limit the server does not have.
+    - path: 'docs/openapi.json'
+      rule_id: 'CKV_OPENAPI_21'
+      reason: 'Uncapped arrays are observed response shapes; every request-body array is bounded by its Zod schema and a 64 KB body limit'
     - path: 'docs/openapi.json'
       rule_id: 'CKV_OPENAPI_5'
       reason: 'Empty security is the explicit declaration that a route is public; only public routes carry it, enforced by test/unit/openapi-contract.test.js'

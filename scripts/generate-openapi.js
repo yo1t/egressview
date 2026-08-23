@@ -28,6 +28,9 @@ const { ALL_PERMISSIONS, AGENT_PERMISSIONS } = require('../src/permissions');
 
 const ROOT = path.join(__dirname, '..');
 const OUTPUT = path.join(ROOT, 'docs', 'openapi.json');
+// Captured from what the server actually validated, not written by hand; see
+// scripts/capture-request-schemas.js.
+const BODIES = path.join(ROOT, 'docs', 'request-schemas.json');
 
 const SECURITY_SCHEMES = {
   sessionCookie: {
@@ -82,7 +85,48 @@ function describe(route) {
   return `Requires ${route.permissions.map((p) => `\`${p}\``).join(' and ')}.`;
 }
 
+function captured() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(BODIES, 'utf8'));
+    return { bodies: parsed.bodies || {}, responses: parsed.responses || {} };
+  } catch {
+    return { bodies: {}, responses: {} };
+  }
+}
+
+/**
+ * What a route was seen to return under test, described as such.
+ *
+ * Nothing validates a response on the way out, so unlike the request bodies
+ * these are not read off a schema the server enforces -- they are observations.
+ * Every one is marked, because a reader who treats an observation as a
+ * guarantee has been misled by this document rather than helped by it.
+ */
+function responsesFor(route, observed) {
+  const seen = observed[`${route.method} ${route.path}`];
+  const out = {
+    200: { description: 'Handled.' },
+    ...(route.access === ACCESS.PUBLIC ? {} : {
+      401: { description: 'No usable credential.' },
+      403: { description: 'Authenticated, but not permitted.' },
+    }),
+  };
+  for (const [status, schema] of Object.entries(seen || {})) {
+    out[status] = {
+      description: (out[status]?.description || 'Observed under test.')
+        + ' Shape observed under test, not a guarantee: responses are not validated on the way out.',
+      content: {
+        'application/json': {
+          schema: { ...schema, 'x-observed': true },
+        },
+      },
+    };
+  }
+  return out;
+}
+
 function build({ version } = {}) {
+  const { bodies, responses: observed } = captured();
   const paths = {};
   // Sorted so the generated file is stable: an unordered object would produce
   // a different document on every run and make the drift check meaningless.
@@ -91,20 +135,19 @@ function build({ version } = {}) {
   );
   for (const route of routes) {
     const item = paths[route.path] || (paths[route.path] = {});
+    const body = bodies[`${route.method} ${route.path}`];
     item[route.method.toLowerCase()] = {
       summary: `${route.method} ${route.path}`,
-      description: describe(route),
+      description: describe(route)
+        + (body ? '' : ' The request body is not described here.'),
       security: securityFor(route),
-      responses: {
-        // Only what the access surface implies. A body schema asserted here
-        // without being generated from the route's Zod schema would be a
-        // guess presented as a contract.
-        200: { description: 'Handled.' },
-        ...(route.access === ACCESS.PUBLIC ? {} : {
-          401: { description: 'No usable credential.' },
-          403: { description: 'Authenticated, but not permitted.' },
-        }),
-      },
+      ...(body ? {
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: body } },
+        },
+      } : {}),
+      responses: responsesFor(route, observed),
     };
   }
 
@@ -134,10 +177,16 @@ function build({ version } = {}) {
         'Generated from src/permission-matrix.js, the same object the server '
         + 'enforces, so this cannot describe a route the server does not have '
         + 'or miss one it does.\n\n'
-        + '**This describes the access surface, not the payloads.** Request '
-        + 'and response bodies are validated by Zod at the route and by CHECK '
-        + 'constraints at rest; they are not described here yet. Regenerate '
-        + 'with `npm run docs:openapi`.',
+        + 'Request bodies are described for the routes the test suite '
+        + 'exercises, captured from the schema the server actually validated '
+        + 'rather than written by hand -- a hand-written list would go stale '
+        + 'the first time a route changed. Operations without one say so in '
+        + 'their description.\n\n'
+        + 'Response shapes are **observed**, not enforced: nothing validates a '
+        + 'response on the way out, so these describe what routes were seen to '
+        + 'return under test. Each is marked `x-observed`. **Treat them as '
+        + 'documentation of behaviour, not as a promise.**\n\n'
+        + 'Regenerate with `npm run docs:openapi`, which re-captures first.',
       license: { name: 'AGPL-3.0-only' },
     },
     components: {
