@@ -98,7 +98,8 @@ The order matters, and the command enforces it:
    the thing the tag names, and signing afterwards does not fix that.
 2. Refuses a tag that is **already published**, before spending a build and a
    signature on it.
-3. Builds and signs with the KMS key.
+3. Builds and signs with the KMS key, then records provenance for what it
+   just built and checks that the provenance describes that artifact.
 4. Verifies the bundle, then **proves three tamper cases fail**: a modified
    archive, a rewritten checksum, and a forged signature.
 5. Compares the key fingerprint against the trust registry **and the DNS TXT
@@ -115,6 +116,31 @@ with nothing to verify — which is exactly the state 2.0.x was left in.
 
 Add `--dry-run` to exercise everything up to step 5 without creating anything
 on GitHub.
+
+### Provenance
+
+Alongside the signature, the release carries an `.intoto.jsonl`: a DSSE
+envelope holding SLSA v1 provenance, signed with the same key. The signature
+says the artifact is ours; the provenance says **which commit it was built
+from**.
+
+**The build is not hermetic and the document does not pretend it is.** The
+release is produced on a maintainer workstation, deliberately -- see below --
+so this is SLSA Build L2, not L3, and the predicate records that in
+`x-slsaBuildLevel` and in a note on the builder. A reader comparing it against
+a hosted builder's provenance can see the difference without knowing the
+project.
+
+It records the **commit, not the tag**: a tag can be moved.
+
+```bash
+node scripts/verify-provenance.js --artifact egressview-offline-<v>.tar.gz --provenance egressview-offline-<v>.tar.gz.intoto.jsonl --public-key egressview-offline-<v>.tar.gz.pub.pem
+```
+
+That checks two things, and the second is the one that matters: that the
+envelope's signature is valid, and that **the digest inside it is the digest of
+the artifact you have**. A valid signature over a statement about a different
+file proves nothing about this one.
 
 ### The gate behind it
 

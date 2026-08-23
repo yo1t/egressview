@@ -86,7 +86,7 @@ AWS_PROFILE=egressview-release npm run release:publish -- --tag v2.0.3
 
 1. `HEAD`がタグと厳密に一致し、作業ツリーがclean、`npm run release:check`が通ることを確認するまで**着手しません**。dirtyな状態から作ったリリースはタグが指すものではなく、後から署名しても直りません。
 2. **既に公開済み**のタグは、ビルドと署名を費やす**前に**拒否します。
-3. KMS鍵でビルドと署名を行います。
+3. KMS鍵でビルドと署名を行い、いま作ったものの由来を記録して、**その証跡がその成果物を指していること**を確認します。
 4. バンドルを検証し、さらに**改竄3ケースが落ちることを証明**します（アーカイブの改変、チェックサムの書き換え、署名の偽造）。
 5. fingerprintをtrust registry**とDNS TXTレコード**に照合します。DNSはこのリポジトリとは別系統の資格情報で提供されています。**成果物の隣にしか公開されていないfingerprintは何も証明しません。**
 6. **draft**としてリリースを作成し、4点をアップロードします。
@@ -96,6 +96,20 @@ AWS_PROFILE=egressview-release npm run release:publish -- --tag v2.0.3
 **draft先行が、未署名のリリースを「起こりにくい」ではなく「作れない」にしている点です。** どこかで落ちれば残るのはdraftであって、「検証手段が無い公開済みリリース」にはなりません。2.0.xが置かれていたのは、まさにその状態でした。
 
 `--dry-run` を付けると、GitHub上に何も作らずに5番までを実行できます。
+
+### provenance（由来の証跡）
+
+署名と並んで、リリースは`.intoto.jsonl`を持ちます。SLSA v1のprovenanceを収めたDSSEエンベロープで、**同じ鍵で署名**されています。署名は「この成果物は我々のものだ」と言い、provenanceは「**どのcommitから作られたか**」を言います。
+
+**ビルドはhermeticではなく、この文書はそのふりをしません。** リリースはメンテナのワークステーションで作られます（意図的です——下記参照）。したがってこれは**SLSA Build L2であってL3ではなく**、`x-slsaBuildLevel`とbuilderの注記にその旨を記録しています。**ホスト型ビルダーのprovenanceと見比べる人が、このプロジェクトを知らなくても違いを見て取れるように。**
+
+記録するのは**tagではなくcommit**です。**tagは動かせます。**
+
+```bash
+node scripts/verify-provenance.js --artifact egressview-offline-<v>.tar.gz --provenance egressview-offline-<v>.tar.gz.intoto.jsonl --public-key egressview-offline-<v>.tar.gz.pub.pem
+```
+
+確認するのは2つで、**重要なのは2つ目**です。エンベロープの署名が正しいこと、そして**その中のdigestが手元の成果物のdigestであること。** 別のファイルについての文書に有効な署名が付いていても、目の前のファイルについては何も証明しません。
 
 ### その後ろのゲート
 
