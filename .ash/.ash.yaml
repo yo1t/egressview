@@ -27,6 +27,19 @@ global_settings:
       rule_id: 'SECRET-HEX-HIGH-ENTROPY-STRING'
       reason: 'The same RFC 9001 Appendix A packet, used to test which packets are decrypted'
 
+    # ── conntrack CI fixture ────────────────────────────────────────────────
+    # This image exists to be a router: it listens on 22 and logs in as root
+    # because reading conntrack needs root or CAP_NET_ADMIN, which is exactly
+    # how the real OpenWrt / ASUS / Ubiquiti devices are reached. Both are the
+    # thing under test, not oversights. It is built by CI, run for a few
+    # seconds, never published, and its password is generated per run.
+    - path: 'test/fixtures/conntrack-router/Dockerfile'
+      rule_id: 'CKV_DOCKER_1'
+      reason: 'The fixture is an SSH-reachable router; port 22 is what the collection path connects to'
+    - path: 'test/fixtures/conntrack-router/Dockerfile'
+      rule_id: 'CKV_DOCKER_3'
+      reason: 'Reading conntrack needs root, as on the real devices this stands in for'
+
     # ── OpenAPI ─────────────────────────────────────────────────────────────
     # CKV_OPENAPI_5 fires on an operation whose `security` is an empty list.
     # That is not a missing declaration: with a protected-by-default global
