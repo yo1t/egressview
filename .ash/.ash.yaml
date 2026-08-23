@@ -23,6 +23,9 @@ global_settings:
     - path: 'apps/agent-macos/Tests/EgressViewAgentCoreTests/QUICInitialTests.swift'
       rule_id: 'SECRET-HEX-HIGH-ENTROPY-STRING'
       reason: 'RFC 9001 Appendix A published test vectors, not credentials'
+    - path: 'apps/agent-macos/Tests/EgressViewAgentCoreTests/QUICServerNameWiringTests.swift'
+      rule_id: 'SECRET-HEX-HIGH-ENTROPY-STRING'
+      reason: 'The same RFC 9001 Appendix A packet, used to test which packets are decrypted'
 
     # ── OpenAPI ─────────────────────────────────────────────────────────────
     # CKV_OPENAPI_5 fires on an operation whose `security` is an empty list.

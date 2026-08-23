@@ -115,6 +115,28 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
         }
     }
 
+    /// The name in the opening bytes, whichever transport put it there.
+    ///
+    /// Separated from `handleOutboundData` because an `NEFilterFlow` cannot be
+    /// made outside the extension, and a rule about which packets get
+    /// decrypted is worth testing without one.
+    ///
+    /// TLS is tried first: the name is in the clear there and no key is
+    /// derived. QUIC is consulted only when that finds nothing, which on a
+    /// udp/443 flow it always will.
+    static func serverName(
+        in readBytes: Data, offset: Int, quicClassification: QUICInitialCandidate?
+    ) -> String? {
+        if let name = TLSClientHello.serverName(in: readBytes) { return name }
+        // Only the first datagram of a connection, and only a v1 Initial. A
+        // later datagram is protected with keys derived from the handshake,
+        // which an observer does not have; a version this does not know would
+        // be decrypted with the wrong salt and reported as malformed rather
+        // than left alone.
+        guard offset == 0, quicClassification == .version1 else { return nil }
+        return QUICInitial.serverName(inDatagram: readBytes)
+    }
+
     open override func handleOutboundData(
         from flow: NEFilterFlow,
         readBytesStartOffset offset: Int,
@@ -123,15 +145,20 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
         guard let socketFlow = flow as? NEFilterSocketFlow else {
             return .allow()
         }
+        var classification: QUICInitialCandidate?
         if let metadata = adapter.metadata(from: socketFlow),
            metadata.networkProtocol == .udp, metadata.remotePort == 443 {
+            let seen = QUICInitialProbe.classify(readBytes)
+            classification = seen
             didObserveQUICFeasibility(.outboundCallback(
                 offset: offset,
                 byteCount: readBytes.count,
-                classification: QUICInitialProbe.classify(readBytes)
+                classification: seen
             ))
         }
-        if let name = TLSClientHello.serverName(in: readBytes) {
+        if let name = Self.serverName(
+            in: readBytes, offset: offset, quicClassification: classification
+        ) {
             lock.withLock {
                 openFlows.noteServerName(name, flowID: socketFlow.identifier)
             }

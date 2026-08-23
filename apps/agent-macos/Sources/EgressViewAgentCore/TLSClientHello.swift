@@ -5,7 +5,9 @@ import Foundation
 /// This is the only thing the agent ever looks at inside a connection, and it
 /// looks at it only when the user has turned that on. The name is in the
 /// clear because the client has to say where it is going before it can agree
-/// on a key -- nothing here decrypts anything.
+/// on a key -- nothing in *this* file decrypts anything. QUIC encrypts the
+/// same message, and `QUICInitial` does decrypt that one packet; the claim
+/// here is about TLS, and it is worth keeping the two apart.
 ///
 /// Every length in the message is attacker-controlled, so every read is bounds
 /// checked and a malformed message yields nil rather than a guess. Returning
