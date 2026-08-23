@@ -43,18 +43,28 @@
     box-shadow:0 2px 14px rgba(0,0,0,.5)}
   .brand b{font-size:1.05rem; font-weight:600; letter-spacing:.2px}
   .lang{margin-left:auto; display:flex; border:1px solid var(--border);
-    border-radius:9px; overflow:hidden; background:rgba(0,0,0,.25)}
+    border-radius:9px; overflow:hidden; background:rgba(0,0,0,.25);
+    /* Never absorb the squeeze: at 375px this was being compressed until
+       "日本語" stacked one character per line. */
+    flex:none;}
   .lang button{
     appearance:none; background:transparent; border:0; color:var(--muted);
     font:inherit; font-size:.84rem; padding:6px 13px; cursor:pointer;
+    white-space:nowrap;
   }
   .lang button+button{border-left:1px solid var(--border)}
   .lang button[aria-pressed="true"]{background:var(--surface-2); color:var(--text)}
   .lang button:hover{color:var(--text)}
-  .brand span{color:var(--muted); font-size:1.05rem}
+  .brand span{color:var(--muted); font-size:1.05rem; white-space:nowrap}
 
   h1{font-size:clamp(2rem,5.5vw,2.9rem); line-height:1.15; margin:0 0 14px;
      letter-spacing:-.02em; font-weight:650}
+  /* Japanese has no spaces, so a line can break between any two characters --
+     which is how a heading ended up with a lone particle on its own line, and
+     with a katakana word split down the middle. `auto-phrase` breaks at
+     phrase boundaries instead; browsers that do not know it fall back to the
+     ordinary behaviour, which is no worse than before. */
+  html[lang="ja"] h1, html[lang="ja"] .lede{word-break:auto-phrase; line-break:strict}
   .lede{font-size:1.12rem; color:var(--muted); margin:0 0 36px; max-width:56ch}
   .lede strong{color:var(--text); font-weight:600}
 
@@ -111,6 +121,12 @@
   @media (max-width:560px){
     .hero .wrap{padding:52px 24px 44px}
     .btn{width:100%; justify-content:center}
+    /* The logo, the name and the toggle share one line; the product line
+       moves under them rather than being wrung out beside the logo. */
+    .brand{flex-wrap:wrap; gap:10px 12px}
+    .brand span{order:3; flex-basis:100%; margin-top:-2px; font-size:.98rem}
+    /* The desktop break lands mid-phrase at this width. */
+    h1 br{display:none}
   }
 </style>
 </head>
