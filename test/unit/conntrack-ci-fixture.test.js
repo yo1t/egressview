@@ -52,6 +52,14 @@ describe('conntrack CI fixture (P2-91)', () => {
     assert.ok(sleepAt > 0 && sshdAt > sleepAt);
   });
 
+  it('ポートが開いただけでは待ち終わらない', () => {
+    // The first CI run failed with "Connection lost before handshake": the
+    // port was bound and sshd was not serving yet. A readiness check that
+    // proves less than the client needs is a readiness check that lies.
+    assert.doesNotMatch(ci, /if nc -z localhost 2222/);
+    assert.match(ci, /banner" == SSH-\*/);
+  });
+
   it('失敗したときコンテナのログを出す', () => {
     // Without it the only evidence is "the test failed", on a path whose
     // whole difficulty is that it talks to something else.

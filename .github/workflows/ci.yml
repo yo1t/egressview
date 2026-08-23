@@ -91,10 +91,18 @@ jobs:
             -e "ROUTER_PASSWORD=$password" -p 2222:22 egressview-conntrack-router
 
       - name: Wait for it to answer
+        # `nc -z` only proves the port is bound, and the first run failed with
+        # "Connection lost before handshake" because sshd had the socket but
+        # was not serving yet. Waiting for the version banner waits for the
+        # thing the poller actually needs.
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 30); do
-            if nc -z localhost 2222; then echo "ssh up after ${attempt}"; exit 0; fi
+          for attempt in $(seq 1 40); do
+            banner=$(timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2222; head -c 20 <&3' 2>/dev/null || true)
+            if [[ "$banner" == SSH-* ]]; then
+              echo "ssh serving after ${attempt} attempts: ${banner%%$'\r'*}"
+              exit 0
+            fi
             sleep 2
           done
           docker logs conntrack-router
