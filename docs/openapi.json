@@ -1,0 +1,3029 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "EgressView Hub HTTP API",
+    "version": "1.10.0",
+    "description": "Generated from src/permission-matrix.js, the same object the server enforces, so this cannot describe a route the server does not have or miss one it does.\n\n**This describes the access surface, not the payloads.** Request and response bodies are validated by Zod at the route and by CHECK constraints at rest; they are not described here yet. Regenerate with `npm run docs:openapi`.",
+    "license": {
+      "name": "AGPL-3.0-only"
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "egressview_session",
+        "description": "Browser session. HttpOnly, and state-changing requests additionally require the CSRF token issued with it."
+      },
+      "apiToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API identity token. Stored only as a hash, so a copy of the database does not yield a usable credential."
+      },
+      "agentToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An enrolled agent, prefixed egva_. A separate access class: an agent token cannot reach a route in any other class, and a session cannot reach an agent route."
+      }
+    },
+    "x-permissions": [
+      "agent.ingest",
+      "ai.run",
+      "audit.read",
+      "auth.admin",
+      "backup.restore",
+      "network.read",
+      "notes.write",
+      "settings.write"
+    ],
+    "x-mcpTools": {
+      "get_alerts": "network.read",
+      "get_device_notes": "network.read",
+      "get_device_traffic": "network.read",
+      "get_devices": "network.read",
+      "get_new_nodes": "network.read",
+      "get_threat_connections": "network.read",
+      "get_threat_summary": "network.read",
+      "get_top_destinations": "network.read",
+      "get_traffic_summary": "network.read",
+      "query_connections": "network.read",
+      "set_device_note": "notes.write"
+    }
+  },
+  "paths": {
+    "/api/admin/regenerate-token": {
+      "post": {
+        "summary": "POST /api/admin/regenerate-token",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/admin/verify": {
+      "post": {
+        "summary": "POST /api/admin/verify",
+        "description": "No authentication.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          }
+        }
+      }
+    },
+    "/api/agent/capabilities": {
+      "get": {
+        "summary": "GET /api/agent/capabilities",
+        "description": "Requires an enrolled agent token.",
+        "security": [
+          {
+            "agentToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agent/enrollment-requests": {
+      "post": {
+        "summary": "POST /api/agent/enrollment-requests",
+        "description": "No authentication.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          }
+        }
+      }
+    },
+    "/api/agent/enrollment-requests/claim": {
+      "post": {
+        "summary": "POST /api/agent/enrollment-requests/claim",
+        "description": "No authentication.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          }
+        }
+      }
+    },
+    "/api/agent/geo-cache": {
+      "get": {
+        "summary": "GET /api/agent/geo-cache",
+        "description": "Requires an enrolled agent token.",
+        "security": [
+          {
+            "agentToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agent/ingest": {
+      "post": {
+        "summary": "POST /api/agent/ingest",
+        "description": "Requires an enrolled agent token.",
+        "security": [
+          {
+            "agentToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agent/registration/revoke": {
+      "post": {
+        "summary": "POST /api/agent/registration/revoke",
+        "description": "Requires an enrolled agent token.",
+        "security": [
+          {
+            "agentToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agent/threat-intel": {
+      "get": {
+        "summary": "GET /api/agent/threat-intel",
+        "description": "Requires an enrolled agent token.",
+        "security": [
+          {
+            "agentToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agent/token/rotate": {
+      "post": {
+        "summary": "POST /api/agent/token/rotate",
+        "description": "Requires an enrolled agent token.",
+        "security": [
+          {
+            "agentToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agents": {
+      "get": {
+        "summary": "GET /api/agents",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agents/:agentId/revoke": {
+      "post": {
+        "summary": "POST /api/agents/:agentId/revoke",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agents/enrollment-requests": {
+      "get": {
+        "summary": "GET /api/agents/enrollment-requests",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agents/enrollment-requests/:requestId/approve": {
+      "post": {
+        "summary": "POST /api/agents/enrollment-requests/:requestId/approve",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agents/enrollment-requests/:requestId/reject": {
+      "post": {
+        "summary": "POST /api/agents/enrollment-requests/:requestId/reject",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agents/enrollment-tokens": {
+      "post": {
+        "summary": "POST /api/agents/enrollment-tokens",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agents/ingest-metrics": {
+      "get": {
+        "summary": "GET /api/agents/ingest-metrics",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/agents/transport": {
+      "get": {
+        "summary": "GET /api/agents/transport",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/agents/transport",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/analyze": {
+      "post": {
+        "summary": "POST /api/ai/analyze",
+        "description": "Requires `ai.run`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "ai.run"
+            ]
+          },
+          {
+            "apiToken": [
+              "ai.run"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/chat": {
+      "post": {
+        "summary": "POST /api/ai/chat",
+        "description": "Requires `ai.run`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "ai.run"
+            ]
+          },
+          {
+            "apiToken": [
+              "ai.run"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/conversations": {
+      "get": {
+        "summary": "GET /api/ai/conversations",
+        "description": "Requires `ai.run`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "ai.run"
+            ]
+          },
+          {
+            "apiToken": [
+              "ai.run"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/conversations/:id": {
+      "delete": {
+        "summary": "DELETE /api/ai/conversations/:id",
+        "description": "Requires `ai.run`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "ai.run"
+            ]
+          },
+          {
+            "apiToken": [
+              "ai.run"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "get": {
+        "summary": "GET /api/ai/conversations/:id",
+        "description": "Requires `ai.run`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "ai.run"
+            ]
+          },
+          {
+            "apiToken": [
+              "ai.run"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/facts": {
+      "get": {
+        "summary": "GET /api/ai/facts",
+        "description": "Requires `ai.run`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "ai.run"
+            ]
+          },
+          {
+            "apiToken": [
+              "ai.run"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/guardrails": {
+      "post": {
+        "summary": "POST /api/ai/guardrails",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/models": {
+      "post": {
+        "summary": "POST /api/ai/models",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/notification-config": {
+      "get": {
+        "summary": "GET /api/ai/notification-config",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/ai/notification-config",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/notification-events": {
+      "get": {
+        "summary": "GET /api/ai/notification-events",
+        "description": "Requires `audit.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "audit.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "audit.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/notification-run-now": {
+      "post": {
+        "summary": "POST /api/ai/notification-run-now",
+        "description": "Requires `ai.run`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "ai.run"
+            ]
+          },
+          {
+            "apiToken": [
+              "ai.run"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/notification-test": {
+      "post": {
+        "summary": "POST /api/ai/notification-test",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/pricing/check": {
+      "post": {
+        "summary": "POST /api/ai/pricing/check",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/pricing/diagnostics": {
+      "get": {
+        "summary": "GET /api/ai/pricing/diagnostics",
+        "description": "Requires `ai.run`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "ai.run"
+            ]
+          },
+          {
+            "apiToken": [
+              "ai.run"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/test": {
+      "post": {
+        "summary": "POST /api/ai/test",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/ai/usage/monthly": {
+      "get": {
+        "summary": "GET /api/ai/usage/monthly",
+        "description": "Requires `ai.run`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "ai.run"
+            ]
+          },
+          {
+            "apiToken": [
+              "ai.run"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/auth/api-identities": {
+      "get": {
+        "summary": "GET /api/auth/api-identities",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/auth/api-identities",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/auth/api-identities/:id/revoke": {
+      "post": {
+        "summary": "POST /api/auth/api-identities/:id/revoke",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/auth/api-identities/self": {
+      "get": {
+        "summary": "GET /api/auth/api-identities/self",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/auth/audit-events": {
+      "get": {
+        "summary": "GET /api/auth/audit-events",
+        "description": "Requires `audit.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "audit.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "audit.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/auth/change-password": {
+      "post": {
+        "summary": "POST /api/auth/change-password",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "POST /api/auth/login",
+        "description": "No authentication.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "summary": "POST /api/auth/logout",
+        "description": "Requires any authenticated identity.",
+        "security": [
+          {
+            "sessionCookie": []
+          },
+          {
+            "apiToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/auth/methods": {
+      "get": {
+        "summary": "GET /api/auth/methods",
+        "description": "No authentication.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          }
+        }
+      }
+    },
+    "/api/auth/oidc/callback": {
+      "get": {
+        "summary": "GET /api/auth/oidc/callback",
+        "description": "No authentication.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          }
+        }
+      }
+    },
+    "/api/auth/oidc/start": {
+      "get": {
+        "summary": "GET /api/auth/oidc/start",
+        "description": "No authentication.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          }
+        }
+      }
+    },
+    "/api/auth/oidc/test": {
+      "post": {
+        "summary": "POST /api/auth/oidc/test",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/auth/security-config": {
+      "get": {
+        "summary": "GET /api/auth/security-config",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/auth/security-config",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/auth/sessions": {
+      "get": {
+        "summary": "GET /api/auth/sessions",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/auth/sessions/:id/revoke": {
+      "post": {
+        "summary": "POST /api/auth/sessions/:id/revoke",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/auth/sessions/revoke-all": {
+      "post": {
+        "summary": "POST /api/auth/sessions/revoke-all",
+        "description": "Requires `auth.admin`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "auth.admin"
+            ]
+          },
+          {
+            "apiToken": [
+              "auth.admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/auth/status": {
+      "get": {
+        "summary": "GET /api/auth/status",
+        "description": "No authentication.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          }
+        }
+      }
+    },
+    "/api/backup/config": {
+      "post": {
+        "summary": "POST /api/backup/config",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/backup/create": {
+      "post": {
+        "summary": "POST /api/backup/create",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/backup/download/:name": {
+      "get": {
+        "summary": "GET /api/backup/download/:name",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/backup/list": {
+      "get": {
+        "summary": "GET /api/backup/list",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/backup/prune": {
+      "post": {
+        "summary": "POST /api/backup/prune",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/backup/prune/:jobId": {
+      "delete": {
+        "summary": "DELETE /api/backup/prune/:jobId",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "get": {
+        "summary": "GET /api/backup/prune/:jobId",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/backup/restore": {
+      "post": {
+        "summary": "POST /api/backup/restore",
+        "description": "Requires `backup.restore`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "backup.restore"
+            ]
+          },
+          {
+            "apiToken": [
+              "backup.restore"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/backup/upload": {
+      "post": {
+        "summary": "POST /api/backup/upload",
+        "description": "Requires `backup.restore`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "backup.restore"
+            ]
+          },
+          {
+            "apiToken": [
+              "backup.restore"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/beacons": {
+      "get": {
+        "summary": "GET /api/beacons",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/beacons/:id/dismiss": {
+      "post": {
+        "summary": "POST /api/beacons/:id/dismiss",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/beacons/config": {
+      "get": {
+        "summary": "GET /api/beacons/config",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/beacons/config",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/cisco/detect": {
+      "post": {
+        "summary": "POST /api/cisco/detect",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/config/ai": {
+      "get": {
+        "summary": "GET /api/config/ai",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/config/ai",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/config/datasources": {
+      "get": {
+        "summary": "GET /api/config/datasources",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/config/datasources",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/config/detection-notifications": {
+      "get": {
+        "summary": "GET /api/config/detection-notifications",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/config/detection-notifications",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/config/general": {
+      "post": {
+        "summary": "POST /api/config/general",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/config/manual-threat": {
+      "get": {
+        "summary": "GET /api/config/manual-threat",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/config/manual-threat",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/config/slack": {
+      "get": {
+        "summary": "GET /api/config/slack",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/config/slack",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/connections": {
+      "get": {
+        "summary": "GET /api/connections",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/connections/export": {
+      "get": {
+        "summary": "GET /api/connections/export",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/connections/memory": {
+      "get": {
+        "summary": "GET /api/connections/memory",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/connections/new-nodes": {
+      "get": {
+        "summary": "GET /api/connections/new-nodes",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/connections/summary": {
+      "get": {
+        "summary": "GET /api/connections/summary",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/connections/threat-connections": {
+      "get": {
+        "summary": "GET /api/connections/threat-connections",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/connections/threat-counts": {
+      "get": {
+        "summary": "GET /api/connections/threat-counts",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/devices": {
+      "get": {
+        "summary": "GET /api/devices",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/devices/archive": {
+      "post": {
+        "summary": "POST /api/devices/archive",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/devices/merge": {
+      "post": {
+        "summary": "POST /api/devices/merge",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/devices/merge-candidates": {
+      "get": {
+        "summary": "GET /api/devices/merge-candidates",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/devices/reject": {
+      "post": {
+        "summary": "POST /api/devices/reject",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/devices/unarchive": {
+      "post": {
+        "summary": "POST /api/devices/unarchive",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/login": {
+      "post": {
+        "summary": "POST /api/login",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/nonce": {
+      "post": {
+        "summary": "POST /api/nonce",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/notes": {
+      "get": {
+        "summary": "GET /api/notes",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/notes",
+        "description": "Requires `notes.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "notes.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "notes.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/notes/draft": {
+      "post": {
+        "summary": "POST /api/notes/draft",
+        "description": "Requires `notes.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "notes.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "notes.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/notification-log": {
+      "get": {
+        "summary": "GET /api/notification-log",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/routers": {
+      "get": {
+        "summary": "GET /api/routers",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/routers",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/routers/:id": {
+      "delete": {
+        "summary": "DELETE /api/routers/:id",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      },
+      "put": {
+        "summary": "PUT /api/routers/:id",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/routers/detect": {
+      "post": {
+        "summary": "POST /api/routers/detect",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/slack/lookup-user": {
+      "post": {
+        "summary": "POST /api/slack/lookup-user",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/slack/test": {
+      "post": {
+        "summary": "POST /api/slack/test",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/slack/verify": {
+      "post": {
+        "summary": "POST /api/slack/verify",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "summary": "GET /api/status",
+        "description": "Requires `network.read`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "network.read"
+            ]
+          },
+          {
+            "apiToken": [
+              "network.read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/threat/manual-lookup": {
+      "post": {
+        "summary": "POST /api/threat/manual-lookup",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/api/yamaha/detect": {
+      "post": {
+        "summary": "POST /api/yamaha/detect",
+        "description": "Requires `settings.write`.",
+        "security": [
+          {
+            "sessionCookie": [
+              "settings.write"
+            ]
+          },
+          {
+            "apiToken": [
+              "settings.write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          },
+          "401": {
+            "description": "No usable credential."
+          },
+          "403": {
+            "description": "Authenticated, but not permitted."
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "summary": "GET /healthz",
+        "description": "No authentication.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "summary": "GET /readyz",
+        "description": "No authentication.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Handled."
+          }
+        }
+      }
+    }
+  }
+}
