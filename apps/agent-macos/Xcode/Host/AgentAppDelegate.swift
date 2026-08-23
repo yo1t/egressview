@@ -53,6 +53,12 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         credentialStore: KeychainAgentCredentialStore(),
         agentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
     )
+    private lazy var diagnosticsExporter = AgentDiagnosticsExporter(
+        store: store,
+        monitoring: { [weak self] in self?.currentMonitoringStatus ?? .paused },
+        hubDelivery: hubDelivery,
+        threatIntel: threatIntelController
+    )
     private lazy var notificationCoordinator = AgentNotificationCoordinator(
         store: store, hub: hubDelivery, threats: threatIntelController,
         notifier: AgentUserNotifier.shared
@@ -205,6 +211,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item(L("Open EgressView..."), action: #selector(openObservations), key: "o"))
         menu.addItem(item(L("Settings..."), action: #selector(openSettings), key: ","))
         menu.addItem(item(L("About EgressView Agent"), action: #selector(openAbout)))
+        menu.addItem(item(L("Save diagnostics..."), action: #selector(saveDiagnostics)))
         if let version = updateController.availableVersion {
             menu.addItem(item(L("Update %@ ready...", version), action: #selector(openSettings)))
         }
@@ -322,6 +329,13 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         settingsWindowController().show()
+    }
+
+    /// Deliberately in the menu rather than behind a settings screen. It is
+    /// wanted when the agent is misbehaving, and a screen that will not open is
+    /// a poor place to keep the thing that explains why.
+    @objc private func saveDiagnostics() {
+        diagnosticsExporter.export()
     }
 
     @objc private func openAbout() {

@@ -31,6 +31,20 @@ enum AgentMonitoringStatus: Equatable {
     case removalRebootRequired
     case failed(String)
 
+    /// Whether collection is meant to be running. `notRecording` is
+    /// deliberately false: the whole point of that state is that monitoring was
+    /// asked for and is not happening.
+    var isMonitoringOn: Bool {
+        switch self {
+        case .paused, .approvalRequired, .rebootRequired, .updateNotRunning,
+             .notRecording, .diagnosticNotRecording, .deactivating,
+             .removalApprovalRequired, .removalRebootRequired, .failed:
+            return false
+        case .lightweight, .fullActivationRequested, .fullStarting, .fullActive:
+            return true
+        }
+    }
+
     var label: String {
         switch self {
         case .paused: return L("Monitoring paused")

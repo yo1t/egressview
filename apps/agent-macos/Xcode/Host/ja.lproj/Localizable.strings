@@ -500,3 +500,9 @@
 "Latest application" = "直近のアプリ";
 "Times" = "回数";
 "%lld times" = "%lld回";
+
+/* Diagnostics export (P3-36) */
+"Save diagnostics..." = "診断情報を保存...";
+"Save EgressView Agent diagnostics" = "EgressView Agentの診断情報を保存";
+"Plain text, containing no destination address, process name or host name. Open it and read it before you send it anywhere." = "プレーンテキストで、通信先アドレス・プロセス名・ホスト名を含みません。どこかへ送る前に開いて中身を読んでください。";
+"Could not save the diagnostics file" = "診断情報を保存できませんでした";

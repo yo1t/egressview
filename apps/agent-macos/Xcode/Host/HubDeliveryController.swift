@@ -28,6 +28,12 @@ final class HubDeliveryController: ObservableObject {
     )
     @Published private(set) var oldestPending = L("Oldest pending: %@", L("none"))
     @Published private(set) var lastAcknowledged = L("Last acknowledged: %@", L("never"))
+    /// The queue figures as numbers, kept alongside the strings the settings
+    /// screen shows. The diagnostics export needs the numbers, and reopening
+    /// the queue to get them would mean a second handle on a file the sender
+    /// already holds -- which would fail exactly when the agent is already in
+    /// the state the export exists to explain.
+    private(set) var latestQueueStatus: AgentDeliveryQueueStatus?
     @Published var errorMessage: String?
     @Published private(set) var notificationState: NotificationState = .inactive
 
@@ -202,6 +208,7 @@ final class HubDeliveryController: ObservableObject {
                 notificationState = .inactive
             }
         }
+        latestQueueStatus = queueStatus
         pending = L(
             "Pending: %lld · invalid: %lld · overflow: %lld · prior unclassified: %lld",
             queueStatus.pendingCount,

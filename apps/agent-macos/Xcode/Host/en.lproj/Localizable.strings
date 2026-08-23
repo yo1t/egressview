@@ -498,3 +498,9 @@
 "Latest application" = "Latest application";
 "Times" = "Times";
 "%lld times" = "%lld times";
+
+/* Diagnostics export (P3-36) */
+"Save diagnostics..." = "Save diagnostics...";
+"Save EgressView Agent diagnostics" = "Save EgressView Agent diagnostics";
+"Plain text, containing no destination address, process name or host name. Open it and read it before you send it anywhere." = "Plain text, containing no destination address, process name or host name. Open it and read it before you send it anywhere.";
+"Could not save the diagnostics file" = "Could not save the diagnostics file";
