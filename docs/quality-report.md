@@ -70,7 +70,7 @@ Fifty-eight PRs merged (#213--#270), plus #271 after the measurement commit. One
 - **Low, agent diagnostics**: there is no crash reporting and no structured diagnostic bundle. When the agent misbehaves on a user's machine, the recovery procedure is a person reading logs over the user's shoulder.
 - **Low, operational**: the four hardware/external-service integration files are still not part of the default CI workflow.
 - **Low, reliability supervision**: the event-loop watchdog force-kills a wedged Hub process and still depends on an external service manager to bring it back, but the repository now carries a supported systemd unit and production image that supply it, along with the two systemd directives the watchdog quietly requires. **Whether a given host actually restarts is still only provable on that host**, and the procedure for checking says so.
-- **Low, ecosystem**: the production image is built and started by CI on every change, but has not been run anywhere in anger. The HTTP contract now describes **43 of its 111 operations' request bodies**, captured from the schema the server actually validated. **Response bodies remain undescribed**, and request bodies are covered only for the routes the test suite exercises -- the document says both rather than implying completeness.
+- **Low, ecosystem**: the production image is built and started by CI on every change, but has not been run anywhere in anger. The HTTP contract describes **43 request bodies** captured from the schema the server actually validated, and **87 operations' response shapes observed under test**. The two are not the same kind of statement and the document does not pretend they are: requests are read off a schema the server enforces, responses are watched coming back, because **nothing validates a response on the way out**. Every observed shape is marked `x-observed` and says it is not a guarantee.
 - **Low, maintainability**: `public/js/ai-insights.js` (892) and `src/history.js` (847) remain the largest modules; `src/db-migrate.js` grew to 818 lines and `src/routes/agents.js` to 707.
 - **Low, supply chain**: `npm audit` cannot see SQLite CVEs inside the `better-sqlite3` amalgamation; the blind spot is documented with manual verification steps.
 - **Low, demo exposure**: the public demo authenticates every visitor as an anonymous `viewer`, which is the point of a demo; no credential is published and writes are refused twice over.
@@ -189,7 +189,7 @@ Values in parentheses are the previous report's figures where they changed. The 
 
 | Characteristic | Score | Strengths | Remaining gap |
 |---|---:|---|---|
-| Functional suitability | 9 | Multi-router collection, a macOS endpoint agent with per-process attribution and local threat matching, agent/router correlation, AI insights, exports, MCP with OAuth, and an OpenAPI description generated from the permission matrix, with request bodies captured from what the server validates | Response bodies are not described, and request bodies only for exercised routes |
+| Functional suitability | 9 | Multi-router collection, a macOS endpoint agent with per-process attribution and local threat matching, agent/router correlation, AI insights, exports, MCP with OAuth, and an OpenAPI description generated from the permission matrix, with request bodies captured from what the server validates and response shapes observed under test | Responses are observed rather than enforced, and both are covered only for exercised routes |
 | Performance efficiency | **9** | WAL, batching, bounded summaries, indexed agent-scoped lookups, an hourly aggregate behind the agent's charts, and an agent runtime cost cut by roughly an order of magnitude | Backup checks can still create short host-level latency spikes |
 | Compatibility | 9 | Node 22/24/26, JA/EN throughout, Yamaha/Cisco/ASUS/conntrack paths, macOS 13+ agent, correct operation at `/` and behind a proxy subpath | Hardware-specific verification remains fixture-dependent in CI |
 | Usability | 9 | Responsive UI, setup guides, auto-detection, health diagnostics, a public read-only demo, an installable notarised agent that says when it has stopped, and a product site that states the requirements before the download | Router-side setup is still the real onboarding cost |
@@ -214,7 +214,7 @@ Values in parentheses are the previous report's figures where they changed. The 
 - SSRF protection resolves operator-configured hostnames, rejects link-local/metadata/multicast/broadcast results, and pins the checked address to prevent DNS rebinding.
 - Dependency install scripts are disabled; the native-dependency audit blind spot is documented with manual verification steps.
 
-Points are withheld for no default hardware integration CI, an OpenAPI contract that does not yet describe response bodies, and a supported service artifact that has not yet been run in a real deployment.
+Points are withheld for no default hardware integration CI, an OpenAPI contract whose response shapes are observed rather than enforced, and a supported service artifact that has not yet been run in a real deployment.
 
 ---
 
@@ -292,4 +292,4 @@ The runtime-cost work deserves a sentence of its own, because the failure was of
 
 **The reason it was missing has been addressed, and that mattered more than the signature itself.** Signing was a step a person had to remember, and three releases in a row are evidence that remembering is not a control. The pipeline had never failed; the discipline around it had. Releasing is now a single command that refuses to start from a checkout that is not the tag, proves three tamper cases fail, uploads to a draft, verifies the assets **as downloaded from the release page**, and only then publishes — so a failure anywhere leaves a draft rather than a public release with nothing to verify. A workflow checks the published result on publish, on edit, and weekly, catching a release made any other way. Signing deliberately stays on a workstation: moving the key into CI would trade a discipline problem for a supply-chain problem.
 
-The rest of the improvement list is unchanged in kind: continuous fuzzing, and response schemas in the OpenAPI contract. None is a release blocker. Provenance is built and tested but has not yet ridden a release.
+The rest of the improvement list is unchanged in kind: continuous fuzzing, and OpenAPI response shapes that are enforced rather than observed. None is a release blocker. Provenance is built and tested but has not yet ridden a release.

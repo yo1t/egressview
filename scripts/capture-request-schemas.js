@@ -33,23 +33,38 @@ if (require.main === module) {
   // saw anything. Merging them is the point: no single test file exercises
   // more than a handful of routes.
   const bodies = {};
+  const responses = {};
+  const { merge } = require('../src/request-schema-capture');
   for (const line of out.split('\n')) {
     const at = line.indexOf('__REQUEST_SCHEMAS__');
     if (at < 0) continue;
     const chunk = JSON.parse(line.slice(at + '__REQUEST_SCHEMAS__'.length));
-    for (const [route, schema] of Object.entries(chunk.bodies)) {
+    for (const [route, schema] of Object.entries(chunk.bodies || {})) {
       // First writer wins, and the keys are sorted below, so the output does
       // not depend on which test file happened to finish first.
       if (!(route in bodies)) bodies[route] = schema;
     }
+    // Responses are merged rather than first-wins: a field one test file
+    // happened not to exercise must not become required for everyone.
+    for (const [route, byStatus] of Object.entries(chunk.responses || {})) {
+      responses[route] = responses[route] || {};
+      for (const [status, schema] of Object.entries(byStatus)) {
+        responses[route][status] = responses[route][status]
+          ? merge(responses[route][status], schema)
+          : schema;
+      }
+    }
   }
   if (!Object.keys(bodies).length) throw new Error('The capture runner produced nothing');
-  const sorted = Object.fromEntries(
-    Object.entries(bodies).sort(([a], [b]) => a.localeCompare(b))
+  const sortKeys = (o) => Object.fromEntries(
+    Object.entries(o).sort(([a], [b]) => a.localeCompare(b))
   );
-  fs.writeFileSync(OUTPUT, `${JSON.stringify({ bodies: sorted }, null, 2)}\n`);
+  fs.writeFileSync(OUTPUT, `${JSON.stringify({
+    bodies: sortKeys(bodies), responses: sortKeys(responses),
+  }, null, 2)}\n`);
   process.stderr.write(
-    `Wrote ${path.relative(ROOT, OUTPUT)}: ${Object.keys(sorted).length} routes\n`
+    `Wrote ${path.relative(ROOT, OUTPUT)}: ${Object.keys(bodies).length} request bodies, `
+    + `${Object.keys(responses).length} routes with observed responses\n`
   );
 }
 

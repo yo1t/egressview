@@ -85,16 +85,48 @@ function describe(route) {
   return `Requires ${route.permissions.map((p) => `\`${p}\``).join(' and ')}.`;
 }
 
-function requestBodies() {
+function captured() {
   try {
-    return JSON.parse(fs.readFileSync(BODIES, 'utf8')).bodies || {};
+    const parsed = JSON.parse(fs.readFileSync(BODIES, 'utf8'));
+    return { bodies: parsed.bodies || {}, responses: parsed.responses || {} };
   } catch {
-    return {};
+    return { bodies: {}, responses: {} };
   }
 }
 
+/**
+ * What a route was seen to return under test, described as such.
+ *
+ * Nothing validates a response on the way out, so unlike the request bodies
+ * these are not read off a schema the server enforces -- they are observations.
+ * Every one is marked, because a reader who treats an observation as a
+ * guarantee has been misled by this document rather than helped by it.
+ */
+function responsesFor(route, observed) {
+  const seen = observed[`${route.method} ${route.path}`];
+  const out = {
+    200: { description: 'Handled.' },
+    ...(route.access === ACCESS.PUBLIC ? {} : {
+      401: { description: 'No usable credential.' },
+      403: { description: 'Authenticated, but not permitted.' },
+    }),
+  };
+  for (const [status, schema] of Object.entries(seen || {})) {
+    out[status] = {
+      description: (out[status]?.description || 'Observed under test.')
+        + ' Shape observed under test, not a guarantee: responses are not validated on the way out.',
+      content: {
+        'application/json': {
+          schema: { ...schema, 'x-observed': true },
+        },
+      },
+    };
+  }
+  return out;
+}
+
 function build({ version } = {}) {
-  const bodies = requestBodies();
+  const { bodies, responses: observed } = captured();
   const paths = {};
   // Sorted so the generated file is stable: an unordered object would produce
   // a different document on every run and make the drift check meaningless.
@@ -115,16 +147,7 @@ function build({ version } = {}) {
           content: { 'application/json': { schema: body } },
         },
       } : {}),
-      responses: {
-        // Only what the access surface implies. A body schema asserted here
-        // without being generated from the route's Zod schema would be a
-        // guess presented as a contract.
-        200: { description: 'Handled.' },
-        ...(route.access === ACCESS.PUBLIC ? {} : {
-          401: { description: 'No usable credential.' },
-          403: { description: 'Authenticated, but not permitted.' },
-        }),
-      },
+      responses: responsesFor(route, observed),
     };
   }
 
@@ -159,8 +182,11 @@ function build({ version } = {}) {
         + 'rather than written by hand -- a hand-written list would go stale '
         + 'the first time a route changed. Operations without one say so in '
         + 'their description.\n\n'
-        + '**Response bodies are still not described.** Regenerate with '
-        + '`npm run docs:openapi`, which re-captures first.',
+        + 'Response shapes are **observed**, not enforced: nothing validates a '
+        + 'response on the way out, so these describe what routes were seen to '
+        + 'return under test. Each is marked `x-observed`. **Treat them as '
+        + 'documentation of behaviour, not as a promise.**\n\n'
+        + 'Regenerate with `npm run docs:openapi`, which re-captures first.',
       license: { name: 'AGPL-3.0-only' },
     },
     components: {

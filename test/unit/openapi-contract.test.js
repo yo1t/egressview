@@ -135,11 +135,45 @@ describe('OpenAPI contract', () => {
     );
   });
 
+  it('レスポンスは観測であって保証ではないと、すべての箇所で言う', () => {
+    // Nothing validates a response on the way out. A reader who takes an
+    // observation for a guarantee has been misled by this document rather
+    // than helped by it, so the marking is not optional.
+    let marked = 0;
+    for (const [p, item] of Object.entries(document.paths)) {
+      for (const [method, operation] of Object.entries(item)) {
+        for (const [status, response] of Object.entries(operation.responses)) {
+          if (!response.content) continue;
+          marked += 1;
+          assert.equal(
+            response.content['application/json'].schema['x-observed'], true,
+            `${method.toUpperCase()} ${p} ${status} is not marked as observed`
+          );
+          assert.match(response.description, /not a guarantee/);
+        }
+      }
+    }
+    assert.ok(marked > 50, `only ${marked} responses carry a shape`);
+    assert.match(document.info.description, /observed.*not enforced/s);
+  });
+
+  it('毎回は返らなかったフィールドをrequiredにしない', () => {
+    // The merge is what keeps one lucky example from becoming a promise.
+    const { merge, shapeOf } = require('../../src/request-schema-capture');
+    const merged = merge(shapeOf({ a: 1, b: 'x' }), shapeOf({ a: 2 }));
+    assert.deepEqual(merged.required, ['a']);
+    assert.ok('b' in merged.properties);
+  });
+
   it('記述していない範囲を明示する', () => {
     // A contract that silently describes half of what it claims is worse than
     // one that says which half.
-    // Response bodies are still undescribed, and the document has to keep
-    // saying which half it covers.
-    assert.match(document.info.description, /Response bodies are still not described/);
+    // The document has to keep saying which parts are enforced and which are
+    // only observed. Losing that line would turn descriptions into promises.
+    assert.match(document.info.description, /Request bodies are described for the routes/);
+    assert.ok(
+      document.info.description.includes('documentation of behaviour, not as a promise'),
+      'the document stopped saying that observed shapes are not promises'
+    );
   });
 });
