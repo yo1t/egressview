@@ -1,0 +1,105 @@
+name: Distribution page
+
+# Publishes the page at dl.egressview.com.
+#
+# It was being published by hand -- `aws s3 cp`, then waiting out a 300-second
+# TTL because nobody held cloudfront:CreateInvalidation. A step a person has to
+# remember is how main and a published site drift apart, and this repository
+# has already been bitten by that once, when three releases went out unsigned.
+#
+# The packages are NOT published here. `scripts/publish-agent-release.js` owns
+# that path, and the role this job assumes cannot write a .pkg or the manifest
+# every installed agent polls -- only index.html, robots.txt and sitemap.xml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/dl/**'
+      - '.github/workflows/dl-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: distribution-page
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: vars.AWS_DL_BUCKET != ''
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    environment:
+      name: distribution-page
+      url: https://dl.egressview.com/
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the page still reads its version from the manifest
+        # The page draws the version, size and download URL from
+        # /macos/manifest.json at load. If that ever became a literal, this
+        # page would start advertising a version nobody published.
+        run: |
+          set -euo pipefail
+          grep -q "fetch('/macos/manifest.json'" site/dl/index.html
+          test -s site/dl/robots.txt
+          test -s site/dl/sitemap.xml
+
+      - name: Assume the publishing role
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ secrets.AWS_DL_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_SITE_REGION }}
+          role-session-name: dl-deploy-${{ github.run_id }}
+
+      - name: Upload the page
+        # Named objects, matching what the role is allowed to write. `s3 sync`
+        # is deliberately not used: it would try to reconcile a directory
+        # against a bucket that also holds the signed packages.
+        run: |
+          set -euo pipefail
+          bucket="${{ vars.AWS_DL_BUCKET }}"
+          aws s3 cp site/dl/index.html "s3://$bucket/index.html" \
+            --content-type 'text/html; charset=utf-8' --cache-control 'public, max-age=300'
+          aws s3 cp site/dl/robots.txt "s3://$bucket/robots.txt" \
+            --content-type 'text/plain; charset=utf-8' --cache-control 'public, max-age=300'
+          aws s3 cp site/dl/sitemap.xml "s3://$bucket/sitemap.xml" \
+            --content-type 'application/xml; charset=utf-8' --cache-control 'public, max-age=300'
+
+      - name: Invalidate the cache
+        run: |
+          set -euo pipefail
+          id=$(aws cloudfront create-invalidation \
+            --distribution-id "${{ vars.AWS_DL_DISTRIBUTION_ID }}" \
+            --paths '/' '/index.html' '/robots.txt' '/sitemap.xml' \
+            --query 'Invalidation.Id' --output text)
+          echo "invalidation $id"
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "${{ vars.AWS_DL_DISTRIBUTION_ID }}" --id "$id"
+
+      - name: Verify what is actually being served
+        # The version is drawn by script from the manifest, so it is not in the
+        # served HTML and cannot be checked by reading it. What can be checked
+        # is that the page still asks the manifest, and that what the manifest
+        # offers is actually downloadable -- a page whose download button points
+        # at a missing package is the failure that matters here.
+        run: |
+          set -euo pipefail
+          base=https://dl.egressview.com
+          for path in / /robots.txt /sitemap.xml /macos/manifest.json; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$base$path")
+            echo "$path -> $code"
+            [ "$code" = "200" ] || exit 1
+          done
+          curl -sS --max-time 30 "$base/" | grep -q "/macos/manifest.json" || {
+            echo 'the served page no longer reads the manifest' >&2; exit 1; }
+          url=$(curl -sS --max-time 30 "$base/macos/manifest.json" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["url"])')
+          echo "manifest offers $url"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 60 -r 0-0 "$url")
+          [ "$code" = "206" ] || [ "$code" = "200" ] || {
+            echo "the package the page offers is not downloadable ($code)" >&2; exit 1; }
