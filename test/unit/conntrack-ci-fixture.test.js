@@ -60,6 +60,12 @@ describe('conntrack CI fixture (P2-91)', () => {
     assert.match(ci, /banner" == SSH-\*/);
   });
 
+  it('sshdが応答することをイメージ自身も報告する', () => {
+    // The same readiness the workflow waits for, reported by the container.
+    // The first CI failure was connecting before sshd was serving.
+    assert.match(dockerfile, /HEALTHCHECK[\s\S]{0,200}grep -q SSH-/);
+  });
+
   it('失敗したときコンテナのログを出す', () => {
     // Without it the only evidence is "the test failed", on a path whose
     // whole difficulty is that it talks to something else.

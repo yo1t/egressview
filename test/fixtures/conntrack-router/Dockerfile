@@ -26,5 +26,12 @@ RUN sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config \
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+# CKV_DOCKER_2 asks for one, and it is genuinely useful here: the test's first
+# failure was connecting before sshd was serving. This reports the same thing
+# the workflow waits for.
+HEALTHCHECK --interval=2s --timeout=3s --start-period=2s --retries=20 \
+  CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/22; head -c 4 <&3 | grep -q SSH-'
+
 EXPOSE 22
 ENTRYPOINT ["/entrypoint.sh"]
