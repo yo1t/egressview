@@ -110,6 +110,23 @@ function build({ version } = {}) {
 
   return {
     openapi: '3.1.0',
+    servers: [{
+      // Self-hosted, so there is no canonical address; the scheme is the part
+      // that matters here. Every credential this document describes -- session
+      // cookie, API token, agent token -- is a bearer secret, and describing
+      // them without saying they travel over TLS would describe a different,
+      // worse system than the one that exists.
+      url: 'https://{host}{basePath}',
+      description: 'Your own Hub. HTTPS only: the credentials below are bearer secrets.',
+      variables: {
+        host: { default: 'egressview.example', description: 'The host you run the Hub on' },
+        basePath: { default: '', description: 'Set when the Hub is served under a subpath' },
+      },
+    }],
+    // Protected by default, so a route added without a security block is
+    // described as requiring a credential rather than as open. The ten public
+    // routes override this with an explicit empty list.
+    security: [{ sessionCookie: [] }, { apiToken: [] }],
     info: {
       title: 'EgressView Hub HTTP API',
       version: version || require('../package.json').version,

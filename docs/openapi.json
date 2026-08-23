@@ -1,5 +1,29 @@
 {
   "openapi": "3.1.0",
+  "servers": [
+    {
+      "url": "https://{host}{basePath}",
+      "description": "Your own Hub. HTTPS only: the credentials below are bearer secrets.",
+      "variables": {
+        "host": {
+          "default": "egressview.example",
+          "description": "The host you run the Hub on"
+        },
+        "basePath": {
+          "default": "",
+          "description": "Set when the Hub is served under a subpath"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "sessionCookie": []
+    },
+    {
+      "apiToken": []
+    }
+  ],
   "info": {
     "title": "EgressView Hub HTTP API",
     "version": "1.10.0",
