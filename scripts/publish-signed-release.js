@@ -124,7 +124,28 @@ function bundlePaths(outputDir, version) {
     checksum: `${artifact}.sha256`,
     signature: `${artifact}.sig`,
     publicKey: `${artifact}.pub.pem`,
+    // Where the artifact came from, alongside the signature saying it is ours.
+    provenance: `${artifact}.intoto.jsonl`,
   };
+}
+
+/**
+ * The signature says the artifact is ours. The provenance says where it came
+ * from. Neither is worth anything if the provenance describes a different
+ * file, which is the failure this checks for.
+ */
+function assertProvenanceMatches(paths) {
+  const result = JSON.parse(run(process.execPath, [
+    path.join(ROOT, 'scripts', 'verify-provenance.js'),
+    '--artifact', paths.artifact,
+    '--provenance', paths.provenance,
+    '--public-key', paths.publicKey,
+  ]));
+  if (!result.verified) fail('The provenance just produced does not verify');
+  process.stderr.write(
+    `   ${result.buildLevel}, commit ${String(result.commit).slice(0, 8)}\n`
+  );
+  return result;
 }
 
 function verifyBundle(paths, options = {}) {
@@ -154,6 +175,9 @@ function assertTamperCasesFail(paths) {
   try {
     const copy = {};
     for (const [name, file] of Object.entries(paths)) {
+      // Provenance is produced after this runs; the four signed files are what
+      // the tamper cases are about.
+      if (!fs.existsSync(file)) continue;
       copy[name] = path.join(scratch, path.basename(file));
       fs.copyFileSync(file, copy[name]);
     }
@@ -225,6 +249,7 @@ function assertPublishedAssetsVerify(tag, repo, version) {
     const result = verifyBundle(downloaded);
     if (!result?.verified) fail('The published assets did not verify');
     assertFingerprintAnchored(downloaded.publicKey);
+    assertProvenanceMatches(downloaded);
     process.stderr.write(`   verified ${result.files} files from the release page\n`);
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
@@ -273,6 +298,17 @@ function main(argv = process.argv.slice(2)) {
     assertTamperCasesFail(paths);
     const { fingerprint, keyId } = assertFingerprintAnchored(paths.publicKey);
 
+    step('Recording where this build came from');
+    run(process.execPath, [
+      path.join(ROOT, 'scripts', 'build-provenance.js'),
+      '--artifact', paths.artifact,
+      '--output', paths.provenance,
+      '--kms-key-id', options.kmsKeyId,
+      '--region', options.region,
+      '--commit', commit,
+    ], { stdio: ['ignore', 'inherit', 'inherit'] });
+    assertProvenanceMatches(paths);
+
     if (options.dryRun) {
       step('Dry run: stopping before anything is created on GitHub');
       return { tag: options.tag, version, fingerprint, keyId, published: false };
@@ -314,4 +350,5 @@ if (require.main === module) {
 module.exports = {
   main, parseArgs, assertReleasableCheckout, bundlePaths, releaseState,
   assertFingerprintAnchored, assertTamperCasesFail, assertPublishedAssetsVerify,
+  assertProvenanceMatches,
 };
