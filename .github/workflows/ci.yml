@@ -57,6 +57,66 @@ jobs:
         if: matrix.node-version == 22
         run: npm run test:fuzz
 
+  conntrack-integration:
+    name: conntrack collection path
+    # The one hardware integration that does not need hardware. SSH in, work
+    # out where the table lives, read it, parse real NAT sessions -- a path
+    # that until now was only ever exercised against somebody's router, which
+    # means it was not exercised at all between releases.
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start a router with a real conntrack table
+        id: router
+        run: |
+          set -euo pipefail
+          # Generated per run and never written to the repository, so there is
+          # no committed credential even for a throwaway container.
+          password="$(openssl rand -hex 16)"
+          echo "::add-mask::$password"
+          echo "password=$password" >> "$GITHUB_OUTPUT"
+          docker build -t egressview-conntrack-router test/fixtures/conntrack-router
+          docker run -d --name conntrack-router --privileged \
+            -e "ROUTER_PASSWORD=$password" -p 2222:22 egressview-conntrack-router
+
+      - name: Wait for it to answer
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if nc -z localhost 2222; then echo "ssh up after ${attempt}"; exit 0; fi
+            sleep 2
+          done
+          docker logs conntrack-router
+          exit 1
+
+      - name: Collect from it
+        env:
+          RUN_CONNTRACK_DOCKER: '1'
+          EGRESSVIEW_CONNTRACK_TEST_HOST: 127.0.0.1
+          EGRESSVIEW_CONNTRACK_TEST_PORT: '2222'
+          EGRESSVIEW_CONNTRACK_TEST_USER: root
+          EGRESSVIEW_CONNTRACK_TEST_PASS: ${{ steps.router.outputs.password }}
+        run: node --test test/integration/conntrack-docker.test.js
+
+      - name: Show the container's log if that failed
+        if: failure()
+        run: docker logs conntrack-router || true
+
+      - name: Stop it
+        if: always()
+        run: docker rm -f conntrack-router || true
+
   production-image:
     name: Production image
     # An untested Dockerfile in the repository is the claim of a supported
