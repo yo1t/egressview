@@ -165,6 +165,27 @@ describe('OpenAPI contract', () => {
     assert.ok('b' in merged.properties);
   });
 
+  it('リクエストの配列には必ず上限がある', () => {
+    // What makes the CKV_OPENAPI_21 suppression safe: the rule guards against
+    // accepting an unbounded array, and that is a request-side concern. If a
+    // request array ever loses its bound, the suppression stops being
+    // justified and this fails.
+    const uncapped = [];
+    const walk = (schema, where) => {
+      if (!schema || typeof schema !== 'object') return;
+      if (schema.type === 'array' && schema.maxItems == null) uncapped.push(where);
+      for (const value of Object.values(schema)) {
+        if (value && typeof value === 'object') walk(value, where);
+      }
+    };
+    for (const [p, item] of Object.entries(document.paths)) {
+      for (const [method, operation] of Object.entries(item)) {
+        if (operation.requestBody) walk(operation.requestBody, `${method.toUpperCase()} ${p}`);
+      }
+    }
+    assert.deepEqual(uncapped, [], 'a request body accepts an array with no maximum');
+  });
+
   it('記述していない範囲を明示する', () => {
     // A contract that silently describes half of what it claims is worse than
     // one that says which half.
