@@ -26,6 +26,17 @@ describe('macOS Agent settings structure', () => {
     assert.match(source, /case \.notifications: notificationSettings/);
   });
 
+  it('診断タブから診断ファイルを保存できる', () => {
+    // Asked for on 2026-08-23: the menu is the only entry point, and settings
+    // has room to say what is in the file before someone sends it. Both are
+    // kept -- this window is one of the things that can fail to open, which is
+    // exactly when the file is wanted.
+    assert.match(source, /settingsGroup\(L\("Diagnostics file"\)\)/);
+    assert.match(source, /Button\(L\("Save diagnostics\.\.\."\)\) \{ model\.saveDiagnostics\(\) \}/);
+    assert.match(source, /no destination address, process name or host name/);
+    assert.match(source, /Also available from the menu bar/);
+  });
+
   it('provides a dedicated Data Enrichment destination', () => {
     assert.match(source, /case enrichment/);
     assert.match(source, /case \.enrichment: return L\("Data Enrichment"\)/);

@@ -172,6 +172,12 @@ final class AgentMonitoringController {
     private let extensionController: SystemExtensionController
     private let gateState: MonitoringGateState
     private let healthProbe: SystemExtensionHealthProbe
+
+    /// What macOS last said is enabled, for the diagnostics export. Nil until
+    /// a probe has been answered, which is itself worth reporting.
+    var enabledExtensionVersion: SystemExtensionVersion? {
+        healthProbe.lastEnabledExtensionVersion
+    }
     private let healthTimer = PeriodicWork()
     private var lightweightCollector: LightweightCollector?
     private var fullMonitoringCollector: FullMonitoringCollector?

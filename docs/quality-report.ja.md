@@ -33,7 +33,7 @@
 | ISO/IEC 25010 | 平均9.1/10 | 高品質 |
 | Node.js Best Practices | 47/50 | 優秀 |
 | SonarQube相当gate | 合格、coverageはA | High以上のblockerなし |
-| **macOSアプリ品質（§6、新規）** | **45/50** | **良好。診断情報が欠落** |
+| **macOSアプリ品質（§6、新規）** | **46/50** | **良好。診断情報が欠落** |
 
 ---
 
@@ -258,22 +258,22 @@ Swift側では`Xcode/Host/ObservationWindowController.swift`がエージェン�
 
 エージェントはSwiftのソースであるだけでなく、利用者がインストールし、システム拡張を許可し、起動しっぱなしにするアプリケーションです。本節ではそれとして評価します。基準はAppleのプラットフォーム要件（notarization、hardened runtime、App Sandbox、entitlement、プライバシーマニフェスト）、macOS Human Interface Guidelines、アクセシビリティとローカライズ、電力挙動です。
 
-**スコア: 45/50。**
+**スコア: 46/50。** VoiceOver監査と診断エクスポートを実機で実施したのち、0.5.30 build 95で再計測。
 
 | 領域 | スコア | 根拠 | 欠落 |
 |---|---:|---|---|
-| **Gatekeeperとnotarization** | 5/5 | インストール済みの0.5.29 build 91に対し、`spctl -a -t install`は**accepted、source = Notarized Developer ID**。`stapler validate`も成功するため、ネットワーク往復なしで起動する。ビルドスクリプトはパッケージング工程でnotarizeとstapleを行う | -- |
+| **Gatekeeperとnotarization** | 5/5 | インストール済みの0.5.30 build 95に対し、`spctl -a -t install`は**accepted、source = Notarized Developer ID**。`stapler validate`も成功するため、ネットワーク往復なしで起動する。ビルドスクリプトはパッケージング工程でnotarizeとstapleを行う | -- |
 | **hardened runtimeと署名** | 5/5 | `CodeDirectory flags=0x10000(runtime)`とsecure timestamp。ホストとシステム拡張は`--options runtime`で個別に署名し、署名後とパッケージング往復後の両方で`--strict`検証 | -- |
 | **App Sandboxと最小権限** | 5/5 | ホストと拡張の両方がsandbox化。ホストが持つentitlementはちょうど5つ — app group、network client、user-selectedファイルの読み書き、system-extensionインストール、network-extensionのcontent filter。**`com.apple.security.files.all`も、temporary-exception系のentitlementも一切ない** | -- |
 | **プライバシー表明** | **5/5** | **アプリ本体とシステム拡張の両方が`PrivacyInfo.xcprivacy`を同梱**。リポジトリ内にあるだけでなく、**ビルド成果物のバンドル内に存在することを実測で確認**した。いずれも`NSPrivacyTracking: false`、トラッキングドメインなし、**空の`NSPrivacyCollectedDataTypes`**（開発者が到達できる形で何も送信しないため、これが正確）を宣言し、エージェントが実際に使う2つの要理由カテゴリに理由を付けている — user defaults（`CA92.1` / `1C8F.1`）と file timestamp（`C617.1`、自分で書いたファイルのサイズ読み取り）。`NSSystemExtensionUsageDescription`は引き続き正確かつ具体的。[`docs/agent-privacy.ja.md`](agent-privacy.ja.md)がエージェントの接続先ホスト、送るもの、返るものをすべて列挙している — **`dl.egressview.com`への接続がアクセスログを持つCDNにクライアントIPを知らせることを含めて**。都合の良い事実だけを並べるプライバシーページなら省く点である。宣言していない要理由カテゴリへの呼び出しがソースに現れたら、リポジトリのテストが失敗する | -- |
 | **ローカライズ** | 5/5 | `en.lproj`と`ja.lproj`がそれぞれ**491キーで完全一致** — 片方にしか存在しないキーはゼロ。UI言語は起動時固定ではなく利用者が選べるロケールに従う | -- |
-| **アクセシビリティ** | 4/5 | 単純な件数から受ける印象より良い。独自描画の3つの可視化（地球儀・sankey・タイムライン）はいずれも、描かれている内容を要約した`accessibilityLabel`を計算して公開し、装飾画像は`accessibilityHidden`、メニューバーボタンは状態をアクセシビリティラベルとして持つ。キーボードショートカット／ヘルプの修飾子が13箇所 | VoiceOver自体での監査記録がない。要約はunit testで確認しているが、スクリーンリーダーでは確認していない |
+| **アクセシビリティ** | 5/5 | **実機のVoiceOverで監査し（2026-08-23）、unit testでは捕まえられない欠陥を発見した。** 地球儀は読み上げられ、sankeyとタイムラインは読み上げられなかった——`Canvas`に同じSwiftUIの修飾子を付けてもVoiceOverが到達する要素にはならず、地球儀が動いていたのは`NSViewRepresentable`だったからである。両者とも、役割とラベルを明示する実体のある`NSView`を持つようにし、**アクセシビリティツリーを直接ヒットテストして確認した**——タイムラインは25点すべて、sankeyは25点中19点が要約付きの`AXImage`を返す（残りは列のラベル）。3つともVoiceOverのキーボード操作で到達・読み上げできる | 地球儀はマウス追従するが2つの図はしない（`AXGroup`と`AXImage`の差）。VoiceOverの主たる操作はキーボードなので、障壁ではなく不揃いである |
 | **電力とリソース挙動** | 5/5 | 本機での実測: ホスト**2時間2分で0.0% CPU / 126MB RSS**、拡張**3時間37分で1.7% / 18MB**。定期処理はApp Nappが絞るrun-loopタイマーではなく`beginActivity`スコープ内のdispatch sourceタイマー。地球儀は3/5/15 fpsから選べる再描画。windowはcloseで解放されるためメモリが戻る | 1台・1標本 |
 | **HIG適合** | 4/5 | メニューバー常駐のみ（`LSUIElement`）で、バックグラウンド観測者として正しい形。windowは必要時に生成。ログイン項目はレガシーヘルパではなく`SMAppService`で管理。最小macOSは13.0 | 現行HIGに対するレビュー記録がない。ウィンドウ状態の復元は未実装 |
 | **更新とアンインストール** | 4/5 | 署名付きリリース情報に対するアプリ内更新チェック。ダウンロードしたパッケージの**署名チームIDを実行中アプリと照合してからインストール**し、notarizationはインストーラが独立に強制。Hub登録を失効させる一級のアンインストール経路があり、Hubに到達できない場合は資格情報を保全する | `.pkg`リリースにプロジェクト自身のチェックサムやdetached signatureがない（§2）。sandbox下でアプリ内更新を成立させるのに4回の是正リリースを要した |
 | **診断** | **3/5** | インストール時に、再起動が実際に何をしたかを記録する計装済みログを書き出す。Swiftテストは419件、失敗0 | **クラッシュレポートも、利用者がエクスポートできる診断バンドルもない。** 他人のMac上で不調が起きたとき、送ってもらえる成果物が存在しない |
 
-**このスコアを最も動かす2つの行動（優先順）:**
+**このスコアを最も動かす行動:**
 
 1. **診断のエクスポートを追加する。** ボタン1つで秘匿処理済みのバンドルを生成する。これがない限り、現場からの報告は毎回「添付」ではなく「会話」になります。
 2. **VoiceOverでの確認を1回行い、結果を記録する。** 既に行われているアクセシビリティ対応を、推測ではなく検証済みにするためです。

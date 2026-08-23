@@ -16,17 +16,20 @@ final class AgentDiagnosticsExporter {
     /// faults this report has to be able to describe, so requiring one would
     /// make the export unavailable in exactly that case.
     private let store: ObservationStore?
+    private let extensionVersion: () -> SystemExtensionVersion?
     private let monitoring: () -> AgentMonitoringStatus
     private let hubDelivery: HubDeliveryController
     private let threatIntel: ThreatIntelController
 
     init(
         store: ObservationStore?,
+        extensionVersion: @escaping () -> SystemExtensionVersion?,
         monitoring: @escaping () -> AgentMonitoringStatus,
         hubDelivery: HubDeliveryController,
         threatIntel: ThreatIntelController
     ) {
         self.store = store
+        self.extensionVersion = extensionVersion
         self.monitoring = monitoring
         self.hubDelivery = hubDelivery
         self.threatIntel = threatIntel
@@ -56,6 +59,38 @@ final class AgentDiagnosticsExporter {
         }
     }
 
+    /// A sandboxed app cannot read /var/log. Saying so is the point: "absent"
+    /// would send the reader looking for a missing file instead of at the
+    /// sandbox, and the log is still there for whoever asked for this export.
+    private func readInstallLog() -> AgentDiagnosticsReport.InstallLog {
+        guard FileManager.default.fileExists(atPath: installLogPath) else {
+            // The sandbox hides it rather than reporting it missing, so a
+            // negative here is not proof of absence either.
+            return .unreadable("not visible from inside the app sandbox")
+        }
+        do {
+            return .contents(try String(contentsOfFile: installLogPath, encoding: .utf8))
+        } catch {
+            return .unreadable(error.localizedDescription)
+        }
+    }
+
+    /// Read straight out of the app, so it is present even on a Mac where
+    /// nothing has gone wrong. The probe that reports what macOS is *running*
+    /// only fires during silence, which meant this field said "unknown" on
+    /// every healthy machine -- exactly the machines a first report comes from.
+    private func bundledExtensionVersion() -> String? {
+        let url = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Library/SystemExtensions")
+            .appendingPathComponent("com.egressview.agent.filter.systemextension")
+            .appendingPathComponent("Contents/Info.plist")
+        guard let plist = NSDictionary(contentsOf: url),
+              let short = plist["CFBundleShortVersionString"] as? String,
+              let build = plist["CFBundleVersion"] as? String
+        else { return nil }
+        return "\(short) build \(build)"
+    }
+
     private func defaultFileName() -> String {
         let stamp = DateFormatter()
         stamp.dateFormat = "yyyyMMdd-HHmmss"
@@ -71,7 +106,8 @@ final class AgentDiagnosticsExporter {
         // different faults, and reporting the second when the first happened
         // would send the reader looking in the wrong place.
         let storage = (try? store?.storageSummary()) ?? ObservationStorageSummary(
-            rawObservationCount: -1, rolledUpHourCount: -1, threatIndicatorCount: -1,
+            rawObservationCount: -1, rolledUpHourCount: -1, chartHourCount: -1,
+            threatIndicatorCount: -1,
             oldestObservationAt: nil, newestObservationAt: nil
         )
         // Taken from the controller rather than by reopening the queue: a
@@ -88,7 +124,10 @@ final class AgentDiagnosticsExporter {
             // The status label is what the user sees in the menu bar, so a
             // report and a screenshot describe the same thing.
             extensionState: status.label,
-            extensionVersion: nil,
+            bundledExtensionVersion: bundledExtensionVersion(),
+            runningExtensionVersion: extensionVersion().map {
+                "\($0.shortVersion) build \($0.bundleVersion)"
+            },
             monitoringEnabled: status.isMonitoringOn,
             health: status.menuBarLabel.isEmpty ? "no warning" : status.menuBarLabel,
             lastObservationAt: storage.newestObservationAt,
@@ -100,7 +139,7 @@ final class AgentDiagnosticsExporter {
             lastAcknowledgedAt: queue?.lastAcknowledgedAt,
             unreadableStateResetAt: queue?.unreadableStateResetAt,
             threatIntelSource: String(describing: threatIntel.activeSource),
-            installLogTail: try? String(contentsOfFile: installLogPath, encoding: .utf8)
+            installLog: readInstallLog()
         )
     }
 }

@@ -504,3 +504,8 @@
 "Save EgressView Agent diagnostics" = "Save EgressView Agent diagnostics";
 "Plain text, containing no destination address, process name or host name. Open it and read it before you send it anywhere." = "Plain text, containing no destination address, process name or host name. Open it and read it before you send it anywhere.";
 "Could not save the diagnostics file" = "Could not save the diagnostics file";
+
+/* Diagnostics tab (P3-36 follow-up) */
+"Diagnostics file" = "Diagnostics file";
+"Writes what is needed to explain a fault: which build is running, whether the extension answered, when the last observation landed, and what the installer did. It contains no destination address, process name or host name, and it is plain text so you can read all of it before sending it anywhere." = "Writes what is needed to explain a fault: which build is running, whether the extension answered, when the last observation landed, and what the installer did. It contains no destination address, process name or host name, and it is plain text so you can read all of it before sending it anywhere.";
+"Also available from the menu bar, which still works if this window will not open." = "Also available from the menu bar, which still works if this window will not open.";

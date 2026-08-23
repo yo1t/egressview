@@ -1445,6 +1445,33 @@ private extension View {
     func agentSection() -> some View { modifier(AgentSectionBackground()) }
 }
 
+/// Carries the accessibility element for a drawing that SwiftUI will not give
+/// one to.
+///
+/// Two attempts at this with SwiftUI modifiers did not work on a real Mac. The
+/// globe did work, and the only thing separating it from the sankey and the
+/// timeline is that the globe is an NSView: `.accessibilityElement()` over an
+/// `NSViewRepresentable` lands, and the same modifiers over a `Canvas` do not.
+/// So this copies the thing that works rather than guessing at another
+/// modifier -- a real view, declaring itself an element, sized to the drawing
+/// it stands behind.
+private struct AgentDrawingAccessibility: NSViewRepresentable {
+    let label: String
+
+    func makeNSView(context: Context) -> NSView { Surface() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        view.setAccessibilityLabel(label)
+    }
+
+    private final class Surface: NSView {
+        override func isAccessibilityElement() -> Bool { true }
+        override func accessibilityRole() -> NSAccessibility.Role? { .image }
+        // Behind the drawing, so it must not swallow clicks meant for it.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
 private struct AgentChartCard<Content: View>: View {
     let title: String
     let subtitle: String
@@ -1627,8 +1654,13 @@ private struct AgentTimelineChart: View {
             } else {
                 Canvas { context, size in draw(in: &context, size: size) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .accessibilityElement()
-                    .accessibilityLabel(summary)
+                    // A Canvas is hit-tested where it drew, so the gaps
+                    // between bars are not part of it and a pointer lands on
+                    // nothing. The globe is an NSView and gets a solid frame
+                    // for free, which is why it worked and these did not.
+                    // The SwiftUI element is deliberately not used here; it
+                    // did not receive VoiceOver on a real Mac twice over.
+                    .background(AgentDrawingAccessibility(label: summary))
                 AgentSeriesLegend(entries: model.series.enumerated().map {
                     .init(name: $0.element.name, color: agentSeriesColor($0.offset, isRemainder: $0.element.isRemainder))
                 })
@@ -2426,8 +2458,6 @@ private struct AgentSankeyChart: View {
                             .frame(width: proxy.size.width)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .accessibilityElement()
-                    .accessibilityLabel(summary)
                     AgentSankeyColumn(
                         title: L("Destination"),
                         nodes: model.destinations,
@@ -2436,6 +2466,14 @@ private struct AgentSankeyChart: View {
                         alignment: .trailing
                     )
                 }
+                // On the whole diagram, not on the ribbons alone, and with a
+                // solid hit area: a Canvas is hit-tested where it drew, so the
+                // space between ribbons belongs to nothing and a pointer lands
+                // on nothing. The globe is an NSView, which gets a solid frame
+                // for free -- that is why it worked and these did not.
+                // As with the timeline: an NSView carries the element,
+                // because the SwiftUI modifiers did not.
+                .background(AgentDrawingAccessibility(label: summary))
             }
             if model.byteCoverageIsPartial {
                 AgentPartialCoverageNote(count: model.observationsWithoutBytes)
@@ -2632,17 +2670,9 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
         // Closing the window set this false and nothing set it back, so a
-        // window opened a second time never saw a new connection arrive: every
-        // `noteObservationsAvailable` returned at the guard, and only the
-        // fifteen-second timer still refreshed.
+        // window opened a second time stayed on its initial snapshot.
         model.isWindowVisible = true
         model.start()
-    }
-
-    @MainActor
-    func noteObservationsAvailable() {
-        guard window?.isVisible == true else { return }
-        model.refresh()
     }
 
     @MainActor

@@ -303,6 +303,7 @@ private final class AgentSettingsViewModel: ObservableObject {
     private let onRetentionChanged: (Int) -> Void
     private let onLanguageChanged: () -> Void
     private let onRefreshQUICDiagnostics: () -> Void
+    private let onSaveDiagnostics: () -> Void
     private let onServerNameChanged: (Bool) -> Void
     private let maintenanceQueue = DispatchQueue(label: "com.egressview.agent.settings-maintenance")
 
@@ -313,7 +314,8 @@ private final class AgentSettingsViewModel: ObservableObject {
         onRetentionChanged: @escaping (Int) -> Void,
         onLanguageChanged: @escaping () -> Void,
         onServerNameChanged: @escaping (Bool) -> Void,
-        onRefreshQUICDiagnostics: @escaping () -> Void
+        onRefreshQUICDiagnostics: @escaping () -> Void,
+        onSaveDiagnostics: @escaping () -> Void
     ) {
         self.store = store
         self.launchController = launchController
@@ -322,6 +324,7 @@ private final class AgentSettingsViewModel: ObservableObject {
         self.onLanguageChanged = onLanguageChanged
         self.onServerNameChanged = onServerNameChanged
         self.onRefreshQUICDiagnostics = onRefreshQUICDiagnostics
+        self.onSaveDiagnostics = onSaveDiagnostics
         refreshLaunchAtLogin()
     }
 
@@ -351,6 +354,10 @@ private final class AgentSettingsViewModel: ObservableObject {
 
     func refreshQUICDiagnostics() {
         onRefreshQUICDiagnostics()
+    }
+
+    func saveDiagnostics() {
+        onSaveDiagnostics()
     }
 
     func toggleLaunchAtLogin() {
@@ -788,6 +795,18 @@ private struct AgentSettingsView: View {
                 L("Diagnostics"),
                 subtitle: L("Technical counters for troubleshooting network monitoring.")
             )
+            settingsGroup(L("Diagnostics file")) {
+                Text(L("Writes what is needed to explain a fault: which build is running, whether the extension answered, when the last observation landed, and what the installer did. It contains no destination address, process name or host name, and it is plain text so you can read all of it before sending it anywhere."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(L("Save diagnostics...")) { model.saveDiagnostics() }
+                // Also in the menu bar, deliberately. This screen is one of
+                // the things that can fail to open, and that is exactly when
+                // the file is wanted.
+                Text(L("Also available from the menu bar, which still works if this window will not open."))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
             settingsGroup(L("QUIC destination-name diagnostics")) {
                 Text(L("These aggregate counters help determine whether QUIC Initial packets reach the network extension. They do not retain packet content, IP addresses, host names, or application identity."))
                     .font(.caption)
@@ -1106,6 +1125,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         onLanguageChanged: @escaping () -> Void,
         onServerNameChanged: @escaping (Bool) -> Void,
         onRefreshQUICDiagnostics: @escaping () -> Void,
+        onSaveDiagnostics: @escaping () -> Void,
         onClose: @escaping () -> Void = {}
     ) {
         self.hub = hub
@@ -1121,7 +1141,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             onRetentionChanged: onRetentionChanged,
             onLanguageChanged: onLanguageChanged,
             onServerNameChanged: onServerNameChanged,
-            onRefreshQUICDiagnostics: onRefreshQUICDiagnostics
+            onRefreshQUICDiagnostics: onRefreshQUICDiagnostics,
+            onSaveDiagnostics: onSaveDiagnostics
         )
         self.model = model
         let hostingController = NSHostingController(

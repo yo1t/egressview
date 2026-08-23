@@ -506,3 +506,8 @@
 "Save EgressView Agent diagnostics" = "EgressView Agentの診断情報を保存";
 "Plain text, containing no destination address, process name or host name. Open it and read it before you send it anywhere." = "プレーンテキストで、通信先アドレス・プロセス名・ホスト名を含みません。どこかへ送る前に開いて中身を読んでください。";
 "Could not save the diagnostics file" = "診断情報を保存できませんでした";
+
+/* Diagnostics tab (P3-36 follow-up) */
+"Diagnostics file" = "診断ファイル";
+"Writes what is needed to explain a fault: which build is running, whether the extension answered, when the last observation landed, and what the installer did. It contains no destination address, process name or host name, and it is plain text so you can read all of it before sending it anywhere." = "障害の説明に必要なものを書き出します。どのbuildが動いているか、Extensionが応答したか、最後の観測がいつ届いたか、インストーラが何をしたか。通信先アドレス・プロセス名・ホスト名は含みません。プレーンテキストなので、どこかへ送る前に全部読めます。";
+"Also available from the menu bar, which still works if this window will not open." = "メニューバーからも実行できます。この画面が開かないときでも使えます。";

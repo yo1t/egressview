@@ -2,20 +2,24 @@ import XCTest
 @testable import EgressViewAgentCore
 
 final class AgentDiagnosticsReportTests: XCTestCase {
-    private func inputs(installLog: String? = nil) -> AgentDiagnosticsReport.Inputs {
+    private func inputs(
+        installLog: AgentDiagnosticsReport.InstallLog = .absent
+    ) -> AgentDiagnosticsReport.Inputs {
         AgentDiagnosticsReport.Inputs(
             generatedAt: Date(timeIntervalSince1970: 1_770_000_000),
             appVersion: "0.5.29",
             appBuild: "91",
             osVersion: "15.2",
             extensionState: "running",
-            extensionVersion: "0.5.29",
+            bundledExtensionVersion: "0.5.30 build 93",
+            runningExtensionVersion: nil,
             monitoringEnabled: true,
             health: "healthy",
             lastObservationAt: Date(timeIntervalSince1970: 1_769_999_000),
             storage: ObservationStorageSummary(
                 rawObservationCount: 12_345,
-                rolledUpHourCount: 720,
+                rolledUpHourCount: 0,
+                chartHourCount: 82_201,
                 threatIndicatorCount: 40_000,
                 oldestObservationAt: Date(timeIntervalSince1970: 1_768_000_000),
                 newestObservationAt: Date(timeIntervalSince1970: 1_769_999_000)
@@ -27,7 +31,7 @@ final class AgentDiagnosticsReportTests: XCTestCase {
             lastAcknowledgedAt: nil,
             unreadableStateResetAt: nil,
             threatIntelSource: "directDownload",
-            installLogTail: installLog
+            installLog: installLog
         )
     }
 
@@ -82,11 +86,48 @@ final class AgentDiagnosticsReportTests: XCTestCase {
         XCTAssertEqual(lines.last, "line 500")
     }
 
-    func testSaysSoWhenThereIsNoInstallLog() {
-        // An absent log and an unread log look the same to a reader unless the
-        // report distinguishes them.
-        let text = AgentDiagnosticsReport(inputs(installLog: nil)).render()
-        XCTAssertTrue(text.contains("/var/log/egressview-agent-install.log is absent or empty"))
+    func testDistinguishesAnUnreadableLogFromAnAbsentOne() {
+        // Found on a real Mac: the export said the installer log was "absent
+        // or empty" while the file existed and had just recorded this very
+        // install. The agent is sandboxed and /var/log is outside it. Saying
+        // "absent" sends the reader looking for a missing file instead of at
+        // the sandbox.
+        let absent = AgentDiagnosticsReport(inputs(installLog: .absent)).render()
+        XCTAssertTrue(absent.contains("absent -- no install has recorded anything here"))
+
+        let unreadable = AgentDiagnosticsReport(
+            inputs(installLog: .unreadable("not visible from inside the app sandbox"))
+        ).render()
+        XCTAssertTrue(unreadable.contains("not readable by the agent (sandboxed)"))
+        // The log still exists for whoever asked for the export.
+        XCTAssertTrue(unreadable.contains("sudo tail"))
+    }
+
+    func testReportsBothAggregatesSeparately() {
+        // Also found on a real Mac: a single "rolled up" figure showed 0 on a
+        // machine holding 82,201 chart rows, which reads as "nothing was
+        // folded" when the opposite is true.
+        let text = AgentDiagnosticsReport(inputs()).render()
+        // Matched on the label and value rather than on the exact padding:
+        // pinning column widths makes a cosmetic change look like a defect.
+        func value(_ label: String) -> String? {
+            text.split(separator: "\n")
+                .first { $0.trimmingCharacters(in: .whitespaces).hasPrefix(label) }
+                .map { $0.trimmingCharacters(in: .whitespaces).dropFirst(label.count) }
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+        XCTAssertEqual(value("folded hours"), "0")
+        XCTAssertEqual(value("chart hours"), "82201")
+    }
+
+    func testReportsTheBundledExtensionEvenOnAHealthyMac() {
+        // Found on a real Mac: this said "unknown" every time, because it was
+        // wired to a probe that only runs once collection has gone quiet --
+        // which is never, on the machines a first report comes from.
+        let text = AgentDiagnosticsReport(inputs()).render()
+        XCTAssertTrue(text.contains("0.5.30 build 93"))
+        // And it does not pretend to know what macOS is running.
+        XCTAssertTrue(text.contains("not asked -- macOS is only queried when collection goes quiet"))
     }
 
     func testReportsTheFieldsThatWouldHaveNarrowedTheOutage() {
