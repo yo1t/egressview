@@ -12,6 +12,14 @@ final class SystemExtensionHealthProbe: NSObject, OSSystemExtensionRequestDelega
     private let identifier: String
     private let appBundleVersion: String
     private var completion: ((MonitoringHealth) -> Void)?
+
+    /// The build macOS says is enabled, kept from the last answered probe.
+    ///
+    /// The diagnostics export reported "unknown" here, which is the one field
+    /// most likely to explain an outage: a host and an extension on different
+    /// builds is a state this agent has actually been in, and it is invisible
+    /// without this.
+    private(set) var lastEnabledExtensionVersion: SystemExtensionVersion?
     /// The request in flight.
     ///
     /// Held because nothing else does. `submitRequest` does not keep the
@@ -94,6 +102,9 @@ final class SystemExtensionHealthProbe: NSObject, OSSystemExtensionRequestDelega
                 isAwaitingUserApproval: $0.isAwaitingUserApproval,
                 isUninstalling: $0.isUninstalling
             )
+        }
+        if let enabled = versions.first(where: { $0.isEnabled && !$0.isUninstalling }) {
+            lastEnabledExtensionVersion = enabled
         }
         finish(MonitoringHealthCheck.evaluate(
             versions: versions,

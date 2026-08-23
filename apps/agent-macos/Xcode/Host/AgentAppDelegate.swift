@@ -55,6 +55,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     )
     private lazy var diagnosticsExporter = AgentDiagnosticsExporter(
         store: store,
+        extensionVersion: { [weak self] in self?.controller.enabledExtensionVersion },
         monitoring: { [weak self] in self?.currentMonitoringStatus ?? .paused },
         hubDelivery: hubDelivery,
         threatIntel: threatIntelController
@@ -73,7 +74,6 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
                 if self?.isPreparedForRemoval == false {
                     self?.hubDelivery.enqueue(observations)
                 }
-                self?.observationWindow?.noteObservationsAvailable()
             }
         },
         storageErrorHandler: { [weak self] error in
@@ -298,6 +298,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
                 self?.controller.setReadsServerName(enabled)
             },
             onRefreshQUICDiagnostics: { [weak self] in self?.controller.requestQUICDiagnostics() },
+            onSaveDiagnostics: { [weak self] in self?.diagnosticsExporter.export() },
             onClose: { [weak self] in self?.settingsWindow = nil }
         )
         controller.updateMonitoringStatus(currentMonitoringStatus)

@@ -32,8 +32,31 @@ describe('macOS Agent idle cost', () => {
   });
 
   it('ウィンドウを開き直したら可視状態が戻る', () => {
-    const show = window.slice(window.indexOf('    func show() {'), window.indexOf('    func noteObservationsAvailable'));
+    const show = window.slice(window.indexOf('    func show() {'), window.indexOf('    func updateMonitoringStatus'));
     assert.match(show, /model\.isWindowVisible = true/);
+  });
+
+  it('観測到着ごとの画面集計を15秒周期へ集約する', () => {
+    assert.doesNotMatch(appDelegate, /observationWindow\?\.noteObservationsAvailable\(\)/);
+    assert.doesNotMatch(window, /func noteObservationsAvailable\(\)/);
+    assert.match(window, /refreshTimer\.start\(every: 15\)/);
+  });
+
+  it('sankeyとタイムラインはNSViewでVoiceOverの要素を持つ', () => {
+    // Found on a real Mac (2026-08-23) and fixed twice wrongly before this.
+    // The globe is read aloud and these two were not, and the only difference
+    // was that the globe is an NSViewRepresentable: the same SwiftUI
+    // accessibility modifiers over a Canvas produced nothing VoiceOver would
+    // land on. This copies the mechanism that works instead of guessing at
+    // another modifier.
+    assert.match(window, /struct AgentDrawingAccessibility: NSViewRepresentable/);
+    assert.match(window, /override func isAccessibilityElement\(\) -> Bool \{ true \}/);
+    assert.match(window, /accessibilityRole\(\) -> NSAccessibility\.Role\? \{ \.image \}/);
+    // Behind the drawing, so it must not swallow clicks meant for it.
+    assert.match(window, /override func hitTest\(_ point: NSPoint\) -> NSView\? \{ nil \}/);
+
+    const backed = window.match(/\.background\(AgentDrawingAccessibility\(label: summary\)\)/g) || [];
+    assert.equal(backed.length, 2, 'expected the sankey and the timeline');
   });
 
   it('XPC取得は前回の応答を待ち、返らなければ接続を張り直す', () => {

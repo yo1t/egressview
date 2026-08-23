@@ -3,7 +3,12 @@ import Foundation
 /// How much this Mac has stored, and over what span. Counts and dates only.
 public struct ObservationStorageSummary: Equatable, Sendable {
     public let rawObservationCount: Int
+    /// Two aggregates, reported separately. `hourly_rollup` is the older
+    /// fold and `chart_hourly` is what the charts read since P3-33; a single
+    /// "rolled up" figure showed 0 on a machine holding 82,201 chart rows,
+    /// which reads as "nothing was folded" when the opposite is true.
     public let rolledUpHourCount: Int
+    public let chartHourCount: Int
     public let threatIndicatorCount: Int
     public let oldestObservationAt: Date?
     public let newestObservationAt: Date?
@@ -11,12 +16,14 @@ public struct ObservationStorageSummary: Equatable, Sendable {
     public init(
         rawObservationCount: Int,
         rolledUpHourCount: Int,
+        chartHourCount: Int,
         threatIndicatorCount: Int,
         oldestObservationAt: Date?,
         newestObservationAt: Date?
     ) {
         self.rawObservationCount = rawObservationCount
         self.rolledUpHourCount = rolledUpHourCount
+        self.chartHourCount = chartHourCount
         self.threatIndicatorCount = threatIndicatorCount
         self.oldestObservationAt = oldestObservationAt
         self.newestObservationAt = newestObservationAt
@@ -38,13 +45,29 @@ public struct ObservationStorageSummary: Equatable, Sendable {
 /// counts and dates, not rows -- and the one free-text field, the install log,
 /// is redacted before it is included.
 public struct AgentDiagnosticsReport: Sendable {
+    /// What happened when the installer log was read.
+    public enum InstallLog: Sendable, Equatable {
+        case contents(String)
+        case absent
+        /// The file exists as far as anyone else is concerned; this process
+        /// could not open it.
+        case unreadable(String)
+    }
+
     public struct Inputs: Sendable {
         public var generatedAt: Date
         public var appVersion: String
         public var appBuild: String
         public var osVersion: String
         public var extensionState: String
-        public var extensionVersion: String?
+        /// What is inside the app, always readable.
+        public var bundledExtensionVersion: String?
+        /// What macOS last said it is running. Nil is the ordinary state on a
+        /// healthy Mac: the probe runs only when collection has gone quiet,
+        /// because macOS retains request state for every one submitted. A
+        /// mismatch between this and the bundled version is the shape of a
+        /// real fault, so both are reported rather than one merged figure.
+        public var runningExtensionVersion: String?
         public var monitoringEnabled: Bool
         public var health: String
         public var lastObservationAt: Date?
@@ -56,22 +79,27 @@ public struct AgentDiagnosticsReport: Sendable {
         public var lastAcknowledgedAt: Date?
         public var unreadableStateResetAt: Date?
         public var threatIntelSource: String
-        public var installLogTail: String?
+        /// Three states, not two. A sandboxed app cannot read /var/log, and
+        /// reporting that as "absent" sends the reader looking for a missing
+        /// file instead of at the sandbox.
+        public var installLog: InstallLog
 
         public init(
             generatedAt: Date, appVersion: String, appBuild: String, osVersion: String,
-            extensionState: String, extensionVersion: String?, monitoringEnabled: Bool,
+            extensionState: String, bundledExtensionVersion: String?,
+            runningExtensionVersion: String?, monitoringEnabled: Bool,
             health: String, lastObservationAt: Date?, storage: ObservationStorageSummary,
             isEnrolledWithHub: Bool, deliveryEnabled: Bool, pendingDeliveryCount: Int,
             oldestPendingAt: Date?, lastAcknowledgedAt: Date?, unreadableStateResetAt: Date?,
-            threatIntelSource: String, installLogTail: String?
+            threatIntelSource: String, installLog: InstallLog
         ) {
             self.generatedAt = generatedAt
             self.appVersion = appVersion
             self.appBuild = appBuild
             self.osVersion = osVersion
             self.extensionState = extensionState
-            self.extensionVersion = extensionVersion
+            self.bundledExtensionVersion = bundledExtensionVersion
+            self.runningExtensionVersion = runningExtensionVersion
             self.monitoringEnabled = monitoringEnabled
             self.health = health
             self.lastObservationAt = lastObservationAt
@@ -83,7 +111,7 @@ public struct AgentDiagnosticsReport: Sendable {
             self.lastAcknowledgedAt = lastAcknowledgedAt
             self.unreadableStateResetAt = unreadableStateResetAt
             self.threatIntelSource = threatIntelSource
-            self.installLogTail = installLogTail
+            self.installLog = installLog
         }
     }
 
@@ -149,14 +177,17 @@ public struct AgentDiagnosticsReport: Sendable {
         lines.append("")
         lines.append("== Monitoring")
         lines.append(row("extension", "\(inputs.extensionState)"))
-        lines.append(row("extension build", "\(inputs.extensionVersion ?? "unknown")"))
+        lines.append(row("extension bundled", inputs.bundledExtensionVersion ?? "unreadable"))
+        lines.append(row("extension running", inputs.runningExtensionVersion
+            ?? "not asked -- macOS is only queried when collection goes quiet"))
         lines.append(row("enabled", "\(inputs.monitoringEnabled ? "yes" : "no")"))
         lines.append(row("health", inputs.health.isEmpty ? "no warning" : inputs.health))
         lines.append(row("last observation", "\(when(inputs.lastObservationAt))"))
         lines.append("")
         lines.append("== Stored on this Mac")
         lines.append(row("observations", "\(inputs.storage.rawObservationCount)"))
-        lines.append(row("rolled-up hours", "\(inputs.storage.rolledUpHourCount)"))
+        lines.append(row("folded hours", "\(inputs.storage.rolledUpHourCount)"))
+        lines.append(row("chart hours", "\(inputs.storage.chartHourCount)"))
         lines.append(row("threat indicators", "\(inputs.storage.threatIndicatorCount)"))
         lines.append(row("oldest", "\(when(inputs.storage.oldestObservationAt))"))
         lines.append(row("newest", "\(when(inputs.storage.newestObservationAt))"))
@@ -173,12 +204,23 @@ public struct AgentDiagnosticsReport: Sendable {
         }
         lines.append("")
         lines.append("== Installer log")
-        if let log = Self.prepareInstallLog(inputs.installLogTail) {
-            lines.append("  last \(Self.installLogLineLimit) lines, account names removed")
-            lines.append("")
-            lines.append(log)
-        } else {
-            lines.append("  none -- /var/log/egressview-agent-install.log is absent or empty")
+        switch inputs.installLog {
+        case .contents(let raw):
+            if let log = Self.prepareInstallLog(raw) {
+                lines.append("  last \(Self.installLogLineLimit) lines, account names removed")
+                lines.append("")
+                lines.append(log)
+            } else {
+                lines.append("  empty")
+            }
+        case .absent:
+            lines.append("  absent -- no install has recorded anything here")
+        case .unreadable(let reason):
+            // Said plainly, because it is the expected state: the agent is
+            // sandboxed and /var/log is outside it. The log is still there for
+            // whoever asked for this file to read directly.
+            lines.append("  not readable by the agent (sandboxed): \(reason)")
+            lines.append("  read it directly: sudo tail -40 /var/log/egressview-agent-install.log")
         }
         lines.append("")
         return lines.joined(separator: "\n")

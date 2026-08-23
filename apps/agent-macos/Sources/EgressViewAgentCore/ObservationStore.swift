@@ -653,6 +653,7 @@ public final class ObservationStore: @unchecked Sendable {
     public func storageSummary() throws -> ObservationStorageSummary {
         let rawCount = try scalar("SELECT count(*) FROM observations") ?? 0
         let rolledUpCount = try scalar("SELECT count(*) FROM hourly_rollup") ?? 0
+        let chartCount = try scalar("SELECT count(*) FROM chart_hourly") ?? 0
         let oldest = try scalarDouble("SELECT min(first_observed_at) FROM observations")
             .map { Date(timeIntervalSince1970: $0) }
         let newest = try scalarDouble("SELECT max(last_observed_at) FROM observations")
@@ -660,6 +661,7 @@ public final class ObservationStore: @unchecked Sendable {
         return ObservationStorageSummary(
             rawObservationCount: rawCount,
             rolledUpHourCount: rolledUpCount,
+            chartHourCount: chartCount,
             threatIndicatorCount: try threatIndicatorCount(),
             oldestObservationAt: oldest,
             newestObservationAt: newest

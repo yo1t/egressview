@@ -33,7 +33,7 @@ Everything else moved forward. This was the largest cycle yet: 58 PRs (#213--#27
 | ISO/IEC 25010 | 9.1/10 average | High quality |
 | Node.js Best Practices | 47/50 | Excellent |
 | SonarQube-equivalent gate | Passed; coverage rating A | No high-severity blocker |
-| **macOS application quality (§6, new)** | **45/50** | **Strong; no crash diagnostics** |
+| **macOS application quality (§6, new)** | **46/50** | **Strong; no crash diagnostics** |
 
 ---
 
@@ -258,22 +258,22 @@ On the Swift side, `Xcode/Host/ObservationWindowController.swift` is by a wide m
 
 The agent is not only Swift source; it is an application a user installs, grants a system extension to, and leaves running. This section evaluates it as such, against Apple's platform requirements (notarisation, hardened runtime, App Sandbox, entitlements, privacy manifest), the macOS Human Interface Guidelines, accessibility and localisation expectations, and energy behaviour.
 
-**Score: 45/50.**
+**Score: 46/50**, re-measured on 0.5.30 build 95 after a VoiceOver audit and a diagnostics export were run on a real Mac.
 
 | Area | Score | Evidence | Gap |
 |---|---:|---|---|
-| **Gatekeeper and notarisation** | 5/5 | On the installed 0.5.29 build 91: `spctl -a -t install` returns **accepted, source = Notarized Developer ID**; `stapler validate` succeeds, so it launches without a network round trip. The build script notarises and staples as part of packaging | -- |
+| **Gatekeeper and notarisation** | 5/5 | On the installed 0.5.30 build 95: `spctl -a -t install` returns **accepted, source = Notarized Developer ID**; `stapler validate` succeeds, so it launches without a network round trip. The build script notarises and staples as part of packaging | -- |
 | **Hardened runtime and signing** | 5/5 | `CodeDirectory flags=0x10000(runtime)` with a secure timestamp; host and system extension are signed separately with `--options runtime` and verified with `--strict` after signing and again after a packaging round trip | -- |
 | **App Sandbox and least privilege** | 5/5 | Both host and extension are sandboxed. The host holds exactly five entitlements — app group, network client, user-selected files read/write, system-extension install, and the network-extension content filter. **There is no `com.apple.security.files.all` and no temporary-exception entitlement anywhere** | -- |
 | **Privacy declaration** | **5/5** | **Both the app and the system extension now ship a `PrivacyInfo.xcprivacy`**, verified present in the built bundles rather than only in the repository. Each declares `NSPrivacyTracking: false`, no tracking domains, an **empty `NSPrivacyCollectedDataTypes`** — accurate, because nothing is transmitted where the developer can reach it — and reasons for the two required-reason categories the agent actually uses: user defaults (`CA92.1`, `1C8F.1`) and file timestamp (`C617.1`, reading the size of files it wrote itself). `NSSystemExtensionUsageDescription` remains accurate and specific. [`docs/agent-privacy.md`](agent-privacy.md) lists every host the agent contacts, what is sent, and what comes back — **including that reaching `dl.egressview.com` reveals the client IP to a CDN that keeps access logs**, which a privacy page listing only flattering facts would omit. A repository test fails the build if a call into an undeclared required-reason category appears in the source | -- |
 | **Localisation** | 5/5 | `en.lproj` and `ja.lproj` each hold **491 keys with exact parity** — no key exists in one and not the other. UI language follows a user-selectable locale rather than being fixed at launch | -- |
-| **Accessibility** | 4/5 | Better than a naive count suggests. The three custom-drawn visualisations — globe, sankey, timeline — each expose a computed `accessibilityLabel` summarising what is drawn, decorative images are `accessibilityHidden`, and the menu-bar button carries its status as an accessibility label. 13 keyboard-shortcut and help modifiers | No audit against VoiceOver itself has been recorded. The summaries are asserted by unit tests, not by a screen reader |
+| **Accessibility** | 5/5 | **Audited with VoiceOver on a real Mac (2026-08-23), and the audit found a defect the unit tests could not.** The globe was announced and the sankey and timeline were not: the same SwiftUI accessibility modifiers over a `Canvas` produce nothing VoiceOver lands on, while the globe worked because it is an `NSViewRepresentable`. Both now carry a real `NSView` that declares itself an element with a role and label, verified by hit-testing the accessibility tree directly — 25 sampled points across the timeline all return `AXImage` with its summary, and 19 of 25 across the sankey, the rest being its column labels. All three are reached and read by VoiceOver keyboard navigation | The globe follows the mouse pointer and the two charts do not, a consequence of `AXGroup` versus `AXImage`. Keyboard navigation is VoiceOver's primary model, so this is an inconsistency rather than a barrier |
 | **Energy and resource behaviour** | 5/5 | Measured on this machine: host **0.0% CPU / 126 MB RSS after 2h02m**; extension **1.7% / 18 MB after 3h37m**. Periodic work uses a dispatch-source timer inside a `beginActivity` scope rather than a run-loop timer App Nap throttles; the globe redraws at a selectable 3/5/15 fps; windows are released on close so memory returns | Single machine, single sample |
 | **HIG conformance** | 4/5 | A menu-bar-only app (`LSUIElement`), which is the right shape for a background observer; windows created on demand; login item managed through `SMAppService` rather than a legacy helper; minimum macOS 13.0 | No documented review against the current HIG; window state restoration is not implemented |
 | **Update and uninstall** | 4/5 | In-app update checking against signed release metadata, with the downloaded package's signing **team identifier verified against the running app before install** — notarisation is then enforced independently by the installer. A first-class uninstall path exists and revokes the Hub registration, preserving the credential if the Hub cannot be reached | The `.pkg` releases carry no checksum or detached signature of the project's own (see §2). Four corrective releases were needed to make in-app update work from a sandbox |
 | **Diagnostics** | **3/5** | Installation writes a instrumented log recording what the relaunch actually did. Swift tests: 419, 0 failing | **No crash reporting and no user-exportable diagnostic bundle.** When the agent misbehaves on someone else's Mac, there is no artefact to ask for |
 
-**The two actions that would move this score most, in order:**
+**The action that would move this score most:**
 
 1. **Add a diagnostics export** — a single button producing a redacted bundle. Without it, every field report is a conversation instead of an attachment.
 2. **Run a VoiceOver pass** and record the result, so the accessibility work already done is verified rather than assumed.
