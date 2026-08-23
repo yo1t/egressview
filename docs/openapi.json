@@ -27,7 +27,7 @@
   "info": {
     "title": "EgressView Hub HTTP API",
     "version": "1.10.0",
-    "description": "Generated from src/permission-matrix.js, the same object the server enforces, so this cannot describe a route the server does not have or miss one it does.\n\n**This describes the access surface, not the payloads.** Request and response bodies are validated by Zod at the route and by CHECK constraints at rest; they are not described here yet. Regenerate with `npm run docs:openapi`.",
+    "description": "Generated from src/permission-matrix.js, the same object the server enforces, so this cannot describe a route the server does not have or miss one it does.\n\nRequest bodies are described for the routes the test suite exercises, captured from the schema the server actually validated rather than written by hand -- a hand-written list would go stale the first time a route changed. Operations without one say so in their description.\n\n**Response bodies are still not described.** Regenerate with `npm run docs:openapi`, which re-captures first.",
     "license": {
       "name": "AGPL-3.0-only"
     }
@@ -92,6 +92,27 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "currentPassword": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "currentPassword"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -110,6 +131,27 @@
         "summary": "POST /api/admin/verify",
         "description": "No authentication.",
         "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "maxLength": 4096
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -120,7 +162,7 @@
     "/api/agent/capabilities": {
       "get": {
         "summary": "GET /api/agent/capabilities",
-        "description": "Requires an enrolled agent token.",
+        "description": "Requires an enrolled agent token. The request body is not described here.",
         "security": [
           {
             "agentToken": []
@@ -144,6 +186,65 @@
         "summary": "POST /api/agent/enrollment-requests",
         "description": "No authentication.",
         "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 6,
+                    "maxLength": 6,
+                    "pattern": "^[0-9A-Za-z]{6}$"
+                  },
+                  "agent": {
+                    "type": "object",
+                    "properties": {
+                      "hostName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "platform": {
+                        "type": "string",
+                        "enum": [
+                          "macos",
+                          "windows",
+                          "linux"
+                        ]
+                      },
+                      "osVersion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "agentVersion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "hostName",
+                      "platform",
+                      "osVersion",
+                      "agentVersion"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "code",
+                  "agent"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -156,6 +257,33 @@
         "summary": "POST /api/agent/enrollment-requests/claim",
         "description": "No authentication.",
         "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "requestId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "claimSecret": {
+                    "type": "string",
+                    "pattern": "^egvc_[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "claimSecret"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -166,7 +294,7 @@
     "/api/agent/geo-cache": {
       "get": {
         "summary": "GET /api/agent/geo-cache",
-        "description": "Requires an enrolled agent token.",
+        "description": "Requires an enrolled agent token. The request body is not described here.",
         "security": [
           {
             "agentToken": []
@@ -194,6 +322,205 @@
             "agentToken": []
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "batchId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "sentAt": {
+                    "type": "string",
+                    "maxLength": 32,
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                  },
+                  "agent": {
+                    "type": "object",
+                    "properties": {
+                      "hostName": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "platform": {
+                        "type": "string",
+                        "enum": [
+                          "macos",
+                          "windows",
+                          "linux"
+                        ]
+                      },
+                      "osVersion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "agentVersion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      }
+                    },
+                    "required": [
+                      "hostName",
+                      "platform",
+                      "osVersion",
+                      "agentVersion"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "observations": {
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "observationId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "networkProtocol": {
+                          "type": "string",
+                          "enum": [
+                            "tcp",
+                            "udp"
+                          ]
+                        },
+                        "localAddress": {
+                          "type": "string",
+                          "maxLength": 45
+                        },
+                        "localPort": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 65535
+                        },
+                        "remoteAddress": {
+                          "type": "string",
+                          "maxLength": 45
+                        },
+                        "remotePort": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 65535
+                        },
+                        "processID": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2147483647
+                        },
+                        "processName": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "bundleID": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "firstObservedAt": {
+                          "type": "string",
+                          "maxLength": 32,
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                        },
+                        "lastObservedAt": {
+                          "type": "string",
+                          "maxLength": 32,
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                        },
+                        "bytesIn": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^(?:0|[1-9]\\d{0,19})$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "bytesOut": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^(?:0|[1-9]\\d{0,19})$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "collector": {
+                          "type": "string",
+                          "enum": [
+                            "network-extension",
+                            "libproc"
+                          ]
+                        },
+                        "confidence": {
+                          "type": "string",
+                          "enum": [
+                            "exact",
+                            "sampled"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "observationId",
+                        "networkProtocol",
+                        "localAddress",
+                        "localPort",
+                        "remoteAddress",
+                        "remotePort",
+                        "processID",
+                        "processName",
+                        "bundleID",
+                        "firstObservedAt",
+                        "lastObservedAt",
+                        "bytesIn",
+                        "bytesOut",
+                        "collector",
+                        "confidence"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "schemaVersion",
+                  "batchId",
+                  "sentAt",
+                  "agent",
+                  "observations"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -210,7 +537,7 @@
     "/api/agent/registration/revoke": {
       "post": {
         "summary": "POST /api/agent/registration/revoke",
-        "description": "Requires an enrolled agent token.",
+        "description": "Requires an enrolled agent token. The request body is not described here.",
         "security": [
           {
             "agentToken": []
@@ -232,7 +559,7 @@
     "/api/agent/threat-intel": {
       "get": {
         "summary": "GET /api/agent/threat-intel",
-        "description": "Requires an enrolled agent token.",
+        "description": "Requires an enrolled agent token. The request body is not described here.",
         "security": [
           {
             "agentToken": []
@@ -254,7 +581,7 @@
     "/api/agent/token/rotate": {
       "post": {
         "summary": "POST /api/agent/token/rotate",
-        "description": "Requires an enrolled agent token.",
+        "description": "Requires an enrolled agent token. The request body is not described here.",
         "security": [
           {
             "agentToken": []
@@ -276,7 +603,7 @@
     "/api/agents": {
       "get": {
         "summary": "GET /api/agents",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -305,7 +632,7 @@
     "/api/agents/:agentId/revoke": {
       "post": {
         "summary": "POST /api/agents/:agentId/revoke",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -334,7 +661,7 @@
     "/api/agents/enrollment-requests": {
       "get": {
         "summary": "GET /api/agents/enrollment-requests",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -376,6 +703,23 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "replaceExisting": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -392,7 +736,7 @@
     "/api/agents/enrollment-requests/:requestId/reject": {
       "post": {
         "summary": "POST /api/agents/enrollment-requests/:requestId/reject",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -421,7 +765,7 @@
     "/api/agents/enrollment-tokens": {
       "post": {
         "summary": "POST /api/agents/enrollment-tokens",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -450,7 +794,7 @@
     "/api/agents/ingest-metrics": {
       "get": {
         "summary": "GET /api/agents/ingest-metrics",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -479,7 +823,7 @@
     "/api/agents/transport": {
       "get": {
         "summary": "GET /api/agents/transport",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -506,7 +850,7 @@
       },
       "post": {
         "summary": "POST /api/agents/transport",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -548,6 +892,55 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "to": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sourceKind": {
+                    "type": "string",
+                    "enum": [
+                      "router",
+                      "agent"
+                    ]
+                  },
+                  "sourceId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "cloudConsentConfirmed": {
+                    "type": "boolean"
+                  },
+                  "language": {
+                    "type": "string",
+                    "enum": [
+                      "ja",
+                      "en"
+                    ]
+                  }
+                },
+                "required": [
+                  "from"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -577,6 +970,75 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "to": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "sourceKind": {
+                    "type": "string",
+                    "enum": [
+                      "router",
+                      "agent"
+                    ]
+                  },
+                  "sourceId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "cloudConsentConfirmed": {
+                    "type": "boolean"
+                  },
+                  "language": {
+                    "type": "string",
+                    "enum": [
+                      "ja",
+                      "en"
+                    ]
+                  },
+                  "conversationId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "requestId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "priorAnalysis": {
+                    "type": "string",
+                    "maxLength": 8000
+                  }
+                },
+                "required": [
+                  "from",
+                  "message"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -593,7 +1055,7 @@
     "/api/ai/conversations": {
       "get": {
         "summary": "GET /api/ai/conversations",
-        "description": "Requires `ai.run`.",
+        "description": "Requires `ai.run`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -622,7 +1084,7 @@
     "/api/ai/conversations/:id": {
       "delete": {
         "summary": "DELETE /api/ai/conversations/:id",
-        "description": "Requires `ai.run`.",
+        "description": "Requires `ai.run`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -649,7 +1111,7 @@
       },
       "get": {
         "summary": "GET /api/ai/conversations/:id",
-        "description": "Requires `ai.run`.",
+        "description": "Requires `ai.run`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -678,7 +1140,7 @@
     "/api/ai/facts": {
       "get": {
         "summary": "GET /api/ai/facts",
-        "description": "Requires `ai.run`.",
+        "description": "Requires `ai.run`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -720,6 +1182,27 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "region": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "region"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -749,6 +1232,27 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "region": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "region"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -765,7 +1269,7 @@
     "/api/ai/notification-config": {
       "get": {
         "summary": "GET /api/ai/notification-config",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -805,6 +1309,142 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "frequency": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "daily",
+                      "weekly"
+                    ]
+                  },
+                  "weekday": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 6
+                  },
+                  "time": {
+                    "type": "string",
+                    "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "rangeHours": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 336
+                  },
+                  "destinations": {
+                    "type": "object",
+                    "properties": {
+                      "ui": {
+                        "type": "boolean"
+                      },
+                      "slack": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "ui",
+                      "slack"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "rules": {
+                    "type": "object",
+                    "properties": {
+                      "scheduled": {
+                        "type": "boolean"
+                      },
+                      "danger": {
+                        "type": "boolean"
+                      },
+                      "newDestination": {
+                        "type": "boolean"
+                      },
+                      "increase": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "scheduled",
+                      "danger",
+                      "newDestination",
+                      "increase"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "threat": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "dangerThreshold": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "newDestinationsThreshold": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      },
+                      "increaseThreshold": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1000
+                      }
+                    },
+                    "required": [
+                      "enabled",
+                      "dangerThreshold",
+                      "newDestinationsThreshold",
+                      "increaseThreshold"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "dailyLimit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 6
+                  },
+                  "cooldownMinutes": {
+                    "type": "integer",
+                    "minimum": 15,
+                    "maximum": 1440
+                  },
+                  "automationConsent": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "frequency",
+                  "weekday",
+                  "time",
+                  "timezone",
+                  "rangeHours",
+                  "destinations",
+                  "threat",
+                  "dailyLimit",
+                  "cooldownMinutes",
+                  "automationConsent"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -821,7 +1461,7 @@
     "/api/ai/notification-events": {
       "get": {
         "summary": "GET /api/ai/notification-events",
-        "description": "Requires `audit.read`.",
+        "description": "Requires `audit.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -850,7 +1490,7 @@
     "/api/ai/notification-run-now": {
       "post": {
         "summary": "POST /api/ai/notification-run-now",
-        "description": "Requires `ai.run`.",
+        "description": "Requires `ai.run`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -879,7 +1519,7 @@
     "/api/ai/notification-test": {
       "post": {
         "summary": "POST /api/ai/notification-test",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -921,6 +1561,38 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "ollama",
+                      "anthropic",
+                      "openai",
+                      "bedrock"
+                    ]
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 400
+                  }
+                },
+                "required": [
+                  "provider",
+                  "model"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -937,7 +1609,7 @@
     "/api/ai/pricing/diagnostics": {
       "get": {
         "summary": "GET /api/ai/pricing/diagnostics",
-        "description": "Requires `ai.run`.",
+        "description": "Requires `ai.run`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -979,6 +1651,19 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -995,7 +1680,7 @@
     "/api/ai/usage/monthly": {
       "get": {
         "summary": "GET /api/ai/usage/monthly",
-        "description": "Requires `ai.run`.",
+        "description": "Requires `ai.run`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1024,7 +1709,7 @@
     "/api/auth/api-identities": {
       "get": {
         "summary": "GET /api/auth/api-identities",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1064,6 +1749,52 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "permissions": {
+                    "minItems": 1,
+                    "maxItems": 7,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "network.read",
+                        "notes.write",
+                        "ai.run",
+                        "settings.write",
+                        "backup.restore",
+                        "auth.admin",
+                        "audit.read"
+                      ]
+                    }
+                  },
+                  "expiresInMs": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "label",
+                  "permissions",
+                  "expiresInMs"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -1080,7 +1811,7 @@
     "/api/auth/api-identities/:id/revoke": {
       "post": {
         "summary": "POST /api/auth/api-identities/:id/revoke",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1109,7 +1840,7 @@
     "/api/auth/api-identities/self": {
       "get": {
         "summary": "GET /api/auth/api-identities/self",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1138,7 +1869,7 @@
     "/api/auth/audit-events": {
       "get": {
         "summary": "GET /api/auth/audit-events",
-        "description": "Requires `audit.read`.",
+        "description": "Requires `audit.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1180,6 +1911,36 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "currentPassword": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "newPassword": {
+                    "type": "string",
+                    "minLength": 14,
+                    "maxLength": 256
+                  },
+                  "revokeOtherSessions": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "currentPassword",
+                  "newPassword"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -1198,6 +1959,32 @@
         "summary": "POST /api/auth/login",
         "description": "No authentication.",
         "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "deviceLabel": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "password"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -1208,7 +1995,7 @@
     "/api/auth/logout": {
       "post": {
         "summary": "POST /api/auth/logout",
-        "description": "Requires any authenticated identity.",
+        "description": "Requires any authenticated identity. The request body is not described here.",
         "security": [
           {
             "sessionCookie": []
@@ -1233,7 +2020,7 @@
     "/api/auth/methods": {
       "get": {
         "summary": "GET /api/auth/methods",
-        "description": "No authentication.",
+        "description": "No authentication. The request body is not described here.",
         "security": [],
         "responses": {
           "200": {
@@ -1245,7 +2032,7 @@
     "/api/auth/oidc/callback": {
       "get": {
         "summary": "GET /api/auth/oidc/callback",
-        "description": "No authentication.",
+        "description": "No authentication. The request body is not described here.",
         "security": [],
         "responses": {
           "200": {
@@ -1257,7 +2044,7 @@
     "/api/auth/oidc/start": {
       "get": {
         "summary": "GET /api/auth/oidc/start",
-        "description": "No authentication.",
+        "description": "No authentication. The request body is not described here.",
         "security": [],
         "responses": {
           "200": {
@@ -1269,7 +2056,7 @@
     "/api/auth/oidc/test": {
       "post": {
         "summary": "POST /api/auth/oidc/test",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1298,7 +2085,7 @@
     "/api/auth/security-config": {
       "get": {
         "summary": "GET /api/auth/security-config",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1338,6 +2125,56 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "clientSecret": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "allowedEmails": {
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 320,
+                      "format": "email",
+                      "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                    }
+                  },
+                  "allowedDomains": {
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253
+                    }
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "clientId",
+                  "allowedEmails",
+                  "allowedDomains"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -1354,7 +2191,7 @@
     "/api/auth/sessions": {
       "get": {
         "summary": "GET /api/auth/sessions",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1383,7 +2220,7 @@
     "/api/auth/sessions/:id/revoke": {
       "post": {
         "summary": "POST /api/auth/sessions/:id/revoke",
-        "description": "Requires `auth.admin`.",
+        "description": "Requires `auth.admin`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1425,6 +2262,23 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "includeSelf": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -1441,7 +2295,7 @@
     "/api/auth/status": {
       "get": {
         "summary": "GET /api/auth/status",
-        "description": "No authentication.",
+        "description": "No authentication. The request body is not described here.",
         "security": [],
         "responses": {
           "200": {
@@ -1466,6 +2320,38 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "intervalHours": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "maxGenerations": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 9007199254740991
+                  },
+                  "maxBackupBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "autoPrune": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -1482,7 +2368,7 @@
     "/api/backup/create": {
       "post": {
         "summary": "POST /api/backup/create",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1511,7 +2397,7 @@
     "/api/backup/download/:name": {
       "get": {
         "summary": "GET /api/backup/download/:name",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1540,7 +2426,7 @@
     "/api/backup/list": {
       "get": {
         "summary": "GET /api/backup/list",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1582,6 +2468,24 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "execute": {
+                    "default": false,
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -1598,7 +2502,7 @@
     "/api/backup/prune/:jobId": {
       "delete": {
         "summary": "DELETE /api/backup/prune/:jobId",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1625,7 +2529,7 @@
       },
       "get": {
         "summary": "GET /api/backup/prune/:jobId",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1667,6 +2571,28 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -1683,7 +2609,7 @@
     "/api/backup/upload": {
       "post": {
         "summary": "POST /api/backup/upload",
-        "description": "Requires `backup.restore`.",
+        "description": "Requires `backup.restore`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1712,7 +2638,7 @@
     "/api/beacons": {
       "get": {
         "summary": "GET /api/beacons",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1741,7 +2667,7 @@
     "/api/beacons/:id/dismiss": {
       "post": {
         "summary": "POST /api/beacons/:id/dismiss",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1770,7 +2696,7 @@
     "/api/beacons/config": {
       "get": {
         "summary": "GET /api/beacons/config",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1810,6 +2736,94 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "minObs": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "maxLength": 32
+                      }
+                    ]
+                  },
+                  "maxCov": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "maxLength": 32
+                      }
+                    ]
+                  },
+                  "minIntervalMs": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "maxLength": 32
+                      }
+                    ]
+                  },
+                  "maxIntervalMs": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "maxLength": 32
+                      }
+                    ]
+                  },
+                  "scanIntervalMs": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "maxLength": 32
+                      }
+                    ]
+                  },
+                  "whitelistDomains": {
+                    "maxItems": 200,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 253
+                    }
+                  },
+                  "orgAllowlist": {
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 100
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -1839,6 +2853,36 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "ciscoIp": {
+                    "type": "string",
+                    "maxLength": 45
+                  },
+                  "ciscoUser": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "ciscoPass": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "ciscoEnablePass": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -1855,7 +2899,7 @@
     "/api/config/ai": {
       "get": {
         "summary": "GET /api/config/ai",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1895,6 +2939,117 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "disabled",
+                      "ollama",
+                      "anthropic",
+                      "openai",
+                      "bedrock"
+                    ]
+                  },
+                  "models": {
+                    "type": "object",
+                    "properties": {
+                      "ollama": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "anthropic": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "openai": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "bedrock": {
+                        "type": "string",
+                        "maxLength": 400
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "keys": {
+                    "type": "object",
+                    "properties": {
+                      "anthropic": {
+                        "type": "string",
+                        "maxLength": 4096
+                      },
+                      "openai": {
+                        "type": "string",
+                        "maxLength": 4096
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "clearKeys": {
+                    "maxItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "anthropic",
+                        "openai"
+                      ]
+                    }
+                  },
+                  "cloudConsent": {
+                    "type": "object",
+                    "properties": {
+                      "anthropic": {
+                        "type": "boolean"
+                      },
+                      "openai": {
+                        "type": "boolean"
+                      },
+                      "bedrock": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "ollamaEndpoint": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "region": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "guardrail": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "id": {
+                        "type": "string",
+                        "maxLength": 2048
+                      },
+                      "version": {
+                        "type": "string",
+                        "maxLength": 64
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -1911,7 +3066,7 @@
     "/api/config/datasources": {
       "get": {
         "summary": "GET /api/config/datasources",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -1951,6 +3106,59 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "dnsmasq": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "logFile": {
+                        "type": "string",
+                        "maxLength": 4096
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "inspect": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "logFile": {
+                        "type": "string",
+                        "maxLength": 4096
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "dhcpd": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "logFile": {
+                        "type": "string",
+                        "maxLength": 4096
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -1967,7 +3175,7 @@
     "/api/config/detection-notifications": {
       "get": {
         "summary": "GET /api/config/detection-notifications",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2007,6 +3215,44 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "threat": {
+                    "type": "object",
+                    "properties": {
+                      "slack": {
+                        "type": "boolean"
+                      },
+                      "history": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "newDevice": {
+                    "type": "object",
+                    "properties": {
+                      "slack": {
+                        "type": "boolean"
+                      },
+                      "history": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2036,6 +3282,38 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "homeCountry": {
+                    "type": "string"
+                  },
+                  "language": {
+                    "type": "string",
+                    "enum": [
+                      "ja",
+                      "en"
+                    ]
+                  },
+                  "autoInvestigate": {
+                    "type": "boolean"
+                  },
+                  "retentionDays": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2052,7 +3330,7 @@
     "/api/config/manual-threat": {
       "get": {
         "summary": "GET /api/config/manual-threat",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2092,6 +3370,60 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "keys": {
+                    "type": "object",
+                    "properties": {
+                      "abuseipdb": {
+                        "type": "string",
+                        "maxLength": 4096
+                      },
+                      "virustotal": {
+                        "type": "string",
+                        "maxLength": 4096
+                      },
+                      "otx": {
+                        "type": "string",
+                        "maxLength": 4096
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "clearKeys": {
+                    "maxItems": 3,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "abuseipdb",
+                        "virustotal",
+                        "otx"
+                      ]
+                    }
+                  },
+                  "cacheTtlMinutes": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 1440
+                  },
+                  "minIntervalSeconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3600
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2108,7 +3440,7 @@
     "/api/config/slack": {
       "get": {
         "summary": "GET /api/config/slack",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2148,6 +3480,40 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "token": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "userId": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "cooldownMinutes": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1440
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2164,7 +3530,7 @@
     "/api/connections": {
       "get": {
         "summary": "GET /api/connections",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2193,7 +3559,7 @@
     "/api/connections/export": {
       "get": {
         "summary": "GET /api/connections/export",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2222,7 +3588,7 @@
     "/api/connections/memory": {
       "get": {
         "summary": "GET /api/connections/memory",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2251,7 +3617,7 @@
     "/api/connections/new-nodes": {
       "get": {
         "summary": "GET /api/connections/new-nodes",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2280,7 +3646,7 @@
     "/api/connections/summary": {
       "get": {
         "summary": "GET /api/connections/summary",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2309,7 +3675,7 @@
     "/api/connections/threat-connections": {
       "get": {
         "summary": "GET /api/connections/threat-connections",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2338,7 +3704,7 @@
     "/api/connections/threat-counts": {
       "get": {
         "summary": "GET /api/connections/threat-counts",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2367,7 +3733,7 @@
     "/api/devices": {
       "get": {
         "summary": "GET /api/devices",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2409,6 +3775,28 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "deviceId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "deviceId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2438,6 +3826,34 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "keepId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "dropId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "keepId",
+                  "dropId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2454,7 +3870,7 @@
     "/api/devices/merge-candidates": {
       "get": {
         "summary": "GET /api/devices/merge-candidates",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2496,6 +3912,37 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "string",
+                        "maxLength": 16,
+                        "pattern": "^\\d+$"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2525,6 +3972,28 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "deviceId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "deviceId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2554,6 +4023,82 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "password": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "routerIp": {
+                    "type": "string",
+                    "maxLength": 45
+                  },
+                  "yamahaIp": {
+                    "type": "string",
+                    "maxLength": 45
+                  },
+                  "yamahaUser": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "yamahaPass": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "yamahaNat": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 6
+                      },
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 999999
+                      }
+                    ]
+                  },
+                  "ciscoIp": {
+                    "type": "string",
+                    "maxLength": 45
+                  },
+                  "ciscoUser": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "ciscoPass": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "ciscoEnablePass": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "doAsus": {
+                    "type": "boolean"
+                  },
+                  "doYamaha": {
+                    "type": "boolean"
+                  },
+                  "doCisco": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2570,7 +4115,7 @@
     "/api/nonce": {
       "post": {
         "summary": "POST /api/nonce",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2599,7 +4144,7 @@
     "/api/notes": {
       "get": {
         "summary": "GET /api/notes",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2639,6 +4184,40 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "ip": {
+                    "type": "string",
+                    "maxLength": 45
+                  },
+                  "mac": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "deviceId": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  "key": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2668,6 +4247,28 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "ip": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 45
+                  }
+                },
+                "required": [
+                  "ip"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2684,7 +4285,7 @@
     "/api/notification-log": {
       "get": {
         "summary": "GET /api/notification-log",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2713,7 +4314,7 @@
     "/api/routers": {
       "get": {
         "summary": "GET /api/routers",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2753,6 +4354,61 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "yamaha",
+                      "cisco",
+                      "conntrack"
+                    ]
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "ip": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "user": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "pass": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "enablePass": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "nat": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2769,7 +4425,7 @@
     "/api/routers/:id": {
       "delete": {
         "summary": "DELETE /api/routers/:id",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2809,6 +4465,61 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "yamaha",
+                      "cisco",
+                      "conntrack"
+                    ]
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "ip": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "user": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "pass": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "enablePass": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "nat": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2825,7 +4536,7 @@
     "/api/routers/detect": {
       "post": {
         "summary": "POST /api/routers/detect",
-        "description": "Requires `settings.write`.",
+        "description": "Requires `settings.write`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2867,6 +4578,32 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "token": {
+                    "type": "string",
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "username"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2896,6 +4633,19 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2925,6 +4675,24 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "maxLength": 512
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -2941,7 +4709,7 @@
     "/api/status": {
       "get": {
         "summary": "GET /api/status",
-        "description": "Requires `network.read`.",
+        "description": "Requires `network.read`. The request body is not described here.",
         "security": [
           {
             "sessionCookie": [
@@ -2983,6 +4751,42 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "ip": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 45
+                  },
+                  "providers": {
+                    "minItems": 1,
+                    "maxItems": 3,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "abuseipdb",
+                        "virustotal",
+                        "otx"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "ip",
+                  "providers"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -3012,6 +4816,45 @@
             ]
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "yamahaIp": {
+                    "type": "string",
+                    "maxLength": 45
+                  },
+                  "yamahaUser": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "yamahaPass": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "yamahaNat": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^\\d{1,6}$"
+                      },
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 999999
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Handled."
@@ -3028,7 +4871,7 @@
     "/healthz": {
       "get": {
         "summary": "GET /healthz",
-        "description": "No authentication.",
+        "description": "No authentication. The request body is not described here.",
         "security": [],
         "responses": {
           "200": {
@@ -3040,7 +4883,7 @@
     "/readyz": {
       "get": {
         "summary": "GET /readyz",
-        "description": "No authentication.",
+        "description": "No authentication. The request body is not described here.",
         "security": [],
         "responses": {
           "200": {

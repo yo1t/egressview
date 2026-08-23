@@ -28,6 +28,9 @@ const { ALL_PERMISSIONS, AGENT_PERMISSIONS } = require('../src/permissions');
 
 const ROOT = path.join(__dirname, '..');
 const OUTPUT = path.join(ROOT, 'docs', 'openapi.json');
+// Captured from what the server actually validated, not written by hand; see
+// scripts/capture-request-schemas.js.
+const BODIES = path.join(ROOT, 'docs', 'request-schemas.json');
 
 const SECURITY_SCHEMES = {
   sessionCookie: {
@@ -82,7 +85,16 @@ function describe(route) {
   return `Requires ${route.permissions.map((p) => `\`${p}\``).join(' and ')}.`;
 }
 
+function requestBodies() {
+  try {
+    return JSON.parse(fs.readFileSync(BODIES, 'utf8')).bodies || {};
+  } catch {
+    return {};
+  }
+}
+
 function build({ version } = {}) {
+  const bodies = requestBodies();
   const paths = {};
   // Sorted so the generated file is stable: an unordered object would produce
   // a different document on every run and make the drift check meaningless.
@@ -91,10 +103,18 @@ function build({ version } = {}) {
   );
   for (const route of routes) {
     const item = paths[route.path] || (paths[route.path] = {});
+    const body = bodies[`${route.method} ${route.path}`];
     item[route.method.toLowerCase()] = {
       summary: `${route.method} ${route.path}`,
-      description: describe(route),
+      description: describe(route)
+        + (body ? '' : ' The request body is not described here.'),
       security: securityFor(route),
+      ...(body ? {
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: body } },
+        },
+      } : {}),
       responses: {
         // Only what the access surface implies. A body schema asserted here
         // without being generated from the route's Zod schema would be a
@@ -134,10 +154,13 @@ function build({ version } = {}) {
         'Generated from src/permission-matrix.js, the same object the server '
         + 'enforces, so this cannot describe a route the server does not have '
         + 'or miss one it does.\n\n'
-        + '**This describes the access surface, not the payloads.** Request '
-        + 'and response bodies are validated by Zod at the route and by CHECK '
-        + 'constraints at rest; they are not described here yet. Regenerate '
-        + 'with `npm run docs:openapi`.',
+        + 'Request bodies are described for the routes the test suite '
+        + 'exercises, captured from the schema the server actually validated '
+        + 'rather than written by hand -- a hand-written list would go stale '
+        + 'the first time a route changed. Operations without one say so in '
+        + 'their description.\n\n'
+        + '**Response bodies are still not described.** Regenerate with '
+        + '`npm run docs:openapi`, which re-captures first.',
       license: { name: 'AGPL-3.0-only' },
     },
     components: {

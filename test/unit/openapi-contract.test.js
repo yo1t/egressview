@@ -3,6 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 
 const { build, render, OUTPUT } = require('../../scripts/generate-openapi');
 const { ACCESS, HTTP_ROUTE_MATRIX } = require('../../src/permission-matrix');
@@ -91,9 +92,54 @@ describe('OpenAPI contract', () => {
     assert.match(document.servers[0].url, /^https:/);
   });
 
+  it('リクエストボディはサーバが実際に検証したものから来る', () => {
+    // Not written by hand: a list tying routes to schemas would go stale the
+    // first time a route changed, which is the failure this contract exists
+    // to avoid.
+    const captured = JSON.parse(
+      fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'request-schemas.json'), 'utf8')
+    ).bodies;
+    for (const [route, schema] of Object.entries(captured)) {
+      const [method, ...rest] = route.split(' ');
+      const operation = document.paths[rest.join(' ')]?.[method.toLowerCase()];
+      assert.ok(operation, `${route} is captured but absent from the contract`);
+      assert.deepEqual(
+        operation.requestBody.content['application/json'].schema, schema
+      );
+    }
+  });
+
+  it('ボディを書いていないoperationはそう言う', () => {
+    // Silence would read as "this route takes nothing", which is a different
+    // and false claim.
+    for (const [p, item] of Object.entries(document.paths)) {
+      for (const [method, operation] of Object.entries(item)) {
+        if (operation.requestBody) continue;
+        assert.match(
+          operation.description, /The request body is not described here\./,
+          `${method.toUpperCase()} ${p} is silent about its body`
+        );
+      }
+    }
+  });
+
+  it('ボディの記述が減らない', () => {
+    // A ratchet. Coverage comes from what the tests exercise, so it can only
+    // fall if a test stops calling a route -- which is worth noticing.
+    const described = Object.values(document.paths)
+      .flatMap((item) => Object.values(item))
+      .filter((operation) => operation.requestBody).length;
+    assert.ok(
+      described >= 43,
+      `only ${described} operations describe a body; it was 43 when this was written`
+    );
+  });
+
   it('記述していない範囲を明示する', () => {
     // A contract that silently describes half of what it claims is worse than
     // one that says which half.
-    assert.match(document.info.description, /access surface, not the payloads/);
+    // Response bodies are still undescribed, and the document has to keep
+    // saying which half it covers.
+    assert.match(document.info.description, /Response bodies are still not described/);
   });
 });
