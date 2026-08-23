@@ -643,6 +643,29 @@ public final class ObservationStore: @unchecked Sendable {
         try scalar("SELECT count(*) FROM threat_indicators") ?? 0
     }
 
+    /// How much is stored and over what span -- counts and dates only.
+    ///
+    /// Deliberately returns no address, process name or hostname. This is what
+    /// the diagnostics export reads, and the export must not be able to carry
+    /// the user's traffic out of the machine even by accident. Keeping the
+    /// return type incapable of holding one is stronger than remembering not
+    /// to put one in.
+    public func storageSummary() throws -> ObservationStorageSummary {
+        let rawCount = try scalar("SELECT count(*) FROM observations") ?? 0
+        let rolledUpCount = try scalar("SELECT count(*) FROM hourly_rollup") ?? 0
+        let oldest = try scalarDouble("SELECT min(first_observed_at) FROM observations")
+            .map { Date(timeIntervalSince1970: $0) }
+        let newest = try scalarDouble("SELECT max(last_observed_at) FROM observations")
+            .map { Date(timeIntervalSince1970: $0) }
+        return ObservationStorageSummary(
+            rawObservationCount: rawCount,
+            rolledUpHourCount: rolledUpCount,
+            threatIndicatorCount: try threatIndicatorCount(),
+            oldestObservationAt: oldest,
+            newestObservationAt: newest
+        )
+    }
+
     /// Distinct destinations in the period, for matching against the
     /// indicators. Matching happens in Swift rather than in SQL because the
     /// parent-domain and CIDR rules are not expressible as a join, and having
