@@ -513,3 +513,25 @@
 /* Destination names over QUIC (P3-29) */
 "Read the name from the handshake" = "Read the name from the handshake";
 "Reads the first message of a connection, in which the client says where it is going. Over TLS that message is in the clear. Over QUIC it is encrypted with keys derived from the connection ID, which is not — so that one packet is decrypted, exactly as any observer of the network could. Nothing after the first message is read, no later packet can be read at all, and the name stays on this Mac. Off unless you turn it on. Applies to connections started after the change." = "Reads the first message of a connection, in which the client says where it is going. Over TLS that message is in the clear. Over QUIC it is encrypted with keys derived from the connection ID, which is not — so that one packet is decrypted, exactly as any observer of the network could. Nothing after the first message is read, no later packet can be read at all, and the name stays on this Mac. Off unless you turn it on. Applies to connections started after the change.";
+
+/* Deleting a period, and keeping a copy first */
+"Delete records from before" = "Delete records from before";
+"Delete records from before this date?" = "Delete records from before this date?";
+"Save a copy first..." = "Save a copy first...";
+"This cannot be undone. Saving a copy writes the records to a file and does not delete anything." = "This cannot be undone. Saving a copy writes the records to a file and does not delete anything.";
+"Save a copy before deleting" = "Save a copy before deleting";
+"Individual records only. Hours already reduced to totals cannot be written out as records, and are not in this file." = "Individual records only. Hours already reduced to totals cannot be written out as records, and are not in this file.";
+"Saved %lld records to %@." = "Saved %lld records to %@.";
+
+/* Settings file */
+"Settings file" = "Settings file";
+"Carries your preferences to another Mac. It holds no Hub credential, no Hub address, and nothing that identifies this Mac, so you can read it before passing it on. Launching at login and third-party lookups are left out: a file should not be able to make those changes for you." = "Carries your preferences to another Mac. It holds no Hub credential, no Hub address, and nothing that identifies this Mac, so you can read it before passing it on. Launching at login and third-party lookups are left out: a file should not be able to make those changes for you.";
+"Export settings..." = "Export settings...";
+"Import settings..." = "Import settings...";
+"Save EgressView Agent settings" = "Save EgressView Agent settings";
+"Import EgressView Agent settings" = "Import EgressView Agent settings";
+"Preferences only. It contains no Hub credential, no Hub address, and nothing that identifies this Mac -- open it and read it before you pass it on." = "Preferences only. It contains no Hub credential, no Hub address, and nothing that identifies this Mac -- open it and read it before you pass it on.";
+"Saved settings to %@." = "Saved settings to %@.";
+"Applied %lld settings." = "Applied %lld settings.";
+"Applied %lld settings. Ignored: %@." = "Applied %lld settings. Ignored: %@.";
+"Could not read the settings file: %@" = "Could not read the settings file: %@";

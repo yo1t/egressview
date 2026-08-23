@@ -515,3 +515,25 @@
 /* Destination names over QUIC (P3-29) */
 "Read the name from the handshake" = "ハンドシェイクから名前を読む";
 "Reads the first message of a connection, in which the client says where it is going. Over TLS that message is in the clear. Over QUIC it is encrypted with keys derived from the connection ID, which is not — so that one packet is decrypted, exactly as any observer of the network could. Nothing after the first message is read, no later packet can be read at all, and the name stays on this Mac. Off unless you turn it on. Applies to connections started after the change." = "接続の最初のメッセージを読みます。クライアントがどこへ行くかを告げる部分です。TLSではそのメッセージは平文です。QUICでは暗号化されていますが、鍵は平文で流れる接続IDから導けるため、**その1パケットだけを復号します**——ネットワークを見ている誰にでもできることです。最初のメッセージより後は読みません。以降のパケットはそもそも読めません。名前はこのMacに残ります。既定では無効です。変更後に開始した接続から適用されます。";
+
+/* 期間を指定した削除と、先に控えを取ること */
+"Delete records from before" = "この日より前の記録を削除";
+"Delete records from before this date?" = "この日より前の記録を削除しますか？";
+"Save a copy first..." = "先に控えを保存...";
+"This cannot be undone. Saving a copy writes the records to a file and does not delete anything." = "元に戻せません。「控えを保存」はファイルに書き出すだけで、何も削除しません。";
+"Save a copy before deleting" = "削除する前に控えを保存";
+"Individual records only. Hours already reduced to totals cannot be written out as records, and are not in this file." = "個別の記録だけです。すでに時間別の合計にまとめられた分は記録として書き出せないため、このファイルには含まれません。";
+"Saved %lld records to %@." = "%lld件を%@に保存しました。";
+
+/* 設定ファイル */
+"Settings file" = "設定ファイル";
+"Carries your preferences to another Mac. It holds no Hub credential, no Hub address, and nothing that identifies this Mac, so you can read it before passing it on. Launching at login and third-party lookups are left out: a file should not be able to make those changes for you." = "設定を別のMacへ持っていくためのファイルです。Hubの資格情報もHubのアドレスも、このMacを特定できるものも入っていません。渡す前に中身を読めます。ログイン時起動と第三者への問い合わせは入れていません——ファイルがあなたの代わりにその変更をできてはいけないからです。";
+"Export settings..." = "設定を書き出す...";
+"Import settings..." = "設定を読み込む...";
+"Save EgressView Agent settings" = "EgressView Agentの設定を保存";
+"Import EgressView Agent settings" = "EgressView Agentの設定を読み込む";
+"Preferences only. It contains no Hub credential, no Hub address, and nothing that identifies this Mac -- open it and read it before you pass it on." = "設定だけです。Hubの資格情報もHubのアドレスも、このMacを特定できるものも含みません。渡す前に開いて全部読めます。";
+"Saved settings to %@." = "設定を%@に保存しました。";
+"Applied %lld settings." = "%lld件の設定を適用しました。";
+"Applied %lld settings. Ignored: %@." = "%lld件の設定を適用しました。無視した項目: %@。";
+"Could not read the settings file: %@" = "設定ファイルを読めませんでした: %@";
