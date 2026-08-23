@@ -1471,10 +1471,10 @@ public final class ObservationStore: @unchecked Sendable {
                     "DELETE FROM observations WHERE last_observed_at < "
                     + "\(rawCutoff.timeIntervalSince1970)"
                 )
-                try execute(
-                    "DELETE FROM hourly_rollup WHERE hour_start < "
-                    + "\(retentionCutoff.timeIntervalSince1970)"
-                )
+                // Retention has to reach everything, not just this one table:
+                // `chart_hourly` was never pruned here, and grew by a measured
+                // 1.5 MB a day for as long as the agent ran.
+                try deleteHistoryLocked(before: retentionCutoff.timeIntervalSince1970)
                 try execute("COMMIT")
                 return folded
             } catch {
@@ -1482,6 +1482,83 @@ public final class ObservationStore: @unchecked Sendable {
                 throw error
             }
         }
+    }
+
+    /// Every table that carries observation history, in one place.
+    ///
+    /// `observations` and `hourly_rollup` used to be the whole list here, and
+    /// `chart_hourly` was not on it. Measured on a real store: "delete history
+    /// before this date" left 62,142 chart rows behind, 38,780 of them still
+    /// carrying the destination host name, and the charts could redraw the
+    /// exact hours the user had deleted. Anything derived from observations
+    /// and bounded by time belongs in this function, so that the next table
+    /// added to the schema is not silently left behind in the same way.
+    private func deleteHistoryLocked(before seconds: Double) throws {
+        try execute("DELETE FROM hourly_rollup WHERE hour_start < \(seconds)")
+        try execute("DELETE FROM chart_hourly WHERE hour_start < \(seconds)")
+        try execute(
+            "DELETE FROM pending_destination_country WHERE last_observed_at < \(seconds)"
+        )
+        // A session that spans the cutoff is trimmed, not dropped: the part
+        // after the cutoff is still a period this Mac was being watched, and
+        // dropping it would report those minutes as unobserved.
+        try execute(
+            "DELETE FROM coverage_sessions WHERE ended_at IS NOT NULL AND ended_at < \(seconds)"
+        )
+        try execute(
+            "UPDATE coverage_sessions SET started_at = \(seconds) WHERE started_at < \(seconds)"
+        )
+        try execute(
+            "DELETE FROM sleep_periods WHERE ended_at IS NOT NULL AND ended_at < \(seconds)"
+        )
+        try execute(
+            "UPDATE sleep_periods SET started_at = \(seconds) WHERE started_at < \(seconds)"
+        )
+    }
+
+    /// The hour containing the cutoff is deleted whole, because part of it is
+    /// data the user asked to remove. What survived of that hour is still
+    /// theirs, so fold it again from the rows that remain -- otherwise the
+    /// chart, which reads this table for every hour below the watermark, would
+    /// show an empty hour where observations still exist.
+    private func refoldBoundaryHourLocked(cutoff seconds: Double) throws {
+        let boundaryHour = (seconds / 3600).rounded(.down) * 3600
+        guard boundaryHour < seconds else { return }
+        // At or above the watermark the hour has not been folded yet, and the
+        // next fold would add its totals to whatever this wrote.
+        let watermark = try scalarDouble("SELECT folded_through FROM chart_hourly_state") ?? 0
+        guard boundaryHour < watermark else { return }
+        try execute("""
+        INSERT INTO chart_hourly (
+            hour_start, process_name, remote_address, remote_hostname,
+            session_count, bytes, unknown_bytes
+        )
+        SELECT \(boundaryHour), process_name, remote_address,
+               COALESCE(NULLIF(remote_hostname, ''), ''),
+               COUNT(*),
+               SUM(COALESCE(bytes_in, 0) + COALESCE(bytes_out, 0)),
+               SUM(CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END)
+        FROM observations
+        WHERE last_observed_at >= \(seconds)
+          AND last_observed_at < \(boundaryHour + 3600)
+        GROUP BY process_name, remote_address, 4
+        """)
+    }
+
+    /// The country list is an all-time accumulator, so a cutoff cannot trim it:
+    /// a row's first visit and its count come partly from hours that no longer
+    /// exist. Rebuilding it from what remains is exact, and it is the only
+    /// option that neither keeps a deleted fact nor invents a replacement.
+    private func rebuildCountryVisitsLocked(now: Date) throws {
+        try execute("DELETE FROM country_visit_summary")
+        try execute(
+            "UPDATE country_visit_state SET retained_history_backfilled_at = NULL WHERE id = 1"
+        )
+        pendingCountryUpdates.removeAll(keepingCapacity: true)
+        knownVisitedCountries.removeAll()
+        // Without geo data there is nothing to rebuild from; the flag stays
+        // clear, so the next scheduled backfill does it once geo arrives.
+        _ = try backfillCountryVisitsLocked(now: now)
     }
 
     /// "Delete history before this date", which the JSON Lines journal could
@@ -1494,8 +1571,19 @@ public final class ObservationStore: @unchecked Sendable {
                 "SELECT COUNT(*) FROM observations WHERE last_observed_at < ?",
                 bindDouble: seconds
             ) ?? 0
-            try execute("DELETE FROM observations WHERE last_observed_at < \(seconds)")
-            try execute("DELETE FROM hourly_rollup WHERE hour_start < \(seconds)")
+            // One transaction: a deletion that stops half way through is the
+            // failure this whole function exists to prevent.
+            try execute("BEGIN IMMEDIATE")
+            do {
+                try execute("DELETE FROM observations WHERE last_observed_at < \(seconds)")
+                try deleteHistoryLocked(before: seconds)
+                try refoldBoundaryHourLocked(cutoff: seconds)
+                try execute("COMMIT")
+            } catch {
+                try? execute("ROLLBACK")
+                throw error
+            }
+            try rebuildCountryVisitsLocked(now: Date())
             return removed
         }
     }

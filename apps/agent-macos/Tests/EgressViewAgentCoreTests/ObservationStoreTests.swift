@@ -329,6 +329,90 @@ final class ObservationStoreTests: XCTestCase {
         XCTAssertEqual(try store.statistics().rawCount, 1)
     }
 
+    func testDeletingHistoryLeavesNothingTheChartsCanRedraw() throws {
+        // Measured on a real store before this was fixed: deleting history
+        // before a date left 62,142 rows in the chart aggregate, 38,780 of
+        // them still carrying the destination host name, and the charts drew
+        // the deleted hours as if nothing had happened.
+        let store = try makeStore()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let old = now.addingTimeInterval(-3 * 86_400)
+        try store.append([
+            observation(at: old, hostname: "deleted.example"),
+            observation(at: now, hostname: "kept.example"),
+        ])
+        try store.foldCompletedHoursForCharts(now: now.addingTimeInterval(3_600))
+        XCTAssertGreaterThan(try store.storageSummary().chartHourCount, 0)
+
+        _ = try store.removeObservations(before: now.addingTimeInterval(-86_400))
+
+        let deletedPeriod = try store.appDestinationTotals(
+            from: old.addingTimeInterval(-3_600), to: old.addingTimeInterval(3_600)
+        )
+        XCTAssertTrue(
+            deletedPeriod.isEmpty,
+            "the deleted period is still drawable: \(deletedPeriod)"
+        )
+        XCTAssertEqual(try store.storageSummary().chartHourCount, 1)
+    }
+
+    func testDeletingHistoryKeepsWhatSurvivedOfTheBoundaryHour() throws {
+        // The hour containing the cutoff is deleted whole, because part of it
+        // was asked for. The rest of that hour is still the user's, and must
+        // not turn into an empty hour in the chart.
+        let store = try makeStore()
+        let hour = Date(timeIntervalSince1970: 1_800_000_000)
+        let cutoff = hour.addingTimeInterval(1_800)
+        try store.append([
+            observation(at: hour.addingTimeInterval(60)),
+            observation(remote: "203.0.113.9", at: cutoff.addingTimeInterval(60)),
+        ])
+        try store.foldCompletedHoursForCharts(now: hour.addingTimeInterval(7_200))
+
+        _ = try store.removeObservations(before: cutoff)
+
+        let rows = try store.appDestinationTotals(
+            from: hour, to: hour.addingTimeInterval(3_600)
+        )
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.sessionCount, 1)
+    }
+
+    func testDeletingHistoryTrimsCoverageRatherThanDroppingIt() throws {
+        // Dropping a session that spans the cutoff would report the minutes
+        // after it as unobserved, which is the one thing coverage exists to
+        // say truthfully.
+        let store = try makeStore()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let cutoff = now.addingTimeInterval(-86_400)
+        try store.beginCoverageSession(at: now.addingTimeInterval(-3 * 86_400))
+        try store.endCoverageSession(at: now)
+
+        _ = try store.removeObservations(before: cutoff)
+
+        let sessions = try store.coverageSessions(
+            from: now.addingTimeInterval(-4 * 86_400), to: now
+        )
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(
+            sessions.first?.start.timeIntervalSince1970, cutoff.timeIntervalSince1970
+        )
+    }
+
+    func testRetentionPrunesTheChartAggregateToo() throws {
+        // Measured on a real store: the chart aggregate was never pruned by
+        // retention and grew by 1.5 MB a day for as long as the agent ran.
+        let store = try makeStore(retention: ObservationRetention(retentionDays: 30, rawDays: 14))
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try store.append([observation(at: now.addingTimeInterval(-40 * 86_400))])
+        try store.foldCompletedHoursForCharts(now: now.addingTimeInterval(-39 * 86_400))
+        XCTAssertGreaterThan(try store.storageSummary().chartHourCount, 0)
+
+        _ = try store.compact(now: now)
+
+        XCTAssertEqual(try store.storageSummary().chartHourCount, 0)
+    }
+
     func testSurvivesReopeningTheSameFile() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let url = directory.appendingPathComponent("history.sqlite")
