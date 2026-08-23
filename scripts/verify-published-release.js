@@ -94,6 +94,11 @@ function checkRelease(tag, repo) {
     }
     if (problems.length) return problems;
 
+    // Provenance arrived after some releases were published, so its absence on
+    // an older one is reported rather than treated as a failure. A release
+    // that has it must have one that actually verifies.
+    const hasProvenance = files.includes(`${artifact}.intoto.jsonl`);
+
     const paths = {
       artifact: path.join(scratch, artifact),
       checksum: path.join(scratch, `${artifact}.sha256`),
@@ -129,8 +134,27 @@ function checkRelease(tag, repo) {
     } catch {
       problems.push(`${tag}: could not read the DNS trust anchor at ${DNS_ANCHOR}`);
     }
+    if (hasProvenance) {
+      try {
+        const result = JSON.parse(run(process.execPath, [
+          path.join(ROOT, 'scripts', 'verify-provenance.js'),
+          '--artifact', paths.artifact,
+          '--provenance', path.join(scratch, `${artifact}.intoto.jsonl`),
+          '--public-key', paths.publicKey,
+        ]));
+        if (!result?.verified) problems.push(`${tag}: the published provenance does not verify`);
+      } catch (error) {
+        const detail = String(error.stderr || error.message).trim().split('\n')[0];
+        problems.push(`${tag}: the published provenance does not verify\n  ${detail}`);
+      }
+    }
+
     if (!problems.length) {
-      process.stderr.write(`${tag}: ${verified.files} files, signature and fingerprint check out\n`);
+      const note = hasProvenance ? 'signature, fingerprint and provenance' : 'signature and fingerprint';
+      process.stderr.write(`${tag}: ${verified.files} files, ${note} check out\n`);
+      if (!hasProvenance) {
+        process.stderr.write(`${tag}: no provenance -- published before it existed\n`);
+      }
     }
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
