@@ -25,10 +25,13 @@ describe('distribution page on a phone', () => {
     assert.match(page, /@media \(max-width:560px\)[\s\S]*\.brand span\{order:3; flex-basis:100%/);
   });
 
-  it('デスクトップ用の改行を狭い画面で使わない', () => {
-    // The <br> is placed for a wide line. At 375px it left a lone particle on
-    // its own line, which is the thing that looked broken.
-    assert.match(page, /@media \(max-width:560px\)[\s\S]*h1 br\{display:none\}/);
+  it('見出しの2行を狭い画面でも2行のまま保つ', () => {
+    // The heading is written as two lines and reads as two lines. Shrinking
+    // the type keeps each of them on one line at 320px, where the longer is
+    // 13 characters -- dropping the break instead lost the pause between the
+    // question and its subject.
+    assert.match(page, /@media \(max-width:560px\)[\s\S]*html\[lang="ja"\] h1\{font-size:min\(1\.5rem,6\.4vw\)\}/);
+    assert.doesNotMatch(page, /h1 br\{display:none\}/);
   });
 
   it('日本語は文節で折り返す', () => {

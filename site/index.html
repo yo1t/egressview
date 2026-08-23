@@ -152,11 +152,11 @@
   @media (max-width:560px){
     section.wrap{padding:44px 24px}
     .btn{width:100%;justify-content:center}
-    /* The break in the heading is placed for a wide line. At this width the
-       second clause does not fit either, so keeping it only guarantees a
-       third line with one character on it. */
-    html[lang="ja"] h1 br{display:none}
+    /* Small enough that each clause of the heading keeps to the single line it
+       was written as. The vw term holds that down to a 320px screen; the two
+       clauses are 12 characters at their longest. */
     h1{font-size:1.85rem}
+    html[lang="ja"] h1{font-size:min(1.6rem,7vw)}
   }
 </style>
 </head>

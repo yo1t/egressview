@@ -20,11 +20,12 @@ describe('product site on a phone', () => {
     assert.match(page, /html\[lang="ja"\] body\{[^}]*line-break:strict/s);
   });
 
-  it('デスクトップ用の改行を狭い画面で使わない', () => {
-    // The <br> in the heading is placed for a wide line. At 375px the second
-    // clause does not fit either, so keeping it only guarantees a third line
-    // carrying a single character.
-    assert.match(page, /@media \(max-width:560px\)[\s\S]*html\[lang="ja"\] h1 br\{display:none\}/);
+  it('見出しの2行を狭い画面でも2行のまま保つ', () => {
+    // Each clause of the Japanese heading is written as one line. Shrinking
+    // the type keeps it that way at 320px, where the longest clause is 12
+    // characters -- the alternative was a third line with one character on it.
+    assert.match(page, /@media \(max-width:560px\)[\s\S]*html\[lang="ja"\] h1\{font-size:min\(1\.6rem,7vw\)\}/);
+    assert.doesNotMatch(page, /h1 br\{display:none\}/);
   });
 
   it('セクションの上下余白が実際に効いている', () => {

@@ -125,8 +125,10 @@
        moves under them rather than being wrung out beside the logo. */
     .brand{flex-wrap:wrap; gap:10px 12px}
     .brand span{order:3; flex-basis:100%; margin-top:-2px; font-size:.98rem}
-    /* The desktop break lands mid-phrase at this width. */
-    h1 br{display:none}
+    /* The heading is written as two lines and reads as two lines. Small
+       enough that each of them keeps to one: the longer is 13 characters,
+       and the vw term holds that down to a 320px screen. */
+    html[lang="ja"] h1{font-size:min(1.5rem,6.4vw)}
   }
 </style>
 </head>
