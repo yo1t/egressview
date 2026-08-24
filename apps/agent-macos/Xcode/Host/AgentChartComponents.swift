@@ -14,7 +14,7 @@ import SwiftUI
 /// and the count of connections whose data volume was never measured is gone.
 /// A reader comparing last week with last month would otherwise conclude the
 /// names had stopped being recorded.
-private struct AgentRolledUpHistoryNote: View {
+struct AgentRolledUpHistoryNote: View {
     let applies: Bool
 
     var body: some View {

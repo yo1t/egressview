@@ -48,12 +48,21 @@ describe('BackupPruneRunner', () => {
     let ticks = 0;
     const timer = setInterval(() => { ticks += 1; }, 10);
 
-    for (let i = 0; i < 50 && runner.get(job.id).status === 'running'; i++) {
+    // Wait for the worker rather than for a fixed number of turns. The budget
+    // used to be 50 x 10ms, and a CI runner under load took 510ms to start a
+    // worker and block for 100 -- so the assertion below fired on a job that
+    // was still perfectly healthy. A gate that goes red for being slow teaches
+    // people that red means nothing.
+    const deadline = Date.now() + 5000;
+    while (runner.get(job.id).status === 'running' && Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     clearInterval(timer);
 
     assert.equal(runner.get(job.id).status, 'completed');
+    // The subject: the loop kept turning while the worker blocked. The worker
+    // blocks for 100ms, so a main thread that was blocked with it could not
+    // have accumulated these.
     assert.ok(ticks >= 3, `expected the main event loop to advance, got ${ticks} ticks`);
   });
 
