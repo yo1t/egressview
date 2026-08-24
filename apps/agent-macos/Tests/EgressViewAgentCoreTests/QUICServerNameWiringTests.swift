@@ -59,38 +59,50 @@ final class QUICServerNameWiringTests: XCTestCase {
 
     private var datagram: Data { bytes(Self.protectedClientInitial) }
 
-    private func name(offset: Int = 0, _ c: QUICInitialCandidate?) -> String? {
-        PassOnlyFilterDataProvider.serverName(
-            in: datagram, offset: offset, quicClassification: c
-        )
+    /// The real path, not a helper beside it: what the provider decides, and
+    /// what the assembler then does with the bytes.
+    ///
+    /// The helper these tests used to call stopped being called by the shipped
+    /// code on 2026-08-24 and nobody noticed, because the tests kept passing
+    /// against it. A test that survives its subject being disconnected is not
+    /// testing the subject.
+    private func assembledName(_ c: QUICInitialCandidate?, datagrams: [Data]) -> String? {
+        guard PassOnlyFilterDataProvider.shouldAssembleQUICName(c) else { return nil }
+        var assembler = QUICInitial.Assembler()
+        for datagram in datagrams {
+            if case let .name(found) = assembler.accept(datagram: datagram) { return found }
+        }
+        return nil
     }
 
     func testReadsTheNameFromAQUICInitial() {
-        // What the feasibility gate was for. Before this, a udp/443 flow was
-        // counted and then left unnamed.
-        XCTAssertEqual(name(.version1), "example.com")
-    }
-
-    func testOnlyTheFirstDatagramIsDecrypted() {
-        // A later datagram is protected with keys derived from the handshake,
-        // which an observer does not have. Attempting it would spend the work
-        // to produce nothing.
-        XCTAssertNil(name(offset: 1, .version1))
-        XCTAssertNil(name(offset: 1200, .version1))
+        XCTAssertEqual(assembledName(.version1, datagrams: [datagram]), "example.com")
     }
 
     func testAVersionThisDoesNotKnowIsLeftAlone() {
         // Decrypting with the wrong salt would fail the tag and be reported as
         // malformed, which is a worse answer than not looking.
-        XCTAssertNil(name(.version2))
-        XCTAssertNil(name(.unsupportedVersionLongHeader))
-        XCTAssertNil(name(.notQUICInitial))
+        XCTAssertFalse(PassOnlyFilterDataProvider.shouldAssembleQUICName(.unsupportedVersionLongHeader))
+        XCTAssertFalse(PassOnlyFilterDataProvider.shouldAssembleQUICName(.notQUICInitial))
     }
 
     func testAFlowThatIsNotUDP443IsNotEvenClassified() {
         // nil classification is how a TCP flow arrives here. It must not fall
         // through into QUIC decryption on the strength of its bytes alone.
-        XCTAssertNil(name(nil))
+        XCTAssertFalse(PassOnlyFilterDataProvider.shouldAssembleQUICName(nil))
+        XCTAssertNil(assembledName(nil, datagrams: [datagram]))
+    }
+
+    func testReadingIsNotStoppedByTheByteOffset() {
+        // The defect this replaced: the rule used to be `offset == 0`, so a
+        // ClientHello split across two Initial packets was read only as far as
+        // the first. On this Mac that was 172 recognised Initials and no name.
+        XCTAssertTrue(PassOnlyFilterDataProvider.shouldAssembleQUICName(.version1))
+        XCTAssertEqual(
+            assembledName(.version1, datagrams: [Data([0x00, 0x01]), datagram]),
+            "example.com",
+            "a datagram after the first must still be read"
+        )
     }
 
     func testTLSStillWins() {
@@ -101,9 +113,7 @@ final class QUICServerNameWiringTests: XCTestCase {
         record.append(UInt8(hello.count >> 8))
         record.append(UInt8(hello.count & 0xff))
         record.append(hello)
-        XCTAssertNil(PassOnlyFilterDataProvider.serverName(
-            in: record, offset: 0, quicClassification: nil
-        ))
+        XCTAssertNil(TLSClientHello.serverName(in: record))
     }
 }
 

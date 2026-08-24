@@ -11,6 +11,7 @@ const settings = read('apps/agent-macos/Xcode/Host/HubDeliveryController.swift')
 const privacyEn = read('docs/agent-privacy.md');
 const privacyJa = read('docs/agent-privacy.ja.md');
 const provider = read('apps/agent-macos/Sources/EgressViewNetworkExtension/PassOnlyFilterDataProvider.swift');
+const quicInitial = read('apps/agent-macos/Sources/EgressViewAgentCore/QUICInitial.swift');
 
 describe('destination names over QUIC (P3-29)', () => {
   it('復号することを設定画面が隠さない', () => {
@@ -32,18 +33,35 @@ describe('destination names over QUIC (P3-29)', () => {
     assert.match(privacyJa, /会話を読めません/);
   });
 
-  it('復号は最初のdatagramのv1 Initialに限る', () => {
-    // A later datagram is protected with keys an observer does not have, and a
-    // version this does not know would be decrypted with the wrong salt and
-    // reported as malformed -- a worse answer than not looking.
-    assert.match(provider, /guard offset == 0, quicClassification == \.version1 else \{ return nil \}/);
+  it('読む範囲は「最初のメッセージ」であって、byte offsetではない', () => {
+    // This pinned `guard offset == 0` until 2026-08-24, and kept passing after
+    // the shipped code stopped calling the function it was pinning. The rule
+    // that matters is which versions are attempted; where reading stops is the
+    // assembler's bound, and the bound is what keeps it from running forever.
+    assert.match(provider, /static func shouldAssembleQUICName/);
+    assert.doesNotMatch(provider, /guard offset == 0/);
+    assert.match(quicInitial, /public static let maximumDatagrams = \d/);
+  });
+
+  it('ECHの公開名を行き先として見せないと、両言語で書いてある', () => {
+    // Measured on a real Mac: 8 of 521,575 named observations were
+    // `cloudflare-ech.com`. Rare is not a reason to leave it unwritten --
+    // without it, that name reads as the place the traffic went. The agent
+    // cannot detect which names these are either, because Chrome sends the
+    // same extension without using ECH, which is what ECH is for.
+    assert.match(privacyEn, /public name shared by many sites/);
+    assert.match(privacyEn, /cannot tell whether a given name is one of these/);
+    assert.match(privacyJa, /多数のサイトが共有する公開名/);
+    assert.match(privacyJa, /公開名かどうかを判定できません/);
   });
 
   it('安い読み取りを先に試す', () => {
     // TLS puts the name in the clear; deriving a key for a flow that did not
     // need it would be work spent to produce the same answer.
-    const tlsAt = provider.indexOf('TLSClientHello.serverName(in: readBytes)');
-    const quicAt = provider.indexOf('QUICInitial.serverName(inDatagram: readBytes)');
-    assert.ok(tlsAt > 0 && quicAt > 0 && tlsAt < quicAt);
+    // Pinned as the condition rather than as source order: the QUIC attempt
+    // has to be reachable only when the clear-text read already came back
+    // empty, and an ordering check would still pass if that guard were lost.
+    assert.match(provider, /var name = TLSClientHello\.serverName\(in: readBytes\)/);
+    assert.match(provider, /if name == nil, isQUICCandidate \{/);
   });
 });
