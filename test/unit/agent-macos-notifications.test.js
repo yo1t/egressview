@@ -18,10 +18,12 @@ const policy = fs.readFileSync(
   path.join(root, 'apps/agent-macos/Sources/EgressViewAgentCore/AgentNotificationPolicy.swift'),
   'utf8'
 );
-const mainWindow = fs.readFileSync(
-  path.join(root, 'apps/agent-macos/Xcode/Host/ObservationWindowController.swift'),
-  'utf8'
-);
+// Split across files in P3-40; this checks the window's code, not one file.
+const mainWindow = [
+  'ObservationWindowController.swift', 'AgentMainViewModel.swift',
+].map((name) => fs.readFileSync(
+  path.join(root, 'apps/agent-macos/Xcode/Host', name), 'utf8'
+)).join('\n');
 
 describe('macOS Agent notifications', () => {
   it('offers all notification categories in a dedicated settings screen', () => {
