@@ -186,7 +186,8 @@ struct AgentMainView: View {
                             coverage: model.coverage,
                             monitoringStatus: model.monitoringStatus,
                             storage: model.storage,
-                            threats: model.threats
+                            threats: model.threats,
+                            usesRolledUpHistory: model.usesRolledUpHistory
                         )
                         .frame(maxWidth: .infinity)
                         .frame(height: metrics.topHeight)
@@ -712,6 +713,11 @@ struct AgentOverviewPanel: View {
     let monitoringStatus: String
     let storage: ObservationStoreStatistics?
     let threats: ThreatReport
+    /// Whether this period leans on hours whose individual records have aged
+    /// out. The store answered this and the view model published it; nothing
+    /// displayed it, so the connection log for an old period looked empty for
+    /// no stated reason. Found on 2026-08-24 while splitting this file.
+    let usesRolledUpHistory: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -772,6 +778,8 @@ struct AgentOverviewPanel: View {
             // No threat intelligence here on purpose. This agent classifies
             // nothing on its own, and a panel that looked like a verdict would
             // be inventing one.
+            AgentRolledUpHistoryNote(applies: usesRolledUpHistory)
+
             VStack(alignment: .leading, spacing: 5) {
                 Label(
                     L("Packet contents are never collected."),

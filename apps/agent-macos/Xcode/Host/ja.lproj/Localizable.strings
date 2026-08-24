@@ -469,7 +469,7 @@
 "The installer is no longer available. Check again to download it." = "インストーラが見つかりません。もう一度確認してダウンロードしてください。";
 "macOS could not open the installer." = "macOSがインストーラを開けませんでした。";
 "The installer was opened. It stops monitoring, replaces this app, and starts it again." = "インストーラを開きました。監視を停止し、このアプリを置き換えて、起動し直します。";
-"Part of this period is kept as hourly totals. For that part, destinations are shown as addresses, and nothing shorter than an hour is separated out." = "この期間の一部は、1時間ごとの集計として保存されています。その範囲では通信先はアドレスで表示され、1時間より短い区別はできません。";
+"Part of this period is kept as hourly totals. Individual connections there have aged out, so the log and CSV cannot show them and nothing shorter than an hour is separated out. Destinations keep their names." = "この期間の一部は時間単位の集計として保持されています。その部分は個別の通信記録が期限切れで消えているため、通信ログとCSVには出せず、1時間より短い単位には分けられません。通信先の名前は残ります。";
 "Destination names" = "通信先の名前";
 "macOS supplies the name for applications that use its own networking. About half of connections come from applications that do not, including every browser measured — those show as addresses." = "macOSが名前を教えてくれるのは、macOS自身のネットワーク機能を使うアプリの通信だけです。実測では約半数がそれ以外で、ブラウザは全滅でした。それらはアドレスで表示されます。";
 "Read the name from the TLS handshake" = "TLSハンドシェイクから名前を読み取る";

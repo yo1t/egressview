@@ -398,8 +398,12 @@ private final class AgentSettingsViewModel: ObservableObject {
         NSApplication.shared.activate(ignoringOtherApps: true)
         let panel = NSSavePanel()
         panel.title = L("Save a copy before deleting")
+        // Named for what is in it. Passing the epoch as the start produced
+        // `egressview-19700101-0900-to-...`, which is accurate about the range
+        // asked for and useless as a file name.
+        let oldest = (try? store.storageSummary().oldestObservationAt) ?? nil
         panel.nameFieldStringValue = ObservationCSV.suggestedFileName(
-            from: Date(timeIntervalSince1970: 0), to: cutoff ?? Date()
+            from: oldest ?? cutoff ?? Date(), to: cutoff ?? Date()
         )
         panel.allowedContentTypes = [.commaSeparatedText]
         // Rolled-up hours have no individual records left to write. A file

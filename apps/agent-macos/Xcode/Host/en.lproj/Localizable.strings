@@ -467,7 +467,7 @@
 "The installer is no longer available. Check again to download it." = "The installer is no longer available. Check again to download it.";
 "macOS could not open the installer." = "macOS could not open the installer.";
 "The installer was opened. It stops monitoring, replaces this app, and starts it again." = "The installer was opened. It stops monitoring, replaces this app, and starts it again.";
-"Part of this period is kept as hourly totals. For that part, destinations are shown as addresses, and nothing shorter than an hour is separated out." = "Part of this period is kept as hourly totals. For that part, destinations are shown as addresses, and nothing shorter than an hour is separated out.";
+"Part of this period is kept as hourly totals. Individual connections there have aged out, so the log and CSV cannot show them and nothing shorter than an hour is separated out. Destinations keep their names." = "Part of this period is kept as hourly totals. Individual connections there have aged out, so the log and CSV cannot show them and nothing shorter than an hour is separated out. Destinations keep their names.";
 "Destination names" = "Destination names";
 "macOS supplies the name for applications that use its own networking. About half of connections come from applications that do not, including every browser measured — those show as addresses." = "macOS supplies the name for applications that use its own networking. About half of connections come from applications that do not, including every browser measured — those show as addresses.";
 "Read the name from the TLS handshake" = "Read the name from the TLS handshake";
