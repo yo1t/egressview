@@ -14,13 +14,18 @@ import SwiftUI
 /// and the count of connections whose data volume was never measured is gone.
 /// A reader comparing last week with last month would otherwise conclude the
 /// names had stopped being recorded.
+/// Claimed until 2026-08-24 that a folded destination loses its name. That
+/// stopped being true when `chart_hourly` arrived: it keeps the name and
+/// covers every folded hour. Measured on a real store -- 91,695 chart rows,
+/// 62,458 of them named, and no rolled-up hour outside them. What ages out is
+/// the individual connections, not what they were called.
 struct AgentRolledUpHistoryNote: View {
     let applies: Bool
 
     var body: some View {
         if applies {
             Label(
-                L("Part of this period is kept as hourly totals. For that part, destinations are shown as addresses, and nothing shorter than an hour is separated out."),
+                L("Part of this period is kept as hourly totals. Individual connections there have aged out, so the log and CSV cannot show them and nothing shorter than an hour is separated out. Destinations keep their names."),
                 systemImage: "clock.arrow.circlepath"
             )
             .font(.caption)

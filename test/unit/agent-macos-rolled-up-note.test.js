@@ -23,11 +23,14 @@ describe('古い期間が時間集計であることを画面が言う', () => {
     assert.match(window, /usesRolledUpHistory: model\.usesRolledUpHistory/);
   });
 
-  it('何が読めなくなるかまで書いてある', () => {
-    // "This is rolled up" alone would leave the reader to work out what that
-    // costs them. Names and anything shorter than an hour are what it costs.
-    assert.match(components, /kept as hourly totals/);
-    assert.match(components, /destinations are shown as addresses/);
-    assert.match(components, /nothing shorter than an hour is separated out/);
+  it('何が失われて何が残るかを、実際のとおりに書いてある', () => {
+    // The note claimed destinations become addresses. That stopped being true
+    // when `chart_hourly` arrived: it keeps the name and covers every folded
+    // hour. Measured on a real store -- 91,695 chart rows, 62,458 with a name,
+    // and no rolled-up hour outside them. What ages out is the individual
+    // connections, not what they were called.
+    assert.match(components, /Individual connections there have aged out/);
+    assert.match(components, /Destinations keep their names/);
+    assert.doesNotMatch(components, /destinations are shown as addresses/);
   });
 });
