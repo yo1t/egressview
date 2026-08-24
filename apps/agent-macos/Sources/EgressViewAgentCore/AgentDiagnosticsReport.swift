@@ -79,6 +79,10 @@ public struct AgentDiagnosticsReport: Sendable {
         public var lastAcknowledgedAt: Date?
         public var unreadableStateResetAt: Date?
         public var threatIntelSource: String
+        /// What happened to the runs before this one. Empty on a Mac where the
+        /// App Group container could not be opened, which the report says
+        /// elsewhere.
+        public var runHistory: AgentRunHistory
         /// Three states, not two. A sandboxed app cannot read /var/log, and
         /// reporting that as "absent" sends the reader looking for a missing
         /// file instead of at the sandbox.
@@ -91,7 +95,8 @@ public struct AgentDiagnosticsReport: Sendable {
             health: String, lastObservationAt: Date?, storage: ObservationStorageSummary,
             isEnrolledWithHub: Bool, deliveryEnabled: Bool, pendingDeliveryCount: Int,
             oldestPendingAt: Date?, lastAcknowledgedAt: Date?, unreadableStateResetAt: Date?,
-            threatIntelSource: String, installLog: InstallLog
+            threatIntelSource: String, runHistory: AgentRunHistory = AgentRunHistory(),
+            installLog: InstallLog
         ) {
             self.generatedAt = generatedAt
             self.appVersion = appVersion
@@ -111,6 +116,7 @@ public struct AgentDiagnosticsReport: Sendable {
             self.lastAcknowledgedAt = lastAcknowledgedAt
             self.unreadableStateResetAt = unreadableStateResetAt
             self.threatIntelSource = threatIntelSource
+            self.runHistory = runHistory
             self.installLog = installLog
         }
     }
@@ -149,6 +155,54 @@ public struct AgentDiagnosticsReport: Sendable {
         let lines = text.split(whereSeparator: \.isNewline)
         let kept = lines.suffix(installLogLineLimit).joined(separator: "\n")
         return redactAccountNames(kept)
+    }
+
+    /// The runs before this one, as counts and times.
+    ///
+    /// A crashed agent cannot write a report, so this is written *before* the
+    /// crash and read after it. An unexpected ending is not called a crash: a
+    /// force quit and a machine that lost power look exactly the same from
+    /// here, and naming one of them would be a guess presented as a finding.
+    static func renderRuns(_ history: AgentRunHistory, when: (Date?) -> String) -> [String] {
+        // Pads but never truncates. `padding(toLength:)` cuts a longer label
+        // silently, which turned "silent before end" into "silent before en"
+        // -- a label that reads like a typo in a file whose whole job is to be
+        // believed.
+        func row(_ label: String, _ value: String) -> String {
+            let width = 21
+            let gap = label.count >= width ? " " : String(repeating: " ", count: width - label.count)
+            return "  " + label + gap + value
+        }
+        func duration(_ seconds: TimeInterval) -> String {
+            let total = Int(seconds.rounded())
+            if total < 60 { return "\(total)s" }
+            if total < 3600 { return "\(total / 60)m" }
+            return "\(total / 3600)h \((total % 3600) / 60)m"
+        }
+        let previous = history.runs.dropLast()
+        guard !previous.isEmpty else {
+            return [row("recorded", "none -- this is the first run since the record began")]
+        }
+        let unexpected = history.unexpectedEndings()
+        var lines = [
+            row("recorded", "\(previous.count) (most recent \(AgentRunHistory.limit))"),
+            row("ended unexpectedly", "\(unexpected.count)"),
+        ]
+        guard let last = unexpected.first else { return lines }
+        lines.append("")
+        lines.append("  The most recent run that did not shut down cleanly. A crash, a force")
+        lines.append("  quit and a machine that lost power are the same thing from here.")
+        lines.append(row("  started", when(last.startedAt)))
+        lines.append(row("  last alive", when(last.lastHeartbeatAt)))
+        lines.append(row("  ran for", "at least \(duration(last.knownDuration))"))
+        lines.append(row("  build", last.build))
+        if let silence = last.silenceBeforeEnd {
+            lines.append(row("  last observation", when(last.lastObservationAt)))
+            lines.append(row("  silent before end", duration(silence)))
+        } else {
+            lines.append(row("  last observation", "never -- it recorded nothing at all"))
+        }
+        return lines
     }
 
     public func render() -> String {
@@ -202,6 +256,9 @@ public struct AgentDiagnosticsReport: Sendable {
         if let reset = inputs.unreadableStateResetAt {
             lines.append(row("queue reset", "\(when(reset)) -- what it held never reached the Hub"))
         }
+        lines.append("")
+        lines.append("== Previous runs")
+        lines.append(contentsOf: Self.renderRuns(inputs.runHistory, when: when))
         lines.append("")
         lines.append("== Installer log")
         switch inputs.installLog {
