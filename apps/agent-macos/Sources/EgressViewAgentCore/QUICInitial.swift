@@ -42,11 +42,64 @@ public enum QUICInitial {
     static let maximumCryptoBytes = TLSClientHello.maximumInterestingBytes
 
     public static func serverName(inDatagram datagram: Data) -> String? {
-        guard let packet = parseLongHeader(datagram) else { return nil }
-        let keys = InitialKeys(destinationConnectionID: packet.destinationConnectionID)
-        guard let plaintext = decrypt(packet: packet, keys: keys) else { return nil }
-        guard let hello = reassembleCryptoFrames(plaintext) else { return nil }
-        return TLSClientHello.serverName(inHandshake: hello)
+        var assembler = Assembler()
+        if case let .name(name) = assembler.accept(datagram: datagram) { return name }
+        return nil
+    }
+
+    /// A ClientHello that does not fit in one Initial packet.
+    ///
+    /// Measured on this Mac, 2026-08-24: 173 UDP/443 flows produced 172 QUIC v1
+    /// Initial candidates and **not one name**. Chrome's ClientHello carries
+    /// GREASE, ALPN and often ECH, which puts it over the ~1200 bytes an
+    /// Initial datagram holds, so it arrives as CRYPTO frames spread across two
+    /// packets. Reading one datagram and giving up finds a handshake that stops
+    /// mid-extension, and the TLS parser correctly refuses to guess.
+    ///
+    /// Keyed once from the first packet's destination connection ID, which the
+    /// client repeats for the rest of its first flight.
+    public struct Assembler {
+        public enum Outcome: Equatable, Sendable {
+            case name(String)
+            /// A QUIC Initial that did not complete the handshake bytes yet.
+            case needsMore
+            /// Not a client Initial this can read. Nothing more will help.
+            case notInitial
+        }
+
+        /// Two datagrams carry a ClientHello that needs splitting; four is
+        /// room for one that is unusual without holding a flow open for a
+        /// client that is never going to send one.
+        public static let maximumDatagrams = 4
+
+        private var buffer = Data(count: QUICInitial.maximumCryptoBytes)
+        private var highWater = 0
+        private var sawCrypto = false
+        private var datagrams = 0
+
+        public init() {}
+
+        /// Bytes of handshake gathered so far. Counting them is what tells a
+        /// failure to decrypt apart from a ClientHello that is still arriving.
+        public var assembledByteCount: Int { highWater }
+
+        public mutating func accept(datagram: Data) -> Outcome {
+            guard datagrams < Self.maximumDatagrams else { return .notInitial }
+            datagrams += 1
+            guard let packet = QUICInitial.parseLongHeader(datagram) else { return .notInitial }
+            let keys = InitialKeys(destinationConnectionID: packet.destinationConnectionID)
+            guard let plaintext = QUICInitial.decrypt(packet: packet, keys: keys) else {
+                return .notInitial
+            }
+            guard QUICInitial.mergeCryptoFrames(
+                plaintext, into: &buffer, highWater: &highWater, sawCrypto: &sawCrypto
+            ) else { return .notInitial }
+            guard sawCrypto else { return .notInitial }
+            if let name = TLSClientHello.serverName(inHandshake: buffer.prefix(highWater)) {
+                return .name(name)
+            }
+            return datagrams < Self.maximumDatagrams ? .needsMore : .notInitial
+        }
     }
 
     // MARK: - Long header
@@ -222,10 +275,25 @@ public enum QUICInitial {
     /// Offsets are attacker-chosen, so the reassembly buffer is bounded and a
     /// frame reaching past the bound is dropped rather than growing it.
     static func reassembleCryptoFrames(_ plaintext: Data) -> Data? {
-        var reader = Reader(plaintext)
         var buffer = Data(count: maximumCryptoBytes)
         var highWater = 0
         var sawCrypto = false
+        guard mergeCryptoFrames(
+            plaintext, into: &buffer, highWater: &highWater, sawCrypto: &sawCrypto
+        ), sawCrypto else { return nil }
+        return buffer.prefix(highWater)
+    }
+
+    /// Merges one packet's CRYPTO frames into handshake bytes gathered so far.
+    ///
+    /// Offsets are attacker-chosen, so the buffer is fixed and a frame reaching
+    /// past it is dropped rather than growing it. Returns false only when the
+    /// frames could not be parsed at all.
+    @discardableResult
+    static func mergeCryptoFrames(
+        _ plaintext: Data, into buffer: inout Data, highWater: inout Int, sawCrypto: inout Bool
+    ) -> Bool {
+        var reader = Reader(plaintext)
 
         while let type = reader.byte() {
             switch type {
@@ -236,7 +304,7 @@ public enum QUICInitial {
             case 0x06:  // CRYPTO
                 guard let offset = reader.variableLengthInteger(),
                       let length = reader.variableLengthInteger(),
-                      let payload = reader.take(Int(length)) else { return nil }
+                      let payload = reader.take(Int(length)) else { return false }
                 sawCrypto = true
                 let start = Int(offset)
                 guard start >= 0, start + payload.count <= maximumCryptoBytes else { continue }
@@ -249,10 +317,10 @@ public enum QUICInitial {
                 // Any other frame type in a client Initial means this is not
                 // the packet being looked for, or the parse has gone wrong.
                 // Stopping is better than guessing at frame lengths.
-                return sawCrypto ? buffer.prefix(highWater) : nil
+                return true
             }
         }
-        return sawCrypto ? buffer.prefix(highWater) : nil
+        return true
     }
 
     // MARK: - Reader
@@ -295,5 +363,50 @@ public enum QUICInitial {
             for b in rest { value = (value << 8) | UInt64(b) }
             return value
         }
+    }
+}
+
+/// The reassembly in progress for each flow whose first flight is still
+/// arriving.
+///
+/// Kept small on purpose. A flow that never completes a ClientHello is dropped
+/// by its own assembler after a few datagrams, and `finish` removes it the
+/// moment the flow stops being inspected -- so this cannot become the place
+/// where memory quietly accumulates for as long as the extension runs.
+public struct QUICInitialAssemblerStore {
+    /// More concurrent QUIC handshakes than this at one instant means
+    /// something other than a browser is talking, and the oldest is the one
+    /// least likely to still be arriving.
+    public static let maximumFlows = 64
+
+    private var assemblers: [String: QUICInitial.Assembler] = [:]
+    private var order: [String] = []
+
+    public init() {}
+
+    public var count: Int { assemblers.count }
+
+    public mutating func accept(datagram: Data, flowID: String) -> QUICInitial.Assembler.Outcome {
+        var assembler = assemblers[flowID] ?? QUICInitial.Assembler()
+        if assemblers[flowID] == nil {
+            order.append(flowID)
+            if order.count > Self.maximumFlows, let oldest = order.first {
+                order.removeFirst()
+                assemblers.removeValue(forKey: oldest)
+            }
+        }
+        let outcome = assembler.accept(datagram: datagram)
+        switch outcome {
+        case .needsMore:
+            assemblers[flowID] = assembler
+        case .name, .notInitial:
+            finish(flowID: flowID)
+        }
+        return outcome
+    }
+
+    public mutating func finish(flowID: String) {
+        guard assemblers.removeValue(forKey: flowID) != nil else { return }
+        order.removeAll { $0 == flowID }
     }
 }

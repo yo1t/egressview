@@ -167,3 +167,83 @@ final class QUICInitialTests: XCTestCase {
         XCTAssertEqual(out?.count ?? 0, 0)
     }
 }
+
+extension QUICInitialTests {
+    /// The ClientHello out of the RFC 9001 vector, on its own.
+    private var rfc9001Handshake: Data {
+        // The plaintext frames begin `06 00 40f1` -- CRYPTO, offset 0,
+        // length 0x00f1. Everything after that header is the handshake.
+        bytes(Self.unprotectedFrames).dropFirst(4).prefix(0xf1)
+    }
+
+    private func cryptoFrame(offset: Int, _ payload: Data) -> Data {
+        var frame = Data([0x06])
+        frame.append(contentsOf: [UInt8(0x40 | (offset >> 8)), UInt8(offset & 0xff)])
+        frame.append(contentsOf: [UInt8(0x40 | (payload.count >> 8)), UInt8(payload.count & 0xff)])
+        frame.append(payload)
+        return frame
+    }
+
+    /// A ClientHello too big for one Initial packet.
+    ///
+    /// Measured on a real Mac 2026-08-24: **172 QUIC v1 Initial candidates and
+    /// zero names.** Chrome's ClientHello carries GREASE, ALPN and often ECH,
+    /// which puts it past the ~1200 bytes an Initial datagram holds, so it
+    /// arrives as CRYPTO frames spread over two packets.
+    func testHalfAClientHelloYieldsNoName() throws {
+        let hello = rfc9001Handshake
+        let firstHalf = cryptoFrame(offset: 0, hello.prefix(hello.count / 2))
+
+        var buffer = Data(count: QUICInitial.maximumCryptoBytes)
+        var highWater = 0
+        var sawCrypto = false
+        XCTAssertTrue(QUICInitial.mergeCryptoFrames(
+            firstHalf, into: &buffer, highWater: &highWater, sawCrypto: &sawCrypto
+        ))
+        XCTAssertTrue(sawCrypto, "the frame was read")
+        XCTAssertNil(
+            TLSClientHello.serverName(inHandshake: buffer.prefix(highWater)),
+            "a handshake that stops mid-extension must not produce a name"
+        )
+    }
+
+    func testTheNameAppearsOnceTheSecondPacketIsMergedIn() throws {
+        let hello = rfc9001Handshake
+        let cut = hello.count / 2
+        var buffer = Data(count: QUICInitial.maximumCryptoBytes)
+        var highWater = 0
+        var sawCrypto = false
+
+        for frame in [cryptoFrame(offset: 0, hello.prefix(cut)),
+                      cryptoFrame(offset: cut, hello.suffix(from: hello.startIndex + cut))] {
+            XCTAssertTrue(QUICInitial.mergeCryptoFrames(
+                frame, into: &buffer, highWater: &highWater, sawCrypto: &sawCrypto
+            ))
+        }
+        XCTAssertEqual(highWater, hello.count)
+        XCTAssertEqual(TLSClientHello.serverName(inHandshake: buffer.prefix(highWater)), "example.com")
+    }
+
+    func testAFinishedFlowIsDroppedRatherThanKept() throws {
+        // Otherwise this store is where memory quietly accumulates for as long
+        // as the extension runs.
+        var store = QUICInitialAssemblerStore()
+        let outcome = store.accept(
+            datagram: bytes(Self.protectedClientInitial), flowID: "a"
+        )
+        XCTAssertEqual(outcome, .name("example.com"))
+        XCTAssertEqual(store.count, 0)
+    }
+
+    func testAssemblyGivesUpRatherThanWaitingForever() throws {
+        var assembler = QUICInitial.Assembler()
+        for _ in 0..<QUICInitial.Assembler.maximumDatagrams {
+            _ = assembler.accept(datagram: Data([0x00, 0x01]))
+        }
+        XCTAssertEqual(
+            assembler.accept(datagram: bytes(Self.protectedClientInitial)),
+            .notInitial,
+            "past the bound, even a real Initial is not looked at"
+        )
+    }
+}

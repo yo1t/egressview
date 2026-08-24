@@ -53,6 +53,12 @@ final class FullMonitoringXPCServer: NSObject, NSXPCListenerDelegate, FullMonito
                     byteCount: byteCount,
                     classification: classification
                 )
+            case let .assembly(outcome):
+                switch outcome {
+                case .name: quicDiagnostics.recordServerNameFound()
+                case .needsMore: quicDiagnostics.recordAwaitingMoreDatagrams()
+                case .notInitial: break
+                }
             }
         }
     }

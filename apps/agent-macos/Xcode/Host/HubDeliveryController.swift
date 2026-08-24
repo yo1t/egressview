@@ -939,7 +939,7 @@ private struct AgentSettingsView: View {
                 if model.readsServerName {
                     if let diagnostics = model.quicDiagnostics {
                         Text(L(
-                            "QUIC check since extension start: UDP/443 flows %lld · data callbacks %lld (offset 0: %lld) · inspected bytes %lld · Initial candidates %lld (v1 %lld / v2 %lld) · other long headers %lld. No packet content or identity is retained.",
+                            "QUIC check since extension start: UDP/443 flows %lld · data callbacks %lld (offset 0: %lld) · inspected bytes %lld · Initial candidates %lld (v1 %lld / v2 %lld) · other long headers %lld · names read %lld (waiting for a second datagram %lld). No packet content or identity is retained.",
                             diagnostics.udp443Flows,
                             diagnostics.outboundCallbacks,
                             diagnostics.zeroOffsetCallbacks,
@@ -947,7 +947,9 @@ private struct AgentSettingsView: View {
                             diagnostics.initialCandidates,
                             diagnostics.version1InitialCandidates,
                             diagnostics.version2InitialCandidates,
-                            diagnostics.unsupportedVersionLongHeaders
+                            diagnostics.unsupportedVersionLongHeaders,
+                            diagnostics.serverNamesFound,
+                            diagnostics.awaitingMoreDatagrams
                         ))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)

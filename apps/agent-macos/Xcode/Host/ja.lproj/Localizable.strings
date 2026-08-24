@@ -210,7 +210,7 @@
 "Six-character enrollment code" = "6文字の登録コード";
 "Sent metadata summary" = "送信する情報：ホスト名、ローカル/宛先アドレスとポート、プロトコル、プロセス名とID、bundle ID、時刻、バイト数、収集方式、信頼度。";
 "Not sent metadata summary" = "送信しない情報：パケット内容、認証情報、コマンドライン、アカウント名、ファイルパス、ブラウザURL、閲覧履歴。";
-"QUIC check since extension start: UDP/443 flows %lld · data callbacks %lld (offset 0: %lld) · inspected bytes %lld · Initial candidates %lld (v1 %lld / v2 %lld) · other long headers %lld. No packet content or identity is retained." = "Extension起動後のQUIC確認：UDP/443フロー %lld・データcallback %lld（offset 0：%lld）・検査byte %lld・Initial候補 %lld（v1 %lld / v2 %lld）・その他long header %lld。packet内容や識別情報は保持しません。";
+"QUIC check since extension start: UDP/443 flows %lld · data callbacks %lld (offset 0: %lld) · inspected bytes %lld · Initial candidates %lld (v1 %lld / v2 %lld) · other long headers %lld · names read %lld (waiting for a second datagram %lld). No packet content or identity is retained." = "Extension起動後のQUIC確認：UDP/443フロー %lld・データcallback %lld（offset 0：%lld）・検査byte %lld・Initial候補 %lld（v1 %lld / v2 %lld）・その他long header %lld・**読めた名前 %lld**（2つ目のデータグラム待ち %lld）。packet内容や識別情報は保持しません。";
 "Press Refresh to read aggregate QUIC counters from network monitoring." = "「更新」を押すとネットワーク監視からQUIC集計値を取得します。";
 "Refresh QUIC check counters" = "QUIC確認カウンタを更新";
 "Confirm metadata delivery" = "上記の情報をこのMacから送信することを確認しました";
