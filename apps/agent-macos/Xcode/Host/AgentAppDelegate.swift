@@ -28,6 +28,11 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     private var threatAvailabilityObserver: AnyCancellable?
     private var updateAvailabilityObserver: AnyCancellable?
     private let chartFoldTimer = PeriodicWork()
+    private let runHeartbeatTimer = PeriodicWork()
+    /// Marks that this run started, so that a run which never gets to mark its
+    /// own end is recognisable afterwards. A crashed agent cannot write a
+    /// report; this is written before it needs one. (P3-41)
+    private let runRecorder = AgentRunRecorder.inAppGroup()
     private var activity: NSObjectProtocol?
     private lazy var hubDelivery = HubDeliveryController()
     private lazy var updateController = AgentUpdateController(
@@ -112,6 +117,28 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    /// Records this run, and keeps a heartbeat so a later report can say how
+    /// far the previous one got before it stopped.
+    ///
+    /// The heartbeat carries the newest observation time as well, because a run
+    /// that was alive but had stopped recording and a run that was recording
+    /// until it died are the same length and completely different faults.
+    /// 2026-08-18 was the first kind and took thirteen hours to notice.
+    private func startRunHeartbeat() {
+        guard let runRecorder else { return }
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        runRecorder.beginRun(build: build ?? "unknown")
+        // A minute is fine-grained enough to bound the end of a run and cheap
+        // enough to ignore: one small atomic write, off the main thread.
+        runHeartbeatTimer.start(every: 60) { [weak self] in
+            guard let self else { return }
+            DispatchQueue.global(qos: .utility).async {
+                let newest = try? self.store?.storageSummary().newestObservationAt
+                runRecorder.heartbeat(lastObservationAt: newest ?? nil)
+            }
+        }
+    }
+
     private func startChartFolding() {
         foldCharts()
         chartFoldTimer.start(every: 300) { [weak self] in self?.foldCharts() }
@@ -134,6 +161,10 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Says goodbye. Everything that does not reach this line is, by that
+        // absence, an unexpected ending -- which is the only way a process that
+        // died can leave a trace of having died.
+        runRecorder?.endRun()
         // Closes the current stretch of coverage. A session left open would
         // claim the app was watching for however long it was quit.
         controller.endCoverageForShutdown()
@@ -159,6 +190,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         applyRetentionPolicy()
+        startRunHeartbeat()
         controller.restoreMonitoringState()
         // Asks macOS whether monitoring is really running, rather than assuming
         // that installing it was enough.

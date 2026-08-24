@@ -139,6 +139,9 @@ final class AgentDiagnosticsExporter {
             lastAcknowledgedAt: queue?.lastAcknowledgedAt,
             unreadableStateResetAt: queue?.unreadableStateResetAt,
             threatIntelSource: String(describing: threatIntel.activeSource),
+            // Read fresh rather than held: the export exists to describe a
+            // fault, and a copy taken at launch would predate it.
+            runHistory: AgentRunRecorder.inAppGroup()?.snapshot() ?? AgentRunHistory(),
             installLog: readInstallLog()
         )
     }
