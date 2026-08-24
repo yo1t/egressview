@@ -511,6 +511,14 @@ describe('collection source scope', () => {
       ) VALUES (?, ?, ?, 'udp', ?, ?, ?, ?, ?, ?, ?, ?, ?, '30', '40', 'network-extension', 'exact', ?)`)
         .run('agent-a', 'agent-only', 'batch-1', '192.0.2.30', 52000, '203.0.113.53', 53,
           101, 'mDNSResponder', null, now, now, now);
+      writer.prepare(`INSERT INTO agent_observations (
+        agentId, observationId, batchId, networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, collector, confidence, receivedAt
+      ) VALUES (?, ?, ?, 'udp', ?, ?, ?, ?, ?, ?, ?, ?, ?, '30', '40', 'network-extension', 'exact', ?)`)
+        .run('agent-a', 'agent-only-old', 'batch-1', '192.0.2.30', 52001, '203.0.113.53', 53,
+          102, 'OldResolver', null, now - 60_000, now - 60_000, now);
 
       const routerRows = history.queryByTimeRange(null, null, {
         sourceScope: { sourceKind: 'router', sourceId: 'router-a' },
@@ -523,6 +531,9 @@ describe('collection source scope', () => {
       assert.equal(agentRows.find(row => row.dst === '203.0.113.53').process, 'mDNSResponder');
       assert.equal(history.countByTimeRange(null, null, { sourceScope: agentScope }), 2);
       assert.equal(history.summarizeByTimeRange(null, null, { sourceScope: agentScope }).total, 2);
+      const currentAgentRows = history.queryByTimeRange(now - 1000, now + 1000, { sourceScope: agentScope });
+      assert.equal(currentAgentRows.find(row => row.dst === '203.0.113.53').firstSeen, now);
+      assert.equal(currentAgentRows.find(row => row.dst === '203.0.113.53').process, 'mDNSResponder');
       assert.deepEqual(new Set(history.listSourceDeviceKeys(agentScope).map(row => row.src)),
         new Set(['192.0.2.10', '192.0.2.30']));
 
