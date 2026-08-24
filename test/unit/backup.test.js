@@ -172,6 +172,16 @@ describe('createBackup', () => {
     backup._setPathsForTest(fakeDb, backupDir);
   });
 
+  it('does not create a partial backup when free space is below the safe minimum', async () => {
+    try {
+      backup._setFreeBytesForTest(0);
+      assert.equal(await backup.createBackup(), null);
+      assert.equal(backup.listBackups().length, 0);
+    } finally {
+      backup._setFreeBytesForTest(null);
+    }
+  });
+
   it('creates a backup file and returns its name', async () => {
     const name = await backup.createBackup();
     assert.ok(typeof name === 'string');
