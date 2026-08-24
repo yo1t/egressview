@@ -9,7 +9,8 @@ const root = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const store = read('apps/agent-macos/Sources/EgressViewAgentCore/ObservationStore.swift');
 const atlas = read('apps/agent-macos/Sources/EgressViewAgentCore/WorldAtlas.swift');
-const globe = read('apps/agent-macos/Xcode/Host/ObservationWindowController.swift');
+// The globe moved out of ObservationWindowController.swift in P3-40.
+const globe = read('apps/agent-macos/Xcode/Host/AgentGlobeChart.swift');
 
 describe('macOS Agent all-time country history', () => {
   it('uses a bounded country summary and keeps unresolved addresses separate', () => {

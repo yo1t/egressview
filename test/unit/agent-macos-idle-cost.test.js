@@ -7,7 +7,14 @@ const { describe, it } = require('node:test');
 
 const hostDir = path.join(__dirname, '..', '..', 'apps/agent-macos/Xcode/Host');
 const read = (f) => fs.readFileSync(path.join(hostDir, f), 'utf8');
-const window = read('ObservationWindowController.swift');
+// The observation window is several files since P3-40; the assertions below
+// are about the window's code, not about which file holds it.
+const windowSources = [
+  'ObservationWindowController.swift', 'AgentMainViewModel.swift',
+  'AgentChartComponents.swift', 'AgentTimelineChart.swift',
+  'AgentGlobeChart.swift', 'AgentSankeyChart.swift', 'AgentThreatPanel.swift',
+];
+const window = windowSources.map(read).join('\n');
 const collector = read('FullMonitoringCollector.swift');
 const appDelegate = read('AgentAppDelegate.swift');
 const settings = read('HubDeliveryController.swift');
