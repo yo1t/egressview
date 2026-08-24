@@ -2,6 +2,7 @@
 
 function createHealthState() {
   let ready = false;
+  const degraded = new Map();
 
   return {
     markReady() {
@@ -10,14 +11,27 @@ function createHealthState() {
     markNotReady() {
       ready = false;
     },
+    markDegraded(component, reason = 'unavailable') {
+      degraded.set(String(component), String(reason));
+    },
+    clearDegraded(component) {
+      degraded.delete(String(component));
+    },
     isReady() {
-      return ready;
+      return ready && degraded.size === 0;
     },
     liveness() {
       return { status: 'ok' };
     },
     readiness() {
-      return { status: ready ? 'ready' : 'not_ready' };
+      if (!ready) return { status: 'not_ready' };
+      if (degraded.size > 0) {
+        return {
+          status: 'degraded',
+          components: [...degraded.entries()].map(([component, reason]) => ({ component, reason })),
+        };
+      }
+      return { status: 'ready' };
     },
   };
 }

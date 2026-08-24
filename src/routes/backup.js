@@ -5,6 +5,9 @@ const { Router } = require('express');
 const { z } = require('zod');
 const path = require('path');
 const fs   = require('fs');
+const os = require('os');
+const { Transform } = require('stream');
+const { pipeline } = require('stream/promises');
 const { parseRequest } = require('../http-validation');
 const logger = require('../logger');
 
@@ -26,15 +29,15 @@ const backupPruneJobSchema = z.object({ jobId: z.string().uuid() }).strict();
  *   requireAdmin,
  *   backup, history,
  *   runtime,         // for setKnownMacs
- *   appRoot: string  // __dirname of server.js
- * }} ctx
+   * }} ctx
  */
 module.exports = function backupRoutes(ctx) {
   const {
     requireAdmin, backup, history, runtime, devices, enrichment, beacons,
-    sessions, authAudit, apiIdentities, agentIdentities, agentIngest, io, appRoot,
+    sessions, authAudit, apiIdentities, agentIdentities, agentIngest, io,
   } = ctx;
   const router = Router();
+  let uploadInProgress = false;
 
   function closeDbConnections() {
     history.closeDb();
@@ -112,46 +115,60 @@ module.exports = function backupRoutes(ctx) {
     }
   });
 
-  router.post('/backup/upload', requireAdmin, (req, res) => {
-    const chunks  = [];
-    let received  = 0;
-    let aborted   = false;
+  router.post('/backup/upload', requireAdmin, async (req, res) => {
+    const declaredBytes = Number(req.get('content-length'));
+    if (Number.isFinite(declaredBytes) && declaredBytes > UPLOAD_MAX_BYTES) {
+      req.resume();
+      return res.status(413).json({ error: `File too large (max ${UPLOAD_MAX_BYTES / 1024 / 1024}MB)` });
+    }
+    if (uploadInProgress) {
+      req.resume();
+      return res.status(409).json({ error: 'A backup upload or restore is already running' });
+    }
 
-    req.on('data', chunk => {
-      if (aborted) return;
-      received += chunk.length;
-      if (received > UPLOAD_MAX_BYTES) {
-        aborted = true;
-        res.status(413).json({ error: `File too large (max ${UPLOAD_MAX_BYTES / 1024 / 1024}MB)` });
-        req.resume();
-        return;
-      }
-      chunks.push(chunk);
-    });
+    uploadInProgress = true;
+    let received = 0;
+    let header = Buffer.alloc(0);
+    let tempDir = null;
+    try {
+      tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'egressview-upload-'));
+      await fs.promises.chmod(tempDir, 0o700);
+      const tempPath = path.join(tempDir, `${crypto.randomBytes(8).toString('hex')}.db`);
+      const meter = new Transform({
+        transform(chunk, _encoding, callback) {
+          received += chunk.length;
+          if (received > UPLOAD_MAX_BYTES) {
+            const error = new Error('upload too large');
+            error.code = 'UPLOAD_TOO_LARGE';
+            return callback(error);
+          }
+          if (header.length < 16) header = Buffer.concat([header, chunk]).subarray(0, 16);
+          callback(null, chunk);
+        },
+      });
+      await pipeline(req, meter, fs.createWriteStream(tempPath, { flags: 'wx', mode: 0o600 }));
 
-    req.on('end', async () => {
-      if (aborted) return;
-      const tempPath = path.join(appRoot, `.egressview-upload-temp-${crypto.randomBytes(4).toString('hex')}.db`);
-      try {
-        const buf = Buffer.concat(chunks);
-        if (buf.length < 100) return res.status(400).json({ error: 'File too small' });
-        if (!buf.slice(0, 16).equals(Buffer.from('SQLite format 3\0')))
-          return res.status(400).json({ error: 'Invalid database file' });
-        await fs.promises.writeFile(tempPath, buf);
-        await backup.restoreFromFile(tempPath, {
-          beforeReplace: closeDbConnections,
-          afterReplace: afterRestore,
-          beforeRollback: closeDbConnections,
-          afterRollback: afterRestore,
-        });
-        res.json({ success: true, message: 'Restored from uploaded file. Restart recommended.' });
-      } catch (e) {
-        logger.error('[backup] upload restore error:', e.message);
-        res.status(500).json({ error: 'Restore failed. Check server logs.' });
-      } finally {
-        await fs.promises.unlink(tempPath).catch(() => {});
+      if (received < 100) return res.status(400).json({ error: 'File too small' });
+      if (!header.equals(Buffer.from('SQLite format 3\0'))) {
+        return res.status(400).json({ error: 'Invalid database file' });
       }
-    });
+      await backup.restoreFromFile(tempPath, {
+        beforeReplace: closeDbConnections,
+        afterReplace: afterRestore,
+        beforeRollback: closeDbConnections,
+        afterRollback: afterRestore,
+      });
+      res.json({ success: true, message: 'Restored from uploaded file. Restart recommended.' });
+    } catch (e) {
+      if (e.code === 'UPLOAD_TOO_LARGE') {
+        return res.status(413).json({ error: `File too large (max ${UPLOAD_MAX_BYTES / 1024 / 1024}MB)` });
+      }
+      logger.error('[backup] upload restore error:', e.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Restore failed. Check server logs.' });
+    } finally {
+      uploadInProgress = false;
+      if (tempDir) await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
   });
 
   router.post('/backup/config', requireAdmin, (req, res) => {

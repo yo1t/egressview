@@ -376,7 +376,7 @@ async function _doLookupRdap(ip, generation = rdapGeneration) {
     if (generation === rdapGeneration) {
       rdapCache.set(ip, result);
       _persistRdap(ip, result);
-      logger.info(`[rdap] ${ip} → ${country} / ${org}`);
+      logger.info(`[rdap] lookup complete → ${country} / ${org}`);
     }
     recordApiOk('rdap');
     return result;

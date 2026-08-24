@@ -125,7 +125,8 @@ describe('auth-sessions: ログイン', () => {
     const { status, body } = await req(makeApp(ctx), 'POST', '/api/auth/login', { body: GOOD });
     assert.equal(status, 200);
     assert.equal(body.success, true);
-    assert.ok(body.token);
+    assert.equal(body.token, undefined);
+    assert.equal(body.expiresAt, 123);
   });
 
   it('ローカル復旧ログインは常に admin ロールになる', async () => {

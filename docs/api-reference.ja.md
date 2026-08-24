@@ -127,7 +127,7 @@ EgressViewには、Yamaha/Ciscoを混在して最大10台登録できます。
 - `POST /api/backup/create`は整合性のあるSQLite snapshotを作成・検証します。
 - `GET /api/backup/download/:name`は指定generationをdownloadします。
 - `POST /api/backup/restore`は`{ "name": "..." }`を使います。
-- `POST /api/backup/upload`はmultipartではなく、最大100 MBのSQLite fileをraw bodyで受け取ります。
+- `POST /api/backup/upload`はmultipartではなく、最大100 MBのSQLite fileをraw bodyで受け取ります。owner限定の一時fileへstreamし、restore uploadは同時1件だけを許可します。重複要求には`409`を返します。
 - `POST /api/backup/config`は正の`intervalHours`、2以上の`maxGenerations`、0以上の`maxBackupBytes`（`0`は上限無効）、booleanの`autoPrune`を受け取ります。自動pruneは既定で無効です。
 - `POST /api/backup/prune`は`{ "execute": false }`で検証付きdry-run、`{ "execute": true }`で確認済みcleanupを開始し、worker jobを含む`202`を返します。整合性検証はmain event loop外で動作するため、収集とHTTP応答を継続します。同時実行は1件だけで、重複要求には`409`を返します。
 - `GET /api/backup/prune/:jobId`はjob状態（`running`、`cancelling`、`timing_out`、`completed`、`cancelled`、`timed_out`、`failed`）、進捗、完了後の計画／結果を返します。`DELETE /api/backup/prune/:jobId`は安全なcancelを要求します。通常2世代と最新の検証済みmigration世代を常に残し、破損・未検証・変更済み・一時ファイルは削除しません。
@@ -135,7 +135,7 @@ EgressViewには、Yamaha/Ciscoを混在して最大10台登録できます。
 ## プロセスhealth
 
 - `GET /healthz`は認証不要・cache無効のliveness確認で、Node.js event loopが応答できる場合だけ`{ "status": "ok" }`を返します。
-- `GET /readyz`は認証不要・cache無効のreadiness確認です。設定とDB bootstrap完了前は`503`と`{ "status": "not_ready" }`、完了後は`200`と`{ "status": "ready" }`を返します。router、DB、認証情報は公開しません。
+- `GET /readyz`は認証不要・cache無効のreadiness確認です。設定とDB bootstrap完了前は`503`と`{ "status": "not_ready" }`、完了後は`200`と`{ "status": "ready" }`を返します。必須の監査storeへの書き込みが失敗すると、復旧まで詳細を限定した`503` `degraded`応答になります。router、DB path、例外文、認証情報は公開しません。
 
 ## AIプロバイダー設定
 
@@ -152,6 +152,7 @@ AI洞察はローカル集計を常時表示し、利用者が明示的に実行
 - `GET /api/ai/usage/monthly`はbrowserの`timezoneOffset`（分）を受け取り、現地暦の今月・先月について呼び出し回数とtoken合計を返します。応答の`pricing`にはcatalog version、基準日、根拠URLを含みます。`pricedTokens`、`unpricedTokens`、model別`unpricedModels`により、概算USDが価格確認済み分だけの部分合計である場合を明示します。成功したOllama / Anthropic / OpenAI / Bedrock呼び出しはprovider/modelと呼び出し時点の価格表version・単価をv7 SQLiteへ追記するため、料金表更新後も過去月を再計算しません。未知model料金の`unknownPriceRequests`とproviderがusageを返さなかった`usageMissingRequests`を区別し、0 USDと誤表示しません。Bedrock Guardrailsなどの追加料金は含みません。会話履歴取得時はassistant回答へ同じrequest IDの`usageInputTokens` / `usageOutputTokens` / `usageTotalTokens` / `estimatedCostUsd` / `pricingVersion`を付加し、記録開始前の履歴はprovider/modelとnullのusageだけを返します。UIは英語で`$`、日本語で明示的な`USD`表記を使い、為替換算しません。
 - `GET /api/ai/pricing/diagnostics`は`timezoneOffset`を受け取り、選択中modelのcatalog状態と今月・先月の未価格model別usageを返します。model IDと使用量だけを扱い、APIキー、prompt、通信内容は公開しません。
 - `POST /api/ai/chat`は最大4,000文字の`message`、期間、任意の`conversationId`と`requestId`を受け付けます。user行をAI呼び出し前にv6 SQLiteへ追記し、完了後にassistant行、失敗時は本文を含まない失敗行を追記します。同じ`requestId + role`は重複しません。
+- 全生成経路はprovider呼び出し前にUTC日単位の永続budgetを予約します。principal/providerごとのrequest・記録token上限の既定値は`.env.example`に記載し、到達時は`429`、provider失敗もrequest 1回として記録します。
 - `GET /api/ai/conversations`は最大100会話と保存件数・本文bytesを返します。`GET /api/ai/conversations/:id`は最大500メッセージを追記順に返し、`DELETE /api/ai/conversations/:id`だけが会話を明示削除します。再起動や設定変更で既存行を更新・truncateしません。
 
 providerは初期状態で無効です。Anthropic/OpenAIは固定の公式API endpointを使い、任意HTTP(S) endpointを設定できるのはOllamaだけです。BedrockはリージョンとConverse APIを使い、認証はAWS SDKのdefault credential chainに委譲します（キー入力・保存なし）。Bedrock対応は通常依存（`@aws-sdk/client-bedrock-runtime`と`@aws-sdk/client-bedrock`）として同梱され、追加インストールは不要です。詳細は`docs/setup-bedrock.ja.md`を参照してください。

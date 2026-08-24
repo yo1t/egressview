@@ -140,7 +140,10 @@ module.exports = function authSessionRoutes(ctx) {
     }
     logger.info(`[auth] Login OK (session ${session.id}: ${deviceLabel || 'unknown device'})`);
     audit(req, 'login', 'success', { sessionId: Number(session.id) });
-    res.json({ success: true, token: session.token, expiresAt: session.expiresAt });
+    // The bearer token lives only in the HttpOnly cookie. Returning the same
+    // value in JSON would make it readable to browser JavaScript and defeat
+    // the main XSS containment property of the cookie.
+    res.json({ success: true, expiresAt: session.expiresAt });
   });
 
   router.post('/auth/logout', requireAdmin, (req, res) => {

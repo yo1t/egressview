@@ -65,7 +65,7 @@ Fifty-eight PRs merged (#213--#270), plus #271 after the measurement commit. One
 
 ### Open risks
 
-- **Low, supply chain**: v2.0.0 and v2.0.1 remain without assets and always will; they are recorded as such in `release-signing/unsigned-releases.json` and superseded by the signed 2.0.2. **The cause has been addressed**: releasing is now one command that uploads to a draft, verifies what the release page serves, and only then publishes, with a workflow gate behind it on publish, on edit, and weekly. The agent `.pkg` releases are notarised and stapled by Apple, which is a real and independently checkable signature, but they carry no checksum or detached signature of the project's own.
+- **Low, historical supply chain**: v2.0.0 and v2.0.1 remain unsigned; v1.9.0 and v2.0.2 are signed but carry macOS extended attributes rejected by the current package policy. These pre-policy facts are typed and recorded in the legacy-named `release-signing/unsigned-releases.json`. **The cause has been addressed**: v2.0.3's downloaded archive passes the current signature, independent fingerprint, and packaging checks, and releasing is now one command that verifies a draft before publishing. The agent `.pkg` releases are notarised and stapled by Apple, but carry no project-specific checksum or detached signature.
 - **Low, new attack surface**: the agent ingest API remains a new authenticated write path — permission-gated, doubly validated, idempotent, rate-limited — and should stay behind the same transport protections as the rest of the API.
 - **Low, agent diagnostics**: there is no crash reporting and no structured diagnostic bundle. When the agent misbehaves on a user's machine, the recovery procedure is a person reading logs over the user's shoulder.
 - **Low, operational**: the four hardware/external-service integration files are still not part of the default CI workflow.
@@ -96,7 +96,7 @@ Fifty-eight PRs merged (#213--#270), plus #271 after the measurement commit. One
 | Installed agent, Gatekeeper | `spctl` **accepted, source = Notarized Developer ID** |
 | Installed agent, hardened runtime | `CodeDirectory flags=0x10000(runtime)`, secure timestamp present |
 | Installed agent, notarisation ticket | `stapler validate` succeeded |
-| **Published release verification** | **v2.0.2 carries archive + checksum + detached signature + public key.** Signed from the `v2.0.2` tag with KMS `egressview-release-2026`; **the four assets were downloaded from the release page and verified there**: `shasum -c` OK, `openssl pkeyutl -verify` Signature Verified Successfully, and the downloaded public key's fingerprint matches the DNS TXT trust anchor served under separate credentials. Three tamper cases (archive, checksum, signature) each exit non-zero. v2.0.0 and v2.0.1 remain without assets. Agent `.pkg` releases carry the notarised package only |
+| **Published release verification** | **v2.0.3's downloaded archive passes the current verifier**: archive, checksum, detached signature, public key, and the independently served DNS fingerprint all agree. v1.9.0/v2.0.2 are recorded pre-policy packaging exceptions because their signed archives carry rejected extended attributes; v2.0.0/v2.0.1 remain unsigned. Agent `.pkg` releases carry the notarised package only |
 
 ### Codebase Metrics
 

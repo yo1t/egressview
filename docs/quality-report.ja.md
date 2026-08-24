@@ -65,7 +65,7 @@
 
 ### 残存リスク
 
-- **Low・サプライチェーン**: v2.0.0とv2.0.1は資産なしのままで、今後もそうです。`release-signing/unsigned-releases.json`に理由付きで記録され、署名済みの2.0.2に置き換えられています。**原因には対処済み**です。リリースはdraftへアップロードし、リリースページが配信するものを検証してから公開に切り替える1コマンドになり、その後ろに公開時・編集時・週次のワークフローゲートがあります。エージェントの`.pkg`はAppleによりnotarize・stapleされており、これは実在し独立に検証できる署名ですが、プロジェクト自身のチェックサムやdetached signatureは付いていません。
+- **Low・過去のサプライチェーン**: v2.0.0とv2.0.1は未署名のままです。v1.9.0とv2.0.2は署名済みですが、現在のパッケージ方針が拒否するmacOS拡張属性を含みます。これらの方針発効前の事実は、旧名を維持した`release-signing/unsigned-releases.json`に種別と理由付きで記録しています。**原因には対処済み**で、v2.0.3の公開アーカイブは現在の署名・独立fingerprint・パッケージ検証を通過します。エージェントの`.pkg`はAppleによりnotarize・stapleされていますが、プロジェクト独自のチェックサムやdetached signatureは付いていません。
 - **Low・新しい攻撃面**: エージェントのingest APIは引き続き新しい認証付き書き込み経路です。権限gate、二重検証、冪等、レート制限がありますが、APIの他部分と同じ経路上の保護下に置くべきです。
 - **Low・エージェントの診断**: クラッシュレポートも、構造化された診断バンドルもありません。利用者のマシン上で不調が起きたとき、復旧手順は「人が肩越しにログを読む」ことになります。
 - **Low・運用**: ハードウェア／外部サービス連携の4ファイルは既定のCIワークフローに含まれていません。
@@ -96,7 +96,7 @@
 | インストール済みエージェント: Gatekeeper | `spctl` **accepted、source = Notarized Developer ID** |
 | インストール済みエージェント: hardened runtime | `CodeDirectory flags=0x10000(runtime)`、secure timestampあり |
 | インストール済みエージェント: notarizationチケット | `stapler validate` 成功 |
-| **公開リリースの検証** | **v2.0.2がアーカイブ＋チェックサム＋detached signature＋公開鍵を保持。** `v2.0.2`タグからKMS `egressview-release-2026`で署名。**4つの資産をリリースページからダウンロードし、そこで検証した**: `shasum -c` OK、`openssl pkeyutl -verify` Signature Verified Successfully、ダウンロードした公開鍵のfingerprintは**別系統の資格情報で提供されるDNS TXTのtrust anchorと一致**。改竄3ケース（アーカイブ／チェックサム／署名）はいずれも非ゼロ終了。v2.0.0とv2.0.1は資産なしのまま。エージェントの`.pkg`リリースはnotarize済みパッケージのみ |
+| **公開リリースの検証** | **v2.0.3の公開アーカイブは現在の検証器を通過**: アーカイブ、チェックサム、detached signature、公開鍵、別系統のDNS fingerprintがすべて一致。v1.9.0/v2.0.2は拒否対象の拡張属性を含む方針発効前の署名済み例外、v2.0.0/v2.0.1は未署名として記録。エージェントの`.pkg`リリースはnotarize済みパッケージのみ |
 
 ### コードベース指標
 

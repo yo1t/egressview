@@ -70,7 +70,7 @@ async function _run(ip, mac) {
   investigatedAt.set(ip, Date.now());
   if (_notes.has(ip, mac)) return;
   try {
-    logger.info(`[auto-investigate] start ${ip} (mac=${mac || '?'})`);
+    logger.info('[auto-investigate] start');
     const result = await _deviceId.investigateIp(ip, {
       ouiDb:         _deviceId.getOuiDb(),
       yamahaExec:    _yamaha.isReady() ? _yamaha.yamahaExec : null,
@@ -90,9 +90,9 @@ async function _run(ip, mac) {
       throw e;
     }
     _io.emit('notes-update', { notes: _notes.getAll() });
-    logger.info(`[auto-investigate] saved ${ip}`);
+    logger.info('[auto-investigate] saved');
   } catch (e) {
-    logger.error(`[auto-investigate] ${ip} failed: ${e.message}`);
+    logger.error(`[auto-investigate] failed: ${e.name || 'Error'}`);
   }
 }
 

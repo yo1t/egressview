@@ -13,12 +13,13 @@ const publisher = path.join(root, 'scripts', 'publish-signed-release.js');
 const policy = JSON.parse(fs.readFileSync(policyFile, 'utf8'));
 
 describe('release signature gate', () => {
-  it('未署名リリースの免除は理由付きで記録されている', () => {
+  it('旧リリースの例外は種別と理由付きで記録されている', () => {
     // An exemption without a reason is indistinguishable from silencing a
     // failure, which is the one thing this list must not become.
     assert.ok(policy.releases.length > 0);
     for (const release of policy.releases) {
       assert.match(release.tag, /^v\d+\.\d+\.\d+$/);
+      assert.match(release.kind, /^(?:unsigned|legacy-package-policy)$/);
       assert.ok(release.reason && release.reason.length > 30, `${release.tag} has no real reason`);
       assert.match(release.publishedAt, /^\d{4}-\d{2}-\d{2}$/);
       assert.match(release.recordedAt, /^\d{4}-\d{2}-\d{2}$/);

@@ -3774,6 +3774,24 @@
         "properties": {
           "status": {
             "type": "string"
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "component": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "component",
+                "reason"
+              ]
+            }
           }
         },
         "required": [
@@ -4277,6 +4295,25 @@
           }
         },
         "required": [
+          "error",
+          "success"
+        ]
+      },
+      "429": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
           "error",
           "success"
         ]
@@ -4943,17 +4980,13 @@
           "success": {
             "type": "boolean"
           },
-          "token": {
-            "type": "string"
-          },
           "expiresAt": {
             "type": "integer"
           }
         },
         "required": [
           "expiresAt",
-          "success",
-          "token"
+          "success"
         ]
       },
       "400": {
@@ -5288,6 +5321,45 @@
         ]
       },
       "500": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      }
+    },
+    "POST /api/backup/upload": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "success"
+        ]
+      },
+      "409": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "413": {
         "type": "object",
         "properties": {
           "error": {

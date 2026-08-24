@@ -289,6 +289,9 @@ jobs:
     name: ASH security scan
     timeout-minutes: 20
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -307,6 +310,16 @@ jobs:
         # Python available). Fails the job (exit 2) when actionable findings > 0,
         # honouring the suppressions committed in .ash/.ash.yaml.
         run: ash --mode local --fail-on-findings
+
+      - name: Upload ASH SARIF to code scanning
+        if: >-
+          always()
+          && (github.event_name != 'pull_request'
+          || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@4c0873ef8656cb3c50b3f42fb63bc1ade0cfa827 # v4
+        with:
+          sarif_file: .ash/ash_output/reports/ash.ghas.sarif
+          category: ash
 
       - name: Upload ASH results on failure
         if: failure()

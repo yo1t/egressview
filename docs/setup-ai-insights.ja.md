@@ -67,6 +67,10 @@ Guardrails、cached token、batch/service tier、税、為替、
 providerやAWSの契約割引、失敗時にprovider側だけで発生した費用は含まれません。請求確認には
 各providerのbilling consoleを使用してください。
 
+## 1日ごとの安全上限
+
+手動分析、対話、接続確認、AIイベント通知はすべて、provider呼び出し前にSQLiteへ永続的な予約を記録します。上限はUTC 00:00にリセットされます。既定値はprincipalごとに1日50回・記録token 1,000,000、provider全体で1日200回・4,000,000 tokenです。失敗した呼び出しもrequest 1回に数え、provider障害時の無制限な課金を防ぎます。変更する場合は`.env.example`の4つの`EGRESSVIEW_AI_*_DAILY_*_LIMIT`を使います。上限到達時は生成前にHTTP `429`を返します。
+
 ## Privacy上の選択
 
 外部送信を避ける場合はAIを無効のまま使うか、管理下のOllamaを選択してください。Bedrockも

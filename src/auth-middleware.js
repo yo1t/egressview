@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { ALL_PERMISSIONS, checkPermissions } = require('./permissions');
+const { ALL_PERMISSIONS, PERMISSIONS, checkPermissions } = require('./permissions');
 const { ACCESS, classifyHttpRequest } = require('./permission-matrix');
 const { permissionsForRole, principalFor } = require('./roles');
 
@@ -42,6 +42,37 @@ function createAuthMiddleware({
   // else. See src/demo-visitor.js for why this exists and what gates it.
   demoVisitor = null,
 }) {
+  const sensitiveReadPermissions = new Set([
+    PERMISSIONS.AI_RUN,
+    PERMISSIONS.AUTH_ADMIN,
+    PERMISSIONS.AUDIT_READ,
+    PERMISSIONS.BACKUP_RESTORE,
+    PERMISSIONS.SETTINGS_WRITE,
+  ]);
+
+  function auditIdentity(auth) {
+    const identity = isApiIdentity(auth) ? auth.identity : null;
+    const authMethod = identity
+      ? 'api-identity'
+      : auth === 'admin'
+        ? 'api-token'
+        : auth.authMethod || 'local';
+    const actor = identity
+      ? `api:${identity.id}`
+      : auth === 'admin'
+        ? 'admin-api-token'
+        : `session:${auth.id}`;
+    return {
+      authMethod,
+      actor,
+      principal: principalFor({
+        authMethod,
+        subject: identity ? null : auth?.subjectHash,
+        apiIdentityId: identity?.id,
+      }),
+    };
+  }
+
   function authenticate(provided) {
     // The demo has no credential to hand out, so an anonymous caller is the
     // expected case there. Real credentials are still checked first, so an
@@ -81,6 +112,14 @@ function createAuthMiddleware({
     }
     if (demoVisitor) return { auth: demoVisitor, source: 'demo' };
     return null;
+  }
+
+  function authorizeCredential(provided, requiredPermissions, { browserSessionOnly = false } = {}) {
+    const auth = browserSessionOnly ? sessions.verifySession(provided) : authenticate(provided);
+    if (!auth) return null;
+    const permissions = Object.freeze([...resolvePermissions({ auth, source: 'realtime' })]);
+    const permissionCheck = checkPermissions(permissions, requiredPermissions);
+    return Object.freeze({ auth, permissions, ...permissionCheck, ...auditIdentity(auth) });
   }
 
   function appendAudit(req, eventType, outcome, metadata) {
@@ -173,6 +212,15 @@ function createAuthMiddleware({
           { statusCode: res.statusCode }
         );
       });
+    } else if (requiredPermissions.some(permission => sensitiveReadPermissions.has(permission))) {
+      res.on('finish', () => {
+        appendAudit(
+          req,
+          'api_sensitive_read',
+          res.statusCode < 400 ? 'success' : 'failure',
+          { statusCode: res.statusCode }
+        );
+      });
     }
     req.permissionAuthorized = true;
     next();
@@ -210,6 +258,7 @@ function createAuthMiddleware({
   return {
     authenticate,
     authenticateRequest,
+    authorizeCredential,
     enforceApiPermissions,
     requireAdmin,
     requireAgent,

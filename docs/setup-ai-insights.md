@@ -73,6 +73,19 @@ model as price-tracked or price-unavailable before it is used. Guardrails, cache
 rates, provider/AWS contractual discounts, and provider-side charges for failed
 requests are excluded. Use the provider billing console for invoice reconciliation.
 
+## Daily safety limits
+
+Every manual analysis, chat, connection test, and automatic AI notification
+reserves a durable SQLite budget entry before the provider is called. Limits
+reset at 00:00 UTC. By default, one principal can make 50 requests and use
+1,000,000 recorded tokens per day; all principals combined can make 200
+requests and use 4,000,000 recorded tokens per provider per day. Failed calls
+still consume a request reservation, preventing repeated provider failures from
+becoming an unbounded bill. Configure the four
+`EGRESSVIEW_AI_*_DAILY_*_LIMIT` variables documented in `.env.example` when a
+deployment needs a different ceiling. HTTP `429` is returned before generation
+when a limit is reached.
+
 ## Privacy choice
 
 Leave AI disabled or use an Ollama endpoint you control when external submission

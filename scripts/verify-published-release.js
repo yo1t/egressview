@@ -22,9 +22,9 @@ const { fingerprintPublicKey } = require('./release-key-fingerprint');
 
 const ROOT = path.join(__dirname, '..');
 const REGISTRY = path.join(ROOT, 'release-signing', 'trusted-fingerprints.json');
-// Releases that predate the one-command publisher and were never signed. They
-// are recorded so this gate reports a known fact instead of failing for ever,
-// which is how a gate teaches people to ignore it.
+// Releases that predate the one-command publisher and cannot pass the current
+// verifier. Most were unsigned; two signed archives retained macOS extended
+// attributes that the stricter package policy now refuses.
 const KNOWN_UNSIGNED = path.join(ROOT, 'release-signing', 'unsigned-releases.json');
 const DNS_ANCHOR = '_egressview-release.egressview.com';
 // Agent releases carry a notarised .pkg signed by Apple, which is a real and
@@ -54,7 +54,7 @@ function parseArgs(argv) {
   return options;
 }
 
-function knownUnsigned() {
+function knownReleaseExceptions() {
   const policy = JSON.parse(fs.readFileSync(KNOWN_UNSIGNED, 'utf8'));
   return new Map(policy.releases.map((release) => [release.tag, release]));
 }
@@ -169,14 +169,14 @@ function main(argv = process.argv.slice(2)) {
     process.stderr.write('No published Hub releases to check\n');
     return [];
   }
-  const exempt = knownUnsigned();
+  const exempt = knownReleaseExceptions();
   const problems = [];
   for (const tag of tags) {
     const known = exempt.get(tag);
     if (known) {
       // Reported, not skipped silently: the fact that these shipped without
       // anything to verify is part of the record.
-      process.stderr.write(`${tag}: known unsigned, recorded — ${known.reason}\n`);
+      process.stderr.write(`${tag}: known ${known.kind}, recorded — ${known.reason}\n`);
       continue;
     }
     problems.push(...checkRelease(tag, options.repo));
@@ -193,4 +193,4 @@ function main(argv = process.argv.slice(2)) {
 
 if (require.main === module) main();
 
-module.exports = { main, parseArgs, checkRelease, releasesToCheck, knownUnsigned };
+module.exports = { main, parseArgs, checkRelease, releasesToCheck, knownReleaseExceptions };

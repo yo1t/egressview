@@ -1,19 +1,35 @@
 {
-  "//": "Releases published without signed assets, recorded rather than hidden. The release signature gate fails for any unlisted release that cannot be verified; adding an entry here is a deliberate, reviewable act, not a way to quiet a new failure. Nothing may be added for a release published after the date the one-command publisher landed.",
+  "//": "Historical releases that the current verifier cannot fully accept, recorded rather than hidden. The gate fails for every unlisted release; nothing may be added after the one-command publisher policy date. The filename is retained for compatibility even though entries can be unsigned or signed with a pre-policy packaging defect.",
   "schemaVersion": 1,
   "policyEffectiveFrom": "2026-08-22",
   "releases": [
     {
       "tag": "v2.0.0",
+      "kind": "unsigned",
       "publishedAt": "2026-08-16",
       "reason": "Published before the release step was a single command. The signing pipeline existed and was tested; it was not run. Superseded by v2.0.2, which is signed.",
       "recordedAt": "2026-08-22"
     },
     {
       "tag": "v2.0.1",
+      "kind": "unsigned",
       "publishedAt": "2026-08-17",
       "reason": "Same cause as v2.0.0. Superseded by v2.0.2, which is signed.",
       "recordedAt": "2026-08-22"
+    },
+    {
+      "tag": "v1.9.0",
+      "kind": "legacy-package-policy",
+      "publishedAt": "2026-08-12",
+      "reason": "The detached signature and checksum exist, but the archive carries macOS extended attributes that the current verifier rejects. This predates the one-command publisher and is superseded by v2.0.3, whose downloaded archive passes the current verifier.",
+      "recordedAt": "2026-08-24"
+    },
+    {
+      "tag": "v2.0.2",
+      "kind": "legacy-package-policy",
+      "publishedAt": "2026-08-18",
+      "reason": "The detached signature and checksum exist, but the archive carries macOS extended attributes that the current verifier rejects. This predates the one-command publisher and is superseded by v2.0.3, whose downloaded archive passes the current verifier.",
+      "recordedAt": "2026-08-24"
     }
   ]
 }
