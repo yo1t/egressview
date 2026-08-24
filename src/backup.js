@@ -20,6 +20,15 @@ let backupIntervalHours = 24; // default: daily
 let maxGenerations = 7;       // default: 7 backups
 let maxBackupBytes = 0;       // default: no storage cap
 let autoPrune = false;        // explicit opt-in only
+let freeBytesOverride = null;  // tests only
+
+function backupCapacity() {
+  const dbSize = fs.statSync(DB_PATH).size;
+  const stats = fs.statfsSync(BACKUP_DIR);
+  const freeBytes = freeBytesOverride == null ? stats.bsize * stats.bavail : freeBytesOverride;
+  const requiredBytes = dbSize + backupInventory.DEFAULT_SAFETY_MARGIN_BYTES;
+  return { dbSize, freeBytes, requiredBytes, ready: freeBytes >= requiredBytes };
+}
 
 function resolvePruneTimeout(value) {
   const parsed = Number(value);
@@ -35,6 +44,11 @@ const pruneRunner = new BackupPruneRunner({
       const deleted = job.result?.deleted || [];
       logger.info(`[backup] Cleanup ${job.id} completed: ${deleted.length} verified generation(s), ` +
                   `${job.result?.deletedBytes || 0} bytes released`);
+      if (job.source === 'automatic-capacity') {
+        createBackup({ capacityPruned: true }).catch(error => {
+          logger.warn('[backup] Backup retry after capacity cleanup failed:', error.message);
+        });
+      }
     } else if (!['completed', 'cancelled'].includes(job.status)) {
       logger.warn(`[backup] Cleanup ${job.id} ${job.status}:`, internalError || job.error || 'unknown error');
     }
@@ -96,12 +110,26 @@ function replaceDbAtomically(sourcePath) {
 // db.backup() takes a consistent snapshot including WAL contents, unlike a
 // plain file copy which would miss transactions not yet checkpointed into
 // the main DB file.
-async function createBackup() {
+async function createBackup({ capacityPruned = false } = {}) {
   if (!fs.existsSync(DB_PATH)) {
     logger.info('[backup] No database to backup');
     return null;
   }
   ensureBackupDir();
+  const capacity = backupCapacity();
+  if (!capacity.ready) {
+    logger.warn(`[backup] Backup skipped: need ${capacity.requiredBytes} bytes, ` +
+                `${capacity.freeBytes} bytes available`);
+    if (autoPrune && !capacityPruned && !pruneRunner.getActive()) {
+      try {
+        const job = startPruneJob({ execute: true, source: 'automatic-capacity' });
+        logger.info(`[backup] Capacity cleanup started: ${job.id}`);
+      } catch (pruneError) {
+        logger.warn('[backup] Capacity cleanup could not start:', pruneError.message);
+      }
+    }
+    return null;
+  }
   const timestamp = new Date().toISOString().replace('T', '_').replace(/[:.]/g, '-').replace('Z', '');
   const uniqueId = crypto.randomBytes(4).toString('hex');
   const backupName = `egressview_${timestamp}-${uniqueId}.db`;
@@ -336,7 +364,12 @@ function _setPathsForTest(dbPath, backupDir) {
   maxGenerations      = 7;
   maxBackupBytes      = 0;
   autoPrune           = false;
+  freeBytesOverride   = null;
   stopPeriodicBackup();
+}
+
+function _setFreeBytesForTest(value) {
+  freeBytesOverride = value;
 }
 
 module.exports = {
@@ -358,5 +391,6 @@ module.exports = {
   cancelPruneJob,
   logCapacityWarning,
   _setPathsForTest,
+  _setFreeBytesForTest,
   _verifyDbFile: verifyDbFile,
 };
