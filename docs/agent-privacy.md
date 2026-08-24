@@ -65,9 +65,32 @@ are derived from the connection ID, which travels in the clear, by a procedure
 published in RFC 9001 — **anyone watching the network can do this.** It reveals
 nothing that was protected from an observer.
 
-It reaches exactly one packet. Every later packet is protected with keys
+It reaches the first message only. Every later packet is protected with keys
 derived from the TLS handshake, which an observer does not have. **The agent
 cannot read a QUIC conversation and never will be able to.**
+
+A browser's ClientHello often does not fit in one Initial packet and **arrives
+in two**, so reading continues until that first message is complete and stops
+there. Measured 2026-08-24: 27 flows produced 56 callbacks, 28 of them the
+second packet. **What is read is still the first message; the reach has not
+grown.**
+
+### A name that was read is not always the destination
+
+On a connection using **ECH (Encrypted Client Hello)**, the name given in the
+clear is a **public name shared by many sites** — `cloudflare-ech.com`, for
+example. The real destination is encrypted inside it and **cannot be read, by
+anyone watching the network.**
+
+**The agent also cannot tell whether a given name is one of these.** Chrome
+sends the same extension on connections that do not use ECH (GREASE), so an
+observer cannot distinguish real ECH from GREASE — **that is what ECH is for.**
+Marking names as uncertain on that basis would put a wrong mark on the great
+majority of names that are exactly what they appear to be.
+
+It is rare in practice: on this Mac, 8 of 521,575 named observations carried
+`cloudflare-ech.com` — 0.002%. **Rare is not a reason to leave it unwritten:
+without this, such a name reads as the place the traffic went.**
 
 ## Threat matching happens on your Mac
 

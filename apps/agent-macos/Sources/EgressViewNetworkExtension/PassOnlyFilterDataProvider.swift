@@ -125,26 +125,20 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
         }
     }
 
-    /// The name in the opening bytes, whichever transport put it there.
+    /// Whether these opening bytes are worth trying to assemble a QUIC name
+    /// from.
     ///
-    /// Separated from `handleOutboundData` because an `NEFilterFlow` cannot be
-    /// made outside the extension, and a rule about which packets get
-    /// decrypted is worth testing without one.
+    /// Version 2 is included because its Initial keys derive the same way; a
+    /// version this does not know would be decrypted with the wrong salt and
+    /// reported as malformed, which is a worse answer than not looking.
     ///
-    /// TLS is tried first: the name is in the clear there and no key is
-    /// derived. QUIC is consulted only when that finds nothing, which on a
-    /// udp/443 flow it always will.
-    static func serverName(
-        in readBytes: Data, offset: Int, quicClassification: QUICInitialCandidate?
-    ) -> String? {
-        if let name = TLSClientHello.serverName(in: readBytes) { return name }
-        // Only the first datagram of a connection, and only a v1 Initial. A
-        // later datagram is protected with keys derived from the handshake,
-        // which an observer does not have; a version this does not know would
-        // be decrypted with the wrong salt and reported as malformed rather
-        // than left alone.
-        guard offset == 0, quicClassification == .version1 else { return nil }
-        return QUICInitial.serverName(inDatagram: readBytes)
+    /// Deliberately not a rule about `offset`. Until 2026-08-24 it was, and
+    /// that was the defect: a ClientHello arriving in two Initial packets was
+    /// read only as far as the first, and 172 recognised Initials produced no
+    /// name at all. Where the reading stops is the assembler's bound, not a
+    /// test on the byte offset.
+    static func shouldAssembleQUICName(_ classification: QUICInitialCandidate?) -> Bool {
+        classification == .version1 || classification == .version2
     }
 
     open override func handleOutboundData(
@@ -161,7 +155,7 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
            metadata.networkProtocol == .udp, metadata.remotePort == 443 {
             let seen = QUICInitialProbe.classify(readBytes)
             classification = seen
-            isQUICCandidate = seen == .version1 || seen == .version2
+            isQUICCandidate = Self.shouldAssembleQUICName(seen)
             didObserveQUICFeasibility(.outboundCallback(
                 offset: offset,
                 byteCount: readBytes.count,
