@@ -35,6 +35,11 @@ public enum QUICFeasibilityEvent: Equatable, Sendable {
         byteCount: Int,
         classification: QUICInitialCandidate
     )
+    /// What became of a QUIC Initial once its handshake bytes were gathered.
+    /// Separated from the candidate count because "recognised as an Initial"
+    /// and "a name came out of it" were the same number until they were not:
+    /// on 2026-08-24 the first was 172 and the second was 0.
+    case assembly(QUICInitial.Assembler.Outcome)
 }
 
 open class PassOnlyFilterDataProvider: NEFilterDataProvider {
@@ -57,6 +62,11 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
     private let adapter = NetworkExtensionFlowAdapter()
     private let mapper = NetworkFlowObservationMapper()
     private var openFlows = OpenFlowRegistry()
+    /// One QUIC reassembly per flow, held only while its first flight is still
+    /// arriving. Bounded in both directions: each assembler stops after a few
+    /// datagrams, and the store drops the flow as soon as a name is found or
+    /// the flow is allowed through.
+    private var quicAssemblers = QUICInitialAssemblerStore()
     private let lock = NSLock()
 
     public override init() {
@@ -146,21 +156,40 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
             return .allow()
         }
         var classification: QUICInitialCandidate?
+        var isQUICCandidate = false
         if let metadata = adapter.metadata(from: socketFlow),
            metadata.networkProtocol == .udp, metadata.remotePort == 443 {
             let seen = QUICInitialProbe.classify(readBytes)
             classification = seen
+            isQUICCandidate = seen == .version1 || seen == .version2
             didObserveQUICFeasibility(.outboundCallback(
                 offset: offset,
                 byteCount: readBytes.count,
                 classification: seen
             ))
         }
-        if let name = Self.serverName(
-            in: readBytes, offset: offset, quicClassification: classification
-        ) {
+
+        var name = TLSClientHello.serverName(in: readBytes)
+        var wantsMoreDatagrams = false
+        if name == nil, isQUICCandidate {
+            // A ClientHello too big for one Initial arrives in two. Measured
+            // 2026-08-24: 172 v1 Initial candidates on this Mac produced not
+            // one name, because this returned after the first datagram and the
+            // handshake stopped mid-extension.
+            let outcome = lock.withLock {
+                quicAssemblers.accept(datagram: readBytes, flowID: socketFlow.identifier.uuidString)
+            }
+            switch outcome {
+            case .name(let found): name = found
+            case .needsMore: wantsMoreDatagrams = true
+            case .notInitial: break
+            }
+            didObserveQUICFeasibility(.assembly(outcome))
+        }
+        if let name {
             lock.withLock {
                 openFlows.noteServerName(name, flowID: socketFlow.identifier)
+                quicAssemblers.finish(flowID: socketFlow.identifier.uuidString)
             }
         }
         let opening = lock.withLock {
@@ -170,9 +199,18 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
             )
         }
         if let opening { didObserve(opening) }
-        // Either way this flow is done being looked at. The name is in the
-        // first message or it is not there, and holding a flow open in the hope
-        // of a second one would delay the user's traffic for nothing.
+        if wantsMoreDatagrams {
+            // Pass everything seen so far and ask for the next datagram. The
+            // bound lives in the assembler; this cannot wait forever, and it
+            // never holds bytes back -- `passBytes` releases them all.
+            return NEFilterDataVerdict(
+                passBytes: readBytes.count,
+                peekBytes: TLSClientHello.maximumInterestingBytes
+            )
+        }
+        // Otherwise this flow is done being looked at: the name is found, or
+        // the client is not going to say one in a form this can read.
+        lock.withLock { quicAssemblers.finish(flowID: socketFlow.identifier.uuidString) }
         return .allow()
     }
 

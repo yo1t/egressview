@@ -57,6 +57,14 @@ public struct QUICFeasibilityDiagnostics: Codable, Equatable, Sendable {
     public private(set) var version1InitialCandidates: UInt64 = 0
     public private(set) var version2InitialCandidates: UInt64 = 0
     public private(set) var unsupportedVersionLongHeaders: UInt64 = 0
+    /// Initials whose handshake bytes were gathered but did not yet contain a
+    /// name -- the state a ClientHello split across two datagrams is in after
+    /// the first one.
+    public private(set) var awaitingMoreDatagrams: UInt64 = 0
+    /// Names actually read out of a QUIC handshake. Until 2026-08-24 this was
+    /// not counted at all, which is why 172 Initial candidates and zero names
+    /// looked like success.
+    public private(set) var serverNamesFound: UInt64 = 0
 
     public init(startedAt: Date = Date()) {
         self.startedAt = startedAt
@@ -64,6 +72,16 @@ public struct QUICFeasibilityDiagnostics: Codable, Equatable, Sendable {
 
     public var initialCandidates: UInt64 {
         Self.addingWithoutOverflow(version1InitialCandidates, version2InitialCandidates)
+    }
+
+    public mutating func recordAwaitingMoreDatagrams(at date: Date = Date()) {
+        awaitingMoreDatagrams = Self.incrementingWithoutOverflow(awaitingMoreDatagrams)
+        updatedAt = date
+    }
+
+    public mutating func recordServerNameFound(at date: Date = Date()) {
+        serverNamesFound = Self.incrementingWithoutOverflow(serverNamesFound)
+        updatedAt = date
     }
 
     public mutating func recordUDP443Flow(at date: Date = Date()) {

@@ -210,7 +210,7 @@
 "Six-character enrollment code" = "Six-character enrollment code";
 "Sent metadata summary" = "Sent: host name, local/remote address and port, protocol, process name and ID, bundle ID, timestamps, byte counters, collector and confidence.";
 "Not sent metadata summary" = "Never sent: packet payloads, credentials, command lines, account names, file paths, browser URLs or browsing history.";
-"QUIC check since extension start: UDP/443 flows %lld · data callbacks %lld (offset 0: %lld) · inspected bytes %lld · Initial candidates %lld (v1 %lld / v2 %lld) · other long headers %lld. No packet content or identity is retained." = "QUIC check since extension start: UDP/443 flows %lld · data callbacks %lld (offset 0: %lld) · inspected bytes %lld · Initial candidates %lld (v1 %lld / v2 %lld) · other long headers %lld. No packet content or identity is retained.";
+"QUIC check since extension start: UDP/443 flows %lld · data callbacks %lld (offset 0: %lld) · inspected bytes %lld · Initial candidates %lld (v1 %lld / v2 %lld) · other long headers %lld · names read %lld (waiting for a second datagram %lld). No packet content or identity is retained." = "QUIC check since extension start: UDP/443 flows %lld · data callbacks %lld (offset 0: %lld) · inspected bytes %lld · Initial candidates %lld (v1 %lld / v2 %lld) · other long headers %lld · names read %lld (waiting for a second datagram %lld). No packet content or identity is retained.";
 "Press Refresh to read aggregate QUIC counters from network monitoring." = "Press Refresh to read aggregate QUIC counters from network monitoring.";
 "Refresh QUIC check counters" = "Refresh QUIC check counters";
 "Confirm metadata delivery" = "I understand and want this Mac to send the listed metadata";
