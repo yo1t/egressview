@@ -375,7 +375,7 @@ describe('auth route: session lifecycle', () => {
       deviceLabel: 'browser',
     });
     assert.equal(status, 200);
-    assert.deepEqual(body, { success: true, token: 'token-browser', expiresAt: 123 });
+    assert.deepEqual(body, { success: true, expiresAt: 123 });
   });
 
   it('selects the login cookie path from the exact forwarded prefix', async () => {

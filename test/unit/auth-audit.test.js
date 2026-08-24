@@ -41,4 +41,24 @@ describe('authentication audit store', () => {
     assert.equal(event.clientIpHash.length, 12);
     assert.doesNotMatch(JSON.stringify(event), /person@example|192\.0\.2\.10/);
   });
+
+  it('proves writability and reports runtime write failures', () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-audit-health-'));
+    const dbPath = path.join(dir, 'audit.db');
+    const migrationDb = new Database(dbPath);
+    runMigrations(migrationDb, dbPath);
+    migrationDb.close();
+    authAudit.initDb(dbPath, { hashKey: 'stable-test-key' });
+
+    const statuses = [];
+    authAudit.setWriteStatusHandler(status => statuses.push(status));
+    assert.doesNotThrow(() => authAudit.assertWritable());
+    assert.equal(statuses.at(-1).ok, true);
+
+    authAudit.closeDb();
+    assert.equal(authAudit.append({ eventType: 'must-fail' }), null);
+    assert.equal(statuses.at(-1).ok, false);
+    assert.equal(authAudit.health().writeFailures, 1);
+    assert.throws(() => authAudit.assertWritable(), /not initialized/);
+  });
 });

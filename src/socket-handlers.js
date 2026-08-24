@@ -1,6 +1,7 @@
 'use strict';
 
 const { parseCookies, SESSION_COOKIE } = require('./auth-cookies');
+const { PERMISSIONS } = require('./permissions');
 
 function buildClientConfig({
   appState,
@@ -46,7 +47,7 @@ function buildClientConfig({
 function registerSocketHandlers({
   io,
   appState,
-  authenticate,
+  authorizeCredential,
   asus,
   yamaha,
   cisco,
@@ -57,12 +58,44 @@ function registerSocketHandlers({
   logger = console,
   now = () => Date.now(),
   getRouters = () => [],
+  authAudit = null,
 }) {
   io.use((socket, next) => {
     const cookies = parseCookies(socket.handshake.headers?.cookie);
-    const provided = String(socket.handshake.auth?.token || cookies[SESSION_COOKIE] || '');
-    if (!appState.adminToken) return next(new Error('認証未初期化'));
-    if (!authenticate(provided)) return next(new Error('Unauthorized'));
+    const handshakeToken = String(socket.handshake.auth?.token || '');
+    const provided = handshakeToken || String(cookies[SESSION_COOKIE] || '');
+    const audit = (outcome, reason, decision = null) => authAudit?.append({
+      eventType: 'realtime_authentication',
+      outcome,
+      authMethod: decision?.authMethod,
+      actor: decision?.actor,
+      principal: decision?.principal,
+      clientIp: socket.handshake.address || socket.conn?.remoteAddress,
+      path: '/socket.io',
+      metadata: reason ? { reason } : undefined,
+    });
+    if (!appState.adminToken) {
+      audit('failure', 'authentication_not_initialized');
+      return next(new Error('認証未初期化'));
+    }
+    const decision = authorizeCredential(provided, [PERMISSIONS.NETWORK_READ], {
+      // A cookie is only a browser session. API identities and the break-glass
+      // admin token must never become browser credentials through a forged
+      // Cookie header.
+      browserSessionOnly: !handshakeToken,
+    });
+    if (!decision?.auth) {
+      audit('failure', 'invalid_credential');
+      return next(new Error('Unauthorized'));
+    }
+    if (!decision.allowed) {
+      audit('failure', 'permission_denied', decision);
+      return next(new Error('Forbidden'));
+    }
+    socket.data = socket.data || {};
+    socket.data.auth = decision.auth;
+    socket.data.permissions = decision.permissions;
+    audit('success', null, decision);
     next();
   });
 

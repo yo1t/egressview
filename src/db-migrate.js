@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -659,6 +659,28 @@ const MIGRATIONS = [
           ON agent_observations(agentId, batchId);
         CREATE INDEX idx_agent_observations_agent_flow
           ON agent_observations(agentId, localAddress, remoteAddress, remotePort);
+      `);
+    },
+  },
+  {
+    version: 18,
+    description: 'durable per-principal and provider AI budget reservations (P2-98)',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS ai_budget_events (
+          eventId        TEXT PRIMARY KEY,
+          principalHash  TEXT NOT NULL CHECK(length(principalHash) = 64),
+          provider       TEXT NOT NULL,
+          kind           TEXT NOT NULL,
+          createdAt      INTEGER NOT NULL,
+          completedAt    INTEGER,
+          totalTokens    INTEGER NOT NULL DEFAULT 0 CHECK(totalTokens >= 0),
+          outcome        TEXT NOT NULL CHECK(outcome IN ('reserved', 'complete', 'failure'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_budget_principal_provider_time
+          ON ai_budget_events(principalHash, provider, createdAt);
+        CREATE INDEX IF NOT EXISTS idx_ai_budget_provider_time
+          ON ai_budget_events(provider, createdAt);
       `);
     },
   },

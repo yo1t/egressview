@@ -213,4 +213,20 @@ describe('health endpoints', () => {
     healthState.markNotReady();
     assert.equal((await request(app, '/readyz')).status, 503);
   });
+
+  it('withdraws readiness while a required component is degraded', async () => {
+    const { app, healthState } = makeApp();
+    healthState.markReady();
+    healthState.markDegraded('authentication_audit', 'write_failed');
+
+    const degraded = await request(app, '/readyz');
+    assert.equal(degraded.status, 503);
+    assert.deepEqual(degraded.body, {
+      status: 'degraded',
+      components: [{ component: 'authentication_audit', reason: 'write_failed' }],
+    });
+
+    healthState.clearDegraded('authentication_audit');
+    assert.equal((await request(app, '/readyz')).status, 200);
+  });
 });

@@ -90,8 +90,9 @@ const pricingCheckSchema = z.object({
 
 module.exports = function aiRoutes({
   requireAdmin, aiProvider, saveConfig, history, threatIntel, routerManager, devices, asus, agentIdentities,
-  agentIngest = null,
+  agentIngest = null, aiBudget,
 }) {
+  if (!aiBudget?.begin || !aiBudget?.finish) throw new TypeError('AI budget enforcement is required');
   const router = Router();
   const collectionSources = sourceScope => {
     const routers = routerManager?.list?.() || [];
@@ -126,6 +127,23 @@ module.exports = function aiRoutes({
     }];
   };
   const warnedUnpricedModels = new Set();
+
+  function budgetPrincipal(req) {
+    return req.principal || req.actor || (req.session?.id ? `session:${req.session.id}` : 'local:admin');
+  }
+
+  function budgetError(res, error) {
+    if (error.code !== 'AI_BUDGET_EXCEEDED' && error.code !== 'AI_BUDGET_UNAVAILABLE') return false;
+    const now = new Date();
+    const nextUtcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+    res.setHeader('Retry-After', Math.max(1, Math.ceil((nextUtcDay - Date.now()) / 1000)));
+    res.status(error.code === 'AI_BUDGET_EXCEEDED' ? 429 : 503).json({
+      success: false,
+      error: error.message,
+      code: error.code,
+    });
+    return true;
+  }
 
   function persistUsage(result, { kind, requestId = randomUUID(), conversationId = null } = {}) {
     if (!result || typeof history?.appendAiUsage !== 'function') return;
@@ -219,11 +237,17 @@ module.exports = function aiRoutes({
   router.post('/ai/test', requireAdmin, async (req, res) => {
     const parsed = parseRequest(emptySchema, req.body, res);
     if (!parsed.ok) return;
+    let reservation;
     try {
+      const provider = aiProvider.getPublicConfig().provider;
+      reservation = aiBudget.begin({ principal: budgetPrincipal(req), provider, kind: 'test' });
       const result = await aiProvider.testConnection();
+      aiBudget.finish(reservation, { outcome: 'complete', totalTokens: result.usage?.totalTokens || 0 });
       persistUsage(result, { kind: 'test' });
       res.json({ success: true, ...withModelPricing(result) });
     } catch (error) {
+      if (reservation) aiBudget.finish(reservation, { outcome: 'failure' });
+      if (budgetError(res, error)) return;
       res.status(400).json({ success: false, error: error.message });
     }
   });
@@ -343,7 +367,10 @@ module.exports = function aiRoutes({
     }
     const controller = new AbortController();
     req.once('aborted', () => controller.abort());
+    let reservation;
     try {
+      const provider = aiProvider.getPublicConfig().provider;
+      reservation = aiBudget.begin({ principal: budgetPrincipal(req), provider, kind: 'analysis' });
       const sourceScope = scoped.scope;
       const routers = collectionSources(sourceScope);
       const facts = buildAiFacts({ history, threatIntel, routers, from, to, sourceScope });
@@ -353,9 +380,12 @@ module.exports = function aiRoutes({
         cloudConsentConfirmed: parsed.data.cloudConsentConfirmed,
         language: parsed.data.language,
       });
+      aiBudget.finish(reservation, { outcome: 'complete', totalTokens: result.usage?.totalTokens || 0 });
       persistUsage(result, { kind: 'analysis' });
       res.json({ success: true, range: { from, to }, ...result });
     } catch (error) {
+      if (reservation) aiBudget.finish(reservation, { outcome: 'failure' });
+      if (budgetError(res, error)) return;
       const status = error.code === 'AI_BUSY' ? 409 : error.code === 'AI_CONSENT_REQUIRED' ? 403 : 400;
       res.status(status).json({ success: false, error: error.message });
     }
@@ -394,6 +424,15 @@ module.exports = function aiRoutes({
     }
     const publicConfig = aiProvider.getPublicConfig();
     if (publicConfig.provider === 'disabled') return res.status(400).json({ error: 'AI provider is disabled' });
+    let reservation;
+    try {
+      reservation = aiBudget.begin({
+        principal: budgetPrincipal(req), provider: publicConfig.provider, kind: 'chat',
+      });
+    } catch (error) {
+      if (budgetError(res, error)) return;
+      throw error;
+    }
     const sourceScope = scoped.scope;
     let conversationId = parsed.data.conversationId || randomUUID();
     const requestId = parsed.data.requestId || randomUUID();
@@ -454,6 +493,7 @@ module.exports = function aiRoutes({
         conversation: prior.filter(message => message.status === 'complete' && message.body)
           .slice(-20).map(message => ({ role: message.role, body: message.body })),
       });
+      aiBudget.finish(reservation, { outcome: 'complete', totalTokens: response.usage?.totalTokens || 0 });
       const assistant = history.appendMessage({
         messageId: randomUUID(), conversationId, requestId, role: 'assistant', body: response.text,
         createdAt: Date.now(), provider: response.provider, model: response.model, rangeFrom: from, rangeTo: to,
@@ -471,6 +511,7 @@ module.exports = function aiRoutes({
         estimatedCostUsd: response.estimatedCostUsd,
       });
     } catch (error) {
+      if (reservation) aiBudget.finish(reservation, { outcome: 'failure' });
       history.appendMessage({
         messageId: randomUUID(), conversationId, requestId, role: 'assistant', body: null,
         createdAt: Date.now(), provider: publicConfig.provider, model, rangeFrom: from, rangeTo: to,

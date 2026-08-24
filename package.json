@@ -36,6 +36,7 @@
     "src/",
     "scripts/demo-seed.js",
     "scripts/gen-demo-db.js",
+    "scripts/check-demo-db-secrets.js",
     "scripts/secret-scan.js",
     "scripts/check-frontend-innerhtml.js",
     "scripts/frontend-innerhtml-allowlist.json",
@@ -84,7 +85,7 @@
     "test:offline-distribution": "node --test test/unit/offline-bundle.test.js",
     "test:smoke": "playwright test",
     "security:audit": "npm audit --omit=dev --audit-level=moderate",
-    "security:secrets": "node scripts/secret-scan.js",
+    "security:secrets": "node scripts/secret-scan.js && node scripts/check-demo-db-secrets.js",
     "security:check": "npm run security:audit && npm run security:secrets",
     "soak:check": "node scripts/check-observation-consistency.js",
     "release:check": "npm run lint && npm run test:unit && npm run test:smoke && npm run security:check && npm pack --dry-run",
@@ -104,8 +105,8 @@
     "auth:reset": "node scripts/reset-admin-password.js"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock": "^3.1106.0",
-    "@aws-sdk/client-bedrock-runtime": "^3.1106.0",
+    "@aws-sdk/client-bedrock": "^3.1111.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1111.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "axios": "^1.19.0",
@@ -123,7 +124,7 @@
     "@modelcontextprotocol/client": "^2.0.0",
     "@playwright/test": "^1.62.1",
     "eslint": "^10.8.1",
-    "globals": "^17.9.0",
+    "globals": "^17.11.0",
     "socket.io-client": "^4.8.3"
   },
   "overrides": {

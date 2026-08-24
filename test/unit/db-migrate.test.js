@@ -393,7 +393,7 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
 
     db = openDb(p);
     runMigrations(db, p);
-    assert.equal(db.pragma('user_version', { simple: true }), 17);
+    assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     assert.equal(db.prepare('SELECT localPort FROM agent_observations WHERE observationId = ?').get('obs-1').localPort, 49152);
     const indexes = new Set(db.prepare(`SELECT name FROM sqlite_master WHERE type='index'`).all().map(row => row.name));
     for (const name of [
@@ -415,7 +415,7 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
     db.close();
 
     const backups = fs.readdirSync(TMP)
-      .filter(name => name.startsWith('v17-agent-local-port.db.pre-migration.v16-to-v17'));
+      .filter(name => name.startsWith(`v17-agent-local-port.db.pre-migration.v16-to-v${SCHEMA_VERSION}`));
     assert.equal(backups.length, 1);
     _verifyDbCopy(path.join(TMP, backups[0]));
   });

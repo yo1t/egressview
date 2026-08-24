@@ -6,6 +6,7 @@ const logger = require('./logger');
 
 const fs   = require('fs');
 const path = require('path');
+const crypto = require('node:crypto');
 
 const DEFAULT_CONFIG_FILE = path.join(__dirname, '..', '.egressview.json');
 
@@ -17,6 +18,7 @@ const DEFAULT_CONFIG_FILE = path.join(__dirname, '..', '.egressview.json');
  */
 function loadFile(file = DEFAULT_CONFIG_FILE) {
   try {
+    secureExistingFile(file);
     return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (err) {
     if (err && err.code === 'ENOENT') return {};
@@ -31,6 +33,7 @@ function loadFile(file = DEFAULT_CONFIG_FILE) {
  */
 function loadFileOrThrow(file = DEFAULT_CONFIG_FILE) {
   try {
+    secureExistingFile(file);
     return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (err) {
     if (err && err.code === 'ENOENT') return {};
@@ -58,15 +61,33 @@ function loadFileSafe(file = DEFAULT_CONFIG_FILE) {
  * @param {string} [file]
  */
 function saveFile(data, file = DEFAULT_CONFIG_FILE) {
-  const tmp = file + '.tmp';
+  const tmp = `${file}.tmp-${process.pid}-${crypto.randomUUID()}`;
   try {
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), {
+      mode: 0o600,
+      flag: 'wx',
+    });
     fs.chmodSync(tmp, 0o600);
     fs.renameSync(tmp, file);
   } catch (err) {
     try { fs.unlinkSync(tmp); } catch {}
     throw err;
   }
+}
+
+function secureExistingFile(file) {
+  let stats;
+  try {
+    stats = fs.lstatSync(file);
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+  if (stats.isSymbolicLink()) {
+    throw new Error(`Refusing symbolic-link configuration file: ${file}`);
+  }
+  if (!stats.isFile()) throw new Error(`Configuration path is not a regular file: ${file}`);
+  if ((stats.mode & 0o777) !== 0o600) fs.chmodSync(file, 0o600);
 }
 
 /**
@@ -88,4 +109,12 @@ function persistSecret(section, updates, file = DEFAULT_CONFIG_FILE) {
   }
 }
 
-module.exports = { loadFile, loadFileOrThrow, loadFileSafe, saveFile, persistSecret, DEFAULT_CONFIG_FILE };
+module.exports = {
+  loadFile,
+  loadFileOrThrow,
+  loadFileSafe,
+  saveFile,
+  persistSecret,
+  secureExistingFile,
+  DEFAULT_CONFIG_FILE,
+};

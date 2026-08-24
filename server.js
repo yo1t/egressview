@@ -31,6 +31,7 @@ const { manualThreatLookup } = manualThreatModule;
 const aiProviderModule = require('./src/ai-provider');
 const { aiProvider }  = aiProviderModule;
 const { createAiNotificationService } = require('./src/ai-notification-service');
+const { createAiBudget } = require('./src/ai-budget');
 const notifier        = require('./src/notifier');
 const i18n            = require('./src/i18n-server');
 const backup          = require('./src/backup');
@@ -152,6 +153,7 @@ const io     = new Server(server, {
     catch { cb(null, false); }
   },
 });
+const aiBudget = createAiBudget({ history });
 const aiNotificationService = createAiNotificationService({
   aiProvider,
   history,
@@ -162,6 +164,7 @@ const aiNotificationService = createAiNotificationService({
   getRouters: () => routerManagerApi.list(),
   getLanguage: () => appState.uiLanguage,
   emit: (event, payload) => io.emit(event, payload),
+  aiBudget,
 });
 
 // ─── Config: load from / save to config file ─────────────────────────────────
@@ -346,8 +349,8 @@ const authBoundary = createAuthMiddleware({
   demoVisitor,
 });
 const {
-  authenticate,
   authenticateRequest,
+  authorizeCredential,
   enforceApiPermissions,
   requireAdmin,
   requireAgent,
@@ -425,6 +428,7 @@ const routeCtx = {
   manualThreat:       manualThreatLookup,
   aiProvider,
   aiNotificationService,
+  aiBudget,
   demoVisitor,
 };
 
@@ -452,13 +456,14 @@ configureHttpApp(app, {
 registerSocketHandlers({
   io,
   appState,
-  authenticate,
+  authorizeCredential,
   asus,
   yamaha,
   cisco,
   notes,
   history,
   threatIntel,
+  authAudit,
   defaultRouterIp: DEFAULT_ROUTER_IP,
   logger,
   getRouters: () => routerManagerApi.list(),
@@ -680,6 +685,11 @@ server.listen(PORT, HOST, () => {
     agentIdentities,
     agentIngest,
   });
+  authAudit.setWriteStatusHandler((status) => {
+    if (status.ok) healthState.clearDegraded('authentication_audit');
+    else healthState.markDegraded('authentication_audit', 'write_failed');
+  });
+  authAudit.assertWritable();
   setInterval(() => sessions.pruneExpired(), 6 * 60 * 60 * 1000);
   apiIdentities.pruneExpired();
   setInterval(() => apiIdentities.pruneExpired(), 24 * 60 * 60 * 1000).unref();

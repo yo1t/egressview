@@ -57,7 +57,62 @@ function createAiUsageStore({ getDb }) {
     `).all(from, to, safeLimit);
   }
 
-  return { appendAiUsage, summarizeAiUsage, summarizeUnpricedAiUsage };
+  function reserveAiBudget({
+    eventId, principalHash, provider, kind, createdAt, dayStart,
+    principalRequestLimit, principalTokenLimit, providerRequestLimit, providerTokenLimit,
+  }) {
+    const db = requireDb();
+    return db.transaction(() => {
+      const summarize = principal => db.prepare(`
+        SELECT COUNT(*) AS requests, COALESCE(SUM(totalTokens), 0) AS totalTokens
+        FROM ai_budget_events
+        WHERE createdAt >= ? AND provider = ?
+          AND (? IS NULL OR principalHash = ?)
+      `).get(dayStart, provider, principal, principal);
+      const principalUsage = summarize(principalHash);
+      const providerUsage = summarize(null);
+      let reason = null;
+      if (principalUsage.requests >= principalRequestLimit) reason = 'principal_request_limit';
+      else if (principalUsage.totalTokens >= principalTokenLimit) reason = 'principal_token_limit';
+      else if (providerUsage.requests >= providerRequestLimit) reason = 'provider_request_limit';
+      else if (providerUsage.totalTokens >= providerTokenLimit) reason = 'provider_token_limit';
+      if (reason) return { allowed: false, reason, principalUsage, providerUsage };
+      db.prepare(`
+        INSERT INTO ai_budget_events
+          (eventId, principalHash, provider, kind, createdAt, completedAt, totalTokens, outcome)
+        VALUES (?, ?, ?, ?, ?, NULL, 0, 'reserved')
+      `).run(eventId, principalHash, provider, kind, createdAt);
+      return { allowed: true, principalUsage, providerUsage };
+    })();
+  }
+
+  function completeAiBudget(eventId, { outcome, totalTokens = 0, completedAt = Date.now() }) {
+    if (!['complete', 'failure'].includes(outcome)) throw new Error('invalid AI budget outcome');
+    return requireDb().prepare(`
+      UPDATE ai_budget_events
+      SET outcome = ?, totalTokens = ?, completedAt = ?
+      WHERE eventId = ? AND outcome = 'reserved'
+    `).run(outcome, Math.max(0, Math.floor(Number(totalTokens) || 0)), completedAt, eventId).changes;
+  }
+
+  function summarizeAiBudget(principalHash, provider, from, to) {
+    return requireDb().prepare(`
+      SELECT COUNT(*) AS requests, COALESCE(SUM(totalTokens), 0) AS totalTokens,
+             COALESCE(SUM(CASE WHEN outcome = 'failure' THEN 1 ELSE 0 END), 0) AS failures
+      FROM ai_budget_events
+      WHERE createdAt >= ? AND createdAt < ? AND provider = ?
+        AND (? IS NULL OR principalHash = ?)
+    `).get(from, to, provider, principalHash, principalHash);
+  }
+
+  return {
+    appendAiUsage,
+    summarizeAiUsage,
+    summarizeUnpricedAiUsage,
+    reserveAiBudget,
+    completeAiBudget,
+    summarizeAiBudget,
+  };
 }
 
 module.exports = { createAiUsageStore };

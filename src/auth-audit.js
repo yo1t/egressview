@@ -12,6 +12,9 @@ const DEFAULT_DB_PATH = path.join(__dirname, '..', '.egressview.db');
 let db = null;
 let lastDbPath = DEFAULT_DB_PATH;
 let hashKey = crypto.randomBytes(32);
+let writeFailures = 0;
+let lastWriteError = null;
+let writeStatusHandler = null;
 
 function sha256(value) {
   return crypto.createHmac('sha256', hashKey).update(String(value || '')).digest('hex');
@@ -22,6 +25,7 @@ function initDb(dbPath, options = {}) {
   if (options.hashKey) hashKey = Buffer.from(options.hashKey);
   db = new Database(lastDbPath);
   db.pragma('journal_mode = WAL');
+  lastWriteError = null;
 }
 
 function setHashKey(value) {
@@ -49,7 +53,10 @@ function boundedMetadata(metadata) {
 }
 
 function append(event = {}) {
-  if (!db) return null;
+  if (!db) {
+    recordWriteStatus(new Error('Authentication audit store is not initialized'));
+    return null;
+  }
   const row = {
     eventId: crypto.randomUUID(),
     createdAt: Date.now(),
@@ -76,10 +83,40 @@ function append(event = {}) {
         (@eventId, @createdAt, @eventType, @outcome, @authMethod, @actorHash, @principalHash,
          @requestId, @clientIpHash, @httpMethod, @path, @metadata)
     `).run(row);
+    recordWriteStatus(null);
     return row.eventId;
   } catch (error) {
+    recordWriteStatus(error);
     logger.warn('[auth-audit] Append failed:', error.message);
     return null;
+  }
+}
+
+function recordWriteStatus(error) {
+  if (error) {
+    writeFailures += 1;
+    lastWriteError = error.message;
+  } else {
+    lastWriteError = null;
+  }
+  try {
+    writeStatusHandler?.({ ok: !error, writeFailures, lastWriteError });
+  } catch {}
+}
+
+function health() {
+  return { open: Boolean(db), writeFailures, lastWriteError, dbPath: lastDbPath };
+}
+
+function setWriteStatusHandler(handler) {
+  writeStatusHandler = typeof handler === 'function' ? handler : null;
+}
+
+function assertWritable() {
+  if (!db) throw new Error('Authentication audit store is not initialized');
+  const probeId = append({ eventType: 'auth_audit_startup', outcome: 'success' });
+  if (!probeId) {
+    throw new Error(`Authentication audit store is not writable: ${lastWriteError || 'unknown error'}`);
   }
 }
 
@@ -115,15 +152,21 @@ function prune(retentionDays = DEFAULT_RETENTION_DAYS) {
 
 module.exports = {
   append,
+  assertWritable,
   closeDb,
+  health,
   initDb,
   list,
   prune,
   reopen,
   setHashKey,
+  setWriteStatusHandler,
   DEFAULT_RETENTION_DAYS,
   _resetForTest(dbPath = ':memory:') {
     closeDb();
+    writeFailures = 0;
+    lastWriteError = null;
+    writeStatusHandler = null;
     initDb(dbPath, { hashKey: 'test-audit-key' });
   },
 };

@@ -153,8 +153,10 @@ catches a release created another way — from the GitHub web interface, say —
 and catches assets removed or replaced after publication. It needs no AWS
 access.
 
-Releases that predate this procedure and were never signed are recorded in
-`release-signing/unsigned-releases.json` with a reason each, so the gate reports
+Releases that predate this procedure and cannot pass the current verifier are
+recorded in the legacy-named `release-signing/unsigned-releases.json` with a
+type and reason. This includes unsigned releases and signed archives carrying
+extended attributes rejected by the current package policy, so the gate reports
 a known fact instead of failing for ever. **A gate that always fails is one
 people learn to ignore.** A test refuses any entry for a release published on
 or after the policy date, so the list cannot become a way to quiet a new

@@ -1967,6 +1967,33 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "error",
+                    "success"
+                  ],
+                  "x-observed": true
+                }
+              }
+            }
           }
         }
       }
@@ -4740,17 +4767,13 @@
                     "success": {
                       "type": "boolean"
                     },
-                    "token": {
-                      "type": "string"
-                    },
                     "expiresAt": {
                       "type": "integer"
                     }
                   },
                   "required": [
                     "expiresAt",
-                    "success",
-                    "token"
+                    "success"
                   ],
                   "x-observed": true
                 }
@@ -6214,13 +6237,71 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled."
+            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message",
+                    "success"
+                  ],
+                  "x-observed": true
+                }
+              }
+            }
           },
           "401": {
             "description": "No usable credential."
           },
           "403": {
             "description": "Authenticated, but not permitted."
+          },
+          "409": {
+            "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "x-observed": true
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "x-observed": true
+                }
+              }
+            }
           }
         }
       }
@@ -10497,6 +10578,24 @@
                   "properties": {
                     "status": {
                       "type": "string"
+                    },
+                    "components": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "component": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "component",
+                          "reason"
+                        ]
+                      }
                     }
                   },
                   "required": [

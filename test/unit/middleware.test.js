@@ -226,4 +226,47 @@ describe('API permission boundary', () => {
     res.emit('finish');
     assert.equal(events.filter(event => event.eventType === 'api_mutation').length, 1);
   });
+
+  it('audits sensitive reads without logging high-frequency network reads', () => {
+    const fixture = createFixture();
+    const sensitiveReq = mockReq({
+      token: fixture.adminToken,
+      method: 'GET',
+      originalUrl: '/api/auth/audit-events?before=123',
+    });
+    const sensitiveRes = mockRes();
+    fixture.middleware.enforceApiPermissions(sensitiveReq, sensitiveRes, () => {});
+    sensitiveRes.emit('finish');
+
+    assert.equal(fixture.events.length, 1);
+    assert.equal(fixture.events[0].eventType, 'api_sensitive_read');
+    assert.equal(fixture.events[0].path, '/api/auth/audit-events?before=123');
+
+    const networkReq = mockReq({
+      token: fixture.adminToken,
+      method: 'GET',
+      originalUrl: '/api/connections?limit=10',
+    });
+    const networkRes = mockRes();
+    fixture.middleware.enforceApiPermissions(networkReq, networkRes, () => {});
+    networkRes.emit('finish');
+    assert.equal(fixture.events.length, 1);
+  });
+
+  it('keeps browser sessions and API credentials distinct for realtime authorization', () => {
+    const fixture = createFixture();
+    const apiDecision = fixture.middleware.authorizeCredential(
+      fixture.adminToken,
+      [PERMISSIONS.NETWORK_READ]
+    );
+    assert.equal(apiDecision.allowed, true);
+    assert.equal(apiDecision.authMethod, 'api-token');
+
+    const cookieDecision = fixture.middleware.authorizeCredential(
+      fixture.adminToken,
+      [PERMISSIONS.NETWORK_READ],
+      { browserSessionOnly: true }
+    );
+    assert.equal(cookieDecision, null);
+  });
 });

@@ -11,10 +11,15 @@ import { updateFilterTabs, lastMeshNodes, lastMainMac, lastClients, setGraphDevi
 import { toggleSection, settingsBtn, showStatus } from './settings.js?v=__ASSET_VERSION__';
 import { getDisplayScope, getRouterSource, updateRouterSources } from './display-scope.js?v=__ASSET_VERSION__';
 
-// ─── Admin token auth (saved in localStorage) ─────────────────────────
+// ─── Browser authentication ───────────────────────────────────────────
 const TOKEN_KEY = 'egressview_admin_token';
-
-let adminToken = localStorage.getItem(TOKEN_KEY) || '';
+const legacyStoredToken = localStorage.getItem(TOKEN_KEY) || '';
+// Production browsers use an HttpOnly session cookie. Remove credentials left
+// by pre-cookie releases before any request is made. The non-production demo
+// keeps its fixed token path for browser smoke tests only; server.js refuses
+// DEMO_MODE under NODE_ENV=production.
+localStorage.removeItem(TOKEN_KEY);
+let adminToken = typeof _DEMO_MODE !== 'undefined' && _DEMO_MODE ? legacyStoredToken : '';
 
 // devicesData reference — injected from devices.js via setDevicesDataRef()
 let _devicesDataRef = [];
@@ -42,8 +47,9 @@ function refreshSavedPlaceholders() {
   });
 }
 
-// Existing header tokens remain supported for automation and upgrades. New
-// browser logins use an HttpOnly session cookie and a separate CSRF cookie.
+// Header tokens remain an API/automation credential, not a production browser
+// credential. Browser logins use an HttpOnly session cookie and a separate
+// CSRF cookie.
 
 // In-flight dedup: if multiple concurrent requests all hit 401 simultaneously,
 // they share a single prompt session instead of stacking multiple dialogs.

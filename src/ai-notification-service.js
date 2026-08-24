@@ -170,6 +170,7 @@ function createAiNotificationService(deps) {
     aiProvider, history, threatIntel, devices, asus, notifier,
     getRouters, getLanguage = () => 'ja', emit = () => {},
     now = () => Date.now(), setIntervalFn = setInterval, clearIntervalFn = clearInterval,
+    aiBudget,
   } = deps;
   let config = normalizeConfig();
   let timer = null;
@@ -263,6 +264,12 @@ function createAiNotificationService(deps) {
       return { skipped: true, reason: 'already-run' };
     }
 
+    let budgetReservation = null;
+    if (aiBudget) {
+      budgetReservation = aiBudget.begin({
+        principal: 'system:ai-notifications', provider, kind: `notification:${triggerType || 'unknown'}`,
+      });
+    }
     running = true;
     const to = now();
     const from = to - config.rangeHours * 60 * 60_000;
@@ -275,6 +282,9 @@ function createAiNotificationService(deps) {
         cloudConsentConfirmed: cloud,
         language: getLanguage(),
       });
+      if (budgetReservation) {
+        aiBudget.finish(budgetReservation, { outcome: 'complete', totalTokens: result.usage?.totalTokens || 0 });
+      }
       persistUsage(result, requestId);
       const slackSent = config.destinations.slack
         ? await notifier.sendAiNotification({
@@ -313,6 +323,7 @@ function createAiNotificationService(deps) {
       emit('ai-notification', { ...event, body: undefined });
       return event;
     } catch (error) {
+      if (budgetReservation) aiBudget.finish(budgetReservation, { outcome: 'failure' });
       history.appendAiNotification({
         eventId: randomUUID(),
         triggerType,

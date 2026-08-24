@@ -40,6 +40,26 @@ describe('loadFileOrThrow', () => {
     fs.writeFileSync(tmpFile, '{"foo":');
     assert.throws(() => loadFileOrThrow(tmpFile), SyntaxError);
   });
+
+  it('repairs overly broad permissions before reading credentials', () => {
+    fs.writeFileSync(tmpFile, JSON.stringify({ ok: true }), { mode: 0o644 });
+    fs.chmodSync(tmpFile, 0o644);
+    assert.deepEqual(loadFileOrThrow(tmpFile), { ok: true });
+    assert.equal(fs.statSync(tmpFile).mode & 0o777, 0o600);
+  });
+
+  it('refuses a symbolic-link configuration path', { skip: process.platform === 'win32' }, () => {
+    const target = `${tmpFile}.target`;
+    const link = `${tmpFile}.link`;
+    fs.writeFileSync(target, JSON.stringify({ secret: true }), { mode: 0o600 });
+    try {
+      fs.symlinkSync(target, link);
+      assert.throws(() => loadFileOrThrow(link), /symbolic-link/);
+    } finally {
+      fs.rmSync(link, { force: true });
+      fs.rmSync(target, { force: true });
+    }
+  });
 });
 
 describe('saveFile + loadFile round-trip', () => {
@@ -58,7 +78,8 @@ describe('saveFile + loadFile round-trip', () => {
   it('propagates write failures without leaving a temporary file', () => {
     const target = path.join(os.tmpdir(), `missing-egressview-dir-${Date.now()}`, 'config.json');
     assert.throws(() => saveFile({ ok: true }, target));
-    assert.equal(fs.existsSync(target + '.tmp'), false);
+    const parent = path.dirname(target);
+    assert.equal(fs.existsSync(parent), false);
   });
 });
 

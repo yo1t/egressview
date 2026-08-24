@@ -90,11 +90,18 @@ describe('registerSocketHandlers', () => {
     const { asus, yamaha, cisco } = createRouters({
       asus: { isAuthenticated: () => false },
     });
+    const auditEvents = [];
 
     registerSocketHandlers({
       io,
       appState,
-      authenticate: (token) => token === 'good-token' ? { user: 'ok' } : null,
+      authorizeCredential: (token) => token === 'good-token'
+        ? {
+            auth: { user: 'ok' }, permissions: ['network.read'], allowed: true,
+            authMethod: 'local', actor: 'session:one', principal: 'local:admin',
+          }
+        : null,
+      authAudit: { append: event => auditEvents.push(event) },
       asus,
       yamaha,
       cisco,
@@ -116,6 +123,9 @@ describe('registerSocketHandlers', () => {
     let authResult = null;
     middleware({ handshake: { auth: { token: 'good-token' } } }, (err) => { authResult = err || 'ok'; });
     assert.equal(authResult, 'ok');
+    assert.equal(auditEvents[0].eventType, 'realtime_authentication');
+    assert.equal(auditEvents[0].outcome, 'success');
+    assert.equal(auditEvents[0].actor, 'session:one');
 
     const emitted = [];
     onConnection({
@@ -140,7 +150,7 @@ describe('registerSocketHandlers', () => {
     registerSocketHandlers({
       io,
       appState: createAppState({ adminToken: '' }),
-      authenticate: () => null,
+      authorizeCredential: () => null,
       asus,
       yamaha,
       cisco,
@@ -154,6 +164,69 @@ describe('registerSocketHandlers', () => {
     assert.equal(error?.message, '認証未初期化');
   });
 
+  it('denies a valid identity that lacks network.read before any payload is emitted', () => {
+    let middleware;
+    let onConnection;
+    const io = {
+      use(fn) { middleware = fn; },
+      on(event, fn) { if (event === 'connection') onConnection = fn; },
+    };
+    const { asus, yamaha, cisco } = createRouters();
+    const decisions = [];
+    const auditEvents = [];
+    registerSocketHandlers({
+      io,
+      appState: createAppState(),
+      authorizeCredential(token, required, options) {
+        decisions.push({ token, required, options });
+        return { auth: { kind: 'api-identity' }, permissions: ['notes.write'], allowed: false };
+      },
+      authAudit: { append: event => auditEvents.push(event) },
+      asus,
+      yamaha,
+      cisco,
+      notes: { getAll: () => ({ private: 'must not be sent' }) },
+      history: { getConnectionHistory: () => new Map([['secret', { id: 'secret' }]]) },
+      defaultRouterIp: '192.168.1.1',
+    });
+
+    const socket = { handshake: { auth: { token: 'notes-only' } }, data: {} };
+    let error;
+    middleware(socket, err => { error = err; });
+
+    assert.equal(error?.message, 'Forbidden');
+    assert.deepEqual(decisions[0].required, ['network.read']);
+    assert.equal(decisions[0].options.browserSessionOnly, false);
+    assert.equal(socket.data.auth, undefined);
+    assert.equal(typeof onConnection, 'function');
+    assert.equal(auditEvents[0].outcome, 'failure');
+    assert.deepEqual(auditEvents[0].metadata, { reason: 'permission_denied' });
+  });
+
+  it('treats cookie credentials as browser sessions only', () => {
+    let middleware;
+    const io = { use(fn) { middleware = fn; }, on() {} };
+    const { asus, yamaha, cisco } = createRouters();
+    let options;
+    registerSocketHandlers({
+      io,
+      appState: createAppState(),
+      authorizeCredential(_token, _required, receivedOptions) {
+        options = receivedOptions;
+        return null;
+      },
+      asus,
+      yamaha,
+      cisco,
+      notes: { getAll: () => ({}) },
+      history: { getConnectionHistory: () => new Map() },
+      defaultRouterIp: '192.168.1.1',
+    });
+
+    middleware({ handshake: { headers: { cookie: 'egressview_session=forged-api-token' } } }, () => {});
+    assert.equal(options.browserSessionOnly, true);
+  });
+
   it('loads the initial one-hour window from SQLite instead of the bounded hot map', () => {
     let onConnection;
     const io = { use() {}, on(_event, fn) { onConnection = fn; } };
@@ -162,7 +235,7 @@ describe('registerSocketHandlers', () => {
     registerSocketHandlers({
       io,
       appState: createAppState(),
-      authenticate: () => true,
+      authorizeCredential: () => ({ auth: true, permissions: ['network.read'], allowed: true }),
       asus,
       yamaha,
       cisco,

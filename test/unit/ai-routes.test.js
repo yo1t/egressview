@@ -45,11 +45,38 @@ function request(app, method, url, body = null) {
 function appFor(aiProvider, saveConfig = () => {}, overrides = {}) {
   const app = express();
   app.use(express.json());
-  app.use('/api', aiRoutes({ requireAdmin, aiProvider, saveConfig, ...overrides }));
+  const aiBudget = overrides.aiBudget || {
+    begin: () => ({ eventId: randomUUID() }),
+    finish: () => true,
+  };
+  app.use('/api', aiRoutes({ requireAdmin, aiProvider, saveConfig, ...overrides, aiBudget }));
   return app;
 }
 
 describe('AI configuration routes', () => {
+  it('returns 429 before generation when the durable AI budget is exhausted', async () => {
+    let generated = false;
+    const provider = createAiProvider({ fetchImpl: async () => {
+      generated = true;
+      return new Response(JSON.stringify({ response: 'must not run' }), { status: 200 });
+    } });
+    provider.configure({ provider: 'ollama', models: { ollama: 'm' } });
+    const exhausted = new Error('Daily AI usage limit reached');
+    exhausted.code = 'AI_BUDGET_EXCEEDED';
+    const app = appFor(provider, undefined, {
+      aiBudget: { begin: () => { throw exhausted; }, finish: () => true },
+      history: {
+        countFactsByTimeRange: () => ({}), groupDstByTimeRange: () => [], groupServiceByTimeRange: () => [],
+      },
+      routerManager: { list: () => [] },
+    });
+
+    const result = await request(app, 'POST', '/api/ai/analyze', { from: 1, to: 2 });
+    assert.equal(result.status, 429);
+    assert.equal(result.body.code, 'AI_BUDGET_EXCEEDED');
+    assert.equal(generated, false);
+  });
+
   it('stores provider settings without returning secret values', async () => {
     const aiProvider = createAiProvider();
     const app = appFor(aiProvider);
@@ -352,7 +379,8 @@ describe('AI configuration routes', () => {
     let context;
     let usage;
     const provider = createAiProvider({ fetchImpl: async (_url, options) => {
-      context = JSON.parse(JSON.parse(options.body).prompt.split('\n\n').at(-1));
+      const prompt = JSON.parse(options.body).prompt;
+      context = JSON.parse(prompt.match(/BEGIN_UNTRUSTED_NETWORK_DATA\n(.+)\nEND_UNTRUSTED_NETWORK_DATA/)[1]).facts;
       return new Response(JSON.stringify({ response: '確認結果', prompt_eval_count: 40, eval_count: 10 }), { status: 200 });
     } });
     provider.configure({ provider: 'ollama', models: { ollama: 'local-model' } });

@@ -59,6 +59,37 @@ function request(app, method, url, body = null) {
   });
 }
 
+function requestBytes(app, url, payload, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = Readable.from(payload);
+    req.method = 'POST';
+    req.url = url;
+    req.headers = {
+      'content-type': 'application/octet-stream',
+      'content-length': String(payload.length),
+      ...headers,
+    };
+    Object.defineProperty(req, 'ip', { value: '127.0.0.1', configurable: true });
+    req._destroy = (error, done) => done(error);
+    const res = new http.ServerResponse(req);
+    const chunks = [];
+    const socket = new Writable({
+      write(chunk, _encoding, callback) { chunks.push(Buffer.from(chunk)); callback(); },
+    });
+    socket.cork = () => {};
+    socket.uncork = () => {};
+    socket.setTimeout = () => {};
+    socket.destroy = () => {};
+    res.assignSocket(socket);
+    res.on('finish', () => {
+      const raw = Buffer.concat(chunks).toString();
+      const text = raw.split('\r\n\r\n').slice(1).join('\r\n\r\n');
+      resolve({ status: res.statusCode, body: JSON.parse(text || 'null') });
+    });
+    app.handle(req, res, reject);
+  });
+}
+
 function mount(routes) {
   const app = express();
   app.use(express.json());
@@ -226,6 +257,58 @@ describe('config routes', () => {
 });
 
 describe('backup configuration route', () => {
+  it('streams an uploaded database through an owner-only temporary file', async () => {
+    const sqlite = Buffer.concat([Buffer.from('SQLite format 3\0'), Buffer.alloc(256)]);
+    let inspected = null;
+    const app = mount(backupRoutes({
+      requireAdmin,
+      backup: {
+        async restoreFromFile(file) {
+          const stat = await require('node:fs').promises.stat(file);
+          inspected = { bytes: stat.size, mode: stat.mode & 0o777 };
+        },
+      },
+      appRoot: process.cwd(),
+    }));
+
+    const result = await requestBytes(app, '/api/backup/upload', sqlite);
+    assert.equal(result.status, 200);
+    assert.deepEqual(inspected, { bytes: sqlite.length, mode: 0o600 });
+  });
+
+  it('rejects an oversized declared upload before buffering its body', async () => {
+    const app = mount(backupRoutes({ requireAdmin, backup: {}, appRoot: process.cwd() }));
+    const result = await requestBytes(app, '/api/backup/upload', Buffer.from('x'), {
+      'content-length': String(100 * 1024 * 1024 + 1),
+    });
+    assert.equal(result.status, 413);
+  });
+
+  it('allows only one uploaded restore at a time', async () => {
+    const sqlite = Buffer.concat([Buffer.from('SQLite format 3\0'), Buffer.alloc(256)]);
+    let releaseRestore;
+    let restoreStarted;
+    const started = new Promise(resolve => { restoreStarted = resolve; });
+    const blocked = new Promise(resolve => { releaseRestore = resolve; });
+    const app = mount(backupRoutes({
+      requireAdmin,
+      backup: {
+        async restoreFromFile() {
+          restoreStarted();
+          await blocked;
+        },
+      },
+      appRoot: process.cwd(),
+    }));
+
+    const first = requestBytes(app, '/api/backup/upload', sqlite);
+    await started;
+    const second = await requestBytes(app, '/api/backup/upload', sqlite);
+    assert.equal(second.status, 409);
+    releaseRestore();
+    assert.equal((await first).status, 200);
+  });
+
   it('coerces positive integer strings through the shared schema', async () => {
     let config = { intervalHours: 24, maxGenerations: 7, maxBackupBytes: 0, autoPrune: false };
     const backup = {

@@ -202,6 +202,14 @@ export function initBackupSettings(showStatus) {
 
   document.getElementById('backup-upload-input')?.addEventListener('change', async event => {
     const file = event.target.files[0];
+    const maxUploadBytes = 100 * 1024 * 1024;
+    if (file?.size > maxUploadBytes) {
+      showStatus('backup-action-status', tVars('settings.error.withMessage', {
+        message: 'Backup file exceeds the 100 MB upload limit',
+      }), false);
+      event.target.value = '';
+      return;
+    }
     if (!file || !confirm(tVars('settings.backup.confirmUpload', { name: file.name }))) {
       event.target.value = '';
       return;

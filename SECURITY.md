@@ -21,12 +21,22 @@ EgressView monitors your LAN passively and can be accessed remotely when HTTPS i
 - All API endpoints and the WebSocket are protected by local/OIDC sessions or an API token. Browser sessions use HttpOnly/SameSite cookies and CSRF protection.
 - Google OIDC is optional and uses PKCE, state, nonce, signed ID tokens, verified email, and an explicit email/domain allowlist. The emergency local administrator remains available during IdP or internet outages.
 - Browser authorization is least-privilege: local login is `admin`, an explicitly allowed Google email is `operator`, and a domain-only match is read-only `viewer`. Allowlist membership alone never grants Google users administrator access.
-- Authentication and mutating API events are appended to a pseudonymous SQLite audit log. Raw client IPs, email addresses, credentials, and request bodies are not stored there.
+- Authentication, realtime authentication, mutating API events, and sensitive reads are appended to a pseudonymous SQLite audit log. Raw client IPs, email addresses, credentials, query strings, and request bodies are not stored there. Startup fails if the audit store is not writable; a runtime write failure withdraws readiness until a write succeeds again.
 - HTTPS protects credentials and dashboard data in transit when accessing EgressView from outside the LAN.
 - Router credentials and the SQLite database stay on the host machine; nothing is sent to a cloud service. Threat-intelligence feeds are downloaded and matched locally.
 - Router IP inputs are restricted to private address ranges (SSRF protection).
 
 For internet-facing deployments, terminate HTTPS at a trusted reverse proxy, set `EGRESSVIEW_PUBLIC_URL`, and configure an exact `EGRESSVIEW_TRUST_PROXY` IP/CIDR allowlist. Never trust forwarded headers from every source. Use a strong unique login password, keep EgressView updated, and avoid sharing access with untrusted users. Security reports for internet-accessible deployments are in scope.
+
+EgressView stores router passwords, optional cloud API keys, and recovery
+credentials in its local JSON configuration because a portable Linux/macOS
+service cannot depend on one universal key store. The file is rejected when it
+is a symbolic link, is automatically restricted to mode `0600`, and is replaced
+atomically through an owner-only temporary file. Protect the host account and
+its backups, enable full-disk or encrypted-volume protection, and do not place
+the configuration in a shared or synchronized directory. An encrypted disk is
+the boundary for secrets at rest; file permissions alone do not protect a
+running or root-compromised host.
 
 Signed portable releases use an Ed25519 signature over the archive checksum,
 plus a CycloneDX SBOM and per-file manifest. The public key distributed beside
