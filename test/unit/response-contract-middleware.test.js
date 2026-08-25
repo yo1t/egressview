@@ -58,9 +58,9 @@ describe('観測するが拒まない（P2-95 step 4）', () => {
     assert.equal(diagnostics.snapshot().violations, 1);
   });
 
-  it('enforceを求められても、この段階では拒まない', () => {
-    // The mode exists so the same middleware serves step 5; what it must not
-    // do is start refusing the moment somebody sets the variable.
+  it('enforceでも、名簿に無いルートは拒まない', () => {
+    // Enforcement is per route and each entry is a decision. Setting the mode
+    // must not start refusing everything that has a contract.
     const diagnostics = createResponseContractDiagnostics();
     const middleware = createResponseContractMiddleware({
       mode: 'enforce',
@@ -70,6 +70,23 @@ describe('観測するが拒まない（P2-95 step 4）', () => {
     });
     const res = run(middleware, { body: { ok: 'no' } });
     assert.deepEqual(res.sent, [{ ok: 'no' }]);
+  });
+
+  it('強制対象の名簿は、決定として空から始まる', () => {
+    // Enforcing replaces a response that is slightly wrong with one that is
+    // definitely broken. It earns a place only where sending the wrong thing
+    // is worse than sending nothing.
+    const { ENFORCED_ROUTES, isEnforcedRoute } = require('../../src/response-contract');
+    assert.ok(Array.isArray(ENFORCED_ROUTES));
+    assert.equal(isEnforcedRoute('GET /api/status', 200), false);
+  });
+
+  it('拒むのは成功応答だけ', () => {
+    // Replacing a 4xx or 5xx with a different 5xx tells the caller less than
+    // the original already did.
+    const { isEnforcedRoute } = require('../../src/response-contract');
+    assert.equal(isEnforcedRoute('GET /anything', 404), false);
+    assert.equal(isEnforcedRoute('GET /anything', 500), false);
   });
 
   it('既定では何も見ない', () => {

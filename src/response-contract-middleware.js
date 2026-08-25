@@ -16,6 +16,7 @@ const {
   MODES,
   classifyResponse,
   createResponseContractDiagnostics,
+  isEnforcedRoute,
   routeKey,
 } = require('./response-contract');
 const { createRegistry } = require('./response-contracts');
@@ -95,6 +96,13 @@ function createResponseContractMiddleware({
             } else {
               diagnostics.recordViolation(route || `(before any route) ${res.statusCode}`);
               report(route || '(before any route)', res.statusCode, result);
+              // Refused only for a route that was put on the list one at a
+              // time, and only for a success response: replacing a 4xx with a
+              // 5xx tells the caller less than the original already did.
+              if (active === 'enforce' && isEnforcedRoute(route, res.statusCode)) {
+                this.status(500);
+                return originalJson.call(this, { error: 'Response did not match its contract' });
+              }
             }
             break;
           }
