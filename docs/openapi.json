@@ -310,39 +310,44 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "schemaVersions": {
+                      "maxItems": 500,
                       "type": "array",
                       "items": {
-                        "type": "integer"
+                        "type": "number"
                       }
                     },
                     "maxObservationsPerBatch": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "maxBodyBytes": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "requestsPerMinute": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "compression": {
-                      "type": "array"
+                      "maxItems": 500,
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
-                    "compression",
-                    "maxBodyBytes",
+                    "schemaVersions",
                     "maxObservationsPerBatch",
+                    "maxBodyBytes",
                     "requestsPerMinute",
-                    "schemaVersions"
+                    "compression"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -5412,35 +5417,33 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "sessions": {
+                      "maxItems": 500,
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
                           "id": {
-                            "type": "integer"
-                          },
-                          "current": {
-                            "type": "boolean"
+                            "type": "number"
                           }
                         },
                         "required": [
-                          "current",
                           "id"
-                        ]
+                        ],
+                        "additionalProperties": {}
                       }
                     }
                   },
                   "required": [
                     "sessions"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -9203,7 +9206,36 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled."
+            "description": "Declared by the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notes": {
+                      "anyOf": [
+                        {
+                          "maxItems": 500,
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "notes"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
           },
           "400": {
             "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
@@ -10724,14 +10756,16 @@
   },
   "x-response-contract-coverage": {
     "declared": [
+      "GET /api/agent/capabilities",
       "GET /api/auth/audit-events",
+      "GET /api/auth/sessions",
+      "GET /api/notes",
       "GET /api/status"
     ],
     "observedOnly": [
       "DELETE /api/ai/conversations/:id",
       "DELETE /api/backup/prune/:jobId",
       "DELETE /api/routers/:id",
-      "GET /api/agent/capabilities",
       "GET /api/agent/geo-cache",
       "GET /api/agent/threat-intel",
       "GET /api/agents",
@@ -10746,7 +10780,6 @@
       "GET /api/auth/api-identities/self",
       "GET /api/auth/methods",
       "GET /api/auth/security-config",
-      "GET /api/auth/sessions",
       "GET /api/auth/status",
       "GET /api/backup/prune/:jobId",
       "GET /api/beacons",
@@ -10756,7 +10789,6 @@
       "GET /api/config/slack",
       "GET /api/devices",
       "GET /api/devices/merge-candidates",
-      "GET /api/notes",
       "GET /api/notification-log",
       "GET /api/routers",
       "POST /api/admin/regenerate-token",

@@ -73,9 +73,21 @@ describe('再生成が自分自身を止めない', () => {
   it('捕捉の実行からdrift検査を外してある', () => {
     // Any change to the generator used to block its own regeneration: the
     // document cannot be updated until it matches, and cannot match until it
-    // is updated. Hit twice on 2026-08-24.
-    const capture = read('scripts/capture-request-schemas.js');
-    assert.match(capture, /includeDriftCheck/);
-    assert.match(capture, /f !== 'openapi-contract\.test\.js'/);
+    // is updated. Hit three times on 2026-08-24 and -25.
+    //
+    // Asserted as behaviour rather than as the expression that implements it.
+    // The first version of this test pinned one filename, and broke the moment
+    // the exclusion became a list -- pinning how something is written says
+    // nothing about whether it works.
+    const { ARTIFACT_DRIFT_TESTS, testFiles } = require('../../scripts/capture-request-schemas');
+    const captured = testFiles().map((f) => path.basename(f));
+    const withDrift = testFiles({ includeDriftCheck: true }).map((f) => path.basename(f));
+
+    assert.ok(ARTIFACT_DRIFT_TESTS.length >= 2, 'the class has become one filename again');
+    for (const name of ARTIFACT_DRIFT_TESTS) {
+      assert.ok(!captured.includes(name), `${name} still runs during capture`);
+      assert.ok(withDrift.includes(name), `${name} is not in the suite at all`);
+    }
+    assert.ok(captured.length > 100, 'capture stopped running the rest of the suite');
   });
 });

@@ -68,8 +68,31 @@ const auditEvent = z.object({
   metadata: z.string().nullable().optional(),
 });
 
+/**
+ * What the agent is allowed to send, told to the agent.
+ *
+ * Constants, not a query: this response is the same on every call, so a
+ * declaration can be exact rather than permissive.
+ */
+const agentCapabilities = z.object({
+  schemaVersions: z.array(z.number()).max(BOUNDED_ARRAY_LIMIT),
+  maxObservationsPerBatch: z.number(),
+  maxBodyBytes: z.number(),
+  requestsPerMinute: z.number(),
+  compression: z.array(z.string()).max(BOUNDED_ARRAY_LIMIT),
+}).loose();
+
 function createRegistry() {
   const registry = createResponseContractRegistry();
+
+  // Refusals, wherever they come from. Measured across the whole document on
+  // 2026-08-25: every error body carries `error` as a string, and the variants
+  // only *add* fields (`ok`, `success`, `hint`, `requestId`, `job`, `code`).
+  // The single exception is `GET /readyz` 503, which is on the never-enforced
+  // list because a readiness check must answer when everything else is broken.
+  for (const status of [400, 401, 403, 409, 413, 415, 429, 500]) {
+    registry.declareEnvelope(status, errorEnvelope);
+  }
 
   // GET /api/status -- the offline fields are why this is not `.strict()`.
   registry.declare('GET /api/status', 200, z.object({
@@ -84,7 +107,25 @@ function createRegistry() {
     events: z.array(auditEvent).max(BOUNDED_ARRAY_LIMIT),
   }).loose());
 
+  // GET /api/auth/sessions -- browser sessions for one Hub. `listSessions`
+  // returns what is held in memory; a Hub with more than 500 live sessions has
+  // a different problem than this contract.
+  registry.declare('GET /api/auth/sessions', 200, z.object({
+    sessions: z.array(z.object({ id: z.number() }).loose()).max(BOUNDED_ARRAY_LIMIT),
+  }).loose());
+
+  // GET /api/agent/capabilities -- constants, so this can be exact.
+  registry.declare('GET /api/agent/capabilities', 200, agentCapabilities);
+
+  // GET /api/notes -- one note per device on this network.
+  registry.declare('GET /api/notes', 200, z.object({
+    notes: z.union([
+      z.array(z.unknown()).max(BOUNDED_ARRAY_LIMIT),
+      z.record(z.string(), z.unknown()),
+    ]),
+  }).loose());
+
   return registry;
 }
 
-module.exports = { auditEvent, createRegistry, errorEnvelope };
+module.exports = { agentCapabilities, auditEvent, createRegistry, errorEnvelope };
