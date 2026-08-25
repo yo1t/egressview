@@ -102,7 +102,8 @@
     "gen:demo-db": "node scripts/gen-demo-db.js",
     "benchmark:summary": "node scripts/benchmark-summary.js --generate 100000",
     "benchmark:poll-batch": "node scripts/benchmark-poll-batch.js 600",
-    "auth:reset": "node scripts/reset-admin-password.js"
+    "auth:reset": "node scripts/reset-admin-password.js",
+    "api:check-responses": "node scripts/check-response-contracts.js"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock": "^3.1111.0",

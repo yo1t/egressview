@@ -201,6 +201,32 @@ jobs:
       - name: Secret scan
         run: npm run security:secrets
 
+  response-contracts:
+    # Runs the suite a second time with response validation on. Separate from
+    # the unit-test job on purpose: a broken contract and a broken test are
+    # different failures, and reading one as the other wastes the time this
+    # gate is meant to save.
+    name: Response contracts
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Fails on a response that breaks its contract, and on a contract nothing
+      # exercised -- a declaration nobody checked reads as success and proves
+      # nothing.
+      - name: Check declared response contracts
+        run: npm run api:check-responses
+
   portability:
     name: Offline portability (${{ matrix.runtime }})
     timeout-minutes: 15
