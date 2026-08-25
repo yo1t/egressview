@@ -147,11 +147,14 @@ describe('ログが利用者のデータを写さない', () => {
       registry: registryWith('GET /api/status', 200, z.object({ routerIp: z.boolean() })),
       logger: { warn: (line) => warnings.push(line) },
     });
-    run(middleware, { body: { routerIp: '10.41.128.183' } });
+    // TEST-NET-1, not this network's address. The first version of this test
+    // used a real one -- in the test asserting that a log must not carry the
+    // user's data -- and the secret scan caught it.
+    run(middleware, { body: { routerIp: '192.0.2.10' } });
 
     assert.equal(warnings.length, 1);
     assert.match(warnings[0], /routerIp/);
-    assert.doesNotMatch(warnings[0], /10\.41\.128\.183/);
+    assert.doesNotMatch(warnings[0], /192\.0\.2\.10/);
   });
 
   it('同じ違反を繰り返し書かない', () => {
