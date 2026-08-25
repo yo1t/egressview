@@ -4689,42 +4689,10 @@
             }
           },
           "401": {
-            "description": "Declared by the server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
+            "description": "No usable credential."
           },
           "403": {
-            "description": "Declared by the server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
+            "description": "Authenticated, but not permitted."
           }
         }
       }
@@ -10351,42 +10319,10 @@
             }
           },
           "401": {
-            "description": "Declared by the server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
+            "description": "No usable credential."
           },
           "403": {
-            "description": "Declared by the server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
+            "description": "Authenticated, but not permitted."
           }
         }
       }

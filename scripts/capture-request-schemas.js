@@ -68,11 +68,21 @@ if (require.main === module) {
   );
 }
 
-function testFiles() {
+/**
+ * The suite, minus the check on the artifact being regenerated.
+ *
+ * `openapi-contract.test.js` asserts the committed document matches what the
+ * generator produces. Running it *during* capture means any change to the
+ * generator blocks its own regeneration: the document cannot be updated until
+ * it matches, and it cannot match until it is updated. Capture exists to walk
+ * the routes, and that test walks none.
+ */
+function testFiles({ includeDriftCheck = false } = {}) {
   const dir = path.join(ROOT, 'test', 'unit');
   return fs.readdirSync(dir)
     .filter((f) => f.endsWith('.test.js'))
+    .filter((f) => includeDriftCheck || f !== 'openapi-contract.test.js')
     .map((f) => path.join('test', 'unit', f));
 }
 
-module.exports = { OUTPUT };
+module.exports = { OUTPUT, testFiles };

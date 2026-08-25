@@ -31,7 +31,20 @@ const {
   createResponseContractRegistry,
 } = require('./response-contract');
 
-/** The body every refusal shares. Produced by the middleware, not per route. */
+/**
+ * The body every refusal shares.
+ *
+ * **Not declared against any route, and that is a finding rather than an
+ * omission.** It was, until the step-3 gate reported all four such contracts
+ * as never exercised: a 401 or 403 is produced by the authentication
+ * middleware *before* a route matches, so `req.route` does not exist and the
+ * response cannot be attributed to the route it was heading for. Declaring it
+ * per route said something untrue about where it comes from.
+ *
+ * It belongs to the middleware and will be declared there, once keyed by
+ * something that exists at the moment it is sent. Exported meanwhile so the
+ * shape is written down once.
+ */
 const errorEnvelope = z.object({ error: z.string() });
 
 /**
@@ -64,16 +77,12 @@ function createRegistry() {
     routerIp: z.string().nullable(),
     enrichment: z.object({}).loose(),
   }).loose());
-  registry.declare('GET /api/status', 401, errorEnvelope);
-  registry.declare('GET /api/status', 403, errorEnvelope);
 
   // GET /api/auth/audit-events -- `list` clamps its limit to 500, which is
   // what makes this bounded rather than a promise nobody keeps.
   registry.declare('GET /api/auth/audit-events', 200, z.object({
     events: z.array(auditEvent).max(BOUNDED_ARRAY_LIMIT),
   }).loose());
-  registry.declare('GET /api/auth/audit-events', 401, errorEnvelope);
-  registry.declare('GET /api/auth/audit-events', 403, errorEnvelope);
 
   return registry;
 }
