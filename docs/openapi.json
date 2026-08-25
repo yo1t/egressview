@@ -27,7 +27,7 @@
   "info": {
     "title": "EgressView Hub HTTP API",
     "version": "1.10.0",
-    "description": "Generated from src/permission-matrix.js, the same object the server enforces, so this cannot describe a route the server does not have or miss one it does.\n\nRequest bodies are described for the routes the test suite exercises, captured from the schema the server actually validated rather than written by hand -- a hand-written list would go stale the first time a route changed. Operations without one say so in their description.\n\nResponse shapes are **observed**, not enforced: nothing validates a response on the way out, so these describe what routes were seen to return under test. Each is marked `x-observed`. **Treat them as documentation of behaviour, not as a promise.**\n\nRegenerate with `npm run docs:openapi`, which re-captures first.",
+    "description": "Generated from src/permission-matrix.js, the same object the server enforces, so this cannot describe a route the server does not have or miss one it does.\n\nRequest bodies are described for the routes the test suite exercises, captured from the schema the server actually validated rather than written by hand -- a hand-written list would go stale the first time a route changed. Operations without one say so in their description.\n\nResponses come in two kinds and the difference matters. A schema marked `x-observed` describes what a route was **seen to return under test** -- documentation of behaviour, not a promise, and only as complete as the paths the tests happened to walk. A schema without that marking is **declared by the server** and is what the route promises. `x-array-elements-observed` marks a declaration that covers the envelope but not every element of an array.\n\nRegenerate with `npm run docs:openapi`, which re-captures first.",
     "license": {
       "name": "AGPL-3.0-only"
     }
@@ -4546,20 +4546,125 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "events": {
-                      "type": "array"
+                      "maxItems": 500,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "eventId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "number"
+                          },
+                          "eventType": {
+                            "type": "string"
+                          },
+                          "outcome": {
+                            "type": "string"
+                          },
+                          "authMethod": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "actorHash": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "principalHash": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "requestId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "clientIpHash": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "httpMethod": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "path": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "metadata": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "eventId",
+                          "createdAt",
+                          "eventType",
+                          "outcome"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
                     "events"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -4584,10 +4689,42 @@
             }
           },
           "401": {
-            "description": "No usable credential."
+            "description": "Declared by the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           },
           "403": {
-            "description": "Authenticated, but not permitted."
+            "description": "Declared by the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -10178,7 +10315,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10188,29 +10325,68 @@
                       "type": "boolean"
                     },
                     "routerIp": {
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "enrichment": {
                       "type": "object",
                       "properties": {},
-                      "required": []
+                      "additionalProperties": {}
                     }
                   },
                   "required": [
                     "authenticated",
-                    "enrichment",
-                    "routerIp"
+                    "routerIp",
+                    "enrichment"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
             }
           },
           "401": {
-            "description": "No usable credential."
+            "description": "Declared by the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           },
           "403": {
-            "description": "Authenticated, but not permitted."
+            "description": "Declared by the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -10609,5 +10785,126 @@
         }
       }
     }
+  },
+  "x-response-contract-coverage": {
+    "declared": [
+      "GET /api/auth/audit-events",
+      "GET /api/status"
+    ],
+    "observedOnly": [
+      "DELETE /api/ai/conversations/:id",
+      "DELETE /api/backup/prune/:jobId",
+      "DELETE /api/routers/:id",
+      "GET /api/agent/capabilities",
+      "GET /api/agent/geo-cache",
+      "GET /api/agent/threat-intel",
+      "GET /api/agents",
+      "GET /api/agents/enrollment-requests",
+      "GET /api/agents/ingest-metrics",
+      "GET /api/ai/conversations/:id",
+      "GET /api/ai/facts",
+      "GET /api/ai/notification-config",
+      "GET /api/ai/pricing/diagnostics",
+      "GET /api/ai/usage/monthly",
+      "GET /api/auth/api-identities",
+      "GET /api/auth/api-identities/self",
+      "GET /api/auth/methods",
+      "GET /api/auth/security-config",
+      "GET /api/auth/sessions",
+      "GET /api/auth/status",
+      "GET /api/backup/prune/:jobId",
+      "GET /api/beacons",
+      "GET /api/beacons/config",
+      "GET /api/config/ai",
+      "GET /api/config/detection-notifications",
+      "GET /api/config/slack",
+      "GET /api/devices",
+      "GET /api/devices/merge-candidates",
+      "GET /api/notes",
+      "GET /api/notification-log",
+      "GET /api/routers",
+      "POST /api/admin/regenerate-token",
+      "POST /api/admin/verify",
+      "POST /api/agent/enrollment-requests",
+      "POST /api/agent/enrollment-requests/claim",
+      "POST /api/agent/ingest",
+      "POST /api/agent/registration/revoke",
+      "POST /api/agent/token/rotate",
+      "POST /api/agents/:agentId/revoke",
+      "POST /api/agents/enrollment-requests/:requestId/approve",
+      "POST /api/agents/enrollment-requests/:requestId/reject",
+      "POST /api/agents/enrollment-tokens",
+      "POST /api/ai/analyze",
+      "POST /api/ai/chat",
+      "POST /api/ai/guardrails",
+      "POST /api/ai/models",
+      "POST /api/ai/notification-config",
+      "POST /api/ai/pricing/check",
+      "POST /api/ai/test",
+      "POST /api/auth/api-identities",
+      "POST /api/auth/change-password",
+      "POST /api/auth/login",
+      "POST /api/auth/logout",
+      "POST /api/auth/oidc/test",
+      "POST /api/auth/security-config",
+      "POST /api/auth/sessions/:id/revoke",
+      "POST /api/auth/sessions/revoke-all",
+      "POST /api/backup/config",
+      "POST /api/backup/prune",
+      "POST /api/backup/restore",
+      "POST /api/backup/upload",
+      "POST /api/beacons/:id/dismiss",
+      "POST /api/beacons/config",
+      "POST /api/cisco/detect",
+      "POST /api/config/ai",
+      "POST /api/config/datasources",
+      "POST /api/config/detection-notifications",
+      "POST /api/config/general",
+      "POST /api/config/manual-threat",
+      "POST /api/config/slack",
+      "POST /api/devices/archive",
+      "POST /api/devices/merge",
+      "POST /api/devices/reject",
+      "POST /api/devices/unarchive",
+      "POST /api/login",
+      "POST /api/notes",
+      "POST /api/notes/draft",
+      "POST /api/routers",
+      "POST /api/slack/lookup-user",
+      "POST /api/slack/test",
+      "POST /api/slack/verify",
+      "POST /api/threat/manual-lookup",
+      "POST /api/yamaha/detect",
+      "PUT /api/routers/:id"
+    ],
+    "neverEnforced": [
+      "GET /api/auth/oidc/callback",
+      "GET /api/auth/oidc/start",
+      "GET /api/backup/download/:name",
+      "GET /api/connections/export",
+      "GET /healthz",
+      "GET /readyz"
+    ],
+    "undescribed": [
+      "GET /api/agents/transport",
+      "GET /api/ai/conversations",
+      "GET /api/ai/notification-events",
+      "GET /api/backup/list",
+      "GET /api/config/datasources",
+      "GET /api/config/manual-threat",
+      "GET /api/connections",
+      "GET /api/connections/memory",
+      "GET /api/connections/new-nodes",
+      "GET /api/connections/summary",
+      "GET /api/connections/threat-connections",
+      "GET /api/connections/threat-counts",
+      "POST /api/agents/transport",
+      "POST /api/ai/notification-run-now",
+      "POST /api/ai/notification-test",
+      "POST /api/auth/api-identities/:id/revoke",
+      "POST /api/backup/create",
+      "POST /api/nonce",
+      "POST /api/routers/detect"
+    ]
   }
 }
