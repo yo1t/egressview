@@ -899,7 +899,7 @@
         },
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server.",
             "content": {
               "application/json": {
                 "schema": {
@@ -909,26 +909,33 @@
                       "type": "string"
                     },
                     "accepted": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "duplicate": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "rejected": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "receivedAt": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "replayed": {
                       "type": "boolean"
                     },
-                    "requestId": {},
-                    "ok": {
-                      "type": "boolean"
+                    "requestId": {
+                      "type": "string"
                     }
                   },
-                  "x-observed": true
+                  "required": [
+                    "batchId",
+                    "accepted",
+                    "duplicate",
+                    "rejected",
+                    "receivedAt",
+                    "replayed"
+                  ],
+                  "additionalProperties": {}
                 }
               }
             }
@@ -3999,7 +4006,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4008,176 +4015,24 @@
                     "pricing": {
                       "type": "object",
                       "properties": {
-                        "catalogVersion": {
-                          "type": "string"
-                        },
-                        "currency": {
-                          "type": "string"
-                        },
-                        "effectiveFrom": {
-                          "type": "string"
-                        },
-                        "sourceUrls": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
-                        },
                         "approximate": {
                           "type": "boolean"
                         }
                       },
                       "required": [
-                        "approximate",
-                        "catalogVersion",
-                        "currency",
-                        "effectiveFrom",
-                        "sourceUrls"
-                      ]
+                        "approximate"
+                      ],
+                      "additionalProperties": {}
                     },
-                    "selectedModel": {
-                      "type": "null"
-                    },
-                    "current": {
-                      "type": "object",
-                      "properties": {
-                        "from": {
-                          "type": "integer"
-                        },
-                        "to": {
-                          "type": "integer"
-                        },
-                        "requests": {
-                          "type": "integer"
-                        },
-                        "inputTokens": {
-                          "type": "integer"
-                        },
-                        "outputTokens": {
-                          "type": "integer"
-                        },
-                        "totalTokens": {
-                          "type": "integer"
-                        },
-                        "pricedRequests": {
-                          "type": "integer"
-                        },
-                        "estimatedCostUsd": {
-                          "type": "number"
-                        },
-                        "unpricedModels": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              },
-                              "requests": {
-                                "type": "integer"
-                              },
-                              "totalTokens": {
-                                "type": "integer"
-                              }
-                            },
-                            "required": [
-                              "model",
-                              "provider",
-                              "requests",
-                              "totalTokens"
-                            ]
-                          }
-                        }
-                      },
-                      "required": [
-                        "estimatedCostUsd",
-                        "from",
-                        "inputTokens",
-                        "outputTokens",
-                        "pricedRequests",
-                        "requests",
-                        "to",
-                        "totalTokens",
-                        "unpricedModels"
-                      ]
-                    },
-                    "previous": {
-                      "type": "object",
-                      "properties": {
-                        "from": {
-                          "type": "integer"
-                        },
-                        "to": {
-                          "type": "integer"
-                        },
-                        "requests": {
-                          "type": "integer"
-                        },
-                        "inputTokens": {
-                          "type": "integer"
-                        },
-                        "outputTokens": {
-                          "type": "integer"
-                        },
-                        "totalTokens": {
-                          "type": "integer"
-                        },
-                        "pricedRequests": {
-                          "type": "integer"
-                        },
-                        "estimatedCostUsd": {
-                          "type": "number"
-                        },
-                        "unpricedModels": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              },
-                              "requests": {
-                                "type": "integer"
-                              },
-                              "totalTokens": {
-                                "type": "integer"
-                              }
-                            },
-                            "required": [
-                              "model",
-                              "provider",
-                              "requests",
-                              "totalTokens"
-                            ]
-                          }
-                        }
-                      },
-                      "required": [
-                        "estimatedCostUsd",
-                        "from",
-                        "inputTokens",
-                        "outputTokens",
-                        "pricedRequests",
-                        "requests",
-                        "to",
-                        "totalTokens",
-                        "unpricedModels"
-                      ]
-                    }
+                    "current": {},
+                    "previous": {}
                   },
                   "required": [
-                    "current",
-                    "previous",
                     "pricing",
-                    "selectedModel"
+                    "current",
+                    "previous"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -10757,10 +10612,12 @@
   "x-response-contract-coverage": {
     "declared": [
       "GET /api/agent/capabilities",
+      "GET /api/ai/usage/monthly",
       "GET /api/auth/audit-events",
       "GET /api/auth/sessions",
       "GET /api/notes",
-      "GET /api/status"
+      "GET /api/status",
+      "POST /api/agent/ingest"
     ],
     "observedOnly": [
       "DELETE /api/ai/conversations/:id",
@@ -10775,7 +10632,6 @@
       "GET /api/ai/facts",
       "GET /api/ai/notification-config",
       "GET /api/ai/pricing/diagnostics",
-      "GET /api/ai/usage/monthly",
       "GET /api/auth/api-identities",
       "GET /api/auth/api-identities/self",
       "GET /api/auth/methods",
@@ -10795,7 +10651,6 @@
       "POST /api/admin/verify",
       "POST /api/agent/enrollment-requests",
       "POST /api/agent/enrollment-requests/claim",
-      "POST /api/agent/ingest",
       "POST /api/agent/registration/revoke",
       "POST /api/agent/token/rotate",
       "POST /api/agents/:agentId/revoke",

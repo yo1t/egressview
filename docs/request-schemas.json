@@ -4027,11 +4027,16 @@
           "replayed": {
             "type": "boolean"
           },
-          "requestId": {},
-          "ok": {
-            "type": "boolean"
-          }
-        }
+          "requestId": {}
+        },
+        "required": [
+          "accepted",
+          "batchId",
+          "duplicate",
+          "receivedAt",
+          "rejected",
+          "replayed"
+        ]
       },
       "400": {
         "type": "object",
