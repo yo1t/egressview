@@ -135,26 +135,42 @@ describe('OpenAPI contract', () => {
     );
   });
 
-  it('レスポンスは観測であって保証ではないと、すべての箇所で言う', () => {
-    // Nothing validates a response on the way out. A reader who takes an
-    // observation for a guarantee has been misled by this document rather
-    // than helped by it, so the marking is not optional.
-    let marked = 0;
+  it('観測と宣言を取り違えられる書き方をしない', () => {
+    // Until 2026-08-24 every response here was an observation, and this test
+    // asserted so. Some are now declared by the server (P2-95). The property
+    // that matters did not change: a reader must never take one for the other.
+    // An observation that lost its marking would read as a promise.
+    // Per response, not per route: a route can have a declared 200 and an
+    // observed 400, and assuming otherwise is how a document ends up calling
+    // an observation a promise.
+    let observed = 0;
+    let declaredSchemas = 0;
     for (const [p, item] of Object.entries(document.paths)) {
       for (const [method, operation] of Object.entries(item)) {
+        const route = `${method.toUpperCase()} ${p}`;
         for (const [status, response] of Object.entries(operation.responses)) {
           if (!response.content) continue;
-          marked += 1;
-          assert.equal(
-            response.content['application/json'].schema['x-observed'], true,
-            `${method.toUpperCase()} ${p} ${status} is not marked as observed`
-          );
-          assert.match(response.description, /not a guarantee/);
+          const schema = response.content['application/json'].schema;
+          const claimsDeclared = /Declared by the server/.test(response.description);
+          if (claimsDeclared) {
+            declaredSchemas += 1;
+            assert.equal(
+              schema['x-observed'], undefined,
+              `${route} ${status} is declared and must not claim to be observed`
+            );
+          } else {
+            observed += 1;
+            assert.equal(
+              schema['x-observed'], true,
+              `${route} ${status} is neither declared nor marked as observed`
+            );
+            assert.match(response.description, /not a guarantee/);
+          }
         }
       }
     }
-    assert.ok(marked > 50, `only ${marked} responses carry a shape`);
-    assert.match(document.info.description, /observed.*not enforced/s);
+    assert.ok(observed > 50, `only ${observed} responses carry an observed shape`);
+    assert.ok(declaredSchemas > 0, 'no response is declared, so step 2 did nothing');
   });
 
   it('毎回は返らなかったフィールドをrequiredにしない', () => {
@@ -193,8 +209,12 @@ describe('OpenAPI contract', () => {
     // only observed. Losing that line would turn descriptions into promises.
     assert.match(document.info.description, /Request bodies are described for the routes/);
     assert.ok(
-      document.info.description.includes('documentation of behaviour, not as a promise'),
+      document.info.description.includes('documentation of behaviour, not a promise'),
       'the document stopped saying that observed shapes are not promises'
+    );
+    assert.ok(
+      document.info.description.includes('declared by the server'),
+      'the document stopped distinguishing a declaration from an observation'
     );
   });
 });

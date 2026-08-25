@@ -25,6 +25,16 @@ const {
   ACCESS, HTTP_ROUTE_MATRIX, MCP_TOOL_PERMISSIONS,
 } = require('../src/permission-matrix');
 const { ALL_PERMISSIONS, AGENT_PERMISSIONS } = require('../src/permissions');
+const { toJSONSchema } = require('zod');
+const { isNeverEnforced } = require('../src/response-contract');
+const { createRegistry } = require('../src/response-contracts');
+
+/**
+ * Statuses a declaration may cover. Kept short deliberately: a contract for a
+ * status the route cannot return would be a promise about something that never
+ * happens, which is the kind of documentation that erodes trust in the rest.
+ */
+const DECLARED_STATUSES = [200, 201, 202, 400, 401, 403, 404, 409, 413, 429, 500];
 
 const ROOT = path.join(__dirname, '..');
 const OUTPUT = path.join(ROOT, 'docs', 'openapi.json');
@@ -102,8 +112,9 @@ function captured() {
  * Every one is marked, because a reader who treats an observation as a
  * guarantee has been misled by this document rather than helped by it.
  */
-function responsesFor(route, observed) {
-  const seen = observed[`${route.method} ${route.path}`];
+function responsesFor(route, observed, registry, coverage) {
+  const key = `${route.method} ${route.path}`;
+  const seen = observed[key];
   const out = {
     200: { description: 'Handled.' },
     ...(route.access === ACCESS.PUBLIC ? {} : {
@@ -122,11 +133,43 @@ function responsesFor(route, observed) {
       },
     };
   }
+
+  // A declaration replaces an observation, and takes `x-observed` with it.
+  // The point of the whole exercise is that the two are not the same claim:
+  // one says what the server promises, the other says what it happened to do
+  // while the tests were watching.
+  let declaredHere = 0;
+  for (const status of DECLARED_STATUSES) {
+    const contract = registry.lookup(key, status);
+    if (!contract) continue;
+    declaredHere += 1;
+    const schema = toJSONSchema(contract.schema);
+    delete schema.$schema;
+    out[status] = {
+      description: 'Declared by the server.'
+        + (contract.arrayElementsObserved
+          ? ' The envelope is declared; the array elements are observed, not checked.'
+          : ''),
+      content: { 'application/json': { schema } },
+      ...(contract.arrayElementsObserved ? { 'x-array-elements-observed': true } : {}),
+    };
+  }
+
+  if (isNeverEnforced(key)) coverage.neverEnforced.push(key);
+  else if (declaredHere > 0) coverage.declared.push(key);
+  else if (seen) coverage.observedOnly.push(key);
+  else coverage.undescribed.push(key);
   return out;
 }
 
 function build({ version } = {}) {
   const { bodies, responses: observed } = captured();
+  const registry = createRegistry();
+  // Named so the report cannot quietly become a count of nothing: a route with
+  // no contract is listed, not omitted. `declared` means "has at least one
+  // declared response" -- declarations are per route *and* status, so a route
+  // can appear here while some of its statuses are still observations.
+  const coverage = { declared: [], observedOnly: [], neverEnforced: [], undescribed: [] };
   const paths = {};
   // Sorted so the generated file is stable: an unordered object would produce
   // a different document on every run and make the drift check meaningless.
@@ -147,7 +190,7 @@ function build({ version } = {}) {
           content: { 'application/json': { schema: body } },
         },
       } : {}),
-      responses: responsesFor(route, observed),
+      responses: responsesFor(route, observed, registry, coverage),
     };
   }
 
@@ -182,10 +225,13 @@ function build({ version } = {}) {
         + 'rather than written by hand -- a hand-written list would go stale '
         + 'the first time a route changed. Operations without one say so in '
         + 'their description.\n\n'
-        + 'Response shapes are **observed**, not enforced: nothing validates a '
-        + 'response on the way out, so these describe what routes were seen to '
-        + 'return under test. Each is marked `x-observed`. **Treat them as '
-        + 'documentation of behaviour, not as a promise.**\n\n'
+        + 'Responses come in two kinds and the difference matters. A schema '
+        + 'marked `x-observed` describes what a route was **seen to return '
+        + 'under test** -- documentation of behaviour, not a promise, and only '
+        + 'as complete as the paths the tests happened to walk. A schema '
+        + 'without that marking is **declared by the server** and is what the '
+        + 'route promises. `x-array-elements-observed` marks a declaration '
+        + 'that covers the envelope but not every element of an array.\n\n'
         + 'Regenerate with `npm run docs:openapi`, which re-captures first.',
       license: { name: 'AGPL-3.0-only' },
     },
@@ -197,6 +243,12 @@ function build({ version } = {}) {
       ),
     },
     paths,
+    'x-response-contract-coverage': {
+      declared: coverage.declared.sort(),
+      observedOnly: coverage.observedOnly.sort(),
+      neverEnforced: coverage.neverEnforced.sort(),
+      undescribed: coverage.undescribed.sort(),
+    },
   };
 }
 
