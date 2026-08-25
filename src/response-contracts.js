@@ -125,6 +125,35 @@ function createRegistry() {
     ]),
   }).loose());
 
+  // The routes this Hub actually serves, in the order the step-4 observer
+  // reported them: agent ingest carries 71% of API traffic, and none of the
+  // contracts declared before it were ever exercised in production.
+
+  // POST /api/agent/ingest -- `batchAck`, a frozen object of counts.
+  registry.declare('POST /api/agent/ingest', 200, z.object({
+    batchId: z.string(),
+    accepted: z.number(),
+    duplicate: z.number(),
+    rejected: z.number(),
+    receivedAt: z.number(),
+    replayed: z.boolean(),
+    requestId: z.string().optional(),
+  }).loose());
+
+  // GET /api/ai/usage/monthly -- four objects, no arrays.
+  registry.declare('GET /api/ai/usage/monthly', 200, z.object({
+    pricing: z.object({ approximate: z.boolean() }).loose(),
+    current: z.unknown(),
+    previous: z.unknown(),
+  }).loose());
+
+  // GET /api/connections/summary is *not* declared, though the step-4
+  // observer named it as one of the busiest. Its tests call the handler
+  // directly with a stand-in `res`, never through Express, so nothing can
+  // reach it to check the contract and the gate would report a declaration
+  // nobody exercised. Declaring it needs an HTTP-level test first: a contract
+  // that cannot be verified is the thing this whole design refuses to ship.
+
   return registry;
 }
 
