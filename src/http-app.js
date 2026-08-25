@@ -165,6 +165,17 @@ function configureHttpApp(app, {
         + `violations=${snapshot.violations} unmatched=${snapshot.unmatched} `
         + `neverEnforced=${snapshot.neverEnforced} checkedMs=${snapshot.checkedMilliseconds}`
       );
+      // Which routes, not just how many. The first run on the Hub reported
+      // 137 unmatched and named none of them, which says a number and asks
+      // the reader to go and find the work themselves.
+      const busiest = Object.entries(snapshot.unmatchedRoutes)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 8);
+      if (busiest.length) {
+        logger.info(
+          `[response-contract] undeclared: ${busiest.map(([route, count]) => `${route} x${count}`).join(', ')}`
+        );
+      }
     }, 15 * 60 * 1000);
     summary.unref();
   }

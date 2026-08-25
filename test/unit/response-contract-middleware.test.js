@@ -220,5 +220,9 @@ describe('アプリに接続されている', () => {
     assert.match(source, /\[response-contract\] mode=/);
     assert.match(source, /checkedMs=/);
     assert.match(source, /summary\.unref\(\)/);
+    // Which routes, not just how many. The first run reported 137 unmatched
+    // and named none of them: a number that asks the reader to go and find
+    // the work themselves is not a report.
+    assert.match(source, /\[response-contract\] undeclared:/);
   });
 });
