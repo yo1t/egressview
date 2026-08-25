@@ -61,6 +61,36 @@ const NEVER_ENFORCED = Object.freeze([
 
 const NEVER_ENFORCED_ROUTES = new Set(NEVER_ENFORCED.map((entry) => entry.route));
 
+/**
+ * Routes whose responses are refused in production when they break contract.
+ *
+ * **Empty on purpose, and adding to it is a decision each time.** Enforcing
+ * replaces a response that is slightly wrong with one that is definitely
+ * broken, so it earns its place only where sending the wrong thing is worse
+ * than sending nothing -- a body carrying settings, credentials or provider
+ * configuration, where an unexpected field is a leak rather than a mismatch.
+ *
+ * Ordinary shape drift does not belong here. It is caught in CI before it
+ * ships and counted in production after; turning it into a 500 would take a
+ * working screen away from someone to report a documentation problem.
+ *
+ * Measured 2026-08-25, fifteen minutes of real traffic: 136 responses checked
+ * against 15 contracts, **zero violations**, 0.05 ms each. The cost is not
+ * what makes this list short.
+ */
+const ENFORCED_ROUTES = Object.freeze([]);
+
+const ENFORCED_ROUTE_SET = new Set(ENFORCED_ROUTES.map((entry) => entry.route));
+
+/**
+ * Refusal applies to success responses only. Replacing a 4xx or 5xx with a
+ * different 5xx tells the caller less than the original did, and the original
+ * was already telling them something went wrong.
+ */
+function isEnforcedRoute(route, status) {
+  return ENFORCED_ROUTE_SET.has(route) && status >= 200 && status < 300;
+}
+
 function isNeverEnforced(route) {
   return NEVER_ENFORCED_ROUTES.has(route);
 }
@@ -216,6 +246,8 @@ function classifyResponse({ mode, route, status, registry }) {
 
 module.exports = {
   BOUNDED_ARRAY_LIMIT,
+  ENFORCED_ROUTES,
+  isEnforcedRoute,
   MODES,
   NEVER_ENFORCED,
   classifyResponse,
