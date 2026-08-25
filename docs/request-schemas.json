@@ -3618,6 +3618,25 @@
       }
     },
     "GET /api/notes": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "notes": {
+            "type": "object",
+            "properties": {
+              "192.168.1.10": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "192.168.1.10"
+            ]
+          }
+        },
+        "required": [
+          "notes"
+        ]
+      },
       "400": {
         "type": "object",
         "properties": {

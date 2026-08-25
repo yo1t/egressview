@@ -20,6 +20,34 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const OUTPUT = path.join(ROOT, 'docs', 'request-schemas.json');
 
+/**
+ * Tests that compare the committed document to what the generator would
+ * produce.
+ *
+ * Running these *during* capture means any change to the generator blocks its
+ * own regeneration: the document cannot be updated until it matches, and it
+ * cannot match until it is updated. Hit three times on 2026-08-24 and -25,
+ * the third time in a new file -- which is why this is a named class with a
+ * rule rather than one filename.
+ *
+ * A test belongs here when it reads `docs/openapi.json` and asserts something
+ * about how it was generated. It does not belong here for reading the document
+ * to check a property of the API itself.
+ */
+const ARTIFACT_DRIFT_TESTS = [
+  'openapi-contract.test.js',
+  'response-contract-generation.test.js',
+];
+
+/** The suite, minus the checks on the artifact being regenerated. */
+function testFiles({ includeDriftCheck = false } = {}) {
+  const dir = path.join(ROOT, 'test', 'unit');
+  return fs.readdirSync(dir)
+    .filter((f) => f.endsWith('.test.js'))
+    .filter((f) => includeDriftCheck || !ARTIFACT_DRIFT_TESTS.includes(f))
+    .map((f) => path.join('test', 'unit', f));
+}
+
 if (require.main === module) {
   const runner = path.join(__dirname, 'capture-request-schemas-runner.js');
   const out = execFileSync(process.execPath, ['--test', ...testFiles()], {
@@ -68,21 +96,4 @@ if (require.main === module) {
   );
 }
 
-/**
- * The suite, minus the check on the artifact being regenerated.
- *
- * `openapi-contract.test.js` asserts the committed document matches what the
- * generator produces. Running it *during* capture means any change to the
- * generator blocks its own regeneration: the document cannot be updated until
- * it matches, and it cannot match until it is updated. Capture exists to walk
- * the routes, and that test walks none.
- */
-function testFiles({ includeDriftCheck = false } = {}) {
-  const dir = path.join(ROOT, 'test', 'unit');
-  return fs.readdirSync(dir)
-    .filter((f) => f.endsWith('.test.js'))
-    .filter((f) => includeDriftCheck || f !== 'openapi-contract.test.js')
-    .map((f) => path.join('test', 'unit', f));
-}
-
-module.exports = { OUTPUT, testFiles };
+module.exports = { ARTIFACT_DRIFT_TESTS, OUTPUT, testFiles };

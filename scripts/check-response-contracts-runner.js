@@ -30,23 +30,29 @@ try {
   response.json = function json(body) {
     try {
       const route = routeKey(this.req);
-      if (!route) {
-        unresolved += 1;
+      const status = this.statusCode;
+      // A route contract wins. The envelope catches what middleware sent
+      // before a route was chosen -- which is where every unattributable
+      // response measured on 2026-08-25 came from.
+      const contract = (route && registry.lookup(route, status))
+        || registry.lookupEnvelope(status);
+      if (!contract) {
+        if (!route) unresolved += 1;
       } else {
-        const contract = registry.lookup(route, this.statusCode);
-        if (contract) {
-          const result = contract.schema.safeParse(body);
-          if (result.success) {
-            verified.add(`${route} ${this.statusCode}`);
-          } else {
-            violations.push({
-              route,
-              status: this.statusCode,
-              issues: result.error.issues.slice(0, 4).map(
-                (issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`
-              ),
-            });
-          }
+        const name = contract.envelope
+          ? `envelope ${status}`
+          : `${route} ${status}`;
+        const result = contract.schema.safeParse(body);
+        if (result.success) {
+          verified.add(name);
+        } else {
+          violations.push({
+            route: contract.envelope ? `${route || '(before any route)'} [envelope]` : route,
+            status,
+            issues: result.error.issues.slice(0, 4).map(
+              (issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`
+            ),
+          });
         }
       }
     } catch {

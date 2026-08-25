@@ -51,7 +51,7 @@ function collect(output) {
 
 function declaredKeys() {
   const registry = createRegistry();
-  const keys = [];
+  const keys = registry.envelopeStatuses().map((status) => `envelope ${status}`);
   for (const route of registry.declaredRoutes()) {
     // The registry is keyed by route and status; ask it which statuses it
     // holds rather than guessing at the usual ones.
