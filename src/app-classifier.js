@@ -103,12 +103,14 @@ function guessApp(dport, proto, dstHost) {
 function summarizeAppGroups(rows, unknownLabel = 'Unknown') {
   const counts = new Map();
   for (const row of rows || []) {
-    const app = guessApp(row.dport, row.proto, row.dstHost || row.dst) || unknownLabel;
-    counts.set(app, (counts.get(app) || 0) + (row.count || 0));
+    const app = row.app || guessApp(row.dport, row.proto, row.dstHost || row.dst) || unknownLabel;
+    const attribution = row.attribution || null;
+    const key = `${attribution || ''}\u0000${app}`;
+    const current = counts.get(key) || { app, count: 0, attribution };
+    current.count += row.count || 0;
+    counts.set(key, current);
   }
-  return [...counts.entries()]
-    .map(([app, count]) => ({ app, count }))
-    .sort((a, b) => b.count - a.count);
+  return [...counts.values()].sort((a, b) => b.count - a.count);
 }
 
 module.exports = { guessApp, summarizeAppGroups };

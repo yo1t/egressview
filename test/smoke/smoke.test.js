@@ -1448,7 +1448,7 @@ test('log view shows rows with long period (14d)', async ({ page }) => {
   const rows = page.locator('#log-tbody tr:not(#log-scroll-sentinel)');
   const rowCount = await rows.count();
   expect(rowCount, 'log view should show rows for 14d period').toBeGreaterThan(0);
-  await expect(rows.first().locator('td')).toHaveCount(9);
+  await expect(rows.first().locator('td')).toHaveCount(10);
   await expect(rows.first().locator('td').first()).not.toHaveText('');
 
   expect(fatalErrors(errors), `Long period log errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
@@ -1881,7 +1881,7 @@ test('log view infinite scroll appends rows on scroll', async ({ page }) => {
   await page.locator('#log-scroll-sentinel').scrollIntoViewIfNeeded();
   await expect(renderedRows).toHaveCount(201);
   expect(await renderedRows.first().textContent(), 'append should preserve existing DOM rows').toBe(firstRowText);
-  await expect(renderedRows.last().locator('td')).toHaveCount(9);
+  await expect(renderedRows.last().locator('td')).toHaveCount(10);
 
   expect(fatalErrors(errors), `Scroll errors:\n  ${fatalErrors(errors).join('\n  ')}`).toHaveLength(0);
 });

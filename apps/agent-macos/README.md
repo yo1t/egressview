@@ -95,7 +95,7 @@ than trust it.
 
 | | Goes to | Contains |
 |---|---|---|
-| **Observations** | Your Hub | Addresses, ports, process names. **Not hostnames** — the name your app asked for stays local |
+| **Observations** | Your Hub | This Mac's host name; local/remote addresses and ports; protocol; process name and ID; bundle ID when available; timestamps; byte counts; collector and confidence. **Not destination host names** — the name your app asked for stays local |
 | **Update checks** | The signed distribution host | The agent's version. Disclosed on first launch |
 | **Threat indicators and locations** | Your Hub | **Nothing about your traffic.** The whole list comes down and the matching happens here |
 

@@ -102,13 +102,17 @@ function connectionSource(scope, alias = 'c', { from = null, to = null } = {}) {
         o.localAddress AS src, o.remoteAddress AS dst, o.remotePort AS dport,
         LOWER(o.networkProtocol) AS proto, NULLIF(o.localPort, 0) AS sport,
         NULL AS ttl, NULL AS srcMac, NULL AS srcVendor,
-        NULL AS srcDnsName, NULL AS srcMdnsName, NULL AS dstHost,
-        NULL AS country, NULL AS org, NULL AS lat, NULL AS lon, NULL AS city,
+        NULL AS srcDnsName, NULL AS srcMdnsName, MAX(ac.dstHost) AS dstHost,
+        MAX(ac.country) AS country, MAX(ac.org) AS org,
+        MAX(ac.lat) AS lat, MAX(ac.lon) AS lon, MAX(ac.city) AS city,
         MIN(o.firstObservedAt) AS firstSeen, MAX(o.lastObservedAt) AS lastSeen,
         MAX(a.hostName) AS agentHost, MAX(o.processName) AS process,
         MAX(o.processId) AS pid
       FROM agent_observations o
       JOIN agents a ON a.agentId = o.agentId
+      LEFT JOIN connections ac
+        ON ac.src = o.localAddress AND ac.dst = o.remoteAddress
+          AND ac.dport = o.remotePort AND ac.proto = UPPER(o.networkProtocol)
       WHERE o.agentId = ?
         ${observationRangeSql}
         AND NOT EXISTS (
@@ -415,11 +419,99 @@ function createHistoryQueries({
       delete row.totalGroups;
       delete row.allLocationSessions;
     }
-    const appRows = timed('applications', () => db.prepare(
-      `${source.cte} SELECT dport, proto, COALESCE(NULLIF(dstHost, ''), dst) AS dstHost, COUNT(*) AS count
-       FROM ${source.from}${where}
-       GROUP BY dport, proto, dstHost ORDER BY count DESC`
-    ).all(...source.params, ...params));
+    const appRows = timed('applications', () => {
+      const hourFrom = Math.floor(rangeFrom / 3_600_000) * 3_600_000;
+      const hourTo = Math.floor(rangeTo / 3_600_000) * 3_600_000;
+      if (sourceScope?.sourceKind === 'router') {
+        return db.prepare(`
+          ${source.cte}${source.cte ? ',' : 'WITH'} filtered_connections AS (
+            SELECT src, dst, dport, proto, dstHost
+            FROM ${source.from}${where}
+          ), identified_apps AS (
+            SELECT fc.src, fc.dst, fc.dport, UPPER(fc.proto) AS proto,
+              o.agentId, COALESCE(NULLIF(o.bundleId, ''), o.processName) AS appIdentity,
+              MAX(o.processName) AS app
+            FROM filtered_connections fc
+            JOIN connection_agent_observations link
+              ON link.src = fc.src AND link.dst = fc.dst
+                AND link.dport = fc.dport AND link.proto = UPPER(fc.proto)
+            JOIN agent_observations o
+              ON o.agentId = link.agentId AND o.observationId = link.observationId
+            WHERE o.lastObservedAt >= ? AND o.firstObservedAt <= ?
+            GROUP BY fc.src, fc.dst, fc.dport, UPPER(fc.proto),
+              o.agentId, COALESCE(NULLIF(o.bundleId, ''), o.processName)
+          ), identified_connections AS (
+            SELECT src, dst, dport, proto FROM identified_apps
+            GROUP BY src, dst, dport, proto
+          ), app_groups AS (
+            SELECT app, 'agent' AS attribution,
+              NULL AS dport, NULL AS proto, NULL AS dstHost, COUNT(*) AS count
+            FROM identified_apps GROUP BY app
+            UNION ALL
+            SELECT NULL, 'inferred', fc.dport, fc.proto,
+              COALESCE(NULLIF(fc.dstHost, ''), fc.dst), COUNT(*)
+            FROM filtered_connections fc
+            LEFT JOIN identified_connections ia
+              ON ia.src = fc.src AND ia.dst = fc.dst
+                AND ia.dport = fc.dport AND ia.proto = UPPER(fc.proto)
+            WHERE ia.src IS NULL
+            GROUP BY fc.dport, fc.proto, COALESCE(NULLIF(fc.dstHost, ''), fc.dst)
+          ) SELECT * FROM app_groups ORDER BY count DESC
+        `).all(...source.params, ...params, rangeFrom, rangeTo);
+      }
+
+      const rollupFilters = [
+        'h.hourStart >= ?', 'h.hourStart <= ?',
+        'h.lastObservedAt >= ?', 'h.firstObservedAt <= ?',
+      ];
+      const rollupParams = [hourFrom, hourTo, rangeFrom, rangeTo];
+      if (sourceScope?.sourceKind === 'agent') {
+        rollupFilters.push('h.agentId = ?');
+        rollupParams.push(sourceScope.sourceId);
+      }
+      if (src != null) {
+        rollupFilters.push('h.localAddress = ?');
+        rollupParams.push(src);
+      }
+      const fallback = sourceScope?.sourceKind === 'agent' ? '' : `
+        UNION ALL
+        SELECT NULL, 'inferred', fc.dport, fc.proto,
+          COALESCE(NULLIF(fc.dstHost, ''), fc.dst), COUNT(*)
+        FROM filtered_connections fc
+        LEFT JOIN identified_connections ia
+          ON ia.src = fc.src AND ia.dst = fc.dst
+            AND ia.dport = fc.dport AND ia.proto = UPPER(fc.proto)
+        WHERE ia.src IS NULL
+        GROUP BY fc.dport, fc.proto, COALESCE(NULLIF(fc.dstHost, ''), fc.dst)`;
+      const filteredCte = sourceScope?.sourceKind === 'agent' ? '' : `
+        filtered_connections AS (
+          SELECT src, dst, dport, proto, dstHost FROM ${source.from}${where}
+        ),`;
+      const prefix = sourceScope?.sourceKind === 'agent' ? 'WITH' : `${source.cte}${source.cte ? ',' : 'WITH'}`;
+      const statement = db.prepare(`
+        ${prefix} ${filteredCte} identified_apps AS (
+          SELECT h.localAddress AS src, h.remoteAddress AS dst,
+            h.remotePort AS dport, UPPER(h.networkProtocol) AS proto,
+            h.agentId, h.appIdentity, MAX(h.processName) AS app
+          FROM agent_app_hourly h
+          WHERE ${rollupFilters.join(' AND ')}
+          GROUP BY h.localAddress, h.remoteAddress, h.remotePort,
+            UPPER(h.networkProtocol), h.agentId, h.appIdentity
+        ), identified_connections AS (
+          SELECT src, dst, dport, proto FROM identified_apps
+          GROUP BY src, dst, dport, proto
+        ), app_groups AS (
+          SELECT app, 'agent' AS attribution,
+            NULL AS dport, NULL AS proto, NULL AS dstHost, COUNT(*) AS count
+          FROM identified_apps GROUP BY app
+          ${fallback}
+        ) SELECT * FROM app_groups ORDER BY count DESC
+      `);
+      const selectedParams = sourceScope?.sourceKind === 'agent'
+        ? []
+        : [...source.params, ...params];
+      return statement.all(...selectedParams, ...rollupParams);
+    });
     const timeline = timed('timeline', () => db.prepare(
       `${source.cte} SELECT ${targetExpr} AS key,
               CASE

@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 18;
+const SCHEMA_VERSION = 19;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -681,6 +681,51 @@ const MIGRATIONS = [
           ON ai_budget_events(principalHash, provider, createdAt);
         CREATE INDEX IF NOT EXISTS idx_ai_budget_provider_time
           ON ai_budget_events(provider, createdAt);
+      `);
+    },
+  },
+  {
+    version: 19,
+    description: 'hourly Agent application attribution rollup (P3-51)',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_app_hourly (
+          hourStart        INTEGER NOT NULL,
+          agentId          TEXT NOT NULL,
+          appIdentity      TEXT NOT NULL,
+          processName      TEXT NOT NULL,
+          localAddress     TEXT NOT NULL,
+          remoteAddress    TEXT NOT NULL,
+          remotePort       INTEGER NOT NULL,
+          networkProtocol  TEXT NOT NULL,
+          firstObservedAt  INTEGER NOT NULL,
+          lastObservedAt   INTEGER NOT NULL,
+          PRIMARY KEY (
+            hourStart, agentId, appIdentity, localAddress,
+            remoteAddress, remotePort, networkProtocol
+          )
+        ) WITHOUT ROWID;
+
+        INSERT OR IGNORE INTO agent_app_hourly (
+          hourStart, agentId, appIdentity, processName,
+          localAddress, remoteAddress, remotePort, networkProtocol,
+          firstObservedAt, lastObservedAt
+        )
+        SELECT CAST(lastObservedAt / 3600000 AS INTEGER) * 3600000,
+          agentId, COALESCE(NULLIF(bundleId, ''), processName), MAX(processName),
+          localAddress, remoteAddress, remotePort, networkProtocol,
+          MIN(firstObservedAt), MAX(lastObservedAt)
+        FROM agent_observations
+        GROUP BY CAST(lastObservedAt / 3600000 AS INTEGER), agentId,
+          COALESCE(NULLIF(bundleId, ''), processName), localAddress,
+          remoteAddress, remotePort, networkProtocol;
+
+        CREATE INDEX IF NOT EXISTS idx_agent_app_hourly_flow
+          ON agent_app_hourly(
+            localAddress, remoteAddress, remotePort, networkProtocol, hourStart
+          );
+        CREATE INDEX IF NOT EXISTS idx_agent_app_hourly_agent_time
+          ON agent_app_hourly(agentId, hourStart);
       `);
     },
   },

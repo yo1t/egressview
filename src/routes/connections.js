@@ -125,6 +125,11 @@ function attachThreats(connections, threatIntel) {
   }));
 }
 
+function attachApplications(connections, history, sourceScope, from, to) {
+  if (typeof history.attachAgentAttributions !== 'function') return connections;
+  return history.attachAgentAttributions(connections, { sourceScope, from, to });
+}
+
 function matchesThreatFilter(row, fThreat) {
   if (!fThreat) return true;
   if (fThreat === 'safe')   return !row.threat;
@@ -381,7 +386,7 @@ function connectionsRoutes(ctx) {
       if (['safe', 'warn', 'danger'].includes(fThreat)) {
         const result = queryThreatFilteredPage(history, threatIntel, from, to, clampedLimit, offset, opts, fThreat);
         return res.json({
-          connections: result.connections,
+          connections: attachApplications(result.connections, history, opts.sourceScope, from, to),
           total: result.total,
           limit: clampedLimit,
           offset,
@@ -389,9 +394,9 @@ function connectionsRoutes(ctx) {
         });
       }
       const total = history.countByTimeRange(from, to, { filters: opts.filters, sourceScope: opts.sourceScope });
-      const connections = attachThreats(
+      const connections = attachApplications(attachThreats(
         history.queryByTimeRangePaged(from, to, clampedLimit, offset, opts), threatIntel
-      );
+      ), history, opts.sourceScope, from, to);
       return res.json({ connections, total, limit: clampedLimit, offset, serverTime: Date.now() });
     }
 
@@ -416,6 +421,7 @@ function connectionsRoutes(ctx) {
 
 module.exports = connectionsRoutes;
 module.exports._attachThreats = attachThreats;
+module.exports._attachApplications = attachApplications;
 module.exports._matchesThreatFilter = matchesThreatFilter;
 module.exports._parseTimestampParam = parseTimestampParam;
 module.exports._parsePaginationOpts = parsePaginationOpts;

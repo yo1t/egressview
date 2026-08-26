@@ -93,6 +93,8 @@ function renderStatsSummary(summary, selIp) {
     unknownLabel: t('stats.app.unknown'),
     otherLabel: t('stats.legend.other'),
     guessApp,
+    agentSuffix: t('stats.app.agentSuffix'),
+    inferredSuffix: t('stats.app.inferredSuffix'),
   }));
   updateStatsMaps(selIp, mapPointsFromSummary(summary));
 }

@@ -27,7 +27,7 @@ function makeHistory() {
     },
     observationIdsForSource: source => source === 'yamaha'
       ? ['yamaha1']
-      : source === 'cisco' ? ['cisco1'] : [`legacy-${source}`],
+      : source === 'cisco' ? ['cisco1'] : source === 'agent' ? [] : [`legacy-${source}`],
     _log: log,
     _batches: batches,
   };
@@ -303,6 +303,25 @@ describe('recordConnection', () => {
 });
 
 describe('recordConnections', () => {
+  it('notifies for a threatened Agent flow even when its local address is unknown', () => {
+    const notif = makeNotifier();
+    const { history: hist } = initRuntime({
+      notifier: notif,
+      threatIntel: makeThreatIntel({ tag: 'known-c2' }),
+    });
+
+    const [record] = runtime.recordConnections([{
+      src: '::', sport: 0, dst: '203.0.113.66', dport: 443, proto: 'TCP',
+      agentHost: 'macbook', process: 'Browser', pid: 321,
+    }], Date.now(), 'agent');
+
+    assert.equal(notif._calls.notify.length, 1);
+    assert.equal(notif._calls.notify[0].dst, '203.0.113.66');
+    assert.equal(record.entry.process, 'Browser');
+    assert.deepEqual(record.entry.observedBy, []);
+    assert.equal(hist._batches.length, 1);
+  });
+
   it('persists one history batch and deduplicates device updates by IP', () => {
     const devs = makeDevices();
     const { history: hist } = initRuntime({ devices: devs });

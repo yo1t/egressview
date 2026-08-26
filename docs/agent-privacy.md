@@ -32,7 +32,7 @@ the agent collects nothing.
 
 | Host | When | What is sent | What comes back |
 |---|---|---|---|
-| **Your Hub** (the address you entered) | Only after you enrol, and only if delivery is on | Connection metadata observed on this Mac: process, remote address and port, byte counts, timestamps. **Never payload bytes** | Acknowledgement; threat feed data; map locations for addresses you have already observed |
+| **Your Hub** (the address you entered) | Only after you enrol, and only if delivery is on | This Mac's host name and observed connection metadata: local/remote addresses and ports, protocol, process name and ID, bundle ID when available, timestamps, byte counts, collector and confidence. **Never payloads, credentials, command lines, file paths, browser URLs or destination host names** | Acknowledgement; threat feed data; map locations for addresses you have already observed |
 | **`dl.egressview.com`** | Update check on a schedule, and when you press Check for Updates | An ordinary HTTPS GET. No identifier, no account, no observation data | A release manifest, and the `.pkg` if you choose to install |
 | **`feodotracker.abuse.ch`, `threatfox.abuse.ch`, `urlhaus.abuse.ch`, `www.spamhaus.org`** | **Only if you turn on direct feed download**, which is off when a Hub supplies feeds | An ordinary HTTPS GET for the whole public list. **Your observations are not sent** — matching happens on your Mac, against the downloaded list | The public indicator lists |
 

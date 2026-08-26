@@ -40,7 +40,12 @@ export function drawAppPieChart(conns, precomputedSlices) {
   svg.attr('viewBox', `0 0 ${w} ${h}`);
   svg.append('rect').attr('width', w).attr('height', h).attr('fill', '#050a14');
 
-  const slices  = precomputedSlices || _buildAppSlices(conns || [], 8, t('stats.app.unknown'), t('stats.legend.other'));
+  const slices  = precomputedSlices || _buildAppSlices(
+    conns || [], 8, t('stats.app.unknown'), t('stats.legend.other'), {
+      agentSuffix: t('stats.app.agentSuffix'),
+      inferredSuffix: t('stats.app.inferredSuffix'),
+    }
+  );
   const total   = slices.reduce((s, [, v]) => s + v, 0);
   const otherLbl = t('stats.legend.other');
   const isOther = (i) => i === slices.length - 1 && slices.length > 1 && slices[i][0] === otherLbl;
@@ -139,7 +144,7 @@ export function drawAppPieChart(conns, precomputedSlices) {
     .attr('filter', 'url(#pglow)').text(total.toLocaleString());
   g.append('text').attr('text-anchor', 'middle').attr('dy', '1.15em')
     .attr('fill', '#4a5568').attr('font-size', Math.min(8, r * 0.13))
-    .text(t('stats.app.sessions'));
+    .text(t('stats.app.attributions'));
 
   // ── Legend (2 columns) ─────────────────────────────────────
   const legY0 = topPad + pieAreaH + 8;

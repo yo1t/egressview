@@ -484,6 +484,12 @@ describe('collection source scope', () => {
       history._initForTest(dbPath);
       insert({ src: '192.0.2.10', dst: '198.51.100.10', observedBy: ['router-a'], firstSeen: now, lastSeen: now });
       insert({ src: '192.0.2.20', dst: '198.51.100.20', observedBy: ['router-b'], firstSeen: now, lastSeen: now });
+      insert({
+        src: '192.0.2.30', dst: '203.0.113.53', dport: 53, proto: 'UDP',
+        source: 'agent', observedBy: [], firstSeen: now, lastSeen: now,
+        dstHost: 'resolver.example', country: 'JP', org: 'Example Network',
+        lat: 35.68, lon: 139.76, city: 'Tokyo',
+      });
 
       writer = new Database(dbPath);
       writer.prepare(`INSERT INTO agents (
@@ -508,6 +514,18 @@ describe('collection source scope', () => {
         localAddress, localPort, remoteAddress, remotePort,
         processId, processName, bundleId, firstObservedAt, lastObservedAt,
         bytesIn, bytesOut, collector, confidence, receivedAt
+      ) VALUES (?, ?, ?, 'tcp', ?, ?, ?, ?, ?, ?, ?, ?, ?, '5', '7', 'network-extension', 'exact', ?)`)
+        .run('agent-a', 'correlated-helper', 'batch-1', '192.0.2.10', 51000, '198.51.100.10', 443,
+          103, 'Slack Helper', 'com.tinyspeck.slackmacgap', now, now, now);
+      writer.prepare(`INSERT INTO connection_agent_observations (
+        src, dst, dport, proto, agentId, observationId, matchKind, matchedAt, timeDeltaMs
+      ) VALUES (?, ?, ?, ?, ?, ?, 'exact-5tuple', ?, 0)`)
+        .run('192.0.2.10', '198.51.100.10', 443, 'TCP', 'agent-a', 'correlated-helper', now);
+      writer.prepare(`INSERT INTO agent_observations (
+        agentId, observationId, batchId, networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, collector, confidence, receivedAt
       ) VALUES (?, ?, ?, 'udp', ?, ?, ?, ?, ?, ?, ?, ?, ?, '30', '40', 'network-extension', 'exact', ?)`)
         .run('agent-a', 'agent-only', 'batch-1', '192.0.2.30', 52000, '203.0.113.53', 53,
           101, 'mDNSResponder', null, now, now, now);
@@ -519,6 +537,21 @@ describe('collection source scope', () => {
       ) VALUES (?, ?, ?, 'udp', ?, ?, ?, ?, ?, ?, ?, ?, ?, '30', '40', 'network-extension', 'exact', ?)`)
         .run('agent-a', 'agent-only-old', 'batch-1', '192.0.2.30', 52001, '203.0.113.53', 53,
           102, 'OldResolver', null, now - 60_000, now - 60_000, now);
+      writer.exec(`
+        INSERT INTO agent_app_hourly (
+          hourStart, agentId, appIdentity, processName,
+          localAddress, remoteAddress, remotePort, networkProtocol,
+          firstObservedAt, lastObservedAt
+        )
+        SELECT CAST(lastObservedAt / 3600000 AS INTEGER) * 3600000,
+          agentId, COALESCE(NULLIF(bundleId, ''), processName), MAX(processName),
+          localAddress, remoteAddress, remotePort, networkProtocol,
+          MIN(firstObservedAt), MAX(lastObservedAt)
+        FROM agent_observations
+        GROUP BY CAST(lastObservedAt / 3600000 AS INTEGER), agentId,
+          COALESCE(NULLIF(bundleId, ''), processName), localAddress,
+          remoteAddress, remotePort, networkProtocol
+      `);
 
       const routerRows = history.queryByTimeRange(null, null, {
         sourceScope: { sourceKind: 'router', sourceId: 'router-a' },
@@ -529,6 +562,15 @@ describe('collection source scope', () => {
       const agentRows = history.queryByTimeRange(null, null, { sourceScope: agentScope });
       assert.deepEqual(new Set(agentRows.map(row => row.dst)), new Set(['198.51.100.10', '203.0.113.53']));
       assert.equal(agentRows.find(row => row.dst === '203.0.113.53').process, 'mDNSResponder');
+      assert.deepEqual(
+        (({ dstHost, country, org, lat, lon, city }) => ({ dstHost, country, org, lat, lon, city }))(
+          agentRows.find(row => row.dst === '203.0.113.53')
+        ),
+        {
+          dstHost: 'resolver.example', country: 'JP', org: 'Example Network',
+          lat: 35.68, lon: 139.76, city: 'Tokyo',
+        }
+      );
       assert.equal(history.countByTimeRange(null, null, { sourceScope: agentScope }), 2);
       assert.equal(history.summarizeByTimeRange(null, null, { sourceScope: agentScope }).total, 2);
       const currentAgentRows = history.queryByTimeRange(now - 1000, now + 1000, { sourceScope: agentScope });
@@ -536,6 +578,49 @@ describe('collection source scope', () => {
       assert.equal(currentAgentRows.find(row => row.dst === '203.0.113.53').process, 'mDNSResponder');
       assert.deepEqual(new Set(history.listSourceDeviceKeys(agentScope).map(row => row.src)),
         new Set(['192.0.2.10', '192.0.2.30']));
+
+      const attributedRows = history.attachAgentAttributions(agentRows, { sourceScope: agentScope });
+      const routerBacked = attributedRows.find(row => row.dst === '198.51.100.10');
+      assert.equal(routerBacked.applicationCount, 2);
+      assert.deepEqual(
+        new Set(routerBacked.applications.map(application => application.bundleId)),
+        new Set(['com.apple.Safari', 'com.tinyspeck.slackmacgap'])
+      );
+      assert(routerBacked.applications.every(application => application.matchKind === 'exact-5tuple'));
+      const safari = routerBacked.applications.find(application => application.processName === 'Safari');
+      assert.deepEqual(
+        (({ bytesIn, bytesOut, byteObservationCount, byteCompleteness }) => ({
+          bytesIn, bytesOut, byteObservationCount, byteCompleteness,
+        }))(safari),
+        { bytesIn: '10', bytesOut: '20', byteObservationCount: 1, byteCompleteness: 'complete' }
+      );
+      const slack = routerBacked.applications.find(application => application.processName === 'Slack Helper');
+      assert.equal(slack.bytesIn, '5');
+      assert.equal(slack.bytesOut, '7');
+      assert.equal(slack.byteCompleteness, 'complete');
+      const agentOnly = attributedRows.find(row => row.dst === '203.0.113.53');
+      assert.equal(agentOnly.applicationCount, 2);
+      assert(agentOnly.applications.every(application => application.matchKind === 'agent-only'));
+
+      const currentAgentSummary = history.summarizeByTimeRange(now - 1000, now + 1000, {
+        sourceScope: agentScope,
+      });
+      assert.deepEqual(
+        new Set(currentAgentSummary.appGroups.map(group => `${group.app}:${group.attribution}:${group.count}`)),
+        new Set(['Safari:agent:1', 'Slack Helper:agent:1', 'mDNSResponder:agent:1'])
+      );
+      const routerSummary = history.summarizeByTimeRange(now - 1000, now + 1000, {
+        sourceScope: { sourceKind: 'router', sourceId: 'router-a' },
+      });
+      assert.deepEqual(
+        new Set(routerSummary.appGroups.map(group => `${group.app}:${group.attribution}:${group.count}`)),
+        new Set(['Safari:agent:1', 'Slack Helper:agent:1'])
+      );
+      const allSummary = history.summarizeByTimeRange(now - 1000, now + 1000);
+      assert(allSummary.appGroups.some(group => group.app === 'Safari' && group.attribution === 'agent'));
+      assert(allSummary.appGroups.some(group => group.app === 'Slack Helper' && group.attribution === 'agent'));
+      assert(allSummary.appGroups.some(group => group.app === 'mDNSResponder' && group.attribution === 'agent'));
+      assert(allSummary.appGroups.some(group => group.attribution === 'inferred'));
 
       history.logNotification({ src: '192.0.2.10', dst: '198.51.100.10', dport: 443, proto: 'TCP' }, 'threat', false);
       history.logNotification({ src: '192.0.2.20', dst: '198.51.100.20', dport: 443, proto: 'TCP' }, 'threat', false);
