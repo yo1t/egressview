@@ -181,3 +181,67 @@ final class AgentDeliveryQueueTests: XCTestCase {
         )
     }
 }
+
+extension AgentDeliveryQueueTests {
+    /// The count said four and nothing said why.
+    ///
+    /// On 2026-08-24 `contractRejectedCount` had read 4 for days. The Hub had
+    /// rejected none of the 408,491 observations it accepted, so those four
+    /// were discarded here, on the Mac -- and the only way to find out what
+    /// that meant was to read the function that discarded them.
+    func testEachDiscardNamesTheRuleItFailed() throws {
+        let cases: [(String, ConnectionObservation, AgentDeliveryQueue.ContractRejection)] = [
+            ("port 0", rejectable(remotePort: 0), .remotePortZero),
+            ("remote is not an address", rejectable(remoteAddress: "example.com"), .remoteAddressNotAnIP),
+            ("local is not an address", rejectable(localAddress: ""), .localAddressNotAnIP),
+            ("no process name", rejectable(processName: ""), .processNameUnusable),
+        ]
+        for (name, subject, expected) in cases {
+            XCTAssertEqual(
+                AgentDeliveryQueue.contractRejection(subject), expected,
+                "\(name) was discarded without naming a rule"
+            )
+        }
+    }
+
+    func testADeliverableObservationNamesNoRule() throws {
+        XCTAssertNil(AgentDeliveryQueue.contractRejection(rejectable()))
+    }
+
+    /// The reasons reach the report, not just the count.
+    func testDiscardReasonsAreReadableFromTheQueueStatus() throws {
+        let queue = try AgentDeliveryQueue(fileURL: temporaryURL())
+        try queue.enqueue(
+            [rejectable(remotePort: 0), rejectable(remotePort: 0), rejectable(processName: "")],
+            queuedAt: Date(timeIntervalSince1970: 10)
+        )
+        let status = queue.status()
+        XCTAssertEqual(status.contractRejectedCount, 3)
+        XCTAssertEqual(
+            status.contractRejectionReasons,
+            ["remotePortZero": 2, "processNameUnusable": 1]
+        )
+    }
+
+    private func rejectable(
+        remotePort: UInt16 = 443,
+        remoteAddress: String = "203.0.113.10",
+        localAddress: String = "192.0.2.10",
+        processName: String = "TestApp"
+    ) -> ConnectionObservation {
+        ConnectionObservation(
+            networkProtocol: .tcp,
+            localAddress: localAddress,
+            localPort: 49_152,
+            remoteAddress: remoteAddress,
+            remotePort: remotePort,
+            processID: 42,
+            processName: processName,
+            firstObservedAt: Date(timeIntervalSince1970: 10),
+            lastObservedAt: Date(timeIntervalSince1970: 11),
+            bytesOut: nil,
+            collector: .networkExtension,
+            confidence: .exact
+        )
+    }
+}

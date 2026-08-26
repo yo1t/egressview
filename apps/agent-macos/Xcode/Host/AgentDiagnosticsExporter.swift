@@ -138,6 +138,7 @@ final class AgentDiagnosticsExporter {
             oldestPendingAt: queue?.oldestPendingAt,
             lastAcknowledgedAt: queue?.lastAcknowledgedAt,
             unreadableStateResetAt: queue?.unreadableStateResetAt,
+            contractRejections: queue?.contractRejectionReasons ?? [:],
             threatIntelSource: String(describing: threatIntel.activeSource),
             // Read fresh rather than held: the export exists to describe a
             // fault, and a copy taken at launch would predate it.
