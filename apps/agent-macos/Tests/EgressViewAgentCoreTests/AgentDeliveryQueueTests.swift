@@ -115,6 +115,22 @@ final class AgentDeliveryQueueTests: XCTestCase {
         XCTAssertEqual(restarted.status().droppedCount, 224)
     }
 
+    func testQueueWrittenBeforeReasonCountersIsPreserved() throws {
+        let url = temporaryURL()
+        let queue = try AgentDeliveryQueue(fileURL: url)
+        try queue.enqueue([observation(remotePort: 443)])
+        var stored = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        )
+        stored.removeValue(forKey: "contractRejectionReasons")
+        try JSONSerialization.data(withJSONObject: stored).write(to: url, options: .atomic)
+
+        let restarted = try AgentDeliveryQueue(fileURL: url)
+        XCTAssertEqual(restarted.status().pendingCount, 1)
+        XCTAssertEqual(restarted.status().contractRejectionReasons, [:])
+        XCTAssertNil(restarted.status().unreadableStateResetAt)
+    }
+
     func testThePersistedQueueCanActuallyBeReadBack() throws {
         // The property that matters. A protection class that lets the write
         // succeed but the read fail loses every observation that had not

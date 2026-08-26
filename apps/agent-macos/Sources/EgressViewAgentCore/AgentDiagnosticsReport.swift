@@ -75,6 +75,7 @@ public struct AgentDiagnosticsReport: Sendable {
         public var isEnrolledWithHub: Bool
         public var deliveryEnabled: Bool
         public var pendingDeliveryCount: Int
+        public var contractRejectedCount: Int
         public var oldestPendingAt: Date?
         public var lastAcknowledgedAt: Date?
         public var unreadableStateResetAt: Date?
@@ -99,6 +100,7 @@ public struct AgentDiagnosticsReport: Sendable {
             runningExtensionVersion: String?, monitoringEnabled: Bool,
             health: String, lastObservationAt: Date?, storage: ObservationStorageSummary,
             isEnrolledWithHub: Bool, deliveryEnabled: Bool, pendingDeliveryCount: Int,
+            contractRejectedCount: Int = 0,
             oldestPendingAt: Date?, lastAcknowledgedAt: Date?, unreadableStateResetAt: Date?,
             threatIntelSource: String, contractRejections: [String: Int] = [:],
             runHistory: AgentRunHistory = AgentRunHistory(),
@@ -118,6 +120,7 @@ public struct AgentDiagnosticsReport: Sendable {
             self.isEnrolledWithHub = isEnrolledWithHub
             self.deliveryEnabled = deliveryEnabled
             self.pendingDeliveryCount = pendingDeliveryCount
+            self.contractRejectedCount = contractRejectedCount
             self.oldestPendingAt = oldestPendingAt
             self.lastAcknowledgedAt = lastAcknowledgedAt
             self.unreadableStateResetAt = unreadableStateResetAt
@@ -263,7 +266,7 @@ public struct AgentDiagnosticsReport: Sendable {
         if let reset = inputs.unreadableStateResetAt {
             lines.append(row("queue reset", "\(when(reset)) -- what it held never reached the Hub"))
         }
-        if !inputs.contractRejections.isEmpty {
+        if inputs.contractRejectedCount > 0 {
             lines.append("")
             lines.append("== Discarded before sending")
             lines.append("  This Mac dropped these rather than send them. The rule is named;")
@@ -273,6 +276,11 @@ public struct AgentDiagnosticsReport: Sendable {
                 // longer, and a rule name cut short is a name nobody can
                 // search the source for.
                 lines.append("  \(rule): \(count)")
+            }
+            let classified = inputs.contractRejections.values.reduce(0, +)
+            let unclassified = max(0, inputs.contractRejectedCount - classified)
+            if unclassified > 0 {
+                lines.append("  unclassified (recorded by an earlier version): \(unclassified)")
             }
         }
         lines.append("")

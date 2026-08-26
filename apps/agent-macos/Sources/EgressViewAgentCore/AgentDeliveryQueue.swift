@@ -59,9 +59,9 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         // reconstructed, so preserve it as an explicitly unclassified total.
         var droppedCount = 0
         var contractRejectedCount: Int?
-        /// How many failed each rule. Written alongside the count so a
-        /// diagnostics export can say which rule, not just how many.
-        var contractRejectionReasons: [String: Int] = [:]
+        // Optional for compatibility with queue files written before this
+        // counter existed. Missing data means "not classified", not corrupt.
+        var contractRejectionReasons: [String: Int]?
         var queueOverflowCount: Int?
         var lastAcknowledgedAt: Date?
     }
@@ -115,9 +115,11 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             }
             state.contractRejectedCount = (state.contractRejectedCount ?? 0) + invalidIDs.count
             // Counts per rule, not the observations themselves.
+            var reasonCounts = state.contractRejectionReasons ?? [:]
             for (reason, count) in reasons {
-                state.contractRejectionReasons[reason.rawValue, default: 0] += count
+                reasonCounts[reason.rawValue, default: 0] += count
             }
+            state.contractRejectionReasons = reasonCounts
             try persist()
         }
     }
@@ -157,7 +159,9 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                 // says something was discarded and leaves the reader to go
                 // read this function to find out what -- which is what
                 // `contractRejectedCount = 4` cost on 2026-08-24.
-                state.contractRejectionReasons[reason.rawValue, default: 0] += 1
+                var reasonCounts = state.contractRejectionReasons ?? [:]
+                reasonCounts[reason.rawValue, default: 0] += 1
+                state.contractRejectionReasons = reasonCounts
             }
             state.contractRejectedCount = (state.contractRejectedCount ?? 0)
                 + observations.count - deliverable.count
@@ -232,7 +236,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             AgentDeliveryQueueStatus(
                 pendingCount: state.pending.count,
                 contractRejectedCount: state.contractRejectedCount ?? 0,
-                contractRejectionReasons: state.contractRejectionReasons,
+                contractRejectionReasons: state.contractRejectionReasons ?? [:],
                 queueOverflowCount: state.queueOverflowCount ?? 0,
                 legacyUnclassifiedCount: state.droppedCount,
                 oldestPendingAt: state.pending.map(\.queuedAt).min(),
@@ -299,10 +303,6 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         }
         if observation.firstObservedAt > observation.lastObservedAt { return .timesReversed }
         return nil
-    }
-
-    private static func isDeliverable(_ observation: ConnectionObservation) -> Bool {
-        contractRejection(observation) == nil
     }
 
     private static func isIPAddress(_ value: String) -> Bool {

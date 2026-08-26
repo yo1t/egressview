@@ -135,11 +135,12 @@ final class AgentDiagnosticsExporter {
             isEnrolledWithHub: threatIntel.hasHub,
             deliveryEnabled: hubDelivery.deliveryEnabled,
             pendingDeliveryCount: queue?.pendingCount ?? -1,
+            contractRejectedCount: queue?.contractRejectedCount ?? 0,
             oldestPendingAt: queue?.oldestPendingAt,
             lastAcknowledgedAt: queue?.lastAcknowledgedAt,
             unreadableStateResetAt: queue?.unreadableStateResetAt,
-            contractRejections: queue?.contractRejectionReasons ?? [:],
             threatIntelSource: String(describing: threatIntel.activeSource),
+            contractRejections: queue?.contractRejectionReasons ?? [:],
             // Read fresh rather than held: the export exists to describe a
             // fault, and a copy taken at launch would predate it.
             runHistory: AgentRunRecorder.inAppGroup()?.snapshot() ?? AgentRunHistory(),

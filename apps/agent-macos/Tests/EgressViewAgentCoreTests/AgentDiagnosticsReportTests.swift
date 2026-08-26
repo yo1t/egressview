@@ -56,6 +56,7 @@ final class AgentDiagnosticsReportTests: XCTestCase {
     /// what happened without naming a destination, a process or a host.
     func testDiscardedObservationsAreReportedByRuleName() {
         var subject = inputs()
+        subject.contractRejectedCount = 4
         subject.contractRejections = ["remotePortZero": 3, "processNameUnusable": 1]
         let text = AgentDiagnosticsReport(subject).render()
         XCTAssertTrue(text.contains("Discarded before sending"))
@@ -66,6 +67,14 @@ final class AgentDiagnosticsReportTests: XCTestCase {
     /// Nothing discarded, nothing to explain.
     func testTheDiscardSectionIsAbsentWhenNothingWasDiscarded() {
         XCTAssertFalse(AgentDiagnosticsReport(inputs()).render().contains("Discarded before sending"))
+    }
+
+    func testOlderUnclassifiedDiscardsRemainVisible() {
+        var subject = inputs()
+        subject.contractRejectedCount = 4
+
+        let text = AgentDiagnosticsReport(subject).render()
+        XCTAssertTrue(text.contains("unclassified (recorded by an earlier version): 4"))
     }
 
     func testStatesUpFrontWhatItDoesNotContain() {
