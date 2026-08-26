@@ -78,7 +78,16 @@ const NEVER_ENFORCED_ROUTES = new Set(NEVER_ENFORCED.map((entry) => entry.route)
  * against 15 contracts, **zero violations**, 0.05 ms each. The cost is not
  * what makes this list short.
  */
-const ENFORCED_ROUTES = Object.freeze([]);
+const ENFORCED_ROUTES = Object.freeze([
+  Object.freeze({
+    route: 'GET /api/auth/security-config',
+    reason: 'the OIDC client secret is projected to `clientSecretSet`; an extra key here is a leak',
+  }),
+  Object.freeze({
+    route: 'GET /api/config/ai',
+    reason: 'every provider key is projected to `keySet`; an extra key here is a leak',
+  }),
+]);
 
 const ENFORCED_ROUTE_SET = new Set(ENFORCED_ROUTES.map((entry) => entry.route));
 

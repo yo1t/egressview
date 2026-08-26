@@ -154,6 +154,42 @@ function createRegistry() {
   // nobody exercised. Declaring it needs an HTTP-level test first: a contract
   // that cannot be verified is the thing this whole design refuses to ship.
 
+  // Responses that project a secret down to a fact about it. These are the
+  // ones worth refusing rather than merely counting: `clientSecretSet` and
+  // `keySet` exist so a credential is never sent, and an extra key here is a
+  // leak rather than a mismatch. `.strict()` on purpose -- everywhere else
+  // additions are allowed, because there they are additions.
+
+  // GET /api/auth/security-config -- OIDC settings with the secret reduced to
+  // a boolean by the handler.
+  registry.declare('GET /api/auth/security-config', 200, z.object({
+    oidc: z.strictObject({
+      enabled: z.boolean(),
+      provider: z.string(),
+      clientId: z.string(),
+      clientSecretSet: z.boolean(),
+      allowedEmails: z.array(z.string()).max(BOUNDED_ARRAY_LIMIT),
+      allowedDomains: z.array(z.string()).max(BOUNDED_ARRAY_LIMIT),
+    }),
+    sessionTtlDays: z.number(),
+    trustedProxyConfigured: z.boolean(),
+    warnings: z.array(z.string()).max(BOUNDED_ARRAY_LIMIT),
+  }).strict());
+
+  // GET /api/config/ai -- every provider key reduced to `keySet`.
+  registry.declare('GET /api/config/ai', 200, z.object({
+    provider: z.string(),
+    models: z.record(z.string(), z.string()),
+    ollamaEndpoint: z.string(),
+    region: z.string(),
+    guardrail: z.object({}).loose(),
+    providers: z.record(z.string(), z.strictObject({
+      keySet: z.boolean(),
+      consented: z.boolean().optional(),
+    })),
+    selectedModelPricing: z.unknown().optional(),
+  }).strict());
+
   return registry;
 }
 
