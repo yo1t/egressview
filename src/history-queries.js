@@ -269,8 +269,10 @@ function createHistoryQueries({
     // only, and saying so here is better than a column that is always null.
     return db.prepare(`
       SELECT o.remoteAddress AS dst, COUNT(*) AS cnt
-      FROM agent_observations o
-      WHERE o.lastObservedAt >= ? AND o.lastObservedAt <= ?
+      FROM agents a
+      CROSS JOIN agent_observations AS o INDEXED BY idx_agent_observations_time
+      WHERE o.agentId = a.agentId
+        AND o.lastObservedAt >= ? AND o.lastObservedAt <= ?
         AND NOT EXISTS (
           SELECT 1 FROM connection_agent_observations link
           WHERE link.agentId = o.agentId AND link.observationId = o.observationId

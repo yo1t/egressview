@@ -13,6 +13,7 @@ function makeDb() {
   const file = path.join(os.tmpdir(), `agent-threat-${process.pid}-${Math.random()}.db`);
   const db = new Database(file);
   db.exec(`
+    CREATE TABLE agents (agentId TEXT PRIMARY KEY);
     CREATE TABLE agent_observations (
       agentId TEXT NOT NULL, observationId TEXT NOT NULL, remoteAddress TEXT NOT NULL,
       lastObservedAt INTEGER NOT NULL, PRIMARY KEY (agentId, observationId)
@@ -20,6 +21,9 @@ function makeDb() {
     CREATE TABLE connection_agent_observations (
       agentId TEXT NOT NULL, observationId TEXT NOT NULL
     );
+    CREATE INDEX idx_agent_observations_time
+      ON agent_observations(agentId, lastObservedAt DESC);
+    INSERT INTO agents VALUES ('a1');
   `);
   return { db, file };
 }
@@ -77,6 +81,25 @@ describe('Agentだけが見た宛先を、通知経路が拾う（P3-11）', () 
       db.prepare('INSERT INTO agent_observations VALUES (?,?,?,?)')
         .run('a1', 'o1', '203.0.113.9', 5_000);
       assert.deepEqual(queries.groupAgentOnlyDstByTimeRange(0, 1_000), []);
+    } finally {
+      db.close();
+      fs.rmSync(file, { force: true });
+    }
+  });
+
+  it('Agentごとに既存の期間indexを使い、全観測を走査しない', () => {
+    const { db, file } = makeDb();
+    try {
+      const plan = db.prepare(`
+        EXPLAIN QUERY PLAN
+        SELECT o.remoteAddress
+        FROM agents a
+        CROSS JOIN agent_observations AS o INDEXED BY idx_agent_observations_time
+        WHERE o.agentId = a.agentId
+          AND o.lastObservedAt >= ? AND o.lastObservedAt <= ?
+      `).all(0, 2_000);
+      assert(plan.some(row => String(row.detail).includes('idx_agent_observations_time')));
+      assert(plan.every(row => !String(row.detail).includes('SCAN o')));
     } finally {
       db.close();
       fs.rmSync(file, { force: true });
