@@ -246,6 +246,39 @@ function createHistoryQueries({
     }
   }
 
+  /**
+   * Destinations only an Agent saw, which no unscoped query reaches.
+   *
+   * `connectionSource()` unions Agent observations in only when a caller asks
+   * for one Agent by id. Everything unscoped reads `connections` alone -- and
+   * threat notification is unscoped, so the one path by which a person learns
+   * a destination matched a feed has never looked at Agent-only traffic.
+   *
+   * Measured on the Hub 2026-08-26: 229,826 of 408,301 observations had no
+   * correlated `connections` row, on a Hub that has a router. With no router
+   * it is all of them.
+   *
+   * Bounded by time, like the scoped union beside it: this is asked on a
+   * schedule over a recent window, not over the whole retained history.
+   */
+  function groupAgentOnlyDstByTimeRange(from, to) {
+    const db = getDb();
+    if (!db) return [];
+    // No `dstHost`: the Agent keeps destination names on the Mac and never
+    // sends one (P3-14, fixed by a test). The Hub can match these by address
+    // only, and saying so here is better than a column that is always null.
+    return db.prepare(`
+      SELECT o.remoteAddress AS dst, COUNT(*) AS cnt
+      FROM agent_observations o
+      WHERE o.lastObservedAt >= ? AND o.lastObservedAt <= ?
+        AND NOT EXISTS (
+          SELECT 1 FROM connection_agent_observations link
+          WHERE link.agentId = o.agentId AND link.observationId = o.observationId
+        )
+      GROUP BY o.remoteAddress
+    `).all(from, to).map((row) => ({ ...row, dstHost: null }));
+  }
+
   function groupDstByTimeRange(from, to, { filters = {}, sourceScope = null } = {}) {
     const db = getDb();
     if (!db) return [];
@@ -556,6 +589,7 @@ function createHistoryQueries({
     countByTimeRange,
     countFactsByTimeRange,
     createConnectionExportReader,
+    groupAgentOnlyDstByTimeRange,
     groupDstByTimeRange,
     groupServiceByTimeRange,
     groupSrcForDstsByTimeRange,

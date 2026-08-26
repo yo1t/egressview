@@ -238,11 +238,31 @@ function createAiNotificationService(deps) {
     }
   }
 
+  /**
+   * Destinations that matched a threat feed, from both places they can be.
+   *
+   * `groupDstByTimeRange` unscoped reads `connections` alone. Agent-only
+   * traffic never lands there -- `connectionSource()` unions it in only for a
+   * caller asking about one Agent by id -- so until 2026-08-26 the one path by
+   * which a person learns a destination matched a feed had never looked at it.
+   * On the Hub that day: 229,826 of 408,301 Agent observations had no
+   * correlated row, and that Hub has a router. With no router it is all of
+   * them. **Watching without telling anyone is the failure this product is
+   * supposed to be the opposite of.**
+   *
+   * Agent-only rows are matched by address: the Agent keeps destination names
+   * on the Mac and never sends one.
+   */
   function threatDestinations(from, to) {
-    return history.groupDstByTimeRange(from, to)
-      .filter(row => threatIntel?.matchThreatIntel(row.dst, row.dstHost || row.dst))
-      .map(row => row.dst)
-      .sort();
+    const rows = [
+      ...history.groupDstByTimeRange(from, to),
+      ...(history.groupAgentOnlyDstByTimeRange?.(from, to) || []),
+    ];
+    const matched = new Set();
+    for (const row of rows) {
+      if (threatIntel?.matchThreatIntel(row.dst, row.dstHost || row.dst)) matched.add(row.dst);
+    }
+    return [...matched].sort();
   }
 
   async function run({ triggerType, triggerKey = null, cause = '', consentConfirmed = false } = {}) {
