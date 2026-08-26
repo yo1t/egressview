@@ -4,6 +4,8 @@ import Network
 public struct AgentDeliveryQueueStatus: Equatable, Sendable {
     public let pendingCount: Int
     public let contractRejectedCount: Int
+    /// How many failed each rule, so a report can say which one.
+    public let contractRejectionReasons: [String: Int]
     public let queueOverflowCount: Int
     public let legacyUnclassifiedCount: Int
     public let oldestPendingAt: Date?
@@ -16,6 +18,7 @@ public struct AgentDeliveryQueueStatus: Equatable, Sendable {
     public init(
         pendingCount: Int,
         contractRejectedCount: Int,
+        contractRejectionReasons: [String: Int] = [:],
         queueOverflowCount: Int,
         legacyUnclassifiedCount: Int,
         oldestPendingAt: Date?,
@@ -24,6 +27,7 @@ public struct AgentDeliveryQueueStatus: Equatable, Sendable {
     ) {
         self.pendingCount = pendingCount
         self.contractRejectedCount = contractRejectedCount
+        self.contractRejectionReasons = contractRejectionReasons
         self.queueOverflowCount = queueOverflowCount
         self.legacyUnclassifiedCount = legacyUnclassifiedCount
         self.oldestPendingAt = oldestPendingAt
@@ -55,6 +59,9 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         // reconstructed, so preserve it as an explicitly unclassified total.
         var droppedCount = 0
         var contractRejectedCount: Int?
+        // Optional for compatibility with queue files written before this
+        // counter existed. Missing data means "not classified", not corrupt.
+        var contractRejectionReasons: [String: Int]?
         var queueOverflowCount: Int?
         var lastAcknowledgedAt: Date?
     }
@@ -95,8 +102,11 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             try? FileManager.default.removeItem(at: fileURL)
             return
         }
-        let invalidIDs = Set(state.pending.compactMap { entry in
-            Self.isDeliverable(entry.observation) ? nil : entry.observationID
+        var reasons: [ContractRejection: Int] = [:]
+        let invalidIDs = Set(state.pending.compactMap { entry -> UUID? in
+            guard let reason = Self.contractRejection(entry.observation) else { return nil }
+            reasons[reason, default: 0] += 1
+            return entry.observationID
         })
         if !invalidIDs.isEmpty {
             state.pending.removeAll { invalidIDs.contains($0.observationID) }
@@ -104,6 +114,12 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                 state.activeBatch = nil
             }
             state.contractRejectedCount = (state.contractRejectedCount ?? 0) + invalidIDs.count
+            // Counts per rule, not the observations themselves.
+            var reasonCounts = state.contractRejectionReasons ?? [:]
+            for (reason, count) in reasons {
+                reasonCounts[reason.rawValue, default: 0] += count
+            }
+            state.contractRejectionReasons = reasonCounts
             try persist()
         }
     }
@@ -132,7 +148,21 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
     public func enqueue(_ observations: [ConnectionObservation], queuedAt: Date = Date()) throws {
         guard !observations.isEmpty else { return }
         try lock.withLock {
-            let deliverable = observations.filter(Self.isDeliverable)
+            var deliverable: [ConnectionObservation] = []
+            deliverable.reserveCapacity(observations.count)
+            for observation in observations {
+                guard let reason = Self.contractRejection(observation) else {
+                    deliverable.append(observation)
+                    continue
+                }
+                // The rule it failed, not the observation. A count on its own
+                // says something was discarded and leaves the reader to go
+                // read this function to find out what -- which is what
+                // `contractRejectedCount = 4` cost on 2026-08-24.
+                var reasonCounts = state.contractRejectionReasons ?? [:]
+                reasonCounts[reason.rawValue, default: 0] += 1
+                state.contractRejectionReasons = reasonCounts
+            }
             state.contractRejectedCount = (state.contractRejectedCount ?? 0)
                 + observations.count - deliverable.count
             let activeIDs = Set(state.activeBatch?.observationIDs ?? [])
@@ -206,6 +236,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             AgentDeliveryQueueStatus(
                 pendingCount: state.pending.count,
                 contractRejectedCount: state.contractRejectedCount ?? 0,
+                contractRejectionReasons: state.contractRejectionReasons ?? [:],
                 queueOverflowCount: state.queueOverflowCount ?? 0,
                 legacyUnclassifiedCount: state.droppedCount,
                 oldestPendingAt: state.pending.map(\.queuedAt).min(),
@@ -246,13 +277,32 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
     }
 
-    private static func isDeliverable(_ observation: ConnectionObservation) -> Bool {
-        observation.remotePort > 0
-            && isIPAddress(observation.localAddress)
-            && isIPAddress(observation.remoteAddress)
-            && isSafeText(observation.processName, maximumLength: 256)
-            && observation.bundleID.map { isSafeText($0, maximumLength: 255) } ?? true
-            && observation.firstObservedAt <= observation.lastObservedAt
+    /// Which rule an observation failed, if any.
+    ///
+    /// The count alone said four observations were discarded and nothing said
+    /// why -- on 2026-08-24 that number had been 4 for days and the only way
+    /// to find out what it meant was to read this function. A rule name is not
+    /// the observation: it carries no address, no process and no time, so
+    /// keeping it costs nothing anyone would object to.
+    public enum ContractRejection: String, Codable, Equatable, Sendable {
+        case remotePortZero
+        case localAddressNotAnIP
+        case remoteAddressNotAnIP
+        case processNameUnusable
+        case bundleIDUnusable
+        case timesReversed
+    }
+
+    static func contractRejection(_ observation: ConnectionObservation) -> ContractRejection? {
+        if observation.remotePort <= 0 { return .remotePortZero }
+        if !isIPAddress(observation.localAddress) { return .localAddressNotAnIP }
+        if !isIPAddress(observation.remoteAddress) { return .remoteAddressNotAnIP }
+        if !isSafeText(observation.processName, maximumLength: 256) { return .processNameUnusable }
+        if let bundleID = observation.bundleID, !isSafeText(bundleID, maximumLength: 255) {
+            return .bundleIDUnusable
+        }
+        if observation.firstObservedAt > observation.lastObservedAt { return .timesReversed }
+        return nil
     }
 
     private static func isIPAddress(_ value: String) -> Bool {

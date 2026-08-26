@@ -50,6 +50,33 @@ final class AgentDiagnosticsReportTests: XCTestCase {
         )
     }
 
+    /// The report says which rule discarded them, and stays free of traffic.
+    ///
+    /// A rule name is not an observation: "remotePortZero" tells the reader
+    /// what happened without naming a destination, a process or a host.
+    func testDiscardedObservationsAreReportedByRuleName() {
+        var subject = inputs()
+        subject.contractRejectedCount = 4
+        subject.contractRejections = ["remotePortZero": 3, "processNameUnusable": 1]
+        let text = AgentDiagnosticsReport(subject).render()
+        XCTAssertTrue(text.contains("Discarded before sending"))
+        XCTAssertTrue(text.contains("remotePortZero"))
+        XCTAssertTrue(text.contains("processNameUnusable"))
+    }
+
+    /// Nothing discarded, nothing to explain.
+    func testTheDiscardSectionIsAbsentWhenNothingWasDiscarded() {
+        XCTAssertFalse(AgentDiagnosticsReport(inputs()).render().contains("Discarded before sending"))
+    }
+
+    func testOlderUnclassifiedDiscardsRemainVisible() {
+        var subject = inputs()
+        subject.contractRejectedCount = 4
+
+        let text = AgentDiagnosticsReport(subject).render()
+        XCTAssertTrue(text.contains("unclassified (recorded by an earlier version): 4"))
+    }
+
     func testStatesUpFrontWhatItDoesNotContain() {
         // A person is asked to send this file. They should be able to see the
         // claim, and then check it, without reading to the end.

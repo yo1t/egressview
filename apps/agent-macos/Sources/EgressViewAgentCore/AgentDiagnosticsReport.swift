@@ -75,9 +75,15 @@ public struct AgentDiagnosticsReport: Sendable {
         public var isEnrolledWithHub: Bool
         public var deliveryEnabled: Bool
         public var pendingDeliveryCount: Int
+        public var contractRejectedCount: Int
         public var oldestPendingAt: Date?
         public var lastAcknowledgedAt: Date?
         public var unreadableStateResetAt: Date?
+        /// Observations this Mac discarded before sending, by the rule each
+        /// failed. The count alone was in the queue file and nowhere else: on
+        /// 2026-08-24 it had read 4 for days, and finding out what it meant
+        /// meant reading the source.
+        public var contractRejections: [String: Int]
         public var threatIntelSource: String
         /// What happened to the runs before this one. Empty on a Mac where the
         /// App Group container could not be opened, which the report says
@@ -94,8 +100,10 @@ public struct AgentDiagnosticsReport: Sendable {
             runningExtensionVersion: String?, monitoringEnabled: Bool,
             health: String, lastObservationAt: Date?, storage: ObservationStorageSummary,
             isEnrolledWithHub: Bool, deliveryEnabled: Bool, pendingDeliveryCount: Int,
+            contractRejectedCount: Int = 0,
             oldestPendingAt: Date?, lastAcknowledgedAt: Date?, unreadableStateResetAt: Date?,
-            threatIntelSource: String, runHistory: AgentRunHistory = AgentRunHistory(),
+            threatIntelSource: String, contractRejections: [String: Int] = [:],
+            runHistory: AgentRunHistory = AgentRunHistory(),
             installLog: InstallLog
         ) {
             self.generatedAt = generatedAt
@@ -112,10 +120,12 @@ public struct AgentDiagnosticsReport: Sendable {
             self.isEnrolledWithHub = isEnrolledWithHub
             self.deliveryEnabled = deliveryEnabled
             self.pendingDeliveryCount = pendingDeliveryCount
+            self.contractRejectedCount = contractRejectedCount
             self.oldestPendingAt = oldestPendingAt
             self.lastAcknowledgedAt = lastAcknowledgedAt
             self.unreadableStateResetAt = unreadableStateResetAt
             self.threatIntelSource = threatIntelSource
+            self.contractRejections = contractRejections
             self.runHistory = runHistory
             self.installLog = installLog
         }
@@ -255,6 +265,23 @@ public struct AgentDiagnosticsReport: Sendable {
         lines.append(row("last acknowledged", "\(when(inputs.lastAcknowledgedAt))"))
         if let reset = inputs.unreadableStateResetAt {
             lines.append(row("queue reset", "\(when(reset)) -- what it held never reached the Hub"))
+        }
+        if inputs.contractRejectedCount > 0 {
+            lines.append("")
+            lines.append("== Discarded before sending")
+            lines.append("  This Mac dropped these rather than send them. The rule is named;")
+            lines.append("  the observation is not kept.")
+            for (rule, count) in inputs.contractRejections.sorted(by: { $0.key < $1.key }) {
+                // Not `row`: it pads to a fixed width and truncates anything
+                // longer, and a rule name cut short is a name nobody can
+                // search the source for.
+                lines.append("  \(rule): \(count)")
+            }
+            let classified = inputs.contractRejections.values.reduce(0, +)
+            let unclassified = max(0, inputs.contractRejectedCount - classified)
+            if unclassified > 0 {
+                lines.append("  unclassified (recorded by an earlier version): \(unclassified)")
+            }
         }
         lines.append("")
         lines.append("== Previous runs")
