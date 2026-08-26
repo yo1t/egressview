@@ -68,8 +68,31 @@ const auditEvent = z.object({
   metadata: z.string().nullable().optional(),
 });
 
+/**
+ * What the agent is allowed to send, told to the agent.
+ *
+ * Constants, not a query: this response is the same on every call, so a
+ * declaration can be exact rather than permissive.
+ */
+const agentCapabilities = z.object({
+  schemaVersions: z.array(z.number()).max(BOUNDED_ARRAY_LIMIT),
+  maxObservationsPerBatch: z.number(),
+  maxBodyBytes: z.number(),
+  requestsPerMinute: z.number(),
+  compression: z.array(z.string()).max(BOUNDED_ARRAY_LIMIT),
+}).loose();
+
 function createRegistry() {
   const registry = createResponseContractRegistry();
+
+  // Refusals, wherever they come from. Measured across the whole document on
+  // 2026-08-25: every error body carries `error` as a string, and the variants
+  // only *add* fields (`ok`, `success`, `hint`, `requestId`, `job`, `code`).
+  // The single exception is `GET /readyz` 503, which is on the never-enforced
+  // list because a readiness check must answer when everything else is broken.
+  for (const status of [400, 401, 403, 409, 413, 415, 429, 500]) {
+    registry.declareEnvelope(status, errorEnvelope);
+  }
 
   // GET /api/status -- the offline fields are why this is not `.strict()`.
   registry.declare('GET /api/status', 200, z.object({
@@ -84,7 +107,90 @@ function createRegistry() {
     events: z.array(auditEvent).max(BOUNDED_ARRAY_LIMIT),
   }).loose());
 
+  // GET /api/auth/sessions -- browser sessions for one Hub. `listSessions`
+  // returns what is held in memory; a Hub with more than 500 live sessions has
+  // a different problem than this contract.
+  registry.declare('GET /api/auth/sessions', 200, z.object({
+    sessions: z.array(z.object({ id: z.number() }).loose()).max(BOUNDED_ARRAY_LIMIT),
+  }).loose());
+
+  // GET /api/agent/capabilities -- constants, so this can be exact.
+  registry.declare('GET /api/agent/capabilities', 200, agentCapabilities);
+
+  // GET /api/notes -- one note per device on this network.
+  registry.declare('GET /api/notes', 200, z.object({
+    notes: z.union([
+      z.array(z.unknown()).max(BOUNDED_ARRAY_LIMIT),
+      z.record(z.string(), z.unknown()),
+    ]),
+  }).loose());
+
+  // The routes this Hub actually serves, in the order the step-4 observer
+  // reported them: agent ingest carries 71% of API traffic, and none of the
+  // contracts declared before it were ever exercised in production.
+
+  // POST /api/agent/ingest -- `batchAck`, a frozen object of counts.
+  registry.declare('POST /api/agent/ingest', 200, z.object({
+    batchId: z.string(),
+    accepted: z.number(),
+    duplicate: z.number(),
+    rejected: z.number(),
+    receivedAt: z.number(),
+    replayed: z.boolean(),
+    requestId: z.string().optional(),
+  }).loose());
+
+  // GET /api/ai/usage/monthly -- four objects, no arrays.
+  registry.declare('GET /api/ai/usage/monthly', 200, z.object({
+    pricing: z.object({ approximate: z.boolean() }).loose(),
+    current: z.unknown(),
+    previous: z.unknown(),
+  }).loose());
+
+  // GET /api/connections/summary is *not* declared, though the step-4
+  // observer named it as one of the busiest. Its tests call the handler
+  // directly with a stand-in `res`, never through Express, so nothing can
+  // reach it to check the contract and the gate would report a declaration
+  // nobody exercised. Declaring it needs an HTTP-level test first: a contract
+  // that cannot be verified is the thing this whole design refuses to ship.
+
+  // Responses that project a secret down to a fact about it. These are the
+  // ones worth refusing rather than merely counting: `clientSecretSet` and
+  // `keySet` exist so a credential is never sent, and an extra key here is a
+  // leak rather than a mismatch. `.strict()` on purpose -- everywhere else
+  // additions are allowed, because there they are additions.
+
+  // GET /api/auth/security-config -- OIDC settings with the secret reduced to
+  // a boolean by the handler.
+  registry.declare('GET /api/auth/security-config', 200, z.object({
+    oidc: z.strictObject({
+      enabled: z.boolean(),
+      provider: z.string(),
+      clientId: z.string(),
+      clientSecretSet: z.boolean(),
+      allowedEmails: z.array(z.string()).max(BOUNDED_ARRAY_LIMIT),
+      allowedDomains: z.array(z.string()).max(BOUNDED_ARRAY_LIMIT),
+    }),
+    sessionTtlDays: z.number(),
+    trustedProxyConfigured: z.boolean(),
+    warnings: z.array(z.string()).max(BOUNDED_ARRAY_LIMIT),
+  }).strict());
+
+  // GET /api/config/ai -- every provider key reduced to `keySet`.
+  registry.declare('GET /api/config/ai', 200, z.object({
+    provider: z.string(),
+    models: z.record(z.string(), z.string()),
+    ollamaEndpoint: z.string(),
+    region: z.string(),
+    guardrail: z.object({}).loose(),
+    providers: z.record(z.string(), z.strictObject({
+      keySet: z.boolean(),
+      consented: z.boolean().optional(),
+    })),
+    selectedModelPricing: z.unknown().optional(),
+  }).strict());
+
   return registry;
 }
 
-module.exports = { auditEvent, createRegistry, errorEnvelope };
+module.exports = { agentCapabilities, auditEvent, createRegistry, errorEnvelope };

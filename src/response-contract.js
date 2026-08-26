@@ -61,6 +61,45 @@ const NEVER_ENFORCED = Object.freeze([
 
 const NEVER_ENFORCED_ROUTES = new Set(NEVER_ENFORCED.map((entry) => entry.route));
 
+/**
+ * Routes whose responses are refused in production when they break contract.
+ *
+ * **Empty on purpose, and adding to it is a decision each time.** Enforcing
+ * replaces a response that is slightly wrong with one that is definitely
+ * broken, so it earns its place only where sending the wrong thing is worse
+ * than sending nothing -- a body carrying settings, credentials or provider
+ * configuration, where an unexpected field is a leak rather than a mismatch.
+ *
+ * Ordinary shape drift does not belong here. It is caught in CI before it
+ * ships and counted in production after; turning it into a 500 would take a
+ * working screen away from someone to report a documentation problem.
+ *
+ * Measured 2026-08-25, fifteen minutes of real traffic: 136 responses checked
+ * against 15 contracts, **zero violations**, 0.05 ms each. The cost is not
+ * what makes this list short.
+ */
+const ENFORCED_ROUTES = Object.freeze([
+  Object.freeze({
+    route: 'GET /api/auth/security-config',
+    reason: 'the OIDC client secret is projected to `clientSecretSet`; an extra key here is a leak',
+  }),
+  Object.freeze({
+    route: 'GET /api/config/ai',
+    reason: 'every provider key is projected to `keySet`; an extra key here is a leak',
+  }),
+]);
+
+const ENFORCED_ROUTE_SET = new Set(ENFORCED_ROUTES.map((entry) => entry.route));
+
+/**
+ * Refusal applies to success responses only. Replacing a 4xx or 5xx with a
+ * different 5xx tells the caller less than the original did, and the original
+ * was already telling them something went wrong.
+ */
+function isEnforcedRoute(route, status) {
+  return ENFORCED_ROUTE_SET.has(route) && status >= 200 && status < 300;
+}
+
 function isNeverEnforced(route) {
   return NEVER_ENFORCED_ROUTES.has(route);
 }
@@ -74,6 +113,7 @@ function isNeverEnforced(route) {
  */
 function createResponseContractRegistry() {
   const contracts = new Map();
+  const envelopes = new Map();
 
   function key(route, status) { return `${route} ${status}`; }
 
@@ -106,6 +146,29 @@ function createResponseContractRegistry() {
       });
       return this;
     },
+
+    /**
+     * A contract for a status wherever it is produced, not for one route.
+     *
+     * Refusals are not the route's doing. Measured 2026-08-25: every response
+     * the suite could not attribute to a route came from middleware -- rate
+     * limiting, authentication, a body too large, a body that would not parse
+     * -- and `req.route` does not exist yet when those are sent. Declaring
+     * them per route said something untrue about where they come from.
+     */
+    declareEnvelope(status, schema) {
+      if (!Number.isInteger(status)) {
+        throw new TypeError(`Envelope contract needs a status code, got ${status}`);
+      }
+      if (!schema || typeof schema.safeParse !== 'function') {
+        throw new TypeError(`Envelope contract for ${status} needs a schema`);
+      }
+      envelopes.set(status, { status, schema, bounded: true, envelope: true });
+      return this;
+    },
+
+    lookupEnvelope(status) { return envelopes.get(status) || null; },
+    envelopeStatuses() { return [...envelopes.keys()].sort((a, b) => a - b); },
 
     lookup(route, status) { return contracts.get(key(route, status)) || null; },
     declaredRoutes() { return [...new Set([...contracts.values()].map((c) => c.route))].sort(); },
@@ -168,10 +231,20 @@ function createResponseContractDiagnostics() {
 function classifyResponse({ mode, route, status, registry }) {
   if (!MODES.includes(mode)) throw new TypeError(`Unknown response contract mode: ${mode}`);
   if (mode === 'off') return { action: 'skip', reason: 'off' };
-  if (!route) return { action: 'unmatched', reason: 'route could not be resolved' };
-  if (isNeverEnforced(route)) return { action: 'never-enforced', reason: 'excluded by policy' };
-  const contract = registry.lookup(route, status);
-  if (!contract) return { action: 'unmatched', reason: 'no contract declared' };
+  if (route && isNeverEnforced(route)) {
+    return { action: 'never-enforced', reason: 'excluded by policy' };
+  }
+  // A route-specific contract wins; the envelope catches what middleware sent
+  // before a route was ever chosen, which is the only thing that can be said
+  // about a response nobody's handler produced.
+  const contract = (route && registry.lookup(route, status))
+    || registry.lookupEnvelope(status);
+  if (!contract) {
+    return {
+      action: 'unmatched',
+      reason: route ? 'no contract declared' : 'route could not be resolved',
+    };
+  }
   if (mode === 'enforce' && !contract.bounded) {
     // Refusing to call it enforced is the point. An unbounded array can only
     // be sampled, and a sampled response is not a checked one.
@@ -182,6 +255,8 @@ function classifyResponse({ mode, route, status, registry }) {
 
 module.exports = {
   BOUNDED_ARRAY_LIMIT,
+  ENFORCED_ROUTES,
+  isEnforcedRoute,
   MODES,
   NEVER_ENFORCED,
   classifyResponse,

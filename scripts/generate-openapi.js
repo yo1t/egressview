@@ -26,7 +26,7 @@ const {
 } = require('../src/permission-matrix');
 const { ALL_PERMISSIONS, AGENT_PERMISSIONS } = require('../src/permissions');
 const { toJSONSchema } = require('zod');
-const { isNeverEnforced } = require('../src/response-contract');
+const { isEnforcedRoute, isNeverEnforced } = require('../src/response-contract');
 const { createRegistry } = require('../src/response-contracts');
 
 /**
@@ -145,12 +145,20 @@ function responsesFor(route, observed, registry, coverage) {
     declaredHere += 1;
     const schema = toJSONSchema(contract.schema);
     delete schema.$schema;
+    // Three claims, not two. Declared means the server promises this and CI
+    // refuses to ship a build that breaks it. Enforced means the running Hub
+    // refuses to send a response that breaks it. Collapsing them would let a
+    // reader take a CI-checked shape for one that is checked where they are.
+    const enforced = isEnforcedRoute(key, status);
     out[status] = {
-      description: 'Declared by the server.'
+      description: (enforced
+        ? 'Declared by the server, and refused at runtime if it does not hold.'
+        : 'Declared by the server, and checked in CI.')
         + (contract.arrayElementsObserved
           ? ' The envelope is declared; the array elements are observed, not checked.'
           : ''),
       content: { 'application/json': { schema } },
+      ...(enforced ? { 'x-enforced': true } : {}),
       ...(contract.arrayElementsObserved ? { 'x-array-elements-observed': true } : {}),
     };
   }
@@ -230,7 +238,11 @@ function build({ version } = {}) {
         + 'under test** -- documentation of behaviour, not a promise, and only '
         + 'as complete as the paths the tests happened to walk. A schema '
         + 'without that marking is **declared by the server** and is what the '
-        + 'route promises. `x-array-elements-observed` marks a declaration '
+        + 'route promises, and CI refuses to ship a build that breaks it. '
+        + 'A schema marked `x-enforced` is refused by the running Hub as well: '
+        + 'those are responses that project a credential down to a fact about '
+        + 'it, where an extra field would be a leak rather than a mismatch. '
+        + '`x-array-elements-observed` marks a declaration '
         + 'that covers the envelope but not every element of an array.\n\n'
         + 'Regenerate with `npm run docs:openapi`, which re-captures first.',
       license: { name: 'AGPL-3.0-only' },

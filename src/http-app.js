@@ -10,6 +10,7 @@ const authRoutes = require('./routes/auth');
 const apiIdentityRoutes = require('./routes/api-identities');
 const agentRoutes = require('./routes/agents');
 const { AGENT_INGEST_MAX_BODY_BYTES } = require('./agent-ingest-schema');
+const { createResponseContractMiddleware } = require('./response-contract-middleware');
 const notesRoutes = require('./routes/notes');
 const connectionsRoutes = require('./routes/connections');
 const devicesRoutes = require('./routes/devices');
@@ -148,6 +149,36 @@ function configureHttpApp(app, {
     if (req.path === '/agent/ingest') return next();
     return req.body === undefined ? apiJson(req, res, next) : next();
   });
+  // Watches responses against their contracts. Off unless
+  // EGRESSVIEW_RESPONSE_CONTRACTS says otherwise, and even then it only
+  // counts: production enforcement is decided route by route, after this has
+  // run long enough to say what it would have refused. (P2-95 step 4)
+  const responseContracts = createResponseContractMiddleware();
+  if (responseContracts.mode !== 'off') {
+    app.use('/api', responseContracts);
+    // Every fifteen minutes, into the journal the operator already reads.
+    // A counter nobody looks at answers nothing.
+    const summary = setInterval(() => {
+      const snapshot = responseContracts.snapshot();
+      logger.info(
+        `[response-contract] mode=${snapshot.mode} matched=${snapshot.matched} `
+        + `violations=${snapshot.violations} unmatched=${snapshot.unmatched} `
+        + `neverEnforced=${snapshot.neverEnforced} checkedMs=${snapshot.checkedMilliseconds}`
+      );
+      // Which routes, not just how many. The first run on the Hub reported
+      // 137 unmatched and named none of them, which says a number and asks
+      // the reader to go and find the work themselves.
+      const busiest = Object.entries(snapshot.unmatchedRoutes)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 8);
+      if (busiest.length) {
+        logger.info(
+          `[response-contract] undeclared: ${busiest.map(([route, count]) => `${route} x${count}`).join(', ')}`
+        );
+      }
+    }, 15 * 60 * 1000);
+    summary.unref();
+  }
   app.use('/api', enforceApiPermissions);
   app.use('/api/agent/ingest', agentJsonBoundary);
   if (demoReadOnly) app.use('/api', createDemoReadOnly());

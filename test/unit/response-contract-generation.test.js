@@ -26,7 +26,21 @@ describe('宣言は観測を置き換える（P2-95 step 2）', () => {
     assert.ok(declared, 'GET /api/status 200 has no schema');
     assert.equal(declared['x-observed'], undefined);
     assert.equal(document.paths['/api/status'].get.responses['200'].description,
-      'Declared by the server.');
+      'Declared by the server, and checked in CI.');
+  });
+
+  it('宣言と強制を、同じ言葉で書かない', () => {
+    // Three claims, not two: observed, declared (CI refuses to ship a build
+    // that breaks it), and enforced (the running Hub refuses to send it).
+    // Collapsing the last two would let a reader take a CI-checked shape for
+    // one that is checked where they are.
+    const enforced = document.paths['/api/config/ai'].get.responses['200'];
+    assert.equal(enforced['x-enforced'], true);
+    assert.match(enforced.description, /refused at runtime/);
+
+    const declaredOnly = document.paths['/api/status'].get.responses['200'];
+    assert.equal(declaredOnly['x-enforced'], undefined);
+    assert.doesNotMatch(declaredOnly.description, /runtime/);
   });
 
   it('宣言していないレスポンスには x-observed が残る', () => {

@@ -91,6 +91,18 @@ describe('notes routes: zod request validation', () => {
     assert.equal((await request(app, 'GET', '/api/notes?extra=1')).status, 400);
   });
 
+  it('returns the notes it holds', async () => {
+    // Added 2026-08-25 because the response-contract gate reported
+    // `GET /api/notes 200` as declared and never exercised. Only the rejection
+    // path was tested: the route's success had no test at all, and the
+    // document had never seen its shape.
+    const { app, notes } = makeApp();
+    notes.set('192.168.1.10', 'trusted device');
+    const result = await request(app, 'GET', '/api/notes');
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body.notes, { '192.168.1.10': 'trusted device' });
+  });
+
   it('keeps the legacy note write contract for valid input', async () => {
     const { app, notes } = makeApp();
     const result = await request(app, 'POST', '/api/notes', {

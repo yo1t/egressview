@@ -67,7 +67,14 @@ describe('Agent JSON boundary', () => {
   function makeApp() {
     const app = express();
     app.use('/api/agent/ingest', agentJsonBoundary);
-    app.post('/api/agent/ingest', (_req, res) => res.json({ ok: true }));
+    // Stands in for the real route to exercise the body-parser boundary, so
+    // it answers in the shape the real one does. A stand-in that returns
+    // something the server never returns is a small piece of fiction, and the
+    // response-contract gate reads it as the server breaking its contract.
+    app.post('/api/agent/ingest', (_req, res) => res.json({
+      batchId: 'test-batch', accepted: 0, duplicate: 0, rejected: 0,
+      receivedAt: 0, replayed: false,
+    }));
     app.use((error, _req, res, _next) => res.status(500).json({ error: error.message }));
     return app;
   }

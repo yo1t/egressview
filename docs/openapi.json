@@ -27,7 +27,7 @@
   "info": {
     "title": "EgressView Hub HTTP API",
     "version": "1.10.0",
-    "description": "Generated from src/permission-matrix.js, the same object the server enforces, so this cannot describe a route the server does not have or miss one it does.\n\nRequest bodies are described for the routes the test suite exercises, captured from the schema the server actually validated rather than written by hand -- a hand-written list would go stale the first time a route changed. Operations without one say so in their description.\n\nResponses come in two kinds and the difference matters. A schema marked `x-observed` describes what a route was **seen to return under test** -- documentation of behaviour, not a promise, and only as complete as the paths the tests happened to walk. A schema without that marking is **declared by the server** and is what the route promises. `x-array-elements-observed` marks a declaration that covers the envelope but not every element of an array.\n\nRegenerate with `npm run docs:openapi`, which re-captures first.",
+    "description": "Generated from src/permission-matrix.js, the same object the server enforces, so this cannot describe a route the server does not have or miss one it does.\n\nRequest bodies are described for the routes the test suite exercises, captured from the schema the server actually validated rather than written by hand -- a hand-written list would go stale the first time a route changed. Operations without one say so in their description.\n\nResponses come in two kinds and the difference matters. A schema marked `x-observed` describes what a route was **seen to return under test** -- documentation of behaviour, not a promise, and only as complete as the paths the tests happened to walk. A schema without that marking is **declared by the server** and is what the route promises, and CI refuses to ship a build that breaks it. A schema marked `x-enforced` is refused by the running Hub as well: those are responses that project a credential down to a fact about it, where an extra field would be a leak rather than a mismatch. `x-array-elements-observed` marks a declaration that covers the envelope but not every element of an array.\n\nRegenerate with `npm run docs:openapi`, which re-captures first.",
     "license": {
       "name": "AGPL-3.0-only"
     }
@@ -310,39 +310,44 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "schemaVersions": {
+                      "maxItems": 500,
                       "type": "array",
                       "items": {
-                        "type": "integer"
+                        "type": "number"
                       }
                     },
                     "maxObservationsPerBatch": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "maxBodyBytes": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "requestsPerMinute": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "compression": {
-                      "type": "array"
+                      "maxItems": 500,
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
-                    "compression",
-                    "maxBodyBytes",
+                    "schemaVersions",
                     "maxObservationsPerBatch",
+                    "maxBodyBytes",
                     "requestsPerMinute",
-                    "schemaVersions"
+                    "compression"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -894,7 +899,7 @@
         },
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -904,26 +909,33 @@
                       "type": "string"
                     },
                     "accepted": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "duplicate": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "rejected": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "receivedAt": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "replayed": {
                       "type": "boolean"
                     },
-                    "requestId": {},
-                    "ok": {
-                      "type": "boolean"
+                    "requestId": {
+                      "type": "string"
                     }
                   },
-                  "x-observed": true
+                  "required": [
+                    "batchId",
+                    "accepted",
+                    "duplicate",
+                    "rejected",
+                    "receivedAt",
+                    "replayed"
+                  ],
+                  "additionalProperties": {}
                 }
               }
             }
@@ -3994,7 +4006,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4003,176 +4015,24 @@
                     "pricing": {
                       "type": "object",
                       "properties": {
-                        "catalogVersion": {
-                          "type": "string"
-                        },
-                        "currency": {
-                          "type": "string"
-                        },
-                        "effectiveFrom": {
-                          "type": "string"
-                        },
-                        "sourceUrls": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
-                        },
                         "approximate": {
                           "type": "boolean"
                         }
                       },
                       "required": [
-                        "approximate",
-                        "catalogVersion",
-                        "currency",
-                        "effectiveFrom",
-                        "sourceUrls"
-                      ]
+                        "approximate"
+                      ],
+                      "additionalProperties": {}
                     },
-                    "selectedModel": {
-                      "type": "null"
-                    },
-                    "current": {
-                      "type": "object",
-                      "properties": {
-                        "from": {
-                          "type": "integer"
-                        },
-                        "to": {
-                          "type": "integer"
-                        },
-                        "requests": {
-                          "type": "integer"
-                        },
-                        "inputTokens": {
-                          "type": "integer"
-                        },
-                        "outputTokens": {
-                          "type": "integer"
-                        },
-                        "totalTokens": {
-                          "type": "integer"
-                        },
-                        "pricedRequests": {
-                          "type": "integer"
-                        },
-                        "estimatedCostUsd": {
-                          "type": "number"
-                        },
-                        "unpricedModels": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              },
-                              "requests": {
-                                "type": "integer"
-                              },
-                              "totalTokens": {
-                                "type": "integer"
-                              }
-                            },
-                            "required": [
-                              "model",
-                              "provider",
-                              "requests",
-                              "totalTokens"
-                            ]
-                          }
-                        }
-                      },
-                      "required": [
-                        "estimatedCostUsd",
-                        "from",
-                        "inputTokens",
-                        "outputTokens",
-                        "pricedRequests",
-                        "requests",
-                        "to",
-                        "totalTokens",
-                        "unpricedModels"
-                      ]
-                    },
-                    "previous": {
-                      "type": "object",
-                      "properties": {
-                        "from": {
-                          "type": "integer"
-                        },
-                        "to": {
-                          "type": "integer"
-                        },
-                        "requests": {
-                          "type": "integer"
-                        },
-                        "inputTokens": {
-                          "type": "integer"
-                        },
-                        "outputTokens": {
-                          "type": "integer"
-                        },
-                        "totalTokens": {
-                          "type": "integer"
-                        },
-                        "pricedRequests": {
-                          "type": "integer"
-                        },
-                        "estimatedCostUsd": {
-                          "type": "number"
-                        },
-                        "unpricedModels": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              },
-                              "requests": {
-                                "type": "integer"
-                              },
-                              "totalTokens": {
-                                "type": "integer"
-                              }
-                            },
-                            "required": [
-                              "model",
-                              "provider",
-                              "requests",
-                              "totalTokens"
-                            ]
-                          }
-                        }
-                      },
-                      "required": [
-                        "estimatedCostUsd",
-                        "from",
-                        "inputTokens",
-                        "outputTokens",
-                        "pricedRequests",
-                        "requests",
-                        "to",
-                        "totalTokens",
-                        "unpricedModels"
-                      ]
-                    }
+                    "current": {},
+                    "previous": {}
                   },
                   "required": [
-                    "current",
-                    "previous",
                     "pricing",
-                    "selectedModel"
+                    "current",
+                    "previous"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -4546,7 +4406,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Declared by the server.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5182,7 +5042,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and refused at runtime if it does not hold.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5204,12 +5064,14 @@
                           "type": "boolean"
                         },
                         "allowedEmails": {
+                          "maxItems": 500,
                           "type": "array",
                           "items": {
                             "type": "string"
                           }
                         },
                         "allowedDomains": {
+                          "maxItems": 500,
                           "type": "array",
                           "items": {
                             "type": "string"
@@ -5217,22 +5079,27 @@
                         }
                       },
                       "required": [
-                        "allowedDomains",
-                        "allowedEmails",
+                        "enabled",
+                        "provider",
                         "clientId",
                         "clientSecretSet",
-                        "enabled",
-                        "provider"
-                      ]
+                        "allowedEmails",
+                        "allowedDomains"
+                      ],
+                      "additionalProperties": false
                     },
                     "sessionTtlDays": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "trustedProxyConfigured": {
                       "type": "boolean"
                     },
                     "warnings": {
-                      "type": "array"
+                      "maxItems": 500,
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -5241,10 +5108,11 @@
                     "trustedProxyConfigured",
                     "warnings"
                   ],
-                  "x-observed": true
+                  "additionalProperties": false
                 }
               }
-            }
+            },
+            "x-enforced": true
           },
           "401": {
             "description": "No usable credential."
@@ -5412,35 +5280,33 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "sessions": {
+                      "maxItems": 500,
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
                           "id": {
-                            "type": "integer"
-                          },
-                          "current": {
-                            "type": "boolean"
+                            "type": "number"
                           }
                         },
                         "required": [
-                          "current",
                           "id"
-                        ]
+                        ],
+                        "additionalProperties": {}
                       }
                     }
                   },
                   "required": [
                     "sessions"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -6843,7 +6709,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and refused at runtime if it does not hold.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6854,26 +6720,12 @@
                     },
                     "models": {
                       "type": "object",
-                      "properties": {
-                        "ollama": {
-                          "type": "string"
-                        },
-                        "anthropic": {
-                          "type": "string"
-                        },
-                        "openai": {
-                          "type": "string"
-                        },
-                        "bedrock": {
-                          "type": "string"
-                        }
+                      "propertyNames": {
+                        "type": "string"
                       },
-                      "required": [
-                        "anthropic",
-                        "bedrock",
-                        "ollama",
-                        "openai"
-                      ]
+                      "additionalProperties": {
+                        "type": "string"
+                      }
                     },
                     "ollamaEndpoint": {
                       "type": "string"
@@ -6883,127 +6735,45 @@
                     },
                     "guardrail": {
                       "type": "object",
-                      "properties": {
-                        "enabled": {
-                          "type": "boolean"
-                        },
-                        "id": {
-                          "type": "string"
-                        },
-                        "version": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "enabled",
-                        "id",
-                        "version"
-                      ]
+                      "properties": {},
+                      "additionalProperties": {}
                     },
                     "providers": {
                       "type": "object",
-                      "properties": {
-                        "ollama": {
-                          "type": "object",
-                          "properties": {
-                            "keySet": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "keySet"
-                          ]
-                        },
-                        "anthropic": {
-                          "type": "object",
-                          "properties": {
-                            "keySet": {
-                              "type": "boolean"
-                            },
-                            "consented": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "consented",
-                            "keySet"
-                          ]
-                        },
-                        "openai": {
-                          "type": "object",
-                          "properties": {
-                            "keySet": {
-                              "type": "boolean"
-                            },
-                            "consented": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "consented",
-                            "keySet"
-                          ]
-                        },
-                        "bedrock": {
-                          "type": "object",
-                          "properties": {
-                            "keySet": {
-                              "type": "boolean"
-                            },
-                            "consented": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "consented",
-                            "keySet"
-                          ]
-                        }
+                      "propertyNames": {
+                        "type": "string"
                       },
-                      "required": [
-                        "anthropic",
-                        "bedrock",
-                        "ollama",
-                        "openai"
-                      ]
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "keySet": {
+                            "type": "boolean"
+                          },
+                          "consented": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "keySet"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
-                    "selectedModelPricing": {
-                      "type": "object",
-                      "properties": {
-                        "provider": {
-                          "type": "string"
-                        },
-                        "model": {
-                          "type": "string"
-                        },
-                        "priced": {
-                          "type": "boolean"
-                        },
-                        "pricing": {
-                          "type": "null"
-                        }
-                      },
-                      "required": [
-                        "model",
-                        "priced",
-                        "pricing",
-                        "provider"
-                      ]
-                    }
+                    "selectedModelPricing": {}
                   },
                   "required": [
-                    "guardrail",
+                    "provider",
                     "models",
                     "ollamaEndpoint",
-                    "provider",
-                    "providers",
                     "region",
-                    "selectedModelPricing"
+                    "guardrail",
+                    "providers"
                   ],
-                  "x-observed": true
+                  "additionalProperties": false
                 }
               }
-            }
+            },
+            "x-enforced": true
           },
           "401": {
             "description": "No usable credential."
@@ -9203,7 +8973,36 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled."
+            "description": "Declared by the server, and checked in CI.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notes": {
+                      "anyOf": [
+                        {
+                          "maxItems": 500,
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "notes"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
           },
           "400": {
             "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
@@ -10283,7 +10082,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Declared by the server.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10724,14 +10523,20 @@
   },
   "x-response-contract-coverage": {
     "declared": [
+      "GET /api/agent/capabilities",
+      "GET /api/ai/usage/monthly",
       "GET /api/auth/audit-events",
-      "GET /api/status"
+      "GET /api/auth/security-config",
+      "GET /api/auth/sessions",
+      "GET /api/config/ai",
+      "GET /api/notes",
+      "GET /api/status",
+      "POST /api/agent/ingest"
     ],
     "observedOnly": [
       "DELETE /api/ai/conversations/:id",
       "DELETE /api/backup/prune/:jobId",
       "DELETE /api/routers/:id",
-      "GET /api/agent/capabilities",
       "GET /api/agent/geo-cache",
       "GET /api/agent/threat-intel",
       "GET /api/agents",
@@ -10741,29 +10546,23 @@
       "GET /api/ai/facts",
       "GET /api/ai/notification-config",
       "GET /api/ai/pricing/diagnostics",
-      "GET /api/ai/usage/monthly",
       "GET /api/auth/api-identities",
       "GET /api/auth/api-identities/self",
       "GET /api/auth/methods",
-      "GET /api/auth/security-config",
-      "GET /api/auth/sessions",
       "GET /api/auth/status",
       "GET /api/backup/prune/:jobId",
       "GET /api/beacons",
       "GET /api/beacons/config",
-      "GET /api/config/ai",
       "GET /api/config/detection-notifications",
       "GET /api/config/slack",
       "GET /api/devices",
       "GET /api/devices/merge-candidates",
-      "GET /api/notes",
       "GET /api/notification-log",
       "GET /api/routers",
       "POST /api/admin/regenerate-token",
       "POST /api/admin/verify",
       "POST /api/agent/enrollment-requests",
       "POST /api/agent/enrollment-requests/claim",
-      "POST /api/agent/ingest",
       "POST /api/agent/registration/revoke",
       "POST /api/agent/token/rotate",
       "POST /api/agents/:agentId/revoke",
