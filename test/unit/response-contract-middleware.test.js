@@ -103,11 +103,16 @@ describe('観測するが拒まない（P2-95 step 4）', () => {
     res.req = req;
     res.status = function status(code) { this.statusCode = code; return this; };
     middleware(req, res, () => {});
-    res.json({ provider: 'anthropic', apiKey: 'sk-ant-leaked' });
+    // Not shaped like a real credential, and not called one. The first
+    // version wrote `apiKey: 'sk-ant-...'` here -- in the test asserting a
+    // credential must not be sent -- and detect-secrets flagged it. What the
+    // test needs is an unexpected field with a value it can look for, not a
+    // convincing forgery.
+    res.json({ provider: 'anthropic', unexpectedField: 'must-not-be-sent' });
 
     assert.equal(res.statusCode, 500);
     assert.deepEqual(res.sent, [{ error: 'Response did not match its contract' }]);
-    assert.doesNotMatch(JSON.stringify(res.sent), /sk-ant-leaked/);
+    assert.doesNotMatch(JSON.stringify(res.sent), /must-not-be-sent/);
   });
 
   it('拒むのは成功応答だけ', () => {
