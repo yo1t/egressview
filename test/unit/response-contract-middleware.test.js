@@ -103,11 +103,11 @@ describe('観測するが拒まない（P2-95 step 4）', () => {
     res.req = req;
     res.status = function status(code) { this.statusCode = code; return this; };
     middleware(req, res, () => {});
-    // Not shaped like a real credential, and not called one. The first
-    // version wrote `apiKey: 'sk-ant-...'` here -- in the test asserting a
-    // credential must not be sent -- and detect-secrets flagged it. What the
-    // test needs is an unexpected field with a value it can look for, not a
-    // convincing forgery.
+    // An unexpected field with a value the test can look for -- deliberately
+    // not shaped like a credential and not named like one. Two earlier
+    // versions were: the first put a realistic provider key here, and the
+    // second explained that in a comment written the same way. Both were
+    // flagged, in the test that exists to assert a credential is never sent.
     res.json({ provider: 'anthropic', unexpectedField: 'must-not-be-sent' });
 
     assert.equal(res.statusCode, 500);
