@@ -27,7 +27,7 @@
   "info": {
     "title": "EgressView Hub HTTP API",
     "version": "1.10.0",
-    "description": "Generated from src/permission-matrix.js, the same object the server enforces, so this cannot describe a route the server does not have or miss one it does.\n\nRequest bodies are described for the routes the test suite exercises, captured from the schema the server actually validated rather than written by hand -- a hand-written list would go stale the first time a route changed. Operations without one say so in their description.\n\nResponses come in two kinds and the difference matters. A schema marked `x-observed` describes what a route was **seen to return under test** -- documentation of behaviour, not a promise, and only as complete as the paths the tests happened to walk. A schema without that marking is **declared by the server** and is what the route promises. `x-array-elements-observed` marks a declaration that covers the envelope but not every element of an array.\n\nRegenerate with `npm run docs:openapi`, which re-captures first.",
+    "description": "Generated from src/permission-matrix.js, the same object the server enforces, so this cannot describe a route the server does not have or miss one it does.\n\nRequest bodies are described for the routes the test suite exercises, captured from the schema the server actually validated rather than written by hand -- a hand-written list would go stale the first time a route changed. Operations without one say so in their description.\n\nResponses come in two kinds and the difference matters. A schema marked `x-observed` describes what a route was **seen to return under test** -- documentation of behaviour, not a promise, and only as complete as the paths the tests happened to walk. A schema without that marking is **declared by the server** and is what the route promises, and CI refuses to ship a build that breaks it. A schema marked `x-enforced` is refused by the running Hub as well: those are responses that project a credential down to a fact about it, where an extra field would be a leak rather than a mismatch. `x-array-elements-observed` marks a declaration that covers the envelope but not every element of an array.\n\nRegenerate with `npm run docs:openapi`, which re-captures first.",
     "license": {
       "name": "AGPL-3.0-only"
     }
@@ -310,7 +310,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Declared by the server.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -899,7 +899,7 @@
         },
         "responses": {
           "200": {
-            "description": "Declared by the server.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4006,7 +4006,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Declared by the server.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4406,7 +4406,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Declared by the server.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5042,7 +5042,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and refused at runtime if it does not hold.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5064,12 +5064,14 @@
                           "type": "boolean"
                         },
                         "allowedEmails": {
+                          "maxItems": 500,
                           "type": "array",
                           "items": {
                             "type": "string"
                           }
                         },
                         "allowedDomains": {
+                          "maxItems": 500,
                           "type": "array",
                           "items": {
                             "type": "string"
@@ -5077,22 +5079,27 @@
                         }
                       },
                       "required": [
-                        "allowedDomains",
-                        "allowedEmails",
+                        "enabled",
+                        "provider",
                         "clientId",
                         "clientSecretSet",
-                        "enabled",
-                        "provider"
-                      ]
+                        "allowedEmails",
+                        "allowedDomains"
+                      ],
+                      "additionalProperties": false
                     },
                     "sessionTtlDays": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "trustedProxyConfigured": {
                       "type": "boolean"
                     },
                     "warnings": {
-                      "type": "array"
+                      "maxItems": 500,
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -5101,10 +5108,11 @@
                     "trustedProxyConfigured",
                     "warnings"
                   ],
-                  "x-observed": true
+                  "additionalProperties": false
                 }
               }
-            }
+            },
+            "x-enforced": true
           },
           "401": {
             "description": "No usable credential."
@@ -5272,7 +5280,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Declared by the server.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6701,7 +6709,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and refused at runtime if it does not hold.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6712,26 +6720,12 @@
                     },
                     "models": {
                       "type": "object",
-                      "properties": {
-                        "ollama": {
-                          "type": "string"
-                        },
-                        "anthropic": {
-                          "type": "string"
-                        },
-                        "openai": {
-                          "type": "string"
-                        },
-                        "bedrock": {
-                          "type": "string"
-                        }
+                      "propertyNames": {
+                        "type": "string"
                       },
-                      "required": [
-                        "anthropic",
-                        "bedrock",
-                        "ollama",
-                        "openai"
-                      ]
+                      "additionalProperties": {
+                        "type": "string"
+                      }
                     },
                     "ollamaEndpoint": {
                       "type": "string"
@@ -6741,127 +6735,45 @@
                     },
                     "guardrail": {
                       "type": "object",
-                      "properties": {
-                        "enabled": {
-                          "type": "boolean"
-                        },
-                        "id": {
-                          "type": "string"
-                        },
-                        "version": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "enabled",
-                        "id",
-                        "version"
-                      ]
+                      "properties": {},
+                      "additionalProperties": {}
                     },
                     "providers": {
                       "type": "object",
-                      "properties": {
-                        "ollama": {
-                          "type": "object",
-                          "properties": {
-                            "keySet": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "keySet"
-                          ]
-                        },
-                        "anthropic": {
-                          "type": "object",
-                          "properties": {
-                            "keySet": {
-                              "type": "boolean"
-                            },
-                            "consented": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "consented",
-                            "keySet"
-                          ]
-                        },
-                        "openai": {
-                          "type": "object",
-                          "properties": {
-                            "keySet": {
-                              "type": "boolean"
-                            },
-                            "consented": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "consented",
-                            "keySet"
-                          ]
-                        },
-                        "bedrock": {
-                          "type": "object",
-                          "properties": {
-                            "keySet": {
-                              "type": "boolean"
-                            },
-                            "consented": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "consented",
-                            "keySet"
-                          ]
-                        }
+                      "propertyNames": {
+                        "type": "string"
                       },
-                      "required": [
-                        "anthropic",
-                        "bedrock",
-                        "ollama",
-                        "openai"
-                      ]
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "keySet": {
+                            "type": "boolean"
+                          },
+                          "consented": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "keySet"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
-                    "selectedModelPricing": {
-                      "type": "object",
-                      "properties": {
-                        "provider": {
-                          "type": "string"
-                        },
-                        "model": {
-                          "type": "string"
-                        },
-                        "priced": {
-                          "type": "boolean"
-                        },
-                        "pricing": {
-                          "type": "null"
-                        }
-                      },
-                      "required": [
-                        "model",
-                        "priced",
-                        "pricing",
-                        "provider"
-                      ]
-                    }
+                    "selectedModelPricing": {}
                   },
                   "required": [
-                    "guardrail",
+                    "provider",
                     "models",
                     "ollamaEndpoint",
-                    "provider",
-                    "providers",
                     "region",
-                    "selectedModelPricing"
+                    "guardrail",
+                    "providers"
                   ],
-                  "x-observed": true
+                  "additionalProperties": false
                 }
               }
-            }
+            },
+            "x-enforced": true
           },
           "401": {
             "description": "No usable credential."
@@ -9061,7 +8973,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Declared by the server.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10170,7 +10082,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Declared by the server.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10614,7 +10526,9 @@
       "GET /api/agent/capabilities",
       "GET /api/ai/usage/monthly",
       "GET /api/auth/audit-events",
+      "GET /api/auth/security-config",
       "GET /api/auth/sessions",
+      "GET /api/config/ai",
       "GET /api/notes",
       "GET /api/status",
       "POST /api/agent/ingest"
@@ -10635,12 +10549,10 @@
       "GET /api/auth/api-identities",
       "GET /api/auth/api-identities/self",
       "GET /api/auth/methods",
-      "GET /api/auth/security-config",
       "GET /api/auth/status",
       "GET /api/backup/prune/:jobId",
       "GET /api/beacons",
       "GET /api/beacons/config",
-      "GET /api/config/ai",
       "GET /api/config/detection-notifications",
       "GET /api/config/slack",
       "GET /api/devices",

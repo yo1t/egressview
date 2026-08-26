@@ -72,13 +72,42 @@ describe('観測するが拒まない（P2-95 step 4）', () => {
     assert.deepEqual(res.sent, [{ ok: 'no' }]);
   });
 
-  it('強制対象の名簿は、決定として空から始まる', () => {
+  it('強制するのは、送る方が悪い応答だけ', () => {
     // Enforcing replaces a response that is slightly wrong with one that is
     // definitely broken. It earns a place only where sending the wrong thing
-    // is worse than sending nothing.
+    // is worse than sending nothing -- here, two responses that project a
+    // credential down to a fact about it.
     const { ENFORCED_ROUTES, isEnforcedRoute } = require('../../src/response-contract');
-    assert.ok(Array.isArray(ENFORCED_ROUTES));
+    assert.deepEqual(ENFORCED_ROUTES.map((entry) => entry.route), [
+      'GET /api/auth/security-config',
+      'GET /api/config/ai',
+    ]);
+    for (const entry of ENFORCED_ROUTES) {
+      assert.match(entry.reason, /leak/, `${entry.route} does not say why refusing beats sending`);
+    }
+    // Ordinary routes stay out: shape drift is caught in CI before it ships.
     assert.equal(isEnforcedRoute('GET /api/status', 200), false);
+    assert.equal(isEnforcedRoute('POST /api/agent/ingest', 200), false);
+  });
+
+  it('秘密が混ざった応答は、名簿にあれば拒まれる', () => {
+    // The failure this list exists for: a projection that stops projecting.
+    const { z } = require('zod');
+    const registry = createResponseContractRegistry();
+    registry.declare('GET /api/config/ai', 200, z.object({ provider: z.string() }).strict());
+    const middleware = createResponseContractMiddleware({
+      mode: 'enforce', registry, logger: { warn() {} },
+    });
+    const req = { method: 'GET', baseUrl: '/api', route: { path: '/config/ai' } };
+    const res = fakeResponse(200);
+    res.req = req;
+    res.status = function status(code) { this.statusCode = code; return this; };
+    middleware(req, res, () => {});
+    res.json({ provider: 'anthropic', apiKey: 'sk-ant-leaked' });
+
+    assert.equal(res.statusCode, 500);
+    assert.deepEqual(res.sent, [{ error: 'Response did not match its contract' }]);
+    assert.doesNotMatch(JSON.stringify(res.sent), /sk-ant-leaked/);
   });
 
   it('拒むのは成功応答だけ', () => {
