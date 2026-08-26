@@ -562,6 +562,10 @@
   .log-device-filter-chip { background: var(--accent); color: #fff; border-radius: 4px; padding: 1px 7px; font-size: 11px; cursor: pointer; }
   .log-table td.log-scroll-sentinel-cell { height: 1px; padding: 0; border: none; }
   .log-app-cell { font-size: 11px; color: var(--muted); }
+  .log-app-traffic-cell { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .log-app-attribution { display: inline-block; margin-left: 5px; padding: 0 4px; border: 1px solid var(--border); border-radius: 999px; font-size: 8px; line-height: 14px; color: var(--muted); }
+  .log-app-attribution-confirmed { border-color: #22c55e55; color: #4ade80; }
+  .log-app-attribution-inferred { border-color: #f59e0b55; color: #fbbf24; }
   .log-org-cell { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
   .notif-log-clickable-row { cursor: pointer; }
   .notif-log-empty-cell { text-align: center; color: var(--muted); padding: 32px; }

@@ -172,10 +172,19 @@ function guessApp(dport, proto, dstHost) {
 }
 
 // Returns [[label, count], ...] sorted by count desc, with an optional "Other" tail.
-function _buildAppSlices(conns, topN, unknownLabel, otherLabel) {
+function _buildAppSlices(conns, topN, unknownLabel, otherLabel, {
+  agentSuffix = '', inferredSuffix = '',
+} = {}) {
   const counts = new Map();
   for (const c of conns) {
-    const app = guessApp(c.dport, c.proto, c.dstHost || c.dst) || unknownLabel;
+    if (c.applications?.length) {
+      for (const application of c.applications) {
+        const app = `${application.processName || unknownLabel}${agentSuffix}`;
+        counts.set(app, (counts.get(app) || 0) + 1);
+      }
+      continue;
+    }
+    const app = `${guessApp(c.dport, c.proto, c.dstHost || c.dst) || unknownLabel}${inferredSuffix}`;
     counts.set(app, (counts.get(app) || 0) + 1);
   }
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);

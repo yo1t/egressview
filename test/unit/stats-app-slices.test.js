@@ -64,6 +64,25 @@ describe('_buildAppSlices — basic counting', () => {
     const slices = _buildAppSlices([c(59999)], 8, UNKNOWN, OTHER);
     assert.deepEqual(slices, [[UNKNOWN, 1]]);
   });
+
+  it('uses every Agent application and marks guessed rows separately', () => {
+    const attributed = {
+      ...c(443, 'TCP'),
+      applications: [
+        { agentId: 'agent-a', processName: 'Safari', bundleId: 'com.apple.Safari' },
+        { agentId: 'agent-a', processName: 'Slack', bundleId: 'com.tinyspeck.slackmacgap' },
+      ],
+    };
+    const result = _buildAppSlices(
+      [attributed, c(53, 'UDP')], 8, UNKNOWN, OTHER,
+      { agentSuffix: ' (Agent)', inferredSuffix: ' (inferred)' }
+    );
+    assert.deepEqual(result, [
+      ['Safari (Agent)', 1],
+      ['Slack (Agent)', 1],
+      ['DNS (inferred)', 1],
+    ]);
+  });
 });
 
 // ─── UDP vs TCP disambiguation ──────────────────────────────────────────────

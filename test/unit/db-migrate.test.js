@@ -434,6 +434,42 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
     assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
     db.close();
   });
+
+  it('backfills the v19 hourly Agent application rollup without losing app identities', () => {
+    const p = tmpDb('v19-agent-app-hourly');
+    const db = openDb(p);
+    for (const migration of _MIGRATIONS.filter(item => item.version <= 18)) {
+      db.transaction(() => {
+        migration.up(db, {});
+        db.pragma(`user_version = ${migration.version}`);
+      })();
+    }
+    const insert = db.prepare(`
+      INSERT INTO agent_observations (
+        agentId, observationId, batchId, networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, collector, confidence, receivedAt
+      ) VALUES ('agent-1', ?, 'batch-1', 'tcp',
+        '192.0.2.10', ?, '198.51.100.20', 443,
+        ?, 'Example Helper', 'com.example.app', ?, ?, NULL, NULL,
+        'network-extension', 'exact', ?)
+    `);
+    insert.run('obs-1', 49152, 42, 3_600_100, 3_600_200, 3_600_201);
+    insert.run('obs-2', 49153, 43, 3_600_300, 3_600_400, 3_600_401);
+
+    runMigrations(db, p);
+
+    assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
+    const rollup = db.prepare('SELECT * FROM agent_app_hourly').get();
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM agent_app_hourly').get().n, 1);
+    assert.equal(rollup.hourStart, 3_600_000);
+    assert.equal(rollup.appIdentity, 'com.example.app');
+    assert.equal(rollup.firstObservedAt, 3_600_100);
+    assert.equal(rollup.lastObservedAt, 3_600_400);
+    assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
+    db.close();
+  });
 });
 
 // ─── P2-30 v4/v5: expand observations, then remove source ─────────────────────

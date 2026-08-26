@@ -11,6 +11,7 @@ const { MIGRATED_IDS, expandSourceToRouterIds, routerKindForId } = require('./ro
 const { checkObservationConsistency: checkConsistency } = require('./observation-consistency');
 const { createHistoryCache, DEFAULT_HOT_MAX_ENTRIES } = require('./history-cache');
 const { createHistoryQueries } = require('./history-queries');
+const { createAgentAttribution } = require('./agent-attribution');
 const { createAiConversationStore } = require('./ai-conversation-store');
 const { createAiUsageStore } = require('./ai-usage-store');
 const { createAiNotificationStore } = require('./ai-notification-store');
@@ -122,6 +123,11 @@ const {
 const aiConversationStore = createAiConversationStore({ getDb: () => db });
 const aiUsageStore = createAiUsageStore({ getDb: () => db });
 const aiNotificationStore = createAiNotificationStore({ getDb: () => db });
+const agentAttribution = createAgentAttribution({ getDb: () => db });
+
+function attachAgentAttributions(rows, options) {
+  return agentAttribution.attach(rows, options);
+}
 
 function _secureDbFiles() {
   for (const suffix of ['', '-shm', '-wal']) {
@@ -813,6 +819,7 @@ module.exports = {
   getMemoryStats,
   queryByTimeRange,
   queryByTimeRangePaged,
+  attachAgentAttributions,
   countByTimeRange,
   countFactsByTimeRange,
   createConnectionExportReader,

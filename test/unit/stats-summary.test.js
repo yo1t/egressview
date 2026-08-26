@@ -35,6 +35,8 @@ function slices(groups, topN, { tStub = k => k, guessAppStub = () => '' } = {}) 
     unknownLabel: tStub('stats.app.unknown'),
     otherLabel:   tStub('stats.legend.other'),
     guessApp:     guessAppStub,
+    agentSuffix:  tStub('stats.app.agentSuffix'),
+    inferredSuffix: tStub('stats.app.inferredSuffix'),
   });
 }
 
@@ -142,6 +144,21 @@ describe('appSlicesFromSummary', () => {
     const https = result.find(([l]) => l === 'HTTPS');
     assert.ok(https, 'expected guessApp fallback to HTTPS');
     assert.equal(https[1], 2);
+  });
+
+  it('keeps Agent-observed and inferred application groups visibly separate', () => {
+    const groups = [
+      { app: 'Safari', attribution: 'agent', count: 2 },
+      { dport: 443, proto: 'TCP', attribution: 'inferred', count: 3 },
+    ];
+    const result = JSON.parse(JSON.stringify(slices(groups, 8, {
+      tStub: key => ({
+        'stats.app.agentSuffix': ' (Agent)',
+        'stats.app.inferredSuffix': ' (inferred)',
+      })[key] || key,
+      guessAppStub: () => 'HTTPS',
+    })));
+    assert.deepEqual(result, [['HTTPS (inferred)', 3], ['Safari (Agent)', 2]]);
   });
 });
 

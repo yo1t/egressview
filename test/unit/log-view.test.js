@@ -243,7 +243,7 @@ describe('Connection Log view behavior', () => {
     assert.equal(params.get('offset'), '0');
   });
 
-  it('renders connection values as text in a nine-cell DOM row', async () => {
+  it('renders connection values as text in a ten-cell DOM row', async () => {
     const h = makeHarness({
       rows: [{
         src: '<b>source</b>',
@@ -260,10 +260,67 @@ describe('Connection Log view behavior', () => {
     const tbody = h.getEl('log-tbody');
     assert.equal(tbody.children.length, 1);
     assert.equal(tbody.children[0].tagName, 'TR');
-    assert.equal(tbody.children[0].children.length, 9);
+    assert.equal(tbody.children[0].children.length, 10);
     assert.match(tbody.textContent, /<img src=x onerror=alert\(1\)>/);
     assert.match(tbody.textContent, /<script>unsafe\(\)<\/script>/);
-    assert.deepEqual(tbody.children[0].children.map(cell => cell.tagName), Array(9).fill('TD'));
+    assert.deepEqual(tbody.children[0].children.map(cell => cell.tagName), Array(10).fill('TD'));
+  });
+
+  it('shows multiple Agent applications without replacing them with a port guess', async () => {
+    const h = makeHarness({
+      rows: [{
+        src: '192.0.2.10', dst: '198.51.100.10', dport: 443, proto: 'TCP',
+        applicationCount: 2,
+        applications: [
+          {
+            agentHost: 'macbook', processName: 'Google Chrome Helper',
+            bundleId: 'com.google.Chrome', matchKind: 'exact-5tuple',
+            bytesIn: '1536', bytesOut: '18446744073709551615',
+            byteObservationCount: 1, byteCompleteness: 'complete',
+          },
+          {
+            agentHost: 'macbook', processName: 'Slack Helper',
+            bundleId: 'com.tinyspeck.slackmacgap', matchKind: 'unique-4tuple-time',
+            bytesIn: '512', bytesOut: null,
+            byteObservationCount: 2, byteCompleteness: 'partial',
+          },
+        ],
+      }],
+    });
+    h.context.updateLogView();
+    await h.settle();
+
+    const appCell = h.getEl('log-tbody').children[0].children[4];
+    assert.match(appCell.textContent, /Google Chrome Helper \+1/);
+    assert.match(appCell.textContent, /log\.app\.badge\.confirmed/);
+    assert.match(appCell.title, /com\.google\.Chrome/);
+    assert.match(appCell.title, /com\.tinyspeck\.slackmacgap/);
+    const trafficCell = h.getEl('log-tbody').children[0].children[5];
+    assert.match(trafficCell.textContent, /↓ 1.5 KiB/);
+    assert.match(trafficCell.textContent, /↑ 16 EiB/);
+    assert.match(trafficCell.textContent, /\+1/);
+    assert.match(trafficCell.title, /Google Chrome Helper/);
+    assert.match(trafficCell.title, /Slack Helper/);
+    assert.match(trafficCell.title, /log\.appTraffic\.partial/);
+  });
+
+  it('shows unavailable Agent byte counts as unknown rather than zero', async () => {
+    const h = makeHarness({
+      rows: [{
+        src: '192.0.2.10', dst: '198.51.100.10', dport: 443, proto: 'TCP',
+        applications: [{
+          agentHost: 'macbook', processName: 'Safari', matchKind: 'agent-only',
+          bytesIn: null, bytesOut: null, byteObservationCount: 1,
+          byteCompleteness: 'unavailable',
+        }],
+      }],
+    });
+    h.context.updateLogView();
+    await h.settle();
+
+    const trafficCell = h.getEl('log-tbody').children[0].children[5];
+    assert.equal(trafficCell.textContent, '—');
+    assert.doesNotMatch(trafficCell.textContent, /0/);
   });
 
   it('server-side filters keep pagination and are sent as API params', async () => {

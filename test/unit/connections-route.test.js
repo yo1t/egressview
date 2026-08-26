@@ -4,7 +4,10 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { _attachThreats, _parseTimestampParam, _parsePaginationOpts, MAX_LIMIT, SERVER_FILTER_COLS } = require('../../src/routes/connections');
+const {
+  _attachApplications, _attachThreats, _parseTimestampParam, _parsePaginationOpts,
+  MAX_LIMIT, SERVER_FILTER_COLS,
+} = require('../../src/routes/connections');
 
 describe('connections route: attachThreats', () => {
   it('adds threat intel to SQLite/API rows that do not persist threat', () => {
@@ -54,6 +57,27 @@ describe('connections route: attachThreats', () => {
     // Returns the original rows without modification — threat field is absent
     assert.strictEqual(result, rows, 'should return the original array reference');
     assert.equal(result[0].threat, undefined, 'threat field should not be set');
+  });
+});
+
+describe('connections route: Agent application attribution', () => {
+  it('passes the selected source scope to one bounded history lookup', () => {
+    const rows = [{ src: '192.0.2.10', dst: '198.51.100.10', dport: 443, proto: 'TCP' }];
+    const scope = { sourceKind: 'agent', sourceId: 'agent-a' };
+    let calls = 0;
+    const result = _attachApplications(rows, {
+      attachAgentAttributions(received, options) {
+        calls++;
+        assert.strictEqual(received, rows);
+        assert.deepEqual(options.sourceScope, scope);
+        assert.equal(options.from, 1000);
+        assert.equal(options.to, 2000);
+        return received.map(row => ({ ...row, applications: [{ processName: 'Safari' }] }));
+      },
+    }, scope, 1000, 2000);
+
+    assert.equal(calls, 1);
+    assert.equal(result[0].applications[0].processName, 'Safari');
   });
 });
 

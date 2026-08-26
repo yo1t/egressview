@@ -17,7 +17,101 @@ import { appendDisplayScope } from './display-scope.js?v=__ASSET_VERSION__';
  * says "Google Chrome Helper" would be discarding the better answer.
  */
 function appLabel(connection) {
+  const applications = connection.applications || [];
+  if (applications.length) {
+    const extra = Math.max(0, (connection.applicationCount || applications.length) - 1);
+    return `${applications[0].processName}${extra ? ` +${extra}` : ''}`;
+  }
   return connection.process || guessApp(connection.dport, connection.proto, connection.dstHost || connection.dst);
+}
+
+function appAttributionTitle(connection) {
+  if (!connection.applications?.length) {
+    return connection.process
+      ? `${connection.process}${connection.pid ? ` (pid ${connection.pid})` : ''}${connection.agentHost ? ` — ${connection.agentHost}` : ''}`
+      : '';
+  }
+  const lines = connection.applications.map(application => {
+    const identity = application.bundleId
+      ? `${application.processName} (${application.bundleId})`
+      : application.processName;
+    const confidence = application.matchKind === 'exact-5tuple'
+      ? t('log.app.confirmed')
+      : application.matchKind === 'unique-4tuple-time'
+        ? t('log.app.inferred')
+        : t('log.app.agentOnly');
+    return `${identity} — ${application.agentHost} [${confidence}]\n${appTrafficTitle(application)}`;
+  });
+  if (connection.omittedApplicationCount) {
+    lines.push(tVars('log.app.more', { count: connection.omittedApplicationCount }));
+  }
+  return lines.join('\n');
+}
+
+function formatAppBytes(value) {
+  if (value == null || !/^\d+$/.test(String(value))) return null;
+  const bytes = BigInt(value);
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB'];
+  let divisor = 1n;
+  let unit = 0;
+  while (unit < units.length - 1 && bytes >= divisor * 1024n) {
+    divisor *= 1024n;
+    unit++;
+  }
+  if (unit === 0) return `${bytes} ${units[unit]}`;
+  const tenths = (bytes * 10n + divisor / 2n) / divisor;
+  const whole = tenths / 10n;
+  const fraction = tenths % 10n;
+  return `${whole}${whole < 10n && fraction ? `.${fraction}` : ''} ${units[unit]}`;
+}
+
+function appTrafficTitle(application) {
+  const received = formatAppBytes(application.bytesIn) || t('log.appTraffic.unavailable');
+  const sent = formatAppBytes(application.bytesOut) || t('log.appTraffic.unavailable');
+  const completeness = application.byteCompleteness === 'partial'
+    ? ` [${t('log.appTraffic.partial')}]`
+    : '';
+  return `${t('log.appTraffic.agentPerspective')}: `
+    + `${t('log.appTraffic.received')} ${received} / ${t('log.appTraffic.sent')} ${sent}${completeness}`;
+}
+
+function createAppTrafficCell(connection) {
+  const applications = connection.applications || [];
+  const primary = applications[0];
+  if (!primary || primary.byteCompleteness === 'unavailable') {
+    return createTextElement('td', '—', { className: 'log-app-traffic-cell' });
+  }
+  const received = formatAppBytes(primary.bytesIn) || '—';
+  const sent = formatAppBytes(primary.bytesOut) || '—';
+  const partial = primary.byteCompleteness === 'partial' ? '*' : '';
+  const extra = Math.max(0, (connection.applicationCount || applications.length) - 1);
+  const title = applications.map(application => (
+    `${application.processName} — ${appTrafficTitle(application)}`
+  ));
+  if (connection.omittedApplicationCount) {
+    title.push(tVars('log.app.more', { count: connection.omittedApplicationCount }));
+  }
+  return createTextElement(
+    'td',
+    `↓ ${received}  ↑ ${sent}${partial}${extra ? `  +${extra}` : ''}`,
+    { className: 'log-app-traffic-cell', title: title.join('\n') }
+  );
+}
+
+function createAppCell(connection) {
+  const cell = createTextElement('td', appLabel(connection), {
+    className: 'log-app-cell',
+    title: appAttributionTitle(connection),
+  });
+  const primary = connection.applications?.[0];
+  if (!primary) return cell;
+  const badgeKey = primary.matchKind === 'exact-5tuple'
+    ? 'confirmed'
+    : primary.matchKind === 'unique-4tuple-time' ? 'inferred' : 'agentOnly';
+  cell.appendChild(createTextElement('span', t(`log.app.badge.${badgeKey}`), {
+    className: `log-app-attribution log-app-attribution-${badgeKey}`,
+  }));
+  return cell;
 }
 
 const logSortState = { col: 'lastSeen', dir: 'desc' };
@@ -271,7 +365,7 @@ function setupScrollObserver() {
   const sentinel = document.createElement('tr');
   sentinel.id = 'log-scroll-sentinel';
   const sentinelCell = document.createElement('td');
-  sentinelCell.colSpan = 9;
+  sentinelCell.colSpan = 10;
   sentinelCell.className = 'log-scroll-sentinel-cell';
   sentinel.appendChild(sentinelCell);
   tbody.appendChild(sentinel);
@@ -456,12 +550,8 @@ function createLogRow(connection) {
   appendLogCell(row, dstLabel, { title: connection.dst });
   row.appendChild(createThreatCell(connection, isLowConfidence));
   appendLogCell(row, connection.dport);
-  appendLogCell(row, appLabel(connection), {
-    className: 'log-app-cell',
-    title: connection.process
-      ? `${connection.process}${connection.pid ? ` (pid ${connection.pid})` : ''}${connection.agentHost ? ` — ${connection.agentHost}` : ''}`
-      : '',
-  });
+  row.appendChild(createAppCell(connection));
+  row.appendChild(createAppTrafficCell(connection));
   appendLogCell(row, connection.proto);
   appendLogCell(row, `${flag} ${connection.country || ''}`);
   appendLogCell(row, connection.org || '', { className: 'log-org-cell', title: connection.org || '' });

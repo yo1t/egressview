@@ -82,10 +82,28 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
         @collector, @confidence, @receivedAt
       )
     `);
+    const upsertAppHourly = database.prepare(`
+      INSERT INTO agent_app_hourly (
+        hourStart, agentId, appIdentity, processName,
+        localAddress, remoteAddress, remotePort, networkProtocol,
+        firstObservedAt, lastObservedAt
+      ) VALUES (
+        @hourStart, @agentId, @appIdentity, @processName,
+        @localAddress, @remoteAddress, @remotePort, @networkProtocol,
+        @firstObservedAt, @lastObservedAt
+      )
+      ON CONFLICT (
+        hourStart, agentId, appIdentity, localAddress,
+        remoteAddress, remotePort, networkProtocol
+      ) DO UPDATE SET
+        processName = excluded.processName,
+        firstObservedAt = MIN(agent_app_hourly.firstObservedAt, excluded.firstObservedAt),
+        lastObservedAt = MAX(agent_app_hourly.lastObservedAt, excluded.lastObservedAt)
+    `);
 
     let acceptedCount = 0;
     for (const observation of envelope.observations) {
-      const result = insertObservation.run({
+      const stored = {
         agentId,
         observationId: observation.observationId,
         batchId: envelope.batchId,
@@ -104,7 +122,15 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
         collector: observation.collector,
         confidence: observation.confidence,
         receivedAt,
-      });
+      };
+      const result = insertObservation.run(stored);
+      if (result.changes) {
+        upsertAppHourly.run({
+          ...stored,
+          hourStart: Math.floor(stored.lastObservedAt / 3_600_000) * 3_600_000,
+          appIdentity: stored.bundleId || stored.processName,
+        });
+      }
       acceptedCount += result.changes;
     }
 
@@ -171,6 +197,7 @@ function pruneObservations({ before }) {
     const observations = database.prepare(
       'DELETE FROM agent_observations WHERE lastObservedAt < ?'
     ).run(before).changes;
+    database.prepare('DELETE FROM agent_app_hourly WHERE lastObservedAt < ?').run(before);
     const batches = database.prepare(`
       DELETE FROM agent_ingest_batches
       WHERE receivedAt < ?
@@ -248,6 +275,16 @@ function _initForTest(dbPath = ':memory:') {
       collector TEXT NOT NULL, confidence TEXT NOT NULL, receivedAt INTEGER NOT NULL,
       PRIMARY KEY (agentId, observationId)
     );
+    CREATE TABLE agent_app_hourly (
+      hourStart INTEGER NOT NULL, agentId TEXT NOT NULL, appIdentity TEXT NOT NULL,
+      processName TEXT NOT NULL, localAddress TEXT NOT NULL, remoteAddress TEXT NOT NULL,
+      remotePort INTEGER NOT NULL, networkProtocol TEXT NOT NULL,
+      firstObservedAt INTEGER NOT NULL, lastObservedAt INTEGER NOT NULL,
+      PRIMARY KEY (
+        hourStart, agentId, appIdentity, localAddress,
+        remoteAddress, remotePort, networkProtocol
+      )
+    ) WITHOUT ROWID;
     CREATE TABLE connections (
       src TEXT NOT NULL, dst TEXT NOT NULL, dport INTEGER NOT NULL, proto TEXT NOT NULL,
       sport INTEGER, firstSeen INTEGER NOT NULL, lastSeen INTEGER NOT NULL,

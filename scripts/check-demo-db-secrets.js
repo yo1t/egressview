@@ -45,8 +45,10 @@ for (const file of trackedDatabases()) {
         .filter(column => /TEXT|CHAR|CLOB|BLOB/i.test(column.type || ''));
       if (!columns.length) continue;
       const selected = columns.map(column => quoteIdentifier(column.name)).join(', ');
-      const rows = db.prepare(`SELECT rowid AS __rowid, ${selected} FROM ${quoteIdentifier(table)}`).iterate();
+      const rows = db.prepare(`SELECT ${selected} FROM ${quoteIdentifier(table)}`).iterate();
+      let rowNumber = 0;
       for (const row of rows) {
+        rowNumber += 1;
         for (const column of columns) {
           const value = row[column.name];
           if (value === null || value === undefined) continue;
@@ -55,7 +57,7 @@ for (const file of trackedDatabases()) {
             if (pattern.test(text)) {
               findings.push({
                 file,
-                location: `${table}.${column.name} rowid=${row.__rowid}`,
+                location: `${table}.${column.name} row=${rowNumber}`,
                 name: checkName,
               });
             }

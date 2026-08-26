@@ -20,11 +20,17 @@ export function statsTargetRows(summary) {
 // Aggregate app groups into [label, count] slices, folding the tail into
 // an "other" slice. `guessApp` and the two labels are injected so the
 // function stays i18n-free.
-export function appSlicesFromSummary(groups, topN, { unknownLabel, otherLabel, guessApp }) {
+export function appSlicesFromSummary(groups, topN, {
+  unknownLabel, otherLabel, guessApp, agentSuffix = '', inferredSuffix = '',
+}) {
   const counts = new Map();
   for (const g of groups || []) {
-    const app = g.app || guessApp(g.dport, g.proto, g.dstHost) || unknownLabel;
-    counts.set(app, (counts.get(app) || 0) + (g.count || 0));
+    const base = g.app || guessApp(g.dport, g.proto, g.dstHost) || unknownLabel;
+    const suffix = g.attribution === 'agent'
+      ? agentSuffix
+      : g.attribution === 'inferred' ? inferredSuffix : '';
+    const label = `${base}${suffix}`;
+    counts.set(label, (counts.get(label) || 0) + (g.count || 0));
   }
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
   const top = sorted.slice(0, topN);

@@ -37,6 +37,10 @@ describe('Agent ingest store', () => {
     assert.equal(row.processId, 42);
     assert.equal(row.bytesIn, '9007199254740993');
     assert.equal(row.bytesOut, null);
+    const appRollup = store._dbForTest().prepare('SELECT * FROM agent_app_hourly').get();
+    assert.equal(appRollup.agentId, agentId);
+    assert.equal(appRollup.processName, golden.observations[0].processName);
+    assert.equal(appRollup.appIdentity, golden.observations[0].bundleID);
   });
 
   it('returns the original ACK for 100 retries without duplicating storage', () => {
@@ -48,6 +52,41 @@ describe('Agent ingest store', () => {
     const database = store._dbForTest();
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_ingest_batches').get().n, 1);
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 1);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_app_hourly').get().n, 1);
+  });
+
+  it('folds the same hourly app identity but preserves a second app on the same flow', () => {
+    const envelope = copy();
+    const original = envelope.observations[0];
+    envelope.observations = [
+      original,
+      {
+        ...structuredClone(original),
+        observationId: '00000000-0000-4000-8000-000000000088',
+        processID: 43,
+        firstObservedAt: '2026-08-11T12:00:02.000Z',
+        lastObservedAt: '2026-08-11T12:00:03.000Z',
+      },
+      {
+        ...structuredClone(original),
+        observationId: '00000000-0000-4000-8000-000000000089',
+        processID: 44,
+        processName: 'Second App',
+        bundleID: 'com.example.second',
+      },
+    ];
+
+    const ack = store.storeBatch(agentId, envelope, { receivedAt });
+    const rows = store._dbForTest().prepare(
+      'SELECT * FROM agent_app_hourly ORDER BY appIdentity'
+    ).all();
+
+    assert.equal(ack.accepted, 3);
+    assert.equal(rows.length, 2);
+    const example = rows.find(row => row.appIdentity === original.bundleID);
+    assert.equal(example.firstObservedAt, Date.parse(original.firstObservedAt));
+    assert.equal(example.lastObservedAt, Date.parse('2026-08-11T12:00:03.000Z'));
+    assert(rows.some(row => row.appIdentity === 'com.example.second'));
   });
 
   it('counts an observation reused by a different batch as a duplicate', () => {
@@ -105,5 +144,6 @@ describe('Agent ingest store', () => {
     const result = store.pruneObservations({ before: receivedAt + 1 });
     assert.deepEqual(result, { correlations: 0, observations: 1, batches: 1 });
     assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
+    assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_app_hourly').get().n, 0);
   });
 });
