@@ -119,6 +119,7 @@ final class AgentMainViewModel: ObservableObject {
         }.sorted { $0.name < $1.name }
     }
     @Published private(set) var summary = AgentPeriodSummary()
+    @Published private(set) var localInsights: AgentLocalInsightSnapshot?
     @Published private(set) var coverage = CoverageSummary(
         share: 1, firstCovered: nil, gaps: [], startedInsidePeriod: false
     )
@@ -341,6 +342,24 @@ final class AgentMainViewModel: ObservableObject {
                     )
                 }
 
+                if tab == .insights {
+                    let current = try store.appDestinationTotals(
+                        from: from, to: to, grouping: .name
+                    )
+                    let duration = to.timeIntervalSince(from)
+                    let previousStart = from.addingTimeInterval(-duration)
+                    let previous = try store.appDestinationTotals(
+                        from: previousStart, to: from, grouping: .name
+                    )
+                    data.localInsights = try AgentLocalInsightBuilder.build(
+                        current: current,
+                        previous: previous,
+                        periodStart: from,
+                        periodEnd: to,
+                        generatedAt: to
+                    )
+                }
+
                 // The threat count appears on the network tab too, so it is
                 // computed for both -- but only there, and never for the log.
                 if tab == .network || tab == .threats {
@@ -388,6 +407,7 @@ final class AgentMainViewModel: ObservableObject {
     /// are filled in; the rest keep whatever they already held.
     private struct LoadedData {
         var summary: AgentPeriodSummary?
+        var localInsights: AgentLocalInsightSnapshot?
         var sankey: SankeyModel?
         var timeline: TimelineModel?
         var globe: GlobeModel?
@@ -402,6 +422,7 @@ final class AgentMainViewModel: ObservableObject {
 
     private func apply(_ data: LoadedData, tab: AgentMainTab) {
         if let value = data.summary { summary = value }
+        if let value = data.localInsights { localInsights = value }
         if let value = data.sankey { sankey = value }
         if let value = data.timeline { timeline = value }
         if let value = data.globe { globe = value }

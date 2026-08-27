@@ -28,6 +28,10 @@ enum AgentMainTab: String, CaseIterable, Identifiable {
     /// read without ever seeing that collection had stopped -- which is exactly
     /// how an outage went unnoticed for hours.
     case network
+    /// A deterministic local summary first. Phase 1 has no provider client;
+    /// the bounded preview below it is the exact shape a later manual AI
+    /// action may send after consent.
+    case insights
     /// Its own tab. The log wants the whole window -- rows are long and there
     /// are hundreds of them -- and sharing the screen with the charts left both
     /// too short to read.
@@ -44,6 +48,7 @@ enum AgentMainTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .network: return L("Network status")
+        case .insights: return L("Insights")
         case .threats: return L("Threats")
         case .log: return L("Connection log")
         case .notifications: return L("Notification history")
@@ -98,6 +103,7 @@ struct AgentMainView: View {
             Group {
                 switch model.selectedTab {
                 case .network: analysisView
+                case .insights: insightsView
                 case .threats: threatsView
                 case .log: logView
                 case .notifications: notificationHistoryView
@@ -161,7 +167,7 @@ struct AgentMainView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(maxWidth: 620)
+            .frame(maxWidth: 760)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
@@ -221,6 +227,20 @@ struct AgentMainView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var insightsView: some View {
+        VStack(spacing: 0) {
+            errorBanner
+            AgentInsightPanel(
+                snapshot: model.localInsights,
+                monitoringStatus: model.monitoringStatus,
+                isRefreshing: model.isRefreshing
+            )
+            .padding(.horizontal, 20)
+            .padding(.bottom, 18)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
