@@ -1,0 +1,76 @@
+name: Continuous fuzzing
+
+# Fuzzing that is not bounded by the PR gate's budget (P2-96).
+#
+# The gate runs 300 iterations on one seed, because a gate that takes an hour
+# is a gate people route around. That finds shallow breakage every time and
+# never finds the input that needs a long search. This runs four times a day,
+# 20 minutes, from seeds it has not used before -- measured on a laptop, that
+# is roughly 400 million inputs per run against 5,700 in the gate.
+#
+# **This is not OSS-Fuzz.** There is no coverage feedback and no corpus-guided
+# mutation, so it does not learn which inputs reach new code. It searches more
+# of the same space for longer. That difference is why the run prints its
+# counts: a job that quietly stops running looks exactly like a job that finds
+# nothing.
+#
+# A finding is written into test/fuzz/corpus/ and uploaded here. Committing
+# those files makes them permanent regression tests: corpus.test.js replays
+# every one of them, and `npm test` runs it.
+#
+# At most five inputs per parser are saved per run. A real defect fires on
+# thousands of them -- measured with a deliberately broken parser, three
+# seconds produced 4,639 distinct failing inputs -- and saving them all buries
+# the second defect under the first. Every finding is still counted.
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: How long to fuzz, in minutes
+        required: false
+        default: '20'
+      seed:
+        description: Start from this seed instead of a random one
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz parsers past the gate budget
+    # Comfortably above the fuzzing budget so the job is never killed
+    # mid-write, which would lose a finding it had already made.
+    timeout-minutes: 40
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fuzz
+        id: fuzz
+        run: |
+          node scripts/fuzz-continuous.js \
+            --minutes "${{ github.event.inputs.minutes || '20' }}" \
+            ${{ github.event.inputs.seed && format('--seed {0}', github.event.inputs.seed) || '' }}
+
+      - name: Upload the inputs it found
+        # always(), because the run fails when it finds something, and the
+        # inputs are the whole point of that failure.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus
+          path: test/fuzz/corpus/
+          if-no-files-found: ignore
+          retention-days: 30

@@ -72,7 +72,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test test/unit/*.test.js",
+    "test": "node --test test/unit/*.test.js test/fuzz/corpus.test.js",
     "test:unit": "node --test test/unit/*.test.js",
     "test:coverage": "node --experimental-test-coverage --test --test-coverage-lines=83 --test-coverage-branches=79 --test-coverage-functions=80 test/unit/*.test.js",
     "lint": "eslint . && npm run lint:innerhtml",
@@ -82,6 +82,7 @@
     "test:portability": "node --test test/portability/*.test.js",
     "test:fuzz": "node --test test/fuzz/*.test.js",
     "test:fuzz:long": "FUZZ_ITERATIONS=50000 node --test test/fuzz/parsers.fuzz.test.js",
+    "test:fuzz:continuous": "node scripts/fuzz-continuous.js",
     "test:offline-distribution": "node --test test/unit/offline-bundle.test.js",
     "test:smoke": "playwright test",
     "security:audit": "npm audit --omit=dev --audit-level=moderate",
