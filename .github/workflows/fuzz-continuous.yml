@@ -23,18 +23,14 @@ name: Continuous fuzzing
 # seconds produced 4,639 distinct failing inputs -- and saving them all buries
 # the second defect under the first. Every finding is still counted.
 
+# No workflow_dispatch inputs. They would have to be interpolated into the
+# `run:` step, which is a shell injection from anyone who can press the button,
+# and a dispatch input is not worth that. The run prints its seed, so a finding
+# is reproduced locally with `node scripts/fuzz-continuous.js --seed <value>`.
 on:
   schedule:
     - cron: '23 */6 * * *'
   workflow_dispatch:
-    inputs:
-      minutes:
-        description: How long to fuzz, in minutes
-        required: false
-        default: '20'
-      seed:
-        description: Start from this seed instead of a random one
-        required: false
 
 permissions:
   contents: read
@@ -47,10 +43,10 @@ jobs:
     timeout-minutes: 40
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
 
@@ -58,17 +54,13 @@ jobs:
         run: npm ci
 
       - name: Fuzz
-        id: fuzz
-        run: |
-          node scripts/fuzz-continuous.js \
-            --minutes "${{ github.event.inputs.minutes || '20' }}" \
-            ${{ github.event.inputs.seed && format('--seed {0}', github.event.inputs.seed) || '' }}
+        run: node scripts/fuzz-continuous.js --minutes 20
 
       - name: Upload the inputs it found
         # always(), because the run fails when it finds something, and the
         # inputs are the whole point of that failure.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-corpus
           path: test/fuzz/corpus/
