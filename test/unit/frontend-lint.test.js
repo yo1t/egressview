@@ -58,6 +58,10 @@ const APP_SCRIPT_FILES = [
   'devices.js',
   'notif-log.js',
   'log.js',
+  'ai-format.js',
+  'ai-providers.js',
+  'ai-usage.js',
+  'ai-notification-settings.js',
   'ai-insights.js',
   'settings-backup.js',
   'settings-sessions.js',
@@ -67,6 +71,10 @@ const APP_SCRIPT_FILES = [
   'settings-manual-threat.js',
   'settings-ai.js',
   'settings-agents.js',
+  // Imported by settings.js, but absent from this list until 2026-08-29, so
+  // every check in this file had skipped them since they were written.
+  'settings-detection.js',
+  'settings-security.js',
   'settings.js',
   'time-filter.js',
   'router-settings.js',
@@ -147,6 +155,22 @@ function hasClickHandler(script, id) {
 }
 
 describe('Frontend script wiring invariants', () => {
+  it('lints every module in public/js, not only the ones someone remembered', () => {
+    // APP_SCRIPT_FILES is written by hand, and every check in this file reads
+    // through it. A module missing from the list is not reported as missing --
+    // it is simply never examined, and passes. That is the shape of defect
+    // this project keeps finding: something that looks like success because
+    // nobody looked.
+    const onDisk = Object.keys(moduleSources).sort();
+    const listed = [...APP_SCRIPT_FILES].sort();
+    const unlisted = onDisk.filter(file => !listed.includes(file));
+    assert.deepEqual(unlisted, [],
+      `public/js modules absent from APP_SCRIPT_FILES are never linted: ${unlisted.join(', ')}`);
+    const missing = listed.filter(file => !onDisk.includes(file));
+    assert.deepEqual(missing, [],
+      `APP_SCRIPT_FILES names files that do not exist: ${missing.join(', ')}`);
+  });
+
   it('uses a single ES module entry point in index.html', () => {
     assert.match(html, /<script type="module" src="__BASE__\/js\/main\.js\?v=__ASSET_VERSION__"><\/script>/,
       'index.html should load main.js as an ES module entry point');
