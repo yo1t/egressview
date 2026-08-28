@@ -1,25 +1,46 @@
 'use strict';
 
 /**
- * The tables a database is given directly, rather than by a migration.
+ * The objects `initDb` creates directly, after the migrations have run.
  *
- * Split out of `history.js` (P2-97): it was 150 of that file's 856 lines, and
- * it is what you open when you add a column -- not something to scroll past
- * while reading how the database is opened and recovered.
+ * Split out of `history.js` (P2-97). What this file actually is took two
+ * passes to state correctly, and the first attempt was wrong in a way worth
+ * recording.
  *
- * **Most of it does nothing.** `initDb` runs migrations first, and on an empty
- * database those build the schema from version 0 to the current one. Measured
- * 2026-08-29: migrations create 42 objects, and re-running everything below
- * then creates **6** -- `connections`, `notification_log`, and four indexes.
- * Those predate migrations, which is why nothing creates them.
+ * **It is not the schema of a fresh database.** `initDb` runs migrations
+ * first, and on an empty database those build everything from version 0
+ * upward. Measured 2026-08-29: migrations create 42 objects, and everything
+ * below then creates 6.
  *
- * Every statement is `IF NOT EXISTS`, so the other 36 definitions are ignored
- * wherever they disagree with what the migrations built. **A column added to
- * one of them takes effect nowhere**, on a fresh database or an existing one.
- * `test/unit/history-schema.test.js` pins which six are real so that
- * duplication cannot quietly grow.
+ * **Nor is it dead.** Migrations never run again once `user_version` reaches
+ * the current version, so on a database that says 19 while an object is
+ * missing -- a restored upload, an interrupted operation -- these statements
+ * are the only thing that puts anything back.
+ *
+ * **What it repairs is an accident of history, not a design.** Dropping each
+ * object in turn from a migrated database and re-running `initDb`'s sequence,
+ * measured 2026-08-29:
+ *
+ *   repaired      13 of 48 -- connections, notification_log, routers,
+ *                 connection_observations, ai_notification_events, and 8 indexes
+ *   not repaired  35 of 48 -- including agents, agent_observations,
+ *                 audit_events, api_identities and every ai_* table
+ *
+ * Two of the repaired five are load-bearing on every install: `connections`
+ * and `notification_log` predate migrations, so nothing else creates them at
+ * all. The rest of the coverage is whatever happened to get written here.
+ *
+ * **A partial repair is not a safety net.** A database missing
+ * `agent_observations` fails at runtime whatever happens to `connections`, and
+ * silently recreating `connections` empty would present data loss as a working
+ * system. Making this either complete or explicit is open work; see
+ * `test/unit/history-schema.test.js`, which pins both halves so the split
+ * cannot drift unnoticed.
+ *
+ * Every statement is `IF NOT EXISTS`. The three definitions that duplicate
+ * what migrations build have columns identical to the migrated tables, checked
+ * by the same test.
  */
-
 /** Connection rows and the indexes reads depend on. */
 const CONNECTIONS_SQL = `
     CREATE TABLE IF NOT EXISTS connections (
