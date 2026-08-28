@@ -43,6 +43,16 @@ describe('macOS Agent settings structure', () => {
     assert.match(source, /case \.enrichment: enrichmentSettings/);
   });
 
+  it('provides a dedicated AI destination for Ollama configuration', () => {
+    assert.match(source, /case ai/);
+    assert.match(source, /case \.ai: return L\("AI"\)/);
+    assert.match(source, /case \.ai: aiSettings/);
+    const ai = section('private var aiSettings:', '@ViewBuilder\n    private var geoSection:');
+    assert.match(ai, /ollama\.setEndpoint/);
+    assert.match(ai, /ollama\.selectModel/);
+    assert.match(ai, /ollama\.saveAndTest\(\)/);
+  });
+
   it('keeps Hub settings limited to enrollment and delivery', () => {
     const hub = section('private var hubSettings:', 'private var enrichmentSettings:');
     assert.match(hub, /settingsGroup\(L\("Enrollment"\)\)/);

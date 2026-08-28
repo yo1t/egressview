@@ -6,7 +6,10 @@ struct AgentInsightPanel: View {
     let snapshot: AgentLocalInsightSnapshot?
     let monitoringStatus: String
     let isRefreshing: Bool
+    @ObservedObject var ollama: AgentOllamaController
 
+    @State private var question = ""
+    @State private var confirmsClearAll = false
     @State private var showsPreview = false
     @State private var copied = false
     @ObservedObject private var language = AgentLanguageSettings.shared
@@ -19,6 +22,7 @@ struct AgentInsightPanel: View {
                     metrics(snapshot.context)
                     changes(snapshot.context)
                     preview(snapshot)
+                    conversation(snapshot)
                 } else {
                     VStack(spacing: 10) {
                         Image(systemName: "chart.line.uptrend.xyaxis")
@@ -38,6 +42,7 @@ struct AgentInsightPanel: View {
             .padding(18)
         }
         .agentSection()
+        .task(id: ollama.isEnabled) { ollama.refreshAvailableModels() }
     }
 
     private var header: some View {
@@ -56,13 +61,222 @@ struct AgentInsightPanel: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Label(L("No AI · Insight data not sent"), systemImage: "lock.shield")
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(.green)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(Capsule().fill(Color.green.opacity(0.12)))
+            VStack(alignment: .trailing, spacing: 8) {
+                // One badge. It says the ordinary thing, and says the problem
+                // instead when there is one -- rather than a second line
+                // announcing every success beneath it.
+                if let problem = ollama.problem {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(Color.orange.opacity(0.12)))
+                        .frame(maxWidth: 380, alignment: .trailing)
+                } else {
+                    Label(
+                        ollama.isEnabled ? L("Ollama ready · Local only") : L("AI off · Insight data not sent"),
+                        systemImage: "lock.shield"
+                    )
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(Color.green.opacity(0.12)))
+                }
+                modelPickers
+            }
         }
+    }
+
+    /// Which model answers, beside the badge that says whether it can.
+    ///
+    /// No card of its own: the badge above already says the provider is Ollama
+    /// and whether it is ready, and a card repeating that was two controls
+    /// saying one thing.
+    ///
+    /// Provider is a list of one today. It is a list because the next
+    /// providers are already specified (P3-20 Phase 3-4), and a control that
+    /// has to be rebuilt to take the second one is a control that gets rebuilt
+    /// wrong.
+    private var modelPickers: some View {
+        HStack(spacing: 8) {
+            Picker(L("Provider"), selection: providerBinding) {
+                ForEach(AgentInsightPanel.providers, id: \.self) { provider in
+                    Text(provider).tag(provider)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 110)
+            .disabled(AgentInsightPanel.providers.count < 2 || ollama.isRunning)
+
+            Picker(L("Model"), selection: modelBinding) {
+                if ollama.modelChoices.isEmpty {
+                    Text(L("No model selected")).tag("")
+                }
+                ForEach(ollama.modelChoices, id: \.self) { name in
+                    Text(name).tag(name)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 190)
+            .disabled(ollama.isRunning)
+        }
+        .controlSize(.small)
+    }
+
+    private var providerBinding: Binding<String> {
+        .constant(AgentInsightPanel.providers[0])
+    }
+
+    private var modelBinding: Binding<String> {
+        Binding(get: { self.ollama.model }, set: { self.ollama.selectModel($0) })
+    }
+
+    static let providers = ["Ollama"]
+
+    private func conversation(_ snapshot: AgentLocalInsightSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label(L("Ask about this period"), systemImage: "text.bubble")
+                    .font(.headline)
+                Spacer()
+                Button(L("New conversation")) { ollama.newConversation() }
+                    .disabled(ollama.isRunning)
+                Button(L("Delete all"), role: .destructive) { confirmsClearAll = true }
+                    .disabled(ollama.messages.isEmpty)
+            }
+
+            if !ollama.isEnabled {
+                Text(L("Choose a model above, or configure Ollama in Settings > AI."))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            // The box you type in sits above the answers: the thing you came
+            // to do should not be below a conversation that grows every time
+            // you do it.
+            TextField(L("Ask about the bounded preview"), text: $question, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(2...5)
+                .disabled(ollama.isRunning || !ollama.isEnabled)
+            HStack {
+                Button(L("Analyze current period")) {
+                    ollama.analyze(
+                        snapshot: snapshot,
+                        question: L("Summarize the notable changes and suggest proportionate checks. Do not infer facts not present in the aggregates.")
+                    )
+                }
+                .disabled(ollama.isRunning || !ollama.isEnabled)
+                Button(L("Ask")) {
+                    let submitted = question
+                    question = ""
+                    ollama.analyze(snapshot: snapshot, question: submitted)
+                }
+                .disabled(
+                    ollama.isRunning || !ollama.isEnabled
+                        || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+                if ollama.isRunning {
+                    ProgressView().controlSize(.small)
+                    Button(L("Stop"), role: .destructive) { ollama.stop() }
+                }
+                Spacer()
+                Label(L("30 second limit · one request at a time"), systemImage: "timer")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            if ollama.activeMessages.isEmpty {
+                Text(L("No local AI messages yet. Start with a factual analysis or enter a question."))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 70, alignment: .center)
+            } else {
+                // Newest exchange first, so the answer to what you just
+                // asked is next to the box you asked it in -- but a question
+                // and its answer stay in the order they happened. Reversing
+                // every message put each answer above its own question.
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(exchanges, id: \.id) { exchange in
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(exchange.messages) { message in
+                                messageRow(message)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(cardBackground)
+        .confirmationDialog(
+            L("Delete every AI conversation on this Mac?"),
+            isPresented: $confirmsClearAll,
+            titleVisibility: .visible
+        ) {
+            Button(L("Delete all"), role: .destructive) { ollama.deleteAllHistory() }
+            Button(L("Cancel"), role: .cancel) { }
+        } message: {
+            Text(L("%lld messages will be deleted. This cannot be undone.", ollama.messages.count))
+        }
+    }
+
+    private struct Exchange: Identifiable {
+        let id: UUID
+        let messages: [AgentAIConversationMessage]
+    }
+
+    /// One question and its answer, grouped by the request that produced them.
+    private var exchanges: [Exchange] {
+        var order: [UUID] = []
+        var grouped: [UUID: [AgentAIConversationMessage]] = [:]
+        for message in ollama.activeMessages {
+            if grouped[message.requestID] == nil { order.append(message.requestID) }
+            grouped[message.requestID, default: []].append(message)
+        }
+        return order.reversed().map { Exchange(id: $0, messages: grouped[$0] ?? []) }
+    }
+
+    private func messageRow(_ message: AgentAIConversationMessage) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(message.role == .user ? L("You") : "Ollama")
+                    .font(.caption.bold())
+                Spacer()
+                Text(message.createdAt, style: .time)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                // Offered on questions too, not only answers: a question can
+                // be the part someone wants gone.
+                Button(L("Delete")) { ollama.deleteMessage(message.id) }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .accessibilityLabel(
+                        message.role == .user
+                            ? L("Delete this question")
+                            : L("Delete this answer")
+                    )
+            }
+            Text(message.body)
+                .textSelection(.enabled)
+                .foregroundStyle(message.status == .failed ? Color.orange : Color.primary)
+            if let input = message.inputTokens, let output = message.outputTokens {
+                Text(L("Tokens: %lld input · %lld output", input, output))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .background(
+            (message.role == .user ? Color.blue : Color.primary).opacity(0.07),
+            in: RoundedRectangle(cornerRadius: 9)
+        )
     }
 
     private func metrics(_ context: AgentLocalInsightContext) -> some View {
@@ -145,7 +359,7 @@ struct AgentInsightPanel: View {
     private func preview(_ snapshot: AgentLocalInsightSnapshot) -> some View {
         DisclosureGroup(isExpanded: $showsPreview) {
             VStack(alignment: .leading, spacing: 14) {
-                Text(L("This is the complete bounded context a future manual AI analysis may send. Phase 1 does not include an AI provider or a send action."))
+                Text(L("This is the complete bounded context sent only when you manually ask the configured local Ollama model."))
                     .foregroundStyle(.secondary)
 
                 VStack(alignment: .leading, spacing: 5) {

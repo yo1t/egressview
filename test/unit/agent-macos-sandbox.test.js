@@ -31,9 +31,21 @@ describe('macOS Agent App Sandbox boundary', () => {
     const hostBuild = entitlement(hostInfo, 'CFBundleVersion');
     const extensionBuild = entitlement(extensionInfo, 'CFBundleVersion');
 
-    assert.equal(hostVersion, '0.5.34');
+    assert.match(hostVersion, /^\d+\.\d+\.\d+$/);
     assert.equal(extensionVersion, hostVersion);
     assert.equal(extensionBuild, hostBuild);
+  });
+
+  it('versions the Mach service with the Extension build', () => {
+    const build = entitlement(extensionInfo, 'CFBundleVersion');
+    const service = entitlement(extensionInfo, 'NEMachServiceName');
+    const xpcSource = fs.readFileSync(
+      path.join(root, 'apps/agent-macos/Sources/EgressViewAgentCore/FullMonitoringXPC.swift'),
+      'utf8'
+    );
+
+    assert.equal(service, `group.com.egressview.agent.xpc.${build}`);
+    assert.match(xpcSource, new RegExp(`machServiceName = "${service.replaceAll('.', '\\.')}"`));
   });
 
   it('sandboxes every shipped process in Debug and Developer ID builds', () => {

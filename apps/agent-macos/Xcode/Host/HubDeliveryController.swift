@@ -539,6 +539,7 @@ private enum AgentSettingsSection: String, CaseIterable, Identifiable {
     case notifications
     case hub
     case enrichment
+    case ai
     case history
     case diagnostics
     case uninstall
@@ -550,6 +551,7 @@ private enum AgentSettingsSection: String, CaseIterable, Identifiable {
         case .notifications: return L("Notifications")
         case .hub: return L("Hub")
         case .enrichment: return L("Data Enrichment")
+        case .ai: return L("AI")
         case .history: return L("History")
         case .diagnostics: return L("Diagnostics")
         case .uninstall: return L("Uninstall")
@@ -561,6 +563,7 @@ private enum AgentSettingsSection: String, CaseIterable, Identifiable {
         case .notifications: return "bell"
         case .hub: return "network"
         case .enrichment: return "sparkles"
+        case .ai: return "cpu"
         case .history: return "clock.arrow.circlepath"
         case .diagnostics: return "stethoscope"
         case .uninstall: return "trash"
@@ -615,6 +618,7 @@ private struct AgentSettingsView: View {
     @ObservedObject var uninstall: AgentUninstallController
     @ObservedObject var geo: GeoCacheController
     @ObservedObject var threats: ThreatIntelController
+    @ObservedObject var ollama: AgentOllamaController
     @ObservedObject private var notifications = AgentUserNotifier.shared
     @ObservedObject private var language = AgentLanguageSettings.shared
     @AppStorage(AgentGlobeFrameRate.defaultsKey)
@@ -642,6 +646,7 @@ private struct AgentSettingsView: View {
                     case .notifications: notificationSettings
                     case .hub: hubSettings
                     case .enrichment: enrichmentSettings
+                    case .ai: aiSettings
                     case .history: history
                     case .diagnostics: diagnosticsSettings
                     case .uninstall: uninstallSettings
@@ -867,6 +872,59 @@ private struct AgentSettingsView: View {
             )
             geoSection
             threatSection
+        }
+    }
+
+    private var aiSettings: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            settingsTitle(
+                L("AI"),
+                subtitle: L("Configure local AI and test the connection used by Insights.")
+            )
+            settingsGroup(L("Local AI with Ollama")) {
+                Text(L("Optional and manual only. EgressView connects only to Ollama on this Mac; it never sends this analysis to the public Internet."))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                HStack(alignment: .bottom, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L("Endpoint")).font(.caption).foregroundStyle(.secondary)
+                        TextField("http://127.0.0.1:11434", text: Binding(
+                            get: { ollama.endpoint }, set: { ollama.setEndpoint($0) }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L("Model")).font(.caption).foregroundStyle(.secondary)
+                        // Chosen from what Ollama reports, not typed. A typed
+                        // name has to match one that is installed, and the
+                        // person had no way to see the list before pressing
+                        // Save and test.
+                        Picker(L("Model"), selection: Binding(
+                            get: { ollama.model }, set: { ollama.selectModel($0) }
+                        )) {
+                            if ollama.modelChoices.isEmpty {
+                                Text(L("Press Save and test to list models")).tag("")
+                            }
+                            ForEach(ollama.modelChoices, id: \.self) { name in
+                                Text(name).tag(name)
+                            }
+                        }
+                        .labelsHidden()
+                        .disabled(ollama.isRunning)
+                    }
+                    .frame(width: 220)
+                }
+                Button(ollama.isRunning ? L("Checking...") : L("Save and test")) {
+                    ollama.saveAndTest()
+                }
+                .disabled(ollama.isRunning)
+                if let status = ollama.status {
+                    Text(status)
+                        .font(.callout)
+                        .foregroundStyle(ollama.isEnabled ? Color.green : Color.orange)
+                        .textSelection(.enabled)
+                }
+            }
         }
     }
 
@@ -1272,6 +1330,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let uninstall: AgentUninstallController
     private let geo: GeoCacheController
     private let threats: ThreatIntelController
+    private let ollama: AgentOllamaController
     private let onClose: () -> Void
 
     init(
@@ -1281,6 +1340,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         uninstall: AgentUninstallController,
         geo: GeoCacheController,
         threats: ThreatIntelController,
+        ollama: AgentOllamaController,
         launchController: LaunchAtLoginController,
         onMonitoringMode: @escaping (AgentMonitoringMode) -> Void,
         onRetentionChanged: @escaping (Int) -> Void,
@@ -1295,6 +1355,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.uninstall = uninstall
         self.geo = geo
         self.threats = threats
+        self.ollama = ollama
         self.onClose = onClose
         let model = AgentSettingsViewModel(
             store: store,
@@ -1308,7 +1369,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         )
         self.model = model
         let hostingController = NSHostingController(
-            rootView: AgentSettingsView(model: model, hub: hub, updates: updates, uninstall: uninstall, geo: geo, threats: threats)
+            rootView: AgentSettingsView(
+                model: model,
+                hub: hub,
+                updates: updates,
+                uninstall: uninstall,
+                geo: geo,
+                threats: threats,
+                ollama: ollama
+            )
         )
         let window = NSWindow(contentViewController: hostingController)
         window.title = L("EgressView Agent Settings")
