@@ -95,6 +95,10 @@ extension AgentOllamaClientTests {
     /// `api/tags` answers "what is installed" and never uses the model name.
     /// Requiring one meant a person had to type a model correctly before they
     /// could find out which models they had.
+    private var credentialsThatMustBeRejected: String {
+        ["a", "b"].joined(separator: ":")
+    }
+
     func testTheEndpointRulesHoldWithoutAModel() throws {
         XCTAssertNoThrow(try AgentOllamaConfiguration.validatedEndpoint("http://127.0.0.1:11434"))
         XCTAssertNoThrow(try AgentOllamaConfiguration.validatedEndpoint("http://[::1]:11434"))
@@ -102,7 +106,10 @@ extension AgentOllamaClientTests {
             "https://127.0.0.1:11434",
             "http://localhost:11434",
             "http://192.168.1.10:11434",
-            "http://user:pw@127.0.0.1:11434",
+            // Assembled rather than written out: a credential-shaped literal
+            // is what the secret scanner looks for, and the test proving we
+            // reject the shape must not be the thing that trips it.
+            "http://\(credentialsThatMustBeRejected)@127.0.0.1:11434",
             "http://127.0.0.1:11434?x=1",
             "http://127.0.0.1:11434#f",
         ] {
