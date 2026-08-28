@@ -58,6 +58,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
         credentialStore: KeychainAgentCredentialStore(),
         agentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
     )
+    private lazy var ollamaController = AgentOllamaController()
     private lazy var diagnosticsExporter = AgentDiagnosticsExporter(
         store: store,
         extensionVersion: { [weak self] in self?.controller.enabledExtensionVersion },
@@ -300,7 +301,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     private func observationWindowController() -> ObservationWindowController {
         if let observationWindow { return observationWindow }
-        let controller = ObservationWindowController(store: store) { [weak self] in
+        let controller = ObservationWindowController(store: store, ollama: ollamaController) { [weak self] in
             self?.observationWindow = nil
         }
         controller.updateMonitoringStatus(currentMonitoringStatus)
@@ -322,6 +323,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
             uninstall: uninstallController,
             geo: geoCacheController,
             threats: threatIntelController,
+            ollama: ollamaController,
             launchController: launchAtLoginController,
             onMonitoringMode: { [weak self] mode in self?.selectMonitoringMode(mode) },
             onRetentionChanged: { [weak self] days in self?.applyRetentionPolicy(days: days) },

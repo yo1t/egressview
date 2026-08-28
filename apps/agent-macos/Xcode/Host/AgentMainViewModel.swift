@@ -120,6 +120,7 @@ final class AgentMainViewModel: ObservableObject {
     }
     @Published private(set) var summary = AgentPeriodSummary()
     @Published private(set) var localInsights: AgentLocalInsightSnapshot?
+    let ollama: AgentOllamaController
     @Published private(set) var coverage = CoverageSummary(
         share: 1, firstCovered: nil, gaps: [], startedInsidePeriod: false
     )
@@ -151,8 +152,9 @@ final class AgentMainViewModel: ObservableObject {
     private let refreshTimer = PeriodicWork()
     private let threatCandidateCache = ThreatCandidateRefreshCache()
 
-    init(store: ObservationStore?) {
+    init(store: ObservationStore?, ollama: AgentOllamaController) {
         self.store = store
+        self.ollama = ollama
     }
 
     func start() {

@@ -236,7 +236,8 @@ struct AgentMainView: View {
             AgentInsightPanel(
                 snapshot: model.localInsights,
                 monitoringStatus: model.monitoringStatus,
-                isRefreshing: model.isRefreshing
+                isRefreshing: model.isRefreshing,
+                ollama: model.ollama
             )
             .padding(.horizontal, 20)
             .padding(.bottom, 18)
@@ -878,8 +879,12 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     private let onClose: () -> Void
 
     @MainActor
-    init(store: ObservationStore?, onClose: @escaping () -> Void = {}) {
-        let model = AgentMainViewModel(store: store)
+    init(
+        store: ObservationStore?,
+        ollama: AgentOllamaController,
+        onClose: @escaping () -> Void = {}
+    ) {
+        let model = AgentMainViewModel(store: store, ollama: ollama)
         self.model = model
         self.onClose = onClose
         let hostingController = NSHostingController(rootView: AgentMainView(model: model))

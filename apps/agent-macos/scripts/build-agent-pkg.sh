@@ -172,13 +172,47 @@ POSTINSTALL
 chmod +x "$SCRIPTS_DIR/preinstall" "$SCRIPTS_DIR/postinstall"
 
 COMPONENT_PKG="$WORK_DIR/component.pkg"
+
+# Install into /Applications, and only there.
+#
+# `pkgbuild` marks an application bundle relocatable unless told otherwise. A
+# relocatable package does not install where the package says; it asks
+# LaunchServices and Spotlight where a bundle with this identifier already
+# lives and installs over that. On 2026-08-28 this Mac had 22 registrations for
+# `com.egressview.agent.macos` -- release round-trip directories the build
+# script had already deleted, Debug builds, and an app indexed inside an Xcode
+# archive whose recorded path (`/InstallationBuildProductsLocation/...`) does
+# not exist. The installer chose one of those and refused: "the installer is
+# prohibited from installing this software here", with no way for the person to
+# find out why.
+#
+# That is not a developer-only situation. An old copy on a second disk, in a
+# backup, or in a Downloads folder is enough to send a customer's installer
+# somewhere other than /Applications, or to stop it entirely.
+COMPONENT_PLIST="$WORK_DIR/component.plist"
+pkgbuild --analyze --root "$PAYLOAD_DIR" "$COMPONENT_PLIST" >/dev/null
+/usr/libexec/PlistBuddy -c 'Set :0:BundleIsRelocatable false' "$COMPONENT_PLIST"
+if /usr/libexec/PlistBuddy -c 'Print :0:BundleIsRelocatable' "$COMPONENT_PLIST" | grep -q true; then
+  fail 'The component plist still allows relocation; the package would install over an unrelated copy.'
+fi
+
 pkgbuild \
     --root "$PAYLOAD_DIR" \
     --install-location /Applications \
+    --component-plist "$COMPONENT_PLIST" \
     --scripts "$SCRIPTS_DIR" \
     --identifier "$BUNDLE_ID" \
     --version "$VERSION" \
     "$COMPONENT_PKG"
+
+# Checked on the built package, not only on the input: the guarantee is about
+# what ships.
+if xar -xf "$COMPONENT_PKG" PackageInfo -C "$WORK_DIR" 2>/dev/null; then
+  if grep -q '<relocate>' "$WORK_DIR/PackageInfo"; then
+    fail 'The built package still carries a relocate rule and would not reliably install into /Applications.'
+  fi
+  rm -f "$WORK_DIR/PackageInfo"
+fi
 
 # Says what installing did, including that monitoring stopped. An agent that
 # stops watching without saying so is the fault this release spent the most

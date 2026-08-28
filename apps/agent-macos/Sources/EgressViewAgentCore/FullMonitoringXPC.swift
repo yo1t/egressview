@@ -11,8 +11,12 @@ import Foundation
 }
 
 public enum FullMonitoringXPC {
-    // NetworkExtension requires this name to begin with an App Group entitlement.
-    public static let machServiceName = "group.com.egressview.agent.xpc"
+    // NetworkExtension requires this name to begin with an App Group
+    // entitlement. The build suffix is also required: launchd retains the old
+    // provider's endpoint while a System Extension update is being completed,
+    // so reusing one fixed name can leave the new provider unable to register
+    // until macOS restarts.
+    public static let machServiceName = "group.com.egressview.agent.xpc.115"
     public static let hostBundleIdentifier = "com.egressview.agent.macos"
 
     public static func encoder() -> JSONEncoder {

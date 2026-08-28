@@ -42,7 +42,11 @@ jobs:
           test -d "$extension"
           test "$(plutil -extract CFBundleIdentifier raw "$extension/Contents/Info.plist")" = "com.egressview.agent.filter"
           test -n "$(plutil -extract NSSystemExtensionUsageDescription raw "$extension/Contents/Info.plist")"
-          test "$(plutil -extract NetworkExtension.NEMachServiceName raw "$extension/Contents/Info.plist")" = "group.com.egressview.agent.xpc"
+          # Per build, so an old System Extension cannot keep the name across
+          # an update and leave the new listener with "Operation not
+          # permitted" while monitoring silently stops.
+          build="$(plutil -extract CFBundleVersion raw "$extension/Contents/Info.plist")"
+          test "$(plutil -extract NetworkExtension.NEMachServiceName raw "$extension/Contents/Info.plist")" = "group.com.egressview.agent.xpc.$build"
           ! plutil -extract NEMachServiceName raw "$extension/Contents/Info.plist" >/dev/null 2>&1
           ! plutil -extract com.apple.security.xpc.mach-service.name raw Xcode/SystemExtension/EgressViewFilter.entitlements >/dev/null 2>&1
           ! plutil -extract com.apple.security.xpc.mach-service.name raw Xcode/SystemExtension/EgressViewFilter.DeveloperID.entitlements >/dev/null 2>&1
