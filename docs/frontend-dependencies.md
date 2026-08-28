@@ -20,6 +20,8 @@ entry point; imports determine evaluation order and cache-busted asset URLs.
    - `settings-manual-threat.js`
    - `settings-ai.js`
    - `settings-agents.js`
+   - `settings-detection.js`
+   - `settings-security.js`
 8. `router-settings.js`
 9. `map-common.js`
 10. `stats.js`
@@ -30,7 +32,13 @@ entry point; imports determine evaluation order and cache-busted asset URLs.
 15. `threat-popup.js`
 16. `devices.js`
 17. `notif-log.js`
-18. `ai-insights.js`
+18. `ai-insights.js` — the AI panel, split by responsibility (P2-97):
+    - `ai-format.js` — numbers, dates and identifiers
+    - `ai-providers.js` — which provider is in use and what to call it
+    - `ai-usage.js` — tokens and estimated cost; everything that spends budget
+      asks for it to be redrawn, so it imports none of the others
+    - `ai-notification-settings.js` — when the Hub speaks on its own
+    - `ai-insights.js` — facts, chat, and the panel's lifecycle
 19. `main.js`
 
 `socket.io`, D3, and topojson are loaded before the app scripts.

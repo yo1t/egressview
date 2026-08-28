@@ -15,6 +15,7 @@ const { createAgentAttribution } = require('./agent-attribution');
 const { createAiConversationStore } = require('./ai-conversation-store');
 const { createAiUsageStore } = require('./ai-usage-store');
 const { createAiNotificationStore } = require('./ai-notification-store');
+const { CONNECTIONS_SQL, OBSERVATIONS_SQL, EVENTS_SQL } = require('./history-schema');
 
 const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
   ? path.resolve(process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB)
@@ -212,108 +213,11 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
   runMigrations(db, actualPath, { sourceRouterMap });
 
   // Create tables for fresh databases (idempotent — skipped if already exist)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS connections (
-      src       TEXT NOT NULL,
-      dst       TEXT NOT NULL,
-      dport     INTEGER NOT NULL,
-      proto     TEXT NOT NULL,
-      sport     INTEGER,
-      ttl       INTEGER,
-      srcMac    TEXT,
-      srcVendor TEXT,
-      srcDnsName  TEXT,
-      srcMdnsName TEXT,
-      dstHost   TEXT,
-      country   TEXT,
-      org       TEXT,
-      lat       REAL,
-      lon       REAL,
-      city      TEXT,
-      firstSeen INTEGER NOT NULL,
-      lastSeen  INTEGER NOT NULL,
-      agentHost TEXT,
-      process   TEXT,
-      pid       INTEGER,
-      PRIMARY KEY (src, dst, dport, proto)
-    );
-    CREATE INDEX IF NOT EXISTS idx_lastSeen ON connections(lastSeen);
-    CREATE INDEX IF NOT EXISTS idx_src ON connections(src);
-    CREATE INDEX IF NOT EXISTS idx_dst ON connections(dst);
-  `);
-
-  // Multi-router observation tables. Normally created by
-  // the v4 migration; repeated here so a fresh DB gets them too.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS routers (
-      id          TEXT PRIMARY KEY,
-      kind        TEXT NOT NULL,
-      displayName TEXT NOT NULL,
-      createdAt   INTEGER NOT NULL,
-      deletedAt   INTEGER
-    );
-    CREATE TABLE IF NOT EXISTS connection_observations (
-      src             TEXT    NOT NULL,
-      dst             TEXT    NOT NULL,
-      dport           INTEGER NOT NULL,
-      proto           TEXT    NOT NULL,
-      routerId        TEXT    NOT NULL,
-      firstObservedAt INTEGER NOT NULL,
-      lastObservedAt  INTEGER NOT NULL,
-      PRIMARY KEY (src, dst, dport, proto, routerId)
-    );
-    CREATE INDEX IF NOT EXISTS idx_obs_router   ON connection_observations(routerId);
-    CREATE INDEX IF NOT EXISTS idx_obs_lastSeen ON connection_observations(lastObservedAt);
-  `);
+  db.exec(CONNECTIONS_SQL);
+  db.exec(OBSERVATIONS_SQL);
   routerKinds = new Map(db.prepare('SELECT id, kind FROM routers').all().map(row => [row.id, row.kind]));
 
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS notification_log (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      type            TEXT    NOT NULL,
-      slackSent       INTEGER NOT NULL DEFAULT 0,
-      src             TEXT,
-      srcMac          TEXT,
-      srcVendor       TEXT,
-      srcMdnsName     TEXT,
-      srcDnsName      TEXT,
-      dst             TEXT,
-      dstHost         TEXT,
-      dport           INTEGER,
-      proto           TEXT,
-      country         TEXT,
-      city            TEXT,
-      org             TEXT,
-      threatSource    TEXT,
-      threatTag       TEXT,
-      threatConfidence TEXT,
-      detectedAt      INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_nlog_detectedAt ON notification_log(detectedAt);
-    CREATE TABLE IF NOT EXISTS ai_notification_events (
-      eventId          TEXT PRIMARY KEY,
-      triggerType      TEXT NOT NULL CHECK(triggerType IN ('scheduled', 'threat', 'manual', 'test')),
-      triggerKey       TEXT UNIQUE,
-      cause            TEXT NOT NULL,
-      createdAt        INTEGER NOT NULL,
-      rangeFrom        INTEGER NOT NULL,
-      rangeTo          INTEGER NOT NULL,
-      status           TEXT NOT NULL CHECK(status IN ('complete', 'failed')),
-      provider         TEXT NOT NULL,
-      model            TEXT NOT NULL,
-      body             TEXT,
-      slackSent        INTEGER NOT NULL DEFAULT 0,
-      inputTokens      INTEGER NOT NULL DEFAULT 0 CHECK(inputTokens >= 0),
-      outputTokens     INTEGER NOT NULL DEFAULT 0 CHECK(outputTokens >= 0),
-      totalTokens      INTEGER NOT NULL DEFAULT 0 CHECK(totalTokens >= 0),
-      estimatedCostUsd REAL,
-      errorCode        TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_ai_notification_created
-      ON ai_notification_events(createdAt DESC);
-    CREATE INDEX IF NOT EXISTS idx_ai_notification_cause
-      ON ai_notification_events(triggerType, cause, createdAt DESC);
-  `);
+  db.exec(EVENTS_SQL);
 
   stmtInsertNotifLog = db.prepare(`
     INSERT INTO notification_log

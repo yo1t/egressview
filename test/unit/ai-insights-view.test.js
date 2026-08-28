@@ -6,8 +6,24 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { describe, it } = require('node:test');
 
-const source = fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', 'ai-insights.js'), 'utf8')
+// The AI panel is several modules (P2-97). They are concatenated in
+// dependency order and run as one script, because the assertions below are
+// about what the panel renders, not about how it is filed. Import and export
+// lines are stripped, so every function lands in the shared context exactly as
+// it did when this was one file.
+const MODULES = [
+  'ai-format.js',
+  'ai-providers.js',
+  'ai-usage.js',
+  'ai-notification-settings.js',
+  'ai-insights.js',
+];
+
+const source = MODULES
+  .map(name => fs.readFileSync(path.join(__dirname, '..', '..', 'public', 'js', name), 'utf8'))
+  .join('\n')
   .replace(/^import\s[^;]+;?\s*$/gm, '')
+  .replace(/^import\s*\{[\s\S]*?\}\s*from\s*'[^']+';?\s*$/gm, '')
   .replace(/^export\s+\{[^}]*\};?\s*$/gm, '')
   .replace(/initAiInsights\(\);/, '');
 
