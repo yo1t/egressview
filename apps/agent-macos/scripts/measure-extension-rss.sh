@@ -16,6 +16,14 @@
 #   - the extension's PID and elapsed time are recorded, because a restart
 #     resets RSS and would otherwise read as "it levelled off"
 #
+# **Nothing here queries the agent's database.** The first version recorded an
+# observation count alongside each sample, to correlate growth with traffic.
+# On 2026-08-29 that query stopped returning: `sqlite3` blocked on the live
+# database for two hours and ten minutes, and the sampler sat inside it while
+# five samples went unrecorded. The thing that was supposed to measure was
+# stopped by the thing measuring alongside it. A sampler must not be able to
+# block on anything outside itself.
+#
 # Usage:
 #   ./scripts/measure-extension-rss.sh --hours 48 --interval 1800 --out FILE
 set -euo pipefail
@@ -45,15 +53,9 @@ if [[ -e "$OUT" ]]; then
   printf 'Refusing to append to existing %s\n' "$OUT" >&2
   exit 1
 fi
-printf 'sample,timestamp,ext_pid,ext_rss_kb,ext_etime,host_pid,host_rss_kb,host_etime,observations\n' > "$OUT"
+printf 'sample,timestamp,ext_pid,ext_rss_kb,ext_etime,host_pid,host_rss_kb,host_etime\n' > "$OUT"
 
 field() { ps -o "$2=" -p "$1" 2>/dev/null | tr -d ' ' ; }
-
-observations() {
-  local db="$HOME/Library/Group Containers/group.com.egressview.agent/observations.sqlite"
-  [[ -f "$db" ]] || { printf 'NA'; return; }
-  sqlite3 "file:${db}?mode=ro" 'SELECT COUNT(*) FROM observations;' 2>/dev/null || printf 'NA'
-}
 
 for (( i = 1; i <= SAMPLES; i++ )); do
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -73,9 +75,9 @@ for (( i = 1; i <= SAMPLES; i++ )); do
     host_pid=NONE; host_rss=NA; host_etime=NA
   fi
 
-  printf '%d,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+  printf '%d,%s,%s,%s,%s,%s,%s,%s\n' \
     "$i" "$now" "$ext_pid" "${ext_rss:-NA}" "${ext_etime:-NA}" \
-    "$host_pid" "${host_rss:-NA}" "${host_etime:-NA}" "$(observations)" >> "$OUT"
+    "$host_pid" "${host_rss:-NA}" "${host_etime:-NA}" >> "$OUT"
 
   printf 'sample %d/%d at %s\n' "$i" "$SAMPLES" "$now" > "$HEARTBEAT"
 
