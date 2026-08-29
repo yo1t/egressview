@@ -20,6 +20,14 @@ public sealed record NetworkObservation(
     string? InterfaceId,
     string Source);
 
+public sealed record StartupFlow(
+    string Protocol,
+    string LocalAddress,
+    int LocalPort,
+    string RemoteAddress,
+    int RemotePort,
+    int ProcessId);
+
 public sealed record CollectorSnapshot(
     string State,
     long Accepted,

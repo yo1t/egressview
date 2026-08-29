@@ -40,5 +40,9 @@ $after = Inspect-Database
     afterCount = $after.database.observationCount
     beforeIntegrity = $before.database.integrity
     afterIntegrity = $after.database.integrity
+    beforeFlows = $before.flows
+    afterFlows = $after.flows
+    beforeCoverage = $before.coverage
+    afterCoverage = $after.coverage
     serviceStatus = (Get-Service $serviceName).Status.ToString()
 } | ConvertTo-Json | Set-Content -LiteralPath $Output -Encoding UTF8
