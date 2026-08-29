@@ -16,6 +16,7 @@ const { createAiConversationStore } = require('./ai-conversation-store');
 const { createAiUsageStore } = require('./ai-usage-store');
 const { createAiNotificationStore } = require('./ai-notification-store');
 const { CONNECTIONS_SQL, OBSERVATIONS_SQL, EVENTS_SQL } = require('./history-schema');
+const { reportSchemaCompleteness } = require('./schema-completeness');
 
 const DEFAULT_DB_PATH = process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB
   ? path.resolve(process.env.EGRESSVIEW_DB_PATH || process.env.EGRESSVIEW_DB)
@@ -218,6 +219,18 @@ function initDb(dbPath, { sourceRouterMap: mapOverride } = {}) {
   routerKinds = new Map(db.prepare('SELECT id, kind FROM routers').all().map(row => [row.id, row.kind]));
 
   db.exec(EVENTS_SQL);
+
+  // Said before anything prepares a statement against a table that may not be
+  // there. `integrity_check` above passes with a table missing, so without
+  // this the first symptom is a query failing much later (P2-97).
+  reportSchemaCompleteness({
+    db,
+    Database,
+    runMigrations,
+    sourceRouterMap,
+    logger,
+    version: db.pragma('user_version', { simple: true }),
+  });
 
   stmtInsertNotifLog = db.prepare(`
     INSERT INTO notification_log
