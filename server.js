@@ -684,6 +684,7 @@ server.listen(PORT, HOST, () => {
     apiIdentities,
     agentIdentities,
     agentIngest,
+    threatIntel,
   });
   authAudit.setWriteStatusHandler((status) => {
     if (status.ok) healthState.clearDegraded('authentication_audit');
