@@ -140,6 +140,38 @@ public struct ThreatFeedDownloader: Sendable {
     }
 
     /// `id,dateadded,url,url_status,…,threat,…`
+    /// Services that host other people's files.
+    ///
+    /// URLhaus lists the URL malware was served from. A match on one of these
+    /// says something was hosted there, not that the host is hostile, so it is
+    /// low confidence.
+    ///
+    /// **The same list exists in `src/threat-intel.js` on the Hub.** Two
+    /// copies is the price of the Agent judging without one; a test asserts
+    /// they hold the same entries, because an Agent that disagrees with its
+    /// Hub about the same destination is the defect P3-19 exists to prevent.
+    public static let lowConfidenceDomains: Set<String> = [
+        "github.com", "raw.githubusercontent.com", "gist.githubusercontent.com",
+        "gitlab.com", "bitbucket.org",
+        "drive.google.com", "docs.google.com", "storage.googleapis.com",
+        "dropbox.com", "dl.dropboxusercontent.com",
+        "onedrive.live.com", "1drv.ms",
+        "cdn.discordapp.com", "media.discordapp.net",
+        "pastebin.com", "paste.ee",
+        "transfer.sh", "anonfiles.com",
+        "amazonaws.com", "s3.amazonaws.com",
+        "cloudfront.net", "azureedge.net", "blob.core.windows.net",
+        "archive.org",
+    ]
+
+    /// Matches the Hub: the host itself, or its last two labels.
+    public static func confidence(forHost host: String) -> ThreatIndicator.Confidence {
+        let lowered = host.lowercased()
+        let parent = lowered.split(separator: ".").suffix(2).joined(separator: ".")
+        return lowConfidenceDomains.contains(lowered) || lowConfidenceDomains.contains(parent)
+            ? .low : .high
+    }
+
     static func parseURLhaus(_ text: String, source: String) -> [ThreatIndicator] {
         lines(text).compactMap { line in
             guard !line.hasPrefix("#") else { return nil }
@@ -148,11 +180,15 @@ public struct ThreatFeedDownloader: Sendable {
                 return nil
             }
             let isAddress = isPlausibleIPv4(host)
+            let confidence = isAddress ? ThreatIndicator.Confidence.high : Self.confidence(forHost: host)
             return ThreatIndicator(
                 kind: isAddress ? .ip : .domain,
                 value: isAddress ? host : host.lowercased(),
                 source: source,
-                tag: "malware distribution"
+                tag: confidence == .low
+                    ? "file hosting service (low confidence)"
+                    : "malware distribution",
+                confidence: confidence
             )
         }
     }

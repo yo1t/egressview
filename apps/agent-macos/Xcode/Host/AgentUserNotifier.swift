@@ -410,8 +410,19 @@ final class AgentNotificationCoordinator {
     ) {
         guard case .success(let report) = result else { return }
         seenThreats = seenThreats.filter { now.timeIntervalSince($0.value) < 86_400 }
+        // High confidence only (P3-19).
+        //
+        // URLhaus lists where malware was served from, so a match on
+        // github.com or s3.amazonaws.com says a file sat there -- not that the
+        // destination is hostile. Notifying on those means telling someone
+        // their normal use of Google Drive is a threat, every day, until they
+        // stop reading the notifications. The low-confidence matches are still
+        // recorded and still shown in the Threats tab; they just do not
+        // interrupt anyone.
+        let notifiable = report.highConfidenceAddresses
         let addresses = Set(report.findings.compactMap { finding -> String? in
             guard finding.candidate.lastObservedAt >= since,
+                  notifiable.contains(finding.candidate.address),
                   seenThreats[finding.candidate.address] == nil else { return nil }
             return finding.candidate.address
         })

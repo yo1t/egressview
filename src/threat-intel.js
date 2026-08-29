@@ -295,12 +295,24 @@ function needsRefresh() {
 // about ten thousand entries, six times smaller than the location cache
 // already being distributed, so there is no reason to be cleverer than this.
 function listIndicators() {
+  // Confidence is the fourth element, appended rather than keyed.
+  //
+  // Without it an Agent judging on its own -- away from home, or with delivery
+  // switched off -- had no way to tell a C2 address from a file someone put on
+  // Google Drive, and warned about both equally (P3-19). The Hub has drawn
+  // that line since P2-71 and simply dropped it here.
+  //
+  // **The schema version does not change.** Agents accept version 1 only, so
+  // raising it would make every deployed Agent reject the whole payload and
+  // stop matching threats, silently. Positional rows are read by index, so an
+  // older Agent ignores a fourth element it does not know about.
+  const confidenceOf = (meta) => (meta.confidence === 'low' ? 'low' : 'high');
   return {
     ips: Array.from(threatIps, ([ip, meta]) => [
-      ip, meta.source || null, meta.tag || null,
+      ip, meta.source || null, meta.tag || null, confidenceOf(meta),
     ]),
     domains: Array.from(threatDomains, ([domain, meta]) => [
-      domain, meta.source || null, meta.tag || null,
+      domain, meta.source || null, meta.tag || null, confidenceOf(meta),
     ]),
     // Sent as text so the agent parses one thing, not the network/mask pair
     // this side happens to keep for speed.
@@ -308,6 +320,7 @@ function listIndicators() {
       `${numToIp(entry.network)}/${entry.prefix}`,
       entry.source || null,
       entry.tag || null,
+      confidenceOf(entry),
     ]),
     lastFetch,
   };
