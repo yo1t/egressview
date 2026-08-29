@@ -133,6 +133,7 @@ apps/agent-macos/EgressViewAgent.xcodeproj/xcuserdata/
 # Windows Agent local build and runtime state
 apps/agent-windows/**/bin/
 apps/agent-windows/**/obj/
+apps/agent-windows/.publish/
 apps/agent-windows/*.db
 apps/agent-windows/*.db-wal
 apps/agent-windows/*.db-shm
