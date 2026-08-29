@@ -89,6 +89,8 @@ module.exports = function configRoutes(ctx) {
       // while every count on screen looked healthy, because the other feeds
       // are large. A screen that cannot say which feed is missing cannot tell
       // "nothing was found" from "nobody looked".
+      //
+      // This router is mounted at /api, so the path is `GET /api/status`.
       threatIntel:   threatIntel && typeof threatIntel.getStats === 'function'
         ? threatIntel.getStats()
         : null,
