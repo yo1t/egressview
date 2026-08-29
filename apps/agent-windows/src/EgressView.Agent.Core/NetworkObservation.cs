@@ -28,4 +28,10 @@ public sealed record CollectorSnapshot(
     long PersistenceFailures,
     DateTimeOffset? LastObservedAt,
     DateTimeOffset? LastPersistedAt,
-    int QueueCapacity);
+    int QueueCapacity,
+    bool EtwSessionActive = false,
+    long EtwEventsSeen = 0,
+    long EtwEventsIgnored = 0,
+    long InterfaceUnresolved = 0,
+    int EtwEventsLost = 0,
+    string? CollectorError = null);

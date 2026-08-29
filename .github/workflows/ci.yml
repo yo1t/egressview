@@ -14,6 +14,28 @@ permissions:
   contents: read
 
 jobs:
+  windows-agent:
+    name: Windows Agent build and core tests
+    timeout-minutes: 15
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: apps/agent-windows/**/packages.lock.json
+
+      - name: Build Windows Agent
+        working-directory: apps/agent-windows
+        run: dotnet build EgressViewAgent.Windows.slnx -c Release
+
+      - name: Test persistence, bounded drops, and privacy-safe diagnostics
+        working-directory: apps/agent-windows
+        run: dotnet run --project tests/EgressView.Agent.Core.Tests -c Release --no-build
+
   test:
     name: Unit tests (Node ${{ matrix.node-version }})
     timeout-minutes: 15

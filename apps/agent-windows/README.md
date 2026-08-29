@@ -3,9 +3,12 @@
 Phase 1の最小vertical sliceです。ネットワーク観測をbounded channelで受け、Windows標準SQLiteへ
 batch保存し、再起動後の整合性とprivacy-safeな診断を確認します。
 
-現時点では開発用で、Windows Service登録、ETW collector、UI、MSIはまだ含みません。
+ETW collectorとSCM service hostを含みます。ETW session開始には管理者権限または`LocalService`が必要です。
+UI、Named Pipe IPC、MSIはまだ含みません。
 
 ```powershell
 dotnet build EgressViewAgent.Windows.slnx -c Release
 dotnet run --project tests/EgressView.Agent.Core.Tests -c Release
+dotnet run --project src/EgressView.Agent.Service -c Release -- --console --seconds 15 --data .\agent.db --diagnostics .\diagnostics.json
+dotnet run --project src/EgressView.Agent.Service -c Release -- --inspect --data .\agent.db
 ```
