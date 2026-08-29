@@ -169,3 +169,80 @@ describe('実行時の挙動を変えない', () => {
     assert.doesNotMatch(source, /app\.use|router\./);
   });
 });
+
+describe('P2-95の積み残しを宣言する（2026-08-29）', () => {
+  const { createRegistry } = require('../../src/response-contracts');
+
+  it('GET /api/ai/facts が宣言されている', () => {
+    // #315's description said this was declared when it was not; the gate's
+    // `undeclared: GET /api/ai/facts x15` was the evidence, and the P2-95 spec
+    // carries the correction. This is the implementation catching up to what
+    // was written.
+    const contract = createRegistry().lookup('GET /api/ai/facts', 200);
+    assert.ok(contract, 'GET /api/ai/facts 200 is not declared');
+    const shape = {
+      serverTime: 1,
+      range: { from: 1, to: 2, durationMs: 1 },
+      previousRange: { from: 0, to: 1, durationMs: 1 },
+      collection: {
+        health: 'ok', enabledCount: 1, readyCount: 1,
+        reportedSessions: 5, lastUpdatedAt: null, routers: [],
+      },
+      sourceScope: null,
+      current: { connections: 1, devices: 1, destinations: 1, safe: 1, warn: 0, danger: 0 },
+      previous: { connections: 0, devices: 0, destinations: 0, safe: 0, warn: 0, danger: 0 },
+    };
+    assert.equal(contract.schema.safeParse(shape).success, true);
+  });
+
+  it('lastUpdatedAt は null を取る', () => {
+    // Null until a collection source has succeeded once, which is the state a
+    // fresh Hub is in -- the one a contract is most likely to meet first.
+    const contract = createRegistry().lookup('GET /api/ai/facts', 200);
+    const withNumber = contract.schema.safeParse({
+      serverTime: 1,
+      range: { from: 1, to: 2, durationMs: 1 },
+      previousRange: { from: 0, to: 1, durationMs: 1 },
+      collection: {
+        health: 'off', enabledCount: 0, readyCount: 0,
+        reportedSessions: 0, lastUpdatedAt: 1_700_000_000, routers: [],
+      },
+      sourceScope: { sourceKind: 'agent', sourceId: 'a1' },
+      current: { connections: 0, devices: 0, destinations: 0, safe: 0, warn: 0, danger: 0 },
+      previous: { connections: 0, devices: 0, destinations: 0, safe: 0, warn: 0, danger: 0 },
+    });
+    assert.equal(withNumber.success, true);
+  });
+
+  it('GET /api/devices が宣言され、boundedを主張しない', () => {
+    // 203 devices on the production Hub, under the 500-element limit -- which
+    // is a count, not a bound. The route has no pagination, so a larger
+    // network exceeds it and the declaration must not say otherwise.
+    const contract = createRegistry().lookup('GET /api/devices', 200);
+    assert.ok(contract, 'GET /api/devices 200 is not declared');
+    assert.equal(contract.bounded, false);
+    assert.equal(contract.arrayElementsObserved, true);
+    assert.equal(contract.schema.safeParse({ devices: [] }).success, true);
+    assert.equal(contract.schema.safeParse({ devices: [{ ip: '192.0.2.10' }] }).success, true);
+    assert.equal(contract.schema.safeParse({}).success, false);
+  });
+
+  it('boundedでない宣言はenforceにならない', () => {
+    // The property that makes `bounded: false` more than a label.
+    const registry = createRegistry();
+    for (const route of ['GET /api/ai/facts', 'GET /api/devices']) {
+      const decision = classifyResponse({ mode: 'enforce', route, status: 200, registry });
+      assert.equal(decision.action, 'observe', `${route} would be enforced`);
+      assert.match(decision.reason, /unbounded/);
+    }
+  });
+
+  it('connections/summary は宣言しないままにする', () => {
+    // Its tests call the handler directly with a stand-in `res`, never through
+    // Express, so nothing can reach it to check the contract. Declaring it
+    // would create a contract nobody exercises, which is what the gate exists
+    // to refuse. An HTTP-level test comes first.
+    assert.equal(createRegistry().lookup('GET /api/connections/summary', 200), null);
+  });
+});
+
