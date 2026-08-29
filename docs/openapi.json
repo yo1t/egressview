@@ -2504,52 +2504,54 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI. The envelope is declared; the array elements are observed, not checked.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "serverTime": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "range": {
                       "type": "object",
                       "properties": {
                         "from": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "to": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "durationMs": {
-                          "type": "integer"
+                          "type": "number"
                         }
                       },
                       "required": [
-                        "durationMs",
                         "from",
-                        "to"
-                      ]
+                        "to",
+                        "durationMs"
+                      ],
+                      "additionalProperties": {}
                     },
                     "previousRange": {
                       "type": "object",
                       "properties": {
                         "from": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "to": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "durationMs": {
-                          "type": "integer"
+                          "type": "number"
                         }
                       },
                       "required": [
-                        "durationMs",
                         "from",
-                        "to"
-                      ]
+                        "to",
+                        "durationMs"
+                      ],
+                      "additionalProperties": {}
                     },
                     "collection": {
                       "type": "object",
@@ -2558,153 +2560,126 @@
                           "type": "string"
                         },
                         "enabledCount": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "readyCount": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "reportedSessions": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "lastUpdatedAt": {
-                          "type": [
-                            "integer",
-                            "null"
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
                           ]
                         },
                         "routers": {
                           "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "kind": {
-                                "type": "string"
-                              },
-                              "displayName": {
-                                "type": "string"
-                              },
-                              "enabled": {
-                                "type": "boolean"
-                              },
-                              "ready": {
-                                "type": "boolean"
-                              },
-                              "sessionCount": {
-                                "type": "integer"
-                              },
-                              "lastSuccessAt": {
-                                "type": [
-                                  "integer",
-                                  "null"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "displayName",
-                              "enabled",
-                              "id",
-                              "kind",
-                              "lastSuccessAt",
-                              "ready",
-                              "sessionCount"
-                            ]
-                          }
+                          "items": {}
                         }
                       },
                       "required": [
-                        "enabledCount",
                         "health",
-                        "lastUpdatedAt",
+                        "enabledCount",
                         "readyCount",
                         "reportedSessions",
+                        "lastUpdatedAt",
                         "routers"
-                      ]
+                      ],
+                      "additionalProperties": {}
                     },
                     "sourceScope": {
-                      "type": [
-                        "null",
-                        "object"
+                      "anyOf": [
+                        {},
+                        {
+                          "type": "null"
+                        }
                       ]
                     },
                     "current": {
                       "type": "object",
                       "properties": {
                         "connections": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "devices": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "destinations": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "safe": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "warn": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "danger": {
-                          "type": "integer"
+                          "type": "number"
                         }
                       },
                       "required": [
                         "connections",
-                        "danger",
-                        "destinations",
                         "devices",
+                        "destinations",
                         "safe",
-                        "warn"
-                      ]
+                        "warn",
+                        "danger"
+                      ],
+                      "additionalProperties": {}
                     },
                     "previous": {
                       "type": "object",
                       "properties": {
                         "connections": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "devices": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "destinations": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "safe": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "warn": {
-                          "type": "integer"
+                          "type": "number"
                         },
                         "danger": {
-                          "type": "integer"
+                          "type": "number"
                         }
                       },
                       "required": [
                         "connections",
-                        "danger",
-                        "destinations",
                         "devices",
+                        "destinations",
                         "safe",
-                        "warn"
-                      ]
+                        "warn",
+                        "danger"
+                      ],
+                      "additionalProperties": {}
                     }
                   },
                   "required": [
-                    "collection",
-                    "current",
-                    "previous",
-                    "previousRange",
-                    "range",
                     "serverTime",
-                    "sourceScope"
+                    "range",
+                    "previousRange",
+                    "collection",
+                    "sourceScope",
+                    "current",
+                    "previous"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
-            }
+            },
+            "x-array-elements-observed": true
           },
           "400": {
             "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
@@ -8249,7 +8224,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI. The envelope is declared; the array elements are observed, not checked.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8257,48 +8232,17 @@
                   "properties": {
                     "devices": {
                       "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "deviceId": {
-                            "type": "string"
-                          },
-                          "ip": {
-                            "type": "string"
-                          },
-                          "mac": {
-                            "type": "string"
-                          },
-                          "ipv6Addrs": {
-                            "type": [
-                              "array",
-                              "null"
-                            ]
-                          },
-                          "note": {
-                            "type": [
-                              "null",
-                              "string"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "deviceId",
-                          "ip",
-                          "ipv6Addrs",
-                          "mac",
-                          "note"
-                        ]
-                      }
+                      "items": {}
                     }
                   },
                   "required": [
                     "devices"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
-            }
+            },
+            "x-array-elements-observed": true
           },
           "400": {
             "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
@@ -10524,11 +10468,13 @@
   "x-response-contract-coverage": {
     "declared": [
       "GET /api/agent/capabilities",
+      "GET /api/ai/facts",
       "GET /api/ai/usage/monthly",
       "GET /api/auth/audit-events",
       "GET /api/auth/security-config",
       "GET /api/auth/sessions",
       "GET /api/config/ai",
+      "GET /api/devices",
       "GET /api/notes",
       "GET /api/status",
       "POST /api/agent/ingest"
@@ -10543,7 +10489,6 @@
       "GET /api/agents/enrollment-requests",
       "GET /api/agents/ingest-metrics",
       "GET /api/ai/conversations/:id",
-      "GET /api/ai/facts",
       "GET /api/ai/notification-config",
       "GET /api/ai/pricing/diagnostics",
       "GET /api/auth/api-identities",
@@ -10555,7 +10500,6 @@
       "GET /api/beacons/config",
       "GET /api/config/detection-notifications",
       "GET /api/config/slack",
-      "GET /api/devices",
       "GET /api/devices/merge-candidates",
       "GET /api/notification-log",
       "GET /api/routers",
