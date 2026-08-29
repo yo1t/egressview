@@ -83,13 +83,17 @@ describe('脅威フィードの鮮度をソースごとに言う (P3-54)', () =>
   });
 });
 
-describe('/api/config/status がフィードの状態を返す (P3-54)', () => {
+describe('GET /api/status がフィードの状態を返す (P3-54)', () => {
   const configRoutes = require('../../src/routes/config');
 
   function statusHandlerFor(ctx) {
-    // The route module builds an Express router; the status route is the one
-    // GET /status. Reached through the router's stack rather than a stand-in,
-    // so a route that was never registered fails here rather than passing.
+    // The router is mounted at /api, so this route is `GET /api/status`.
+    // Verified against the running Hub: /api/status answers 401 (auth
+    // required, route present) while /api/config/status is 404. The comment
+    // in config.js said the latter until 2026-08-29.
+    //
+    // Reached through the router's own stack rather than a stand-in, so a
+    // route that was never registered fails here rather than passing.
     const router = configRoutes(ctx);
     const layer = router.stack.find(
       (l) => l.route && l.route.path === '/status' && l.route.methods.get
@@ -127,6 +131,105 @@ describe('/api/config/status がフィードの状態を返す (P3-54)', () => {
     let body = null;
     handler({ query: {} }, { json: (value) => { body = value; } });
     assert.equal(body.threatIntel, null);
+  });
+});
+
+describe('指標が再起動をまたいで残る (P3-54 part B)', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+
+  function freshModule() {
+    delete require.cache[require.resolve('../../src/threat-intel')];
+    return require('../../src/threat-intel');
+  }
+
+  function temporaryDb() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egressview-threat-'));
+    return path.join(dir, 'h.sqlite');
+  }
+
+  it('取得したものがディスクに残り、次の起動で照合に使える', () => {
+    // The gap part A exposed: the maps live in memory, so a process that
+    // starts while a feed is down starts without it. Production was in that
+    // state twice on 2026-08-29.
+    const dbPath = temporaryDb();
+    const first = freshModule();
+    first.initDb(dbPath);
+    first._applyFeedResults([
+      ok(FEODO), ok(''), ok(''), ok(SPAMHAUS),
+    ]);
+    first.closeDb();
+
+    const second = freshModule();
+    second.initDb(dbPath);
+    // Matching works before any fetch has been attempted in this process.
+    const match = second.matchThreatIntel('198.51.100.9', null);
+    assert.equal(match?.source, 'feodo');
+    second.closeDb();
+  });
+
+  it('復元した指標を「取得できた」とは言わない', () => {
+    // Reporting a restore as a success would put back exactly the silence
+    // part A removed. Restored entries are being matched against, so the feed
+    // is contributing -- it just has not answered in this process.
+    const dbPath = temporaryDb();
+    const first = freshModule();
+    first.initDb(dbPath);
+    first._applyFeedResults([ok(FEODO), ok(''), ok(''), ok(SPAMHAUS)]);
+    first.closeDb();
+
+    const second = freshModule();
+    second.initDb(dbPath);
+    const feodo = second.getStats().feeds.find(f => f.name === 'feodo');
+    assert.equal(feodo.lastSuccessAt, null, 'a restore is not a fetch');
+    assert.ok(feodo.restoredAt, 'the restore time is recorded');
+    assert.equal(feodo.contributingNothing, false, 'restored entries are matched against');
+    assert.ok(feodo.entries > 0);
+    second.closeDb();
+  });
+
+  it('取得に成功すると、そのソースの古い行を置き換える', () => {
+    // Per source, so one feed's refresh never drops another's cache.
+    const dbPath = temporaryDb();
+    const first = freshModule();
+    first.initDb(dbPath);
+    first._applyFeedResults([ok(FEODO), ok(''), ok(''), ok(SPAMHAUS)]);
+    // Feodo now lists a different address; the old one must not linger.
+    first._applyFeedResults([
+      ok('2026-01-01 00:00:00,198.51.100.77,443,2026-01-02,online\n'),
+      ok(''), ok(''), ok(SPAMHAUS),
+    ]);
+    first.closeDb();
+
+    const second = freshModule();
+    second.initDb(dbPath);
+    assert.equal(second.matchThreatIntel('198.51.100.77', null)?.source, 'feodo');
+    assert.equal(second.matchThreatIntel('198.51.100.9', null), null,
+      'the replaced address is gone from the cache too');
+    // Spamhaus survived the Feodo refresh.
+    assert.ok(second.getStats().cidrs > 0);
+    second.closeDb();
+  });
+
+  it('キャッシュが壊れていても起動を止めない', () => {
+    // The cache is a convenience. Losing it costs a fetch, not a Hub.
+    const dbPath = temporaryDb();
+    const first = freshModule();
+    first.initDb(dbPath);
+    first._applyFeedResults([ok(FEODO), ok(''), ok(''), ok(SPAMHAUS)]);
+    first.closeDb();
+
+    const Database = require('better-sqlite3');
+    const raw = new Database(dbPath);
+    raw.exec("UPDATE threat_indicator_cache SET meta = 'not json'");
+    raw.close();
+
+    const second = freshModule();
+    assert.doesNotThrow(() => second.initDb(dbPath));
+    // The row still loads; only its metadata was unreadable.
+    assert.equal(second.matchThreatIntel('198.51.100.9', null)?.source, 'feodo');
+    second.closeDb();
   });
 });
 

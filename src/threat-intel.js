@@ -7,6 +7,8 @@ let _offline = null;
 function setOfflinePolicy(policy) { _offline = policy; }
 
 const axios = require('axios');
+const path = require('path');
+const Database = require('better-sqlite3');
 
 // IP set: exact match
 const threatIps = new Map(); // ip → { source, tag, port? }
@@ -23,9 +25,118 @@ const threatIps = new Map(); // ip → { source, tag, port? }
  * is right. What it cannot survive is a restart: these maps live in memory
  * only, so a process that starts while a feed is down starts without it
  * entirely. That is P3-54's part B; this is part A -- being able to say which
- * feed is contributing what, and when it last succeeded.
+ * feed is contributing what, and when it last succeeded. Read through
+ * `getStats()`, which `GET /api/status` returns.
  */
 const feedState = new Map();
+
+// ─── Persistence ─────────────────────────────────────────────────────────────
+//
+// Indicators used to live only in these maps, so a restart while a feed was
+// down started without that feed entirely and stayed that way (P3-54 part A
+// found production in exactly that state, twice in one day). Keeping a failed
+// feed's previous entries in memory is right, and useless across a restart.
+//
+// Stored the way enrichment stores its RDAP and geo caches: this Hub's own
+// SQLite file, its own tables, loaded once at startup.
+//
+// **Loaded entries are marked as restored, not as fetched.** A feed whose
+// entries came from disk has not answered in this process, and the difference
+// is the whole point of part A -- reporting them as a success would put back
+// the silence that was just removed.
+
+const DB_PATH = path.join(__dirname, '..', '.egressview.db');
+let db = null;
+
+function initDb(dbPath) {
+  db = new Database(dbPath || DB_PATH);
+  db.pragma('journal_mode = WAL');
+  db.pragma('busy_timeout = 5000');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS threat_indicator_cache (
+      kind       TEXT NOT NULL,
+      value      TEXT NOT NULL,
+      source     TEXT NOT NULL,
+      meta       TEXT,
+      fetchedAt  INTEGER NOT NULL,
+      PRIMARY KEY (kind, value)
+    );
+    CREATE INDEX IF NOT EXISTS idx_threat_cache_source
+      ON threat_indicator_cache(source);
+  `);
+  return loadFromDisk();
+}
+
+function closeDb() {
+  if (db) { try { db.close(); } catch { /* already gone */ } db = null; }
+}
+
+/** Everything one feed contributed, replacing what was there for that feed. */
+function persistFeed(source, rows) {
+  if (!db) return;
+  try {
+    const now = Date.now();
+    const remove = db.prepare('DELETE FROM threat_indicator_cache WHERE source = ?');
+    const insert = db.prepare(
+      'INSERT OR REPLACE INTO threat_indicator_cache (kind, value, source, meta, fetchedAt) '
+      + 'VALUES (?, ?, ?, ?, ?)'
+    );
+    db.transaction(() => {
+      remove.run(source);
+      for (const row of rows) {
+        insert.run(row.kind, row.value, source, JSON.stringify(row.meta || {}), now);
+      }
+    })();
+  } catch (error) {
+    // Never the reason a fetch fails. The indicators are already in memory and
+    // matching works; losing the cache costs a restart, not this run.
+    logger.error(`[threat-intel] Could not cache ${source} indicators: ${error.message}`);
+  }
+}
+
+function loadFromDisk() {
+  if (!db) return { restored: 0 };
+  try {
+    const rows = db.prepare(
+      'SELECT kind, value, source, meta, fetchedAt FROM threat_indicator_cache'
+    ).all();
+    const perSource = new Map();
+    for (const row of rows) {
+      let meta = {};
+      try { meta = JSON.parse(row.meta) || {}; } catch { meta = {}; }
+      if (row.kind === 'ip') threatIps.set(row.value, { ...meta, source: row.source });
+      else if (row.kind === 'domain') threatDomains.set(row.value, { ...meta, source: row.source });
+      else if (row.kind === 'cidr' && Number.isFinite(meta.network) && Number.isFinite(meta.prefix)) {
+        threatCidrs.push({ ...meta, source: row.source });
+      } else continue;
+      const state = perSource.get(row.source) || { count: 0, fetchedAt: row.fetchedAt };
+      state.count += 1;
+      state.fetchedAt = Math.max(state.fetchedAt, row.fetchedAt);
+      perSource.set(row.source, state);
+    }
+    for (const [source, state] of perSource) {
+      // restoredAt, not lastSuccessAt. Nothing has answered yet in this
+      // process, and saying otherwise would hide the thing part A exposes.
+      feedState.set(source, {
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        restoredAt: state.fetchedAt,
+        count: state.count,
+        lastError: null,
+      });
+    }
+    if (rows.length) {
+      logger.info(
+        `[threat-intel] Restored ${rows.length} cached indicators from disk `
+        + `(${[...perSource.keys()].join(', ')}). Matching starts before the first fetch.`
+      );
+    }
+    return { restored: rows.length };
+  } catch (error) {
+    logger.error(`[threat-intel] Could not read cached indicators: ${error.message}`);
+    return { restored: 0 };
+  }
+}
 
 function recordFeed(name, { count = null, error = null } = {}) {
   const previous = feedState.get(name) || { lastSuccessAt: null, count: 0 };
@@ -200,6 +311,9 @@ function _applyFeedResults(results) {
     for (const e of entries) { newIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
     logger.info(`[threat-intel] Feodo: ${entries.length} IPs`);
     recordFeed('feodo', { count: entries.length });
+    persistFeed('feodo', entries.map(e => ({
+      kind: 'ip', value: e.ip, meta: { tag: e.tag, port: e.port },
+    })));
   } else {
     logger.error('[threat-intel] Feodo fetch failed:', results[0].reason?.message);
     recordFeed('feodo', { error: results[0].reason?.message || 'unknown error' });
@@ -212,6 +326,9 @@ function _applyFeedResults(results) {
     for (const e of entries) { newIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
     logger.info(`[threat-intel] ThreatFox: ${entries.length} IOCs`);
     recordFeed('threatfox', { count: entries.length });
+    persistFeed('threatfox', entries.map(e => ({
+      kind: 'ip', value: e.ip, meta: { tag: e.tag, port: e.port },
+    })));
   } else {
     logger.error('[threat-intel] ThreatFox fetch failed:', results[1].reason?.message);
     recordFeed('threatfox', { error: results[1].reason?.message || 'unknown error' });
@@ -228,6 +345,11 @@ function _applyFeedResults(results) {
     }
     logger.info(`[threat-intel] URLhaus: ${entries.length} entries (IPs + domains)`);
     recordFeed('urlhaus', { count: entries.length });
+    persistFeed('urlhaus', entries.map(e => ({
+      kind: e.type === 'ip' ? 'ip' : 'domain',
+      value: e.value,
+      meta: { tag: e.tag, url: e.url, confidence: e.confidence },
+    })));
   } else {
     // Keep existing URLhaus data rather than wiping it on transient failure
     logger.error('[threat-intel] URLhaus fetch failed (keeping previous data):', results[2].reason?.message);
@@ -241,6 +363,11 @@ function _applyFeedResults(results) {
     newCidrs.push(...entries);
     logger.info(`[threat-intel] Spamhaus DROP: ${entries.length} CIDRs`);
     recordFeed('spamhaus', { count: entries.length });
+    persistFeed('spamhaus', entries.map(e => ({
+      kind: 'cidr',
+      value: `${numToIp(e.network)}/${e.prefix}`,
+      meta: { network: e.network, mask: e.mask, prefix: e.prefix, tag: e.tag },
+    })));
   } else {
     logger.error('[threat-intel] Spamhaus DROP fetch failed (keeping previous data):', results[3].reason?.message);
     recordFeed('spamhaus', { error: results[3].reason?.message || 'unknown error' });
@@ -399,14 +526,22 @@ function getStats() {
       lastSuccessAt: state.lastSuccessAt,
       lastAttemptAt: state.lastAttemptAt,
       lastError: state.lastError,
+      // When these entries were written to disk, if they came from there.
+      // Present without lastSuccessAt means: matching on cached indicators,
+      // this process has not reached the feed yet.
+      restoredAt: state.restoredAt || null,
       // True only when this process has never had this feed. The retained
       // entries of a feed that failed later are still being matched against.
-      contributingNothing: !state.lastSuccessAt,
+      // Nothing at all -- neither a fetch nor a restore. A feed running on
+      // restored entries is contributing; it is just not fresh.
+      contributingNothing: !state.lastSuccessAt && !state.restoredAt,
     })),
   };
 }
 
 module.exports = {
+  initDb,
+  closeDb,
   setOfflinePolicy,
   fetchThreatIntel,
   matchThreatIntel,

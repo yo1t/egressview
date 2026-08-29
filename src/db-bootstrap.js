@@ -15,12 +15,12 @@
  *   dbPath: string,
  *   sourceRouterMap?: { yamaha: string, cisco: string },
  *   history, sessions, devices, enrichment, beacons, authAudit, apiIdentities,
- *   agentIdentities, agentIngest,
+ *   agentIdentities, agentIngest, threatIntel,
  * }} deps
  */
 function runDbBootstrap({
   dbPath, sourceRouterMap, history, sessions, devices, enrichment, beacons, authAudit,
-  apiIdentities, agentIdentities, agentIngest,
+  apiIdentities, agentIdentities, agentIngest, threatIntel,
 }) {
   // 1. history first: runs the versioned migrations (with the P2-33
   //    fail-closed backup). Throws on failure — nothing below runs.
@@ -35,6 +35,10 @@ function runDbBootstrap({
   if (apiIdentities) apiIdentities.initDb(dbPath);
   if (agentIdentities) agentIdentities.initDb(dbPath);
   if (agentIngest) agentIngest.initDb(dbPath);
+  // Threat indicators are cached here too (P3-54 part B). Without it a restart
+  // while a feed is down starts with that feed absent and stays that way --
+  // which production did, twice, on 2026-08-29.
+  if (threatIntel) threatIntel.initDb(dbPath);
   return { staleEnrichmentIps: enrichResult?.staleIps || [] };
 }
 
