@@ -61,6 +61,10 @@ function makeHarness() {
   panes[0].classList.add('active');
 
   const context = {
+    // Imported helpers openSettings calls. The harness strips imports, so
+    // each one needs a stand-in; `loadThreatFeedStatus` shows which feeds
+    // answered (P3-54).
+    loadThreatFeedStatus: () => {},
     document: {
       getElementById: getEl,
       querySelectorAll(selector) {

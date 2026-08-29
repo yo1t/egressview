@@ -18,6 +18,8 @@ entry point; imports determine evaluation order and cache-busted asset URLs.
    - `settings-legacy-routers.js`
    - `settings-slack.js`
    - `settings-manual-threat.js`
+   - `settings-threat-feeds.js` — which threat feeds answered, and which the
+     Hub is matching without (P3-54)
    - `settings-ai.js`
    - `settings-agents.js`
    - `settings-detection.js`
