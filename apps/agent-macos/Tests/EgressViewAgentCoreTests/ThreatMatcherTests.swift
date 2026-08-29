@@ -228,3 +228,38 @@ final class ThreatIsolationTests: XCTestCase {
         }
     }
 }
+
+extension ThreatMatcherTests {
+    /// Two candidates that differ only by host name must not share an id.
+    ///
+    /// `destinationsForThreatMatching` groups by address, host name and
+    /// process, so one address reached by one app appears twice whenever a
+    /// name was resolved for some of its connections and not others -- which
+    /// is ordinary, because names arrive from SNI after the flow opens. The id
+    /// left the host name out, so both rows carried the same one and SwiftUI
+    /// reported `ForEach` producing undefined results (P3-53).
+    func testFindingsDifferingOnlyByHostNameHaveDistinctIDs() {
+        let matcher = ThreatMatcher(indicators: [
+            ThreatIndicator(kind: .ip, value: "198.51.100.5", source: "test", tag: nil),
+        ])
+        let named = ThreatCandidate(
+            address: "198.51.100.5", hostname: "known.example",
+            processName: "Example", sessionCount: 3,
+            lastObservedAt: Date(timeIntervalSince1970: 100)
+        )
+        let unnamed = ThreatCandidate(
+            address: "198.51.100.5", hostname: nil,
+            processName: "Example", sessionCount: 1,
+            lastObservedAt: Date(timeIntervalSince1970: 100)
+        )
+
+        let report = ThreatReport.evaluate(
+            candidates: [named, unnamed], matcher: matcher, availability: .checked(indicatorCount: 1, fetchedAt: Date(timeIntervalSince1970: 50))
+        )
+
+        XCTAssertEqual(report.findings.count, 2)
+        XCTAssertEqual(Set(report.findings.map { $0.id }).count, 2, "ids collided")
+        // One address is still one destination to worry about.
+        XCTAssertEqual(report.destinationCount, 1)
+    }
+}

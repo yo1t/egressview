@@ -187,7 +187,17 @@ public struct ThreatFinding: Equatable, Sendable, Identifiable {
     public let candidate: ThreatCandidate
     public let match: ThreatMatch
 
-    public var id: String { "\(candidate.address)|\(candidate.processName)|\(match.matchedValue)" }
+    /// Unique per row the threat table can show.
+    ///
+    /// The host name belongs here because candidates are grouped by it:
+    /// one address reached by one app appears twice whenever a name was
+    /// resolved for some of its connections and not others, which is ordinary
+    /// -- names arrive from SNI after the flow opens. Leaving it out gave both
+    /// rows the same id, and SwiftUI reported `ForEach` producing undefined
+    /// results (P3-53).
+    public var id: String {
+        "\(candidate.address)|\(candidate.hostname ?? "")|\(candidate.processName)|\(match.matchedValue)"
+    }
 
     public init(candidate: ThreatCandidate, match: ThreatMatch) {
         self.candidate = candidate
