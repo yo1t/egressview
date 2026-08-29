@@ -640,3 +640,5 @@
 "Choose one of the models Ollama has installed." = "Ollamaに導入済みのモデルから選んでください。";
 "Ollama answered, but no model is installed. Pull one with: ollama pull qwen3:8b" = "Ollamaは応答しましたが、モデルが1つも入っていません。次で取得できます: ollama pull qwen3:8b";
 "Press Save and test to list models" = "「保存して接続確認」でモデル一覧を取得";
+"Match worth acting on" = "対応すべき一致";
+"Low confidence match" = "確信度の低い一致";

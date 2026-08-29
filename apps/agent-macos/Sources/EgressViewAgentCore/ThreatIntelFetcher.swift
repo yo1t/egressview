@@ -99,11 +99,18 @@ public struct ThreatIntelFetcher: Sendable {
             guard let rows = root[key] as? [[Any]] else { return [] }
             return rows.compactMap { row in
                 guard let value = row.first as? String, !value.isEmpty else { return nil }
+                // Confidence is the fourth element and may be absent: a Hub
+                // older than P3-19 sends three. Absent means high, which is
+                // the stricter reading -- a missing field must not quietly
+                // downgrade a real threat to "probably fine".
+                let confidence = (row.count > 3 ? row[3] as? String : nil)
+                    .flatMap(ThreatIndicator.Confidence.init(rawValue:)) ?? .high
                 return ThreatIndicator(
                     kind: kind,
                     value: value,
                     source: row.count > 1 ? row[1] as? String : nil,
-                    tag: row.count > 2 ? row[2] as? String : nil
+                    tag: row.count > 2 ? row[2] as? String : nil,
+                    confidence: confidence
                 )
             }
         }

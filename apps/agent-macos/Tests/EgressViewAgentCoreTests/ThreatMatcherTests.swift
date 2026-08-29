@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import EgressViewAgentCore
 
@@ -263,3 +264,108 @@ extension ThreatMatcherTests {
         XCTAssertEqual(report.destinationCount, 1)
     }
 }
+
+extension ThreatMatcherTests {
+    /// A file on Google Drive is not a C2 address (P3-19).
+    func testURLhausMatchesOnFileHostsAreLowConfidence() {
+        let csv = """
+        # id,dateadded,url,url_status
+        1,2026-01-01,https://drive.google.com/file/d/abc,online
+        2,2026-01-01,https://evil.example/payload.bin,online
+        3,2026-01-01,https://198.51.100.9/payload.bin,online
+        """
+        let indicators = ThreatFeedDownloader.parseURLhaus(csv, source: "urlhaus")
+        let byValue = Dictionary(uniqueKeysWithValues: indicators.map { ($0.value, $0) })
+
+        XCTAssertEqual(byValue["drive.google.com"]?.confidence, .low)
+        XCTAssertEqual(byValue["evil.example"]?.confidence, .high)
+        // An address is judged on the address, never on a host list.
+        XCTAssertEqual(byValue["198.51.100.9"]?.confidence, .high)
+    }
+
+    /// The parent domain counts, as it does on the Hub.
+    func testSubdomainsOfAFileHostAreAlsoLowConfidence() {
+        XCTAssertEqual(ThreatFeedDownloader.confidence(forHost: "somebucket.s3.amazonaws.com"), .low)
+        XCTAssertEqual(ThreatFeedDownloader.confidence(forHost: "GitHub.com"), .low)
+        XCTAssertEqual(ThreatFeedDownloader.confidence(forHost: "notgithub.example"), .high)
+    }
+
+    /// One high-confidence match makes the destination worth looking at.
+    func testAnAddressIsLowConfidenceOnlyWhenNothingAboutItIsHigh() {
+        let matcher = ThreatMatcher(indicators: [
+            ThreatIndicator(kind: .domain, value: "drive.google.com", source: "urlhaus",
+                            tag: nil, confidence: .low),
+            ThreatIndicator(kind: .ip, value: "198.51.100.9", source: "feodo",
+                            tag: nil, confidence: .high),
+        ])
+        let onlyLow = ThreatCandidate(
+            address: "203.0.113.7", hostname: "drive.google.com", processName: "Finder",
+            sessionCount: 1, lastObservedAt: Date(timeIntervalSince1970: 100)
+        )
+        let high = ThreatCandidate(
+            address: "198.51.100.9", hostname: nil, processName: "curl",
+            sessionCount: 1, lastObservedAt: Date(timeIntervalSince1970: 100)
+        )
+
+        let report = ThreatReport.evaluate(
+            candidates: [onlyLow, high], matcher: matcher,
+            availability: .checked(indicatorCount: 2, fetchedAt: nil)
+        )
+
+        XCTAssertEqual(report.destinationCount, 2)
+        XCTAssertEqual(report.highConfidenceDestinationCount, 1)
+        XCTAssertEqual(report.lowConfidenceDestinationCount, 1)
+        XCTAssertEqual(report.highConfidenceAddresses, ["198.51.100.9"])
+    }
+
+    /// A Hub older than P3-19 sends three elements. Absent means high.
+    func testAMissingConfidenceIsReadAsHigh() throws {
+        let payload = """
+        {"schemaVersion":1,"available":true,
+         "ips":[["198.51.100.9","feodo","botnet"]],
+         "domains":[["bad.example","urlhaus","malware","low"]],
+         "cidrs":[]}
+        """
+        let result = try ThreatIntelFetcher.decode(Data(payload.utf8), etag: nil)
+        guard case .updated(let indicators, _, _) = result else {
+            return XCTFail("expected updated, got \(result)")
+        }
+        let byValue = Dictionary(uniqueKeysWithValues: indicators.map { ($0.value, $0) })
+        // Three elements: unknown level must not quietly become "probably fine".
+        XCTAssertEqual(byValue["198.51.100.9"]?.confidence, .high)
+        XCTAssertEqual(byValue["bad.example"]?.confidence, .low)
+    }
+}
+
+extension ThreatMatcherTests {
+    /// A store whose version is behind its schema still opens.
+    ///
+    /// `user_version` records which migrations have run; it does not prove the
+    /// schema matches. A restored database, or one whose version was set back,
+    /// can already hold a column the next migration is about to add. A plain
+    /// `ALTER TABLE` throws there, `migrate()` fails, and the Agent cannot
+    /// open its history at all -- losing the whole view because a column was
+    /// already correct.
+    func testAStoreWhoseVersionIsBehindItsSchemaStillOpens() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("history.sqlite")
+
+        let store = try ObservationStore(fileURL: url)
+        try store.replaceThreatIndicators([
+            ThreatIndicator(kind: .ip, value: "198.51.100.9", source: "feodo",
+                            tag: nil, confidence: .high),
+        ])
+
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &database), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(database, "PRAGMA user_version=10;", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(database)
+
+        // The confidence column is still there while the version says it is not.
+        let reopened = try ObservationStore(fileURL: url)
+        XCTAssertEqual(try reopened.threatIndicators().first?.confidence, .high)
+    }
+}
+

@@ -489,6 +489,18 @@ public final class ObservationStore: @unchecked Sendable {
             )
             try execute("PRAGMA user_version=10")
         }
+        if version < 11 {
+            // Confidence for stored indicators (P3-19). Existing rows become
+            // `high`, which is the stricter reading: an indicator whose level
+            // is unknown must not be quietly downgraded. The next feed fetch
+            // replaces the table wholesale and fills the real values in.
+            if try !columnExists(table: "threat_indicators", column: "confidence") {
+                try execute(
+                    "ALTER TABLE threat_indicators ADD COLUMN confidence TEXT NOT NULL DEFAULT 'high'"
+                )
+            }
+            try execute("PRAGMA user_version=11")
+        }
     }
 
     // MARK: - Coverage
@@ -602,8 +614,8 @@ public final class ObservationStore: @unchecked Sendable {
         do {
             try execute("DELETE FROM threat_indicators")
             let statement = try prepare("""
-            INSERT OR REPLACE INTO threat_indicators (kind, value, source, tag)
-            VALUES (?, ?, ?, ?)
+            INSERT OR REPLACE INTO threat_indicators (kind, value, source, tag, confidence)
+            VALUES (?, ?, ?, ?, ?)
             """)
             defer { sqlite3_finalize(statement) }
             for indicator in indicators {
@@ -612,6 +624,7 @@ public final class ObservationStore: @unchecked Sendable {
                 bindText(statement, 2, indicator.value)
                 bindOptionalText(statement, 3, indicator.source)
                 bindOptionalText(statement, 4, indicator.tag)
+                bindText(statement, 5, indicator.confidence.rawValue)
                 guard sqlite3_step(statement) == SQLITE_DONE else {
                     throw ObservationStoreError.statement(lastMessage)
                 }
@@ -624,7 +637,7 @@ public final class ObservationStore: @unchecked Sendable {
     }
 
     public func threatIndicators() throws -> [ThreatIndicator] {
-        let statement = try prepare("SELECT kind, value, source, tag FROM threat_indicators")
+        let statement = try prepare("SELECT kind, value, source, tag, confidence FROM threat_indicators")
         defer { sqlite3_finalize(statement) }
         var result: [ThreatIndicator] = []
         while sqlite3_step(statement) == SQLITE_ROW {
@@ -633,7 +646,9 @@ public final class ObservationStore: @unchecked Sendable {
                   let value = text(statement, 1)
             else { continue }
             result.append(ThreatIndicator(
-                kind: kind, value: value, source: text(statement, 2), tag: text(statement, 3)
+                kind: kind, value: value, source: text(statement, 2), tag: text(statement, 3),
+                confidence: text(statement, 4)
+                    .flatMap(ThreatIndicator.Confidence.init(rawValue:)) ?? .high
             ))
         }
         return result
@@ -2055,6 +2070,23 @@ public final class ObservationStore: @unchecked Sendable {
             throw ObservationStoreError.statement("\(lastMessage) — \(sql.prefix(120))")
         }
         return statement
+    }
+
+    /// Whether a column is already there.
+    ///
+    /// `user_version` says which migrations have run; it does not prove the
+    /// schema matches. A database restored from elsewhere, or one whose
+    /// version was set back, can hold a column a later migration is about to
+    /// add -- and a plain `ALTER TABLE` then throws, `migrate()` fails, and
+    /// the store will not open at all. Losing the whole history view because a
+    /// column was already correct is the wrong trade.
+    private func columnExists(table: String, column: String) throws -> Bool {
+        let statement = try prepare("PRAGMA table_info(\(table))")
+        defer { sqlite3_finalize(statement) }
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if text(statement, 1) == column { return true }
+        }
+        return false
     }
 
     private func scalar(_ sql: String, bindDouble: Double? = nil) throws -> Int? {
