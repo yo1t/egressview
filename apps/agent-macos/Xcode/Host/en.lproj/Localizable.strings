@@ -638,3 +638,5 @@
 "Choose one of the models Ollama has installed." = "Choose one of the models Ollama has installed.";
 "Ollama answered, but no model is installed. Pull one with: ollama pull qwen3:8b" = "Ollama answered, but no model is installed. Pull one with: ollama pull qwen3:8b";
 "Press Save and test to list models" = "Press Save and test to list models";
+"Match worth acting on" = "Match worth acting on";
+"Low confidence match" = "Low confidence match";

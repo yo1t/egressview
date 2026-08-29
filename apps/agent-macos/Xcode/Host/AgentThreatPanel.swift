@@ -91,11 +91,22 @@ struct AgentThreatPanel: View {
         VSplitView {
             Table(report.findings, selection: $selection) {
                 TableColumn(L("Destination")) { finding in
-                    Text(finding.candidate.hostname ?? finding.candidate.address)
-                        .monospaced()
-                        .help(Self.tooltip(for: finding))
+                    HStack(spacing: 6) {
+                        // Low confidence is marked, not hidden. A file hosted
+                        // on a service people use all day is worth seeing and
+                        // not worth interrupting anyone about (P3-19).
+                        Image(systemName: finding.confidence == .high
+                              ? "exclamationmark.triangle.fill" : "questionmark.circle")
+                            .foregroundStyle(finding.confidence == .high ? Color.orange : Color.secondary)
+                            .accessibilityLabel(finding.confidence == .high
+                                                ? L("Match worth acting on")
+                                                : L("Low confidence match"))
+                        Text(finding.candidate.hostname ?? finding.candidate.address)
+                            .monospaced()
+                    }
+                    .help(Self.tooltip(for: finding))
                 }
-                .width(min: 170, ideal: 240)
+                .width(min: 190, ideal: 260)
                 TableColumn(L("Application")) { finding in
                     Text(finding.candidate.processName)
                         .help(Self.tooltip(for: finding))

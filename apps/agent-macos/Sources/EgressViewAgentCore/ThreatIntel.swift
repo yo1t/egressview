@@ -8,15 +8,36 @@ public struct ThreatIndicator: Equatable, Sendable {
         case cidr
     }
 
+    /// How much a match means, matching what the Hub decides (P3-19).
+    ///
+    /// URLhaus lists the URL where malware was hosted, so a match on
+    /// `github.com` or `s3.amazonaws.com` says something was hosted there --
+    /// not that the domain is hostile. Treating those the same as a C2 address
+    /// means the ordinary use of ordinary services raises alarms, and a person
+    /// who is warned about Google Drive every day stops reading warnings.
+    ///
+    /// The Hub has made this distinction since P2-71. The Agent did not, so a
+    /// Mac away from its Hub judged the same destination differently from the
+    /// Hub judging it -- which the completion criteria for P3-19 rule out.
+    public enum Confidence: String, Sendable, CaseIterable {
+        case high
+        case low
+    }
+
     public let kind: Kind
     /// The address, domain or CIDR the feed listed.
     public let value: String
     public let source: String?
     public let tag: String?
+    public let confidence: Confidence
 
-    public init(kind: Kind, value: String, source: String?, tag: String?) {
+    public init(
+        kind: Kind, value: String, source: String?, tag: String?,
+        confidence: Confidence = .high
+    ) {
         self.kind = kind
         self.value = value
+        self.confidence = confidence
         self.source = source
         self.tag = tag
     }
@@ -187,7 +208,21 @@ public struct ThreatFinding: Equatable, Sendable, Identifiable {
     public let candidate: ThreatCandidate
     public let match: ThreatMatch
 
-    public var id: String { "\(candidate.address)|\(candidate.processName)|\(match.matchedValue)" }
+    /// Unique per row the threat table can show.
+    ///
+    /// The host name belongs here because candidates are grouped by it:
+    /// one address reached by one app appears twice whenever a name was
+    /// resolved for some of its connections and not others, which is ordinary
+    /// -- names arrive from SNI after the flow opens. Leaving it out gave both
+    /// rows the same id, and SwiftUI reported `ForEach` producing undefined
+    /// results (P3-53).
+    public var id: String {
+        "\(candidate.address)|\(candidate.hostname ?? "")|\(candidate.processName)|\(match.matchedValue)"
+    }
+
+    /// How much this match means. Reads through to the indicator so the
+    /// screen and the notifier cannot disagree about it.
+    public var confidence: ThreatIndicator.Confidence { match.indicator.confidence }
 
     public init(candidate: ThreatCandidate, match: ThreatMatch) {
         self.candidate = candidate
@@ -211,6 +246,27 @@ public struct ThreatReport: Equatable, Sendable {
     public var destinationCount: Int {
         Set(findings.map(\.candidate.address)).count
     }
+
+    /// Destinations whose match is worth acting on, separated from the ones
+    /// that only say a file was hosted on a service people use all day.
+    ///
+    /// Counting them together is how a person learns to ignore the number
+    /// (P3-19): if Google Drive raises the same alarm as a C2 address, the
+    /// alarm stops meaning anything.
+    ///
+    /// An address is low confidence only when **nothing** about it is high.
+    /// One high-confidence match is enough to make the destination worth
+    /// looking at, whatever else also matched it.
+    public var highConfidenceAddresses: Set<String> {
+        Set(findings.filter { $0.confidence == .high }.map(\.candidate.address))
+    }
+
+    public var lowConfidenceAddresses: Set<String> {
+        Set(findings.map(\.candidate.address)).subtracting(highConfidenceAddresses)
+    }
+
+    public var highConfidenceDestinationCount: Int { highConfidenceAddresses.count }
+    public var lowConfidenceDestinationCount: Int { lowConfidenceAddresses.count }
 
     /// True only when indicators were actually loaded. An empty list from a
     /// screen that never had indicators is not "no threats".
