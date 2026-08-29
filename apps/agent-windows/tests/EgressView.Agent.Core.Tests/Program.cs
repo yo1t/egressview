@@ -50,7 +50,37 @@ try
         Assert(reopenedDrops.ReadCounters().GetValueOrDefault("queue-full") > 0, "drop reason survives restart");
     }
 
-    Console.WriteLine("PASS: persistence, restart, integrity, bounded drops, and privacy-safe diagnostics");
+    var coverageDatabase = Path.Combine(directory, "coverage.db");
+    using (var coverageStore = new ObservationStore(coverageDatabase))
+    {
+        var started = DateTimeOffset.UtcNow;
+        var snapshot = new[]
+        {
+            new StartupFlow("TCP", "10.0.0.1", 50000, "10.0.0.2", 443, 99),
+            new StartupFlow("TCP", "10.0.0.1", 50001, "10.0.0.3", 443, 99),
+        };
+        var firstCoverage = coverageStore.BeginCoverage(snapshot, started);
+        await using (var flowPipeline = new ObservationPipeline(coverageStore))
+        {
+            Assert(flowPipeline.TrySubmit(new NetworkObservation(started.AddSeconds(1), 99, "TCP",
+                "10.0.0.1", 50000, "10.0.0.2", 443, 128, 0,
+                ObservationLayer.Logical, "test", "etw")), "ETW flow accepted");
+        }
+        var flowStats = coverageStore.ReadFlowStats();
+        Assert(flowStats.Total == 2 && flowStats.Both == 1 && flowStats.Snapshot == 1, "snapshot and ETW upsert to one flow");
+        Assert(flowStats.BytesUnknown == 1, "snapshot-only bytes remain unknown");
+        coverageStore.EndCoverage(firstCoverage, started.AddSeconds(2));
+        Assert(coverageStore.ReadCoverage() == (1, 0, 0), "normal coverage closes");
+        coverageStore.BeginCoverage(snapshot, started.AddSeconds(3));
+        coverageStore.BeginCoverage(snapshot, started.AddSeconds(4));
+        Assert(coverageStore.ReadCoverage() == (3, 1, 1), "previous open coverage is abandoned");
+    }
+
+    var liveSnapshot = StartupSnapshot.Capture();
+    Assert(liveSnapshot.Where(flow => flow.Protocol == "TCP").All(flow => flow.RemotePort > 0),
+        "TCP startup snapshot excludes listeners");
+
+    Console.WriteLine("PASS: persistence, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics");
     return 0;
 }
 finally

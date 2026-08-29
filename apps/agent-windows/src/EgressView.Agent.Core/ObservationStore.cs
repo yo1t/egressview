@@ -30,6 +30,31 @@ public sealed class ObservationStore : IDisposable
           name TEXT PRIMARY KEY,
           value INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS flows(
+          flow_key TEXT PRIMARY KEY,
+          protocol TEXT NOT NULL,
+          local_address TEXT NOT NULL,
+          local_port INTEGER NOT NULL,
+          remote_address TEXT NOT NULL,
+          remote_port INTEGER NOT NULL,
+          process_id INTEGER NOT NULL,
+          first_seen TEXT NOT NULL,
+          last_seen TEXT NOT NULL,
+          origin TEXT NOT NULL CHECK(origin IN ('snapshot','etw','both')),
+          bytes_sent INTEGER,
+          bytes_received INTEGER,
+          layer TEXT NOT NULL CHECK(layer IN ('logical','vpn_transport')),
+          interface_id TEXT
+        );
+        CREATE INDEX IF NOT EXISTS flows_last_seen ON flows(last_seen);
+        DELETE FROM flows WHERE origin='snapshot' AND protocol='TCP' AND remote_port=0;
+        CREATE TABLE IF NOT EXISTS coverage_sessions(
+          id INTEGER PRIMARY KEY,
+          started_at TEXT NOT NULL,
+          ended_at TEXT,
+          snapshot_count INTEGER NOT NULL
+        );
+        UPDATE schema_version SET version=2 WHERE version < 2;
         """;
 
     private readonly object gate = new();
@@ -58,7 +83,20 @@ public sealed class ObservationStore : IDisposable
                       remote_address,remote_port,bytes_sent,bytes_received,layer,interface_id,source)
                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
                     """;
+                const string flowSql = """
+                    INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,
+                      process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id)
+                    VALUES(?,?,?,?,?,?,?,?,?,'etw',?,?,?,?)
+                    ON CONFLICT(flow_key) DO UPDATE SET
+                      last_seen=excluded.last_seen,
+                      origin=CASE WHEN flows.origin='snapshot' THEN 'both' ELSE flows.origin END,
+                      bytes_sent=CASE WHEN flows.bytes_sent IS NULL THEN excluded.bytes_sent ELSE flows.bytes_sent+excluded.bytes_sent END,
+                      bytes_received=CASE WHEN flows.bytes_received IS NULL THEN excluded.bytes_received ELSE flows.bytes_received+excluded.bytes_received END,
+                      layer=excluded.layer,
+                      interface_id=COALESCE(excluded.interface_id,flows.interface_id)
+                    """;
                 Check(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+                Check(WinSqlite.Prepare(db, flowSql, -1, out var flowStatement, 0));
                 try
                 {
                     foreach (var item in observations)
@@ -78,9 +116,17 @@ public sealed class ObservationStore : IDisposable
                         CheckDone(WinSqlite.Step(statement));
                         Check(WinSqlite.Reset(statement));
                         Check(WinSqlite.ClearBindings(statement));
+                        Bind(flowStatement, 1, StartupSnapshot.FlowKey(item.Protocol, item.LocalAddress, item.LocalPort, item.RemoteAddress, item.RemotePort, item.ProcessId));
+                        Bind(flowStatement, 2, item.Protocol); Bind(flowStatement, 3, item.LocalAddress);
+                        Check(WinSqlite.BindInt64(flowStatement, 4, item.LocalPort)); Bind(flowStatement, 5, item.RemoteAddress);
+                        Check(WinSqlite.BindInt64(flowStatement, 6, item.RemotePort)); Check(WinSqlite.BindInt64(flowStatement, 7, item.ProcessId));
+                        Bind(flowStatement, 8, item.ObservedAt.ToUniversalTime().ToString("O")); Bind(flowStatement, 9, item.ObservedAt.ToUniversalTime().ToString("O"));
+                        BindNullable(flowStatement, 10, item.BytesSent); BindNullable(flowStatement, 11, item.BytesReceived);
+                        Bind(flowStatement, 12, item.Layer == ObservationLayer.Logical ? "logical" : "vpn_transport"); BindNullable(flowStatement, 13, item.InterfaceId);
+                        CheckDone(WinSqlite.Step(flowStatement)); Check(WinSqlite.Reset(flowStatement)); Check(WinSqlite.ClearBindings(flowStatement));
                     }
                 }
-                finally { WinSqlite.Finalize(statement); }
+                finally { WinSqlite.Finalize(statement); WinSqlite.Finalize(flowStatement); }
                 Execute("COMMIT");
             }
             catch
@@ -89,6 +135,62 @@ public sealed class ObservationStore : IDisposable
                 throw;
             }
         }
+    }
+
+    public long BeginCoverage(IReadOnlyList<StartupFlow> snapshot, DateTimeOffset startedAt)
+    {
+        lock (gate)
+        {
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                foreach (var flow in snapshot)
+                {
+                    var key = StartupSnapshot.FlowKey(flow.Protocol, flow.LocalAddress, flow.LocalPort, flow.RemoteAddress, flow.RemotePort, flow.ProcessId).Replace("'", "''", StringComparison.Ordinal);
+                    Execute($"INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id) VALUES('{key}','{flow.Protocol}','{flow.LocalAddress}',{flow.LocalPort},'{flow.RemoteAddress}',{flow.RemotePort},{flow.ProcessId},'{startedAt:O}','{startedAt:O}','snapshot',NULL,NULL,'logical',NULL) ON CONFLICT(flow_key) DO NOTHING");
+                }
+                Execute($"INSERT INTO coverage_sessions(started_at,snapshot_count) VALUES('{startedAt:O}',{snapshot.Count})");
+                var id = ScalarInt64("SELECT last_insert_rowid()");
+                Execute("COMMIT");
+                return id;
+            }
+            catch { Execute("ROLLBACK"); throw; }
+        }
+    }
+
+    public void EndCoverage(long id, DateTimeOffset endedAt)
+    {
+        lock (gate) Execute($"UPDATE coverage_sessions SET ended_at='{endedAt:O}' WHERE id={id} AND ended_at IS NULL");
+    }
+
+    public IReadOnlyDictionary<string, long> ReadFlowOrigins()
+    {
+        lock (gate)
+        {
+            var result = new Dictionary<string, long>(StringComparer.Ordinal);
+            Check(WinSqlite.Prepare(db, "SELECT origin,COUNT(*) FROM flows GROUP BY origin", -1, out var statement, 0));
+            try { while (WinSqlite.Step(statement) == WinSqlite.Row) result[Marshal.PtrToStringUTF8(WinSqlite.ColumnText(statement, 0)) ?? "unknown"] = WinSqlite.ColumnInt64(statement, 1); }
+            finally { WinSqlite.Finalize(statement); }
+            return result;
+        }
+    }
+
+    public (long Total, long Active, long Abandoned) ReadCoverage()
+    {
+        lock (gate) return (
+            ScalarInt64("SELECT COUNT(*) FROM coverage_sessions"),
+            ScalarInt64("SELECT COUNT(*) FROM coverage_sessions WHERE ended_at IS NULL AND id=(SELECT MAX(id) FROM coverage_sessions)"),
+            ScalarInt64("SELECT COUNT(*) FROM coverage_sessions WHERE ended_at IS NULL AND id < (SELECT COALESCE(MAX(id),0) FROM coverage_sessions)"));
+    }
+
+    public (long Total, long Snapshot, long Etw, long Both, long BytesUnknown) ReadFlowStats()
+    {
+        lock (gate) return (
+            ScalarInt64("SELECT COUNT(*) FROM flows"),
+            ScalarInt64("SELECT COUNT(*) FROM flows WHERE origin='snapshot'"),
+            ScalarInt64("SELECT COUNT(*) FROM flows WHERE origin='etw'"),
+            ScalarInt64("SELECT COUNT(*) FROM flows WHERE origin='both'"),
+            ScalarInt64("SELECT COUNT(*) FROM flows WHERE bytes_sent IS NULL OR bytes_received IS NULL"));
     }
 
     public void AddCounter(string name, long amount)
