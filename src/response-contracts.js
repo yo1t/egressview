@@ -147,6 +147,63 @@ function createRegistry() {
     previous: z.unknown(),
   }).loose());
 
+  // GET /api/ai/facts -- counts for two periods, plus who was collecting.
+  //
+  // Declared from the shape `buildAiFacts` actually returns, read by calling
+  // it, not from the route's reading of it. The correction in the P2-95 spec
+  // exists because #315's description claimed this was declared when it was
+  // not; the gate's `undeclared: GET /api/ai/facts x15` was the evidence.
+  //
+  // `bounded: false`: `collection.routers` has one entry per configured
+  // collection source and nothing caps it. A real Hub has a handful, but "few
+  // in practice" is not a bound, and a contract that says enforced when it
+  // means sampled is the thing this design refuses.
+  const periodCounts = z.object({
+    connections: z.number(),
+    devices: z.number(),
+    destinations: z.number(),
+    safe: z.number(),
+    warn: z.number(),
+    danger: z.number(),
+  }).loose();
+  const factsRange = z.object({
+    from: z.number(),
+    to: z.number(),
+    durationMs: z.number(),
+  }).loose();
+  registry.declare('GET /api/ai/facts', 200, z.object({
+    serverTime: z.number(),
+    range: factsRange,
+    previousRange: factsRange,
+    collection: z.object({
+      health: z.string(),
+      enabledCount: z.number(),
+      readyCount: z.number(),
+      reportedSessions: z.number(),
+      // Null until a collection source has succeeded once.
+      lastUpdatedAt: z.number().nullable(),
+      routers: z.array(z.unknown()),
+    }).loose(),
+    // Null when the caller did not scope the question to one source.
+    sourceScope: z.unknown().nullable(),
+    current: periodCounts,
+    previous: periodCounts,
+  }).loose(), { bounded: false, arrayElementsObserved: true });
+
+  // GET /api/devices -- every device this Hub knows about.
+  //
+  // `bounded: false`: nothing caps the list. Measured on the production Hub
+  // 2026-08-29: 203 devices, comfortably under the 500-element limit -- which
+  // is a count, not a bound. The route has no pagination, so a larger network
+  // exceeds it and the declaration must not claim otherwise.
+  //
+  // The elements are `z.unknown()`. A device row carries names, notes and
+  // vendor strings that several subsystems extend; pinning them here would
+  // make the contract an obstacle to ordinary additions rather than a check.
+  registry.declare('GET /api/devices', 200, z.object({
+    devices: z.array(z.unknown()),
+  }).loose(), { bounded: false, arrayElementsObserved: true });
+
   // GET /api/connections/summary is *not* declared, though the step-4
   // observer named it as one of the busiest. Its tests call the handler
   // directly with a stand-in `res`, never through Express, so nothing can
