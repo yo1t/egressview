@@ -23,7 +23,8 @@ const threatIps = new Map(); // ip → { source, tag, port? }
  * is right. What it cannot survive is a restart: these maps live in memory
  * only, so a process that starts while a feed is down starts without it
  * entirely. That is P3-54's part B; this is part A -- being able to say which
- * feed is contributing what, and when it last succeeded.
+ * feed is contributing what, and when it last succeeded. Read through
+ * `getStats()`, which `GET /api/status` returns.
  */
 const feedState = new Map();
 

@@ -83,13 +83,17 @@ describe('脅威フィードの鮮度をソースごとに言う (P3-54)', () =>
   });
 });
 
-describe('/api/config/status がフィードの状態を返す (P3-54)', () => {
+describe('GET /api/status がフィードの状態を返す (P3-54)', () => {
   const configRoutes = require('../../src/routes/config');
 
   function statusHandlerFor(ctx) {
-    // The route module builds an Express router; the status route is the one
-    // GET /status. Reached through the router's stack rather than a stand-in,
-    // so a route that was never registered fails here rather than passing.
+    // The router is mounted at /api, so this route is `GET /api/status`.
+    // Verified against the running Hub: /api/status answers 401 (auth
+    // required, route present) while /api/config/status is 404. The comment
+    // in config.js said the latter until 2026-08-29.
+    //
+    // Reached through the router's own stack rather than a stand-in, so a
+    // route that was never registered fails here rather than passing.
     const router = configRoutes(ctx);
     const layer = router.stack.find(
       (l) => l.route && l.route.path === '/status' && l.route.methods.get
