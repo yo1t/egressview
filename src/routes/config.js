@@ -43,7 +43,7 @@ const dataSourcesSchema = z.object({
  */
 module.exports = function configRoutes(ctx) {
   const {
-    requireAdmin, asus, enrichment, notifier, history,
+    requireAdmin, asus, enrichment, notifier, history, threatIntel,
     dnsmasqLog, inspectSyslog, dhcpdSyslog,
     runtime, appState, saveConfig,
   } = ctx;
@@ -84,6 +84,14 @@ module.exports = function configRoutes(ctx) {
       authenticated: asus.isAuthenticated(),
       routerIp:      asus.getRouterIp(),
       enrichment:    enrichment.getApiStats(),
+      // Per feed, not just a total (P3-54). On 2026-08-29 the Hub matched
+      // with Feodo's C2 list entirely absent -- abuse.ch was returning 503 --
+      // while every count on screen looked healthy, because the other feeds
+      // are large. A screen that cannot say which feed is missing cannot tell
+      // "nothing was found" from "nobody looked".
+      threatIntel:   threatIntel && typeof threatIntel.getStats === 'function'
+        ? threatIntel.getStats()
+        : null,
       // Lets the UI say a feature is off because of offline mode rather than
       // leaving an unexplained empty panel.
       ...(appState.offlinePolicy ? appState.offlinePolicy.describe() : {}),

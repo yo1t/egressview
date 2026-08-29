@@ -11,6 +11,34 @@ const axios = require('axios');
 // IP set: exact match
 const threatIps = new Map(); // ip → { source, tag, port? }
 
+/**
+ * What each feed is currently contributing, and when it last managed to (P3-54).
+ *
+ * The counts alone cannot answer "is anything missing". On 2026-08-29
+ * abuse.ch's Feodo Tracker returned 503 -- an expired certificate at their
+ * CDN -- and the startup line still read `Ready: 6995 IPs`, because the other
+ * three feeds are large. Feodo's C2 list was absent and nothing said so.
+ *
+ * Retaining a failed source's previous entries is already handled below, and
+ * is right. What it cannot survive is a restart: these maps live in memory
+ * only, so a process that starts while a feed is down starts without it
+ * entirely. That is P3-54's part B; this is part A -- being able to say which
+ * feed is contributing what, and when it last succeeded.
+ */
+const feedState = new Map();
+
+function recordFeed(name, { count = null, error = null } = {}) {
+  const previous = feedState.get(name) || { lastSuccessAt: null, count: 0 };
+  feedState.set(name, {
+    lastAttemptAt: Date.now(),
+    lastSuccessAt: error ? previous.lastSuccessAt : Date.now(),
+    // On failure the previous entries are kept, so the previous count is still
+    // what this feed is contributing. Zeroing it here would under-report.
+    count: error ? previous.count : count,
+    lastError: error,
+  });
+}
+
 // CIDR ranges: Spamhaus DROP
 const threatCidrs = []; // [{ network, mask, source, tag }]
 
@@ -171,8 +199,10 @@ function _applyFeedResults(results) {
     for (const [ip, v] of newIps) { if (v.source === 'feodo') newIps.delete(ip); }
     for (const e of entries) { newIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
     logger.info(`[threat-intel] Feodo: ${entries.length} IPs`);
+    recordFeed('feodo', { count: entries.length });
   } else {
     logger.error('[threat-intel] Feodo fetch failed:', results[0].reason?.message);
+    recordFeed('feodo', { error: results[0].reason?.message || 'unknown error' });
   }
 
   // ThreatFox
@@ -181,8 +211,10 @@ function _applyFeedResults(results) {
     for (const [ip, v] of newIps) { if (v.source === 'threatfox') newIps.delete(ip); }
     for (const e of entries) { newIps.set(e.ip, { source: e.source, tag: e.tag, port: e.port }); }
     logger.info(`[threat-intel] ThreatFox: ${entries.length} IOCs`);
+    recordFeed('threatfox', { count: entries.length });
   } else {
     logger.error('[threat-intel] ThreatFox fetch failed:', results[1].reason?.message);
+    recordFeed('threatfox', { error: results[1].reason?.message || 'unknown error' });
   }
 
   // URLhaus — owns both IPs and domains with 'urlhaus' source
@@ -195,9 +227,11 @@ function _applyFeedResults(results) {
       else                  { newDomains.set(e.value, { source: e.source, tag: e.tag, url: e.url, confidence: e.confidence }); }
     }
     logger.info(`[threat-intel] URLhaus: ${entries.length} entries (IPs + domains)`);
+    recordFeed('urlhaus', { count: entries.length });
   } else {
     // Keep existing URLhaus data rather than wiping it on transient failure
     logger.error('[threat-intel] URLhaus fetch failed (keeping previous data):', results[2].reason?.message);
+    recordFeed('urlhaus', { error: results[2].reason?.message || 'unknown error' });
   }
 
   // Spamhaus DROP — owns CIDRs
@@ -206,8 +240,10 @@ function _applyFeedResults(results) {
     newCidrs.length = 0;
     newCidrs.push(...entries);
     logger.info(`[threat-intel] Spamhaus DROP: ${entries.length} CIDRs`);
+    recordFeed('spamhaus', { count: entries.length });
   } else {
     logger.error('[threat-intel] Spamhaus DROP fetch failed (keeping previous data):', results[3].reason?.message);
+    recordFeed('spamhaus', { error: results[3].reason?.message || 'unknown error' });
   }
 
   // Atomic swap
@@ -216,7 +252,28 @@ function _applyFeedResults(results) {
   threatCidrs.length = 0; threatCidrs.push(...newCidrs);
 
   lastFetch = Date.now();
-  logger.info(`[threat-intel] Ready: ${threatIps.size} IPs, ${threatDomains.size} domains, ${threatCidrs.length} CIDRs`);
+  // Totals, then what is missing from them.
+  //
+  // `Ready: 6995 IPs` read as healthy on 2026-08-29 while Feodo's C2 list was
+  // absent, because the other feeds are large enough to hide one. A count is
+  // not an inventory (P3-54).
+  const unavailable = [...feedState].filter(([, state]) => state.lastError);
+  logger.info(
+    `[threat-intel] Ready: ${threatIps.size} IPs, ${threatDomains.size} domains, `
+    + `${threatCidrs.length} CIDRs`
+  );
+  if (unavailable.length) {
+    logger.error(
+      `[threat-intel] ${unavailable.length} of ${feedState.size} feeds did not answer, so `
+      + 'matching is running without them: '
+      + unavailable.map(([name, state]) => (
+        state.lastSuccessAt
+          ? `${name} (last succeeded ${new Date(state.lastSuccessAt).toISOString()}, `
+            + `${state.count} entries retained)`
+          : `${name} (never succeeded since start, contributing nothing)`
+      )).join(', ')
+    );
+  }
 }
 
 async function fetchThreatIntel() {
@@ -327,7 +384,26 @@ function listIndicators() {
 }
 
 function getStats() {
-  return { ips: threatIps.size, domains: threatDomains.size, cidrs: threatCidrs.length, lastFetch };
+  return {
+    ips: threatIps.size,
+    domains: threatDomains.size,
+    cidrs: threatCidrs.length,
+    lastFetch,
+    // Per feed, so "6,995 indicators" cannot stand in for "every feed
+    // answered". A feed that never succeeded since this process started is
+    // contributing nothing, and that is a different state from one whose
+    // entries are simply old (P3-54).
+    feeds: [...feedState].map(([name, state]) => ({
+      name,
+      entries: state.count,
+      lastSuccessAt: state.lastSuccessAt,
+      lastAttemptAt: state.lastAttemptAt,
+      lastError: state.lastError,
+      // True only when this process has never had this feed. The retained
+      // entries of a feed that failed later are still being matched against.
+      contributingNothing: !state.lastSuccessAt,
+    })),
+  };
 }
 
 module.exports = {
