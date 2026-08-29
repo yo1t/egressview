@@ -29,11 +29,14 @@ internal static class Program
         var database = Argument(args, "--data") ?? Path.Combine(AppContext.BaseDirectory, "data", "egressview-agent.db");
         var seconds = int.TryParse(Argument(args, "--seconds"), out var parsed) ? parsed : 15;
         using var store = new ObservationStore(database);
+        var snapshot = StartupSnapshot.Capture();
+        var coverageId = store.BeginCoverage(snapshot, DateTimeOffset.UtcNow);
         await using var pipeline = new ObservationPipeline(store);
         await using var collector = new EtwNetworkCollector(pipeline);
         try { collector.Start(); }
         catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 2; }
         await Task.Delay(TimeSpan.FromSeconds(seconds));
+        store.EndCoverage(coverageId, DateTimeOffset.UtcNow);
         var diagnostics = DiagnosticsReport.Create(collector.Enrich(pipeline.Snapshot()), store, "0.1.0-dev");
         Console.WriteLine(diagnostics);
         if (Argument(args, "--diagnostics") is { } diagnosticsPath)
@@ -81,11 +84,14 @@ internal sealed class AgentWindowsService : ServiceBase
         var root = Path.Combine(AppContext.BaseDirectory, "data");
         Directory.CreateDirectory(root);
         using var store = new ObservationStore(Path.Combine(root, "egressview-agent.db"));
+        var snapshot = StartupSnapshot.Capture();
+        var coverageId = store.BeginCoverage(snapshot, DateTimeOffset.UtcNow);
         await using var pipeline = new ObservationPipeline(store);
         await using var collector = new EtwNetworkCollector(pipeline);
         collector.Start();
         try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        store.EndCoverage(coverageId, DateTimeOffset.UtcNow);
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(collector.Enrich(pipeline.Snapshot()), store, "0.1.0-dev"));
     }
