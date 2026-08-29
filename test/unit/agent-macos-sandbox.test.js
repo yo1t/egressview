@@ -170,3 +170,39 @@ describe('macOS Agent App Sandbox boundary', () => {
     assert.match(notices, /Natural Earth/);
   });
 });
+
+describe('実機確認で利用者向けバージョンを消費しない (P3-32)', () => {
+  const script = fs.readFileSync(
+    path.join(root, 'apps/agent-macos/scripts/build-agent-pkg.sh'), 'utf8'
+  );
+
+  it('同じ短縮バージョンの再ビルドは、止めずに前のファイルを退避する', () => {
+    // It used to fail and ask for the file to be deleted. Both branches of
+    // that message ended in "delete it", while bumping the short version
+    // changed the file name and skipped the deletion -- so the cheap path was
+    // the one that spent a user-facing version, taken four times on
+    // 2026-08-29 by someone who had just read the comment explaining not to.
+    assert.match(script, /mv "\$PKG_PATH" "\$ARCHIVED"/);
+    assert.doesNotMatch(script, /already exists\. Remove it/);
+  });
+
+  it('未署名ビルドは公開できる名前を取らない', () => {
+    // Running it without an installer identity moved the signed, notarised,
+    // already-published 0.5.48 aside and put an unsigned package in its place.
+    assert.match(script, /egressview-agent-\$VERSION-unsigned\.pkg/);
+    const naming = script.indexOf('if [[ -n "$INSTALLER_IDENTITY" ]]');
+    const archiving = script.indexOf('if [[ -e "$PKG_PATH" ]]');
+    assert.ok(naming !== -1 && naming < archiving,
+      'the name must be chosen before anything is moved aside');
+  });
+
+  it('ビルドの最後に、次の一手を述べる', () => {
+    assert.match(script, /raise CFBundleVersion only/);
+  });
+
+  it('README がこの規則を書いている', () => {
+    const readme = fs.readFileSync(path.join(root, 'apps/agent-macos/README.md'), 'utf8');
+    assert.match(readme, /does not look at `CFBundleShortVersionString`/);
+  });
+});
+

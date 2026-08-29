@@ -371,6 +371,19 @@ EGRESSVIEW_NOTARY_PROFILE="$NOTARY_PROFILE_NAME" \
 EGRESSVIEW_INSTALLER_IDENTITY="$INSTALLER_IDENTITY" ./scripts/build-agent-pkg.sh
 ```
 
+### A look at real hardware does not need a new version
+
+`installd` refuses a package whose **`CFBundleVersion`** matches what is
+installed. It does not look at `CFBundleShortVersionString`. Measured
+2026-08-22: 0.5.29 build 91 installed cleanly over 0.5.29 build 90.
+
+So raise `CFBundleVersion` alone to check something on the machine. The short
+version is what people see, and is spent when something is published.
+
+Rebuilding the same short version moves the previous file aside rather than
+stopping to ask, and an unsigned build is written to a `-unsigned.pkg` name so
+it can never take the place of a published one (P3-32).
+
 It reads the version from the built app and writes
 `dist/egressview-agent-<version>.pkg`, notarised and stapled in its own right —
 stapling the app alone is not enough, because a first install from an unstapled

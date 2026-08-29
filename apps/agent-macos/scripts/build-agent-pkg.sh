@@ -66,10 +66,34 @@ VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_P
 # installed, and does not care about the short version. Measured 2026-08-22 --
 # 0.5.29 build 91 installed cleanly over 0.5.29 build 90.
 #
-# So for a trip to the machine, bump the build and delete the previous file.
-# A user-facing version does not have to be spent on every look.
-PKG_PATH="$DIST_DIR/egressview-agent-$VERSION.pkg"
-[[ -e "$PKG_PATH" ]] && fail "$PKG_PATH already exists. Remove it, or bump CFBundleVersion and remove it."
+# So a trip to the machine needs a new build number and nothing else.
+#
+# **This used to stop and ask for the file to be deleted.** Both branches of
+# that message ended in "delete it", while bumping the short version changed
+# the file name and skipped the deletion entirely -- so the cheap path was the
+# one that spent a user-facing version. It was taken four times on 2026-08-29
+# alone (0.5.45 through 0.5.48), by someone who had just read this comment.
+# A rule that argues with the incentive loses.
+BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist")
+
+# An unsigned build never takes the publishable name.
+#
+# Running this without an installer identity on 2026-08-29 moved the signed,
+# notarised, already-published 0.5.48 aside and put an unsigned package in its
+# place. The name that matches what is on the CDN has to keep meaning that.
+if [[ -n "$INSTALLER_IDENTITY" ]]; then
+  PKG_PATH="$DIST_DIR/egressview-agent-$VERSION.pkg"
+else
+  PKG_PATH="$DIST_DIR/egressview-agent-$VERSION-unsigned.pkg"
+fi
+
+# The previous file is moved aside, stamped with its own modification time.
+# Nothing is lost and nobody is asked to do anything.
+if [[ -e "$PKG_PATH" ]]; then
+  ARCHIVED="${PKG_PATH%.pkg}.$(date -r "$PKG_PATH" +%Y%m%d-%H%M%S).pkg"
+  mv "$PKG_PATH" "$ARCHIVED"
+  printf 'Moved the previous %s aside to %s\n' "$(basename "$PKG_PATH")" "$(basename "$ARCHIVED")"
+fi
 
 # The payload is the app alone, installed into /Applications.
 PAYLOAD_DIR="$WORK_DIR/payload"
@@ -266,6 +290,11 @@ if [[ -z "$INSTALLER_IDENTITY" ]]; then
     cp "$BUILT_PKG" "$PKG_PATH"
     printf 'No EGRESSVIEW_INSTALLER_IDENTITY: built an unsigned package for local checking only. Do not publish it.\n' >&2
     printf 'Installer package: %s\n' "$PKG_PATH"
+# Said at the end, where the next decision gets made. A look at the machine
+# needs a new CFBundleVersion; the short version is what people see and is
+# spent when something is published (P3-32).
+printf 'Version %s, build %s. For another look at the machine, raise CFBundleVersion only.\n' \
+  "$VERSION" "$BUILD"
     exit 0
 fi
 
