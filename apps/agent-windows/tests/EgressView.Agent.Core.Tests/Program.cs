@@ -31,7 +31,21 @@ try
         Assert(json.RootElement.GetProperty("database").GetProperty("observationCount").GetInt64() == 20, "diagnostics count");
         Assert(!report.Contains("100.64.0.1", StringComparison.Ordinal), "diagnostics excludes endpoint");
         Assert(!report.Contains("UDP", StringComparison.Ordinal), "diagnostics excludes raw observation");
+        Assert(json.RootElement.GetProperty("health").GetProperty("status").GetString() == "healthy", "healthy state is explicit");
+        var bundle = Path.Combine(directory, "diagnostics.zip");
+        DiagnosticsBundle.Create(bundle, report);
+        using var archive = System.IO.Compression.ZipFile.OpenRead(bundle);
+        Assert(archive.Entries.Select(entry => entry.FullName).ToHashSet(StringComparer.Ordinal)
+                .SetEquals(new[] { "README.txt", "diagnostics.json" }),
+            "diagnostics bundle contains only documented privacy-safe files");
+        using var bundleReader = new StreamReader(archive.GetEntry("diagnostics.json")!.Open());
+        Assert(!bundleReader.ReadToEnd().Contains("100.64.0.1", StringComparison.Ordinal), "bundle excludes endpoint");
     }
+
+    var stoppedHealth = AgentHealth.Evaluate(
+        new CollectorSnapshot("degraded", 10, 0, 0, 1, DateTimeOffset.UtcNow, null, 32, PersistenceError: "disk-full"), "ok");
+    Assert(stoppedHealth.Status == "stopped" && stoppedHealth.Issues.Single().Code == "disk-full",
+        "disk-full health is stopped with actionable reason");
 
     using (var dropStore = new ObservationStore(Path.Combine(directory, "drops.db")))
     {
