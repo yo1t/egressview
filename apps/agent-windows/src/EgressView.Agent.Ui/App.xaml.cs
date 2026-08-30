@@ -8,9 +8,12 @@ public partial class App : System.Windows.Application
 {
     private const string InstanceName = @"Local\EgressView.Agent.Ui";
     private const string ActivationName = @"Local\EgressView.Agent.Ui.Show";
+    private const string ExitName = @"Local\EgressView.Agent.Ui.Exit";
     private Mutex? instanceMutex;
     private EventWaitHandle? activationEvent;
     private RegisteredWaitHandle? activationRegistration;
+    private EventWaitHandle? exitEvent;
+    private RegisteredWaitHandle? exitRegistration;
     private Forms.NotifyIcon? trayIcon;
 
     internal bool IsExiting { get; private set; }
@@ -19,10 +22,18 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
         activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationName);
+        exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ExitName);
         instanceMutex = new Mutex(true, InstanceName, out var firstInstance);
         if (!firstInstance)
         {
-            activationEvent.Set();
+            if (e.Args.Contains("--exit-ui", StringComparer.Ordinal)) exitEvent.Set();
+            else activationEvent.Set();
+            Shutdown();
+            return;
+        }
+
+        if (e.Args.Contains("--exit-ui", StringComparer.Ordinal))
+        {
             Shutdown();
             return;
         }
@@ -33,6 +44,12 @@ public partial class App : System.Windows.Application
         activationRegistration = ThreadPool.RegisterWaitForSingleObject(
             activationEvent,
             (_, _) => Dispatcher.BeginInvoke(ShowMainWindow),
+            null,
+            Timeout.Infinite,
+            false);
+        exitRegistration = ThreadPool.RegisterWaitForSingleObject(
+            exitEvent,
+            (_, _) => Dispatcher.BeginInvoke(ExitUi),
             null,
             Timeout.Infinite,
             false);
@@ -73,8 +90,10 @@ public partial class App : System.Windows.Application
     {
         IsExiting = true;
         activationRegistration?.Unregister(null);
+        exitRegistration?.Unregister(null);
         trayIcon?.Dispose();
         activationEvent?.Dispose();
+        exitEvent?.Dispose();
         instanceMutex?.Dispose();
         base.OnExit(e);
     }
