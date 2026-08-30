@@ -1,16 +1,21 @@
 using System.Windows;
 using System.ComponentModel;
+using System.Text.Json;
 using EgressView.Agent.Core;
 
 namespace EgressView.Agent.Ui;
 
 public partial class MainWindow : Window
 {
+    private readonly AgentEnrollmentClient enrollment = new();
+    private readonly CancellationTokenSource lifetime = new();
+
     public MainWindow()
     {
         InitializeComponent();
         Loaded += async (_, _) => await RequestAsync("""{"v":1,"op":"status"}""");
         Closing += HideToTray;
+        Closed += (_, _) => lifetime.Cancel();
     }
 
     private void HideToTray(object? sender, CancelEventArgs e)
@@ -24,6 +29,67 @@ public partial class MainWindow : Window
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RequestAsync("""{"v":1,"op":"status"}""");
     private async void SevenDays_Click(object sender, RoutedEventArgs e) => await SummaryAsync(7);
     private async void ThirtyDays_Click(object sender, RoutedEventArgs e) => await SummaryAsync(30);
+    private async void Enroll_Click(object sender, RoutedEventArgs e)
+    {
+        if (!Uri.TryCreate(HubUrl.Text.Trim(), UriKind.Absolute, out var hubUrl))
+        {
+            EnrollmentStatus.Text = "Hub URLを確認してください / Check the Hub URL.";
+            return;
+        }
+        EnrollButton.IsEnabled = false;
+        HubUrl.IsEnabled = false;
+        EnrollmentCode.IsEnabled = false;
+        try
+        {
+            EnrollmentStatus.Text = "登録を申請しています / Requesting enrollment…";
+            var metadata = new AgentEnrollmentMetadata(Environment.MachineName, "windows",
+                Environment.OSVersion.VersionString, "0.1.0-dev");
+            var ticket = await enrollment.ApplyAsync(hubUrl, EnrollmentCode.Password, metadata, lifetime.Token);
+            EnrollmentCode.Clear();
+            while (DateTimeOffset.UtcNow <= ticket.ExpiresAt)
+            {
+                EnrollmentStatus.Text = "Hub管理者の承認を待っています / Waiting for Hub administrator approval…";
+                var claim = await enrollment.ClaimOnceAsync(ticket, lifetime.Token);
+                if (claim.Status == EnrollmentClaimStatus.Pending)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(3), lifetime.Token);
+                    continue;
+                }
+                if (claim.Status == EnrollmentClaimStatus.Rejected)
+                    throw new AgentEnrollmentException("declined");
+                if (claim.Status == EnrollmentClaimStatus.Expired || claim.Credential is null)
+                    throw new AgentEnrollmentException("expired");
+                var request = JsonSerializer.Serialize(new { v = 1, op = "save-enrollment", credential = claim.Credential });
+                var response = await AgentIpcClient.RequestAsync(request, lifetime.Token);
+                using var document = JsonDocument.Parse(response);
+                if (document.RootElement.GetProperty("status").GetString() != "ok")
+                    throw new AgentEnrollmentException(document.RootElement.TryGetProperty("reason", out var reason) ? reason.GetString() ?? "credential-storage-failed" : "credential-storage-failed");
+                EnrollmentStatus.Text = "登録が完了しました。資格情報はServiceが安全に保存しました。\r\nEnrollment complete. The Service stored the credential securely.";
+                return;
+            }
+            throw new AgentEnrollmentException("expired");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (AgentEnrollmentException exception) { EnrollmentStatus.Text = EnrollmentMessage(exception.Reason); }
+        catch { EnrollmentStatus.Text = "登録に失敗しました。Hubへの接続を確認してください。\r\nEnrollment failed. Check the Hub connection."; }
+        finally
+        {
+            EnrollButton.IsEnabled = true;
+            HubUrl.IsEnabled = true;
+            EnrollmentCode.IsEnabled = true;
+        }
+    }
+
+    internal static string EnrollmentMessage(string reason) => reason switch
+    {
+        "invalid-hub-url" => "HTTPSのHub URLを入力してください。HTTPはこのPC内だけ使用できます。\r\nEnter an HTTPS Hub URL. HTTP is allowed only on this PC.",
+        "invalid-enrollment-code" => "6文字の登録コードを確認してください。\r\nCheck the six-character enrollment code.",
+        "plaintext-not-accepted" => "Hubが暗号化されていないAgent通信を許可していません。\r\nThe Hub does not accept unencrypted Agent traffic.",
+        "declined" => "Hub管理者がこの申請を拒否しました。\r\nThe Hub administrator declined this request.",
+        "expired" => "登録申請の有効期限が切れました。新しいコードでやり直してください。\r\nThe enrollment request expired. Try again with a new code.",
+        "credential-storage-failed" => "資格情報をServiceへ保存できませんでした。Agent Serviceを確認してください。\r\nCould not store the credential. Check the Agent Service.",
+        _ => "登録に失敗しました。コードとHubの状態を確認してください。\r\nEnrollment failed. Check the code and Hub status.",
+    };
     private Task SummaryAsync(int days) => RequestAsync($"{{\"v\":1,\"op\":\"summary\",\"days\":{days}}}");
     private async Task RequestAsync(string request)
     {
