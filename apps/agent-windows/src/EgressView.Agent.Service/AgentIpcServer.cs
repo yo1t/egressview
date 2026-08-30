@@ -6,12 +6,12 @@ using EgressView.Agent.Core;
 
 namespace EgressView.Agent.Service;
 
-internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnapshot> snapshot, string allowedSid) : IAsyncDisposable
+internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnapshot> snapshot, string allowedSid,
+    WindowsCredentialStore credentialStore) : IAsyncDisposable
 {
     public const string PipeName = "egressview-agent-v1";
     private readonly CancellationTokenSource stop = new();
     private Task? loop;
-    private readonly WindowsCredentialStore credentialStore = new();
 
     public void Start() => loop = Task.Run(ServeAsync);
 
@@ -35,7 +35,13 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
             using var reader = new StreamReader(pipe, Encoding.UTF8, false, 4096, true);
             await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true) { AutoFlush = true };
             var line = await reader.ReadLineAsync(stop.Token);
-            if (line is not null) await writer.WriteLineAsync(IpcProtocol.Handle(line, Status, Summary, credentialStore.Save));
+            if (line is not null) await writer.WriteLineAsync(IpcProtocol.Handle(line, Status, Summary, credentialStore.Save,
+                enabled =>
+                {
+                    if (enabled && credentialStore.Load() is null)
+                        throw new InvalidOperationException("Enrollment is required before delivery can be enabled.");
+                    store.DeliveryEnabled = enabled;
+                }));
         }
     }
 

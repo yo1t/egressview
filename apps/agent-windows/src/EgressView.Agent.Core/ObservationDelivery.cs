@@ -15,6 +15,12 @@ public sealed record DeliveryQueueStatus(long Pending, long ContractRejected, lo
 
 public sealed partial class ObservationStore
 {
+    public bool DeliveryEnabled
+    {
+        get { lock (gate) return ScalarInt64("SELECT delivery_enabled FROM delivery_state WHERE id=1") == 1; }
+        set { lock (gate) Execute($"UPDATE delivery_state SET delivery_enabled={(value ? 1 : 0)} WHERE id=1"); }
+    }
+
     public void QueueForDelivery(IReadOnlyList<NetworkObservation> observations, DateTimeOffset queuedAt, int maximumPending = 10_000)
     {
         if (observations.Count == 0) return;
@@ -24,43 +30,39 @@ public sealed partial class ObservationStore
             Execute("BEGIN IMMEDIATE");
             try
             {
-                foreach (var item in observations)
-                {
-                    if (item.Layer != ObservationLayer.Logical) continue;
-                    if (!IsDeliverable(item))
-                    {
-                        Execute("UPDATE delivery_state SET contract_rejected=contract_rejected+1 WHERE id=1");
-                        continue;
-                    }
-                    var id = Guid.NewGuid().ToString("D");
-                    var stable = Sql(StartupSnapshot.FlowKey(item.Protocol, item.LocalAddress, item.LocalPort,
-                        item.RemoteAddress, item.RemotePort, item.ProcessId));
-                    var process = Sql(item.ProcessName!);
-                    var first = item.ObservedAt.ToUniversalTime().ToString("O");
-                    var sent = item.BytesSent?.ToString() ?? "NULL";
-                    var received = item.BytesReceived?.ToString() ?? "NULL";
-                    Execute($"""
-                        INSERT INTO delivery_queue(delivery_id,stable_key,protocol,local_address,local_port,remote_address,remote_port,
-                          process_id,process_name,first_observed_at,last_observed_at,bytes_in,bytes_out,queued_at,batch_id)
-                        VALUES('{id}','{stable}','{item.Protocol.ToLowerInvariant()}','{Sql(item.LocalAddress)}',{item.LocalPort},
-                          '{Sql(item.RemoteAddress)}',{item.RemotePort},{item.ProcessId},'{process}','{first}','{first}',{received},{sent},'{queuedAt.ToUniversalTime():O}',NULL)
-                        ON CONFLICT(stable_key) WHERE batch_id IS NULL DO UPDATE SET
-                          last_observed_at=excluded.last_observed_at,process_name=excluded.process_name,
-                          bytes_in=CASE WHEN delivery_queue.bytes_in IS NULL OR excluded.bytes_in IS NULL THEN NULL ELSE delivery_queue.bytes_in+excluded.bytes_in END,
-                          bytes_out=CASE WHEN delivery_queue.bytes_out IS NULL OR excluded.bytes_out IS NULL THEN NULL ELSE delivery_queue.bytes_out+excluded.bytes_out END
-                        """);
-                }
-                var overflow = Math.Max(0, ScalarInt64("SELECT COUNT(*) FROM delivery_queue") - maximumPending);
-                if (overflow > 0)
-                {
-                    Execute($"DELETE FROM delivery_queue WHERE delivery_id IN (SELECT delivery_id FROM delivery_queue WHERE batch_id IS NULL ORDER BY queued_at LIMIT {overflow})");
-                    var removed = Math.Max(0, overflow - Math.Max(0, ScalarInt64("SELECT COUNT(*) FROM delivery_queue") - maximumPending));
-                    if (removed > 0) Execute($"UPDATE delivery_state SET queue_overflow=queue_overflow+{removed} WHERE id=1");
-                }
+                QueueForDeliveryWithinTransaction(observations, queuedAt, maximumPending);
                 Execute("COMMIT");
             }
             catch { TryRollback(); throw; }
         }
+    }
+
+    internal void QueueForDeliveryWithinTransaction(IReadOnlyList<NetworkObservation> observations, DateTimeOffset queuedAt, int maximumPending)
+    {
+        foreach (var item in observations)
+        {
+            if (item.Layer != ObservationLayer.Logical) continue;
+            if (!IsDeliverable(item))
+            {
+                Execute("UPDATE delivery_state SET contract_rejected=contract_rejected+1 WHERE id=1");
+                continue;
+            }
+            var id = Guid.NewGuid().ToString("D");
+            var stable = Sql(StartupSnapshot.FlowKey(item.Protocol, item.LocalAddress, item.LocalPort, item.RemoteAddress, item.RemotePort, item.ProcessId));
+            var first = item.ObservedAt.ToUniversalTime().ToString("O");
+            var sent = item.BytesSent?.ToString() ?? "NULL";
+            var received = item.BytesReceived?.ToString() ?? "NULL";
+            Execute($"""
+                INSERT INTO delivery_queue(delivery_id,stable_key,protocol,local_address,local_port,remote_address,remote_port,process_id,process_name,first_observed_at,last_observed_at,bytes_in,bytes_out,queued_at,batch_id)
+                VALUES('{id}','{stable}','{item.Protocol.ToLowerInvariant()}','{Sql(item.LocalAddress)}',{item.LocalPort},'{Sql(item.RemoteAddress)}',{item.RemotePort},{item.ProcessId},'{Sql(item.ProcessName!)}','{first}','{first}',{received},{sent},'{queuedAt.ToUniversalTime():O}',NULL)
+                ON CONFLICT(stable_key) WHERE batch_id IS NULL DO UPDATE SET last_observed_at=excluded.last_observed_at,process_name=excluded.process_name,bytes_in=CASE WHEN delivery_queue.bytes_in IS NULL OR excluded.bytes_in IS NULL THEN NULL ELSE delivery_queue.bytes_in+excluded.bytes_in END,bytes_out=CASE WHEN delivery_queue.bytes_out IS NULL OR excluded.bytes_out IS NULL THEN NULL ELSE delivery_queue.bytes_out+excluded.bytes_out END
+                """);
+        }
+        var overflow = Math.Max(0, ScalarInt64("SELECT COUNT(*) FROM delivery_queue") - maximumPending);
+        if (overflow <= 0) return;
+        Execute($"DELETE FROM delivery_queue WHERE delivery_id IN (SELECT delivery_id FROM delivery_queue WHERE batch_id IS NULL ORDER BY queued_at LIMIT {overflow})");
+        var removed = Math.Max(0, overflow - Math.Max(0, ScalarInt64("SELECT COUNT(*) FROM delivery_queue") - maximumPending));
+        if (removed > 0) Execute($"UPDATE delivery_state SET queue_overflow=queue_overflow+{removed} WHERE id=1");
     }
 
     public DeliveryBatch? PrepareDeliveryBatch(DateTimeOffset sentAt, int limit = 200)

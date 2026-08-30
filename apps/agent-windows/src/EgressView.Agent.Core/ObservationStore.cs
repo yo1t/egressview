@@ -4,7 +4,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 5;
+    private const int CurrentSchemaVersion = 6;
     private const string Version1Schema = """
         CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL);
         INSERT INTO schema_version(version) SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM schema_version);
@@ -99,6 +99,9 @@ public sealed partial class ObservationStore : IDisposable
         );
         INSERT OR IGNORE INTO delivery_state(id) VALUES(1);
         """;
+    private const string Version6Schema = """
+        ALTER TABLE delivery_state ADD COLUMN delivery_enabled INTEGER NOT NULL DEFAULT 0 CHECK(delivery_enabled IN (0,1));
+        """;
 
     private readonly object gate = new();
     private nint db;
@@ -126,7 +129,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -139,7 +142,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 1) { MigrateVersion1To2(); version = 2; }
         if (version == 2) { MigrateVersion2To3(); version = 3; }
         if (version == 3) { MigrateVersion3To4(); version = 4; }
-        if (version == 4) MigrateVersion4To5();
+        if (version == 4) { MigrateVersion4To5(); version = 5; }
+        if (version == 5) MigrateVersion5To6();
         ValidateSchema();
     }
 
@@ -182,6 +186,14 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion5To6()
+    {
+        var backup = $"{path}.pre-v6.bak";
+        if (!File.Exists(backup)) Execute($"VACUUM INTO '{Sql(backup)}'");
+        try { Execute($"BEGIN IMMEDIATE; {Version6Schema} UPDATE schema_version SET version=6 WHERE version=5; COMMIT;"); }
+        catch { TryRollback(); throw; }
+    }
+
     private void EnsureIntegrity()
     {
         var integrity = ScalarText("PRAGMA integrity_check");
@@ -199,9 +211,11 @@ public sealed partial class ObservationStore : IDisposable
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing process identity columns.");
+        if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('delivery_state') WHERE name='delivery_enabled'") != 1)
+            throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing the delivery opt-in state.");
     }
 
-    public void WriteBatch(IReadOnlyList<NetworkObservation> observations)
+    public void WriteBatch(IReadOnlyList<NetworkObservation> observations, bool queueForDelivery = false)
     {
         if (observations.Count == 0) return;
         lock (gate)
@@ -272,6 +286,7 @@ public sealed partial class ObservationStore : IDisposable
                 finally { WinSqlite.Finalize(statement); WinSqlite.Finalize(flowStatement); }
                 foreach (var (key, value) in summaries)
                     Execute($"INSERT INTO hourly_summary(bucket_start,protocol,layer,observation_count,bytes_sent,bytes_received,bytes_unknown) VALUES('{key.Bucket}','{key.Protocol}','{key.Layer}',{value.Count},{value.Sent},{value.Received},{value.Unknown}) ON CONFLICT(bucket_start,protocol,layer) DO UPDATE SET observation_count=observation_count+excluded.observation_count,bytes_sent=bytes_sent+excluded.bytes_sent,bytes_received=bytes_received+excluded.bytes_received,bytes_unknown=bytes_unknown+excluded.bytes_unknown");
+                if (queueForDelivery) QueueForDeliveryWithinTransaction(observations, DateTimeOffset.UtcNow, 10_000);
                 Execute("COMMIT");
             }
             catch

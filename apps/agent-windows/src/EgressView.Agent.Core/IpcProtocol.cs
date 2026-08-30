@@ -7,7 +7,7 @@ public static class IpcProtocol
     public const int Version = 1;
 
     public static string Handle(string request, Func<string> status, Func<int, IReadOnlyList<HourlySummary>> summary,
-        Action<AgentCredential>? saveCredential = null)
+        Action<AgentCredential>? saveCredential = null, Action<bool>? setDeliveryEnabled = null)
     {
         try
         {
@@ -21,10 +21,20 @@ public static class IpcProtocol
                 "status" => Status(status),
                 "summary" => Summary(root, summary),
                 "save-enrollment" => SaveEnrollment(root, saveCredential),
+                "set-delivery-enabled" => SetDeliveryEnabled(root, setDeliveryEnabled),
                 _ => Reject("unknown-operation"),
             };
         }
         catch (Exception) { return Reject("malformed-request"); }
+    }
+
+    private static string SetDeliveryEnabled(JsonElement root, Action<bool>? set)
+    {
+        if (set is null || !root.TryGetProperty("enabled", out var value) || value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            return Reject("invalid-delivery-setting");
+        try { set(value.GetBoolean()); }
+        catch { return Reject("delivery-setting-failed"); }
+        return JsonSerializer.Serialize(new { status = "ok", enabled = value.GetBoolean() });
     }
 
     private static string SaveEnrollment(JsonElement root, Action<AgentCredential>? save)

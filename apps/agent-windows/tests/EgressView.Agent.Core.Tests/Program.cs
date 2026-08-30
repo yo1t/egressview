@@ -119,15 +119,17 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 5, "v1 database migrates through v2, v3, v4, and v5");
+        Assert(migrated.SchemaVersion == 6, "v1 database migrates through v2, v3, v4, v5, and v6");
+        Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     Assert(File.Exists($"{legacyDatabase}.pre-v2.bak"), "migration creates a consistent pre-v2 backup");
     Assert(File.Exists($"{legacyDatabase}.pre-v3.bak"), "migration creates a consistent pre-v3 backup");
     Assert(File.Exists($"{legacyDatabase}.pre-v4.bak"), "migration creates a consistent pre-v4 backup");
     Assert(File.Exists($"{legacyDatabase}.pre-v5.bak"), "migration creates a consistent pre-v5 backup");
+    Assert(File.Exists($"{legacyDatabase}.pre-v6.bak"), "migration creates a consistent pre-v6 backup");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 5, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 6, "migration is idempotent on restart");
 
     Assert(ProcessNameResolver.Resolve(Environment.ProcessId) is { Length: > 0 }, "current process name resolves");
 
@@ -153,6 +155,11 @@ try
     Assert(!saveResponse.Contains(agentToken, StringComparison.Ordinal), "IPC never echoes the credential token");
     var failedSave = IpcProtocol.Handle(saveRequest, () => "{}", _ => [], _ => throw new IOException("vault unavailable"));
     Assert(failedSave.Contains("credential-storage-failed", StringComparison.Ordinal) && !failedSave.Contains(agentToken, StringComparison.Ordinal), "credential storage failure is actionable and secret-free");
+    bool? deliveryEnabled = null;
+    var enableResponse = IpcProtocol.Handle("""{"v":1,"op":"set-delivery-enabled","enabled":true}""", () => "{}", _ => [], null, value => deliveryEnabled = value);
+    Assert(enableResponse.Contains("\"status\":\"ok\"", StringComparison.Ordinal) && deliveryEnabled == true, "authenticated IPC changes explicit delivery opt-in");
+    Assert(IpcProtocol.Handle("""{"v":1,"op":"set-delivery-enabled","enabled":"yes"}""", () => "{}", _ => [], null, _ => { }).Contains("invalid-delivery-setting", StringComparison.Ordinal),
+        "delivery opt-in rejects ambiguous values");
     await AssertEnrollmentFailure(() => enrollment.ApplyAsync(new Uri("http://hub.example/"), "ABC234",
         new("host", "windows", "Windows", "dev")), "invalid-hub-url", "plaintext remote Hub is rejected client-side");
 
@@ -197,6 +204,22 @@ try
         Assert(deliveryHandler.SawEtwCollector && deliveryHandler.SawProcessId && deliveryHandler.SawBearer, "Windows payload and Agent bearer match the Hub contract");
     }
 
+    var optInDatabase = Path.Combine(directory, "delivery-opt-in.db");
+    using (var optInStore = new ObservationStore(optInDatabase))
+    {
+        var observation = new NetworkObservation(deliveryStarted, 99, "TCP", "10.0.0.1", 54000,
+            "203.0.113.10", 443, 10, 20, ObservationLayer.Logical, "if", "etw", "Browser");
+        await using (var disabledPipeline = new ObservationPipeline(optInStore, deliveryEnabled: () => optInStore.DeliveryEnabled))
+            Assert(disabledPipeline.TrySubmit(observation), "collection remains active while delivery is off");
+        Assert(optInStore.ReadDeliveryStatus().Pending == 0, "delivery off does not queue observations");
+        optInStore.DeliveryEnabled = true;
+        await using (var enabledPipeline = new ObservationPipeline(optInStore, deliveryEnabled: () => optInStore.DeliveryEnabled))
+            Assert(enabledPipeline.TrySubmit(observation), "opted-in observation is accepted");
+        Assert(optInStore.ReadDeliveryStatus().Pending == 1, "delivery on queues persisted observations");
+    }
+    using (var reopenedOptIn = new ObservationStore(optInDatabase))
+        Assert(reopenedOptIn.DeliveryEnabled, "explicit delivery opt-in survives service restart");
+
     using (var summaryStore = new ObservationStore(Path.Combine(directory, "summary.db")))
     {
         var hour = new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero);
@@ -222,9 +245,10 @@ try
         var largeBatch = Enumerable.Range(0, 10_000).Select(index => new NetworkObservation(
             DateTimeOffset.UtcNow, 8, "UDP", "127.0.0.1", 40_000 + index,
             "127.0.0.2", 443, 1, 0, ObservationLayer.Logical, null, "etw")).ToArray();
-        AssertStoreFailure(() => fullStore.WriteBatch(largeBatch), StoreFailureKind.DiskFull,
+        AssertStoreFailure(() => fullStore.WriteBatch(largeBatch, queueForDelivery: true), StoreFailureKind.DiskFull,
             "disk full is classified explicitly");
-        Assert(fullStore.Inspect().Count == 0, "disk-full batch rolls back without partial rows");
+        Assert(fullStore.Inspect().Count == 0 && fullStore.ReadDeliveryStatus().Pending == 0,
+            "disk-full batch atomically rolls back local history and delivery queue");
     }
 
     var pipelineFullDatabase = Path.Combine(directory, "pipeline-full.db");
