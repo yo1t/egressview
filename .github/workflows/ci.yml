@@ -32,6 +32,17 @@ jobs:
         working-directory: apps/agent-windows
         run: dotnet build EgressViewAgent.Windows.slnx -c Release
 
+      - name: Parse Windows Agent PowerShell scripts
+        shell: pwsh
+        run: |
+          $errors = @()
+          Get-ChildItem apps/agent-windows/scripts -Filter *.ps1 | ForEach-Object {
+            $fileErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$fileErrors)
+            $errors += $fileErrors
+          }
+          if ($errors.Count) { $errors | Format-List; exit 1 }
+
       - name: Test persistence, bounded drops, and privacy-safe diagnostics
         working-directory: apps/agent-windows
         run: dotnet run --project tests/EgressView.Agent.Core.Tests -c Release --no-build
