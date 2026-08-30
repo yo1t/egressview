@@ -54,7 +54,7 @@ const agentObservationSchema = z.object({
   lastObservedAt: isoTimestamp,
   bytesIn: uint64Decimal.nullable(),
   bytesOut: uint64Decimal.nullable(),
-  collector: z.enum(['network-extension', 'libproc']),
+  collector: z.enum(['network-extension', 'libproc', 'etw']),
   confidence: z.enum(['exact', 'sampled']),
 }).strict().superRefine((observation, ctx) => {
   if (Date.parse(observation.firstObservedAt) > Date.parse(observation.lastObservedAt)) {
