@@ -54,9 +54,10 @@ public static class StartupSnapshot
             // A listening socket is not an egress connection. Startup coverage
             // exists to fill the gap for connections already carrying traffic.
             if (state != 5) continue; // MIB_TCP_STATE_ESTAB
+            var pid = BitConverter.ToInt32(buffer, offset + (family == AfInet ? 20 : 52));
             yield return family == AfInet
-                ? new StartupFlow("TCP", V4(buffer, offset + 4), Port(buffer, offset + 8), V4(buffer, offset + 12), Port(buffer, offset + 16), BitConverter.ToInt32(buffer, offset + 20))
-                : new StartupFlow("TCP", V6(buffer, offset), Port(buffer, offset + 20), V6(buffer, offset + 24), Port(buffer, offset + 44), BitConverter.ToInt32(buffer, offset + 52));
+                ? new StartupFlow("TCP", V4(buffer, offset + 4), Port(buffer, offset + 8), V4(buffer, offset + 12), Port(buffer, offset + 16), pid, ProcessNameResolver.Resolve(pid))
+                : new StartupFlow("TCP", V6(buffer, offset), Port(buffer, offset + 20), V6(buffer, offset + 24), Port(buffer, offset + 44), pid, ProcessNameResolver.Resolve(pid));
         }
     }
 
@@ -68,9 +69,10 @@ public static class StartupSnapshot
         {
             var offset = 4 + index * rowSize;
             if (offset + rowSize > buffer.Length) yield break;
+            var pid = BitConverter.ToInt32(buffer, offset + (family == AfInet ? 8 : 24));
             yield return family == AfInet
-                ? new StartupFlow("UDP", V4(buffer, offset), Port(buffer, offset + 4), "", 0, BitConverter.ToInt32(buffer, offset + 8))
-                : new StartupFlow("UDP", V6(buffer, offset), Port(buffer, offset + 20), "", 0, BitConverter.ToInt32(buffer, offset + 24));
+                ? new StartupFlow("UDP", V4(buffer, offset), Port(buffer, offset + 4), "", 0, pid, ProcessNameResolver.Resolve(pid))
+                : new StartupFlow("UDP", V6(buffer, offset), Port(buffer, offset + 20), "", 0, pid, ProcessNameResolver.Resolve(pid));
         }
     }
 

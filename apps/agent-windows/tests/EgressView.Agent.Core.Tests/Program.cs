@@ -14,7 +14,7 @@ try
         {
             Assert(pipeline.TrySubmit(new NetworkObservation(
                 DateTimeOffset.UtcNow, 42, "UDP", "100.64.0.1", 50_000 + index,
-                "100.64.0.2", 443, 512, null, ObservationLayer.Logical, "63", "etw")), "observation accepted");
+                "100.64.0.2", 443, 512, null, ObservationLayer.Logical, "63", "etw", "TestApp")), "observation accepted");
         }
     }
 
@@ -23,6 +23,7 @@ try
         var inspection = reopened.Inspect();
         Assert(inspection.Count == 20, "restart preserves all observations");
         Assert(inspection.Integrity == "ok", "integrity check is ok");
+        Assert(reopened.ReadProcessNameStats() == (20, 0), "process names survive restart");
 
         var report = DiagnosticsReport.Create(
             new CollectorSnapshot("healthy", 20, 20, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 32),
@@ -31,6 +32,7 @@ try
         Assert(json.RootElement.GetProperty("database").GetProperty("observationCount").GetInt64() == 20, "diagnostics count");
         Assert(!report.Contains("100.64.0.1", StringComparison.Ordinal), "diagnostics excludes endpoint");
         Assert(!report.Contains("UDP", StringComparison.Ordinal), "diagnostics excludes raw observation");
+        Assert(!report.Contains("TestApp", StringComparison.Ordinal), "diagnostics excludes process names");
         Assert(json.RootElement.GetProperty("health").GetProperty("status").GetString() == "healthy", "healthy state is explicit");
         var bundle = Path.Combine(directory, "diagnostics.zip");
         DiagnosticsBundle.Create(bundle, report);
@@ -85,19 +87,20 @@ try
         var started = DateTimeOffset.UtcNow;
         var snapshot = new[]
         {
-            new StartupFlow("TCP", "10.0.0.1", 50000, "10.0.0.2", 443, 99),
-            new StartupFlow("TCP", "10.0.0.1", 50001, "10.0.0.3", 443, 99),
+            new StartupFlow("TCP", "10.0.0.1", 50000, "10.0.0.2", 443, 99, "SnapshotApp"),
+            new StartupFlow("TCP", "10.0.0.1", 50001, "10.0.0.3", 443, 99, "SnapshotApp"),
         };
         var firstCoverage = coverageStore.BeginCoverage(snapshot, started);
         await using (var flowPipeline = new ObservationPipeline(coverageStore))
         {
             Assert(flowPipeline.TrySubmit(new NetworkObservation(started.AddSeconds(1), 99, "TCP",
                 "10.0.0.1", 50000, "10.0.0.2", 443, 128, 0,
-                ObservationLayer.Logical, "test", "etw")), "ETW flow accepted");
+                ObservationLayer.Logical, "test", "etw", "EtwApp")), "ETW flow accepted");
         }
         var flowStats = coverageStore.ReadFlowStats();
         Assert(flowStats.Total == 2 && flowStats.Both == 1 && flowStats.Snapshot == 1, "snapshot and ETW upsert to one flow");
         Assert(flowStats.BytesUnknown == 1, "snapshot-only bytes remain unknown");
+        Assert(coverageStore.ReadProcessNameStats() == (2, 0), "snapshot and ETW process names are retained");
         coverageStore.EndCoverage(firstCoverage, started.AddSeconds(2));
         Assert(coverageStore.ReadCoverage() == (1, 0, 0), "normal coverage closes");
         coverageStore.BeginCoverage(snapshot, started.AddSeconds(3));
@@ -113,13 +116,16 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 3, "v1 database migrates through v2 to v3");
+        Assert(migrated.SchemaVersion == 4, "v1 database migrates through v2, v3, and v4");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     Assert(File.Exists($"{legacyDatabase}.pre-v2.bak"), "migration creates a consistent pre-v2 backup");
     Assert(File.Exists($"{legacyDatabase}.pre-v3.bak"), "migration creates a consistent pre-v3 backup");
+    Assert(File.Exists($"{legacyDatabase}.pre-v4.bak"), "migration creates a consistent pre-v4 backup");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 3, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 4, "migration is idempotent on restart");
+
+    Assert(ProcessNameResolver.Resolve(Environment.ProcessId) is { Length: > 0 }, "current process name resolves");
 
     using (var summaryStore = new ObservationStore(Path.Combine(directory, "summary.db")))
     {

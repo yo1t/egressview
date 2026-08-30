@@ -18,7 +18,8 @@ public sealed record NetworkObservation(
     long? BytesReceived,
     ObservationLayer Layer,
     string? InterfaceId,
-    string Source);
+    string Source,
+    string? ProcessName = null);
 
 public sealed record StartupFlow(
     string Protocol,
@@ -26,7 +27,8 @@ public sealed record StartupFlow(
     int LocalPort,
     string RemoteAddress,
     int RemotePort,
-    int ProcessId);
+    int ProcessId,
+    string? ProcessName = null);
 
 public sealed record HourlySummary(
     DateTimeOffset BucketStart,
