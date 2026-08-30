@@ -9,9 +9,14 @@ UI、Named Pipe IPC、MSIはまだ含みません。
 起動時にIP HelperのTCP/UDP tableを一度取得し、`flows`へETWとupsertします。snapshotだけのflowは
 バイト数をNULLのまま保持します。`coverage_sessions`は正常停止と強制終了を区別します。
 
+DB migrationはトランザクション内で行い、変更前に`.pre-v2.bak`を作成します。破損DBは空DBとして
+作り直さず起動を停止します。disk fullなどの永続化失敗後は新規観測の受付を停止し、診断の
+`collector.persistenceError`へ理由を残します。
+
 ```powershell
 dotnet build EgressViewAgent.Windows.slnx -c Release
 dotnet run --project tests/EgressView.Agent.Core.Tests -c Release
+dotnet run --project tests/EgressView.Agent.Core.Tests -c Release -- --million
 dotnet run --project src/EgressView.Agent.Service -c Release -- --console --seconds 15 --data .\agent.db --diagnostics .\diagnostics.json
 dotnet run --project src/EgressView.Agent.Service -c Release -- --inspect --data .\agent.db
 ```

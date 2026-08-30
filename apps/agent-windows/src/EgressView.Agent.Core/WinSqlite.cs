@@ -7,6 +7,9 @@ internal static partial class WinSqlite
     internal const int Ok = 0;
     internal const int Row = 100;
     internal const int Done = 101;
+    internal const int Corrupt = 11;
+    internal const int Full = 13;
+    internal const int NotADatabase = 26;
     internal const int OpenReadWrite = 0x00000002;
     internal const int OpenCreate = 0x00000004;
     internal const int OpenFullMutex = 0x00010000;
@@ -25,6 +28,9 @@ internal static partial class WinSqlite
 
     [LibraryImport("winsqlite3", EntryPoint = "sqlite3_errmsg")]
     internal static partial nint ErrorMessage(nint db);
+
+    [LibraryImport("winsqlite3", EntryPoint = "sqlite3_extended_errcode")]
+    internal static partial int ExtendedErrorCode(nint db);
 
     [LibraryImport("winsqlite3", EntryPoint = "sqlite3_prepare_v2", StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int Prepare(nint db, string sql, int bytes, out nint statement, nint tail);

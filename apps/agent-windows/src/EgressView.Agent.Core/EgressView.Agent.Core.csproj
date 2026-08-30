@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.6" />
+    <InternalsVisibleTo Include="EgressView.Agent.Core.Tests" />
   </ItemGroup>
 </Project>

@@ -42,4 +42,19 @@ public sealed record CollectorSnapshot(
     long EtwEventsIgnored = 0,
     long InterfaceUnresolved = 0,
     int EtwEventsLost = 0,
-    string? CollectorError = null);
+    string? CollectorError = null,
+    string? PersistenceError = null);
+
+public enum StoreFailureKind
+{
+    Unknown,
+    Corrupt,
+    DiskFull,
+    SchemaInvalid,
+    SchemaTooNew,
+}
+
+public sealed class ObservationStoreException(StoreFailureKind kind, string message) : InvalidOperationException(message)
+{
+    public StoreFailureKind Kind { get; } = kind;
+}

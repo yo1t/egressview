@@ -35,13 +35,14 @@ internal static class Program
         await using var collector = new EtwNetworkCollector(pipeline);
         try { collector.Start(); }
         catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 2; }
-        await Task.Delay(TimeSpan.FromSeconds(seconds));
-        store.EndCoverage(coverageId, DateTimeOffset.UtcNow);
-        var diagnostics = DiagnosticsReport.Create(collector.Enrich(pipeline.Snapshot()), store, "0.1.0-dev");
+        await Task.WhenAny(Task.Delay(TimeSpan.FromSeconds(seconds)), pipeline.Completion);
+        var snapshotAfterRun = collector.Enrich(pipeline.Snapshot());
+        if (snapshotAfterRun.PersistenceFailures == 0) store.EndCoverage(coverageId, DateTimeOffset.UtcNow);
+        var diagnostics = DiagnosticsReport.Create(snapshotAfterRun, store, "0.1.0-dev");
         Console.WriteLine(diagnostics);
         if (Argument(args, "--diagnostics") is { } diagnosticsPath)
             File.WriteAllText(diagnosticsPath, diagnostics);
-        return collector.Error is null && collector.EventsLost == 0 ? 0 : 3;
+        return collector.Error is null && collector.EventsLost == 0 && snapshotAfterRun.PersistenceFailures == 0 ? 0 : 3;
     }
 
     internal static string? Argument(string[] args, string name)
@@ -89,7 +90,19 @@ internal sealed class AgentWindowsService : ServiceBase
         await using var pipeline = new ObservationPipeline(store);
         await using var collector = new EtwNetworkCollector(pipeline);
         collector.Start();
-        try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
+        Task lifetime;
+        try
+        {
+            lifetime = Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            var completed = await Task.WhenAny(lifetime, pipeline.Completion);
+            if (completed == pipeline.Completion)
+            {
+                var snapshotAfterFailure = pipeline.Snapshot();
+                if (snapshotAfterFailure.PersistenceFailures > 0)
+                    throw new InvalidOperationException($"Persistence stopped: {snapshotAfterFailure.PersistenceError ?? "unknown"}");
+            }
+            await lifetime;
+        }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         store.EndCoverage(coverageId, DateTimeOffset.UtcNow);
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),

@@ -12,6 +12,8 @@ public sealed class ObservationPipeline : IAsyncDisposable
     private long accepted, persisted, queueFullDrops, persistenceFailures;
     private long flushedQueueFullDrops, flushedPersistenceFailures;
     private long lastObservedTicks, lastPersistedTicks;
+    private string? persistenceError;
+    private int persistenceStopped;
 
     public ObservationPipeline(ObservationStore store, int capacity = 65_536, int batchSize = 256)
     {
@@ -29,9 +31,11 @@ public sealed class ObservationPipeline : IAsyncDisposable
     }
 
     public int QueueCapacity { get; }
+    public Task Completion => writer;
 
     public bool TrySubmit(NetworkObservation observation)
     {
+        if (Volatile.Read(ref persistenceStopped) != 0) return false;
         if (!channel.Writer.TryWrite(observation))
         {
             Interlocked.Increment(ref queueFullDrops);
@@ -46,7 +50,8 @@ public sealed class ObservationPipeline : IAsyncDisposable
         persistenceFailures == 0 ? "healthy" : "degraded",
         Interlocked.Read(ref accepted), Interlocked.Read(ref persisted),
         Interlocked.Read(ref queueFullDrops), Interlocked.Read(ref persistenceFailures),
-        FromTicks(Interlocked.Read(ref lastObservedTicks)), FromTicks(Interlocked.Read(ref lastPersistedTicks)), QueueCapacity);
+        FromTicks(Interlocked.Read(ref lastObservedTicks)), FromTicks(Interlocked.Read(ref lastPersistedTicks)), QueueCapacity,
+        PersistenceError: Volatile.Read(ref persistenceError));
 
     private async Task WriteLoopAsync()
     {
@@ -64,9 +69,15 @@ public sealed class ObservationPipeline : IAsyncDisposable
                     Interlocked.Exchange(ref lastPersistedTicks, DateTimeOffset.UtcNow.UtcTicks);
                     FlushCounters();
                 }
-                catch
+                catch (Exception exception)
                 {
                     Interlocked.Increment(ref persistenceFailures);
+                    Volatile.Write(ref persistenceError, exception is ObservationStoreException storeError
+                        ? PersistenceCode(storeError.Kind)
+                        : "unknown");
+                    Volatile.Write(ref persistenceStopped, 1);
+                    channel.Writer.TryComplete();
+                    break;
                 }
                 batch.Clear();
             }
@@ -78,7 +89,7 @@ public sealed class ObservationPipeline : IAsyncDisposable
     {
         channel.Writer.TryComplete();
         await writer.WaitAsync(TimeSpan.FromSeconds(10));
-        FlushCounters();
+        if (Volatile.Read(ref persistenceStopped) == 0) FlushCounters();
         stop.Dispose();
     }
 
@@ -99,4 +110,11 @@ public sealed class ObservationPipeline : IAsyncDisposable
     }
 
     private static DateTimeOffset? FromTicks(long ticks) => ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+    private static string PersistenceCode(StoreFailureKind kind) => kind switch
+    {
+        StoreFailureKind.DiskFull => "disk-full",
+        StoreFailureKind.SchemaInvalid => "schema-invalid",
+        StoreFailureKind.SchemaTooNew => "schema-too-new",
+        _ => kind.ToString().ToLowerInvariant(),
+    };
 }
