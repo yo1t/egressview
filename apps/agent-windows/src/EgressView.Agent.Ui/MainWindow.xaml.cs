@@ -1,11 +1,26 @@
 using System.Windows;
+using System.ComponentModel;
 using EgressView.Agent.Core;
 
 namespace EgressView.Agent.Ui;
 
 public partial class MainWindow : Window
 {
-    public MainWindow() { InitializeComponent(); Loaded += async (_, _) => await RequestAsync("""{"v":1,"op":"status"}"""); }
+    public MainWindow()
+    {
+        InitializeComponent();
+        Loaded += async (_, _) => await RequestAsync("""{"v":1,"op":"status"}""");
+        Closing += HideToTray;
+    }
+
+    private void HideToTray(object? sender, CancelEventArgs e)
+    {
+        if (System.Windows.Application.Current is App { IsExiting: false })
+        {
+            e.Cancel = true;
+            Hide();
+        }
+    }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RequestAsync("""{"v":1,"op":"status"}""");
     private async void SevenDays_Click(object sender, RoutedEventArgs e) => await SummaryAsync(7);
     private async void ThirtyDays_Click(object sender, RoutedEventArgs e) => await SummaryAsync(30);
