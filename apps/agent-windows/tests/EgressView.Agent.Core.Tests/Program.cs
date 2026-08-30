@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using System.Text.Json;
 using EgressView.Agent.Core;
 
@@ -127,6 +129,31 @@ try
 
     Assert(ProcessNameResolver.Resolve(Environment.ProcessId) is { Length: > 0 }, "current process name resolves");
 
+    var requestId = Guid.NewGuid();
+    var agentId = Guid.NewGuid();
+    var claimSecret = "egvc_" + new string('a', 64);
+    var agentToken = "egva_" + new string('b', 64);
+    var enrollmentHandler = new EnrollmentHandler(
+        new(HttpStatusCode.Accepted, $"{{\"requestId\":\"{requestId}\",\"claimSecret\":\"{claimSecret}\",\"expiresAt\":{DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeMilliseconds()}}}"),
+        new(HttpStatusCode.Created, $"{{\"status\":\"approved\",\"token\":\"{agentToken}\",\"agentId\":\"{agentId}\"}}"));
+    var enrollment = new AgentEnrollmentClient(new HttpClient(enrollmentHandler));
+    var ticket = await enrollment.ApplyAsync(new Uri("https://hub.example/"), " abc234 ",
+        new(Environment.MachineName, "windows", Environment.OSVersion.VersionString, "0.1.0-dev"));
+    Assert(ticket.RequestId == requestId && !ticket.ToString().Contains(claimSecret, StringComparison.Ordinal), "enrollment returns a redacted pending ticket");
+    var claim = await enrollment.ClaimOnceAsync(ticket);
+    Assert(claim.Status == EnrollmentClaimStatus.Approved && claim.Credential?.AgentId == agentId, "approved enrollment returns the Agent credential");
+    Assert(!claim.Credential!.ToString().Contains(agentToken, StringComparison.Ordinal), "credential text always redacts the token");
+    Assert(!enrollmentHandler.SawAuthorization, "enrollment never sends an existing bearer");
+    AgentCredential? savedCredential = null;
+    var saveRequest = JsonSerializer.Serialize(new { v = 1, op = "save-enrollment", credential = claim.Credential });
+    var saveResponse = IpcProtocol.Handle(saveRequest, () => "{}", _ => [], value => savedCredential = value);
+    Assert(saveResponse.Contains("\"status\":\"ok\"", StringComparison.Ordinal) && savedCredential?.AgentId == agentId, "authenticated IPC accepts a validated credential without echoing it");
+    Assert(!saveResponse.Contains(agentToken, StringComparison.Ordinal), "IPC never echoes the credential token");
+    var failedSave = IpcProtocol.Handle(saveRequest, () => "{}", _ => [], _ => throw new IOException("vault unavailable"));
+    Assert(failedSave.Contains("credential-storage-failed", StringComparison.Ordinal) && !failedSave.Contains(agentToken, StringComparison.Ordinal), "credential storage failure is actionable and secret-free");
+    await AssertEnrollmentFailure(() => enrollment.ApplyAsync(new Uri("http://hub.example/"), "ABC234",
+        new("host", "windows", "Windows", "dev")), "invalid-hub-url", "plaintext remote Hub is rejected client-side");
+
     using (var summaryStore = new ObservationStore(Path.Combine(directory, "summary.db")))
     {
         var hour = new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero);
@@ -215,4 +242,26 @@ static void AssertStoreFailure(Action action, StoreFailureKind expected, string 
     try { action(); }
     catch (ObservationStoreException exception) when (exception.Kind == expected) { return; }
     throw new InvalidOperationException($"FAILED: {message}");
+}
+
+static async Task AssertEnrollmentFailure(Func<Task> action, string reason, string message)
+{
+    try { await action(); }
+    catch (AgentEnrollmentException exception) when (exception.Reason == reason) { return; }
+    throw new InvalidOperationException($"FAILED: {message}");
+}
+
+sealed class EnrollmentHandler(params (HttpStatusCode Status, string Body)[] responses) : HttpMessageHandler
+{
+    private readonly Queue<(HttpStatusCode Status, string Body)> responses = new(responses);
+    public List<HttpRequestMessage> Requests { get; } = [];
+    public bool SawAuthorization { get; private set; }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        SawAuthorization |= request.Headers.Authorization is not null;
+        Requests.Add(new HttpRequestMessage(request.Method, request.RequestUri) { Content = new StringContent(await request.Content!.ReadAsStringAsync(cancellationToken)) });
+        var response = responses.Dequeue();
+        return new HttpResponseMessage(response.Status) { Content = new StringContent(response.Body, Encoding.UTF8, "application/json") };
+    }
 }
