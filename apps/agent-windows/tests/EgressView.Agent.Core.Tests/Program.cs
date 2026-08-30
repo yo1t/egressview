@@ -131,15 +131,15 @@ try
 
     var requestId = Guid.NewGuid();
     var agentId = Guid.NewGuid();
-    var claimSecret = "egvc_" + new string('a', 64);
+    var claimProof = "egvc_" + new string('a', 64);
     var agentToken = "egva_" + new string('b', 64);
     var enrollmentHandler = new EnrollmentHandler(
-        new(HttpStatusCode.Accepted, $"{{\"requestId\":\"{requestId}\",\"claimSecret\":\"{claimSecret}\",\"expiresAt\":{DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeMilliseconds()}}}"),
+        new(HttpStatusCode.Accepted, $"{{\"requestId\":\"{requestId}\",\"claimSecret\":\"{claimProof}\",\"expiresAt\":{DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeMilliseconds()}}}"),
         new(HttpStatusCode.Created, $"{{\"status\":\"approved\",\"token\":\"{agentToken}\",\"agentId\":\"{agentId}\"}}"));
     var enrollment = new AgentEnrollmentClient(new HttpClient(enrollmentHandler));
     var ticket = await enrollment.ApplyAsync(new Uri("https://hub.example/"), " abc234 ",
         new(Environment.MachineName, "windows", Environment.OSVersion.VersionString, "0.1.0-dev"));
-    Assert(ticket.RequestId == requestId && !ticket.ToString().Contains(claimSecret, StringComparison.Ordinal), "enrollment returns a redacted pending ticket");
+    Assert(ticket.RequestId == requestId && !ticket.ToString().Contains(claimProof, StringComparison.Ordinal), "enrollment returns a redacted pending ticket");
     var claim = await enrollment.ClaimOnceAsync(ticket);
     Assert(claim.Status == EnrollmentClaimStatus.Approved && claim.Credential?.AgentId == agentId, "approved enrollment returns the Agent credential");
     Assert(!claim.Credential!.ToString().Contains(agentToken, StringComparison.Ordinal), "credential text always redacts the token");
