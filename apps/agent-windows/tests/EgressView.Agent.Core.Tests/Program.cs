@@ -84,12 +84,26 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 2, "v1 database migrates to v2");
+        Assert(migrated.SchemaVersion == 3, "v1 database migrates through v2 to v3");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     Assert(File.Exists($"{legacyDatabase}.pre-v2.bak"), "migration creates a consistent pre-v2 backup");
+    Assert(File.Exists($"{legacyDatabase}.pre-v3.bak"), "migration creates a consistent pre-v3 backup");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 2, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 3, "migration is idempotent on restart");
+
+    using (var summaryStore = new ObservationStore(Path.Combine(directory, "summary.db")))
+    {
+        var hour = new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero);
+        summaryStore.WriteBatch(new[]
+        {
+            new NetworkObservation(hour.AddMinutes(1), 1, "TCP", "10.0.0.1", 1, "10.0.0.2", 443, 10, 20, ObservationLayer.Logical, null, "etw"),
+            new NetworkObservation(hour.AddMinutes(2), 1, "TCP", "10.0.0.1", 1, "10.0.0.2", 443, null, null, ObservationLayer.Logical, null, "etw"),
+        });
+        var summary = summaryStore.ReadHourlySummary(hour, hour.AddHours(1)).Single();
+        Assert(summary.ObservationCount == 2 && summary.BytesSent == 10 && summary.BytesReceived == 20 && summary.BytesUnknown == 1,
+            "hourly summary preserves counts, bytes, and unknown bytes");
+    }
 
     var corruptDatabase = Path.Combine(directory, "corrupt.db");
     File.WriteAllBytes(corruptDatabase, "this is not a sqlite database"u8.ToArray());
@@ -134,13 +148,18 @@ try
         for (var offset = 0; offset < 1_000_000; offset += 1_000)
         {
             var batch = Enumerable.Range(offset, 1_000).Select(index => new NetworkObservation(
-                started.AddTicks(index), 9, "TCP", "10.0.0.1", 50_000,
+                started.AddSeconds(index * (30d * 24 * 60 * 60 / 1_000_000)), 9, "TCP", "10.0.0.1", 50_000,
                 "10.0.0.2", 443, 1, 1, ObservationLayer.Logical, "scale", "etw")).ToArray();
             scaleStore.WriteBatch(batch);
         }
         var scale = scaleStore.Inspect();
         Assert(scale.Count == 1_000_000 && scale.Integrity == "ok", "one-million-row database remains complete and valid");
-        Console.WriteLine($"SCALE: 1,000,000 rows in {(DateTimeOffset.UtcNow - started).TotalSeconds:F1}s, {new FileInfo(scaleDatabase).Length} bytes");
+        var queryStarted = DateTimeOffset.UtcNow;
+        var thirtyDays = scaleStore.ReadHourlySummary(started, started.AddDays(31));
+        var queryMilliseconds = (DateTimeOffset.UtcNow - queryStarted).TotalMilliseconds;
+        Assert(thirtyDays.Sum(row => row.ObservationCount) == 1_000_000, "30-day summary covers all million observations");
+        Assert(queryMilliseconds < 1_000, "30-day summary query completes under one second");
+        Console.WriteLine($"SCALE: 1,000,000 rows, 30-day summary {queryMilliseconds:F1}ms, {new FileInfo(scaleDatabase).Length} bytes");
     }
 
     Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics");

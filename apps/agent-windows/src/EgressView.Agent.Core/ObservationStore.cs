@@ -4,7 +4,7 @@ namespace EgressView.Agent.Core;
 
 public sealed class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 3;
     private const string Version1Schema = """
         CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL);
         INSERT INTO schema_version(version) SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM schema_version);
@@ -55,6 +55,18 @@ public sealed class ObservationStore : IDisposable
           snapshot_count INTEGER NOT NULL
         );
         """;
+    private const string Version3Schema = """
+        CREATE TABLE IF NOT EXISTS hourly_summary(
+          bucket_start TEXT NOT NULL,
+          protocol TEXT NOT NULL CHECK(protocol IN ('TCP','UDP')),
+          layer TEXT NOT NULL CHECK(layer IN ('logical','vpn_transport')),
+          observation_count INTEGER NOT NULL,
+          bytes_sent INTEGER NOT NULL,
+          bytes_received INTEGER NOT NULL,
+          bytes_unknown INTEGER NOT NULL,
+          PRIMARY KEY(bucket_start,protocol,layer)
+        );
+        """;
 
     private readonly object gate = new();
     private nint db;
@@ -82,7 +94,7 @@ public sealed class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -92,7 +104,8 @@ public sealed class ObservationStore : IDisposable
             throw new ObservationStoreException(StoreFailureKind.SchemaTooNew, $"Database schema {version} is newer than supported schema {CurrentSchemaVersion}.");
         if (version < 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, $"Database schema version {version} is invalid.");
-        if (version == 1) MigrateVersion1To2();
+        if (version == 1) { MigrateVersion1To2(); version = 2; }
+        if (version == 2) MigrateVersion2To3();
         ValidateSchema();
     }
 
@@ -111,6 +124,14 @@ public sealed class ObservationStore : IDisposable
         }
     }
 
+    private void MigrateVersion2To3()
+    {
+        var backup = $"{path}.pre-v3.bak";
+        if (!File.Exists(backup)) Execute($"VACUUM INTO '{Sql(backup)}'");
+        try { Execute($"BEGIN IMMEDIATE; {Version3Schema} UPDATE schema_version SET version=3 WHERE version=2; COMMIT;"); }
+        catch { TryRollback(); throw; }
+    }
+
     private void EnsureIntegrity()
     {
         var integrity = ScalarText("PRAGMA integrity_check");
@@ -122,8 +143,8 @@ public sealed class ObservationStore : IDisposable
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions')");
-        if (tables != 5)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary')");
+        if (tables != 6)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
     }
 
@@ -155,6 +176,7 @@ public sealed class ObservationStore : IDisposable
                     """;
                 Check(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
                 Check(WinSqlite.Prepare(db, flowSql, -1, out var flowStatement, 0));
+                var summaries = new Dictionary<(string Bucket, string Protocol, string Layer), (long Count, long Sent, long Received, long Unknown)>();
                 try
                 {
                     foreach (var item in observations)
@@ -182,9 +204,18 @@ public sealed class ObservationStore : IDisposable
                         BindNullable(flowStatement, 10, item.BytesSent); BindNullable(flowStatement, 11, item.BytesReceived);
                         Bind(flowStatement, 12, item.Layer == ObservationLayer.Logical ? "logical" : "vpn_transport"); BindNullable(flowStatement, 13, item.InterfaceId);
                         CheckDone(WinSqlite.Step(flowStatement)); Check(WinSqlite.Reset(flowStatement)); Check(WinSqlite.ClearBindings(flowStatement));
+                        var observed = item.ObservedAt.ToUniversalTime();
+                        var bucket = new DateTimeOffset(observed.Year, observed.Month, observed.Day, observed.Hour, 0, 0, TimeSpan.Zero).ToString("O");
+                        var layer = item.Layer == ObservationLayer.Logical ? "logical" : "vpn_transport";
+                        var key = (bucket, item.Protocol, layer);
+                        var current = summaries.GetValueOrDefault(key);
+                        summaries[key] = (current.Count + 1, current.Sent + (item.BytesSent ?? 0),
+                            current.Received + (item.BytesReceived ?? 0), current.Unknown + (item.BytesSent is null || item.BytesReceived is null ? 1 : 0));
                     }
                 }
                 finally { WinSqlite.Finalize(statement); WinSqlite.Finalize(flowStatement); }
+                foreach (var (key, value) in summaries)
+                    Execute($"INSERT INTO hourly_summary(bucket_start,protocol,layer,observation_count,bytes_sent,bytes_received,bytes_unknown) VALUES('{key.Bucket}','{key.Protocol}','{key.Layer}',{value.Count},{value.Sent},{value.Received},{value.Unknown}) ON CONFLICT(bucket_start,protocol,layer) DO UPDATE SET observation_count=observation_count+excluded.observation_count,bytes_sent=bytes_sent+excluded.bytes_sent,bytes_received=bytes_received+excluded.bytes_received,bytes_unknown=bytes_unknown+excluded.bytes_unknown");
                 Execute("COMMIT");
             }
             catch
@@ -298,6 +329,34 @@ public sealed class ObservationStore : IDisposable
         CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
         try { CheckQueryRow(WinSqlite.Step(statement)); return WinSqlite.ColumnInt64(statement, 0); }
         finally { WinSqlite.Finalize(statement); }
+    }
+
+    public IReadOnlyList<HourlySummary> ReadHourlySummary(DateTimeOffset from, DateTimeOffset to)
+    {
+        lock (gate)
+        {
+            var utc = from.ToUniversalTime();
+            var firstBucket = new DateTimeOffset(utc.Year, utc.Month, utc.Day, utc.Hour, 0, 0, TimeSpan.Zero);
+            var sql = $"SELECT bucket_start,protocol,layer,observation_count,bytes_sent,bytes_received,bytes_unknown FROM hourly_summary WHERE bucket_start>='{firstBucket:O}' AND bucket_start<'{to.ToUniversalTime():O}' ORDER BY bucket_start,protocol,layer";
+            CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+            var result = new List<HourlySummary>();
+            try
+            {
+                while (true)
+                {
+                    var code = WinSqlite.Step(statement);
+                    if (code == WinSqlite.Done) break;
+                    CheckQueryRow(code);
+                    var bucket = DateTimeOffset.Parse(Marshal.PtrToStringUTF8(WinSqlite.ColumnText(statement, 0))!);
+                    var protocol = Marshal.PtrToStringUTF8(WinSqlite.ColumnText(statement, 1))!;
+                    var layer = Marshal.PtrToStringUTF8(WinSqlite.ColumnText(statement, 2)) == "logical" ? ObservationLayer.Logical : ObservationLayer.VpnTransport;
+                    result.Add(new HourlySummary(bucket, protocol, layer, WinSqlite.ColumnInt64(statement, 3),
+                        WinSqlite.ColumnInt64(statement, 4), WinSqlite.ColumnInt64(statement, 5), WinSqlite.ColumnInt64(statement, 6)));
+                }
+            }
+            finally { WinSqlite.Finalize(statement); }
+            return result;
+        }
     }
 
     private string ScalarText(string sql)

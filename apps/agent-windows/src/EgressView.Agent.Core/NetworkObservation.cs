@@ -28,6 +28,15 @@ public sealed record StartupFlow(
     int RemotePort,
     int ProcessId);
 
+public sealed record HourlySummary(
+    DateTimeOffset BucketStart,
+    string Protocol,
+    ObservationLayer Layer,
+    long ObservationCount,
+    long BytesSent,
+    long BytesReceived,
+    long BytesUnknown);
+
 public sealed record CollectorSnapshot(
     string State,
     long Accepted,
