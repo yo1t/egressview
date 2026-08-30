@@ -10,6 +10,7 @@ import { initAgentSettings } from './settings-agents.js?v=__ASSET_VERSION__';
 import { initBeaconSettings } from './settings-beacons.js?v=__ASSET_VERSION__';
 import { initSlackSettings } from './settings-slack.js?v=__ASSET_VERSION__';
 import { initDetectionSettings } from './settings-detection.js?v=__ASSET_VERSION__';
+import { loadThreatFeedStatus } from './settings-threat-feeds.js?v=__ASSET_VERSION__';
 import { initManualThreatSettings } from './settings-manual-threat.js?v=__ASSET_VERSION__';
 import { initAiSettings } from './settings-ai.js?v=__ASSET_VERSION__';
 const settingsOverlay = document.getElementById('settings-overlay');
@@ -28,6 +29,10 @@ function openSettings(tab) {
   loadDetectionConfig();
   loadSecurityConfig();
   loadAgents();
+  // Which feeds answered, and which the Hub is matching without (P3-54). The
+  // element for it has existed in index.html since the pane was written and
+  // nothing ever filled it.
+  loadThreatFeedStatus();
   if (typeof tab === 'string' && tab) {
     document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));

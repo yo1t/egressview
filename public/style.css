@@ -114,6 +114,24 @@
   .settings-status.multiline { white-space: pre-line; }
   .settings-status.ok  { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); color: var(--green); }
   .settings-status.err { background: rgba(239,68,68,0.12);  border: 1px solid rgba(239,68,68,0.35); color: var(--red); }
+  /* Which threat feeds answered (P3-54). Three states, three looks: a feed
+     running on restored entries is matching but is not fresh, and showing it
+     the same as a fetched one puts back the silence this exists to remove. */
+  .threat-feed-status { margin-top: 12px; font-size: 12px; }
+  .threat-feed-heading { margin-bottom: 6px; color: var(--muted); }
+  .threat-feed-row {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    padding: 5px 8px; border-radius: 6px; margin-bottom: 4px;
+    border: 1px solid transparent;
+  }
+  .threat-feed-name { font-weight: 600; min-width: 120px; }
+  .threat-feed-detail { color: var(--muted); flex: 1; }
+  .threat-feed-error { flex-basis: 100%; color: var(--red); font-size: 11px; }
+  .threat-feed-fresh  { background: rgba(16,185,129,0.10); border-color: rgba(16,185,129,0.25); }
+  /* Amber, not green: matching on entries this process never fetched. */
+  .threat-feed-cached { background: rgba(245,158,11,0.10); border-color: rgba(245,158,11,0.30); }
+  .threat-feed-absent { background: rgba(239,68,68,0.12);  border-color: rgba(239,68,68,0.35); }
+
   .settings-session-section-title { cursor: default; font-size: 12px; margin-bottom: 8px; }
   .settings-session-list { font-size: 11px; }
   .settings-session-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
