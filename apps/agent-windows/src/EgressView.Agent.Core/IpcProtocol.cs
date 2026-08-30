@@ -6,7 +6,8 @@ public static class IpcProtocol
 {
     public const int Version = 1;
 
-    public static string Handle(string request, Func<string> status, Func<int, IReadOnlyList<HourlySummary>> summary)
+    public static string Handle(string request, Func<string> status, Func<int, IReadOnlyList<HourlySummary>> summary,
+        Action<AgentCredential>? saveCredential = null)
     {
         try
         {
@@ -19,10 +20,21 @@ public static class IpcProtocol
             {
                 "status" => Status(status),
                 "summary" => Summary(root, summary),
+                "save-enrollment" => SaveEnrollment(root, saveCredential),
                 _ => Reject("unknown-operation"),
             };
         }
         catch (Exception) { return Reject("malformed-request"); }
+    }
+
+    private static string SaveEnrollment(JsonElement root, Action<AgentCredential>? save)
+    {
+        if (save is null || !root.TryGetProperty("credential", out var value)) return Reject("operation-unavailable");
+        var credential = value.Deserialize<AgentCredential>();
+        if (credential is null || !AgentEnrollmentClient.IsValidCredential(credential)) return Reject("invalid-credential");
+        try { save(credential); }
+        catch { return Reject("credential-storage-failed"); }
+        return JsonSerializer.Serialize(new { status = "ok" });
     }
 
     private static string Status(Func<string> read)
