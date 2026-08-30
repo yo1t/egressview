@@ -80,7 +80,70 @@ try
     Assert(liveSnapshot.Where(flow => flow.Protocol == "TCP").All(flow => flow.RemotePort > 0),
         "TCP startup snapshot excludes listeners");
 
-    Console.WriteLine("PASS: persistence, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics");
+    var legacyDatabase = Path.Combine(directory, "legacy-v1.db");
+    ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
+    using (var migrated = new ObservationStore(legacyDatabase))
+    {
+        Assert(migrated.SchemaVersion == 2, "v1 database migrates to v2");
+        Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
+    }
+    Assert(File.Exists($"{legacyDatabase}.pre-v2.bak"), "migration creates a consistent pre-v2 backup");
+    using (var migratedAgain = new ObservationStore(legacyDatabase))
+        Assert(migratedAgain.SchemaVersion == 2, "migration is idempotent on restart");
+
+    var corruptDatabase = Path.Combine(directory, "corrupt.db");
+    File.WriteAllBytes(corruptDatabase, "this is not a sqlite database"u8.ToArray());
+    AssertStoreFailure(() => new ObservationStore(corruptDatabase), StoreFailureKind.Corrupt,
+        "corrupt database fails closed instead of being recreated");
+
+    var fullDatabase = Path.Combine(directory, "full.db");
+    using (var fullStore = new ObservationStore(fullDatabase))
+    {
+        fullStore.LimitGrowthForTesting(1);
+        var largeBatch = Enumerable.Range(0, 10_000).Select(index => new NetworkObservation(
+            DateTimeOffset.UtcNow, 8, "UDP", "127.0.0.1", 40_000 + index,
+            "127.0.0.2", 443, 1, 0, ObservationLayer.Logical, null, "etw")).ToArray();
+        AssertStoreFailure(() => fullStore.WriteBatch(largeBatch), StoreFailureKind.DiskFull,
+            "disk full is classified explicitly");
+        Assert(fullStore.Inspect().Count == 0, "disk-full batch rolls back without partial rows");
+    }
+
+    var pipelineFullDatabase = Path.Combine(directory, "pipeline-full.db");
+    using (var pipelineFullStore = new ObservationStore(pipelineFullDatabase))
+    {
+        pipelineFullStore.LimitGrowthForTesting(1);
+        var fullPipeline = new ObservationPipeline(pipelineFullStore, capacity: 2_000, batchSize: 2_000);
+        for (var index = 0; index < 2_000; index++)
+            Assert(fullPipeline.TrySubmit(new NetworkObservation(DateTimeOffset.UtcNow, 8, "UDP",
+                "127.0.0.1", 40_000 + index, "127.0.0.2", 443, 1, 0,
+                ObservationLayer.Logical, null, "etw")), "pre-failure observation accepted");
+        await fullPipeline.DisposeAsync();
+        var failedSnapshot = fullPipeline.Snapshot();
+        Assert(failedSnapshot.PersistenceFailures == 1 && failedSnapshot.PersistenceError == "disk-full",
+            "pipeline exposes disk-full reason");
+        Assert(!fullPipeline.TrySubmit(new NetworkObservation(DateTimeOffset.UtcNow, 8, "UDP",
+            "127.0.0.1", 1, "127.0.0.2", 443, 1, 0, ObservationLayer.Logical, null, "etw")),
+            "pipeline stops accepting after persistence failure");
+    }
+
+    if (args.Contains("--million", StringComparer.OrdinalIgnoreCase))
+    {
+        var scaleDatabase = Path.Combine(directory, "million.db");
+        var started = DateTimeOffset.UtcNow;
+        using var scaleStore = new ObservationStore(scaleDatabase);
+        for (var offset = 0; offset < 1_000_000; offset += 1_000)
+        {
+            var batch = Enumerable.Range(offset, 1_000).Select(index => new NetworkObservation(
+                started.AddTicks(index), 9, "TCP", "10.0.0.1", 50_000,
+                "10.0.0.2", 443, 1, 1, ObservationLayer.Logical, "scale", "etw")).ToArray();
+            scaleStore.WriteBatch(batch);
+        }
+        var scale = scaleStore.Inspect();
+        Assert(scale.Count == 1_000_000 && scale.Integrity == "ok", "one-million-row database remains complete and valid");
+        Console.WriteLine($"SCALE: 1,000,000 rows in {(DateTimeOffset.UtcNow - started).TotalSeconds:F1}s, {new FileInfo(scaleDatabase).Length} bytes");
+    }
+
+    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics");
     return 0;
 }
 finally
@@ -91,4 +154,11 @@ finally
 static void Assert(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException($"FAILED: {message}");
+}
+
+static void AssertStoreFailure(Action action, StoreFailureKind expected, string message)
+{
+    try { action(); }
+    catch (ObservationStoreException exception) when (exception.Kind == expected) { return; }
+    throw new InvalidOperationException($"FAILED: {message}");
 }
