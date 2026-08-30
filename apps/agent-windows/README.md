@@ -22,4 +22,8 @@ dotnet run --project tests/EgressView.Agent.Core.Tests -c Release
 dotnet run --project tests/EgressView.Agent.Core.Tests -c Release -- --million
 dotnet run --project src/EgressView.Agent.Service -c Release -- --console --seconds 15 --data .\agent.db --diagnostics .\diagnostics.json
 dotnet run --project src/EgressView.Agent.Service -c Release -- --inspect --data .\agent.db
+dotnet run --project src/EgressView.Agent.Service -c Release -- --diagnostics-bundle .\diagnostics.zip --data .\agent.db
 ```
+
+診断bundleはendpoint、process名、credential、raw観測、SQLite DBを含みません。Serviceの収集停止は
+Windows Application Event Logのsource `EgressViewAgent`、event ID 1001にも記録します。

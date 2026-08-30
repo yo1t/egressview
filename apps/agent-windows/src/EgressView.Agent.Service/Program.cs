@@ -11,7 +11,19 @@ internal static class Program
             return RunConsoleAsync(args).GetAwaiter().GetResult();
         if (args.Contains("--inspect", StringComparer.OrdinalIgnoreCase))
             return Inspect(args);
+        if (args.Contains("--diagnostics-bundle", StringComparer.OrdinalIgnoreCase))
+            return ExportBundle(args);
         ServiceBase.Run(new AgentWindowsService());
+        return 0;
+    }
+
+    private static int ExportBundle(string[] args)
+    {
+        var database = Argument(args, "--data") ?? throw new ArgumentException("--data is required");
+        var destination = Argument(args, "--diagnostics-bundle") ?? throw new ArgumentException("--diagnostics-bundle path is required");
+        using var store = new ObservationStore(database);
+        var report = DiagnosticsReport.Create(new CollectorSnapshot("stopped", 0, 0, 0, 0, null, null, 0), store, "0.1.0-dev");
+        DiagnosticsBundle.Create(destination, report);
         return 0;
     }
 
@@ -68,6 +80,7 @@ internal sealed class AgentWindowsService : ServiceBase
             catch (Exception ex)
             {
                 WriteStartupFailure(ex);
+                WriteEventLogFailure(ex);
                 Environment.Exit(1);
             }
         });
@@ -117,6 +130,17 @@ internal sealed class AgentWindowsService : ServiceBase
             Directory.CreateDirectory(root);
             File.WriteAllText(Path.Combine(root, "startup-error.txt"),
                 $"{DateTimeOffset.UtcNow:O} {exception.GetType().Name}: {exception.Message}");
+        }
+        catch { }
+    }
+
+    private static void WriteEventLogFailure(Exception exception)
+    {
+        try
+        {
+            System.Diagnostics.EventLog.WriteEntry("EgressViewAgent",
+                $"EgressView Agent stopped collecting. {exception.GetType().Name}: {exception.Message}",
+                System.Diagnostics.EventLogEntryType.Error, 1001);
         }
         catch { }
     }

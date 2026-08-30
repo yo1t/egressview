@@ -9,12 +9,14 @@ public static class DiagnosticsReport
         var (count, integrity) = store.Inspect();
         var coverage = store.ReadCoverage();
         var flowStats = store.ReadFlowStats();
+        var health = AgentHealth.Evaluate(snapshot, integrity);
         return JsonSerializer.Serialize(new
         {
             schemaVersion = 1,
             generatedAt = DateTimeOffset.UtcNow,
             version,
             collector = snapshot,
+            health = new { status = health.Status, issues = health.Issues.Select(issue => new { code = issue.Code, action = issue.Action }) },
             database = new { observationCount = count, integrity, schemaVersion = store.SchemaVersion, durableCounters = store.ReadCounters() },
             flows = new { total = flowStats.Total, snapshot = flowStats.Snapshot, etw = flowStats.Etw, both = flowStats.Both, bytesUnknown = flowStats.BytesUnknown, byOrigin = store.ReadFlowOrigins() },
             coverage = new { total = coverage.Total, active = coverage.Active, abandoned = coverage.Abandoned },
