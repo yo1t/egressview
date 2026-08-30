@@ -1,4 +1,7 @@
 using System.ServiceProcess;
+using System.IO.Pipes;
+using System.Text;
+using Microsoft.Win32;
 using EgressView.Agent.Core;
 
 namespace EgressView.Agent.Service;
@@ -13,7 +16,21 @@ internal static class Program
             return Inspect(args);
         if (args.Contains("--diagnostics-bundle", StringComparer.OrdinalIgnoreCase))
             return ExportBundle(args);
+        if (args.Contains("--ipc-request", StringComparer.OrdinalIgnoreCase))
+            return IpcRequest(args);
         ServiceBase.Run(new AgentWindowsService());
+        return 0;
+    }
+
+    private static int IpcRequest(string[] args)
+    {
+        var request = Argument(args, "--ipc-request") ?? throw new ArgumentException("--ipc-request JSON is required");
+        using var client = new NamedPipeClientStream(".", AgentIpcServer.PipeName, PipeDirection.InOut);
+        client.Connect(5_000);
+        using var writer = new StreamWriter(client, new UTF8Encoding(false), 4096, true) { AutoFlush = true };
+        using var reader = new StreamReader(client, Encoding.UTF8, false, 4096, true);
+        writer.WriteLine(request);
+        Console.WriteLine(reader.ReadLine());
         return 0;
     }
 
@@ -103,6 +120,8 @@ internal sealed class AgentWindowsService : ServiceBase
         await using var pipeline = new ObservationPipeline(store);
         await using var collector = new EtwNetworkCollector(pipeline);
         collector.Start();
+        await using var ipc = new AgentIpcServer(store, () => collector.Enrich(pipeline.Snapshot()), ReadAllowedUserSid());
+        ipc.Start();
         Task lifetime;
         try
         {
@@ -132,6 +151,15 @@ internal sealed class AgentWindowsService : ServiceBase
                 $"{DateTimeOffset.UtcNow:O} {exception.GetType().Name}: {exception.Message}");
         }
         catch { }
+    }
+
+    private static string ReadAllowedUserSid()
+    {
+        using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\EgressView\Agent", writable: false);
+        var sid = key?.GetValue("AllowedUserSid") as string;
+        if (string.IsNullOrWhiteSpace(sid)) throw new InvalidOperationException("IPC allowed user SID is not configured.");
+        _ = new System.Security.Principal.SecurityIdentifier(sid);
+        return sid;
     }
 
     private static void WriteEventLogFailure(Exception exception)
