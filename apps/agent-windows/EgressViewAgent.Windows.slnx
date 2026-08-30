@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="src/EgressView.Agent.Core/EgressView.Agent.Core.csproj" />
   <Project Path="src/EgressView.Agent.Service/EgressView.Agent.Service.csproj" />
+  <Project Path="src/EgressView.Agent.Ui/EgressView.Agent.Ui.csproj" />
   <Project Path="tests/EgressView.Agent.Core.Tests/EgressView.Agent.Core.Tests.csproj" />
 </Solution>

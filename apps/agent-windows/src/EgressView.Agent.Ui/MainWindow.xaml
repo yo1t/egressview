@@ -1,0 +1,13 @@
+<Window x:Class="EgressView.Agent.Ui.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="EgressView Agent for Windows" Height="460" Width="720" MinHeight="360" MinWidth="560">
+  <Grid Margin="24"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition/></Grid.RowDefinitions>
+    <TextBlock Text="EgressView Agent for Windows" FontSize="24" FontWeight="SemiBold" />
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,20,0,16">
+      <Button Content="状態を更新 / Refresh" Click="Refresh_Click" Padding="14,8" AutomationProperties.Name="状態を更新"/>
+      <Button Content="7日 / 7 days" Click="SevenDays_Click" Margin="8,0,0,0" Padding="14,8"/>
+      <Button Content="30日 / 30 days" Click="ThirtyDays_Click" Margin="8,0,0,0" Padding="14,8"/>
+    </StackPanel>
+    <Border Grid.Row="2" BorderBrush="#D0D7DE" BorderThickness="1" CornerRadius="6" Background="#F6F8FA" Padding="18">
+      <TextBox x:Name="Output" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="Transparent" FontFamily="Segoe UI" FontSize="16" AutomationProperties.Name="Agent status and history" />
+    </Border>
+  </Grid>
+</Window>
