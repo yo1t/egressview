@@ -4,7 +4,7 @@ namespace EgressView.Agent.Core;
 
 public sealed class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
     private const string Version1Schema = """
         CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL);
         INSERT INTO schema_version(version) SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM schema_version);
@@ -67,6 +67,10 @@ public sealed class ObservationStore : IDisposable
           PRIMARY KEY(bucket_start,protocol,layer)
         );
         """;
+    private const string Version4Schema = """
+        ALTER TABLE observations ADD COLUMN process_name TEXT;
+        ALTER TABLE flows ADD COLUMN process_name TEXT;
+        """;
 
     private readonly object gate = new();
     private nint db;
@@ -94,7 +98,7 @@ public sealed class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -105,7 +109,8 @@ public sealed class ObservationStore : IDisposable
         if (version < 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, $"Database schema version {version} is invalid.");
         if (version == 1) { MigrateVersion1To2(); version = 2; }
-        if (version == 2) MigrateVersion2To3();
+        if (version == 2) { MigrateVersion2To3(); version = 3; }
+        if (version == 3) MigrateVersion3To4();
         ValidateSchema();
     }
 
@@ -132,6 +137,14 @@ public sealed class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion3To4()
+    {
+        var backup = $"{path}.pre-v4.bak";
+        if (!File.Exists(backup)) Execute($"VACUUM INTO '{Sql(backup)}'");
+        try { Execute($"BEGIN IMMEDIATE; {Version4Schema} UPDATE schema_version SET version=4 WHERE version=3; COMMIT;"); }
+        catch { TryRollback(); throw; }
+    }
+
     private void EnsureIntegrity()
     {
         var integrity = ScalarText("PRAGMA integrity_check");
@@ -146,6 +159,9 @@ public sealed class ObservationStore : IDisposable
         var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary')");
         if (tables != 6)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
+        var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
+        if (processNameColumns != 2)
+            throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing process identity columns.");
     }
 
     public void WriteBatch(IReadOnlyList<NetworkObservation> observations)
@@ -159,20 +175,21 @@ public sealed class ObservationStore : IDisposable
             {
                 const string sql = """
                     INSERT INTO observations(observed_at,process_id,protocol,local_address,local_port,
-                      remote_address,remote_port,bytes_sent,bytes_received,layer,interface_id,source)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                      remote_address,remote_port,bytes_sent,bytes_received,layer,interface_id,source,process_name)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """;
                 const string flowSql = """
                     INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,
-                      process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id)
-                    VALUES(?,?,?,?,?,?,?,?,?,'etw',?,?,?,?)
+                      process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name)
+                    VALUES(?,?,?,?,?,?,?,?,?,'etw',?,?,?,?,?)
                     ON CONFLICT(flow_key) DO UPDATE SET
                       last_seen=excluded.last_seen,
                       origin=CASE WHEN flows.origin='snapshot' THEN 'both' ELSE flows.origin END,
                       bytes_sent=CASE WHEN flows.bytes_sent IS NULL THEN excluded.bytes_sent ELSE flows.bytes_sent+excluded.bytes_sent END,
                       bytes_received=CASE WHEN flows.bytes_received IS NULL THEN excluded.bytes_received ELSE flows.bytes_received+excluded.bytes_received END,
                       layer=excluded.layer,
-                      interface_id=COALESCE(excluded.interface_id,flows.interface_id)
+                      interface_id=COALESCE(excluded.interface_id,flows.interface_id),
+                      process_name=COALESCE(excluded.process_name,flows.process_name)
                     """;
                 Check(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
                 Check(WinSqlite.Prepare(db, flowSql, -1, out var flowStatement, 0));
@@ -193,6 +210,7 @@ public sealed class ObservationStore : IDisposable
                         Bind(statement, 10, item.Layer == ObservationLayer.Logical ? "logical" : "vpn_transport");
                         BindNullable(statement, 11, item.InterfaceId);
                         Bind(statement, 12, item.Source);
+                        BindNullable(statement, 13, item.ProcessName);
                         CheckDone(WinSqlite.Step(statement));
                         Check(WinSqlite.Reset(statement));
                         Check(WinSqlite.ClearBindings(statement));
@@ -203,6 +221,7 @@ public sealed class ObservationStore : IDisposable
                         Bind(flowStatement, 8, item.ObservedAt.ToUniversalTime().ToString("O")); Bind(flowStatement, 9, item.ObservedAt.ToUniversalTime().ToString("O"));
                         BindNullable(flowStatement, 10, item.BytesSent); BindNullable(flowStatement, 11, item.BytesReceived);
                         Bind(flowStatement, 12, item.Layer == ObservationLayer.Logical ? "logical" : "vpn_transport"); BindNullable(flowStatement, 13, item.InterfaceId);
+                        BindNullable(flowStatement, 14, item.ProcessName);
                         CheckDone(WinSqlite.Step(flowStatement)); Check(WinSqlite.Reset(flowStatement)); Check(WinSqlite.ClearBindings(flowStatement));
                         var observed = item.ObservedAt.ToUniversalTime();
                         var bucket = new DateTimeOffset(observed.Year, observed.Month, observed.Day, observed.Hour, 0, 0, TimeSpan.Zero).ToString("O");
@@ -236,7 +255,8 @@ public sealed class ObservationStore : IDisposable
                 foreach (var flow in snapshot)
                 {
                     var key = StartupSnapshot.FlowKey(flow.Protocol, flow.LocalAddress, flow.LocalPort, flow.RemoteAddress, flow.RemotePort, flow.ProcessId).Replace("'", "''", StringComparison.Ordinal);
-                    Execute($"INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id) VALUES('{key}','{flow.Protocol}','{flow.LocalAddress}',{flow.LocalPort},'{flow.RemoteAddress}',{flow.RemotePort},{flow.ProcessId},'{startedAt:O}','{startedAt:O}','snapshot',NULL,NULL,'logical',NULL) ON CONFLICT(flow_key) DO NOTHING");
+                    var processName = flow.ProcessName is null ? "NULL" : $"'{Sql(flow.ProcessName)}'";
+                    Execute($"INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name) VALUES('{key}','{flow.Protocol}','{flow.LocalAddress}',{flow.LocalPort},'{flow.RemoteAddress}',{flow.RemotePort},{flow.ProcessId},'{startedAt:O}','{startedAt:O}','snapshot',NULL,NULL,'logical',NULL,{processName}) ON CONFLICT(flow_key) DO NOTHING");
                 }
                 Execute($"INSERT INTO coverage_sessions(started_at,snapshot_count) VALUES('{startedAt:O}',{snapshot.Count})");
                 var id = ScalarInt64("SELECT last_insert_rowid()");
@@ -280,6 +300,13 @@ public sealed class ObservationStore : IDisposable
             ScalarInt64("SELECT COUNT(*) FROM flows WHERE origin='etw'"),
             ScalarInt64("SELECT COUNT(*) FROM flows WHERE origin='both'"),
             ScalarInt64("SELECT COUNT(*) FROM flows WHERE bytes_sent IS NULL OR bytes_received IS NULL"));
+    }
+
+    public (long Resolved, long Unresolved) ReadProcessNameStats()
+    {
+        lock (gate) return (
+            ScalarInt64("SELECT COUNT(*) FROM flows WHERE process_name IS NOT NULL"),
+            ScalarInt64("SELECT COUNT(*) FROM flows WHERE process_name IS NULL"));
     }
 
     public void AddCounter(string name, long amount)

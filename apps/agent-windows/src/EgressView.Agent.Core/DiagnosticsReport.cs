@@ -9,6 +9,7 @@ public static class DiagnosticsReport
         var (count, integrity) = store.Inspect();
         var coverage = store.ReadCoverage();
         var flowStats = store.ReadFlowStats();
+        var processNames = store.ReadProcessNameStats();
         var health = AgentHealth.Evaluate(snapshot, integrity);
         return JsonSerializer.Serialize(new
         {
@@ -18,7 +19,7 @@ public static class DiagnosticsReport
             collector = snapshot,
             health = new { status = health.Status, issues = health.Issues.Select(issue => new { code = issue.Code, action = issue.Action }) },
             database = new { observationCount = count, integrity, schemaVersion = store.SchemaVersion, durableCounters = store.ReadCounters() },
-            flows = new { total = flowStats.Total, snapshot = flowStats.Snapshot, etw = flowStats.Etw, both = flowStats.Both, bytesUnknown = flowStats.BytesUnknown, byOrigin = store.ReadFlowOrigins() },
+            flows = new { total = flowStats.Total, snapshot = flowStats.Snapshot, etw = flowStats.Etw, both = flowStats.Both, bytesUnknown = flowStats.BytesUnknown, processNames = new { resolved = processNames.Resolved, unresolved = processNames.Unresolved }, byOrigin = store.ReadFlowOrigins() },
             coverage = new { total = coverage.Total, active = coverage.Active, abandoned = coverage.Abandoned },
             privacy = new { includesEndpoints = false, includesProcessNames = false, includesCredentials = false },
         }, new JsonSerializerOptions { WriteIndented = true });

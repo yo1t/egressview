@@ -113,20 +113,20 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         }
 
         if (localInterface is null) Interlocked.Increment(ref interfaceUnresolved);
-        var layer = IsVpnTransport(pid, localInterface) ? ObservationLayer.VpnTransport : ObservationLayer.Logical;
+        var processName = ProcessNameResolver.Resolve(pid);
+        var layer = IsVpnTransport(processName, localInterface) ? ObservationLayer.VpnTransport : ObservationLayer.Logical;
         pipeline.TrySubmit(new NetworkObservation(
             e.TimeStamp.ToUniversalTime(), pid,
             e.EventName.Contains("UDP", StringComparison.OrdinalIgnoreCase) ? "UDP" : "TCP",
             localAddress, localPort, remoteAddress, remotePort,
             direction == Direction.Send ? bytes : 0, direction == Direction.Receive ? bytes : 0,
-            layer, localInterface?.Id, "etw"));
+            layer, localInterface?.Id, "etw", processName));
     }
 
-    private bool IsVpnTransport(int pid, InterfaceInfo? localInterface)
+    private static bool IsVpnTransport(string? processName, InterfaceInfo? localInterface)
     {
         if (localInterface is null || localInterface.IsVirtual) return false;
-        try { return VpnProcesses.Contains(Process.GetProcessById(pid).ProcessName); }
-        catch { return false; }
+        return processName is not null && VpnProcesses.Contains(processName);
     }
 
     private InterfaceInfo? FindInterface(string address)
