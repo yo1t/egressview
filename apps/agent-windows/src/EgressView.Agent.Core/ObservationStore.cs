@@ -2,9 +2,9 @@ using System.Runtime.InteropServices;
 
 namespace EgressView.Agent.Core;
 
-public sealed class ObservationStore : IDisposable
+public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 4;
+    private const int CurrentSchemaVersion = 5;
     private const string Version1Schema = """
         CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL);
         INSERT INTO schema_version(version) SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM schema_version);
@@ -71,6 +71,34 @@ public sealed class ObservationStore : IDisposable
         ALTER TABLE observations ADD COLUMN process_name TEXT;
         ALTER TABLE flows ADD COLUMN process_name TEXT;
         """;
+    private const string Version5Schema = """
+        CREATE TABLE IF NOT EXISTS delivery_queue(
+          delivery_id TEXT PRIMARY KEY,
+          stable_key TEXT NOT NULL,
+          protocol TEXT NOT NULL CHECK(protocol IN ('tcp','udp')),
+          local_address TEXT NOT NULL,
+          local_port INTEGER NOT NULL,
+          remote_address TEXT NOT NULL,
+          remote_port INTEGER NOT NULL,
+          process_id INTEGER NOT NULL,
+          process_name TEXT NOT NULL,
+          first_observed_at TEXT NOT NULL,
+          last_observed_at TEXT NOT NULL,
+          bytes_in INTEGER,
+          bytes_out INTEGER,
+          queued_at TEXT NOT NULL,
+          batch_id TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS delivery_queue_pending_flow ON delivery_queue(stable_key) WHERE batch_id IS NULL;
+        CREATE INDEX IF NOT EXISTS delivery_queue_batch ON delivery_queue(batch_id,queued_at);
+        CREATE TABLE IF NOT EXISTS delivery_state(
+          id INTEGER PRIMARY KEY CHECK(id=1),
+          contract_rejected INTEGER NOT NULL DEFAULT 0,
+          queue_overflow INTEGER NOT NULL DEFAULT 0,
+          last_acknowledged_at TEXT
+        );
+        INSERT OR IGNORE INTO delivery_state(id) VALUES(1);
+        """;
 
     private readonly object gate = new();
     private nint db;
@@ -98,7 +126,7 @@ public sealed class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -110,7 +138,8 @@ public sealed class ObservationStore : IDisposable
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, $"Database schema version {version} is invalid.");
         if (version == 1) { MigrateVersion1To2(); version = 2; }
         if (version == 2) { MigrateVersion2To3(); version = 3; }
-        if (version == 3) MigrateVersion3To4();
+        if (version == 3) { MigrateVersion3To4(); version = 4; }
+        if (version == 4) MigrateVersion4To5();
         ValidateSchema();
     }
 
@@ -145,6 +174,14 @@ public sealed class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion4To5()
+    {
+        var backup = $"{path}.pre-v5.bak";
+        if (!File.Exists(backup)) Execute($"VACUUM INTO '{Sql(backup)}'");
+        try { Execute($"BEGIN IMMEDIATE; {Version5Schema} UPDATE schema_version SET version=5 WHERE version=4; COMMIT;"); }
+        catch { TryRollback(); throw; }
+    }
+
     private void EnsureIntegrity()
     {
         var integrity = ScalarText("PRAGMA integrity_check");
@@ -156,8 +193,8 @@ public sealed class ObservationStore : IDisposable
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary')");
-        if (tables != 6)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state')");
+        if (tables != 8)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)

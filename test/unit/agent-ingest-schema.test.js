@@ -25,6 +25,15 @@ describe('agent ingest v1 schema', () => {
     assert.equal(result.observations[0].bytesIn, '9007199254740993');
   });
 
+  it('accepts Windows ETW observations', () => {
+    const windows = copy();
+    windows.agent.platform = 'windows';
+    windows.agent.hostName = 'desktop-01';
+    windows.observations[0].collector = 'etw';
+    windows.observations[0].bundleID = null;
+    assert.equal(agentIngestEnvelopeSchema.safeParse(windows).success, true);
+  });
+
   it('rejects unknown envelope and observation fields', () => {
     const envelope = copy();
     envelope.unexpectedField = 'must-not-pass';

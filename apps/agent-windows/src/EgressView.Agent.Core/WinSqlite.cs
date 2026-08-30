@@ -59,6 +59,9 @@ internal static partial class WinSqlite
     [LibraryImport("winsqlite3", EntryPoint = "sqlite3_column_int64")]
     internal static partial long ColumnInt64(nint statement, int index);
 
+    [LibraryImport("winsqlite3", EntryPoint = "sqlite3_column_type")]
+    internal static partial int ColumnType(nint statement, int index);
+
     [LibraryImport("winsqlite3", EntryPoint = "sqlite3_column_text")]
     internal static partial nint ColumnText(nint statement, int index);
 }

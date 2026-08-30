@@ -10,6 +10,7 @@ public static class DiagnosticsReport
         var coverage = store.ReadCoverage();
         var flowStats = store.ReadFlowStats();
         var processNames = store.ReadProcessNameStats();
+        var delivery = store.ReadDeliveryStatus();
         var health = AgentHealth.Evaluate(snapshot, integrity);
         return JsonSerializer.Serialize(new
         {
@@ -21,6 +22,7 @@ public static class DiagnosticsReport
             database = new { observationCount = count, integrity, schemaVersion = store.SchemaVersion, durableCounters = store.ReadCounters() },
             flows = new { total = flowStats.Total, snapshot = flowStats.Snapshot, etw = flowStats.Etw, both = flowStats.Both, bytesUnknown = flowStats.BytesUnknown, processNames = new { resolved = processNames.Resolved, unresolved = processNames.Unresolved }, byOrigin = store.ReadFlowOrigins() },
             coverage = new { total = coverage.Total, active = coverage.Active, abandoned = coverage.Abandoned },
+            delivery = new { pending = delivery.Pending, contractRejected = delivery.ContractRejected, queueOverflow = delivery.QueueOverflow, oldestPendingAt = delivery.OldestPendingAt, lastAcknowledgedAt = delivery.LastAcknowledgedAt },
             privacy = new { includesEndpoints = false, includesProcessNames = false, includesCredentials = false },
         }, new JsonSerializerOptions { WriteIndented = true });
     }

@@ -32,6 +32,7 @@ try
             reopened, "test");
         using var json = JsonDocument.Parse(report);
         Assert(json.RootElement.GetProperty("database").GetProperty("observationCount").GetInt64() == 20, "diagnostics count");
+        Assert(json.RootElement.GetProperty("delivery").GetProperty("pending").GetInt64() == 0, "diagnostics reports privacy-safe delivery state");
         Assert(!report.Contains("100.64.0.1", StringComparison.Ordinal), "diagnostics excludes endpoint");
         Assert(!report.Contains("UDP", StringComparison.Ordinal), "diagnostics excludes raw observation");
         Assert(!report.Contains("TestApp", StringComparison.Ordinal), "diagnostics excludes process names");
@@ -118,14 +119,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 4, "v1 database migrates through v2, v3, and v4");
+        Assert(migrated.SchemaVersion == 5, "v1 database migrates through v2, v3, v4, and v5");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     Assert(File.Exists($"{legacyDatabase}.pre-v2.bak"), "migration creates a consistent pre-v2 backup");
     Assert(File.Exists($"{legacyDatabase}.pre-v3.bak"), "migration creates a consistent pre-v3 backup");
     Assert(File.Exists($"{legacyDatabase}.pre-v4.bak"), "migration creates a consistent pre-v4 backup");
+    Assert(File.Exists($"{legacyDatabase}.pre-v5.bak"), "migration creates a consistent pre-v5 backup");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 4, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 5, "migration is idempotent on restart");
 
     Assert(ProcessNameResolver.Resolve(Environment.ProcessId) is { Length: > 0 }, "current process name resolves");
 
@@ -153,6 +155,47 @@ try
     Assert(failedSave.Contains("credential-storage-failed", StringComparison.Ordinal) && !failedSave.Contains(agentToken, StringComparison.Ordinal), "credential storage failure is actionable and secret-free");
     await AssertEnrollmentFailure(() => enrollment.ApplyAsync(new Uri("http://hub.example/"), "ABC234",
         new("host", "windows", "Windows", "dev")), "invalid-hub-url", "plaintext remote Hub is rejected client-side");
+
+    var deliveryDatabase = Path.Combine(directory, "delivery.db");
+    var deliveryStarted = DateTimeOffset.UtcNow;
+    Guid activeBatchId;
+    using (var deliveryStore = new ObservationStore(deliveryDatabase))
+    {
+        var flow = new NetworkObservation(deliveryStarted, 77, "TCP", "10.0.0.1", 50000, "203.0.113.8", 443,
+            120, 80, ObservationLayer.Logical, "if", "etw", "Browser");
+        deliveryStore.QueueForDelivery([flow, flow with { ObservedAt = deliveryStarted.AddSeconds(1), BytesSent = 30, BytesReceived = 20 }], deliveryStarted);
+        deliveryStore.QueueForDelivery([
+            flow with { RemotePort = 0 },
+            flow with { Layer = ObservationLayer.VpnTransport, ProcessName = "tailscaled" },
+        ], deliveryStarted);
+        var status = deliveryStore.ReadDeliveryStatus();
+        Assert(status == new DeliveryQueueStatus(1, 1, 0, deliveryStarted, null), "delivery queue aggregates a logical flow, rejects invalid data, and excludes VPN transport");
+        var batch = deliveryStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(2))!;
+        activeBatchId = batch.BatchId;
+        Assert(batch.Observations.Count == 1 && batch.Observations[0].BytesOut == 150 && batch.Observations[0].BytesIn == 100, "delivery batch preserves exact aggregate bytes");
+        Assert(deliveryStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(3))!.BatchId == activeBatchId, "unacknowledged retry preserves the batch ID");
+    }
+    using (var reopenedDelivery = new ObservationStore(deliveryDatabase))
+    {
+        Assert(reopenedDelivery.PrepareDeliveryBatch(deliveryStarted.AddSeconds(4))!.BatchId == activeBatchId, "active batch survives service restart");
+        reopenedDelivery.AcknowledgeDelivery(activeBatchId, deliveryStarted.AddSeconds(5));
+        Assert(reopenedDelivery.ReadDeliveryStatus().Pending == 0 && reopenedDelivery.ReadDeliveryStatus().LastAcknowledgedAt == deliveryStarted.AddSeconds(5), "ACK removes only the matching durable batch");
+    }
+    using (var senderStore = new ObservationStore(Path.Combine(directory, "sender.db")))
+    {
+        senderStore.QueueForDelivery([new NetworkObservation(deliveryStarted, 88, "UDP", "10.0.0.1", 53000,
+            "203.0.113.9", 443, 42, 24, ObservationLayer.Logical, "if", "etw", "Browser")], deliveryStarted);
+        var deliveryHandler = new DeliveryHandler(500, 429, 200);
+        var sender = new DeliverySender(new HttpClient(deliveryHandler));
+        var credential = new AgentCredential(new Uri("https://hub.example/"), agentId, agentToken, deliveryStarted);
+        var metadata = new DeliveryMetadata("host", "windows", "Windows", "dev");
+        Assert((await sender.SendNextAsync(senderStore, credential, metadata)).Kind == DeliveryAttemptKind.Retryable, "5xx keeps the durable batch for retry");
+        var limited = await sender.SendNextAsync(senderStore, credential, metadata);
+        Assert(limited.Kind == DeliveryAttemptKind.RateLimited && limited.RetryAfter == TimeSpan.FromSeconds(7), "429 honors Retry-After without dropping data");
+        Assert((await sender.SendNextAsync(senderStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged, "matching ACK removes the batch");
+        Assert(senderStore.ReadDeliveryStatus().Pending == 0 && deliveryHandler.BatchIds.Distinct().Count() == 1, "all retries use the same idempotent batch ID");
+        Assert(deliveryHandler.SawEtwCollector && deliveryHandler.SawProcessId && deliveryHandler.SawBearer, "Windows payload and Agent bearer match the Hub contract");
+    }
 
     using (var summaryStore = new ObservationStore(Path.Combine(directory, "summary.db")))
     {
@@ -263,5 +306,34 @@ sealed class EnrollmentHandler(params (HttpStatusCode Status, string Body)[] res
         Requests.Add(new HttpRequestMessage(request.Method, request.RequestUri) { Content = new StringContent(await request.Content!.ReadAsStringAsync(cancellationToken)) });
         var response = responses.Dequeue();
         return new HttpResponseMessage(response.Status) { Content = new StringContent(response.Body, Encoding.UTF8, "application/json") };
+    }
+}
+
+sealed class DeliveryHandler(params int[] statuses) : HttpMessageHandler
+{
+    private readonly Queue<int> statuses = new(statuses);
+    public List<Guid> BatchIds { get; } = [];
+    public bool SawEtwCollector { get; private set; }
+    public bool SawProcessId { get; private set; }
+    public bool SawBearer { get; private set; }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement;
+        var batchId = root.GetProperty("batchId").GetGuid();
+        BatchIds.Add(batchId);
+        var observation = root.GetProperty("observations")[0];
+        SawEtwCollector |= observation.GetProperty("collector").GetString() == "etw";
+        SawProcessId |= observation.GetProperty("processID").GetInt32() == 88;
+        SawBearer |= request.Headers.Authorization?.Scheme == "Bearer" && request.Headers.Authorization.Parameter?.StartsWith("egva_", StringComparison.Ordinal) == true;
+        var status = statuses.Dequeue();
+        var response = new HttpResponseMessage((HttpStatusCode)status);
+        if (status == 429) response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(7));
+        response.Content = new StringContent(status == 200
+            ? $"{{\"batchId\":\"{batchId}\",\"accepted\":1,\"duplicate\":0,\"rejected\":0,\"replayed\":false}}"
+            : "{}", Encoding.UTF8, "application/json");
+        return response;
     }
 }
