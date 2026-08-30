@@ -4,7 +4,8 @@ Phase 1の最小vertical sliceです。ネットワーク観測をbounded channe
 batch保存し、再起動後の整合性とprivacy-safeな診断を確認します。
 
 ETW collectorとSCM service hostを含みます。ETW session開始には管理者権限または`LocalService`が必要です。
-UI、Named Pipe IPC、MSIはまだ含みません。
+UIとMSIはまだ含みません。Named Pipe IPCはインストール時に明示したUIユーザーSIDだけを許可し、
+SYSTEMを許可、NETWORKを明示拒否します。Administrators、Everyone、Anonymousは許可しません。
 
 起動時にIP HelperのTCP/UDP tableを一度取得し、`flows`へETWとupsertします。snapshotだけのflowは
 バイト数をNULLのまま保持します。`coverage_sessions`は正常停止と強制終了を区別します。
@@ -23,6 +24,7 @@ dotnet run --project tests/EgressView.Agent.Core.Tests -c Release -- --million
 dotnet run --project src/EgressView.Agent.Service -c Release -- --console --seconds 15 --data .\agent.db --diagnostics .\diagnostics.json
 dotnet run --project src/EgressView.Agent.Service -c Release -- --inspect --data .\agent.db
 dotnet run --project src/EgressView.Agent.Service -c Release -- --diagnostics-bundle .\diagnostics.zip --data .\agent.db
+dotnet run --project src/EgressView.Agent.Service -c Release -- --ipc-request '{"v":1,"op":"status"}'
 ```
 
 診断bundleはendpoint、process名、credential、raw観測、SQLite DBを含みません。Serviceの収集停止は

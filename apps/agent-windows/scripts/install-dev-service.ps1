@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)] [string] $Source,
     [string] $Destination = 'C:\Program Files\EgressView Agent Dev',
+    [string] $AllowedUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value,
     [string] $Log
 )
 
@@ -19,6 +20,9 @@ $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not [System.Diagnostics.EventLog]::SourceExists($eventSource)) {
     New-EventLog -LogName Application -Source $eventSource
 }
+$registry = 'HKLM:\SOFTWARE\EgressView\Agent'
+New-Item -Path $registry -Force | Out-Null
+New-ItemProperty -Path $registry -Name AllowedUserSid -Value $AllowedUserSid -PropertyType String -Force | Out-Null
 if ($existing) {
     Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
     $existing.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(20))
