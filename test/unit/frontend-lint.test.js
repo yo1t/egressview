@@ -69,6 +69,7 @@ const APP_SCRIPT_FILES = [
   'settings-legacy-routers.js',
   'settings-slack.js',
   'settings-manual-threat.js',
+  'settings-threat-feeds.js',
   'settings-ai.js',
   'settings-agents.js',
   // Imported by settings.js, but absent from this list until 2026-08-29, so
