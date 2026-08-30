@@ -18,12 +18,13 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel Margin="18" MaxWidth="620" HorizontalAlignment="Left">
             <TextBlock Text="EgressView Hubへ登録 / Enroll with EgressView Hub" FontSize="19" FontWeight="SemiBold"/>
-            <TextBlock Margin="0,10,0,18" TextWrapping="Wrap" Text="登録申請では、このPCのホスト名、Windowsのバージョン、Agentのバージョンを指定したHubへ送ります。この開発版は承認済み資格情報を保存しますが、観測データの送信はまだ開始しません。&#x0a;&#x0a;Enrollment sends this PC's hostname, Windows version, and Agent version to the Hub you specify. This development build stores the approved credential but does not start observation delivery yet."/>
+            <TextBlock Margin="0,10,0,18" TextWrapping="Wrap" Text="登録申請では、このPCのホスト名、Windowsのバージョン、Agentのバージョンを指定したHubへ送ります。登録後も、下のスイッチを明示的にONにするまで観測データは送信しません。&#x0a;&#x0a;Enrollment sends this PC's hostname, Windows version, and Agent version to the Hub you specify. Observations are not delivered until you explicitly turn on the switch below."/>
             <TextBlock Text="Hub URL" FontWeight="SemiBold"/>
             <TextBox x:Name="HubUrl" Margin="0,6,0,14" Padding="8" Text="https://" AutomationProperties.Name="Hub URL"/>
             <TextBlock Text="6文字の登録コード / Six-character enrollment code" FontWeight="SemiBold"/>
             <PasswordBox x:Name="EnrollmentCode" Margin="0,6,0,14" Padding="8" MaxLength="6" AutomationProperties.Name="Enrollment code"/>
             <Button x:Name="EnrollButton" Content="登録を申請 / Request enrollment" Click="Enroll_Click" Padding="14,9" HorizontalAlignment="Left"/>
+            <CheckBox x:Name="DeliveryEnabled" Margin="0,18,0,0" Content="観測データをこのHubへ送信する / Send observations to this Hub" Click="DeliveryEnabled_Click" AutomationProperties.Name="Hub observation delivery"/>
             <Border Margin="0,18,0,0" BorderBrush="#D0D7DE" BorderThickness="1" CornerRadius="6" Background="#F6F8FA" Padding="14">
               <TextBlock x:Name="EnrollmentStatus" Text="未登録 / Not enrolled" TextWrapping="Wrap" AutomationProperties.Name="Enrollment status"/>
             </Border>

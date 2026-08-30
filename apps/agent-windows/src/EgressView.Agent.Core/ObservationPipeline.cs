@@ -9,17 +9,19 @@ public sealed class ObservationPipeline : IAsyncDisposable
     private readonly CancellationTokenSource stop = new();
     private readonly Task writer;
     private readonly int batchSize;
+    private readonly Func<bool>? deliveryEnabled;
     private long accepted, persisted, queueFullDrops, persistenceFailures;
     private long flushedQueueFullDrops, flushedPersistenceFailures;
     private long lastObservedTicks, lastPersistedTicks;
     private string? persistenceError;
     private int persistenceStopped;
 
-    public ObservationPipeline(ObservationStore store, int capacity = 65_536, int batchSize = 256)
+    public ObservationPipeline(ObservationStore store, int capacity = 65_536, int batchSize = 256, Func<bool>? deliveryEnabled = null)
     {
         this.store = store;
         QueueCapacity = capacity;
         this.batchSize = batchSize;
+        this.deliveryEnabled = deliveryEnabled;
         channel = Channel.CreateBounded<NetworkObservation>(new BoundedChannelOptions(capacity)
         {
             // Wait makes TryWrite return false when full, so every drop is observable.
@@ -64,7 +66,7 @@ public sealed class ObservationPipeline : IAsyncDisposable
                 while (batch.Count < batchSize && channel.Reader.TryRead(out var next)) batch.Add(next);
                 try
                 {
-                    store.WriteBatch(batch);
+                    store.WriteBatch(batch, deliveryEnabled?.Invoke() == true);
                     Interlocked.Add(ref persisted, batch.Count);
                     Interlocked.Exchange(ref lastPersistedTicks, DateTimeOffset.UtcNow.UtcTicks);
                     FlushCounters();

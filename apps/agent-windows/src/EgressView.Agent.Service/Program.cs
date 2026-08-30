@@ -60,7 +60,7 @@ internal static class Program
         using var store = new ObservationStore(database);
         var snapshot = StartupSnapshot.Capture();
         var coverageId = store.BeginCoverage(snapshot, DateTimeOffset.UtcNow);
-        await using var pipeline = new ObservationPipeline(store);
+        await using var pipeline = new ObservationPipeline(store, deliveryEnabled: () => store.DeliveryEnabled);
         await using var collector = new EtwNetworkCollector(pipeline);
         try { collector.Start(); }
         catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 2; }
@@ -117,11 +117,13 @@ internal sealed class AgentWindowsService : ServiceBase
         using var store = new ObservationStore(Path.Combine(root, "egressview-agent.db"));
         var snapshot = StartupSnapshot.Capture();
         var coverageId = store.BeginCoverage(snapshot, DateTimeOffset.UtcNow);
-        await using var pipeline = new ObservationPipeline(store);
+        await using var pipeline = new ObservationPipeline(store, deliveryEnabled: () => store.DeliveryEnabled);
         await using var collector = new EtwNetworkCollector(pipeline);
         collector.Start();
-        await using var ipc = new AgentIpcServer(store, () => collector.Enrich(pipeline.Snapshot()), ReadAllowedUserSid());
+        var credentialStore = new WindowsCredentialStore();
+        await using var ipc = new AgentIpcServer(store, () => collector.Enrich(pipeline.Snapshot()), ReadAllowedUserSid(), credentialStore);
         ipc.Start();
+        var delivery = RunDeliveryAsync(store, credentialStore, cancellationToken);
         Task lifetime;
         try
         {
@@ -137,8 +139,41 @@ internal sealed class AgentWindowsService : ServiceBase
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         store.EndCoverage(coverageId, DateTimeOffset.UtcNow);
+        await delivery;
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(collector.Enrich(pipeline.Snapshot()), store, "0.1.0-dev"));
+    }
+
+    private static async Task RunDeliveryAsync(ObservationStore store, WindowsCredentialStore credentials, CancellationToken cancellationToken)
+    {
+        var sender = new DeliverySender();
+        var retry = TimeSpan.FromSeconds(5);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var delay = TimeSpan.FromSeconds(5);
+            try
+            {
+                if (store.DeliveryEnabled && credentials.Load() is { } credential)
+                {
+                    var result = await sender.SendNextAsync(store, credential,
+                        new(Environment.MachineName, "windows", Environment.OSVersion.VersionString, "0.1.0-dev"), cancellationToken);
+                    delay = result.Kind switch
+                    {
+                        DeliveryAttemptKind.Acknowledged => TimeSpan.Zero,
+                        DeliveryAttemptKind.Empty => TimeSpan.FromSeconds(15),
+                        DeliveryAttemptKind.RateLimited => result.RetryAfter ?? TimeSpan.FromMinutes(1),
+                        DeliveryAttemptKind.AuthorizationRequired => TimeSpan.FromMinutes(5),
+                        _ => retry,
+                    };
+                    retry = result.Kind is DeliveryAttemptKind.Retryable or DeliveryAttemptKind.Rejected or DeliveryAttemptKind.InvalidAcknowledgement
+                        ? TimeSpan.FromSeconds(Math.Min(retry.TotalSeconds * 2, 300)) : TimeSpan.FromSeconds(5);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            catch { delay = retry; retry = TimeSpan.FromSeconds(Math.Min(retry.TotalSeconds * 2, 300)); }
+            if (delay > TimeSpan.Zero) try { await Task.Delay(delay, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+        }
     }
 
     private static void WriteStartupFailure(Exception exception)

@@ -9,11 +9,12 @@ public partial class MainWindow : Window
 {
     private readonly AgentEnrollmentClient enrollment = new();
     private readonly CancellationTokenSource lifetime = new();
+    private bool loadingDeliveryState;
 
     public MainWindow()
     {
         InitializeComponent();
-        Loaded += async (_, _) => await RequestAsync("""{"v":1,"op":"status"}""");
+        Loaded += async (_, _) => await RefreshStatusAsync();
         Closing += HideToTray;
         Closed += (_, _) => lifetime.Cancel();
     }
@@ -26,7 +27,7 @@ public partial class MainWindow : Window
             Hide();
         }
     }
-    private async void Refresh_Click(object sender, RoutedEventArgs e) => await RequestAsync("""{"v":1,"op":"status"}""");
+    private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshStatusAsync();
     private async void SevenDays_Click(object sender, RoutedEventArgs e) => await SummaryAsync(7);
     private async void ThirtyDays_Click(object sender, RoutedEventArgs e) => await SummaryAsync(30);
     private async void Enroll_Click(object sender, RoutedEventArgs e)
@@ -78,6 +79,43 @@ public partial class MainWindow : Window
             HubUrl.IsEnabled = true;
             EnrollmentCode.IsEnabled = true;
         }
+    }
+
+    private async void DeliveryEnabled_Click(object sender, RoutedEventArgs e)
+    {
+        if (loadingDeliveryState) return;
+        var enabled = DeliveryEnabled.IsChecked == true;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "set-delivery-enabled", enabled }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            if (document.RootElement.GetProperty("status").GetString() != "ok") throw new InvalidOperationException();
+            EnrollmentStatus.Text = enabled
+                ? "観測データのHub送信を開始しました / Hub observation delivery is on."
+                : "観測データのHub送信を停止しました / Hub observation delivery is off.";
+        }
+        catch
+        {
+            loadingDeliveryState = true;
+            DeliveryEnabled.IsChecked = !enabled;
+            loadingDeliveryState = false;
+            EnrollmentStatus.Text = "送信設定を変更できませんでした / Could not change delivery setting.";
+        }
+    }
+
+    private async Task RefreshStatusAsync()
+    {
+        Output.Text = "読み込み中 / Loading…";
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"status"}""");
+            Output.Text = IpcResponsePresenter.Present(response);
+            using var document = JsonDocument.Parse(response);
+            loadingDeliveryState = true;
+            DeliveryEnabled.IsChecked = document.RootElement.GetProperty("data").GetProperty("deliveryEnabled").GetBoolean();
+            loadingDeliveryState = false;
+        }
+        catch (Exception exception) { Output.Text = $"Agentに接続できません / Cannot connect to Agent\r\n{exception.Message}"; }
     }
 
     internal static string EnrollmentMessage(string reason) => reason switch
