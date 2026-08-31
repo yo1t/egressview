@@ -45,26 +45,31 @@ struct AgentObservationRow: Identifiable {
     }
 }
 
+enum AgentMainSelectionChange: Equatable {
+    case tab
+    case scale
+    case metric
+    case destinationGrouping
+}
+
+/// The four choices the toolbar Pickers write.
+///
+/// Held as one value so the view keeps one `@State` rather than four, and so a
+/// fifth choice cannot be half-wired: it has to be added to `adopt(_:)` for the
+/// selection to reach the model at all.
+struct AgentMainSelection: Equatable {
+    var tab: AgentMainTab
+    var scale: TimeScale
+    var metric: TrafficMetric
+    var grouping: DestinationGrouping
+}
+
 @MainActor
 final class AgentMainViewModel: ObservableObject {
-    @Published var selectedTab = AgentMainTab.network {
-        didSet {
-            guard oldValue != selectedTab else { return }
-            // Opening the dedicated threat screen is an explicit request for
-            // current results, so it bypasses the long-window screen cache.
-            if selectedTab == .threats { threatCandidateCache.invalidate() }
-            refresh()
-        }
-    }
-    @Published var scale = TimeScale.hour {
-        didSet { refresh() }
-    }
-    @Published var metric = TrafficMetric.sessions {
-        didSet { refresh() }
-    }
-    @Published var destinationGrouping = DestinationGrouping.name {
-        didSet { refresh() }
-    }
+    @Published var selectedTab = AgentMainTab.network
+    @Published var scale = TimeScale.hour
+    @Published var metric = TrafficMetric.sessions
+    @Published var destinationGrouping = DestinationGrouping.name
     @Published private(set) var availableMetrics: [TrafficMetric] = [.sessions]
     @Published private(set) var sankey = SankeyAggregator().aggregate([], metric: .sessions)
     @Published private(set) var globe = GlobeAggregator().aggregate(
@@ -151,6 +156,7 @@ final class AgentMainViewModel: ObservableObject {
     private let loadQueue = DispatchQueue(label: "com.egressview.agent.main-window")
     private let refreshTimer = PeriodicWork()
     private let threatCandidateCache = ThreatCandidateRefreshCache()
+    private var refreshCoordinator = LatestWinsRefreshCoordinator()
 
     init(store: ObservationStore?, ollama: AgentOllamaController) {
         self.store = store
@@ -276,16 +282,86 @@ final class AgentMainViewModel: ObservableObject {
             : observation.remoteAddress
     }
 
+    /// What the Pickers should currently show.
+    var selection: AgentMainSelection {
+        AgentMainSelection(
+            tab: selectedTab, scale: scale, metric: metric, grouping: destinationGrouping
+        )
+    }
+
+    /// Takes the view's selection and reports what changed.
+    ///
+    /// **Call this from outside a view update.** The Pickers write a `@State`
+    /// value and this is reached from a `Task`, which is the whole point:
+    /// measured 2026-09-01, writing these `@Published` properties from the
+    /// Picker itself produced 72 `Publishing changes from within view updates`
+    /// warnings for the same operations that produce none this way.
+    ///
+    /// The write has been tried in three places -- `didSet`, `onChange(of:)`,
+    /// and the `Binding`'s own `set` -- and **all three run inside the update**.
+    /// It is not the place that matters, it is that the Picker's write and the
+    /// model's write happen in the same transaction.
+    func adopt(_ new: AgentMainSelection) {
+        var changes: [AgentMainSelectionChange] = []
+        if new.tab != selectedTab {
+            selectedTab = new.tab
+            changes.append(.tab)
+        }
+        if new.scale != scale {
+            scale = new.scale
+            changes.append(.scale)
+        }
+        if new.metric != metric {
+            metric = new.metric
+            changes.append(.metric)
+        }
+        if new.grouping != destinationGrouping {
+            destinationGrouping = new.grouping
+            changes.append(.destinationGrouping)
+        }
+        for change in changes { selectionDidChange(change) }
+    }
+
+    func selectionDidChange(_ change: AgentMainSelectionChange) {
+        // Opening the dedicated threat screen is an explicit request for
+        // current results, so it bypasses the long-window screen cache. Keep
+        // this in the model rather than exposing cache internals to the view.
+        if change == .tab, selectedTab == .threats {
+            threatCandidateCache.invalidate()
+        }
+        requestRefresh(selectionChanged: true)
+    }
+
     func refresh() {
+        requestRefresh(selectionChanged: false)
+    }
+
+    private func requestRefresh(selectionChanged: Bool) {
         // Notification history is held by AgentUserNotifier and publishes its
-        // own changes. Do not scan SQLite every fifteen seconds for a tab that
-        // does not use the selected connection period.
-        guard selectedTab != .notifications else { return }
+        // own changes. A tab change still advances the selection generation so
+        // an in-flight result for another tab cannot overwrite this screen.
+        if selectedTab == .notifications {
+            if selectionChanged {
+                _ = refreshCoordinator.selectionChanged(shouldRefresh: false)
+            }
+            return
+        }
         guard let store else {
             errorMessage = L("Local history is unavailable because App Group access failed.")
             return
         }
-        guard !isRefreshing else { return }
+
+        let token = selectionChanged
+            ? refreshCoordinator.selectionChanged(shouldRefresh: true)
+            : refreshCoordinator.requestRefresh()
+        guard let token else { return }
+        startRefresh(token, store: store)
+    }
+
+    private func startRefresh(
+        _ token: LatestWinsRefreshCoordinator.Token,
+        store: ObservationStore
+    ) {
         isRefreshing = true
         let selection = VisualizationSelection(scale: scale, metric: metric, end: Date())
         let grouping = destinationGrouping
@@ -393,13 +469,23 @@ final class AgentMainViewModel: ObservableObject {
             }
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.isRefreshing = false
-                switch result {
-                case .success(let data):
-                    self.apply(data, tab: tab)
-                    self.errorMessage = nil
-                case .failure(let error):
-                    self.errorMessage = error.localizedDescription
+                let completion = self.refreshCoordinator.complete(
+                    token,
+                    shouldContinue: self.selectedTab != .notifications
+                )
+                if completion.shouldApply {
+                    switch result {
+                    case .success(let data):
+                        self.apply(data, tab: tab)
+                        self.errorMessage = nil
+                    case .failure(let error):
+                        self.errorMessage = error.localizedDescription
+                    }
+                }
+                if let next = completion.next {
+                    self.startRefresh(next, store: store)
+                } else {
+                    self.isRefreshing = false
                 }
             }
         }

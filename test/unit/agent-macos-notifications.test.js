@@ -58,7 +58,7 @@ describe('macOS Agent notifications', () => {
   it('does not run connection-history queries for the notification tab', () => {
     assert.match(
       mainWindow,
-      /guard selectedTab != \.notifications else \{ return \}[\s\S]*guard let store/
+      /if selectedTab == \.notifications \{[\s\S]{0,180}selectionChanged\(shouldRefresh: false\)[\s\S]{0,80}return[\s\S]{0,80}guard let store/
     );
   });
 

@@ -95,6 +95,15 @@ struct AgentMainView: View {
     @ObservedObject private var language = AgentLanguageSettings.shared
     @ObservedObject private var notifications = AgentUserNotifier.shared
 
+    /// What the Pickers write. The model is updated from it, not by them.
+    ///
+    /// A `@State` write does not publish, so the Picker's own write cannot be
+    /// a publish from within a view update. See `AgentMainViewModel.adopt(_:)`
+    /// for what was measured.
+    @State private var selection = AgentMainSelection(
+        tab: .network, scale: .hour, metric: .sessions, grouping: .name
+    )
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -115,6 +124,15 @@ struct AgentMainView: View {
         .frame(minWidth: 900, minHeight: 620)
         .background(Color(nsColor: .windowBackgroundColor))
         .environment(\.locale, language.language.locale)
+        // The two directions, kept next to each other so neither is added
+        // without the other. Outward goes through a Task, which leaves the
+        // update the Picker's write started; inward carries the model's own
+        // corrections back (it resets `metric` when one is unavailable).
+        .onAppear { selection = model.selection }
+        .onChange(of: selection) { new in
+            Task { @MainActor in model.adopt(new) }
+        }
+        .onChange(of: model.selection) { selection = $0 }
     }
 
     private var header: some View {
@@ -139,7 +157,7 @@ struct AgentMainView: View {
                             .foregroundStyle(.secondary)
                             .frame(width: 190, alignment: .trailing)
                     } else {
-                        Picker(L("Period"), selection: $model.scale) {
+                        Picker(L("Period"), selection: $selection.scale) {
                             ForEach(TimeScale.allCases) { scale in
                                 Text(scale.title).tag(scale)
                             }
@@ -160,7 +178,7 @@ struct AgentMainView: View {
                 .disabled(model.isRefreshing)
             }
 
-            Picker(L("View"), selection: $model.selectedTab) {
+            Picker(L("View"), selection: $selection.tab) {
                 ForEach(AgentMainTab.allCases) { tab in
                     Text(tab.title).tag(tab)
                 }
@@ -516,7 +534,7 @@ struct AgentMainView: View {
         // Offered only when both views can say something. A picker whose other
         // option is always blank is worse than no picker.
         if model.availableMetrics.count > 1 {
-            Picker(L("Measure"), selection: $model.metric) {
+            Picker(L("Measure"), selection: $selection.metric) {
                 ForEach(model.availableMetrics) { metric in
                     Text(metric.title).tag(metric)
                 }
@@ -527,7 +545,7 @@ struct AgentMainView: View {
     }
 
     private var destinationGroupingPicker: some View {
-        Picker(L("Destinations by"), selection: $model.destinationGrouping) {
+        Picker(L("Destinations by"), selection: $selection.grouping) {
             ForEach(DestinationGrouping.allCases) { grouping in
                 Text(grouping.title).tag(grouping)
             }
