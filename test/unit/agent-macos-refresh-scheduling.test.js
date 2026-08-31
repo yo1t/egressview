@@ -37,7 +37,7 @@ test('the Pickers write @State, never the model', () => {
 });
 
 test('the model is adopted from a Task, outside the update', () => {
-  const outward = view.match(/\.onChange\(of: selection\)[\s\S]{0,200}?\n        \}/);
+  const outward = view.match(/\.onChange\(of: selection\)[\s\S]{0,200}?\n {8}\}/);
   assert.ok(outward, 'no onChange(of: selection)');
   assert.match(outward[0], /Task \{ @MainActor in[\s\S]{0,80}model\.adopt\(new\)/);
 });
@@ -63,7 +63,7 @@ test('every selection field is carried and adopted', () => {
     'AgentMainSelection fields changed; update this test and the Pickers together'
   );
 
-  const adopt = model.match(/func adopt\(_ new: AgentMainSelection\) \{([\s\S]*?)\n    \}/);
+  const adopt = model.match(/func adopt\(_ new: AgentMainSelection\) \{([\s\S]*?)\n {4}\}/);
   assert.ok(adopt, 'adopt(_:) not found');
   for (const field of declared) {
     assert.match(
@@ -73,7 +73,7 @@ test('every selection field is carried and adopted', () => {
     );
   }
 
-  const snapshot = model.match(/var selection: AgentMainSelection \{([\s\S]*?)\n    \}/);
+  const snapshot = model.match(/var selection: AgentMainSelection \{([\s\S]*?)\n {4}\}/);
   assert.ok(snapshot, 'selection snapshot not found');
   for (const field of declared) {
     assert.match(
