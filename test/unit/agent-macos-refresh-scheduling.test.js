@@ -13,38 +13,75 @@ const view = readFileSync(
   'utf8'
 );
 
-// Writing the selection from a Binding's set, rather than from didSet or
-// onChange, is what keeps the write out of a view update. Measured
-// 2026-08-31: with the four didSets moved to onChange the warning count was
-// unchanged at 19, because onChange runs inside the same update transaction.
-test('Agent selections are written from the Picker binding, not didSet or onChange', () => {
+// The four Picker choices, named as the selection struct spells them.
+const FIELDS = ['tab', 'scale', 'metric', 'grouping'];
+
+// Measured 2026-09-01: writing these @Published properties from the Picker --
+// in didSet, in onChange, or in the Binding's own set -- produced 72
+// "Publishing changes from within view updates" warnings for the operations
+// that produce none once the Picker writes @State and the model is updated
+// from a Task. All three placements run inside the view update; what matters
+// is that the Picker's write and the model's write share a transaction.
+test('the Pickers write @State, never the model', () => {
+  for (const field of FIELDS) {
+    assert.match(view, new RegExp(`selection: \\$selection\\.${field}\\)`));
+  }
   for (const property of ['selectedTab', 'scale', 'metric', 'destinationGrouping']) {
-    assert.match(model, new RegExp(`@Published var ${property} =`));
+    // No Picker bound straight to the model, and no didSet behind it.
+    assert.doesNotMatch(view, new RegExp(`selection: \\$model\\.${property}\\)`));
     assert.doesNotMatch(
       model,
       new RegExp(`@Published var ${property}[^\\n]*\\{[\\s\\S]{0,120}didSet`)
     );
-    assert.doesNotMatch(view, new RegExp(`onChange\\(of: model\\.${property}\\)`));
-    assert.match(
-      view,
-      new RegExp(`selection: selectionBinding\\(\\\\.${property},`)
-    );
   }
 });
 
-test('The selection binding writes the value and then reports the change', () => {
-  const helper = view.match(
-    /private func selectionBinding[\s\S]{0,700}?\n    \}/
+test('the model is adopted from a Task, outside the update', () => {
+  const outward = view.match(/\.onChange\(of: selection\)[\s\S]{0,200}?\n        \}/);
+  assert.ok(outward, 'no onChange(of: selection)');
+  assert.match(outward[0], /Task \{ @MainActor in[\s\S]{0,80}model\.adopt\(new\)/);
+});
+
+// Both directions must exist. A one-way binding leaves the Pickers showing a
+// stale value after the model corrects one itself (it resets `metric` when the
+// chosen measure is unavailable).
+test('the selection is synchronised in both directions', () => {
+  assert.match(view, /\.onChange\(of: selection\)/);
+  assert.match(view, /\.onChange\(of: model\.selection\) \{ selection = \$0 \}/);
+  assert.match(view, /\.onAppear \{ selection = model\.selection \}/);
+});
+
+// The guard against half-wiring a fifth choice: every field of the struct has
+// to be carried by `selection` and handled by `adopt`, or this fails.
+test('every selection field is carried and adopted', () => {
+  const struct = model.match(/struct AgentMainSelection: Equatable \{([\s\S]*?)\n\}/);
+  assert.ok(struct, 'AgentMainSelection not found');
+  const declared = [...struct[1].matchAll(/var (\w+):/g)].map((m) => m[1]);
+  assert.deepEqual(
+    declared.slice().sort(),
+    FIELDS.slice().sort(),
+    'AgentMainSelection fields changed; update this test and the Pickers together'
   );
-  assert.ok(helper, 'selectionBinding helper not found');
-  const body = helper[0];
-  assert.match(body, /set: \{ newValue in/);
-  assert.match(body, /guard model\[keyPath: keyPath\] != newValue else \{ return \}/);
-  assert.ok(
-    body.indexOf('model[keyPath: keyPath] = newValue')
-      < body.indexOf('model.selectionDidChange(change)'),
-    'the value must be written before the change is reported'
-  );
+
+  const adopt = model.match(/func adopt\(_ new: AgentMainSelection\) \{([\s\S]*?)\n    \}/);
+  assert.ok(adopt, 'adopt(_:) not found');
+  for (const field of declared) {
+    assert.match(
+      adopt[1],
+      new RegExp(`new\\.${field} !=`),
+      `adopt(_:) does not compare ${field}`
+    );
+  }
+
+  const snapshot = model.match(/var selection: AgentMainSelection \{([\s\S]*?)\n    \}/);
+  assert.ok(snapshot, 'selection snapshot not found');
+  for (const field of declared) {
+    assert.match(
+      snapshot[1],
+      new RegExp(`${field}:`),
+      `the selection snapshot omits ${field}`
+    );
+  }
 });
 
 test('Agent refresh scheduling keeps cache ownership and stale-result checks in the model', () => {

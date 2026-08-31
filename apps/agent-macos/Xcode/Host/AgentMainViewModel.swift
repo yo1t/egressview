@@ -52,6 +52,18 @@ enum AgentMainSelectionChange: Equatable {
     case destinationGrouping
 }
 
+/// The four choices the toolbar Pickers write.
+///
+/// Held as one value so the view keeps one `@State` rather than four, and so a
+/// fifth choice cannot be half-wired: it has to be added to `adopt(_:)` for the
+/// selection to reach the model at all.
+struct AgentMainSelection: Equatable {
+    var tab: AgentMainTab
+    var scale: TimeScale
+    var metric: TrafficMetric
+    var grouping: DestinationGrouping
+}
+
 @MainActor
 final class AgentMainViewModel: ObservableObject {
     @Published var selectedTab = AgentMainTab.network
@@ -268,6 +280,46 @@ final class AgentMainViewModel: ObservableObject {
         return observation.remoteAddress.contains(":")
             ? "[\(observation.remoteAddress)]"
             : observation.remoteAddress
+    }
+
+    /// What the Pickers should currently show.
+    var selection: AgentMainSelection {
+        AgentMainSelection(
+            tab: selectedTab, scale: scale, metric: metric, grouping: destinationGrouping
+        )
+    }
+
+    /// Takes the view's selection and reports what changed.
+    ///
+    /// **Call this from outside a view update.** The Pickers write a `@State`
+    /// value and this is reached from a `Task`, which is the whole point:
+    /// measured 2026-09-01, writing these `@Published` properties from the
+    /// Picker itself produced 72 `Publishing changes from within view updates`
+    /// warnings for the same operations that produce none this way.
+    ///
+    /// The write has been tried in three places -- `didSet`, `onChange(of:)`,
+    /// and the `Binding`'s own `set` -- and **all three run inside the update**.
+    /// It is not the place that matters, it is that the Picker's write and the
+    /// model's write happen in the same transaction.
+    func adopt(_ new: AgentMainSelection) {
+        var changes: [AgentMainSelectionChange] = []
+        if new.tab != selectedTab {
+            selectedTab = new.tab
+            changes.append(.tab)
+        }
+        if new.scale != scale {
+            scale = new.scale
+            changes.append(.scale)
+        }
+        if new.metric != metric {
+            metric = new.metric
+            changes.append(.metric)
+        }
+        if new.grouping != destinationGrouping {
+            destinationGrouping = new.grouping
+            changes.append(.destinationGrouping)
+        }
+        for change in changes { selectionDidChange(change) }
     }
 
     func selectionDidChange(_ change: AgentMainSelectionChange) {
