@@ -115,6 +115,18 @@ struct AgentMainView: View {
         .frame(minWidth: 900, minHeight: 620)
         .background(Color(nsColor: .windowBackgroundColor))
         .environment(\.locale, language.language.locale)
+        .onChange(of: model.selectedTab) { _ in
+            model.selectionDidChange(.tab)
+        }
+        .onChange(of: model.scale) { _ in
+            model.selectionDidChange(.scale)
+        }
+        .onChange(of: model.metric) { _ in
+            model.selectionDidChange(.metric)
+        }
+        .onChange(of: model.destinationGrouping) { _ in
+            model.selectionDidChange(.destinationGrouping)
+        }
     }
 
     private var header: some View {

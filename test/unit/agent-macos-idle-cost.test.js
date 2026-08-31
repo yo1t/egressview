@@ -110,7 +110,8 @@ describe('macOS Agent idle cost', () => {
     assert.doesNotMatch(window, /let rollup = try store\.hourlyRollup/);
     assert.match(window, /sessionCount: pairs\.reduce/);
     assert.match(window, /threatCandidateCache\.candidates\(scale: selection\.scale\)/);
-    assert.match(window, /if selectedTab == \.threats \{ threatCandidateCache\.invalidate\(\) \}/);
+    assert.match(window, /if change == \.tab, selectedTab == \.threats \{/);
+    assert.match(window, /threatCandidateCache\.invalidate\(\)/);
   });
 
   // Two behaviours users can see, fixed here so they are decisions rather than
@@ -129,6 +130,9 @@ describe('macOS Agent idle cost', () => {
     // to five minutes: the cache holds the observed destinations, not just the
     // indicators, so a newly seen dangerous destination waits for the TTL.
     // Opening the threat tab is an explicit request for current results.
-    assert.match(window, /selectedTab == \.threats \{ threatCandidateCache\.invalidate\(\) \}/);
+    assert.match(
+      window,
+      /if change == \.tab, selectedTab == \.threats \{[\s\S]{0,100}threatCandidateCache\.invalidate\(\)/
+    );
   });
 });
