@@ -13,18 +13,38 @@ const view = readFileSync(
   'utf8'
 );
 
-test('Agent selections refresh after the binding update instead of in didSet', () => {
+// Writing the selection from a Binding's set, rather than from didSet or
+// onChange, is what keeps the write out of a view update. Measured
+// 2026-08-31: with the four didSets moved to onChange the warning count was
+// unchanged at 19, because onChange runs inside the same update transaction.
+test('Agent selections are written from the Picker binding, not didSet or onChange', () => {
   for (const property of ['selectedTab', 'scale', 'metric', 'destinationGrouping']) {
     assert.match(model, new RegExp(`@Published var ${property} =`));
     assert.doesNotMatch(
       model,
       new RegExp(`@Published var ${property}[^\\n]*\\{[\\s\\S]{0,120}didSet`)
     );
+    assert.doesNotMatch(view, new RegExp(`onChange\\(of: model\\.${property}\\)`));
     assert.match(
       view,
-      new RegExp(`onChange\\(of: model\\.${property}\\)[\\s\\S]{0,100}selectionDidChange`)
+      new RegExp(`selection: selectionBinding\\(\\\\.${property},`)
     );
   }
+});
+
+test('The selection binding writes the value and then reports the change', () => {
+  const helper = view.match(
+    /private func selectionBinding[\s\S]{0,700}?\n    \}/
+  );
+  assert.ok(helper, 'selectionBinding helper not found');
+  const body = helper[0];
+  assert.match(body, /set: \{ newValue in/);
+  assert.match(body, /guard model\[keyPath: keyPath\] != newValue else \{ return \}/);
+  assert.ok(
+    body.indexOf('model[keyPath: keyPath] = newValue')
+      < body.indexOf('model.selectionDidChange(change)'),
+    'the value must be written before the change is reported'
+  );
 });
 
 test('Agent refresh scheduling keeps cache ownership and stale-result checks in the model', () => {

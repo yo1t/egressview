@@ -115,18 +115,31 @@ struct AgentMainView: View {
         .frame(minWidth: 900, minHeight: 620)
         .background(Color(nsColor: .windowBackgroundColor))
         .environment(\.locale, language.language.locale)
-        .onChange(of: model.selectedTab) { _ in
-            model.selectionDidChange(.tab)
-        }
-        .onChange(of: model.scale) { _ in
-            model.selectionDidChange(.scale)
-        }
-        .onChange(of: model.metric) { _ in
-            model.selectionDidChange(.metric)
-        }
-        .onChange(of: model.destinationGrouping) { _ in
-            model.selectionDidChange(.destinationGrouping)
-        }
+    }
+
+    /// Writes the selection from the Picker's own `set`, not from a view
+    /// modifier.
+    ///
+    /// `onChange(of:)` runs inside the same update transaction as the change
+    /// that triggered it, so writing `@Published` there is still "publishing
+    /// from within view updates" -- measured 2026-08-31: moving the four
+    /// `didSet`s to `onChange` left the warning count unchanged at 19.
+    ///
+    /// A `Binding`'s `set` is not part of a body evaluation. The language
+    /// Picker on this same screen has always written through one and has never
+    /// produced the warning.
+    private func selectionBinding<Value: Equatable>(
+        _ keyPath: ReferenceWritableKeyPath<AgentMainViewModel, Value>,
+        _ change: AgentMainSelectionChange
+    ) -> Binding<Value> {
+        Binding(
+            get: { model[keyPath: keyPath] },
+            set: { newValue in
+                guard model[keyPath: keyPath] != newValue else { return }
+                model[keyPath: keyPath] = newValue
+                model.selectionDidChange(change)
+            }
+        )
     }
 
     private var header: some View {
@@ -151,7 +164,7 @@ struct AgentMainView: View {
                             .foregroundStyle(.secondary)
                             .frame(width: 190, alignment: .trailing)
                     } else {
-                        Picker(L("Period"), selection: $model.scale) {
+                        Picker(L("Period"), selection: selectionBinding(\.scale, .scale)) {
                             ForEach(TimeScale.allCases) { scale in
                                 Text(scale.title).tag(scale)
                             }
@@ -172,7 +185,7 @@ struct AgentMainView: View {
                 .disabled(model.isRefreshing)
             }
 
-            Picker(L("View"), selection: $model.selectedTab) {
+            Picker(L("View"), selection: selectionBinding(\.selectedTab, .tab)) {
                 ForEach(AgentMainTab.allCases) { tab in
                     Text(tab.title).tag(tab)
                 }
@@ -528,7 +541,7 @@ struct AgentMainView: View {
         // Offered only when both views can say something. A picker whose other
         // option is always blank is worse than no picker.
         if model.availableMetrics.count > 1 {
-            Picker(L("Measure"), selection: $model.metric) {
+            Picker(L("Measure"), selection: selectionBinding(\.metric, .metric)) {
                 ForEach(model.availableMetrics) { metric in
                     Text(metric.title).tag(metric)
                 }
@@ -539,7 +552,7 @@ struct AgentMainView: View {
     }
 
     private var destinationGroupingPicker: some View {
-        Picker(L("Destinations by"), selection: $model.destinationGrouping) {
+        Picker(L("Destinations by"), selection: selectionBinding(\.destinationGrouping, .destinationGrouping)) {
             ForEach(DestinationGrouping.allCases) { grouping in
                 Text(grouping.title).tag(grouping)
             }
