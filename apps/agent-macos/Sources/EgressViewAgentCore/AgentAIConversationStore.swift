@@ -23,13 +23,16 @@ public struct AgentAIConversationMessage: Codable, Equatable, Identifiable, Send
     public let errorCode: String?
     public let inputTokens: Int?
     public let outputTokens: Int?
+    public let estimatedCostUSD: Double?
+    public let pricingVersion: String?
 
     public init(
         id: UUID = UUID(), conversationID: UUID, requestID: UUID,
         role: AgentAIMessageRole, body: String, createdAt: Date = Date(),
         provider: String = "ollama", model: String,
         status: AgentAIMessageStatus = .complete, errorCode: String? = nil,
-        inputTokens: Int? = nil, outputTokens: Int? = nil
+        inputTokens: Int? = nil, outputTokens: Int? = nil,
+        estimatedCostUSD: Double? = nil, pricingVersion: String? = nil
     ) {
         self.id = id
         self.conversationID = conversationID
@@ -43,6 +46,8 @@ public struct AgentAIConversationMessage: Codable, Equatable, Identifiable, Send
         self.errorCode = errorCode
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
+        self.estimatedCostUSD = estimatedCostUSD
+        self.pricingVersion = pricingVersion
     }
 }
 
@@ -224,7 +229,7 @@ public final class AgentAIConversationStore: @unchecked Sendable {
     public func messages(limit: Int = 500) throws -> [AgentAIConversationMessage] {
         try lock.withLock {
             let rows = try applyDeletions(to: try decodedLines())
-            return Array(rows.suffix(max(1, min(limit, 500))))
+            return Array(rows.suffix(max(1, min(limit, 50_000))))
         }
     }
 }

@@ -631,6 +631,8 @@ private struct AgentSettingsView: View {
     )
     @State private var confirmUninstall = false
     @State private var confirmLocalOnlyUninstall = false
+    @State private var openAIAPIKey = ""
+    @State private var openAICloudConsent = false
 
     var body: some View {
         NavigationSplitView {
@@ -879,8 +881,22 @@ private struct AgentSettingsView: View {
         VStack(alignment: .leading, spacing: 22) {
             settingsTitle(
                 L("AI"),
-                subtitle: L("Configure local AI and test the connection used by Insights.")
+                subtitle: L("Choose local AI or explicitly configure a cloud provider for Insights.")
             )
+            settingsGroup(L("AI provider")) {
+                Picker(L("Provider"), selection: Binding(
+                    get: { ollama.provider }, set: { ollama.selectProvider($0) }
+                )) {
+                    ForEach(AgentAIProvider.allCases) { provider in
+                        Text(provider.title).tag(provider)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(ollama.isRunning)
+            }
+            if ollama.provider == .openAI {
+                openAISettings
+            } else {
             settingsGroup(L("Local AI with Ollama")) {
                 Text(L("Optional and manual only. EgressView connects only to Ollama on this Mac; it never sends this analysis to the public Internet."))
                     .font(.callout)
@@ -925,6 +941,58 @@ private struct AgentSettingsView: View {
                         .textSelection(.enabled)
                 }
             }
+            }
+        }
+    }
+
+    private var openAISettings: some View {
+        settingsGroup(L("OpenAI API")) {
+            Text(L("Off by default. Only the bounded preview shown in Insights is sent, and only after you confirm each request. OpenAI receives application names, destination names or addresses, time ranges, and aggregate counts. API charges may apply."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L("API key (stored only in Keychain)"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SecureField(
+                    ollama.openAIEnabled ? L("Key stored in Keychain · enter only to replace") : L("OpenAI API key"),
+                    text: $openAIAPIKey
+                )
+                .textFieldStyle(.roundedBorder)
+            }
+            Picker(L("Model"), selection: Binding(
+                get: { ollama.openAIModel }, set: { ollama.selectCurrentModel($0) }
+            )) {
+                ForEach(AgentOpenAIConfiguration.models, id: \.self) { model in
+                    Text(model).tag(model)
+                }
+            }
+            Toggle(isOn: $openAICloudConsent) {
+                Text(L("I understand that the displayed bounded metadata is sent to OpenAI and may incur API charges."))
+            }
+            Button(ollama.isRunning ? L("Checking...") : L("Save and test")) {
+                let key = openAIAPIKey
+                openAIAPIKey = ""
+                ollama.saveAndTestOpenAI(apiKey: key, consent: openAICloudConsent)
+            }
+            .disabled(ollama.isRunning || !openAICloudConsent)
+            if ollama.openAIEnabled {
+                Button(L("Remove OpenAI API key"), role: .destructive) {
+                    openAIAPIKey = ""
+                    openAICloudConsent = false
+                    ollama.removeOpenAIConfiguration()
+                }
+                .disabled(ollama.isRunning)
+            }
+            if let status = ollama.status {
+                Text(status)
+                    .font(.callout)
+                    .foregroundStyle(ollama.openAIEnabled ? Color.green : Color.orange)
+                    .textSelection(.enabled)
+            }
+            Text(L("Pricing estimate catalog: %@. Actual billing may differ.", AgentAIPriceCatalog.version))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
