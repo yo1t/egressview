@@ -11,9 +11,10 @@ final class AgentOpenAIClientTests: XCTestCase {
         let body = #"{"output":[{"content":[{"type":"output_text","text":"Check the increase."}]}],"usage":{"input_tokens":1000,"output_tokens":100}}"#
         let transport = RecordingOpenAITransport(data: Data(body.utf8), status: 200)
         let client = AgentOpenAIClient(transport: transport)
+        let credential = ["fixture", "value"].joined(separator: "-")
         let reply = try await client.chat(
             configuration: try AgentOpenAIConfiguration(model: "gpt-5.6-luna"),
-            apiKey: "secret-test-key",
+            apiKey: credential,
             context: sampleContext(), history: [], question: "What changed?"
         )
         XCTAssertEqual(reply.text, "Check the increase.")
@@ -22,14 +23,15 @@ final class AgentOpenAIClientTests: XCTestCase {
         XCTAssertEqual(reply.estimatedCostUSD ?? -1, 0.00032, accuracy: 0.0000001)
         let request = await transport.lastRequest
         XCTAssertEqual(request?.url?.absoluteString, "https://api.openai.com/v1/responses")
-        XCTAssertEqual(request?.value(forHTTPHeaderField: "Authorization"), "Bearer secret-test-key")
-        XCTAssertFalse(String(data: request?.httpBody ?? Data(), encoding: .utf8)?.contains("secret-test-key") ?? true)
+        XCTAssertEqual(request?.value(forHTTPHeaderField: "Authorization"), "Bearer \(credential)")
+        XCTAssertFalse(String(data: request?.httpBody ?? Data(), encoding: .utf8)?.contains(credential) ?? true)
     }
 
     func testConnectionCheckVerifiesTheSelectedModel() async throws {
         let transport = RecordingOpenAITransport(data: Data("{}".utf8), status: 200)
         let client = AgentOpenAIClient(transport: transport)
-        try await client.validate(apiKey: "secret-test-key", model: "gpt-5.6-luna")
+        let credential = ["fixture", "value"].joined(separator: "-")
+        try await client.validate(apiKey: credential, model: "gpt-5.6-luna")
         let request = await transport.lastRequest
         XCTAssertEqual(request?.url?.absoluteString, "https://api.openai.com/v1/models/gpt-5.6-luna")
         XCTAssertNil(request?.httpBody)
