@@ -470,6 +470,66 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
     assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
     db.close();
   });
+
+  it('migrates v19 Agent observations to v20 and accepts ETW without losing data', () => {
+    const p = tmpDb('v20-agent-etw');
+    const db = openDb(p);
+    for (const migration of _MIGRATIONS.filter(item => item.version <= 19)) {
+      db.transaction(() => {
+        migration.up(db, {});
+        db.pragma(`user_version = ${migration.version}`);
+      })();
+    }
+    db.prepare(`
+      INSERT INTO agent_observations (
+        agentId, observationId, batchId, networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, collector, confidence, receivedAt
+      ) VALUES ('agent-1', 'obs-macos', 'batch-1', 'tcp',
+        '192.0.2.10', 49152, '198.51.100.20', 443,
+        42, 'Example', NULL, 100, 200, NULL, NULL,
+        'network-extension', 'exact', 201)
+    `).run();
+
+    runMigrations(db, p);
+
+    assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
+    assert.equal(db.prepare('SELECT collector FROM agent_observations').get().collector, 'network-extension');
+    const insertEtw = db.prepare(`
+      INSERT INTO agent_observations
+      SELECT agentId, 'obs-windows', 'batch-2', networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, 'Windows App', bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, 'etw', confidence, receivedAt
+      FROM agent_observations WHERE observationId = 'obs-macos'
+    `).run();
+    assert.equal(insertEtw.changes, 1);
+    assert.throws(() => db.prepare(`
+      INSERT INTO agent_observations
+      SELECT agentId, 'obs-invalid', 'batch-3', networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, 'unknown', confidence, receivedAt
+      FROM agent_observations WHERE observationId = 'obs-macos'
+    `).run(), /CHECK constraint failed/);
+    const indexes = new Set(db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='index'"
+    ).all().map(row => row.name));
+    for (const name of [
+      'idx_agent_observations_time',
+      'idx_agent_observations_flow_time',
+      'idx_agent_observations_batch',
+      'idx_agent_observations_agent_flow',
+    ]) assert(indexes.has(name), `missing ${name}`);
+    assert.equal(db.pragma('integrity_check', { simple: true }), 'ok');
+    db.close();
+
+    const backups = fs.readdirSync(TMP)
+      .filter(name => name.startsWith(`v20-agent-etw.db.pre-migration.v19-to-v${SCHEMA_VERSION}`));
+    assert.equal(backups.length, 1);
+    _verifyDbCopy(path.join(TMP, backups[0]));
+  });
 });
 
 // ─── P2-30 v4/v5: expand observations, then remove source ─────────────────────

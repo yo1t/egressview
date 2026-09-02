@@ -43,6 +43,60 @@ describe('Agent ingest store', () => {
     assert.equal(appRollup.appIdentity, golden.observations[0].bundleID);
   });
 
+  it('accepts the Windows ETW collector under the production DB contract', () => {
+    const envelope = copy();
+    envelope.agent.platform = 'windows';
+    envelope.observations[0].collector = 'etw';
+
+    const ack = store.storeBatch(agentId, envelope, { receivedAt });
+
+    assert.equal(ack.accepted, 1);
+    assert.equal(ack.duplicate, 0);
+    assert.equal(ack.rejected, 0);
+    assert.equal(store._dbForTest().prepare(
+      'SELECT collector FROM agent_observations'
+    ).get().collector, 'etw');
+  });
+
+  it('separates accepted, duplicate, and DB-rejected observations', () => {
+    store.storeBatch(agentId, copy(), { receivedAt });
+    const envelope = copy();
+    envelope.batchId = '00000000-0000-4000-8000-000000000099';
+    envelope.observations.push({
+      ...structuredClone(envelope.observations[0]),
+      observationId: '00000000-0000-4000-8000-000000000088',
+      collector: 'unknown-collector',
+    }, {
+      ...structuredClone(envelope.observations[0]),
+      observationId: '00000000-0000-4000-8000-000000000089',
+      collector: 'etw',
+    });
+
+    const ack = store.storeBatch(agentId, envelope, { receivedAt: receivedAt + 1 });
+
+    assert.deepEqual(ack, {
+      batchId: envelope.batchId,
+      accepted: 1,
+      duplicate: 1,
+      rejected: 1,
+      receivedAt: receivedAt + 1,
+      replayed: false,
+    });
+    assert.deepEqual(ack.acceptedObservationIds, [
+      '00000000-0000-4000-8000-000000000089',
+    ]);
+    assert.equal(JSON.stringify(ack).includes('acceptedObservationIds'), false);
+    assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 2);
+    assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_app_hourly').get().n, 1);
+    assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_ingest_batches').get().n, 1);
+
+    const retry = store.storeBatch(agentId, envelope, { receivedAt: receivedAt + 2 });
+    assert.equal(retry.replayed, false);
+    assert.equal(retry.accepted, 0);
+    assert.equal(retry.duplicate, 2);
+    assert.equal(retry.rejected, 1);
+  });
+
   it('returns the original ACK for 100 retries without duplicating storage', () => {
     const first = store.storeBatch(agentId, copy(), { receivedAt });
     for (let index = 0; index < 100; index += 1) {

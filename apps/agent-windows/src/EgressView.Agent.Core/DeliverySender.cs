@@ -57,9 +57,12 @@ public sealed class DeliverySender
             AgentIngestAcknowledgement? acknowledgement;
             try { acknowledgement = await response.Content.ReadFromJsonAsync<AgentIngestAcknowledgement>(Json, cancellationToken); }
             catch (JsonException) { return new(DeliveryAttemptKind.InvalidAcknowledgement); }
-            if (acknowledgement is null || acknowledgement.BatchId != batch.BatchId || acknowledgement.Rejected != 0
-                || acknowledgement.Accepted + acknowledgement.Duplicate != batch.Observations.Count)
+            if (acknowledgement is null || acknowledgement.BatchId != batch.BatchId
+                || acknowledgement.Accepted < 0 || acknowledgement.Duplicate < 0 || acknowledgement.Rejected < 0
+                || (long)acknowledgement.Accepted + acknowledgement.Duplicate + acknowledgement.Rejected != batch.Observations.Count)
                 return new(DeliveryAttemptKind.InvalidAcknowledgement);
+            if (acknowledgement.Rejected != 0)
+                return new(DeliveryAttemptKind.Rejected);
             store.AcknowledgeDelivery(batch.BatchId, DateTimeOffset.UtcNow);
             return new(DeliveryAttemptKind.Acknowledged);
         }
