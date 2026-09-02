@@ -67,7 +67,9 @@ describe('macOS Agent Ollama Phase 2 safety boundary', () => {
 
   it('localizes live status from state instead of freezing the previous language', () => {
     assert.match(controller, /private enum StatusState/);
-    assert.match(controller, /provider == \.openAI \? openAIStatus : statusState\.map\(localized\)/);
+    assert.match(controller, /case \.ollama: statusState\.map\(localized\)/);
+    assert.match(controller, /case \.anthropic: anthropicStatus/);
+    assert.match(controller, /case \.openAI: openAIStatus/);
     assert.match(controller, /case \.connected\(let model\): return L\("Connected to Ollama/);
     assert.doesNotMatch(controller, /@Published private\(set\) var status: String\?/);
   });

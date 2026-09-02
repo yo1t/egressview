@@ -80,9 +80,7 @@ struct AgentInsightPanel: View {
                 } else {
                     Label(
                         ollama.isCurrentProviderEnabled
-                            ? (ollama.provider == .ollama
-                               ? L("Ollama ready · Local only")
-                               : L("OpenAI ready · Manual cloud send"))
+                            ? providerReadyLabel
                             : L("AI off · Insight data not sent"),
                         systemImage: "lock.shield"
                     )
@@ -224,9 +222,9 @@ struct AgentInsightPanel: View {
         } message: {
             Text(L("%lld messages will be deleted. This cannot be undone.", ollama.messages.count))
         }
-        .alert(L("Send bounded network metadata to OpenAI?"), isPresented: cloudConfirmationPresented) {
+        .alert(cloudConfirmationTitle, isPresented: cloudConfirmationPresented) {
             Button(L("Cancel"), role: .cancel) { pendingCloudQuestion = nil }
-            Button(L("Send to OpenAI")) {
+            Button(cloudSendButtonTitle) {
                 guard let pendingCloudQuestion else { return }
                 question = ""
                 ollama.analyze(snapshot: snapshot, question: pendingCloudQuestion)
@@ -234,8 +232,9 @@ struct AgentInsightPanel: View {
             }
         } message: {
             Text(L(
-                "The preview contains totals, time range, up to %lld application names, and up to %lld destination names or addresses. It will be sent to OpenAI and may incur API charges. No API key or raw connection rows are included.",
-                snapshot.context.topApplications.count, snapshot.context.topDestinations.count
+                "The preview contains totals, time range, up to %lld application names, and up to %lld destination names or addresses. It will be sent to %@ and may incur API charges. No API key or raw connection rows are included.",
+                snapshot.context.topApplications.count, snapshot.context.topDestinations.count,
+                ollama.currentProviderTitle
             ))
         }
     }
@@ -421,7 +420,7 @@ struct AgentInsightPanel: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text(ollama.provider == .ollama
                      ? L("This is the complete bounded context sent only when you manually ask the configured local Ollama model.")
-                     : L("This is the complete bounded context sent to OpenAI only after you confirm each request."))
+                     : L("This is the complete bounded context sent to %@ only after you confirm each request.", ollama.currentProviderTitle))
                     .foregroundStyle(.secondary)
 
                 VStack(alignment: .leading, spacing: 5) {
@@ -484,7 +483,23 @@ struct AgentInsightPanel: View {
     }
 
     private func providerName(_ value: String) -> String {
-        value == AgentAIProvider.openAI.rawValue ? "OpenAI" : "Ollama"
+        AgentAIProvider(rawValue: value)?.title ?? value
+    }
+
+    private var providerReadyLabel: String {
+        switch ollama.provider {
+        case .ollama: L("Ollama ready · Local only")
+        case .anthropic: L("Anthropic ready · Manual cloud send")
+        case .openAI: L("OpenAI ready · Manual cloud send")
+        }
+    }
+
+    private var cloudConfirmationTitle: String {
+        L("Send bounded network metadata to %@?", ollama.currentProviderTitle)
+    }
+
+    private var cloudSendButtonTitle: String {
+        L("Send to %@", ollama.currentProviderTitle)
     }
 
     private func previewList(

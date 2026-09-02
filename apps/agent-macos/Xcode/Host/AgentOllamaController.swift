@@ -3,10 +3,17 @@ import Foundation
 
 enum AgentAIProvider: String, CaseIterable, Identifiable {
     case ollama
+    case anthropic
     case openAI = "openai"
 
     var id: String { rawValue }
-    var title: String { self == .ollama ? "Ollama" : "OpenAI" }
+    var title: String {
+        switch self {
+        case .ollama: "Ollama"
+        case .anthropic: "Anthropic"
+        case .openAI: "OpenAI"
+        }
+    }
 }
 
 @MainActor
@@ -45,6 +52,9 @@ final class AgentOllamaController: ObservableObject {
         static let model = "agentOllamaModel"
         static let enabled = "agentOllamaEnabled"
         static let provider = "agentAIProvider"
+        static let anthropicModel = "agentAnthropicModel"
+        static let anthropicEnabled = "agentAnthropicEnabled"
+        static let anthropicConsent = "agentAnthropicCloudConsent"
         static let openAIModel = "agentOpenAIModel"
         static let openAIEnabled = "agentOpenAIEnabled"
         static let openAIConsent = "agentOpenAICloudConsent"
@@ -59,12 +69,16 @@ final class AgentOllamaController: ObservableObject {
     @Published private(set) var messages: [AgentAIConversationMessage] = []
     @Published private(set) var activeConversationID: UUID?
     @Published private(set) var provider: AgentAIProvider
+    @Published private(set) var anthropicModel: String
+    @Published private(set) var anthropicEnabled: Bool
+    @Published private(set) var anthropicStatus: String?
     @Published private(set) var openAIModel: String
     @Published private(set) var openAIEnabled: Bool
     @Published private(set) var openAIStatus: String?
 
     private let defaults: UserDefaults
     private let client: AgentOllamaClient
+    private let anthropicClient: AgentAnthropicClient
     private let openAIClient: AgentOpenAIClient
     private let apiKeyStore: any AgentAPIKeyStoring
     private let historyStore: AgentAIConversationStore?
@@ -74,12 +88,14 @@ final class AgentOllamaController: ObservableObject {
     init(
         defaults: UserDefaults = .standard,
         client: AgentOllamaClient = AgentOllamaClient(),
+        anthropicClient: AgentAnthropicClient = AgentAnthropicClient(),
         openAIClient: AgentOpenAIClient = AgentOpenAIClient(),
         apiKeyStore: any AgentAPIKeyStoring = KeychainAgentAPIKeyStore(),
         historyStore: AgentAIConversationStore? = try? AgentAIConversationStore()
     ) {
         self.defaults = defaults
         self.client = client
+        self.anthropicClient = anthropicClient
         self.openAIClient = openAIClient
         self.apiKeyStore = apiKeyStore
         self.historyStore = historyStore
@@ -87,6 +103,8 @@ final class AgentOllamaController: ObservableObject {
         model = defaults.string(forKey: Keys.model) ?? ""
         isEnabled = defaults.bool(forKey: Keys.enabled)
         provider = AgentAIProvider(rawValue: defaults.string(forKey: Keys.provider) ?? "") ?? .ollama
+        anthropicModel = defaults.string(forKey: Keys.anthropicModel) ?? AgentAnthropicConfiguration.models[0]
+        anthropicEnabled = defaults.bool(forKey: Keys.anthropicEnabled)
         openAIModel = defaults.string(forKey: Keys.openAIModel) ?? AgentOpenAIConfiguration.models[0]
         openAIEnabled = defaults.bool(forKey: Keys.openAIEnabled)
         restoreHistory()
@@ -112,20 +130,40 @@ final class AgentOllamaController: ObservableObject {
     }
 
     var status: String? {
-        provider == .openAI ? openAIStatus : statusState.map(localized)
+        switch provider {
+        case .ollama: statusState.map(localized)
+        case .anthropic: anthropicStatus
+        case .openAI: openAIStatus
+        }
     }
 
-    var isCurrentProviderEnabled: Bool { provider == .ollama ? isEnabled : openAIEnabled }
+    var isCurrentProviderEnabled: Bool {
+        switch provider {
+        case .ollama: isEnabled
+        case .anthropic: anthropicEnabled
+        case .openAI: openAIEnabled
+        }
+    }
 
-    var currentModel: String { provider == .ollama ? model : openAIModel }
+    var currentModel: String {
+        switch provider {
+        case .ollama: model
+        case .anthropic: anthropicModel
+        case .openAI: openAIModel
+        }
+    }
 
     var currentModelChoices: [String] {
-        provider == .ollama ? modelChoices : AgentOpenAIConfiguration.models
+        switch provider {
+        case .ollama: modelChoices
+        case .anthropic: AgentAnthropicConfiguration.models
+        case .openAI: AgentOpenAIConfiguration.models
+        }
     }
 
     var currentProviderTitle: String { provider.title }
 
-    var cloudExecutionRequiresConsent: Bool { provider == .openAI }
+    var cloudExecutionRequiresConsent: Bool { provider != .ollama }
 
     var monthlyUsage: (input: Int, output: Int, cost: Double?) {
         let calendar = Calendar.current
@@ -156,6 +194,9 @@ final class AgentOllamaController: ObservableObject {
     /// Settings > AI shows the full status: that is where a person goes to
     /// change something and wants to see it took effect.
     var problem: String? {
+        if provider == .anthropic {
+            return anthropicEnabled ? nil : anthropicStatus
+        }
         if provider == .openAI {
             return openAIEnabled ? nil : openAIStatus
         }
@@ -182,15 +223,68 @@ final class AgentOllamaController: ObservableObject {
     }
 
     func selectCurrentModel(_ value: String) {
-        if provider == .ollama {
+        switch provider {
+        case .ollama:
             selectModel(value)
-        } else {
+        case .anthropic:
+            guard AgentAnthropicConfiguration.models.contains(value), value != anthropicModel else { return }
+            anthropicModel = value
+            defaults.set(value, forKey: Keys.anthropicModel)
+            anthropicEnabled = false
+            defaults.set(false, forKey: Keys.anthropicEnabled)
+            anthropicStatus = L("Save and test again after changing the model.")
+        case .openAI:
             guard AgentOpenAIConfiguration.models.contains(value), value != openAIModel else { return }
             openAIModel = value
             defaults.set(value, forKey: Keys.openAIModel)
             openAIEnabled = false
             defaults.set(false, forKey: Keys.openAIEnabled)
             openAIStatus = L("Save and test again after changing the model.")
+        }
+    }
+
+    func saveAndTestAnthropic(apiKey: String, consent: Bool) {
+        guard !isRunning else { return }
+        guard consent else {
+            anthropicEnabled = false
+            anthropicStatus = L("Confirm that bounded network metadata will be sent to Anthropic.")
+            return
+        }
+        let entered = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if entered.isEmpty && !anthropicEnabled {
+            anthropicEnabled = false
+            anthropicStatus = L("Enter an Anthropic API key.")
+            return
+        }
+        do { _ = try AgentAnthropicConfiguration(model: anthropicModel) } catch {
+            anthropicEnabled = false
+            anthropicStatus = L("Select a supported Claude model.")
+            return
+        }
+        isRunning = true
+        anthropicStatus = L("Checking Anthropic...")
+        inferenceTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let candidate = entered.isEmpty
+                    ? try await apiKeyStore.loadDetached(provider: AgentAIProvider.anthropic.rawValue)
+                    : entered
+                guard let candidate, !candidate.isEmpty else { throw AgentAnthropicError.invalidAPIKey }
+                try await anthropicClient.validate(apiKey: candidate, model: anthropicModel)
+                try Task.checkCancellation()
+                try await apiKeyStore.saveDetached(candidate, provider: AgentAIProvider.anthropic.rawValue)
+                defaults.set(anthropicModel, forKey: Keys.anthropicModel)
+                defaults.set(true, forKey: Keys.anthropicConsent)
+                defaults.set(true, forKey: Keys.anthropicEnabled)
+                anthropicEnabled = true
+                anthropicStatus = L("Connected to Anthropic. Model %@ is ready.", anthropicModel)
+            } catch {
+                anthropicEnabled = false
+                defaults.set(false, forKey: Keys.anthropicEnabled)
+                anthropicStatus = anthropicCloudError(error)
+            }
+            isRunning = false
+            inferenceTask = nil
         }
     }
 
@@ -357,6 +451,10 @@ final class AgentOllamaController: ObservableObject {
     }
 
     func analyze(snapshot: AgentLocalInsightSnapshot, question: String) {
+        if provider == .anthropic {
+            analyzeAnthropic(snapshot: snapshot, question: question)
+            return
+        }
         if provider == .openAI {
             analyzeOpenAI(snapshot: snapshot, question: question)
             return
@@ -425,6 +523,113 @@ final class AgentOllamaController: ObservableObject {
                     model: configuration.model, status: .failed, errorCode: detail
                 ))
                 statusState = cancelled ? .stopped : state(for: error)
+            }
+            isRunning = false
+            inferenceTask = nil
+        }
+    }
+
+    func removeAnthropicConfiguration() {
+        guard !isRunning else { return }
+        isRunning = true
+        inferenceTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await apiKeyStore.deleteDetached(provider: AgentAIProvider.anthropic.rawValue)
+                anthropicEnabled = false
+                defaults.set(false, forKey: Keys.anthropicEnabled)
+                defaults.set(false, forKey: Keys.anthropicConsent)
+                anthropicStatus = L("Anthropic API key removed from Keychain.")
+            } catch {
+                anthropicStatus = L("Could not remove the Anthropic API key: %@", error.localizedDescription)
+            }
+            isRunning = false
+            inferenceTask = nil
+        }
+    }
+
+    private func analyzeAnthropic(snapshot: AgentLocalInsightSnapshot, question: String) {
+        guard anthropicEnabled, defaults.bool(forKey: Keys.anthropicConsent), !isRunning else { return }
+        let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanQuestion.isEmpty, cleanQuestion.count <= 2_000 else {
+            anthropicStatus = L("Enter a question of 2,000 characters or fewer.")
+            return
+        }
+        let configuration: AgentAnthropicConfiguration
+        do { configuration = try AgentAnthropicConfiguration(model: anthropicModel) } catch {
+            anthropicStatus = L("Select a supported Claude model.")
+            return
+        }
+        let conversationID = activeConversationID ?? UUID()
+        let requestID = UUID()
+        let conversationMessages = messages.filter {
+            $0.conversationID == conversationID && $0.provider == AgentAIProvider.anthropic.rawValue
+        }
+        let completedRequests = Set(conversationMessages.compactMap {
+            $0.role == .assistant && $0.status == .complete ? $0.requestID : nil
+        })
+        let prior = conversationMessages.filter { completedRequests.contains($0.requestID) }
+        do {
+            try append(AgentAIConversationMessage(
+                conversationID: conversationID,
+                requestID: requestID,
+                role: .user,
+                body: cleanQuestion,
+                provider: AgentAIProvider.anthropic.rawValue,
+                model: configuration.model
+            ))
+        } catch {
+            anthropicStatus = L("Could not save the question: %@", error.localizedDescription)
+            return
+        }
+        activeConversationID = conversationID
+        isRunning = true
+        anthropicStatus = L("Anthropic is analyzing the bounded preview...")
+        inferenceTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                guard let apiKey = try await apiKeyStore.loadDetached(
+                    provider: AgentAIProvider.anthropic.rawValue
+                ) else { throw AgentAnthropicError.invalidAPIKey }
+                let reply = try await anthropicClient.chat(
+                    configuration: configuration,
+                    apiKey: apiKey,
+                    context: snapshot.context,
+                    history: prior,
+                    question: cleanQuestion
+                )
+                try Task.checkCancellation()
+                try append(AgentAIConversationMessage(
+                    conversationID: conversationID,
+                    requestID: requestID,
+                    role: .assistant,
+                    body: reply.text,
+                    provider: AgentAIProvider.anthropic.rawValue,
+                    model: configuration.model,
+                    inputTokens: reply.inputTokens,
+                    outputTokens: reply.outputTokens,
+                    estimatedCostUSD: reply.estimatedCostUSD,
+                    pricingVersion: AgentAIPriceCatalog.version
+                ))
+                anthropicStatus = L("Analysis completed with %@.", configuration.model)
+            } catch {
+                let cancelled = isCancellation(error)
+                if let cloud = error as? AgentAnthropicError,
+                   cloud == .invalidAPIKey || cloud == .httpStatus(401) {
+                    anthropicEnabled = false
+                    defaults.set(false, forKey: Keys.anthropicEnabled)
+                }
+                try? append(AgentAIConversationMessage(
+                    conversationID: conversationID,
+                    requestID: requestID,
+                    role: .assistant,
+                    body: cancelled ? L("Request stopped by the user.") : anthropicCloudError(error),
+                    provider: AgentAIProvider.anthropic.rawValue,
+                    model: configuration.model,
+                    status: .failed,
+                    errorCode: cancelled ? "cancelled" : String(describing: type(of: error))
+                ))
+                anthropicStatus = cancelled ? L("Anthropic request stopped.") : anthropicCloudError(error)
             }
             isRunning = false
             inferenceTask = nil
@@ -579,7 +784,9 @@ final class AgentOllamaController: ObservableObject {
 
     var activeMessages: [AgentAIConversationMessage] {
         guard let activeConversationID else { return [] }
-        return messages.filter { $0.conversationID == activeConversationID }
+        return messages.filter {
+            $0.conversationID == activeConversationID && $0.provider == provider.rawValue
+        }
     }
 
     private func append(_ message: AgentAIConversationMessage) throws {
@@ -594,7 +801,7 @@ final class AgentOllamaController: ObservableObject {
         guard let restored = try? historyStore?.messages(limit: 50_000) else { return }
         usageMessages = restored
         messages = Array(restored.suffix(500))
-        activeConversationID = messages.last?.conversationID
+        activeConversationID = messages.last(where: { $0.provider == provider.rawValue })?.conversationID
     }
 
     private func invalidateConfiguration() {
@@ -698,6 +905,26 @@ final class AgentOllamaController: ObservableObject {
             }
         }
         return L("OpenAI request failed: %@", error.localizedDescription)
+    }
+
+    private func anthropicCloudError(_ error: Error) -> String {
+        if isCancellation(error) { return L("Anthropic request stopped.") }
+        if let urlError = error as? URLError, urlError.code == .timedOut {
+            return L("Anthropic did not respond within 30 seconds.")
+        }
+        if let error = error as? AgentAnthropicError {
+            switch error {
+            case .invalidAPIKey: return L("Enter a valid Anthropic API key.")
+            case .invalidModel: return L("Select a supported Claude model.")
+            case .invalidQuestion: return L("Enter a question of 2,000 characters or fewer.")
+            case .contextTooLarge: return L("The bounded preview is too large to analyze safely.")
+            case .responseTooLarge: return L("Anthropic returned more than the 1 MB safety limit.")
+            case .invalidResponse: return L("Anthropic returned a response EgressView could not read.")
+            case .httpStatus(let status): return L("Anthropic returned HTTP %lld.", status)
+            case .emptyResponse: return L("Anthropic returned an empty answer.")
+            }
+        }
+        return L("Anthropic request failed: %@", error.localizedDescription)
     }
 }
 
