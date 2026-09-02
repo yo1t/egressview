@@ -360,6 +360,27 @@ describe('Agent HTTP ingest', () => {
     assert.equal(auditJson.includes(enrolled.body.token), false);
   });
 
+  it('accepts a Windows ETW payload through the HTTP and DB contract', async () => {
+    const { app } = makeApp();
+    const { enrolled } = await enrolledAgent(app);
+    const envelope = ingestEnvelope();
+    envelope.agent.platform = 'windows';
+    envelope.observations[0].collector = 'etw';
+
+    const response = await request(app, 'POST', '/api/agent/ingest', {
+      body: envelope,
+      headers: { Authorization: `Bearer ${enrolled.body.token}` },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.accepted, 1);
+    assert.equal(response.body.duplicate, 0);
+    assert.equal(response.body.rejected, 0);
+    assert.equal(agentIngestStore._dbForTest().prepare(
+      'SELECT collector FROM agent_observations'
+    ).get().collector, 'etw');
+  });
+
   it('ingests in an offline/private profile without making outbound requests', async () => {
     const originalFetch = global.fetch;
     let outboundCalls = 0;

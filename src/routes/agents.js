@@ -676,18 +676,35 @@ module.exports = function agentRoutes({
       } else {
         ingestMetrics.accepted += ack.accepted;
         ingestMetrics.duplicate += ack.duplicate;
+        ingestMetrics.rejected += ack.rejected;
+        if (ack.rejected > 0) ingestMetrics.failures += 1;
         // Storing the observation is not enough. Threat matching, destination
         // enrichment, device tracking and notifications all run over
         // connections, so an agent flow that never became one was listed
         // without ever being checked against anything -- indistinguishable, on
         // screen, from a flow that was checked and found safe.
-        recordAgentFlows(parsed.data);
+        const acceptedIds = new Set(ack.acceptedObservationIds || (
+          ack.rejected === 0 && ack.duplicate === 0
+            && ack.accepted === parsed.data.observations.length
+            ? parsed.data.observations.map(item => item.observationId)
+            : []
+        ));
+        if (acceptedIds.size > 0) {
+          recordAgentFlows({
+            ...parsed.data,
+            observations: parsed.data.observations.filter(observation => (
+              acceptedIds.has(observation.observationId)
+            )),
+          });
+        }
       }
-      audit(req, 'agent_ingest', 'success', {
+      audit(req, 'agent_ingest', ack.rejected > 0 ? 'failure' : 'success', {
+        reason: ack.rejected > 0 ? 'observation_rejected' : undefined,
         batchRef: agentIdentities.auditRef(parsed.data.batchId),
         observationCount: parsed.data.observations.length,
         acceptedCount: ack.accepted,
         duplicateCount: ack.duplicate,
+        rejectedCount: ack.rejected,
         replayed: ack.replayed,
         durationMs: Date.now() - startedAt,
       });

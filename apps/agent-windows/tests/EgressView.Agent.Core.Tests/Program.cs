@@ -203,6 +203,21 @@ try
         Assert(senderStore.ReadDeliveryStatus().Pending == 0 && deliveryHandler.BatchIds.Distinct().Count() == 1, "all retries use the same idempotent batch ID");
         Assert(deliveryHandler.SawEtwCollector && deliveryHandler.SawProcessId && deliveryHandler.SawBearer, "Windows payload and Agent bearer match the Hub contract");
     }
+    using (var rejectedStore = new ObservationStore(Path.Combine(directory, "sender-rejected.db")))
+    {
+        rejectedStore.QueueForDelivery([new NetworkObservation(deliveryStarted, 89, "TCP", "10.0.0.1", 53001,
+            "203.0.113.10", 443, 12, 8, ObservationLayer.Logical, "if", "etw", "Browser")], deliveryStarted);
+        var handler = new DeliveryHandler(200, 200) { RejectedAcknowledgements = 1 };
+        var sender = new DeliverySender(new HttpClient(handler));
+        var credential = new AgentCredential(new Uri("https://hub.example/"), agentId, agentToken, deliveryStarted);
+        var metadata = new DeliveryMetadata("host", "windows", "Windows", "dev");
+        Assert((await sender.SendNextAsync(rejectedStore, credential, metadata)).Kind == DeliveryAttemptKind.Rejected,
+            "a Hub-rejected row keeps the durable batch for retry");
+        Assert(rejectedStore.ReadDeliveryStatus().Pending == 1, "rejected ACK does not drop Windows observations");
+        Assert((await sender.SendNextAsync(rejectedStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged,
+            "the same durable batch can be accepted after the Hub contract is fixed");
+        Assert(handler.BatchIds.Distinct().Count() == 1, "a rejected ACK preserves the idempotent batch ID");
+    }
 
     var optInDatabase = Path.Combine(directory, "delivery-opt-in.db");
     using (var optInStore = new ObservationStore(optInDatabase))
@@ -340,6 +355,7 @@ sealed class DeliveryHandler(params int[] statuses) : HttpMessageHandler
     public bool SawEtwCollector { get; private set; }
     public bool SawProcessId { get; private set; }
     public bool SawBearer { get; private set; }
+    public int RejectedAcknowledgements { get; set; }
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -355,8 +371,10 @@ sealed class DeliveryHandler(params int[] statuses) : HttpMessageHandler
         var status = statuses.Dequeue();
         var response = new HttpResponseMessage((HttpStatusCode)status);
         if (status == 429) response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(7));
+        var rejected = status == 200 && RejectedAcknowledgements > 0 ? 1 : 0;
+        if (rejected > 0) RejectedAcknowledgements -= 1;
         response.Content = new StringContent(status == 200
-            ? $"{{\"batchId\":\"{batchId}\",\"accepted\":1,\"duplicate\":0,\"rejected\":0,\"replayed\":false}}"
+            ? $"{{\"batchId\":\"{batchId}\",\"accepted\":{1 - rejected},\"duplicate\":0,\"rejected\":{rejected},\"replayed\":false}}"
             : "{}", Encoding.UTF8, "application/json");
         return response;
     }

@@ -10,6 +10,11 @@ const {
 const logger = require('./logger');
 
 const DEFAULT_DB_PATH = path.join(__dirname, '..', '.egressview.db');
+const REJECTED_OBSERVATION_CODES = new Set([
+  'SQLITE_CONSTRAINT_CHECK',
+  'SQLITE_CONSTRAINT_NOTNULL',
+  'SQLITE_CONSTRAINT_DATATYPE',
+]);
 
 let db = null;
 let lastDbPath = DEFAULT_DB_PATH;
@@ -45,15 +50,26 @@ function requireDb() {
   return db;
 }
 
-function batchAck(row, replayed) {
-  return Object.freeze({
+function batchAck(row, replayed, acceptedObservationIds = []) {
+  const ack = {
     batchId: row.batchId,
     accepted: row.acceptedCount,
     duplicate: row.duplicateCount,
     rejected: row.rejectedCount,
     receivedAt: row.receivedAt,
     replayed,
+  };
+  // Internal route wiring needs to avoid feeding rejected rows into derived
+  // connection tables. Keep this out of the public JSON ACK.
+  Object.defineProperty(ack, 'acceptedObservationIds', {
+    value: Object.freeze([...acceptedObservationIds]),
+    enumerable: false,
   });
+  return Object.freeze(ack);
+}
+
+function isRejectedObservationError(error) {
+  return REJECTED_OBSERVATION_CODES.has(error?.code);
 }
 
 function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
@@ -67,8 +83,11 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
     `).get(agentId, envelope.batchId);
     if (existing) return batchAck(existing, true);
 
+    const observationExists = database.prepare(`
+      SELECT 1 FROM agent_observations WHERE agentId = ? AND observationId = ?
+    `);
     const insertObservation = database.prepare(`
-      INSERT OR IGNORE INTO agent_observations (
+      INSERT INTO agent_observations (
         agentId, observationId, batchId, networkProtocol,
         localAddress, localPort, remoteAddress, remotePort,
         processId, processName, bundleId,
@@ -102,7 +121,14 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
     `);
 
     let acceptedCount = 0;
+    let duplicateCount = 0;
+    let rejectedCount = 0;
+    const acceptedObservationIds = [];
     for (const observation of envelope.observations) {
+      if (observationExists.get(agentId, observation.observationId)) {
+        duplicateCount += 1;
+        continue;
+      }
       const stored = {
         agentId,
         observationId: observation.observationId,
@@ -123,32 +149,44 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
         confidence: observation.confidence,
         receivedAt,
       };
-      const result = insertObservation.run(stored);
-      if (result.changes) {
-        upsertAppHourly.run({
-          ...stored,
-          hourStart: Math.floor(stored.lastObservedAt / 3_600_000) * 3_600_000,
-          appIdentity: stored.bundleId || stored.processName,
-        });
+      try {
+        insertObservation.run(stored);
+      } catch (error) {
+        if (isRejectedObservationError(error)) {
+          rejectedCount += 1;
+          continue;
+        }
+        throw error;
       }
-      acceptedCount += result.changes;
+      upsertAppHourly.run({
+        ...stored,
+        hourStart: Math.floor(stored.lastObservedAt / 3_600_000) * 3_600_000,
+        appIdentity: stored.bundleId || stored.processName,
+      });
+      acceptedCount += 1;
+      acceptedObservationIds.push(observation.observationId);
     }
 
-    const duplicateCount = envelope.observations.length - acceptedCount;
-    database.prepare(`
-      INSERT INTO agent_ingest_batches (
-        agentId, batchId, schemaVersion, sentAt, receivedAt,
-        acceptedCount, duplicateCount, rejectedCount, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'complete')
-    `).run(
-      agentId,
-      envelope.batchId,
-      envelope.schemaVersion,
-      Date.parse(envelope.sentAt),
-      receivedAt,
-      acceptedCount,
-      duplicateCount
-    );
+    // A rejected row must remain retryable. Recording this batch as complete
+    // would make every retry replay the rejection forever, even after a Hub
+    // migration adds support for the observation. Accepted rows remain
+    // idempotent through their own primary key until the whole batch succeeds.
+    if (rejectedCount === 0) {
+      database.prepare(`
+        INSERT INTO agent_ingest_batches (
+          agentId, batchId, schemaVersion, sentAt, receivedAt,
+          acceptedCount, duplicateCount, rejectedCount, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'complete')
+      `).run(
+        agentId,
+        envelope.batchId,
+        envelope.schemaVersion,
+        Date.parse(envelope.sentAt),
+        receivedAt,
+        acceptedCount,
+        duplicateCount
+      );
+    }
 
     database.prepare(`
       UPDATE agents SET platform = ?, hostName = ?, osVersion = ?, agentVersion = ?, updatedAt = ?
@@ -166,9 +204,9 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
       batchId: envelope.batchId,
       acceptedCount,
       duplicateCount,
-      rejectedCount: 0,
+      rejectedCount,
       receivedAt,
-    }, false);
+    }, false, acceptedObservationIds);
   });
 
   const ack = operation.immediate();
@@ -268,12 +306,16 @@ function _initForTest(dbPath = ':memory:') {
     );
     CREATE TABLE agent_observations (
       agentId TEXT NOT NULL, observationId TEXT NOT NULL, batchId TEXT NOT NULL,
-      networkProtocol TEXT NOT NULL, localAddress TEXT NOT NULL, localPort INTEGER NOT NULL,
-      remoteAddress TEXT NOT NULL, remotePort INTEGER NOT NULL, processId INTEGER NOT NULL,
+      networkProtocol TEXT NOT NULL CHECK(networkProtocol IN ('tcp', 'udp')),
+      localAddress TEXT NOT NULL, localPort INTEGER NOT NULL CHECK(localPort BETWEEN 0 AND 65535),
+      remoteAddress TEXT NOT NULL, remotePort INTEGER NOT NULL CHECK(remotePort BETWEEN 1 AND 65535),
+      processId INTEGER NOT NULL CHECK(processId BETWEEN 0 AND 2147483647),
       processName TEXT NOT NULL, bundleId TEXT, firstObservedAt INTEGER NOT NULL,
       lastObservedAt INTEGER NOT NULL, bytesIn TEXT, bytesOut TEXT,
-      collector TEXT NOT NULL, confidence TEXT NOT NULL, receivedAt INTEGER NOT NULL,
-      PRIMARY KEY (agentId, observationId)
+      collector TEXT NOT NULL CHECK(collector IN ('network-extension', 'libproc', 'etw')),
+      confidence TEXT NOT NULL CHECK(confidence IN ('exact', 'sampled')),
+      receivedAt INTEGER NOT NULL, PRIMARY KEY (agentId, observationId),
+      CHECK(lastObservedAt >= firstObservedAt)
     );
     CREATE TABLE agent_app_hourly (
       hourStart INTEGER NOT NULL, agentId TEXT NOT NULL, appIdentity TEXT NOT NULL,
