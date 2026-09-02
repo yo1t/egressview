@@ -50,7 +50,7 @@ describe('macOS Agent local insights Phase 1', () => {
   it('puts the model beside the readiness badge, with no card repeating it', () => {
     // The header badge already names the provider and says whether it is
     // ready. A separate card restating that was two controls saying one thing.
-    assert.match(panel, /static let providers = \["Ollama"\]/);
+    assert.match(panel, /ForEach\(AgentAIProvider\.allCases\)/);
     assert.match(panel, /Picker\(L\("Provider"\)/);
     assert.match(panel, /Picker\(L\("Model"\)/);
     assert.doesNotMatch(panel, /private var modelBar/);
@@ -65,6 +65,19 @@ describe('macOS Agent local insights Phase 1', () => {
       conversation.indexOf('TextField(') < conversation.indexOf('activeMessages.isEmpty'),
       'the box you type in must come before the answers it produces'
     );
+  });
+
+  it('requires two explicit cloud consent steps and keeps the API key in Keychain', () => {
+    const controller = read('apps/agent-macos/Xcode/Host/AgentOllamaController.swift');
+    const settings = read('apps/agent-macos/Xcode/Host/HubDeliveryController.swift');
+    const keyStore = read('apps/agent-macos/Sources/EgressViewAgentCore/AgentAPIKeyStore.swift');
+    assert.match(settings, /Toggle\(isOn: \$openAICloudConsent\)/);
+    assert.match(settings, /SecureField\(/);
+    assert.match(panel, /Send bounded network metadata to OpenAI\?/);
+    assert.match(panel, /pendingCloudQuestion/);
+    assert.match(controller, /KeychainAgentAPIKeyStore/);
+    assert.match(keyStore, /kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly/);
+    assert.doesNotMatch(controller, /defaults\.set\([^\n]*APIKey/);
   });
 
   it('offers deletion per message and for everything, and asks first', () => {

@@ -12,6 +12,7 @@ struct AgentInsightPanel: View {
     @State private var confirmsClearAll = false
     @State private var showsPreview = false
     @State private var copied = false
+    @State private var pendingCloudQuestion: String?
     @ObservedObject private var language = AgentLanguageSettings.shared
 
     var body: some View {
@@ -78,7 +79,11 @@ struct AgentInsightPanel: View {
                         .frame(maxWidth: 380, alignment: .trailing)
                 } else {
                     Label(
-                        ollama.isEnabled ? L("Ollama ready · Local only") : L("AI off · Insight data not sent"),
+                        ollama.isCurrentProviderEnabled
+                            ? (ollama.provider == .ollama
+                               ? L("Ollama ready · Local only")
+                               : L("OpenAI ready · Manual cloud send"))
+                            : L("AI off · Insight data not sent"),
                         systemImage: "lock.shield"
                     )
                         .font(.callout.weight(.semibold))
@@ -94,30 +99,25 @@ struct AgentInsightPanel: View {
 
     /// Which model answers, beside the badge that says whether it can.
     ///
-    /// No card of its own: the badge above already says the provider is Ollama
-    /// and whether it is ready, and a card repeating that was two controls
-    /// saying one thing.
+    /// No card of its own: the badge above already says which provider is
+    /// ready, so a separate provider card would repeat the same state.
     ///
-    /// Provider is a list of one today. It is a list because the next
-    /// providers are already specified (P3-20 Phase 3-4), and a control that
-    /// has to be rebuilt to take the second one is a control that gets rebuilt
-    /// wrong.
     private var modelPickers: some View {
         HStack(spacing: 8) {
             Picker(L("Provider"), selection: providerBinding) {
-                ForEach(AgentInsightPanel.providers, id: \.self) { provider in
-                    Text(provider).tag(provider)
+                ForEach(AgentAIProvider.allCases) { provider in
+                    Text(provider.title).tag(provider)
                 }
             }
             .labelsHidden()
             .frame(width: 110)
-            .disabled(AgentInsightPanel.providers.count < 2 || ollama.isRunning)
+            .disabled(ollama.isRunning)
 
             Picker(L("Model"), selection: modelBinding) {
-                if ollama.modelChoices.isEmpty {
+                if ollama.currentModelChoices.isEmpty {
                     Text(L("No model selected")).tag("")
                 }
-                ForEach(ollama.modelChoices, id: \.self) { name in
+                ForEach(ollama.currentModelChoices, id: \.self) { name in
                     Text(name).tag(name)
                 }
             }
@@ -128,15 +128,13 @@ struct AgentInsightPanel: View {
         .controlSize(.small)
     }
 
-    private var providerBinding: Binding<String> {
-        .constant(AgentInsightPanel.providers[0])
+    private var providerBinding: Binding<AgentAIProvider> {
+        Binding(get: { ollama.provider }, set: { ollama.selectProvider($0) })
     }
 
     private var modelBinding: Binding<String> {
-        Binding(get: { self.ollama.model }, set: { self.ollama.selectModel($0) })
+        Binding(get: { ollama.currentModel }, set: { ollama.selectCurrentModel($0) })
     }
-
-    static let providers = ["Ollama"]
 
     private func conversation(_ snapshot: AgentLocalInsightSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -150,8 +148,8 @@ struct AgentInsightPanel: View {
                     .disabled(ollama.messages.isEmpty)
             }
 
-            if !ollama.isEnabled {
-                Text(L("Choose a model above, or configure Ollama in Settings > AI."))
+            if !ollama.isCurrentProviderEnabled {
+                Text(L("Choose and configure an AI provider in Settings > AI."))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -162,22 +160,21 @@ struct AgentInsightPanel: View {
             TextField(L("Ask about the bounded preview"), text: $question, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(2...5)
-                .disabled(ollama.isRunning || !ollama.isEnabled)
+                .disabled(ollama.isRunning || !ollama.isCurrentProviderEnabled)
             HStack {
                 Button(L("Analyze current period")) {
-                    ollama.analyze(
-                        snapshot: snapshot,
-                        question: L("Summarize the notable changes and suggest proportionate checks. Do not infer facts not present in the aggregates.")
+                    submit(
+                        L("Summarize the notable changes and suggest proportionate checks. Do not infer facts not present in the aggregates."),
+                        snapshot: snapshot
                     )
                 }
-                .disabled(ollama.isRunning || !ollama.isEnabled)
+                .disabled(ollama.isRunning || !ollama.isCurrentProviderEnabled)
                 Button(L("Ask")) {
                     let submitted = question
-                    question = ""
-                    ollama.analyze(snapshot: snapshot, question: submitted)
+                    submit(submitted, snapshot: snapshot)
                 }
                 .disabled(
-                    ollama.isRunning || !ollama.isEnabled
+                    ollama.isRunning || !ollama.isCurrentProviderEnabled
                         || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 )
                 if ollama.isRunning {
@@ -191,6 +188,8 @@ struct AgentInsightPanel: View {
             }
 
             Divider()
+
+            usageSummary
 
             if ollama.activeMessages.isEmpty {
                 Text(L("No local AI messages yet. Start with a factual analysis or enter a question."))
@@ -225,6 +224,55 @@ struct AgentInsightPanel: View {
         } message: {
             Text(L("%lld messages will be deleted. This cannot be undone.", ollama.messages.count))
         }
+        .alert(L("Send bounded network metadata to OpenAI?"), isPresented: cloudConfirmationPresented) {
+            Button(L("Cancel"), role: .cancel) { pendingCloudQuestion = nil }
+            Button(L("Send to OpenAI")) {
+                guard let pendingCloudQuestion else { return }
+                question = ""
+                ollama.analyze(snapshot: snapshot, question: pendingCloudQuestion)
+                self.pendingCloudQuestion = nil
+            }
+        } message: {
+            Text(L(
+                "The preview contains totals, time range, up to %lld application names, and up to %lld destination names or addresses. It will be sent to OpenAI and may incur API charges. No API key or raw connection rows are included.",
+                snapshot.context.topApplications.count, snapshot.context.topDestinations.count
+            ))
+        }
+    }
+
+    private func submit(_ value: String, snapshot: AgentLocalInsightSnapshot) {
+        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        if ollama.cloudExecutionRequiresConsent {
+            pendingCloudQuestion = clean
+        } else {
+            question = ""
+            ollama.analyze(snapshot: snapshot, question: clean)
+        }
+    }
+
+    private var cloudConfirmationPresented: Binding<Bool> {
+        Binding(
+            get: { pendingCloudQuestion != nil },
+            set: { if !$0 { pendingCloudQuestion = nil } }
+        )
+    }
+
+    private var usageSummary: some View {
+        let usage = ollama.monthlyUsage
+        return HStack(spacing: 8) {
+            Label(
+                L("This month: %lld input · %lld output tokens", usage.input, usage.output),
+                systemImage: "gauge.with.dots.needle.50percent"
+            )
+            if let cost = usage.cost {
+                Text(String(format: L("Estimated USD %.4f"), cost))
+            } else if usage.input > 0 || usage.output > 0 {
+                Text(L("Estimated cost unknown"))
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
     private struct Exchange: Identifiable {
@@ -246,7 +294,7 @@ struct AgentInsightPanel: View {
     private func messageRow(_ message: AgentAIConversationMessage) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(message.role == .user ? L("You") : "Ollama")
+                Text(message.role == .user ? L("You") : providerName(message.provider))
                     .font(.caption.bold())
                 Spacer()
                 Text(message.createdAt, style: .time)
@@ -270,6 +318,18 @@ struct AgentInsightPanel: View {
                 Text(L("Tokens: %lld input · %lld output", input, output))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+            if message.role == .assistant {
+                HStack(spacing: 5) {
+                    Text("\(providerName(message.provider)) · \(message.model)")
+                    if let cost = message.estimatedCostUSD {
+                        Text(String(format: L("Estimated USD %.6f"), cost))
+                    } else if message.inputTokens != nil || message.outputTokens != nil {
+                        Text(L("Estimated cost unknown"))
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
         }
         .padding(10)
@@ -359,7 +419,9 @@ struct AgentInsightPanel: View {
     private func preview(_ snapshot: AgentLocalInsightSnapshot) -> some View {
         DisclosureGroup(isExpanded: $showsPreview) {
             VStack(alignment: .leading, spacing: 14) {
-                Text(L("This is the complete bounded context sent only when you manually ask the configured local Ollama model."))
+                Text(ollama.provider == .ollama
+                     ? L("This is the complete bounded context sent only when you manually ask the configured local Ollama model.")
+                     : L("This is the complete bounded context sent to OpenAI only after you confirm each request."))
                     .foregroundStyle(.secondary)
 
                 VStack(alignment: .leading, spacing: 5) {
@@ -419,6 +481,10 @@ struct AgentInsightPanel: View {
         }
         .padding(16)
         .background(cardBackground)
+    }
+
+    private func providerName(_ value: String) -> String {
+        value == AgentAIProvider.openAI.rawValue ? "OpenAI" : "Ollama"
     }
 
     private func previewList(

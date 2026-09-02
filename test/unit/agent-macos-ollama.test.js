@@ -58,7 +58,7 @@ describe('macOS Agent Ollama Phase 2 safety boundary', () => {
     // answers. The endpoint did not -- it is set once, and a wrong value there
     // is the difference between local and not local.
     assert.doesNotMatch(panel, /ollama\.setEndpoint/);
-    assert.match(panel, /ollama\.selectModel/);
+    assert.match(panel, /ollama\.selectCurrentModel/);
     assert.match(appDelegate, /private lazy var ollamaController = AgentOllamaController\(\)/);
     assert.match(appDelegate, /ObservationWindowController\(store: store, ollama: ollamaController\)/);
     assert.match(appDelegate, /ollama: ollamaController/);
@@ -67,7 +67,7 @@ describe('macOS Agent Ollama Phase 2 safety boundary', () => {
 
   it('localizes live status from state instead of freezing the previous language', () => {
     assert.match(controller, /private enum StatusState/);
-    assert.match(controller, /var status: String\? \{[\s\S]*statusState\.map\(localized\)/);
+    assert.match(controller, /provider == \.openAI \? openAIStatus : statusState\.map\(localized\)/);
     assert.match(controller, /case \.connected\(let model\): return L\("Connected to Ollama/);
     assert.doesNotMatch(controller, /@Published private\(set\) var status: String\?/);
   });
@@ -131,7 +131,7 @@ describe('macOS Agent Ollama Phase 2 safety boundary', () => {
     // models exist.
     assert.match(controller, /var modelChoices: \[String\]/);
     assert.match(settings, /ollama\.modelChoices/);
-    assert.match(panel, /ollama\.modelChoices/);
+    assert.match(panel, /ollama\.currentModelChoices/);
   });
 
   it('reconnects when a model is picked, and only announces failures', () => {
@@ -141,7 +141,7 @@ describe('macOS Agent Ollama Phase 2 safety boundary', () => {
     assert.match(controller, /func selectModel\(_ name: String\)/);
     const select = controller.slice(controller.indexOf('func selectModel'));
     assert.match(select.slice(0, 400), /setModel\(name\)[\s\S]*saveAndTest\(\)/);
-    assert.match(panel, /set: \{ self\.ollama\.selectModel\(\$0\) \}/);
+    assert.match(panel, /set: \{ ollama\.selectCurrentModel\(\$0\) \}/);
     assert.match(settings, /set: \{ ollama\.selectModel\(\$0\) \}/);
 
     // An endpoint is typed a character at a time and must not connect on every
@@ -156,8 +156,7 @@ describe('macOS Agent Ollama Phase 2 safety boundary', () => {
     assert.match(settings, /ollama\.status/);
   });
 
-  it('does not add cloud providers or credentials in this phase', () => {
-    const phaseTwo = `${client}\n${controller}\n${panel}`;
-    assert.doesNotMatch(phaseTwo, /Anthropic|OpenAI|Bedrock|InvokeModel|apiKey|Keychain/);
+  it('keeps the Ollama client free of cloud providers and credentials', () => {
+    assert.doesNotMatch(client, /Anthropic|OpenAI|Bedrock|InvokeModel|apiKey|Keychain/);
   });
 });

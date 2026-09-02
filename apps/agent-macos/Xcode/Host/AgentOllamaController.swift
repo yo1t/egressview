@@ -1,6 +1,14 @@
 import EgressViewAgentCore
 import Foundation
 
+enum AgentAIProvider: String, CaseIterable, Identifiable {
+    case ollama
+    case openAI = "openai"
+
+    var id: String { rawValue }
+    var title: String { self == .ollama ? "Ollama" : "OpenAI" }
+}
+
 @MainActor
 final class AgentOllamaController: ObservableObject {
     private enum StatusState {
@@ -36,6 +44,10 @@ final class AgentOllamaController: ObservableObject {
         static let endpoint = "agentOllamaEndpoint"
         static let model = "agentOllamaModel"
         static let enabled = "agentOllamaEnabled"
+        static let provider = "agentAIProvider"
+        static let openAIModel = "agentOpenAIModel"
+        static let openAIEnabled = "agentOpenAIEnabled"
+        static let openAIConsent = "agentOpenAICloudConsent"
     }
 
     @Published private(set) var endpoint: String
@@ -46,23 +58,37 @@ final class AgentOllamaController: ObservableObject {
     @Published private(set) var availableModels: [String] = []
     @Published private(set) var messages: [AgentAIConversationMessage] = []
     @Published private(set) var activeConversationID: UUID?
+    @Published private(set) var provider: AgentAIProvider
+    @Published private(set) var openAIModel: String
+    @Published private(set) var openAIEnabled: Bool
+    @Published private(set) var openAIStatus: String?
 
     private let defaults: UserDefaults
     private let client: AgentOllamaClient
+    private let openAIClient: AgentOpenAIClient
+    private let apiKeyStore: any AgentAPIKeyStoring
     private let historyStore: AgentAIConversationStore?
     private var inferenceTask: Task<Void, Never>?
+    private var usageMessages: [AgentAIConversationMessage] = []
 
     init(
         defaults: UserDefaults = .standard,
         client: AgentOllamaClient = AgentOllamaClient(),
+        openAIClient: AgentOpenAIClient = AgentOpenAIClient(),
+        apiKeyStore: any AgentAPIKeyStoring = KeychainAgentAPIKeyStore(),
         historyStore: AgentAIConversationStore? = try? AgentAIConversationStore()
     ) {
         self.defaults = defaults
         self.client = client
+        self.openAIClient = openAIClient
+        self.apiKeyStore = apiKeyStore
         self.historyStore = historyStore
         endpoint = defaults.string(forKey: Keys.endpoint) ?? AgentOllamaConfiguration.defaultEndpoint
         model = defaults.string(forKey: Keys.model) ?? ""
         isEnabled = defaults.bool(forKey: Keys.enabled)
+        provider = AgentAIProvider(rawValue: defaults.string(forKey: Keys.provider) ?? "") ?? .ollama
+        openAIModel = defaults.string(forKey: Keys.openAIModel) ?? AgentOpenAIConfiguration.models[0]
+        openAIEnabled = defaults.bool(forKey: Keys.openAIEnabled)
         restoreHistory()
     }
 
@@ -86,7 +112,37 @@ final class AgentOllamaController: ObservableObject {
     }
 
     var status: String? {
-        statusState.map(localized)
+        provider == .openAI ? openAIStatus : statusState.map(localized)
+    }
+
+    var isCurrentProviderEnabled: Bool { provider == .ollama ? isEnabled : openAIEnabled }
+
+    var currentModel: String { provider == .ollama ? model : openAIModel }
+
+    var currentModelChoices: [String] {
+        provider == .ollama ? modelChoices : AgentOpenAIConfiguration.models
+    }
+
+    var currentProviderTitle: String { provider.title }
+
+    var cloudExecutionRequiresConsent: Bool { provider == .openAI }
+
+    var monthlyUsage: (input: Int, output: Int, cost: Double?) {
+        let calendar = Calendar.current
+        let now = Date()
+        let rows = usageMessages.filter {
+            $0.role == .assistant && calendar.isDate($0.createdAt, equalTo: now, toGranularity: .month)
+        }
+        let billable = rows.filter {
+            $0.provider != AgentAIProvider.ollama.rawValue && ($0.inputTokens != nil || $0.outputTokens != nil)
+        }
+        let costs = billable.compactMap(\.estimatedCostUSD)
+        return (
+            rows.compactMap(\.inputTokens).reduce(0, +),
+            rows.compactMap(\.outputTokens).reduce(0, +),
+            costs.count == billable.count
+                ? costs.reduce(0, +) : nil
+        )
     }
 
     /// The status, but only when something is wrong.
@@ -100,6 +156,9 @@ final class AgentOllamaController: ObservableObject {
     /// Settings > AI shows the full status: that is where a person goes to
     /// change something and wants to see it took effect.
     var problem: String? {
+        if provider == .openAI {
+            return openAIEnabled ? nil : openAIStatus
+        }
         guard let statusState else { return nil }
         switch statusState {
         case .checking, .connected, .stopped, .analyzing, .completed,
@@ -112,6 +171,71 @@ final class AgentOllamaController: ObservableObject {
              .invalidResponse, .httpStatus, .emptyResponse, .timedOut,
              .cannotConnect, .requestFailed, .deleteFailed:
             return localized(statusState)
+        }
+    }
+
+    func selectProvider(_ value: AgentAIProvider) {
+        guard provider != value, !isRunning else { return }
+        provider = value
+        defaults.set(value.rawValue, forKey: Keys.provider)
+        activeConversationID = nil
+    }
+
+    func selectCurrentModel(_ value: String) {
+        if provider == .ollama {
+            selectModel(value)
+        } else {
+            guard AgentOpenAIConfiguration.models.contains(value), value != openAIModel else { return }
+            openAIModel = value
+            defaults.set(value, forKey: Keys.openAIModel)
+            openAIEnabled = false
+            defaults.set(false, forKey: Keys.openAIEnabled)
+            openAIStatus = L("Save and test again after changing the model.")
+        }
+    }
+
+    func saveAndTestOpenAI(apiKey: String, consent: Bool) {
+        guard !isRunning else { return }
+        guard consent else {
+            openAIEnabled = false
+            openAIStatus = L("Confirm that bounded network metadata will be sent to OpenAI.")
+            return
+        }
+        let entered = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if entered.isEmpty && !openAIEnabled {
+            openAIEnabled = false
+            openAIStatus = L("Enter an OpenAI API key.")
+            return
+        }
+        do { _ = try AgentOpenAIConfiguration(model: openAIModel) } catch {
+            openAIEnabled = false
+            openAIStatus = L("Select a supported OpenAI model.")
+            return
+        }
+        isRunning = true
+        openAIStatus = L("Checking OpenAI...")
+        inferenceTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let candidate = entered.isEmpty
+                    ? try await apiKeyStore.loadDetached(provider: AgentAIProvider.openAI.rawValue)
+                    : entered
+                guard let candidate, !candidate.isEmpty else { throw AgentOpenAIError.invalidAPIKey }
+                try await openAIClient.validate(apiKey: candidate, model: openAIModel)
+                try Task.checkCancellation()
+                try await apiKeyStore.saveDetached(candidate, provider: AgentAIProvider.openAI.rawValue)
+                defaults.set(openAIModel, forKey: Keys.openAIModel)
+                defaults.set(true, forKey: Keys.openAIConsent)
+                defaults.set(true, forKey: Keys.openAIEnabled)
+                openAIEnabled = true
+                openAIStatus = L("Connected to OpenAI. Model %@ is ready.", openAIModel)
+            } catch {
+                openAIEnabled = false
+                defaults.set(false, forKey: Keys.openAIEnabled)
+                openAIStatus = cloudError(error)
+            }
+            isRunning = false
+            inferenceTask = nil
         }
     }
 
@@ -233,6 +357,10 @@ final class AgentOllamaController: ObservableObject {
     }
 
     func analyze(snapshot: AgentLocalInsightSnapshot, question: String) {
+        if provider == .openAI {
+            analyzeOpenAI(snapshot: snapshot, question: question)
+            return
+        }
         guard isEnabled, !isRunning else { return }
         let configuration: AgentOllamaConfiguration
         do {
@@ -249,7 +377,9 @@ final class AgentOllamaController: ObservableObject {
         }
         let conversationID = activeConversationID ?? UUID()
         let requestID = UUID()
-        let conversationMessages = messages.filter { $0.conversationID == conversationID }
+        let conversationMessages = messages.filter {
+            $0.conversationID == conversationID && $0.provider == AgentAIProvider.ollama.rawValue
+        }
         let completedRequests = Set(conversationMessages.compactMap { message in
             message.role == .assistant && message.status == .complete ? message.requestID : nil
         })
@@ -295,6 +425,97 @@ final class AgentOllamaController: ObservableObject {
                     model: configuration.model, status: .failed, errorCode: detail
                 ))
                 statusState = cancelled ? .stopped : state(for: error)
+            }
+            isRunning = false
+            inferenceTask = nil
+        }
+    }
+
+    func removeOpenAIConfiguration() {
+        guard !isRunning else { return }
+        isRunning = true
+        inferenceTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await apiKeyStore.deleteDetached(provider: AgentAIProvider.openAI.rawValue)
+                openAIEnabled = false
+                defaults.set(false, forKey: Keys.openAIEnabled)
+                defaults.set(false, forKey: Keys.openAIConsent)
+                openAIStatus = L("OpenAI API key removed from Keychain.")
+            } catch {
+                openAIStatus = L("Could not remove the OpenAI API key: %@", error.localizedDescription)
+            }
+            isRunning = false
+            inferenceTask = nil
+        }
+    }
+
+    private func analyzeOpenAI(snapshot: AgentLocalInsightSnapshot, question: String) {
+        guard openAIEnabled, defaults.bool(forKey: Keys.openAIConsent), !isRunning else { return }
+        let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanQuestion.isEmpty, cleanQuestion.count <= 2_000 else {
+            openAIStatus = L("Enter a question of 2,000 characters or fewer.")
+            return
+        }
+        let configuration: AgentOpenAIConfiguration
+        do { configuration = try AgentOpenAIConfiguration(model: openAIModel) } catch {
+            openAIStatus = L("Select a supported OpenAI model.")
+            return
+        }
+        let conversationID = activeConversationID ?? UUID()
+        let requestID = UUID()
+        let conversationMessages = messages.filter {
+            $0.conversationID == conversationID && $0.provider == AgentAIProvider.openAI.rawValue
+        }
+        let completedRequests = Set(conversationMessages.compactMap {
+            $0.role == .assistant && $0.status == .complete ? $0.requestID : nil
+        })
+        let prior = conversationMessages.filter { completedRequests.contains($0.requestID) }
+        do {
+            try append(AgentAIConversationMessage(
+                conversationID: conversationID, requestID: requestID, role: .user,
+                body: cleanQuestion, provider: AgentAIProvider.openAI.rawValue, model: configuration.model
+            ))
+        } catch {
+            openAIStatus = L("Could not save the question: %@", error.localizedDescription)
+            return
+        }
+        activeConversationID = conversationID
+        isRunning = true
+        openAIStatus = L("OpenAI is analyzing the bounded preview...")
+        inferenceTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                guard let apiKey = try await apiKeyStore.loadDetached(
+                    provider: AgentAIProvider.openAI.rawValue
+                ) else { throw AgentOpenAIError.invalidAPIKey }
+                let reply = try await openAIClient.chat(
+                    configuration: configuration, apiKey: apiKey,
+                    context: snapshot.context, history: prior, question: cleanQuestion
+                )
+                try Task.checkCancellation()
+                try append(AgentAIConversationMessage(
+                    conversationID: conversationID, requestID: requestID, role: .assistant,
+                    body: reply.text, provider: AgentAIProvider.openAI.rawValue, model: configuration.model,
+                    inputTokens: reply.inputTokens, outputTokens: reply.outputTokens,
+                    estimatedCostUSD: reply.estimatedCostUSD, pricingVersion: AgentAIPriceCatalog.version
+                ))
+                openAIStatus = L("Analysis completed with %@.", configuration.model)
+            } catch {
+                let cancelled = isCancellation(error)
+                if let cloud = error as? AgentOpenAIError {
+                    if cloud == .invalidAPIKey || cloud == .httpStatus(401) {
+                        openAIEnabled = false
+                        defaults.set(false, forKey: Keys.openAIEnabled)
+                    }
+                }
+                try? append(AgentAIConversationMessage(
+                    conversationID: conversationID, requestID: requestID, role: .assistant,
+                    body: cancelled ? L("Request stopped by the user.") : cloudError(error),
+                    provider: AgentAIProvider.openAI.rawValue, model: configuration.model,
+                    status: .failed, errorCode: cancelled ? "cancelled" : String(describing: type(of: error))
+                ))
+                openAIStatus = cancelled ? L("OpenAI request stopped.") : cloudError(error)
             }
             isRunning = false
             inferenceTask = nil
@@ -348,7 +569,8 @@ final class AgentOllamaController: ObservableObject {
     /// Re-read rather than mutate in place, so what the screen shows is what
     /// the file now holds.
     private func reloadAfterDeletion() {
-        messages = (try? historyStore?.messages()) ?? []
+        usageMessages = (try? historyStore?.messages(limit: 50_000)) ?? []
+        messages = Array(usageMessages.suffix(500))
         if let active = activeConversationID,
            !messages.contains(where: { $0.conversationID == active }) {
             activeConversationID = nil
@@ -364,12 +586,15 @@ final class AgentOllamaController: ObservableObject {
         guard let historyStore else { throw AgentOllamaControllerError.historyUnavailable }
         try historyStore.append(message)
         messages.append(message)
+        if messages.count > 500 { messages.removeFirst(messages.count - 500) }
+        usageMessages.append(message)
     }
 
     private func restoreHistory() {
-        guard let restored = try? historyStore?.messages() else { return }
-        messages = restored
-        activeConversationID = restored.last?.conversationID
+        guard let restored = try? historyStore?.messages(limit: 50_000) else { return }
+        usageMessages = restored
+        messages = Array(restored.suffix(500))
+        activeConversationID = messages.last?.conversationID
     }
 
     private func invalidateConfiguration() {
@@ -453,6 +678,26 @@ final class AgentOllamaController: ObservableObject {
     private func isCancellation(_ error: Error) -> Bool {
         if error is CancellationError { return true }
         return (error as? URLError)?.code == .cancelled
+    }
+
+    private func cloudError(_ error: Error) -> String {
+        if isCancellation(error) { return L("OpenAI request stopped.") }
+        if let urlError = error as? URLError, urlError.code == .timedOut {
+            return L("OpenAI did not respond within 30 seconds.")
+        }
+        if let error = error as? AgentOpenAIError {
+            switch error {
+            case .invalidAPIKey: return L("Enter a valid OpenAI API key.")
+            case .invalidModel: return L("Select a supported OpenAI model.")
+            case .invalidQuestion: return L("Enter a question of 2,000 characters or fewer.")
+            case .contextTooLarge: return L("The bounded preview is too large to analyze safely.")
+            case .responseTooLarge: return L("OpenAI returned more than the 1 MB safety limit.")
+            case .invalidResponse: return L("OpenAI returned a response EgressView could not read.")
+            case .httpStatus(let status): return L("OpenAI returned HTTP %lld.", status)
+            case .emptyResponse: return L("OpenAI returned an empty answer.")
+            }
+        }
+        return L("OpenAI request failed: %@", error.localizedDescription)
     }
 }
 
