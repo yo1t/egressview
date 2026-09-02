@@ -55,9 +55,10 @@ describe('macOS Agent local insights Phase 1', () => {
     assert.match(panel, /Picker\(L\("Model"\)/);
     assert.doesNotMatch(panel, /private var modelBar/);
     const header = panel.slice(panel.indexOf('private var header'), panel.indexOf('private var modelPickers'));
-    assert.match(header, /Ollama ready · Local only/);
+    assert.match(header, /providerReadyLabel/);
+    assert.match(panel, /case \.ollama: L\("Ollama ready · Local only"\)/);
     assert.ok(
-      header.indexOf('Ollama ready · Local only') < header.indexOf('modelPickers'),
+      header.indexOf('providerReadyLabel') < header.indexOf('modelPickers'),
       'the model picker belongs under the badge that says whether it can answer'
     );
     const conversation = panel.slice(panel.indexOf('private func conversation'));
@@ -72,8 +73,9 @@ describe('macOS Agent local insights Phase 1', () => {
     const settings = read('apps/agent-macos/Xcode/Host/HubDeliveryController.swift');
     const keyStore = read('apps/agent-macos/Sources/EgressViewAgentCore/AgentAPIKeyStore.swift');
     assert.match(settings, /Toggle\(isOn: \$openAICloudConsent\)/);
+    assert.match(settings, /Toggle\(isOn: \$anthropicCloudConsent\)/);
     assert.match(settings, /SecureField\(/);
-    assert.match(panel, /Send bounded network metadata to OpenAI\?/);
+    assert.match(panel, /Send bounded network metadata to %@\?/);
     assert.match(panel, /pendingCloudQuestion/);
     assert.match(controller, /KeychainAgentAPIKeyStore/);
     assert.match(keyStore, /kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly/);

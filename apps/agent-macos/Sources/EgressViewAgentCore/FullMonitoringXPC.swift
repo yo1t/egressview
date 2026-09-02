@@ -16,7 +16,7 @@ public enum FullMonitoringXPC {
     // provider's endpoint while a System Extension update is being completed,
     // so reusing one fixed name can leave the new provider unable to register
     // until macOS restarts.
-    public static let machServiceName = "group.com.egressview.agent.xpc.120"
+    public static let machServiceName = "group.com.egressview.agent.xpc.121"
     public static let hostBundleIdentifier = "com.egressview.agent.macos"
 
     public static func encoder() -> JSONEncoder {

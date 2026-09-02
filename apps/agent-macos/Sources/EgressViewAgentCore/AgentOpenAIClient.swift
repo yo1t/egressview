@@ -153,16 +153,20 @@ public struct AgentOpenAIClient: Sendable {
 }
 
 public enum AgentAIPriceCatalog {
-    public static let version = "2026-07-30"
+    public static let version = "2026-09-02"
 
     public static func estimatedCostUSD(
         provider: String, model: String, inputTokens: Int?, outputTokens: Int?
     ) -> Double? {
-        guard provider == "openai", let inputTokens, let outputTokens else { return nil }
-        let rates: (Double, Double)? = switch model {
-        case "gpt-5.6-luna": (0.20, 1.20)
-        case "gpt-5.6-terra": (2.00, 12.00)
-        case "gpt-5.6-sol": (4.00, 20.00)
+        guard let inputTokens, let outputTokens else { return nil }
+        let rates: (Double, Double)? = switch (provider, model) {
+        case ("openai", "gpt-5.6-luna"): (0.20, 1.20)
+        case ("openai", "gpt-5.6-terra"): (2.00, 12.00)
+        case ("openai", "gpt-5.6-sol"): (4.00, 20.00)
+        case ("anthropic", "claude-haiku-4-5-20251001"): (1.00, 5.00)
+        case ("anthropic", "claude-sonnet-5"): (2.00, 10.00)
+        case ("anthropic", "claude-opus-5"): (5.00, 25.00)
+        case ("anthropic", "claude-fable-5-1"): (10.00, 50.00)
         default: nil
         }
         guard let rates else { return nil }

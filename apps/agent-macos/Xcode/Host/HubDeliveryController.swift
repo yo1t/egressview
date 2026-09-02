@@ -631,6 +631,8 @@ private struct AgentSettingsView: View {
     )
     @State private var confirmUninstall = false
     @State private var confirmLocalOnlyUninstall = false
+    @State private var anthropicAPIKey = ""
+    @State private var anthropicCloudConsent = false
     @State private var openAIAPIKey = ""
     @State private var openAICloudConsent = false
 
@@ -894,10 +896,9 @@ private struct AgentSettingsView: View {
                 .pickerStyle(.segmented)
                 .disabled(ollama.isRunning)
             }
-            if ollama.provider == .openAI {
-                openAISettings
-            } else {
-            settingsGroup(L("Local AI with Ollama")) {
+            switch ollama.provider {
+            case .ollama:
+                settingsGroup(L("Local AI with Ollama")) {
                 Text(L("Optional and manual only. EgressView connects only to Ollama on this Mac; it never sends this analysis to the public Internet."))
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -940,8 +941,63 @@ private struct AgentSettingsView: View {
                         .foregroundStyle(ollama.isEnabled ? Color.green : Color.orange)
                         .textSelection(.enabled)
                 }
+                }
+            case .anthropic:
+                anthropicSettings
+            case .openAI:
+                openAISettings
             }
+        }
+    }
+
+    private var anthropicSettings: some View {
+        settingsGroup(L("Anthropic API")) {
+            Text(L("Off by default. Only the bounded preview shown in Insights is sent, and only after you confirm each request. Anthropic receives application names, destination names or addresses, time ranges, and aggregate counts. API charges may apply."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L("API key (stored only in Keychain)"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                SecureField(
+                    ollama.anthropicEnabled ? L("Key stored in Keychain · enter only to replace") : L("Anthropic API key"),
+                    text: $anthropicAPIKey
+                )
+                .textFieldStyle(.roundedBorder)
             }
+            Picker(L("Model"), selection: Binding(
+                get: { ollama.anthropicModel }, set: { ollama.selectCurrentModel($0) }
+            )) {
+                ForEach(AgentAnthropicConfiguration.models, id: \.self) { model in
+                    Text(model).tag(model)
+                }
+            }
+            Toggle(isOn: $anthropicCloudConsent) {
+                Text(L("I understand that the displayed bounded metadata is sent to Anthropic and may incur API charges."))
+            }
+            Button(ollama.isRunning ? L("Checking...") : L("Save and test")) {
+                let key = anthropicAPIKey
+                anthropicAPIKey = ""
+                ollama.saveAndTestAnthropic(apiKey: key, consent: anthropicCloudConsent)
+            }
+            .disabled(ollama.isRunning || !anthropicCloudConsent)
+            if ollama.anthropicEnabled {
+                Button(L("Remove Anthropic API key"), role: .destructive) {
+                    anthropicAPIKey = ""
+                    anthropicCloudConsent = false
+                    ollama.removeAnthropicConfiguration()
+                }
+                .disabled(ollama.isRunning)
+            }
+            if let status = ollama.status {
+                Text(status)
+                    .font(.callout)
+                    .foregroundStyle(ollama.anthropicEnabled ? Color.green : Color.orange)
+                    .textSelection(.enabled)
+            }
+            Text(L("Pricing estimate catalog: %@. Actual billing may differ.", AgentAIPriceCatalog.version))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
