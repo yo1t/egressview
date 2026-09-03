@@ -181,6 +181,10 @@ struct AgentGlobeChart: View {
                             .padding(6)
                     }
                     .accessibilityElement()
+                    // Measured 2026-09-03: without this the globe is AXUnknown,
+                    // while the sankey and the timeline are AXImage. The three
+                    // are the same kind of thing and were read as two.
+                    .accessibilityAddTraits(.isImage)
                     .accessibilityLabel(summary)
                 }
                 if !model.visitedCountryCodes.isEmpty {

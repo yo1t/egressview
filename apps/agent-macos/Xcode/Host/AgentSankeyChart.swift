@@ -136,6 +136,15 @@ private struct AgentSankeyColumn: View {
         }
         .font(.caption)
         .frame(width: 150, alignment: alignment == .leading ? .leading : .trailing)
+        // Hidden from VoiceOver, shown on screen.
+        //
+        // Measured 2026-09-03: these two columns put 38 separate elements
+        // inside the diagram: a process name, then bare figures, then a
+        // destination address, each read on its own. A bare "570" says nothing
+        // about what it counts, and the same numbers are already in the summary
+        // the drawing carries. The timeline and the globe are each one element;
+        // this was the only drawing that was not.
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
