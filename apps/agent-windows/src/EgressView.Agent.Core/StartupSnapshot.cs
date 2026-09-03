@@ -16,11 +16,16 @@ public static class StartupSnapshot
 
     public static IReadOnlyList<StartupFlow> Capture()
     {
+        // One resolver for the whole table: the rows share far fewer processes
+        // than they have entries, so this also stops the same PID being looked
+        // up once per connection.
+        var names = new ProcessNameResolver();
+        var observedAt = DateTimeOffset.UtcNow;
         var rows = new List<StartupFlow>();
-        rows.AddRange(ReadTcp(AfInet));
-        rows.AddRange(ReadTcp(AfInet6));
-        rows.AddRange(ReadUdp(AfInet));
-        rows.AddRange(ReadUdp(AfInet6));
+        rows.AddRange(ReadTcp(AfInet, names, observedAt));
+        rows.AddRange(ReadTcp(AfInet6, names, observedAt));
+        rows.AddRange(ReadUdp(AfInet, names, observedAt));
+        rows.AddRange(ReadUdp(AfInet6, names, observedAt));
         return rows;
     }
 
@@ -42,7 +47,7 @@ public static class StartupSnapshot
         finally { Marshal.FreeHGlobal(pointer); }
     }
 
-    private static IEnumerable<StartupFlow> ReadTcp(int family)
+    private static IEnumerable<StartupFlow> ReadTcp(int family, ProcessNameResolver names, DateTimeOffset observedAt)
     {
         var buffer = ReadTable(true, family, TcpOwnerPidAll, out var count);
         var rowSize = family == AfInet ? 24 : 56;
@@ -56,12 +61,12 @@ public static class StartupSnapshot
             if (state != 5) continue; // MIB_TCP_STATE_ESTAB
             var pid = BitConverter.ToInt32(buffer, offset + (family == AfInet ? 20 : 52));
             yield return family == AfInet
-                ? new StartupFlow("TCP", V4(buffer, offset + 4), Port(buffer, offset + 8), V4(buffer, offset + 12), Port(buffer, offset + 16), pid, ProcessNameResolver.Resolve(pid))
-                : new StartupFlow("TCP", V6(buffer, offset), Port(buffer, offset + 20), V6(buffer, offset + 24), Port(buffer, offset + 44), pid, ProcessNameResolver.Resolve(pid));
+                ? new StartupFlow("TCP", V4(buffer, offset + 4), Port(buffer, offset + 8), V4(buffer, offset + 12), Port(buffer, offset + 16), pid, names.Resolve(pid, observedAt))
+                : new StartupFlow("TCP", V6(buffer, offset), Port(buffer, offset + 20), V6(buffer, offset + 24), Port(buffer, offset + 44), pid, names.Resolve(pid, observedAt));
         }
     }
 
-    private static IEnumerable<StartupFlow> ReadUdp(int family)
+    private static IEnumerable<StartupFlow> ReadUdp(int family, ProcessNameResolver names, DateTimeOffset observedAt)
     {
         var buffer = ReadTable(false, family, UdpOwnerPid, out var count);
         var rowSize = family == AfInet ? 12 : 28;
@@ -71,8 +76,8 @@ public static class StartupSnapshot
             if (offset + rowSize > buffer.Length) yield break;
             var pid = BitConverter.ToInt32(buffer, offset + (family == AfInet ? 8 : 24));
             yield return family == AfInet
-                ? new StartupFlow("UDP", V4(buffer, offset), Port(buffer, offset + 4), "", 0, pid, ProcessNameResolver.Resolve(pid))
-                : new StartupFlow("UDP", V6(buffer, offset), Port(buffer, offset + 20), "", 0, pid, ProcessNameResolver.Resolve(pid));
+                ? new StartupFlow("UDP", V4(buffer, offset), Port(buffer, offset + 4), "", 0, pid, names.Resolve(pid, observedAt))
+                : new StartupFlow("UDP", V6(buffer, offset), Port(buffer, offset + 20), "", 0, pid, names.Resolve(pid, observedAt));
         }
     }
 

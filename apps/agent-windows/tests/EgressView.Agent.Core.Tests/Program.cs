@@ -131,7 +131,8 @@ try
     using (var migratedAgain = new ObservationStore(legacyDatabase))
         Assert(migratedAgain.SchemaVersion == 6, "migration is idempotent on restart");
 
-    Assert(ProcessNameResolver.Resolve(Environment.ProcessId) is { Length: > 0 }, "current process name resolves");
+    Assert(new ProcessNameResolver().Resolve(Environment.ProcessId, DateTimeOffset.UtcNow) is { Length: > 0 },
+        "current process name resolves");
 
     var requestId = Guid.NewGuid();
     var agentId = Guid.NewGuid();
@@ -308,7 +309,45 @@ try
         Console.WriteLine($"SCALE: 1,000,000 rows, 30-day summary {queryMilliseconds:F1}ms, {new FileInfo(scaleDatabase).Length} bytes");
     }
 
-    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics");
+    // Process names outlive the process. Without this the name is lost the
+    // moment a short-lived process exits, and every later observation of the
+    // same flow is dropped before delivery because the Hub requires a name.
+    {
+        var now = DateTimeOffset.UtcNow;
+        var started = now.AddMinutes(-1);
+        var alive = true;
+        var resolver = new ProcessNameResolver(
+            TimeSpan.FromMinutes(2),
+            pid => alive && pid == 4242 ? new ProcessNameResolver.LiveProcess("beacon.exe", started) : null);
+
+        Assert(resolver.Resolve(4242, now) == "beacon.exe", "a live process resolves");
+        alive = false;
+        Assert(resolver.Resolve(4242, now.AddSeconds(30)) == "beacon.exe",
+            "the name survives the process for observations inside the window");
+        Assert(resolver.CacheHits == 1, "the surviving answer came from the cache");
+        Assert(resolver.Resolve(4242, now.AddMinutes(10)) is null,
+            "the name is not reused indefinitely after the process is gone");
+        Assert(resolver.Expired == 1, "expiry is counted rather than silent");
+
+        // A PID handed to a different process must not inherit the old name.
+        // A wrong name is worse than none: a missing name is visibly missing,
+        // a wrong one is indistinguishable from a correct one.
+        var reused = new ProcessNameResolver(
+            TimeSpan.FromMinutes(2),
+            pid => alive ? new ProcessNameResolver.LiveProcess("first.exe", started) : null);
+        alive = true;
+        Assert(reused.Resolve(77, now) == "first.exe", "the first user of the PID resolves");
+        alive = false;
+        Assert(reused.Resolve(77, started.AddMinutes(-5)) is null,
+            "an observation older than the cached process is refused");
+        Assert(reused.PidReuseRejected == 1, "PID reuse is counted rather than silent");
+
+        Assert(new ProcessNameResolver().Resolve(0, now) is null, "PID 0 has no name");
+        Assert(new ProcessNameResolver().Resolve(Environment.ProcessId, now) is not null,
+            "the running test process resolves through the real probe");
+    }
+
+    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, and process-name retention");
     return 0;
 }
 finally
