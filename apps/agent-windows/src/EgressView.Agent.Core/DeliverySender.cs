@@ -21,6 +21,7 @@ public sealed class DeliverySender
         {
             Timeout = TimeSpan.FromSeconds(20),
         };
+        AgentEnrollmentClient.EnsureUserAgent(this.http);
     }
 
     public async Task<DeliveryAttempt> SendNextAsync(ObservationStore store, AgentCredential credential,
