@@ -342,6 +342,22 @@ try
             "an observation older than the cached process is refused");
         Assert(reused.PidReuseRejected == 1, "PID reuse is counted rather than silent");
 
+        // A process start event names the process before any of its traffic
+        // is seen, which is the only way to name one that exits before its
+        // first event is processed.
+        var fromStart = new ProcessNameResolver(TimeSpan.FromMinutes(2), _ => null);
+        fromStart.Observe(9001, @"\Device\HarddiskVolume4\Windows\System32\curl.exe", started);
+        Assert(fromStart.Resolve(9001, now) == "curl",
+            "a process that never answered a query is still named from its start event");
+        Assert(fromStart.ObservedStarts == 1, "names learned from start events are counted");
+        Assert(fromStart.Resolve(9001, started.AddMinutes(-1)) is null,
+            "a start event does not name observations that predate the process");
+
+        Assert(ProcessNameResolver.BareName(@"C:\Program Files\Vendor\app.exe") == "app",
+            "a path becomes the bare name Process.ProcessName would give");
+        Assert(ProcessNameResolver.BareName("svchost.exe") == "svchost", "an extension is dropped");
+        Assert(ProcessNameResolver.BareName("") is null, "an empty image name is not a name");
+
         Assert(new ProcessNameResolver().Resolve(0, now) is null, "PID 0 has no name");
         Assert(new ProcessNameResolver().Resolve(Environment.ProcessId, now) is not null,
             "the running test process resolves through the real probe");
