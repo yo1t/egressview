@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -24,12 +25,26 @@ public sealed class AgentEnrollmentException(string reason, int? statusCode = nu
     public int? StatusCode { get; } = statusCode;
 }
 
-public sealed partial class AgentEnrollmentClient(HttpClient http)
+public sealed partial class AgentEnrollmentClient
 {
+    private readonly HttpClient http;
+
     public AgentEnrollmentClient() : this(new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false })
     {
         Timeout = TimeSpan.FromSeconds(15),
     }) { }
+
+    public AgentEnrollmentClient(HttpClient http)
+    {
+        this.http = http;
+        EnsureUserAgent(http);
+    }
+
+    internal static void EnsureUserAgent(HttpClient client)
+    {
+        if (client.DefaultRequestHeaders.UserAgent.Count == 0)
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("EgressView-Agent-Windows", "0.1.0-dev"));
+    }
 
     public async Task<AgentEnrollmentTicket> ApplyAsync(
         Uri hubUrl, string code, AgentEnrollmentMetadata metadata, CancellationToken cancellationToken = default)

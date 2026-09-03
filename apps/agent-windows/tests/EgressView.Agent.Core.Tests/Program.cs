@@ -148,6 +148,7 @@ try
     Assert(claim.Status == EnrollmentClaimStatus.Approved && claim.Credential?.AgentId == agentId, "approved enrollment returns the Agent credential");
     Assert(!claim.Credential!.ToString().Contains(agentToken, StringComparison.Ordinal), "credential text always redacts the token");
     Assert(!enrollmentHandler.SawAuthorization, "enrollment never sends an existing bearer");
+    Assert(enrollmentHandler.SawUserAgent, "enrollment identifies the Windows Agent so standard WAF rules accept it");
     AgentCredential? savedCredential = null;
     var saveRequest = JsonSerializer.Serialize(new { v = 1, op = "save-enrollment", credential = claim.Credential });
     var saveResponse = IpcProtocol.Handle(saveRequest, () => "{}", _ => [], value => savedCredential = value);
@@ -201,7 +202,8 @@ try
         Assert(limited.Kind == DeliveryAttemptKind.RateLimited && limited.RetryAfter == TimeSpan.FromSeconds(7), "429 honors Retry-After without dropping data");
         Assert((await sender.SendNextAsync(senderStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged, "matching ACK removes the batch");
         Assert(senderStore.ReadDeliveryStatus().Pending == 0 && deliveryHandler.BatchIds.Distinct().Count() == 1, "all retries use the same idempotent batch ID");
-        Assert(deliveryHandler.SawEtwCollector && deliveryHandler.SawProcessId && deliveryHandler.SawBearer, "Windows payload and Agent bearer match the Hub contract");
+        Assert(deliveryHandler.SawEtwCollector && deliveryHandler.SawProcessId && deliveryHandler.SawBearer && deliveryHandler.SawUserAgent,
+            "Windows payload, Agent bearer, and User-Agent match the Hub contract");
     }
     using (var rejectedStore = new ObservationStore(Path.Combine(directory, "sender-rejected.db")))
     {
@@ -338,10 +340,12 @@ sealed class EnrollmentHandler(params (HttpStatusCode Status, string Body)[] res
     private readonly Queue<(HttpStatusCode Status, string Body)> responses = new(responses);
     public List<HttpRequestMessage> Requests { get; } = [];
     public bool SawAuthorization { get; private set; }
+    public bool SawUserAgent { get; private set; }
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         SawAuthorization |= request.Headers.Authorization is not null;
+        SawUserAgent |= request.Headers.UserAgent.Any(value => value.Product?.Name == "EgressView-Agent-Windows");
         Requests.Add(new HttpRequestMessage(request.Method, request.RequestUri) { Content = new StringContent(await request.Content!.ReadAsStringAsync(cancellationToken)) });
         var response = responses.Dequeue();
         return new HttpResponseMessage(response.Status) { Content = new StringContent(response.Body, Encoding.UTF8, "application/json") };
@@ -355,6 +359,7 @@ sealed class DeliveryHandler(params int[] statuses) : HttpMessageHandler
     public bool SawEtwCollector { get; private set; }
     public bool SawProcessId { get; private set; }
     public bool SawBearer { get; private set; }
+    public bool SawUserAgent { get; private set; }
     public int RejectedAcknowledgements { get; set; }
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -368,6 +373,7 @@ sealed class DeliveryHandler(params int[] statuses) : HttpMessageHandler
         SawEtwCollector |= observation.GetProperty("collector").GetString() == "etw";
         SawProcessId |= observation.GetProperty("processID").GetInt32() == 88;
         SawBearer |= request.Headers.Authorization?.Scheme == "Bearer" && request.Headers.Authorization.Parameter?.StartsWith("egva_", StringComparison.Ordinal) == true;
+        SawUserAgent |= request.Headers.UserAgent.Any(value => value.Product?.Name == "EgressView-Agent-Windows");
         var status = statuses.Dequeue();
         var response = new HttpResponseMessage((HttpStatusCode)status);
         if (status == 429) response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(7));

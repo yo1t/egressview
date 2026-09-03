@@ -71,8 +71,12 @@ public partial class MainWindow : Window
             throw new AgentEnrollmentException("expired");
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
-        catch (AgentEnrollmentException exception) { EnrollmentStatus.Text = EnrollmentMessage(exception.Reason); }
-        catch { EnrollmentStatus.Text = "登録に失敗しました。Hubへの接続を確認してください。\r\nEnrollment failed. Check the Hub connection."; }
+        catch (AgentEnrollmentException exception) { EnrollmentStatus.Text = EnrollmentDiagnostic(exception); }
+        catch (Exception exception)
+        {
+            EnrollmentStatus.Text = "登録に失敗しました。Hubへの接続を確認してください。\r\nEnrollment failed. Check the Hub connection."
+                + $"\r\nDiagnostic: {exception.GetType().Name}";
+        }
         finally
         {
             EnrollButton.IsEnabled = true;
@@ -128,6 +132,8 @@ public partial class MainWindow : Window
         "credential-storage-failed" => "資格情報をServiceへ保存できませんでした。Agent Serviceを確認してください。\r\nCould not store the credential. Check the Agent Service.",
         _ => "登録に失敗しました。コードとHubの状態を確認してください。\r\nEnrollment failed. Check the code and Hub status.",
     };
+    internal static string EnrollmentDiagnostic(AgentEnrollmentException exception) => EnrollmentMessage(exception.Reason)
+        + $"\r\nDiagnostic: {exception.Reason}{(exception.StatusCode is { } status ? $" (HTTP {status})" : string.Empty)}";
     private Task SummaryAsync(int days) => RequestAsync($"{{\"v\":1,\"op\":\"summary\",\"days\":{days}}}");
     private async Task RequestAsync(string request)
     {
