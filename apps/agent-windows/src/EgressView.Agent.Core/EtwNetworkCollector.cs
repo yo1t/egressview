@@ -10,6 +10,10 @@ namespace EgressView.Agent.Core;
 public sealed class EtwNetworkCollector : IAsyncDisposable
 {
     private static readonly Guid KernelNetwork = new("7DD42A49-5329-4832-8DFD-43D979153A88");
+    // Microsoft-Windows-Kernel-Process. Only the process keyword is enabled:
+    // thread and image-load events would multiply the volume for nothing.
+    private static readonly Guid KernelProcess = new("22FB2CD6-0E7B-422B-A0C7-2FAD1FD0E716");
+    private const ulong ProcessKeyword = 0x10;
     private static readonly HashSet<string> VpnProcesses = new(StringComparer.OrdinalIgnoreCase)
     {
         "tailscaled", "wireguard", "openvpn", "openvpnserv", "nordvpn-service", "protonvpn.service",
@@ -22,6 +26,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private Task? processing;
     private long eventsSeen, eventsIgnored, interfaceUnresolved;
     private string? error;
+    private string? processNameSourceError;
 
     public EtwNetworkCollector(ObservationPipeline pipeline)
     {
@@ -36,6 +41,12 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     public long InterfaceUnresolved => Interlocked.Read(ref interfaceUnresolved);
     public int EventsLost { get; private set; }
     public string? Error => error;
+    /// Why process start events are unavailable, when they are. Network
+    /// collection continues without them; names just fall back to querying,
+    /// which loses the processes that exit first. Reporting it keeps that a
+    /// visible reduction rather than a silent one.
+    public string? ProcessNameSourceError => processNameSourceError;
+    public long ProcessStartsObserved => processNames.ObservedStarts;
 
     public void Start()
     {
@@ -46,7 +57,18 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         {
             session = new TraceEventSession(sessionName) { StopOnDispose = true };
             session.EnableProvider(KernelNetwork, TraceEventLevel.Verbose, ulong.MaxValue);
-            session.Source.Dynamic.All += Record;
+            // Process starts are an enrichment, not the collection itself. If
+            // they cannot be enabled the Agent still observes traffic, so this
+            // failure is recorded and carried on from rather than thrown.
+            try
+            {
+                session.EnableProvider(KernelProcess, TraceEventLevel.Informational, ProcessKeyword);
+            }
+            catch (Exception ex)
+            {
+                processNameSourceError = $"{ex.GetType().Name}: {ex.Message}";
+            }
+            session.Source.Dynamic.All += Dispatch;
             processing = Task.Run(() =>
             {
                 try { session.Source.Process(); }
@@ -72,6 +94,29 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         CollectorError = Error,
         State = Error is not null || EventsLost > 0 || snapshot.PersistenceFailures > 0 ? "degraded" : snapshot.State,
     };
+
+    private void Dispatch(TraceEvent e)
+    {
+        if (e.ProviderGuid == KernelProcess) { RecordProcessStart(e); return; }
+        Record(e);
+    }
+
+    /// A process start carries the name before any of its traffic appears, so
+    /// a process that exits before its first network event is processed can
+    /// still be named. Querying at that point would be too late.
+    private void RecordProcessStart(TraceEvent e)
+    {
+        if (!e.EventName.Contains("Start", StringComparison.OrdinalIgnoreCase)) return;
+        var pid = Payload(e, "ProcessID") is { } raw && int.TryParse(raw, out var parsed) ? parsed : 0;
+        if (pid <= 0) return;
+        processNames.Observe(pid, Payload(e, "ImageName"), e.TimeStamp.ToUniversalTime());
+    }
+
+    private static string? Payload(TraceEvent e, string name)
+    {
+        try { return e.PayloadByName(name)?.ToString(); }
+        catch (Exception) { return null; }
+    }
 
     private void Record(TraceEvent e)
     {

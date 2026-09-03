@@ -34,7 +34,7 @@ public sealed class ProcessNameResolver
     private readonly TimeSpan retention;
     private readonly Func<int, LiveProcess?> probe;
 
-    private long cacheHits, liveLookups, expired, pidReuseRejected;
+    private long cacheHits, liveLookups, expired, pidReuseRejected, observedStarts;
 
     public ProcessNameResolver() : this(DefaultRetention, ProbeLiveProcess) { }
 
@@ -56,6 +56,8 @@ public sealed class ProcessNameResolver
     public long LiveLookups => Interlocked.Read(ref liveLookups);
     public long Expired => Interlocked.Read(ref expired);
     public long PidReuseRejected => Interlocked.Read(ref pidReuseRejected);
+    /// Names learned from process start events rather than by querying.
+    public long ObservedStarts => Interlocked.Read(ref observedStarts);
     public int Cached => cache.Count;
 
     /// <param name="observedAt">
@@ -98,6 +100,37 @@ public sealed class ProcessNameResolver
 
         Interlocked.Increment(ref cacheHits);
         return entry.Name;
+    }
+
+    /// Record a process the moment it starts, before any of its traffic is
+    /// seen.
+    ///
+    /// Querying at event time cannot help a process that is already gone by
+    /// the time its first event is processed, and those are exactly the
+    /// short-lived processes worth naming. Learning the name from the process
+    /// start event removes the race instead of narrowing it.
+    ///
+    /// The image name arrives as a path; it is reduced to the bare name so it
+    /// matches what Process.ProcessName produces. Two spellings of the same
+    /// program would split its traffic in the Hub's per-application view.
+    public void Observe(int processId, string? imageName, DateTimeOffset startedAt)
+    {
+        if (processId <= 0) return;
+        var name = Sanitize(BareName(imageName));
+        if (name is null) return;
+        Interlocked.Increment(ref observedStarts);
+        Remember(processId, new Entry(name, startedAt, Later(startedAt)));
+    }
+
+    internal static string? BareName(string? imageName)
+    {
+        if (string.IsNullOrWhiteSpace(imageName)) return null;
+        var trimmed = imageName.Trim();
+        var separator = trimmed.LastIndexOfAny(['\\', '/']);
+        if (separator >= 0) trimmed = trimmed[(separator + 1)..];
+        var dot = trimmed.LastIndexOf('.');
+        if (dot > 0) trimmed = trimmed[..dot];
+        return trimmed.Length == 0 ? null : trimmed;
     }
 
     private void Remember(int processId, Entry entry)
