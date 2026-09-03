@@ -15,6 +15,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         "tailscaled", "wireguard", "openvpn", "openvpnserv", "nordvpn-service", "protonvpn.service",
     };
     private readonly ObservationPipeline pipeline;
+    private readonly ProcessNameResolver processNames = new();
     private readonly object interfaceGate = new();
     private Dictionary<string, InterfaceInfo> interfaces = new(StringComparer.OrdinalIgnoreCase);
     private TraceEventSession? session;
@@ -113,7 +114,10 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         }
 
         if (localInterface is null) Interlocked.Increment(ref interfaceUnresolved);
-        var processName = ProcessNameResolver.Resolve(pid);
+        // The event timestamp, not the current time: events reach here through
+        // a channel, so a short-lived process may already be gone by now and
+        // the name has to be judged against when the traffic happened.
+        var processName = processNames.Resolve(pid, e.TimeStamp.ToUniversalTime());
         var layer = IsVpnTransport(processName, localInterface) ? ObservationLayer.VpnTransport : ObservationLayer.Logical;
         pipeline.TrySubmit(new NetworkObservation(
             e.TimeStamp.ToUniversalTime(), pid,
