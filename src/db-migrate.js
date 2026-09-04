@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 20;
+const SCHEMA_VERSION = 21;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -789,6 +789,70 @@ const MIGRATIONS = [
         CREATE INDEX idx_agent_observations_agent_flow
           ON agent_observations(agentId, localAddress, remoteAddress, remotePort);
       `);
+    },
+  },
+  {
+    version: 21,
+    description: 'clear reverse-DNS names that only restate the address (source parity)',
+    up(db) {
+      // The destination side has always dropped a PTR that only restates the
+      // address; the source side stored one. AWS's resolver answers
+      // ip-<a>-<b>-<c>-<d>.<region>.compute.internal for any private address it
+      // is asked about, so the source column carried a made-up hostname while
+      // the destination column carried the address.
+      //
+      // Measured on production 2026-09-04: 386,343 of 407,733 connection rows
+      // and 123 device rows held such a name, and NOT ONE held a genuine one.
+      // Clearing them loses nothing and stops the two columns disagreeing.
+      //
+      // The rule itself lives in enrichment.isPtrJunk. This restates it in SQL
+      // rather than importing it, because a migration must keep behaving the
+      // same after the rule changes -- a migration that follows today's code
+      // would rewrite a database differently depending on when it ran.
+      // `test/unit/source-name-ptr-parity.test.js` pins the two to agree on the
+      // shapes that matter.
+      const junk = `
+        %LIKE_TARGET% LIKE 'ip-%-%-%-%.%'
+        OR %LIKE_TARGET% LIKE '%.compute.internal'
+        OR %LIKE_TARGET% LIKE 'ec2-%.compute.amazonaws.com'
+        OR %LIKE_TARGET% LIKE 'ec2-%.compute-1.amazonaws.com'
+        OR %LIKE_TARGET% LIKE '%.in-addr.arpa'
+      `;
+      const clear = (table, column) => {
+        const where = junk.replaceAll('%LIKE_TARGET%', column);
+        const { changes } = db
+          .prepare(`UPDATE ${table} SET ${column} = NULL WHERE ${column} IS NOT NULL AND (${where})`)
+          .run();
+        if (changes) logger.info(`[migrate] v21 cleared ${changes} ${table}.${column} value(s)`);
+      };
+      // The columns were found by scanning every TEXT column on production,
+      // not by guessing which tables hold a name: the first pass at this
+      // migration named connections and devices and missed
+      // device_observations.hostname, which held 3,033,539 of them -- eight
+      // times the connections table.
+      //
+      // Destination columns are deliberately absent. They already apply the
+      // test at write time, and what remains in them is real:
+      // notification_log.dstHost holds 125 rows and every one is ip-api.com.
+      //
+      // Nothing here is guaranteed to exist yet: on an empty database the
+      // connections DDL runs after the migrations, and older databases predate
+      // the device tables. Clear what is there and leave the rest alone.
+      for (const [table, column] of [
+        ['connections', 'srcDnsName'],
+        ['notification_log', 'srcDnsName'],
+        ['device_observations', 'hostname'],
+        ['devices', 'dnsName'],
+        ['device_history', 'dnsName'],
+      ]) {
+        const exists = db
+          .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+          .pluck()
+          .get(table);
+        if (!exists) continue;
+        const hasColumn = db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === column);
+        if (hasColumn) clear(table, column);
+      }
     },
   },
 ];

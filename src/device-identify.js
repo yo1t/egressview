@@ -11,6 +11,12 @@ const dns = require('dns').promises;
 const fs = require('fs');
 const path = require('path');
 const { isAllowedRouterIp } = require('./utils');
+// The same test the destination side applies (runtime.js, enrichment-queue.js).
+// Without it a PTR that only restates the address -- AWS answers
+// ip-<a>-<b>-<c>-<d>.<region>.compute.internal for any private address it is
+// asked about -- was stored as this device's name, so the source column showed
+// a made-up hostname while the destination column showed the address.
+const { isPtrJunk } = require('./enrichment');
 
 // Injected at startup so the decision is made before any request is built.
 let _offline = null;
@@ -138,7 +144,8 @@ async function refreshNodeMeta(ip, mac) {
       dns.reverse(ip),
       new Promise((_, rej) => setTimeout(() => rej(new Error('to')), 1500))
     ]);
-    meta.dnsName = (arr && arr[0]) || null;
+    const ptr = (arr && arr[0]) || null;
+    meta.dnsName = isPtrJunk(ptr) ? null : ptr;
   } catch { /* keep previous */ }
   try {
     if (Bonjour) {
@@ -364,7 +371,7 @@ async function investigateIp(ip, { ouiDb: ouiDbRef, yamahaExec, yamahaEnabled, y
     probeSsdp(ip),
     probeMdns(ip),
     Promise.race([
-      dns.reverse(ip).then(arr => arr[0]),
+      dns.reverse(ip).then(arr => (isPtrJunk(arr[0]) ? null : arr[0])),
       new Promise(resolve => setTimeout(() => resolve(null), 1500)),
     ]).catch(() => null),
     probeBonjourForIp(ip, 3000),
