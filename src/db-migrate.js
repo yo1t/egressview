@@ -805,23 +805,20 @@ const MIGRATIONS = [
       // and 123 device rows held such a name, and NOT ONE held a genuine one.
       // Clearing them loses nothing and stops the two columns disagreeing.
       //
-      // The rule itself lives in enrichment.isPtrJunk. This restates it in SQL
-      // rather than importing it, because a migration must keep behaving the
-      // same after the rule changes -- a migration that follows today's code
-      // would rewrite a database differently depending on when it ran.
-      // `test/unit/source-name-ptr-parity.test.js` pins the two to agree on the
-      // shapes that matter.
-      const junk = `
-        %LIKE_TARGET% LIKE 'ip-%-%-%-%.%'
-        OR %LIKE_TARGET% LIKE '%.compute.internal'
-        OR %LIKE_TARGET% LIKE 'ec2-%.compute.amazonaws.com'
-        OR %LIKE_TARGET% LIKE 'ec2-%.compute-1.amazonaws.com'
-        OR %LIKE_TARGET% LIKE '%.in-addr.arpa'
-      `;
+      // Freeze the v21 rule here rather than importing today's isPtrJunk. A
+      // migration must rewrite the same input identically after the runtime
+      // rule changes. Do not approximate this with LIKE: `ip-%-%-%-%.%` also
+      // matches legitimate names such as ip-east-office-floor-printer.example.
+      const ptrJunkV21 = /ec2-[\d-]+\.compute(?:-1)?\.amazonaws\.com$|\.compute\.internal$|\.static\.\S+\.fttx\.|ip-\d+-\d+-\d+-\d+\.|ptr\d|\.in-addr\.arpa$/i;
+      const numericAddressV21 = /^\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3}\./;
+      db.function('egressview_v21_is_ptr_junk', { deterministic: true }, host => {
+        if (typeof host !== 'string' || !host) return 1;
+        return ptrJunkV21.test(host) || numericAddressV21.test(host) ? 1 : 0;
+      });
       const clear = (table, column) => {
-        const where = junk.replaceAll('%LIKE_TARGET%', column);
         const { changes } = db
-          .prepare(`UPDATE ${table} SET ${column} = NULL WHERE ${column} IS NOT NULL AND (${where})`)
+          .prepare(`UPDATE ${table} SET ${column} = NULL
+                    WHERE ${column} IS NOT NULL AND egressview_v21_is_ptr_junk(${column}) = 1`)
           .run();
         if (changes) logger.info(`[migrate] v21 cleared ${changes} ${table}.${column} value(s)`);
       };
