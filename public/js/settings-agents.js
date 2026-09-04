@@ -138,6 +138,39 @@ export function initAgentSettings(showStatus) {
     }
   }
 
+  // Read-only: a revoked enrolment cannot be resumed, so there is nothing to
+  // act on here. Rows are kept rather than deleted -- the observations they
+  // sent still reference them.
+  function renderRevokedAgents(revoked) {
+    const box = document.getElementById('revoked-agents-list');
+    if (!box) return;
+    if (!revoked.length) {
+      box.replaceChildren(
+        textElement('span', t('settings.log.noRevokedAgents'), 'settings-session-muted')
+      );
+      return;
+    }
+    box.replaceChildren(...revoked.map(agent => {
+      const row = textElement('div', '', 'settings-agent-row');
+      const details = textElement('span', '', 'settings-agent-details');
+      details.append(
+        textElement('strong', agent.hostName, 'settings-agent-host'),
+        textElement(
+          'span',
+          `${agent.platform} ${agent.osVersion} · ${agent.agentVersion}`,
+          'settings-session-muted'
+        ),
+        textElement(
+          'span',
+          tVars('settings.agents.revokedAt', { time: fmtTs(agent.revokedAt) }),
+          'settings-agent-revoked'
+        )
+      );
+      row.appendChild(details);
+      return row;
+    }));
+  }
+
   async function loadAgents() {
     const box = document.getElementById('agents-list');
     try {
@@ -146,11 +179,16 @@ export function initAgentSettings(showStatus) {
       if (!response.ok) throw new Error(body.error || 'Could not load Agents');
       const agents = body.agents || [];
       updateAgentSources(agents);
-      if (!agents.length) {
+      // Revoked agents go to the log screen. Two thirds of this list was
+      // finished registrations, so the two agents actually running were being
+      // picked out of nine rows.
+      renderRevokedAgents(agents.filter(agent => agent.revokedAt));
+      const live = agents.filter(agent => !agent.revokedAt);
+      if (!live.length) {
         box.replaceChildren(textElement('span', t('settings.agents.none'), 'settings-session-muted'));
         return;
       }
-      box.replaceChildren(...agents.map(agent => {
+      box.replaceChildren(...live.map(agent => {
         const row = textElement('div', '', 'settings-agent-row');
         const details = textElement('span', '', 'settings-agent-details');
         details.append(
@@ -162,14 +200,12 @@ export function initAgentSettings(showStatus) {
           ),
           textElement(
             'span',
-            agent.revokedAt
-              ? tVars('settings.agents.revokedAt', { time: fmtTs(agent.revokedAt) })
-              : tVars('settings.agents.lastSeen', { time: fmtTs(agent.lastSeenAt) }),
-            agent.revokedAt ? 'settings-agent-revoked' : 'settings-session-seen'
+            tVars('settings.agents.lastSeen', { time: fmtTs(agent.lastSeenAt) }),
+            'settings-session-seen'
           )
         );
         row.appendChild(details);
-        if (!agent.revokedAt) {
+        {
           const revoke = textElement('button', t('settings.agents.revoke'), 'beacon-dismiss-btn');
           revoke.type = 'button';
           revoke.addEventListener('click', async () => {
@@ -220,5 +256,7 @@ export function initAgentSettings(showStatus) {
 
   // Lives on the L3/L4 tab: an operator thinks about data sources in one place.
   document.querySelector('[data-tab="l3l4"]')?.addEventListener('click', loadAll);
+  // The log screen reads the same list, so opening it directly still fills it.
+  document.querySelector('[data-tab="log"]')?.addEventListener('click', loadAgents);
   return { loadAgents, loadRequests, loadTransport, loadAll };
 }

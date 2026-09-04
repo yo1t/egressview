@@ -52,8 +52,9 @@ describe('shared i18n catalog', () => {
 
   it('contains the complete migrated catalog in both languages', () => {
     // Grew by 7 on 2026-08-29: the threat-feed status strings (P3-54).
-    assert.equal(jaKeys.size, 906);
-    assert.equal(enKeys.size, 906);
+    // Grew by 5 on 2026-09-05: the log screen that revoked agents moved to (P3-56).
+    assert.equal(jaKeys.size, 911);
+    assert.equal(enKeys.size, 911);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 
