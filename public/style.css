@@ -184,6 +184,10 @@
   .settings-save-spaced { margin-top: 16px; }
   .settings-divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
   .settings-subsection-title { cursor: default; font-size: 12px; margin-bottom: 8px; }
+  /* Heading and its action on one line, so the button does not drift down the
+     page as the list below it grows. */
+  .settings-subsection-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .settings-subsection-heading .settings-subsection-title { margin-bottom: 8px; }
   .settings-inline-button { width: auto; padding: 6px 16px; }
   .token-regenerate-btn { background: transparent; border: 1px solid var(--red, #f87171); color: var(--red, #f87171); }
   .settings-copy-section { margin-bottom: 12px; }

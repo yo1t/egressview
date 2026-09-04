@@ -43,7 +43,7 @@
         </button>
         <button class="settings-tab" data-tab="l3l4">
           <span class="tab-badge">L3/L4</span>
-          <span class="tab-name" data-i18n="settings.tab.l3l4">ルーター</span>
+          <span class="tab-name" data-i18n="settings.tab.l3l4">/Agents</span>
         </button>
         <button class="settings-tab" data-tab="l2">
           <span class="tab-badge">L2</span>
@@ -64,6 +64,10 @@
         <button class="settings-tab" data-tab="datasource">
           <span class="tab-badge">📡</span>
           <span class="tab-name" data-i18n="settings.tab.datasource">データソース</span>
+        </button>
+        <button class="settings-tab" data-tab="log">
+          <span class="tab-badge">📜</span>
+          <span class="tab-name" data-i18n="settings.tab.log">ログ</span>
         </button>
       </nav>
       <!-- Right: content -->
@@ -133,7 +137,10 @@
                a router is polled by the Hub, while an agent pushes to it, so the
                health readings and the setup steps do not mean the same thing. -->
           <section class="settings-subsection" id="agent-source-section">
-          <div class="pane-title settings-subsection-title" data-i18n="settings.agents.section">Mac / Agent</div>
+          <div class="settings-subsection-heading">
+            <div class="pane-title settings-subsection-title" data-i18n="settings.agents.section">Agents</div>
+            <button class="connect-btn settings-inline-button" id="agent-enrollment-create-btn" type="button" data-i18n="settings.agents.create">登録コードを発行</button>
+          </div>
           <p class="settings-copy settings-copy-block" data-i18n="settings.agents.desc">
             Macなどの端末を登録すると、ルーターからは見えないプロセス単位の通信も記録されます。ルーターはEgressViewが取りに行きますが、端末は端末側から送ってくるため、登録した端末が起動していない間は届きません。
           </p>
@@ -149,7 +156,6 @@
           </div>
 
           <div id="agents-list" class="settings-agent-list"></div>
-          <button class="connect-btn settings-inline-button" id="agent-enrollment-create-btn" type="button" data-i18n="settings.agents.create">登録コードを発行</button>
           <div class="settings-status" id="agents-status"></div>
           </section>
 
@@ -859,6 +865,21 @@
 
           <button class="connect-btn" id="datasource-save-btn" data-i18n="settings.btn.save">Save</button>
           <div class="settings-status" id="datasource-status"></div>
+        </div>
+
+        <!-- What is finished. A revoked agent cannot be brought back -- a new
+             enrolment issues a new code -- so this is read-only, and it is here
+             rather than on the Agents screen so the live list stays the length
+             of what is actually running. -->
+        <div class="settings-pane" id="pane-log">
+          <div class="pane-title pane-title-static" data-i18n="settings.section.log">📜 ログ</div>
+          <section class="settings-subsection">
+            <div class="pane-title settings-subsection-title" data-i18n="settings.log.revokedAgents">失効した端末</div>
+            <p class="settings-copy settings-copy-block" data-i18n="settings.log.revokedAgentsDesc">
+              失効させた端末の記録です。失効した登録は再開できません。同じ端末をもう一度使うときは、登録コードを発行し直してください。
+            </p>
+            <div id="revoked-agents-list" class="settings-agent-list"></div>
+          </section>
         </div>
       </div>
     </div>

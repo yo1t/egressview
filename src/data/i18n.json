@@ -215,7 +215,7 @@
     "banner.disconnected": "セッションが切れています。",
     "banner.button": "⚙ 設定から再接続",
     "banner.yamaha": "⚙ Yamaha接続を再確認",
-    "settings.tab.l3l4": "ルーター",
+    "settings.tab.l3l4": "/Agents",
     "settings.tab.l2": "WiFi AP",
     "settings.tab.general": "General",
     "settings.tab.notifications": "通知",
@@ -361,7 +361,7 @@
     "settings.sessions.roleHint": "ロールはログイン方法から自動で決まります。ローカル管理者は管理者、許可メールでのGoogleログインは運用、許可ドメインのみで一致したGoogleログインは閲覧のみです。",
     "settings.sessions.revoke": "ログアウト",
     "settings.sessions.revokeAll": "他の端末を全てログアウト",
-    "settings.agents.section": "Mac / Agent",
+    "settings.agents.section": "Agents",
     "settings.agents.desc": "Macなどの端末を登録すると、ルーターからは見えないプロセス単位の通信も記録されます。ルーターはEgressViewが取りに行きますが、端末は端末側から送ってくるため、登録した端末が起動していない間は届きません。",
     "settings.agents.none": "登録済みAgentはありません",
     "settings.agents.create": "登録コードを発行",
@@ -907,7 +907,12 @@
     "settings.agents.duplicateHost": "同じ名前の端末が既に登録されています",
     "settings.agents.replaceConfirm": "{host} は既に登録されています。既存の登録を無効にして置き換えますか。「キャンセル」を選ぶと別の端末として追加します。",
     "settings.agents.transportSaved": "通信の設定を保存しました。",
-    "settings.agents.flowHint": "コードを発行して端末へ入力すると、ここへ承認待ちとして表示されます。承認して初めて接続できます。"
+    "settings.agents.flowHint": "コードを発行して端末へ入力すると、ここへ承認待ちとして表示されます。承認して初めて接続できます。",
+    "settings.tab.log": "ログ",
+    "settings.section.log": "📜 ログ",
+    "settings.log.revokedAgents": "失効した端末",
+    "settings.log.revokedAgentsDesc": "失効させた端末の記録です。失効した登録は再開できません。同じ端末をもう一度使うときは、登録コードを発行し直してください。",
+    "settings.log.noRevokedAgents": "失効した端末はありません。"
   },
   "en": {
     "tab.graph": "📊 Graph Map",
@@ -1126,7 +1131,7 @@
     "banner.button": "⚙ Reconnect via Settings",
     "banner.yamaha": "⚙ Re-check Yamaha connection",
     "banner.cisco": "⚙ Re-check Cisco connection",
-    "settings.tab.l3l4": "Router",
+    "settings.tab.l3l4": "/Agents",
     "settings.tab.l2": "WiFi AP",
     "settings.tab.general": "General",
     "settings.tab.notifications": "Notifications",
@@ -1274,7 +1279,7 @@
     "settings.sessions.roleHint": "Roles are assigned automatically from how you signed in. The local administrator is admin, a Google login matched by an allowed email is an operator, and one matched only by an allowed domain is view only.",
     "settings.sessions.revoke": "Log out",
     "settings.sessions.revokeAll": "Log out all other devices",
-    "settings.agents.section": "Mac / Agent",
+    "settings.agents.section": "Agents",
     "settings.agents.desc": "Registering a Mac records which process made each connection — something the router cannot see. Routers are polled by EgressView; devices push to it instead, so nothing arrives while a registered device is switched off.",
     "settings.agents.none": "No Agents are enrolled",
     "settings.agents.create": "Create enrollment code",
@@ -1817,6 +1822,11 @@
     "settings.agents.duplicateHost": "A device with this name is already registered",
     "settings.agents.replaceConfirm": "{host} is already registered. Revoke the existing registration and replace it? Choose Cancel to add this as a separate device.",
     "settings.agents.transportSaved": "Transport setting saved.",
-    "settings.agents.flowHint": "Create a code and enter it on the device: the request appears here for approval, and the device connects only once you approve it."
+    "settings.agents.flowHint": "Create a code and enter it on the device: the request appears here for approval, and the device connects only once you approve it.",
+    "settings.tab.log": "Log",
+    "settings.section.log": "📜 Log",
+    "settings.log.revokedAgents": "Revoked agents",
+    "settings.log.revokedAgentsDesc": "A record of agents you have revoked. A revoked enrolment cannot be resumed; to use the same device again, issue a new enrolment code.",
+    "settings.log.noRevokedAgents": "No agents have been revoked."
   }
 }

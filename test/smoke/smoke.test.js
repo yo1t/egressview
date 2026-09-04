@@ -1708,7 +1708,19 @@ test('settings tabs save and connection buttons work without console errors', as
   await expect(page.locator('#agents-status')).toContainText(/発行|created/i);
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#agents-list .beacon-dismiss-btn').click();
-  await expect(page.locator('#agents-list .settings-agent-revoked')).toHaveCount(1);
+  // Revoking takes the agent off this list: it is what is running, and a
+  // revoked enrolment is not. The record moves to the log tab, read-only,
+  // because a revoked enrolment cannot be resumed.
+  await expect(page.locator('#agents-list .settings-agent-row')).toHaveCount(0);
+  await page.click('.settings-tab[data-tab="log"]');
+  await expect(page.locator('#pane-log')).toHaveClass(/active/);
+  await expect(page.locator('#revoked-agents-list .settings-agent-row')).toHaveCount(1);
+  await expect(page.locator('#revoked-agents-list .settings-agent-revoked')).toHaveCount(1);
+  // Nothing to act on there.
+  await expect(page.locator('#revoked-agents-list button')).toHaveCount(0);
+  // The escaping the live list was checked for has to hold here too.
+  await expect(page.locator('#revoked-agents-list')).toContainText('<img src=x onerror=alert(1)>');
+  await expect(page.locator('#revoked-agents-list img')).toHaveCount(0);
   await page.click('.settings-tab[data-tab="general"]');
   await page.locator('#s-home-country').selectOption('JP');
   await page.click('#general-save-btn');

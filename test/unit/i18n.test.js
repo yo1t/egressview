@@ -51,9 +51,11 @@ describe('shared i18n catalog', () => {
   });
 
   it('contains the complete migrated catalog in both languages', () => {
+    // Grew by 7 on 2026-08-29: the threat-feed status strings (P3-54).
     // Grew by 2 on 2026-09-05: non-JSON backup API response diagnostics.
-    assert.equal(jaKeys.size, 908);
-    assert.equal(enKeys.size, 908);
+    // Grew by 5 on 2026-09-05: the log screen that revoked agents moved to (P3-56).
+    assert.equal(jaKeys.size, 913);
+    assert.equal(enKeys.size, 913);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 
