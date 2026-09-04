@@ -32,6 +32,9 @@ test('v21 clears names that only restate the address', () => {
   insert.run('192.168.10.33', '1.1.1.1', 'ip-192-168-10-33.ap-northeast-1.compute.internal', null);
   insert.run('10.0.0.5', '1.1.1.1', 'ec2-1-2-3-4.compute-1.amazonaws.com', null);
   insert.run('10.0.0.6', '1.1.1.1', '5.0.0.10.in-addr.arpa', null);
+  insert.run('10.0.0.7', '1.1.1.1', '1-2-3-4.example.net', null);
+  insert.run('10.0.0.8', '1.1.1.1', 'router.static.example.fttx.invalid', null);
+  insert.run('10.0.0.9', '1.1.1.1', 'customer-ptr12.example.net', null);
   runMigrations(db, file);
   const left = db.prepare('SELECT COUNT(*) FROM connections WHERE srcDnsName IS NOT NULL').pluck().get();
   assert.equal(left, 0, 'a name that restates the address survived');
@@ -47,11 +50,17 @@ test('v21 keeps genuine names, including ones that start with ip-', () => {
   insert.run('192.168.10.34', '1.1.1.1', 'printer.local', 'one.one.one.one');
   insert.run('192.168.10.35', '208.95.112.1', 'nas.home', 'ip-api.com');
   insert.run('192.168.10.36', '103.253.24.69', 'laptop', 'ip-253-24-69.axgn.com');
+  insert.run('192.168.10.37', '1.1.1.1', 'ip-east-office-floor-printer.example.com', null);
   runMigrations(db, file);
   const names = db.prepare('SELECT srcDnsName FROM connections ORDER BY src').pluck().all();
-  assert.deepEqual(names, ['printer.local', 'nas.home', 'laptop']);
+  assert.deepEqual(names, [
+    'printer.local',
+    'nas.home',
+    'laptop',
+    'ip-east-office-floor-printer.example.com',
+  ]);
   const hosts = db.prepare('SELECT dstHost FROM connections ORDER BY src').pluck().all();
-  assert.deepEqual(hosts, ['one.one.one.one', 'ip-api.com', 'ip-253-24-69.axgn.com'],
+  assert.deepEqual(hosts, ['one.one.one.one', 'ip-api.com', 'ip-253-24-69.axgn.com', null],
     'v21 must not touch destination names');
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });
