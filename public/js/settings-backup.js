@@ -5,6 +5,24 @@ import { apiFetch } from './auth-socket.js?v=__ASSET_VERSION__';
 export function initBackupSettings(showStatus) {
   const PRUNE_POLL_INTERVAL_MS = 1000;
 
+  async function readJsonResponse(response) {
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.toLowerCase().includes('application/json')) {
+      await response.text().catch(() => '');
+      throw new Error(tVars('settings.backup.invalidResponse', { status: response.status }));
+    }
+    let body;
+    try {
+      body = await response.json();
+    } catch {
+      throw new Error(tVars('settings.backup.invalidResponse', { status: response.status }));
+    }
+    if (!response.ok) {
+      throw new Error(body?.error || tVars('settings.backup.requestFailed', { status: response.status }));
+    }
+    return body;
+  }
+
   function formatBytes(value) {
     const bytes = Number(value) || 0;
     if (bytes < 1024) return `${bytes} B`;
@@ -59,7 +77,7 @@ export function initBackupSettings(showStatus) {
       const response = await apiFetch(_BASE + '/api/backup/restore', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
       });
-      const data = await response.json();
+      const data = await readJsonResponse(response);
       showStatus('backup-action-status', data.success ? t('settings.backup.restored') : data.error, data.success);
     } catch (error) {
       showStatus('backup-action-status', tVars('settings.error.withMessage', { message: error.message }), false);
@@ -69,7 +87,7 @@ export function initBackupSettings(showStatus) {
   async function loadBackupList() {
     const list = document.getElementById('backup-list');
     try {
-      const data = await (await apiFetch(_BASE + '/api/backup/list')).json();
+      const data = await readJsonResponse(await apiFetch(_BASE + '/api/backup/list'));
       if (data.config) {
         document.getElementById('s-backup-interval').value = String(data.config.intervalHours);
         document.getElementById('s-backup-generations').value = String(data.config.maxGenerations);
@@ -125,8 +143,7 @@ export function initBackupSettings(showStatus) {
       }), true);
       await new Promise(resolve => setTimeout(resolve, PRUNE_POLL_INTERVAL_MS));
       const response = await apiFetch(_BASE + '/api/backup/prune/' + encodeURIComponent(job.id));
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || t('settings.error.generic'));
+      const data = await readJsonResponse(response);
       job = data.job;
     }
     if (job?.status !== 'completed') {
@@ -154,7 +171,7 @@ export function initBackupSettings(showStatus) {
 
   document.getElementById('backup-create-btn').addEventListener('click', async () => {
     try {
-      const data = await (await apiFetch(_BASE + '/api/backup/create', { method: 'POST' })).json();
+      const data = await readJsonResponse(await apiFetch(_BASE + '/api/backup/create', { method: 'POST' }));
       showStatus('backup-action-status', data.success ? tVars('settings.backup.created', { name: data.name }) : t('settings.error.generic'), data.success);
       loadBackupList();
     } catch (error) {
@@ -169,8 +186,7 @@ export function initBackupSettings(showStatus) {
       const previewResponse = await apiFetch(_BASE + '/api/backup/prune', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execute: false }),
       });
-      const preview = await previewResponse.json();
-      if (!previewResponse.ok) throw new Error(preview.error || t('settings.error.generic'));
+      const preview = await readJsonResponse(previewResponse);
       const previewJob = await waitForPruneJob(preview.job);
       const plan = previewJob.result;
       if (!plan.candidates.length) {
@@ -184,8 +200,7 @@ export function initBackupSettings(showStatus) {
       const executeResponse = await apiFetch(_BASE + '/api/backup/prune', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ execute: true }),
       });
-      const executed = await executeResponse.json();
-      if (!executeResponse.ok) throw new Error(executed.error || t('settings.error.generic'));
+      const executed = await readJsonResponse(executeResponse);
       const executeJob = await waitForPruneJob(executed.job);
       const result = executeJob.result;
       showStatus('backup-prune-status', tVars('settings.backup.cleanupDone', {
@@ -215,9 +230,9 @@ export function initBackupSettings(showStatus) {
       return;
     }
     try {
-      const data = await (await apiFetch(_BASE + '/api/backup/upload', {
+      const data = await readJsonResponse(await apiFetch(_BASE + '/api/backup/upload', {
         method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: await file.arrayBuffer(),
-      })).json();
+      }));
       showStatus('backup-action-status', data.success ? t('settings.backup.restored') : data.error, data.success);
       loadBackupList();
     } catch (error) {
