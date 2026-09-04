@@ -825,11 +825,23 @@ const MIGRATIONS = [
           .run();
         if (changes) logger.info(`[migrate] v21 cleared ${changes} ${table}.${column} value(s)`);
       };
+      // The columns were found by scanning every TEXT column on production,
+      // not by guessing which tables hold a name: the first pass at this
+      // migration named connections and devices and missed
+      // device_observations.hostname, which held 3,033,539 of them -- eight
+      // times the connections table.
+      //
+      // Destination columns are deliberately absent. They already apply the
+      // test at write time, and what remains in them is real:
+      // notification_log.dstHost holds 125 rows and every one is ip-api.com.
+      //
       // Nothing here is guaranteed to exist yet: on an empty database the
       // connections DDL runs after the migrations, and older databases predate
       // the device tables. Clear what is there and leave the rest alone.
       for (const [table, column] of [
         ['connections', 'srcDnsName'],
+        ['notification_log', 'srcDnsName'],
+        ['device_observations', 'hostname'],
         ['devices', 'dnsName'],
         ['device_history', 'dnsName'],
       ]) {
