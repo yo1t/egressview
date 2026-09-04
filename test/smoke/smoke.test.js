@@ -1777,6 +1777,16 @@ test('settings tabs save and connection buttons work without console errors', as
   await expect(page.locator('#backup-config-status')).toBeVisible();
   await page.click('#backup-prune-btn');
   await expect(page.locator('#backup-prune-status')).toBeVisible();
+  await page.unroute('**/api/backup/prune');
+  await page.route('**/api/backup/prune', route => route.fulfill({
+    status: 502,
+    contentType: 'text/html',
+    body: '<html><body>Bad Gateway</body></html>',
+  }));
+  await page.click('#backup-prune-btn');
+  await expect(page.locator('#backup-prune-status')).toContainText('HTTP 502');
+  await expect(page.locator('#backup-prune-status')).not.toContainText('Unexpected token');
+  await expect(page.locator('#backup-prune-btn')).toBeEnabled();
   await page.click('#backup-create-btn');
   await expect(page.locator('#backup-action-status')).toBeVisible();
 
