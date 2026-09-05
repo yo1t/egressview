@@ -32,11 +32,13 @@ public sealed class ProcessNameResolver
 
     private readonly ConcurrentDictionary<int, Entry> cache = new();
     private readonly ConcurrentDictionary<int, byte> processesPresentAtStartup;
+    private readonly ConcurrentDictionary<int, byte> startEventsWithoutName = new();
     private readonly TimeSpan retention;
     private readonly Func<int, LiveProcess?> probe;
 
     private long cacheHits, liveLookups, expired, pidReuseRejected, observedStarts, neverSeen;
     private long neverSeenAtStartup, neverSeenAfterStartup, invalidProcessId;
+    private long neverSeenAfterStartProbeMiss, neverSeenWithoutStartEvent;
 
     public ProcessNameResolver() : this(DefaultRetention, ProbeLiveProcess, SnapshotProcessIds()) { }
 
@@ -72,6 +74,11 @@ public sealed class ProcessNameResolver
     /// Nameless observations whose PID was absent at startup. These point to
     /// a missed lifecycle event or a process that exited before probing.
     public long NeverSeenAfterStartup => Interlocked.Read(ref neverSeenAfterStartup);
+    /// Nameless post-startup observations for a PID whose start event arrived,
+    /// but whose process had already disappeared when it was queried.
+    public long NeverSeenAfterStartProbeMiss => Interlocked.Read(ref neverSeenAfterStartProbeMiss);
+    /// Nameless post-startup observations with no lifecycle start observed.
+    public long NeverSeenWithoutStartEvent => Interlocked.Read(ref neverSeenWithoutStartEvent);
     /// Observations carrying PID zero or another unusable process identifier.
     public long InvalidProcessId => Interlocked.Read(ref invalidProcessId);
     public int Cached => cache.Count;
@@ -110,7 +117,13 @@ public sealed class ProcessNameResolver
             if (processesPresentAtStartup.ContainsKey(processId))
                 Interlocked.Increment(ref neverSeenAtStartup);
             else
+            {
                 Interlocked.Increment(ref neverSeenAfterStartup);
+                if (startEventsWithoutName.ContainsKey(processId))
+                    Interlocked.Increment(ref neverSeenAfterStartProbeMiss);
+                else
+                    Interlocked.Increment(ref neverSeenWithoutStartEvent);
+            }
             return null;
         }
 
@@ -150,6 +163,7 @@ public sealed class ProcessNameResolver
         processesPresentAtStartup.TryRemove(processId, out _);
         var name = Sanitize(BareName(imageName));
         if (name is null) return;
+        startEventsWithoutName.TryRemove(processId, out _);
         Interlocked.Increment(ref observedStarts);
         Remember(processId, new Entry(name, startedAt, Later(startedAt)));
     }
@@ -169,9 +183,18 @@ public sealed class ProcessNameResolver
         // was present in the initial snapshot, even if it exits before the
         // live-process query completes.
         processesPresentAtStartup.TryRemove(processId, out _);
-        if (SafeProbe(processId) is not { } running) return;
+        if (SafeProbe(processId) is not { } running)
+        {
+            startEventsWithoutName[processId] = 0;
+            return;
+        }
         var name = Sanitize(running.Name);
-        if (name is null) return;
+        if (name is null)
+        {
+            startEventsWithoutName[processId] = 0;
+            return;
+        }
+        startEventsWithoutName.TryRemove(processId, out _);
         Interlocked.Increment(ref observedStarts);
         Remember(processId, new Entry(name, running.StartedAt ?? startedAt, Later(startedAt)));
     }
