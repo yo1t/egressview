@@ -129,8 +129,8 @@ EgressViewには、Yamaha/Ciscoを混在して最大10台登録できます。
 - `POST /api/backup/restore`は`{ "name": "..." }`を使います。
 - `POST /api/backup/upload`はmultipartではなく、最大100 MBのSQLite fileをraw bodyで受け取ります。owner限定の一時fileへstreamし、restore uploadは同時1件だけを許可します。重複要求には`409`を返します。
 - `POST /api/backup/config`は正の`intervalHours`、2以上の`maxGenerations`、0以上の`maxBackupBytes`（`0`は上限無効）、booleanの`autoPrune`を受け取ります。自動pruneは既定で無効です。
-- `POST /api/backup/prune`は`{ "execute": false }`で高速なメタデータのみのdry-run、`{ "execute": true }`で確認済みcleanupを開始し、worker jobを含む`202`を返します。計画時は最新の通常2世代とmigration 1世代を保護し、その復元点だけSQLiteヘッダーとページ構造を定時間で確認します。同時実行は1件だけで、重複要求には`409`を返します。
-- `GET /api/backup/prune/:jobId`はjob状態（`running`、`cancelling`、`timing_out`、`completed`、`cancelled`、`timed_out`、`failed`）、進捗、完了後の計画／結果を返します。`DELETE /api/backup/prune/:jobId`は安全なcancelを要求します。実行時は計画を再作成し、削除直前に候補の論理サイズ、割当サイズ、更新時刻を再照合します。一時ファイルは候補にせず、保護対象の復元点が軽量安全確認に失敗した場合は削除を停止します。
+- `POST /api/backup/prune`は`{ "execute": false }`で高速なdry-run、`{ "execute": true }`で確認済みcleanupを開始し、worker jobを含む`202`を返します。計画時は各ファイルのSQLiteヘッダー100バイトだけを読み、復元不能なファイルを保持世代数から除外し、利用可能な通常2世代とmigration 1世代を新しい順に保護します。一方が不足する場合は、もう一方の利用可能な世代で合計3世代を補います。同時実行は1件だけで、重複要求には`409`を返します。
+- `GET /api/backup/prune/:jobId`はjob状態（`running`、`cancelling`、`timing_out`、`completed`、`cancelled`、`timed_out`、`failed`）、進捗、完了後の計画／結果を返します。`DELETE /api/backup/prune/:jobId`は安全なcancelを要求します。実行時は計画を再作成し、削除直前に候補の論理サイズ、割当サイズ、更新時刻、ヘッダー状態を再照合します。一時ファイルは候補にしません。完全なintegrity checkはバックアップ作成時と復元前に引き続き必須です。
 
 ## プロセスhealth
 

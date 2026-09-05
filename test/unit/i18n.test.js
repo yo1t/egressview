@@ -55,8 +55,9 @@ describe('shared i18n catalog', () => {
     // Grew by 2 on 2026-09-05: non-JSON backup API response diagnostics.
     // Grew by 5 on 2026-09-05: the log screen that revoked agents moved to (P3-56).
     // Grew by 1 on 2026-09-05: fail-closed backup cleanup safety feedback.
-    assert.equal(jaKeys.size, 914);
-    assert.equal(enKeys.size, 914);
+    // Grew by 1 on 2026-09-05: degraded-retention cleanup confirmation.
+    assert.equal(jaKeys.size, 915);
+    assert.equal(enKeys.size, 915);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 
