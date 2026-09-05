@@ -7,7 +7,8 @@ public static class IpcProtocol
     public const int Version = 1;
 
     public static string Handle(string request, Func<string> status, Func<int, IReadOnlyList<HourlySummary>> summary,
-        Action<AgentCredential>? saveCredential = null, Action<bool>? setDeliveryEnabled = null)
+        Action<AgentCredential>? saveCredential = null, Action<bool>? setDeliveryEnabled = null,
+        Func<int, int, IReadOnlyList<RecentFlow>>? recentFlows = null)
     {
         try
         {
@@ -20,12 +21,23 @@ public static class IpcProtocol
             {
                 "status" => Status(status),
                 "summary" => Summary(root, summary),
+                "recent-flows" => RecentFlows(root, recentFlows),
                 "save-enrollment" => SaveEnrollment(root, saveCredential),
                 "set-delivery-enabled" => SetDeliveryEnabled(root, setDeliveryEnabled),
                 _ => Reject("unknown-operation"),
             };
         }
         catch (Exception) { return Reject("malformed-request"); }
+    }
+
+    private static string RecentFlows(JsonElement root, Func<int, int, IReadOnlyList<RecentFlow>>? read)
+    {
+        if (read is null) return Reject("operation-unavailable");
+        var limit = root.TryGetProperty("limit", out var value) ? value.GetInt32() : 0;
+        if (limit is not (50 or 100 or 200 or 500)) return Reject("invalid-limit");
+        var offset = root.TryGetProperty("offset", out var offsetValue) ? offsetValue.GetInt32() : 0;
+        if (offset is < 0 or > 1_000_000) return Reject("invalid-offset");
+        return JsonSerializer.Serialize(new { status = "ok", limit, offset, data = read(limit, offset) });
     }
 
     private static string SetDeliveryEnabled(JsonElement root, Action<bool>? set)

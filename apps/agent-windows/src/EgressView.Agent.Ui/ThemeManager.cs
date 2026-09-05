@@ -8,6 +8,8 @@ internal static class ThemeManager
 {
     private const string PersonalizeKey = @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 
+    internal static bool IsDark { get; private set; }
+
     internal static void ApplySystemTheme(ResourceDictionary resources)
     {
         var dark = false;
@@ -22,6 +24,7 @@ internal static class ThemeManager
             // never prevent the monitoring UI from opening.
         }
 
+        IsDark = dark;
         var palette = dark
             ? new Dictionary<string, string>
             {

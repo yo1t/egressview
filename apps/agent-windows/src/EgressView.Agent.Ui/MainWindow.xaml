@@ -1,99 +1,22 @@
 <Window x:Class="EgressView.Agent.Ui.MainWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="EgressView Agent for Windows"
-        Height="680" Width="980" MinHeight="560" MinWidth="760"
-        WindowStartupLocation="CenterScreen" UseLayoutRounding="True" SnapsToDevicePixels="True">
-  <Grid>
-    <Grid.RowDefinitions><RowDefinition Height="82"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-
-    <Border Grid.Row="0" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="0,0,0,1">
-      <Grid Margin="28,0">
-        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-        <StackPanel VerticalAlignment="Center">
-          <TextBlock Text="EgressView" Style="{StaticResource PageTitleStyle}"/>
-          <TextBlock Text="Agent for Windows" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="13"/>
-        </StackPanel>
-        <Border x:Name="MonitoringBadge" Grid.Column="1" Background="{DynamicResource SurfaceSecondaryBrush}" CornerRadius="14" Padding="12,5" VerticalAlignment="Center">
-          <StackPanel Orientation="Horizontal">
-            <Ellipse x:Name="MonitoringDot" Width="8" Height="8" Fill="{DynamicResource TextSecondaryBrush}" Margin="0,0,7,0" VerticalAlignment="Center"/>
-            <TextBlock x:Name="MonitoringStatus" Text="確認中 / Checking" Foreground="{DynamicResource TextSecondaryBrush}" FontWeight="SemiBold"
-                       AutomationProperties.LiveSetting="Polite"/>
-          </StackPanel>
-        </Border>
-      </Grid>
-    </Border>
-
-    <Grid Grid.Row="1" Margin="28,24,28,28">
-      <TabControl>
-        <TabItem Header="概要 / Overview">
-          <Grid>
-            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="16"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <Grid>
-              <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-              <StackPanel>
-                <TextBlock Text="ネットワークの状態" Style="{StaticResource SectionTitleStyle}"/>
-                <TextBlock Text="Network status" Style="{StaticResource BodySecondaryStyle}" Margin="0,3,0,0"/>
-              </StackPanel>
-              <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button Content="更新 / Refresh" Click="Refresh_Click" Style="{StaticResource PrimaryButtonStyle}" AutomationProperties.Name="状態を更新"/>
-                <Button Content="7日 / 7 days" Click="SevenDays_Click" Style="{StaticResource FluentButtonStyle}" Margin="8,0,0,0"/>
-                <Button Content="30日 / 30 days" Click="ThirtyDays_Click" Style="{StaticResource FluentButtonStyle}" Margin="8,0,0,0"/>
-              </StackPanel>
-            </Grid>
-            <Border Grid.Row="2" Style="{StaticResource CardStyle}">
-              <Grid>
-                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                <TextBlock Text="Agent status" FontWeight="SemiBold"/>
-                <TextBox Grid.Row="2" x:Name="Output" IsReadOnly="True" TextWrapping="Wrap"
-                         VerticalScrollBarVisibility="Auto" BorderThickness="0" Padding="0" Background="Transparent"
-                         VerticalContentAlignment="Top" FontSize="15" AutomationProperties.Name="Agent status and history"/>
-              </Grid>
-            </Border>
-          </Grid>
-        </TabItem>
-
-        <TabItem Header="Hub接続 / Hub">
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <Grid MaxWidth="900" HorizontalAlignment="Stretch">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="0.9*"/><ColumnDefinition Width="24"/><ColumnDefinition Width="1.1*"/></Grid.ColumnDefinitions>
-              <StackPanel Margin="0,4,0,0">
-                <TextBlock Text="EgressView Hubに接続" Style="{StaticResource SectionTitleStyle}"/>
-                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Style="{StaticResource BodySecondaryStyle}"
-                           Text="このPCをHubへ登録すると、許可した観測データを組織のEgressViewへ送信できます。"/>
-                <Border Margin="0,20,0,0" Background="{DynamicResource AccentSoftBrush}" CornerRadius="8" Padding="16">
-                  <StackPanel>
-                    <TextBlock Text="送信前に確認してください" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}"/>
-                    <TextBlock Margin="0,7,0,0" TextWrapping="Wrap" Style="{StaticResource BodySecondaryStyle}"
-                               Text="登録申請ではPCのホスト名、Windowsのバージョン、Agentのバージョンを送信します。観測データは右側のスイッチをONにするまで送信しません。"/>
-                    <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" Style="{StaticResource BodySecondaryStyle}"
-                               Text="Enrollment sends device metadata only. Observation delivery remains off until you explicitly enable it."/>
-                  </StackPanel>
-                </Border>
-              </StackPanel>
-
-              <Border Grid.Column="2" Style="{StaticResource CardStyle}">
-                <StackPanel>
-                  <TextBlock Text="Hub registration" FontWeight="SemiBold" FontSize="16" Margin="0,0,0,18"/>
-                  <TextBlock Text="Hub URL" Style="{StaticResource FieldLabelStyle}"/>
-                  <TextBox x:Name="HubUrl" Margin="0,0,0,16" Text="https://" AutomationProperties.Name="Hub URL"/>
-                  <TextBlock Text="6文字の登録コード / Six-character code" Style="{StaticResource FieldLabelStyle}"/>
-                  <PasswordBox x:Name="EnrollmentCode" Margin="0,0,0,18" MaxLength="6" AutomationProperties.Name="Enrollment code"/>
-                  <Button x:Name="EnrollButton" Content="登録を申請 / Request enrollment" Click="Enroll_Click"
-                          Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left"/>
-                  <Border Height="1" Background="{DynamicResource StrokeBrush}" Margin="0,22"/>
-                  <CheckBox x:Name="DeliveryEnabled" Content="観測データをこのHubへ送信する&#x0a;Send observations to this Hub"
-                            Click="DeliveryEnabled_Click" AutomationProperties.Name="Hub observation delivery"/>
-                  <Border Margin="0,18,0,0" Background="{DynamicResource SurfaceSecondaryBrush}" BorderBrush="{DynamicResource StrokeBrush}"
-                          BorderThickness="1" CornerRadius="6" Padding="14">
-                    <TextBlock x:Name="EnrollmentStatus" Text="未登録 / Not enrolled" TextWrapping="Wrap" AutomationProperties.Name="Enrollment status"/>
-                  </Border>
-                </StackPanel>
-              </Border>
-            </Grid>
-          </ScrollViewer>
-        </TabItem>
-      </TabControl>
-    </Grid>
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:EgressView.Agent.Ui" Title="EgressView Agent for Windows" Height="760" Width="1120" MinHeight="640" MinWidth="900" WindowStartupLocation="CenterScreen">
+  <Grid><Grid.RowDefinitions><RowDefinition Height="82"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="0,0,0,1"><Grid Margin="28,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock Text="EgressView Agent" Style="{StaticResource PageTitleStyle}"/><TextBlock Text="{DynamicResource AppSubtitle}" Style="{StaticResource BodySecondaryStyle}"/></StackPanel><Border x:Name="MonitoringBadge" Grid.Column="1" Background="{DynamicResource SurfaceSecondaryBrush}" CornerRadius="14" Padding="12,5" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><Ellipse x:Name="MonitoringDot" Width="8" Height="8" Margin="0,0,7,0"/><TextBlock x:Name="MonitoringStatus" Text="{DynamicResource Checking}" FontWeight="SemiBold" AutomationProperties.LiveSetting="Polite"/></StackPanel></Border></Grid></Border>
+    <Grid Grid.Row="1" Margin="28,20,28,28"><TabControl x:Name="MainTabs" SelectionChanged="MainTabs_SelectionChanged">
+      <TabItem Header="{DynamicResource NetworkStatus}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="14"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{DynamicResource NetworkStatus}" Style="{StaticResource SectionTitleStyle}"/><TextBlock x:Name="PeriodCaption" Text="{DynamicResource Last7Days}" Style="{StaticResource BodySecondaryStyle}"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="{DynamicResource Refresh}" Click="Refresh_Click" Style="{StaticResource PrimaryButtonStyle}"/><Button Content="{DynamicResource Last7Days}" Click="SevenDays_Click" Style="{StaticResource FluentButtonStyle}" Margin="8,0,0,0"/><Button Content="{DynamicResource Last30Days}" Click="ThirtyDays_Click" Style="{StaticResource FluentButtonStyle}" Margin="8,0,0,0"/></StackPanel></Grid>
+        <Grid Grid.Row="2"><Grid.RowDefinitions><RowDefinition Height="1.2*"/><RowDefinition Height="14"/><RowDefinition Height="0.8*"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="1.08*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="0.92*"/></Grid.ColumnDefinitions>
+          <Border Style="{StaticResource CardStyle}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="{DynamicResource Globe}" FontSize="16" FontWeight="SemiBold"/><local:WorldGlobeControl x:Name="Globe" Grid.Row="1" MinHeight="220" AutomationProperties.Name="{DynamicResource GlobeUnavailable}"/><Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{DynamicResource GlobeUnavailable}" Style="{StaticResource BodySecondaryStyle}" TextWrapping="Wrap"/><Button x:Name="RotateButton" Grid.Column="1" Content="{DynamicResource Stop}" Click="Rotate_Click" Style="{StaticResource FluentButtonStyle}" Margin="12,0,0,0"/></Grid></Grid></Border>
+          <StackPanel Grid.Column="2"><UniformGrid Columns="2" Margin="0,0,0,14"><Border Style="{StaticResource MetricCardStyle}" Margin="0,0,7,7"><StackPanel><TextBlock Text="{DynamicResource Connections}" Style="{StaticResource MetricLabelStyle}"/><TextBlock x:Name="ConnectionCount" Text="—" Style="{StaticResource MetricValueStyle}"/></StackPanel></Border><Border Style="{StaticResource MetricCardStyle}" Margin="7,0,0,7"><StackPanel><TextBlock Text="{DynamicResource Applications}" Style="{StaticResource MetricLabelStyle}"/><TextBlock x:Name="ApplicationCount" Text="—" Style="{StaticResource MetricValueStyle}"/></StackPanel></Border><Border Style="{StaticResource MetricCardStyle}" Margin="0,7,7,0"><StackPanel><TextBlock Text="{DynamicResource Destinations}" Style="{StaticResource MetricLabelStyle}"/><TextBlock x:Name="DestinationCount" Text="—" Style="{StaticResource MetricValueStyle}"/></StackPanel></Border><Border Style="{StaticResource MetricCardStyle}" Margin="7,7,0,0"><StackPanel><TextBlock Text="{DynamicResource Coverage}" Style="{StaticResource MetricLabelStyle}"/><TextBlock x:Name="CoverageValue" Text="—" Style="{StaticResource MetricValueStyle}"/></StackPanel></Border></UniformGrid>
+            <Border Style="{StaticResource CardStyle}" Padding="16"><StackPanel><TextBlock Text="{DynamicResource NetworkFlow}" FontWeight="SemiBold"/><Grid Margin="0,18,0,8"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="52"/><ColumnDefinition/></Grid.ColumnDefinitions><Border Background="{DynamicResource AccentSoftBrush}" CornerRadius="8" Padding="12"><TextBlock Text="{DynamicResource Applications}" HorizontalAlignment="Center"/></Border><TextBlock Grid.Column="1" Text="→" FontSize="24" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center"/><Border Grid.Column="2" Background="{DynamicResource AccentSoftBrush}" CornerRadius="8" Padding="12"><TextBlock Text="Internet" HorizontalAlignment="Center"/></Border></Grid><TextBlock x:Name="FlowCaption" Style="{StaticResource BodySecondaryStyle}" TextWrapping="Wrap"/></StackPanel></Border></StackPanel>
+          <Border Grid.Row="2" Grid.ColumnSpan="3" Style="{StaticResource CardStyle}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><TextBlock Text="{DynamicResource TrafficTimeline}" FontSize="16" FontWeight="SemiBold"/><local:TrafficTimelineControl x:Name="Timeline" Grid.Row="1" Margin="0,14,0,0" MinHeight="110" AutomationProperties.Name="{DynamicResource TrafficTimeline}"/></Grid></Border>
+        </Grid></Grid></TabItem>
+      <TabItem Header="{DynamicResource ConnectionLog}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="14"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{DynamicResource ConnectionLog}" Style="{StaticResource SectionTitleStyle}"/><TextBlock Text="Newest first · local data" Style="{StaticResource BodySecondaryStyle}"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal"><TextBlock Text="{DynamicResource Rows}" VerticalAlignment="Center" Margin="0,0,8,0"/><ComboBox x:Name="RowLimit" Width="80" SelectedIndex="1" SelectionChanged="RowLimit_SelectionChanged"><ComboBoxItem Content="50"/><ComboBoxItem Content="100"/><ComboBoxItem Content="200"/><ComboBoxItem Content="500"/></ComboBox><Button Content="{DynamicResource ExportCsv}" Click="ExportCsv_Click" Style="{StaticResource PrimaryButtonStyle}" Margin="10,0,0,0"/></StackPanel></Grid>
+        <Border Grid.Row="2" Style="{StaticResource CardStyle}" Padding="0"><DataGrid x:Name="ConnectionGrid" ItemsSource="{Binding RecentFlows}" IsReadOnly="True" AutoGenerateColumns="False" CanUserSortColumns="True" GridLinesVisibility="Horizontal" BorderThickness="0" Background="Transparent" AlternatingRowBackground="{DynamicResource SurfaceSecondaryBrush}" AutomationProperties.Name="{DynamicResource ConnectionLog}"><DataGrid.Columns><DataGridTextColumn Header="{DynamicResource LastSeen}" Binding="{Binding LastSeenText}" SortMemberPath="LastSeen" Width="160"/><DataGridTextColumn Header="{DynamicResource Process}" Binding="{Binding ProcessName}" Width="*"/><DataGridTextColumn Header="{DynamicResource Destination}" Binding="{Binding Destination}" Width="1.3*"/><DataGridTextColumn Header="{DynamicResource Protocol}" Binding="{Binding Protocol}" Width="90"/><DataGridTextColumn Header="{DynamicResource BytesIn}" Binding="{Binding BytesReceivedText}" Width="100"/><DataGridTextColumn Header="{DynamicResource BytesOut}" Binding="{Binding BytesSentText}" Width="100"/><DataGridTextColumn Header="{DynamicResource Collector}" Binding="{Binding Origin}" Width="90"/></DataGrid.Columns></DataGrid></Border><TextBlock x:Name="LogStatus" Grid.Row="3" Style="{StaticResource BodySecondaryStyle}" Margin="0,10,0,0" AutomationProperties.LiveSetting="Polite"/></Grid></TabItem>
+      <TabItem Header="{DynamicResource NotificationHistory}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="14"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{DynamicResource NotificationHistory}" Style="{StaticResource SectionTitleStyle}"/><TextBlock x:Name="NotificationSummary" Style="{StaticResource BodySecondaryStyle}"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="{DynamicResource SendTest}" Click="SendTestNotification_Click" Style="{StaticResource PrimaryButtonStyle}"/><Button Content="{DynamicResource ClearHistory}" Click="ClearNotifications_Click" Style="{StaticResource FluentButtonStyle}" Margin="8,0,0,0"/></StackPanel></Grid><Border Grid.Row="2" Style="{StaticResource CardStyle}" Padding="0"><ListView x:Name="NotificationList" Background="Transparent" BorderThickness="0"><ListView.ItemTemplate><DataTemplate><Grid Margin="10"><Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="120"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="{Binding DateText}" Foreground="{DynamicResource TextSecondaryBrush}"/><TextBlock Grid.Column="1" Text="{Binding Kind}" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}"/><StackPanel Grid.Column="2"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Body}" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}"/></StackPanel></Grid></DataTemplate></ListView.ItemTemplate></ListView></Border></Grid></TabItem>
+      <TabItem Header="{DynamicResource Hub}"><ScrollViewer><Grid MaxWidth="900"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="24"/><ColumnDefinition/></Grid.ColumnDefinitions><StackPanel Margin="0,4,0,0"><TextBlock Text="{DynamicResource HubConnect}" Style="{StaticResource SectionTitleStyle}"/><TextBlock Text="{DynamicResource HubExplanation}" Margin="0,8,0,0" Style="{StaticResource BodySecondaryStyle}" TextWrapping="Wrap"/><Border Margin="0,20,0,0" Background="{DynamicResource AccentSoftBrush}" CornerRadius="8" Padding="16"><StackPanel><TextBlock Text="{DynamicResource ReviewBeforeSending}" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}"/><TextBlock Text="{DynamicResource EnrollmentPrivacy}" Margin="0,7,0,0" Style="{StaticResource BodySecondaryStyle}" TextWrapping="Wrap"/></StackPanel></Border></StackPanel><Border Grid.Column="2" Style="{StaticResource CardStyle}"><StackPanel><TextBlock Text="{DynamicResource HubRegistration}" FontWeight="SemiBold" FontSize="16" Margin="0,0,0,18"/><TextBlock Text="Hub URL" Style="{StaticResource FieldLabelStyle}"/><TextBox x:Name="HubUrl" Text="https://" Margin="0,0,0,16"/><TextBlock Text="{DynamicResource EnrollmentCode}" Style="{StaticResource FieldLabelStyle}"/><PasswordBox x:Name="EnrollmentCode" MaxLength="6" Margin="0,0,0,18"/><Button x:Name="EnrollButton" Content="{DynamicResource RequestEnrollment}" Click="Enroll_Click" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left"/><Border Height="1" Background="{DynamicResource StrokeBrush}" Margin="0,22"/><CheckBox x:Name="DeliveryEnabled" Content="{DynamicResource DeliveryOption}" Click="DeliveryEnabled_Click"/><Border Margin="0,18,0,0" Background="{DynamicResource SurfaceSecondaryBrush}" CornerRadius="6" Padding="14"><TextBlock x:Name="EnrollmentStatus" Text="{DynamicResource NotEnrolled}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/></Border></StackPanel></Border></Grid></ScrollViewer></TabItem>
+      <TabItem Header="{DynamicResource Settings}"><ScrollViewer><StackPanel MaxWidth="720" HorizontalAlignment="Left"><TextBlock Text="{DynamicResource Settings}" Style="{StaticResource SectionTitleStyle}"/><TextBlock Text="{DynamicResource SettingsHint}" Style="{StaticResource BodySecondaryStyle}" Margin="0,5,0,20"/><Border Style="{StaticResource CardStyle}"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="260"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="18"/><RowDefinition Height="Auto"/><RowDefinition Height="18"/><RowDefinition Height="Auto"/><RowDefinition Height="18"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="{DynamicResource Language}" FontWeight="SemiBold"/><ComboBox x:Name="LanguageChoice" Grid.Column="1" SelectionChanged="LanguageChoice_SelectionChanged"><ComboBoxItem Tag="System" Content="{DynamicResource SystemDefault}"/><ComboBoxItem Tag="English" Content="English"/><ComboBoxItem Tag="Japanese" Content="日本語"/></ComboBox><TextBlock Grid.Row="2" Text="{DynamicResource NotificationsEnabled}" FontWeight="SemiBold"/><CheckBox x:Name="NotificationsEnabled" Grid.Row="2" Grid.Column="1" Checked="NotificationSettings_Changed" Unchecked="NotificationSettings_Changed"/><TextBlock Grid.Row="4" Text="{DynamicResource DailyLimit}" FontWeight="SemiBold"/><ComboBox x:Name="DailyLimitChoice" Grid.Row="4" Grid.Column="1" SelectionChanged="NotificationSettings_Changed"><ComboBoxItem Content="5"/><ComboBoxItem Content="10"/><ComboBoxItem Content="20"/></ComboBox><TextBlock Grid.Row="6" Text="{DynamicResource GlobeFrameRate}" FontWeight="SemiBold"/><ComboBox x:Name="FrameRateChoice" Grid.Row="6" Grid.Column="1" SelectionChanged="FrameRateChoice_SelectionChanged"><ComboBoxItem Tag="3" Content="{DynamicResource EnergySaver}"/><ComboBoxItem Tag="5" Content="{DynamicResource Standard}"/><ComboBoxItem Tag="15" Content="{DynamicResource Smooth}"/></ComboBox></Grid></Border></StackPanel></ScrollViewer></TabItem>
+    </TabControl></Grid>
   </Grid>
 </Window>
