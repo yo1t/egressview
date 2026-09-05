@@ -20,6 +20,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     };
     private readonly ObservationPipeline pipeline;
     private readonly ProcessNameResolver processNames = new();
+    private readonly DeferredProcessObservations deferredNames = new();
     private readonly object interfaceGate = new();
     private Dictionary<string, InterfaceInfo> interfaces = new(StringComparer.OrdinalIgnoreCase);
     private TraceEventSession? session;
@@ -108,12 +109,18 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         NamesInvalidProcessId = processNames.InvalidProcessId,
         NamesExpired = processNames.Expired,
         NamesPidReuseRejected = processNames.PidReuseRejected,
+        NamesDeferredPending = deferredNames.Pending,
+        NamesDeferred = deferredNames.Deferred,
+        NamesRecoveredFromStop = deferredNames.Recovered,
+        NamesDeferredExpired = deferredNames.Expired,
+        NamesDeferredOverflow = deferredNames.Overflow,
         ProcessNameSourceError = processNameSourceError,
         State = Error is not null || EventsLost > 0 || snapshot.PersistenceFailures > 0 ? "degraded" : snapshot.State,
     };
 
     private void Dispatch(TraceEvent e)
     {
+        Submit(deferredNames.Expire(DateTimeOffset.UtcNow));
         if (e.ProviderGuid == KernelProcess) { RecordProcessLifecycle(e); return; }
         Record(e);
     }
@@ -135,8 +142,24 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         if (pid <= 0) return;
         var createdAt = CreateTime(e) ?? e.TimeStamp.ToUniversalTime();
 
-        if (started) processNames.Learn(pid, createdAt);
-        else processNames.Observe(pid, Payload(e, "ImageName"), createdAt);
+        if (started)
+        {
+            processNames.Learn(pid, createdAt);
+            return;
+        }
+
+        var stoppedName = processNames.Observe(pid, Payload(e, "ImageName"), createdAt);
+        if (stoppedName is not null)
+        {
+            foreach (var observation in deferredNames.Complete(pid, createdAt, stoppedName))
+            {
+                var localInterface = FindInterface(observation.LocalAddress);
+                pipeline.TrySubmit(observation with
+                {
+                    Layer = IsVpnTransport(stoppedName, localInterface) ? ObservationLayer.VpnTransport : ObservationLayer.Logical,
+                });
+            }
+        }
     }
 
     /// The process create time distinguishes one use of a PID from the next,
@@ -210,12 +233,17 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         // the name has to be judged against when the traffic happened.
         var processName = processNames.Resolve(pid, e.TimeStamp.ToUniversalTime());
         var layer = IsVpnTransport(processName, localInterface) ? ObservationLayer.VpnTransport : ObservationLayer.Logical;
-        pipeline.TrySubmit(new NetworkObservation(
+        var observation = new NetworkObservation(
             e.TimeStamp.ToUniversalTime(), pid,
             e.EventName.Contains("UDP", StringComparison.OrdinalIgnoreCase) ? "UDP" : "TCP",
             localAddress, localPort, remoteAddress, remotePort,
             direction == Direction.Send ? bytes : 0, direction == Direction.Receive ? bytes : 0,
-            layer, localInterface?.Id, "etw", processName));
+            layer, localInterface?.Id, "etw", processName);
+        if (processName is null
+            && processNames.TryGetUnresolvedStart(pid, out var processStartedAt)
+            && deferredNames.TryDefer(observation, processStartedAt, DateTimeOffset.UtcNow))
+            return;
+        pipeline.TrySubmit(observation);
     }
 
     private static bool IsVpnTransport(string? processName, InterfaceInfo? localInterface)
@@ -257,8 +285,14 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         try { EventsLost = session.EventsLost; } catch { }
         try { session.Stop(); } catch { }
         if (processing is not null) await processing.WaitAsync(TimeSpan.FromSeconds(10));
+        Submit(deferredNames.Drain());
         session.Dispose();
         session = null;
+    }
+
+    private void Submit(IEnumerable<NetworkObservation> observations)
+    {
+        foreach (var observation in observations) pipeline.TrySubmit(observation);
     }
 
     private enum Direction { Send, Receive, Neutral }

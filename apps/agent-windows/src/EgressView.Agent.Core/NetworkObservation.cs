@@ -70,6 +70,11 @@ public sealed record CollectorSnapshot(
     long NamesInvalidProcessId = 0,
     long NamesExpired = 0,
     long NamesPidReuseRejected = 0,
+    int NamesDeferredPending = 0,
+    long NamesDeferred = 0,
+    long NamesRecoveredFromStop = 0,
+    long NamesDeferredExpired = 0,
+    long NamesDeferredOverflow = 0,
     string? ProcessNameSourceError = null);
 
 public enum StoreFailureKind

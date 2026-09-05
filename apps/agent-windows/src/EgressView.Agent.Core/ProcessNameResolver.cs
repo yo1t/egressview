@@ -32,7 +32,7 @@ public sealed class ProcessNameResolver
 
     private readonly ConcurrentDictionary<int, Entry> cache = new();
     private readonly ConcurrentDictionary<int, byte> processesPresentAtStartup;
-    private readonly ConcurrentDictionary<int, byte> startEventsWithoutName = new();
+    private readonly ConcurrentDictionary<int, DateTimeOffset> startEventsWithoutName = new();
     private readonly TimeSpan retention;
     private readonly Func<int, LiveProcess?> probe;
 
@@ -82,6 +82,9 @@ public sealed class ProcessNameResolver
     /// Observations carrying PID zero or another unusable process identifier.
     public long InvalidProcessId => Interlocked.Read(ref invalidProcessId);
     public int Cached => cache.Count;
+
+    public bool TryGetUnresolvedStart(int processId, out DateTimeOffset startedAt) =>
+        startEventsWithoutName.TryGetValue(processId, out startedAt);
 
     /// <param name="observedAt">
     /// When the observation happened, not when it is being processed. Events
@@ -157,15 +160,16 @@ public sealed class ProcessNameResolver
     /// The image name arrives as a path; it is reduced to the bare name so it
     /// matches what Process.ProcessName produces. Two spellings of the same
     /// program would split its traffic in the Hub's per-application view.
-    public void Observe(int processId, string? imageName, DateTimeOffset startedAt)
+    public string? Observe(int processId, string? imageName, DateTimeOffset startedAt)
     {
-        if (processId <= 0) return;
+        if (processId <= 0) return null;
         processesPresentAtStartup.TryRemove(processId, out _);
         var name = Sanitize(BareName(imageName));
-        if (name is null) return;
+        if (name is null) return null;
         startEventsWithoutName.TryRemove(processId, out _);
         Interlocked.Increment(ref observedStarts);
         Remember(processId, new Entry(name, startedAt, Later(startedAt)));
+        return name;
     }
 
     /// Learn the name of a process that has just started.
@@ -185,13 +189,13 @@ public sealed class ProcessNameResolver
         processesPresentAtStartup.TryRemove(processId, out _);
         if (SafeProbe(processId) is not { } running)
         {
-            startEventsWithoutName[processId] = 0;
+            startEventsWithoutName[processId] = startedAt;
             return;
         }
         var name = Sanitize(running.Name);
         if (name is null)
         {
-            startEventsWithoutName[processId] = 0;
+            startEventsWithoutName[processId] = startedAt;
             return;
         }
         startEventsWithoutName.TryRemove(processId, out _);
