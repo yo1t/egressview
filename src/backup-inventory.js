@@ -54,10 +54,10 @@ function candidateFiles(dbPath, backupDir) {
   return entries.sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
 }
 
-// Retention planning only needs to reject an obviously unusable protected
-// restore point. Full integrity checks already run when a backup is created
-// and again before restore; repeating them for every old generation made a
-// dry-run take tens of minutes on production-sized databases.
+// Retention planning reads only the fixed-size SQLite header. Full integrity
+// checks already run when a backup is created and again before restore;
+// repeating them for every generation made a dry-run take tens of minutes on
+// production-sized databases.
 function inspectSqliteHeader(entry) {
   let fd = null;
   try {
@@ -145,22 +145,45 @@ function buildPrunePlan({
   freeBytes,
   onProgress,
 } = {}) {
-  const entries = candidateFiles(dbPath, backupDir);
+  const entries = candidateFiles(dbPath, backupDir).map(inspectSqliteHeader);
   const totalBytes = entries.reduce((sum, entry) => sum + entry.allocatedSize, 0);
   const summary = capacity(dbPath, entries, safetyMarginBytes, freeBytes);
   const candidates = [];
   const selected = new Set();
-  const remaining = {
-    normal: entries.filter(entry => entry.kind === 'normal'),
-    migration: entries.filter(entry => entry.kind === 'migration'),
+  const usable = {
+    normal: entries.filter(entry => entry.kind === 'normal' && entry.header === 'ok'),
+    migration: entries.filter(entry => entry.kind === 'migration' && entry.header === 'ok'),
   };
   const minimum = { normal: MIN_NORMAL_GENERATIONS, migration: MIN_MIGRATION_GENERATIONS };
-
+  const present = {
+    normal: entries.some(entry => entry.kind === 'normal'),
+    migration: entries.some(entry => entry.kind === 'migration'),
+  };
+  const missing = {
+    normal: present.normal ? Math.max(0, minimum.normal - usable.normal.length) : 0,
+    migration: present.migration ? Math.max(0, minimum.migration - usable.migration.length) : 0,
+  };
+  // Preserve the total number of restore points when one class is short. A
+  // migration snapshot is preferable to deleting a valid fallback merely
+  // because a normal generation could not be created.
+  const effectiveMinimum = {
+    normal: Math.min(usable.normal.length, minimum.normal + missing.migration),
+    migration: Math.min(usable.migration.length, minimum.migration + missing.normal),
+  };
   const protectedEntries = [
-    ...remaining.normal.slice(-MIN_NORMAL_GENERATIONS),
-    ...remaining.migration.slice(-MIN_MIGRATION_GENERATIONS),
-  ].map(inspectSqliteHeader);
-  const unsafeProtected = protectedEntries.filter(entry => entry.header !== 'ok');
+    ...usable.normal.slice(-effectiveMinimum.normal),
+    ...usable.migration.slice(-effectiveMinimum.migration),
+  ];
+  const protectedPaths = new Set(protectedEntries.map(entry => entry.path));
+  const remaining = {
+    normal: usable.normal.filter(entry => !protectedPaths.has(entry.path)),
+    migration: usable.migration.filter(entry => !protectedPaths.has(entry.path)),
+  };
+
+  for (const entry of entries.filter(entry => entry.header !== 'ok')) {
+    entry.reason = 'invalid-backup';
+    addCandidate(entry, candidates, selected);
+  }
 
   onProgress?.({
     phase: 'planning',
@@ -172,17 +195,18 @@ function buildPrunePlan({
 
   function removeOldest(kind, reason) {
     const list = remaining[kind];
-    if (list.length <= minimum[kind]) return false;
+    if (!list.length) return false;
     const [entry] = list.splice(0, 1);
     if (!addCandidate(entry, candidates, selected)) return false;
     entry.reason = reason;
     return true;
   }
 
-  while (remaining.normal.length > Math.max(MIN_NORMAL_GENERATIONS, maxGenerations)) {
+  const normalRetention = Math.max(effectiveMinimum.normal, maxGenerations);
+  while (remaining.normal.length + effectiveMinimum.normal > normalRetention) {
     if (!removeOldest('normal', 'generation-limit')) break;
   }
-  while (remaining.migration.length > MIN_MIGRATION_GENERATIONS) {
+  while (remaining.migration.length > 0) {
     if (!removeOldest('migration', 'migration-retention')) break;
   }
 
@@ -192,8 +216,7 @@ function buildPrunePlan({
   const needMigrationSpace = () => projectedFreeBytes < summary.migrationRequiredBytes;
 
   while (needStorageReduction() || needMigrationSpace()) {
-    const kinds = ['normal', 'migration'].filter(kind =>
-      remaining[kind].length > minimum[kind]);
+    const kinds = ['normal', 'migration'].filter(kind => remaining[kind].length > 0);
     const choices = kinds
       .map(kind => ({ kind, entry: remaining[kind][0] }))
       .filter(choice => choice.entry)
@@ -207,6 +230,8 @@ function buildPrunePlan({
     projectedBackupBytes -= added.allocatedSize;
     projectedFreeBytes += added.allocatedSize;
   }
+
+  candidates.sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
 
   const publicEntries = entries.map(({ path: _path, mtimeMs: _mtimeMs, error, reason: _reason, ...entry }) => ({
     ...entry,
@@ -230,8 +255,9 @@ function buildPrunePlan({
       minNormalGenerations: MIN_NORMAL_GENERATIONS,
       minMigrationGenerations: MIN_MIGRATION_GENERATIONS,
     },
-    safetyBlocked: unsafeProtected.length > 0,
-    blocked: unsafeProtected.length > 0 || needStorageReduction() || needMigrationSpace(),
+    retentionDegraded: missing.normal > 0 || missing.migration > 0,
+    safetyBlocked: false,
+    blocked: missing.normal > 0 || missing.migration > 0 || needStorageReduction() || needMigrationSpace(),
   };
 }
 
@@ -250,6 +276,10 @@ function executePrune(options = {}) {
     if (!source || source.size !== candidate.size || source.allocatedSize !== candidate.allocatedSize ||
         source.created !== candidate.created) {
       throw new Error(`Backup changed after prune planning: ${candidate.name}`);
+    }
+    const current = inspectSqliteHeader(source);
+    if (current.header !== candidate.header || current.schema !== candidate.schema) {
+      throw new Error(`Backup safety state changed after prune planning: ${candidate.name}`);
     }
     unlinkFile(source.path);
     const sidecarWarnings = [];

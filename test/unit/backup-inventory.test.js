@@ -101,7 +101,7 @@ describe('backup prune planning', () => {
     assert.equal(plan.limits.minMigrationGenerations, 1);
   });
 
-  it('blocks cleanup when a protected restore point fails the fast safety check', () => {
+  it('does not let a broken newest generation displace usable restore points', () => {
     const old = normal('egressview_2026-01-01_00-00-00.db');
     const middle = normal('egressview_2026-01-02_00-00-00.db');
     const newest = normal('egressview_2026-01-03_00-00-00.db');
@@ -114,14 +114,33 @@ describe('backup prune planning', () => {
 
     const plan = inventory.buildPrunePlan({ dbPath, backupDir, maxGenerations: 2 });
 
-    assert.deepEqual(plan.candidates.map(entry => entry.name), [path.basename(old), path.basename(middle)]);
-    assert.equal(plan.entries.find(entry => entry.name === path.basename(broken)).integrity, 'unchecked');
-    assert.equal(plan.protectedRestorePoints.find(entry => entry.name === path.basename(broken)).header, 'failed');
-    assert.equal(plan.safetyBlocked, true);
-    assert.equal(plan.blocked, true);
-    assert.throws(() => inventory.executePrune({ dbPath, backupDir, maxGenerations: 2 }),
-      /Protected restore point/);
-    assert.equal(inventory._candidateFiles(dbPath, backupDir).length, 4);
+    assert.deepEqual(plan.candidates.map(entry => entry.name), [path.basename(old), path.basename(broken)]);
+    assert.equal(plan.candidates.find(entry => entry.name === path.basename(broken)).reason, 'invalid-backup');
+    assert.equal(plan.entries.find(entry => entry.name === path.basename(broken)).header, 'failed');
+    assert.deepEqual(plan.protectedRestorePoints.map(entry => entry.name), [path.basename(middle), path.basename(newest)]);
+    assert.equal(plan.safetyBlocked, false);
+    assert.equal(plan.blocked, false);
+  });
+
+  it('uses extra migration snapshots when normal restore points are short', () => {
+    const usableNormal = normal('egressview_2026-01-01_00-00-00.db');
+    const broken = path.join(backupDir, 'egressview_2026-01-02_00-00-00.db');
+    fs.writeFileSync(broken, 'broken');
+    setTime(usableNormal, 1);
+    setTime(broken, 2);
+    for (let index = 1; index <= 3; index += 1) {
+      const filePath = migration(`v${index}-to-v${index + 1}.2026-01-0${index}T00-00-00`);
+      setTime(filePath, index);
+    }
+
+    const plan = inventory.buildPrunePlan({ dbPath, backupDir, maxGenerations: 2 });
+
+    assert.equal(plan.retentionDegraded, true);
+    assert.equal(plan.safetyBlocked, false);
+    assert.equal(plan.protectedRestorePoints.filter(entry => entry.kind === 'normal').length, 1);
+    assert.equal(plan.protectedRestorePoints.filter(entry => entry.kind === 'migration').length, 2);
+    assert.equal(plan.candidates.find(entry => entry.name === path.basename(broken)).reason, 'invalid-backup');
+    assert.equal(plan.candidates.filter(entry => entry.kind === 'migration').length, 1);
   });
 
   it('does not scan an old deletion candidate as a database', () => {

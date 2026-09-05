@@ -197,7 +197,10 @@ export function initBackupSettings(showStatus) {
         showStatus('backup-prune-status', t(plan.blocked ? 'settings.backup.cleanupBlocked' : 'settings.backup.cleanupNone'), !plan.blocked);
         return;
       }
-      if (!confirm(tVars('settings.backup.cleanupConfirm', {
+      const confirmKey = plan.retentionDegraded
+        ? 'settings.backup.cleanupConfirmDegraded'
+        : 'settings.backup.cleanupConfirm';
+      if (!confirm(tVars(confirmKey, {
         count: plan.candidates.length,
         size: formatBytes(plan.candidateBytes),
       }))) return;
