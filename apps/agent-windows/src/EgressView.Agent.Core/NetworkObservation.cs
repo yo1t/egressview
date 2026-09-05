@@ -63,6 +63,9 @@ public sealed record CollectorSnapshot(
     long NamesFromStartEvents = 0,
     long NamesFromCache = 0,
     long NamesNeverSeen = 0,
+    long NamesNeverSeenAtStartup = 0,
+    long NamesNeverSeenAfterStartup = 0,
+    long NamesInvalidProcessId = 0,
     long NamesExpired = 0,
     long NamesPidReuseRejected = 0,
     string? ProcessNameSourceError = null);

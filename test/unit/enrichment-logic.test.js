@@ -68,6 +68,33 @@ describe('lookupRdap cache hit', () => {
   });
 });
 
+describe('lookupRdap non-public guard', () => {
+  beforeEach(reset);
+
+  it('clears a misleading legacy IANA result for a private destination', async () => {
+    enrichment.getRdapCache().set('10.0.0.8', {
+      country: null,
+      org: 'Internet Assigned Numbers Authority',
+      expires: Date.now() + 60_000,
+    });
+
+    const result = await enrichment.lookupRdap('10.0.0.8');
+    assert.equal(result.country, null);
+    assert.equal(result.org, null);
+    assert.ok(result.expires > Date.now() + 50 * 365 * 24 * 60 * 60 * 1000);
+    assert.equal(enrichment.getApiStats().rdap.ok, 0, 'no public RDAP request was made');
+  });
+
+  it('guards loopback, link-local, multicast and IPv6 private addresses centrally', async () => {
+    for (const ip of ['127.0.0.1', '169.254.1.2', '224.0.0.251', '::1', 'fc00::1', 'fe80::1']) {
+      const result = await enrichment.lookupRdap(ip);
+      assert.equal(result.org, null, ip);
+    }
+    assert.equal(enrichment.getApiStats().rdap.ok, 0);
+    assert.equal(enrichment.getApiStats().rdap.fail, 0);
+  });
+});
+
 // ─── lookupRdapBatch — all cached ────────────────────────────────────────────
 
 describe('lookupRdapBatch (all cached)', () => {

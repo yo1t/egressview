@@ -371,13 +371,26 @@ try
         var missed = new ProcessNameResolver(TimeSpan.FromMinutes(2), _ => null);
         missed.Learn(5151, started);
         Assert(missed.ObservedStarts == 0, "a start for a process already gone teaches nothing");
+        Assert(missed.Resolve(5151, now) is null && missed.NeverSeenAfterStartup == 1,
+            "a process whose start was seen but could not be queried is classified after startup");
+
+        var startupMiss = new ProcessNameResolver(TimeSpan.FromMinutes(2), _ => null, [6161]);
+        Assert(startupMiss.Resolve(6161, now) is null, "a process present at startup can remain nameless");
+        Assert(startupMiss.NeverSeen == 1 && startupMiss.NeverSeenAtStartup == 1
+            && startupMiss.NeverSeenAfterStartup == 0,
+            "never-seen observations identify the startup snapshot gap");
+        startupMiss.Learn(6161, started);
+        Assert(startupMiss.Resolve(6161, now) is null && startupMiss.NeverSeenAfterStartup == 1,
+            "a later lifecycle start removes a reused PID from the startup population");
 
         Assert(ProcessNameResolver.BareName(@"C:\Program Files\Vendor\app.exe") == "app",
             "a path becomes the bare name Process.ProcessName would give");
         Assert(ProcessNameResolver.BareName("svchost.exe") == "svchost", "an extension is dropped");
         Assert(ProcessNameResolver.BareName("") is null, "an empty image name is not a name");
 
-        Assert(new ProcessNameResolver().Resolve(0, now) is null, "PID 0 has no name");
+        var invalidPid = new ProcessNameResolver();
+        Assert(invalidPid.Resolve(0, now) is null && invalidPid.InvalidProcessId == 1,
+            "PID 0 has no name and is classified separately");
         Assert(new ProcessNameResolver().Resolve(Environment.ProcessId, now) is not null,
             "the running test process resolves through the real probe");
     }
