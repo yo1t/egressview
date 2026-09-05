@@ -194,7 +194,10 @@ export function initBackupSettings(showStatus) {
         return;
       }
       if (!plan.candidates.length) {
-        showStatus('backup-prune-status', t(plan.blocked ? 'settings.backup.cleanupBlocked' : 'settings.backup.cleanupNone'), !plan.blocked);
+        const statusKey = plan.retentionDegraded
+          ? 'settings.backup.cleanupDegradedNone'
+          : (plan.blocked ? 'settings.backup.cleanupBlocked' : 'settings.backup.cleanupNone');
+        showStatus('backup-prune-status', t(statusKey), !plan.blocked && !plan.retentionDegraded);
         return;
       }
       const confirmKey = plan.retentionDegraded
