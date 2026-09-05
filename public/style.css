@@ -110,8 +110,13 @@
   .connect-btn {
     /* flex, not inline-flex: inline-level boxes shrink to their content, which
        collapsed every full-width button to about 32px and wrapped the label
-       down the page. */
-    width: 100%; min-height: 36px; padding: 8px 16px; margin-top: 8px;
+       down the page.
+       Width comes from the label with a 120px floor, the same floor the
+       secondary buttons use -- one basis, so nothing drifts apart again. Full
+       width made every action look like the most important thing on the
+       screen, and 'DL' as wide as 'Save'. */
+    width: auto; align-self: flex-start; min-width: 120px; max-width: 100%;
+    min-height: 36px; padding: 8px 16px; margin-top: 8px;
     display: flex; align-items: center; justify-content: center;
     background: var(--accent); border: none; border-radius: 8px;
     color: #fff; font-family: inherit; font-size: 13px; font-weight: 600;
@@ -176,9 +181,11 @@
      Two shapes cover every case already present: buttons share the row
      equally, or they take their content width with a floor. */
   .settings-actions-row { display: flex; gap: 8px; }
-  .settings-actions-row > .connect-btn { flex: 1 1 0; width: auto; min-width: 120px; }
+  /* nowrap: a long label must not grow the control -- that is what rendered the
+     AI save button at 52px while the same button elsewhere was 36px. */
+  .settings-actions-row > .connect-btn { flex: 0 1 auto; width: auto; min-width: 120px; white-space: nowrap; }
   .settings-security-actions { display: flex; gap: 8px; }
-  .settings-security-actions .connect-btn { flex: 1 1 0; width: auto; min-width: 120px; }
+  .settings-security-actions .connect-btn { flex: 0 1 auto; width: auto; min-width: 120px; }
   .settings-audit-list { max-height: 220px; overflow: auto; font-size: 10px; }
   .settings-audit-row {
     display: grid; grid-template-columns: minmax(120px, 1fr) 64px 70px 116px;
@@ -223,7 +230,7 @@
   .manual-threat-clear { margin-top: 5px; font-size: 9px; color: var(--muted); }
   .manual-threat-lookup { margin-top: 14px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,.12); }
   .manual-threat-provider-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 12px; }
-  .manual-threat-send { width: 100%; }
+
   .manual-threat-results { display: grid; gap: 8px; margin-top: 10px; }
   .manual-threat-result { padding: 10px; border: 1px solid var(--border); border-radius: 7px; font-size: 10px; }
   .manual-threat-result.ok { border-color: rgba(39,201,151,.35); }
@@ -231,11 +238,7 @@
   .manual-threat-result dl { display: grid; grid-template-columns: minmax(110px, auto) 1fr; gap: 3px 10px; margin: 7px 0 0; }
   .manual-threat-result dt { color: var(--muted); }
   .manual-threat-result dd { margin: 0; overflow-wrap: anywhere; }
-  .ai-settings-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  /* One line, like every other action row: this label is long enough to wrap,
-     which grew the control to 52px while the same button elsewhere was 36px. */
-  .ai-settings-actions .connect-btn { width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ai-settings-actions .connect-btn > * { min-width: 0; }
+
   .ai-test-button { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
   .ai-test-button:hover { background: rgba(59,130,246,.12); }
   .ai-key-clear { margin-top: 7px; font-size: 9px; color: var(--muted); }
@@ -258,15 +261,22 @@
   .slack-create-wrap { margin-top: 12px; }
   .slack-create-link { font-size: 10px; color: var(--accent); text-decoration: none; }
   .slack-actions { display: flex; gap: 8px; margin-top: 12px; }
-  .slack-actions > .connect-btn { flex: 1 1 0; width: auto; min-width: 120px; }
+  .slack-actions > .connect-btn { flex: 0 1 auto; width: auto; min-width: 120px; }
   .slack-test-button { background: transparent; border-color: var(--accent); color: var(--accent); }
   .backup-list-section { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; }
   .backup-list { font-size: 11px; color: var(--muted); margin: 8px 0; max-height: 150px; overflow-y: auto; }
   .backup-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .backup-upload-label { cursor: pointer; }
   .backup-list-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--border); }
-  .backup-list-label { flex: 1; }
-  .backup-list-button { min-height: 28px; padding: 4px 10px; font-size: 12px; }
+  /* The timestamp takes what the buttons do not, rather than the other way
+     round: it was wrapping onto three lines beside two fixed-width buttons. */
+
+  /* The timestamp takes what the buttons do not, rather than the other way
+     round: it was wrapping onto three lines beside two fixed-width buttons. */
+  .backup-list-label { flex: 1 1 auto; min-width: 0; }
+  /* Content width, not an equal share of the row: DL took 139px and squeezed
+     the timestamp beside it onto three lines. */
+  .backup-list-button { min-width: 0; min-height: 28px; padding: 4px 12px; font-size: 12px; flex: 0 0 auto; }
   .backup-capacity-status { display: block; margin: 7px 0; white-space: pre-line; }
   .datasource-copy { margin-bottom: 16px; }
   .settings-divider-compact { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
@@ -285,7 +295,7 @@
   .router-card-name { font-size: 12px; font-weight: 700; }
   .router-card-meta { color: var(--muted); font-size: 10px; margin-top: 3px; }
   .router-card-actions { display: flex; gap: 5px; }
-  .router-icon-btn { min-height: 28px; background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; cursor: pointer; font-family: inherit; }
+  .router-icon-btn { min-width: 0; min-height: 28px; background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; cursor: pointer; font-family: inherit; }
   .router-icon-btn:hover { border-color: var(--accent); color: var(--text); }
   .router-add-btn { margin-top: 10px; background: transparent; border: 1px dashed var(--accent); color: var(--accent); }
   .router-add-btn:hover { background: rgba(59,130,246,.1); }
@@ -659,7 +669,7 @@
   .beacon-cov-low  { color: #4ade80; font-weight: 700; }
   .beacon-cov-mid  { color: #fbbf24; font-weight: 700; }
   .beacon-cov-high { color: #f97316; font-weight: 700; }
-  .beacon-dismiss-btn { min-height: 28px; padding: 4px 10px; font-size: 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
+  .beacon-dismiss-btn { min-width: 0; min-height: 28px; padding: 4px 12px; font-size: 12px; border-radius: 6px; flex: 0 0 auto; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
   .beacon-dismiss-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
 
   .threat-clickable { cursor: pointer; }
