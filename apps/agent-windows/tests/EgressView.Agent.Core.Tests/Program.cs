@@ -403,14 +403,29 @@ try
         ], at);
 
         var counters = store.ReadCounters();
-        long Counter(string reason) => counters.TryGetValue($"contract-rejected-{reason}", out var value) ? value : 0;
+        long Counter(string reason) => counters!.TryGetValue($"contract-rejected-{reason}", out var value) ? value : 0;
         Assert(Counter("process-name") == 2, "a missing and an empty name are both counted as the name");
         Assert(Counter("remote-port") == 1, "an out-of-range remote port is counted separately");
         Assert(Counter("remote-address") == 1, "an unparseable remote address is counted separately");
+
         Assert(store.ReadDeliveryStatus().ContractRejected == 4, "the total still counts every rejection");
         Assert(store.ReadDeliveryStatus().Pending == 1, "the deliverable observation is still queued");
         Assert(counters.Keys.All(key => !key.Contains("203.0.113.7", StringComparison.Ordinal)),
             "reason counters name the failing part of the contract, never the value");
+        // An inbound multicast observation has no local address by design. It
+        // is named for what it is, so that a deliberate omission is not read as
+        // a malformed observation.
+        store.QueueForDelivery([
+            new NetworkObservation(at, 10, "UDP", "", 5353, "224.0.0.251", 5353, 0, 1,
+                ObservationLayer.Logical, null, "etw", "mdns"),
+        ], at);
+        counters = store.ReadCounters();
+        Assert(Counter("inbound-multicast-no-local-address") == 1,
+            "a deliberate omission is named as one, not as a malformed address");
+        Assert(Counter("local-address") == 0,
+            "the deliberate omission does not inflate the malformed-address count");
+        Assert(store.ReadDeliveryStatus().ContractRejected == 5,
+            "the deliberate omission is still counted in the total that says how much never arrives");
     }
 
     Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, and rejection reasons");

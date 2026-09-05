@@ -165,6 +165,12 @@ public sealed partial class ObservationStore
     {
         if (item.RemotePort is <= 0 or > 65535) return "remote-port";
         if (item.LocalPort is < 0 or > 65535) return "local-port";
+        // An inbound group datagram names the sender and the group but not the
+        // interface that received it, so the collector leaves the local address
+        // empty rather than inventing one. That is a deliberate omission, not a
+        // malformed observation, and calling it "local-address" alongside real
+        // contract failures buries the ones worth fixing.
+        if (item.LocalAddress.Length == 0) return "inbound-multicast-no-local-address";
         if (!IPAddress.TryParse(item.LocalAddress, out _)) return "local-address";
         if (!IPAddress.TryParse(item.RemoteAddress, out _)) return "remote-address";
         if (item.ProcessId < 0) return "process-id";
