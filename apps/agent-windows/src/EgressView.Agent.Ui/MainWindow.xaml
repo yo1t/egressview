@@ -1,36 +1,99 @@
-<Window x:Class="EgressView.Agent.Ui.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="EgressView Agent for Windows" Height="560" Width="760" MinHeight="460" MinWidth="620">
-  <Grid Margin="24"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/></Grid.RowDefinitions>
-    <TextBlock Text="EgressView Agent for Windows" FontSize="24" FontWeight="SemiBold" />
-    <TabControl Grid.Row="1" Margin="0,20,0,0">
-      <TabItem Header="状態 / Status">
-        <Grid Margin="16"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition/></Grid.RowDefinitions>
-          <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-            <Button Content="状態を更新 / Refresh" Click="Refresh_Click" Padding="14,8" AutomationProperties.Name="状態を更新"/>
-            <Button Content="7日 / 7 days" Click="SevenDays_Click" Margin="8,0,0,0" Padding="14,8"/>
-            <Button Content="30日 / 30 days" Click="ThirtyDays_Click" Margin="8,0,0,0" Padding="14,8"/>
+<Window x:Class="EgressView.Agent.Ui.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="EgressView Agent for Windows"
+        Height="680" Width="980" MinHeight="560" MinWidth="760"
+        WindowStartupLocation="CenterScreen" UseLayoutRounding="True" SnapsToDevicePixels="True">
+  <Grid>
+    <Grid.RowDefinitions><RowDefinition Height="82"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+
+    <Border Grid.Row="0" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="0,0,0,1">
+      <Grid Margin="28,0">
+        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel VerticalAlignment="Center">
+          <TextBlock Text="EgressView" Style="{StaticResource PageTitleStyle}"/>
+          <TextBlock Text="Agent for Windows" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="13"/>
+        </StackPanel>
+        <Border x:Name="MonitoringBadge" Grid.Column="1" Background="{DynamicResource SurfaceSecondaryBrush}" CornerRadius="14" Padding="12,5" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal">
+            <Ellipse x:Name="MonitoringDot" Width="8" Height="8" Fill="{DynamicResource TextSecondaryBrush}" Margin="0,0,7,0" VerticalAlignment="Center"/>
+            <TextBlock x:Name="MonitoringStatus" Text="確認中 / Checking" Foreground="{DynamicResource TextSecondaryBrush}" FontWeight="SemiBold"
+                       AutomationProperties.LiveSetting="Polite"/>
           </StackPanel>
-          <Border Grid.Row="1" BorderBrush="#D0D7DE" BorderThickness="1" CornerRadius="6" Background="#F6F8FA" Padding="18">
-            <TextBox x:Name="Output" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="Transparent" FontFamily="Segoe UI" FontSize="16" AutomationProperties.Name="Agent status and history" />
-          </Border>
-        </Grid>
-      </TabItem>
-      <TabItem Header="Hub登録 / Hub enrollment">
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
-          <StackPanel Margin="18" MaxWidth="620" HorizontalAlignment="Left">
-            <TextBlock Text="EgressView Hubへ登録 / Enroll with EgressView Hub" FontSize="19" FontWeight="SemiBold"/>
-            <TextBlock Margin="0,10,0,18" TextWrapping="Wrap" Text="登録申請では、このPCのホスト名、Windowsのバージョン、Agentのバージョンを指定したHubへ送ります。登録後も、下のスイッチを明示的にONにするまで観測データは送信しません。&#x0a;&#x0a;Enrollment sends this PC's hostname, Windows version, and Agent version to the Hub you specify. Observations are not delivered until you explicitly turn on the switch below."/>
-            <TextBlock Text="Hub URL" FontWeight="SemiBold"/>
-            <TextBox x:Name="HubUrl" Margin="0,6,0,14" Padding="8" Text="https://" AutomationProperties.Name="Hub URL"/>
-            <TextBlock Text="6文字の登録コード / Six-character enrollment code" FontWeight="SemiBold"/>
-            <PasswordBox x:Name="EnrollmentCode" Margin="0,6,0,14" Padding="8" MaxLength="6" AutomationProperties.Name="Enrollment code"/>
-            <Button x:Name="EnrollButton" Content="登録を申請 / Request enrollment" Click="Enroll_Click" Padding="14,9" HorizontalAlignment="Left"/>
-            <CheckBox x:Name="DeliveryEnabled" Margin="0,18,0,0" Content="観測データをこのHubへ送信する / Send observations to this Hub" Click="DeliveryEnabled_Click" AutomationProperties.Name="Hub observation delivery"/>
-            <Border Margin="0,18,0,0" BorderBrush="#D0D7DE" BorderThickness="1" CornerRadius="6" Background="#F6F8FA" Padding="14">
-              <TextBlock x:Name="EnrollmentStatus" Text="未登録 / Not enrolled" TextWrapping="Wrap" AutomationProperties.Name="Enrollment status"/>
+        </Border>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1" Margin="28,24,28,28">
+      <TabControl>
+        <TabItem Header="概要 / Overview">
+          <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="16"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel>
+                <TextBlock Text="ネットワークの状態" Style="{StaticResource SectionTitleStyle}"/>
+                <TextBlock Text="Network status" Style="{StaticResource BodySecondaryStyle}" Margin="0,3,0,0"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Content="更新 / Refresh" Click="Refresh_Click" Style="{StaticResource PrimaryButtonStyle}" AutomationProperties.Name="状態を更新"/>
+                <Button Content="7日 / 7 days" Click="SevenDays_Click" Style="{StaticResource FluentButtonStyle}" Margin="8,0,0,0"/>
+                <Button Content="30日 / 30 days" Click="ThirtyDays_Click" Style="{StaticResource FluentButtonStyle}" Margin="8,0,0,0"/>
+              </StackPanel>
+            </Grid>
+            <Border Grid.Row="2" Style="{StaticResource CardStyle}">
+              <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <TextBlock Text="Agent status" FontWeight="SemiBold"/>
+                <TextBox Grid.Row="2" x:Name="Output" IsReadOnly="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" BorderThickness="0" Padding="0" Background="Transparent"
+                         VerticalContentAlignment="Top" FontSize="15" AutomationProperties.Name="Agent status and history"/>
+              </Grid>
             </Border>
-          </StackPanel>
-        </ScrollViewer>
-      </TabItem>
-    </TabControl>
+          </Grid>
+        </TabItem>
+
+        <TabItem Header="Hub接続 / Hub">
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <Grid MaxWidth="900" HorizontalAlignment="Stretch">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="0.9*"/><ColumnDefinition Width="24"/><ColumnDefinition Width="1.1*"/></Grid.ColumnDefinitions>
+              <StackPanel Margin="0,4,0,0">
+                <TextBlock Text="EgressView Hubに接続" Style="{StaticResource SectionTitleStyle}"/>
+                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Style="{StaticResource BodySecondaryStyle}"
+                           Text="このPCをHubへ登録すると、許可した観測データを組織のEgressViewへ送信できます。"/>
+                <Border Margin="0,20,0,0" Background="{DynamicResource AccentSoftBrush}" CornerRadius="8" Padding="16">
+                  <StackPanel>
+                    <TextBlock Text="送信前に確認してください" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}"/>
+                    <TextBlock Margin="0,7,0,0" TextWrapping="Wrap" Style="{StaticResource BodySecondaryStyle}"
+                               Text="登録申請ではPCのホスト名、Windowsのバージョン、Agentのバージョンを送信します。観測データは右側のスイッチをONにするまで送信しません。"/>
+                    <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" Style="{StaticResource BodySecondaryStyle}"
+                               Text="Enrollment sends device metadata only. Observation delivery remains off until you explicitly enable it."/>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+
+              <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                <StackPanel>
+                  <TextBlock Text="Hub registration" FontWeight="SemiBold" FontSize="16" Margin="0,0,0,18"/>
+                  <TextBlock Text="Hub URL" Style="{StaticResource FieldLabelStyle}"/>
+                  <TextBox x:Name="HubUrl" Margin="0,0,0,16" Text="https://" AutomationProperties.Name="Hub URL"/>
+                  <TextBlock Text="6文字の登録コード / Six-character code" Style="{StaticResource FieldLabelStyle}"/>
+                  <PasswordBox x:Name="EnrollmentCode" Margin="0,0,0,18" MaxLength="6" AutomationProperties.Name="Enrollment code"/>
+                  <Button x:Name="EnrollButton" Content="登録を申請 / Request enrollment" Click="Enroll_Click"
+                          Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Left"/>
+                  <Border Height="1" Background="{DynamicResource StrokeBrush}" Margin="0,22"/>
+                  <CheckBox x:Name="DeliveryEnabled" Content="観測データをこのHubへ送信する&#x0a;Send observations to this Hub"
+                            Click="DeliveryEnabled_Click" AutomationProperties.Name="Hub observation delivery"/>
+                  <Border Margin="0,18,0,0" Background="{DynamicResource SurfaceSecondaryBrush}" BorderBrush="{DynamicResource StrokeBrush}"
+                          BorderThickness="1" CornerRadius="6" Padding="14">
+                    <TextBlock x:Name="EnrollmentStatus" Text="未登録 / Not enrolled" TextWrapping="Wrap" AutomationProperties.Name="Enrollment status"/>
+                  </Border>
+                </StackPanel>
+              </Border>
+            </Grid>
+          </ScrollViewer>
+        </TabItem>
+      </TabControl>
+    </Grid>
   </Grid>
 </Window>
