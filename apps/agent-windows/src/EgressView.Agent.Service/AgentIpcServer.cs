@@ -41,12 +41,13 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
                     if (enabled && credentialStore.Load() is null)
                         throw new InvalidOperationException("Enrollment is required before delivery can be enabled.");
                     store.DeliveryEnabled = enabled;
-                }, store.ReadRecentFlows));
+                }, store.ReadRecentFlows, Globe));
         }
     }
 
     private string Status() => DiagnosticsReport.Create(snapshot(), store, "0.1.0-dev");
     private IReadOnlyList<HourlySummary> Summary(int days) => store.ReadHourlySummary(DateTimeOffset.UtcNow.AddDays(-days), DateTimeOffset.UtcNow);
+    private IReadOnlyList<GlobePoint> Globe(int days) => store.ReadGlobePoints(DateTimeOffset.UtcNow.AddDays(-days), DateTimeOffset.UtcNow);
 
     public async ValueTask DisposeAsync()
     {

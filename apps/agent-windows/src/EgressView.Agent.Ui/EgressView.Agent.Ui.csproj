@@ -9,4 +9,9 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../EgressView.Agent.Core/EgressView.Agent.Core.csproj" /></ItemGroup>
+  <ItemGroup>
+    <!-- The same bundled Natural Earth TopoJSON used by the Mac Agent. -->
+    <Resource Include="../../../agent-macos/Sources/EgressViewAgentCore/Resources/world-atlas-countries-110m.json"
+              Link="Resources/world-atlas-countries-110m.json" />
+  </ItemGroup>
 </Project>

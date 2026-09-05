@@ -10,10 +10,12 @@ namespace EgressView.Agent.Ui;
 /// <summary>Offline orthographic globe. It never fetches tiles or sends addresses.</summary>
 public sealed class WorldGlobeControl : FrameworkElement
 {
+    private readonly IReadOnlyList<(double Lat, double Lon)[]> atlas = WorldAtlas.Load();
     private readonly DispatcherTimer timer;
     private double longitude = 140;
     private DateTimeOffset previousFrame;
     private bool rotating = true;
+    private IReadOnlyList<EgressView.Agent.Core.GlobePoint> points = [];
 
     public WorldGlobeControl()
     {
@@ -32,6 +34,12 @@ public sealed class WorldGlobeControl : FrameworkElement
     public int FramesPerSecond
     {
         set { timer.Interval = TimeSpan.FromSeconds(1d / Math.Clamp(value, 1, 30)); ReconcileTimer(); }
+    }
+
+    public void SetPoints(IReadOnlyList<EgressView.Agent.Core.GlobePoint> value)
+    {
+        points = value;
+        InvalidateVisual();
     }
 
     private void ReconcileTimer()
@@ -69,10 +77,17 @@ public sealed class WorldGlobeControl : FrameworkElement
         foreach (var meridian in Enumerable.Range(0, 12).Select(i => i * 30d))
             DrawLine(drawing, gridPen, Enumerable.Range(-18, 37).Select(i => (i * 5d, meridian)), center, radius);
 
-        // Deliberately coarse, bundled land silhouettes: recognizable context without map-tile traffic.
-        var landPen = new Pen(accent, 1.1);
-        foreach (var land in Land)
+        var landPen = new Pen(accent, 0.9);
+        foreach (var land in atlas)
             DrawLine(drawing, landPen, land, center, radius);
+
+        foreach (var item in points.OrderBy(point => point.Connections))
+        {
+            var point = Project(item.Latitude, item.Longitude, center, radius);
+            if (point is null) continue;
+            var size = Math.Clamp(2.5 + Math.Log10(item.Connections + 1) * 2.2, 3, 10);
+            drawing.DrawEllipse(accent, new Pen(surface, 1), point.Value, size, size);
+        }
     }
 
     private void DrawLine(DrawingContext drawing, Pen pen, IEnumerable<(double Lat, double Lon)> coordinates, Point center, double radius)
@@ -99,13 +114,4 @@ public sealed class WorldGlobeControl : FrameworkElement
             center.Y - (Math.Cos(phi0) * Math.Sin(phi) - Math.Sin(phi0) * Math.Cos(phi) * Math.Cos(lambda)) * radius);
     }
 
-    private static readonly (double Lat, double Lon)[][] Land =
-    [
-        [(72,-165),(60,-140),(50,-125),(25,-105),(10,-80),(30,-65),(48,-55),(70,-85),(72,-165)],
-        [(12,-80),(-5,-75),(-25,-70),(-55,-68),(-35,-50),(-5,-35),(12,-55),(12,-80)],
-        [(72,-10),(55,20),(60,60),(45,100),(55,150),(35,145),(10,105),(5,75),(25,50),(35,15),(55,-10),(72,-10)],
-        [(35,-15),(15,-18),(-35,18),(-35,35),(-5,50),(20,40),(35,15),(35,-15)],
-        [(-10,112),(-40,115),(-43,145),(-15,154),(-10,112)],
-        [(45,130),(31,130),(35,140),(44,146),(45,130)]
-    ];
 }

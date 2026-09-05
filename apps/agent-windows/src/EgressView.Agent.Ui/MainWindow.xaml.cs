@@ -71,9 +71,16 @@ public partial class MainWindow : Window
             if (rawFlows.Count == 0) await RefreshFlowsAsync();
             ApplicationCount.Text = rawFlows.Select(item => item.ProcessName).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).Count().ToString("N0");
             DestinationCount.Text = rawFlows.Select(item => (item.RemoteAddress, item.RemotePort)).Distinct().Count().ToString("N0");
-            FlowCaption.Text = string.Format(CultureInfo.CurrentCulture, "{0:N0} {1} · {2:N0} {3}", ApplicationCount.Text == "—" ? 0 : int.Parse(ApplicationCount.Text, NumberStyles.Number), LocalizationManager.Text("Applications"), DestinationCount.Text == "—" ? 0 : int.Parse(DestinationCount.Text, NumberStyles.Number), LocalizationManager.Text("Destinations"));
+            FlowDiagram.SetItems(rawFlows);
+            var globeResponse = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "globe", days = selectedDays }), lifetime.Token);
+            using var globeDocument = JsonDocument.Parse(globeResponse);
+            var globePoints = globeDocument.RootElement.GetProperty("data").Deserialize<List<GlobePoint>>() ?? [];
+            Globe.SetPoints(globePoints);
+            GlobeCaption.Text = globePoints.Count == 0
+                ? LocalizationManager.Text("GlobeUnavailable")
+                : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeLocations"), globePoints.Count);
         }
-        catch (Exception exception) { FlowCaption.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
+        catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
     }
 
     private async Task RefreshFlowsAsync()
@@ -82,6 +89,7 @@ public partial class MainWindow : Window
         {
             var limit = SelectedLimit();
             rawFlows = await ReadFlowPageAsync(limit, 0);
+            FlowDiagram.SetItems(rawFlows);
             RecentFlows.Clear();
             foreach (var flow in rawFlows) RecentFlows.Add(new FlowRow(flow));
             LogStatus.Text = rawFlows.Count == 0 ? LocalizationManager.Text("NoConnections") : $"{rawFlows.Count:N0} {LocalizationManager.Text("Rows").ToLower(CultureInfo.CurrentCulture)}";

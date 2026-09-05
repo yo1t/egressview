@@ -4,7 +4,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 6;
+    private const int CurrentSchemaVersion = 7;
     private const string Version1Schema = """
         CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL);
         INSERT INTO schema_version(version) SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM schema_version);
@@ -102,6 +102,21 @@ public sealed partial class ObservationStore : IDisposable
     private const string Version6Schema = """
         ALTER TABLE delivery_state ADD COLUMN delivery_enabled INTEGER NOT NULL DEFAULT 0 CHECK(delivery_enabled IN (0,1));
         """;
+    private const string Version7Schema = """
+        CREATE TABLE IF NOT EXISTS geo_locations(
+          ip TEXT PRIMARY KEY,
+          latitude REAL NOT NULL,
+          longitude REAL NOT NULL,
+          country_code TEXT,
+          city TEXT
+        );
+        CREATE TABLE IF NOT EXISTS geo_cache_state(
+          id INTEGER PRIMARY KEY CHECK(id=1),
+          etag TEXT,
+          fetched_at TEXT
+        );
+        INSERT OR IGNORE INTO geo_cache_state(id) VALUES(1);
+        """;
 
     private readonly object gate = new();
     private nint db;
@@ -129,7 +144,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -143,7 +158,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 2) { MigrateVersion2To3(); version = 3; }
         if (version == 3) { MigrateVersion3To4(); version = 4; }
         if (version == 4) { MigrateVersion4To5(); version = 5; }
-        if (version == 5) MigrateVersion5To6();
+        if (version == 5) { MigrateVersion5To6(); version = 6; }
+        if (version == 6) MigrateVersion6To7();
         ValidateSchema();
     }
 
@@ -194,6 +210,14 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion6To7()
+    {
+        var backup = $"{path}.pre-v7.bak";
+        if (!File.Exists(backup)) Execute($"VACUUM INTO '{Sql(backup)}'");
+        try { Execute($"BEGIN IMMEDIATE; {Version7Schema} UPDATE schema_version SET version=7 WHERE version=6; COMMIT;"); }
+        catch { TryRollback(); throw; }
+    }
+
     private void EnsureIntegrity()
     {
         var integrity = ScalarText("PRAGMA integrity_check");
@@ -205,8 +229,8 @@ public sealed partial class ObservationStore : IDisposable
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state')");
-        if (tables != 8)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state')");
+        if (tables != 10)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
@@ -463,6 +487,85 @@ public sealed partial class ObservationStore : IDisposable
                         Text(statement, 11) == "vpn_transport" ? ObservationLayer.VpnTransport : ObservationLayer.Logical,
                         NullableTextValue(statement, 12), Text(statement, 13)));
                 }
+            }
+            finally { WinSqlite.Finalize(statement); }
+            return result;
+        }
+    }
+
+    public (string? ETag, DateTimeOffset? FetchedAt) ReadGeoCacheState()
+    {
+        lock (gate)
+        {
+            CheckOperation(WinSqlite.Prepare(db, "SELECT etag,fetched_at FROM geo_cache_state WHERE id=1", -1, out var statement, 0));
+            try
+            {
+                CheckQueryRow(WinSqlite.Step(statement));
+                var etag = NullableTextValue(statement, 0);
+                var fetched = NullableTextValue(statement, 1);
+                return (etag, fetched is null ? null : DateTimeOffset.Parse(fetched));
+            }
+            finally { WinSqlite.Finalize(statement); }
+        }
+    }
+
+    public void ReplaceGeoLocations(IReadOnlyList<GeoLocation> locations, string? etag, DateTimeOffset fetchedAt)
+    {
+        lock (gate)
+        {
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                Execute("DELETE FROM geo_locations");
+                const string sql = "INSERT INTO geo_locations(ip,latitude,longitude,country_code,city) VALUES(?,?,?,?,?)";
+                CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+                try
+                {
+                    foreach (var location in locations)
+                    {
+                        Bind(statement, 1, location.Ip);
+                        Check(WinSqlite.BindDouble(statement, 2, location.Latitude));
+                        Check(WinSqlite.BindDouble(statement, 3, location.Longitude));
+                        BindNullable(statement, 4, location.CountryCode);
+                        BindNullable(statement, 5, location.City);
+                        CheckDone(WinSqlite.Step(statement));
+                        Check(WinSqlite.Reset(statement));
+                        Check(WinSqlite.ClearBindings(statement));
+                    }
+                }
+                finally { WinSqlite.Finalize(statement); }
+                Execute($"UPDATE geo_cache_state SET etag={(etag is null ? "NULL" : $"'{Sql(etag)}'")},fetched_at='{fetchedAt.ToUniversalTime():O}' WHERE id=1");
+                Execute("COMMIT");
+            }
+            catch { TryRollback(); throw; }
+        }
+    }
+
+    public void MarkGeoCacheFetched(string? etag, DateTimeOffset fetchedAt)
+    {
+        lock (gate) Execute($"UPDATE geo_cache_state SET etag={(etag is null ? "etag" : $"'{Sql(etag)}'")},fetched_at='{fetchedAt.ToUniversalTime():O}' WHERE id=1");
+    }
+
+    public IReadOnlyList<GlobePoint> ReadGlobePoints(DateTimeOffset from, DateTimeOffset to)
+    {
+        lock (gate)
+        {
+            var sql = $"""
+                SELECT g.latitude,g.longitude,g.country_code,g.city,COUNT(*),
+                       SUM(COALESCE(f.bytes_sent,0)+COALESCE(f.bytes_received,0))
+                FROM flows f JOIN geo_locations g ON g.ip=f.remote_address
+                WHERE f.last_seen>='{from.ToUniversalTime():O}' AND f.last_seen<'{to.ToUniversalTime():O}'
+                GROUP BY g.latitude,g.longitude,g.country_code,g.city
+                ORDER BY COUNT(*) DESC LIMIT 250
+                """;
+            CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+            var result = new List<GlobePoint>();
+            try
+            {
+                while (WinSqlite.Step(statement) == WinSqlite.Row)
+                    result.Add(new GlobePoint(WinSqlite.ColumnDouble(statement, 0), WinSqlite.ColumnDouble(statement, 1),
+                        NullableTextValue(statement, 2), NullableTextValue(statement, 3), WinSqlite.ColumnInt64(statement, 4),
+                        WinSqlite.ColumnInt64(statement, 5)));
             }
             finally { WinSqlite.Finalize(statement); }
             return result;
