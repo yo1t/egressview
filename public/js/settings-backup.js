@@ -189,6 +189,10 @@ export function initBackupSettings(showStatus) {
       const preview = await readJsonResponse(previewResponse);
       const previewJob = await waitForPruneJob(preview.job);
       const plan = previewJob.result;
+      if (plan.safetyBlocked) {
+        showStatus('backup-prune-status', t('settings.backup.cleanupSafetyBlocked'), false);
+        return;
+      }
       if (!plan.candidates.length) {
         showStatus('backup-prune-status', t(plan.blocked ? 'settings.backup.cleanupBlocked' : 'settings.backup.cleanupNone'), !plan.blocked);
         return;

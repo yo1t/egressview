@@ -779,7 +779,7 @@
           </div>
           <label class="settings-check-label settings-form-top-8">
             <input id="s-backup-auto-prune" type="checkbox">
-            <span data-i18n="settings.backup.autoPrune">検証済みの安全な候補だけを自動削除</span>
+            <span data-i18n="settings.backup.autoPrune">最低保持世代を守って古いバックアップを自動削除</span>
           </label>
           <p class="settings-field-hint" data-i18n="settings.backup.retentionSafety">通常バックアップ2世代と最新のmigrationバックアップ1世代は常に保護されます。</p>
           <button class="connect-btn settings-form-top-12" id="backup-config-save" data-i18n="settings.btn.save">保存</button>
@@ -787,7 +787,7 @@
           <div class="backup-list-section">
             <label class="form-label" data-i18n="settings.backup.capacity">容量診断</label>
             <div id="backup-capacity-status" class="settings-status backup-capacity-status"></div>
-            <button class="connect-btn" id="backup-prune-btn" data-i18n="settings.backup.cleanup">安全な削除候補を確認</button>
+            <button class="connect-btn" id="backup-prune-btn" data-i18n="settings.backup.cleanup">削除候補を確認</button>
             <div class="settings-status" id="backup-prune-status"></div>
             <label class="form-label" data-i18n="settings.backup.list">バックアップ一覧</label>
             <div id="backup-list" class="backup-list"></div>

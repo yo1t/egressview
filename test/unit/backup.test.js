@@ -239,11 +239,11 @@ describe('automatic backup prune', () => {
   });
   after(teardown);
 
-  it('removes only verified oldest files when explicitly enabled', async () => {
+  it('removes only oldest files above the retention floor when explicitly enabled', async () => {
     for (let i = 1; i <= 5; i++) {
       makeRealDb(path.join(backupDir, `egressview_2025-01-0${i}_00-00-00.db`), `generation-${i}`);
     }
-    // Creating a generation runs the verified prune plan only after opt-in.
+    // Creating a generation runs the retention-based prune plan only after opt-in.
     await backup.createBackup();
     for (let i = 0; i < 100 && backup.getActivePruneJob(); i++) {
       await new Promise(resolve => setTimeout(resolve, 10));

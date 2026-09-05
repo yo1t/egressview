@@ -215,7 +215,7 @@ module.exports = function backupRoutes(ctx) {
         return res.status(409).json({ error: 'A backup cleanup job is already running.', job: error.job });
       }
       logger.error('[backup] prune error:', error.message);
-      res.status(500).json({ error: 'Backup cleanup failed safely. No unverified backup was removed.' });
+      res.status(500).json({ error: 'Backup cleanup failed safely. Protected restore points were not removed.' });
     }
   });
 

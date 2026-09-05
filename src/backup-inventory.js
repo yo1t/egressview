@@ -43,6 +43,7 @@ function candidateFiles(dbPath, backupDir) {
         kind: location.kind,
         path: filePath,
         size: stats.size,
+        allocatedSize: Number.isFinite(stats.blocks) ? stats.blocks * 512 : stats.size,
         created: stats.mtime.toISOString(),
         mtimeMs: stats.mtimeMs,
         integrity: 'unchecked',
@@ -51,6 +52,33 @@ function candidateFiles(dbPath, backupDir) {
     }
   }
   return entries.sort((a, b) => a.mtimeMs - b.mtimeMs || a.name.localeCompare(b.name));
+}
+
+// Retention planning only needs to reject an obviously unusable protected
+// restore point. Full integrity checks already run when a backup is created
+// and again before restore; repeating them for every old generation made a
+// dry-run take tens of minutes on production-sized databases.
+function inspectSqliteHeader(entry) {
+  let fd = null;
+  try {
+    fd = fs.openSync(entry.path, 'r');
+    const header = Buffer.alloc(100);
+    const bytesRead = fs.readSync(fd, header, 0, header.length, 0);
+    if (bytesRead !== header.length || header.toString('binary', 0, 16) !== 'SQLite format 3\0') {
+      throw new Error('invalid SQLite header');
+    }
+    const rawPageSize = header.readUInt16BE(16);
+    const pageSize = rawPageSize === 1 ? 65536 : rawPageSize;
+    const validPageSize = pageSize >= 512 && pageSize <= 65536 && (pageSize & (pageSize - 1)) === 0;
+    if (!validPageSize || entry.size < pageSize || entry.size % pageSize !== 0) {
+      throw new Error('invalid SQLite page geometry');
+    }
+    return { ...entry, header: 'ok', schema: header.readUInt32BE(60) };
+  } catch (error) {
+    return { ...entry, header: 'failed', schema: null, error: error.message };
+  } finally {
+    if (fd != null) { try { fs.closeSync(fd); } catch {} }
+  }
 }
 
 function verifyEntry(entry) {
@@ -78,7 +106,8 @@ function capacity(dbPath, entries, safetyMarginBytes = DEFAULT_SAFETY_MARGIN_BYT
   const migrationRequiredBytes = dbSize * 2 + safetyMarginBytes;
   return {
     dbSize,
-    backupBytes: entries.reduce((sum, entry) => sum + entry.size, 0),
+    backupBytes: entries.reduce((sum, entry) => sum + entry.allocatedSize, 0),
+    logicalBackupBytes: entries.reduce((sum, entry) => sum + entry.size, 0),
     freeBytes,
     safetyMarginBytes,
     migrationRequiredBytes,
@@ -101,7 +130,7 @@ function buildInventory({ dbPath, backupDir, verify = false, safetyMarginBytes, 
 }
 
 function addCandidate(entry, candidates, selected) {
-  if (entry.integrity !== 'ok' || selected.has(entry.path)) return false;
+  if (selected.has(entry.path)) return false;
   selected.add(entry.path);
   candidates.push(entry);
   return true;
@@ -116,21 +145,8 @@ function buildPrunePlan({
   freeBytes,
   onProgress,
 } = {}) {
-  const rawEntries = candidateFiles(dbPath, backupDir);
-  const totalBytes = rawEntries.reduce((sum, entry) => sum + entry.size, 0);
-  let verifiedBytes = 0;
-  const entries = rawEntries.map((entry, index) => {
-    const verified = verifyEntry(entry);
-    verifiedBytes += entry.size;
-    onProgress?.({
-      phase: 'planning',
-      completed: index + 1,
-      total: rawEntries.length,
-      verifiedBytes,
-      totalBytes,
-    });
-    return verified;
-  });
+  const entries = candidateFiles(dbPath, backupDir);
+  const totalBytes = entries.reduce((sum, entry) => sum + entry.allocatedSize, 0);
   const summary = capacity(dbPath, entries, safetyMarginBytes, freeBytes);
   const candidates = [];
   const selected = new Set();
@@ -140,36 +156,46 @@ function buildPrunePlan({
   };
   const minimum = { normal: MIN_NORMAL_GENERATIONS, migration: MIN_MIGRATION_GENERATIONS };
 
+  const protectedEntries = [
+    ...remaining.normal.slice(-MIN_NORMAL_GENERATIONS),
+    ...remaining.migration.slice(-MIN_MIGRATION_GENERATIONS),
+  ].map(inspectSqliteHeader);
+  const unsafeProtected = protectedEntries.filter(entry => entry.header !== 'ok');
+
+  onProgress?.({
+    phase: 'planning',
+    completed: entries.length,
+    total: entries.length,
+    verifiedBytes: 0,
+    totalBytes,
+  });
+
   function removeOldest(kind, reason) {
     const list = remaining[kind];
-    if (list.filter(entry => entry.integrity === 'ok').length <= minimum[kind]) return false;
-    const index = list.findIndex(entry => entry.integrity === 'ok');
-    if (index === -1) return false;
-    const [entry] = list.splice(index, 1);
+    if (list.length <= minimum[kind]) return false;
+    const [entry] = list.splice(0, 1);
     if (!addCandidate(entry, candidates, selected)) return false;
     entry.reason = reason;
     return true;
   }
 
-  while (remaining.normal.filter(entry => entry.integrity === 'ok').length >
-         Math.max(MIN_NORMAL_GENERATIONS, maxGenerations)) {
+  while (remaining.normal.length > Math.max(MIN_NORMAL_GENERATIONS, maxGenerations)) {
     if (!removeOldest('normal', 'generation-limit')) break;
   }
-  while (remaining.migration.filter(entry => entry.integrity === 'ok').length >
-         MIN_MIGRATION_GENERATIONS) {
+  while (remaining.migration.length > MIN_MIGRATION_GENERATIONS) {
     if (!removeOldest('migration', 'migration-retention')) break;
   }
 
-  let projectedBackupBytes = summary.backupBytes - candidates.reduce((sum, entry) => sum + entry.size, 0);
-  let projectedFreeBytes = summary.freeBytes + candidates.reduce((sum, entry) => sum + entry.size, 0);
+  let projectedBackupBytes = summary.backupBytes - candidates.reduce((sum, entry) => sum + entry.allocatedSize, 0);
+  let projectedFreeBytes = summary.freeBytes + candidates.reduce((sum, entry) => sum + entry.allocatedSize, 0);
   const needStorageReduction = () => maxBackupBytes > 0 && projectedBackupBytes > maxBackupBytes;
   const needMigrationSpace = () => projectedFreeBytes < summary.migrationRequiredBytes;
 
   while (needStorageReduction() || needMigrationSpace()) {
     const kinds = ['normal', 'migration'].filter(kind =>
-      remaining[kind].filter(entry => entry.integrity === 'ok').length > minimum[kind]);
+      remaining[kind].length > minimum[kind]);
     const choices = kinds
-      .map(kind => ({ kind, entry: remaining[kind].find(entry => entry.integrity === 'ok') }))
+      .map(kind => ({ kind, entry: remaining[kind][0] }))
       .filter(choice => choice.entry)
       .sort((a, b) => a.entry.mtimeMs - b.entry.mtimeMs || a.entry.name.localeCompare(b.entry.name));
     if (!choices.length) break;
@@ -178,8 +204,8 @@ function buildPrunePlan({
     removeOldest(choices[0].kind, reason);
     if (candidates.length === before) break;
     const added = candidates[candidates.length - 1];
-    projectedBackupBytes -= added.size;
-    projectedFreeBytes += added.size;
+    projectedBackupBytes -= added.allocatedSize;
+    projectedFreeBytes += added.allocatedSize;
   }
 
   const publicEntries = entries.map(({ path: _path, mtimeMs: _mtimeMs, error, reason: _reason, ...entry }) => ({
@@ -190,7 +216,8 @@ function buildPrunePlan({
   return {
     entries: publicEntries,
     candidates: publicCandidates,
-    candidateBytes: publicCandidates.reduce((sum, entry) => sum + entry.size, 0),
+    candidateBytes: publicCandidates.reduce((sum, entry) => sum + entry.allocatedSize, 0),
+    protectedRestorePoints: protectedEntries.map(({ path: _path, mtimeMs: _mtimeMs, ...entry }) => entry),
     summary: {
       ...summary,
       projectedBackupBytes,
@@ -203,40 +230,57 @@ function buildPrunePlan({
       minNormalGenerations: MIN_NORMAL_GENERATIONS,
       minMigrationGenerations: MIN_MIGRATION_GENERATIONS,
     },
-    blocked: (needStorageReduction() || needMigrationSpace()),
+    safetyBlocked: unsafeProtected.length > 0,
+    blocked: unsafeProtected.length > 0 || needStorageReduction() || needMigrationSpace(),
   };
 }
 
 function executePrune(options = {}) {
   const plan = buildPrunePlan(options);
+  if (plan.safetyBlocked) {
+    throw new Error('Protected restore point failed the fast SQLite safety check');
+  }
   const deleted = [];
-  let verifiedBytes = 0;
-  const totalBytes = plan.candidates.reduce((sum, entry) => sum + entry.size, 0);
+  let deletedBytes = 0;
+  const totalBytes = plan.candidates.reduce((sum, entry) => sum + entry.allocatedSize, 0);
   const unlinkFile = options.unlinkFile || fs.unlinkSync;
   for (const [index, candidate] of plan.candidates.entries()) {
     const source = candidateFiles(options.dbPath, options.backupDir)
       .find(entry => entry.name === candidate.name && entry.kind === candidate.kind);
-    if (!source || source.size !== candidate.size || source.created !== candidate.created) {
+    if (!source || source.size !== candidate.size || source.allocatedSize !== candidate.allocatedSize ||
+        source.created !== candidate.created) {
       throw new Error(`Backup changed after prune planning: ${candidate.name}`);
     }
-    const verified = verifyEntry(source);
-    if (verified.integrity !== 'ok') {
-      throw new Error(`Backup failed integrity verification before prune: ${candidate.name}`);
-    }
-    verifiedBytes += source.size;
     unlinkFile(source.path);
-    deleted.push({ name: source.name, kind: source.kind, size: source.size, reason: candidate.reason });
+    const sidecarWarnings = [];
+    for (const suffix of ['-journal', '-wal', '-shm']) {
+      try { unlinkFile(source.path + suffix); } catch (error) {
+        // The immutable backup itself is already gone. A stale sidecar does
+        // not contain a usable restore point, so report it without turning a
+        // completed deletion into an ambiguous failure.
+        if (error.code !== 'ENOENT') sidecarWarnings.push(suffix);
+      }
+    }
+    deletedBytes += source.allocatedSize;
+    deleted.push({
+      name: source.name,
+      kind: source.kind,
+      size: source.size,
+      allocatedSize: source.allocatedSize,
+      reason: candidate.reason,
+      ...(sidecarWarnings.length ? { sidecarWarnings } : {}),
+    });
     options.onProgress?.({
       phase: 'deleting',
       completed: index + 1,
       total: plan.candidates.length,
-      verifiedBytes,
+      verifiedBytes: 0,
       totalBytes,
     });
   }
   return {
     deleted,
-    deletedBytes: deleted.reduce((sum, entry) => sum + entry.size, 0),
+    deletedBytes,
     diagnostics: buildInventory({
       dbPath: options.dbPath,
       backupDir: options.backupDir,
@@ -254,4 +298,5 @@ module.exports = {
   DEFAULT_SAFETY_MARGIN_BYTES,
   _candidateFiles: candidateFiles,
   _verifyEntry: verifyEntry,
+  _inspectSqliteHeader: inspectSqliteHeader,
 };
