@@ -345,6 +345,7 @@ try
         // A process start event names the process before any of its traffic
         // is seen, which is the only way to name one that exits before its
         // first event is processed.
+        var aliveForLearn = true;
         var fromStart = new ProcessNameResolver(TimeSpan.FromMinutes(2), _ => null);
         fromStart.Observe(9001, @"\Device\HarddiskVolume4\Windows\System32\curl.exe", started);
         Assert(fromStart.Resolve(9001, now) == "curl",
@@ -353,17 +354,141 @@ try
         Assert(fromStart.Resolve(9001, started.AddMinutes(-1)) is null,
             "a start event does not name observations that predate the process");
 
+        // ProcessStart carries no image name, so the name has to be queried at
+        // that instant. This is the path that was silently doing nothing when
+        // it looked for a field the start event does not have.
+        var learned = new ProcessNameResolver(
+            TimeSpan.FromMinutes(2),
+            pid => pid == 5150 && aliveForLearn
+                ? new ProcessNameResolver.LiveProcess("installer", started)
+                : null);
+        learned.Learn(5150, started);
+        Assert(learned.ObservedStarts == 1, "a start event names the process by querying it while it is alive");
+        aliveForLearn = false;
+        Assert(learned.Resolve(5150, now) == "installer",
+            "the learned name survives the process that has since exited");
+
+        var missed = new ProcessNameResolver(TimeSpan.FromMinutes(2), _ => null);
+        missed.Learn(5151, started);
+        Assert(missed.ObservedStarts == 0, "a start for a process already gone teaches nothing");
+        Assert(missed.Resolve(5151, now) is null && missed.NeverSeenAfterStartup == 1,
+            "a process whose start was seen but could not be queried is classified after startup");
+        Assert(missed.NeverSeenAfterStartProbeMiss == 1 && missed.NeverSeenWithoutStartEvent == 0,
+            "a missed live query is distinguished from a lifecycle event that never arrived");
+
+        var noStartEvent = new ProcessNameResolver(TimeSpan.FromMinutes(2), _ => null);
+        Assert(noStartEvent.Resolve(5252, now) is null && noStartEvent.NeverSeenWithoutStartEvent == 1,
+            "a post-startup PID with no lifecycle event is classified separately");
+
+        var startupMiss = new ProcessNameResolver(TimeSpan.FromMinutes(2), _ => null, [6161]);
+        Assert(startupMiss.Resolve(6161, now) is null, "a process present at startup can remain nameless");
+        Assert(startupMiss.NeverSeen == 1 && startupMiss.NeverSeenAtStartup == 1
+            && startupMiss.NeverSeenAfterStartup == 0,
+            "never-seen observations identify the startup snapshot gap");
+        startupMiss.Learn(6161, started);
+        Assert(startupMiss.Resolve(6161, now) is null && startupMiss.NeverSeenAfterStartup == 1,
+            "a later lifecycle start removes a reused PID from the startup population");
+
         Assert(ProcessNameResolver.BareName(@"C:\Program Files\Vendor\app.exe") == "app",
             "a path becomes the bare name Process.ProcessName would give");
         Assert(ProcessNameResolver.BareName("svchost.exe") == "svchost", "an extension is dropped");
         Assert(ProcessNameResolver.BareName("") is null, "an empty image name is not a name");
 
-        Assert(new ProcessNameResolver().Resolve(0, now) is null, "PID 0 has no name");
+        var invalidPid = new ProcessNameResolver();
+        Assert(invalidPid.Resolve(0, now) is null && invalidPid.InvalidProcessId == 1,
+            "PID 0 has no name and is classified separately");
         Assert(new ProcessNameResolver().Resolve(Environment.ProcessId, now) is not null,
             "the running test process resolves through the real probe");
     }
 
-    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, and process-name retention");
+    // A process too short-lived for the ProcessStart callback's live query is
+    // held briefly. ProcessStop supplies the real image name; matching the
+    // create time prevents a reused PID from naming the wrong observation.
+    {
+        var now = DateTimeOffset.UtcNow;
+        NetworkObservation Observation(int pid) => new(now, pid, "TCP", "192.0.2.2", 5000,
+            "203.0.113.8", 443, 10, 0, ObservationLayer.Logical, null, "etw");
+        var deferred = new DeferredProcessObservations(TimeSpan.FromSeconds(2), capacity: 2);
+        Assert(deferred.TryDefer(Observation(7001), now.AddSeconds(-1), now), "nameless observation is deferred");
+        Assert(deferred.Complete(7001, now.AddSeconds(-2), "wrong").Count == 0,
+            "the same reused PID with a different start time cannot name it");
+        var recovered = deferred.Complete(7001, now.AddSeconds(-1), "curl");
+        Assert(recovered.Count == 1 && recovered[0].ProcessName == "curl",
+            "ProcessStop recovers the exact process observation");
+        Assert(deferred.Deferred == 1 && deferred.Recovered == 1 && deferred.Pending == 0,
+            "defer and recovery are visible in diagnostics");
+
+        Assert(deferred.TryDefer(Observation(7002), now, now), "a second observation is deferred");
+        var expired = deferred.Expire(now.AddSeconds(2));
+        Assert(expired.Count == 1 && expired[0].ProcessName is null && deferred.Expired == 1,
+            "an absent stop event releases the observation nameless after the bound");
+
+        Assert(deferred.TryDefer(Observation(7003), now, now), "capacity slot one is used");
+        Assert(deferred.TryDefer(Observation(7003), now, now), "capacity slot two is used");
+        Assert(!deferred.TryDefer(Observation(7003), now, now) && deferred.Overflow == 1,
+            "the bounded buffer refuses and counts overflow");
+        Assert(deferred.Drain().Count == 2 && deferred.Pending == 0,
+            "shutdown drains observations instead of losing them");
+
+        // ETW callbacks can be delayed by load even though their event times
+        // are close together. Expiry follows the event timeline, not callback
+        // wall time, and ProcessStop completion gets the first chance to name
+        // an observation at the boundary.
+        var delayed = new DeferredProcessObservations(TimeSpan.FromSeconds(10));
+        Assert(delayed.TryDefer(Observation(7004), now, now), "a delayed callback observation is deferred");
+        Assert(delayed.Expire(now.AddSeconds(9)).Count == 0,
+            "callback latency does not expire an observation before its event-time deadline");
+        Assert(delayed.Complete(7004, now, "worker").Single().ProcessName == "worker",
+            "a delayed ProcessStop still supplies the exact name before expiry");
+    }
+
+    // A rejection total says how much never reaches the Hub. Only the reason
+    // says what to fix: a name that could be recovered and a port that never
+    // can are indistinguishable in a single counter.
+    {
+        var reasonsDatabase = Path.Combine(directory, "reasons.db");
+        using var store = new ObservationStore(reasonsDatabase);
+        store.DeliveryEnabled = true;
+        var at = DateTimeOffset.UtcNow;
+        NetworkObservation Observation(string? name, int remotePort = 443, string remote = "203.0.113.7", int pid = 10) =>
+            new(at, pid, "TCP", "192.0.2.5", 5000, remote, remotePort, 1, 0,
+                ObservationLayer.Logical, null, "etw", name);
+
+        store.QueueForDelivery([
+            Observation("good"),
+            Observation(null),
+            Observation(""),
+            Observation("bad", remotePort: 0),
+            Observation("bad", remote: "not-an-address"),
+        ], at);
+
+        var counters = store.ReadCounters();
+        long Counter(string reason) => counters!.TryGetValue($"contract-rejected-{reason}", out var value) ? value : 0;
+        Assert(Counter("process-name") == 2, "a missing and an empty name are both counted as the name");
+        Assert(Counter("remote-port") == 1, "an out-of-range remote port is counted separately");
+        Assert(Counter("remote-address") == 1, "an unparseable remote address is counted separately");
+
+        Assert(store.ReadDeliveryStatus().ContractRejected == 4, "the total still counts every rejection");
+        Assert(store.ReadDeliveryStatus().Pending == 1, "the deliverable observation is still queued");
+        Assert(counters.Keys.All(key => !key.Contains("203.0.113.7", StringComparison.Ordinal)),
+            "reason counters name the failing part of the contract, never the value");
+        // An inbound multicast observation has no local address by design. It
+        // is named for what it is, so that a deliberate omission is not read as
+        // a malformed observation.
+        store.QueueForDelivery([
+            new NetworkObservation(at, 10, "UDP", "", 5353, "224.0.0.251", 5353, 0, 1,
+                ObservationLayer.Logical, null, "etw", "mdns"),
+        ], at);
+        counters = store.ReadCounters();
+        Assert(Counter("inbound-multicast-no-local-address") == 1,
+            "a deliberate omission is named as one, not as a malformed address");
+        Assert(Counter("local-address") == 0,
+            "the deliberate omission does not inflate the malformed-address count");
+        Assert(store.ReadDeliveryStatus().ContractRejected == 5,
+            "the deliberate omission is still counted in the total that says how much never arrives");
+    }
+
+    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, and rejection reasons");
     return 0;
 }
 finally

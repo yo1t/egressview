@@ -52,9 +52,30 @@ public sealed record CollectorSnapshot(
     long EtwEventsSeen = 0,
     long EtwEventsIgnored = 0,
     long InterfaceUnresolved = 0,
+    // Inbound group datagrams left out on purpose. Not a collection gap.
+    long InboundMulticastIgnored = 0,
     int EtwEventsLost = 0,
     string? CollectorError = null,
-    string? PersistenceError = null);
+    string? PersistenceError = null,
+    // How process names were arrived at. The counts say whether a nameless
+    // observation is recoverable (the process was there and we lost it) or
+    // not (it was already running before collection began).
+    long NamesFromStartEvents = 0,
+    long NamesFromCache = 0,
+    long NamesNeverSeen = 0,
+    long NamesNeverSeenAtStartup = 0,
+    long NamesNeverSeenAfterStartup = 0,
+    long NamesNeverSeenAfterStartProbeMiss = 0,
+    long NamesNeverSeenWithoutStartEvent = 0,
+    long NamesInvalidProcessId = 0,
+    long NamesExpired = 0,
+    long NamesPidReuseRejected = 0,
+    int NamesDeferredPending = 0,
+    long NamesDeferred = 0,
+    long NamesRecoveredFromStop = 0,
+    long NamesDeferredExpired = 0,
+    long NamesDeferredOverflow = 0,
+    string? ProcessNameSourceError = null);
 
 public enum StoreFailureKind
 {

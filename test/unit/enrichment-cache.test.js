@@ -89,6 +89,36 @@ describe('enrichment: RDAP cache persistence', () => {
       cleanupTmpDb();
     }
   });
+
+  it('既存のprivate IPのIANA組織名を消し、background refreshからも除外する', () => {
+    const dbPath = makeTmpDb();
+    try {
+      enrichment.initDb(dbPath);
+
+      const Database = require('better-sqlite3');
+      const db = new Database(dbPath);
+      db.prepare(`INSERT INTO rdap_cache (ip, country, org, expires)
+                  VALUES (?, ?, ?, ?)`).run(
+        '192.168.1.1', null, 'Internet Assigned Numbers Authority', Date.now() - 1000,
+      );
+      db.close();
+
+      const { staleIps } = enrichment.reopen();
+      const entry = enrichment.getRdapCache().get('192.168.1.1');
+      assert.equal(entry.country, null);
+      assert.equal(entry.org, null);
+      assert.ok(entry.expires > Date.now() + 50 * 365 * 24 * 60 * 60 * 1000);
+      assert.equal(staleIps.includes('192.168.1.1'), false);
+
+      const persisted = new Database(dbPath, { readonly: true });
+      const row = persisted.prepare('SELECT country, org, expires FROM rdap_cache WHERE ip = ?').get('192.168.1.1');
+      persisted.close();
+      assert.equal(row.org, null, 'misleading organization is removed from SQLite too');
+    } finally {
+      enrichment._initForTest();
+      cleanupTmpDb();
+    }
+  });
 });
 
 // ─── Geo cache persistence ───────────────────────────────────────────────────

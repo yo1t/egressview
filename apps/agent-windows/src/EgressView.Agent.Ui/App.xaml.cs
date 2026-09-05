@@ -21,6 +21,7 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        ThemeManager.ApplySystemTheme(Resources);
         activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationName);
         exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ExitName);
         instanceMutex = new Mutex(true, InstanceName, out var firstInstance);
