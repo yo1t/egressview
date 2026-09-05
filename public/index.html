@@ -736,9 +736,9 @@
               <p id="ai-model-pricing-status" class="settings-field-hint ai-model-pricing-status"></p>
             </div>
           </div>
-          <div class="ai-settings-actions">
+          <div class="settings-actions-row">
+            <button class="connect-btn ai-test-button" id="ai-test-btn" type="button" data-i18n="settings.ai.test">モデル取得・保存</button>
             <button class="connect-btn" id="ai-save-btn" type="button" data-i18n="settings.btn.save">保存</button>
-            <button class="connect-btn ai-test-button" id="ai-test-btn" type="button" data-i18n="settings.ai.test">接続確認・モデル取得</button>
           </div>
           <div class="settings-status" id="ai-status"></div>
           <p class="settings-field-hint ai-privacy-note" data-i18n="settings.ai.privacy">
@@ -782,7 +782,10 @@
             <span data-i18n="settings.backup.autoPrune">最低保持世代を守って古いバックアップを自動削除</span>
           </label>
           <p class="settings-field-hint" data-i18n="settings.backup.retentionSafety">通常バックアップ2世代と最新のmigrationバックアップ1世代は常に保護されます。</p>
-          <button class="connect-btn settings-form-top-12" id="backup-config-save" data-i18n="settings.btn.save">保存</button>
+          <div class="settings-actions-row settings-form-top-12">
+            <button class="connect-btn" id="backup-config-save" data-i18n="settings.btn.save">保存</button>
+            <button class="connect-btn" id="backup-create-btn" data-i18n="settings.backup.create">今すぐバックアップ</button>
+          </div>
           <div class="settings-status" id="backup-config-status"></div>
           <div class="backup-list-section">
             <label class="form-label" data-i18n="settings.backup.capacity">容量診断</label>
@@ -792,7 +795,6 @@
             <label class="form-label" data-i18n="settings.backup.list">バックアップ一覧</label>
             <div id="backup-list" class="backup-list"></div>
             <div class="backup-actions">
-              <button class="connect-btn" id="backup-create-btn" data-i18n="settings.backup.create">今すぐバックアップ</button>
               <label class="connect-btn backup-upload-label" data-i18n="settings.backup.upload">ファイルからリストア
                 <input type="file" id="backup-upload-input" class="is-hidden" accept=".db">
               </label>
