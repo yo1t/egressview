@@ -401,6 +401,36 @@ try
             "the running test process resolves through the real probe");
     }
 
+    // A process too short-lived for the ProcessStart callback's live query is
+    // held briefly. ProcessStop supplies the real image name; matching the
+    // create time prevents a reused PID from naming the wrong observation.
+    {
+        var now = DateTimeOffset.UtcNow;
+        NetworkObservation Observation(int pid) => new(now, pid, "TCP", "192.0.2.2", 5000,
+            "203.0.113.8", 443, 10, 0, ObservationLayer.Logical, null, "etw");
+        var deferred = new DeferredProcessObservations(TimeSpan.FromSeconds(2), capacity: 2);
+        Assert(deferred.TryDefer(Observation(7001), now.AddSeconds(-1), now), "nameless observation is deferred");
+        Assert(deferred.Complete(7001, now.AddSeconds(-2), "wrong").Count == 0,
+            "the same reused PID with a different start time cannot name it");
+        var recovered = deferred.Complete(7001, now.AddSeconds(-1), "curl");
+        Assert(recovered.Count == 1 && recovered[0].ProcessName == "curl",
+            "ProcessStop recovers the exact process observation");
+        Assert(deferred.Deferred == 1 && deferred.Recovered == 1 && deferred.Pending == 0,
+            "defer and recovery are visible in diagnostics");
+
+        Assert(deferred.TryDefer(Observation(7002), now, now), "a second observation is deferred");
+        var expired = deferred.Expire(now.AddSeconds(2));
+        Assert(expired.Count == 1 && expired[0].ProcessName is null && deferred.Expired == 1,
+            "an absent stop event releases the observation nameless after the bound");
+
+        Assert(deferred.TryDefer(Observation(7003), now, now), "capacity slot one is used");
+        Assert(deferred.TryDefer(Observation(7003), now, now), "capacity slot two is used");
+        Assert(!deferred.TryDefer(Observation(7003), now, now) && deferred.Overflow == 1,
+            "the bounded buffer refuses and counts overflow");
+        Assert(deferred.Drain().Count == 2 && deferred.Pending == 0,
+            "shutdown drains observations instead of losing them");
+    }
+
     // A rejection total says how much never reaches the Hub. Only the reason
     // says what to fix: a name that could be recovered and a port that never
     // can are indistinguishable in a single counter.
