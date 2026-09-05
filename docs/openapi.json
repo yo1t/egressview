@@ -853,7 +853,8 @@
                           "type": "string",
                           "enum": [
                             "network-extension",
-                            "libproc"
+                            "libproc",
+                            "etw"
                           ]
                         },
                         "confidence": {

@@ -42,7 +42,7 @@ const pruneRunner = new BackupPruneRunner({
   onSettled(job, internalError) {
     if (job.status === 'completed' && job.operation === 'execute') {
       const deleted = job.result?.deleted || [];
-      logger.info(`[backup] Cleanup ${job.id} completed: ${deleted.length} verified generation(s), ` +
+      logger.info(`[backup] Cleanup ${job.id} completed: ${deleted.length} old generation(s), ` +
                   `${job.result?.deletedBytes || 0} bytes released`);
       if (job.source === 'automatic-capacity') {
         createBackup({ capacityPruned: true }).catch(error => {

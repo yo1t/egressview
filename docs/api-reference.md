@@ -123,14 +123,14 @@ Create/detect bodies use `kind` (`yamaha` or `cisco`), `displayName`, `ip`, `use
 
 ## Backup and restore
 
-- `GET /api/backup/list` lists normal generations, retention settings, normal/pre-migration inventory, disk headroom, and next-migration readiness. Inventory entries are lightweight and report `integrity: "unchecked"` until a verified cleanup preview runs.
+- `GET /api/backup/list` lists normal generations, retention settings, normal/pre-migration inventory, disk headroom, and next-migration readiness. Inventory entries are metadata-only and report `integrity: "unchecked"`; complete integrity checks run when a backup is created and immediately before restore.
 - `POST /api/backup/create` creates and verifies a consistent SQLite snapshot.
 - `GET /api/backup/download/:name` downloads a named generation.
 - `POST /api/backup/restore` uses `{ "name": "..." }`.
 - `POST /api/backup/upload` accepts a raw SQLite file body up to 100 MB, not multipart form data. It streams into an owner-only temporary file and permits only one restore upload at a time; a concurrent request receives `409`.
 - `POST /api/backup/config` accepts positive `intervalHours`, `maxGenerations` (minimum 2), non-negative `maxBackupBytes` (`0` disables the storage cap), and boolean `autoPrune`. Auto-prune defaults to off.
-- `POST /api/backup/prune` accepts `{ "execute": false }` for a verified dry-run or `{ "execute": true }` for confirmed cleanup and returns `202` with a worker job. Integrity checks run outside the main event loop, so collection and HTTP remain responsive. Only one cleanup job may run; another request receives `409`.
-- `GET /api/backup/prune/:jobId` returns job status (`running`, `cancelling`, `timing_out`, `completed`, `cancelled`, `timed_out`, or `failed`), progress, and the completed plan/result. `DELETE /api/backup/prune/:jobId` requests safe cancellation. Cleanup always keeps two normal generations and the latest verified migration generation; corrupt, unverified, changed, and temporary files are never deleted.
+- `POST /api/backup/prune` accepts `{ "execute": false }` for a fast metadata-only dry-run or `{ "execute": true }` for confirmed cleanup and returns `202` with a worker job. Planning protects the latest two normal generations and latest migration generation, then performs a bounded SQLite header/page-geometry check on those restore points only. Only one cleanup job may run; another request receives `409`.
+- `GET /api/backup/prune/:jobId` returns job status (`running`, `cancelling`, `timing_out`, `completed`, `cancelled`, `timed_out`, or `failed`), progress, and the completed plan/result. `DELETE /api/backup/prune/:jobId` requests safe cancellation. Execution recomputes the plan and rechecks each candidate's logical size, allocated size, and modification time before deletion. Temporary files are never candidates, and cleanup is blocked if a protected restore point fails its fast safety check.
 
 ## Process health
 

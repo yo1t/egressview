@@ -61,6 +61,7 @@ describe('backup inventory', () => {
     assert.ok(result.entries.every(entry => entry.integrity === 'unchecked'));
     assert.ok(result.summary.dbSize > 0);
     assert.ok(result.summary.backupBytes > 0);
+    assert.ok(result.summary.logicalBackupBytes >= result.summary.backupBytes);
   });
 
   it('reports schema and integrity without exposing filesystem paths', () => {
@@ -92,12 +93,15 @@ describe('backup prune planning', () => {
 
     assert.equal(plan.candidates.filter(entry => entry.kind === 'normal').length, 2);
     assert.equal(plan.candidates.filter(entry => entry.kind === 'migration').length, 2);
-    assert.ok(plan.candidates.every(entry => entry.integrity === 'ok'));
+    assert.ok(plan.candidates.every(entry => entry.integrity === 'unchecked'));
+    assert.equal(plan.protectedRestorePoints.length, 3);
+    assert.ok(plan.protectedRestorePoints.every(entry => entry.header === 'ok'));
+    assert.equal(plan.safetyBlocked, false);
     assert.equal(plan.limits.minNormalGenerations, 2);
     assert.equal(plan.limits.minMigrationGenerations, 1);
   });
 
-  it('never proposes a corrupt backup for deletion or treats it as verified', () => {
+  it('blocks cleanup when a protected restore point fails the fast safety check', () => {
     const old = normal('egressview_2026-01-01_00-00-00.db');
     const middle = normal('egressview_2026-01-02_00-00-00.db');
     const newest = normal('egressview_2026-01-03_00-00-00.db');
@@ -110,8 +114,47 @@ describe('backup prune planning', () => {
 
     const plan = inventory.buildPrunePlan({ dbPath, backupDir, maxGenerations: 2 });
 
-    assert.deepEqual(plan.candidates.map(entry => entry.name), [path.basename(old)]);
-    assert.equal(plan.entries.find(entry => entry.name === path.basename(broken)).integrity, 'failed');
+    assert.deepEqual(plan.candidates.map(entry => entry.name), [path.basename(old), path.basename(middle)]);
+    assert.equal(plan.entries.find(entry => entry.name === path.basename(broken)).integrity, 'unchecked');
+    assert.equal(plan.protectedRestorePoints.find(entry => entry.name === path.basename(broken)).header, 'failed');
+    assert.equal(plan.safetyBlocked, true);
+    assert.equal(plan.blocked, true);
+    assert.throws(() => inventory.executePrune({ dbPath, backupDir, maxGenerations: 2 }),
+      /Protected restore point/);
+    assert.equal(inventory._candidateFiles(dbPath, backupDir).length, 4);
+  });
+
+  it('does not scan an old deletion candidate as a database', () => {
+    const broken = path.join(backupDir, 'egressview_2026-01-01_00-00-00.db');
+    fs.writeFileSync(broken, 'broken');
+    const middle = normal('egressview_2026-01-02_00-00-00.db');
+    const newest = normal('egressview_2026-01-03_00-00-00.db');
+    setTime(broken, 1);
+    setTime(middle, 2);
+    setTime(newest, 3);
+
+    const plan = inventory.buildPrunePlan({ dbPath, backupDir, maxGenerations: 2 });
+
+    assert.deepEqual(plan.candidates.map(entry => entry.name), [path.basename(broken)]);
+    assert.equal(plan.safetyBlocked, false);
+    assert.ok(plan.protectedRestorePoints.every(entry => entry.header === 'ok'));
+  });
+
+  it('plans large sparse generations without reading their contents', () => {
+    for (let index = 1; index <= 12; index += 1) {
+      const filePath = normal(`egressview_2026-02-${String(index).padStart(2, '0')}_00-00-00.db`);
+      fs.truncateSync(filePath, 4 * 1024 * 1024 * 1024);
+      setTime(filePath, index);
+    }
+
+    const started = performance.now();
+    const plan = inventory.buildPrunePlan({ dbPath, backupDir, maxGenerations: 2 });
+    const elapsedMs = performance.now() - started;
+
+    assert.equal(plan.candidates.length, 10);
+    assert.equal(plan.safetyBlocked, false);
+    assert.ok(elapsedMs < 1_000, `metadata-only planning took ${elapsedMs.toFixed(1)}ms`);
+    assert.ok(plan.summary.logicalBackupBytes > plan.summary.backupBytes);
   });
 
   it('uses names as a deterministic tie-breaker for equal timestamps', () => {
@@ -146,14 +189,15 @@ describe('backup prune planning', () => {
     assert.equal(plan.blocked, true);
   });
 
-  it('selects oldest verified generations until the storage cap is met', () => {
+  it('selects oldest generations until the physical storage cap is met', () => {
     const files = [];
     for (let index = 1; index <= 4; index += 1) {
       const filePath = normal(`egressview_2026-01-0${index}_00-00-00.db`);
       setTime(filePath, index);
       files.push(filePath);
     }
-    const oneGeneration = fs.statSync(files[0]).size;
+    const stats = fs.statSync(files[0]);
+    const oneGeneration = Number.isFinite(stats.blocks) ? stats.blocks * 512 : stats.size;
 
     const plan = inventory.buildPrunePlan({
       dbPath,
@@ -167,7 +211,7 @@ describe('backup prune planning', () => {
     assert.ok(plan.summary.projectedBackupBytes <= oneGeneration * 3);
   });
 
-  it('uses safe candidates for migration headroom but never crosses retention floors', () => {
+  it('uses old candidates for migration headroom but never crosses retention floors', () => {
     for (let index = 1; index <= 4; index += 1) {
       const filePath = normal(`egressview_2026-01-0${index}_00-00-00.db`);
       setTime(filePath, index);
@@ -187,7 +231,7 @@ describe('backup prune planning', () => {
 });
 
 describe('backup prune execution', () => {
-  it('does not change files during dry-run and removes only reverified candidates', () => {
+  it('does not change files during dry-run and removes only recomputed candidates', () => {
     for (let index = 1; index <= 4; index += 1) {
       const filePath = normal(`egressview_2026-01-0${index}_00-00-00.db`);
       setTime(filePath, index);

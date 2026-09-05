@@ -123,14 +123,14 @@ EgressViewには、Yamaha/Ciscoを混在して最大10台登録できます。
 
 ## Backupとrestore
 
-- `GET /api/backup/list`は通常generation、保持設定、通常／pre-migration inventory、ディスク余力、次回migration準備状態を返します。軽量inventoryでは、検証付きcleanup previewを実行するまで`integrity: "unchecked"`です。
+- `GET /api/backup/list`は通常generation、保持設定、通常／pre-migration inventory、ディスク余力、次回migration準備状態を返します。inventoryはメタデータのみを読み、`integrity: "unchecked"`を返します。完全な整合性検査はバックアップ作成時とリストア直前に実行します。
 - `POST /api/backup/create`は整合性のあるSQLite snapshotを作成・検証します。
 - `GET /api/backup/download/:name`は指定generationをdownloadします。
 - `POST /api/backup/restore`は`{ "name": "..." }`を使います。
 - `POST /api/backup/upload`はmultipartではなく、最大100 MBのSQLite fileをraw bodyで受け取ります。owner限定の一時fileへstreamし、restore uploadは同時1件だけを許可します。重複要求には`409`を返します。
 - `POST /api/backup/config`は正の`intervalHours`、2以上の`maxGenerations`、0以上の`maxBackupBytes`（`0`は上限無効）、booleanの`autoPrune`を受け取ります。自動pruneは既定で無効です。
-- `POST /api/backup/prune`は`{ "execute": false }`で検証付きdry-run、`{ "execute": true }`で確認済みcleanupを開始し、worker jobを含む`202`を返します。整合性検証はmain event loop外で動作するため、収集とHTTP応答を継続します。同時実行は1件だけで、重複要求には`409`を返します。
-- `GET /api/backup/prune/:jobId`はjob状態（`running`、`cancelling`、`timing_out`、`completed`、`cancelled`、`timed_out`、`failed`）、進捗、完了後の計画／結果を返します。`DELETE /api/backup/prune/:jobId`は安全なcancelを要求します。通常2世代と最新の検証済みmigration世代を常に残し、破損・未検証・変更済み・一時ファイルは削除しません。
+- `POST /api/backup/prune`は`{ "execute": false }`で高速なメタデータのみのdry-run、`{ "execute": true }`で確認済みcleanupを開始し、worker jobを含む`202`を返します。計画時は最新の通常2世代とmigration 1世代を保護し、その復元点だけSQLiteヘッダーとページ構造を定時間で確認します。同時実行は1件だけで、重複要求には`409`を返します。
+- `GET /api/backup/prune/:jobId`はjob状態（`running`、`cancelling`、`timing_out`、`completed`、`cancelled`、`timed_out`、`failed`）、進捗、完了後の計画／結果を返します。`DELETE /api/backup/prune/:jobId`は安全なcancelを要求します。実行時は計画を再作成し、削除直前に候補の論理サイズ、割当サイズ、更新時刻を再照合します。一時ファイルは候補にせず、保護対象の復元点が軽量安全確認に失敗した場合は削除を停止します。
 
 ## プロセスhealth
 
