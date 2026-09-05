@@ -24,7 +24,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private Dictionary<string, InterfaceInfo> interfaces = new(StringComparer.OrdinalIgnoreCase);
     private TraceEventSession? session;
     private Task? processing;
-    private long eventsSeen, eventsIgnored, interfaceUnresolved;
+    private long eventsSeen, eventsIgnored, interfaceUnresolved, inboundMulticastIgnored;
     private string? error;
     private string? processNameSourceError;
 
@@ -39,6 +39,11 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     public long EventsSeen => Interlocked.Read(ref eventsSeen);
     public long EventsIgnored => Interlocked.Read(ref eventsIgnored);
     public long InterfaceUnresolved => Interlocked.Read(ref interfaceUnresolved);
+    /// Inbound group datagrams, dropped before storage. Counted rather
+    /// than discarded quietly: the number says how much is being left out
+    /// on purpose, so the choice stays visible instead of looking like a
+    /// collection gap.
+    public long InboundMulticastIgnored => Interlocked.Read(ref inboundMulticastIgnored);
     public int EventsLost { get; private set; }
     public string? Error => error;
     /// Why process start events are unavailable, when they are. Network
@@ -90,6 +95,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         EtwEventsSeen = EventsSeen,
         EtwEventsIgnored = EventsIgnored,
         InterfaceUnresolved = InterfaceUnresolved,
+        InboundMulticastIgnored = InboundMulticastIgnored,
         EtwEventsLost = EventsLost,
         CollectorError = Error,
         NamesFromStartEvents = processNames.ObservedStarts,
@@ -168,10 +174,22 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             (localAddress, localPort, remoteAddress, remotePort, localInterface) = (destinationAddress, destinationPort, sourceAddress, sourcePort, destinationInterface);
         else if (sourceMulticast || destinationMulticast)
         {
-            var received = direction == Direction.Receive;
-            (localAddress, localPort, remoteAddress, remotePort, localInterface) = received
-                ? ("", destinationPort, sourceAddress, sourcePort, null)
-                : (sourceAddress, sourcePort, destinationAddress, destinationPort, sourceInterface);
+            // An inbound group datagram is another device announcing itself.
+            // It is not this machine sending anything, which is what this
+            // product watches. It also names the sender and the group but not
+            // the interface that received it, so it has no local address and
+            // can never satisfy the Hub's contract -- it would be stored and
+            // then dropped, every time.
+            //
+            // Outbound multicast is a different thing and is kept: this
+            // machine announcing itself is traffic it sent.
+            if (direction == Direction.Receive)
+            {
+                Interlocked.Increment(ref inboundMulticastIgnored);
+                return;
+            }
+            (localAddress, localPort, remoteAddress, remotePort, localInterface) =
+                (sourceAddress, sourcePort, destinationAddress, destinationPort, sourceInterface);
         }
         else
         {

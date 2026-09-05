@@ -52,6 +52,8 @@ public sealed record CollectorSnapshot(
     long EtwEventsSeen = 0,
     long EtwEventsIgnored = 0,
     long InterfaceUnresolved = 0,
+    // Inbound group datagrams left out on purpose. Not a collection gap.
+    long InboundMulticastIgnored = 0,
     int EtwEventsLost = 0,
     string? CollectorError = null,
     string? PersistenceError = null,
