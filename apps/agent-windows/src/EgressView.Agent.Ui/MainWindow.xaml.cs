@@ -115,11 +115,25 @@ public partial class MainWindow : Window
             var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"status"}""");
             Output.Text = IpcResponsePresenter.Present(response);
             using var document = JsonDocument.Parse(response);
+            var healthy = document.RootElement.GetProperty("data").GetProperty("health").GetProperty("status").GetString() == "healthy";
+            SetMonitoringState(healthy);
             loadingDeliveryState = true;
             DeliveryEnabled.IsChecked = document.RootElement.GetProperty("data").GetProperty("deliveryEnabled").GetBoolean();
             loadingDeliveryState = false;
         }
-        catch (Exception exception) { Output.Text = $"Agentに接続できません / Cannot connect to Agent\r\n{exception.Message}"; }
+        catch (Exception exception)
+        {
+            SetMonitoringState(false);
+            Output.Text = $"Agentに接続できません / Cannot connect to Agent\r\n{exception.Message}";
+        }
+    }
+
+    private void SetMonitoringState(bool healthy)
+    {
+        MonitoringStatus.Text = healthy ? "監視中 / Monitoring" : "要確認 / Needs attention";
+        MonitoringStatus.Foreground = (System.Windows.Media.Brush)FindResource(healthy ? "SuccessBrush" : "ErrorBrush");
+        MonitoringDot.Fill = MonitoringStatus.Foreground;
+        MonitoringBadge.Background = (System.Windows.Media.Brush)FindResource(healthy ? "SuccessSoftBrush" : "ErrorSoftBrush");
     }
 
     internal static string EnrollmentMessage(string reason) => reason switch
