@@ -438,6 +438,37 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    public IReadOnlyList<RecentFlow> ReadRecentFlows(int limit, int offset = 0)
+    {
+        if (limit is not (50 or 100 or 200 or 500)) throw new ArgumentOutOfRangeException(nameof(limit));
+        if (offset is < 0 or > 1_000_000) throw new ArgumentOutOfRangeException(nameof(offset));
+        lock (gate)
+        {
+            const string columns = "first_seen,last_seen,protocol,local_address,local_port,remote_address,remote_port,process_id,process_name,bytes_sent,bytes_received,layer,interface_id,origin";
+            var sql = $"SELECT {columns} FROM flows ORDER BY last_seen DESC,flow_key LIMIT {limit} OFFSET {offset}";
+            CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+            var result = new List<RecentFlow>();
+            try
+            {
+                while (true)
+                {
+                    var code = WinSqlite.Step(statement);
+                    if (code == WinSqlite.Done) break;
+                    CheckQueryRow(code);
+                    result.Add(new RecentFlow(
+                        DateTimeOffset.Parse(Text(statement, 0)), DateTimeOffset.Parse(Text(statement, 1)),
+                        Text(statement, 2), Text(statement, 3), (int)WinSqlite.ColumnInt64(statement, 4),
+                        Text(statement, 5), (int)WinSqlite.ColumnInt64(statement, 6), (int)WinSqlite.ColumnInt64(statement, 7),
+                        NullableTextValue(statement, 8), NullableInt64(statement, 9), NullableInt64(statement, 10),
+                        Text(statement, 11) == "vpn_transport" ? ObservationLayer.VpnTransport : ObservationLayer.Logical,
+                        NullableTextValue(statement, 12), Text(statement, 13)));
+                }
+            }
+            finally { WinSqlite.Finalize(statement); }
+            return result;
+        }
+    }
+
     private string ScalarText(string sql)
     {
         CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
@@ -455,6 +486,7 @@ public sealed partial class ObservationStore : IDisposable
     }
 
     private static void Bind(nint statement, int index, string value) => Check(WinSqlite.BindText(statement, index, value, -1, new nint(-1)));
+    private static string? NullableTextValue(nint statement, int column) => WinSqlite.ColumnType(statement, column) == 5 ? null : Text(statement, column);
     private static void BindNullable(nint statement, int index, long? value) => Check(value is null ? WinSqlite.BindNull(statement, index) : WinSqlite.BindInt64(statement, index, value.Value));
     private static void BindNullable(nint statement, int index, string? value) { if (value is null) Check(WinSqlite.BindNull(statement, index)); else Bind(statement, index, value); }
     private void CheckDone(int code) { if (code != WinSqlite.Done) throw Failure(code, CurrentError()); }

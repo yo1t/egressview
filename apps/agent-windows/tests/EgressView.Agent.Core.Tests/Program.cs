@@ -26,6 +26,11 @@ try
         Assert(inspection.Count == 20, "restart preserves all observations");
         Assert(inspection.Integrity == "ok", "integrity check is ok");
         Assert(reopened.ReadProcessNameStats() == (20, 0), "process names survive restart");
+        var recent = reopened.ReadRecentFlows(50);
+        Assert(recent.Count == 20 && recent.All(flow => flow.ProcessName == "TestApp"),
+            "bounded recent flows expose persisted process identity to the local UI");
+        Assert(reopened.ReadRecentFlows(50, 10).Count == 10,
+            "recent flow pagination supports complete bounded CSV export");
 
         var report = DiagnosticsReport.Create(
             new CollectorSnapshot("healthy", 20, 20, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 32),
@@ -61,6 +66,18 @@ try
     var ipcSummary = IpcProtocol.Handle("""{"v":1,"op":"summary","days":7}""", () => "{}", days =>
         [new HourlySummary(DateTimeOffset.UtcNow, "TCP", ObservationLayer.Logical, days, 1, 2, 0)]);
     Assert(ipcSummary.Contains("\"days\":7", StringComparison.Ordinal), "IPC permits only fixed 7-day summary");
+    var recentResponse = IpcProtocol.Handle("""{"v":1,"op":"recent-flows","limit":100}""", () => "{}", _ => [],
+        recentFlows: (limit, offset) => [new RecentFlow(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "TCP", "10.0.0.1", 50000,
+            "203.0.113.8", 443, 42, "Browser", 10, 20, ObservationLayer.Logical, "if", "etw")]);
+    Assert(recentResponse.Contains("203.0.113.8", StringComparison.Ordinal), "IPC returns bounded recent flow data to the authenticated UI");
+    Assert(IpcProtocol.Handle("""{"v":1,"op":"recent-flows","limit":101}""", () => "{}", _ => [], recentFlows: (_, _) => []).Contains("invalid-limit", StringComparison.Ordinal),
+        "IPC rejects arbitrary recent flow limits");
+    Assert(IpcProtocol.Handle("""{"v":1,"op":"recent-flows","limit":500,"offset":-1}""", () => "{}", _ => [], recentFlows: (_, _) => []).Contains("invalid-offset", StringComparison.Ordinal),
+        "IPC rejects invalid pagination offsets");
+    var csv = ObservationCsv.Export([new RecentFlow(DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, "TCP", "::1", 50000,
+        "203.0.113.8", 443, 42, "Browser, \"Beta\"", null, 20, ObservationLayer.Logical, null, "etw")]);
+    Assert(csv.Contains("\"Browser, \"\"Beta\"\"\"", StringComparison.Ordinal) && csv.EndsWith("\r\n", StringComparison.Ordinal),
+        "CSV follows RFC 4180 quoting and ends with a record separator");
     Assert(IpcProtocol.Handle("""{"v":99,"op":"status"}""", () => "{}", _ => []).Contains("version-mismatch", StringComparison.Ordinal),
         "IPC rejects unknown protocol version");
     var rejectedOperation = IpcProtocol.Handle("""{"v":1,"op":"read_file","path":"C:\\\\Windows\\\\win.ini"}""", () => "{}", _ => []);

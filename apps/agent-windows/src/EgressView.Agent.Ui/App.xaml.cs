@@ -15,6 +15,7 @@ public partial class App : System.Windows.Application
     private EventWaitHandle? exitEvent;
     private RegisteredWaitHandle? exitRegistration;
     private Forms.NotifyIcon? trayIcon;
+    internal LocalNotificationService Notifications { get; } = new();
 
     internal bool IsExiting { get; private set; }
 
@@ -22,6 +23,7 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
         ThemeManager.ApplySystemTheme(Resources);
+        LocalizationManager.Apply(Resources);
         activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationName);
         exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ExitName);
         instanceMutex = new Mutex(true, InstanceName, out var firstInstance);
@@ -72,6 +74,9 @@ public partial class App : System.Windows.Application
         };
         trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowMainWindow);
     }
+
+    internal void ShowNotification(string title, string body) =>
+        trayIcon?.ShowBalloonTip(5_000, title, body, Forms.ToolTipIcon.Info);
 
     private void ShowMainWindow()
     {
