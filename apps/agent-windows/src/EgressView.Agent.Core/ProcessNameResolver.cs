@@ -31,19 +31,23 @@ public sealed class ProcessNameResolver
     private const int MaxEntries = 8192;
 
     private readonly ConcurrentDictionary<int, Entry> cache = new();
+    private readonly ConcurrentDictionary<int, byte> processesPresentAtStartup;
     private readonly TimeSpan retention;
     private readonly Func<int, LiveProcess?> probe;
 
     private long cacheHits, liveLookups, expired, pidReuseRejected, observedStarts, neverSeen;
+    private long neverSeenAtStartup, neverSeenAfterStartup, invalidProcessId;
 
-    public ProcessNameResolver() : this(DefaultRetention, ProbeLiveProcess) { }
+    public ProcessNameResolver() : this(DefaultRetention, ProbeLiveProcess, SnapshotProcessIds()) { }
 
     /// The probe is injectable so the reuse and expiry rules can be tested
     /// without waiting for real processes to start and exit.
-    public ProcessNameResolver(TimeSpan retention, Func<int, LiveProcess?> probe)
+    public ProcessNameResolver(TimeSpan retention, Func<int, LiveProcess?> probe, IEnumerable<int>? startupProcessIds = null)
     {
         this.retention = retention;
         this.probe = probe;
+        processesPresentAtStartup = new ConcurrentDictionary<int, byte>(
+            (startupProcessIds ?? []).Where(pid => pid > 0).Select(pid => new KeyValuePair<int, byte>(pid, 0)));
     }
 
     /// A process as it exists right now. StartedAt is absent when the process
@@ -62,6 +66,14 @@ public sealed class ProcessNameResolver
     /// received a start event for. Nothing can name these: the process was
     /// already running when collection began, or its start was missed.
     public long NeverSeen => Interlocked.Read(ref neverSeen);
+    /// Nameless observations whose PID existed when this resolver started.
+    /// These identify the startup-snapshot gap without exposing the PID.
+    public long NeverSeenAtStartup => Interlocked.Read(ref neverSeenAtStartup);
+    /// Nameless observations whose PID was absent at startup. These point to
+    /// a missed lifecycle event or a process that exited before probing.
+    public long NeverSeenAfterStartup => Interlocked.Read(ref neverSeenAfterStartup);
+    /// Observations carrying PID zero or another unusable process identifier.
+    public long InvalidProcessId => Interlocked.Read(ref invalidProcessId);
     public int Cached => cache.Count;
 
     /// <param name="observedAt">
@@ -71,7 +83,11 @@ public sealed class ProcessNameResolver
     /// </param>
     public string? Resolve(int processId, DateTimeOffset observedAt)
     {
-        if (processId <= 0) return null;
+        if (processId <= 0)
+        {
+            Interlocked.Increment(ref invalidProcessId);
+            return null;
+        }
 
         var live = SafeProbe(processId);
         if (live is { } running)
@@ -91,6 +107,10 @@ public sealed class ProcessNameResolver
             // from an expired entry is what separates "started before we did"
             // from "we forgot", and those need different fixes.
             Interlocked.Increment(ref neverSeen);
+            if (processesPresentAtStartup.ContainsKey(processId))
+                Interlocked.Increment(ref neverSeenAtStartup);
+            else
+                Interlocked.Increment(ref neverSeenAfterStartup);
             return null;
         }
 
@@ -127,6 +147,7 @@ public sealed class ProcessNameResolver
     public void Observe(int processId, string? imageName, DateTimeOffset startedAt)
     {
         if (processId <= 0) return;
+        processesPresentAtStartup.TryRemove(processId, out _);
         var name = Sanitize(BareName(imageName));
         if (name is null) return;
         Interlocked.Increment(ref observedStarts);
@@ -144,6 +165,10 @@ public sealed class ProcessNameResolver
     public void Learn(int processId, DateTimeOffset startedAt)
     {
         if (processId <= 0) return;
+        // Seeing a start proves this use of the PID is not the process that
+        // was present in the initial snapshot, even if it exits before the
+        // live-process query completes.
+        processesPresentAtStartup.TryRemove(processId, out _);
         if (SafeProbe(processId) is not { } running) return;
         var name = Sanitize(running.Name);
         if (name is null) return;
@@ -204,6 +229,19 @@ public sealed class ProcessNameResolver
             return new LiveProcess(process.ProcessName, startedAt);
         }
         catch (Exception) { return null; }
+    }
+
+    private static IEnumerable<int> SnapshotProcessIds()
+    {
+        try
+        {
+            return Process.GetProcesses().Select(process =>
+            {
+                try { return process.Id; }
+                finally { process.Dispose(); }
+            }).ToArray();
+        }
+        catch (Exception) { return []; }
     }
 
     private static string? Sanitize(string? name) =>

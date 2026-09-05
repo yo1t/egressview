@@ -36,6 +36,7 @@ const inFlightRdap  = new Map(); // ip → Promise  (in-flight dedupe)
 let rdapGeneration  = 0;         // incremented on each reopen() to invalidate stale in-flight Promise writes
 const RDAP_TTL_MS   = 30 * 24 * 60 * 60 * 1000; // 30 days
 const RDAP_FAIL_TTL = 60 * 60 * 1000;       // 60min retry on failure
+const RDAP_PERMANENT_TTL = 100 * 365 * 24 * 60 * 60 * 1000;
 
 const geoCache    = new Map(); // ip → {lat, lon, city, countryCode, expires}
 const GEO_TTL_MS       = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -129,7 +130,22 @@ function initDb(dbPath) {
     }
   }
   if (upgraded > 0) logger.info(`[enrichment] ${upgraded} private IP geo entries upgraded to permanent TTL`);
-  return { staleIps };
+
+  // Older router paths sent RFC1918 destinations to ARIN, which returned the
+  // reservation for the whole block (usually IANA). Replace those misleading
+  // organization records during load so the fixed lookup path takes effect
+  // immediately rather than waiting up to 30 days for expiry.
+  let rdapUpgraded = 0;
+  for (const row of rdapRows) {
+    if (isNonPublicIp(row.ip)) {
+      const entry = { country: null, org: null, expires: privUpgradeNow + RDAP_PERMANENT_TTL };
+      rdapCache.set(row.ip, entry);
+      stmtUpsertRdap.run({ ip: row.ip, country: null, org: null, expires: entry.expires });
+      rdapUpgraded++;
+    }
+  }
+  if (rdapUpgraded > 0) logger.info(`[enrichment] ${rdapUpgraded} non-public RDAP entries cleared`);
+  return { staleIps: staleIps.filter(ip => !isNonPublicIp(ip)) };
 }
 
 function reopen() {
@@ -395,6 +411,15 @@ async function _doLookupRdap(ip, generation = rdapGeneration) {
 async function lookupRdap(ip) {
   if (_offline?.allows && !_offline.allows('rdap')) return null;
   const now = Date.now();
+  // This is the trust boundary shared by router, Agent and investigation
+  // callers. A caller-side check can be forgotten; the public RDAP client
+  // itself must never receive private, loopback, link-local or multicast IPs.
+  if (isNonPublicIp(ip)) {
+    const internal = { country: null, org: null, expires: now + RDAP_PERMANENT_TTL };
+    rdapCache.set(ip, internal);
+    _persistRdap(ip, internal);
+    return internal;
+  }
   const cached = rdapCache.get(ip);
   if (cached && now < cached.expires) return cached;  // cache hit: return immediately, no Map write
 
