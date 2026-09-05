@@ -98,10 +98,24 @@
     font-family: inherit; font-size: 12px; transition: border-color 0.15s; outline: none;
   }
   .form-input:focus { border-color: var(--accent); }
+  /* Three sizes, and no others: primary 36px, secondary 32px, in-list 28px.
+     Measured 2026-09-05 before this change: 67 visible buttons across the
+     settings screens carried 11 distinct heights, 4 font sizes and 7 paddings,
+     and .connect-btn alone appeared at nine different heights because every
+     screen's own class overrode the padding and font size it sets.
+
+     Height comes from min-height rather than padding, so a label that wraps no
+     longer changes the size of the control -- that is what rendered the AI
+     screen's save button at 59px while the same button elsewhere was 39px. */
   .connect-btn {
-    width: 100%; padding: 10px; margin-top: 8px;
+    /* flex, not inline-flex: inline-level boxes shrink to their content, which
+       collapsed every full-width button to about 32px and wrapped the label
+       down the page. */
+    width: 100%; min-height: 36px; padding: 8px 16px; margin-top: 8px;
+    display: flex; align-items: center; justify-content: center;
     background: var(--accent); border: none; border-radius: 8px;
     color: #fff; font-family: inherit; font-size: 13px; font-weight: 600;
+    line-height: 1.3;
     cursor: pointer; transition: background 0.15s, opacity 0.15s;
   }
   .connect-btn:hover { background: #2563eb; }
@@ -154,9 +168,17 @@
   .settings-agent-details { display: grid; flex: 1; gap: 2px; min-width: 0; }
   .settings-agent-host { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
   .settings-agent-revoked { color: var(--red); font-size: 10px; }
-  .settings-session-revoke-all { width: auto; padding: 5px 14px; margin-top: 8px; font-size: 10px; background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .settings-session-revoke-all { width: auto; min-height: 32px; padding: 6px 14px; margin-top: 8px; font-size: 12px; background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  /* Action rows: the same layout everywhere, so the same button is the same
+     width. Measured 2026-09-05: every action row sat in a 334px parent, yet
+     Save rendered at 61, 120, 162, 163 and 334px because each screen brought
+     its own row -- flex here, a 1fr 1fr grid there, a plain block elsewhere.
+     Two shapes cover every case already present: buttons share the row
+     equally, or they take their content width with a floor. */
+  .settings-actions-row { display: flex; gap: 8px; }
+  .settings-actions-row > .connect-btn { flex: 1 1 0; width: auto; min-width: 120px; }
   .settings-security-actions { display: flex; gap: 8px; }
-  .settings-security-actions .connect-btn { width: auto; min-width: 120px; }
+  .settings-security-actions .connect-btn { flex: 1 1 0; width: auto; min-width: 120px; }
   .settings-audit-list { max-height: 220px; overflow: auto; font-size: 10px; }
   .settings-audit-row {
     display: grid; grid-template-columns: minmax(120px, 1fr) 64px 70px 116px;
@@ -188,7 +210,7 @@
      page as the list below it grows. */
   .settings-subsection-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .settings-subsection-heading .settings-subsection-title { margin-bottom: 8px; }
-  .settings-inline-button { width: auto; padding: 6px 16px; }
+  .settings-inline-button { width: auto; min-height: 32px; padding: 6px 16px; }
   .token-regenerate-btn { background: transparent; border: 1px solid var(--red, #f87171); color: var(--red, #f87171); }
   .settings-copy-section { margin-bottom: 12px; }
   .settings-copy-left { padding-left: 22px; }
@@ -210,6 +232,10 @@
   .manual-threat-result dt { color: var(--muted); }
   .manual-threat-result dd { margin: 0; overflow-wrap: anywhere; }
   .ai-settings-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  /* One line, like every other action row: this label is long enough to wrap,
+     which grew the control to 52px while the same button elsewhere was 36px. */
+  .ai-settings-actions .connect-btn { width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ai-settings-actions .connect-btn > * { min-width: 0; }
   .ai-test-button { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
   .ai-test-button:hover { background: rgba(59,130,246,.12); }
   .ai-key-clear { margin-top: 7px; font-size: 9px; color: var(--muted); }
@@ -220,9 +246,9 @@
   .ai-model-pricing-status.is-priced { color: var(--green); }
   .ai-model-pricing-status.is-unpriced { color: #fbbf24; }
   .settings-subsection-title-wide { margin-bottom: 12px; }
-  .slack-small-button { padding: 5px 12px; width: auto; }
-  .slack-verify-button { margin-top: 6px; font-size: 10px; }
-  .slack-lookup-button { white-space: nowrap; font-size: 9px; flex-shrink: 0; }
+  .slack-small-button { width: auto; min-height: 32px; padding: 6px 14px; font-size: 12px; }
+  .slack-verify-button { margin-top: 6px; }
+  .slack-lookup-button { white-space: nowrap; flex-shrink: 0; }
   .slack-info { display: none; font-size: 10px; margin-top: 4px; }
   .slack-info.is-visible { display: block; }
   .slack-info.ok { color: var(--green); }
@@ -232,6 +258,7 @@
   .slack-create-wrap { margin-top: 12px; }
   .slack-create-link { font-size: 10px; color: var(--accent); text-decoration: none; }
   .slack-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .slack-actions > .connect-btn { flex: 1 1 0; width: auto; min-width: 120px; }
   .slack-test-button { background: transparent; border-color: var(--accent); color: var(--accent); }
   .backup-list-section { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; }
   .backup-list { font-size: 11px; color: var(--muted); margin: 8px 0; max-height: 150px; overflow-y: auto; }
@@ -239,7 +266,7 @@
   .backup-upload-label { cursor: pointer; }
   .backup-list-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--border); }
   .backup-list-label { flex: 1; }
-  .backup-list-button { font-size: 9px; padding: 2px 6px; }
+  .backup-list-button { min-height: 28px; padding: 4px 10px; font-size: 12px; }
   .backup-capacity-status { display: block; margin: 7px 0; white-space: pre-line; }
   .datasource-copy { margin-bottom: 16px; }
   .settings-divider-compact { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
@@ -258,7 +285,7 @@
   .router-card-name { font-size: 12px; font-weight: 700; }
   .router-card-meta { color: var(--muted); font-size: 10px; margin-top: 3px; }
   .router-card-actions { display: flex; gap: 5px; }
-  .router-icon-btn { background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; cursor: pointer; font-family: inherit; }
+  .router-icon-btn { min-height: 28px; background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; cursor: pointer; font-family: inherit; }
   .router-icon-btn:hover { border-color: var(--accent); color: var(--text); }
   .router-add-btn { margin-top: 10px; background: transparent; border: 1px dashed var(--accent); color: var(--accent); }
   .router-add-btn:hover { background: rgba(59,130,246,.1); }
@@ -451,7 +478,7 @@
   .ai-eyebrow { color: #38bdf8; font-size: 10px; font-weight: 800; letter-spacing: 0.18em; }
   .ai-hero h2 { margin: 5px 0 4px; font-size: clamp(24px, 4vw, 42px); letter-spacing: -0.04em; }
   .ai-hero p { margin: 0; color: var(--muted); font-size: 12px; }
-  .ai-refresh { border: 1px solid rgba(56,189,248,0.4); border-radius: 999px; padding: 7px 16px; color: #7dd3fc; background: rgba(14,165,233,0.08); cursor: pointer; }
+  .ai-refresh { min-height: 32px; border: 1px solid rgba(56,189,248,0.4); border-radius: 8px; padding: 6px 16px; font-size: 12px; color: #7dd3fc; background: rgba(14,165,233,0.08); cursor: pointer; }
   .ai-refresh:hover { background: rgba(14,165,233,0.16); }
   .ai-period { margin-top: 4px; color: var(--muted); font-size: 11px; }
   .ai-collection { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; max-width: 1180px; width: 100%; margin: 0 auto; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(17,24,39,0.72); font-size: 11px; }
@@ -491,7 +518,7 @@
   .ai-analysis { display: flex; align-items: flex-start; gap: 16px; max-width: 1180px; width: 100%; margin: 2px auto 0; padding: 24px; border: 1px solid rgba(56,189,248,0.32); border-radius: 14px; background: linear-gradient(135deg, rgba(14,165,233,0.08), rgba(17,24,39,0.82)); }
   .ai-analysis-body { min-width: 0; flex: 1; }
   .ai-analysis-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
-  .ai-analysis-cancel { border: 0; color: #fca5a5; background: transparent; cursor: pointer; }
+  .ai-analysis-cancel { min-height: 32px; padding: 6px 14px; border: 1px solid rgba(252,165,165,0.4); border-radius: 8px; font-size: 12px; color: #fca5a5; background: transparent; cursor: pointer; }
   .ai-analysis-cancel.is-hidden { display: none; }
   .ai-analysis-meta { color: var(--muted); font-size: 10px; }
   .ai-analysis-result { min-height: 80px; margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 10px; background: rgba(3,7,18,0.55); color: var(--text); font: 12px/1.75 inherit; }
@@ -537,6 +564,9 @@
   .ai-notification-fieldset .ai-notification-grid { flex-basis: 100%; margin-top: 2px; }
   .ai-notification-consent { display: flex; align-items: flex-start; gap: 8px; margin-top: 18px; color: var(--muted); font-size: 10px; line-height: 1.5; }
   .ai-notification-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  /* Not flex: 1 -- this row mixes buttons with status text, so the buttons take
+     their content width with the same floor the other rows use. */
+  .ai-notification-actions > button { width: auto; min-width: 120px; }
   .ai-notification-history { margin-top: 20px; }
   .ai-notification-event { padding: 10px 12px; border-top: 1px solid var(--border); }
   .ai-notification-event strong, .ai-notification-event span { display: block; }
@@ -624,7 +654,7 @@
   .beacon-cov-low  { color: #4ade80; font-weight: 700; }
   .beacon-cov-mid  { color: #fbbf24; font-weight: 700; }
   .beacon-cov-high { color: #f97316; font-weight: 700; }
-  .beacon-dismiss-btn { font-size: 10px; padding: 2px 7px; border-radius: 3px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
+  .beacon-dismiss-btn { min-height: 28px; padding: 4px 10px; font-size: 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
   .beacon-dismiss-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
 
   .threat-clickable { cursor: pointer; }
