@@ -32,6 +32,11 @@ jobs:
         working-directory: apps/agent-windows
         run: dotnet build EgressViewAgent.Windows.slnx -c Release
 
+      - name: Build unsigned Windows MSI
+        working-directory: apps/agent-windows
+        shell: pwsh
+        run: .\scripts\build-msi.ps1 -Version 0.1.0
+
       - name: Parse Windows Agent PowerShell scripts
         shell: pwsh
         run: |

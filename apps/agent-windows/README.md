@@ -28,7 +28,14 @@ dotnet run --project src/EgressView.Agent.Service -c Release -- --ipc-request '{
 dotnet publish src/EgressView.Agent.Service -c Release -r win-x64 --self-contained false -o .\.publish\service
 dotnet publish src/EgressView.Agent.Ui -c Release -r win-x64 --self-contained false -o .\.publish\ui
 .\scripts\install-dev-service.ps1 -Source .\.publish\service -UiSource .\.publish\ui
+.\scripts\build-msi.ps1 -Version 0.1.0
 ```
+
+利用者向けには`artifacts\windows\EgressView-Agent-Windows-0.1.0-unsigned.msi`を使います。MSIは
+self-contained x64 buildを内包するため、.NET runtimeの事前導入は不要です。Windowsの通常のinstaller UI、
+Program Filesへの配置、LocalService、スタートメニュー、ログオン時のtray起動、メジャーアップグレード、
+「インストールされているアプリ」からのアンインストールを管理します。`-unsigned`は開発成果物であり、
+一般配布前にはAuthenticode署名、署名検証、SmartScreen実測が必要です。
 
 開発用installerはServiceを`LocalService`として配置し、同時にUIを`ui` subdirectoryへ配置します。
 **管理者PowerShellで実行する必要があります。** 既定のtray自動起動は次回ログオンから有効で、installerが
