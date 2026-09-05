@@ -345,6 +345,7 @@ try
         // A process start event names the process before any of its traffic
         // is seen, which is the only way to name one that exits before its
         // first event is processed.
+        var aliveForLearn = true;
         var fromStart = new ProcessNameResolver(TimeSpan.FromMinutes(2), _ => null);
         fromStart.Observe(9001, @"\Device\HarddiskVolume4\Windows\System32\curl.exe", started);
         Assert(fromStart.Resolve(9001, now) == "curl",
@@ -352,6 +353,24 @@ try
         Assert(fromStart.ObservedStarts == 1, "names learned from start events are counted");
         Assert(fromStart.Resolve(9001, started.AddMinutes(-1)) is null,
             "a start event does not name observations that predate the process");
+
+        // ProcessStart carries no image name, so the name has to be queried at
+        // that instant. This is the path that was silently doing nothing when
+        // it looked for a field the start event does not have.
+        var learned = new ProcessNameResolver(
+            TimeSpan.FromMinutes(2),
+            pid => pid == 5150 && aliveForLearn
+                ? new ProcessNameResolver.LiveProcess("installer", started)
+                : null);
+        learned.Learn(5150, started);
+        Assert(learned.ObservedStarts == 1, "a start event names the process by querying it while it is alive");
+        aliveForLearn = false;
+        Assert(learned.Resolve(5150, now) == "installer",
+            "the learned name survives the process that has since exited");
+
+        var missed = new ProcessNameResolver(TimeSpan.FromMinutes(2), _ => null);
+        missed.Learn(5151, started);
+        Assert(missed.ObservedStarts == 0, "a start for a process already gone teaches nothing");
 
         Assert(ProcessNameResolver.BareName(@"C:\Program Files\Vendor\app.exe") == "app",
             "a path becomes the bare name Process.ProcessName would give");
@@ -363,7 +382,38 @@ try
             "the running test process resolves through the real probe");
     }
 
-    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, and process-name retention");
+    // A rejection total says how much never reaches the Hub. Only the reason
+    // says what to fix: a name that could be recovered and a port that never
+    // can are indistinguishable in a single counter.
+    {
+        var reasonsDatabase = Path.Combine(directory, "reasons.db");
+        using var store = new ObservationStore(reasonsDatabase);
+        store.DeliveryEnabled = true;
+        var at = DateTimeOffset.UtcNow;
+        NetworkObservation Observation(string? name, int remotePort = 443, string remote = "203.0.113.7", int pid = 10) =>
+            new(at, pid, "TCP", "192.0.2.5", 5000, remote, remotePort, 1, 0,
+                ObservationLayer.Logical, null, "etw", name);
+
+        store.QueueForDelivery([
+            Observation("good"),
+            Observation(null),
+            Observation(""),
+            Observation("bad", remotePort: 0),
+            Observation("bad", remote: "not-an-address"),
+        ], at);
+
+        var counters = store.ReadCounters();
+        long Counter(string reason) => counters.TryGetValue($"contract-rejected-{reason}", out var value) ? value : 0;
+        Assert(Counter("process-name") == 2, "a missing and an empty name are both counted as the name");
+        Assert(Counter("remote-port") == 1, "an out-of-range remote port is counted separately");
+        Assert(Counter("remote-address") == 1, "an unparseable remote address is counted separately");
+        Assert(store.ReadDeliveryStatus().ContractRejected == 4, "the total still counts every rejection");
+        Assert(store.ReadDeliveryStatus().Pending == 1, "the deliverable observation is still queued");
+        Assert(counters.Keys.All(key => !key.Contains("203.0.113.7", StringComparison.Ordinal)),
+            "reason counters name the failing part of the contract, never the value");
+    }
+
+    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, and rejection reasons");
     return 0;
 }
 finally

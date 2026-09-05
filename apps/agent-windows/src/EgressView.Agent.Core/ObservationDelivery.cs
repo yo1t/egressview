@@ -42,9 +42,14 @@ public sealed partial class ObservationStore
         foreach (var item in observations)
         {
             if (item.Layer != ObservationLayer.Logical) continue;
-            if (!IsDeliverable(item))
+            if (RejectionReason(item) is { } reason)
             {
                 Execute("UPDATE delivery_state SET contract_rejected=contract_rejected+1 WHERE id=1");
+                // The total says how much never reaches the Hub; only the
+                // reason says what to fix. Without it, a name that could be
+                // recovered and a port that never can look identical.
+                Execute($"INSERT INTO collector_counters(name,value) VALUES('contract-rejected-{reason}',1) " +
+                        "ON CONFLICT(name) DO UPDATE SET value=value+1");
                 continue;
             }
             var id = Guid.NewGuid().ToString("D");
@@ -151,7 +156,20 @@ public sealed partial class ObservationStore
 
     private static string Text(nint statement, int column) => Marshal.PtrToStringUTF8(WinSqlite.ColumnText(statement, column))!;
     private static long? NullableInt64(nint statement, int column) => WinSqlite.ColumnType(statement, column) == 5 ? null : WinSqlite.ColumnInt64(statement, column);
-    private static bool IsDeliverable(NetworkObservation item) => item.RemotePort is > 0 and <= 65535
-        && item.LocalPort is >= 0 and <= 65535 && IPAddress.TryParse(item.LocalAddress, out _) && IPAddress.TryParse(item.RemoteAddress, out _)
-        && item.ProcessId >= 0 && item.ProcessName is { Length: > 0 and <= 256 } name && !name.Any(char.IsControl);
+    /// Why the Hub would refuse this observation, or null when it would not.
+    ///
+    /// The reason is the counter name, so the breakdown arrives in diagnostics
+    /// through the existing durable counters. Names are deliberately coarse:
+    /// they say which part of the contract failed, never what the value was.
+    private static string? RejectionReason(NetworkObservation item)
+    {
+        if (item.RemotePort is <= 0 or > 65535) return "remote-port";
+        if (item.LocalPort is < 0 or > 65535) return "local-port";
+        if (!IPAddress.TryParse(item.LocalAddress, out _)) return "local-address";
+        if (!IPAddress.TryParse(item.RemoteAddress, out _)) return "remote-address";
+        if (item.ProcessId < 0) return "process-id";
+        if (item.ProcessName is not { Length: > 0 and <= 256 } name) return "process-name";
+        if (name.Any(char.IsControl)) return "process-name";
+        return null;
+    }
 }

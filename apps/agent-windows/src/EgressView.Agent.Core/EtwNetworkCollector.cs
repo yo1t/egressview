@@ -92,25 +92,48 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         InterfaceUnresolved = InterfaceUnresolved,
         EtwEventsLost = EventsLost,
         CollectorError = Error,
+        NamesFromStartEvents = processNames.ObservedStarts,
+        NamesFromCache = processNames.CacheHits,
+        NamesNeverSeen = processNames.NeverSeen,
+        NamesExpired = processNames.Expired,
+        NamesPidReuseRejected = processNames.PidReuseRejected,
+        ProcessNameSourceError = processNameSourceError,
         State = Error is not null || EventsLost > 0 || snapshot.PersistenceFailures > 0 ? "degraded" : snapshot.State,
     };
 
     private void Dispatch(TraceEvent e)
     {
-        if (e.ProviderGuid == KernelProcess) { RecordProcessStart(e); return; }
+        if (e.ProviderGuid == KernelProcess) { RecordProcessLifecycle(e); return; }
         Record(e);
     }
 
-    /// A process start carries the name before any of its traffic appears, so
-    /// a process that exits before its first network event is processed can
-    /// still be named. Querying at that point would be too late.
-    private void RecordProcessStart(TraceEvent e)
+    /// Names a process from its lifecycle events, before its traffic is seen.
+    ///
+    /// The two events carry different things. **ProcessStart has no image
+    /// name** -- only the PID and create time -- so the name has to be queried
+    /// there, which is safe because the process is certainly alive at that
+    /// instant. ProcessStop does carry the image name, and is used as a second
+    /// chance for events still in the channel.
+    private void RecordProcessLifecycle(TraceEvent e)
     {
-        if (!e.EventName.Contains("Start", StringComparison.OrdinalIgnoreCase)) return;
+        var started = e.EventName.Contains("ProcessStart", StringComparison.OrdinalIgnoreCase);
+        var stopped = e.EventName.Contains("ProcessStop", StringComparison.OrdinalIgnoreCase);
+        if (!started && !stopped) return;
+
         var pid = Payload(e, "ProcessID") is { } raw && int.TryParse(raw, out var parsed) ? parsed : 0;
         if (pid <= 0) return;
-        processNames.Observe(pid, Payload(e, "ImageName"), e.TimeStamp.ToUniversalTime());
+        var createdAt = CreateTime(e) ?? e.TimeStamp.ToUniversalTime();
+
+        if (started) processNames.Learn(pid, createdAt);
+        else processNames.Observe(pid, Payload(e, "ImageName"), createdAt);
     }
+
+    /// The process create time distinguishes one use of a PID from the next,
+    /// so it is preferred over the event timestamp where the provider gives it.
+    private static DateTimeOffset? CreateTime(TraceEvent e) =>
+        Payload(e, "CreateTime") is { } raw && DateTimeOffset.TryParse(raw, out var parsed)
+            ? parsed.ToUniversalTime()
+            : null;
 
     private static string? Payload(TraceEvent e, string name)
     {
