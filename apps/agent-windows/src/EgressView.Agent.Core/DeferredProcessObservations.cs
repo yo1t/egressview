@@ -15,7 +15,7 @@ public sealed class DeferredProcessObservations
 
     public DeferredProcessObservations(TimeSpan? retention = null, int capacity = 4096)
     {
-        this.retention = retention ?? TimeSpan.FromSeconds(2);
+        this.retention = retention ?? TimeSpan.FromSeconds(10);
         if (this.retention <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(retention));
         if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
         this.capacity = capacity;
