@@ -50,6 +50,9 @@ internal static partial class WinSqlite
     [LibraryImport("winsqlite3", EntryPoint = "sqlite3_bind_int64")]
     internal static partial int BindInt64(nint statement, int index, long value);
 
+    [LibraryImport("winsqlite3", EntryPoint = "sqlite3_bind_double")]
+    internal static partial int BindDouble(nint statement, int index, double value);
+
     [LibraryImport("winsqlite3", EntryPoint = "sqlite3_bind_null")]
     internal static partial int BindNull(nint statement, int index);
 
@@ -58,6 +61,9 @@ internal static partial class WinSqlite
 
     [LibraryImport("winsqlite3", EntryPoint = "sqlite3_column_int64")]
     internal static partial long ColumnInt64(nint statement, int index);
+
+    [LibraryImport("winsqlite3", EntryPoint = "sqlite3_column_double")]
+    internal static partial double ColumnDouble(nint statement, int index);
 
     [LibraryImport("winsqlite3", EntryPoint = "sqlite3_column_type")]
     internal static partial int ColumnType(nint statement, int index);

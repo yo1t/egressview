@@ -74,6 +74,9 @@ try
         "IPC rejects arbitrary recent flow limits");
     Assert(IpcProtocol.Handle("""{"v":1,"op":"recent-flows","limit":500,"offset":-1}""", () => "{}", _ => [], recentFlows: (_, _) => []).Contains("invalid-offset", StringComparison.Ordinal),
         "IPC rejects invalid pagination offsets");
+    var globeResponse = IpcProtocol.Handle("""{"v":1,"op":"globe","days":7}""", () => "{}", _ => [],
+        globePoints: _ => [new GlobePoint(35.68, 139.76, "JP", "Tokyo", 4, 1024)]);
+    Assert(globeResponse.Contains("Tokyo", StringComparison.Ordinal), "IPC returns bounded globe aggregates to the authenticated UI");
     var csv = ObservationCsv.Export([new RecentFlow(DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, "TCP", "::1", 50000,
         "203.0.113.8", 443, 42, "Browser, \"Beta\"", null, 20, ObservationLayer.Logical, null, "etw")]);
     Assert(csv.Contains("\"Browser, \"\"Beta\"\"\"", StringComparison.Ordinal) && csv.EndsWith("\r\n", StringComparison.Ordinal),
@@ -136,7 +139,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 6, "v1 database migrates through v2, v3, v4, v5, and v6");
+        Assert(migrated.SchemaVersion == 7, "v1 database migrates through v2, v3, v4, v5, v6, and v7");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
@@ -145,8 +148,21 @@ try
     Assert(File.Exists($"{legacyDatabase}.pre-v4.bak"), "migration creates a consistent pre-v4 backup");
     Assert(File.Exists($"{legacyDatabase}.pre-v5.bak"), "migration creates a consistent pre-v5 backup");
     Assert(File.Exists($"{legacyDatabase}.pre-v6.bak"), "migration creates a consistent pre-v6 backup");
+    Assert(File.Exists($"{legacyDatabase}.pre-v7.bak"), "migration creates a consistent pre-v7 backup");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 6, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 7, "migration is idempotent on restart");
+
+    using (var geoStore = new ObservationStore(Path.Combine(directory, "geo.db")))
+    {
+        var observedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        geoStore.WriteBatch([new NetworkObservation(observedAt, 9, "TCP", "10.0.0.1", 50000,
+            "203.0.113.8", 443, 10, 20, ObservationLayer.Logical, null, "etw", "Browser")]);
+        geoStore.ReplaceGeoLocations([new GeoLocation("203.0.113.8", 35.68, 139.76, "JP", "Tokyo")], "etag-1", observedAt);
+        var globe = geoStore.ReadGlobePoints(observedAt.AddMinutes(-1), DateTimeOffset.UtcNow);
+        Assert(globe.Count == 1 && globe[0].City == "Tokyo" && globe[0].Connections == 1 && globe[0].Bytes == 30,
+            "geo cache joins locally with observations without exposing the full cache to UI");
+        Assert(geoStore.ReadGeoCacheState().ETag == "etag-1", "geo cache state survives alongside locations");
+    }
 
     Assert(new ProcessNameResolver().Resolve(Environment.ProcessId, DateTimeOffset.UtcNow) is { Length: > 0 },
         "current process name resolves");
