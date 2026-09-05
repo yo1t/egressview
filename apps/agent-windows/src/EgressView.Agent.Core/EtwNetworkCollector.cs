@@ -120,9 +120,20 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
 
     private void Dispatch(TraceEvent e)
     {
-        Submit(deferredNames.Expire(DateTimeOffset.UtcNow));
-        if (e.ProviderGuid == KernelProcess) { RecordProcessLifecycle(e); return; }
+        var eventAt = e.TimeStamp.ToUniversalTime();
+        // Trace callbacks can arrive well after the event under load. Expiring
+        // against wall clock used to discard an observation immediately before
+        // its delayed ProcessStop callback supplied the real image name. Give
+        // lifecycle completion first refusal, then advance expiry using the ETW
+        // event timeline so callback latency does not become data loss.
+        if (e.ProviderGuid == KernelProcess)
+        {
+            RecordProcessLifecycle(e);
+            Submit(deferredNames.Expire(eventAt));
+            return;
+        }
         Record(e);
+        Submit(deferredNames.Expire(eventAt));
     }
 
     /// Names a process from its lifecycle events, before its traffic is seen.
@@ -241,7 +252,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             layer, localInterface?.Id, "etw", processName);
         if (processName is null
             && processNames.TryGetUnresolvedStart(pid, out var processStartedAt)
-            && deferredNames.TryDefer(observation, processStartedAt, DateTimeOffset.UtcNow))
+            && deferredNames.TryDefer(observation, processStartedAt, observation.ObservedAt))
             return;
         pipeline.TrySubmit(observation);
     }

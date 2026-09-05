@@ -429,6 +429,17 @@ try
             "the bounded buffer refuses and counts overflow");
         Assert(deferred.Drain().Count == 2 && deferred.Pending == 0,
             "shutdown drains observations instead of losing them");
+
+        // ETW callbacks can be delayed by load even though their event times
+        // are close together. Expiry follows the event timeline, not callback
+        // wall time, and ProcessStop completion gets the first chance to name
+        // an observation at the boundary.
+        var delayed = new DeferredProcessObservations(TimeSpan.FromSeconds(10));
+        Assert(delayed.TryDefer(Observation(7004), now, now), "a delayed callback observation is deferred");
+        Assert(delayed.Expire(now.AddSeconds(9)).Count == 0,
+            "callback latency does not expire an observation before its event-time deadline");
+        Assert(delayed.Complete(7004, now, "worker").Single().ProcessName == "worker",
+            "a delayed ProcessStop still supplies the exact name before expiry");
     }
 
     // A rejection total says how much never reaches the Hub. Only the reason
