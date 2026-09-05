@@ -373,6 +373,12 @@ try
         Assert(missed.ObservedStarts == 0, "a start for a process already gone teaches nothing");
         Assert(missed.Resolve(5151, now) is null && missed.NeverSeenAfterStartup == 1,
             "a process whose start was seen but could not be queried is classified after startup");
+        Assert(missed.NeverSeenAfterStartProbeMiss == 1 && missed.NeverSeenWithoutStartEvent == 0,
+            "a missed live query is distinguished from a lifecycle event that never arrived");
+
+        var noStartEvent = new ProcessNameResolver(TimeSpan.FromMinutes(2), _ => null);
+        Assert(noStartEvent.Resolve(5252, now) is null && noStartEvent.NeverSeenWithoutStartEvent == 1,
+            "a post-startup PID with no lifecycle event is classified separately");
 
         var startupMiss = new ProcessNameResolver(TimeSpan.FromMinutes(2), _ => null, [6161]);
         Assert(startupMiss.Resolve(6161, now) is null, "a process present at startup can remain nameless");

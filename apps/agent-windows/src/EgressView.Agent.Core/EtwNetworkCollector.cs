@@ -103,6 +103,8 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         NamesNeverSeen = processNames.NeverSeen,
         NamesNeverSeenAtStartup = processNames.NeverSeenAtStartup,
         NamesNeverSeenAfterStartup = processNames.NeverSeenAfterStartup,
+        NamesNeverSeenAfterStartProbeMiss = processNames.NeverSeenAfterStartProbeMiss,
+        NamesNeverSeenWithoutStartEvent = processNames.NeverSeenWithoutStartEvent,
         NamesInvalidProcessId = processNames.InvalidProcessId,
         NamesExpired = processNames.Expired,
         NamesPidReuseRejected = processNames.PidReuseRejected,

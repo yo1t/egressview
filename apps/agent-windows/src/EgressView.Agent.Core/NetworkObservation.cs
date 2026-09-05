@@ -65,6 +65,8 @@ public sealed record CollectorSnapshot(
     long NamesNeverSeen = 0,
     long NamesNeverSeenAtStartup = 0,
     long NamesNeverSeenAfterStartup = 0,
+    long NamesNeverSeenAfterStartProbeMiss = 0,
+    long NamesNeverSeenWithoutStartEvent = 0,
     long NamesInvalidProcessId = 0,
     long NamesExpired = 0,
     long NamesPidReuseRejected = 0,
