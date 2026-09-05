@@ -24,7 +24,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private Dictionary<string, InterfaceInfo> interfaces = new(StringComparer.OrdinalIgnoreCase);
     private TraceEventSession? session;
     private Task? processing;
-    private long eventsSeen, eventsIgnored, interfaceUnresolved;
+    private long eventsSeen, eventsIgnored, interfaceUnresolved, inboundMulticastIgnored;
     private string? error;
     private string? processNameSourceError;
 
@@ -39,6 +39,11 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     public long EventsSeen => Interlocked.Read(ref eventsSeen);
     public long EventsIgnored => Interlocked.Read(ref eventsIgnored);
     public long InterfaceUnresolved => Interlocked.Read(ref interfaceUnresolved);
+    /// Inbound group datagrams, dropped before storage. Counted rather
+    /// than discarded quietly: the number says how much is being left out
+    /// on purpose, so the choice stays visible instead of looking like a
+    /// collection gap.
+    public long InboundMulticastIgnored => Interlocked.Read(ref inboundMulticastIgnored);
     public int EventsLost { get; private set; }
     public string? Error => error;
     /// Why process start events are unavailable, when they are. Network
@@ -90,27 +95,51 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         EtwEventsSeen = EventsSeen,
         EtwEventsIgnored = EventsIgnored,
         InterfaceUnresolved = InterfaceUnresolved,
+        InboundMulticastIgnored = InboundMulticastIgnored,
         EtwEventsLost = EventsLost,
         CollectorError = Error,
+        NamesFromStartEvents = processNames.ObservedStarts,
+        NamesFromCache = processNames.CacheHits,
+        NamesNeverSeen = processNames.NeverSeen,
+        NamesExpired = processNames.Expired,
+        NamesPidReuseRejected = processNames.PidReuseRejected,
+        ProcessNameSourceError = processNameSourceError,
         State = Error is not null || EventsLost > 0 || snapshot.PersistenceFailures > 0 ? "degraded" : snapshot.State,
     };
 
     private void Dispatch(TraceEvent e)
     {
-        if (e.ProviderGuid == KernelProcess) { RecordProcessStart(e); return; }
+        if (e.ProviderGuid == KernelProcess) { RecordProcessLifecycle(e); return; }
         Record(e);
     }
 
-    /// A process start carries the name before any of its traffic appears, so
-    /// a process that exits before its first network event is processed can
-    /// still be named. Querying at that point would be too late.
-    private void RecordProcessStart(TraceEvent e)
+    /// Names a process from its lifecycle events, before its traffic is seen.
+    ///
+    /// The two events carry different things. **ProcessStart has no image
+    /// name** -- only the PID and create time -- so the name has to be queried
+    /// there, which is safe because the process is certainly alive at that
+    /// instant. ProcessStop does carry the image name, and is used as a second
+    /// chance for events still in the channel.
+    private void RecordProcessLifecycle(TraceEvent e)
     {
-        if (!e.EventName.Contains("Start", StringComparison.OrdinalIgnoreCase)) return;
+        var started = e.EventName.Contains("ProcessStart", StringComparison.OrdinalIgnoreCase);
+        var stopped = e.EventName.Contains("ProcessStop", StringComparison.OrdinalIgnoreCase);
+        if (!started && !stopped) return;
+
         var pid = Payload(e, "ProcessID") is { } raw && int.TryParse(raw, out var parsed) ? parsed : 0;
         if (pid <= 0) return;
-        processNames.Observe(pid, Payload(e, "ImageName"), e.TimeStamp.ToUniversalTime());
+        var createdAt = CreateTime(e) ?? e.TimeStamp.ToUniversalTime();
+
+        if (started) processNames.Learn(pid, createdAt);
+        else processNames.Observe(pid, Payload(e, "ImageName"), createdAt);
     }
+
+    /// The process create time distinguishes one use of a PID from the next,
+    /// so it is preferred over the event timestamp where the provider gives it.
+    private static DateTimeOffset? CreateTime(TraceEvent e) =>
+        Payload(e, "CreateTime") is { } raw && DateTimeOffset.TryParse(raw, out var parsed)
+            ? parsed.ToUniversalTime()
+            : null;
 
     private static string? Payload(TraceEvent e, string name)
     {
@@ -145,10 +174,22 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             (localAddress, localPort, remoteAddress, remotePort, localInterface) = (destinationAddress, destinationPort, sourceAddress, sourcePort, destinationInterface);
         else if (sourceMulticast || destinationMulticast)
         {
-            var received = direction == Direction.Receive;
-            (localAddress, localPort, remoteAddress, remotePort, localInterface) = received
-                ? ("", destinationPort, sourceAddress, sourcePort, null)
-                : (sourceAddress, sourcePort, destinationAddress, destinationPort, sourceInterface);
+            // An inbound group datagram is another device announcing itself.
+            // It is not this machine sending anything, which is what this
+            // product watches. It also names the sender and the group but not
+            // the interface that received it, so it has no local address and
+            // can never satisfy the Hub's contract -- it would be stored and
+            // then dropped, every time.
+            //
+            // Outbound multicast is a different thing and is kept: this
+            // machine announcing itself is traffic it sent.
+            if (direction == Direction.Receive)
+            {
+                Interlocked.Increment(ref inboundMulticastIgnored);
+                return;
+            }
+            (localAddress, localPort, remoteAddress, remotePort, localInterface) =
+                (sourceAddress, sourcePort, destinationAddress, destinationPort, sourceInterface);
         }
         else
         {

@@ -34,7 +34,7 @@ public sealed class ProcessNameResolver
     private readonly TimeSpan retention;
     private readonly Func<int, LiveProcess?> probe;
 
-    private long cacheHits, liveLookups, expired, pidReuseRejected, observedStarts;
+    private long cacheHits, liveLookups, expired, pidReuseRejected, observedStarts, neverSeen;
 
     public ProcessNameResolver() : this(DefaultRetention, ProbeLiveProcess) { }
 
@@ -58,6 +58,10 @@ public sealed class ProcessNameResolver
     public long PidReuseRejected => Interlocked.Read(ref pidReuseRejected);
     /// Names learned from process start events rather than by querying.
     public long ObservedStarts => Interlocked.Read(ref observedStarts);
+    /// Observations for a PID this resolver never saw alive and never
+    /// received a start event for. Nothing can name these: the process was
+    /// already running when collection began, or its start was missed.
+    public long NeverSeen => Interlocked.Read(ref neverSeen);
     public int Cached => cache.Count;
 
     /// <param name="observedAt">
@@ -81,7 +85,14 @@ public sealed class ProcessNameResolver
 
         // The process is gone. Its name is still the right answer for the
         // events it produced while it was alive.
-        if (!cache.TryGetValue(processId, out var entry)) return null;
+        if (!cache.TryGetValue(processId, out var entry))
+        {
+            // Never seen alive and no start event for it. Distinguishing this
+            // from an expired entry is what separates "started before we did"
+            // from "we forgot", and those need different fixes.
+            Interlocked.Increment(ref neverSeen);
+            return null;
+        }
 
         if (entry.StartedAt is { } startedAt && observedAt < startedAt)
         {
@@ -120,6 +131,24 @@ public sealed class ProcessNameResolver
         if (name is null) return;
         Interlocked.Increment(ref observedStarts);
         Remember(processId, new Entry(name, startedAt, Later(startedAt)));
+    }
+
+    /// Learn the name of a process that has just started.
+    ///
+    /// The provider's ProcessStart event carries the PID and the create time
+    /// but **not** the image name -- that field is only on ProcessStop, which
+    /// is too late for the traffic in between. At the instant of the start
+    /// event the process is certainly alive, so querying it there is what
+    /// removes the race: by the time its first network event is processed it
+    /// may already be gone.
+    public void Learn(int processId, DateTimeOffset startedAt)
+    {
+        if (processId <= 0) return;
+        if (SafeProbe(processId) is not { } running) return;
+        var name = Sanitize(running.Name);
+        if (name is null) return;
+        Interlocked.Increment(ref observedStarts);
+        Remember(processId, new Entry(name, running.StartedAt ?? startedAt, Later(startedAt)));
     }
 
     internal static string? BareName(string? imageName)
