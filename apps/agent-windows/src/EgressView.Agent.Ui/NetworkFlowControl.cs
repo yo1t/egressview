@@ -11,15 +11,20 @@ namespace EgressView.Agent.Ui;
 /// <summary>Application-to-destination Sankey, following the Mac Agent layout.</summary>
 public sealed class NetworkFlowControl : FrameworkElement
 {
-    /// Beyond this the ribbons are too thin to read, so the rest is summed
-    /// into one visible band instead of being dropped. A chart that silently
-    /// omits most of its data looks complete while showing a fraction.
+    /// The most nodes ever named per side, before the height available cuts
+    /// it further. Past this the ribbons are too thin to read, so the rest is
+    /// summed into one visible band instead of being dropped: a chart that
+    /// silently omits most of its data looks complete while showing a
+    /// fraction.
     private const int TopNodes = 7;
     private const double LabelWidth = 132;
     private const double NodeWidth = 9;
     private const double NodeGap = 6;
     private const double LineHeight = 14;
     private const double TopMargin = 8;
+    /// Below this a node is a line rather than a band, and its label points at
+    /// something the reader cannot see.
+    private const double MinNodeHeight = 4;
 
     private IReadOnlyList<AppDestinationAggregate> links = [];
     private bool useBytes;
@@ -47,8 +52,16 @@ public sealed class NetworkFlowControl : FrameworkElement
         // Keep every value: the ones outside the top N are folded into a band
         // rather than discarded, so the ribbons still add up to the total the
         // summary card reports.
-        var appNames = TopNames(entries.GroupBy(entry => entry.App), other);
-        var destinationNames = TopNames(entries.GroupBy(entry => entry.Destination), other);
+        //
+        // How many to name is decided by how thick each would be drawn, not by
+        // a fixed count. Measured by data volume one destination often holds
+        // most of the total, and the rest then arrive as sub-pixel slivers
+        // under a stack of labels nobody can match to them. Naming fewer and
+        // letting the band carry the remainder says the same thing and can be
+        // read.
+        var height = Math.Max(1, ActualHeight - TopMargin * 2);
+        var appNames = TopNames(entries.GroupBy(entry => entry.App), other, height);
+        var destinationNames = TopNames(entries.GroupBy(entry => entry.Destination), other, height);
         var folded = entries
             .GroupBy(entry => (App: Bucket(entry.App, appNames, other), Destination: Bucket(entry.Destination, destinationNames, other)))
             .Select(group => new Entry(group.Key.App, group.Key.Destination, group.Sum(entry => entry.Value)))
@@ -61,7 +74,6 @@ public sealed class NetworkFlowControl : FrameworkElement
 
         // One scale for node heights and ribbon thickness. Two scales make the
         // ribbons leave their node, which is what a reader notices first.
-        var height = Math.Max(1, ActualHeight - TopMargin * 2);
         var tallest = Math.Max(apps.Length, destinations.Length);
         var usable = Math.Max(1, height - NodeGap * Math.Max(0, tallest - 1));
         var scale = usable / (double)total;
@@ -131,16 +143,32 @@ public sealed class NetworkFlowControl : FrameworkElement
             DrawLabel(drawing, node.Name, FormatValue(node.Value), new Point(0, y), LabelWidth - 10, TextAlignment.Left);
         foreach (var (node, y) in Declutter(destinations, destinationRects, ActualHeight))
             DrawLabel(drawing, node.Name, FormatValue(node.Value), new Point(rightX + NodeWidth + 10, y),
-                Math.Max(20, ActualWidth - rightX - NodeWidth - 10), TextAlignment.Right);
+                Math.Max(20, ActualWidth - rightX - NodeWidth - 11), TextAlignment.Right);
     }
 
-    private static string[] TopNames(IEnumerable<IGrouping<string, Entry>> groups, string other) =>
-        groups.Select(group => new Node(group.Key, group.Sum(entry => entry.Value)))
+    /// The nodes worth naming: the largest few, cut short at the first one
+    /// too thin to see. A named node the reader cannot find on the chart is
+    /// worse than an honest remainder, because it looks like it is there.
+    private static string[] TopNames(IEnumerable<IGrouping<string, Entry>> groups, string other, double height)
+    {
+        var ranked = groups.Select(group => new Node(group.Key, group.Sum(entry => entry.Value)))
             .OrderByDescending(node => node.Value)
             .Take(TopNodes)
-            .Select(node => node.Name)
-            .Where(name => name != other)
             .ToArray();
+        var total = ranked.Length == 0 ? 0 : groups.Sum(group => group.Sum(entry => entry.Value));
+        if (total <= 0) return [];
+
+        var named = 0;
+        for (var index = 0; index < ranked.Length; index++)
+        {
+            // Room for this many named nodes plus the remainder band, so the
+            // gaps between them are paid for before the thickness is judged.
+            var usable = height - NodeGap * (index + 1);
+            if (usable <= 0 || ranked[index].Value * usable / total < MinNodeHeight) break;
+            named = index + 1;
+        }
+        return ranked.Take(named).Select(node => node.Name).Where(name => name != other).ToArray();
+    }
 
     private static string Bucket(string name, string[] top, string other) =>
         Array.IndexOf(top, name) >= 0 ? name : other;
