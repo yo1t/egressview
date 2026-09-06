@@ -9,6 +9,10 @@ var database = Path.Combine(directory, "agent.db");
 
 try
 {
+    Assert(EgressView.Agent.Service.Program.CommandLineFailureMessage(new UnauthorizedAccessException()) ==
+        "EgressView Agent command failed: IPC access denied.",
+        "CLI access denial is converted to a controlled error instead of an unhandled Windows error");
+
     using (var store = new ObservationStore(database))
     {
         await using var pipeline = new ObservationPipeline(store, capacity: 32, batchSize: 8);

@@ -79,7 +79,7 @@
     </Component>
 
     <Component Id="UiAutoStart" Directory="UIFOLDER" Guid="*">
-      <RegistryValue Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run"
+      <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run"
                      Name="EgressView Agent" Type="string" Value="&quot;[UIFOLDER]EgressView.Agent.Ui.exe&quot;" KeyPath="yes" />
     </Component>
 
