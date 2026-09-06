@@ -26,7 +26,6 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = this;
-        SourceInitialized += (_, _) => NativeWindowTheme.Apply(this);
         Loaded += async (_, _) => { LoadSettings(); await RefreshAllAsync(); refreshTimer.Start(); };
         IsVisibleChanged += (_, _) => { if (IsVisible) refreshTimer.Start(); else refreshTimer.Stop(); };
         refreshTimer.Tick += async (_, _) => { if (IsVisible && IsActive) await RefreshVisibleAsync(); };
@@ -40,8 +39,27 @@ public partial class MainWindow : Window
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAllAsync();
-    private async void SevenDays_Click(object sender, RoutedEventArgs e) { selectedDays = 7; PeriodCaption.SetResourceReference(TextBlock.TextProperty, "Last7Days"); await RefreshNetworkAsync(); }
-    private async void ThirtyDays_Click(object sender, RoutedEventArgs e) { selectedDays = 30; PeriodCaption.SetResourceReference(TextBlock.TextProperty, "Last30Days"); await RefreshNetworkAsync(); }
+    private async void SevenDays_Click(object sender, RoutedEventArgs e)
+    {
+        selectedDays = 7;
+        ApplyPeriodSelection();
+        PeriodCaption.SetResourceReference(TextBlock.TextProperty, "Last7Days");
+        await RefreshNetworkAsync();
+    }
+
+    private async void ThirtyDays_Click(object sender, RoutedEventArgs e)
+    {
+        selectedDays = 30;
+        ApplyPeriodSelection();
+        PeriodCaption.SetResourceReference(TextBlock.TextProperty, "Last30Days");
+        await RefreshNetworkAsync();
+    }
+
+    private void ApplyPeriodSelection()
+    {
+        SevenDaysButton.Style = (Style)FindResource(selectedDays == 7 ? "SelectedPeriodButtonStyle" : "PeriodButtonStyle");
+        ThirtyDaysButton.Style = (Style)FindResource(selectedDays == 30 ? "SelectedPeriodButtonStyle" : "PeriodButtonStyle");
+    }
 
     private async Task RefreshAllAsync()
     {

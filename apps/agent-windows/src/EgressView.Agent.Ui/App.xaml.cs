@@ -23,6 +23,7 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
         ThemeManager.ApplySystemTheme(Resources);
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         LocalizationManager.Apply(Resources);
         activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationName);
         exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ExitName);
@@ -95,6 +96,7 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         IsExiting = true;
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged;
         activationRegistration?.Unregister(null);
         exitRegistration?.Unregister(null);
         trayIcon?.Dispose();
@@ -102,5 +104,12 @@ public partial class App : System.Windows.Application
         exitEvent?.Dispose();
         instanceMutex?.Dispose();
         base.OnExit(e);
+    }
+
+    private void SystemThemeChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category is not Microsoft.Win32.UserPreferenceCategory.Color and
+            not Microsoft.Win32.UserPreferenceCategory.General) return;
+        Dispatcher.BeginInvoke(() => ThemeManager.ApplySystemTheme(Resources));
     }
 }
