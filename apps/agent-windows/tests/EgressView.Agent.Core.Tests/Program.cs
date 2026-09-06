@@ -81,6 +81,12 @@ try
     var globeResponse = IpcProtocol.Handle("""{"v":1,"op":"globe","days":7}""", () => "{}", _ => [],
         globePoints: _ => [new GlobePoint(35.68, 139.76, "JP", "Tokyo", 4, 1024)]);
     Assert(globeResponse.Contains("Tokyo", StringComparison.Ordinal), "IPC returns bounded globe aggregates to the authenticated UI");
+    var analysisResponse = IpcProtocol.Handle("""{"v":1,"op":"analysis","minutes":360}""", () => "{}", _ => [],
+        analysis: (minutes, offset) => new PeriodAnalysis(DateTimeOffset.UtcNow.AddMinutes(-minutes-offset), DateTimeOffset.UtcNow.AddMinutes(-offset),
+            12, 2, 3, 4096, 1, 1, DateTimeOffset.UtcNow.AddDays(-1), 20, [], []));
+    Assert(analysisResponse.Contains("\"Connections\":12", StringComparison.Ordinal), "IPC returns bounded period analysis");
+    Assert(IpcProtocol.Handle("""{"v":1,"op":"analysis","minutes":61}""", () => "{}", _ => [], analysis: (_, _) => throw new InvalidOperationException()).Contains("invalid-range", StringComparison.Ordinal),
+        "IPC rejects an arbitrary analysis range");
     var csv = ObservationCsv.Export([new RecentFlow(DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, "TCP", "::1", 50000,
         "203.0.113.8", 443, 42, "Browser, \"Beta\"", null, 20, ObservationLayer.Logical, null, "etw")]);
     Assert(csv.Contains("\"Browser, \"\"Beta\"\"\"", StringComparison.Ordinal) && csv.EndsWith("\r\n", StringComparison.Ordinal),
@@ -143,7 +149,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 7, "v1 database migrates through v2, v3, v4, v5, v6, and v7");
+        Assert(migrated.SchemaVersion == 8, "v1 database migrates through v2-v8");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
@@ -153,8 +159,9 @@ try
     Assert(File.Exists($"{legacyDatabase}.pre-v5.bak"), "migration creates a consistent pre-v5 backup");
     Assert(File.Exists($"{legacyDatabase}.pre-v6.bak"), "migration creates a consistent pre-v6 backup");
     Assert(File.Exists($"{legacyDatabase}.pre-v7.bak"), "migration creates a consistent pre-v7 backup");
+    Assert(File.Exists($"{legacyDatabase}.pre-v8.bak"), "migration creates a consistent pre-v8 backup");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 7, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 8, "migration is idempotent on restart");
 
     using (var geoStore = new ObservationStore(Path.Combine(directory, "geo.db")))
     {
@@ -166,6 +173,20 @@ try
         Assert(globe.Count == 1 && globe[0].City == "Tokyo" && globe[0].Connections == 1 && globe[0].Bytes == 30,
             "geo cache joins locally with observations without exposing the full cache to UI");
         Assert(geoStore.ReadGeoCacheState().ETag == "etag-1", "geo cache state survives alongside locations");
+        var coverage = geoStore.BeginCoverage([], observedAt.AddMinutes(-1));
+        var analysis = geoStore.ReadPeriodAnalysis(observedAt.AddMinutes(-2), DateTimeOffset.UtcNow);
+        Assert(analysis.Connections == 1 && analysis.Applications == 1 && analysis.Destinations == 1 && analysis.Bytes == 30,
+            "period analysis returns exact whole-period totals instead of a recent-row sample");
+        Assert(analysis.Links.Single().Application == "Browser" && analysis.Timeline.Sum(item => item.Connections) == 1,
+            "period analysis carries app-destination links and a bounded timeline");
+        geoStore.EndCoverage(coverage, DateTimeOffset.UtcNow);
+
+        geoStore.ReplaceThreatIndicators(true,
+            [new ThreatIndicator("ip", "203.0.113.8", "test-feed", "test C2", "high")], "threat-etag", observedAt);
+        var threatReport = geoStore.ReadThreatReport(observedAt.AddMinutes(-2), DateTimeOffset.UtcNow);
+        Assert(threatReport.Availability == "available" && threatReport.CheckedDestinations == 1 &&
+            threatReport.Findings.Single().Destination == "203.0.113.8",
+            "threat indicators are matched locally without sending destinations to the Hub");
     }
 
     Assert(new ProcessNameResolver().Resolve(Environment.ProcessId, DateTimeOffset.UtcNow) is { Length: > 0 },

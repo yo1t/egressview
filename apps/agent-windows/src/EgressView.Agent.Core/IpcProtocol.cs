@@ -9,7 +9,9 @@ public static class IpcProtocol
     public static string Handle(string request, Func<string> status, Func<int, IReadOnlyList<HourlySummary>> summary,
         Action<AgentCredential>? saveCredential = null, Action<bool>? setDeliveryEnabled = null,
         Func<int, int, IReadOnlyList<RecentFlow>>? recentFlows = null,
-        Func<int, IReadOnlyList<GlobePoint>>? globePoints = null)
+        Func<int, IReadOnlyList<GlobePoint>>? globePoints = null,
+        Func<int, int, PeriodAnalysis>? analysis = null,
+        Func<int, ThreatReport>? threats = null)
     {
         try
         {
@@ -24,6 +26,8 @@ public static class IpcProtocol
                 "summary" => Summary(root, summary),
                 "recent-flows" => RecentFlows(root, recentFlows),
                 "globe" => Globe(root, globePoints),
+                "analysis" => Analysis(root, analysis),
+                "threats" => Threats(root, threats),
                 "save-enrollment" => SaveEnrollment(root, saveCredential),
                 "set-delivery-enabled" => SetDeliveryEnabled(root, setDeliveryEnabled),
                 _ => Reject("unknown-operation"),
@@ -35,9 +39,34 @@ public static class IpcProtocol
     private static string Globe(JsonElement root, Func<int, IReadOnlyList<GlobePoint>>? read)
     {
         if (read is null) return Reject("operation-unavailable");
-        var days = root.TryGetProperty("days", out var value) ? value.GetInt32() : 0;
-        if (days is not (7 or 30)) return Reject("invalid-range");
-        return JsonSerializer.Serialize(new { status = "ok", days, data = read(days) });
+        var minutes = ReadRangeMinutes(root);
+        if (minutes == 0) return Reject("invalid-range");
+        return JsonSerializer.Serialize(new { status = "ok", minutes, data = read(minutes) });
+    }
+
+    private static string Analysis(JsonElement root, Func<int, int, PeriodAnalysis>? read)
+    {
+        if (read is null) return Reject("operation-unavailable");
+        var minutes = ReadRangeMinutes(root);
+        if (minutes == 0) return Reject("invalid-range");
+        var offset = root.TryGetProperty("offsetMinutes", out var offsetValue) ? offsetValue.GetInt32() : 0;
+        if (offset is < 0 or > 43_200 || (offset != 0 && offset != minutes)) return Reject("invalid-offset");
+        return JsonSerializer.Serialize(new { status = "ok", minutes, offsetMinutes = offset, data = read(minutes, offset) });
+    }
+
+    private static string Threats(JsonElement root, Func<int, ThreatReport>? read)
+    {
+        if (read is null) return Reject("operation-unavailable");
+        var minutes = ReadRangeMinutes(root);
+        if (minutes == 0) return Reject("invalid-range");
+        return JsonSerializer.Serialize(new { status = "ok", minutes, data = read(minutes) });
+    }
+
+    private static int ReadRangeMinutes(JsonElement root)
+    {
+        var minutes = root.TryGetProperty("minutes", out var value) ? value.GetInt32() :
+            root.TryGetProperty("days", out var days) ? days.GetInt32() * 1440 : 0;
+        return minutes is 60 or 360 or 1440 or 10080 or 43200 ? minutes : 0;
     }
 
     private static string RecentFlows(JsonElement root, Func<int, int, IReadOnlyList<RecentFlow>>? read)

@@ -18,9 +18,12 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer refreshTimer = new() { Interval = TimeSpan.FromSeconds(15) };
     private bool loadingSettings;
     private bool loadingDeliveryState;
-    private int selectedDays = 7;
+    private int selectedMinutes = 10_080;
     private IReadOnlyList<RecentFlow> rawFlows = [];
+    private PeriodAnalysis? currentAnalysis;
+    private IReadOnlyList<GlobePoint> currentGlobePoints = [];
     public ObservableCollection<FlowRow> RecentFlows { get; } = [];
+    public ObservableCollection<ThreatRow> ThreatRows { get; } = [];
 
     public MainWindow()
     {
@@ -39,26 +42,17 @@ public partial class MainWindow : Window
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAllAsync();
-    private async void SevenDays_Click(object sender, RoutedEventArgs e)
+    private async void PeriodChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        selectedDays = 7;
-        ApplyPeriodSelection();
-        PeriodCaption.SetResourceReference(TextBlock.TextProperty, "Last7Days");
-        await RefreshNetworkAsync();
+        if (!IsLoaded || PeriodChoice.SelectedItem is not ComboBoxItem item || !int.TryParse(item.Tag?.ToString(), out selectedMinutes)) return;
+        await RefreshVisibleAsync();
     }
 
-    private async void ThirtyDays_Click(object sender, RoutedEventArgs e)
+    private async void AnalysisChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        selectedDays = 30;
-        ApplyPeriodSelection();
-        PeriodCaption.SetResourceReference(TextBlock.TextProperty, "Last30Days");
-        await RefreshNetworkAsync();
-    }
-
-    private void ApplyPeriodSelection()
-    {
-        SevenDaysButton.Style = (Style)FindResource(selectedDays == 7 ? "SelectedPeriodButtonStyle" : "PeriodButtonStyle");
-        ThirtyDaysButton.Style = (Style)FindResource(selectedDays == 30 ? "SelectedPeriodButtonStyle" : "PeriodButtonStyle");
+        if (!IsLoaded) return;
+        RenderAnalysis();
+        await Task.CompletedTask;
     }
 
     private async Task RefreshAllAsync()
@@ -66,13 +60,16 @@ public partial class MainWindow : Window
         await RefreshStatusAsync();
         await RefreshNetworkAsync();
         await RefreshFlowsAsync();
+        await RefreshThreatsAsync();
         RefreshNotifications();
     }
 
     private Task RefreshVisibleAsync() => MainTabs.SelectedIndex switch
     {
         0 => RefreshNetworkAsync(),
-        1 => RefreshFlowsAsync(),
+        1 => RefreshInsightsAsync(),
+        2 => RefreshFlowsAsync(),
+        3 => RefreshThreatsAsync(),
         _ => RefreshStatusAsync(),
     };
 
@@ -80,23 +77,18 @@ public partial class MainWindow : Window
     {
         try
         {
-            var summaryResponse = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "summary", days = selectedDays }), lifetime.Token);
-            using var summaryDocument = JsonDocument.Parse(summaryResponse);
-            var summaries = summaryDocument.RootElement.GetProperty("data").Deserialize<List<HourlySummary>>() ?? [];
-            Timeline.SetItems(summaries);
-            ConnectionCount.Text = summaries.Sum(item => item.ObservationCount).ToString("N0");
-
-            if (rawFlows.Count == 0) await RefreshFlowsAsync();
-            ApplicationCount.Text = rawFlows.Select(item => item.ProcessName).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).Count().ToString("N0");
-            DestinationCount.Text = rawFlows.Select(item => (item.RemoteAddress, item.RemotePort)).Distinct().Count().ToString("N0");
-            FlowDiagram.SetItems(rawFlows);
-            var globeResponse = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "globe", days = selectedDays }), lifetime.Token);
+            currentAnalysis = await ReadAnalysisAsync(selectedMinutes);
+            RenderAnalysis();
+            var globeResponse = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "globe", minutes = selectedMinutes }), lifetime.Token);
             using var globeDocument = JsonDocument.Parse(globeResponse);
-            var globePoints = globeDocument.RootElement.GetProperty("data").Deserialize<List<GlobePoint>>() ?? [];
-            Globe.SetPoints(globePoints);
-            GlobeCaption.Text = globePoints.Count == 0
+            currentGlobePoints = globeDocument.RootElement.GetProperty("data").Deserialize<List<GlobePoint>>() ?? [];
+            Globe.SetPoints(currentGlobePoints);
+            CountryList.ItemsSource = currentGlobePoints.GroupBy(point => point.CountryCode ?? LocalizationManager.Text("Unknown"))
+                .Select(group => new RankedRow(group.Key, group.Sum(point => IsByteMetric ? point.Bytes : point.Connections), IsByteMetric)).OrderByDescending(row => row.RawValue).ToArray();
+            GlobeCaption.Text = currentGlobePoints.Count == 0
                 ? LocalizationManager.Text("GlobeUnavailable")
-                : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeLocations"), globePoints.Count);
+                : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeLocations"), currentGlobePoints.Count);
+            await RefreshThreatsAsync();
         }
         catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
     }
@@ -107,12 +99,94 @@ public partial class MainWindow : Window
         {
             var limit = SelectedLimit();
             rawFlows = await ReadFlowPageAsync(limit, 0);
-            FlowDiagram.SetItems(rawFlows);
-            RecentFlows.Clear();
-            foreach (var flow in rawFlows) RecentFlows.Add(new FlowRow(flow));
-            LogStatus.Text = rawFlows.Count == 0 ? LocalizationManager.Text("NoConnections") : $"{rawFlows.Count:N0} {LocalizationManager.Text("Rows").ToLower(CultureInfo.CurrentCulture)}";
+            ApplyLogFilter();
         }
         catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
+    }
+
+    private async Task<PeriodAnalysis> ReadAnalysisAsync(int minutes)
+    {
+        var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "analysis", minutes }), lifetime.Token);
+        using var document = JsonDocument.Parse(response);
+        return document.RootElement.GetProperty("data").Deserialize<PeriodAnalysis>() ?? throw new InvalidDataException("Missing analysis response.");
+    }
+
+    private bool IsByteMetric => MetricChoice.SelectedItem is ComboBoxItem item && Equals(item.Tag, "bytes");
+
+    private void RenderAnalysis()
+    {
+        if (currentAnalysis is not { } data) return;
+        ConnectionCount.Text = data.Connections.ToString("N0");
+        ApplicationCount.Text = data.Applications.ToString("N0");
+        DestinationCount.Text = data.Destinations.ToString("N0");
+        CoverageValue.Text = $"{data.CoverageRatio:P0}";
+        StorageSummary.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("StorageSummary"), data.StoredFlows.ToString("N0"), FlowRow.FormatBytes(data.Bytes));
+        MonitoringSince.Text = data.MonitoringStartedAt is { } started ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("MonitoringSince"), started.LocalDateTime.ToString("g")) : string.Empty;
+        CoverageNote.Text = data.CoverageRatio < 0.999 ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("PartialCoverage"), data.CoverageRatio) : string.Empty;
+        var names = DestinationChoice.SelectedItem is ComboBoxItem destination && Equals(destination.Tag, "name");
+        FlowDiagram.SetItems(data.Links, IsByteMetric, names);
+        Timeline.SetItems(data.Timeline, IsByteMetric);
+        FlowCaption.Text = IsByteMetric ? LocalizationManager.Text("RibbonBytes") : LocalizationManager.Text("RibbonConnections");
+        TimelineCaption.Text = IsByteMetric ? LocalizationManager.Text("TimelineBytes") : LocalizationManager.Text("TimelineTotal");
+    }
+
+    private async Task RefreshInsightsAsync()
+    {
+        try
+        {
+            var current = currentAnalysis is not null && (currentAnalysis.To - currentAnalysis.From).TotalMinutes == selectedMinutes
+                ? currentAnalysis : await ReadAnalysisAsync(selectedMinutes);
+            var previousResponse = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "analysis", minutes = selectedMinutes, offsetMinutes = selectedMinutes }), lifetime.Token);
+            using var previousDocument = JsonDocument.Parse(previousResponse);
+            var previous = previousDocument.RootElement.GetProperty("data").Deserialize<PeriodAnalysis>();
+            currentAnalysis = current;
+            InsightConnections.Text = current.Connections.ToString("N0");
+            InsightApplications.Text = current.Applications.ToString("N0");
+            InsightDestinations.Text = current.Destinations.ToString("N0");
+            InsightBytes.Text = FlowRow.FormatBytes(current.Bytes);
+            InsightConnectionsDelta.Text = previous is null || previous.Connections == 0 ? LocalizationManager.Text("NoPreviousData") : $"{(current.Connections - previous.Connections) / (double)previous.Connections:+0%;-0%;0%} {LocalizationManager.Text("VersusPrevious")}";
+            TopApplicationsList.ItemsSource = current.Links.GroupBy(link => link.Application).Select(group => new RankedRow(group.Key, group.Sum(link => IsByteMetric ? link.Bytes : link.Connections), IsByteMetric)).OrderByDescending(row => row.RawValue).Take(10).ToArray();
+            var names = DestinationChoice.SelectedItem is ComboBoxItem destination && Equals(destination.Tag, "name");
+            TopDestinationsList.ItemsSource = current.Links.GroupBy(link => names ? link.DestinationName : link.Destination).Select(group => new RankedRow(group.Key, group.Sum(link => IsByteMetric ? link.Bytes : link.Connections), IsByteMetric)).OrderByDescending(row => row.RawValue).Take(10).ToArray();
+        }
+        catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
+    }
+
+    private async Task RefreshThreatsAsync()
+    {
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "threats", minutes = selectedMinutes }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            var report = document.RootElement.GetProperty("data").Deserialize<ThreatReport>() ?? throw new InvalidDataException();
+            ThreatRows.Clear(); foreach (var finding in report.Findings) ThreatRows.Add(new(finding));
+            var high = report.Findings.Where(item => item.Confidence == "high").Select(item => item.Destination).Distinct().Count();
+            var low = report.Findings.Select(item => item.Destination).Distinct().Count() - high;
+            ThreatCount.Text = report.Availability == "available" ? (high + low).ToString("N0") : "—";
+            ThreatChecked.Text = report.CheckedDestinations.ToString("N0"); ThreatHigh.Text = high.ToString("N0"); ThreatLow.Text = low.ToString("N0");
+            ThreatStatus.Text = report.Availability switch { "available" when report.Findings.Count == 0 => LocalizationManager.Text("NoThreatMatches"), "available" => string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("ThreatMatches"), report.Findings.Count), "unavailable" => LocalizationManager.Text("HubNoThreatFeeds"), _ => LocalizationManager.Text("ThreatNotChecked") };
+        }
+        catch { ThreatStatus.Text = LocalizationManager.Text("ThreatNotChecked"); ThreatCount.Text = "—"; }
+    }
+
+    private void LogFilter_Changed(object sender, RoutedEventArgs e) { if (IsLoaded) ApplyLogFilter(); }
+    private void ApplyLogFilter()
+    {
+        var query = LogSearch.Text.Trim();
+        var protocol = ProtocolFilter.SelectedItem is ComboBoxItem item ? item.Tag?.ToString() : "all";
+        var filtered = rawFlows.Where(flow => (protocol == "all" || flow.Protocol == protocol) &&
+            (query.Length == 0 || (flow.ProcessName?.Contains(query, StringComparison.CurrentCultureIgnoreCase) ?? false) || flow.RemoteAddress.Contains(query, StringComparison.OrdinalIgnoreCase))).ToArray();
+        RecentFlows.Clear(); foreach (var flow in filtered) RecentFlows.Add(new FlowRow(flow));
+        LogStatus.Text = filtered.Length == 0 ? LocalizationManager.Text("NoConnections") : $"{filtered.Length:N0} {LocalizationManager.Text("Rows").ToLower(CultureInfo.CurrentCulture)}";
+    }
+
+    private void GlobeViewChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        var countries = GlobeViewChoice.SelectedItem is ComboBoxItem item && Equals(item.Tag, "countries");
+        Globe.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
+        CountryList.Visibility = countries ? Visibility.Visible : Visibility.Collapsed;
+        RotateButton.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private async Task RefreshStatusAsync()
@@ -162,8 +236,8 @@ public partial class MainWindow : Window
     private async void ExportCsv_Click(object sender, RoutedEventArgs e)
     {
         var now = DateTimeOffset.Now;
-        var from = now.AddDays(-selectedDays);
-        var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "CSV (*.csv)|*.csv", FileName = ObservationCsv.SuggestedFileName(now.AddDays(-selectedDays), now), AddExtension = true };
+        var from = now.AddMinutes(-selectedMinutes);
+        var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "CSV (*.csv)|*.csv", FileName = ObservationCsv.SuggestedFileName(from, now), AddExtension = true };
         if (dialog.ShowDialog(this) != true) return;
         try
         {
@@ -302,7 +376,25 @@ public sealed class FlowRow(RecentFlow value)
     public string BytesReceivedText => FormatBytes(value.BytesReceived);
     public string BytesSentText => FormatBytes(value.BytesSent);
     public string Origin => value.Origin;
-    private static string FormatBytes(long? bytes) => bytes is null ? "—" : bytes < 1024 ? $"{bytes} B" : bytes < 1_048_576 ? $"{bytes / 1024d:N1} KiB" : $"{bytes / 1_048_576d:N1} MiB";
+    internal static string FormatBytes(long? bytes) => bytes is null ? "—" : bytes < 1024 ? $"{bytes} B" : bytes < 1_048_576 ? $"{bytes / 1024d:N1} KiB" : bytes < 1_073_741_824 ? $"{bytes / 1_048_576d:N1} MiB" : $"{bytes / 1_073_741_824d:N1} GiB";
+}
+
+internal sealed class RankedRow(string name, long value, bool bytes)
+{
+    public string Name { get; } = name;
+    public long RawValue { get; } = value;
+    public string Value { get; } = bytes ? FlowRow.FormatBytes(value) : value.ToString("N0");
+    public string Display => $"{Name}    {Value}";
+}
+
+public sealed class ThreatRow(ThreatFinding value)
+{
+    public string Confidence => LocalizationManager.Text(value.Confidence == "high" ? "HighConfidence" : "LowConfidence");
+    public string Destination => value.Destination;
+    public string Application => value.Application;
+    public string Connections => value.Connections.ToString("N0");
+    public string Feed => value.Source ?? "—";
+    public string Reason => value.Tag ?? $"{value.IndicatorKind}: {value.MatchedValue}";
 }
 
 internal sealed class NotificationRow(NotificationHistoryEntry value)

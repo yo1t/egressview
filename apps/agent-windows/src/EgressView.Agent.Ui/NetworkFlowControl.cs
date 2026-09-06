@@ -11,15 +11,21 @@ namespace EgressView.Agent.Ui;
 /// <summary>Compact application-to-destination Sankey, following the Mac Agent layout.</summary>
 public sealed class NetworkFlowControl : FrameworkElement
 {
-    private IReadOnlyList<RecentFlow> flows = [];
-    public void SetItems(IReadOnlyList<RecentFlow> value) { flows = value; InvalidateVisual(); }
+    private IReadOnlyList<AppDestinationAggregate> links = [];
+    private bool useBytes;
+    public void SetItems(IReadOnlyList<AppDestinationAggregate> value, bool bytes, bool names)
+    {
+        links = names ? value.Select(item => item with { Destination = item.DestinationName }).ToArray() : value;
+        useBytes = bytes; InvalidateVisual();
+    }
 
     protected override void OnRender(DrawingContext drawing)
     {
         base.OnRender(drawing);
-        if (flows.Count == 0 || ActualWidth < 220 || ActualHeight < 80) return;
-        var entries = flows.GroupBy(flow => (App: flow.ProcessName ?? $"PID {flow.ProcessId}", Destination: Destination(flow)))
-            .Select(group => new Entry(group.Key.App, group.Key.Destination, group.Count()))
+        if (links.Count == 0 || ActualWidth < 220 || ActualHeight < 80) return;
+        var entries = links.Select(link => new Entry(link.Application, link.Destination,
+                useBytes ? link.Bytes : link.Connections))
+            .Where(entry => entry.Value > 0)
             .OrderByDescending(entry => entry.Value).Take(12).ToArray();
         var apps = entries.GroupBy(entry => entry.App).Select(group => new Node(group.Key, group.Sum(value => value.Value)))
             .OrderByDescending(node => node.Value).Take(6).ToArray();
@@ -62,12 +68,12 @@ public sealed class NetworkFlowControl : FrameworkElement
         for (var index = 0; index < apps.Length; index++)
         {
             drawing.DrawRectangle(palette[index % palette.Length], null, appRects[apps[index].Name]);
-            DrawLabel(drawing, apps[index].Name, new Point(0, appRects[apps[index].Name].Top), labelWidth - 8, TextAlignment.Left);
+            DrawLabel(drawing, apps[index].Name, FormatValue(apps[index].Value), new Point(0, appRects[apps[index].Name].Top), labelWidth - 8, TextAlignment.Left);
         }
         foreach (var node in destinations)
         {
             drawing.DrawRectangle(secondary, null, destinationRects[node.Name]);
-            DrawLabel(drawing, node.Name, new Point(rightX + nodeWidth + 8, destinationRects[node.Name].Top), labelWidth - 8, TextAlignment.Right);
+            DrawLabel(drawing, node.Name, FormatValue(node.Value), new Point(rightX + nodeWidth + 8, destinationRects[node.Name].Top), labelWidth - 8, TextAlignment.Right);
         }
     }
 
@@ -84,11 +90,11 @@ public sealed class NetworkFlowControl : FrameworkElement
         return result;
     }
 
-    private void DrawLabel(DrawingContext drawing, string value, Point origin, double width, TextAlignment alignment)
+    private void DrawLabel(DrawingContext drawing, string value, string metric, Point origin, double width, TextAlignment alignment)
     {
         var text = value.Length > 18 ? value[..8] + "…" + value[^7..] : value;
-        var formatted = new FormattedText(text, System.Globalization.CultureInfo.CurrentCulture, System.Windows.FlowDirection.LeftToRight,
-            new Typeface("Segoe UI Variable Text"), 11, (Brush)FindResource("TextPrimaryBrush"), VisualTreeHelper.GetDpi(this).PixelsPerDip)
+        var formatted = new FormattedText($"{text}  {metric}", System.Globalization.CultureInfo.CurrentCulture, System.Windows.FlowDirection.LeftToRight,
+            new Typeface("Segoe UI Variable Text"), 10.5, (Brush)FindResource("TextPrimaryBrush"), VisualTreeHelper.GetDpi(this).PixelsPerDip)
         { MaxTextWidth = width, TextAlignment = alignment, Trimming = TextTrimming.CharacterEllipsis };
         drawing.DrawText(formatted, origin);
     }
@@ -96,7 +102,7 @@ public sealed class NetworkFlowControl : FrameworkElement
     private Brush[] Palette() => [
         (Brush)FindResource("AccentBrush"), Brushes.Teal, Brushes.MediumSlateBlue,
         Brushes.DarkOrange, Brushes.DeepPink, Brushes.MediumSeaGreen];
-    private static string Destination(RecentFlow flow) => flow.RemoteAddress.Contains(':') ? $"[{flow.RemoteAddress}]" : flow.RemoteAddress;
-    private sealed record Entry(string App, string Destination, int Value);
-    private sealed record Node(string Name, int Value);
+    private string FormatValue(long value) => useBytes ? FlowRow.FormatBytes(value) : value.ToString("N0");
+    private sealed record Entry(string App, string Destination, long Value);
+    private sealed record Node(string Name, long Value);
 }
