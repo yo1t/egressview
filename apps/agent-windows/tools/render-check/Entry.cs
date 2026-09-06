@@ -1,5 +1,7 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using EgressView.Agent.Core;
@@ -60,11 +62,13 @@ internal static class Entry
             foreach (var (w, h) in new[] { (700, 200), (520, 170), (420, 150), (360, 120) })
             {
                 var flow = new NetworkFlowControl();
+                VerifyAutomationPeer(flow, "Application to destination flow");
                 flow.SetItems(links, bytes, false);
                 Save(flow, w, h, Path.Combine(output, $"sankey-{label}-{w}x{h}.png"));
             }
 
         var globe = new WorldGlobeControl { IsRotating = false };
+        VerifyAutomationPeer(globe, "Globe");
         globe.SetPoints(
         [
             new GlobePoint(35.68, 139.69, "JP", "Tokyo", 17900, 0),
@@ -90,6 +94,7 @@ internal static class Entry
             foreach (var (w, h) in new[] { (700, 200), (520, 170), (420, 150), (360, 120) })
             {
                 var chart = new TrafficTimelineControl();
+                VerifyAutomationPeer(chart, "Traffic timeline");
                 chart.SetItems(timeline, bytes, timelineStart, timelineStart.AddHours(6));
                 Save(chart, w, h, Path.Combine(output, $"timeline-{label}-{w}x{h}.png"));
             }
@@ -126,6 +131,15 @@ internal static class Entry
 
         Console.WriteLine($"wrote {output}");
         return 0;
+    }
+
+    private static void VerifyAutomationPeer(FrameworkElement element, string name)
+    {
+        AutomationProperties.SetName(element, name);
+        var peer = UIElementAutomationPeer.CreatePeerForElement(element)
+            ?? throw new InvalidOperationException($"No automation peer: {element.GetType().Name}");
+        if (peer.GetName() != name)
+            throw new InvalidOperationException($"Automation name mismatch: {element.GetType().Name}");
     }
 
     /// Whether anything was painted outside the control's own bounds, in
