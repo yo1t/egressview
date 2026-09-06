@@ -152,6 +152,7 @@ internal sealed class AgentWindowsService : ServiceBase
         var delivery = RunDeliveryAsync(store, credentialStore, cancellationToken);
         var geoCache = RunGeoCacheAsync(store, credentialStore, cancellationToken);
         var threatIntel = RunThreatIntelAsync(store, credentialStore, cancellationToken);
+        var maintenance = RunMaintenanceAsync(store, cancellationToken);
         Task lifetime;
         try
         {
@@ -170,8 +171,39 @@ internal sealed class AgentWindowsService : ServiceBase
         await delivery;
         await geoCache;
         await threatIntel;
+        await maintenance;
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(collector.Enrich(pipeline.Snapshot()), store, "0.1.0-dev"));
+    }
+
+    private static async Task RunMaintenanceAsync(ObservationStore store, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                RetentionMaintenanceResult result;
+                do
+                {
+                    result = store.PruneRetentionBatch(DateTimeOffset.UtcNow);
+                    if (result.ObservationsDeleted > 0) store.AddCounter("retention-observations-deleted", result.ObservationsDeleted);
+                    if (result.FlowsDeleted > 0) store.AddCounter("retention-flows-deleted", result.FlowsDeleted);
+                    if (result.HourlySummariesDeleted > 0) store.AddCounter("retention-hourly-deleted", result.HourlySummariesDeleted);
+                    if (result.CoverageSessionsDeleted > 0) store.AddCounter("retention-coverage-deleted", result.CoverageSessionsDeleted);
+                    if (result.MayHaveMore(50_000)) await Task.Delay(100, cancellationToken);
+                } while (result.MayHaveMore(50_000) && !cancellationToken.IsCancellationRequested);
+                if (store.CompactIfBeneficial()) store.AddCounter("retention-compactions", 1);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            catch
+            {
+                try { store.AddCounter("retention-maintenance-failure", 1); }
+                catch { /* The original store failure remains visible through health/startup diagnostics. */ }
+            }
+
+            try { await Task.Delay(TimeSpan.FromHours(24), cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+        }
     }
 
     private static async Task RunGeoCacheAsync(ObservationStore store, WindowsCredentialStore credentials, CancellationToken cancellationToken)

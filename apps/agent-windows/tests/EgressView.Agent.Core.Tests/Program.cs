@@ -153,15 +153,39 @@ try
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
-    Assert(File.Exists($"{legacyDatabase}.pre-v2.bak"), "migration creates a consistent pre-v2 backup");
-    Assert(File.Exists($"{legacyDatabase}.pre-v3.bak"), "migration creates a consistent pre-v3 backup");
-    Assert(File.Exists($"{legacyDatabase}.pre-v4.bak"), "migration creates a consistent pre-v4 backup");
-    Assert(File.Exists($"{legacyDatabase}.pre-v5.bak"), "migration creates a consistent pre-v5 backup");
-    Assert(File.Exists($"{legacyDatabase}.pre-v6.bak"), "migration creates a consistent pre-v6 backup");
-    Assert(File.Exists($"{legacyDatabase}.pre-v7.bak"), "migration creates a consistent pre-v7 backup");
-    Assert(File.Exists($"{legacyDatabase}.pre-v8.bak"), "migration creates a consistent pre-v8 backup");
+    var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v8.bak", StringComparison.Ordinal),
+        "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
         Assert(migratedAgain.SchemaVersion == 8, "migration is idempotent on restart");
+
+    var retentionDatabase = Path.Combine(directory, "retention.db");
+    using (var retentionStore = new ObservationStore(retentionDatabase))
+    {
+        var now = new DateTimeOffset(2026, 9, 6, 12, 0, 0, TimeSpan.Zero);
+        retentionStore.WriteBatch([
+            new NetworkObservation(now.AddDays(-15), 1, "TCP", "10.0.0.1", 40001, "203.0.113.1", 443, 1, 1, ObservationLayer.Logical, null, "etw", "OldRaw"),
+            new NetworkObservation(now.AddDays(-13), 2, "TCP", "10.0.0.1", 40002, "203.0.113.2", 443, 1, 1, ObservationLayer.Logical, null, "etw", "FreshRaw"),
+            new NetworkObservation(now.AddDays(-31), 3, "TCP", "10.0.0.1", 40003, "203.0.113.3", 443, 1, 1, ObservationLayer.Logical, null, "etw", "OldAggregate")
+        ]);
+        var oldCoverage = retentionStore.BeginCoverage([], now.AddDays(-31));
+        retentionStore.EndCoverage(oldCoverage, now.AddDays(-31).AddMinutes(1));
+        var result = retentionStore.PruneRetentionBatch(now, batchSize: 1);
+        Assert(result.ObservationsDeleted == 1 && result.FlowsDeleted == 1 && result.HourlySummariesDeleted == 1 && result.CoverageSessionsDeleted == 1,
+            "retention prunes raw data at 14 days and aggregates at 30 days in bounded batches");
+        var second = retentionStore.PruneRetentionBatch(now, batchSize: 10);
+        Assert(second.ObservationsDeleted == 1 && second.FlowsDeleted == 0,
+            "raw observations older than 14 days are removed without deleting 30-day flows");
+        Assert(retentionStore.Inspect().Count == 1 && retentionStore.ReadRecentFlows(50).Count == 2,
+            "fresh raw data and 30-day aggregate data survive retention");
+        retentionStore.WriteBatch([
+            new NetworkObservation(now.AddDays(-31), 4, "TCP", "10.0.0.1", 40004, "203.0.113.4", 443, 1, 1, ObservationLayer.Logical, null, "etw", "Queued")
+        ], queueForDelivery: true);
+        var pending = retentionStore.ReadDeliveryStatus().Pending;
+        while (retentionStore.PruneRetentionBatch(now, batchSize: 10).TotalDeleted > 0) { }
+        Assert(pending == 1 && retentionStore.ReadDeliveryStatus().Pending == 1,
+            "retention never deletes unsent delivery queue data");
+    }
 
     using (var geoStore = new ObservationStore(Path.Combine(directory, "geo.db")))
     {
