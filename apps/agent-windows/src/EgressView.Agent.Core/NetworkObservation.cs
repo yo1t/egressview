@@ -39,6 +39,27 @@ public sealed record HourlySummary(
     long BytesReceived,
     long BytesUnknown);
 
+public sealed record RecentFlow(
+    DateTimeOffset FirstSeen,
+    DateTimeOffset LastSeen,
+    string Protocol,
+    string LocalAddress,
+    int LocalPort,
+    string RemoteAddress,
+    int RemotePort,
+    int ProcessId,
+    string? ProcessName,
+    long? BytesSent,
+    long? BytesReceived,
+    ObservationLayer Layer,
+    string? InterfaceId,
+    string Origin);
+
+public sealed record GeoLocation(string Ip, double Latitude, double Longitude, string? CountryCode, string? City);
+
+public sealed record GlobePoint(double Latitude, double Longitude, string? CountryCode, string? City,
+    long Connections, long Bytes);
+
 public sealed record CollectorSnapshot(
     string State,
     long Accepted,
