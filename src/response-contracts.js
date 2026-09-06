@@ -357,6 +357,49 @@ function createRegistry() {
     beacons: z.array(z.unknown()),
   }).loose(), { bounded: false, arrayElementsObserved: true });
 
+  // The four routes that were still undeclared on 2026-09-06 because no test
+  // reached them over HTTP. `test/unit/undeclared-routes-http.test.js` mounts
+  // each router and requests them, so these are checked rather than asserted.
+
+  // GET /api/connections -- the paged connection list.
+  //
+  // `bounded: false`: the handler clamps `limit`, but the clamp is a page size
+  // rather than a bound on the collection, and a caller walks it with
+  // `offset`. `unknown()` rows for the same reason as `/api/devices`: a
+  // connection row gains fields as enrichment grows.
+  registry.declare('GET /api/connections', 200, z.object({
+    connections: z.array(z.unknown()),
+    total: z.number(),
+    limit: z.number(),
+    offset: z.number(),
+    serverTime: z.number(),
+  }).loose(), { bounded: false, arrayElementsObserved: true });
+
+  // GET /api/connections/threat-counts -- three counts and a clock. No arrays,
+  // so this can be exact.
+  registry.declare('GET /api/connections/threat-counts', 200, z.object({
+    safe: z.number(),
+    warn: z.number(),
+    danger: z.number(),
+    serverTime: z.number(),
+  }).loose());
+
+  // GET /api/ai/notification-events -- what the Hub decided to say, and when.
+  //
+  // `bounded: false`: the route takes a `limit` and passes it to the store; a
+  // caller may ask for more than the 500-element limit this file calls bounded.
+  registry.declare('GET /api/ai/notification-events', 200, z.object({
+    events: z.array(z.unknown()),
+  }).loose(), { bounded: false, arrayElementsObserved: true });
+
+  // GET /api/ai/conversations -- stored AI conversations and what they cost in
+  // storage. `listConversations` takes a default limit of 100 and nothing
+  // caps a caller's history, so this stays unbounded.
+  registry.declare('GET /api/ai/conversations', 200, z.object({
+    conversations: z.array(z.unknown()),
+    storage: z.unknown(),
+  }).loose(), { bounded: false, arrayElementsObserved: true });
+
   // Responses that project a secret down to a fact about it. These are the
   // ones worth refusing rather than merely counting: `clientSecretSet` and
   // `keySet` exist so a credential is never sent, and an extra key here is a

@@ -45,6 +45,7 @@ final class HubDeliveryController: ObservableObject {
     private lazy var sender: AgentIngestSender? = makeSender()
     private var senderState: AgentIngestSenderState = .off
     private var droppedObservations = AgentDroppedObservationWatcher()
+    private var deliveryHealth = AgentDeliveryHealthEvaluator()
 
     init() {
         _ = sender
@@ -193,20 +194,13 @@ final class HubDeliveryController: ObservableObject {
         if newlyDropped {
             notificationState = .dataDropped
         } else {
+            // Authorisation is not a health question. It needs the user, it
+            // will not resolve on its own, and delaying it buys nothing.
             switch state {
-            case .idle where deliveryEnabled,
-                 .sending where deliveryEnabled:
-                notificationState = .healthy
-            case .retryScheduled:
-                notificationState = .unavailable
             case .authorizationRequired:
                 notificationState = .authorizationRequired
-            case .failed:
-                notificationState = .failed
-            case .off, .paused, .waitingForNetwork, .idle, .sending:
-                // A laptop moving between networks is normal. Do not turn
-                // temporary lack of a path into an alarm.
-                notificationState = .inactive
+            default:
+                notificationState = deliveryNotificationState(for: state, queueStatus: queueStatus)
             }
         }
         latestQueueStatus = queueStatus
@@ -219,6 +213,50 @@ final class HubDeliveryController: ObservableObject {
         )
         oldestPending = L("Oldest pending: %@", format(queueStatus.oldestPendingAt, fallback: L("none")))
         lastAcknowledged = L("Last acknowledged: %@", format(queueStatus.lastAcknowledgedAt, fallback: L("never")))
+    }
+
+    /// Judged by acknowledgement and by how long a problem has lasted, not by
+    /// the name of the sender's current state (P3-85, P3-68).
+    ///
+    /// `.idle` used to mean healthy here. It means "not sending right now",
+    /// which a sender that has delivered nothing for nine hours passes through
+    /// between retries -- and on 2026-09-06 that told the user delivery had
+    /// recovered eight times while 7,981 observations sat in the queue.
+    private func deliveryNotificationState(
+        for state: AgentIngestSenderState,
+        queueStatus: AgentDeliveryQueueStatus
+    ) -> NotificationState {
+        let isProblem: Bool
+        let isInactive: Bool
+        switch state {
+        case .retryScheduled, .failed:
+            isProblem = true
+            isInactive = false
+        case .off, .paused, .waitingForNetwork:
+            isProblem = false
+            isInactive = true
+        case .idle, .sending:
+            isProblem = false
+            isInactive = !deliveryEnabled
+        case .authorizationRequired:
+            isProblem = true
+            isInactive = false
+        }
+        let verdict = deliveryHealth.evaluate(
+            isDelivering: !isProblem && !isInactive,
+            isProblem: isProblem,
+            isInactive: isInactive,
+            pendingCount: queueStatus.pendingCount,
+            lastAcknowledgedAt: queueStatus.lastAcknowledgedAt
+        )
+        switch verdict {
+        case .healthy: return .healthy
+        case .unavailable: return .unavailable
+        // Too new to report. Hold the previous state rather than announcing
+        // either a problem or a recovery on the strength of a few seconds.
+        case .settling: return notificationState
+        case .inactive: return .inactive
+        }
     }
 
     private func label(for state: AgentIngestSenderState) -> String {
