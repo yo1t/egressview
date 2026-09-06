@@ -51,6 +51,8 @@ try
             reopened, "test");
         using var json = JsonDocument.Parse(report);
         Assert(json.RootElement.GetProperty("database").GetProperty("observationCount").GetInt64() == 20, "diagnostics count");
+        Assert(json.RootElement.GetProperty("database").GetProperty("storageBytes").GetInt64() > 0,
+            "diagnostics reports privacy-safe database disk usage");
         Assert(json.RootElement.GetProperty("delivery").GetProperty("pending").GetInt64() == 0, "diagnostics reports privacy-safe delivery state");
         Assert(!report.Contains("100.64.0.1", StringComparison.Ordinal), "diagnostics excludes endpoint");
         Assert(!report.Contains("UDP", StringComparison.Ordinal), "diagnostics excludes raw observation");
@@ -64,6 +66,14 @@ try
             "diagnostics bundle contains only documented privacy-safe files");
         using var bundleReader = new StreamReader(archive.GetEntry("diagnostics.json")!.Open());
         Assert(!bundleReader.ReadToEnd().Contains("100.64.0.1", StringComparison.Ordinal), "bundle excludes endpoint");
+
+        var beforeBackup = reopened.ReadStorageBytes();
+        File.WriteAllBytes(database + ".pre-v99.bak", new byte[123]);
+        Assert(reopened.ReadStorageBytes() == beforeBackup + 123,
+            "disk usage includes retained migration backups alongside SQLite files");
+        File.WriteAllBytes(database + ".unrelated.bak", new byte[321]);
+        Assert(reopened.ReadStorageBytes() == beforeBackup + 123,
+            "disk usage excludes unrelated files in the data directory");
     }
 
     var stoppedHealth = AgentHealth.Evaluate(
@@ -242,6 +252,7 @@ try
         var analysis = geoStore.ReadPeriodAnalysis(observedAt.AddMinutes(-2), DateTimeOffset.UtcNow);
         Assert(analysis.Connections == 2 && analysis.Applications == 2 && analysis.Destinations == 2 && analysis.Bytes == 33,
             "period analysis returns exact whole-period totals instead of a recent-row sample");
+        Assert(analysis.StorageBytes > 0, "period analysis exposes actual local database storage instead of traffic bytes");
         Assert(analysis.Links.Single(link => link.Application == "Browser").DestinationName == "api.bad.example" && analysis.Timeline.Sum(item => item.Connections) == 2,
             "period analysis uses the observed hostname as Name and falls back explicitly to IP");
         geoStore.EndCoverage(coverage, DateTimeOffset.UtcNow);
