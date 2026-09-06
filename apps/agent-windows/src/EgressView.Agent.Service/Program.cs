@@ -10,17 +10,43 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
-        if (args.Contains("--console", StringComparer.OrdinalIgnoreCase))
-            return RunConsoleAsync(args).GetAwaiter().GetResult();
-        if (args.Contains("--inspect", StringComparer.OrdinalIgnoreCase))
-            return Inspect(args);
-        if (args.Contains("--diagnostics-bundle", StringComparer.OrdinalIgnoreCase))
-            return ExportBundle(args);
-        if (args.Contains("--ipc-request", StringComparer.OrdinalIgnoreCase))
-            return IpcRequest(args);
+        if (IsCommandLineRequest(args))
+        {
+            try
+            {
+                if (args.Contains("--console", StringComparer.OrdinalIgnoreCase))
+                    return RunConsoleAsync(args).GetAwaiter().GetResult();
+                if (args.Contains("--inspect", StringComparer.OrdinalIgnoreCase))
+                    return Inspect(args);
+                if (args.Contains("--diagnostics-bundle", StringComparer.OrdinalIgnoreCase))
+                    return ExportBundle(args);
+                return IpcRequest(args);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(CommandLineFailureMessage(ex));
+                return 4;
+            }
+        }
+
         ServiceBase.Run(new AgentWindowsService());
         return 0;
     }
+
+    private static bool IsCommandLineRequest(string[] args) =>
+        args.Contains("--console", StringComparer.OrdinalIgnoreCase) ||
+        args.Contains("--inspect", StringComparer.OrdinalIgnoreCase) ||
+        args.Contains("--diagnostics-bundle", StringComparer.OrdinalIgnoreCase) ||
+        args.Contains("--ipc-request", StringComparer.OrdinalIgnoreCase);
+
+    internal static string CommandLineFailureMessage(Exception exception) => exception switch
+    {
+        ArgumentException argument => $"EgressView Agent command failed: {argument.Message}",
+        UnauthorizedAccessException => "EgressView Agent command failed: IPC access denied.",
+        System.TimeoutException => "EgressView Agent command failed: IPC connection timed out.",
+        IOException => "EgressView Agent command failed: an I/O operation failed.",
+        _ => $"EgressView Agent command failed ({exception.GetType().Name})."
+    };
 
     private static int IpcRequest(string[] args)
     {

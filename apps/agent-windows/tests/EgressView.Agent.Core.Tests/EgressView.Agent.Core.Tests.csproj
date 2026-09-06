@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/EgressView.Agent.Core/EgressView.Agent.Core.csproj" />
+    <ProjectReference Include="../../src/EgressView.Agent.Service/EgressView.Agent.Service.csproj" />
   </ItemGroup>
 </Project>
