@@ -25,8 +25,10 @@ DB migrationはトランザクション内で行い、変更前に`.pre-v2.bak`�
 作り直さず起動を停止します。disk fullなどの永続化失敗後は新規観測の受付を停止し、診断の
 `collector.persistenceError`へ理由を残します。
 
-raw観測と別に`hourly_summary`をprotocol・logical/VPN transport別で更新します。7日・30日の
-履歴表示はraw全走査をせず、この集約をrange queryします。開始時刻を含むhour bucketも欠けません。
+raw観測と別に`hourly_summary`をprotocol・logical/VPN transport別で更新します。timeline用の
+`chart_hourly`は完了したUTC hourをアプリ別に折り畳み、現在の未完了hourだけをraw観測から読みます。
+7日・30日の描画で`flows.last_seen`を時刻として使わず、長時間flowが右端へ移動することも、raw全走査も
+避けます。旧DBでアプリ次元を持たないhourは`その他`として総量を欠落させません。
 
 ```powershell
 dotnet build EgressViewAgent.Windows.slnx -c Release

@@ -159,15 +159,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 9, "v1 database migrates through v2-v9");
+        Assert(migrated.SchemaVersion == 10, "v1 database migrates through v2-v10");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v9.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v10.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 9, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 10, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -178,10 +178,11 @@ try
             new NetworkObservation(now.AddDays(-13), 2, "TCP", "10.0.0.1", 40002, "203.0.113.2", 443, 1, 1, ObservationLayer.Logical, null, "etw", "FreshRaw"),
             new NetworkObservation(now.AddDays(-31), 3, "TCP", "10.0.0.1", 40003, "203.0.113.3", 443, 1, 1, ObservationLayer.Logical, null, "etw", "OldAggregate")
         ]);
+        retentionStore.FoldCompletedHoursForCharts(now);
         var oldCoverage = retentionStore.BeginCoverage([], now.AddDays(-31));
         retentionStore.EndCoverage(oldCoverage, now.AddDays(-31).AddMinutes(1));
         var result = retentionStore.PruneRetentionBatch(now, batchSize: 1);
-        Assert(result.ObservationsDeleted == 1 && result.FlowsDeleted == 1 && result.HourlySummariesDeleted == 1 && result.CoverageSessionsDeleted == 1,
+        Assert(result.ObservationsDeleted == 1 && result.FlowsDeleted == 1 && result.HourlySummariesDeleted == 1 && result.CoverageSessionsDeleted == 1 && result.ChartSummariesDeleted == 1,
             "retention prunes raw data at 14 days and aggregates at 30 days in bounded batches");
         var second = retentionStore.PruneRetentionBatch(now, batchSize: 10);
         Assert(second.ObservationsDeleted == 1 && second.FlowsDeleted == 0,
@@ -195,6 +196,32 @@ try
         while (retentionStore.PruneRetentionBatch(now, batchSize: 10).TotalDeleted > 0) { }
         Assert(pending == 1 && retentionStore.ReadDeliveryStatus().Pending == 1,
             "retention never deletes unsent delivery queue data");
+    }
+
+
+    using (var timelineStore = new ObservationStore(Path.Combine(directory, "timeline-observed-at.db")))
+    {
+        var from = new DateTimeOffset(2026, 9, 6, 0, 0, 0, TimeSpan.Zero);
+        timelineStore.WriteBatch([
+            new NetworkObservation(from.AddMinutes(10), 42, "TCP", "10.0.0.1", 51000,
+                "203.0.113.42", 443, 10, 20, ObservationLayer.Logical, null, "etw", "LongLived"),
+            new NetworkObservation(from.AddHours(2).AddMinutes(10), 42, "TCP", "10.0.0.1", 51000,
+                "203.0.113.42", 443, 30, 40, ObservationLayer.Logical, null, "etw", "LongLived")
+        ]);
+        Assert(timelineStore.FoldCompletedHoursForCharts(from.AddHours(3)) == 2 &&
+            timelineStore.FoldCompletedHoursForCharts(from.AddHours(3)) == 0,
+            "completed chart hours fold once and the watermark makes the operation idempotent");
+        var timeline = timelineStore.ReadPeriodAnalysis(from, from.AddHours(12), bucketCount: 12);
+        Assert(timeline.Connections == 1 && timeline.Timeline.Sum(item => item.Connections) == 2 &&
+            timeline.Timeline.Select(item => item.Bucket).ToHashSet().SetEquals([0, 2]),
+            "timeline uses each observation time instead of moving one long-lived flow into its last-seen bucket");
+        timelineStore.WriteBatch([
+            new NetworkObservation(from.AddHours(3).AddMinutes(10), 43, "UDP", "10.0.0.1", 51001,
+                "198.51.100.43", 443, null, null, ObservationLayer.Logical, null, "etw", "CurrentHour")
+        ]);
+        timeline = timelineStore.ReadPeriodAnalysis(from, from.AddHours(12), bucketCount: 12);
+        Assert(timeline.Timeline.Sum(item => item.Connections) == 3 && timeline.Timeline.Any(item => item.Bucket == 3),
+            "timeline combines folded complete hours with the current raw hour without gaps or duplicates");
     }
 
     using (var geoStore = new ObservationStore(Path.Combine(directory, "geo.db")))
@@ -408,7 +435,16 @@ try
         var queryMilliseconds = (DateTimeOffset.UtcNow - queryStarted).TotalMilliseconds;
         Assert(thirtyDays.Sum(row => row.ObservationCount) == 1_000_000, "30-day summary covers all million observations");
         Assert(queryMilliseconds < 1_000, "30-day summary query completes under one second");
-        Console.WriteLine($"SCALE: 1,000,000 rows, 30-day summary {queryMilliseconds:F1}ms, {new FileInfo(scaleDatabase).Length} bytes");
+        var foldStarted = DateTimeOffset.UtcNow;
+        scaleStore.FoldCompletedHoursForCharts(started.AddDays(31));
+        var foldMilliseconds = (DateTimeOffset.UtcNow - foldStarted).TotalMilliseconds;
+        var timelineStarted = DateTimeOffset.UtcNow;
+        var scaleTimeline = scaleStore.ReadPeriodAnalysis(started, started.AddDays(30), bucketCount: 60);
+        var timelineMilliseconds = (DateTimeOffset.UtcNow - timelineStarted).TotalMilliseconds;
+        Assert(scaleTimeline.Timeline.Sum(row => row.Connections) == 1_000_000,
+            "30-day timeline preserves all observation-time counts after folding");
+        Assert(timelineMilliseconds < 1_000, "30-day timeline aggregate query completes under one second");
+        Console.WriteLine($"SCALE: 1,000,000 rows, summary {queryMilliseconds:F1}ms, one-time chart fold {foldMilliseconds:F1}ms, timeline {timelineMilliseconds:F1}ms, {new FileInfo(scaleDatabase).Length} bytes");
     }
 
     // Process names outlive the process. Without this the name is lost the
