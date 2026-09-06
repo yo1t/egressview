@@ -7,7 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 const Database = require('better-sqlite3');
 
-const { runMigrations } = require('../../src/db-migrate');
+const { runMigrations, SCHEMA_VERSION } = require('../../src/db-migrate');
 
 function v20Database() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ev-v21-test-'));
@@ -86,7 +86,7 @@ test('v21 runs on a database that has none of those tables', () => {
   const file = path.join(dir, 'test.db');
   const db = new Database(file);
   runMigrations(db, file);
-  assert.equal(db.pragma('user_version', { simple: true }), 21);
+  assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });

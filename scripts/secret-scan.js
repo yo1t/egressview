@@ -60,8 +60,21 @@ function isBinary(buffer) {
   return buffer.includes(0);
 }
 
-function trackedFiles() {
-  return execFileSync('git', ['ls-files'], { encoding: 'utf8' })
+/**
+ * Every file a commit could carry: tracked, plus new ones not yet staged.
+ *
+ * `--others --exclude-standard` is the difference between catching a mistake
+ * and catching it a commit later. A plain `ls-files` sees nothing in a file
+ * that has never been added, which is exactly the state a newly written test
+ * fixture is in while it is being written -- and a real LAN address was
+ * written into one on 2026-09-06 and reported clean by this script. Ignored
+ * files stay out: they are local by policy and never reach a commit.
+ */
+function scannableFiles() {
+  return execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
     .split('\n')
     .filter(Boolean)
     .filter(file => !SKIP_PATH.test(file))
@@ -70,7 +83,7 @@ function trackedFiles() {
 
 const findings = [];
 
-for (const file of trackedFiles()) {
+for (const file of scannableFiles()) {
   if (!fs.existsSync(file)) continue;
   const stats = fs.statSync(file);
   if (!stats.isFile() || stats.size > MAX_FILE_BYTES) continue;
