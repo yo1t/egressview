@@ -1110,14 +1110,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI. The envelope is declared; the array elements are observed, not checked.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "schemaVersion": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "generatedAt": {
                       "type": "string"
@@ -1126,48 +1126,41 @@
                       "type": "boolean"
                     },
                     "fetchedAt": {
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "ips": {
                       "type": "array",
-                      "items": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      }
+                      "items": {}
                     },
                     "domains": {
                       "type": "array",
-                      "items": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      }
+                      "items": {}
                     },
                     "cidrs": {
                       "type": "array",
-                      "items": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      }
+                      "items": {}
                     }
                   },
                   "required": [
-                    "available",
-                    "cidrs",
-                    "domains",
+                    "schemaVersion",
                     "generatedAt",
+                    "available",
                     "ips",
-                    "schemaVersion"
+                    "domains",
+                    "cidrs"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
-            }
+            },
+            "x-array-elements-observed": true
           },
           "401": {
             "description": "No usable credential. Shape observed under test, not a guarantee: responses are not validated on the way out.",
@@ -1250,7 +1243,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1277,36 +1270,51 @@
                             "type": "string"
                           },
                           "createdAt": {
-                            "type": "integer"
+                            "type": "number"
                           },
                           "updatedAt": {
-                            "type": "integer"
+                            "type": "number"
                           },
                           "lastSeenAt": {
-                            "type": "null"
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "revokedAt": {
-                            "type": "null"
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [
                           "agentId",
+                          "platform",
+                          "hostName",
+                          "osVersion",
                           "agentVersion",
                           "createdAt",
-                          "hostName",
+                          "updatedAt",
                           "lastSeenAt",
-                          "osVersion",
-                          "platform",
-                          "revokedAt",
-                          "updatedAt"
-                        ]
+                          "revokedAt"
+                        ],
+                        "additionalProperties": false
                       }
                     }
                   },
                   "required": [
                     "agents"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -2317,7 +2325,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI. The envelope is declared; the array elements are observed, not checked.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2328,136 +2336,27 @@
                       "properties": {
                         "conversationId": {
                           "type": "string"
-                        },
-                        "createdAt": {
-                          "type": "integer"
-                        },
-                        "provider": {
-                          "type": "string"
-                        },
-                        "model": {
-                          "type": "string"
-                        },
-                        "rangeFrom": {
-                          "type": "integer"
-                        },
-                        "rangeTo": {
-                          "type": "integer"
                         }
                       },
                       "required": [
-                        "conversationId",
-                        "createdAt",
-                        "model",
-                        "provider",
-                        "rangeFrom",
-                        "rangeTo"
-                      ]
+                        "conversationId"
+                      ],
+                      "additionalProperties": {}
                     },
                     "messages": {
                       "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "messageId": {
-                            "type": "string"
-                          },
-                          "conversationId": {
-                            "type": "string"
-                          },
-                          "requestId": {
-                            "type": "string"
-                          },
-                          "role": {
-                            "type": "string"
-                          },
-                          "body": {
-                            "type": "string"
-                          },
-                          "createdAt": {
-                            "type": "integer"
-                          },
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "rangeFrom": {
-                            "type": "integer"
-                          },
-                          "rangeTo": {
-                            "type": "integer"
-                          },
-                          "status": {
-                            "type": "string"
-                          },
-                          "errorCode": {
-                            "type": "null"
-                          },
-                          "sourceKind": {
-                            "type": "string"
-                          },
-                          "sourceId": {
-                            "type": "string"
-                          },
-                          "usageInputTokens": {
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          },
-                          "usageOutputTokens": {
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          },
-                          "usageTotalTokens": {
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          },
-                          "estimatedCostUsd": {
-                            "type": "null"
-                          },
-                          "pricingVersion": {
-                            "type": "null"
-                          }
-                        },
-                        "required": [
-                          "body",
-                          "conversationId",
-                          "createdAt",
-                          "errorCode",
-                          "estimatedCostUsd",
-                          "messageId",
-                          "model",
-                          "pricingVersion",
-                          "provider",
-                          "rangeFrom",
-                          "rangeTo",
-                          "requestId",
-                          "role",
-                          "sourceId",
-                          "sourceKind",
-                          "status",
-                          "usageInputTokens",
-                          "usageOutputTokens",
-                          "usageTotalTokens"
-                        ]
-                      }
+                      "items": {}
                     }
                   },
                   "required": [
                     "conversation",
                     "messages"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
-            }
+            },
+            "x-array-elements-observed": true
           },
           "401": {
             "description": "No usable credential."
@@ -2952,7 +2851,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2964,78 +2863,36 @@
                         "frequency": {
                           "type": "string"
                         },
-                        "weekday": {
-                          "type": "integer"
-                        },
-                        "time": {
-                          "type": "string"
-                        },
-                        "timezone": {
-                          "type": "string"
-                        },
-                        "rangeHours": {
-                          "type": "integer"
-                        },
                         "destinations": {
                           "type": "object",
-                          "properties": {
-                            "ui": {
-                              "type": "boolean"
-                            },
-                            "slack": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "slack",
-                            "ui"
-                          ]
+                          "properties": {},
+                          "additionalProperties": {}
+                        },
+                        "rules": {
+                          "type": "object",
+                          "properties": {},
+                          "additionalProperties": {}
                         },
                         "threat": {
                           "type": "object",
-                          "properties": {
-                            "enabled": {
-                              "type": "boolean"
-                            },
-                            "dangerThreshold": {
-                              "type": "integer"
-                            },
-                            "newDestinationsThreshold": {
-                              "type": "integer"
-                            },
-                            "increaseThreshold": {
-                              "type": "integer"
-                            }
-                          },
-                          "required": [
-                            "dangerThreshold",
-                            "enabled",
-                            "increaseThreshold",
-                            "newDestinationsThreshold"
-                          ]
-                        },
-                        "dailyLimit": {
-                          "type": "integer"
-                        },
-                        "cooldownMinutes": {
-                          "type": "integer"
+                          "properties": {},
+                          "additionalProperties": {}
                         },
                         "automationConsent": {
                           "type": "boolean"
+                        },
+                        "automationProvider": {
+                          "not": {}
                         }
                       },
                       "required": [
-                        "automationConsent",
-                        "cooldownMinutes",
-                        "dailyLimit",
-                        "destinations",
                         "frequency",
-                        "rangeHours",
+                        "destinations",
+                        "rules",
                         "threat",
-                        "time",
-                        "timezone",
-                        "weekday"
-                      ]
+                        "automationConsent"
+                      ],
+                      "additionalProperties": {}
                     },
                     "status": {
                       "type": "object",
@@ -3046,24 +2903,27 @@
                         "provider": {
                           "type": "string"
                         },
-                        "slackReady": {
+                        "automationReady": {
                           "type": "boolean"
                         },
-                        "automationReady": {
+                        "slackReady": {
                           "type": "boolean"
                         }
                       },
                       "required": [
+                        "running",
                         "provider",
-                        "running"
-                      ]
+                        "automationReady",
+                        "slackReady"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "config",
                     "status"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -3349,11 +3209,19 @@
                         },
                         "provider": {
                           "type": "string"
+                        },
+                        "automationReady": {
+                          "type": "boolean"
+                        },
+                        "slackReady": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
+                        "automationReady",
                         "provider",
-                        "running"
+                        "running",
+                        "slackReady"
                       ]
                     }
                   },
@@ -7246,7 +7114,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7265,10 +7133,7 @@
                               "type": "boolean"
                             }
                           },
-                          "required": [
-                            "history",
-                            "slack"
-                          ]
+                          "additionalProperties": false
                         },
                         "newDevice": {
                           "type": "object",
@@ -7280,22 +7145,20 @@
                               "type": "boolean"
                             }
                           },
-                          "required": [
-                            "history",
-                            "slack"
-                          ]
+                          "additionalProperties": false
                         }
                       },
                       "required": [
-                        "newDevice",
-                        "threat"
-                      ]
+                        "threat",
+                        "newDevice"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "config"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -7801,7 +7664,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7816,23 +7679,30 @@
                         "userId": {
                           "type": "string"
                         },
-                        "cooldownMinutes": {
-                          "type": "integer"
-                        },
                         "displayName": {
                           "type": "string"
+                        },
+                        "cooldownMinutes": {
+                          "type": "number"
+                        },
+                        "tokenSet": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
+                        "enabled",
+                        "userId",
                         "displayName",
-                        "userId"
-                      ]
+                        "cooldownMinutes",
+                        "tokenSet"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "config"
                   ],
-                  "x-observed": true
+                  "additionalProperties": false
                 }
               }
             }
@@ -7933,17 +7803,21 @@
                         "userId": {
                           "type": "string"
                         },
+                        "displayName": {
+                          "type": "string"
+                        },
                         "cooldownMinutes": {
                           "type": "integer"
                         },
-                        "displayName": {
-                          "type": "string"
+                        "tokenSet": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
                         "cooldownMinutes",
                         "displayName",
                         "enabled",
+                        "tokenSet",
                         "userId"
                       ]
                     }
@@ -9322,13 +9196,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled. Shape observed under test, not a guarantee: responses are not validated on the way out.",
+            "description": "Declared by the server, and checked in CI.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "routers": {
+                      "maxItems": 500,
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -9338,31 +9213,108 @@
                           },
                           "kind": {
                             "type": "string"
+                          },
+                          "displayName": {
+                            "type": "string"
+                          },
+                          "hostName": {
+                            "type": "string"
+                          },
+                          "ip": {
+                            "type": "string"
+                          },
+                          "user": {
+                            "type": "string"
+                          },
+                          "nat": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ]
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "passSet": {
+                            "type": "boolean"
+                          },
+                          "enablePassSet": {
+                            "type": "boolean"
+                          },
+                          "ready": {
+                            "type": "boolean"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "lastSuccessAt": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "lastError": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sessionCount": {
+                            "type": "number"
                           }
                         },
                         "required": [
                           "id",
-                          "kind"
-                        ]
+                          "kind",
+                          "displayName",
+                          "hostName",
+                          "ip",
+                          "user",
+                          "enabled",
+                          "passSet",
+                          "enablePassSet",
+                          "ready",
+                          "state",
+                          "message",
+                          "lastSuccessAt",
+                          "lastError",
+                          "sessionCount"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "maxRouters": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "serverTime": {
-                      "type": "integer"
+                      "type": "number"
                     },
                     "processStartedAt": {
-                      "type": "integer"
+                      "type": "number"
                     }
                   },
                   "required": [
-                    "maxRouters",
-                    "processStartedAt",
                     "routers",
-                    "serverTime"
+                    "maxRouters",
+                    "serverTime",
+                    "processStartedAt"
                   ],
-                  "x-observed": true
+                  "additionalProperties": {}
                 }
               }
             }
@@ -10504,15 +10456,22 @@
   "x-response-contract-coverage": {
     "declared": [
       "GET /api/agent/capabilities",
+      "GET /api/agent/threat-intel",
+      "GET /api/agents",
+      "GET /api/ai/conversations/:id",
       "GET /api/ai/facts",
+      "GET /api/ai/notification-config",
       "GET /api/ai/usage/monthly",
       "GET /api/auth/audit-events",
       "GET /api/auth/security-config",
       "GET /api/auth/sessions",
       "GET /api/config/ai",
+      "GET /api/config/detection-notifications",
+      "GET /api/config/slack",
       "GET /api/connections/summary",
       "GET /api/devices",
       "GET /api/notes",
+      "GET /api/routers",
       "GET /api/status",
       "POST /api/agent/ingest"
     ],
@@ -10521,12 +10480,8 @@
       "DELETE /api/backup/prune/:jobId",
       "DELETE /api/routers/:id",
       "GET /api/agent/geo-cache",
-      "GET /api/agent/threat-intel",
-      "GET /api/agents",
       "GET /api/agents/enrollment-requests",
       "GET /api/agents/ingest-metrics",
-      "GET /api/ai/conversations/:id",
-      "GET /api/ai/notification-config",
       "GET /api/ai/pricing/diagnostics",
       "GET /api/auth/api-identities",
       "GET /api/auth/api-identities/self",
@@ -10535,11 +10490,8 @@
       "GET /api/backup/prune/:jobId",
       "GET /api/beacons",
       "GET /api/beacons/config",
-      "GET /api/config/detection-notifications",
-      "GET /api/config/slack",
       "GET /api/devices/merge-candidates",
       "GET /api/notification-log",
-      "GET /api/routers",
       "POST /api/admin/regenerate-token",
       "POST /api/admin/verify",
       "POST /api/agent/enrollment-requests",

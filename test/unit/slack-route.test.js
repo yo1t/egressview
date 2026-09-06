@@ -8,11 +8,16 @@ const { Readable, Writable } = require('node:stream');
 const express = require('express');
 
 const slackRoutes = require('../../src/routes/slack');
+const notifier = require('../../src/notifier');
 
 const requireAdmin = (req, res, next) => next();
 
 const defaultNotifier = {
-  getConfig:   () => ({ enabled: false, userId: '', cooldownMinutes: 5 }),
+  // The real projection, not a hand-written stand-in. A stub that answers
+  // three of the five keys makes the route look like it returns three, and
+  // the response contract declared from the handler would then be pinned to
+  // something production never sends.
+  getConfig:   () => notifier.getConfig(),
   configure:   () => {},
   test:        async () => ({ ok: true }),
   verifyToken: async () => ({ ok: true, botName: 'EgressBot' }),
@@ -86,7 +91,10 @@ describe('slack route: GET /api/config/slack', () => {
 
   it('prefers the notifier-held displayName', async () => {
     const app = makeApp({
-      notifier: { ...defaultNotifier, getConfig: () => ({ displayName: 'Runtime User', userId: 'U1' }) },
+      notifier: {
+        ...defaultNotifier,
+        getConfig: () => ({ ...notifier.getConfig(), displayName: 'Runtime User', userId: 'U1' }),
+      },
       loadConfig: () => ({ slack: { displayName: 'Stored User' } }),
     });
     const { body } = await req(app, 'GET', '/api/config/slack');

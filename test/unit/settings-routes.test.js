@@ -12,6 +12,7 @@ const beaconRoutes = require('../../src/routes/beacons');
 const routerRoutes = require('../../src/routes/routers');
 const devicesRoutes = require('../../src/routes/devices');
 const apiIdentityRoutes = require('../../src/routes/api-identities');
+const { publicRouter } = require('../../src/router-config');
 
 const requireAdmin = (_req, _res, next) => next();
 
@@ -600,7 +601,13 @@ describe('router routes', () => {
     assert.equal(called, false);
   });
   it('covers list, create, update, and delete responses', async () => {
-    const records = [{ id: 'yamaha1', kind: 'yamaha' }];
+    // Through the real projection: `routerManager.list` never hands out a bare
+    // record, and a stub that does would let a response contract be declared
+    // against a shape production does not send.
+    const records = [publicRouter({
+      id: 'yamaha1', kind: 'yamaha', displayName: 'Main', hostName: '',
+      ip: '192.0.2.1', user: 'admin', pass: 'x', nat: 1, enabled: true,
+    })];
     const manager = {
       list: () => records,
       upsert: input => ({ ...input, id: input.id || 'cisco1' }),

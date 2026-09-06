@@ -251,3 +251,117 @@ describe('P2-95の積み残しを宣言する（2026-08-29）', () => {
   });
 });
 
+describe('残っていた未宣言ルートを宣言する（2026-09-06）', () => {
+  const { createRegistry } = require('../../src/response-contracts');
+
+  it('宣言する前に、テストがそのルートに届いていることを測った', () => {
+    // Measured across the whole suite on 2026-09-06 by recording every
+    // (route, status) an Express JSON response was sent under. Four more
+    // routes were still undeclared in production -- `GET /api/connections`,
+    // `/api/connections/threat-counts`, `/api/ai/notification-events`,
+    // `/api/ai/conversations` -- and no test reaches any of them over HTTP,
+    // so they stay undeclared until one does. A declaration nobody exercises
+    // is what the step-3 gate exists to refuse.
+    const registry = createRegistry();
+    for (const route of [
+      'GET /api/connections',
+      'GET /api/connections/threat-counts',
+      'GET /api/ai/notification-events',
+      'GET /api/ai/conversations',
+    ]) {
+      assert.equal(registry.lookup(route, 200), null, `${route} was declared without a test reaching it`);
+    }
+  });
+
+  it('agentsの行はtokenHashを持って出られない', () => {
+    // `listAgents` is `SELECT * FROM agents` through a projection, and the
+    // table holds `tokenHash`. Strict is the check that the projection is
+    // still the thing standing between the two.
+    const contract = createRegistry().lookup('GET /api/agents', 200);
+    assert.ok(contract);
+    const agent = {
+      agentId: 'a1', platform: 'macos', hostName: 'host', osVersion: '15.0',
+      agentVersion: '1.0.0', createdAt: 1, updatedAt: 2,
+      lastSeenAt: null, revokedAt: null,
+    };
+    assert.equal(contract.schema.safeParse({ agents: [agent] }).success, true);
+    assert.equal(
+      contract.schema.safeParse({ agents: [{ ...agent, tokenHash: 'deadbeef' }] }).success,
+      false
+    );
+    // No cap on how many agents may enrol, so this must not claim one.
+    assert.equal(contract.bounded, false);
+  });
+
+  it('routerの行はパスワードを持って出られない', () => {
+    const contract = createRegistry().lookup('GET /api/routers', 200);
+    assert.ok(contract);
+    const row = {
+      id: 'r1', kind: 'yamaha', displayName: 'Main', hostName: '',
+      ip: '192.0.2.1', user: 'admin', nat: 1, enabled: true,
+      passSet: true, enablePassSet: false, ready: true, state: 'ready',
+      message: '', lastSuccessAt: null, lastError: null, sessionCount: 0,
+    };
+    const body = { routers: [row], maxRouters: 10, serverTime: 1, processStartedAt: 0 };
+    assert.equal(contract.schema.safeParse(body).success, true);
+    assert.equal(
+      contract.schema.safeParse({ ...body, routers: [{ ...row, pass: 'secret' }] }).success,
+      false
+    );
+    // `upsert` refuses an eleventh router, so this bound exists in the code.
+    assert.equal(contract.bounded, true);
+  });
+
+  it('slackのtokenは真偽値としてしか出られない', () => {
+    const contract = createRegistry().lookup('GET /api/config/slack', 200);
+    assert.ok(contract);
+    const config = {
+      enabled: false, userId: '', displayName: '', cooldownMinutes: 5, tokenSet: true,
+    };
+    assert.equal(contract.schema.safeParse({ config }).success, true);
+    assert.equal(
+      contract.schema.safeParse({ config: { ...config, token: 'xoxb-real' } }).success,
+      false
+    );
+  });
+
+  it('automationProviderは返さない', () => {
+    // Which provider the consent was given for. Answering it back would let a
+    // screen show consent for a provider the user never agreed to.
+    const contract = createRegistry().lookup('GET /api/ai/notification-config', 200);
+    assert.ok(contract);
+    const body = {
+      config: {
+        frequency: 'off',
+        destinations: { ui: true, slack: false },
+        rules: { scheduled: false },
+        threat: { enabled: false },
+        automationConsent: false,
+      },
+      status: {
+        running: false, provider: 'ollama', automationReady: true, slackReady: false,
+      },
+    };
+    assert.equal(contract.schema.safeParse(body).success, true);
+    assert.equal(
+      contract.schema.safeParse({
+        ...body,
+        config: { ...body.config, automationProvider: 'anthropic' },
+      }).success,
+      false
+    );
+  });
+
+  it('脅威指標は境界を主張しない', () => {
+    // About ten thousand indicators, and `available: false` is a Hub with no
+    // feeds rather than an error -- the agent has to tell that apart from
+    // "nothing found".
+    const contract = createRegistry().lookup('GET /api/agent/threat-intel', 200);
+    assert.ok(contract);
+    assert.equal(contract.bounded, false);
+    assert.equal(contract.schema.safeParse({
+      schemaVersion: 1, generatedAt: '2026-09-06T00:00:00Z', available: false,
+      ips: [], domains: [], cidrs: [],
+    }).success, true);
+  });
+});

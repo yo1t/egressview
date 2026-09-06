@@ -229,6 +229,120 @@ function createRegistry() {
     cached: z.boolean(),
   }).loose(), { bounded: false, arrayElementsObserved: true });
 
+  // GET /api/agents -- one row per enrolled agent, through `publicAgent`.
+  //
+  // The element is `.strict()` and that is the point: `listAgents` runs
+  // `SELECT * FROM agents` and hands each row to a projection that drops
+  // `tokenHash`. A column added to that table reaches the projection
+  // automatically the day someone widens it, so "nothing extra came out" is
+  // the property worth checking rather than a mismatch to tolerate.
+  //
+  // `bounded: false`: agents are enrolled one at a time by an administrator
+  // and nothing caps how many. Two on this network today, which is a count.
+  registry.declare('GET /api/agents', 200, z.object({
+    agents: z.array(z.strictObject({
+      agentId: z.string(),
+      platform: z.string(),
+      hostName: z.string(),
+      osVersion: z.string(),
+      agentVersion: z.string(),
+      createdAt: z.number(),
+      updatedAt: z.number(),
+      lastSeenAt: z.number().nullable(),
+      revokedAt: z.number().nullable(),
+    })),
+  }).loose(), { bounded: false });
+
+  // GET /api/routers -- the collection sources, through `publicRouter`.
+  //
+  // Bounded for a reason that exists in the code rather than in practice:
+  // `upsert` refuses an eleventh router, and the response says so in
+  // `maxRouters`. The element is `.strict()` for the same reason as agents --
+  // the record it is projected from holds `pass` and `enablePass`, and both
+  // are meant to leave here as booleans or not at all.
+  registry.declare('GET /api/routers', 200, z.object({
+    routers: z.array(z.strictObject({
+      id: z.string(),
+      kind: z.string(),
+      displayName: z.string(),
+      hostName: z.string(),
+      ip: z.string(),
+      user: z.string(),
+      // Yamaha only; `undefined` is dropped by JSON for every other kind.
+      nat: z.union([z.string(), z.number()]).optional(),
+      enabled: z.boolean(),
+      passSet: z.boolean(),
+      enablePassSet: z.boolean(),
+      ready: z.boolean(),
+      state: z.string(),
+      message: z.string(),
+      lastSuccessAt: z.number().nullable(),
+      lastError: z.string().nullable(),
+      sessionCount: z.number(),
+    })).max(BOUNDED_ARRAY_LIMIT),
+    maxRouters: z.number(),
+    serverTime: z.number(),
+    processStartedAt: z.number(),
+  }).loose());
+
+  // GET /api/agent/threat-intel -- the indicator set an agent matches against
+  // locally, so that asking "is this dangerous?" never sends the address.
+  //
+  // One shape covers both answers. `available: false` is a Hub with no feeds
+  // and is not an error: the agent has to tell "nothing found" apart from
+  // "nobody looked", and the empty arrays below are what it reads.
+  //
+  // `bounded: false` and `unknown()` rows: about ten thousand indicators, sent
+  // positionally as `[value, source, tag, confidence]`. The fourth element is
+  // absent from a Hub older than P3-19.
+  registry.declare('GET /api/agent/threat-intel', 200, z.object({
+    schemaVersion: z.number(),
+    generatedAt: z.string(),
+    available: z.boolean(),
+    fetchedAt: z.string().nullable().optional(),
+    ips: z.array(z.unknown()),
+    domains: z.array(z.unknown()),
+    cidrs: z.array(z.unknown()),
+  }).loose(), { bounded: false, arrayElementsObserved: true });
+
+  // GET /api/ai/notification-config -- when the Hub is allowed to speak first.
+  //
+  // `automationProvider` is removed by the handler, and `z.undefined()` says
+  // so rather than leaving it to a reader to notice: the field records which
+  // provider the consent was given for, and answering it back would let a
+  // screen show consent for a provider the user never agreed to.
+  registry.declare('GET /api/ai/notification-config', 200, z.object({
+    config: z.object({
+      frequency: z.string(),
+      destinations: z.object({}).loose(),
+      rules: z.object({}).loose(),
+      threat: z.object({}).loose(),
+      automationConsent: z.boolean(),
+      // Absent, not merely falsy: `z.never().optional()` passes when the key
+      // is missing and fails the moment it is answered back.
+      automationProvider: z.never().optional(),
+    }).loose(),
+    status: z.strictObject({
+      running: z.boolean(),
+      provider: z.string(),
+      automationReady: z.boolean(),
+      slackReady: z.boolean(),
+    }),
+  }).loose());
+
+  // GET /api/config/detection-notifications -- the per-detection delivery
+  // switches. Two channels each, no arrays, so this can be exact.
+  const detectionChannels = z.strictObject({
+    slack: z.boolean().optional(),
+    history: z.boolean().optional(),
+  });
+  registry.declare('GET /api/config/detection-notifications', 200, z.object({
+    config: z.strictObject({
+      threat: detectionChannels,
+      newDevice: detectionChannels,
+    }),
+  }).loose());
+
   // Responses that project a secret down to a fact about it. These are the
   // ones worth refusing rather than merely counting: `clientSecretSet` and
   // `keySet` exist so a credential is never sent, and an extra key here is a
@@ -264,6 +378,31 @@ function createRegistry() {
     })),
     selectedModelPricing: z.unknown().optional(),
   }).strict());
+
+  // GET /api/config/slack -- the bot token reduced to `tokenSet` by
+  // `notifier.getConfig`. `.strict()` because the token is the whole reason
+  // this projection exists.
+  registry.declare('GET /api/config/slack', 200, z.object({
+    config: z.strictObject({
+      enabled: z.boolean(),
+      userId: z.string(),
+      displayName: z.string(),
+      cooldownMinutes: z.number(),
+      tokenSet: z.boolean(),
+    }),
+  }).strict());
+
+  // GET /api/ai/conversations/:id -- one stored conversation and its messages.
+  //
+  // `bounded: false` and `unknown()` rows: a conversation grows a message per
+  // turn and nothing trims it while it is open, so the count is a measurement
+  // rather than a limit. The rows are `SELECT *` from `ai_conversations` and
+  // `ai_messages`, and pinning them here would make the contract an obstacle
+  // to ordinary schema growth rather than a check that the envelope holds.
+  registry.declare('GET /api/ai/conversations/:id', 200, z.object({
+    conversation: z.object({ conversationId: z.string() }).loose(),
+    messages: z.array(z.unknown()),
+  }).loose(), { bounded: false, arrayElementsObserved: true });
 
   return registry;
 }
