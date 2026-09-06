@@ -5,9 +5,11 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 10;
+    private const int CurrentSchemaVersion = 11;
     public static readonly TimeSpan RawRetention = TimeSpan.FromDays(14);
     public static readonly TimeSpan AggregateRetention = TimeSpan.FromDays(30);
+    public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan CoverageStaleAfter = TimeSpan.FromSeconds(15);
     private const string Version1Schema = """
         CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL);
         INSERT INTO schema_version(version) SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM schema_version);
@@ -158,6 +160,11 @@ public sealed partial class ObservationStore : IDisposable
           folded_through TEXT NOT NULL
         );
         """;
+    private const string Version11Schema = """
+        ALTER TABLE coverage_sessions ADD COLUMN confirmed_at TEXT;
+        ALTER TABLE coverage_sessions ADD COLUMN interrupted INTEGER NOT NULL DEFAULT 0 CHECK(interrupted IN (0,1));
+        UPDATE coverage_sessions SET confirmed_at=COALESCE(ended_at,started_at);
+        """;
 
     private readonly object gate = new();
     private nint db;
@@ -185,7 +192,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -203,7 +210,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 6) { MigrateVersion6To7(); version = 7; }
         if (version == 7) { MigrateVersion7To8(); version = 8; }
         if (version == 8) { MigrateVersion8To9(); version = 9; }
-        if (version == 9) MigrateVersion9To10();
+        if (version == 9) { MigrateVersion9To10(); version = 10; }
+        if (version == 10) MigrateVersion10To11();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -279,6 +287,13 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion10To11()
+    {
+        CreateMigrationBackup(11);
+        try { Execute($"BEGIN IMMEDIATE; {Version11Schema} UPDATE schema_version SET version=11 WHERE version=10; COMMIT;"); PruneMigrationBackups(11); }
+        catch { TryRollback(); throw; }
+    }
+
     private string CreateMigrationBackup(int targetVersion)
     {
         var backup = $"{path}.pre-v{targetVersion}.bak";
@@ -337,6 +352,10 @@ public sealed partial class ObservationStore : IDisposable
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing remote hostname columns.");
         if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('delivery_state') WHERE name='delivery_enabled'") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing the delivery opt-in state.");
+        if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('coverage_sessions') WHERE name='confirmed_at'") != 1)
+            throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing coverage confirmation timestamps.");
+        if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('coverage_sessions') WHERE name='interrupted'") != 1)
+            throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing coverage interruption state.");
     }
 
     public void WriteBatch(IReadOnlyList<NetworkObservation> observations, bool queueForDelivery = false)
@@ -480,13 +499,17 @@ public sealed partial class ObservationStore : IDisposable
             Execute("BEGIN IMMEDIATE");
             try
             {
+                // A prior process may have been killed before EndCoverage. Its
+                // last heartbeat is the last instant we can honestly claim;
+                // never extend that abandoned session to this new start.
+                Execute("UPDATE coverage_sessions SET ended_at=COALESCE(confirmed_at,started_at),interrupted=1 WHERE ended_at IS NULL");
                 foreach (var flow in snapshot)
                 {
                     var key = StartupSnapshot.FlowKey(flow.Protocol, flow.LocalAddress, flow.LocalPort, flow.RemoteAddress, flow.RemotePort, flow.ProcessId).Replace("'", "''", StringComparison.Ordinal);
                     var processName = flow.ProcessName is null ? "NULL" : $"'{Sql(flow.ProcessName)}'";
                     Execute($"INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name,remote_hostname) VALUES('{key}','{flow.Protocol}','{flow.LocalAddress}',{flow.LocalPort},'{flow.RemoteAddress}',{flow.RemotePort},{flow.ProcessId},'{startedAt:O}','{startedAt:O}','snapshot',NULL,NULL,'logical',NULL,{processName},NULL) ON CONFLICT(flow_key) DO NOTHING");
                 }
-                Execute($"INSERT INTO coverage_sessions(started_at,snapshot_count) VALUES('{startedAt:O}',{snapshot.Count})");
+                Execute($"INSERT INTO coverage_sessions(started_at,confirmed_at,snapshot_count) VALUES('{startedAt:O}','{startedAt:O}',{snapshot.Count})");
                 var id = ScalarInt64("SELECT last_insert_rowid()");
                 Execute("COMMIT");
                 return id;
@@ -497,7 +520,17 @@ public sealed partial class ObservationStore : IDisposable
 
     public void EndCoverage(long id, DateTimeOffset endedAt)
     {
-        lock (gate) Execute($"UPDATE coverage_sessions SET ended_at='{endedAt:O}' WHERE id={id} AND ended_at IS NULL");
+        lock (gate) Execute($"UPDATE coverage_sessions SET confirmed_at='{endedAt:O}',ended_at='{endedAt:O}' WHERE id={id} AND ended_at IS NULL");
+    }
+
+    public void ConfirmCoverage(long id, DateTimeOffset confirmedAt)
+    {
+        lock (gate) Execute($"UPDATE coverage_sessions SET confirmed_at='{confirmedAt:O}' WHERE id={id} AND ended_at IS NULL");
+    }
+
+    public void InterruptCoverage(long id, DateTimeOffset lastConfirmedAt)
+    {
+        lock (gate) Execute($"UPDATE coverage_sessions SET confirmed_at='{lastConfirmedAt:O}',ended_at='{lastConfirmedAt:O}',interrupted=1 WHERE id={id} AND ended_at IS NULL");
     }
 
     public IReadOnlyDictionary<string, long> ReadFlowOrigins()
@@ -517,7 +550,7 @@ public sealed partial class ObservationStore : IDisposable
         lock (gate) return (
             ScalarInt64("SELECT COUNT(*) FROM coverage_sessions"),
             ScalarInt64("SELECT COUNT(*) FROM coverage_sessions WHERE ended_at IS NULL AND id=(SELECT MAX(id) FROM coverage_sessions)"),
-            ScalarInt64("SELECT COUNT(*) FROM coverage_sessions WHERE ended_at IS NULL AND id < (SELECT COALESCE(MAX(id),0) FROM coverage_sessions)"));
+            ScalarInt64("SELECT COUNT(*) FROM coverage_sessions WHERE interrupted=1"));
     }
 
     public (long Total, long Snapshot, long Etw, long Both, long BytesUnknown) ReadFlowStats()
@@ -930,7 +963,7 @@ public sealed partial class ObservationStore : IDisposable
     private double ReadCoverage(DateTimeOffset from, DateTimeOffset to)
     {
         var intervals = new List<(DateTimeOffset Start, DateTimeOffset End)>();
-        var sql = $"SELECT started_at,ended_at FROM coverage_sessions WHERE started_at<'{to.ToUniversalTime():O}' AND COALESCE(ended_at,'{to.ToUniversalTime():O}')>'{from.ToUniversalTime():O}' ORDER BY started_at";
+        var sql = $"SELECT started_at,ended_at,confirmed_at FROM coverage_sessions WHERE started_at<'{to.ToUniversalTime():O}' AND COALESCE(ended_at,confirmed_at,started_at)>'{from.ToUniversalTime():O}' ORDER BY started_at";
         CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
         try
         {
@@ -938,7 +971,11 @@ public sealed partial class ObservationStore : IDisposable
             {
                 var start = DateTimeOffset.Parse(Text(statement, 0));
                 var endText = NullableTextValue(statement, 1);
-                var end = endText is null ? to : DateTimeOffset.Parse(endText);
+                var confirmedText = NullableTextValue(statement, 2);
+                var confirmed = confirmedText is null ? start : DateTimeOffset.Parse(confirmedText);
+                var end = endText is not null
+                    ? DateTimeOffset.Parse(endText)
+                    : confirmed >= to || to - confirmed <= CoverageStaleAfter ? to : confirmed;
                 intervals.Add((start < from ? from : start, end > to ? to : end));
             }
         }

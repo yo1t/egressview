@@ -156,9 +156,20 @@ try
         Assert(coverageStore.ReadProcessNameStats() == (2, 0), "snapshot and ETW process names are retained");
         coverageStore.EndCoverage(firstCoverage, started.AddSeconds(2));
         Assert(coverageStore.ReadCoverage() == (1, 0, 0), "normal coverage closes");
-        coverageStore.BeginCoverage(snapshot, started.AddSeconds(3));
-        coverageStore.BeginCoverage(snapshot, started.AddSeconds(4));
+        var abandoned = coverageStore.BeginCoverage(snapshot, started.AddSeconds(3));
+        coverageStore.ConfirmCoverage(abandoned, started.AddSeconds(5));
+        var activeAfterRestart = coverageStore.BeginCoverage(snapshot, started.AddSeconds(10));
         Assert(coverageStore.ReadCoverage() == (3, 1, 1), "previous open coverage is abandoned");
+        var crashWindow = coverageStore.ReadPeriodAnalysis(started.AddSeconds(3), started.AddSeconds(10));
+        Assert(Math.Abs(crashWindow.CoverageRatio - (2d / 7d)) < 0.001,
+            "abrupt termination stops coverage at the last heartbeat instead of extending to restart");
+
+        coverageStore.InterruptCoverage(activeAfterRestart, started.AddSeconds(12));
+        var resumed = coverageStore.BeginCoverage(snapshot, started.AddSeconds(20));
+        coverageStore.EndCoverage(resumed, started.AddSeconds(22));
+        var suspendWindow = coverageStore.ReadPeriodAnalysis(started.AddSeconds(10), started.AddSeconds(22));
+        Assert(Math.Abs(suspendWindow.CoverageRatio - (4d / 12d)) < 0.001,
+            "a heartbeat or ETW-loss interruption leaves the unconfirmed gap outside monitoring coverage");
     }
 
     var liveSnapshot = StartupSnapshot.Capture();
@@ -169,15 +180,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 10, "v1 database migrates through v2-v10");
+        Assert(migrated.SchemaVersion == 11, "v1 database migrates through v2-v11");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v10.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v11.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 10, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 11, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
