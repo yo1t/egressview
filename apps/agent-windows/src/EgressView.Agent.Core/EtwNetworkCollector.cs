@@ -31,6 +31,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private string? error;
     private string? processNameSourceError;
     private string? hostnameSourceError;
+    private int eventsLost;
 
     public EtwNetworkCollector(ObservationPipeline pipeline)
     {
@@ -48,7 +49,14 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     /// on purpose, so the choice stays visible instead of looking like a
     /// collection gap.
     public long InboundMulticastIgnored => Interlocked.Read(ref inboundMulticastIgnored);
-    public int EventsLost { get; private set; }
+    public int EventsLost
+    {
+        get
+        {
+            try { return session?.EventsLost ?? eventsLost; }
+            catch { return eventsLost; }
+        }
+    }
     public string? Error => error;
     /// Why process start events are unavailable, when they are. Network
     /// collection continues without them; names just fall back to querying,
@@ -324,7 +332,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     {
         NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
         if (session is null) return;
-        try { EventsLost = session.EventsLost; } catch { }
+        try { eventsLost = session.EventsLost; } catch { }
         try { session.Stop(); } catch { }
         if (processing is not null) await processing.WaitAsync(TimeSpan.FromSeconds(10));
         Submit(deferredNames.Drain());

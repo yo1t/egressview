@@ -119,10 +119,14 @@ public partial class MainWindow : Window
         ConnectionCount.Text = data.Connections.ToString("N0");
         ApplicationCount.Text = data.Applications.ToString("N0");
         DestinationCount.Text = data.Destinations.ToString("N0");
-        CoverageValue.Text = $"{data.CoverageRatio:P0}";
+        CoverageValue.Text = data.CoverageRatio >= 0.999999999
+            ? "100%"
+            : $"{Math.Min(data.CoverageRatio, 0.999):P1}";
         StorageSummary.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("StorageSummary"), data.StoredFlows.ToString("N0"), FlowRow.FormatBytes(data.StorageBytes));
         MonitoringSince.Text = data.MonitoringStartedAt is { } started ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("MonitoringSince"), started.LocalDateTime.ToString("g")) : string.Empty;
-        CoverageNote.Text = data.CoverageRatio < 0.999 ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("PartialCoverage"), data.CoverageRatio) : string.Empty;
+        CoverageNote.Text = data.CoverageRatio < 0.999999999
+            ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("PartialCoverage"), Math.Min(data.CoverageRatio, 0.999))
+            : string.Empty;
         var names = DestinationChoice.SelectedItem is ComboBoxItem destination && Equals(destination.Tag, "name");
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
         Timeline.SetItems(data.Timeline, IsByteMetric);
