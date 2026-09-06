@@ -36,8 +36,8 @@ dotnet run --project src/EgressView.Agent.Service -c Release -- --console --seco
 dotnet run --project src/EgressView.Agent.Service -c Release -- --inspect --data .\agent.db
 dotnet run --project src/EgressView.Agent.Service -c Release -- --diagnostics-bundle .\diagnostics.zip --data .\agent.db
 dotnet run --project src/EgressView.Agent.Service -c Release -- --ipc-request '{"v":1,"op":"status"}'
-dotnet publish src/EgressView.Agent.Service -c Release -r win-x64 --self-contained false -o .\.publish\service
-dotnet publish src/EgressView.Agent.Ui -c Release -r win-x64 --self-contained false -o .\.publish\ui
+dotnet publish src/EgressView.Agent.Service -c Release -r win-x64 --self-contained true -o .\.publish\service
+dotnet publish src/EgressView.Agent.Ui -c Release -r win-x64 --self-contained true -o .\.publish\ui
 .\scripts\install-dev-service.ps1 -Source .\.publish\service -UiSource .\.publish\ui
 .\scripts\build-msi.ps1 -Version 0.1.0
 ```

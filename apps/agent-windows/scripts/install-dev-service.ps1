@@ -36,6 +36,24 @@ $uiBinarySource = Join-Path $uiSourcePath 'EgressView.Agent.Ui.exe'
 if (-not (Test-Path -LiteralPath $serviceBinarySource -PathType Leaf)) { throw "Service executable not found: $serviceBinarySource" }
 if (-not (Test-Path -LiteralPath $uiBinarySource -PathType Leaf)) { throw "UI executable not found: $uiBinarySource" }
 
+# Development installs use the same self-contained deployment model as the MSI.
+# Rejecting framework-dependent output before stopping the existing service avoids
+# mixing it with runtime files left by a previous self-contained installation.
+$requiredServiceRuntimeFiles = @('hostfxr.dll', 'hostpolicy.dll', 'coreclr.dll')
+foreach ($runtimeFile in $requiredServiceRuntimeFiles) {
+    $runtimePath = Join-Path $sourcePath $runtimeFile
+    if (-not (Test-Path -LiteralPath $runtimePath -PathType Leaf)) {
+        throw "Service source must be a self-contained win-x64 publish; missing $runtimeFile. Publish with --self-contained true."
+    }
+}
+$requiredUiRuntimeFiles = @('hostfxr.dll', 'hostpolicy.dll', 'coreclr.dll', 'WindowsBase.dll')
+foreach ($runtimeFile in $requiredUiRuntimeFiles) {
+    $runtimePath = Join-Path $uiSourcePath $runtimeFile
+    if (-not (Test-Path -LiteralPath $runtimePath -PathType Leaf)) {
+        throw "UI source must be a self-contained win-x64 publish; missing $runtimeFile. Publish with --self-contained true."
+    }
+}
+
 $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if (-not [System.Diagnostics.EventLog]::SourceExists($eventSource)) {
     New-EventLog -LogName Application -Source $eventSource
