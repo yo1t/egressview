@@ -13,6 +13,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     // Microsoft-Windows-Kernel-Process. Only the process keyword is enabled:
     // thread and image-load events would multiply the volume for nothing.
     private static readonly Guid KernelProcess = new("22FB2CD6-0E7B-422B-A0C7-2FAD1FD0E716");
+    private static readonly Guid DnsClient = new("1C95126E-7EEA-49A9-A3FE-A378B03DDB4D");
     private const ulong ProcessKeyword = 0x10;
     private static readonly HashSet<string> VpnProcesses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -21,6 +22,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private readonly ObservationPipeline pipeline;
     private readonly ProcessNameResolver processNames = new();
     private readonly DeferredProcessObservations deferredNames = new();
+    private readonly DnsNameCache dnsNames = new();
     private readonly object interfaceGate = new();
     private Dictionary<string, InterfaceInfo> interfaces = new(StringComparer.OrdinalIgnoreCase);
     private TraceEventSession? session;
@@ -28,6 +30,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private long eventsSeen, eventsIgnored, interfaceUnresolved, inboundMulticastIgnored;
     private string? error;
     private string? processNameSourceError;
+    private string? hostnameSourceError;
 
     public EtwNetworkCollector(ObservationPipeline pipeline)
     {
@@ -74,6 +77,17 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             {
                 processNameSourceError = $"{ex.GetType().Name}: {ex.Message}";
             }
+            try
+            {
+                // Event 3008 contains the requesting PID, query name and the
+                // resolved addresses. This is metadata Windows already has;
+                // no packet payload is captured and reverse DNS is never used.
+                session.EnableProvider(DnsClient, TraceEventLevel.Informational, ulong.MaxValue);
+            }
+            catch (Exception ex)
+            {
+                hostnameSourceError = $"{ex.GetType().Name}: {ex.Message}";
+            }
             session.Source.Dynamic.All += Dispatch;
             processing = Task.Run(() =>
             {
@@ -115,7 +129,11 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         NamesDeferredExpired = deferredNames.Expired,
         NamesDeferredOverflow = deferredNames.Overflow,
         ProcessNameSourceError = processNameSourceError,
-        State = Error is not null || EventsLost > 0 || snapshot.PersistenceFailures > 0 ? "degraded" : snapshot.State,
+        HostnamesResolved = dnsNames.CacheHits,
+        HostnamesUnavailable = dnsNames.CacheMisses,
+        DnsEventsSeen = dnsNames.EventsSeen,
+        HostnameSourceError = hostnameSourceError,
+        State = Error is not null || EventsLost > 0 || snapshot.PersistenceFailures > 0 || hostnameSourceError is not null ? "degraded" : snapshot.State,
     };
 
     private void Dispatch(TraceEvent e)
@@ -132,8 +150,20 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             Submit(deferredNames.Expire(eventAt));
             return;
         }
+        if (e.ProviderGuid == DnsClient)
+        {
+            RecordDnsResult(e);
+            Submit(deferredNames.Expire(eventAt));
+            return;
+        }
         Record(e);
         Submit(deferredNames.Expire(eventAt));
+    }
+
+    private void RecordDnsResult(TraceEvent e)
+    {
+        if ((int)e.ID != 3008 || !string.Equals(Payload(e, "QueryStatus"), "0", StringComparison.Ordinal)) return;
+        dnsNames.Observe(e.ProcessID, Payload(e, "QueryName"), Payload(e, "QueryResults"), e.TimeStamp.ToUniversalTime());
     }
 
     /// Names a process from its lifecycle events, before its traffic is seen.
@@ -243,13 +273,14 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         // a channel, so a short-lived process may already be gone by now and
         // the name has to be judged against when the traffic happened.
         var processName = processNames.Resolve(pid, e.TimeStamp.ToUniversalTime());
+        var remoteHostname = dnsNames.Resolve(pid, remoteAddress, e.TimeStamp.ToUniversalTime());
         var layer = IsVpnTransport(processName, localInterface) ? ObservationLayer.VpnTransport : ObservationLayer.Logical;
         var observation = new NetworkObservation(
             e.TimeStamp.ToUniversalTime(), pid,
             e.EventName.Contains("UDP", StringComparison.OrdinalIgnoreCase) ? "UDP" : "TCP",
             localAddress, localPort, remoteAddress, remotePort,
             direction == Direction.Send ? bytes : 0, direction == Direction.Receive ? bytes : 0,
-            layer, localInterface?.Id, "etw", processName);
+            layer, localInterface?.Id, "etw", processName, remoteHostname);
         if (processName is null
             && processNames.TryGetUnresolvedStart(pid, out var processStartedAt)
             && deferredNames.TryDefer(observation, processStartedAt, observation.ObservedAt))

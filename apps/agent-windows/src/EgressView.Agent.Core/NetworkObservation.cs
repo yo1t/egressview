@@ -19,7 +19,8 @@ public sealed record NetworkObservation(
     ObservationLayer Layer,
     string? InterfaceId,
     string Source,
-    string? ProcessName = null);
+    string? ProcessName = null,
+    string? RemoteHostname = null);
 
 public sealed record StartupFlow(
     string Protocol,
@@ -53,7 +54,8 @@ public sealed record RecentFlow(
     long? BytesReceived,
     ObservationLayer Layer,
     string? InterfaceId,
-    string Origin);
+    string Origin,
+    string? RemoteHostname = null);
 
 public sealed record GeoLocation(string Ip, double Latitude, double Longitude, string? CountryCode, string? City);
 
@@ -77,7 +79,11 @@ public sealed record ThreatFinding(string Destination, string Application, long 
     long ConnectionsWithoutBytes, DateTimeOffset LastSeen, string IndicatorKind, string MatchedValue,
     string? Source, string? Tag, string Confidence);
 public sealed record ThreatReport(string Availability, long IndicatorCount, DateTimeOffset? FetchedAt,
-    int CheckedDestinations, IReadOnlyList<ThreatFinding> Findings);
+    int CheckedDestinations, IReadOnlyList<ThreatFinding> Findings)
+{
+    public int DomainCheckedDestinations { get; init; }
+    public int DomainUncheckedDestinations { get; init; }
+}
 
 public sealed record RetentionMaintenanceResult(long ObservationsDeleted, long FlowsDeleted,
     long HourlySummariesDeleted, long CoverageSessionsDeleted)
@@ -123,7 +129,11 @@ public sealed record CollectorSnapshot(
     long NamesRecoveredFromStop = 0,
     long NamesDeferredExpired = 0,
     long NamesDeferredOverflow = 0,
-    string? ProcessNameSourceError = null);
+    string? ProcessNameSourceError = null,
+    long HostnamesResolved = 0,
+    long HostnamesUnavailable = 0,
+    long DnsEventsSeen = 0,
+    string? HostnameSourceError = null);
 
 public enum StoreFailureKind
 {
