@@ -237,12 +237,17 @@ describe('P2-95の積み残しを宣言する（2026-08-29）', () => {
     }
   });
 
-  it('connections/summary は宣言しないままにする', () => {
-    // Its tests call the handler directly with a stand-in `res`, never through
-    // Express, so nothing can reach it to check the contract. Declaring it
-    // would create a contract nobody exercises, which is what the gate exists
-    // to refuse. An HTTP-level test comes first.
-    assert.equal(createRegistry().lookup('GET /api/connections/summary', 200), null);
+  it('connections/summary は HTTP テストができたので宣言する', () => {
+    // It stayed undeclared while its only tests called the handler directly
+    // with a stand-in `res`: a contract nobody exercises is what the gate
+    // exists to refuse. `test/unit/connections-summary-http.test.js` now
+    // mounts the router and requests it over HTTP, so the declaration is
+    // checked against a real response rather than asserted.
+    const contract = createRegistry().lookup('GET /api/connections/summary', 200);
+    assert.ok(contract, 'the route should be declared now that HTTP-level tests reach it');
+    // Unbounded on purpose: one measured production response carried 500
+    // destinations and 315 timeline points.
+    assert.equal(contract.bounded, false);
   });
 });
 
