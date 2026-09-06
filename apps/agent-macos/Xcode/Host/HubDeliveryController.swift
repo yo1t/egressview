@@ -44,7 +44,7 @@ final class HubDeliveryController: ObservableObject {
     private var deliverySampler = ObservationPersistenceSampler(refreshInterval: 60)
     private lazy var sender: AgentIngestSender? = makeSender()
     private var senderState: AgentIngestSenderState = .off
-    private var lastRejectedOrOverflowCount: Int?
+    private var droppedObservations = AgentDroppedObservationWatcher()
 
     init() {
         _ = sender
@@ -186,9 +186,10 @@ final class HubDeliveryController: ObservableObject {
     private func render(state: AgentIngestSenderState, queueStatus: AgentDeliveryQueueStatus) {
         senderState = state
         status = label(for: state)
-        let rejectedOrOverflow = queueStatus.queueOverflowCount + queueStatus.contractRejectedCount
-        let newlyDropped = lastRejectedOrOverflowCount.map { rejectedOrOverflow > $0 } ?? false
-        lastRejectedOrOverflowCount = rejectedOrOverflow
+        let newlyDropped = droppedObservations.observe(
+            queueOverflowCount: queueStatus.queueOverflowCount,
+            contractRejectedCount: queueStatus.contractRejectedCount
+        )
         if newlyDropped {
             notificationState = .dataDropped
         } else {
