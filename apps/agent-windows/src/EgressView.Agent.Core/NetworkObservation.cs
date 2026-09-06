@@ -86,11 +86,11 @@ public sealed record ThreatReport(string Availability, long IndicatorCount, Date
 }
 
 public sealed record RetentionMaintenanceResult(long ObservationsDeleted, long FlowsDeleted,
-    long HourlySummariesDeleted, long CoverageSessionsDeleted)
+    long HourlySummariesDeleted, long CoverageSessionsDeleted, long ChartSummariesDeleted = 0)
 {
-    public long TotalDeleted => ObservationsDeleted + FlowsDeleted + HourlySummariesDeleted + CoverageSessionsDeleted;
+    public long TotalDeleted => ObservationsDeleted + FlowsDeleted + HourlySummariesDeleted + CoverageSessionsDeleted + ChartSummariesDeleted;
     public bool MayHaveMore(int batchSize) => ObservationsDeleted == batchSize || FlowsDeleted == batchSize ||
-        HourlySummariesDeleted == batchSize || CoverageSessionsDeleted == batchSize;
+        HourlySummariesDeleted == batchSize || CoverageSessionsDeleted == batchSize || ChartSummariesDeleted == batchSize;
 }
 
 public sealed record CollectorSnapshot(

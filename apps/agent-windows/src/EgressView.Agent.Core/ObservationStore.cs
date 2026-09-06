@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 9;
+    private const int CurrentSchemaVersion = 10;
     public static readonly TimeSpan RawRetention = TimeSpan.FromDays(14);
     public static readonly TimeSpan AggregateRetention = TimeSpan.FromDays(30);
     private const string Version1Schema = """
@@ -141,6 +141,23 @@ public sealed partial class ObservationStore : IDisposable
         ALTER TABLE observations ADD COLUMN remote_hostname TEXT;
         ALTER TABLE flows ADD COLUMN remote_hostname TEXT;
         """;
+    private const string Version10Schema = """
+        CREATE TABLE IF NOT EXISTS chart_hourly(
+          bucket_start TEXT NOT NULL,
+          application TEXT NOT NULL,
+          layer TEXT NOT NULL CHECK(layer IN ('logical','vpn_transport')),
+          observation_count INTEGER NOT NULL,
+          bytes_sent INTEGER NOT NULL,
+          bytes_received INTEGER NOT NULL,
+          bytes_unknown INTEGER NOT NULL,
+          PRIMARY KEY(bucket_start,application,layer)
+        );
+        CREATE INDEX IF NOT EXISTS chart_hourly_bucket ON chart_hourly(bucket_start);
+        CREATE TABLE IF NOT EXISTS chart_hourly_state(
+          id INTEGER PRIMARY KEY CHECK(id=1),
+          folded_through TEXT NOT NULL
+        );
+        """;
 
     private readonly object gate = new();
     private nint db;
@@ -168,7 +185,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -185,7 +202,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 5) { MigrateVersion5To6(); version = 6; }
         if (version == 6) { MigrateVersion6To7(); version = 7; }
         if (version == 7) { MigrateVersion7To8(); version = 8; }
-        if (version == 8) MigrateVersion8To9();
+        if (version == 8) { MigrateVersion8To9(); version = 9; }
+        if (version == 9) MigrateVersion9To10();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -254,6 +272,13 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion9To10()
+    {
+        CreateMigrationBackup(10);
+        try { Execute($"BEGIN IMMEDIATE; {Version10Schema} UPDATE schema_version SET version=10 WHERE version=9; COMMIT;"); PruneMigrationBackups(10); }
+        catch { TryRollback(); throw; }
+    }
+
     private string CreateMigrationBackup(int targetVersion)
     {
         var backup = $"{path}.pre-v{targetVersion}.bak";
@@ -301,8 +326,8 @@ public sealed partial class ObservationStore : IDisposable
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state')");
-        if (tables != 12)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state')");
+        if (tables != 14)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
@@ -413,9 +438,10 @@ public sealed partial class ObservationStore : IDisposable
                 var observations = DeleteBatch("observations", "id", "observed_at", rawCutoff, batchSize);
                 var flows = DeleteBatch("flows", "flow_key", "last_seen", aggregateCutoff, batchSize);
                 var summaries = DeleteBatch("hourly_summary", "rowid", "bucket_start", aggregateCutoff, batchSize);
+                var chartSummaries = DeleteBatch("chart_hourly", "rowid", "bucket_start", aggregateCutoff, batchSize);
                 var coverage = DeleteBatch("coverage_sessions", "id", "COALESCE(ended_at,started_at)", aggregateCutoff, batchSize);
                 Execute("COMMIT");
-                return new(observations, flows, summaries, coverage);
+                return new(observations, flows, summaries, coverage, chartSummaries);
             }
             catch
             {
@@ -588,6 +614,60 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// <summary>
+    /// Folds complete UTC hours into the bounded chart aggregate. The current
+    /// hour remains raw so a refresh never double-counts an hour still changing.
+    /// </summary>
+    public long FoldCompletedHoursForCharts(DateTimeOffset now)
+    {
+        var utc = now.ToUniversalTime();
+        var currentHour = new DateTimeOffset(utc.Year, utc.Month, utc.Day, utc.Hour, 0, 0, TimeSpan.Zero);
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            var watermarkText = NullableScalarText("SELECT MAX(folded_through) FROM chart_hourly_state");
+            DateTimeOffset watermark;
+            if (watermarkText is null)
+            {
+                var oldestText = NullableScalarText("SELECT MIN(observed_at) FROM observations");
+                if (oldestText is null)
+                {
+                    Execute($"INSERT INTO chart_hourly_state(id,folded_through) VALUES(1,'{currentHour:O}')");
+                    return 0;
+                }
+                var oldest = DateTimeOffset.Parse(oldestText).ToUniversalTime();
+                watermark = new DateTimeOffset(oldest.Year, oldest.Month, oldest.Day, oldest.Hour, 0, 0, TimeSpan.Zero);
+            }
+            else watermark = DateTimeOffset.Parse(watermarkText).ToUniversalTime();
+            if (watermark >= currentHour) return 0;
+
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                Execute($"""
+                    INSERT INTO chart_hourly(bucket_start,application,layer,observation_count,bytes_sent,bytes_received,bytes_unknown)
+                    SELECT substr(observed_at,1,13) || ':00:00.0000000+00:00',
+                           COALESCE(NULLIF(process_name,''),'Unknown'),layer,COUNT(*),
+                           SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
+                           SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
+                    FROM observations
+                    WHERE observed_at>='{watermark:O}' AND observed_at<'{currentHour:O}'
+                    GROUP BY 1,2,layer
+                    ON CONFLICT(bucket_start,application,layer) DO UPDATE SET
+                      observation_count=observation_count+excluded.observation_count,
+                      bytes_sent=bytes_sent+excluded.bytes_sent,
+                      bytes_received=bytes_received+excluded.bytes_received,
+                      bytes_unknown=bytes_unknown+excluded.bytes_unknown;
+                    INSERT INTO chart_hourly_state(id,folded_through) VALUES(1,'{currentHour:O}')
+                    ON CONFLICT(id) DO UPDATE SET folded_through=excluded.folded_through;
+                    """);
+                Execute("COMMIT");
+            }
+            catch { TryRollback(); throw; }
+            return ScalarInt64($"SELECT COUNT(*) FROM chart_hourly WHERE bucket_start>='{watermark:O}' AND bucket_start<'{currentHour:O}'");
+        }
+    }
+
     public IReadOnlyList<RecentFlow> ReadRecentFlows(int limit, int offset = 0)
     {
         if (limit is not (50 or 100 or 200 or 500)) throw new ArgumentOutOfRangeException(nameof(limit));
@@ -740,22 +820,43 @@ public sealed partial class ObservationStore : IDisposable
 
             var durationSeconds = Math.Max(1, (to - from).TotalSeconds);
             var timeline = new List<AppTimelineAggregate>();
+            var widthSeconds = durationSeconds / bucketCount;
+            var fromUtc = from.ToUniversalTime();
+            var toUtc = to.ToUniversalTime();
+            var aggregateStart = new DateTimeOffset(fromUtc.Year, fromUtc.Month, fromUtc.Day, fromUtc.Hour, 0, 0, TimeSpan.Zero);
+            if (aggregateStart < fromUtc) aggregateStart = aggregateStart.AddHours(1);
+            var aggregateEnd = new DateTimeOffset(toUtc.Year, toUtc.Month, toUtc.Day, toUtc.Hour, 0, 0, TimeSpan.Zero);
+            var watermarkText = NullableScalarText("SELECT MAX(folded_through) FROM chart_hourly_state");
+            var watermark = watermarkText is null ? aggregateStart : DateTimeOffset.Parse(watermarkText).ToUniversalTime();
+            aggregateEnd = aggregateEnd < watermark ? aggregateEnd : watermark;
+            if (widthSeconds < 3600 || aggregateEnd <= aggregateStart) aggregateEnd = aggregateStart;
+            var widthText = widthSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
             var timelineSql = $"""
-                WITH ranged AS (
-                  SELECT {app} AS application,last_seen,
-                         COALESCE(bytes_sent,0)+COALESCE(bytes_received,0) AS bytes,
-                         CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END AS unknown
-                  FROM flows WHERE {where}
-                ), top_apps AS (
-                  SELECT application FROM ranged GROUP BY application ORDER BY COUNT(*) DESC,application LIMIT 6
-                ), bucketed AS (
-                  SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(last_seen)-julianday('{fromText}'))*86400.0/{durationSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}*{bucketCount} AS INTEGER))) AS bucket,
-                         CASE WHEN application IN (SELECT application FROM top_apps) THEN application ELSE 'Other' END AS series,
-                         bytes,unknown
-                  FROM ranged
+                WITH combined AS (
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(bucket_start)-julianday('{fromText}'))*86400.0/{widthText} AS INTEGER))) AS bucket,
+                         application,SUM(observation_count) AS connections,
+                         SUM(bytes_sent+bytes_received) AS bytes,SUM(bytes_unknown) AS unknown
+                  FROM chart_hourly
+                  WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
+                  GROUP BY bucket,application
+                  UNION ALL
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(observed_at)-julianday('{fromText}'))*86400.0/{widthText} AS INTEGER))) AS bucket,
+                         {app},COUNT(*),SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),
+                         SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
+                  FROM observations
+                  WHERE observed_at>='{fromText}' AND observed_at<'{toText}' AND layer='logical'
+                    AND (observed_at<'{aggregateStart:O}' OR observed_at>='{aggregateEnd:O}')
+                  GROUP BY bucket,2
+                  UNION ALL
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(bucket_start)-julianday('{fromText}'))*86400.0/{widthText} AS INTEGER))) AS bucket,
+                         'Other',SUM(observation_count),SUM(bytes_sent+bytes_received),SUM(bytes_unknown)
+                  FROM hourly_summary h
+                  WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
+                    AND NOT EXISTS(SELECT 1 FROM chart_hourly c WHERE c.bucket_start=h.bucket_start AND c.layer=h.layer)
+                  GROUP BY bucket
                 )
-                SELECT bucket,series,COUNT(*),SUM(bytes),SUM(unknown) FROM bucketed
-                GROUP BY bucket,series ORDER BY bucket,series
+                SELECT bucket,application,SUM(connections),SUM(bytes),SUM(unknown) FROM combined
+                GROUP BY bucket,application ORDER BY bucket,application
                 """;
             CheckOperation(WinSqlite.Prepare(db, timelineSql, -1, out var timelineStatement, 0));
             try
@@ -766,6 +867,14 @@ public sealed partial class ObservationStore : IDisposable
                         WinSqlite.ColumnInt64(timelineStatement, 4)));
             }
             finally { WinSqlite.Finalize(timelineStatement); }
+
+            var topApplications = timeline.GroupBy(item => item.Application)
+                .OrderByDescending(group => group.Sum(item => item.Connections)).ThenBy(group => group.Key, StringComparer.Ordinal)
+                .Take(6).Select(group => group.Key).ToHashSet(StringComparer.Ordinal);
+            timeline = timeline.GroupBy(item => (item.Bucket, Application: topApplications.Contains(item.Application) ? item.Application : "Other"))
+                .Select(group => new AppTimelineAggregate(group.Key.Bucket, group.Key.Application,
+                    group.Sum(item => item.Connections), group.Sum(item => item.Bytes), group.Sum(item => item.ConnectionsWithoutBytes)))
+                .OrderBy(item => item.Bucket).ThenBy(item => item.Application, StringComparer.Ordinal).ToList();
 
             var coverage = ReadCoverage(from, to);
             var monitoringStartText = NullableScalarText("SELECT MIN(started_at) FROM coverage_sessions");

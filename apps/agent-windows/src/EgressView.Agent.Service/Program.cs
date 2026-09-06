@@ -152,6 +152,7 @@ internal sealed class AgentWindowsService : ServiceBase
         var delivery = RunDeliveryAsync(store, credentialStore, cancellationToken);
         var geoCache = RunGeoCacheAsync(store, credentialStore, cancellationToken);
         var threatIntel = RunThreatIntelAsync(store, credentialStore, cancellationToken);
+        var chartAggregation = RunChartAggregationAsync(store, cancellationToken);
         var maintenance = RunMaintenanceAsync(store, cancellationToken);
         Task lifetime;
         try
@@ -171,9 +172,32 @@ internal sealed class AgentWindowsService : ServiceBase
         await delivery;
         await geoCache;
         await threatIntel;
+        await chartAggregation;
         await maintenance;
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(collector.Enrich(pipeline.Snapshot()), store, "0.1.0-dev"));
+    }
+
+    private static async Task RunChartAggregationAsync(ObservationStore store, CancellationToken cancellationToken)
+    {
+        // Let startup finish and IPC become available before a legacy database
+        // performs its one-time fold of retained observations.
+        await Task.Yield();
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var rows = store.FoldCompletedHoursForCharts(DateTimeOffset.UtcNow);
+                if (rows > 0) store.AddCounter("chart-hourly-rows-folded", rows);
+            }
+            catch
+            {
+                try { store.AddCounter("chart-hourly-fold-failure", 1); }
+                catch { /* The original store failure remains visible through diagnostics. */ }
+            }
+            try { await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+        }
     }
 
     private static async Task RunMaintenanceAsync(ObservationStore store, CancellationToken cancellationToken)
@@ -182,6 +206,10 @@ internal sealed class AgentWindowsService : ServiceBase
         {
             try
             {
+                // Preserve application-level history before raw retention can
+                // remove it during the first maintenance pass after upgrade.
+                var chartRows = store.FoldCompletedHoursForCharts(DateTimeOffset.UtcNow);
+                if (chartRows > 0) store.AddCounter("chart-hourly-rows-folded", chartRows);
                 RetentionMaintenanceResult result;
                 do
                 {
@@ -189,6 +217,7 @@ internal sealed class AgentWindowsService : ServiceBase
                     if (result.ObservationsDeleted > 0) store.AddCounter("retention-observations-deleted", result.ObservationsDeleted);
                     if (result.FlowsDeleted > 0) store.AddCounter("retention-flows-deleted", result.FlowsDeleted);
                     if (result.HourlySummariesDeleted > 0) store.AddCounter("retention-hourly-deleted", result.HourlySummariesDeleted);
+                    if (result.ChartSummariesDeleted > 0) store.AddCounter("retention-chart-hourly-deleted", result.ChartSummariesDeleted);
                     if (result.CoverageSessionsDeleted > 0) store.AddCounter("retention-coverage-deleted", result.CoverageSessionsDeleted);
                     if (result.MayHaveMore(50_000)) await Task.Delay(100, cancellationToken);
                 } while (result.MayHaveMore(50_000) && !cancellationToken.IsCancellationRequested);
