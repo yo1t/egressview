@@ -164,7 +164,10 @@ public partial class MainWindow : Window
             var low = report.Findings.Select(item => item.Destination).Distinct().Count() - high;
             ThreatCount.Text = report.Availability == "available" ? (high + low).ToString("N0") : "—";
             ThreatChecked.Text = report.CheckedDestinations.ToString("N0"); ThreatHigh.Text = high.ToString("N0"); ThreatLow.Text = low.ToString("N0");
-            ThreatStatus.Text = report.Availability switch { "available" when report.Findings.Count == 0 => LocalizationManager.Text("NoThreatMatches"), "available" => string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("ThreatMatches"), report.Findings.Count), "unavailable" => LocalizationManager.Text("HubNoThreatFeeds"), _ => LocalizationManager.Text("ThreatNotChecked") };
+            var status = report.Availability switch { "available" when report.Findings.Count == 0 => LocalizationManager.Text("NoThreatMatches"), "available" => string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("ThreatMatches"), report.Findings.Count), "unavailable" => LocalizationManager.Text("HubNoThreatFeeds"), _ => LocalizationManager.Text("ThreatNotChecked") };
+            ThreatStatus.Text = report.Availability == "available"
+                ? $"{status} {string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DomainCoverage"), report.DomainCheckedDestinations, report.DomainUncheckedDestinations)}"
+                : status;
         }
         catch { ThreatStatus.Text = LocalizationManager.Text("ThreatNotChecked"); ThreatCount.Text = "—"; }
     }
@@ -371,7 +374,14 @@ public sealed class FlowRow(RecentFlow value)
     public DateTimeOffset LastSeen => value.LastSeen;
     public string LastSeenText => value.LastSeen.LocalDateTime.ToString("g");
     public string ProcessName => value.ProcessName ?? $"PID {value.ProcessId}";
-    public string Destination => value.RemoteAddress.Contains(':') ? $"[{value.RemoteAddress}]:{value.RemotePort}" : $"{value.RemoteAddress}:{value.RemotePort}";
+    public string Destination
+    {
+        get
+        {
+            var endpoint = value.RemoteAddress.Contains(':') ? $"[{value.RemoteAddress}]:{value.RemotePort}" : $"{value.RemoteAddress}:{value.RemotePort}";
+            return string.IsNullOrWhiteSpace(value.RemoteHostname) ? endpoint : $"{value.RemoteHostname} ({endpoint})";
+        }
+    }
     public string Protocol => value.Protocol;
     public string BytesReceivedText => FormatBytes(value.BytesReceived);
     public string BytesSentText => FormatBytes(value.BytesSent);

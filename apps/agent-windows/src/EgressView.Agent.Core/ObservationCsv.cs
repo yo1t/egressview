@@ -9,7 +9,7 @@ public static class ObservationCsv
     public static readonly string[] Columns =
     [
         "first_observed_at", "last_observed_at", "process_name", "process_id",
-        "protocol", "local_address", "local_port", "remote_address", "remote_port",
+        "protocol", "local_address", "local_port", "remote_address", "remote_hostname", "remote_port",
         "bytes_in", "bytes_out", "layer", "collector"
     ];
 
@@ -29,6 +29,7 @@ public static class ObservationCsv
                 row.LocalAddress,
                 row.LocalPort.ToString(CultureInfo.InvariantCulture),
                 row.RemoteAddress,
+                row.RemoteHostname ?? string.Empty,
                 row.RemotePort.ToString(CultureInfo.InvariantCulture),
                 row.BytesReceived?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
                 row.BytesSent?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,

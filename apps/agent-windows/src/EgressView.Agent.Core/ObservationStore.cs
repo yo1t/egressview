@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 8;
+    private const int CurrentSchemaVersion = 9;
     public static readonly TimeSpan RawRetention = TimeSpan.FromDays(14);
     public static readonly TimeSpan AggregateRetention = TimeSpan.FromDays(30);
     private const string Version1Schema = """
@@ -137,6 +137,10 @@ public sealed partial class ObservationStore : IDisposable
         );
         INSERT OR IGNORE INTO threat_cache_state(id) VALUES(1);
         """;
+    private const string Version9Schema = """
+        ALTER TABLE observations ADD COLUMN remote_hostname TEXT;
+        ALTER TABLE flows ADD COLUMN remote_hostname TEXT;
+        """;
 
     private readonly object gate = new();
     private nint db;
@@ -164,7 +168,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -180,7 +184,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 4) { MigrateVersion4To5(); version = 5; }
         if (version == 5) { MigrateVersion5To6(); version = 6; }
         if (version == 6) { MigrateVersion6To7(); version = 7; }
-        if (version == 7) MigrateVersion7To8();
+        if (version == 7) { MigrateVersion7To8(); version = 8; }
+        if (version == 8) MigrateVersion8To9();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -242,6 +247,13 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion8To9()
+    {
+        CreateMigrationBackup(9);
+        try { Execute($"BEGIN IMMEDIATE; {Version9Schema} UPDATE schema_version SET version=9 WHERE version=8; COMMIT;"); PruneMigrationBackups(9); }
+        catch { TryRollback(); throw; }
+    }
+
     private string CreateMigrationBackup(int targetVersion)
     {
         var backup = $"{path}.pre-v{targetVersion}.bak";
@@ -295,6 +307,9 @@ public sealed partial class ObservationStore : IDisposable
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing process identity columns.");
+        var hostnameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='remote_hostname') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='remote_hostname')");
+        if (hostnameColumns != 2)
+            throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing remote hostname columns.");
         if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('delivery_state') WHERE name='delivery_enabled'") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing the delivery opt-in state.");
     }
@@ -310,13 +325,13 @@ public sealed partial class ObservationStore : IDisposable
             {
                 const string sql = """
                     INSERT INTO observations(observed_at,process_id,protocol,local_address,local_port,
-                      remote_address,remote_port,bytes_sent,bytes_received,layer,interface_id,source,process_name)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                      remote_address,remote_port,bytes_sent,bytes_received,layer,interface_id,source,process_name,remote_hostname)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """;
                 const string flowSql = """
                     INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,
-                      process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name)
-                    VALUES(?,?,?,?,?,?,?,?,?,'etw',?,?,?,?,?)
+                      process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name,remote_hostname)
+                    VALUES(?,?,?,?,?,?,?,?,?,'etw',?,?,?,?,?,?)
                     ON CONFLICT(flow_key) DO UPDATE SET
                       last_seen=excluded.last_seen,
                       origin=CASE WHEN flows.origin='snapshot' THEN 'both' ELSE flows.origin END,
@@ -324,7 +339,8 @@ public sealed partial class ObservationStore : IDisposable
                       bytes_received=CASE WHEN flows.bytes_received IS NULL THEN excluded.bytes_received ELSE flows.bytes_received+excluded.bytes_received END,
                       layer=excluded.layer,
                       interface_id=COALESCE(excluded.interface_id,flows.interface_id),
-                      process_name=COALESCE(excluded.process_name,flows.process_name)
+                      process_name=COALESCE(excluded.process_name,flows.process_name),
+                      remote_hostname=COALESCE(excluded.remote_hostname,flows.remote_hostname)
                     """;
                 Check(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
                 Check(WinSqlite.Prepare(db, flowSql, -1, out var flowStatement, 0));
@@ -346,6 +362,7 @@ public sealed partial class ObservationStore : IDisposable
                         BindNullable(statement, 11, item.InterfaceId);
                         Bind(statement, 12, item.Source);
                         BindNullable(statement, 13, item.ProcessName);
+                        BindNullable(statement, 14, NormalizeDomain(item.RemoteHostname));
                         CheckDone(WinSqlite.Step(statement));
                         Check(WinSqlite.Reset(statement));
                         Check(WinSqlite.ClearBindings(statement));
@@ -357,6 +374,7 @@ public sealed partial class ObservationStore : IDisposable
                         BindNullable(flowStatement, 10, item.BytesSent); BindNullable(flowStatement, 11, item.BytesReceived);
                         Bind(flowStatement, 12, item.Layer == ObservationLayer.Logical ? "logical" : "vpn_transport"); BindNullable(flowStatement, 13, item.InterfaceId);
                         BindNullable(flowStatement, 14, item.ProcessName);
+                        BindNullable(flowStatement, 15, NormalizeDomain(item.RemoteHostname));
                         CheckDone(WinSqlite.Step(flowStatement)); Check(WinSqlite.Reset(flowStatement)); Check(WinSqlite.ClearBindings(flowStatement));
                         var observed = item.ObservedAt.ToUniversalTime();
                         var bucket = new DateTimeOffset(observed.Year, observed.Month, observed.Day, observed.Hour, 0, 0, TimeSpan.Zero).ToString("O");
@@ -440,7 +458,7 @@ public sealed partial class ObservationStore : IDisposable
                 {
                     var key = StartupSnapshot.FlowKey(flow.Protocol, flow.LocalAddress, flow.LocalPort, flow.RemoteAddress, flow.RemotePort, flow.ProcessId).Replace("'", "''", StringComparison.Ordinal);
                     var processName = flow.ProcessName is null ? "NULL" : $"'{Sql(flow.ProcessName)}'";
-                    Execute($"INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name) VALUES('{key}','{flow.Protocol}','{flow.LocalAddress}',{flow.LocalPort},'{flow.RemoteAddress}',{flow.RemotePort},{flow.ProcessId},'{startedAt:O}','{startedAt:O}','snapshot',NULL,NULL,'logical',NULL,{processName}) ON CONFLICT(flow_key) DO NOTHING");
+                    Execute($"INSERT INTO flows(flow_key,protocol,local_address,local_port,remote_address,remote_port,process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name,remote_hostname) VALUES('{key}','{flow.Protocol}','{flow.LocalAddress}',{flow.LocalPort},'{flow.RemoteAddress}',{flow.RemotePort},{flow.ProcessId},'{startedAt:O}','{startedAt:O}','snapshot',NULL,NULL,'logical',NULL,{processName},NULL) ON CONFLICT(flow_key) DO NOTHING");
                 }
                 Execute($"INSERT INTO coverage_sessions(started_at,snapshot_count) VALUES('{startedAt:O}',{snapshot.Count})");
                 var id = ScalarInt64("SELECT last_insert_rowid()");
@@ -576,7 +594,7 @@ public sealed partial class ObservationStore : IDisposable
         if (offset is < 0 or > 1_000_000) throw new ArgumentOutOfRangeException(nameof(offset));
         lock (gate)
         {
-            const string columns = "first_seen,last_seen,protocol,local_address,local_port,remote_address,remote_port,process_id,process_name,bytes_sent,bytes_received,layer,interface_id,origin";
+            const string columns = "first_seen,last_seen,protocol,local_address,local_port,remote_address,remote_port,process_id,process_name,bytes_sent,bytes_received,layer,interface_id,origin,remote_hostname";
             var sql = $"SELECT {columns} FROM flows ORDER BY last_seen DESC,flow_key LIMIT {limit} OFFSET {offset}";
             CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
             var result = new List<RecentFlow>();
@@ -593,7 +611,7 @@ public sealed partial class ObservationStore : IDisposable
                         Text(statement, 5), (int)WinSqlite.ColumnInt64(statement, 6), (int)WinSqlite.ColumnInt64(statement, 7),
                         NullableTextValue(statement, 8), NullableInt64(statement, 9), NullableInt64(statement, 10),
                         Text(statement, 11) == "vpn_transport" ? ObservationLayer.VpnTransport : ObservationLayer.Logical,
-                        NullableTextValue(statement, 12), Text(statement, 13)));
+                        NullableTextValue(statement, 12), Text(statement, 13), NullableTextValue(statement, 14)));
                 }
             }
             finally { WinSqlite.Finalize(statement); }
@@ -710,7 +728,7 @@ public sealed partial class ObservationStore : IDisposable
 
             var links = new List<AppDestinationAggregate>();
             const string qualifiedApp = "COALESCE(NULLIF(f.process_name,''),'Unknown')";
-            var linksSql = $"SELECT {qualifiedApp},f.remote_address,COALESCE(NULLIF(g.city,''),NULLIF(g.country_code,''),f.remote_address),COUNT(*),COALESCE(SUM(COALESCE(f.bytes_sent,0)+COALESCE(f.bytes_received,0)),0),SUM(CASE WHEN f.bytes_sent IS NULL OR f.bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address WHERE f.last_seen>='{fromText}' AND f.first_seen<'{toText}' AND f.layer='logical' GROUP BY 1,2,3 ORDER BY 4 DESC,1,2 LIMIT 512";
+            var linksSql = $"SELECT {qualifiedApp},f.remote_address,COALESCE(NULLIF(f.remote_hostname,''),f.remote_address),COUNT(*),COALESCE(SUM(COALESCE(f.bytes_sent,0)+COALESCE(f.bytes_received,0)),0),SUM(CASE WHEN f.bytes_sent IS NULL OR f.bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows f WHERE f.last_seen>='{fromText}' AND f.first_seen<'{toText}' AND f.layer='logical' GROUP BY 1,2,3 ORDER BY 4 DESC,1,2 LIMIT 512";
             CheckOperation(WinSqlite.Prepare(db, linksSql, -1, out var linksStatement, 0));
             try
             {
@@ -842,6 +860,7 @@ public sealed partial class ObservationStore : IDisposable
             var state = ReadThreatCacheState();
             if (state.Availability != "available") return new(state.Availability, state.IndicatorCount, state.FetchedAt, 0, []);
             var exact = new Dictionary<string, ThreatIndicator>(StringComparer.OrdinalIgnoreCase);
+            var domains = new Dictionary<string, ThreatIndicator>(StringComparer.OrdinalIgnoreCase);
             var cidrs = new List<(uint Network, uint Mask, ThreatIndicator Indicator)>();
             CheckOperation(WinSqlite.Prepare(db, "SELECT kind,value,source,tag,confidence FROM threat_indicators", -1, out var indicatorStatement, 0));
             try
@@ -851,6 +870,7 @@ public sealed partial class ObservationStore : IDisposable
                     var item = new ThreatIndicator(Text(indicatorStatement, 0), Text(indicatorStatement, 1),
                         NullableTextValue(indicatorStatement, 2), NullableTextValue(indicatorStatement, 3), Text(indicatorStatement, 4));
                     if (item.Kind == "ip") exact[item.Value] = item;
+                    else if (item.Kind == "domain" && NormalizeDomain(item.Value) is { } domain) domains[domain] = item;
                     else if (item.Kind == "cidr" && TryParseCidr(item.Value, out var network, out var mask)) cidrs.Add((network, mask, item));
                 }
             }
@@ -862,26 +882,64 @@ public sealed partial class ObservationStore : IDisposable
             // reported thousands where the machine runs dozens. They all fold
             // into one bucket the reader can see and question instead.
             const string app = "COALESCE(NULLIF(process_name,''),'Unknown')";
-            var sql = $"SELECT remote_address,{app},COUNT(*),COALESCE(SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),0),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END),MAX(last_seen) FROM flows WHERE last_seen>='{from.ToUniversalTime():O}' AND first_seen<'{to.ToUniversalTime():O}' AND layer='logical' GROUP BY 1,2 ORDER BY 3 DESC";
+            var sql = $"SELECT remote_address,remote_hostname,{app},COUNT(*),COALESCE(SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),0),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END),MAX(last_seen) FROM flows WHERE last_seen>='{from.ToUniversalTime():O}' AND first_seen<'{to.ToUniversalTime():O}' AND layer='logical' GROUP BY 1,2,3 ORDER BY 4 DESC";
             CheckOperation(WinSqlite.Prepare(db, sql, -1, out var candidateStatement, 0));
             var checkedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var domainChecked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             try
             {
                 while (WinSqlite.Step(candidateStatement) == WinSqlite.Row)
                 {
-                    var address = Text(candidateStatement, 0); checkedDestinations.Add(address);
+                    var address = Text(candidateStatement, 0);
+                    var hostname = NormalizeDomain(NullableTextValue(candidateStatement, 1));
+                    checkedDestinations.Add(address);
+                    if (hostname is not null) domainChecked.Add(address);
                     ThreatIndicator? match = exact.GetValueOrDefault(address);
+                    string? matchedValue = match?.Value;
+                    if (match is null && hostname is not null)
+                    {
+                        foreach (var candidate in DomainCandidates(hostname))
+                        {
+                            if (!domains.TryGetValue(candidate, out match)) continue;
+                            matchedValue = candidate;
+                            break;
+                        }
+                    }
                     if (match is null && TryIpv4(address, out var number))
+                    {
                         match = cidrs.FirstOrDefault(item => (number & item.Mask) == item.Network).Indicator;
+                        matchedValue = match?.Value;
+                    }
                     if (match is null) continue;
-                    findings.Add(new(address, Text(candidateStatement, 1), WinSqlite.ColumnInt64(candidateStatement, 2),
-                        WinSqlite.ColumnInt64(candidateStatement, 3), WinSqlite.ColumnInt64(candidateStatement, 4),
-                        DateTimeOffset.Parse(Text(candidateStatement, 5)), match.Kind, match.Value, match.Source, match.Tag, match.Confidence));
+                    var destination = match.Kind == "domain" ? $"{hostname} ({address})" : address;
+                    findings.Add(new(destination, Text(candidateStatement, 2), WinSqlite.ColumnInt64(candidateStatement, 3),
+                        WinSqlite.ColumnInt64(candidateStatement, 4), WinSqlite.ColumnInt64(candidateStatement, 5),
+                        DateTimeOffset.Parse(Text(candidateStatement, 6)), match.Kind, matchedValue ?? match.Value, match.Source, match.Tag, match.Confidence));
                 }
             }
             finally { WinSqlite.Finalize(candidateStatement); }
-            return new(state.Availability, state.IndicatorCount, state.FetchedAt, checkedDestinations.Count, findings);
+            return new(state.Availability, state.IndicatorCount, state.FetchedAt, checkedDestinations.Count, findings)
+            {
+                DomainCheckedDestinations = domainChecked.Count,
+                DomainUncheckedDestinations = checkedDestinations.Count - domainChecked.Count,
+            };
         }
+    }
+
+    private static IEnumerable<string> DomainCandidates(string hostname)
+    {
+        yield return hostname;
+        var labels = hostname.Split('.');
+        for (var index = 1; index <= labels.Length - 2; index++) yield return string.Join('.', labels[index..]);
+    }
+
+    private static string? NormalizeDomain(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim().TrimEnd('.');
+        if (!trimmed.Contains('.') || IPAddress.TryParse(trimmed, out _)) return null;
+        try { return new System.Globalization.IdnMapping().GetAscii(trimmed).ToLowerInvariant(); }
+        catch (ArgumentException) { return null; }
     }
 
     private static bool TryParseCidr(string value, out uint network, out uint mask)

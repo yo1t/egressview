@@ -9,6 +9,16 @@ var database = Path.Combine(directory, "agent.db");
 
 try
 {
+    var dnsNames = new DnsNameCache(TimeSpan.FromMinutes(10), capacity: 4);
+    var dnsAt = DateTimeOffset.UtcNow;
+    dnsNames.Observe(42, "API.Bücher.Example.", "203.0.113.8;::ffff:203.0.113.9;", dnsAt);
+    Assert(dnsNames.Resolve(42, "203.0.113.8", dnsAt.AddSeconds(1)) == "api.xn--bcher-kva.example" &&
+        dnsNames.Resolve(42, "203.0.113.9", dnsAt.AddSeconds(1)) == "api.xn--bcher-kva.example",
+        "DNS metadata is normalized with IDNA and IPv4-mapped addresses before bounded PID/IP correlation");
+    Assert(dnsNames.Resolve(43, "203.0.113.8", dnsAt.AddSeconds(1)) is null &&
+        dnsNames.Resolve(42, "203.0.113.8", dnsAt.AddMinutes(11)) is null,
+        "hostname correlation does not cross process identity or its bounded lifetime");
+
     Assert(EgressView.Agent.Service.Program.CommandLineFailureMessage(new UnauthorizedAccessException()) ==
         "EgressView Agent command failed: IPC access denied.",
         "CLI access denial is converted to a controlled error instead of an unhandled Windows error");
@@ -20,7 +30,7 @@ try
         {
             Assert(pipeline.TrySubmit(new NetworkObservation(
                 DateTimeOffset.UtcNow, 42, "UDP", "100.64.0.1", 50_000 + index,
-                "100.64.0.2", 443, 512, null, ObservationLayer.Logical, "63", "etw", "TestApp")), "observation accepted");
+                "100.64.0.2", 443, 512, null, ObservationLayer.Logical, "63", "etw", "TestApp", "api.example.com")), "observation accepted");
         }
     }
 
@@ -31,8 +41,8 @@ try
         Assert(inspection.Integrity == "ok", "integrity check is ok");
         Assert(reopened.ReadProcessNameStats() == (20, 0), "process names survive restart");
         var recent = reopened.ReadRecentFlows(50);
-        Assert(recent.Count == 20 && recent.All(flow => flow.ProcessName == "TestApp"),
-            "bounded recent flows expose persisted process identity to the local UI");
+        Assert(recent.Count == 20 && recent.All(flow => flow.ProcessName == "TestApp" && flow.RemoteHostname == "api.example.com"),
+            "bounded recent flows expose persisted process identity and hostname to the local UI");
         Assert(reopened.ReadRecentFlows(50, 10).Count == 10,
             "recent flow pagination supports complete bounded CSV export");
 
@@ -89,8 +99,8 @@ try
         "IPC rejects an arbitrary analysis range");
     var csv = ObservationCsv.Export([new RecentFlow(DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, "TCP", "::1", 50000,
         "203.0.113.8", 443, 42, "Browser, \"Beta\"", null, 20, ObservationLayer.Logical, null, "etw")]);
-    Assert(csv.Contains("\"Browser, \"\"Beta\"\"\"", StringComparison.Ordinal) && csv.EndsWith("\r\n", StringComparison.Ordinal),
-        "CSV follows RFC 4180 quoting and ends with a record separator");
+    Assert(csv.Contains("\"Browser, \"\"Beta\"\"\"", StringComparison.Ordinal) && csv.Contains("remote_hostname", StringComparison.Ordinal) && csv.EndsWith("\r\n", StringComparison.Ordinal),
+        "CSV includes hostname, follows RFC 4180 quoting and ends with a record separator");
     Assert(IpcProtocol.Handle("""{"v":99,"op":"status"}""", () => "{}", _ => []).Contains("version-mismatch", StringComparison.Ordinal),
         "IPC rejects unknown protocol version");
     var rejectedOperation = IpcProtocol.Handle("""{"v":1,"op":"read_file","path":"C:\\\\Windows\\\\win.ini"}""", () => "{}", _ => []);
@@ -149,15 +159,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 8, "v1 database migrates through v2-v8");
+        Assert(migrated.SchemaVersion == 9, "v1 database migrates through v2-v9");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v8.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v9.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 8, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 9, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -190,8 +200,12 @@ try
     using (var geoStore = new ObservationStore(Path.Combine(directory, "geo.db")))
     {
         var observedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
-        geoStore.WriteBatch([new NetworkObservation(observedAt, 9, "TCP", "10.0.0.1", 50000,
-            "203.0.113.8", 443, 10, 20, ObservationLayer.Logical, null, "etw", "Browser")]);
+        geoStore.WriteBatch([
+            new NetworkObservation(observedAt, 9, "TCP", "10.0.0.1", 50000,
+                "203.0.113.8", 443, 10, 20, ObservationLayer.Logical, null, "etw", "Browser", "API.Bad.Example."),
+            new NetworkObservation(observedAt, 10, "TCP", "10.0.0.1", 50001,
+                "198.51.100.7", 443, 1, 2, ObservationLayer.Logical, null, "etw", "DirectIp")
+        ]);
         geoStore.ReplaceGeoLocations([new GeoLocation("203.0.113.8", 35.68, 139.76, "JP", "Tokyo")], "etag-1", observedAt);
         var globe = geoStore.ReadGlobePoints(observedAt.AddMinutes(-1), DateTimeOffset.UtcNow);
         Assert(globe.Count == 1 && globe[0].City == "Tokyo" && globe[0].Connections == 1 && globe[0].Bytes == 30,
@@ -199,18 +213,24 @@ try
         Assert(geoStore.ReadGeoCacheState().ETag == "etag-1", "geo cache state survives alongside locations");
         var coverage = geoStore.BeginCoverage([], observedAt.AddMinutes(-1));
         var analysis = geoStore.ReadPeriodAnalysis(observedAt.AddMinutes(-2), DateTimeOffset.UtcNow);
-        Assert(analysis.Connections == 1 && analysis.Applications == 1 && analysis.Destinations == 1 && analysis.Bytes == 30,
+        Assert(analysis.Connections == 2 && analysis.Applications == 2 && analysis.Destinations == 2 && analysis.Bytes == 33,
             "period analysis returns exact whole-period totals instead of a recent-row sample");
-        Assert(analysis.Links.Single().Application == "Browser" && analysis.Timeline.Sum(item => item.Connections) == 1,
-            "period analysis carries app-destination links and a bounded timeline");
+        Assert(analysis.Links.Single(link => link.Application == "Browser").DestinationName == "api.bad.example" && analysis.Timeline.Sum(item => item.Connections) == 2,
+            "period analysis uses the observed hostname as Name and falls back explicitly to IP");
         geoStore.EndCoverage(coverage, DateTimeOffset.UtcNow);
 
         geoStore.ReplaceThreatIndicators(true,
-            [new ThreatIndicator("ip", "203.0.113.8", "test-feed", "test C2", "high")], "threat-etag", observedAt);
+            [new ThreatIndicator("domain", "bad.example", "test-feed", "test domain", "high")], "threat-etag", observedAt);
         var threatReport = geoStore.ReadThreatReport(observedAt.AddMinutes(-2), DateTimeOffset.UtcNow);
-        Assert(threatReport.Availability == "available" && threatReport.CheckedDestinations == 1 &&
-            threatReport.Findings.Single().Destination == "203.0.113.8",
-            "threat indicators are matched locally without sending destinations to the Hub");
+        Assert(threatReport.Availability == "available" && threatReport.CheckedDestinations == 2 &&
+            threatReport.DomainCheckedDestinations == 1 && threatReport.DomainUncheckedDestinations == 1 &&
+            threatReport.Findings.Single().MatchedValue == "bad.example",
+            "parent-domain indicators match locally while hostname-unavailable destinations remain explicit");
+        geoStore.ReplaceThreatIndicators(true,
+            [new ThreatIndicator("ip", "203.0.113.8", "ip-feed", "exact IP", "high"),
+             new ThreatIndicator("domain", "bad.example", "domain-feed", "domain", "high")], "threat-etag-2", observedAt);
+        Assert(geoStore.ReadThreatReport(observedAt.AddMinutes(-2), DateTimeOffset.UtcNow).Findings.Single().IndicatorKind == "ip",
+            "exact IP remains higher priority than hostname and parent-domain matches");
     }
 
     Assert(new ProcessNameResolver().Resolve(Environment.ProcessId, DateTimeOffset.UtcNow) is { Length: > 0 },
