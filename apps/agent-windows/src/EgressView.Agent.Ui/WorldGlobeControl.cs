@@ -16,7 +16,10 @@ public sealed class WorldGlobeControl : FrameworkElement
     private readonly DispatcherTimer timer;
     private double longitude = 140;
     private DateTimeOffset previousFrame;
-    private bool rotating = true;
+    // Match the Mac Agent and stay still until the person explicitly asks
+    // for motion. Reprojecting the complete atlas and every route at 5 fps
+    // is expensive on software-rendered or remote Windows sessions.
+    private bool rotating;
     private IReadOnlyList<EgressView.Agent.Core.GlobePoint> points = [];
     private readonly (double Latitude, double Longitude) home = EgressView.Agent.Core.HomeLocation.Current();
 
