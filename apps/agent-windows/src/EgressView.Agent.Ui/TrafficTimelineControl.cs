@@ -46,7 +46,7 @@ public sealed class TrafficTimelineControl : FrameworkElement
         for (var index = 0; index < series.Length && legendX < ActualWidth - 60; index++)
         {
             drawing.DrawRoundedRectangle(palette[index % palette.Length], null, new Rect(legendX, baseline + 9, 9, 9), 2, 2);
-            var label = new FormattedText(series[index], System.Globalization.CultureInfo.CurrentCulture, System.Windows.FlowDirection.LeftToRight,
+            var label = new FormattedText(LocalizationManager.Application(series[index]), System.Globalization.CultureInfo.CurrentCulture, System.Windows.FlowDirection.LeftToRight,
                 new Typeface("Segoe UI Variable Text"), 9.5, (Brush)FindResource("TextSecondaryBrush"), VisualTreeHelper.GetDpi(this).PixelsPerDip)
             { MaxTextWidth = 82, Trimming = TextTrimming.CharacterEllipsis };
             drawing.DrawText(label, new Point(legendX + 13, baseline + 6));

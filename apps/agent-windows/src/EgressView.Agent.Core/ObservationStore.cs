@@ -607,7 +607,11 @@ public sealed partial class ObservationStore : IDisposable
         {
             var fromText = from.ToUniversalTime().ToString("O");
             var toText = to.ToUniversalTime().ToString("O");
-            const string app = "COALESCE(NULLIF(process_name,''),'PID ' || process_id)";
+            // A PID is not an application. Keying nameless flows by their PID
+            // made every unnamed process its own "application", so the count
+            // reported thousands where the machine runs dozens. They all fold
+            // into one bucket the reader can see and question instead.
+            const string app = "COALESCE(NULLIF(process_name,''),'Unknown')";
             var where = $"last_seen>='{fromText}' AND first_seen<'{toText}' AND layer='logical'";
             var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),COALESCE(SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),0),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows WHERE {where}";
             CheckOperation(WinSqlite.Prepare(db, totalsSql, -1, out var totalsStatement, 0));
@@ -624,7 +628,7 @@ public sealed partial class ObservationStore : IDisposable
             finally { WinSqlite.Finalize(totalsStatement); }
 
             var links = new List<AppDestinationAggregate>();
-            const string qualifiedApp = "COALESCE(NULLIF(f.process_name,''),'PID ' || f.process_id)";
+            const string qualifiedApp = "COALESCE(NULLIF(f.process_name,''),'Unknown')";
             var linksSql = $"SELECT {qualifiedApp},f.remote_address,COALESCE(NULLIF(g.city,''),NULLIF(g.country_code,''),f.remote_address),COUNT(*),COALESCE(SUM(COALESCE(f.bytes_sent,0)+COALESCE(f.bytes_received,0)),0),SUM(CASE WHEN f.bytes_sent IS NULL OR f.bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address WHERE f.last_seen>='{fromText}' AND f.first_seen<'{toText}' AND f.layer='logical' GROUP BY 1,2,3 ORDER BY 4 DESC,1,2 LIMIT 512";
             CheckOperation(WinSqlite.Prepare(db, linksSql, -1, out var linksStatement, 0));
             try
@@ -772,7 +776,11 @@ public sealed partial class ObservationStore : IDisposable
             finally { WinSqlite.Finalize(indicatorStatement); }
 
             var findings = new List<ThreatFinding>();
-            const string app = "COALESCE(NULLIF(process_name,''),'PID ' || process_id)";
+            // A PID is not an application. Keying nameless flows by their PID
+            // made every unnamed process its own "application", so the count
+            // reported thousands where the machine runs dozens. They all fold
+            // into one bucket the reader can see and question instead.
+            const string app = "COALESCE(NULLIF(process_name,''),'Unknown')";
             var sql = $"SELECT remote_address,{app},COUNT(*),COALESCE(SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),0),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END),MAX(last_seen) FROM flows WHERE last_seen>='{from.ToUniversalTime():O}' AND first_seen<'{to.ToUniversalTime():O}' AND layer='logical' GROUP BY 1,2 ORDER BY 3 DESC";
             CheckOperation(WinSqlite.Prepare(db, sql, -1, out var candidateStatement, 0));
             var checkedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
