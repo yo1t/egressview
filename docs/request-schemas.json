@@ -3290,6 +3290,17 @@
       }
     },
     "GET /api/beacons": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "beacons": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "beacons"
+        ]
+      },
       "400": {
         "type": "object",
         "properties": {

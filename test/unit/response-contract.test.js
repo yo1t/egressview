@@ -256,12 +256,15 @@ describe('残っていた未宣言ルートを宣言する（2026-09-06）', () 
 
   it('宣言する前に、テストがそのルートに届いていることを測った', () => {
     // Measured across the whole suite on 2026-09-06 by recording every
-    // (route, status) an Express JSON response was sent under. Four more
-    // routes were still undeclared in production -- `GET /api/connections`,
-    // `/api/connections/threat-counts`, `/api/ai/notification-events`,
-    // `/api/ai/conversations` -- and no test reaches any of them over HTTP,
-    // so they stay undeclared until one does. A declaration nobody exercises
-    // is what the step-3 gate exists to refuse.
+    // (route, status) an Express JSON response was sent under. Four routes
+    // are still undeclared in production and no test reaches any of them over
+    // HTTP, so they stay undeclared until one does. A declaration nobody
+    // exercises is what the step-3 gate exists to refuse.
+    //
+    // `GET /api/beacons` was on this list for a day. Its tests checked six
+    // rejections and never asked for the list, and because 400 is answered by
+    // the envelope contract, the route looked tested. A success response
+    // nobody has seen is what the measurement is for.
     const registry = createRegistry();
     for (const route of [
       'GET /api/connections',
