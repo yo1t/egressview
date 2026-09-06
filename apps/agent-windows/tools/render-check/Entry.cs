@@ -30,6 +30,9 @@ internal static class Entry
         { Source = new Uri("pack://application:,,,/EgressView.Agent.Ui;component/Themes/Fluent.xaml") });
         application.Resources.MergedDictionaries.Add(new ResourceDictionary
         { Source = new Uri("pack://application:,,,/EgressView.Agent.Ui;component/Resources/Strings.ja.xaml") });
+        ThemeManager.ApplySystemTheme(application.Resources);
+        var accent = (SolidColorBrush)application.Resources["AccentBrush"];
+        Console.WriteLine($"system theme dark={ThemeManager.IsDark} accent={accent.Color}");
 
         // Shaped like the real thing: one destination taking most of the
         // volume, a long tail past the top few, and a couple of shares too
@@ -110,6 +113,16 @@ internal static class Entry
         globeSegmented.Items.Add(new ListBoxItem { Content = "地球儀" });
         globeSegmented.Items.Add(new ListBoxItem { Content = "アクセス先の国" });
         Save(globeSegmented, 210, 40, Path.Combine(output, "segmented-globe.png"));
+
+        ThemeManager.ApplyTheme(application.Resources, false, Color.FromRgb(0xD1, 0x34, 0x38));
+        var lightSegmented = new System.Windows.Controls.ListBox
+        {
+            Style = (Style)application.FindResource("SegmentedSelectorStyle"),
+            SelectedIndex = 0,
+        };
+        lightSegmented.Items.Add(new ListBoxItem { Content = "Connections" });
+        lightSegmented.Items.Add(new ListBoxItem { Content = "Data volume" });
+        Save(lightSegmented, 210, 40, Path.Combine(output, "segmented-light-accent.png"));
 
         Console.WriteLine($"wrote {output}");
         return 0;
