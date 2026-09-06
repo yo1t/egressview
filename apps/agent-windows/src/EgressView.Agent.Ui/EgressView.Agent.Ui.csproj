@@ -7,6 +7,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- WPF's built-in Fluent ThemeMode is the supported .NET 10 path, but its API remains marked experimental. -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../EgressView.Agent.Core/EgressView.Agent.Core.csproj" /></ItemGroup>
   <ItemGroup>

@@ -7,6 +7,17 @@ ETW collectorとSCM service hostを含みます。ETW session開始には管理�
 最小WPF UIとtray lifecycleを含みます。Named Pipe IPCはインストール時に明示したUIユーザーSIDだけを許可し、
 SYSTEMを許可、NETWORKを明示拒否します。Administrators、Everyone、Anonymousは許可しません。
 
+## UI framework
+
+UIは.NET 10 WPFを意図的に使用します。`ThemeMode=System`の組み込みFluent themeでWindowsの
+light／dark mode、標準control、title barを同期し、製品固有の色はsemantic resourceだけで重ねます。
+Service、tray、単一instance、WiX MSI、offlineの地球儀／Sankey／timelineを既に持つため、見た目だけを
+理由にWinUI 3へ全面移行しません。
+
+WinUI 3は新規native Windows appに対するMicrosoftの推奨であり、候補から外しません。ただし移行判断は、
+DataGrid代替、3つのcustom描画、通知領域icon、unpackaged self-contained Windows App SDK runtimeを
+同じMSIで実証してから行います。これらを通せるspikeなしにUI projectを置換しません。
+
 起動時にIP HelperのTCP/UDP tableを一度取得し、`flows`へETWとupsertします。snapshotだけのflowは
 バイト数をNULLのまま保持します。`coverage_sessions`は正常停止と強制終了を区別します。
 
