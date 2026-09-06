@@ -19,7 +19,7 @@ public static class DiagnosticsReport
             version,
             collector = snapshot,
             health = new { status = health.Status, issues = health.Issues.Select(issue => new { code = issue.Code, action = issue.Action }) },
-            database = new { observationCount = count, integrity, schemaVersion = store.SchemaVersion, durableCounters = store.ReadCounters() },
+            database = new { observationCount = count, storageBytes = store.ReadStorageBytes(), integrity, schemaVersion = store.SchemaVersion, durableCounters = store.ReadCounters() },
             flows = new { total = flowStats.Total, snapshot = flowStats.Snapshot, etw = flowStats.Etw, both = flowStats.Both, bytesUnknown = flowStats.BytesUnknown, processNames = new { resolved = processNames.Resolved, unresolved = processNames.Unresolved }, byOrigin = store.ReadFlowOrigins() },
             coverage = new { total = coverage.Total, active = coverage.Active, abandoned = coverage.Abandoned },
             delivery = new { pending = delivery.Pending, contractRejected = delivery.ContractRejected, queueOverflow = delivery.QueueOverflow, oldestPendingAt = delivery.OldestPendingAt, lastAcknowledgedAt = delivery.LastAcknowledgedAt },

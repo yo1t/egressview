@@ -71,7 +71,10 @@ public sealed record AppTimelineAggregate(
 public sealed record PeriodAnalysis(
     DateTimeOffset From, DateTimeOffset To, long Connections, int Applications, int Destinations,
     long Bytes, long ConnectionsWithoutBytes, double CoverageRatio, DateTimeOffset? MonitoringStartedAt,
-    long StoredFlows, IReadOnlyList<AppDestinationAggregate> Links, IReadOnlyList<AppTimelineAggregate> Timeline);
+    long StoredFlows, IReadOnlyList<AppDestinationAggregate> Links, IReadOnlyList<AppTimelineAggregate> Timeline)
+{
+    public long StorageBytes { get; init; }
+}
 
 public sealed record ThreatIndicator(string Kind, string Value, string? Source, string? Tag, string Confidence);
 public sealed record ThreatCacheState(string Availability, string? ETag, DateTimeOffset? FetchedAt, long IndicatorCount);

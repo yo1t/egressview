@@ -120,7 +120,7 @@ public partial class MainWindow : Window
         ApplicationCount.Text = data.Applications.ToString("N0");
         DestinationCount.Text = data.Destinations.ToString("N0");
         CoverageValue.Text = $"{data.CoverageRatio:P0}";
-        StorageSummary.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("StorageSummary"), data.StoredFlows.ToString("N0"), FlowRow.FormatBytes(data.Bytes));
+        StorageSummary.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("StorageSummary"), data.StoredFlows.ToString("N0"), FlowRow.FormatBytes(data.StorageBytes));
         MonitoringSince.Text = data.MonitoringStartedAt is { } started ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("MonitoringSince"), started.LocalDateTime.ToString("g")) : string.Empty;
         CoverageNote.Text = data.CoverageRatio < 0.999 ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("PartialCoverage"), data.CoverageRatio) : string.Empty;
         var names = DestinationChoice.SelectedItem is ComboBoxItem destination && Equals(destination.Tag, "name");

@@ -557,6 +557,46 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// <summary>
+    /// Bytes occupied by durable database state, including SQLite sidecars and
+    /// retained pre-migration backups. Missing/racing sidecars contribute zero.
+    /// </summary>
+    public long ReadStorageBytes()
+    {
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                path,
+                $"{path}-wal",
+                $"{path}-shm",
+                $"{path}-journal",
+            };
+            var directory = Path.GetDirectoryName(path)!;
+            var backupPattern = Path.GetFileName(path) + ".pre-v*.bak";
+            try
+            {
+                foreach (var backup in Directory.EnumerateFiles(directory, backupPattern, SearchOption.TopDirectoryOnly))
+                    files.Add(backup);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+
+            long total = 0;
+            foreach (var file in files)
+            {
+                try { total = checked(total + new FileInfo(file).Length); }
+                catch (FileNotFoundException) { }
+                catch (DirectoryNotFoundException) { }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+                catch (OverflowException) { return long.MaxValue; }
+            }
+            return total;
+        }
+    }
+
     public IReadOnlyDictionary<string, long> ReadCounters()
     {
         lock (gate)
@@ -880,7 +920,10 @@ public sealed partial class ObservationStore : IDisposable
             var monitoringStartText = NullableScalarText("SELECT MIN(started_at) FROM coverage_sessions");
             var monitoringStartedAt = DateTimeOffset.TryParse(monitoringStartText, out var started) ? started : (DateTimeOffset?)null;
             return new(from, to, connections, applications, destinations, bytes, unknown, coverage,
-                monitoringStartedAt, ScalarInt64("SELECT COUNT(*) FROM flows"), links, timeline);
+                monitoringStartedAt, ScalarInt64("SELECT COUNT(*) FROM flows"), links, timeline)
+            {
+                StorageBytes = ReadStorageBytes(),
+            };
         }
     }
 
