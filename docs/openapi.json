@@ -2253,7 +2253,27 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled."
+            "description": "Declared by the server, and checked in CI. The envelope is declared; the array elements are observed, not checked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "conversations": {
+                      "type": "array",
+                      "items": {}
+                    },
+                    "storage": {}
+                  },
+                  "required": [
+                    "conversations",
+                    "storage"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "x-array-elements-observed": true
           },
           "401": {
             "description": "No usable credential."
@@ -3300,7 +3320,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled."
+            "description": "Declared by the server, and checked in CI. The envelope is declared; the array elements are observed, not checked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {}
+                    }
+                  },
+                  "required": [
+                    "events"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "x-array-elements-observed": true
           },
           "401": {
             "description": "No usable credential."
@@ -7914,7 +7952,41 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled."
+            "description": "Declared by the server, and checked in CI. The envelope is declared; the array elements are observed, not checked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "connections": {
+                      "type": "array",
+                      "items": {}
+                    },
+                    "total": {
+                      "type": "number"
+                    },
+                    "limit": {
+                      "type": "number"
+                    },
+                    "offset": {
+                      "type": "number"
+                    },
+                    "serverTime": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "connections",
+                    "total",
+                    "limit",
+                    "offset",
+                    "serverTime"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "x-array-elements-observed": true
           },
           "401": {
             "description": "No usable credential."
@@ -8123,7 +8195,35 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled."
+            "description": "Declared by the server, and checked in CI.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "safe": {
+                      "type": "number"
+                    },
+                    "warn": {
+                      "type": "number"
+                    },
+                    "danger": {
+                      "type": "number"
+                    },
+                    "serverTime": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "safe",
+                    "warn",
+                    "danger",
+                    "serverTime"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
           },
           "401": {
             "description": "No usable credential."
@@ -10476,9 +10576,11 @@
       "GET /api/agent/capabilities",
       "GET /api/agent/threat-intel",
       "GET /api/agents",
+      "GET /api/ai/conversations",
       "GET /api/ai/conversations/:id",
       "GET /api/ai/facts",
       "GET /api/ai/notification-config",
+      "GET /api/ai/notification-events",
       "GET /api/ai/usage/monthly",
       "GET /api/auth/audit-events",
       "GET /api/auth/security-config",
@@ -10487,7 +10589,9 @@
       "GET /api/config/ai",
       "GET /api/config/detection-notifications",
       "GET /api/config/slack",
+      "GET /api/connections",
       "GET /api/connections/summary",
+      "GET /api/connections/threat-counts",
       "GET /api/devices",
       "GET /api/notes",
       "GET /api/routers",
@@ -10573,16 +10677,12 @@
     ],
     "undescribed": [
       "GET /api/agents/transport",
-      "GET /api/ai/conversations",
-      "GET /api/ai/notification-events",
       "GET /api/backup/list",
       "GET /api/config/datasources",
       "GET /api/config/manual-threat",
-      "GET /api/connections",
       "GET /api/connections/memory",
       "GET /api/connections/new-nodes",
       "GET /api/connections/threat-connections",
-      "GET /api/connections/threat-counts",
       "POST /api/agents/transport",
       "POST /api/ai/notification-run-now",
       "POST /api/ai/notification-test",

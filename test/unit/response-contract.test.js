@@ -254,17 +254,12 @@ describe('P2-95の積み残しを宣言する（2026-08-29）', () => {
 describe('残っていた未宣言ルートを宣言する（2026-09-06）', () => {
   const { createRegistry } = require('../../src/response-contracts');
 
-  it('宣言する前に、テストがそのルートに届いていることを測った', () => {
-    // Measured across the whole suite on 2026-09-06 by recording every
-    // (route, status) an Express JSON response was sent under. Four routes
-    // are still undeclared in production and no test reaches any of them over
-    // HTTP, so they stay undeclared until one does. A declaration nobody
-    // exercises is what the step-3 gate exists to refuse.
-    //
-    // `GET /api/beacons` was on this list for a day. Its tests checked six
-    // rejections and never asked for the list, and because 400 is answered by
-    // the envelope contract, the route looked tested. A success response
-    // nobody has seen is what the measurement is for.
+  it('4ルートは、HTTPで届くテストを書いてから宣言した', () => {
+    // They were undeclared for one reason: nothing reached them over HTTP, so
+    // a declaration would have been a sentence nobody checked. Their absence
+    // was pinned here for exactly as long as that was true.
+    // `test/unit/undeclared-routes-http.test.js` mounts each router and
+    // requests them, and the declarations followed.
     const registry = createRegistry();
     for (const route of [
       'GET /api/connections',
@@ -272,7 +267,11 @@ describe('残っていた未宣言ルートを宣言する（2026-09-06）', () 
       'GET /api/ai/notification-events',
       'GET /api/ai/conversations',
     ]) {
-      assert.equal(registry.lookup(route, 200), null, `${route} was declared without a test reaching it`);
+      const contract = registry.lookup(route, 200);
+      assert.ok(contract, `${route} should be declared now that a test reaches it`);
+      // Every one of them projects live traffic or a caller-set limit, so none
+      // may claim a bound it does not have.
+      assert.equal(contract.bounded, route === 'GET /api/connections/threat-counts');
     }
   });
 

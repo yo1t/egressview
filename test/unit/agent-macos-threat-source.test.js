@@ -35,7 +35,10 @@ describe('macOS Agent threat intelligence source', () => {
 
   it('gates fallback on persisted opt-in and cache age', () => {
     assert.match(controller, /isEnabled: preferences\.isHubFallbackEnabled/);
-    assert.match(controller, /hasCachedIndicators: \(\(try\? store\.threatIndicatorCount\(\)\) \?\? 0\) > 0/);
+    // The count is read from the store and passed in; P3-84 pulled it into a
+    // local so the same number could be logged alongside the decision.
+    assert.match(controller, /let cachedCount = \(try\? store\.threatIndicatorCount\(\)\) \?\? 0/);
+    assert.match(controller, /hasCachedIndicators: cachedCount > 0/);
     assert.match(controller, /lastSuccessfulFetch: preferences\.lastFetch/);
     assert.match(controller, /var isHubFallbackEnabled:/);
   });

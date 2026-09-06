@@ -100,6 +100,16 @@ const connectionsQuerySchema = z.object({
   fThreat: boundedText(16),
 }).strict().superRefine(validateSourceScopePair);
 
+/**
+ * Rounds a range bound down to the cache TTL so that polls within one TTL
+ * share a key. `null` (an open-ended "up to now") is preserved: it already
+ * means the same thing on every request.
+ */
+function quantiseForCache(value) {
+  if (!Number.isFinite(value)) return value ?? null;
+  return Math.floor(value / SUMMARY_CACHE_TTL_MS) * SUMMARY_CACHE_TTL_MS;
+}
+
 function getSummaryCache(key) {
   const hit = summaryCache.get(key);
   if (!hit || Date.now() - hit.at > SUMMARY_CACHE_TTL_MS) {
@@ -240,7 +250,25 @@ function connectionsRoutes(ctx) {
     }
     const src = query.src || null;
     const sourceScope = scoped.scope;
-    const cacheKey = JSON.stringify({ from, to, src, buckets, sourceScope });
+    // Quantised, because the browser's `from` is `Date.now() - N` and moves
+    // every millisecond. With the raw value in the key, every poll of a
+    // rolling range ("last hour", "last 14 days") minted a new entry and the
+    // cache never once served a request -- measured on production 2026-09-06:
+    // 369 responses over three seconds in six hours, every one of them this
+    // route, p50 4,427ms, max 15,743ms, against a four-aggregation cost of
+    // 7,210ms for the all-time range (P3-67).
+    //
+    // Rounding to the cache's own TTL changes nothing about how stale an
+    // answer may be: the TTL already permits serving one that old. It only
+    // stops two requests that would have shared an answer from being told
+    // apart by their microsecond of arrival.
+    const cacheKey = JSON.stringify({
+      from: quantiseForCache(from),
+      to: quantiseForCache(to),
+      src,
+      buckets,
+      sourceScope,
+    });
     const cached = getSummaryCache(cacheKey);
     if (cached) return res.json({ ...cached, serverTime: Date.now(), cached: true });
     const summary = history.summarizeByTimeRange(from, to, {
