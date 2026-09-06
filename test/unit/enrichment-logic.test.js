@@ -223,16 +223,22 @@ describe('lookupGeoBatch coalescing & backoff', () => {
   it('coalesces concurrent calls into a single flush cycle (same promise)', () => {
     // Force backoff to suppress the real API call while verifying only the coalescing behavior
     enrichment._setGeoBackoffUntilForTest(Date.now() + 60_000);
-    const p1 = enrichment.lookupGeoBatch(['203.0.113.10']);
-    const p2 = enrichment.lookupGeoBatch(['203.0.113.11']);
+    // Publicly routed addresses on purpose. The documentation ranges that
+    // used to stand in here are special-use (P3-59), so a geo lookup now
+    // short-circuits before it ever reaches a flush cycle -- the test would
+    // have passed while checking nothing.
+    const p1 = enrichment.lookupGeoBatch(['8.8.8.8']);
+    const p2 = enrichment.lookupGeoBatch(['1.1.1.1']);
     assert.strictEqual(p1, p2, 'calls within the flush window should share one cycle');
     return p1;
   });
 
   it('fail-caches IPs during backoff without calling the API', async () => {
     enrichment._setGeoBackoffUntilForTest(Date.now() + 60_000);
-    await enrichment.lookupGeoBatch(['198.51.100.7']);
-    const entry = enrichment.getGeoCache().get('198.51.100.7');
+    // Publicly routed for the same reason as above: a special-use address is
+    // cached before backoff is consulted, so this would stop testing backoff.
+    await enrichment.lookupGeoBatch(['9.9.9.9']);
+    const entry = enrichment.getGeoCache().get('9.9.9.9');
     assert.ok(entry, 'IP should be fail-cached during backoff');
     assert.equal(entry.lat, null);
     assert.ok(entry.expires > Date.now(), 'entry should carry a retry-suppression TTL');

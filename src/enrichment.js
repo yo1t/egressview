@@ -15,6 +15,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const { isPrivateIpLiteral } = require('./offline-mode');
 const { isBlockedOutboundIpLiteral } = require('./ssrf-guard');
+const { isSpecialUseAddress } = require('./special-use-address');
 
 const DB_PATH = path.join(__dirname, '..', '.egressview.db');
 
@@ -46,8 +47,16 @@ const GEO_PERMANENT_TTL = 100 * 365 * 24 * 60 * 60 * 1000; // ~100 years, for pr
 // Private, loopback, link-local, multicast and other non-routable addresses
 // must never be sent to the public GeoIP service. Keep this aligned with the
 // outbound endpoint guards instead of maintaining another partial IP regex.
+//
+// `isSpecialUseAddress` is the third term rather than a replacement for the
+// first two: the outbound guards exist to stop a request reaching somewhere it
+// should not, and widening them to satisfy this file would change what the
+// SSRF protection means. What it adds here are the ranges nobody routes but
+// nobody attacks either -- 192.0.0.0/24, 198.18.0.0/15, the documentation
+// blocks -- which RDAP happily answers for, with the registry's own name for
+// the reservation (P3-59).
 function isNonPublicIp(ip) {
-  return isPrivateIpLiteral(ip) || isBlockedOutboundIpLiteral(ip);
+  return isPrivateIpLiteral(ip) || isBlockedOutboundIpLiteral(ip) || isSpecialUseAddress(ip);
 }
 
 // ─── External API observability ───────────────────────────────────────────────
