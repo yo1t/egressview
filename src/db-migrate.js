@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 21;
+const SCHEMA_VERSION = 22;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -849,6 +849,110 @@ const MIGRATIONS = [
         if (!exists) continue;
         const hasColumn = db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === column);
         if (hasColumn) clear(table, column);
+      }
+    },
+  },
+  {
+    version: 22,
+    description: 'clear registry reservation names that identify no destination',
+    up(db) {
+      // RDAP answers for an address nobody owns with the registry's record for
+      // the reservation -- `Internet Assigned Numbers Authority` -- and that
+      // string names none of the destinations it was attached to.
+      //
+      // `org` is not only a label. It is the aggregation key, in the browser
+      // and in SQL (`history-queries.js`'s `targetExpr`), so every row sharing
+      // the name collapses into one node. Measured on production 2026-09-06:
+      // 2,824 distinct destinations under a single entry, 21,120 rows, the
+      // sixth largest destination group in the database -- larger than Google
+      // LLC, naming none of them.
+      //
+      // Nothing else can clear these. `org = COALESCE(@org, org)` in the
+      // upsert means a null never overwrites, and
+      // `enrichment-queue.js`'s `setIfChanged` returns early on null, so a
+      // value written before the guard existed stays for good. Measured on the
+      // busiest of these destinations: its RDAP cache row has held
+      // `org: null` for some time while 14,098 connection rows kept the name.
+      //
+      // Freeze the ranges here rather than importing today's list. A migration
+      // must rewrite the same input identically after the runtime rule
+      // changes.
+      const specialUseV22 = [
+        ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
+        ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24],
+        ['192.0.2.0', 24], ['192.88.99.0', 24], ['192.168.0.0', 16],
+        ['198.18.0.0', 15], ['198.51.100.0', 24], ['203.0.113.0', 24],
+        ['224.0.0.0', 4], ['240.0.0.0', 4],
+      ];
+      const toInt = (address) => {
+        const parts = String(address).split('.');
+        if (parts.length !== 4) return null;
+        let value = 0;
+        for (const part of parts) {
+          const octet = Number(part);
+          if (!Number.isInteger(octet) || octet < 0 || octet > 255) return null;
+          value = value * 256 + octet;
+        }
+        return value;
+      };
+      db.function('egressview_v22_is_special_use', { deterministic: true }, (address) => {
+        // IPv6 is deliberately out of scope for the rewrite: production holds
+        // no such row today, and a migration that guesses at a form it has
+        // never seen is a worse risk than one that leaves it alone.
+        const value = toInt(address);
+        if (value === null) return 0;
+        return specialUseV22.some(([base, bits]) => {
+          const start = toInt(base);
+          return value >= start && value < start + 2 ** (32 - bits);
+        }) ? 1 : 0;
+      });
+
+      // The same rule v21 froze. Applied here only to a destination whose
+      // address is special-use: v21 left destination columns alone because the
+      // write path already tests them, which is true for what it writes now
+      // and not for the 49 rows written before it did.
+      const ptrJunkV22 = /ec2-[\d-]+\.compute(?:-1)?\.amazonaws\.com$|\.compute\.internal$|\.static\.\S+\.fttx\.|ip-\d+-\d+-\d+-\d+\.|ptr\d|\.in-addr\.arpa$/i;
+      const numericAddressV22 = /^\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3}\./;
+      db.function('egressview_v22_is_ptr_junk', { deterministic: true }, (host) => {
+        if (typeof host !== 'string' || !host) return 1;
+        return ptrJunkV22.test(host) || numericAddressV22.test(host) ? 1 : 0;
+      });
+
+      const tableExists = (table) => db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .pluck()
+        .get(table);
+      const hasColumns = (table, columns) => {
+        const present = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
+        return columns.every(column => present.has(column));
+      };
+
+      // On an empty database the connections DDL runs after the migrations,
+      // and older databases predate some of these tables. Clear what is there.
+      for (const table of ['connections', 'notification_log']) {
+        if (!tableExists(table)) continue;
+        if (hasColumns(table, ['org', 'dst'])) {
+          const { changes } = db.prepare(
+            `UPDATE ${table} SET org = NULL
+             WHERE org IS NOT NULL AND egressview_v22_is_special_use(dst) = 1`
+          ).run();
+          if (changes) logger.info(`[migrate] v22 cleared ${changes} ${table}.org value(s)`);
+        }
+        // Without this the cleared rows fall back to `dstHost`, which for 27
+        // of these destinations holds a reverse-DNS name that only restates
+        // the address -- the same emptiness in a different column.
+        //
+        // Only the junk ones. `pixel.advertising.com` on a private address is
+        // a name somebody chose, and it identifies the destination.
+        if (hasColumns(table, ['dstHost', 'dst'])) {
+          const { changes } = db.prepare(
+            `UPDATE ${table} SET dstHost = NULL
+             WHERE dstHost IS NOT NULL AND dstHost <> dst
+               AND egressview_v22_is_special_use(dst) = 1
+               AND egressview_v22_is_ptr_junk(dstHost) = 1`
+          ).run();
+          if (changes) logger.info(`[migrate] v22 cleared ${changes} ${table}.dstHost value(s)`);
+        }
       }
     },
   },
