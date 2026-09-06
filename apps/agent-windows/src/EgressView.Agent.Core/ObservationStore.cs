@@ -6,6 +6,8 @@ namespace EgressView.Agent.Core;
 public sealed partial class ObservationStore : IDisposable
 {
     private const int CurrentSchemaVersion = 8;
+    public static readonly TimeSpan RawRetention = TimeSpan.FromDays(14);
+    public static readonly TimeSpan AggregateRetention = TimeSpan.FromDays(30);
     private const string Version1Schema = """
         CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL);
         INSERT INTO schema_version(version) SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM schema_version);
@@ -180,15 +182,16 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 6) { MigrateVersion6To7(); version = 7; }
         if (version == 7) MigrateVersion7To8();
         ValidateSchema();
+        PruneMigrationBackups(CurrentSchemaVersion);
     }
 
     private void MigrateVersion1To2()
     {
-        var backup = $"{path}.pre-v2.bak";
-        if (!File.Exists(backup)) Execute($"VACUUM INTO '{Sql(backup)}'");
+        CreateMigrationBackup(2);
         try
         {
             Execute($"BEGIN IMMEDIATE; {Version2Schema} UPDATE schema_version SET version=2 WHERE version=1; COMMIT;");
+            PruneMigrationBackups(2);
         }
         catch
         {
@@ -199,50 +202,80 @@ public sealed partial class ObservationStore : IDisposable
 
     private void MigrateVersion2To3()
     {
-        var backup = $"{path}.pre-v3.bak";
-        if (!File.Exists(backup)) Execute($"VACUUM INTO '{Sql(backup)}'");
-        try { Execute($"BEGIN IMMEDIATE; {Version3Schema} UPDATE schema_version SET version=3 WHERE version=2; COMMIT;"); }
+        CreateMigrationBackup(3);
+        try { Execute($"BEGIN IMMEDIATE; {Version3Schema} UPDATE schema_version SET version=3 WHERE version=2; COMMIT;"); PruneMigrationBackups(3); }
         catch { TryRollback(); throw; }
     }
 
     private void MigrateVersion3To4()
     {
-        var backup = $"{path}.pre-v4.bak";
-        if (!File.Exists(backup)) Execute($"VACUUM INTO '{Sql(backup)}'");
-        try { Execute($"BEGIN IMMEDIATE; {Version4Schema} UPDATE schema_version SET version=4 WHERE version=3; COMMIT;"); }
+        CreateMigrationBackup(4);
+        try { Execute($"BEGIN IMMEDIATE; {Version4Schema} UPDATE schema_version SET version=4 WHERE version=3; COMMIT;"); PruneMigrationBackups(4); }
         catch { TryRollback(); throw; }
     }
 
     private void MigrateVersion4To5()
     {
-        var backup = $"{path}.pre-v5.bak";
-        if (!File.Exists(backup)) Execute($"VACUUM INTO '{Sql(backup)}'");
-        try { Execute($"BEGIN IMMEDIATE; {Version5Schema} UPDATE schema_version SET version=5 WHERE version=4; COMMIT;"); }
+        CreateMigrationBackup(5);
+        try { Execute($"BEGIN IMMEDIATE; {Version5Schema} UPDATE schema_version SET version=5 WHERE version=4; COMMIT;"); PruneMigrationBackups(5); }
         catch { TryRollback(); throw; }
     }
 
     private void MigrateVersion5To6()
     {
-        var backup = $"{path}.pre-v6.bak";
-        if (!File.Exists(backup)) Execute($"VACUUM INTO '{Sql(backup)}'");
-        try { Execute($"BEGIN IMMEDIATE; {Version6Schema} UPDATE schema_version SET version=6 WHERE version=5; COMMIT;"); }
+        CreateMigrationBackup(6);
+        try { Execute($"BEGIN IMMEDIATE; {Version6Schema} UPDATE schema_version SET version=6 WHERE version=5; COMMIT;"); PruneMigrationBackups(6); }
         catch { TryRollback(); throw; }
     }
 
     private void MigrateVersion6To7()
     {
-        var backup = $"{path}.pre-v7.bak";
-        if (!File.Exists(backup)) Execute($"VACUUM INTO '{Sql(backup)}'");
-        try { Execute($"BEGIN IMMEDIATE; {Version7Schema} UPDATE schema_version SET version=7 WHERE version=6; COMMIT;"); }
+        CreateMigrationBackup(7);
+        try { Execute($"BEGIN IMMEDIATE; {Version7Schema} UPDATE schema_version SET version=7 WHERE version=6; COMMIT;"); PruneMigrationBackups(7); }
         catch { TryRollback(); throw; }
     }
 
     private void MigrateVersion7To8()
     {
-        var backup = $"{path}.pre-v8.bak";
-        if (!File.Exists(backup)) Execute($"VACUUM INTO '{Sql(backup)}'");
-        try { Execute($"BEGIN IMMEDIATE; {Version8Schema} UPDATE schema_version SET version=8 WHERE version=7; COMMIT;"); }
+        CreateMigrationBackup(8);
+        try { Execute($"BEGIN IMMEDIATE; {Version8Schema} UPDATE schema_version SET version=8 WHERE version=7; COMMIT;"); PruneMigrationBackups(8); }
         catch { TryRollback(); throw; }
+    }
+
+    private string CreateMigrationBackup(int targetVersion)
+    {
+        var backup = $"{path}.pre-v{targetVersion}.bak";
+        if (File.Exists(backup)) return backup;
+        EnsureFreeSpaceForCopy();
+        Execute($"VACUUM INTO '{Sql(backup)}'");
+        return backup;
+    }
+
+    private void EnsureFreeSpaceForCopy()
+    {
+        var databaseBytes = File.Exists(path) ? new FileInfo(path).Length : 0;
+        var walPath = $"{path}-wal";
+        var walBytes = File.Exists(walPath) ? new FileInfo(walPath).Length : 0;
+        var required = checked(databaseBytes + walBytes + 64L * 1024 * 1024);
+        var root = Path.GetPathRoot(path);
+        if (string.IsNullOrWhiteSpace(root)) return;
+        var available = new DriveInfo(root).AvailableFreeSpace;
+        if (available < required)
+            throw new ObservationStoreException(StoreFailureKind.DiskFull,
+                $"Migration backup needs {required} bytes free but only {available} bytes are available.");
+    }
+
+    private void PruneMigrationBackups(int keepTargetVersion)
+    {
+        var directory = Path.GetDirectoryName(path)!;
+        var prefix = Path.GetFileName(path) + ".pre-v";
+        foreach (var candidate in Directory.EnumerateFiles(directory, prefix + "*.bak", SearchOption.TopDirectoryOnly))
+        {
+            var name = Path.GetFileName(candidate);
+            var versionText = name[prefix.Length..^4];
+            if (!int.TryParse(versionText, out var version) || version == keepTargetVersion) continue;
+            File.Delete(candidate);
+        }
     }
 
     private void EnsureIntegrity()
@@ -346,6 +379,54 @@ public sealed partial class ObservationStore : IDisposable
                 throw;
             }
         }
+    }
+
+    public RetentionMaintenanceResult PruneRetentionBatch(DateTimeOffset now, int batchSize = 50_000)
+    {
+        if (batchSize is < 1 or > 250_000) throw new ArgumentOutOfRangeException(nameof(batchSize));
+        var rawCutoff = now.ToUniversalTime().Subtract(RawRetention).ToString("O");
+        var aggregateCutoff = now.ToUniversalTime().Subtract(AggregateRetention).ToString("O");
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                var observations = DeleteBatch("observations", "id", "observed_at", rawCutoff, batchSize);
+                var flows = DeleteBatch("flows", "flow_key", "last_seen", aggregateCutoff, batchSize);
+                var summaries = DeleteBatch("hourly_summary", "rowid", "bucket_start", aggregateCutoff, batchSize);
+                var coverage = DeleteBatch("coverage_sessions", "id", "COALESCE(ended_at,started_at)", aggregateCutoff, batchSize);
+                Execute("COMMIT");
+                return new(observations, flows, summaries, coverage);
+            }
+            catch
+            {
+                TryRollback();
+                throw;
+            }
+        }
+    }
+
+    public bool CompactIfBeneficial(double minimumFreeFraction = 0.20)
+    {
+        if (minimumFreeFraction is <= 0 or >= 1) throw new ArgumentOutOfRangeException(nameof(minimumFreeFraction));
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            var pages = ScalarInt64("PRAGMA page_count");
+            var free = ScalarInt64("PRAGMA freelist_count");
+            if (pages == 0 || free < pages * minimumFreeFraction) return false;
+            EnsureFreeSpaceForCopy();
+            Execute("PRAGMA wal_checkpoint(TRUNCATE)");
+            Execute("VACUUM");
+            return true;
+        }
+    }
+
+    private long DeleteBatch(string table, string key, string timeExpression, string cutoff, int batchSize)
+    {
+        Execute($"DELETE FROM {table} WHERE {key} IN (SELECT {key} FROM {table} WHERE {timeExpression}<'{Sql(cutoff)}' ORDER BY {timeExpression} LIMIT {batchSize})");
+        return ScalarInt64("SELECT changes()");
     }
 
     public long BeginCoverage(IReadOnlyList<StartupFlow> snapshot, DateTimeOffset startedAt)

@@ -79,6 +79,14 @@ public sealed record ThreatFinding(string Destination, string Application, long 
 public sealed record ThreatReport(string Availability, long IndicatorCount, DateTimeOffset? FetchedAt,
     int CheckedDestinations, IReadOnlyList<ThreatFinding> Findings);
 
+public sealed record RetentionMaintenanceResult(long ObservationsDeleted, long FlowsDeleted,
+    long HourlySummariesDeleted, long CoverageSessionsDeleted)
+{
+    public long TotalDeleted => ObservationsDeleted + FlowsDeleted + HourlySummariesDeleted + CoverageSessionsDeleted;
+    public bool MayHaveMore(int batchSize) => ObservationsDeleted == batchSize || FlowsDeleted == batchSize ||
+        HourlySummariesDeleted == batchSize || CoverageSessionsDeleted == batchSize;
+}
+
 public sealed record CollectorSnapshot(
     string State,
     long Accepted,
