@@ -546,7 +546,36 @@ try
             "the deliberate omission is still counted in the total that says how much never arrives");
     }
 
-    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, and rejection reasons");
+    {
+        // A straight line between two points on a projected globe is not the
+        // route between them on a sphere. Tokyo to San Francisco passes far
+        // north of the line joining them, and drawing the line instead would
+        // put the traffic over ocean it never crosses.
+        var tokyo = (35.68, 139.69);
+        var sanFrancisco = (37.77, -122.42);
+        var arc = GreatCircle.Path(tokyo, sanFrancisco);
+        Assert(arc.Length == 49, "the arc is sampled at the requested resolution");
+        Assert(Math.Abs(arc[0].Latitude - 35.68) < 0.01 && Math.Abs(arc[0].Longitude - 139.69) < 0.01,
+            "the arc starts at the origin");
+        Assert(Math.Abs(arc[^1].Latitude - 37.77) < 0.01 && Math.Abs(arc[^1].Longitude + 122.42) < 0.01,
+            "the arc ends at the destination");
+        var midpoint = arc[arc.Length / 2];
+        Assert(midpoint.Latitude > 45, "the great circle bends poleward rather than running straight");
+        Assert(Math.Abs(midpoint.Longitude) > 170, "the great circle crosses the date line rather than the Atlantic");
+
+        Assert(GreatCircle.Path(tokyo, tokyo).Length == 2,
+            "an arc to the same place is two points rather than a division by zero");
+
+        // Home is the one place that must not be squashed against the rim,
+        // because every arc starts there.
+        Assert(HomeLocation.PreferredTilt(35.68) > 0 && HomeLocation.PreferredTilt(-35.28) < 0,
+            "the globe tips towards the hemisphere the traffic leaves from");
+        Assert(HomeLocation.Current("JP") == (35.68, 139.69), "a known region places home there");
+        Assert(HomeLocation.Current("ZZ") == HomeLocation.Current("JP"),
+            "an unknown region falls back rather than landing at null island");
+    }
+
+    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, and globe geometry");
     return 0;
 }
 finally

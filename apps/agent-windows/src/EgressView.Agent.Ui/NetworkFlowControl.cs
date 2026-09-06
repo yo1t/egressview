@@ -82,24 +82,38 @@ public sealed class NetworkFlowControl : FrameworkElement
         {
             if (!appRects.TryGetValue(entry.App, out var source) ||
                 !destinationRects.TryGetValue(entry.Destination, out var target)) continue;
-            var thickness = Math.Max(1, entry.Value * scale);
-            var sourceY = source.Top + appOffsets[entry.App] + thickness / 2;
-            var targetY = target.Top + destinationOffsets[entry.Destination] + thickness / 2;
+            // No minimum: a ribbon padded up to a visible width stops summing
+            // to its node, and the stack then spills past the node it belongs
+            // to. A share too small to see is better shown as nothing than as
+            // a share it does not have.
+            var thickness = entry.Value * scale;
+            var sourceTop = source.Top + appOffsets[entry.App];
+            var targetTop = target.Top + destinationOffsets[entry.Destination];
             appOffsets[entry.App] += thickness;
             destinationOffsets[entry.Destination] += thickness;
+            if (thickness < 0.35) continue;
 
             var brush = entry.App == other ? MutedBrush() : palette[appIndex[entry.App] % palette.Length];
-            var pen = new Pen(brush, thickness) { StartLineCap = PenLineCap.Flat, EndLineCap = PenLineCap.Flat };
+            // Filled between two edges rather than stroked along one. A stroke
+            // is measured perpendicular to the curve, so wherever the curve
+            // slopes it covers more vertical space than its share -- which is
+            // why neighbouring ribbons appeared to overlap even though their
+            // ends tile exactly.
             var path = new StreamGeometry();
+            var control = (rightX - leftX) * 0.48;
             using (var context = path.Open())
             {
-                context.BeginFigure(new Point(leftX + NodeWidth, sourceY), false, false);
-                var control = (rightX - leftX) * 0.48;
-                context.BezierTo(new Point(leftX + control, sourceY), new Point(rightX - control, targetY),
-                    new Point(rightX, targetY), true, false);
+                context.BeginFigure(new Point(leftX + NodeWidth, sourceTop), true, true);
+                context.BezierTo(new Point(leftX + control, sourceTop), new Point(rightX - control, targetTop),
+                    new Point(rightX, targetTop), true, false);
+                context.LineTo(new Point(rightX, targetTop + thickness), true, false);
+                context.BezierTo(new Point(rightX - control, targetTop + thickness),
+                    new Point(leftX + control, sourceTop + thickness),
+                    new Point(leftX + NodeWidth, sourceTop + thickness), true, false);
             }
+            path.Freeze();
             drawing.PushOpacity(0.34);
-            drawing.DrawGeometry(null, pen, path);
+            drawing.DrawGeometry(brush, null, path);
             drawing.Pop();
         }
 
@@ -113,9 +127,9 @@ public sealed class NetworkFlowControl : FrameworkElement
 
         // A proportional node can be a couple of pixels tall, so its label is
         // pushed clear of the previous one rather than drawn on top of it.
-        foreach (var (node, y) in Declutter(apps, appRects, height))
+        foreach (var (node, y) in Declutter(apps, appRects, ActualHeight))
             DrawLabel(drawing, node.Name, FormatValue(node.Value), new Point(0, y), LabelWidth - 10, TextAlignment.Left);
-        foreach (var (node, y) in Declutter(destinations, destinationRects, height))
+        foreach (var (node, y) in Declutter(destinations, destinationRects, ActualHeight))
             DrawLabel(drawing, node.Name, FormatValue(node.Value), new Point(rightX + NodeWidth + 10, y),
                 Math.Max(20, ActualWidth - rightX - NodeWidth - 10), TextAlignment.Right);
     }
@@ -145,24 +159,42 @@ public sealed class NetworkFlowControl : FrameworkElement
         var result = new Dictionary<string, Rect>();
         foreach (var node in nodes)
         {
-            var nodeHeight = Math.Max(2, node.Value * scale);
+            var nodeHeight = node.Value * scale;
             result[node.Name] = new Rect(x, y, NodeWidth, nodeHeight);
             y += nodeHeight + NodeGap;
         }
         return result;
     }
 
-    private static IEnumerable<(Node Node, double Y)> Declutter(Node[] nodes, Dictionary<string, Rect> rects, double height)
+    /// Labels centred on their node, then separated.
+    ///
+    /// Pushing each one down past the last leaves the bottom of the list
+    /// hanging off the control, which silently loses the folded remainder --
+    /// the one node whose absence the reader cannot detect. So the run is
+    /// pushed back up from the bottom afterwards, and only genuinely
+    /// unfittable labels are dropped.
+    private static List<(Node Node, double Y)> Declutter(Node[] nodes, Dictionary<string, Rect> rects, double bottom)
     {
+        var placed = new List<(Node Node, double Y)>();
         var previous = double.NegativeInfinity;
         foreach (var node in nodes)
         {
             var rect = rects[node.Name];
             var y = Math.Max(rect.Top + rect.Height / 2 - LineHeight / 2, previous + LineHeight);
-            if (y + LineHeight > height + TopMargin * 2) yield break;
             previous = y;
-            yield return (node, y);
+            placed.Add((node, y));
         }
+
+        var overflow = placed.Count == 0 ? 0 : placed[^1].Y + LineHeight - bottom;
+        if (overflow <= 0) return placed;
+        for (var index = placed.Count - 1; index >= 0; index--)
+        {
+            var lifted = placed[index].Y - overflow;
+            if (index > 0 && lifted < placed[index - 1].Y + LineHeight)
+                overflow = placed[index - 1].Y + LineHeight - lifted;
+            placed[index] = (placed[index].Node, lifted);
+        }
+        return placed.Where(entry => entry.Y >= 0).ToList();
     }
 
     private void DrawLabel(DrawingContext drawing, string value, string metric, Point origin, double width, TextAlignment alignment)
