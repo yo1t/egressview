@@ -129,7 +129,7 @@ public partial class MainWindow : Window
             : string.Empty;
         var names = DestinationChoice.SelectedItem is ComboBoxItem destination && Equals(destination.Tag, "name");
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
-        Timeline.SetItems(data.Timeline, IsByteMetric);
+        Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To);
         FlowCaption.Text = IsByteMetric ? LocalizationManager.Text("RibbonBytes") : LocalizationManager.Text("RibbonConnections");
         TimelineCaption.Text = IsByteMetric ? LocalizationManager.Text("TimelineBytes") : LocalizationManager.Text("TimelineTotal");
     }
