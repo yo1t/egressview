@@ -8138,7 +8138,42 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled."
+            "description": "Declared by the server, and checked in CI. The envelope is declared; the array elements are observed, not checked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "byDst": {
+                      "type": "array",
+                      "items": {}
+                    },
+                    "byDevice": {
+                      "type": "array",
+                      "items": {}
+                    },
+                    "total": {
+                      "type": "number"
+                    },
+                    "serverTime": {
+                      "type": "number"
+                    },
+                    "cached": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "byDst",
+                    "byDevice",
+                    "total",
+                    "serverTime",
+                    "cached"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "x-array-elements-observed": true
           },
           "401": {
             "description": "No usable credential."
@@ -10475,6 +10510,7 @@
       "GET /api/auth/security-config",
       "GET /api/auth/sessions",
       "GET /api/config/ai",
+      "GET /api/connections/summary",
       "GET /api/devices",
       "GET /api/notes",
       "GET /api/status",
@@ -10575,7 +10611,6 @@
       "GET /api/connections",
       "GET /api/connections/memory",
       "GET /api/connections/new-nodes",
-      "GET /api/connections/summary",
       "GET /api/connections/threat-connections",
       "GET /api/connections/threat-counts",
       "POST /api/agents/transport",

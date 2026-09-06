@@ -275,5 +275,11 @@ describe('アプリに接続されている', () => {
     // and named none of them: a number that asks the reader to go and find
     // the work themselves is not a report.
     assert.match(source, /\[response-contract\] undeclared:/);
+    // The same has to hold for violations, and matters more: an undeclared
+    // route is work not yet done, a violation is a response that does not
+    // match what the API promises. Production ran at violations=6 for hours
+    // naming none of them (2026-09-06), which is what this pins.
+    assert.match(source, /\[response-contract\] violating:/);
+    assert.match(source, /snapshot\.violatingRoutes/);
   });
 });

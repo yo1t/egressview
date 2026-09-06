@@ -3548,6 +3548,212 @@
         ]
       }
     },
+    "GET /api/connections/summary": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "byDst": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "dst": {
+                  "type": "string"
+                },
+                "dstHost": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "count",
+                "dst",
+                "dstHost"
+              ]
+            }
+          },
+          "byDevice": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "src": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "count",
+                "src"
+              ]
+            }
+          },
+          "byTarget": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "count",
+                "key",
+                "label"
+              ]
+            }
+          },
+          "byEdge": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "src": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "count",
+                "key",
+                "src"
+              ]
+            }
+          },
+          "byLocation": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "country": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "count",
+                "country",
+                "key"
+              ]
+            }
+          },
+          "mapCoverage": {
+            "type": "object",
+            "properties": {
+              "placed": {
+                "type": "integer"
+              },
+              "unplaced": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "placed",
+              "unplaced"
+            ]
+          },
+          "appGroups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "app": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                },
+                "attribution": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "app",
+                "attribution",
+                "count"
+              ]
+            }
+          },
+          "timeline": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "bucket": {
+                  "type": "integer"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "bucket",
+                "count",
+                "key"
+              ]
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "buckets": {
+            "type": "integer"
+          },
+          "from": {
+            "type": "integer"
+          },
+          "to": {
+            "type": "integer"
+          },
+          "serverTime": {
+            "type": "integer"
+          },
+          "cached": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "appGroups",
+          "buckets",
+          "byDevice",
+          "byDst",
+          "byEdge",
+          "byLocation",
+          "byTarget",
+          "cached",
+          "from",
+          "mapCoverage",
+          "serverTime",
+          "timeline",
+          "to",
+          "total"
+        ]
+      }
+    },
     "GET /api/devices": {
       "200": {
         "type": "object",

@@ -204,12 +204,30 @@ function createRegistry() {
     devices: z.array(z.unknown()),
   }).loose(), { bounded: false, arrayElementsObserved: true });
 
-  // GET /api/connections/summary is *not* declared, though the step-4
-  // observer named it as one of the busiest. Its tests call the handler
-  // directly with a stand-in `res`, never through Express, so nothing can
-  // reach it to check the contract and the gate would report a declaration
-  // nobody exercised. Declaring it needs an HTTP-level test first: a contract
-  // that cannot be verified is the thing this whole design refuses to ship.
+  // GET /api/connections/summary. The busiest undeclared route on the Hub
+  // (x660 in one 15-minute window, 2026-09-06). It stayed undeclared because
+  // its tests called the handler directly with a stand-in `res`, never
+  // through Express, so nothing reached it to check the contract -- a
+  // declaration nobody exercises is what this design refuses to ship.
+  // `test/unit/connections-summary-http.test.js` now mounts the router and
+  // requests it over HTTP, so the shape below is checked rather than asserted.
+  //
+  // The keys were read off the production Hub, not off the test stub: the
+  // stub answers three keys, production answers fourteen. Declaring what the
+  // stub returns would have pinned a contract the real response violates.
+  //
+  // `bounded: false` and `unknown()` elements: every array here is a
+  // projection of live traffic -- 500 destinations, 245 edges, 315 timeline
+  // points in one measured response -- and their rows gain fields as
+  // enrichment grows. Pinning row shapes would make the contract an obstacle
+  // to ordinary additions rather than a check that the envelope holds.
+  registry.declare('GET /api/connections/summary', 200, z.object({
+    byDst: z.array(z.unknown()),
+    byDevice: z.array(z.unknown()),
+    total: z.number(),
+    serverTime: z.number(),
+    cached: z.boolean(),
+  }).loose(), { bounded: false, arrayElementsObserved: true });
 
   // Responses that project a secret down to a fact about it. These are the
   // ones worth refusing rather than merely counting: `clientSecretSet` and

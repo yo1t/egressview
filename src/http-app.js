@@ -176,6 +176,19 @@ function configureHttpApp(app, {
           `[response-contract] undeclared: ${busiest.map(([route, count]) => `${route} x${count}`).join(', ')}`
         );
       }
+      // The same reasoning applies to violations, and applied to them first:
+      // an undeclared route is work not yet done, but a violation is a
+      // response that does not match what the API promises. Production ran
+      // with violations=6 for hours naming none of them, which is the state
+      // the comment above exists to prevent.
+      const violating = Object.entries(snapshot.violatingRoutes)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 8);
+      if (violating.length) {
+        logger.warn(
+          `[response-contract] violating: ${violating.map(([route, count]) => `${route} x${count}`).join(', ')}`
+        );
+      }
     }, 15 * 60 * 1000);
     summary.unref();
   }
