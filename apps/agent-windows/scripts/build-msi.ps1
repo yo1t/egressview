@@ -28,6 +28,12 @@ dotnet publish (Join-Path $agentRoot 'src\EgressView.Agent.Ui\EgressView.Agent.U
     -c Release -r $Runtime --self-contained true -o $uiPublish
 if ($LASTEXITCODE -ne 0) { throw "UI publish failed: $LASTEXITCODE" }
 
+# The output name carries the version, but the intermediate directory does
+# not, so an incremental build of a new version judges itself up to date and
+# then fails copying an MSI it never linked. Discarding it costs a few
+# seconds and removes an error that reads like a WiX fault.
+$installerObj = Join-Path $agentRoot 'installer\obj\Release'
+if (Test-Path -LiteralPath $installerObj) { Remove-Item -LiteralPath $installerObj -Recurse -Force }
 dotnet build (Join-Path $agentRoot 'installer\EgressView.Agent.Installer.wixproj') -c Release `
     -p:ProductVersion=$Version `
     -p:ServicePublishDir=$servicePublish `
