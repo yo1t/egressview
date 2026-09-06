@@ -11,6 +11,7 @@
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../EgressView.Agent.Core/EgressView.Agent.Core.csproj" /></ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="render-check" /></ItemGroup>
   <ItemGroup>
     <!-- The same bundled Natural Earth TopoJSON used by the Mac Agent. -->
     <Resource Include="../../../agent-macos/Sources/EgressViewAgentCore/Resources/world-atlas-countries-110m.json"
