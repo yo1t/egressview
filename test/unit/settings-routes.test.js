@@ -582,6 +582,11 @@ describe('beacon configuration route', () => {
       whitelistDomains: Array.from({ length: 201 }, () => 'example.com'),
     })).status, 400);
     assert.equal((await request(app, 'GET', '/api/beacons?includeDismissed=yes')).status, 400);
+    // The success answer too, not only the refusals: 400 is served by the
+    // envelope contract, so a route whose only test is a rejection stays
+    // undeclared no matter how thoroughly its inputs are checked.
+    assert.equal((await request(app, 'GET', '/api/beacons')).status, 200);
+    assert.equal((await request(app, 'GET', '/api/beacons?includeDismissed=1')).status, 200);
     assert.equal((await request(app, 'GET', '/api/beacons/config?extra=1')).status, 400);
     assert.equal((await request(app, 'POST', '/api/beacons/not-a-number/dismiss', {})).status, 400);
     assert.equal(saves, 0);

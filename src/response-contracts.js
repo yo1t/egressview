@@ -343,6 +343,20 @@ function createRegistry() {
     }),
   }).loose());
 
+  // GET /api/beacons -- suspected beaconing, one row per destination.
+  //
+  // `bounded: false` and `unknown()` rows: `getBeacons` is `SELECT * FROM
+  // beacons` with no limit, and the columns grow as the detector learns to
+  // record more about why it flagged something.
+  //
+  // It reached production undeclared while its tests checked six different
+  // rejections and never once asked for the list: 400 is answered by the
+  // envelope contract, so a route can look thoroughly tested and still have
+  // no success response anybody has seen.
+  registry.declare('GET /api/beacons', 200, z.object({
+    beacons: z.array(z.unknown()),
+  }).loose(), { bounded: false, arrayElementsObserved: true });
+
   // Responses that project a secret down to a fact about it. These are the
   // ones worth refusing rather than merely counting: `clientSecretSet` and
   // `keySet` exist so a credential is never sent, and an extra key here is a

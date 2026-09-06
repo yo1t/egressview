@@ -6139,7 +6139,25 @@
         ],
         "responses": {
           "200": {
-            "description": "Handled."
+            "description": "Declared by the server, and checked in CI. The envelope is declared; the array elements are observed, not checked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "beacons": {
+                      "type": "array",
+                      "items": {}
+                    }
+                  },
+                  "required": [
+                    "beacons"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "x-array-elements-observed": true
           },
           "400": {
             "description": "Observed under test. Shape observed under test, not a guarantee: responses are not validated on the way out.",
@@ -10465,6 +10483,7 @@
       "GET /api/auth/audit-events",
       "GET /api/auth/security-config",
       "GET /api/auth/sessions",
+      "GET /api/beacons",
       "GET /api/config/ai",
       "GET /api/config/detection-notifications",
       "GET /api/config/slack",
@@ -10488,7 +10507,6 @@
       "GET /api/auth/methods",
       "GET /api/auth/status",
       "GET /api/backup/prune/:jobId",
-      "GET /api/beacons",
       "GET /api/beacons/config",
       "GET /api/devices/merge-candidates",
       "GET /api/notification-log",
