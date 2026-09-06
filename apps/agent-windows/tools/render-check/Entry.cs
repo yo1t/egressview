@@ -72,6 +72,25 @@ internal static class Entry
         ]);
         Save(globe, 330, 260, Path.Combine(output, "globe.png"));
 
+        var timelineStart = new DateTimeOffset(2026, 9, 6, 10, 0, 0, TimeSpan.FromHours(9));
+        var timeline = new List<AppTimelineAggregate>();
+        var applications = new[] { "chrome", "codex", "svchost", "tailscaled", "zabbix_agent2", "Other" };
+        for (var bucket = 0; bucket < 60; bucket++)
+            for (var index = 0; index < applications.Length; index++)
+            {
+                var connections = Math.Max(0, (bucket * 17 + index * 31) % 95 - index * 7);
+                if (connections > 0)
+                    timeline.Add(new AppTimelineAggregate(bucket, applications[index], connections,
+                        connections * (32_768L + index * 8_192L), 0));
+            }
+        foreach (var (label, bytes) in new[] { ("connections", false), ("bytes", true) })
+            foreach (var (w, h) in new[] { (700, 200), (520, 170), (420, 150), (360, 120) })
+            {
+                var chart = new TrafficTimelineControl();
+                chart.SetItems(timeline, bytes, timelineStart, timelineStart.AddHours(6));
+                Save(chart, w, h, Path.Combine(output, $"timeline-{label}-{w}x{h}.png"));
+            }
+
         Console.WriteLine($"wrote {output}");
         return 0;
     }
