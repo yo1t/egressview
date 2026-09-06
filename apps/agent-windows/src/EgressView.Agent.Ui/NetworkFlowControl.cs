@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation.Peers;
 using System.Windows.Media;
 using EgressView.Agent.Core;
 using Brush = System.Windows.Media.Brush;
@@ -11,6 +12,8 @@ namespace EgressView.Agent.Ui;
 /// <summary>Application-to-destination Sankey, following the Mac Agent layout.</summary>
 public sealed class NetworkFlowControl : FrameworkElement
 {
+    protected override AutomationPeer OnCreateAutomationPeer() => new FrameworkElementAutomationPeer(this);
+
     /// The most nodes ever named per side, before the height available cuts
     /// it further. Past this the ribbons are too thin to read, so the rest is
     /// summed into one visible band instead of being dropped: a chart that

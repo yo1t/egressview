@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation.Peers;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Point = System.Windows.Point;
@@ -26,6 +27,8 @@ public sealed class WorldGlobeControl : FrameworkElement
         IsVisibleChanged += (_, _) => ReconcileTimer();
         Unloaded += (_, _) => timer.Stop();
     }
+
+    protected override AutomationPeer OnCreateAutomationPeer() => new FrameworkElementAutomationPeer(this);
 
     public bool IsRotating
     {

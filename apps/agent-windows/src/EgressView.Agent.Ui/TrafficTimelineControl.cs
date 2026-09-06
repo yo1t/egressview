@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation.Peers;
 using System.Windows.Media;
 using System.Globalization;
 using EgressView.Agent.Core;
@@ -11,6 +12,8 @@ namespace EgressView.Agent.Ui;
 
 public sealed class TrafficTimelineControl : FrameworkElement
 {
+    protected override AutomationPeer OnCreateAutomationPeer() => new FrameworkElementAutomationPeer(this);
+
     private IReadOnlyList<AppTimelineAggregate> items = [];
     private bool useBytes;
     private DateTimeOffset from;

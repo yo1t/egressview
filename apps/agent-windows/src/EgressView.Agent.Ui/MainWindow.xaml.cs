@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using EgressView.Agent.Core;
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ApplyAccessibilityLabels();
         DataContext = this;
         Loaded += async (_, _) => { LoadSettings(); await RefreshAllAsync(); refreshTimer.Start(); };
         IsVisibleChanged += (_, _) => { if (IsVisible) refreshTimer.Start(); else refreshTimer.Stop(); };
@@ -88,6 +90,7 @@ public partial class MainWindow : Window
             GlobeCaption.Text = currentGlobePoints.Count == 0
                 ? LocalizationManager.Text("GlobeUnavailable")
                 : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeLocations"), currentGlobePoints.Count);
+            AutomationProperties.SetHelpText(Globe, GlobeCaption.Text);
             await RefreshThreatsAsync();
         }
         catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
@@ -132,6 +135,8 @@ public partial class MainWindow : Window
         Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To);
         FlowCaption.Text = IsByteMetric ? LocalizationManager.Text("RibbonBytes") : LocalizationManager.Text("RibbonConnections");
         TimelineCaption.Text = IsByteMetric ? LocalizationManager.Text("TimelineBytes") : LocalizationManager.Text("TimelineTotal");
+        AutomationProperties.SetHelpText(FlowDiagram, FlowCaption.Text);
+        AutomationProperties.SetHelpText(Timeline, TimelineCaption.Text);
     }
 
     private async Task RefreshInsightsAsync()
@@ -277,8 +282,38 @@ public partial class MainWindow : Window
         if (loadingSettings || LanguageChoice.SelectedItem is not ComboBoxItem item || !Enum.TryParse<AgentLanguage>(item.Tag?.ToString(), out var language)) return;
         AgentSettings.Language = language;
         LocalizationManager.Apply(System.Windows.Application.Current.Resources);
+        ApplyAccessibilityLabels();
         SetMonitoringState(MonitoringStatus.Foreground == FindResource("SuccessBrush"));
         RefreshNotifications();
+    }
+
+    private void ApplyAccessibilityLabels()
+    {
+        static void Name(FrameworkElement element, string key) => AutomationProperties.SetName(element, LocalizationManager.Text(key));
+        Name(PeriodChoice, "Period");
+        Name(MetricChoice, "Measure");
+        Name(DestinationChoice, "DestinationsBy");
+        Name(GlobeViewChoice, "CommunicationDestinations");
+        Name(Globe, "Globe");
+        Name(CountryList, "DestinationCountries");
+        Name(FlowDiagram, "WhichAppWhere");
+        Name(Timeline, "WhenTraffic");
+        Name(TopApplicationsList, "TopApplications");
+        Name(TopDestinationsList, "TopDestinations");
+        Name(LogSearch, "Search");
+        Name(ProtocolFilter, "Protocol");
+        Name(RowLimit, "Rows");
+        Name(ConnectionGrid, "ConnectionLog");
+        Name(ThreatGrid, "Threats");
+        Name(NotificationList, "NotificationHistory");
+        Name(EnrollmentCode, "EnrollmentCode");
+        Name(LanguageChoice, "Language");
+        Name(NotificationsEnabled, "NotificationsEnabled");
+        Name(DailyLimitChoice, "DailyLimit");
+        Name(FrameRateChoice, "GlobeFrameRate");
+        AutomationProperties.SetName(HubUrl, "Hub URL");
+        foreach (var status in new[] { MonitoringStatus, CoverageNote, LogStatus, ThreatStatus, NotificationSummary, EnrollmentStatus })
+            AutomationProperties.SetLiveSetting(status, AutomationLiveSetting.Polite);
     }
 
     private void NotificationSettings_Changed(object sender, RoutedEventArgs e)
