@@ -1,0 +1,118 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Id="com.egressview.agent.windows"
+           Name="EgressView Agent"
+           Manufacturer="EgressView"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="4B0D9169-55BA-48E8-AE1B-9F70AB610251"
+           Scope="perMachine"
+           Language="1033"
+           Compressed="yes">
+    <SummaryInformation Description="EgressView Agent for Windows" Manufacturer="EgressView" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of EgressView Agent is already installed."
+                  Schedule="afterInstallInitialize" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="EgressView Agent">
+        <Directory Id="SERVICEFOLDER" Name="service">
+          <Directory Id="DATAFOLDER" Name="data" />
+        </Directory>
+        <Directory Id="UIFOLDER" Name="ui" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ProgramMenuEgressView" Name="EgressView" />
+    </StandardDirectory>
+
+    <Component Id="ServiceExecutable" Directory="SERVICEFOLDER" Guid="*">
+      <File Id="ServiceExe" Source="$(var.ServicePublishDir)\EgressView.Agent.Service.exe" KeyPath="yes" />
+      <ServiceInstall Id="AgentServiceInstall"
+                      Name="EgressViewAgent"
+                      DisplayName="EgressView Agent"
+                      Description="Observes outbound network connections for EgressView."
+                      Type="ownProcess"
+                      Start="auto"
+                      ErrorControl="normal"
+                      Account="NT AUTHORITY\LocalService" />
+      <ServiceControl Id="AgentServiceControl" Name="EgressViewAgent"
+                      Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+    </Component>
+
+    <Component Id="ServiceDataFolder" Directory="DATAFOLDER" Guid="3E169592-177B-4420-A650-B3DB51022A13">
+      <CreateFolder>
+        <util:PermissionEx User="NT AUTHORITY\LocalService" GenericRead="yes" GenericWrite="yes"
+                           Delete="yes" CreateFile="yes" CreateChild="yes" />
+      </CreateFolder>
+      <RegistryValue Root="HKLM" Key="SOFTWARE\EgressView\Agent" Name="DataFolderCreated"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="UiExecutable" Directory="UIFOLDER" Guid="*">
+      <File Id="UiExe" Source="$(var.UiPublishDir)\EgressView.Agent.Ui.exe" KeyPath="yes">
+        <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuEgressView" Name="EgressView Agent"
+                  Description="Open EgressView Agent" WorkingDirectory="UIFOLDER" Advertise="yes" />
+      </File>
+    </Component>
+
+    <Component Id="MachineConfiguration" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryKey Root="HKLM" Key="SOFTWARE\EgressView\Agent">
+        <RegistryValue Name="AllowedUserSid" Type="string" Value="[UserSID]" KeyPath="yes" />
+        <RegistryValue Name="UiPath" Type="string" Value="[UIFOLDER]EgressView.Agent.Ui.exe" />
+        <RegistryValue Name="UiAutoStart" Type="integer" Value="1" />
+      </RegistryKey>
+    </Component>
+
+    <Component Id="LicenseFile" Directory="INSTALLFOLDER" Guid="*">
+      <File Id="LicenseText" Source="..\..\..\LICENSE" Name="LICENSE.txt" KeyPath="yes" />
+    </Component>
+
+    <Component Id="EventLogSource" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryKey Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\EgressViewAgent">
+        <RegistryValue Name="EventMessageFile" Type="string" Value="[SERVICEFOLDER]EgressView.Agent.Service.exe" KeyPath="yes" />
+        <RegistryValue Name="TypesSupported" Type="integer" Value="7" />
+      </RegistryKey>
+    </Component>
+
+    <Component Id="UiAutoStart" Directory="UIFOLDER" Guid="*">
+      <RegistryValue Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                     Name="EgressView Agent" Type="string" Value="&quot;[UIFOLDER]EgressView.Agent.Ui.exe&quot;" KeyPath="yes" />
+    </Component>
+
+    <Component Id="ProgramMenuFolderCleanup" Directory="ProgramMenuEgressView" Guid="*">
+      <RemoveFolder Id="RemoveProgramMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\EgressView\Agent" Name="StartMenuInstalled"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <ComponentGroup Id="ServicePayload" Directory="SERVICEFOLDER">
+      <Files Include="$(var.ServicePublishDir)\**">
+        <Exclude Files="$(var.ServicePublishDir)\EgressView.Agent.Service.exe" />
+        <Exclude Files="$(var.ServicePublishDir)\**\*.pdb" />
+      </Files>
+    </ComponentGroup>
+    <ComponentGroup Id="UiPayload" Directory="UIFOLDER">
+      <Files Include="$(var.UiPublishDir)\**">
+        <Exclude Files="$(var.UiPublishDir)\EgressView.Agent.Ui.exe" />
+        <Exclude Files="$(var.UiPublishDir)\**\*.pdb" />
+      </Files>
+    </ComponentGroup>
+
+    <Feature Id="Complete" Title="EgressView Agent" Level="1">
+      <ComponentRef Id="ServiceExecutable" />
+      <ComponentRef Id="ServiceDataFolder" />
+      <ComponentRef Id="UiExecutable" />
+      <ComponentRef Id="MachineConfiguration" />
+      <ComponentRef Id="LicenseFile" />
+      <ComponentRef Id="EventLogSource" />
+      <ComponentRef Id="UiAutoStart" />
+      <ComponentRef Id="ProgramMenuFolderCleanup" />
+      <ComponentGroupRef Id="ServicePayload" />
+      <ComponentGroupRef Id="UiPayload" />
+    </Feature>
+  </Package>
+</Wix>
