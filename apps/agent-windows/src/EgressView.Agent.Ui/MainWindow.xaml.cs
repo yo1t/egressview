@@ -111,7 +111,7 @@ public partial class MainWindow : Window
         return document.RootElement.GetProperty("data").Deserialize<PeriodAnalysis>() ?? throw new InvalidDataException("Missing analysis response.");
     }
 
-    private bool IsByteMetric => MetricChoice.SelectedItem is ComboBoxItem item && Equals(item.Tag, "bytes");
+    private bool IsByteMetric => MetricChoice.SelectedIndex == 1;
 
     private void RenderAnalysis()
     {
@@ -127,7 +127,7 @@ public partial class MainWindow : Window
         CoverageNote.Text = data.CoverageRatio < 0.999999999
             ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("PartialCoverage"), Math.Min(data.CoverageRatio, 0.999))
             : string.Empty;
-        var names = DestinationChoice.SelectedItem is ComboBoxItem destination && Equals(destination.Tag, "name");
+        var names = DestinationChoice.SelectedIndex == 0;
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
         Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To);
         FlowCaption.Text = IsByteMetric ? LocalizationManager.Text("RibbonBytes") : LocalizationManager.Text("RibbonConnections");
@@ -150,7 +150,7 @@ public partial class MainWindow : Window
             InsightBytes.Text = FlowRow.FormatBytes(current.Bytes);
             InsightConnectionsDelta.Text = previous is null || previous.Connections == 0 ? LocalizationManager.Text("NoPreviousData") : $"{(current.Connections - previous.Connections) / (double)previous.Connections:+0%;-0%;0%} {LocalizationManager.Text("VersusPrevious")}";
             TopApplicationsList.ItemsSource = current.Links.GroupBy(link => link.Application).Select(group => new RankedRow(group.Key, group.Sum(link => IsByteMetric ? link.Bytes : link.Connections), IsByteMetric)).OrderByDescending(row => row.RawValue).Take(10).ToArray();
-            var names = DestinationChoice.SelectedItem is ComboBoxItem destination && Equals(destination.Tag, "name");
+            var names = DestinationChoice.SelectedIndex == 0;
             TopDestinationsList.ItemsSource = current.Links.GroupBy(link => names ? link.DestinationName : link.Destination).Select(group => new RankedRow(group.Key, group.Sum(link => IsByteMetric ? link.Bytes : link.Connections), IsByteMetric)).OrderByDescending(row => row.RawValue).Take(10).ToArray();
         }
         catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
@@ -190,7 +190,7 @@ public partial class MainWindow : Window
     private void GlobeViewChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!IsLoaded) return;
-        var countries = GlobeViewChoice.SelectedItem is ComboBoxItem item && Equals(item.Tag, "countries");
+        var countries = GlobeViewChoice.SelectedIndex == 1;
         Globe.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
         CountryList.Visibility = countries ? Visibility.Visible : Visibility.Collapsed;
         RotateButton.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;

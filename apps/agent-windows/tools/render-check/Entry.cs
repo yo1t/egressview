@@ -91,6 +91,26 @@ internal static class Entry
                 Save(chart, w, h, Path.Combine(output, $"timeline-{label}-{w}x{h}.png"));
             }
 
+        foreach (var selectedIndex in new[] { 0, 1 })
+        {
+            var segmented = new System.Windows.Controls.ListBox
+            {
+                Style = (Style)application.FindResource("SegmentedSelectorStyle"),
+                SelectedIndex = selectedIndex,
+            };
+            segmented.Items.Add(new ListBoxItem { Content = "接続" });
+            segmented.Items.Add(new ListBoxItem { Content = "データ転送量" });
+            Save(segmented, 210, 40, Path.Combine(output, $"segmented-metric-{selectedIndex}.png"));
+        }
+        var globeSegmented = new System.Windows.Controls.ListBox
+        {
+            Style = (Style)application.FindResource("SegmentedSelectorStyle"),
+            SelectedIndex = 1,
+        };
+        globeSegmented.Items.Add(new ListBoxItem { Content = "地球儀" });
+        globeSegmented.Items.Add(new ListBoxItem { Content = "アクセス先の国" });
+        Save(globeSegmented, 210, 40, Path.Combine(output, "segmented-globe.png"));
+
         Console.WriteLine($"wrote {output}");
         return 0;
     }
