@@ -6,6 +6,7 @@ const http = require('node:http');
 const { Readable, Writable } = require('node:stream');
 const { describe, it } = require('node:test');
 const routes = require('../../src/routes/ai-notifications');
+const { normalizeConfig } = require('../../src/ai-notification-service');
 
 const requireAdmin = (_req, _res, next) => next();
 
@@ -42,26 +43,16 @@ function request(app, method, url, body = null) {
 }
 
 function makeApp(overrides = {}) {
-  let config = {
-    frequency: 'off',
-    weekday: 1,
-    time: '09:00',
-    timezone: 'Asia/Tokyo',
-    rangeHours: 168,
-    destinations: { ui: true, slack: false },
-    threat: {
-      enabled: false,
-      dangerThreshold: 1,
-      newDestinationsThreshold: 1,
-      increaseThreshold: 3,
-    },
-    dailyLimit: 3,
-    cooldownMinutes: 60,
-    automationConsent: false,
-  };
+  // The service's own normalization, not a hand-copied literal. A stub that
+  // omits `rules` or `automationProvider` describes a config the running Hub
+  // never holds, and a response contract declared from the handler would then
+  // be measured against the wrong thing.
+  let config = normalizeConfig({});
   const aiNotificationService = {
     exportConfig: () => structuredClone(config),
-    publicStatus: () => ({ running: false, provider: 'ollama' }),
+    publicStatus: () => ({
+      running: false, provider: 'ollama', automationReady: true, slackReady: false,
+    }),
     configure: value => { config = structuredClone(value); return config; },
     testDelivery: async () => ({ triggerType: 'test' }),
     run: async () => ({ triggerType: 'manual' }),
@@ -111,10 +102,16 @@ describe('AI notification routes', () => {
 
   it('requires saved consent for cloud automation', async () => {
     const app = makeApp({ service: {
-      publicStatus: () => ({ running: false, provider: 'bedrock' }),
+      publicStatus: () => ({
+        running: false, provider: 'bedrock', automationReady: false, slackReady: false,
+      }),
     } });
     const current = (await request(app, 'GET', '/api/ai/notification-config')).body.config;
     current.frequency = 'daily';
+    // A schedule is what makes this automation: the rules decide, not the
+    // frequency, and a saved config that has never been automated carries
+    // them all off.
+    current.rules = { ...current.rules, scheduled: true };
     const result = await request(app, 'POST', '/api/ai/notification-config', current);
     assert.equal(result.status, 400);
     assert.match(result.body.error, /consent/i);
@@ -122,7 +119,9 @@ describe('AI notification routes', () => {
 
   it('rejects Slack delivery when the saved channel is incomplete', async () => {
     const app = makeApp({ service: {
-      publicStatus: () => ({ running: false, provider: 'ollama', slackReady: false }),
+      publicStatus: () => ({
+        running: false, provider: 'ollama', automationReady: true, slackReady: false,
+      }),
     } });
     const current = (await request(app, 'GET', '/api/ai/notification-config')).body.config;
     current.destinations = { ui: true, slack: true };
@@ -133,25 +132,14 @@ describe('AI notification routes', () => {
 
   it('does not expose or reuse consent bound to another provider', async () => {
     const app = makeApp({ service: {
-      exportConfig: () => ({
+      exportConfig: () => normalizeConfig({
         frequency: 'daily',
-        weekday: 1,
-        time: '09:00',
-        timezone: 'Asia/Tokyo',
-        rangeHours: 168,
-        destinations: { ui: true, slack: false },
-        threat: {
-          enabled: false,
-          dangerThreshold: 1,
-          newDestinationsThreshold: 1,
-          increaseThreshold: 3,
-        },
-        dailyLimit: 3,
-        cooldownMinutes: 60,
         automationConsent: true,
         automationProvider: 'anthropic',
       }),
-      publicStatus: () => ({ running: false, provider: 'openai', automationReady: false }),
+      publicStatus: () => ({
+        running: false, provider: 'openai', automationReady: false, slackReady: false,
+      }),
     } });
 
     const result = await request(app, 'GET', '/api/ai/notification-config');

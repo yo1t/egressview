@@ -2492,6 +2492,29 @@
                   "ui"
                 ]
               },
+              "rules": {
+                "type": "object",
+                "properties": {
+                  "scheduled": {
+                    "type": "boolean"
+                  },
+                  "danger": {
+                    "type": "boolean"
+                  },
+                  "newDestination": {
+                    "type": "boolean"
+                  },
+                  "increase": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "danger",
+                  "increase",
+                  "newDestination",
+                  "scheduled"
+                ]
+              },
               "threat": {
                 "type": "object",
                 "properties": {
@@ -2532,6 +2555,7 @@
               "destinations",
               "frequency",
               "rangeHours",
+              "rules",
               "threat",
               "time",
               "timezone",
@@ -2547,16 +2571,18 @@
               "provider": {
                 "type": "string"
               },
-              "slackReady": {
+              "automationReady": {
                 "type": "boolean"
               },
-              "automationReady": {
+              "slackReady": {
                 "type": "boolean"
               }
             },
             "required": [
+              "automationReady",
               "provider",
-              "running"
+              "running",
+              "slackReady"
             ]
           }
         },
@@ -3519,15 +3545,21 @@
               "userId": {
                 "type": "string"
               },
+              "displayName": {
+                "type": "string"
+              },
               "cooldownMinutes": {
                 "type": "integer"
               },
-              "displayName": {
-                "type": "string"
+              "tokenSet": {
+                "type": "boolean"
               }
             },
             "required": [
+              "cooldownMinutes",
               "displayName",
+              "enabled",
+              "tokenSet",
               "userId"
             ]
           }
@@ -3921,11 +3953,67 @@
                 },
                 "kind": {
                   "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "hostName": {
+                  "type": "string"
+                },
+                "ip": {
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string"
+                },
+                "nat": {
+                  "type": "integer"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "passSet": {
+                  "type": "boolean"
+                },
+                "enablePassSet": {
+                  "type": "boolean"
+                },
+                "ready": {
+                  "type": "boolean"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "lastSuccessAt": {
+                  "type": "null"
+                },
+                "lastError": {
+                  "type": "null"
+                },
+                "sessionCount": {
+                  "type": "integer"
                 }
               },
               "required": [
+                "displayName",
+                "enablePassSet",
+                "enabled",
+                "hostName",
                 "id",
-                "kind"
+                "ip",
+                "kind",
+                "lastError",
+                "lastSuccessAt",
+                "message",
+                "nat",
+                "passSet",
+                "ready",
+                "sessionCount",
+                "state",
+                "user"
               ]
             }
           },
@@ -4905,11 +4993,19 @@
               },
               "provider": {
                 "type": "string"
+              },
+              "automationReady": {
+                "type": "boolean"
+              },
+              "slackReady": {
+                "type": "boolean"
               }
             },
             "required": [
+              "automationReady",
               "provider",
-              "running"
+              "running",
+              "slackReady"
             ]
           }
         },
@@ -6074,17 +6170,21 @@
               "userId": {
                 "type": "string"
               },
+              "displayName": {
+                "type": "string"
+              },
               "cooldownMinutes": {
                 "type": "integer"
               },
-              "displayName": {
-                "type": "string"
+              "tokenSet": {
+                "type": "boolean"
               }
             },
             "required": [
               "cooldownMinutes",
               "displayName",
               "enabled",
+              "tokenSet",
               "userId"
             ]
           }
