@@ -151,6 +151,7 @@ internal sealed class AgentWindowsService : ServiceBase
         ipc.Start();
         var delivery = RunDeliveryAsync(store, credentialStore, cancellationToken);
         var geoCache = RunGeoCacheAsync(store, credentialStore, cancellationToken);
+        var threatIntel = RunThreatIntelAsync(store, credentialStore, cancellationToken);
         Task lifetime;
         try
         {
@@ -168,6 +169,7 @@ internal sealed class AgentWindowsService : ServiceBase
         store.EndCoverage(coverageId, DateTimeOffset.UtcNow);
         await delivery;
         await geoCache;
+        await threatIntel;
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(collector.Enrich(pipeline.Snapshot()), store, "0.1.0-dev"));
     }
@@ -186,6 +188,30 @@ internal sealed class AgentWindowsService : ServiceBase
                     var result = await client.FetchAsync(credential, state.ETag, cancellationToken);
                     if (result.NotModified) store.MarkGeoCacheFetched(result.ETag, DateTimeOffset.UtcNow);
                     else store.ReplaceGeoLocations(result.Locations, result.ETag, DateTimeOffset.UtcNow);
+                }
+                delay = TimeSpan.FromMinutes(15);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            catch { delay = TimeSpan.FromMinutes(5); }
+            try { await Task.Delay(delay, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+        }
+    }
+
+    private static async Task RunThreatIntelAsync(ObservationStore store, WindowsCredentialStore credentials, CancellationToken cancellationToken)
+    {
+        var client = new ThreatIntelClient();
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var delay = TimeSpan.FromMinutes(5);
+            try
+            {
+                var state = store.ReadThreatCacheState();
+                if (credentials.Load() is { } credential && (state.FetchedAt is null || DateTimeOffset.UtcNow - state.FetchedAt >= TimeSpan.FromHours(6)))
+                {
+                    var result = await client.FetchAsync(credential, state.ETag, cancellationToken);
+                    if (result.NotModified) store.MarkThreatCacheFetched(result.ETag, DateTimeOffset.UtcNow);
+                    else store.ReplaceThreatIndicators(result.Available, result.Indicators, result.ETag, result.FetchedAt ?? DateTimeOffset.UtcNow);
                 }
                 delay = TimeSpan.FromMinutes(15);
             }

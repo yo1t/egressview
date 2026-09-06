@@ -60,6 +60,25 @@ public sealed record GeoLocation(string Ip, double Latitude, double Longitude, s
 public sealed record GlobePoint(double Latitude, double Longitude, string? CountryCode, string? City,
     long Connections, long Bytes);
 
+public sealed record AppDestinationAggregate(
+    string Application, string Destination, string DestinationName, long Connections, long Bytes, long ConnectionsWithoutBytes);
+
+public sealed record AppTimelineAggregate(
+    int Bucket, string Application, long Connections, long Bytes, long ConnectionsWithoutBytes);
+
+public sealed record PeriodAnalysis(
+    DateTimeOffset From, DateTimeOffset To, long Connections, int Applications, int Destinations,
+    long Bytes, long ConnectionsWithoutBytes, double CoverageRatio, DateTimeOffset? MonitoringStartedAt,
+    long StoredFlows, IReadOnlyList<AppDestinationAggregate> Links, IReadOnlyList<AppTimelineAggregate> Timeline);
+
+public sealed record ThreatIndicator(string Kind, string Value, string? Source, string? Tag, string Confidence);
+public sealed record ThreatCacheState(string Availability, string? ETag, DateTimeOffset? FetchedAt, long IndicatorCount);
+public sealed record ThreatFinding(string Destination, string Application, long Connections, long Bytes,
+    long ConnectionsWithoutBytes, DateTimeOffset LastSeen, string IndicatorKind, string MatchedValue,
+    string? Source, string? Tag, string Confidence);
+public sealed record ThreatReport(string Availability, long IndicatorCount, DateTimeOffset? FetchedAt,
+    int CheckedDestinations, IReadOnlyList<ThreatFinding> Findings);
+
 public sealed record CollectorSnapshot(
     string State,
     long Accepted,

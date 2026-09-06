@@ -24,6 +24,17 @@ internal static class LocalizationManager
         CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(EffectiveLanguage == "ja" ? "ja-JP" : "en-US");
     }
 
+    /// The store emits two sentinels in place of an application name: flows
+    /// whose process could not be named, and the remainder past the top few.
+    /// They are aggregation buckets, not programs, so they are shown in the
+    /// reader's language rather than as the internal token.
+    internal static string Application(string name) => name switch
+    {
+        "Unknown" => Text("FlowUnknown"),
+        "Other" => Text("FlowOther"),
+        _ => name,
+    };
+
     internal static string Text(string key) =>
         System.Windows.Application.Current.TryFindResource(key) as string ?? key;
 }
