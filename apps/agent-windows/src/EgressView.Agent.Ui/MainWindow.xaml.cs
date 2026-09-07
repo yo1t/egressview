@@ -237,8 +237,66 @@ public partial class MainWindow : Window
             loadingDeliveryState = false;
             if (!healthy && System.Windows.Application.Current is App app)
                 app.Notifications.Notify("Monitoring", "monitoring-health", "EgressView Agent", LocalizationManager.Text("NeedsAttention"), app.ShowNotification);
+            await RefreshDeliveryStatusAsync();
         }
         catch { SetMonitoringState(false); CoverageValue.Text = LocalizationManager.Text("NeedsAttention"); if (System.Windows.Application.Current is App app) app.UpdateTrayState(true, false); }
+    }
+
+    private async Task RefreshDeliveryStatusAsync()
+    {
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"delivery-status"}""", lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            var data = document.RootElement.GetProperty("data");
+            var enrolled = data.GetProperty("enrolled").GetBoolean();
+            var enabled = data.GetProperty("enabled").GetBoolean();
+            var state = data.GetProperty("state").GetString() ?? "idle";
+            HubDeliveryTarget.Text = enrolled && data.TryGetProperty("hub", out var hub) && hub.ValueKind == JsonValueKind.String
+                ? hub.GetString() ?? LocalizationManager.Text("NotEnrolled") : LocalizationManager.Text("NotEnrolled");
+            HubDeliveryState.Text = DeliveryStateText(state);
+            HubPending.Text = data.GetProperty("pending").GetInt64().ToString("N0", CultureInfo.CurrentCulture);
+            HubLastAck.Text = DateText(data, "lastAcknowledgedAt");
+            HubOldestPending.Text = $"{LocalizationManager.Text("OldestPending")}: {DateText(data, "oldestPendingAt")}";
+            HubRetry.Text = $"{LocalizationManager.Text("NextRetry")}: {DateText(data, "nextRetryAt")}";
+            var failure = data.TryGetProperty("lastFailure", out var failureValue) && failureValue.ValueKind == JsonValueKind.String
+                ? DeliveryStateText(failureValue.GetString() ?? "") : "—";
+            var statusCode = data.TryGetProperty("lastStatusCode", out var statusValue) && statusValue.ValueKind == JsonValueKind.Number
+                ? $" (HTTP {statusValue.GetInt32()})" : string.Empty;
+            HubLastFailure.Text = $"{LocalizationManager.Text("LastFailure")}: {failure}{statusCode}";
+            SendNowButton.IsEnabled = enrolled && enabled && state != "sending";
+        }
+        catch
+        {
+            HubDeliveryState.Text = LocalizationManager.Text("CannotConnect");
+            SendNowButton.IsEnabled = false;
+        }
+    }
+
+    private static string DateText(JsonElement data, string property)
+    {
+        if (!data.TryGetProperty(property, out var value) || value.ValueKind != JsonValueKind.String ||
+            !DateTimeOffset.TryParse(value.GetString(), out var date)) return "—";
+        return date.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
+    }
+
+    private static string DeliveryStateText(string state)
+    {
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        return state switch
+        {
+            "disabled" => ja ? "送信停止" : "Delivery off",
+            "not-enrolled" => ja ? "未登録" : "Not enrolled",
+            "sending" => ja ? "送信中" : "Sending",
+            "up-to-date" => ja ? "送信済み" : "Up to date",
+            "acknowledged" => ja ? "ACK受信" : "Acknowledged",
+            "authorization-required" => ja ? "認証の更新が必要" : "Authorization required",
+            "rate-limited" => ja ? "送信制限中" : "Rate limited",
+            "retryable" => ja ? "一時失敗・再試行予定" : "Temporary failure; retry scheduled",
+            "contract-rejected" => ja ? "Hub契約で拒否" : "Rejected by Hub contract",
+            "invalid-acknowledgement" => ja ? "ACKを検証できません" : "Invalid acknowledgement",
+            _ => ja ? "待機中" : "Idle",
+        };
     }
 
     private void SetMonitoringState(bool healthy, bool enabled = true)
@@ -401,6 +459,7 @@ public partial class MainWindow : Window
                 using var document = JsonDocument.Parse(response);
                 if (document.RootElement.GetProperty("status").GetString() != "ok") throw new AgentEnrollmentException(document.RootElement.TryGetProperty("reason", out var reason) ? reason.GetString() ?? "credential-storage-failed" : "credential-storage-failed");
                 EnrollmentStatus.Text = LocalizationManager.EffectiveLanguage == "ja" ? "登録が完了しました。資格情報はServiceが安全に保存しました。" : "Enrollment complete. The Service stored the credential securely.";
+                await RefreshDeliveryStatusAsync();
                 return;
             }
             throw new AgentEnrollmentException("expired");
@@ -421,8 +480,29 @@ public partial class MainWindow : Window
             using var document = JsonDocument.Parse(response);
             if (document.RootElement.GetProperty("status").GetString() != "ok") throw new InvalidOperationException();
             EnrollmentStatus.Text = LocalizationManager.EffectiveLanguage == "ja" ? (enabled ? "観測データのHub送信を開始しました。" : "観測データのHub送信を停止しました。") : (enabled ? "Hub observation delivery is on." : "Hub observation delivery is off.");
+            await RefreshDeliveryStatusAsync();
         }
         catch { loadingDeliveryState = true; DeliveryEnabled.IsChecked = !enabled; loadingDeliveryState = false; EnrollmentStatus.Text = LocalizationManager.EffectiveLanguage == "ja" ? "送信設定を変更できませんでした。" : "Could not change delivery setting."; }
+    }
+
+    private async void SendNow_Click(object sender, RoutedEventArgs e)
+    {
+        SendNowButton.IsEnabled = false;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"send-delivery-now"}""", lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            if (document.RootElement.GetProperty("status").GetString() != "ok") throw new InvalidOperationException();
+            HubDeliveryState.Text = DeliveryStateText("sending");
+            await Task.Delay(600, lifetime.Token);
+            await RefreshDeliveryStatusAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch
+        {
+            HubDeliveryState.Text = LocalizationManager.EffectiveLanguage == "ja" ? "送信を開始できませんでした" : "Could not start delivery";
+            await RefreshDeliveryStatusAsync();
+        }
     }
 
     internal static string EnrollmentMessage(string reason)

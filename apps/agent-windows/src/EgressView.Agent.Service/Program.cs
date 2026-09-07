@@ -145,10 +145,11 @@ internal sealed class AgentWindowsService : ServiceBase
         await using var monitoring = new MonitoringController(store, pipeline, Path.Combine(root, "monitoring.disabled"));
         monitoring.Start();
         var credentialStore = new WindowsCredentialStore();
+        using var deliveryController = new DeliveryController(store, credentialStore);
         await using var ipc = new AgentIpcServer(store, monitoring.Snapshot, ReadAllowedUserSid(), credentialStore,
-            () => monitoring.Enabled, monitoring.SetEnabled);
+            () => monitoring.Enabled, monitoring.SetEnabled, deliveryController);
         ipc.Start();
-        var delivery = RunDeliveryAsync(store, credentialStore, cancellationToken);
+        var delivery = deliveryController.RunAsync(cancellationToken);
         var geoCache = RunGeoCacheAsync(store, credentialStore, cancellationToken);
         var threatIntel = RunThreatIntelAsync(store, credentialStore, cancellationToken);
         var chartAggregation = RunChartAggregationAsync(store, cancellationToken);
@@ -279,38 +280,6 @@ internal sealed class AgentWindowsService : ServiceBase
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
             catch { delay = TimeSpan.FromMinutes(5); }
             try { await Task.Delay(delay, cancellationToken); }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
-        }
-    }
-
-    private static async Task RunDeliveryAsync(ObservationStore store, WindowsCredentialStore credentials, CancellationToken cancellationToken)
-    {
-        var sender = new DeliverySender();
-        var retry = TimeSpan.FromSeconds(5);
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            var delay = TimeSpan.FromSeconds(5);
-            try
-            {
-                if (store.DeliveryEnabled && credentials.Load() is { } credential)
-                {
-                    var result = await sender.SendNextAsync(store, credential,
-                        new(Environment.MachineName, "windows", Environment.OSVersion.VersionString, "0.1.0-dev"), cancellationToken);
-                    delay = result.Kind switch
-                    {
-                        DeliveryAttemptKind.Acknowledged => TimeSpan.Zero,
-                        DeliveryAttemptKind.Empty => TimeSpan.FromSeconds(15),
-                        DeliveryAttemptKind.RateLimited => result.RetryAfter ?? TimeSpan.FromMinutes(1),
-                        DeliveryAttemptKind.AuthorizationRequired => TimeSpan.FromMinutes(5),
-                        _ => retry,
-                    };
-                    retry = result.Kind is DeliveryAttemptKind.Retryable or DeliveryAttemptKind.Rejected or DeliveryAttemptKind.InvalidAcknowledgement
-                        ? TimeSpan.FromSeconds(Math.Min(retry.TotalSeconds * 2, 300)) : TimeSpan.FromSeconds(5);
-                }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
-            catch { delay = retry; retry = TimeSpan.FromSeconds(Math.Min(retry.TotalSeconds * 2, 300)); }
-            if (delay > TimeSpan.Zero) try { await Task.Delay(delay, cancellationToken); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
         }
     }
