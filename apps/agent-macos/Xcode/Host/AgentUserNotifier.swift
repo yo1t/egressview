@@ -1,6 +1,7 @@
 import Combine
 import EgressViewAgentCore
 import Foundation
+import os
 @preconcurrency import UserNotifications
 
 /// Keeps every notification explicit about the event that caused it.
@@ -220,6 +221,17 @@ final class AgentNotificationCoordinator {
     private let notifier: AgentUserNotifier
     private let scanTimer = PeriodicWork()
     private let hubRetryTimer = PeriodicWork()
+    /// Says whether an outage was announced or refused, and whether the retry
+    /// is running.
+    ///
+    /// Without it, "no notification arrived" has two causes that look
+    /// identical from outside: the problem was never detected, or it was
+    /// detected and the limiter refused it. That ambiguity cost a full
+    /// eighty-eight minute measurement on 2026-09-07 (P3-88), and a second one
+    /// to resolve. `.notice` and `privacy: .public` because `.info` is not
+    /// written to the log store and interpolation is redacted by default --
+    /// both learned the same day. None of this carries a destination.
+    private let logger = Logger(subsystem: "com.egressview.agent.macos", category: "hub-notify")
     private let scanQueue = DispatchQueue(label: "com.egressview.agent.threat-notifications")
     private var cancellables: Set<AnyCancellable> = []
     private var lastThreatScanAt = Date()
@@ -399,12 +411,16 @@ final class AgentNotificationCoordinator {
         let delivered = notifier.notify(
             kind: .hubDelivery, key: "hub-\(issue.0)", title: issue.1, body: issue.2
         )
+        logger.notice(
+            "hub-notify: cause=\(issue.0, privacy: .public) delivered=\(delivered, privacy: .public)"
+        )
         hubProblems.attempted(delivered: delivered)
     }
 
     private func retryHubAnnouncement() {
         let outstanding = hubProblems.shouldRetryAnnouncement()
         guard outstanding.retry, let cause = outstanding.cause else { return }
+        logger.notice("hub-notify: retrying cause=\(cause, privacy: .public)")
         // Rebuild the wording from the state the controller holds now, rather
         // than replaying a stale sentence: an outage that has since become an
         // authorisation failure should say so.
