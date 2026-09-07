@@ -10,6 +10,31 @@ let rawRouters = [];
 let rawAgents = [];
 let routerSources = [];
 let agentSources = [];
+
+/**
+ * How long ago, in the coarsest unit that still says something.
+ *
+ * "Offline" alone made a user check five separate things to find out why: the
+ * agent process, the Hub's `lastSeenAt`, the ingest batch intervals, the Mac's
+ * unified log, and `powerd`. The answer was a twenty-five minute idle sleep
+ * (P3-55). Twenty-five minutes and three days read identically before this.
+ *
+ * Relative rather than a timestamp, because the reader's question is "is this
+ * normal?" and a duration answers it without arithmetic. Minutes below an
+ * hour, hours below a day, days after that -- more precision than that would
+ * suggest the Hub knows more than it does.
+ */
+function elapsedLabel(lastSeenAt, now = Date.now()) {
+  const seen = Number(lastSeenAt);
+  if (!Number.isFinite(seen) || seen <= 0) return t('source.elapsed.unknown');
+  const elapsed = Math.max(0, now - seen);
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 60) return tVars('source.elapsed.minutes', { n: Math.max(1, minutes) });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return tVars('source.elapsed.hours', { n: hours });
+  return tVars('source.elapsed.days', { n: Math.floor(hours / 24) });
+}
+
 let routerCatalogLoaded = false;
 let agentCatalogLoaded = false;
 let selector = null;
@@ -110,7 +135,11 @@ function activeAgentSources(agents, now = Date.now()) {
     return {
       sourceKind: 'agent',
       sourceId: String(agent.agentId),
-      label: `${baseLabel} · ${t(online ? 'source.online' : 'source.offline')}`,
+      // Online is unchanged: nobody was confused by it. Offline gains the
+      // one fact that separates a sleeping Mac from a broken one.
+      label: online
+        ? `${baseLabel} · ${t('source.online')}`
+        : `${baseLabel} · ${tVars('source.offline.since', { elapsed: elapsedLabel(agent.lastSeenAt, now) })}`,
       historyLabel: baseLabel,
       online,
     };
@@ -256,6 +285,7 @@ function getRouterSource(sourceId) {
 
 export {
   STORAGE_KEY,
+  elapsedLabel,
   activeAgentSources,
   activeRouterSources,
   appendDisplayScope,
