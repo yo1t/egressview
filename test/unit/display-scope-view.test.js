@@ -22,6 +22,13 @@ function translation(key) {
     'source.agent.fallback': 'Mac Agent {id}',
     'source.online': 'Online',
     'source.offline': 'Offline',
+    // P3-55: offline now says how long ago, so a sleeping Mac reads
+    // differently from a broken one.
+    'source.offline.since': 'Offline · last seen {elapsed}',
+    'source.elapsed.minutes': '{n} min ago',
+    'source.elapsed.hours': '{n} h ago',
+    'source.elapsed.days': '{n} d ago',
+    'source.elapsed.unknown': 'never seen',
     'source.unavailable': 'Source unavailable',
   })[key] || key;
 }
@@ -131,8 +138,8 @@ describe('display source scope', () => {
     ]);
     assert.deepEqual(agents.map(item => item.label), [
       'MacBook (aaaaaaaa) · Online',
-      'macbook (bbbbbbbb) · Offline',
-      'Mac Agent cccccccc · Offline',
+      'macbook (bbbbbbbb) · Offline · last seen never seen',
+      'Mac Agent cccccccc · Offline · last seen never seen',
     ]);
     context.routersResult = routers;
     context.agentsResult = agents;
