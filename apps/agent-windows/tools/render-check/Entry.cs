@@ -117,7 +117,7 @@ internal static class Entry
         };
         globeSegmented.Items.Add(new ListBoxItem { Content = "地球儀" });
         globeSegmented.Items.Add(new ListBoxItem { Content = "アクセス先の国" });
-        Save(globeSegmented, 210, 40, Path.Combine(output, "segmented-globe.png"));
+        Save(globeSegmented, 240, 40, Path.Combine(output, "segmented-globe.png"));
 
         ThemeManager.ApplyTheme(application.Resources, false, Color.FromRgb(0xD1, 0x34, 0x38));
         var lightSegmented = new System.Windows.Controls.ListBox
