@@ -68,6 +68,9 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     public void Start()
     {
         if (session is not null) throw new InvalidOperationException("ETW collector is already running.");
+        error = null;
+        processNameSourceError = null;
+        hostnameSourceError = null;
         var sessionName = $"EgressViewAgentNetwork-{Environment.ProcessId}";
         try { TraceEventSession.GetActiveSession(sessionName)?.Stop(); } catch { }
         try
@@ -328,9 +331,8 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         lock (interfaceGate) interfaces = updated;
     }
 
-    public async ValueTask DisposeAsync()
+    public async Task StopAsync()
     {
-        NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
         if (session is null) return;
         try { eventsLost = session.EventsLost; } catch { }
         try { session.Stop(); } catch { }
@@ -338,6 +340,13 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         Submit(deferredNames.Drain());
         session.Dispose();
         session = null;
+        processing = null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
+        await StopAsync();
     }
 
     private void Submit(IEnumerable<NetworkObservation> observations)
