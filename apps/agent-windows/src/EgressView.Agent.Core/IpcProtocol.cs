@@ -11,7 +11,8 @@ public static class IpcProtocol
         Func<int, int, IReadOnlyList<RecentFlow>>? recentFlows = null,
         Func<int, IReadOnlyList<GlobePoint>>? globePoints = null,
         Func<int, int, PeriodAnalysis>? analysis = null,
-        Func<int, ThreatReport>? threats = null)
+        Func<int, ThreatReport>? threats = null,
+        Func<bool, bool>? setMonitoringEnabled = null)
     {
         try
         {
@@ -30,10 +31,23 @@ public static class IpcProtocol
                 "threats" => Threats(root, threats),
                 "save-enrollment" => SaveEnrollment(root, saveCredential),
                 "set-delivery-enabled" => SetDeliveryEnabled(root, setDeliveryEnabled),
+                "set-monitoring-enabled" => SetMonitoringEnabled(root, setMonitoringEnabled),
                 _ => Reject("unknown-operation"),
             };
         }
         catch (Exception) { return Reject("malformed-request"); }
+    }
+
+    private static string SetMonitoringEnabled(JsonElement root, Func<bool, bool>? set)
+    {
+        if (set is null || !root.TryGetProperty("enabled", out var value) || value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            return Reject("invalid-monitoring-setting");
+        try
+        {
+            var enabled = set(value.GetBoolean());
+            return JsonSerializer.Serialize(new { status = "ok", enabled });
+        }
+        catch { return Reject("monitoring-setting-failed"); }
     }
 
     private static string Globe(JsonElement root, Func<int, IReadOnlyList<GlobePoint>>? read)

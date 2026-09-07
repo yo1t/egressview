@@ -141,21 +141,19 @@ internal sealed class AgentWindowsService : ServiceBase
         var root = Path.Combine(AppContext.BaseDirectory, "data");
         Directory.CreateDirectory(root);
         using var store = new ObservationStore(Path.Combine(root, "egressview-agent.db"));
-        var snapshot = StartupSnapshot.Capture();
         await using var pipeline = new ObservationPipeline(store, deliveryEnabled: () => store.DeliveryEnabled);
-        await using var collector = new EtwNetworkCollector(pipeline);
-        collector.Start();
-        var coverageStartedAt = DateTimeOffset.UtcNow;
-        var coverageId = store.BeginCoverage(snapshot, coverageStartedAt);
+        await using var monitoring = new MonitoringController(store, pipeline, Path.Combine(root, "monitoring.disabled"));
+        monitoring.Start();
         var credentialStore = new WindowsCredentialStore();
-        await using var ipc = new AgentIpcServer(store, () => collector.Enrich(pipeline.Snapshot()), ReadAllowedUserSid(), credentialStore);
+        await using var ipc = new AgentIpcServer(store, monitoring.Snapshot, ReadAllowedUserSid(), credentialStore,
+            () => monitoring.Enabled, monitoring.SetEnabled);
         ipc.Start();
         var delivery = RunDeliveryAsync(store, credentialStore, cancellationToken);
         var geoCache = RunGeoCacheAsync(store, credentialStore, cancellationToken);
         var threatIntel = RunThreatIntelAsync(store, credentialStore, cancellationToken);
         var chartAggregation = RunChartAggregationAsync(store, cancellationToken);
         var maintenance = RunMaintenanceAsync(store, cancellationToken);
-        var coverage = RunCoverageHeartbeatAsync(store, collector, pipeline, coverageId, coverageStartedAt, cancellationToken);
+        var coverage = monitoring.RunCoverageHeartbeatAsync(cancellationToken);
         Task lifetime;
         try
         {
@@ -170,52 +168,14 @@ internal sealed class AgentWindowsService : ServiceBase
             await lifetime;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        var finalCoverageId = await coverage;
-        if (finalCoverageId is { } activeCoverageId) store.EndCoverage(activeCoverageId, DateTimeOffset.UtcNow);
+        await coverage;
         await delivery;
         await geoCache;
         await threatIntel;
         await chartAggregation;
         await maintenance;
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
-            DiagnosticsReport.Create(collector.Enrich(pipeline.Snapshot()), store, "0.1.0-dev"));
-    }
-
-    private static async Task<long?> RunCoverageHeartbeatAsync(
-        ObservationStore store, EtwNetworkCollector collector, ObservationPipeline pipeline,
-        long initialCoverageId, DateTimeOffset startedAt, CancellationToken cancellationToken)
-    {
-        long? activeCoverageId = initialCoverageId;
-        var lastConfirmedAt = startedAt;
-        var lastEventsLost = collector.EventsLost;
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            try { await Task.Delay(ObservationStore.CoverageHeartbeatInterval, cancellationToken); }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
-
-            var now = DateTimeOffset.UtcNow;
-            var eventsLost = collector.EventsLost;
-            var pipelineSnapshot = pipeline.Snapshot();
-            var healthy = collector.IsActive && collector.Error is null && pipelineSnapshot.PersistenceFailures == 0;
-            var suspended = now - lastConfirmedAt > ObservationStore.CoverageStaleAfter;
-            var lostEvents = eventsLost > lastEventsLost;
-
-            if (activeCoverageId is { } currentId && (suspended || lostEvents || !healthy))
-            {
-                store.InterruptCoverage(currentId, lastConfirmedAt);
-                activeCoverageId = null;
-            }
-            if (healthy)
-            {
-                if (activeCoverageId is null)
-                    activeCoverageId = store.BeginCoverage(StartupSnapshot.Capture(), now);
-                else
-                    store.ConfirmCoverage(activeCoverageId.Value, now);
-                lastConfirmedAt = now;
-            }
-            lastEventsLost = eventsLost;
-        }
-        return activeCoverageId;
+            DiagnosticsReport.Create(monitoring.Snapshot(), store, "0.1.0-dev", monitoring.Enabled));
     }
 
     private static async Task RunChartAggregationAsync(ObservationStore store, CancellationToken cancellationToken)

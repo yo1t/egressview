@@ -43,6 +43,13 @@ public partial class MainWindow : Window
         if (System.Windows.Application.Current is App { IsExiting: false }) { e.Cancel = true; Hide(); }
     }
 
+    internal void SelectTab(int index)
+    {
+        MainTabs.SelectedIndex = Math.Clamp(index, 0, MainTabs.Items.Count - 1);
+    }
+
+    internal Task RefreshStatusFromTrayAsync() => RefreshStatusAsync();
+
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAllAsync();
     private async void PeriodChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -209,22 +216,25 @@ public partial class MainWindow : Window
             using var document = JsonDocument.Parse(response);
             var data = document.RootElement.GetProperty("data");
             var healthy = data.GetProperty("health").GetProperty("status").GetString() == "healthy";
-            SetMonitoringState(healthy);
+            var monitoringEnabled = !data.TryGetProperty("monitoringEnabled", out var enabled) || enabled.GetBoolean();
+            SetMonitoringState(healthy, monitoringEnabled);
+            if (System.Windows.Application.Current is App trayApp) trayApp.UpdateTrayState(monitoringEnabled, healthy);
             var coverage = data.GetProperty("coverage");
-            CoverageValue.Text = coverage.GetProperty("active").GetInt64() > 0 ? LocalizationManager.Text("Monitoring") : LocalizationManager.Text("NeedsAttention");
+            CoverageValue.Text = !monitoringEnabled ? LocalizationManager.Text("MonitoringStopped") :
+                coverage.GetProperty("active").GetInt64() > 0 ? LocalizationManager.Text("Monitoring") : LocalizationManager.Text("NeedsAttention");
             loadingDeliveryState = true;
             DeliveryEnabled.IsChecked = data.GetProperty("deliveryEnabled").GetBoolean();
             loadingDeliveryState = false;
             if (!healthy && System.Windows.Application.Current is App app)
                 app.Notifications.Notify("Monitoring", "monitoring-health", "EgressView Agent", LocalizationManager.Text("NeedsAttention"), app.ShowNotification);
         }
-        catch { SetMonitoringState(false); CoverageValue.Text = LocalizationManager.Text("NeedsAttention"); }
+        catch { SetMonitoringState(false); CoverageValue.Text = LocalizationManager.Text("NeedsAttention"); if (System.Windows.Application.Current is App app) app.UpdateTrayState(true, false); }
     }
 
-    private void SetMonitoringState(bool healthy)
+    private void SetMonitoringState(bool healthy, bool enabled = true)
     {
-        MonitoringStatus.Text = LocalizationManager.Text(healthy ? "Monitoring" : "NeedsAttention");
-        MonitoringStatus.Foreground = (System.Windows.Media.Brush)FindResource(healthy ? "SuccessBrush" : "ErrorBrush");
+        MonitoringStatus.Text = enabled ? LocalizationManager.Text(healthy ? "Monitoring" : "NeedsAttention") : LocalizationManager.Text("MonitoringStopped");
+        MonitoringStatus.Foreground = (System.Windows.Media.Brush)FindResource(enabled && healthy ? "SuccessBrush" : "ErrorBrush");
         MonitoringDot.Fill = MonitoringStatus.Foreground;
         MonitoringBadge.Background = (System.Windows.Media.Brush)FindResource(healthy ? "SuccessSoftBrush" : "ErrorSoftBrush");
     }
@@ -282,8 +292,9 @@ public partial class MainWindow : Window
         if (loadingSettings || LanguageChoice.SelectedItem is not ComboBoxItem item || !Enum.TryParse<AgentLanguage>(item.Tag?.ToString(), out var language)) return;
         AgentSettings.Language = language;
         LocalizationManager.Apply(System.Windows.Application.Current.Resources);
+        if (System.Windows.Application.Current is App app) app.RefreshTrayText();
         ApplyAccessibilityLabels();
-        SetMonitoringState(MonitoringStatus.Foreground == FindResource("SuccessBrush"));
+        _ = RefreshStatusAsync();
         RefreshNotifications();
     }
 

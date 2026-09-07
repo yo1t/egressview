@@ -1,5 +1,8 @@
 using System.Threading;
+using System.Text.Json;
 using System.Windows;
+using System.Windows.Threading;
+using EgressView.Agent.Core;
 using Forms = System.Windows.Forms;
 
 namespace EgressView.Agent.Ui;
@@ -15,6 +18,10 @@ public partial class App : System.Windows.Application
     private EventWaitHandle? exitEvent;
     private RegisteredWaitHandle? exitRegistration;
     private Forms.NotifyIcon? trayIcon;
+    private Forms.ToolStripMenuItem? trayStatus;
+    private Forms.ToolStripMenuItem? monitoringToggle;
+    private readonly DispatcherTimer trayRefresh = new() { Interval = TimeSpan.FromSeconds(15) };
+    private TrayState trayState = TrayState.NeedsAttention;
     internal LocalNotificationService Notifications { get; } = new();
 
     internal bool IsExiting { get; private set; }
@@ -45,6 +52,8 @@ public partial class App : System.Windows.Application
         var window = new MainWindow();
         MainWindow = window;
         CreateTrayIcon();
+        trayRefresh.Tick += async (_, _) => await RefreshTrayStateAsync();
+        trayRefresh.Start();
         activationRegistration = ThreadPool.RegisterWaitForSingleObject(
             activationEvent,
             (_, _) => Dispatcher.BeginInvoke(ShowMainWindow),
@@ -58,14 +67,25 @@ public partial class App : System.Windows.Application
             Timeout.Infinite,
             false);
         window.Show();
+        _ = RefreshTrayStateAsync();
     }
 
     private void CreateTrayIcon()
     {
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("開く / Open", null, (_, _) => Dispatcher.Invoke(ShowMainWindow));
+        trayStatus = new Forms.ToolStripMenuItem { Enabled = false };
+        menu.Items.Add(trayStatus);
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("UIを終了（監視は継続） / Exit UI", null, (_, _) => Dispatcher.Invoke(ExitUi));
+        menu.Items.Add("", null, (_, _) => Dispatcher.Invoke(() => ShowMainWindow()));
+        menu.Items.Add("", null, (_, _) => Dispatcher.Invoke(() => ShowMainWindow(5)));
+        menu.Items.Add("", null, async (_, _) => await Dispatcher.InvokeAsync(SaveDiagnosticsAsync));
+        menu.Items.Add("", null, (_, _) => Dispatcher.Invoke(ShowAbout));
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        monitoringToggle = new Forms.ToolStripMenuItem();
+        monitoringToggle.Click += async (_, _) => await Dispatcher.InvokeAsync(ToggleMonitoringAsync);
+        menu.Items.Add(monitoringToggle);
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        menu.Items.Add("", null, (_, _) => Dispatcher.Invoke(ExitUi));
         trayIcon = new Forms.NotifyIcon
         {
             Icon = System.Drawing.SystemIcons.Information,
@@ -74,17 +94,124 @@ public partial class App : System.Windows.Application
             Visible = true,
         };
         trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowMainWindow);
+        RefreshTrayText();
     }
 
     internal void ShowNotification(string title, string body) =>
         trayIcon?.ShowBalloonTip(5_000, title, body, Forms.ToolTipIcon.Info);
 
-    private void ShowMainWindow()
+    private void ShowMainWindow() => ShowMainWindow(null);
+
+    private void ShowMainWindow(int? tabIndex)
     {
         if (MainWindow is null) return;
+        if (tabIndex is not null && MainWindow is MainWindow window) window.SelectTab(tabIndex.Value);
         MainWindow.Show();
         if (MainWindow.WindowState == WindowState.Minimized) MainWindow.WindowState = WindowState.Normal;
         MainWindow.Activate();
+    }
+
+    internal void UpdateTrayState(bool enabled, bool healthy)
+    {
+        trayState = !enabled ? TrayState.Stopped : healthy ? TrayState.Healthy : TrayState.NeedsAttention;
+        RefreshTrayText();
+    }
+
+    internal void RefreshTrayText()
+    {
+        if (trayIcon?.ContextMenuStrip is not { } menu || trayStatus is null || monitoringToggle is null) return;
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        trayStatus.Text = trayState switch
+        {
+            TrayState.Healthy => ja ? "状態: 監視中" : "Status: Monitoring",
+            TrayState.Stopped => ja ? "状態: 監視停止" : "Status: Monitoring stopped",
+            _ => ja ? "状態: 要確認" : "Status: Needs attention",
+        };
+        menu.Items[2].Text = ja ? "EgressView Agentを開く" : "Open EgressView Agent";
+        menu.Items[3].Text = ja ? "設定" : "Settings";
+        menu.Items[4].Text = ja ? "診断を保存…" : "Save diagnostics…";
+        menu.Items[5].Text = ja ? "EgressView Agentについて" : "About EgressView Agent";
+        monitoringToggle.Text = trayState == TrayState.Stopped
+            ? (ja ? "監視を開始…" : "Start monitoring…")
+            : (ja ? "監視を停止…" : "Stop monitoring…");
+        menu.Items[9].Text = ja ? "UIを終了（監視は継続）" : "Exit UI (monitoring continues)";
+        trayIcon.Icon = trayState switch
+        {
+            TrayState.Healthy => System.Drawing.SystemIcons.Information,
+            TrayState.Stopped => System.Drawing.SystemIcons.Application,
+            _ => System.Drawing.SystemIcons.Warning,
+        };
+        trayIcon.Text = trayStatus.Text.Replace("状態: ", "EgressView Agent — ", StringComparison.Ordinal)
+            .Replace("Status: ", "EgressView Agent — ", StringComparison.Ordinal);
+    }
+
+    private async Task RefreshTrayStateAsync()
+    {
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"status"}""");
+            using var document = JsonDocument.Parse(response);
+            var data = document.RootElement.GetProperty("data");
+            var enabled = !data.TryGetProperty("monitoringEnabled", out var flag) || flag.GetBoolean();
+            var healthy = data.GetProperty("health").GetProperty("status").GetString() == "healthy";
+            UpdateTrayState(enabled, healthy);
+        }
+        catch { UpdateTrayState(true, false); }
+    }
+
+    private async Task ToggleMonitoringAsync()
+    {
+        if (monitoringToggle is null) return;
+        var enable = trayState == TrayState.Stopped;
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        var action = enable ? (ja ? "監視を開始しますか？" : "Start monitoring?") :
+            (ja ? "監視を停止しますか？\n\nUIとHub送信サービスは動作を続けます。" : "Stop monitoring?\n\nThe UI and Hub delivery service will keep running.");
+        if (System.Windows.MessageBox.Show(action, "EgressView Agent", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
+        monitoringToggle.Enabled = false;
+        try
+        {
+            var request = JsonSerializer.Serialize(new { v = 1, op = "set-monitoring-enabled", enabled = enable });
+            var response = await AgentIpcClient.RequestAsync(request);
+            using var document = JsonDocument.Parse(response);
+            if (document.RootElement.GetProperty("status").GetString() != "ok") throw new InvalidOperationException();
+            UpdateTrayState(enable, enable);
+            if (MainWindow is MainWindow window) await window.RefreshStatusFromTrayAsync();
+        }
+        catch
+        {
+            System.Windows.MessageBox.Show(ja ? "監視状態を変更できませんでした。" : "Could not change monitoring state.",
+                "EgressView Agent", MessageBoxButton.OK, MessageBoxImage.Error);
+            await RefreshTrayStateAsync();
+        }
+        finally { monitoringToggle.Enabled = true; }
+    }
+
+    private async Task SaveDiagnosticsAsync()
+    {
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Filter = "ZIP (*.zip)|*.zip",
+            FileName = $"egressview-diagnostics-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.zip",
+            AddExtension = true,
+        };
+        if (dialog.ShowDialog(MainWindow) != true) return;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"status"}""");
+            using var document = JsonDocument.Parse(response);
+            DiagnosticsBundle.Create(dialog.FileName, document.RootElement.GetProperty("data").GetRawText());
+            System.Windows.MessageBox.Show(ja ? "診断を保存しました。" : "Diagnostics saved.", "EgressView Agent", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch { System.Windows.MessageBox.Show(ja ? "診断を保存できませんでした。" : "Could not save diagnostics.", "EgressView Agent", MessageBoxButton.OK, MessageBoxImage.Error); }
+    }
+
+    private void ShowAbout()
+    {
+        var version = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "unknown";
+        System.Windows.MessageBox.Show($"EgressView Agent for Windows\nVersion {version}\n\nAGPL-3.0-or-later",
+            LocalizationManager.EffectiveLanguage == "ja" ? "EgressView Agentについて" : "About EgressView Agent",
+            MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void ExitUi()
@@ -97,6 +224,7 @@ public partial class App : System.Windows.Application
     {
         IsExiting = true;
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged;
+        trayRefresh.Stop();
         activationRegistration?.Unregister(null);
         exitRegistration?.Unregister(null);
         trayIcon?.Dispose();
@@ -112,4 +240,6 @@ public partial class App : System.Windows.Application
             not Microsoft.Win32.UserPreferenceCategory.General) return;
         Dispatcher.BeginInvoke(() => ThemeManager.ApplySystemTheme(Resources));
     }
+
+    private enum TrayState { Healthy, NeedsAttention, Stopped }
 }

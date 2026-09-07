@@ -7,7 +7,7 @@ using EgressView.Agent.Core;
 namespace EgressView.Agent.Service;
 
 internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnapshot> snapshot, string allowedSid,
-    WindowsCredentialStore credentialStore) : IAsyncDisposable
+    WindowsCredentialStore credentialStore, Func<bool> monitoringEnabled, Func<bool, bool> setMonitoringEnabled) : IAsyncDisposable
 {
     public const string PipeName = "egressview-agent-v1";
     private readonly CancellationTokenSource stop = new();
@@ -41,11 +41,11 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
                     if (enabled && credentialStore.Load() is null)
                         throw new InvalidOperationException("Enrollment is required before delivery can be enabled.");
                     store.DeliveryEnabled = enabled;
-                }, store.ReadRecentFlows, Globe, Analysis, Threats));
+                }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled));
         }
     }
 
-    private string Status() => DiagnosticsReport.Create(snapshot(), store, "0.1.0-dev");
+    private string Status() => DiagnosticsReport.Create(snapshot(), store, "0.1.0-dev", monitoringEnabled());
     private IReadOnlyList<HourlySummary> Summary(int days) => store.ReadHourlySummary(DateTimeOffset.UtcNow.AddDays(-days), DateTimeOffset.UtcNow);
     private IReadOnlyList<GlobePoint> Globe(int minutes) => store.ReadGlobePoints(DateTimeOffset.UtcNow.AddMinutes(-minutes), DateTimeOffset.UtcNow);
     private PeriodAnalysis Analysis(int minutes, int offsetMinutes)
