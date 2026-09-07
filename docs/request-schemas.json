@@ -2099,6 +2099,42 @@
         ]
       }
     },
+    "GET /api/ai/conversations": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "conversations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "conversationId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "conversationId"
+              ]
+            }
+          },
+          "storage": {
+            "type": "object",
+            "properties": {
+              "bytes": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "bytes"
+            ]
+          }
+        },
+        "required": [
+          "conversations",
+          "storage"
+        ]
+      }
+    },
     "GET /api/ai/conversations/:id": {
       "200": {
         "type": "object",
@@ -2589,6 +2625,30 @@
         "required": [
           "config",
           "status"
+        ]
+      }
+    },
+    "GET /api/ai/notification-events": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ]
+            }
+          }
+        },
+        "required": [
+          "events"
         ]
       }
     },
@@ -3591,6 +3651,50 @@
         ]
       }
     },
+    "GET /api/connections": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "connections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "src": {
+                  "type": "string"
+                },
+                "dst": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "dst",
+                "src"
+              ]
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "serverTime": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "connections",
+          "limit",
+          "offset",
+          "serverTime",
+          "total"
+        ]
+      }
+    },
     "GET /api/connections/summary": {
       "200": {
         "type": "object",
@@ -3634,6 +3738,15 @@
                 "src"
               ]
             }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "serverTime": {
+            "type": "integer"
+          },
+          "cached": {
+            "type": "boolean"
           },
           "byTarget": {
             "type": "array",
@@ -3760,9 +3873,6 @@
               ]
             }
           },
-          "total": {
-            "type": "integer"
-          },
           "buckets": {
             "type": "integer"
           },
@@ -3771,29 +3881,39 @@
           },
           "to": {
             "type": "integer"
-          },
-          "serverTime": {
-            "type": "integer"
-          },
-          "cached": {
-            "type": "boolean"
           }
         },
         "required": [
-          "appGroups",
-          "buckets",
           "byDevice",
           "byDst",
-          "byEdge",
-          "byLocation",
-          "byTarget",
           "cached",
-          "from",
-          "mapCoverage",
           "serverTime",
-          "timeline",
-          "to",
           "total"
+        ]
+      }
+    },
+    "GET /api/connections/threat-counts": {
+      "200": {
+        "type": "object",
+        "properties": {
+          "safe": {
+            "type": "integer"
+          },
+          "warn": {
+            "type": "integer"
+          },
+          "danger": {
+            "type": "integer"
+          },
+          "serverTime": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "danger",
+          "safe",
+          "serverTime",
+          "warn"
         ]
       }
     },

@@ -1,5 +1,6 @@
 import EgressViewAgentCore
 import Foundation
+import os
 
 /// Keeps the local threat indicator set up to date.
 ///
@@ -8,6 +9,17 @@ import Foundation
 /// fallback and the cached indicators are at least one day old.
 @MainActor
 final class ThreatIntelController: ObservableObject {
+    /// Says which path produced each outcome, because on 2026-09-06 the screen
+    /// reported "the locally held threat information was updated" twice while
+    /// the agent made no connection to any public feed for seven hours and
+    /// forty-one minutes, and the Hub -- deliberately unreachable -- served
+    /// zero threat-intel requests in the same window (P3-84).
+    ///
+    /// `.updated` can only be set from a Hub response or from all four feeds
+    /// downloading, so one of those two measurements was wrong and there was
+    /// nothing in the record to say which. These lines are that record: they
+    /// name the source, the counts, and which feeds were missing.
+    private let logger = Logger(subsystem: "com.egressview.agent.macos", category: "threat-intel")
     enum ActiveSource: Equatable {
         case none
         case cache
@@ -179,12 +191,20 @@ final class ThreatIntelController: ObservableObject {
             // look like "no Hub".
             guard let credential = await credentialStore.loadDetached() else { return }
             let hubSucceeded = await refreshFromHub(store: store, credential: credential)
-            if !hubSucceeded,
-               ThreatIntelFallbackPolicy.shouldDownload(
-                   isEnabled: preferences.isHubFallbackEnabled,
-                   hasCachedIndicators: ((try? store.threatIndicatorCount()) ?? 0) > 0,
-                   lastSuccessfulFetch: preferences.lastFetch
-               ) {
+            let cachedCount = (try? store.threatIndicatorCount()) ?? 0
+            let mayFallBack = ThreatIntelFallbackPolicy.shouldDownload(
+                isEnabled: preferences.isHubFallbackEnabled,
+                hasCachedIndicators: cachedCount > 0,
+                lastSuccessfulFetch: preferences.lastFetch
+            )
+            logger.info(
+                """
+                refresh: source=hub hubSucceeded=\(hubSucceeded) \
+                fallbackEnabled=\(self.preferences.isHubFallbackEnabled) \
+                cached=\(cachedCount) mayFallBack=\(mayFallBack)
+                """
+            )
+            if !hubSucceeded, mayFallBack {
                 await refreshFromFeeds(store: store)
             }
         case .directDownload:
@@ -219,12 +239,14 @@ final class ThreatIntelController: ObservableObject {
         do {
             switch try await fetcher.fetch(knownETag: preferences.etag) {
             case .unchanged:
+                logger.info("hub: 304 unchanged")
                 preferences.lastFetch = Date()
                 lastUpdatedAt = preferences.lastFetch
                 status = .unchanged(at: Date())
                 loadAvailabilityFromStore()
                 activeSource = .hub
             case .hubHasNoFeeds:
+                logger.info("hub: available=false")
                 // Not an error, and not "no threats". The Hub is simply not
                 // running feeds, and the screen has to say which.
                 try store.replaceThreatIndicators([])
@@ -232,6 +254,7 @@ final class ThreatIntelController: ObservableObject {
                 activeSource = .hub
                 status = .hubHasNoFeeds
             case let .updated(indicators, etag, fetchedAt):
+                logger.info("hub: updated indicators=\(indicators.count) etag=\(etag != nil)")
                 try store.replaceThreatIndicators(indicators)
                 preferences.etag = etag
                 preferences.lastFetch = Date()
@@ -247,6 +270,7 @@ final class ThreatIntelController: ObservableObject {
             // What is already stored is kept. A failed fetch is not evidence
             // that the indicators in hand are wrong, and dropping them would
             // turn a network blip into "no threats found".
+            logger.info("hub: failed \(String(describing: error))")
             status = .failed(Self.describe(error))
             loadAvailabilityFromStore()
             return false
@@ -257,6 +281,13 @@ final class ThreatIntelController: ObservableObject {
         status = .fetching
         do {
             let result = try await ThreatFeedDownloader().download()
+            logger.info(
+                """
+                feeds: downloaded indicators=\(result.indicators.count) \
+                missing=\(result.missingSources.joined(separator: ",")) \
+                complete=\(result.isComplete)
+                """
+            )
             try store.replaceThreatIndicators(result.indicators)
             // Force a full Hub response after reconnection. A Hub 304 must not
             // leave a public-feed snapshot labelled as Hub data.
@@ -273,6 +304,7 @@ final class ThreatIntelController: ObservableObject {
                     at: Date()
                 )
         } catch {
+            logger.info("feeds: failed \(String(describing: error))")
             status = .failed(Self.describe(error))
             loadAvailabilityFromStore()
         }

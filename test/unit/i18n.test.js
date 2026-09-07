@@ -57,8 +57,9 @@ describe('shared i18n catalog', () => {
     // Grew by 1 on 2026-09-05: fail-closed backup cleanup safety feedback.
     // Grew by 1 on 2026-09-05: degraded-retention cleanup confirmation.
     // Grew by 1 on 2026-09-05: degraded-retention no-candidate guidance.
-    assert.equal(jaKeys.size, 916);
-    assert.equal(enKeys.size, 916);
+    // Grew by 5 on 2026-09-07: how long a source has been offline (P3-55).
+    assert.equal(jaKeys.size, 921);
+    assert.equal(enKeys.size, 921);
     assert.deepEqual([...jaKeys].sort(), [...enKeys].sort());
   });
 
