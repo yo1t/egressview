@@ -32,6 +32,28 @@ internal static class AgentSettings
         set => Write("GlobeFrameRate", value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
+    internal static string SettingsSection
+    {
+        get => Read("SettingsSection") is { } value && value is "general" or "notifications" or "hub" ? value : "general";
+        set { if (value is "general" or "notifications" or "hub") Write("SettingsSection", value); }
+    }
+
+    internal static double WindowWidth
+    {
+        get => ReadDimension("WindowWidth", 1440, 1020, 7680);
+        set => Write("WindowWidth", value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    internal static double WindowHeight
+    {
+        get => ReadDimension("WindowHeight", 900, 700, 4320);
+        set => Write("WindowHeight", value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private static double ReadDimension(string name, double fallback, double minimum, double maximum) =>
+        double.TryParse(Read(name), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value)
+            && value >= minimum && value <= maximum ? value : fallback;
+
     private static string? Read(string name)
     {
         try { return Registry.CurrentUser.OpenSubKey(KeyPath)?.GetValue(name)?.ToString(); }

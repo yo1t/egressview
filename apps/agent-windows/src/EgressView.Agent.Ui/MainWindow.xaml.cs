@@ -29,11 +29,14 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Width = Math.Min(AgentSettings.WindowWidth, SystemParameters.WorkArea.Width);
+        Height = Math.Min(AgentSettings.WindowHeight, SystemParameters.WorkArea.Height);
         ApplyAccessibilityLabels();
         DataContext = this;
         Loaded += async (_, _) => { LoadSettings(); await RefreshAllAsync(); refreshTimer.Start(); };
         IsVisibleChanged += (_, _) => { if (IsVisible) refreshTimer.Start(); else refreshTimer.Stop(); };
         refreshTimer.Tick += async (_, _) => { if (IsVisible && IsActive) await RefreshVisibleAsync(); };
+        Closing += SaveWindowSize;
         Closing += HideToTray;
         Closed += (_, _) => { refreshTimer.Stop(); lifetime.Cancel(); };
     }
@@ -41,6 +44,13 @@ public partial class MainWindow : Window
     private void HideToTray(object? sender, CancelEventArgs e)
     {
         if (System.Windows.Application.Current is App { IsExiting: false }) { e.Cancel = true; Hide(); }
+    }
+
+    private void SaveWindowSize(object? sender, CancelEventArgs e)
+    {
+        if (WindowState != WindowState.Normal) return;
+        AgentSettings.WindowWidth = ActualWidth;
+        AgentSettings.WindowHeight = ActualHeight;
     }
 
     internal void SelectTab(int index)
@@ -283,8 +293,20 @@ public partial class MainWindow : Window
         NotificationsEnabled.IsChecked = AgentSettings.NotificationsEnabled;
         DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 20 => 2, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
+        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "hub" => 2, _ => 0 };
         Globe.FramesPerSecond = AgentSettings.GlobeFrameRate;
         loadingSettings = false;
+    }
+
+    private void SettingsSectionChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (GeneralSettingsSection is null || NotificationSettingsSection is null || HubSettingsSection is null ||
+            SettingsSectionChoice.SelectedItem is not ListBoxItem item) return;
+        var section = item.Tag?.ToString() ?? "general";
+        GeneralSettingsSection.Visibility = section == "general" ? Visibility.Visible : Visibility.Collapsed;
+        NotificationSettingsSection.Visibility = section == "notifications" ? Visibility.Visible : Visibility.Collapsed;
+        HubSettingsSection.Visibility = section == "hub" ? Visibility.Visible : Visibility.Collapsed;
+        if (!loadingSettings) AgentSettings.SettingsSection = section;
     }
 
     private void LanguageChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -322,6 +344,7 @@ public partial class MainWindow : Window
         Name(NotificationsEnabled, "NotificationsEnabled");
         Name(DailyLimitChoice, "DailyLimit");
         Name(FrameRateChoice, "GlobeFrameRate");
+        Name(SettingsSectionChoice, "SettingsSections");
         AutomationProperties.SetName(HubUrl, "Hub URL");
         foreach (var status in new[] { MonitoringStatus, CoverageNote, LogStatus, ThreatStatus, NotificationSummary, EnrollmentStatus })
             AutomationProperties.SetLiveSetting(status, AutomationLiveSetting.Polite);
