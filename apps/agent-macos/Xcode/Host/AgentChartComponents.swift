@@ -54,6 +54,28 @@ struct AgentPartialCoverageNote: View {
     }
 }
 
+/// Says that the vertical axis stops below the tallest bar, and what that bar
+/// really was.
+///
+/// One 1.71 GB hour used to set the axis and draw the other twenty-three hours
+/// of a day at nothing (P3-87). Letting the axis stop lower makes the day
+/// readable; **not saying so would make the drawing false**, which is worse
+/// than the crowding it fixes.
+struct AgentClippedPeakNote: View {
+    let count: Int
+    let peak: String
+
+    var body: some View {
+        Label(
+            L("%1$lld bar(s) run past the top of the axis. The tallest is %2$@, drawn at full height so the rest of the period stays readable.",
+              count, peak),
+            systemImage: "arrow.up.to.line"
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+}
+
 /// The rounded frame every section sits in.
 ///
 /// One shape and one border for all of them: panels that each invent their own

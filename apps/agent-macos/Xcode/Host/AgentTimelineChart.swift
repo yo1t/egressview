@@ -36,6 +36,12 @@ struct AgentTimelineChart: View {
                 AgentSeriesLegend(entries: model.series.enumerated().map {
                     .init(name: $0.element.name, color: agentSeriesColor($0.offset, isRemainder: $0.element.isRemainder))
                 })
+                if let peak = axis.peak {
+                    AgentClippedPeakNote(
+                        count: axis.clipped.count,
+                        peak: formattedMetric(peak, model.metric)
+                    )
+                }
                 if !sleepPeriods.isEmpty {
                     // Says what the shaded band is. An unexplained grey stripe
                     // is worse than no stripe.
@@ -113,8 +119,17 @@ struct AgentTimelineChart: View {
         }
     }
 
+    /// Computed once for both the drawing and the note under it, so the two
+    /// cannot disagree about what was clipped.
+    private var axis: TimelineAxis { TimelineAxis.fit(totals: model.bucketTotals) }
+
     private func draw(in context: inout GraphicsContext, size: CGSize) {
-        let peak = model.bucketTotals.max() ?? 0
+        // The axis may stop below the tallest bucket: one 1.71 GB hour used
+        // to flatten the other twenty-three to nothing (P3-87). A bucket left
+        // above the top is drawn to the ceiling and marked, and the card says
+        // what it really was -- clipping without saying so would make the
+        // drawing false rather than crowded.
+        let peak = axis.top
         guard peak > 0, model.bucketStarts.count > 1 else { return }
         let plot = CGRect(
             x: yAxisWidth, y: 0,
@@ -145,7 +160,7 @@ struct AgentTimelineChart: View {
             for bucket in model.bucketStarts.indices {
                 let value = series.values.indices.contains(bucket) ? series.values[bucket] : 0
                 guard value > 0 else { continue }
-                let height = plot.height * CGFloat(value / peak)
+                let height = plot.height * CGFloat(min(1, value / peak))
                 let top = baselines[bucket] - height
                 path.addRect(CGRect(
                     x: plot.minX + CGFloat(bucket) * step, y: top,
