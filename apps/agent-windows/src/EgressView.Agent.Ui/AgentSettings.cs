@@ -34,8 +34,8 @@ internal static class AgentSettings
 
     internal static string SettingsSection
     {
-        get => Read("SettingsSection") is { } value && value is "general" or "notifications" or "hub" ? value : "general";
-        set { if (value is "general" or "notifications" or "hub") Write("SettingsSection", value); }
+        get => Read("SettingsSection") is { } value && value is "general" or "notifications" or "enrichment" or "hub" ? value : "general";
+        set { if (value is "general" or "notifications" or "enrichment" or "hub") Write("SettingsSection", value); }
     }
 
     internal static double WindowWidth

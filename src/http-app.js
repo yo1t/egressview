@@ -192,6 +192,22 @@ function configureHttpApp(app, {
     }, 15 * 60 * 1000);
     summary.unref();
   }
+
+  // The summary cache, on the same fifteen-minute beat and into the same
+  // journal. It answered nothing at all until 2026-09-07 -- the browser sends
+  // `from = Date.now() - N`, so every poll of a rolling range minted a new key
+  // -- and nothing said so, because the query was correct, the response was
+  // correct, and only the cost was wrong. A hit rate is what that looks like
+  // from outside (P3-67).
+  const cacheSummary = setInterval(() => {
+    const snapshot = connectionsRoutes.summaryCacheSnapshot();
+    if (snapshot.hitRate === null) return;
+    logger.info(
+      `[summary-cache] hits=${snapshot.hits} misses=${snapshot.misses} `
+      + `hitRate=${(snapshot.hitRate * 100).toFixed(0)}%`
+    );
+  }, 15 * 60 * 1000);
+  cacheSummary.unref();
   app.use('/api', enforceApiPermissions);
   app.use('/api/agent/ingest', agentJsonBoundary);
   if (demoReadOnly) app.use('/api', createDemoReadOnly());

@@ -58,6 +58,7 @@ public sealed record RecentFlow(
     string? RemoteHostname = null);
 
 public sealed record GeoLocation(string Ip, double Latitude, double Longitude, string? CountryCode, string? City);
+public sealed record GeoCacheState(string? ETag, DateTimeOffset? FetchedAt, long LocationCount);
 
 public sealed record GlobePoint(double Latitude, double Longitude, string? CountryCode, string? City,
     long Connections, long Bytes);

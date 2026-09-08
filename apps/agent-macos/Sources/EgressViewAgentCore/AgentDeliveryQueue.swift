@@ -184,10 +184,13 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         }
     }
 
+    /// - Parameter schemaVersion: what the Hub said it accepts, or the
+    ///   agent's current version when it has not been asked (P3-7).
     public func prepareBatch(
         limit: Int,
         sentAt: Date,
-        metadata: AgentIngestMetadata
+        metadata: AgentIngestMetadata,
+        schemaVersion: Int = AgentIngestEnvelope.currentSchemaVersion
     ) throws -> AgentIngestEnvelope? {
         try lock.withLock {
             guard !state.pending.isEmpty else { return nil }
@@ -210,6 +213,7 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
                 throw AgentDeliveryQueueError.corruptActiveBatch
             }
             return AgentIngestEnvelope(
+                schemaVersion: schemaVersion,
                 batchId: active.batchID,
                 sentAt: sentAt,
                 agent: metadata,

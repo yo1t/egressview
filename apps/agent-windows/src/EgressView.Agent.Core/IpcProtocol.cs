@@ -12,7 +12,11 @@ public static class IpcProtocol
         Func<int, IReadOnlyList<GlobePoint>>? globePoints = null,
         Func<int, int, PeriodAnalysis>? analysis = null,
         Func<int, ThreatReport>? threats = null,
-        Func<bool, bool>? setMonitoringEnabled = null)
+        Func<bool, bool>? setMonitoringEnabled = null,
+        Func<string>? deliveryStatus = null,
+        Action? requestDeliveryNow = null,
+        Func<string>? enrichmentStatus = null,
+        Action<string>? requestEnrichmentNow = null)
     {
         try
         {
@@ -32,10 +36,36 @@ public static class IpcProtocol
                 "save-enrollment" => SaveEnrollment(root, saveCredential),
                 "set-delivery-enabled" => SetDeliveryEnabled(root, setDeliveryEnabled),
                 "set-monitoring-enabled" => SetMonitoringEnabled(root, setMonitoringEnabled),
+                "delivery-status" => DynamicStatus(deliveryStatus),
+                "send-delivery-now" => Invoke(requestDeliveryNow, "delivery-unavailable"),
+                "enrichment-status" => DynamicStatus(enrichmentStatus),
+                "refresh-enrichment" => RefreshEnrichment(root, requestEnrichmentNow),
                 _ => Reject("unknown-operation"),
             };
         }
         catch (Exception) { return Reject("malformed-request"); }
+    }
+
+    private static string RefreshEnrichment(JsonElement root, Action<string>? refresh)
+    {
+        var kind = root.TryGetProperty("kind", out var value) ? value.GetString() : null;
+        if (refresh is null || kind is not ("geo" or "threat" or "all")) return Reject("invalid-enrichment-kind");
+        try { refresh(kind); return JsonSerializer.Serialize(new { status = "ok", kind }); }
+        catch { return Reject("enrichment-refresh-failed"); }
+    }
+
+    private static string DynamicStatus(Func<string>? read)
+    {
+        if (read is null) return Reject("operation-unavailable");
+        try { return Status(read); }
+        catch { return Reject("operation-failed"); }
+    }
+
+    private static string Invoke(Action? action, string failure)
+    {
+        if (action is null) return Reject("operation-unavailable");
+        try { action(); return JsonSerializer.Serialize(new { status = "ok" }); }
+        catch { return Reject(failure); }
     }
 
     private static string SetMonitoringEnabled(JsonElement root, Func<bool, bool>? set)
