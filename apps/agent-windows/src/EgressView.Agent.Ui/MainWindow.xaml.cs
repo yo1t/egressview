@@ -396,7 +396,12 @@ public partial class MainWindow : Window
         loadingSettings = true;
         LanguageChoice.SelectedIndex = (int)AgentSettings.Language;
         NotificationsEnabled.IsChecked = AgentSettings.NotificationsEnabled;
-        DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 20 => 2, _ => 1 };
+        NotifyThreat.IsChecked = AgentSettings.NotificationCategoryEnabled("Threat");
+        NotifyMonitoring.IsChecked = AgentSettings.NotificationCategoryEnabled("Monitoring");
+        NotifyHubDelivery.IsChecked = AgentSettings.NotificationCategoryEnabled("HubDelivery");
+        NotifyThreatIntel.IsChecked = AgentSettings.NotificationCategoryEnabled("ThreatIntel");
+        NotifyRecovery.IsChecked = AgentSettings.NotificationCategoryEnabled("Recovery");
+        DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 25 => 2, 0 => 3, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
         SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "hub" => 3, _ => 0 };
         Globe.FramesPerSecond = AgentSettings.GlobeFrameRate;
@@ -526,7 +531,10 @@ public partial class MainWindow : Window
     {
         if (loadingSettings) return;
         AgentSettings.NotificationsEnabled = NotificationsEnabled.IsChecked == true;
-        if (DailyLimitChoice.SelectedItem is ComboBoxItem item && int.TryParse(item.Content?.ToString(), out var value)) AgentSettings.NotificationDailyLimit = value;
+        foreach (var box in new[] { NotifyThreat, NotifyMonitoring, NotifyHubDelivery, NotifyThreatIntel, NotifyRecovery })
+            if (box.Tag is string kind) AgentSettings.SetNotificationCategory(kind, box.IsChecked == true);
+        if (DailyLimitChoice.SelectedItem is ComboBoxItem item && int.TryParse(item.Tag?.ToString(), out var value)) AgentSettings.NotificationDailyLimit = value;
+        RefreshNotifications();
     }
 
     private void FrameRateChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -546,7 +554,8 @@ public partial class MainWindow : Window
     private void RefreshNotifications()
     {
         if (System.Windows.Application.Current is not App app) return;
-        NotificationSummary.Text = $"{LocalizationManager.Text("NotificationsToday")}: {app.Notifications.SentToday:N0} · {LocalizationManager.Text("SuppressedToday")}: {app.Notifications.SuppressedToday:N0}";
+        NotificationPermission.Text = AgentSettings.NotificationsEnabled ? LocalizationManager.Text("NotificationPermissionOn") : LocalizationManager.Text("NotificationPermissionOff");
+        NotificationSummary.Text = $"{LocalizationManager.Text("AttemptsToday")}: {app.Notifications.AttemptsToday:N0} · {LocalizationManager.Text("NotificationsToday")}: {app.Notifications.SentToday:N0} · {LocalizationManager.Text("SuppressedToday")}: {app.Notifications.SuppressedToday:N0}";
         NotificationList.ItemsSource = app.Notifications.History.Select(item => new NotificationRow(item)).ToArray();
     }
 
@@ -689,4 +698,5 @@ internal sealed class NotificationRow(NotificationHistoryEntry value)
     public string Kind => value.Kind;
     public string Title => value.Title;
     public string Body => value.Body;
+    public string Outcome => LocalizationManager.Text(value.Outcome switch { "shown" => "Delivered", "delivery-failed" => "NotDelivered", _ => "Suppressed" });
 }
