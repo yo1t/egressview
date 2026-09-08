@@ -19,6 +19,17 @@ final class ThreatIntelController: ObservableObject {
     /// downloading, so one of those two measurements was wrong and there was
     /// nothing in the record to say which. These lines are that record: they
     /// name the source, the counts, and which feeds were missing.
+    ///
+    /// The record answered on 2026-09-07: the feeds **were** downloaded, and
+    /// the connections to them were observed. The earlier reading of "no
+    /// connection for seven hours" was the measurement that was wrong.
+    ///
+    /// `.notice`, not `.info`: info-level messages are not written to the log
+    /// store, so the first version of this could only be read by someone
+    /// already streaming when it happened -- which is not a record. And every
+    /// interpolated value is `privacy: .public`, because the first version
+    /// printed `missing=<private>`, hiding the one field the whole line
+    /// existed for. None of these carry a destination or a user's data.
     private let logger = Logger(subsystem: "com.egressview.agent.macos", category: "threat-intel")
     enum ActiveSource: Equatable {
         case none
@@ -197,11 +208,12 @@ final class ThreatIntelController: ObservableObject {
                 hasCachedIndicators: cachedCount > 0,
                 lastSuccessfulFetch: preferences.lastFetch
             )
-            logger.info(
+            logger.notice(
                 """
-                refresh: source=hub hubSucceeded=\(hubSucceeded) \
-                fallbackEnabled=\(self.preferences.isHubFallbackEnabled) \
-                cached=\(cachedCount) mayFallBack=\(mayFallBack)
+                refresh: source=hub hubSucceeded=\(hubSucceeded, privacy: .public) \
+                fallbackEnabled=\(self.preferences.isHubFallbackEnabled, privacy: .public) \
+                cached=\(cachedCount, privacy: .public) \
+                mayFallBack=\(mayFallBack, privacy: .public)
                 """
             )
             if !hubSucceeded, mayFallBack {
@@ -239,14 +251,14 @@ final class ThreatIntelController: ObservableObject {
         do {
             switch try await fetcher.fetch(knownETag: preferences.etag) {
             case .unchanged:
-                logger.info("hub: 304 unchanged")
+                logger.notice("hub: 304 unchanged")
                 preferences.lastFetch = Date()
                 lastUpdatedAt = preferences.lastFetch
                 status = .unchanged(at: Date())
                 loadAvailabilityFromStore()
                 activeSource = .hub
             case .hubHasNoFeeds:
-                logger.info("hub: available=false")
+                logger.notice("hub: available=false")
                 // Not an error, and not "no threats". The Hub is simply not
                 // running feeds, and the screen has to say which.
                 try store.replaceThreatIndicators([])
@@ -254,7 +266,7 @@ final class ThreatIntelController: ObservableObject {
                 activeSource = .hub
                 status = .hubHasNoFeeds
             case let .updated(indicators, etag, fetchedAt):
-                logger.info("hub: updated indicators=\(indicators.count) etag=\(etag != nil)")
+                logger.notice("hub: updated indicators=\(indicators.count, privacy: .public) etag=\(etag != nil, privacy: .public)")
                 try store.replaceThreatIndicators(indicators)
                 preferences.etag = etag
                 preferences.lastFetch = Date()
@@ -270,7 +282,7 @@ final class ThreatIntelController: ObservableObject {
             // What is already stored is kept. A failed fetch is not evidence
             // that the indicators in hand are wrong, and dropping them would
             // turn a network blip into "no threats found".
-            logger.info("hub: failed \(String(describing: error))")
+            logger.notice("hub: failed \(String(describing: error), privacy: .public)")
             status = .failed(Self.describe(error))
             loadAvailabilityFromStore()
             return false
@@ -281,11 +293,11 @@ final class ThreatIntelController: ObservableObject {
         status = .fetching
         do {
             let result = try await ThreatFeedDownloader().download()
-            logger.info(
+            logger.notice(
                 """
-                feeds: downloaded indicators=\(result.indicators.count) \
-                missing=\(result.missingSources.joined(separator: ",")) \
-                complete=\(result.isComplete)
+                feeds: downloaded indicators=\(result.indicators.count, privacy: .public) \
+                missing=\(result.missingSources.joined(separator: ","), privacy: .public) \
+                complete=\(result.isComplete, privacy: .public)
                 """
             )
             try store.replaceThreatIndicators(result.indicators)
@@ -304,7 +316,7 @@ final class ThreatIntelController: ObservableObject {
                     at: Date()
                 )
         } catch {
-            logger.info("feeds: failed \(String(describing: error))")
+            logger.notice("feeds: failed \(String(describing: error), privacy: .public)")
             status = .failed(Self.describe(error))
             loadAvailabilityFromStore()
         }

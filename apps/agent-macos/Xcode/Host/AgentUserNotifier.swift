@@ -219,11 +219,15 @@ final class AgentNotificationCoordinator {
     private let threats: ThreatIntelController
     private let notifier: AgentUserNotifier
     private let scanTimer = PeriodicWork()
+    private let hubRetryTimer = PeriodicWork()
     private let scanQueue = DispatchQueue(label: "com.egressview.agent.threat-notifications")
     private var cancellables: Set<AnyCancellable> = []
     private var lastThreatScanAt = Date()
     private var monitoringNeedsAttention = false
-    private var hubNeedsAttention = false
+    /// Which Hub problem is outstanding and whether the user has heard about
+    /// it. `removeDuplicates()` tells this object about a problem once; if the
+    /// cooldown refuses that one attempt, nothing else would ever try (P3-88).
+    private var hubProblems = AgentHubProblemTracker()
     private var seenThreats: [String: Date] = [:]
 
     init(
@@ -245,10 +249,15 @@ final class AgentNotificationCoordinator {
         }.store(in: &cancellables)
         lastThreatScanAt = Date()
         scanTimer.start(every: 60) { [weak self] in self?.scanForNewThreats() }
+        // A problem that persists does not change the published state, so the
+        // subscription above fires once and never again. This is what gives an
+        // outage a second chance after its cooldown expires.
+        hubRetryTimer.start(every: 60) { [weak self] in self?.retryHubAnnouncement() }
     }
 
     func stop() {
         scanTimer.stop()
+        hubRetryTimer.stop()
         cancellables.removeAll()
     }
 
@@ -306,11 +315,17 @@ final class AgentNotificationCoordinator {
         }
     }
 
-    private func handleHubState(_ state: HubDeliveryController.NotificationState) {
-        let issue: (String, String, String)?
+    /// The wording for a delivery problem, or nil when the state is not one.
+    ///
+    /// Separate from `handleHubState` so the retry can rebuild it from the
+    /// state as it stands now, rather than replaying a sentence written when
+    /// the problem started (P3-88).
+    private func issue(
+        for state: HubDeliveryController.NotificationState
+    ) -> (String, String, String)? {
         switch state {
         case .unavailable:
-            issue = (
+            return (
                 "unavailable", L("Hub delivery is delayed"),
                 notificationExplanation(
                     reason: L("Delivery to the configured Hub failed and a retry was scheduled."),
@@ -318,7 +333,7 @@ final class AgentNotificationCoordinator {
                 )
             )
         case .authorizationRequired:
-            issue = (
+            return (
                 "authorization", L("Hub authorization is required"),
                 notificationExplanation(
                     reason: L("The Hub authorization expired or was revoked, so queued observations cannot be sent."),
@@ -326,7 +341,7 @@ final class AgentNotificationCoordinator {
                 )
             )
         case .dataDropped:
-            issue = (
+            return (
                 "dropped", L("Some Hub observations were not queued"),
                 notificationExplanation(
                     reason: L("The queue overflow or contract-rejection counter increased, so some observations were not retained for Hub delivery."),
@@ -334,16 +349,26 @@ final class AgentNotificationCoordinator {
                 )
             )
         case .failed:
-            issue = (
+            return (
                 "failed", L("Hub delivery needs attention"),
                 notificationExplanation(
                     reason: L("The Hub sender entered a failed state and queued observations are not being delivered."),
                     action: L("Open EgressView Agent to review the delivery error.")
                 )
             )
+        case .healthy, .inactive:
+            return nil
+        }
+    }
+
+    private func handleHubState(_ state: HubDeliveryController.NotificationState) {
+        let issue = issue(for: state)
+        switch state {
         case .healthy:
-            if hubNeedsAttention {
-                hubNeedsAttention = false
+            // Only for a problem the user heard about. Otherwise "delivery
+            // recovered" arrives for something they were never told had
+            // broken -- which is how the eighty-eight minute outage read.
+            if hubProblems.recovered() {
                 _ = notifier.notify(
                     kind: .recovery, key: "hub-recovered",
                     title: L("Hub delivery recovered"),
@@ -355,14 +380,36 @@ final class AgentNotificationCoordinator {
             }
             return
         case .inactive:
+            hubProblems.inactive()
             return
+        case .unavailable, .authorizationRequired, .dataDropped, .failed:
+            break
         }
-        hubNeedsAttention = true
-        if let issue {
-            _ = notifier.notify(
-                kind: .hubDelivery, key: "hub-\(issue.0)", title: issue.1, body: issue.2
-            )
-        }
+        guard let issue else { return }
+        guard hubProblems.problem(cause: issue.0) else { return }
+        announceHubProblem(issue)
+    }
+
+    /// Sends one attempt and records whether it reached the user.
+    ///
+    /// The limiter's answer is the whole point: a notification it refused did
+    /// not tell anyone anything, so the problem stays outstanding and the timer
+    /// tries again once the cooldown allows it.
+    private func announceHubProblem(_ issue: (String, String, String)) {
+        let delivered = notifier.notify(
+            kind: .hubDelivery, key: "hub-\(issue.0)", title: issue.1, body: issue.2
+        )
+        hubProblems.attempted(delivered: delivered)
+    }
+
+    private func retryHubAnnouncement() {
+        let outstanding = hubProblems.shouldRetryAnnouncement()
+        guard outstanding.retry, let cause = outstanding.cause else { return }
+        // Rebuild the wording from the state the controller holds now, rather
+        // than replaying a stale sentence: an outage that has since become an
+        // authorisation failure should say so.
+        guard let issue = issue(for: hub.notificationState), issue.0 == cause else { return }
+        announceHubProblem(issue)
     }
 
     private func handleThreatIntelStatus(_ status: ThreatIntelController.Status) {
