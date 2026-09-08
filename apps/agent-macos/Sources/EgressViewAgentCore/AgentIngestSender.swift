@@ -78,6 +78,14 @@ public actor AgentIngestSender {
     private var sendTask: Task<Void, Never>?
     private var currentState: AgentIngestSenderState = .off
     private var authorizationBlocked = false
+    /// What the Hub said it can accept, once it has been asked (P3-7).
+    ///
+    /// Cached rather than fetched per batch: a Hub's version list changes when
+    /// the Hub restarts, not between two batches a second apart. Nil means
+    /// unasked or unanswerable, and both send version 1 -- every Hub accepts
+    /// it, so an unanswered question must not stop delivery that works.
+    private var hubCapabilities: AgentHubCapabilities?
+    private var capabilitiesAsked = false
 
     public init(
         queue: AgentDeliveryQueue,
@@ -190,7 +198,27 @@ public actor AgentIngestSender {
                 publish(.authorizationRequired)
                 return
             }
-            guard let envelope = try queue.prepareBatch(limit: 200, sentAt: now(), metadata: metadata) else {
+            await askCapabilitiesOnce(credential: credential)
+            let outcome = AgentCapabilityNegotiation.decide(capabilities: hubCapabilities)
+            let schemaVersion: Int
+            switch outcome {
+            case let .agreed(version):
+                schemaVersion = version
+            case let .unknown(fallback):
+                schemaVersion = fallback
+            case .incompatible:
+                // Retrying is pointless and the user has something to do. This
+                // is the one capability answer that stops delivery.
+                sendTask = nil
+                publish(.failed("This Hub does not accept anything this agent can send. Update the Hub or the agent."))
+                return
+            }
+            let limit = AgentCapabilityNegotiation.batchSize(
+                capabilities: hubCapabilities, agentLimit: Self.agentBatchLimit
+            )
+            guard let envelope = try queue.prepareBatch(
+                limit: limit, sentAt: now(), metadata: metadata, schemaVersion: schemaVersion
+            ) else {
                 sendTask = nil
                 publish(.idle)
                 return
@@ -241,6 +269,29 @@ public actor AgentIngestSender {
         } catch {
             scheduleRetry()
         }
+    }
+
+    /// How many observations this agent is willing to put in one batch.
+    ///
+    /// The Hub may accept more; that does not make sending more a good idea
+    /// here, because the whole batch is held in memory and re-sent on failure.
+    static let agentBatchLimit = 200
+
+    /// Asks the Hub what it accepts, once per run.
+    ///
+    /// Any failure leaves `hubCapabilities` nil and is not retried in this
+    /// loop: a 404 from a Hub too old to have the endpoint would otherwise add
+    /// a request before every batch, forever, to learn the same nothing.
+    private func askCapabilitiesOnce(credential: AgentCredential) async {
+        guard !capabilitiesAsked else { return }
+        capabilitiesAsked = true
+        guard AgentEnrollmentService.isAllowedHubURL(credential.hubURL) else { return }
+        var request = URLRequest(url: credential.hubURL.appendingPathComponent("api/agent/capabilities"))
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(credential.token)", forHTTPHeaderField: "Authorization")
+        guard let (data, response) = try? await transport.send(request), response.statusCode == 200 else { return }
+        hubCapabilities = try? JSONDecoder().decode(AgentHubCapabilities.self, from: data)
     }
 
     private func makeRequest(

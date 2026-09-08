@@ -7,7 +7,8 @@ using EgressView.Agent.Core;
 namespace EgressView.Agent.Service;
 
 internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnapshot> snapshot, string allowedSid,
-    WindowsCredentialStore credentialStore, Func<bool> monitoringEnabled, Func<bool, bool> setMonitoringEnabled) : IAsyncDisposable
+    WindowsCredentialStore credentialStore, Func<bool> monitoringEnabled, Func<bool, bool> setMonitoringEnabled,
+    DeliveryController delivery, EnrichmentController enrichment) : IAsyncDisposable
 {
     public const string PipeName = "egressview-agent-v1";
     private readonly CancellationTokenSource stop = new();
@@ -35,13 +36,19 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
             using var reader = new StreamReader(pipe, Encoding.UTF8, false, 4096, true);
             await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true) { AutoFlush = true };
             var line = await reader.ReadLineAsync(stop.Token);
-            if (line is not null) await writer.WriteLineAsync(IpcProtocol.Handle(line, Status, Summary, credentialStore.Save,
+            if (line is not null) await writer.WriteLineAsync(IpcProtocol.Handle(line, Status, Summary, credential =>
+                {
+                    credentialStore.Save(credential);
+                    delivery.SettingsChanged();
+                },
                 enabled =>
                 {
                     if (enabled && credentialStore.Load() is null)
                         throw new InvalidOperationException("Enrollment is required before delivery can be enabled.");
                     store.DeliveryEnabled = enabled;
-                }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled));
+                    delivery.SettingsChanged();
+                }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled, DeliveryStatus, delivery.RequestNow,
+                enrichment.Status, enrichment.RequestNow));
         }
     }
 
@@ -54,6 +61,29 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         return store.ReadPeriodAnalysis(to.AddMinutes(-minutes), to);
     }
     private ThreatReport Threats(int minutes) => store.ReadThreatReport(DateTimeOffset.UtcNow.AddMinutes(-minutes), DateTimeOffset.UtcNow);
+    private string DeliveryStatus()
+    {
+        var credential = credentialStore.Load();
+        var queue = store.ReadDeliveryStatus();
+        var runtime = delivery.Status;
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            enrolled = credential is not null,
+            hub = credential?.HubUrl.GetLeftPart(UriPartial.Authority),
+            enabled = store.DeliveryEnabled,
+            pending = queue.Pending,
+            oldestPendingAt = queue.OldestPendingAt,
+            lastAcknowledgedAt = queue.LastAcknowledgedAt,
+            contractRejected = queue.ContractRejected,
+            queueOverflow = queue.QueueOverflow,
+            state = runtime.State,
+            lastAttemptAt = runtime.LastAttemptAt,
+            nextRetryAt = runtime.NextRetryAt,
+            lastFailure = runtime.LastFailure,
+            lastFailureAt = runtime.LastFailureAt,
+            lastStatusCode = runtime.LastStatusCode,
+        });
+    }
 
     public async ValueTask DisposeAsync()
     {

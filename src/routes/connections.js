@@ -110,6 +110,23 @@ function quantiseForCache(value) {
   return Math.floor(value / SUMMARY_CACHE_TTL_MS) * SUMMARY_CACHE_TTL_MS;
 }
 
+/**
+ * How often the summary cache answers, reported with the slow-request log.
+ *
+ * A hit rate near zero is what a broken cache key looks like from outside, and
+ * it is not visible any other way: the query is correct, the response is
+ * correct, and only the cost is wrong.
+ */
+const summaryCacheStats = { hits: 0, misses: 0 };
+
+function summaryCacheSnapshot() {
+  const total = summaryCacheStats.hits + summaryCacheStats.misses;
+  return {
+    ...summaryCacheStats,
+    hitRate: total ? summaryCacheStats.hits / total : null,
+  };
+}
+
 function getSummaryCache(key) {
   const hit = summaryCache.get(key);
   if (!hit || Date.now() - hit.at > SUMMARY_CACHE_TTL_MS) {
@@ -270,6 +287,11 @@ function connectionsRoutes(ctx) {
       sourceScope,
     });
     const cached = getSummaryCache(cacheKey);
+    // Counted, because the cache was serving nothing at all and the response's
+    // own `cached` field is the only place that said so -- and nobody reads a
+    // field on a response nobody kept. Measured 2026-09-06: 369 responses over
+    // three seconds in six hours, every one of them this route (P3-67).
+    summaryCacheStats[cached ? 'hits' : 'misses'] += 1;
     if (cached) return res.json({ ...cached, serverTime: Date.now(), cached: true });
     const summary = history.summarizeByTimeRange(from, to, {
       src,
@@ -455,4 +477,5 @@ module.exports._parseTimestampParam = parseTimestampParam;
 module.exports._parsePaginationOpts = parsePaginationOpts;
 module.exports.MAX_LIMIT = MAX_LIMIT;
 module.exports.SERVER_FILTER_COLS = SERVER_FILTER_COLS;
+module.exports.summaryCacheSnapshot = summaryCacheSnapshot;
 module.exports._sendLargeJson = sendLargeJson;

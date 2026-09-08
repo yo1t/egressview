@@ -9,6 +9,9 @@ namespace EgressView.Agent.Core;
 public sealed record DeliveryMetadata(string HostName, string Platform, string OsVersion, string AgentVersion);
 public enum DeliveryAttemptKind { Empty, Acknowledged, AuthorizationRequired, RateLimited, Retryable, Rejected, InvalidAcknowledgement }
 public sealed record DeliveryAttempt(DeliveryAttemptKind Kind, TimeSpan? RetryAfter = null, int? StatusCode = null);
+public sealed record DeliveryRuntimeStatus(string State, DateTimeOffset? LastAttemptAt = null,
+    DateTimeOffset? NextRetryAt = null, string? LastFailure = null, DateTimeOffset? LastFailureAt = null,
+    int? LastStatusCode = null);
 
 public sealed class DeliverySender
 {

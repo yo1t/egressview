@@ -772,17 +772,17 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
-    public (string? ETag, DateTimeOffset? FetchedAt) ReadGeoCacheState()
+    public GeoCacheState ReadGeoCacheState()
     {
         lock (gate)
         {
-            CheckOperation(WinSqlite.Prepare(db, "SELECT etag,fetched_at FROM geo_cache_state WHERE id=1", -1, out var statement, 0));
+            CheckOperation(WinSqlite.Prepare(db, "SELECT etag,fetched_at,(SELECT COUNT(*) FROM geo_locations) FROM geo_cache_state WHERE id=1", -1, out var statement, 0));
             try
             {
                 CheckQueryRow(WinSqlite.Step(statement));
                 var etag = NullableTextValue(statement, 0);
                 var fetched = NullableTextValue(statement, 1);
-                return (etag, fetched is null ? null : DateTimeOffset.Parse(fetched));
+                return new(etag, fetched is null ? null : DateTimeOffset.Parse(fetched), WinSqlite.ColumnInt64(statement, 2));
             }
             finally { WinSqlite.Finalize(statement); }
         }
