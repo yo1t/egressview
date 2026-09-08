@@ -1,9 +1,10 @@
 using System.Text.Json;
 using System.IO;
+using EgressView.Agent.Core;
 
 namespace EgressView.Agent.Ui;
 
-internal sealed record NotificationHistoryEntry(DateTimeOffset Date, string Kind, string Title, string Body, bool Delivered);
+internal sealed record NotificationHistoryEntry(DateTimeOffset Date, string Kind, string Title, string Body, bool Delivered, string Outcome = "shown");
 
 internal sealed class LocalNotificationService
 {
@@ -20,27 +21,51 @@ internal sealed class LocalNotificationService
 
     internal IReadOnlyList<NotificationHistoryEntry> History => history;
     internal int SentToday => history.Count(item => item.Date.LocalDateTime.Date == DateTime.Today && item.Delivered);
-    internal int SuppressedToday { get; private set; }
+    internal int AttemptsToday => history.Count(item => item.Date.LocalDateTime.Date == DateTime.Today);
+    internal int SuppressedToday => history.Count(item => item.Date.LocalDateTime.Date == DateTime.Today && item.Outcome.StartsWith("suppressed-", StringComparison.Ordinal));
 
     internal bool Notify(string kind, string key, string title, string body, Action<string, string> show, bool bypassLimits = false)
     {
-        if (!AgentSettings.NotificationsEnabled && !bypassLimits) return false;
         var now = DateTimeOffset.Now;
-        if (!bypassLimits && ((cooldowns.TryGetValue(key, out var last) && now - last < TimeSpan.FromHours(1)) ||
-            SentToday >= AgentSettings.NotificationDailyLimit))
+        var decision = NotificationPolicy.Evaluate(
+            AgentSettings.NotificationsEnabled,
+            AgentSettings.NotificationCategoryEnabled(kind),
+            string.Equals(kind, "Monitoring", StringComparison.Ordinal),
+            AgentSettings.NotificationDailyLimit,
+            SentToday,
+            cooldowns.TryGetValue(key, out var last) ? last : null,
+            now,
+            bypassLimits);
+        if (decision != NotificationDecision.Deliver)
         {
-            SuppressedToday++;
+            Add(new NotificationHistoryEntry(now, kind, title, Redact(body), false, $"suppressed-{DecisionName(decision)}"));
             return false;
         }
         cooldowns[key] = now;
         var delivered = true;
         try { show(title, body); }
         catch { delivered = false; }
-        history.Insert(0, new NotificationHistoryEntry(now, kind, title, body, delivered));
-        if (history.Count > 100) history.RemoveRange(100, history.Count - 100);
-        Save();
+        Add(new NotificationHistoryEntry(now, kind, title, Redact(body), delivered, delivered ? "shown" : "delivery-failed"));
         return delivered;
     }
+
+    private void Add(NotificationHistoryEntry item)
+    {
+        history.Insert(0, item);
+        if (history.Count > 100) history.RemoveRange(100, history.Count - 100);
+        Save();
+    }
+
+    private static string Redact(string body) => body.IndexOfAny(['.', ':']) >= 0 ? "EgressView Agent status changed. Open the app for details." : body;
+
+    private static string DecisionName(NotificationDecision decision) => decision switch
+    {
+        NotificationDecision.Disabled => "disabled",
+        NotificationDecision.CategoryDisabled => "category",
+        NotificationDecision.Cooldown => "cooldown",
+        NotificationDecision.DailyLimit => "daily-limit",
+        _ => "unknown",
+    };
 
     internal void Clear() { history.Clear(); Save(); }
 

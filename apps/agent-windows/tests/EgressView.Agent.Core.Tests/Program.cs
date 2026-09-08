@@ -9,6 +9,16 @@ var database = Path.Combine(directory, "agent.db");
 
 try
 {
+    var notificationNow = new DateTimeOffset(2026, 9, 8, 6, 0, 0, TimeSpan.Zero);
+    Assert(NotificationPolicy.Evaluate(true, true, false, 5, 5, null, notificationNow) == NotificationDecision.DailyLimit,
+        "ordinary notifications respect the configured daily limit");
+    Assert(NotificationPolicy.Evaluate(true, true, true, 5, 5, null, notificationNow) == NotificationDecision.Deliver,
+        "monitoring notifications are exempt from the daily limit");
+    Assert(NotificationPolicy.Evaluate(true, true, true, 5, 5, notificationNow.AddMinutes(-30), notificationNow) == NotificationDecision.Cooldown,
+        "monitoring notifications still respect the one-hour per-event cooldown");
+    Assert(NotificationPolicy.Evaluate(true, false, false, 0, 999, null, notificationNow) == NotificationDecision.CategoryDisabled,
+        "a disabled category remains suppressed even when the daily limit is unlimited");
+
     var dnsNames = new DnsNameCache(TimeSpan.FromMinutes(10), capacity: 4);
     var dnsAt = DateTimeOffset.UtcNow;
     dnsNames.Observe(42, "API.Bücher.Example.", "203.0.113.8;::ffff:203.0.113.9;", dnsAt);

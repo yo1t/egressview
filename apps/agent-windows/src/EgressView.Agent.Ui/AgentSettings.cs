@@ -22,9 +22,22 @@ internal static class AgentSettings
 
     internal static int NotificationDailyLimit
     {
-        get => int.TryParse(Read("NotificationDailyLimit"), out var value) && value is 5 or 10 or 20 ? value : 10;
+        get => int.TryParse(Read("NotificationDailyLimit"), out var value) && value is 0 or 5 or 12 or 25 ? value : 12;
         set => Write("NotificationDailyLimit", value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
+
+    internal static bool NotificationCategoryEnabled(string kind) => kind switch
+    {
+        "Threat" => ReadBool("NotifyThreat", true),
+        "Monitoring" => ReadBool("NotifyMonitoring", true),
+        "HubDelivery" => ReadBool("NotifyHubDelivery", false),
+        "ThreatIntel" => ReadBool("NotifyThreatIntel", true),
+        "Recovery" => ReadBool("NotifyRecovery", true),
+        _ => true,
+    };
+
+    internal static void SetNotificationCategory(string kind, bool enabled) =>
+        Write(kind switch { "Threat" => "NotifyThreat", "Monitoring" => "NotifyMonitoring", "HubDelivery" => "NotifyHubDelivery", "ThreatIntel" => "NotifyThreatIntel", "Recovery" => "NotifyRecovery", _ => throw new ArgumentOutOfRangeException(nameof(kind)) }, enabled ? "1" : "0");
 
     internal static int GlobeFrameRate
     {
@@ -59,6 +72,8 @@ internal static class AgentSettings
         try { return Registry.CurrentUser.OpenSubKey(KeyPath)?.GetValue(name)?.ToString(); }
         catch { return null; }
     }
+
+    private static bool ReadBool(string name, bool fallback) => Read(name) is { } value ? value != "0" : fallback;
 
     private static void Write(string name, string value)
     {
