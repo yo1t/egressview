@@ -81,6 +81,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # P3-26: the glossary decision had no way to fail for three weeks, and
+      # the Hub's settings tab kept the retired wording the whole time.
+      - name: Terminology
+        run: npm run lint:terminology
+
       - name: Run unit tests with coverage gate
         if: matrix.node-version == 22
         run: npm run test:coverage
