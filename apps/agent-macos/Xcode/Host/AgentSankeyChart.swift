@@ -53,7 +53,15 @@ struct AgentSankeyChart: View {
                     }
                     .frame(height: contentHeight)
                 }
-                .frame(height: viewportHeight)
+                // Follows the card, which follows the window: how many names
+                // are on screen is whatever the height allows, and the rest is
+                // a scroll away. The minimum is three rows, so a short window
+                // still shows a diagram rather than a scroll bar.
+                .frame(
+                    minHeight: AgentSankeyColumn.headerHeight
+                        + 3 * AgentSankeyColumn.rowHeight,
+                    maxHeight: .infinity
+                )
                 // On the whole diagram, not on the ribbons alone, and with a
                 // solid hit area: a Canvas is hit-tested where it drew, so the
                 // space between ribbons belongs to nothing and a pointer lands
@@ -85,26 +93,17 @@ struct AgentSankeyChart: View {
         )
     }
 
-    /// About how tall one name row is at caption size, including its spacing.
-    private static let rowHeight: CGFloat = 21
-    /// How many rows the card shows without scrolling.
-    ///
-    /// Ten, because the top of the list is what the card is for: the biggest
-    /// flows should be readable the moment it appears. The rest is a scroll
-    /// away rather than a taller card, so this panel keeps the height it has
-    /// beside the globe and the timeline.
-    private static let visibleRows = 10
-
-    private var viewportHeight: CGFloat {
-        CGFloat(Self.visibleRows) * Self.rowHeight
-    }
-
     /// As tall as the longer column needs, so nothing is laid out into a
     /// height it does not have. The drawing is proportional to this, which is
     /// why the ribbons keep meeting their names while scrolling.
+    ///
+    /// No lower bound in rows. The first version of this floored the content
+    /// at ten rows and gave the viewport exactly ten rows' worth, which made
+    /// the diagram 210 points tall whatever the window did -- the card grew
+    /// with the window and the drawing inside it did not (P3-15).
     private var contentHeight: CGFloat {
-        let rows = max(model.apps.count, model.destinations.count, Self.visibleRows)
-        return CGFloat(rows) * Self.rowHeight
+        let rows = max(model.apps.count, model.destinations.count, 1)
+        return AgentSankeyColumn.headerHeight + CGFloat(rows) * AgentSankeyColumn.rowHeight
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize) {
@@ -154,32 +153,88 @@ private struct AgentSankeyColumn: View {
     let coloured: Bool
     let alignment: HorizontalAlignment
 
-    /// About how many characters fit the 150-point column at caption size.
+    /// One name row, and the heading above the column.
     ///
-    /// Not measured per glyph: the point is to keep colliding names apart, and
-    /// that only needs to know roughly where the text runs out (P3-86).
-    private static let labelWidth = 18
+    /// Given to each row explicitly rather than estimated. The estimate was 21
+    /// points against a caption row that measures about 16, so the canvas was
+    /// laid out a third taller than the names beside it and the scroll extent
+    /// was wrong by the same third.
+    static let rowHeight: CGFloat = 18
+    static let headerHeight: CGFloat = 17
 
-    /// Names shortened together, so two destinations cannot read the same.
+    static let columnWidth: CGFloat = 150
+    private static let dotWidth: CGFloat = 7
+    private static let rowSpacing: CGFloat = 6
+
+    /// The font the names are measured with -- and, below, the font they are
+    /// drawn with. One constant used for both, because the two being allowed
+    /// to differ is what broke this the first time it was fixed.
+    ///
+    /// Measuring used `preferredFont(forTextStyle: .caption1)`, which is 10
+    /// points, while `.font(.caption)` draws at 11. Every label was judged
+    /// against a name about 8% narrower than the one that reached the screen,
+    /// so labels that "fitted" overflowed and were truncated again -- the very
+    /// thing the measuring was added to prevent (P3-89).
+    private static let font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+
+    private static func width(of text: String) -> CGFloat {
+        (text as NSString).size(withAttributes: [.font: font]).width
+    }
+
+    private var valueTexts: [String] {
+        nodes.map { formattedMetric($0.value, metric) }
+    }
+
+    /// The figures are given one width for the whole column, so the names do
+    /// not shift about as the numbers change between refreshes.
+    private var valueWidth: CGFloat {
+        (valueTexts.map { Self.width(of: $0) } + [Self.width(of: "0")]).max() ?? 0
+    }
+
+    /// What is actually left for a name once the dot, the gaps and the figures
+    /// have taken theirs.
+    private var nameWidth: CGFloat {
+        max(0, Self.columnWidth - Self.dotWidth - Self.rowSpacing * 2 - valueWidth)
+    }
+
+    /// Names shortened together, so two destinations cannot read the same --
+    /// and shortened to the room each one has, so nobody shortens them again.
+    ///
+    /// The question asked is width, not character count. A fixed budget of 18
+    /// characters was right in the connections view and one point too wide in
+    /// the data volume view, where `24.6 MB` takes more room than `17,187`:
+    /// SwiftUI truncated the label a second time, from the end, which is
+    /// where P3-86 puts the characters that tell two destinations apart
+    /// (P3-89).
+    ///
+    /// Names are therefore a little shorter when the figures beside them are
+    /// wider. That is the column being honest about its width; the
+    /// alternative is a name that claims to be whole and is not.
     private var labels: [String] {
-        DestinationLabel.shorten(
+        let room = nameWidth
+        return DestinationLabel.shorten(
             nodes.map { $0.isRemainder ? L("Other") : $0.name },
-            limit: Self.labelWidth
+            fits: { Self.width(of: $0) <= room }
         )
     }
 
     var body: some View {
-        VStack(alignment: alignment, spacing: 3) {
+        VStack(alignment: alignment, spacing: 0) {
             Text(title)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
+                .frame(height: Self.headerHeight)
             ForEach(Array(zip(nodes, labels).enumerated()), id: \.element.0.name) { index, pair in
                 row(index: index, node: pair.0, label: pair.1)
+                    .frame(height: Self.rowHeight)
             }
             Spacer(minLength: 0)
         }
-        .font(.caption)
-        .frame(width: 150, alignment: alignment == .leading ? .leading : .trailing)
+        // The measured font itself, not a style that resolves to something
+        // else. `.caption` is 11 points here and `.caption1` is 10, and a
+        // label measured against one and drawn in the other does not fit.
+        .font(Font(Self.font))
+        .frame(width: Self.columnWidth, alignment: alignment == .leading ? .leading : .trailing)
         // Hidden from VoiceOver, shown on screen.
         //
         // Measured 2026-09-03: these two columns put 38 separate elements
@@ -197,17 +252,25 @@ private struct AgentSankeyColumn: View {
             .fill(coloured
                   ? agentSeriesColor(index, isRemainder: node.isRemainder)
                   : Color.secondary.opacity(0.6))
-            .frame(width: 7, height: 7)
-        // Already shortened together above, so SwiftUI is not asked to
-        // truncate again -- doing both would drop the part that was kept to
-        // tell two destinations apart.
+            .frame(width: Self.dotWidth, height: Self.dotWidth)
+        // Already shortened to what the column leaves for a name, so SwiftUI
+        // is not asked to truncate again -- doing both would drop the part
+        // that was kept to tell two destinations apart (P3-86, P3-89).
         let name = Text(label)
             .lineLimit(1)
+        // The width the names were shortened against, given to the figures for
+        // real. Without it the reservation is a number in a comment: the
+        // widest row pushes the column and every name is measured against
+        // space it does not have.
         let value = Text(formattedMetric(node.value, metric))
             .foregroundStyle(.secondary)
             .lineLimit(1)
+            .frame(
+                width: valueWidth,
+                alignment: alignment == .leading ? .trailing : .leading
+            )
 
-        HStack(spacing: 6) {
+        HStack(spacing: Self.rowSpacing) {
             // The dot sits against the diagram on both sides, so each name
             // reads outward from the ribbon it belongs to.
             if alignment == .leading {
