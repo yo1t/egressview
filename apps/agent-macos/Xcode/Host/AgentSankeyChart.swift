@@ -179,7 +179,7 @@ private struct AgentSankeyColumn: View {
     /// The figures are given one width for the whole column, so the names do
     /// not shift about as the numbers change between refreshes.
     private var valueWidth: CGFloat {
-        (valueTexts.map(Self.width) + [Self.width("0")]).max() ?? 0
+        (valueTexts.map { Self.width(of: $0) } + [Self.width(of: "0")]).max() ?? 0
     }
 
     /// What is actually left for a name once the dot, the gaps and the figures
@@ -205,7 +205,7 @@ private struct AgentSankeyColumn: View {
         let room = nameWidth
         return DestinationLabel.shorten(
             nodes.map { $0.isRemainder ? L("Other") : $0.name },
-            fits: { Self.width($0) <= room }
+            fits: { Self.width(of: $0) <= room }
         )
     }
 
