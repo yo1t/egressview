@@ -124,13 +124,27 @@ private struct AgentSankeyColumn: View {
     let coloured: Bool
     let alignment: HorizontalAlignment
 
+    /// About how many characters fit the 150-point column at caption size.
+    ///
+    /// Not measured per glyph: the point is to keep colliding names apart, and
+    /// that only needs to know roughly where the text runs out (P3-86).
+    private static let labelWidth = 18
+
+    /// Names shortened together, so two destinations cannot read the same.
+    private var labels: [String] {
+        DestinationLabel.shorten(
+            nodes.map { $0.isRemainder ? L("Other") : $0.name },
+            limit: Self.labelWidth
+        )
+    }
+
     var body: some View {
         VStack(alignment: alignment, spacing: 3) {
             Text(title)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
-            ForEach(Array(nodes.enumerated()), id: \.element.name) { index, node in
-                row(index: index, node: node)
+            ForEach(Array(zip(nodes, labels).enumerated()), id: \.element.0.name) { index, pair in
+                row(index: index, node: pair.0, label: pair.1)
             }
             Spacer(minLength: 0)
         }
@@ -148,15 +162,17 @@ private struct AgentSankeyColumn: View {
     }
 
     @ViewBuilder
-    private func row(index: Int, node: SankeyNode) -> some View {
+    private func row(index: Int, node: SankeyNode, label: String) -> some View {
         let dot = Circle()
             .fill(coloured
                   ? agentSeriesColor(index, isRemainder: node.isRemainder)
                   : Color.secondary.opacity(0.6))
             .frame(width: 7, height: 7)
-        let name = Text(node.isRemainder ? L("Other") : node.name)
+        // Already shortened together above, so SwiftUI is not asked to
+        // truncate again -- doing both would drop the part that was kept to
+        // tell two destinations apart.
+        let name = Text(label)
             .lineLimit(1)
-            .truncationMode(.middle)
         let value = Text(formattedMetric(node.value, metric))
             .foregroundStyle(.secondary)
             .lineLimit(1)
