@@ -146,12 +146,13 @@ internal sealed class AgentWindowsService : ServiceBase
         monitoring.Start();
         var credentialStore = new WindowsCredentialStore();
         using var deliveryController = new DeliveryController(store, credentialStore);
+        using var enrichmentController = new EnrichmentController(store, credentialStore);
         await using var ipc = new AgentIpcServer(store, monitoring.Snapshot, ReadAllowedUserSid(), credentialStore,
-            () => monitoring.Enabled, monitoring.SetEnabled, deliveryController);
+            () => monitoring.Enabled, monitoring.SetEnabled, deliveryController, enrichmentController);
         ipc.Start();
         var delivery = deliveryController.RunAsync(cancellationToken);
-        var geoCache = RunGeoCacheAsync(store, credentialStore, cancellationToken);
-        var threatIntel = RunThreatIntelAsync(store, credentialStore, cancellationToken);
+        var geoCache = enrichmentController.RunGeoAsync(cancellationToken);
+        var threatIntel = enrichmentController.RunThreatAsync(cancellationToken);
         var chartAggregation = RunChartAggregationAsync(store, cancellationToken);
         var maintenance = RunMaintenanceAsync(store, cancellationToken);
         var coverage = monitoring.RunCoverageHeartbeatAsync(cancellationToken);
@@ -232,54 +233,6 @@ internal sealed class AgentWindowsService : ServiceBase
             }
 
             try { await Task.Delay(TimeSpan.FromHours(24), cancellationToken); }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
-        }
-    }
-
-    private static async Task RunGeoCacheAsync(ObservationStore store, WindowsCredentialStore credentials, CancellationToken cancellationToken)
-    {
-        var client = new GeoCacheClient();
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            var delay = TimeSpan.FromMinutes(5);
-            try
-            {
-                var state = store.ReadGeoCacheState();
-                if (credentials.Load() is { } credential && (state.FetchedAt is null || DateTimeOffset.UtcNow - state.FetchedAt >= TimeSpan.FromHours(24)))
-                {
-                    var result = await client.FetchAsync(credential, state.ETag, cancellationToken);
-                    if (result.NotModified) store.MarkGeoCacheFetched(result.ETag, DateTimeOffset.UtcNow);
-                    else store.ReplaceGeoLocations(result.Locations, result.ETag, DateTimeOffset.UtcNow);
-                }
-                delay = TimeSpan.FromMinutes(15);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
-            catch { delay = TimeSpan.FromMinutes(5); }
-            try { await Task.Delay(delay, cancellationToken); }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
-        }
-    }
-
-    private static async Task RunThreatIntelAsync(ObservationStore store, WindowsCredentialStore credentials, CancellationToken cancellationToken)
-    {
-        var client = new ThreatIntelClient();
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            var delay = TimeSpan.FromMinutes(5);
-            try
-            {
-                var state = store.ReadThreatCacheState();
-                if (credentials.Load() is { } credential && (state.FetchedAt is null || DateTimeOffset.UtcNow - state.FetchedAt >= TimeSpan.FromHours(6)))
-                {
-                    var result = await client.FetchAsync(credential, state.ETag, cancellationToken);
-                    if (result.NotModified) store.MarkThreatCacheFetched(result.ETag, DateTimeOffset.UtcNow);
-                    else store.ReplaceThreatIndicators(result.Available, result.Indicators, result.ETag, result.FetchedAt ?? DateTimeOffset.UtcNow);
-                }
-                delay = TimeSpan.FromMinutes(15);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
-            catch { delay = TimeSpan.FromMinutes(5); }
-            try { await Task.Delay(delay, cancellationToken); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
         }
     }
