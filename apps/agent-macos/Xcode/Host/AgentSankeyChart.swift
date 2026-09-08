@@ -162,17 +162,50 @@ private struct AgentSankeyColumn: View {
     static let rowHeight: CGFloat = 18
     static let headerHeight: CGFloat = 17
 
-    /// About how many characters fit the 150-point column at caption size.
-    ///
-    /// Not measured per glyph: the point is to keep colliding names apart, and
-    /// that only needs to know roughly where the text runs out (P3-86).
-    private static let labelWidth = 18
+    static let columnWidth: CGFloat = 150
+    private static let dotWidth: CGFloat = 7
+    private static let rowSpacing: CGFloat = 6
 
-    /// Names shortened together, so two destinations cannot read the same.
+    private static let font = NSFont.preferredFont(forTextStyle: .caption1)
+
+    private static func width(of text: String) -> CGFloat {
+        (text as NSString).size(withAttributes: [.font: font]).width
+    }
+
+    private var valueTexts: [String] {
+        nodes.map { formattedMetric($0.value, metric) }
+    }
+
+    /// The figures are given one width for the whole column, so the names do
+    /// not shift about as the numbers change between refreshes.
+    private var valueWidth: CGFloat {
+        (valueTexts.map(Self.width) + [Self.width("0")]).max() ?? 0
+    }
+
+    /// What is actually left for a name once the dot, the gaps and the figures
+    /// have taken theirs.
+    private var nameWidth: CGFloat {
+        max(0, Self.columnWidth - Self.dotWidth - Self.rowSpacing * 2 - valueWidth)
+    }
+
+    /// Names shortened together, so two destinations cannot read the same --
+    /// and shortened to the room each one has, so nobody shortens them again.
+    ///
+    /// The question asked is width, not character count. A fixed budget of 18
+    /// characters was right in the connections view and one point too wide in
+    /// the data volume view, where `24.6 MB` takes more room than `17,187`:
+    /// SwiftUI truncated the label a second time, from the end, which is
+    /// where P3-86 puts the characters that tell two destinations apart
+    /// (P3-89).
+    ///
+    /// Names are therefore a little shorter when the figures beside them are
+    /// wider. That is the column being honest about its width; the
+    /// alternative is a name that claims to be whole and is not.
     private var labels: [String] {
-        DestinationLabel.shorten(
+        let room = nameWidth
+        return DestinationLabel.shorten(
             nodes.map { $0.isRemainder ? L("Other") : $0.name },
-            limit: Self.labelWidth
+            fits: { Self.width($0) <= room }
         )
     }
 
@@ -189,7 +222,7 @@ private struct AgentSankeyColumn: View {
             Spacer(minLength: 0)
         }
         .font(.caption)
-        .frame(width: 150, alignment: alignment == .leading ? .leading : .trailing)
+        .frame(width: Self.columnWidth, alignment: alignment == .leading ? .leading : .trailing)
         // Hidden from VoiceOver, shown on screen.
         //
         // Measured 2026-09-03: these two columns put 38 separate elements
@@ -207,17 +240,25 @@ private struct AgentSankeyColumn: View {
             .fill(coloured
                   ? agentSeriesColor(index, isRemainder: node.isRemainder)
                   : Color.secondary.opacity(0.6))
-            .frame(width: 7, height: 7)
-        // Already shortened together above, so SwiftUI is not asked to
-        // truncate again -- doing both would drop the part that was kept to
-        // tell two destinations apart.
+            .frame(width: Self.dotWidth, height: Self.dotWidth)
+        // Already shortened to what the column leaves for a name, so SwiftUI
+        // is not asked to truncate again -- doing both would drop the part
+        // that was kept to tell two destinations apart (P3-86, P3-89).
         let name = Text(label)
             .lineLimit(1)
+        // The width the names were shortened against, given to the figures for
+        // real. Without it the reservation is a number in a comment: the
+        // widest row pushes the column and every name is measured against
+        // space it does not have.
         let value = Text(formattedMetric(node.value, metric))
             .foregroundStyle(.secondary)
             .lineLimit(1)
+            .frame(
+                width: valueWidth,
+                alignment: alignment == .leading ? .trailing : .leading
+            )
 
-        HStack(spacing: 6) {
+        HStack(spacing: Self.rowSpacing) {
             // The dot sits against the diagram on both sides, so each name
             // reads outward from the ribbon it belongs to.
             if alignment == .leading {

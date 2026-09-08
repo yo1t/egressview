@@ -109,6 +109,55 @@ final class DestinationLabelTests: XCTestCase {
         }
     }
 
+    // MARK: - 幅で判定する（P3-89）
+
+    /// A stand-in for text measurement: wide letters cost more than narrow
+    /// ones, which is the whole reason character counts were not enough.
+    private func width(_ label: String) -> Double {
+        label.reduce(0) { total, character in
+            total + ("mw".contains(character) ? 2.0 : 1.0)
+        }
+    }
+
+    func test収まっている名前は他の行の都合で短縮されない() {
+        // The column picks one budget for every row when it counts
+        // characters, so one wide name drags the short ones down with it.
+        // Asking per name is what stops that.
+        let names = ["api.github.com", "wwwmmmwwwmmmwwwmmm.example.com"]
+        let labels = DestinationLabel.shorten(names, fits: { width($0) <= 20 })
+        XCTAssertEqual(labels[0], "api.github.com", "収まっているのに短縮された")
+    }
+
+    func test全ての行が与えられた幅に収まる() {
+        // The failure this replaces: a label that did not fit was handed to
+        // the view anyway, and the view truncated it a second time.
+        let names = [
+            "cdn-windows-client-a.example.com",
+            "cdn-windows-client-zulu.example.com",
+            "runtime.us-east-1.kiro.dev",
+            "openvsx.example-content.net",
+            "chatgpt.com",
+        ]
+        for label in DestinationLabel.shorten(names, fits: { width($0) <= 16 }) {
+            XCTAssertLessThanOrEqual(width(label), 16, "\(label) が幅16に収まらない")
+        }
+    }
+
+    func test幅で判定しても衝突は解ける() {
+        let names = [
+            "cdn-windows-client-a.example.com",
+            "cdn-windows-client-b.example.com",
+        ]
+        let labels = DestinationLabel.shorten(names, fits: { width($0) <= 16 })
+        XCTAssertNotEqual(labels[0], labels[1], "両方とも \(labels[0]) と読める")
+    }
+
+    func test何も収まらない幅でも空にならない() {
+        let labels = DestinationLabel.shorten(["api.github.com"], fits: { _ in false })
+        XCTAssertEqual(labels.count, 1)
+        XCTAssertFalse(labels[0].isEmpty)
+    }
+
     func test空の入力を扱える() {
         XCTAssertEqual(DestinationLabel.shorten([], limit: 18), [])
     }

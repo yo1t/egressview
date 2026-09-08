@@ -34,7 +34,21 @@ public enum DestinationLabel {
     ///   raised to that.
     public static func shorten(_ names: [String], limit: Int) -> [String] {
         let width = max(8, limit)
-        let first = names.map { middleTruncated($0, limit: width) }
+        return shorten(names, fits: { $0.count <= width })
+    }
+
+    /// Shortens `names` to whatever `fits` accepts, keeping colliding names
+    /// distinguishable.
+    ///
+    /// The caller decides what fitting means. The column measures the room a
+    /// name actually has; the tests count characters. Deciding here, in
+    /// characters, is what put a name in a space it did not have and let the
+    /// drawing truncate it a second time (P3-89).
+    ///
+    /// `fits` is asked per name, so a short name is not shortened because a
+    /// wide one in the same column had to be.
+    public static func shorten(_ names: [String], fits: (String) -> Bool) -> [String] {
+        let first = names.map { longestFitting($0, fits: fits) { middleTruncated($0, limit: $1) } }
         var groups: [String: [String]] = [:]
         for (name, label) in zip(names, first) { groups[label, default: []].append(name) }
         guard groups.values.contains(where: { $0.count > 1 }) else { return first }
@@ -42,13 +56,37 @@ public enum DestinationLabel {
         return zip(names, first).map { original, label in
             guard let group = groups[label], group.count > 1 else { return label }
             let shared = sharedEnds(of: group)
-            return distinguishing(
-                original,
-                sharedPrefix: shared.prefix,
-                sharedSuffix: shared.suffix,
-                limit: width
-            )
+            return longestFitting(original, fits: fits) { name, limit in
+                distinguishing(
+                    name,
+                    sharedPrefix: shared.prefix,
+                    sharedSuffix: shared.suffix,
+                    limit: limit
+                )
+            }
         }
+    }
+
+    /// The longest label `make` can produce for `name` that `fits` accepts.
+    ///
+    /// Counted down from the whole name rather than searched by halves: the
+    /// two shortenings keep different characters at different lengths, so
+    /// width does not rise perfectly with the count and a binary search can
+    /// settle below the longest label that would have fitted.
+    static func longestFitting(
+        _ name: String,
+        fits: (String) -> Bool,
+        make: (String, Int) -> String
+    ) -> String {
+        var shortest = make(name, 1)
+        for limit in stride(from: name.count, through: 1, by: -1) {
+            let candidate = make(name, limit)
+            if fits(candidate) { return candidate }
+            shortest = candidate
+        }
+        // Nothing fits, so give back the least that can be shown rather than
+        // nothing at all.
+        return shortest
     }
 
     /// `ipv6-cdn-042.example.video.net` -> `ipv6-cdn…video.net`
