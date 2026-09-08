@@ -8,7 +8,7 @@ namespace EgressView.Agent.Service;
 
 internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnapshot> snapshot, string allowedSid,
     WindowsCredentialStore credentialStore, Func<bool> monitoringEnabled, Func<bool, bool> setMonitoringEnabled,
-    DeliveryController delivery) : IAsyncDisposable
+    DeliveryController delivery, EnrichmentController enrichment) : IAsyncDisposable
 {
     public const string PipeName = "egressview-agent-v1";
     private readonly CancellationTokenSource stop = new();
@@ -47,7 +47,8 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
                         throw new InvalidOperationException("Enrollment is required before delivery can be enabled.");
                     store.DeliveryEnabled = enabled;
                     delivery.SettingsChanged();
-                }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled, DeliveryStatus, delivery.RequestNow));
+                }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled, DeliveryStatus, delivery.RequestNow,
+                enrichment.Status, enrichment.RequestNow));
         }
     }
 

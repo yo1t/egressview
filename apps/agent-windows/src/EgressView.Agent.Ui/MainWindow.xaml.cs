@@ -351,20 +351,22 @@ public partial class MainWindow : Window
         NotificationsEnabled.IsChecked = AgentSettings.NotificationsEnabled;
         DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 20 => 2, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
-        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "hub" => 2, _ => 0 };
+        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "hub" => 3, _ => 0 };
         Globe.FramesPerSecond = AgentSettings.GlobeFrameRate;
         loadingSettings = false;
     }
 
     private void SettingsSectionChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (GeneralSettingsSection is null || NotificationSettingsSection is null || HubSettingsSection is null ||
+        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || HubSettingsSection is null ||
             SettingsSectionChoice.SelectedItem is not ListBoxItem item) return;
         var section = item.Tag?.ToString() ?? "general";
         GeneralSettingsSection.Visibility = section == "general" ? Visibility.Visible : Visibility.Collapsed;
         NotificationSettingsSection.Visibility = section == "notifications" ? Visibility.Visible : Visibility.Collapsed;
+        EnrichmentSettingsSection.Visibility = section == "enrichment" ? Visibility.Visible : Visibility.Collapsed;
         HubSettingsSection.Visibility = section == "hub" ? Visibility.Visible : Visibility.Collapsed;
         if (!loadingSettings) AgentSettings.SettingsSection = section;
+        if (section == "enrichment") _ = RefreshEnrichmentStatusAsync();
     }
 
     private void LanguageChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -403,9 +405,69 @@ public partial class MainWindow : Window
         Name(DailyLimitChoice, "DailyLimit");
         Name(FrameRateChoice, "GlobeFrameRate");
         Name(SettingsSectionChoice, "SettingsSections");
+        Name(RefreshGeoButton, "FetchNow");
+        Name(RefreshThreatButton, "FetchNow");
         AutomationProperties.SetName(HubUrl, "Hub URL");
         foreach (var status in new[] { MonitoringStatus, CoverageNote, LogStatus, ThreatStatus, NotificationSummary, EnrollmentStatus })
             AutomationProperties.SetLiveSetting(status, AutomationLiveSetting.Polite);
+    }
+
+    private async Task RefreshEnrichmentStatusAsync()
+    {
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"enrichment-status"}""", lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            var data = document.RootElement.GetProperty("data");
+            var enrolled = data.GetProperty("enrolled").GetBoolean();
+            var source = enrolled && data.TryGetProperty("source", out var sourceValue) && sourceValue.ValueKind == JsonValueKind.String
+                ? sourceValue.GetString() : LocalizationManager.Text("NotEnrolled");
+            EnrichmentSource.Text = $"{LocalizationManager.Text("ActiveSource")}: {source}";
+            RenderEnrichment(data.GetProperty("geo"), GeoEnrichmentStatus, GeoEnrichmentFailure);
+            RenderEnrichment(data.GetProperty("threat"), ThreatEnrichmentStatus, ThreatEnrichmentFailure);
+            RefreshGeoButton.IsEnabled = RefreshThreatButton.IsEnabled = enrolled;
+        }
+        catch
+        {
+            EnrichmentSource.Text = LocalizationManager.Text("CannotConnect");
+            RefreshGeoButton.IsEnabled = RefreshThreatButton.IsEnabled = false;
+        }
+    }
+
+    private static void RenderEnrichment(JsonElement item, TextBlock status, TextBlock failure)
+    {
+        var state = item.GetProperty("state").GetString() ?? "idle";
+        var freshness = item.GetProperty("freshness").GetString() ?? "not-fetched";
+        var count = item.GetProperty("count").GetInt64();
+        status.Text = $"{LocalizationManager.Text("LastSuccess")}: {DateText(item, "lastSuccessAt")} · {LocalizationManager.Text("Items")}: {count:N0} · {EnrichmentStateText(state, freshness)}";
+        failure.Text = item.TryGetProperty("lastFailure", out var value) && value.ValueKind == JsonValueKind.String
+            ? $"{LocalizationManager.Text("LastFailure")}: {value.GetString()}" : string.Empty;
+    }
+
+    private static string EnrichmentStateText(string state, string freshness)
+    {
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        if (state == "fetching") return ja ? "取得中" : "Fetching";
+        if (state == "queued") return ja ? "取得待ち" : "Queued";
+        if (state == "not-enrolled") return ja ? "Hub未登録" : "Not enrolled";
+        if (state == "failed") return ja ? "取得失敗" : "Fetch failed";
+        return freshness switch { "current" => ja ? "最新" : "Current", "stale" => ja ? "期限切れ" : "Stale", _ => ja ? "未取得" : "Not fetched" };
+    }
+
+    private async void RefreshGeo_Click(object sender, RoutedEventArgs e) => await RequestEnrichmentAsync("geo");
+    private async void RefreshThreat_Click(object sender, RoutedEventArgs e) => await RequestEnrichmentAsync("threat");
+
+    private async Task RequestEnrichmentAsync(string kind)
+    {
+        RefreshGeoButton.IsEnabled = RefreshThreatButton.IsEnabled = false;
+        try
+        {
+            await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "refresh-enrichment", kind }), lifetime.Token);
+            await Task.Delay(500, lifetime.Token);
+            await RefreshEnrichmentStatusAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch { await RefreshEnrichmentStatusAsync(); }
     }
 
     private void NotificationSettings_Changed(object sender, RoutedEventArgs e)

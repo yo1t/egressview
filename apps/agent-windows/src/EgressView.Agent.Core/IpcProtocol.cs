@@ -14,7 +14,9 @@ public static class IpcProtocol
         Func<int, ThreatReport>? threats = null,
         Func<bool, bool>? setMonitoringEnabled = null,
         Func<string>? deliveryStatus = null,
-        Action? requestDeliveryNow = null)
+        Action? requestDeliveryNow = null,
+        Func<string>? enrichmentStatus = null,
+        Action<string>? requestEnrichmentNow = null)
     {
         try
         {
@@ -36,10 +38,20 @@ public static class IpcProtocol
                 "set-monitoring-enabled" => SetMonitoringEnabled(root, setMonitoringEnabled),
                 "delivery-status" => DynamicStatus(deliveryStatus),
                 "send-delivery-now" => Invoke(requestDeliveryNow, "delivery-unavailable"),
+                "enrichment-status" => DynamicStatus(enrichmentStatus),
+                "refresh-enrichment" => RefreshEnrichment(root, requestEnrichmentNow),
                 _ => Reject("unknown-operation"),
             };
         }
         catch (Exception) { return Reject("malformed-request"); }
+    }
+
+    private static string RefreshEnrichment(JsonElement root, Action<string>? refresh)
+    {
+        var kind = root.TryGetProperty("kind", out var value) ? value.GetString() : null;
+        if (refresh is null || kind is not ("geo" or "threat" or "all")) return Reject("invalid-enrichment-kind");
+        try { refresh(kind); return JsonSerializer.Serialize(new { status = "ok", kind }); }
+        catch { return Reject("enrichment-refresh-failed"); }
     }
 
     private static string DynamicStatus(Func<string>? read)
