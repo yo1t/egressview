@@ -55,7 +55,8 @@ public sealed record RecentFlow(
     ObservationLayer Layer,
     string? InterfaceId,
     string Origin,
-    string? RemoteHostname = null);
+    string? RemoteHostname = null,
+    string? CountryCode = null);
 
 public sealed record GeoLocation(string Ip, double Latitude, double Longitude, string? CountryCode, string? City);
 public sealed record GeoCacheState(string? ETag, DateTimeOffset? FetchedAt, long LocationCount);

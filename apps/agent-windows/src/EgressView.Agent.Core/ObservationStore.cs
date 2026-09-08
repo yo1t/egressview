@@ -170,6 +170,7 @@ public sealed partial class ObservationStore : IDisposable
     private nint db;
     private bool disposed;
     private readonly string path;
+    private string lastVerifiedIntegrity = "ok";
 
     public long SchemaVersion { get { lock (gate) return ScalarInt64("SELECT version FROM schema_version"); } }
 
@@ -335,6 +336,7 @@ public sealed partial class ObservationStore : IDisposable
         var integrity = ScalarText("PRAGMA integrity_check");
         if (!string.Equals(integrity, "ok", StringComparison.Ordinal))
             throw new ObservationStoreException(StoreFailureKind.Corrupt, $"Database integrity check failed: {integrity}");
+        lastVerifiedIntegrity = integrity;
     }
 
     private void ValidateSchema()
@@ -580,12 +582,13 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
-    public (long Count, string Integrity) Inspect()
+    public (long Count, string Integrity) Inspect(bool verifyIntegrity = true)
     {
         lock (gate)
         {
             var count = ScalarInt64("SELECT COUNT(*) FROM observations");
-            var integrity = ScalarText("PRAGMA integrity_check");
+            var integrity = verifyIntegrity ? ScalarText("PRAGMA integrity_check") : lastVerifiedIntegrity;
+            if (verifyIntegrity) lastVerifiedIntegrity = integrity;
             return (count, integrity);
         }
     }
@@ -747,8 +750,8 @@ public sealed partial class ObservationStore : IDisposable
         if (offset is < 0 or > 1_000_000) throw new ArgumentOutOfRangeException(nameof(offset));
         lock (gate)
         {
-            const string columns = "first_seen,last_seen,protocol,local_address,local_port,remote_address,remote_port,process_id,process_name,bytes_sent,bytes_received,layer,interface_id,origin,remote_hostname";
-            var sql = $"SELECT {columns} FROM flows ORDER BY last_seen DESC,flow_key LIMIT {limit} OFFSET {offset}";
+            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,g.country_code";
+            var sql = $"SELECT {columns} FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address ORDER BY f.last_seen DESC,f.flow_key LIMIT {limit} OFFSET {offset}";
             CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
             var result = new List<RecentFlow>();
             try
@@ -764,7 +767,7 @@ public sealed partial class ObservationStore : IDisposable
                         Text(statement, 5), (int)WinSqlite.ColumnInt64(statement, 6), (int)WinSqlite.ColumnInt64(statement, 7),
                         NullableTextValue(statement, 8), NullableInt64(statement, 9), NullableInt64(statement, 10),
                         Text(statement, 11) == "vpn_transport" ? ObservationLayer.VpnTransport : ObservationLayer.Logical,
-                        NullableTextValue(statement, 12), Text(statement, 13), NullableTextValue(statement, 14)));
+                        NullableTextValue(statement, 12), Text(statement, 13), NullableTextValue(statement, 14), NullableTextValue(statement, 15)));
                 }
             }
             finally { WinSqlite.Finalize(statement); }

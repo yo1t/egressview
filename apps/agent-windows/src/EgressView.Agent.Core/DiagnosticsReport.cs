@@ -4,9 +4,13 @@ namespace EgressView.Agent.Core;
 
 public static class DiagnosticsReport
 {
-    public static string Create(CollectorSnapshot snapshot, ObservationStore store, string version, bool monitoringEnabled = true)
+    public static string Create(CollectorSnapshot snapshot, ObservationStore store, string version, bool monitoringEnabled = true,
+        bool verifyIntegrity = false)
     {
-        var (count, integrity) = store.Inspect();
+        // The service verified the entire database when it opened it. Re-running
+        // integrity_check for every 15-second UI status request can take minutes
+        // on a multi-GB history and monopolizes the single authenticated pipe.
+        var (count, integrity) = store.Inspect(verifyIntegrity);
         var coverage = store.ReadCoverage();
         var flowStats = store.ReadFlowStats();
         var processNames = store.ReadProcessNameStats();
