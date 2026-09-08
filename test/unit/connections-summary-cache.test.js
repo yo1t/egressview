@@ -92,4 +92,20 @@ describe('連続する要約要求がキャッシュを共有する（P3-67）',
     await request(app, `/api/connections/summary?from=${now}&src=192.0.2.11`);
     assert.equal(calls, 2, '別の送信元に同じ答えを返した');
   });
+
+  it('ヒット率を数えるので、効いていないことが外から見える', async () => {
+    // The defect was invisible: the query was correct, the response was
+    // correct, and only the cost was wrong. A hit rate is what that looks
+    // like from outside.
+    const app = mount({ summarizeByTimeRange: () => ({ byDst: [], byDevice: [], total: 0 }) });
+    const before = connectionsRoutes.summaryCacheSnapshot();
+    const now = freshBase();
+    await request(app, `/api/connections/summary?from=${now}`);
+    await request(app, `/api/connections/summary?from=${now + 3}`);
+    const after = connectionsRoutes.summaryCacheSnapshot();
+
+    assert.equal(after.misses - before.misses, 1, 'ミスを数えていない');
+    assert.equal(after.hits - before.hits, 1, 'ヒットを数えていない');
+    assert.ok(after.hitRate > 0, 'ヒット率が出ていない');
+  });
 });
