@@ -193,6 +193,17 @@ private struct AgentSankeyColumn: View {
 
     /// What is actually left for a name once the dot, the gaps and the figures
     /// have taken theirs.
+    ///
+    /// Two gaps, because the row below holds exactly three things. It used to
+    /// hold four -- a `Spacer` sat between the name and the figure, and an
+    /// `HStack` puts its spacing around every child, so the row spent three
+    /// gaps while this subtracted two. Every name was measured against six
+    /// points it did not have and was truncated a second time on the screen
+    /// (P3-89, third attempt).
+    ///
+    /// The spacer is gone and each of the three has an explicit width, so the
+    /// row adds up to the column exactly and this can be checked by reading
+    /// it: 7 + 6 + name + 6 + figure = 150.
     private var nameWidth: CGFloat {
         max(0, Self.columnWidth - Self.dotWidth - Self.rowSpacing * 2 - valueWidth)
     }
@@ -258,6 +269,10 @@ private struct AgentSankeyColumn: View {
         // that was kept to tell two destinations apart (P3-86, P3-89).
         let name = Text(label)
             .lineLimit(1)
+            .frame(
+                width: nameWidth,
+                alignment: alignment == .leading ? .leading : .trailing
+            )
         // The width the names were shortened against, given to the figures for
         // real. Without it the reservation is a number in a comment: the
         // widest row pushes the column and every name is measured against
@@ -276,11 +291,9 @@ private struct AgentSankeyColumn: View {
             if alignment == .leading {
                 dot
                 name
-                Spacer(minLength: 0)
                 value
             } else {
                 value
-                Spacer(minLength: 0)
                 name
                 dot
             }
