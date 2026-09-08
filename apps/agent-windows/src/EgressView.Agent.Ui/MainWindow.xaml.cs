@@ -191,12 +191,24 @@ public partial class MainWindow : Window
             var low = report.Findings.Select(item => item.Destination).Distinct().Count() - high;
             ThreatCount.Text = report.Availability == "available" ? (high + low).ToString("N0") : "—";
             ThreatChecked.Text = report.CheckedDestinations.ToString("N0"); ThreatHigh.Text = high.ToString("N0"); ThreatLow.Text = low.ToString("N0");
+            var fetched = report.FetchedAt is { } fetchedAt ? fetchedAt.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) : "—";
+            ThreatContext.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("ThreatContext"),
+                report.IndicatorCount, fetched, PeriodChoice.SelectedItem is ComboBoxItem range ? range.Content : "—",
+                report.DomainCheckedDestinations, report.DomainUncheckedDestinations);
             var status = report.Availability switch { "available" when report.Findings.Count == 0 => LocalizationManager.Text("NoThreatMatches"), "available" => string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("ThreatMatches"), report.Findings.Count), "unavailable" => LocalizationManager.Text("HubNoThreatFeeds"), _ => LocalizationManager.Text("ThreatNotChecked") };
             ThreatStatus.Text = report.Availability == "available"
                 ? $"{status} {string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DomainCoverage"), report.DomainCheckedDestinations, report.DomainUncheckedDestinations)}"
                 : status;
         }
         catch { ThreatStatus.Text = LocalizationManager.Text("ThreatNotChecked"); ThreatCount.Text = "—"; }
+    }
+
+    private void ThreatGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ThreatGrid.SelectedItem is not ThreatRow row) { ThreatDetail.Text = LocalizationManager.Text("SelectThreat"); return; }
+        ThreatDetail.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("ThreatDetailFormat"),
+            row.Address, row.RequestedName, row.Application, row.IndicatorKind, row.MatchedValue, row.Feed, row.Reason,
+            row.Connections, row.DataVolume, row.FirstSeen, row.LastSeen);
     }
 
     private void LogFilter_Changed(object sender, RoutedEventArgs e) { if (IsLoaded) ApplyLogFilter(); }
@@ -655,12 +667,20 @@ internal sealed class RankedRow(string name, long value, bool bytes)
 
 public sealed class ThreatRow(ThreatFinding value)
 {
-    public string Confidence => LocalizationManager.Text(value.Confidence == "high" ? "HighConfidence" : "LowConfidence");
+    public string Confidence => LocalizationManager.Text(value.Confidence == "high" ? "HighAction" : "LowAction");
     public string Destination => value.Destination;
+    public string Address => value.Address;
+    public string RequestedName => value.RequestedName ?? LocalizationManager.Text("Unavailable");
     public string Application => value.Application;
     public string Connections => value.Connections.ToString("N0");
     public string Feed => value.Source ?? "—";
     public string Reason => value.Tag ?? $"{value.IndicatorKind}: {value.MatchedValue}";
+    public string IndicatorKind => value.IndicatorKind.ToUpperInvariant();
+    public string MatchedValue => value.MatchedValue;
+    public string DataVolume => value.ConnectionsWithoutBytes == 0 ? FlowRow.FormatBytes(value.Bytes) :
+        $"{FlowRow.FormatBytes(value.Bytes)} + {value.ConnectionsWithoutBytes:N0} {LocalizationManager.Text("Unmeasured").ToLower(CultureInfo.CurrentCulture)}";
+    public string FirstSeen => value.FirstSeen.LocalDateTime.ToString("g");
+    public string LastSeen => value.LastSeen.LocalDateTime.ToString("g");
 }
 
 internal sealed class NotificationRow(NotificationHistoryEntry value)

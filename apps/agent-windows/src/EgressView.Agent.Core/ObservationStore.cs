@@ -1074,7 +1074,7 @@ public sealed partial class ObservationStore : IDisposable
             // reported thousands where the machine runs dozens. They all fold
             // into one bucket the reader can see and question instead.
             const string app = "COALESCE(NULLIF(process_name,''),'Unknown')";
-            var sql = $"SELECT remote_address,remote_hostname,{app},COUNT(*),COALESCE(SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),0),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END),MAX(last_seen) FROM flows WHERE last_seen>='{from.ToUniversalTime():O}' AND first_seen<'{to.ToUniversalTime():O}' AND layer='logical' GROUP BY 1,2,3 ORDER BY 4 DESC";
+            var sql = $"SELECT remote_address,remote_hostname,{app},COUNT(*),COALESCE(SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),0),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END),MIN(first_seen),MAX(last_seen) FROM flows WHERE last_seen>='{from.ToUniversalTime():O}' AND first_seen<'{to.ToUniversalTime():O}' AND layer='logical' GROUP BY 1,2,3 ORDER BY 4 DESC";
             CheckOperation(WinSqlite.Prepare(db, sql, -1, out var candidateStatement, 0));
             var checkedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var domainChecked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1104,9 +1104,10 @@ public sealed partial class ObservationStore : IDisposable
                     }
                     if (match is null) continue;
                     var destination = match.Kind == "domain" ? $"{hostname} ({address})" : address;
-                    findings.Add(new(destination, Text(candidateStatement, 2), WinSqlite.ColumnInt64(candidateStatement, 3),
+                    findings.Add(new(destination, address, hostname, Text(candidateStatement, 2), WinSqlite.ColumnInt64(candidateStatement, 3),
                         WinSqlite.ColumnInt64(candidateStatement, 4), WinSqlite.ColumnInt64(candidateStatement, 5),
-                        DateTimeOffset.Parse(Text(candidateStatement, 6)), match.Kind, matchedValue ?? match.Value, match.Source, match.Tag, match.Confidence));
+                        DateTimeOffset.Parse(Text(candidateStatement, 6)), DateTimeOffset.Parse(Text(candidateStatement, 7)),
+                        match.Kind, matchedValue ?? match.Value, match.Source, match.Tag, match.Confidence));
                 }
             }
             finally { WinSqlite.Finalize(candidateStatement); }
