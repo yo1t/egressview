@@ -119,6 +119,7 @@ public partial class MainWindow : Window
         {
             var limit = SelectedLimit();
             rawFlows = await ReadFlowPageAsync(limit, 0);
+            PopulateCountryFilter();
             ApplyLogFilter();
         }
         catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
@@ -201,12 +202,46 @@ public partial class MainWindow : Window
     private void LogFilter_Changed(object sender, RoutedEventArgs e) { if (IsLoaded) ApplyLogFilter(); }
     private void ApplyLogFilter()
     {
-        var query = LogSearch.Text.Trim();
-        var protocol = ProtocolFilter.SelectedItem is ComboBoxItem item ? item.Tag?.ToString() : "all";
-        var filtered = rawFlows.Where(flow => (protocol == "all" || flow.Protocol == protocol) &&
-            (query.Length == 0 || (flow.ProcessName?.Contains(query, StringComparison.CurrentCultureIgnoreCase) ?? false) || flow.RemoteAddress.Contains(query, StringComparison.OrdinalIgnoreCase))).ToArray();
+        var app = AppFilter.Text.Trim();
+        var destination = DestinationFilter.Text.Trim();
+        var port = PortFilter.Text.Trim();
+        var country = SelectedTag(CountryFilter);
+        var protocol = SelectedTag(ProtocolFilter);
+        var volume = SelectedTag(VolumeFilter);
+        var collector = SelectedTag(CollectorFilter);
+        var from = DateTimeOffset.UtcNow.AddMinutes(-selectedMinutes);
+        var filtered = rawFlows.Where(flow => flow.LastSeen >= from &&
+            (app.Length == 0 || (flow.ProcessName?.Contains(app, StringComparison.CurrentCultureIgnoreCase) ?? false)) &&
+            (destination.Length == 0 || flow.RemoteAddress.Contains(destination, StringComparison.OrdinalIgnoreCase) ||
+                (flow.RemoteHostname?.Contains(destination, StringComparison.CurrentCultureIgnoreCase) ?? false)) &&
+            (port.Length == 0 || flow.RemotePort.ToString(CultureInfo.InvariantCulture).Contains(port, StringComparison.Ordinal)) &&
+            (country == "all" || (country == "unknown" ? string.IsNullOrWhiteSpace(flow.CountryCode) : string.Equals(flow.CountryCode, country, StringComparison.OrdinalIgnoreCase))) &&
+            (protocol == "all" || flow.Protocol == protocol) &&
+            (volume == "all" || (volume == "measured" ? flow.BytesSent is not null && flow.BytesReceived is not null : flow.BytesSent is null || flow.BytesReceived is null)) &&
+            (collector == "all" || flow.Origin == collector)).ToArray();
         RecentFlows.Clear(); foreach (var flow in filtered) RecentFlows.Add(new FlowRow(flow));
-        LogStatus.Text = filtered.Length == 0 ? LocalizationManager.Text("NoConnections") : $"{filtered.Length:N0} {LocalizationManager.Text("Rows").ToLower(CultureInfo.CurrentCulture)}";
+        var active = new[] { app.Length > 0, destination.Length > 0, port.Length > 0, country != "all", protocol != "all", volume != "all", collector != "all" }.Count(value => value);
+        LogStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("LogCountStatus"), filtered.Length, rawFlows.Count, active);
+    }
+
+    private static string SelectedTag(System.Windows.Controls.ComboBox combo) => combo.SelectedItem is ComboBoxItem item ? item.Tag?.ToString() ?? "all" : "all";
+
+    private void PopulateCountryFilter()
+    {
+        var selected = SelectedTag(CountryFilter);
+        CountryFilter.Items.Clear();
+        CountryFilter.Items.Add(new ComboBoxItem { Tag = "all", Content = LocalizationManager.Text("AllCountries") });
+        foreach (var code in rawFlows.Select(flow => flow.CountryCode).Where(code => !string.IsNullOrWhiteSpace(code)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(code => code))
+            CountryFilter.Items.Add(new ComboBoxItem { Tag = code, Content = code });
+        CountryFilter.Items.Add(new ComboBoxItem { Tag = "unknown", Content = LocalizationManager.Text("UnknownCountry") });
+        CountryFilter.SelectedItem = CountryFilter.Items.Cast<ComboBoxItem>().FirstOrDefault(item => string.Equals(item.Tag?.ToString(), selected, StringComparison.OrdinalIgnoreCase)) ?? CountryFilter.Items[0];
+    }
+
+    private void ClearLogFilters_Click(object sender, RoutedEventArgs e)
+    {
+        AppFilter.Clear(); DestinationFilter.Clear(); PortFilter.Clear();
+        CountryFilter.SelectedIndex = ProtocolFilter.SelectedIndex = VolumeFilter.SelectedIndex = CollectorFilter.SelectedIndex = 0;
+        ApplyLogFilter();
     }
 
     private void GlobeViewChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -393,8 +428,13 @@ public partial class MainWindow : Window
         Name(Timeline, "WhenTraffic");
         Name(TopApplicationsList, "TopApplications");
         Name(TopDestinationsList, "TopDestinations");
-        Name(LogSearch, "Search");
+        Name(AppFilter, "Process");
+        Name(DestinationFilter, "Destination");
+        Name(PortFilter, "Port");
+        Name(CountryFilter, "Country");
         Name(ProtocolFilter, "Protocol");
+        Name(VolumeFilter, "DataVolume");
+        Name(CollectorFilter, "Collector");
         Name(RowLimit, "Rows");
         Name(ConnectionGrid, "ConnectionLog");
         Name(ThreatGrid, "Threats");
@@ -593,10 +633,11 @@ public sealed class FlowRow(RecentFlow value)
     {
         get
         {
-            var endpoint = value.RemoteAddress.Contains(':') ? $"[{value.RemoteAddress}]:{value.RemotePort}" : $"{value.RemoteAddress}:{value.RemotePort}";
-            return string.IsNullOrWhiteSpace(value.RemoteHostname) ? endpoint : $"{value.RemoteHostname} ({endpoint})";
+            return string.IsNullOrWhiteSpace(value.RemoteHostname) ? value.RemoteAddress : $"{value.RemoteHostname} ({value.RemoteAddress})";
         }
     }
+    public int Port => value.RemotePort;
+    public string Country => value.CountryCode ?? LocalizationManager.Text("Unknown");
     public string Protocol => value.Protocol;
     public string BytesReceivedText => FormatBytes(value.BytesReceived);
     public string BytesSentText => FormatBytes(value.BytesSent);
