@@ -65,7 +65,7 @@ internal static class Program
         var database = Argument(args, "--data") ?? throw new ArgumentException("--data is required");
         var destination = Argument(args, "--diagnostics-bundle") ?? throw new ArgumentException("--diagnostics-bundle path is required");
         using var store = new ObservationStore(database);
-        var report = DiagnosticsReport.Create(new CollectorSnapshot("stopped", 0, 0, 0, 0, null, null, 0), store, "0.1.0-dev");
+        var report = DiagnosticsReport.Create(new CollectorSnapshot("stopped", 0, 0, 0, 0, null, null, 0), store, "0.1.0-dev", verifyIntegrity: true);
         DiagnosticsBundle.Create(destination, report);
         return 0;
     }
@@ -75,7 +75,7 @@ internal static class Program
         var database = Argument(args, "--data") ?? throw new ArgumentException("--data is required");
         using var store = new ObservationStore(database);
         Console.WriteLine(DiagnosticsReport.Create(
-            new CollectorSnapshot("stopped", 0, 0, 0, 0, null, null, 0), store, "0.1.0-dev"));
+            new CollectorSnapshot("stopped", 0, 0, 0, 0, null, null, 0), store, "0.1.0-dev", verifyIntegrity: true));
         return 0;
     }
 

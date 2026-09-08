@@ -170,6 +170,7 @@ public sealed partial class ObservationStore : IDisposable
     private nint db;
     private bool disposed;
     private readonly string path;
+    private string lastVerifiedIntegrity = "ok";
 
     public long SchemaVersion { get { lock (gate) return ScalarInt64("SELECT version FROM schema_version"); } }
 
@@ -335,6 +336,7 @@ public sealed partial class ObservationStore : IDisposable
         var integrity = ScalarText("PRAGMA integrity_check");
         if (!string.Equals(integrity, "ok", StringComparison.Ordinal))
             throw new ObservationStoreException(StoreFailureKind.Corrupt, $"Database integrity check failed: {integrity}");
+        lastVerifiedIntegrity = integrity;
     }
 
     private void ValidateSchema()
@@ -580,12 +582,13 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
-    public (long Count, string Integrity) Inspect()
+    public (long Count, string Integrity) Inspect(bool verifyIntegrity = true)
     {
         lock (gate)
         {
             var count = ScalarInt64("SELECT COUNT(*) FROM observations");
-            var integrity = ScalarText("PRAGMA integrity_check");
+            var integrity = verifyIntegrity ? ScalarText("PRAGMA integrity_check") : lastVerifiedIntegrity;
+            if (verifyIntegrity) lastVerifiedIntegrity = integrity;
             return (count, integrity);
         }
     }
