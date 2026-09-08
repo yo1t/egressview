@@ -15,15 +15,15 @@
 	<key>CFBundlePackageType</key>
 	<string>SYSX</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.5.55</string>
+	<string>0.5.56</string>
 	<key>CFBundleVersion</key>
-	<string>127</string>
+	<string>128</string>
 	<key>NSSystemExtensionUsageDescription</key>
 	<string>EgressView monitors outbound connection metadata without reading application content or blocking traffic.</string>
 	<key>NetworkExtension</key>
 	<dict>
 		<key>NEMachServiceName</key>
-		<string>group.com.egressview.agent.xpc.127</string>
+		<string>group.com.egressview.agent.xpc.128</string>
 		<key>NEProviderClasses</key>
 		<dict>
 			<key>com.apple.networkextension.filter-data</key>
