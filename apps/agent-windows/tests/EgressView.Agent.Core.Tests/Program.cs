@@ -293,8 +293,9 @@ try
         var threatReport = geoStore.ReadThreatReport(observedAt.AddMinutes(-2), DateTimeOffset.UtcNow);
         Assert(threatReport.Availability == "available" && threatReport.CheckedDestinations == 2 &&
             threatReport.DomainCheckedDestinations == 1 && threatReport.DomainUncheckedDestinations == 1 &&
-            threatReport.Findings.Single().MatchedValue == "bad.example",
-            "parent-domain indicators match locally while hostname-unavailable destinations remain explicit");
+            threatReport.Findings.Single() is { MatchedValue: "bad.example", Address: "203.0.113.8", RequestedName: "api.bad.example" } finding &&
+            finding.FirstSeen == observedAt && finding.LastSeen == observedAt,
+            "parent-domain findings retain address, requested name, and observation bounds while hostname-unavailable destinations remain explicit");
         geoStore.ReplaceThreatIndicators(true,
             [new ThreatIndicator("ip", "203.0.113.8", "ip-feed", "exact IP", "high"),
              new ThreatIndicator("domain", "bad.example", "domain-feed", "domain", "high")], "threat-etag-2", observedAt);

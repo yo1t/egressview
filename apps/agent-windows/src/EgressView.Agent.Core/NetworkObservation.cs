@@ -80,9 +80,9 @@ public sealed record PeriodAnalysis(
 
 public sealed record ThreatIndicator(string Kind, string Value, string? Source, string? Tag, string Confidence);
 public sealed record ThreatCacheState(string Availability, string? ETag, DateTimeOffset? FetchedAt, long IndicatorCount);
-public sealed record ThreatFinding(string Destination, string Application, long Connections, long Bytes,
-    long ConnectionsWithoutBytes, DateTimeOffset LastSeen, string IndicatorKind, string MatchedValue,
-    string? Source, string? Tag, string Confidence);
+public sealed record ThreatFinding(string Destination, string Address, string? RequestedName, string Application,
+    long Connections, long Bytes, long ConnectionsWithoutBytes, DateTimeOffset FirstSeen, DateTimeOffset LastSeen,
+    string IndicatorKind, string MatchedValue, string? Source, string? Tag, string Confidence);
 public sealed record ThreatReport(string Availability, long IndicatorCount, DateTimeOffset? FetchedAt,
     int CheckedDestinations, IReadOnlyList<ThreatFinding> Findings)
 {
