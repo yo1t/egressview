@@ -53,7 +53,15 @@ struct AgentSankeyChart: View {
                     }
                     .frame(height: contentHeight)
                 }
-                .frame(height: viewportHeight)
+                // Follows the card, which follows the window: how many names
+                // are on screen is whatever the height allows, and the rest is
+                // a scroll away. The minimum is three rows, so a short window
+                // still shows a diagram rather than a scroll bar.
+                .frame(
+                    minHeight: AgentSankeyColumn.headerHeight
+                        + 3 * AgentSankeyColumn.rowHeight,
+                    maxHeight: .infinity
+                )
                 // On the whole diagram, not on the ribbons alone, and with a
                 // solid hit area: a Canvas is hit-tested where it drew, so the
                 // space between ribbons belongs to nothing and a pointer lands
@@ -85,26 +93,17 @@ struct AgentSankeyChart: View {
         )
     }
 
-    /// About how tall one name row is at caption size, including its spacing.
-    private static let rowHeight: CGFloat = 21
-    /// How many rows the card shows without scrolling.
-    ///
-    /// Ten, because the top of the list is what the card is for: the biggest
-    /// flows should be readable the moment it appears. The rest is a scroll
-    /// away rather than a taller card, so this panel keeps the height it has
-    /// beside the globe and the timeline.
-    private static let visibleRows = 10
-
-    private var viewportHeight: CGFloat {
-        CGFloat(Self.visibleRows) * Self.rowHeight
-    }
-
     /// As tall as the longer column needs, so nothing is laid out into a
     /// height it does not have. The drawing is proportional to this, which is
     /// why the ribbons keep meeting their names while scrolling.
+    ///
+    /// No lower bound in rows. The first version of this floored the content
+    /// at ten rows and gave the viewport exactly ten rows' worth, which made
+    /// the diagram 210 points tall whatever the window did -- the card grew
+    /// with the window and the drawing inside it did not (P3-15).
     private var contentHeight: CGFloat {
-        let rows = max(model.apps.count, model.destinations.count, Self.visibleRows)
-        return CGFloat(rows) * Self.rowHeight
+        let rows = max(model.apps.count, model.destinations.count, 1)
+        return AgentSankeyColumn.headerHeight + CGFloat(rows) * AgentSankeyColumn.rowHeight
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize) {
@@ -154,6 +153,15 @@ private struct AgentSankeyColumn: View {
     let coloured: Bool
     let alignment: HorizontalAlignment
 
+    /// One name row, and the heading above the column.
+    ///
+    /// Given to each row explicitly rather than estimated. The estimate was 21
+    /// points against a caption row that measures about 16, so the canvas was
+    /// laid out a third taller than the names beside it and the scroll extent
+    /// was wrong by the same third.
+    static let rowHeight: CGFloat = 18
+    static let headerHeight: CGFloat = 17
+
     /// About how many characters fit the 150-point column at caption size.
     ///
     /// Not measured per glyph: the point is to keep colliding names apart, and
@@ -169,12 +177,14 @@ private struct AgentSankeyColumn: View {
     }
 
     var body: some View {
-        VStack(alignment: alignment, spacing: 3) {
+        VStack(alignment: alignment, spacing: 0) {
             Text(title)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
+                .frame(height: Self.headerHeight)
             ForEach(Array(zip(nodes, labels).enumerated()), id: \.element.0.name) { index, pair in
                 row(index: index, node: pair.0, label: pair.1)
+                    .frame(height: Self.rowHeight)
             }
             Spacer(minLength: 0)
         }

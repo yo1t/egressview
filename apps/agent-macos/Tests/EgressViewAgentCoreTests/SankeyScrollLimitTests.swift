@@ -1,7 +1,7 @@
 import XCTest
 @testable import EgressViewAgentCore
 
-/// P3-15。上位8件では「その他」が34%を占めていた。30件へ広げ、画面は10件でスクロールする。
+/// P3-15。上位8件では「その他」が34%を占めていた。30件へ広げ、画面に入る件数は窓の高さが決め、残りはスクロールで届く。
 final class SankeyScrollLimitTests: XCTestCase {
     /// A long tail like the measured one: 656 destinations over a day.
     private func manyPairs(_ count: Int) -> [AppDestinationTotal] {

@@ -57,6 +57,58 @@ final class DestinationLabelTests: XCTestCase {
         XCTAssertFalse(labels[0].isEmpty)
     }
 
+    func test末尾だけが違う名前も区別できる() {
+        // Found on the real machine on 2026-09-08, in the build that was
+        // supposed to have fixed P3-86: two rows both read
+        // `cdn-windows-clien…`. Keeping the head cannot separate names that
+        // share their head, and these differ only after it.
+        // These collide under middle truncation -- they share the first nine
+        // characters and the last eight -- which is what put the same string
+        // on two rows.
+        let names = [
+            "cdn-windows-client-a.example.com",
+            "cdn-windows-client-b.example.com",
+        ]
+        XCTAssertEqual(
+            DestinationLabel.middleTruncated(names[0], limit: 18),
+            DestinationLabel.middleTruncated(names[1], limit: 18),
+            "衝突しない名前を選んでしまっており、この試験は何も確かめていない"
+        )
+        let labels = DestinationLabel.shorten(names, limit: 18)
+        XCTAssertNotEqual(labels[0], labels[1], "両方とも \(labels[0]) と読める")
+        XCTAssertTrue(labels[0].contains("a"), "違いのある位置を落とした: \(labels[0])")
+        XCTAssertTrue(labels[1].contains("b"), "違いのある位置を落とした: \(labels[1])")
+    }
+
+    func test先頭も末尾も共通で真ん中だけが違う名前を区別できる() {
+        let names = [
+            "cdn-windows-client-alpha.example.com",
+            "cdn-windows-client-bravo.example.com",
+        ]
+        XCTAssertEqual(
+            DestinationLabel.middleTruncated(names[0], limit: 18),
+            DestinationLabel.middleTruncated(names[1], limit: 18),
+            "衝突しない名前を選んでしまっており、この試験は何も確かめていない"
+        )
+        let labels = DestinationLabel.shorten(names, limit: 18)
+        XCTAssertNotEqual(labels[0], labels[1])
+        XCTAssertTrue(labels[0].contains("al"), "違いのある位置を落とした: \(labels[0])")
+        XCTAssertTrue(labels[1].contains("br"), "違いのある位置を落とした: \(labels[1])")
+    }
+
+    func test省略しても上限の文字数を超えない() {
+        let names = [
+            "cdn-windows-client-a.example.com",
+            "cdn-windows-client-b.example.com",
+            "ipv6-cdn-041.example.video.net",
+            "ipv6-cdn-042.example.video.net",
+            "static.assets.example.com",
+        ]
+        for label in DestinationLabel.shorten(names, limit: 18) {
+            XCTAssertLessThanOrEqual(label.count, 18, "\(label) が18文字を超えた")
+        }
+    }
+
     func test空の入力を扱える() {
         XCTAssertEqual(DestinationLabel.shorten([], limit: 18), [])
     }
