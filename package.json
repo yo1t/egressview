@@ -134,7 +134,7 @@
   "overrides": {
     "@hono/node-server": "2.0.11",
     "socket.io-parser": ">=4.2.7",
-    "hono": ">=4.12.34"
+    "hono": ">=4.13.5"
   },
   "allowScripts": {
     "better-sqlite3": true,
