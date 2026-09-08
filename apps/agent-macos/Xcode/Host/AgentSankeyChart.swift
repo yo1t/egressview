@@ -166,7 +166,16 @@ private struct AgentSankeyColumn: View {
     private static let dotWidth: CGFloat = 7
     private static let rowSpacing: CGFloat = 6
 
-    private static let font = NSFont.preferredFont(forTextStyle: .caption1)
+    /// The font the names are measured with -- and, below, the font they are
+    /// drawn with. One constant used for both, because the two being allowed
+    /// to differ is what broke this the first time it was fixed.
+    ///
+    /// Measuring used `preferredFont(forTextStyle: .caption1)`, which is 10
+    /// points, while `.font(.caption)` draws at 11. Every label was judged
+    /// against a name about 8% narrower than the one that reached the screen,
+    /// so labels that "fitted" overflowed and were truncated again -- the very
+    /// thing the measuring was added to prevent (P3-89).
+    private static let font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
 
     private static func width(of text: String) -> CGFloat {
         (text as NSString).size(withAttributes: [.font: font]).width
@@ -221,7 +230,10 @@ private struct AgentSankeyColumn: View {
             }
             Spacer(minLength: 0)
         }
-        .font(.caption)
+        // The measured font itself, not a style that resolves to something
+        // else. `.caption` is 11 points here and `.caption1` is 10, and a
+        // label measured against one and drawn in the other does not fit.
+        .font(Font(Self.font))
         .frame(width: Self.columnWidth, alignment: alignment == .leading ? .leading : .trailing)
         // Hidden from VoiceOver, shown on screen.
         //
