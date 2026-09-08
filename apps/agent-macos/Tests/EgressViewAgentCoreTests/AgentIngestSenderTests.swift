@@ -28,12 +28,23 @@ private actor SenderTransport: AgentIngestTransport {
     }
 
     func requestCount() -> Int { requests.count }
+    /// Ingest only. The sender also asks the Hub once what it accepts (P3-7),
+    /// and these cases are about delivery, not about that question.
+    func ingestCount() -> Int { requests.filter { $0.url?.path.hasSuffix("ingest") ?? false }.count }
 }
 
 private actor FlakySenderTransport: AgentIngestTransport {
     private var batchIDs: [UUID] = []
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        // The capability question carries no body (P3-7). Answer it with
+        // nothing useful, so the sender falls back to version 1 -- which is
+        // what this case asserted before the question existed.
+        guard request.url?.path.hasSuffix("ingest") ?? false else {
+            return (Data(), HTTPURLResponse(
+                url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil
+            )!)
+        }
         let envelope = try JSONDecoder.iso8601.decode(
             AgentIngestEnvelope.self,
             from: XCTUnwrap(request.httpBody)
@@ -73,8 +84,14 @@ final class AgentIngestSenderTests: XCTestCase {
     func testConnectivityRestorationPushesConfiguredHubAndAcknowledgesBatch() async throws {
         let batchID = LockedValue<UUID?>(nil)
         let transport = SenderTransport { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://hub.example/api/agent/ingest")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer egva_" + String(repeating: "a", count: 64))
+            guard request.url?.path.hasSuffix("ingest") ?? false else {
+                // The capability question, answered with nothing useful so the
+                // sender falls back to version 1 -- which is what these cases
+                // were already asserting before the question existed.
+                return (Data(), HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+            }
+            XCTAssertEqual(request.url?.absoluteString, "https://hub.example/api/agent/ingest")
             let body = try XCTUnwrap(request.httpBody)
             let envelope = try JSONDecoder.iso8601.decode(AgentIngestEnvelope.self, from: body)
             batchID.value = envelope.batchId
@@ -97,7 +114,7 @@ final class AgentIngestSenderTests: XCTestCase {
         try await waitUntil { queue.status().pendingCount == 0 }
 
         XCTAssertNotNil(batchID.value)
-        requestCount = await transport.requestCount()
+        requestCount = await transport.ingestCount()
         XCTAssertEqual(requestCount, 1)
     }
 
@@ -117,7 +134,7 @@ final class AgentIngestSenderTests: XCTestCase {
         await sender.sendNow()
         try await Task.sleep(for: .milliseconds(50))
 
-        let requestCount = await transport.requestCount()
+        let requestCount = await transport.ingestCount()
         XCTAssertEqual(requestCount, 1)
         XCTAssertEqual(queue.status().pendingCount, 2)
         XCTAssertEqual(states.value.last, .authorizationRequired)
@@ -126,6 +143,14 @@ final class AgentIngestSenderTests: XCTestCase {
     func testNewCredentialExplicitlyClearsAuthorizationLatch() async throws {
         let attempts = LockedValue(0)
         let transport = SenderTransport { request in
+            // Count ingest attempts, not every request: the sender also asks
+            // the Hub once what it accepts (P3-7), and the 401 under test
+            // belongs to delivery.
+            guard request.url?.path.hasSuffix("ingest") ?? false else {
+                return (Data(), HTTPURLResponse(
+                    url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil
+                )!)
+            }
             attempts.value += 1
             if attempts.value == 1 {
                 return (Data(), HTTPURLResponse(
@@ -233,7 +258,7 @@ final class AgentIngestSenderTests: XCTestCase {
         guard case .retryScheduled = states.value.last else {
             return XCTFail("new observations must preserve the scheduled retry state")
         }
-        let requestCount = await transport.requestCount()
+        let requestCount = await transport.ingestCount()
         XCTAssertEqual(requestCount, 1)
     }
 

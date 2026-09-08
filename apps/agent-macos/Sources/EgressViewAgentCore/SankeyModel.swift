@@ -51,7 +51,15 @@ public struct SankeyModel: Equatable, Sendable {
 public struct SankeyAggregator: Sendable {
     /// A single Mac produced over 100,000 observations in a day in production.
     /// Everything must be folded before it can be read.
-    public static let defaultLimit = 8
+    /// How many names each side keeps before the rest becomes `Other`.
+    ///
+    /// Thirty. Measured on this Mac over a day: 656 destinations, and the
+    /// remainder falls from 34% at eight names to 21% at thirty. It does not
+    /// keep falling -- the tail is long -- so this is where more rows stop
+    /// buying much. The card shows ten at a time and scrolls to the rest, so
+    /// the extra names cost height in a scroll view rather than on screen
+    /// (P3-15).
+    public static let defaultLimit = 30
 
     public let remainderName: String
     private let limit: Int

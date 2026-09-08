@@ -25,27 +25,35 @@ struct AgentSankeyChart: View {
                 // left to right, and a legend below makes the reader carry a
                 // colour across the card to find out what an end of a ribbon
                 // is.
-                HStack(alignment: .top, spacing: 12) {
-                    AgentSankeyColumn(
-                        title: L("Source"),
-                        nodes: model.apps,
-                        metric: model.metric,
-                        coloured: true,
-                        alignment: .leading
-                    )
-                    GeometryReader { proxy in
-                        Canvas { context, size in draw(in: &context, size: size) }
-                            .frame(width: proxy.size.width)
+                // Scrolls as one piece. The ribbons are drawn against the
+                // same height the names are laid out in, so scrolling the
+                // labels without the drawing would leave every band pointing
+                // at the wrong row (P3-15).
+                ScrollView(.vertical) {
+                    HStack(alignment: .top, spacing: 12) {
+                        AgentSankeyColumn(
+                            title: L("Source"),
+                            nodes: model.apps,
+                            metric: model.metric,
+                            coloured: true,
+                            alignment: .leading
+                        )
+                        GeometryReader { proxy in
+                            Canvas { context, size in draw(in: &context, size: size) }
+                                .frame(width: proxy.size.width)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        AgentSankeyColumn(
+                            title: L("Destination"),
+                            nodes: model.destinations,
+                            metric: model.metric,
+                            coloured: false,
+                            alignment: .trailing
+                        )
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    AgentSankeyColumn(
-                        title: L("Destination"),
-                        nodes: model.destinations,
-                        metric: model.metric,
-                        coloured: false,
-                        alignment: .trailing
-                    )
+                    .frame(height: contentHeight)
                 }
+                .frame(height: viewportHeight)
                 // On the whole diagram, not on the ribbons alone, and with a
                 // solid hit area: a Canvas is hit-tested where it drew, so the
                 // space between ribbons belongs to nothing and a pointer lands
@@ -75,6 +83,28 @@ struct AgentSankeyChart: View {
                   app, share, destination)
             }
         )
+    }
+
+    /// About how tall one name row is at caption size, including its spacing.
+    private static let rowHeight: CGFloat = 21
+    /// How many rows the card shows without scrolling.
+    ///
+    /// Ten, because the top of the list is what the card is for: the biggest
+    /// flows should be readable the moment it appears. The rest is a scroll
+    /// away rather than a taller card, so this panel keeps the height it has
+    /// beside the globe and the timeline.
+    private static let visibleRows = 10
+
+    private var viewportHeight: CGFloat {
+        CGFloat(Self.visibleRows) * Self.rowHeight
+    }
+
+    /// As tall as the longer column needs, so nothing is laid out into a
+    /// height it does not have. The drawing is proportional to this, which is
+    /// why the ribbons keep meeting their names while scrolling.
+    private var contentHeight: CGFloat {
+        let rows = max(model.apps.count, model.destinations.count, Self.visibleRows)
+        return CGFloat(rows) * Self.rowHeight
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize) {
@@ -124,13 +154,27 @@ private struct AgentSankeyColumn: View {
     let coloured: Bool
     let alignment: HorizontalAlignment
 
+    /// About how many characters fit the 150-point column at caption size.
+    ///
+    /// Not measured per glyph: the point is to keep colliding names apart, and
+    /// that only needs to know roughly where the text runs out (P3-86).
+    private static let labelWidth = 18
+
+    /// Names shortened together, so two destinations cannot read the same.
+    private var labels: [String] {
+        DestinationLabel.shorten(
+            nodes.map { $0.isRemainder ? L("Other") : $0.name },
+            limit: Self.labelWidth
+        )
+    }
+
     var body: some View {
         VStack(alignment: alignment, spacing: 3) {
             Text(title)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
-            ForEach(Array(nodes.enumerated()), id: \.element.name) { index, node in
-                row(index: index, node: node)
+            ForEach(Array(zip(nodes, labels).enumerated()), id: \.element.0.name) { index, pair in
+                row(index: index, node: pair.0, label: pair.1)
             }
             Spacer(minLength: 0)
         }
@@ -148,15 +192,17 @@ private struct AgentSankeyColumn: View {
     }
 
     @ViewBuilder
-    private func row(index: Int, node: SankeyNode) -> some View {
+    private func row(index: Int, node: SankeyNode, label: String) -> some View {
         let dot = Circle()
             .fill(coloured
                   ? agentSeriesColor(index, isRemainder: node.isRemainder)
                   : Color.secondary.opacity(0.6))
             .frame(width: 7, height: 7)
-        let name = Text(node.isRemainder ? L("Other") : node.name)
+        // Already shortened together above, so SwiftUI is not asked to
+        // truncate again -- doing both would drop the part that was kept to
+        // tell two destinations apart.
+        let name = Text(label)
             .lineLimit(1)
-            .truncationMode(.middle)
         let value = Text(formattedMetric(node.value, metric))
             .foregroundStyle(.secondary)
             .lineLimit(1)
