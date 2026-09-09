@@ -32,18 +32,22 @@ private func observation(
 }
 
 final class RemoteHostnameIngestBoundaryTests: XCTestCase {
-    /// The whole point of stage 1. The shipped Hub's ingest schema is
-    /// `.strict()`: an unknown field rejects the entire batch, so every agent
-    /// in the field would stop delivering. Sending this needs P3-7's agent-side
-    /// negotiation first.
-    func testTheHostnameIsNeverPutIntoAnIngestPayload() throws {
-        let payload = AgentIngestObservation(
-            observationId: UUID(),
-            observation: observation(remoteHostname: "example.com", flowID: UUID())
-        )
+    private func encoded(_ payload: AgentIngestObservation) throws -> String {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        let json = try XCTUnwrap(String(data: try encoder.encode(payload), encoding: .utf8))
+        return try XCTUnwrap(String(data: try encoder.encode(payload), encoding: .utf8))
+    }
+
+    /// Stage 1's rule, and still the default. The shipped Hub's ingest schema
+    /// is `.strict()`: an unknown field rejects the entire batch, so an agent
+    /// that sends this to a Hub which never asked for it stops delivering
+    /// altogether. Nothing about stage 2 relaxes that -- it only adds a way to
+    /// be told otherwise.
+    func testTheHostnameIsNotSentUnlessTheHubAskedForIt() throws {
+        let json = try encoded(AgentIngestObservation(
+            observationId: UUID(),
+            observation: observation(remoteHostname: "example.com", flowID: UUID())
+        ))
 
         XCTAssertFalse(json.contains("remoteHostname"), "the strict Hub schema would reject the batch")
         XCTAssertFalse(json.contains("flowID"), "the local flow identity must never cross the Hub boundary")
@@ -51,6 +55,44 @@ final class RemoteHostnameIngestBoundaryTests: XCTestCase {
         // The rest of the contract is unchanged.
         XCTAssertTrue(json.contains("\"remoteAddress\":\"203.0.113.5\""))
         XCTAssertTrue(json.contains("\"bytesIn\":\"10\""))
+    }
+
+    /// Stage 2. The name goes only where a Hub has said it reads one.
+    func testTheHostnameIsSentWhenTheHubAcceptsIt() throws {
+        let json = try encoded(AgentIngestObservation(
+            observationId: UUID(),
+            observation: observation(remoteHostname: "example.com", flowID: UUID()),
+            includeHostname: true
+        ))
+
+        XCTAssertTrue(json.contains("\"remoteHostname\":\"example.com\""))
+        // Permission to send the name is not permission to send the flow id.
+        XCTAssertFalse(json.contains("flowID"), "the local flow identity must never cross the Hub boundary")
+    }
+
+    /// A flow the Network Extension could not name must leave the key out
+    /// rather than send an explicit null: the payload has to stay exactly what
+    /// it was for every Hub that has not opted in.
+    func testAnUnnamedFlowSendsNoKeyAtAll() throws {
+        let json = try encoded(AgentIngestObservation(
+            observationId: UUID(),
+            observation: observation(remoteHostname: nil, flowID: UUID()),
+            includeHostname: true
+        ))
+
+        XCTAssertFalse(json.contains("remoteHostname"))
+    }
+
+    /// Absence in the Hub's answer means no, not "unspecified, so try".
+    func testCapabilitiesDecideWhetherTheNameMayBeSent() {
+        let silent = AgentHubCapabilities(schemaVersions: [1])
+        let others = AgentHubCapabilities(schemaVersions: [1], observationFields: ["somethingElse"])
+        let accepting = AgentHubCapabilities(schemaVersions: [1], observationFields: ["remoteHostname"])
+
+        XCTAssertFalse(AgentCapabilityNegotiation.acceptsRemoteHostname(capabilities: nil))
+        XCTAssertFalse(AgentCapabilityNegotiation.acceptsRemoteHostname(capabilities: silent))
+        XCTAssertFalse(AgentCapabilityNegotiation.acceptsRemoteHostname(capabilities: others))
+        XCTAssertTrue(AgentCapabilityNegotiation.acceptsRemoteHostname(capabilities: accepting))
     }
 
     func testTheHostnameDoesNotChangeFlowIdentity() {

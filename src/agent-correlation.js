@@ -67,6 +67,13 @@ function buildUnifiedReadModel(routerConnections, agentObservations) {
       bytesOut: observation.bytesOut,
       collector: observation.collector,
       confidence: observation.confidence,
+      // The name the Mac itself connected to, carried into the destination
+      // column the rest of the product reads. It is not a reverse lookup, so
+      // it does not need the reverse lookup's caveats -- and for a CDN, where
+      // the lookup is ordinarily wrong, it is the only right answer available
+      // (P3-14 stage 2). Absent for an agent that does not send it, and for
+      // every flow the Network Extension could not name.
+      dstHost: observation.remoteHostname ?? null,
       agentOnly: true,
     });
   }
@@ -239,7 +246,7 @@ function createAgentCorrelation({ getDb, windowMs = DEFAULT_CORRELATION_WINDOW_M
         o.remoteAddress AS dst, o.remotePort AS dport,
         o.processId, o.processName, o.bundleId,
         o.firstObservedAt, o.lastObservedAt, o.bytesIn, o.bytesOut,
-        o.collector, o.confidence,
+        o.collector, o.confidence, o.remoteHostname,
         link.src AS connectionSrc, link.dst AS connectionDst,
         link.dport AS connectionDport, link.proto AS connectionProto,
         link.matchKind, link.timeDeltaMs,

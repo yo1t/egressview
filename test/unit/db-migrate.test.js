@@ -403,7 +403,12 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
       'idx_agent_observations_agent_flow',
     ]) assert(indexes.has(name), `missing ${name}`);
     const zeroPort = db.prepare(`
-      INSERT INTO agent_observations
+      INSERT INTO agent_observations (
+        agentId, observationId, batchId, networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, collector, confidence, receivedAt
+      )
       SELECT agentId, 'obs-2', batchId, networkProtocol,
         localAddress, 0, remoteAddress, remotePort,
         processId, processName, bundleId, firstObservedAt, lastObservedAt,
@@ -497,7 +502,12 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
     assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
     assert.equal(db.prepare('SELECT collector FROM agent_observations').get().collector, 'network-extension');
     const insertEtw = db.prepare(`
-      INSERT INTO agent_observations
+      INSERT INTO agent_observations (
+        agentId, observationId, batchId, networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, collector, confidence, receivedAt
+      )
       SELECT agentId, 'obs-windows', 'batch-2', networkProtocol,
         localAddress, localPort, remoteAddress, remotePort,
         processId, 'Windows App', bundleId, firstObservedAt, lastObservedAt,
@@ -506,7 +516,12 @@ describe('db-migrate: v13 Hub-Agent and v14 AI scope additive schemas', () => {
     `).run();
     assert.equal(insertEtw.changes, 1);
     assert.throws(() => db.prepare(`
-      INSERT INTO agent_observations
+      INSERT INTO agent_observations (
+        agentId, observationId, batchId, networkProtocol,
+        localAddress, localPort, remoteAddress, remotePort,
+        processId, processName, bundleId, firstObservedAt, lastObservedAt,
+        bytesIn, bytesOut, collector, confidence, receivedAt
+      )
       SELECT agentId, 'obs-invalid', 'batch-3', networkProtocol,
         localAddress, localPort, remoteAddress, remotePort,
         processId, processName, bundleId, firstObservedAt, lastObservedAt,

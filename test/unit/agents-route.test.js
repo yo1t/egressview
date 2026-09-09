@@ -449,6 +449,9 @@ describe('Agent HTTP ingest', () => {
     assert.equal(capabilities.status, 200);
     assert.deepEqual(capabilities.body.schemaVersions, [1]);
     assert.equal(capabilities.body.maxObservationsPerBatch, 200);
+    // The exact string the agent looks for before it will send the field. A
+    // rename here stops the name being sent and says nothing (P3-14 stage 2).
+    assert.deepEqual(capabilities.body.observationFields, ['remoteHostname']);
     assert.equal(capabilities.body.maxBodyBytes, 512 * 1024);
     // Declared empty rather than omitted, so an agent cannot read a missing
     // field as permission to compress.

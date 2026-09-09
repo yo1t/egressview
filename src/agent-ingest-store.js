@@ -92,13 +92,13 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
         localAddress, localPort, remoteAddress, remotePort,
         processId, processName, bundleId,
         firstObservedAt, lastObservedAt, bytesIn, bytesOut,
-        collector, confidence, receivedAt
+        collector, confidence, receivedAt, remoteHostname
       ) VALUES (
         @agentId, @observationId, @batchId, @networkProtocol,
         @localAddress, @localPort, @remoteAddress, @remotePort,
         @processId, @processName, @bundleId,
         @firstObservedAt, @lastObservedAt, @bytesIn, @bytesOut,
-        @collector, @confidence, @receivedAt
+        @collector, @confidence, @receivedAt, @remoteHostname
       )
     `);
     const upsertAppHourly = database.prepare(`
@@ -148,6 +148,10 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
         collector: observation.collector,
         confidence: observation.confidence,
         receivedAt,
+        // Absent and null mean the same thing here -- the agent had no name
+        // for this flow -- and both must reach SQLite as NULL rather than
+        // undefined, which better-sqlite3 refuses to bind (P3-14 stage 2).
+        remoteHostname: observation.remoteHostname ?? null,
       };
       try {
         insertObservation.run(stored);
@@ -314,7 +318,9 @@ function _initForTest(dbPath = ':memory:') {
       lastObservedAt INTEGER NOT NULL, bytesIn TEXT, bytesOut TEXT,
       collector TEXT NOT NULL CHECK(collector IN ('network-extension', 'libproc', 'etw')),
       confidence TEXT NOT NULL CHECK(confidence IN ('exact', 'sampled')),
-      receivedAt INTEGER NOT NULL, PRIMARY KEY (agentId, observationId),
+      receivedAt INTEGER NOT NULL,
+      remoteHostname TEXT CHECK(remoteHostname IS NULL OR length(remoteHostname) BETWEEN 1 AND 253),
+      PRIMARY KEY (agentId, observationId),
       CHECK(lastObservedAt >= firstObservedAt)
     );
     CREATE TABLE agent_app_hourly (

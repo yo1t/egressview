@@ -7,7 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 const Database = require('better-sqlite3');
 
-const { runMigrations } = require('../../src/db-migrate');
+const { runMigrations, SCHEMA_VERSION } = require('../../src/db-migrate');
 
 function v21Database() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ev-v22-test-'));
@@ -101,7 +101,11 @@ test('v22 runs on a database that has neither table', () => {
   const db = new Database(file);
   db.pragma('user_version = 21');
   runMigrations(db, file);
-  assert.equal(db.pragma('user_version', { simple: true }), 22);
+  // The current version, not a literal 22. What this test is about is that the
+  // upgrade does not fail on a database missing both tables; pinning the
+  // number makes it fail for the unrelated reason that a later migration
+  // exists.
+  assert.equal(db.pragma('user_version', { simple: true }), SCHEMA_VERSION);
   db.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 

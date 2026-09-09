@@ -261,6 +261,18 @@
                   "exact",
                   "sampled"
                 ]
+              },
+              "remoteHostname": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 253
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -1774,12 +1786,19 @@
           },
           "compression": {
             "type": "array"
+          },
+          "observationFields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
           "compression",
           "maxBodyBytes",
           "maxObservationsPerBatch",
+          "observationFields",
           "requestsPerMinute",
           "schemaVersions"
         ]
