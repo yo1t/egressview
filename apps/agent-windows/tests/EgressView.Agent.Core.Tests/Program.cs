@@ -9,6 +9,36 @@ var database = Path.Combine(directory, "agent.db");
 
 try
 {
+    Assert(AgentReleaseKey.MatchesPublishedFingerprint, "the embedded release key matches its published SPKI fingerprint");
+    Assert(AgentSemanticVersion.TryParse("1.2.3", out var stableVersion) &&
+        AgentSemanticVersion.TryParse("1.2.3-preview", out var previewVersion) && stableVersion.CompareTo(previewVersion) > 0,
+        "release versions compare stable builds after prereleases");
+    var updatePayload = Encoding.UTF8.GetBytes("signed-msi-payload");
+    var updateHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(updatePayload));
+    var updateManifest = JsonSerializer.Serialize(new
+    {
+        schemaVersion = 1,
+        platform = "windows",
+        version = "9.8.7",
+        releasedAt = DateTimeOffset.UtcNow,
+        packages = new[] { new { arch = WindowsAgentUpdateClient.HostArch, packageType = "msi", url = "https://dl.egressview.com/windows/EgressView.msi", sha256 = updateHash, sizeBytes = updatePayload.Length, publisher = "EgressView" } },
+    });
+    var updateHandler = new UpdateHandler(updateManifest, updatePayload);
+    var packageVerifier = new TestPackageVerifier();
+    using (var updateClient = new WindowsAgentUpdateClient(updateHandler, verifier: packageVerifier, manifestVerifier: new AcceptManifestVerifier()))
+    {
+        var decision = await updateClient.CheckAsync("1.0.0", "10.0.26100");
+        Assert(decision.Kind == AgentUpdateDecisionKind.UpdateAvailable && decision.Candidate?.Version == "9.8.7",
+            "a newer signed Windows release selects the host architecture MSI");
+        var verified = await updateClient.DownloadAndVerifyAsync(decision.Candidate!, directory);
+        Assert(File.Exists(verified.Path) && verified.Publisher == "EgressView Code Signing" && packageVerifier.Calls == 1,
+            "download requires exact size, SHA-256, Authenticode, and publisher verification before becoming installable");
+        await updateClient.ReverifyAsync(verified);
+        Assert(packageVerifier.Calls == 2, "the verified MSI is hashed and signature-checked again immediately before launch");
+        Assert(updateHandler.UserAgents.All(value => value == "EgressViewAgent/1.0.0 (Windows 10.0.26100)") && !updateHandler.SawCookie,
+            "update checks disclose only the Agent and Windows versions and never send cookies");
+    }
+
     var notificationNow = new DateTimeOffset(2026, 9, 8, 6, 0, 0, TimeSpan.Zero);
     Assert(NotificationPolicy.Evaluate(true, true, false, 5, 5, null, notificationNow) == NotificationDecision.DailyLimit,
         "ordinary notifications respect the configured daily limit");
@@ -861,6 +891,41 @@ sealed class EnrollmentHandler(params (HttpStatusCode Status, string Body)[] res
         Requests.Add(new HttpRequestMessage(request.Method, request.RequestUri) { Content = new StringContent(await request.Content!.ReadAsStringAsync(cancellationToken)) });
         var response = responses.Dequeue();
         return new HttpResponseMessage(response.Status) { Content = new StringContent(response.Body, Encoding.UTF8, "application/json") };
+    }
+}
+
+sealed class AcceptManifestVerifier : IAgentManifestVerifier
+{
+    public bool Verify(ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature) => signature.SequenceEqual(new byte[] { 1, 2, 3 });
+}
+
+sealed class TestPackageVerifier : IWindowsPackageVerifier
+{
+    public int Calls { get; private set; }
+    public string Verify(string path, string expectedPublisher)
+    {
+        Calls++;
+        if (!expectedPublisher.StartsWith("EgressView", StringComparison.Ordinal) || !File.Exists(path)) throw new InvalidOperationException("unexpected verifier input");
+        return "EgressView Code Signing";
+    }
+}
+
+sealed class UpdateHandler(string manifest, byte[] package) : HttpMessageHandler
+{
+    public List<string> UserAgents { get; } = [];
+    public bool SawCookie { get; private set; }
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        UserAgents.Add(request.Headers.UserAgent.ToString());
+        SawCookie |= request.Headers.Contains("Cookie");
+        var path = request.RequestUri!.AbsolutePath;
+        HttpContent content = path.EndsWith("manifest.json", StringComparison.Ordinal)
+            ? new StringContent(manifest, Encoding.UTF8, "application/json")
+            : path.EndsWith("manifest.json.sig", StringComparison.Ordinal)
+                ? new ByteArrayContent([1, 2, 3])
+                : new ByteArrayContent(package);
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
     }
 }
 

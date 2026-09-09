@@ -148,6 +148,7 @@ describe('agent release publication', () => {
       ]));
       assert.deepEqual(manifest.packages.map((entry) => entry.arch), ['arm64', 'x64']);
       assert.deepEqual(manifest.packages.map((entry) => entry.packageType), ['msi', 'msi']);
+      assert.deepEqual(manifest.packages.map((entry) => entry.publisher), ['EgressView', 'EgressView']);
       assert.notEqual(manifest.packages[0].sha256, manifest.packages[1].sha256);
       assert.equal(new Set(manifest.packages.map((entry) => entry.url)).size, 2);
     });

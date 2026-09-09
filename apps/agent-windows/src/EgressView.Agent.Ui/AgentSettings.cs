@@ -67,8 +67,21 @@ internal static class AgentSettings
 
     internal static string SettingsSection
     {
-        get => Read("SettingsSection") is { } value && value is "general" or "notifications" or "enrichment" or "ai" or "history" or "hub" ? value : "general";
-        set { if (value is "general" or "notifications" or "enrichment" or "ai" or "history" or "hub") Write("SettingsSection", value); }
+        get => Read("SettingsSection") is { } value && value is "general" or "notifications" or "enrichment" or "ai" or "history" or "updates" or "hub" ? value : "general";
+        set { if (value is "general" or "notifications" or "enrichment" or "ai" or "history" or "updates" or "hub") Write("SettingsSection", value); }
+    }
+
+    internal static bool AutomaticUpdateChecks
+    {
+        get => ReadBool("AutomaticUpdateChecks", true);
+        set => Write("AutomaticUpdateChecks", value ? "1" : "0");
+    }
+
+    internal static DateTimeOffset? LastUpdateCheck
+    {
+        get => DateTimeOffset.TryParse(Read("LastUpdateCheck"), System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind, out var value) ? value : null;
+        set => Write("LastUpdateCheck", value?.ToString("O", System.Globalization.CultureInfo.InvariantCulture) ?? "");
     }
 
     internal static double WindowWidth
