@@ -5,9 +5,9 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 11;
-    public static readonly TimeSpan RawRetention = TimeSpan.FromDays(14);
-    public static readonly TimeSpan AggregateRetention = TimeSpan.FromDays(30);
+    private const int CurrentSchemaVersion = 12;
+    public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
+    public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
     public static readonly TimeSpan CoverageStaleAfter = TimeSpan.FromSeconds(15);
     private const string Version1Schema = """
@@ -165,6 +165,14 @@ public sealed partial class ObservationStore : IDisposable
         ALTER TABLE coverage_sessions ADD COLUMN interrupted INTEGER NOT NULL DEFAULT 0 CHECK(interrupted IN (0,1));
         UPDATE coverage_sessions SET confirmed_at=COALESCE(ended_at,started_at);
         """;
+    private const string Version12Schema = """
+        CREATE TABLE IF NOT EXISTS local_history_settings(
+          id INTEGER PRIMARY KEY CHECK(id=1),
+          retention_days INTEGER NOT NULL DEFAULT 30 CHECK(retention_days IN (1,7,30,90)),
+          last_cleanup_at TEXT
+        );
+        INSERT OR IGNORE INTO local_history_settings(id) VALUES(1);
+        """;
 
     private readonly object gate = new();
     private nint db;
@@ -193,7 +201,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -212,7 +220,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 7) { MigrateVersion7To8(); version = 8; }
         if (version == 8) { MigrateVersion8To9(); version = 9; }
         if (version == 9) { MigrateVersion9To10(); version = 10; }
-        if (version == 10) MigrateVersion10To11();
+        if (version == 10) { MigrateVersion10To11(); version = 11; }
+        if (version == 11) MigrateVersion11To12();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -295,6 +304,13 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion11To12()
+    {
+        CreateMigrationBackup(12);
+        try { Execute($"BEGIN IMMEDIATE; {Version12Schema} UPDATE schema_version SET version=12 WHERE version=11; COMMIT;"); PruneMigrationBackups(12); }
+        catch { TryRollback(); throw; }
+    }
+
     private string CreateMigrationBackup(int targetVersion)
     {
         var backup = $"{path}.pre-v{targetVersion}.bak";
@@ -343,8 +359,8 @@ public sealed partial class ObservationStore : IDisposable
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state')");
-        if (tables != 14)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings')");
+        if (tables != 15)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
@@ -448,16 +464,18 @@ public sealed partial class ObservationStore : IDisposable
     public RetentionMaintenanceResult PruneRetentionBatch(DateTimeOffset now, int batchSize = 50_000)
     {
         if (batchSize is < 1 or > 250_000) throw new ArgumentOutOfRangeException(nameof(batchSize));
-        var rawCutoff = now.ToUniversalTime().Subtract(RawRetention).ToString("O");
-        var aggregateCutoff = now.ToUniversalTime().Subtract(AggregateRetention).ToString("O");
         lock (gate)
         {
             ThrowIfDisposed();
+            var retentionDays = (int)ScalarInt64("SELECT retention_days FROM local_history_settings WHERE id=1");
+            var rawDays = Math.Min(DefaultRawRetentionDays, retentionDays);
+            var rawCutoff = now.ToUniversalTime().AddDays(-rawDays).ToString("O");
+            var aggregateCutoff = now.ToUniversalTime().AddDays(-retentionDays).ToString("O");
             Execute("BEGIN IMMEDIATE");
             try
             {
                 var observations = DeleteBatch("observations", "id", "observed_at", rawCutoff, batchSize);
-                var flows = DeleteBatch("flows", "flow_key", "last_seen", aggregateCutoff, batchSize);
+                var flows = DeleteBatch("flows", "flow_key", "last_seen", rawCutoff, batchSize);
                 var summaries = DeleteBatch("hourly_summary", "rowid", "bucket_start", aggregateCutoff, batchSize);
                 var chartSummaries = DeleteBatch("chart_hourly", "rowid", "bucket_start", aggregateCutoff, batchSize);
                 var coverage = DeleteBatch("coverage_sessions", "id", "COALESCE(ended_at,started_at)", aggregateCutoff, batchSize);
@@ -470,6 +488,128 @@ public sealed partial class ObservationStore : IDisposable
                 throw;
             }
         }
+    }
+
+    public LocalHistoryStatus ReadLocalHistoryStatus(DateTimeOffset now)
+    {
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            var retentionDays = (int)ScalarInt64("SELECT retention_days FROM local_history_settings WHERE id=1");
+            var lastText = NullableScalarText("SELECT last_cleanup_at FROM local_history_settings WHERE id=1");
+            var oldestRawText = NullableScalarText("SELECT MIN(value) FROM (SELECT MIN(observed_at) value FROM observations UNION ALL SELECT MIN(last_seen) FROM flows)");
+            var oldestAggregateText = NullableScalarText("SELECT MIN(value) FROM (SELECT MIN(bucket_start) value FROM hourly_summary UNION ALL SELECT MIN(bucket_start) FROM chart_hourly)");
+            DateTimeOffset? last = lastText is null ? null : DateTimeOffset.Parse(lastText);
+            return new(retentionDays, Math.Min(DefaultRawRetentionDays, retentionDays), ReadStorageBytes(),
+                oldestRawText is null ? null : DateTimeOffset.Parse(oldestRawText),
+                oldestAggregateText is null ? null : DateTimeOffset.Parse(oldestAggregateText),
+                last, last?.AddHours(24) ?? now.ToUniversalTime());
+        }
+    }
+
+    public void SetRetentionDays(int days)
+    {
+        if (!AllowedRetentionDays.Contains(days)) throw new ArgumentOutOfRangeException(nameof(days));
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            Execute($"UPDATE local_history_settings SET retention_days={days} WHERE id=1");
+        }
+    }
+
+    public void MarkRetentionMaintenanceCompleted(DateTimeOffset completedAt)
+    {
+        lock (gate) Execute($"UPDATE local_history_settings SET last_cleanup_at='{completedAt.ToUniversalTime():O}' WHERE id=1");
+    }
+
+    public IReadOnlyList<RecentFlow> ReadHistoryForExport(DateTimeOffset? before, int limit, int offset)
+    {
+        if (limit is < 1 or > 500) throw new ArgumentOutOfRangeException(nameof(limit));
+        if (offset is < 0 or > 10_000_000) throw new ArgumentOutOfRangeException(nameof(offset));
+        lock (gate)
+        {
+            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,g.country_code";
+            var cutoff = before is null ? string.Empty : $"WHERE f.last_seen<'{Sql(before.Value.ToUniversalTime().ToString("O"))}'";
+            var sql = $"SELECT {columns} FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address {cutoff} ORDER BY f.last_seen DESC,f.flow_key LIMIT {limit} OFFSET {offset}";
+            return ReadRecentFlowQuery(sql);
+        }
+    }
+
+    public LocalHistoryDeletionResult DeleteLocalHistory(DateTimeOffset? before, DateTimeOffset now)
+    {
+        var cutoff = (before ?? now).ToUniversalTime();
+        if (cutoff > now.ToUniversalTime().AddMinutes(5)) throw new ArgumentOutOfRangeException(nameof(before));
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                long observations;
+                long flows;
+                long hourly;
+                long chart;
+                long coverage;
+                if (before is null)
+                {
+                    observations = DeleteAllRows("observations");
+                    flows = DeleteAllRows("flows");
+                    hourly = DeleteAllRows("hourly_summary");
+                    chart = DeleteAllRows("chart_hourly");
+                    Execute("DELETE FROM chart_hourly_state");
+                    coverage = DeleteMatchingCoverage("ended_at IS NOT NULL");
+                    Execute($"UPDATE coverage_sessions SET started_at='{cutoff:O}',confirmed_at='{cutoff:O}' WHERE ended_at IS NULL");
+                }
+                else
+                {
+                    var value = Sql(cutoff.ToString("O"));
+                    observations = DeleteWhere("observations", $"observed_at<'{value}'");
+                    flows = DeleteWhere("flows", $"last_seen<'{value}'");
+                    hourly = DeleteWhere("hourly_summary", $"bucket_start<'{value}'");
+                    chart = DeleteWhere("chart_hourly", $"bucket_start<'{value}'");
+                    coverage = DeleteMatchingCoverage($"ended_at IS NOT NULL AND ended_at<'{value}'");
+                    Execute($"UPDATE coverage_sessions SET started_at='{value}' WHERE started_at<'{value}' AND (ended_at IS NULL OR ended_at>='{value}')");
+                    RefoldDeletionBoundary(cutoff);
+                }
+                Execute("COMMIT");
+                return new(observations, flows, hourly, chart, coverage);
+            }
+            catch
+            {
+                TryRollback();
+                throw;
+            }
+        }
+    }
+
+    private long DeleteAllRows(string table) => DeleteWhere(table, "1=1");
+
+    private long DeleteMatchingCoverage(string condition) => DeleteWhere("coverage_sessions", condition);
+
+    private long DeleteWhere(string table, string condition)
+    {
+        Execute($"DELETE FROM {table} WHERE {condition}");
+        return ScalarInt64("SELECT changes()");
+    }
+
+    private void RefoldDeletionBoundary(DateTimeOffset cutoff)
+    {
+        var boundary = new DateTimeOffset(cutoff.Year, cutoff.Month, cutoff.Day, cutoff.Hour, 0, 0, TimeSpan.Zero);
+        if (boundary == cutoff) return;
+        var end = boundary.AddHours(1);
+        var foldedThrough = NullableScalarText("SELECT folded_through FROM chart_hourly_state WHERE id=1");
+        if (foldedThrough is null || DateTimeOffset.Parse(foldedThrough) <= boundary) return;
+        Execute($"""
+            INSERT INTO hourly_summary(bucket_start,protocol,layer,observation_count,bytes_sent,bytes_received,bytes_unknown)
+            SELECT '{boundary:O}',protocol,layer,COUNT(*),SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
+                   SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
+            FROM observations WHERE observed_at>='{cutoff:O}' AND observed_at<'{end:O}' GROUP BY protocol,layer;
+            INSERT INTO chart_hourly(bucket_start,application,layer,observation_count,bytes_sent,bytes_received,bytes_unknown)
+            SELECT '{boundary:O}',COALESCE(NULLIF(process_name,''),'Unknown'),layer,COUNT(*),
+                   SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
+                   SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
+            FROM observations WHERE observed_at>='{cutoff:O}' AND observed_at<'{end:O}' GROUP BY 2,layer;
+            """);
     }
 
     public bool CompactIfBeneficial(double minimumFreeFraction = 0.20)
@@ -752,27 +892,32 @@ public sealed partial class ObservationStore : IDisposable
         {
             const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,g.country_code";
             var sql = $"SELECT {columns} FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address ORDER BY f.last_seen DESC,f.flow_key LIMIT {limit} OFFSET {offset}";
-            CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
-            var result = new List<RecentFlow>();
-            try
-            {
-                while (true)
-                {
-                    var code = WinSqlite.Step(statement);
-                    if (code == WinSqlite.Done) break;
-                    CheckQueryRow(code);
-                    result.Add(new RecentFlow(
-                        DateTimeOffset.Parse(Text(statement, 0)), DateTimeOffset.Parse(Text(statement, 1)),
-                        Text(statement, 2), Text(statement, 3), (int)WinSqlite.ColumnInt64(statement, 4),
-                        Text(statement, 5), (int)WinSqlite.ColumnInt64(statement, 6), (int)WinSqlite.ColumnInt64(statement, 7),
-                        NullableTextValue(statement, 8), NullableInt64(statement, 9), NullableInt64(statement, 10),
-                        Text(statement, 11) == "vpn_transport" ? ObservationLayer.VpnTransport : ObservationLayer.Logical,
-                        NullableTextValue(statement, 12), Text(statement, 13), NullableTextValue(statement, 14), NullableTextValue(statement, 15)));
-                }
-            }
-            finally { WinSqlite.Finalize(statement); }
-            return result;
+            return ReadRecentFlowQuery(sql);
         }
+    }
+
+    private IReadOnlyList<RecentFlow> ReadRecentFlowQuery(string sql)
+    {
+        CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+        var result = new List<RecentFlow>();
+        try
+        {
+            while (true)
+            {
+                var code = WinSqlite.Step(statement);
+                if (code == WinSqlite.Done) break;
+                CheckQueryRow(code);
+                result.Add(new RecentFlow(
+                    DateTimeOffset.Parse(Text(statement, 0)), DateTimeOffset.Parse(Text(statement, 1)),
+                    Text(statement, 2), Text(statement, 3), (int)WinSqlite.ColumnInt64(statement, 4),
+                    Text(statement, 5), (int)WinSqlite.ColumnInt64(statement, 6), (int)WinSqlite.ColumnInt64(statement, 7),
+                    NullableTextValue(statement, 8), NullableInt64(statement, 9), NullableInt64(statement, 10),
+                    Text(statement, 11) == "vpn_transport" ? ObservationLayer.VpnTransport : ObservationLayer.Logical,
+                    NullableTextValue(statement, 12), Text(statement, 13), NullableTextValue(statement, 14), NullableTextValue(statement, 15)));
+            }
+        }
+        finally { WinSqlite.Finalize(statement); }
+        return result;
     }
 
     public GeoCacheState ReadGeoCacheState()
@@ -1218,6 +1363,16 @@ public sealed partial class ObservationStore : IDisposable
         {
             var current = ScalarInt64("PRAGMA page_count");
             Execute($"PRAGMA max_page_count={current + additionalPages}");
+        }
+    }
+
+    internal void FailHistoryDeletionForTesting(bool enabled)
+    {
+        lock (gate)
+        {
+            if (enabled)
+                Execute("CREATE TEMP TRIGGER IF NOT EXISTS fail_history_delete BEFORE DELETE ON flows BEGIN SELECT RAISE(ABORT,'simulated deletion interruption'); END");
+            else Execute("DROP TRIGGER IF EXISTS fail_history_delete");
         }
     }
 

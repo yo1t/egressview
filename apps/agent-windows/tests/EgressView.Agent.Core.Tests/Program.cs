@@ -160,6 +160,24 @@ try
         "IPC rejects arbitrary recent flow limits");
     Assert(IpcProtocol.Handle("""{"v":1,"op":"recent-flows","limit":500,"offset":-1}""", () => "{}", _ => [], recentFlows: (_, _) => []).Contains("invalid-offset", StringComparison.Ordinal),
         "IPC rejects invalid pagination offsets");
+    var historyNow = new DateTimeOffset(2026, 9, 10, 0, 0, 0, TimeSpan.Zero);
+    var historyStatusResponse = IpcProtocol.Handle("""{"v":1,"op":"history-status"}""", () => "{}", _ => [],
+        historyStatus: () => new LocalHistoryStatus(30, 14, 4096, historyNow.AddDays(-2), historyNow.AddDays(-20), historyNow.AddHours(-1), historyNow.AddHours(23)));
+    Assert(historyStatusResponse.Contains("\"RetentionDays\":30", StringComparison.Ordinal) && historyStatusResponse.Contains("\"StorageBytes\":4096", StringComparison.Ordinal),
+        "IPC exposes retention policy, actual disk use, stored ranges, and next cleanup");
+    var setRetentionResponse = IpcProtocol.Handle("""{"v":1,"op":"set-history-retention","days":7}""", () => "{}", _ => [],
+        setHistoryRetention: days => new LocalHistoryStatus(days, days, 1, null, null, null, historyNow));
+    Assert(setRetentionResponse.Contains("\"RetentionDays\":7", StringComparison.Ordinal) &&
+        IpcProtocol.Handle("""{"v":1,"op":"set-history-retention","days":8}""", () => "{}", _ => [], setHistoryRetention: _ => throw new Exception()).Contains("invalid-retention", StringComparison.Ordinal),
+        "IPC accepts only the documented retention choices");
+    var exportResponse = IpcProtocol.Handle("""{"v":1,"op":"history-export","before":"2026-09-10T00:00:00Z","limit":500,"offset":0}""", () => "{}", _ => [],
+        historyExport: (_, _, _) => [new RecentFlow(historyNow.AddDays(-2), historyNow.AddDays(-1), "TCP", "10.0.0.1", 1, "203.0.113.1", 443, 1, "Exported", 1, 2, ObservationLayer.Logical, null, "etw")]);
+    Assert(exportResponse.Contains("Exported", StringComparison.Ordinal), "IPC pages only authenticated local-history export rows");
+    var deleteInvoked = false;
+    var deleteResponse = IpcProtocol.Handle("""{"v":1,"op":"delete-history","scope":"before","before":"2026-09-01T00:00:00Z"}""", () => "{}", _ => [],
+        deleteHistory: _ => { deleteInvoked = true; return new LocalHistoryDeletionResult(1, 1, 1, 1, 1); });
+    Assert(deleteInvoked && deleteResponse.Contains("\"TotalDeleted\":5", StringComparison.Ordinal),
+        "IPC requires an explicit deletion scope and returns an auditable row count");
     var globeResponse = IpcProtocol.Handle("""{"v":1,"op":"globe","days":7}""", () => "{}", _ => [],
         globePoints: _ => [new GlobePoint(35.68, 139.76, "JP", "Tokyo", 4, 1024)]);
     Assert(globeResponse.Contains("Tokyo", StringComparison.Ordinal), "IPC returns bounded globe aggregates to the authenticated UI");
@@ -243,15 +261,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 11, "v1 database migrates through v2-v11");
+        Assert(migrated.SchemaVersion == 12, "v1 database migrates through v2-v12");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v11.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v12.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 11, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 12, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -269,9 +287,9 @@ try
         Assert(result.ObservationsDeleted == 1 && result.FlowsDeleted == 1 && result.HourlySummariesDeleted == 1 && result.CoverageSessionsDeleted == 1 && result.ChartSummariesDeleted == 1,
             "retention prunes raw data at 14 days and aggregates at 30 days in bounded batches");
         var second = retentionStore.PruneRetentionBatch(now, batchSize: 10);
-        Assert(second.ObservationsDeleted == 1 && second.FlowsDeleted == 0,
-            "raw observations older than 14 days are removed without deleting 30-day flows");
-        Assert(retentionStore.Inspect().Count == 1 && retentionStore.ReadRecentFlows(50).Count == 2,
+        Assert(second.ObservationsDeleted == 1 && second.FlowsDeleted == 1,
+            "individual observations and flow-log records use the same 14-day raw boundary");
+        Assert(retentionStore.Inspect().Count == 1 && retentionStore.ReadRecentFlows(50).Count == 1,
             "fresh raw data and 30-day aggregate data survive retention");
         retentionStore.WriteBatch([
             new NetworkObservation(now.AddDays(-31), 4, "TCP", "10.0.0.1", 40004, "203.0.113.4", 443, 1, 1, ObservationLayer.Logical, null, "etw", "Queued")
@@ -281,6 +299,48 @@ try
         Assert(pending == 1 && retentionStore.ReadDeliveryStatus().Pending == 1,
             "retention never deletes unsent delivery queue data");
     }
+
+    using (var historyStore = new ObservationStore(Path.Combine(directory, "history-controls.db")))
+    {
+        var now = new DateTimeOffset(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
+        historyStore.SetRetentionDays(7);
+        historyStore.WriteBatch([
+            new NetworkObservation(now.AddDays(-8), 1, "TCP", "10.0.0.1", 41001, "203.0.113.10", 443, 1, 2, ObservationLayer.Logical, null, "etw", "Expired"),
+            new NetworkObservation(now.AddDays(-2), 2, "TCP", "10.0.0.1", 41002, "203.0.113.11", 443, 3, 4, ObservationLayer.Logical, null, "etw", "DeleteMe"),
+            new NetworkObservation(now.AddHours(-2), 3, "TCP", "10.0.0.1", 41003, "203.0.113.12", 443, 5, 6, ObservationLayer.Logical, null, "etw", "KeepMe")
+        ]);
+        historyStore.WriteBatch([
+            new NetworkObservation(now.AddDays(-3), 4, "TCP", "10.0.0.1", 41004, "203.0.113.13", 443, 7, 8, ObservationLayer.Logical, null, "etw", "Queued")
+        ], queueForDelivery: true);
+        while (historyStore.PruneRetentionBatch(now, 10).TotalDeleted > 0) { }
+        historyStore.MarkRetentionMaintenanceCompleted(now);
+        var historyStatus = historyStore.ReadLocalHistoryStatus(now);
+        Assert(historyStatus.RetentionDays == 7 && historyStatus.RawDays == 7 && historyStatus.StorageBytes > 0 && historyStatus.LastCleanupAt == now,
+            "user-selected retention is durable and history status reports actual storage and cleanup timing");
+        var exportRows = historyStore.ReadHistoryForExport(now.AddDays(-1), 500, 0);
+        Assert(exportRows.Count == 2 && exportRows.All(item => item.ProcessName is "DeleteMe" or "Queued"),
+            "delete-before export returns exactly the individual flow records about to be removed");
+        var pendingBeforeDelete = historyStore.ReadDeliveryStatus().Pending;
+        var observationsBeforeInterruptedDelete = historyStore.Inspect().Count;
+        var flowsBeforeInterruptedDelete = historyStore.ReadRecentFlows(50).Count;
+        historyStore.FailHistoryDeletionForTesting(true);
+        try { historyStore.DeleteLocalHistory(now.AddDays(-1), now); throw new InvalidOperationException("FAILED: interrupted history deletion unexpectedly committed"); }
+        catch (ObservationStoreException) { }
+        historyStore.FailHistoryDeletionForTesting(false);
+        Assert(historyStore.Inspect().Count == observationsBeforeInterruptedDelete && historyStore.ReadRecentFlows(50).Count == flowsBeforeInterruptedDelete,
+            "an interrupted or disk-full history deletion rolls back every local history table");
+        var deleted = historyStore.DeleteLocalHistory(now.AddDays(-1), now);
+        Assert(deleted.TotalDeleted > 0 && historyStore.ReadRecentFlows(50).Single().ProcessName == "KeepMe" &&
+            historyStore.ReadDeliveryStatus().Pending == pendingBeforeDelete,
+            "dated history deletion is atomic across local history tables and excludes the durable Hub queue");
+        historyStore.DeleteLocalHistory(null, now);
+        Assert(historyStore.Inspect().Count == 0 && historyStore.ReadRecentFlows(50).Count == 0 &&
+            historyStore.ReadDeliveryStatus().Pending == pendingBeforeDelete,
+            "delete-all removes local observation history without deleting unsent Hub delivery");
+    }
+    using (var reopenedHistory = new ObservationStore(Path.Combine(directory, "history-controls.db")))
+        Assert(reopenedHistory.ReadLocalHistoryStatus(DateTimeOffset.UtcNow).RetentionDays == 7,
+            "the selected retention survives a service restart");
 
 
     using (var timelineStore = new ObservationStore(Path.Combine(directory, "timeline-observed-at.db")))

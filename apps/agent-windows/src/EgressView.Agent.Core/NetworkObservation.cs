@@ -98,6 +98,16 @@ public sealed record RetentionMaintenanceResult(long ObservationsDeleted, long F
         HourlySummariesDeleted == batchSize || CoverageSessionsDeleted == batchSize || ChartSummariesDeleted == batchSize;
 }
 
+public sealed record LocalHistoryStatus(int RetentionDays, int RawDays, long StorageBytes,
+    DateTimeOffset? OldestRawAt, DateTimeOffset? OldestAggregateAt,
+    DateTimeOffset? LastCleanupAt, DateTimeOffset NextCleanupAt);
+
+public sealed record LocalHistoryDeletionResult(long ObservationsDeleted, long FlowsDeleted,
+    long HourlySummariesDeleted, long ChartSummariesDeleted, long CoverageSessionsDeleted)
+{
+    public long TotalDeleted => ObservationsDeleted + FlowsDeleted + HourlySummariesDeleted + ChartSummariesDeleted + CoverageSessionsDeleted;
+}
+
 public sealed record CollectorSnapshot(
     string State,
     long Accepted,

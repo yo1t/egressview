@@ -224,6 +224,7 @@ internal sealed class AgentWindowsService : ServiceBase
                     if (result.MayHaveMore(50_000)) await Task.Delay(100, cancellationToken);
                 } while (result.MayHaveMore(50_000) && !cancellationToken.IsCancellationRequested);
                 if (store.CompactIfBeneficial()) store.AddCounter("retention-compactions", 1);
+                store.MarkRetentionMaintenanceCompleted(DateTimeOffset.UtcNow);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
             catch

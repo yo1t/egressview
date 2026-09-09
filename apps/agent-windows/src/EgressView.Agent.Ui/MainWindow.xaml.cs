@@ -29,6 +29,8 @@ public partial class MainWindow : Window
     private CancellationTokenSource? aiRequest;
     private Guid activeConversationId = Guid.NewGuid();
     private bool loadingAiConversation;
+    private bool loadingHistorySettings;
+    private DateTimeOffset? historyOldestRaw;
     public ObservableCollection<FlowRow> RecentFlows { get; } = [];
     public ObservableCollection<ThreatRow> ThreatRows { get; } = [];
 
@@ -413,7 +415,8 @@ public partial class MainWindow : Window
         NotifyRecovery.IsChecked = AgentSettings.NotificationCategoryEnabled("Recovery");
         DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 25 => 2, 0 => 3, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
-        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "hub" => 4, _ => 0 };
+        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "hub" => 5, _ => 0 };
+        DeleteHistoryBefore.SelectedDate = DateTime.Today.AddDays(-30);
         AiProviderChoice.SelectedIndex = AgentSettings.AiProvider switch { "OpenAI" => 1, "Anthropic" => 2, _ => 0 };
         AiEndpoint.Text = AgentSettings.OllamaEndpoint;
         AiCloudConsent.IsChecked = AgentSettings.AiCloudConsent(AgentSettings.AiProvider);
@@ -424,16 +427,18 @@ public partial class MainWindow : Window
 
     private void SettingsSectionChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HubSettingsSection is null ||
+        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HistorySettingsSection is null || HubSettingsSection is null ||
             SettingsSectionChoice.SelectedItem is not ListBoxItem item) return;
         var section = item.Tag?.ToString() ?? "general";
         GeneralSettingsSection.Visibility = section == "general" ? Visibility.Visible : Visibility.Collapsed;
         NotificationSettingsSection.Visibility = section == "notifications" ? Visibility.Visible : Visibility.Collapsed;
         EnrichmentSettingsSection.Visibility = section == "enrichment" ? Visibility.Visible : Visibility.Collapsed;
         AiSettingsSection.Visibility = section == "ai" ? Visibility.Visible : Visibility.Collapsed;
+        HistorySettingsSection.Visibility = section == "history" ? Visibility.Visible : Visibility.Collapsed;
         HubSettingsSection.Visibility = section == "hub" ? Visibility.Visible : Visibility.Collapsed;
         if (!loadingSettings) AgentSettings.SettingsSection = section;
         if (section == "enrichment") _ = RefreshEnrichmentStatusAsync();
+        if (section == "history") _ = RefreshHistoryStatusAsync();
     }
 
     private void LanguageChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -482,6 +487,8 @@ public partial class MainWindow : Window
         Name(SettingsSectionChoice, "SettingsSections");
         Name(AiProviderChoice, "Provider");
         Name(AiModelChoice, "Model");
+        Name(HistoryRetentionChoice, "KeepHistory");
+        Name(DeleteHistoryBefore, "DeleteBefore");
         Name(RefreshGeoButton, "FetchNow");
         Name(RefreshThreatButton, "FetchNow");
         AutomationProperties.SetName(HubUrl, "Hub URL");
@@ -577,6 +584,151 @@ public partial class MainWindow : Window
         NotificationPermission.Text = AgentSettings.NotificationsEnabled ? LocalizationManager.Text("NotificationPermissionOn") : LocalizationManager.Text("NotificationPermissionOff");
         NotificationSummary.Text = $"{LocalizationManager.Text("AttemptsToday")}: {app.Notifications.AttemptsToday:N0} · {LocalizationManager.Text("NotificationsToday")}: {app.Notifications.SentToday:N0} · {LocalizationManager.Text("SuppressedToday")}: {app.Notifications.SuppressedToday:N0}";
         NotificationList.ItemsSource = app.Notifications.History.Select(item => new NotificationRow(item)).ToArray();
+    }
+
+    private async Task RefreshHistoryStatusAsync()
+    {
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"history-status"}""", lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            EnsureAccepted(document.RootElement);
+            RenderHistoryStatus(document.RootElement.GetProperty("data").Deserialize<LocalHistoryStatus>() ?? throw new InvalidDataException());
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception) { HistoryOperationStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
+    }
+
+    private void RenderHistoryStatus(LocalHistoryStatus status)
+    {
+        loadingHistorySettings = true;
+        HistoryRetentionChoice.SelectedIndex = status.RetentionDays switch { 1 => 0, 7 => 1, 90 => 3, _ => 2 };
+        loadingHistorySettings = false;
+        historyOldestRaw = status.OldestRawAt;
+        HistoryRetentionPolicy.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("RawHistoryPolicy"), status.RawDays, status.RetentionDays);
+        HistoryDiskUsage.Text = FlowRow.FormatBytes(status.StorageBytes);
+        HistoryNextCleanup.Text = status.NextCleanupAt.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
+        var raw = status.OldestRawAt?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? "—";
+        var aggregate = status.OldestAggregateAt?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? "—";
+        var last = status.LastCleanupAt?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? LocalizationManager.Text("NotYet");
+        HistoryStoredRange.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("HistoryStoredRangeFormat"), raw, aggregate, last);
+    }
+
+    private async void HistoryRetentionChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || loadingSettings || loadingHistorySettings || HistoryRetentionChoice.SelectedItem is not ComboBoxItem item ||
+            !int.TryParse(item.Tag?.ToString(), out var days)) return;
+        SetHistoryBusy(true);
+        HistoryOperationStatus.Text = LocalizationManager.Text("ApplyingRetention");
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "set-history-retention", days }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            EnsureAccepted(document.RootElement);
+            RenderHistoryStatus(document.RootElement.GetProperty("data").Deserialize<LocalHistoryStatus>() ?? throw new InvalidDataException());
+            HistoryOperationStatus.Text = LocalizationManager.Text("RetentionApplied");
+            await RefreshAllAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception) { HistoryOperationStatus.Text = $"{LocalizationManager.Text("HistoryOperationFailed")} {exception.Message}"; await RefreshHistoryStatusAsync(); }
+        finally { SetHistoryBusy(false); }
+    }
+
+    private async void DeleteHistoryBefore_Click(object sender, RoutedEventArgs e)
+    {
+        if (DeleteHistoryBefore.SelectedDate is not { } date) return;
+        var cutoff = new DateTimeOffset(date.Date, TimeZoneInfo.Local.GetUtcOffset(date.Date));
+        await ConfirmAndDeleteHistoryAsync(cutoff);
+    }
+
+    private async void DeleteAllHistory_Click(object sender, RoutedEventArgs e) => await ConfirmAndDeleteHistoryAsync(null);
+
+    private async Task ConfirmAndDeleteHistoryAsync(DateTimeOffset? cutoff)
+    {
+        var prompt = cutoff is null ? LocalizationManager.Text("ConfirmDeleteAllHistory") : LocalizationManager.Text("ConfirmDeleteBeforeHistory");
+        var choice = System.Windows.MessageBox.Show(this, prompt, LocalizationManager.Text("DeleteHistory"), MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
+        if (choice == MessageBoxResult.Cancel) return;
+        SetHistoryBusy(true);
+        try
+        {
+            if (choice == MessageBoxResult.Yes && !await ExportHistoryAsync(cutoff)) return;
+            HistoryOperationStatus.Text = LocalizationManager.Text("DeletingHistory");
+            var request = cutoff is null
+                ? JsonSerializer.Serialize(new { v = 1, op = "delete-history", scope = "all" })
+                : JsonSerializer.Serialize(new { v = 1, op = "delete-history", scope = "before", before = cutoff.Value.ToUniversalTime() });
+            var response = await AgentIpcClient.RequestAsync(request, lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            EnsureAccepted(document.RootElement);
+            var result = document.RootElement.GetProperty("data").Deserialize<LocalHistoryDeletionResult>() ?? throw new InvalidDataException();
+            HistoryOperationStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("HistoryDeleted"), result.TotalDeleted);
+            await RefreshAllAsync();
+            await RefreshHistoryStatusAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception) { HistoryOperationStatus.Text = $"{LocalizationManager.Text("HistoryOperationFailed")} {exception.Message}"; }
+        finally { SetHistoryBusy(false); }
+    }
+
+    private async Task<bool> ExportHistoryAsync(DateTimeOffset? cutoff)
+    {
+        var end = cutoff ?? DateTimeOffset.Now;
+        var start = historyOldestRaw ?? end;
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = LocalizationManager.Text("SaveCopyBeforeDeleting"),
+            Filter = "CSV (*.csv)|*.csv",
+            FileName = ObservationCsv.SuggestedFileName(start, end),
+            AddExtension = true,
+        };
+        if (dialog.ShowDialog(this) != true) return false;
+        var temporary = $"{dialog.FileName}.tmp-{Guid.NewGuid():N}";
+        try
+        {
+            await using (var writer = new StreamWriter(temporary, false, new System.Text.UTF8Encoding(false)))
+            {
+                await writer.WriteAsync(ObservationCsv.Header);
+                var total = 0;
+                for (var offset = 0; offset <= 10_000_000; offset += 500)
+                {
+                    var page = await ReadHistoryExportPageAsync(cutoff, 500, offset);
+                    await writer.WriteAsync(ObservationCsv.ExportRows(page));
+                    total += page.Count;
+                    HistoryOperationStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SavingHistory"), total);
+                    if (page.Count < 500) break;
+                }
+                await writer.FlushAsync(lifetime.Token);
+            }
+            File.Move(temporary, dialog.FileName, true);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            try { File.Delete(temporary); } catch { }
+            HistoryOperationStatus.Text = $"{LocalizationManager.Text("CsvFailed")} {exception.Message}";
+            return false;
+        }
+    }
+
+    private static void EnsureAccepted(JsonElement root)
+    {
+        if (root.TryGetProperty("status", out var status) && status.GetString() == "ok") return;
+        var reason = root.TryGetProperty("reason", out var value) ? value.GetString() : "unknown";
+        throw new InvalidOperationException(reason);
+    }
+
+    private async Task<IReadOnlyList<RecentFlow>> ReadHistoryExportPageAsync(DateTimeOffset? cutoff, int limit, int offset)
+    {
+        var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "history-export", before = cutoff?.ToUniversalTime(), limit, offset }), lifetime.Token);
+        using var document = JsonDocument.Parse(response);
+        EnsureAccepted(document.RootElement);
+        return document.RootElement.GetProperty("data").Deserialize<List<RecentFlow>>() ?? [];
+    }
+
+    private void SetHistoryBusy(bool busy)
+    {
+        HistoryRetentionChoice.IsEnabled = !busy;
+        DeleteHistoryBeforeButton.IsEnabled = !busy;
+        DeleteAllHistoryButton.IsEnabled = !busy;
     }
 
     private AiProviderKind SelectedAiProvider() => AiProviderChoice.SelectedItem is ComboBoxItem item &&
