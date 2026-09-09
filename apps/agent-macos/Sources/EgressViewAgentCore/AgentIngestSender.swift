@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 public struct AgentIngestAcknowledgement: Decodable, Equatable, Sendable {
     public let batchId: UUID
@@ -85,7 +86,19 @@ public actor AgentIngestSender {
     /// unasked or unanswerable, and both send version 1 -- every Hub accepts
     /// it, so an unanswered question must not stop delivery that works.
     private var hubCapabilities: AgentHubCapabilities?
-    private var capabilitiesAsked = false
+    /// When the Hub was last asked what it accepts.
+    ///
+    /// Not a "have we asked" flag any more. The first version asked once per
+    /// run and never again, on the reasoning that a Hub too old to answer
+    /// would otherwise be asked before every batch forever. That is true and
+    /// it also means a Hub that *gains* a capability is never noticed until
+    /// the agent restarts -- which is exactly what happened the first time a
+    /// Hub gained one (P3-14 stage 2). Asking again on a slow beat costs one
+    /// request an hour and keeps the two in step.
+    private var capabilitiesAskedAt: Date?
+    private static let capabilitiesRefreshInterval: TimeInterval = 60 * 60
+
+    private let logger = Logger(subsystem: "com.egressview.agent.macos", category: "hub-capabilities")
 
     public init(
         queue: AgentDeliveryQueue,
@@ -198,7 +211,7 @@ public actor AgentIngestSender {
                 publish(.authorizationRequired)
                 return
             }
-            await askCapabilitiesOnce(credential: credential)
+            await askCapabilities(credential: credential)
             let outcome = AgentCapabilityNegotiation.decide(capabilities: hubCapabilities)
             let schemaVersion: Int
             switch outcome {
@@ -221,6 +234,7 @@ public actor AgentIngestSender {
             // the shipped strict schema accepts (P3-14 stage 2).
             let includeHostname = AgentCapabilityNegotiation
                 .acceptsRemoteHostname(capabilities: hubCapabilities)
+            logger.notice("hub-capabilities: includeHostname=\(includeHostname, privacy: .public)")
             guard let envelope = try queue.prepareBatch(
                 limit: limit, sentAt: now(), metadata: metadata, schemaVersion: schemaVersion,
                 includeHostname: includeHostname
@@ -283,21 +297,57 @@ public actor AgentIngestSender {
     /// here, because the whole batch is held in memory and re-sent on failure.
     static let agentBatchLimit = 200
 
-    /// Asks the Hub what it accepts, once per run.
+    /// Asks the Hub what it accepts, and asks again on a slow beat.
     ///
-    /// Any failure leaves `hubCapabilities` nil and is not retried in this
-    /// loop: a 404 from a Hub too old to have the endpoint would otherwise add
-    /// a request before every batch, forever, to learn the same nothing.
-    private func askCapabilitiesOnce(credential: AgentCredential) async {
-        guard !capabilitiesAsked else { return }
-        capabilitiesAsked = true
-        guard AgentEnrollmentService.isAllowedHubURL(credential.hubURL) else { return }
+    /// A failure is not fatal -- every Hub still accepts version 1, so
+    /// delivery continues -- but it is no longer permanent either. A Hub that
+    /// was restarting, unreachable for a moment, or simply older than the
+    /// capability being asked about will be asked again within the hour.
+    ///
+    /// Every outcome is recorded. The first version returned silently from
+    /// four different places, so "the Hub does not offer it", "the request
+    /// failed", "the answer would not decode" and "it was never asked" were
+    /// one indistinguishable nothing from outside -- the same shape of blind
+    /// spot that cost two nights on P3-84. `.notice` because `.info` is not
+    /// kept in the log store, and `privacy: .public` because a status code and
+    /// a field name are not the user's data.
+    private func askCapabilities(credential: AgentCredential) async {
+        if let askedAt = capabilitiesAskedAt,
+           hubCapabilities != nil || now().timeIntervalSince(askedAt) < Self.capabilitiesRefreshInterval {
+            return
+        }
+        capabilitiesAskedAt = now()
+
+        guard AgentEnrollmentService.isAllowedHubURL(credential.hubURL) else {
+            logger.notice("hub-capabilities: refused=hub-url-not-allowed")
+            return
+        }
         var request = URLRequest(url: credential.hubURL.appendingPathComponent("api/agent/capabilities"))
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(credential.token)", forHTTPHeaderField: "Authorization")
-        guard let (data, response) = try? await transport.send(request), response.statusCode == 200 else { return }
-        hubCapabilities = try? JSONDecoder().decode(AgentHubCapabilities.self, from: data)
+
+        let result: (Data, HTTPURLResponse)
+        do {
+            result = try await transport.send(request)
+        } catch {
+            logger.notice("hub-capabilities: request failed, will ask again within the hour")
+            return
+        }
+        guard result.1.statusCode == 200 else {
+            logger.notice("hub-capabilities: status=\(result.1.statusCode, privacy: .public)")
+            return
+        }
+        guard let decoded = try? JSONDecoder().decode(AgentHubCapabilities.self, from: result.0) else {
+            logger.notice("hub-capabilities: status=200 but the answer would not decode")
+            return
+        }
+        hubCapabilities = decoded
+        let fields = decoded.observationFields?.joined(separator: ",") ?? "(none)"
+        let versions = decoded.schemaVersions.map(String.init).joined(separator: ",")
+        logger.notice(
+            "hub-capabilities: status=200 versions=\(versions, privacy: .public) fields=\(fields, privacy: .public)"
+        )
     }
 
     private func makeRequest(
