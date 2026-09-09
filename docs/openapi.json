@@ -863,6 +863,18 @@
                             "exact",
                             "sampled"
                           ]
+                        },
+                        "remoteHostname": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 253
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       },
                       "required": [

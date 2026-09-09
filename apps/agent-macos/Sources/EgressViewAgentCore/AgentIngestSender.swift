@@ -216,8 +216,14 @@ public actor AgentIngestSender {
             let limit = AgentCapabilityNegotiation.batchSize(
                 capabilities: hubCapabilities, agentLimit: Self.agentBatchLimit
             )
+            // Only after this Hub has said it reads the field. A Hub that
+            // predates it never lists it, so the payload stays exactly what
+            // the shipped strict schema accepts (P3-14 stage 2).
+            let includeHostname = AgentCapabilityNegotiation
+                .acceptsRemoteHostname(capabilities: hubCapabilities)
             guard let envelope = try queue.prepareBatch(
-                limit: limit, sentAt: now(), metadata: metadata, schemaVersion: schemaVersion
+                limit: limit, sentAt: now(), metadata: metadata, schemaVersion: schemaVersion,
+                includeHostname: includeHostname
             ) else {
                 sendTask = nil
                 publish(.idle)

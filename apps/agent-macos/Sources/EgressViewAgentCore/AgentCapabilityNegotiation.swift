@@ -13,19 +13,25 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
     public let maxBodyBytes: Int?
     public let requestsPerMinute: Int?
     public let compression: [String]?
+    /// Optional observation fields this Hub reads. Absent on every Hub built
+    /// before they existed, which is why absence must mean "send nothing
+    /// extra" rather than "unspecified, so try" (P3-14 stage 2).
+    public let observationFields: [String]?
 
     public init(
         schemaVersions: [Int],
         maxObservationsPerBatch: Int? = nil,
         maxBodyBytes: Int? = nil,
         requestsPerMinute: Int? = nil,
-        compression: [String]? = nil
+        compression: [String]? = nil,
+        observationFields: [String]? = nil
     ) {
         self.schemaVersions = schemaVersions
         self.maxObservationsPerBatch = maxObservationsPerBatch
         self.maxBodyBytes = maxBodyBytes
         self.requestsPerMinute = requestsPerMinute
         self.compression = compression
+        self.observationFields = observationFields
     }
 }
 
@@ -44,6 +50,15 @@ public struct AgentHubCapabilities: Sendable, Equatable, Decodable {
 public enum AgentCapabilityNegotiation {
     /// Versions this agent can produce, newest first.
     public static let supportedByAgent: [Int] = [AgentIngestEnvelope.currentSchemaVersion]
+
+    /// Whether this Hub said it reads the name the Mac connected to.
+    ///
+    /// False for a Hub that answered nothing, answered an older shape, or
+    /// listed other fields and not this one. The agent has no way to learn
+    /// this except by being told, and guessing wrong rejects the whole batch.
+    public static func acceptsRemoteHostname(capabilities: AgentHubCapabilities?) -> Bool {
+        capabilities?.observationFields?.contains("remoteHostname") ?? false
+    }
 
     public enum Outcome: Sendable, Equatable {
         /// A version both sides speak. The highest one, so a Hub that has

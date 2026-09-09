@@ -12,6 +12,9 @@ const AGENT_INGEST_SCHEMA_VERSION = 1;
 // new version — versions exist for changes that break the old reader.
 const AGENT_INGEST_SUPPORTED_SCHEMA_VERSIONS = Object.freeze([1]);
 const AGENT_INGEST_MAX_OBSERVATIONS = 200;
+// Named so the capabilities endpoint and the schema cannot drift apart: an
+// agent is told exactly what this file accepts, from the same list.
+const AGENT_INGEST_OPTIONAL_OBSERVATION_FIELDS = Object.freeze(['remoteHostname']);
 const AGENT_INGEST_MAX_BODY_BYTES = 512 * 1024;
 const AGENT_INGEST_DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const AGENT_INGEST_MAX_FUTURE_MS = 24 * 60 * 60 * 1000;
@@ -29,6 +32,14 @@ const port = z.number().int().min(1).max(65535);
 // port is still required for the observation to be useful and safely bounded.
 const localPort = z.number().int().min(0).max(65535);
 const isoTimestamp = z.iso.datetime({ offset: false, local: false }).max(32);
+// The name the client actually connected to, as the Network Extension reported
+// it -- not a reverse lookup. 253 is the longest a DNS name can be, and a name
+// with whitespace in it is not one; the agent already drops those rather than
+// storing them, and a Hub must not be more trusting of its input than the
+// agent was (P3-14).
+const hostname = z.string().min(1).max(253)
+  .refine(noControlCharacters, 'must not contain control characters')
+  .refine(value => !/\s/.test(value), 'must not contain whitespace');
 const uint64Decimal = z.string().regex(/^(?:0|[1-9]\d{0,19})$/).refine(value => (
   BigInt(value) <= 18_446_744_073_709_551_615n
 ), 'must fit in an unsigned 64-bit integer');
@@ -56,6 +67,12 @@ const agentObservationSchema = z.object({
   bytesOut: uint64Decimal.nullable(),
   collector: z.enum(['network-extension', 'libproc', 'etw']),
   confidence: z.enum(['exact', 'sampled']),
+  // Optional, and that is the whole compatibility story: an agent sends it
+  // only after this Hub has said it accepts it, and a Hub that predates the
+  // field is one whose capabilities never mentioned it. Adding an optional
+  // field is not a new schema version -- versions are for changes that break
+  // the old reader, and this breaks nothing (P3-14 stage 2).
+  remoteHostname: hostname.nullish(),
 }).strict().superRefine((observation, ctx) => {
   if (Date.parse(observation.firstObservedAt) > Date.parse(observation.lastObservedAt)) {
     ctx.addIssue({
@@ -108,6 +125,7 @@ module.exports = {
   AGENT_INGEST_SCHEMA_VERSION,
   AGENT_INGEST_SUPPORTED_SCHEMA_VERSIONS,
   AGENT_INGEST_MAX_OBSERVATIONS,
+  AGENT_INGEST_OPTIONAL_OBSERVATION_FIELDS,
   AGENT_INGEST_MAX_BODY_BYTES,
   AGENT_INGEST_DEFAULT_RETENTION_MS,
   AGENT_INGEST_MAX_FUTURE_MS,

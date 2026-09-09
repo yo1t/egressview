@@ -22,6 +22,7 @@ const {
   validateAgentObservationWindow,
   AGENT_INGEST_SUPPORTED_SCHEMA_VERSIONS,
   AGENT_INGEST_MAX_OBSERVATIONS,
+  AGENT_INGEST_OPTIONAL_OBSERVATION_FIELDS,
   AGENT_INGEST_MAX_BODY_BYTES,
 } = require('../agent-ingest-schema');
 const { parseRequest } = require('../http-validation');
@@ -514,6 +515,12 @@ module.exports = function agentRoutes({
       // Declared empty rather than omitted: an agent must not infer that it may
       // compress because the field is missing.
       compression: [],
+      // The optional observation fields this Hub reads. An agent sends one only
+      // if it is named here -- the same reasoning as `compression`: absence
+      // must never be read as permission. A Hub too old to have this list
+      // answers 404 to the whole endpoint, and the agent sends nothing extra
+      // (P3-14 stage 2).
+      observationFields: [...AGENT_INGEST_OPTIONAL_OBSERVATION_FIELDS],
     });
   });
 

@@ -6,7 +6,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   AGENT_INGEST_MAX_OBSERVATIONS,
+  AGENT_INGEST_OPTIONAL_OBSERVATION_FIELDS,
   agentIngestEnvelopeSchema,
+  agentObservationSchema,
   validateAgentObservationWindow,
 } = require('../../src/agent-ingest-schema');
 
@@ -111,5 +113,32 @@ describe('agent ingest v1 schema', () => {
       now: Date.parse('2026-08-09T12:00:00Z'),
       maxFutureMs: 24 * 60 * 60 * 1000,
     }), [{ index: 0, reason: 'future_timestamp' }]);
+  });
+});
+
+// P3-14 stage 2. The agent looks for this exact string in the capabilities
+// answer; a rename on either side silently stops the field being sent.
+describe('観測に付いてくる宛先名', () => {
+  const base = () => structuredClone(golden.observations[0]);
+
+  it('正しい名前を受け入れる', () => {
+    const parsed = agentObservationSchema.safeParse({ ...base(), remoteHostname: 'api.example.com' });
+    assert.equal(parsed.success, true);
+  });
+
+  it('省略とnullは同じく受け入れる', () => {
+    assert.equal(agentObservationSchema.safeParse(base()).success, true);
+    assert.equal(agentObservationSchema.safeParse({ ...base(), remoteHostname: null }).success, true);
+  });
+
+  it('空白を含む名前と長すぎる名前は拒否する', () => {
+    // The agent drops these rather than storing them; a Hub must not be more
+    // trusting of its input than the agent that sent it was.
+    assert.equal(agentObservationSchema.safeParse({ ...base(), remoteHostname: 'bad name.com' }).success, false);
+    assert.equal(agentObservationSchema.safeParse({ ...base(), remoteHostname: 'a'.repeat(254) }).success, false);
+  });
+
+  it('Agentが探す名前をそのまま公開している', () => {
+    assert.deepEqual([...AGENT_INGEST_OPTIONAL_OBSERVATION_FIELDS], ['remoteHostname']);
   });
 });

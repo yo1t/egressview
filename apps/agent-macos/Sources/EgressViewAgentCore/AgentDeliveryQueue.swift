@@ -190,7 +190,10 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
         limit: Int,
         sentAt: Date,
         metadata: AgentIngestMetadata,
-        schemaVersion: Int = AgentIngestEnvelope.currentSchemaVersion
+        schemaVersion: Int = AgentIngestEnvelope.currentSchemaVersion,
+        // Defaults to false so a caller that has not negotiated cannot send
+        // the field by omission (P3-14 stage 2).
+        includeHostname: Bool = false
     ) throws -> AgentIngestEnvelope? {
         try lock.withLock {
             guard !state.pending.isEmpty else { return nil }
@@ -207,7 +210,11 @@ public final class AgentDeliveryQueue: @unchecked Sendable {
             }
             let byID = Dictionary(uniqueKeysWithValues: state.pending.map { ($0.observationID, $0.observation) })
             let observations = active.observationIDs.compactMap { id in
-                byID[id].map { AgentIngestObservation(observationId: id, observation: $0) }
+                byID[id].map {
+                    AgentIngestObservation(
+                        observationId: id, observation: $0, includeHostname: includeHostname
+                    )
+                }
             }
             guard observations.count == active.observationIDs.count else {
                 throw AgentDeliveryQueueError.corruptActiveBatch

@@ -201,3 +201,31 @@ describe('Agent ingest store', () => {
     assert.equal(store._dbForTest().prepare('SELECT COUNT(*) AS n FROM agent_app_hourly').get().n, 0);
   });
 });
+
+// P3-14 stage 2: the name the client actually used, carried from the agent
+// rather than guessed by a reverse lookup.
+describe('観測に付いてきた宛先名', () => {
+  it('送られてきた名前を保存する', () => {
+    const envelope = copy();
+    envelope.observations[0].remoteHostname = 'api.example.com';
+    store.storeBatch(agentId, envelope, { receivedAt });
+    const row = store._dbForTest()
+      .prepare('SELECT remoteHostname FROM agent_observations WHERE observationId = ?')
+      .get(envelope.observations[0].observationId);
+    assert.equal(row.remoteHostname, 'api.example.com');
+  });
+
+  it('名前が無い観測はNULLで保存され、拒否されない', () => {
+    // An agent that does not send the field, and a flow the Network Extension
+    // could not name, must both keep working -- that is the whole point of the
+    // field being optional.
+    const envelope = copy();
+    delete envelope.observations[0].remoteHostname;
+    const ack = store.storeBatch(agentId, envelope, { receivedAt });
+    assert.equal(ack.rejected, 0);
+    const row = store._dbForTest()
+      .prepare('SELECT remoteHostname FROM agent_observations WHERE observationId = ?')
+      .get(envelope.observations[0].observationId);
+    assert.equal(row.remoteHostname, null);
+  });
+});

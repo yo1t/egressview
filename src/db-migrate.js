@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 22;
+const SCHEMA_VERSION = 23;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -645,7 +645,22 @@ const MIGRATIONS = [
           ))
         );
 
-        INSERT INTO agent_observations SELECT * FROM agent_observations_v16;
+        -- Columns named rather than a star. A rebuild says what the table
+        -- held at the moment it ran; a star says "whatever is there now", and
+        -- the first additive column after it -- remoteHostname in v23 -- makes
+        -- the two disagree the moment anything replays this step.
+        INSERT INTO agent_observations (
+          agentId, observationId, batchId, networkProtocol,
+          localAddress, localPort, remoteAddress, remotePort,
+          processId, processName, bundleId, firstObservedAt, lastObservedAt,
+          bytesIn, bytesOut, collector, confidence, receivedAt
+        )
+        SELECT
+          agentId, observationId, batchId, networkProtocol,
+          localAddress, localPort, remoteAddress, remotePort,
+          processId, processName, bundleId, firstObservedAt, lastObservedAt,
+          bytesIn, bytesOut, collector, confidence, receivedAt
+        FROM agent_observations_v16;
         DROP TABLE agent_observations_v16;
 
         CREATE INDEX idx_agent_observations_time
@@ -774,7 +789,22 @@ const MIGRATIONS = [
           ))
         );
 
-        INSERT INTO agent_observations SELECT * FROM agent_observations_v19;
+        -- Columns named rather than a star. A rebuild says what the table
+        -- held at the moment it ran; a star says "whatever is there now", and
+        -- the first additive column after it -- remoteHostname in v23 -- makes
+        -- the two disagree the moment anything replays this step.
+        INSERT INTO agent_observations (
+          agentId, observationId, batchId, networkProtocol,
+          localAddress, localPort, remoteAddress, remotePort,
+          processId, processName, bundleId, firstObservedAt, lastObservedAt,
+          bytesIn, bytesOut, collector, confidence, receivedAt
+        )
+        SELECT
+          agentId, observationId, batchId, networkProtocol,
+          localAddress, localPort, remoteAddress, remotePort,
+          processId, processName, bundleId, firstObservedAt, lastObservedAt,
+          bytesIn, bytesOut, collector, confidence, receivedAt
+        FROM agent_observations_v19;
         DROP TABLE agent_observations_v19;
 
         CREATE INDEX idx_agent_observations_time
@@ -953,6 +983,41 @@ const MIGRATIONS = [
           ).run();
           if (changes) logger.info(`[migrate] v22 cleared ${changes} ${table}.dstHost value(s)`);
         }
+      }
+    },
+  },
+  {
+    version: 23,
+    description: 'record the hostname an agent observed, alongside the address',
+    up(db) {
+      // The name the client actually connected to. The Hub can already guess
+      // one by reverse lookup, and a guess is wrong for a CDN in the ordinary
+      // case; this column holds what the Mac itself used (P3-14 stage 2).
+      //
+      // Added, not backfilled. Rows written before this ran have no such name
+      // and never will -- the observation is over, and there is nowhere to
+      // learn it from now. Leaving them NULL says that; inventing a reverse
+      // lookup for them would put a guess in the column that exists to avoid
+      // guesses.
+      // Guarded, because a database can reach this version without the table:
+      // the Hub-Agent schema arrived at v13, and a test or an installation
+      // that never carried agents has nothing to alter. v22 learned the same
+      // thing; an unguarded ALTER fails the whole migration.
+      const hasTable = db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get('agent_observations');
+      if (!hasTable) return;
+
+      const columns = new Set(
+        db.prepare('PRAGMA table_info(agent_observations)').all().map(c => c.name)
+      );
+      if (!columns.has('remoteHostname')) {
+        db.exec(`
+          ALTER TABLE agent_observations
+          ADD COLUMN remoteHostname TEXT
+          CHECK(remoteHostname IS NULL OR length(remoteHostname) BETWEEN 1 AND 253)
+        `);
+        logger.info('[migrate] v23 added agent_observations.remoteHostname');
       }
     },
   },

@@ -36,8 +36,24 @@ public struct AgentIngestObservation: Codable, Equatable, Sendable {
     public let bytesOut: String?
     public let collector: CollectorKind
     public let confidence: ObservationConfidence
+    /// The name this Mac actually connected to, sent only when the Hub has
+    /// said it accepts the field.
+    ///
+    /// `nil` is not encoded, so an agent talking to a Hub that never mentioned
+    /// it sends exactly the payload it always did. That matters because the
+    /// shipped ingest schema is `.strict()`: one unknown field rejects the
+    /// whole batch, and every agent in the field would stop delivering
+    /// (P3-14 stage 2).
+    public let remoteHostname: String?
 
-    public init(observationId: UUID, observation: ConnectionObservation) {
+    /// - Parameter includeHostname: whether the Hub said it reads
+    ///   `remoteHostname`. Defaults to false, so a caller that has not asked
+    ///   cannot send it by forgetting to decide.
+    public init(
+        observationId: UUID,
+        observation: ConnectionObservation,
+        includeHostname: Bool = false
+    ) {
         self.observationId = observationId
         self.networkProtocol = observation.networkProtocol
         self.localAddress = observation.localAddress
@@ -54,6 +70,7 @@ public struct AgentIngestObservation: Codable, Equatable, Sendable {
         self.bytesOut = observation.bytesOut.map(String.init)
         self.collector = observation.collector
         self.confidence = observation.confidence
+        self.remoteHostname = includeHostname ? observation.remoteHostname : nil
     }
 
     public init(
@@ -71,7 +88,8 @@ public struct AgentIngestObservation: Codable, Equatable, Sendable {
         bytesIn: String?,
         bytesOut: String?,
         collector: CollectorKind,
-        confidence: ObservationConfidence
+        confidence: ObservationConfidence,
+        remoteHostname: String? = nil
     ) {
         self.observationId = observationId
         self.networkProtocol = networkProtocol
@@ -88,6 +106,7 @@ public struct AgentIngestObservation: Codable, Equatable, Sendable {
         self.bytesOut = bytesOut
         self.collector = collector
         self.confidence = confidence
+        self.remoteHostname = remoteHostname
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -106,6 +125,7 @@ public struct AgentIngestObservation: Codable, Equatable, Sendable {
         case bytesOut
         case collector
         case confidence
+        case remoteHostname
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -125,6 +145,12 @@ public struct AgentIngestObservation: Codable, Equatable, Sendable {
         try container.encode(bytesOut, forKey: .bytesOut)
         try container.encode(collector, forKey: .collector)
         try container.encode(confidence, forKey: .confidence)
+        // `encodeIfPresent`, not `encode`: a nil must leave the key out
+        // entirely rather than send an explicit null. A Hub that does not know
+        // the field would reject the batch either way, and the point of the
+        // negotiation is that the payload is byte-for-byte what it always was
+        // until the Hub says otherwise.
+        try container.encodeIfPresent(remoteHostname, forKey: .remoteHostname)
     }
 }
 
