@@ -21,7 +21,8 @@ public static class IpcProtocol
         Func<int, LocalHistoryStatus>? setHistoryRetention = null,
         Func<DateTimeOffset?, int, int, IReadOnlyList<RecentFlow>>? historyExport = null,
         Func<DateTimeOffset?, LocalHistoryDeletionResult>? deleteHistory = null,
-        Func<string>? diagnostics = null)
+        Func<string>? diagnostics = null,
+        Func<bool, bool, AgentUninstallResult>? prepareUninstall = null)
     {
         try
         {
@@ -50,10 +51,24 @@ public static class IpcProtocol
                 "history-export" => HistoryExport(root, historyExport),
                 "delete-history" => DeleteHistory(root, deleteHistory),
                 "diagnostics" => DynamicStatus(diagnostics),
+                "prepare-uninstall" => PrepareUninstall(root, prepareUninstall),
                 _ => Reject("unknown-operation"),
             };
         }
         catch (Exception) { return Reject("malformed-request"); }
+    }
+
+    private static string PrepareUninstall(JsonElement root, Func<bool, bool, AgentUninstallResult>? prepare)
+    {
+        if (prepare is null) return Reject("operation-unavailable");
+        var removeHistory = root.TryGetProperty("removeHistory", out var remove) && remove.ValueKind == JsonValueKind.True;
+        var continueWithoutRevocation = root.TryGetProperty("continueWithoutRevocation", out var manual) && manual.ValueKind == JsonValueKind.True;
+        try { return JsonSerializer.Serialize(new { status = "ok", data = prepare(removeHistory, continueWithoutRevocation) }); }
+        catch (AgentUninstallException exception)
+        {
+            return JsonSerializer.Serialize(new { status = "rejected", reason = exception.Reason, statusCode = exception.StatusCode });
+        }
+        catch { return Reject("uninstall-preparation-failed"); }
     }
 
     private static string HistoryStatus(Func<LocalHistoryStatus>? read) => read is null

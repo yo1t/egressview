@@ -59,6 +59,13 @@ public sealed class WindowsCredentialStore
         finally { CredFree(pointer); }
     }
 
+    public void Delete()
+    {
+        if (CredDelete(Target, Generic, 0)) return;
+        var error = Marshal.GetLastWin32Error();
+        if (error != 1168) throw new Win32Exception(error);
+    }
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct NativeCredential
     {
@@ -75,5 +82,7 @@ public sealed class WindowsCredentialStore
     [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CredWrite(ref NativeCredential credential, int flags);
     [DllImport("advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CredRead(string target, int type, int flags, out nint credential);
+    [DllImport("advapi32.dll", EntryPoint = "CredDeleteW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CredDelete(string target, int type, int flags);
     [DllImport("advapi32.dll")] private static extern void CredFree(nint credential);
 }

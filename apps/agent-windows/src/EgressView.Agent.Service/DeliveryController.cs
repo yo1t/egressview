@@ -8,6 +8,7 @@ internal sealed class DeliveryController : IDisposable
     private readonly WindowsCredentialStore credentials;
     private readonly DeliverySender sender;
     private readonly SemaphoreSlim wake = new(0, 1);
+    private readonly SemaphoreSlim sendGate = new(1, 1);
     private readonly object stateGate = new();
     private DeliveryRuntimeStatus status = new("idle");
 
@@ -32,6 +33,15 @@ internal sealed class DeliveryController : IDisposable
         try { wake.Release(); } catch (SemaphoreFullException) { }
     }
 
+    internal void PauseAndWait()
+    {
+        store.DeliveryEnabled = false;
+        SettingsChanged();
+        sendGate.Wait();
+        sendGate.Release();
+        SetState("disabled", null);
+    }
+
     internal async Task RunAsync(CancellationToken cancellationToken)
     {
         var retry = TimeSpan.FromSeconds(5);
@@ -46,10 +56,17 @@ internal sealed class DeliveryController : IDisposable
                     SetState("not-enrolled", null);
                 else
                 {
+                    await sendGate.WaitAsync(cancellationToken);
+                    DeliveryAttempt result;
                     var attemptedAt = DateTimeOffset.UtcNow;
-                    SetState("sending", null, attemptedAt);
-                    var result = await sender.SendNextAsync(store, credential,
-                        new(Environment.MachineName, "windows", Environment.OSVersion.VersionString, "0.1.0-dev"), cancellationToken);
+                    try
+                    {
+                        if (!store.DeliveryEnabled) { SetState("disabled", null); continue; }
+                        SetState("sending", null, attemptedAt);
+                        result = await sender.SendNextAsync(store, credential,
+                            new(Environment.MachineName, "windows", Environment.OSVersion.VersionString, "0.1.0-dev"), cancellationToken);
+                    }
+                    finally { sendGate.Release(); }
                     delay = result.Kind switch
                     {
                         DeliveryAttemptKind.Acknowledged => TimeSpan.Zero,
@@ -104,5 +121,5 @@ internal sealed class DeliveryController : IDisposable
 
     private static bool IsFailure(DeliveryAttemptKind kind) => kind is not DeliveryAttemptKind.Empty and not DeliveryAttemptKind.Acknowledged;
 
-    public void Dispose() => wake.Dispose();
+    public void Dispose() { wake.Dispose(); sendGate.Dispose(); }
 }

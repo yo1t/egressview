@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
@@ -416,7 +417,7 @@ public partial class MainWindow : Window
         DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 25 => 2, 0 => 3, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
         AutomaticUpdateChecks.IsChecked = AgentSettings.AutomaticUpdateChecks;
-        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "diagnostics" => 5, "updates" => 6, "hub" => 7, _ => 0 };
+        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "diagnostics" => 5, "updates" => 6, "hub" => 7, "uninstall" => 8, _ => 0 };
         DeleteHistoryBefore.SelectedDate = DateTime.Today.AddDays(-30);
         AiProviderChoice.SelectedIndex = AgentSettings.AiProvider switch { "OpenAI" => 1, "Anthropic" => 2, _ => 0 };
         AiEndpoint.Text = AgentSettings.OllamaEndpoint;
@@ -428,7 +429,7 @@ public partial class MainWindow : Window
 
     private void SettingsSectionChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HistorySettingsSection is null || DiagnosticsSettingsSection is null || UpdateSettingsSection is null || HubSettingsSection is null ||
+        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HistorySettingsSection is null || DiagnosticsSettingsSection is null || UpdateSettingsSection is null || HubSettingsSection is null || UninstallSettingsSection is null ||
             SettingsSectionChoice.SelectedItem is not ListBoxItem item) return;
         var section = item.Tag?.ToString() ?? "general";
         GeneralSettingsSection.Visibility = section == "general" ? Visibility.Visible : Visibility.Collapsed;
@@ -439,6 +440,7 @@ public partial class MainWindow : Window
         DiagnosticsSettingsSection.Visibility = section == "diagnostics" ? Visibility.Visible : Visibility.Collapsed;
         UpdateSettingsSection.Visibility = section == "updates" ? Visibility.Visible : Visibility.Collapsed;
         HubSettingsSection.Visibility = section == "hub" ? Visibility.Visible : Visibility.Collapsed;
+        UninstallSettingsSection.Visibility = section == "uninstall" ? Visibility.Visible : Visibility.Collapsed;
         if (!loadingSettings) AgentSettings.SettingsSection = section;
         if (section == "enrichment") _ = RefreshEnrichmentStatusAsync();
         if (section == "history") _ = RefreshHistoryStatusAsync();
@@ -484,6 +486,61 @@ public partial class MainWindow : Window
     private void AutomaticUpdateChecks_Click(object sender, RoutedEventArgs e)
     {
         if (!loadingSettings) AgentSettings.AutomaticUpdateChecks = AutomaticUpdateChecks.IsChecked == true;
+    }
+
+    private async void PrepareUninstall_Click(object sender, RoutedEventArgs e)
+    {
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        var delete = DeleteHistoryOnUninstall.IsChecked == true;
+        var confirmation = delete
+            ? (ja ? "監視を停止し、Hub登録・資格情報・送信待ちqueueと、このPCの全履歴を削除します。Hubが受理済みのデータは削除されません。続けますか？" : "Monitoring will stop. Hub registration, credentials, pending delivery queue, and all local history will be removed. Hub-accepted data is unaffected. Continue?")
+            : (ja ? "監視を停止し、Hub登録・資格情報・送信待ちqueueを削除します。ローカル履歴とHubが受理済みのデータは残ります。続けますか？" : "Monitoring will stop. Hub registration, credentials, and pending delivery queue will be removed. Local history and Hub-accepted data remain. Continue?");
+        if (System.Windows.MessageBox.Show(confirmation, LocalizationManager.Text("PrepareUninstall"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        await PrepareUninstallAsync(continueWithoutRevocation: false);
+    }
+
+    private async void ContinueWithoutRevoke_Click(object sender, RoutedEventArgs e)
+    {
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        if (System.Windows.MessageBox.Show(ja ? "Hub登録は残ります。Hub管理者が手動で失効させる必要があります。それでも続けますか？" : "The Hub registration will remain and must be revoked manually by a Hub administrator. Continue anyway?",
+            LocalizationManager.Text("ContinueWithoutRevoke"), MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        await PrepareUninstallAsync(continueWithoutRevocation: true);
+    }
+
+    private async Task PrepareUninstallAsync(bool continueWithoutRevocation)
+    {
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        PrepareUninstallButton.IsEnabled = ContinueWithoutRevokeButton.IsEnabled = false;
+        UninstallStatus.Text = ja ? "監視と送信を停止し、Hub登録を失効しています…" : "Stopping monitoring and delivery, then revoking Hub registration…";
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new
+            {
+                v = 1,
+                op = "prepare-uninstall",
+                removeHistory = DeleteHistoryOnUninstall.IsChecked == true,
+                continueWithoutRevocation,
+            }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            if (root.GetProperty("status").GetString() != "ok")
+            {
+                var reason = root.TryGetProperty("reason", out var value) ? value.GetString() : "uninstall-preparation-failed";
+                var statusCode = root.TryGetProperty("statusCode", out var code) && code.ValueKind == JsonValueKind.Number ? $" (HTTP {code.GetInt32()})" : string.Empty;
+                UninstallStatus.Text = (ja ? "Hub登録を失効できませんでした。監視／送信は停止したまま、資格情報と送信queueは残してあります。接続を確認して再試行するか、Hub管理者による手動失効を選んでください。" : "Hub registration could not be revoked. Monitoring and delivery remain paused; credentials and the delivery queue were preserved. Check the connection and retry, or choose manual Hub revocation.") + $"\r\nDiagnostic: {reason}{statusCode}";
+                ContinueWithoutRevokeButton.Visibility = Visibility.Visible;
+                return;
+            }
+            ContinueWithoutRevokeButton.Visibility = Visibility.Collapsed;
+            UninstallStatus.Text = ja ? "アンインストール準備が完了しました。Windowsの「インストールされているアプリ」でEgressView Agentを選んでください。キャンセルした場合、Hubへ再登録するまで送信は再開しません。" : "Preparation is complete. Select EgressView Agent in Windows Installed apps. If you cancel, delivery will not resume until the Agent is enrolled again.";
+            Process.Start(new ProcessStartInfo("ms-settings:appsfeatures-app") { UseShellExecute = true });
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            UninstallStatus.Text = (ja ? "Serviceへ接続できず、何も削除しませんでした。" : "The Service could not be reached; nothing was removed.") + $"\r\nDiagnostic: {exception.GetType().Name}";
+        }
+        finally { PrepareUninstallButton.IsEnabled = ContinueWithoutRevokeButton.IsEnabled = true; }
     }
 
     private async void CheckUpdate_Click(object sender, RoutedEventArgs e)

@@ -48,6 +48,37 @@ try
             "update checks disclose only the Agent and Windows versions and never send cookies");
     }
 
+    var uninstallCredential = new AgentCredential(new Uri("https://hub.example/"), Guid.NewGuid(), $"egva_{new string('a', 64)}", DateTimeOffset.UtcNow);
+    var uninstallHandler = new UninstallHandler(HttpStatusCode.OK);
+    using (var uninstallClient = new AgentUninstallClient(uninstallHandler))
+        await uninstallClient.RevokeAsync(uninstallCredential);
+    Assert(uninstallHandler.RequestUri?.AbsoluteUri == "https://hub.example/api/agent/registration/revoke" &&
+        uninstallHandler.SawBearer && uninstallHandler.ContentBytes == 0,
+        "uninstall revokes the exact Hub registration using only the stored bearer credential");
+    using (var rejectedClient = new AgentUninstallClient(new UninstallHandler(HttpStatusCode.ServiceUnavailable)))
+    {
+        try { await rejectedClient.RevokeAsync(uninstallCredential); throw new InvalidOperationException("FAILED: rejected Hub revocation was accepted"); }
+        catch (AgentUninstallException exception) when (exception.Reason == "hub-rejected" && exception.StatusCode == 503) { }
+    }
+
+    var uninstallDatabase = Path.Combine(directory, "uninstall.db");
+    using (var uninstallStore = new ObservationStore(uninstallDatabase))
+    {
+        var observedAt = DateTimeOffset.UtcNow;
+        var observation = new NetworkObservation(observedAt, 101, "TCP", "192.0.2.10", 49152, "198.51.100.20", 443,
+            12, 1, ObservationLayer.Logical, null, "etw", "test-app");
+        uninstallStore.DeliveryEnabled = true;
+        uninstallStore.WriteBatch([observation]);
+        uninstallStore.QueueForDelivery([observation], observedAt);
+        var kept = uninstallStore.CompleteUninstallPreparation(false, true, false, observedAt);
+        Assert(!uninstallStore.DeliveryEnabled && kept.PendingQueueDeleted == 1 && uninstallStore.ReadHistoryForExport(null, 10, 0).Count == 1,
+            "successful preparation atomically disables delivery and clears its queue while keeping local history by default");
+        uninstallStore.WriteBatch([observation with { ObservedAt = observedAt.AddSeconds(1) }]);
+        var removed = uninstallStore.CompleteUninstallPreparation(true, false, true, observedAt.AddSeconds(2));
+        Assert(removed.ContinuedWithoutRevocation && removed.LocalHistoryDeleted && uninstallStore.ReadHistoryForExport(null, 10, 0).Count == 0,
+            "the explicit local-history choice deletes history while manual Hub revocation remains visible in the result");
+    }
+
     var notificationNow = new DateTimeOffset(2026, 9, 8, 6, 0, 0, TimeSpan.Zero);
     Assert(NotificationPolicy.Evaluate(true, true, false, 5, 5, null, notificationNow) == NotificationDecision.DailyLimit,
         "ordinary notifications respect the configured daily limit");
@@ -180,6 +211,14 @@ try
         diagnostics: () => """{"privacy":{"includesEndpoints":false}}""");
     Assert(ipcDiagnostics.Contains("includesEndpoints", StringComparison.Ordinal),
         "authenticated IPC exposes a separately requested integrity-checked diagnostic report");
+    var prepareResponse = IpcProtocol.Handle("""{"v":1,"op":"prepare-uninstall","removeHistory":true,"continueWithoutRevocation":false}""", () => "{}", _ => [],
+        prepareUninstall: (removeHistory, manual) => new AgentUninstallResult(true, manual, removeHistory, 7));
+    Assert(prepareResponse.Contains("\"HubRegistrationRevoked\":true", StringComparison.Ordinal) && prepareResponse.Contains("\"PendingQueueDeleted\":7", StringComparison.Ordinal),
+        "authenticated IPC passes the explicit history choice and returns the completed uninstall boundary");
+    var failedPrepare = IpcProtocol.Handle("""{"v":1,"op":"prepare-uninstall"}""", () => "{}", _ => [],
+        prepareUninstall: (_, _) => throw new AgentUninstallException("network-error"));
+    Assert(failedPrepare.Contains("network-error", StringComparison.Ordinal),
+        "Hub revocation failure is classified for retry instead of being mistaken for completed cleanup");
     bool? monitoringEnabled = null;
     var monitoringResponse = IpcProtocol.Handle("""{"v":1,"op":"set-monitoring-enabled","enabled":false}""", () => "{}", _ => [],
         setMonitoringEnabled: enabled => { monitoringEnabled = enabled; return enabled; });
@@ -912,6 +951,21 @@ sealed class EnrollmentHandler(params (HttpStatusCode Status, string Body)[] res
         Requests.Add(new HttpRequestMessage(request.Method, request.RequestUri) { Content = new StringContent(await request.Content!.ReadAsStringAsync(cancellationToken)) });
         var response = responses.Dequeue();
         return new HttpResponseMessage(response.Status) { Content = new StringContent(response.Body, Encoding.UTF8, "application/json") };
+    }
+}
+
+sealed class UninstallHandler(HttpStatusCode status) : HttpMessageHandler
+{
+    public Uri? RequestUri { get; private set; }
+    public bool SawBearer { get; private set; }
+    public long ContentBytes { get; private set; } = -1;
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        RequestUri = request.RequestUri;
+        SawBearer = request.Headers.Authorization?.Scheme == "Bearer" && request.Headers.Authorization.Parameter?.StartsWith("egva_", StringComparison.Ordinal) == true;
+        ContentBytes = request.Content is null ? 0 : (await request.Content.ReadAsByteArrayAsync(cancellationToken)).LongLength;
+        return new HttpResponseMessage(status) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
     }
 }
 
