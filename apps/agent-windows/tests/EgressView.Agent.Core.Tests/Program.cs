@@ -19,6 +19,42 @@ try
     Assert(NotificationPolicy.Evaluate(true, false, false, 0, 999, null, notificationNow) == NotificationDecision.CategoryDisabled,
         "a disabled category remains suppressed even when the daily limit is unlimited");
 
+    var aiFrom = new DateTimeOffset(2026, 9, 8, 0, 0, 0, TimeSpan.Zero);
+    PeriodAnalysis AiAnalysis(long connections, string prefix) => new(aiFrom, aiFrom.AddHours(6), connections, 12, 20,
+        connections * 100, 3, 1, aiFrom, 100,
+        Enumerable.Range(0, 15).Select(index => new AppDestinationAggregate(
+            $"{prefix}-app-{index}", $"203.0.113.{index}", $"{prefix}-destination-{index}.example", index + 1, (index + 1) * 100, 0)).ToArray(), []);
+    var aiContext = AiInsightContextBuilder.Build(AiAnalysis(120, "current"), AiAnalysis(90, "previous"), aiFrom.AddHours(7));
+    var aiPreview = AiInsightContextBuilder.Preview(aiContext);
+    Assert(aiContext.SchemaVersion == 1 && aiContext.TopApplications.Count == 10 && aiContext.TopDestinations.Count == 10,
+        "AI context uses the versioned bounded facts contract and limits ranked names");
+    Assert(!aiPreview.Contains("203.0.113", StringComparison.Ordinal) && !aiPreview.Contains("credential", StringComparison.OrdinalIgnoreCase),
+        "AI context excludes raw addresses and credentials");
+    Assert(AgentAiClient.ValidateOllamaEndpoint("http://127.0.0.1:11434").IsLoopback,
+        "Ollama accepts a loopback HTTP endpoint");
+    try { AgentAiClient.ValidateOllamaEndpoint("https://example.com"); throw new InvalidOperationException("FAILED: Ollama accepted a remote endpoint"); }
+    catch (ArgumentException) { }
+    var aiHistoryPath = Path.Combine(directory, "ai-history.jsonl");
+    var aiStore = new AiConversationStore(aiHistoryPath); var aiConversation = Guid.NewGuid();
+    aiStore.Append(new AiConversationMessage(Guid.NewGuid(), aiConversation, "user", "what changed", aiFrom, "Ollama", "local"));
+    aiStore.Append(new AiConversationMessage(Guid.NewGuid(), aiConversation, "assistant", "bounded answer", aiFrom.AddSeconds(1), "Ollama", "local"));
+    Assert(aiStore.Read().Count == 2, "AI conversation history persists locally");
+    aiStore.Delete(aiConversation);
+    Assert(aiStore.Read().Count == 0, "an AI conversation can be deleted without touching observations");
+    var aiHandler = new AiHandler("""{"output":[{"content":[{"type":"output_text","text":"Bounded result"}]}],"usage":{"input_tokens":100,"output_tokens":20}}""");
+    using (var aiClient = new AgentAiClient(aiHandler))
+    {
+        var localOnly = new AiConversationMessage(Guid.NewGuid(), aiConversation, "assistant", "LOCAL-ONLY", aiFrom, "Ollama", "local");
+        var preview = aiClient.BuildPreview(AiProviderKind.OpenAI, "gpt-5.6-luna", aiContext, [localOnly], "what changed?");
+        Assert(preview.Contains("developerInstruction", StringComparison.Ordinal) && preview.Contains("what changed?", StringComparison.Ordinal) &&
+            !preview.Contains("api-key", StringComparison.OrdinalIgnoreCase) && !preview.Contains("LOCAL-ONLY", StringComparison.Ordinal),
+            "the exact AI preview contains every transmitted context component, no credential, and no other-provider history");
+        var reply = await aiClient.ChatAsync(AiProviderKind.OpenAI, "gpt-5.6-luna", "secret-key", "http://127.0.0.1:11434",
+            aiContext, [], "what changed?", CancellationToken.None);
+        Assert(reply.Text == "Bounded result" && reply.EstimatedCostUsd == 0.000044m && aiHandler.SawBearer && !aiHandler.Body.Contains("secret-key", StringComparison.Ordinal),
+            "OpenAI request authenticates by header, parses bounded output, estimates cost, and never puts the key in JSON");
+    }
+
     var dnsNames = new DnsNameCache(TimeSpan.FromMinutes(10), capacity: 4);
     var dnsAt = DateTimeOffset.UtcNow;
     dnsNames.Observe(42, "API.Bücher.Example.", "203.0.113.8;::ffff:203.0.113.9;", dnsAt);
@@ -765,6 +801,18 @@ sealed class EnrollmentHandler(params (HttpStatusCode Status, string Body)[] res
         Requests.Add(new HttpRequestMessage(request.Method, request.RequestUri) { Content = new StringContent(await request.Content!.ReadAsStringAsync(cancellationToken)) });
         var response = responses.Dequeue();
         return new HttpResponseMessage(response.Status) { Content = new StringContent(response.Body, Encoding.UTF8, "application/json") };
+    }
+}
+
+sealed class AiHandler(string responseBody) : HttpMessageHandler
+{
+    public bool SawBearer { get; private set; }
+    public string Body { get; private set; } = "";
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        SawBearer = request.Headers.Authorization?.Scheme == "Bearer" && request.Headers.Authorization.Parameter == "secret-key";
+        Body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(responseBody, Encoding.UTF8, "application/json") };
     }
 }
 

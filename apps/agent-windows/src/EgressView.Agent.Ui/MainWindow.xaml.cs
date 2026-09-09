@@ -22,13 +22,21 @@ public partial class MainWindow : Window
     private int selectedMinutes = 10_080;
     private IReadOnlyList<RecentFlow> rawFlows = [];
     private PeriodAnalysis? currentAnalysis;
+    private PeriodAnalysis? previousAnalysis;
     private IReadOnlyList<GlobePoint> currentGlobePoints = [];
+    private readonly AgentAiClient aiClient = new();
+    private readonly AiConversationStore aiHistory = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "EgressView", "Agent", "ai-conversations.jsonl"));
+    private CancellationTokenSource? aiRequest;
+    private Guid activeConversationId = Guid.NewGuid();
+    private bool loadingAiConversation;
     public ObservableCollection<FlowRow> RecentFlows { get; } = [];
     public ObservableCollection<ThreatRow> ThreatRows { get; } = [];
 
     public MainWindow()
     {
         InitializeComponent();
+        if (aiHistory.Read().OrderByDescending(item => item.CreatedAt).FirstOrDefault() is { } latest)
+            activeConversationId = latest.ConversationId;
         Width = Math.Min(AgentSettings.WindowWidth, SystemParameters.WorkArea.Width);
         Height = Math.Min(AgentSettings.WindowHeight, SystemParameters.WorkArea.Height);
         ApplyAccessibilityLabels();
@@ -38,7 +46,7 @@ public partial class MainWindow : Window
         refreshTimer.Tick += async (_, _) => { if (IsVisible && IsActive) await RefreshVisibleAsync(); };
         Closing += SaveWindowSize;
         Closing += HideToTray;
-        Closed += (_, _) => { refreshTimer.Stop(); lifetime.Cancel(); };
+        Closed += (_, _) => { refreshTimer.Stop(); lifetime.Cancel(); aiRequest?.Cancel(); aiClient.Dispose(); };
     }
 
     private void HideToTray(object? sender, CancelEventArgs e)
@@ -167,6 +175,7 @@ public partial class MainWindow : Window
             using var previousDocument = JsonDocument.Parse(previousResponse);
             var previous = previousDocument.RootElement.GetProperty("data").Deserialize<PeriodAnalysis>();
             currentAnalysis = current;
+            previousAnalysis = previous;
             InsightConnections.Text = current.Connections.ToString("N0");
             InsightApplications.Text = current.Applications.ToString("N0");
             InsightDestinations.Text = current.Destinations.ToString("N0");
@@ -175,6 +184,7 @@ public partial class MainWindow : Window
             TopApplicationsList.ItemsSource = current.Links.GroupBy(link => link.Application).Select(group => new RankedRow(group.Key, group.Sum(link => IsByteMetric ? link.Bytes : link.Connections), IsByteMetric)).OrderByDescending(row => row.RawValue).Take(10).ToArray();
             var names = DestinationChoice.SelectedIndex == 0;
             TopDestinationsList.ItemsSource = current.Links.GroupBy(link => names ? link.DestinationName : link.Destination).Select(group => new RankedRow(group.Key, group.Sum(link => IsByteMetric ? link.Bytes : link.Connections), IsByteMetric)).OrderByDescending(row => row.RawValue).Take(10).ToArray();
+            RefreshAiSurface();
         }
         catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
     }
@@ -403,19 +413,24 @@ public partial class MainWindow : Window
         NotifyRecovery.IsChecked = AgentSettings.NotificationCategoryEnabled("Recovery");
         DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 25 => 2, 0 => 3, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
-        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "hub" => 3, _ => 0 };
+        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "hub" => 4, _ => 0 };
+        AiProviderChoice.SelectedIndex = AgentSettings.AiProvider switch { "OpenAI" => 1, "Anthropic" => 2, _ => 0 };
+        AiEndpoint.Text = AgentSettings.OllamaEndpoint;
+        AiCloudConsent.IsChecked = AgentSettings.AiCloudConsent(AgentSettings.AiProvider);
+        PopulateAiModels();
         Globe.FramesPerSecond = AgentSettings.GlobeFrameRate;
         loadingSettings = false;
     }
 
     private void SettingsSectionChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || HubSettingsSection is null ||
+        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HubSettingsSection is null ||
             SettingsSectionChoice.SelectedItem is not ListBoxItem item) return;
         var section = item.Tag?.ToString() ?? "general";
         GeneralSettingsSection.Visibility = section == "general" ? Visibility.Visible : Visibility.Collapsed;
         NotificationSettingsSection.Visibility = section == "notifications" ? Visibility.Visible : Visibility.Collapsed;
         EnrichmentSettingsSection.Visibility = section == "enrichment" ? Visibility.Visible : Visibility.Collapsed;
+        AiSettingsSection.Visibility = section == "ai" ? Visibility.Visible : Visibility.Collapsed;
         HubSettingsSection.Visibility = section == "hub" ? Visibility.Visible : Visibility.Collapsed;
         if (!loadingSettings) AgentSettings.SettingsSection = section;
         if (section == "enrichment") _ = RefreshEnrichmentStatusAsync();
@@ -445,6 +460,9 @@ public partial class MainWindow : Window
         Name(Timeline, "WhenTraffic");
         Name(TopApplicationsList, "TopApplications");
         Name(TopDestinationsList, "TopDestinations");
+        Name(AiConversation, "AiConversation");
+        Name(AiQuestion, "AiQuestion");
+        Name(AiPreview, "ExactPreview");
         Name(AppFilter, "Process");
         Name(DestinationFilter, "Destination");
         Name(PortFilter, "Port");
@@ -462,6 +480,8 @@ public partial class MainWindow : Window
         Name(DailyLimitChoice, "DailyLimit");
         Name(FrameRateChoice, "GlobeFrameRate");
         Name(SettingsSectionChoice, "SettingsSections");
+        Name(AiProviderChoice, "Provider");
+        Name(AiModelChoice, "Model");
         Name(RefreshGeoButton, "FetchNow");
         Name(RefreshThreatButton, "FetchNow");
         AutomationProperties.SetName(HubUrl, "Hub URL");
@@ -557,6 +577,164 @@ public partial class MainWindow : Window
         NotificationPermission.Text = AgentSettings.NotificationsEnabled ? LocalizationManager.Text("NotificationPermissionOn") : LocalizationManager.Text("NotificationPermissionOff");
         NotificationSummary.Text = $"{LocalizationManager.Text("AttemptsToday")}: {app.Notifications.AttemptsToday:N0} · {LocalizationManager.Text("NotificationsToday")}: {app.Notifications.SentToday:N0} · {LocalizationManager.Text("SuppressedToday")}: {app.Notifications.SuppressedToday:N0}";
         NotificationList.ItemsSource = app.Notifications.History.Select(item => new NotificationRow(item)).ToArray();
+    }
+
+    private AiProviderKind SelectedAiProvider() => AiProviderChoice.SelectedItem is ComboBoxItem item &&
+        Enum.TryParse<AiProviderKind>(item.Tag?.ToString(), out var provider) ? provider : AiProviderKind.Ollama;
+
+    private string SelectedAiModel() => (AiModelChoice.Text ?? string.Empty).Trim();
+
+    private void AiProviderChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (AiModelChoice is null || AiEndpoint is null || AiApiKey is null || AiCloudConsent is null) return;
+        PopulateAiModels();
+        var local = SelectedAiProvider() == AiProviderKind.Ollama;
+        AiEndpoint.IsEnabled = local;
+        AiApiKey.IsEnabled = AiCloudConsent.IsEnabled = !local;
+        AiCloudConsent.IsChecked = AgentSettings.AiCloudConsent(SelectedAiProvider().ToString());
+        if (!loadingSettings && !AgentSettings.AiEnabled(SelectedAiProvider().ToString())) AiSettingsStatus.Text = LocalizationManager.Text("SaveTestRequired");
+        RefreshAiSurface();
+    }
+
+    private void PopulateAiModels()
+    {
+        if (AiModelChoice is null) return;
+        var saved = AgentSettings.AiModel(SelectedAiProvider().ToString());
+        var models = SelectedAiProvider() switch
+        {
+            AiProviderKind.OpenAI => AgentAiClient.OpenAiModels,
+            AiProviderKind.Anthropic => AgentAiClient.AnthropicModels,
+            _ => Array.Empty<string>(),
+        };
+        AiModelChoice.ItemsSource = models;
+        AiModelChoice.IsEditable = SelectedAiProvider() == AiProviderKind.Ollama;
+        AiModelChoice.Text = saved.Length > 0 ? saved : models.FirstOrDefault() ?? string.Empty;
+    }
+
+    private void InvalidateSelectedAiConfiguration()
+    {
+        if (loadingSettings || AiProviderChoice is null) return;
+        AgentSettings.SetAiEnabled(SelectedAiProvider().ToString(), false);
+        if (AiSettingsStatus is not null) AiSettingsStatus.Text = LocalizationManager.Text("SaveTestRequired");
+        RefreshAiSurface();
+    }
+
+    private void AiModelChoice_SelectionChanged(object sender, SelectionChangedEventArgs e) => InvalidateSelectedAiConfiguration();
+    private void AiModelChoice_LostKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e) => InvalidateSelectedAiConfiguration();
+    private void AiEndpoint_TextChanged(object sender, TextChangedEventArgs e)
+    { if (SelectedAiProvider() == AiProviderKind.Ollama) InvalidateSelectedAiConfiguration(); }
+    private void AiCloudConsent_Unchecked(object sender, RoutedEventArgs e) => InvalidateSelectedAiConfiguration();
+
+    private async void SaveTestAi_Click(object sender, RoutedEventArgs e)
+    {
+        var provider = SelectedAiProvider();
+        var model = SelectedAiModel();
+        var entered = AiApiKey.Password.Trim();
+        if (provider != AiProviderKind.Ollama && AiCloudConsent.IsChecked != true)
+        { AiSettingsStatus.Text = LocalizationManager.Text("CloudConsentRequired"); return; }
+        var key = provider == AiProviderKind.Ollama ? null : entered.Length > 0 ? entered : WindowsCredentialVault.Load(provider.ToString());
+        AiSettingsStatus.Text = LocalizationManager.Text("TestingConnection");
+        try
+        {
+            await aiClient.ValidateAsync(provider, model, key, AiEndpoint.Text.Trim(), lifetime.Token);
+            if (provider != AiProviderKind.Ollama && entered.Length > 0) WindowsCredentialVault.Save(provider.ToString(), entered);
+            AgentSettings.AiProvider = provider.ToString(); AgentSettings.SetAiModel(provider.ToString(), model);
+            AgentSettings.OllamaEndpoint = AiEndpoint.Text.Trim(); AgentSettings.SetAiCloudConsent(provider.ToString(), AiCloudConsent.IsChecked == true);
+            AgentSettings.SetAiEnabled(provider.ToString(), true); AiApiKey.Clear();
+            AiSettingsStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("AiReady"), provider, model);
+        }
+        catch (Exception exception) { AgentSettings.SetAiEnabled(provider.ToString(), false); AiSettingsStatus.Text = exception.Message; }
+        RefreshAiSurface();
+    }
+
+    private void RemoveAi_Click(object sender, RoutedEventArgs e)
+    {
+        var provider = SelectedAiProvider();
+        try { if (provider != AiProviderKind.Ollama) WindowsCredentialVault.Delete(provider.ToString()); }
+        catch (Exception exception) { AiSettingsStatus.Text = exception.Message; return; }
+        AgentSettings.SetAiEnabled(provider.ToString(), false); AgentSettings.SetAiCloudConsent(provider.ToString(), false); AiCloudConsent.IsChecked = false; AiApiKey.Clear();
+        AiSettingsStatus.Text = LocalizationManager.Text("AiRemoved"); RefreshAiSurface();
+    }
+
+    private void AiQuestion_TextChanged(object sender, TextChangedEventArgs e) => RefreshAiPreview();
+
+    private AiInsightContext? CurrentAiContext() => currentAnalysis is not null && previousAnalysis is not null
+        ? AiInsightContextBuilder.Build(currentAnalysis, previousAnalysis) : null;
+
+    private IReadOnlyList<AiConversationMessage> CurrentConversation() =>
+        aiHistory.Read().Where(item => item.ConversationId == activeConversationId).OrderBy(item => item.CreatedAt).ToArray();
+
+    private void RefreshAiPreview()
+    {
+        if (AiPreview is null || AiQuestion is null || string.IsNullOrWhiteSpace(AiQuestion.Text) || CurrentAiContext() is not { } context)
+        { if (AiPreview is not null) AiPreview.Text = string.Empty; return; }
+        try { AiPreview.Text = aiClient.BuildPreview(SelectedAiProvider(), SelectedAiModel(), context, CurrentConversation(), AiQuestion.Text); }
+        catch (Exception exception) { AiPreview.Text = exception.Message; }
+    }
+
+    private void RefreshAiSurface()
+    {
+        if (AiProviderStatus is null || AiConversation is null) return;
+        var provider = SelectedAiProvider();
+        AiProviderStatus.Text = AgentSettings.AiEnabled(provider.ToString())
+            ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("AiReady"), provider, AgentSettings.AiModel(provider.ToString()))
+            : LocalizationManager.Text("AiDisabled");
+        var all = aiHistory.Read();
+        var choices = all.GroupBy(item => item.ConversationId).Select(group => new AiConversationRow(
+            group.Key, group.OrderBy(item => item.CreatedAt).First().Body, group.Max(item => item.CreatedAt)))
+            .OrderByDescending(item => item.UpdatedAt).ToList();
+        if (choices.All(item => item.Id != activeConversationId)) choices.Insert(0, new AiConversationRow(activeConversationId, LocalizationManager.Text("NewConversation"), DateTimeOffset.Now));
+        loadingAiConversation = true;
+        AiConversationChoice.ItemsSource = choices;
+        AiConversationChoice.SelectedItem = choices.First(item => item.Id == activeConversationId);
+        loadingAiConversation = false;
+        AiConversation.ItemsSource = all.Where(item => item.ConversationId == activeConversationId).OrderBy(item => item.CreatedAt).Select(item => new AiMessageRow(item)).ToArray();
+        RefreshAiPreview();
+    }
+
+    private void AiConversationChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (loadingAiConversation || AiConversationChoice.SelectedItem is not AiConversationRow row) return;
+        activeConversationId = row.Id; RefreshAiSurface();
+    }
+
+    private async void AskAi_Click(object sender, RoutedEventArgs e)
+    {
+        if (!AgentSettings.AiEnabled(SelectedAiProvider().ToString()) || CurrentAiContext() is not { } context)
+        { AiStatus.Text = LocalizationManager.Text("ConfigureAiFirst"); return; }
+        var provider = SelectedAiProvider(); var model = SelectedAiModel(); var question = AiQuestion.Text.Trim();
+        try { AiPreview.Text = aiClient.BuildPreview(provider, model, context, CurrentConversation(), question); }
+        catch (Exception exception) { AiStatus.Text = exception.Message; return; }
+        if (provider != AiProviderKind.Ollama && System.Windows.MessageBox.Show(
+            LocalizationManager.Text("ConfirmCloudSend"), LocalizationManager.Text("ExactPreview"),
+            MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+
+        aiRequest?.Cancel(); aiRequest?.Dispose(); aiRequest = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        AskAiButton.IsEnabled = false; StopAiButton.IsEnabled = true; AiStatus.Text = LocalizationManager.Text("Analyzing");
+        try
+        {
+            var key = provider == AiProviderKind.Ollama ? null : WindowsCredentialVault.Load(provider.ToString());
+            var prior = CurrentConversation();
+            var reply = await aiClient.ChatAsync(provider, model, key, AgentSettings.OllamaEndpoint, context, prior, question, aiRequest.Token);
+            var requestId = Guid.NewGuid(); var now = DateTimeOffset.UtcNow;
+            aiHistory.Append(new AiConversationMessage(requestId, activeConversationId, "user", question, now, provider.ToString(), model));
+            aiHistory.Append(new AiConversationMessage(Guid.NewGuid(), activeConversationId, "assistant", reply.Text, DateTimeOffset.UtcNow,
+                provider.ToString(), model, reply.InputTokens, reply.OutputTokens, reply.EstimatedCostUsd));
+            AiQuestion.Clear(); AiStatus.Text = LocalizationManager.Text("AnalysisComplete"); RefreshAiSurface();
+        }
+        catch (OperationCanceledException) { AiStatus.Text = LocalizationManager.Text("AnalysisStopped"); }
+        catch (Exception exception) { AiStatus.Text = exception.Message; }
+        finally { AskAiButton.IsEnabled = true; StopAiButton.IsEnabled = false; }
+    }
+
+    private void StopAi_Click(object sender, RoutedEventArgs e) => aiRequest?.Cancel();
+    private void NewConversation_Click(object sender, RoutedEventArgs e) { activeConversationId = Guid.NewGuid(); AiQuestion.Clear(); RefreshAiSurface(); }
+    private void DeleteConversation_Click(object sender, RoutedEventArgs e) { aiHistory.Delete(activeConversationId); activeConversationId = Guid.NewGuid(); RefreshAiSurface(); }
+    private void DeleteAllConversations_Click(object sender, RoutedEventArgs e) { aiHistory.DeleteAll(); activeConversationId = Guid.NewGuid(); RefreshAiSurface(); }
+    private void CopyAi_Click(object sender, RoutedEventArgs e)
+    {
+        var text = CurrentConversation().LastOrDefault(item => item.Role == "assistant")?.Body ?? AiPreview.Text;
+        if (!string.IsNullOrWhiteSpace(text)) System.Windows.Clipboard.SetText(text);
     }
 
     private async void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded && e.Source == MainTabs) await RefreshVisibleAsync(); }
@@ -699,4 +877,20 @@ internal sealed class NotificationRow(NotificationHistoryEntry value)
     public string Title => value.Title;
     public string Body => value.Body;
     public string Outcome => LocalizationManager.Text(value.Outcome switch { "shown" => "Delivered", "delivery-failed" => "NotDelivered", _ => "Suppressed" });
+}
+
+internal sealed class AiMessageRow(AiConversationMessage value)
+{
+    public string Header => $"{value.Role} · {value.Provider} / {value.Model} · {value.CreatedAt.LocalDateTime:g}";
+    public string Body => value.Body;
+    public string Usage => value.InputTokens is null && value.OutputTokens is null ? string.Empty :
+        $"{value.InputTokens:N0} in / {value.OutputTokens:N0} out" + (value.EstimatedCostUsd is { } cost ? $" · est. ${cost:F6}" : string.Empty);
+}
+
+internal sealed class AiConversationRow(Guid id, string firstQuestion, DateTimeOffset updatedAt)
+{
+    public Guid Id { get; } = id;
+    public string FirstQuestion { get; } = firstQuestion;
+    public DateTimeOffset UpdatedAt { get; } = updatedAt;
+    public override string ToString() => $"{FirstQuestion[..Math.Min(FirstQuestion.Length, 28)]} · {UpdatedAt.LocalDateTime:g}";
 }
