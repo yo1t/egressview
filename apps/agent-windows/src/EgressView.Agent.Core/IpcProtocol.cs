@@ -16,7 +16,11 @@ public static class IpcProtocol
         Func<string>? deliveryStatus = null,
         Action? requestDeliveryNow = null,
         Func<string>? enrichmentStatus = null,
-        Action<string>? requestEnrichmentNow = null)
+        Action<string>? requestEnrichmentNow = null,
+        Func<LocalHistoryStatus>? historyStatus = null,
+        Func<int, LocalHistoryStatus>? setHistoryRetention = null,
+        Func<DateTimeOffset?, int, int, IReadOnlyList<RecentFlow>>? historyExport = null,
+        Func<DateTimeOffset?, LocalHistoryDeletionResult>? deleteHistory = null)
     {
         try
         {
@@ -40,10 +44,56 @@ public static class IpcProtocol
                 "send-delivery-now" => Invoke(requestDeliveryNow, "delivery-unavailable"),
                 "enrichment-status" => DynamicStatus(enrichmentStatus),
                 "refresh-enrichment" => RefreshEnrichment(root, requestEnrichmentNow),
+                "history-status" => HistoryStatus(historyStatus),
+                "set-history-retention" => SetHistoryRetention(root, setHistoryRetention),
+                "history-export" => HistoryExport(root, historyExport),
+                "delete-history" => DeleteHistory(root, deleteHistory),
                 _ => Reject("unknown-operation"),
             };
         }
         catch (Exception) { return Reject("malformed-request"); }
+    }
+
+    private static string HistoryStatus(Func<LocalHistoryStatus>? read) => read is null
+        ? Reject("operation-unavailable")
+        : JsonSerializer.Serialize(new { status = "ok", data = read() });
+
+    private static string SetHistoryRetention(JsonElement root, Func<int, LocalHistoryStatus>? set)
+    {
+        var days = root.TryGetProperty("days", out var value) ? value.GetInt32() : 0;
+        if (set is null || !ObservationStore.AllowedRetentionDays.Contains(days)) return Reject("invalid-retention");
+        try { return JsonSerializer.Serialize(new { status = "ok", data = set(days) }); }
+        catch { return Reject("retention-setting-failed"); }
+    }
+
+    private static string HistoryExport(JsonElement root, Func<DateTimeOffset?, int, int, IReadOnlyList<RecentFlow>>? read)
+    {
+        if (read is null) return Reject("operation-unavailable");
+        var limit = root.TryGetProperty("limit", out var limitValue) ? limitValue.GetInt32() : 0;
+        var offset = root.TryGetProperty("offset", out var offsetValue) ? offsetValue.GetInt32() : -1;
+        if (limit is < 1 or > 500 || offset is < 0 or > 10_000_000) return Reject("invalid-pagination");
+        if (!TryOptionalDate(root, "before", out var before)) return Reject("invalid-cutoff");
+        return JsonSerializer.Serialize(new { status = "ok", limit, offset, data = read(before, limit, offset) });
+    }
+
+    private static string DeleteHistory(JsonElement root, Func<DateTimeOffset?, LocalHistoryDeletionResult>? delete)
+    {
+        if (delete is null) return Reject("operation-unavailable");
+        var scope = root.TryGetProperty("scope", out var value) ? value.GetString() : null;
+        if (scope is not ("all" or "before")) return Reject("invalid-cutoff");
+        DateTimeOffset? before = null;
+        if (scope == "before" && (!TryOptionalDate(root, "before", out before) || before is null)) return Reject("invalid-cutoff");
+        try { return JsonSerializer.Serialize(new { status = "ok", data = delete(before) }); }
+        catch { return Reject("history-deletion-failed"); }
+    }
+
+    private static bool TryOptionalDate(JsonElement root, string property, out DateTimeOffset? value)
+    {
+        value = null;
+        if (!root.TryGetProperty(property, out var element) || element.ValueKind == JsonValueKind.Null) return true;
+        if (element.ValueKind != JsonValueKind.String || !DateTimeOffset.TryParse(element.GetString(), out var parsed)) return false;
+        value = parsed.ToUniversalTime();
+        return true;
     }
 
     private static string RefreshEnrichment(JsonElement root, Action<string>? refresh)

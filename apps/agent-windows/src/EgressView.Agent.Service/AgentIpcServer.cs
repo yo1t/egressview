@@ -48,7 +48,8 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
                     store.DeliveryEnabled = enabled;
                     delivery.SettingsChanged();
                 }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled, DeliveryStatus, delivery.RequestNow,
-                enrichment.Status, enrichment.RequestNow));
+                enrichment.Status, enrichment.RequestNow, HistoryStatus, SetHistoryRetention, store.ReadHistoryForExport,
+                cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow)));
         }
     }
 
@@ -83,6 +84,18 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
             lastFailureAt = runtime.LastFailureAt,
             lastStatusCode = runtime.LastStatusCode,
         });
+    }
+
+    private LocalHistoryStatus HistoryStatus() => store.ReadLocalHistoryStatus(DateTimeOffset.UtcNow);
+
+    private LocalHistoryStatus SetHistoryRetention(int days)
+    {
+        store.SetRetentionDays(days);
+        RetentionMaintenanceResult result;
+        do { result = store.PruneRetentionBatch(DateTimeOffset.UtcNow); }
+        while (result.MayHaveMore(50_000));
+        store.MarkRetentionMaintenanceCompleted(DateTimeOffset.UtcNow);
+        return HistoryStatus();
     }
 
     public async ValueTask DisposeAsync()

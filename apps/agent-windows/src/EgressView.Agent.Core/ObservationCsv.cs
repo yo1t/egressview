@@ -16,7 +16,22 @@ public static class ObservationCsv
     public static string Export(IEnumerable<RecentFlow> observations)
     {
         var output = new StringBuilder();
-        output.AppendJoin(',', Columns).Append("\r\n");
+        output.Append(Header);
+        AppendRows(output, observations);
+        return output.ToString();
+    }
+
+    public static string Header => string.Join(',', Columns) + "\r\n";
+
+    public static string ExportRows(IEnumerable<RecentFlow> observations)
+    {
+        var output = new StringBuilder();
+        AppendRows(output, observations);
+        return output.ToString();
+    }
+
+    private static void AppendRows(StringBuilder output, IEnumerable<RecentFlow> observations)
+    {
         foreach (var row in observations)
         {
             var fields = new[]
@@ -39,7 +54,6 @@ public static class ObservationCsv
             };
             output.AppendJoin(',', fields.Select(Field)).Append("\r\n");
         }
-        return output.ToString();
     }
 
     public static string SuggestedFileName(DateTimeOffset from, DateTimeOffset to) =>
