@@ -415,7 +415,8 @@ public partial class MainWindow : Window
         NotifyRecovery.IsChecked = AgentSettings.NotificationCategoryEnabled("Recovery");
         DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 25 => 2, 0 => 3, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
-        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "hub" => 5, _ => 0 };
+        AutomaticUpdateChecks.IsChecked = AgentSettings.AutomaticUpdateChecks;
+        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "updates" => 5, "hub" => 6, _ => 0 };
         DeleteHistoryBefore.SelectedDate = DateTime.Today.AddDays(-30);
         AiProviderChoice.SelectedIndex = AgentSettings.AiProvider switch { "OpenAI" => 1, "Anthropic" => 2, _ => 0 };
         AiEndpoint.Text = AgentSettings.OllamaEndpoint;
@@ -427,7 +428,7 @@ public partial class MainWindow : Window
 
     private void SettingsSectionChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HistorySettingsSection is null || HubSettingsSection is null ||
+        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HistorySettingsSection is null || UpdateSettingsSection is null || HubSettingsSection is null ||
             SettingsSectionChoice.SelectedItem is not ListBoxItem item) return;
         var section = item.Tag?.ToString() ?? "general";
         GeneralSettingsSection.Visibility = section == "general" ? Visibility.Visible : Visibility.Collapsed;
@@ -435,10 +436,69 @@ public partial class MainWindow : Window
         EnrichmentSettingsSection.Visibility = section == "enrichment" ? Visibility.Visible : Visibility.Collapsed;
         AiSettingsSection.Visibility = section == "ai" ? Visibility.Visible : Visibility.Collapsed;
         HistorySettingsSection.Visibility = section == "history" ? Visibility.Visible : Visibility.Collapsed;
+        UpdateSettingsSection.Visibility = section == "updates" ? Visibility.Visible : Visibility.Collapsed;
         HubSettingsSection.Visibility = section == "hub" ? Visibility.Visible : Visibility.Collapsed;
         if (!loadingSettings) AgentSettings.SettingsSection = section;
         if (section == "enrichment") _ = RefreshEnrichmentStatusAsync();
         if (section == "history") _ = RefreshHistoryStatusAsync();
+        if (section == "updates") RefreshUpdateStatus();
+    }
+
+    internal void SelectSettingsSection(string section)
+    {
+        var match = SettingsSectionChoice.Items.OfType<ListBoxItem>().FirstOrDefault(item => item.Tag?.ToString() == section);
+        if (match is not null) SettingsSectionChoice.SelectedItem = match;
+    }
+
+    internal void RefreshUpdateStatus()
+    {
+        if (System.Windows.Application.Current is not App app || InstalledVersion is null) return;
+        var state = app.Updates.State;
+        InstalledVersion.Text = state.CurrentVersion;
+        AvailableVersion.Text = state.AvailableVersion ?? "—";
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        UpdateStatus.Text = state.Kind switch
+        {
+            UpdateStateKind.Checking => ja ? "更新情報を確認しています…" : "Checking release information…",
+            UpdateStateKind.Downloading => ja ? "更新をダウンロードして検証しています…" : "Downloading and verifying the update…",
+            UpdateStateKind.UpToDate => ja ? "最新です。" : "Up to date.",
+            UpdateStateKind.Verified => ja ? "更新を検証しました。インストールできます。" : "The update is verified and ready to install.",
+            UpdateStateKind.Launching => ja ? "Windows Installerを起動しています…" : "Starting Windows Installer…",
+            UpdateStateKind.Failed => state.Detail switch
+            {
+                "verification-failed" => ja ? "署名またはSHA-256の検証に失敗しました。インストールしません。" : "Signature or SHA-256 verification failed. Nothing will be installed.",
+                "network-error" => ja ? "更新サーバーへ接続できませんでした。監視は継続します。" : "Could not reach the update server. Monitoring continues.",
+                _ => ja ? "更新情報を安全に検証できませんでした。" : "The release could not be validated safely.",
+            },
+            _ => ja ? "まだ更新を確認していません。" : "Updates have not been checked yet.",
+        };
+        var checkedText = state.CheckedAt?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? "—";
+        UpdateVerification.Text = state.Publisher is { } publisher
+            ? $"{(ja ? "発行元" : "Publisher")}: {publisher} · {state.Detail} · {(ja ? "最終確認" : "Last checked")}: {checkedText}"
+            : $"{(ja ? "最終確認" : "Last checked")}: {checkedText}";
+        CheckUpdateButton.IsEnabled = state.Kind is not UpdateStateKind.Checking and not UpdateStateKind.Downloading and not UpdateStateKind.Launching;
+        InstallUpdateButton.IsEnabled = app.Updates.CanInstall;
+    }
+
+    private void AutomaticUpdateChecks_Click(object sender, RoutedEventArgs e)
+    {
+        if (!loadingSettings) AgentSettings.AutomaticUpdateChecks = AutomaticUpdateChecks.IsChecked == true;
+    }
+
+    private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (System.Windows.Application.Current is App app) await app.Updates.CheckNowAsync(lifetime.Token);
+    }
+
+    private async void InstallUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (System.Windows.Application.Current is not App app) return;
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        var message = ja
+            ? "署名とSHA-256を再検証してWindows Installerを起動します。監視は一時停止し、完了後に再開します。続けますか？"
+            : "The signature and SHA-256 will be verified again before Windows Installer starts. Monitoring pauses briefly and resumes after setup. Continue?";
+        if (System.Windows.MessageBox.Show(message, "EgressView Agent", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)
+            await app.Updates.LaunchInstallerAsync(lifetime.Token);
     }
 
     private void LanguageChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -488,6 +548,9 @@ public partial class MainWindow : Window
         Name(AiProviderChoice, "Provider");
         Name(AiModelChoice, "Model");
         Name(HistoryRetentionChoice, "KeepHistory");
+        Name(AutomaticUpdateChecks, "AutomaticUpdateChecks");
+        Name(CheckUpdateButton, "CheckForUpdates");
+        Name(InstallUpdateButton, "InstallVerifiedUpdate");
         Name(DeleteHistoryBefore, "DeleteBefore");
         Name(RefreshGeoButton, "FetchNow");
         Name(RefreshThreatButton, "FetchNow");

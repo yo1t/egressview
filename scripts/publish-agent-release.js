@@ -91,6 +91,7 @@ function parseArgs(argv) {
     profile: options.profile,
     output: options.output ? path.resolve(options.output) : null,
     dryRun: Boolean(options.dryRun),
+    publisher: options.publisher || (options.platform === 'windows' ? 'EgressView' : null),
   };
 
   const problems = [];
@@ -144,6 +145,7 @@ function buildManifest(config, now = new Date()) {
         url: `${config.baseUrl}/${config.platform}/${name}`,
         sha256: sha256(entry.file),
         sizeBytes: fs.statSync(entry.file).size,
+        ...(config.publisher ? { publisher: config.publisher } : {}),
       };
     }),
   };

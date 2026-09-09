@@ -20,9 +20,17 @@ public partial class App : System.Windows.Application
     private Forms.NotifyIcon? trayIcon;
     private Forms.ToolStripMenuItem? trayStatus;
     private Forms.ToolStripMenuItem? monitoringToggle;
+    private Forms.ToolStripMenuItem? openItem;
+    private Forms.ToolStripMenuItem? settingsItem;
+    private Forms.ToolStripMenuItem? diagnosticsItem;
+    private Forms.ToolStripMenuItem? aboutItem;
+    private Forms.ToolStripMenuItem? checkUpdatesItem;
+    private Forms.ToolStripMenuItem? installUpdateItem;
+    private Forms.ToolStripMenuItem? exitItem;
     private readonly DispatcherTimer trayRefresh = new() { Interval = TimeSpan.FromSeconds(15) };
     private TrayState trayState = TrayState.NeedsAttention;
     internal LocalNotificationService Notifications { get; } = new();
+    internal AgentUpdateController Updates { get; } = new();
 
     internal bool IsExiting { get; private set; }
 
@@ -68,6 +76,8 @@ public partial class App : System.Windows.Application
             false);
         window.Show();
         _ = RefreshTrayStateAsync();
+        Updates.StateChanged += UpdateStateChanged;
+        _ = Updates.RunIfDueAsync();
     }
 
     private void CreateTrayIcon()
@@ -76,16 +86,25 @@ public partial class App : System.Windows.Application
         trayStatus = new Forms.ToolStripMenuItem { Enabled = false };
         menu.Items.Add(trayStatus);
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("", null, (_, _) => Dispatcher.Invoke(() => ShowMainWindow()));
-        menu.Items.Add("", null, (_, _) => Dispatcher.Invoke(() => ShowMainWindow(5)));
-        menu.Items.Add("", null, async (_, _) => await Dispatcher.InvokeAsync(SaveDiagnosticsAsync));
-        menu.Items.Add("", null, (_, _) => Dispatcher.Invoke(ShowAbout));
+        openItem = new Forms.ToolStripMenuItem("", null, (_, _) => Dispatcher.Invoke(() => ShowMainWindow()));
+        settingsItem = new Forms.ToolStripMenuItem("", null, (_, _) => Dispatcher.Invoke(() => ShowMainWindow(5)));
+        diagnosticsItem = new Forms.ToolStripMenuItem("", null, async (_, _) => await Dispatcher.InvokeAsync(SaveDiagnosticsAsync));
+        aboutItem = new Forms.ToolStripMenuItem("", null, (_, _) => Dispatcher.Invoke(ShowAbout));
+        checkUpdatesItem = new Forms.ToolStripMenuItem("", null, async (_, _) => await Dispatcher.InvokeAsync(CheckForUpdatesAsync));
+        installUpdateItem = new Forms.ToolStripMenuItem("", null, async (_, _) => await Dispatcher.InvokeAsync(InstallUpdateAsync));
+        menu.Items.Add(openItem);
+        menu.Items.Add(settingsItem);
+        menu.Items.Add(diagnosticsItem);
+        menu.Items.Add(checkUpdatesItem);
+        menu.Items.Add(installUpdateItem);
+        menu.Items.Add(aboutItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
         monitoringToggle = new Forms.ToolStripMenuItem();
         monitoringToggle.Click += async (_, _) => await Dispatcher.InvokeAsync(ToggleMonitoringAsync);
         menu.Items.Add(monitoringToggle);
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("", null, (_, _) => Dispatcher.Invoke(ExitUi));
+        exitItem = new Forms.ToolStripMenuItem("", null, (_, _) => Dispatcher.Invoke(ExitUi));
+        menu.Items.Add(exitItem);
         trayIcon = new Forms.NotifyIcon
         {
             Icon = System.Drawing.SystemIcons.Information,
@@ -119,7 +138,8 @@ public partial class App : System.Windows.Application
 
     internal void RefreshTrayText()
     {
-        if (trayIcon?.ContextMenuStrip is not { } menu || trayStatus is null || monitoringToggle is null) return;
+        if (trayIcon is null || trayStatus is null || monitoringToggle is null || openItem is null || settingsItem is null ||
+            diagnosticsItem is null || aboutItem is null || checkUpdatesItem is null || installUpdateItem is null || exitItem is null) return;
         var ja = LocalizationManager.EffectiveLanguage == "ja";
         trayStatus.Text = trayState switch
         {
@@ -127,14 +147,20 @@ public partial class App : System.Windows.Application
             TrayState.Stopped => ja ? "状態: 監視停止" : "Status: Monitoring stopped",
             _ => ja ? "状態: 要確認" : "Status: Needs attention",
         };
-        menu.Items[2].Text = ja ? "EgressView Agentを開く" : "Open EgressView Agent";
-        menu.Items[3].Text = ja ? "設定" : "Settings";
-        menu.Items[4].Text = ja ? "診断を保存…" : "Save diagnostics…";
-        menu.Items[5].Text = ja ? "EgressView Agentについて" : "About EgressView Agent";
+        openItem.Text = ja ? "EgressView Agentを開く" : "Open EgressView Agent";
+        settingsItem.Text = ja ? "設定" : "Settings";
+        diagnosticsItem.Text = ja ? "診断を保存…" : "Save diagnostics…";
+        checkUpdatesItem.Text = Updates.State.Kind is UpdateStateKind.Checking or UpdateStateKind.Downloading
+            ? (ja ? "更新を確認中…" : "Checking for updates…") : (ja ? "更新を確認…" : "Check for updates…");
+        checkUpdatesItem.Enabled = Updates.State.Kind is not UpdateStateKind.Checking and not UpdateStateKind.Downloading and not UpdateStateKind.Launching;
+        installUpdateItem.Text = ja ? "検証済み更新をインストール…" : "Install verified update…";
+        installUpdateItem.Enabled = Updates.CanInstall;
+        installUpdateItem.Visible = Updates.CanInstall;
+        aboutItem.Text = ja ? "EgressView Agentについて" : "About EgressView Agent";
         monitoringToggle.Text = trayState == TrayState.Stopped
             ? (ja ? "監視を開始…" : "Start monitoring…")
             : (ja ? "監視を停止…" : "Stop monitoring…");
-        menu.Items[9].Text = ja ? "UIを終了（監視は継続）" : "Exit UI (monitoring continues)";
+        exitItem.Text = ja ? "UIを終了（監視は継続）" : "Exit UI (monitoring continues)";
         trayIcon.Icon = trayState switch
         {
             TrayState.Healthy => System.Drawing.SystemIcons.Information,
@@ -143,6 +169,31 @@ public partial class App : System.Windows.Application
         };
         trayIcon.Text = trayStatus.Text.Replace("状態: ", "EgressView Agent — ", StringComparison.Ordinal)
             .Replace("Status: ", "EgressView Agent — ", StringComparison.Ordinal);
+    }
+
+    private void UpdateStateChanged(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() =>
+    {
+        RefreshTrayText();
+        if (MainWindow is MainWindow window) window.RefreshUpdateStatus();
+    });
+
+    private async Task CheckForUpdatesAsync()
+    {
+        ShowMainWindow(5);
+        if (MainWindow is MainWindow window) window.SelectSettingsSection("updates");
+        await Updates.CheckNowAsync();
+    }
+
+    private async Task InstallUpdateAsync()
+    {
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        var message = ja
+            ? "署名とSHA-256を再検証してインストーラーを起動します。監視は一時停止し、完了後に自動再開します。続けますか？"
+            : "The signature and SHA-256 will be verified again before Windows Installer starts. Monitoring pauses briefly and resumes after setup. Continue?";
+        if (System.Windows.MessageBox.Show(message, "EgressView Agent", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
+        if (!await Updates.LaunchInstallerAsync())
+            System.Windows.MessageBox.Show(ja ? "検証済みインストーラーを起動できませんでした。" : "Could not launch the verified installer.",
+                "EgressView Agent", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
     private async Task RefreshTrayStateAsync()
@@ -225,6 +276,8 @@ public partial class App : System.Windows.Application
         IsExiting = true;
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged;
         trayRefresh.Stop();
+        Updates.StateChanged -= UpdateStateChanged;
+        Updates.Dispose();
         activationRegistration?.Unregister(null);
         exitRegistration?.Unregister(null);
         trayIcon?.Dispose();
