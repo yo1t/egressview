@@ -552,13 +552,12 @@ public sealed partial class ObservationStore : IDisposable
                 long coverage;
                 if (before is null)
                 {
-                    observations = DeleteAllRows("observations");
-                    flows = DeleteAllRows("flows");
-                    hourly = DeleteAllRows("hourly_summary");
-                    chart = DeleteAllRows("chart_hourly");
-                    Execute("DELETE FROM chart_hourly_state");
-                    coverage = DeleteMatchingCoverage("ended_at IS NOT NULL");
-                    Execute($"UPDATE coverage_sessions SET started_at='{cutoff:O}',confirmed_at='{cutoff:O}' WHERE ended_at IS NULL");
+                    var result = DeleteLocalHistoryWithinTransaction(cutoff);
+                    observations = result.ObservationsDeleted;
+                    flows = result.FlowsDeleted;
+                    hourly = result.HourlySummariesDeleted;
+                    chart = result.ChartSummariesDeleted;
+                    coverage = result.CoverageSessionsDeleted;
                 }
                 else
                 {
@@ -580,6 +579,18 @@ public sealed partial class ObservationStore : IDisposable
                 throw;
             }
         }
+    }
+
+    private LocalHistoryDeletionResult DeleteLocalHistoryWithinTransaction(DateTimeOffset cutoff)
+    {
+        var observations = DeleteAllRows("observations");
+        var flows = DeleteAllRows("flows");
+        var hourly = DeleteAllRows("hourly_summary");
+        var chart = DeleteAllRows("chart_hourly");
+        Execute("DELETE FROM chart_hourly_state");
+        var coverage = DeleteMatchingCoverage("ended_at IS NOT NULL");
+        Execute($"UPDATE coverage_sessions SET started_at='{cutoff:O}',confirmed_at='{cutoff:O}' WHERE ended_at IS NULL");
+        return new(observations, flows, hourly, chart, coverage);
     }
 
     private long DeleteAllRows(string table) => DeleteWhere(table, "1=1");

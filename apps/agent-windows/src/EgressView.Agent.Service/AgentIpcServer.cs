@@ -13,6 +13,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     public const string PipeName = "egressview-agent-v1";
     private readonly CancellationTokenSource stop = new();
     private Task? loop;
+    private readonly AgentUninstallClient uninstallClient = new();
 
     public void Start() => loop = Task.Run(ServeAsync);
 
@@ -49,7 +50,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
                     delivery.SettingsChanged();
                 }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled, DeliveryStatus, delivery.RequestNow,
                 enrichment.Status, enrichment.RequestNow, HistoryStatus, SetHistoryRetention, store.ReadHistoryForExport,
-                cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow), Diagnostics));
+                cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow), Diagnostics, PrepareUninstall));
         }
     }
 
@@ -90,6 +91,22 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
 
     private LocalHistoryStatus HistoryStatus() => store.ReadLocalHistoryStatus(DateTimeOffset.UtcNow);
 
+    private AgentUninstallResult PrepareUninstall(bool removeHistory, bool continueWithoutRevocation)
+    {
+        setMonitoringEnabled(false);
+        delivery.PauseAndWait();
+        var credential = credentialStore.Load();
+        var revoked = false;
+        if (credential is not null && !continueWithoutRevocation)
+        {
+            uninstallClient.RevokeAsync(credential).GetAwaiter().GetResult();
+            revoked = true;
+        }
+        var result = store.CompleteUninstallPreparation(removeHistory, revoked, credential is not null && continueWithoutRevocation, DateTimeOffset.UtcNow);
+        credentialStore.Delete();
+        return result;
+    }
+
     private LocalHistoryStatus SetHistoryRetention(int days)
     {
         store.SetRetentionDays(days);
@@ -104,6 +121,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     {
         stop.Cancel();
         if (loop is not null) try { await loop; } catch (OperationCanceledException) { }
+        uninstallClient.Dispose();
         stop.Dispose();
     }
 }

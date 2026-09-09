@@ -120,6 +120,24 @@ public sealed partial class ObservationStore
         }
     }
 
+    public AgentUninstallResult CompleteUninstallPreparation(bool removeLocalHistory, bool hubRevoked, bool continuedWithoutRevocation, DateTimeOffset now)
+    {
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                Execute("UPDATE delivery_state SET delivery_enabled=0 WHERE id=1");
+                var pending = DeleteWhere("delivery_queue", "1=1");
+                if (removeLocalHistory) DeleteLocalHistoryWithinTransaction(now.ToUniversalTime());
+                Execute("COMMIT");
+                return new(hubRevoked, continuedWithoutRevocation, removeLocalHistory, pending);
+            }
+            catch { TryRollback(); throw; }
+        }
+    }
+
     private IReadOnlyList<DeliveryObservation> ReadDeliveryBatch(Guid batchId)
     {
         var result = new List<DeliveryObservation>();
