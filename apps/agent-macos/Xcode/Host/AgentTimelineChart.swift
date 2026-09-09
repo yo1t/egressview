@@ -80,6 +80,24 @@ struct AgentTimelineChart: View {
     private let yAxisWidth: CGFloat = 56
     private let xAxisHeight: CGFloat = 18
 
+    /// The font the axis labels are drawn in, and the room the topmost one
+    /// needs above its gridline.
+    ///
+    /// The labels are drawn centred on their line, so the top one -- the only
+    /// place the chart says how big the tallest bucket is -- had half its
+    /// glyphs above the canvas and was clipped at every window size (P3-90).
+    ///
+    /// Measured rather than guessed. A constant that decides what a label
+    /// looks like, and that nobody checks, is how the sankey row spent four
+    /// versions being wrong (P3-89).
+    private static let axisLabelFont = NSFont.systemFont(ofSize: 9)
+    private var axisLabelInset: CGFloat {
+        let height = ("0" as NSString)
+            .size(withAttributes: [.font: Self.axisLabelFont])
+            .height
+        return (height / 2).rounded(.up)
+    }
+
     /// Kept in one place so the band and its key cannot drift apart.
     static let sleepColor = Color.blue
 
@@ -131,10 +149,14 @@ struct AgentTimelineChart: View {
         // drawing false rather than crowded.
         let peak = axis.top
         guard peak > 0, model.bucketStarts.count > 1 else { return }
+        // The ceiling sits below the top of the canvas by half a label, so the
+        // topmost tick has somewhere to be drawn. The bars lose those few
+        // points; the number they are measured against becomes readable.
+        let topInset = axisLabelInset
         let plot = CGRect(
-            x: yAxisWidth, y: 0,
+            x: yAxisWidth, y: topInset,
             width: max(1, size.width - yAxisWidth),
-            height: max(1, size.height - xAxisHeight)
+            height: max(1, size.height - xAxisHeight - topInset)
         )
         // Behind everything else: the sleep is the background the bars sit on,
         // not a thing drawn over them.
@@ -149,8 +171,10 @@ struct AgentTimelineChart: View {
             line.move(to: CGPoint(x: plot.minX, y: y))
             line.addLine(to: CGPoint(x: plot.maxX, y: y))
             context.stroke(line, with: .color(.secondary.opacity(0.18)), lineWidth: 1)
+            // The measured font itself, so the room reserved above is the room
+            // the glyphs take.
             let label = Text(formattedMetric(peak * fraction, model.metric))
-                .font(.system(size: 9))
+                .font(Font(Self.axisLabelFont))
                 .foregroundColor(.secondary)
             context.draw(label, at: CGPoint(x: yAxisWidth - 6, y: y), anchor: .trailing)
         }
