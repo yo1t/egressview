@@ -45,10 +45,30 @@ internal static class AgentSettings
         set => Write("GlobeFrameRate", value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
+    internal static string AiProvider
+    {
+        get => Read("AiProvider") is "OpenAI" or "Anthropic" ? Read("AiProvider")! : "Ollama";
+        set { if (value is "Ollama" or "OpenAI" or "Anthropic") Write("AiProvider", value); }
+    }
+
+    internal static string AiModel(string provider) => Read($"AiModel{provider}") ?? "";
+    internal static void SetAiModel(string provider, string value) => Write($"AiModel{provider}", value.Length <= 200 ? value : value[..200]);
+
+    internal static string OllamaEndpoint
+    {
+        get => Read("OllamaEndpoint") ?? "http://127.0.0.1:11434";
+        set => Write("OllamaEndpoint", value);
+    }
+
+    internal static bool AiEnabled(string provider) => ReadBool($"AiEnabled{provider}", false);
+    internal static void SetAiEnabled(string provider, bool value) => Write($"AiEnabled{provider}", value ? "1" : "0");
+    internal static bool AiCloudConsent(string provider) => ReadBool($"AiCloudConsent{provider}", false);
+    internal static void SetAiCloudConsent(string provider, bool value) => Write($"AiCloudConsent{provider}", value ? "1" : "0");
+
     internal static string SettingsSection
     {
-        get => Read("SettingsSection") is { } value && value is "general" or "notifications" or "enrichment" or "hub" ? value : "general";
-        set { if (value is "general" or "notifications" or "enrichment" or "hub") Write("SettingsSection", value); }
+        get => Read("SettingsSection") is { } value && value is "general" or "notifications" or "enrichment" or "ai" or "hub" ? value : "general";
+        set { if (value is "general" or "notifications" or "enrichment" or "ai" or "hub") Write("SettingsSection", value); }
     }
 
     internal static double WindowWidth
