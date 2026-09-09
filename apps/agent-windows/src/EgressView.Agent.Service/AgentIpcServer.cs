@@ -49,11 +49,13 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
                     delivery.SettingsChanged();
                 }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled, DeliveryStatus, delivery.RequestNow,
                 enrichment.Status, enrichment.RequestNow, HistoryStatus, SetHistoryRetention, store.ReadHistoryForExport,
-                cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow)));
+                cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow), Diagnostics));
         }
     }
 
-    private string Status() => DiagnosticsReport.Create(snapshot(), store, "0.1.0-dev", monitoringEnabled());
+    private string Status() => DiagnosticsReport.Create(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled());
+    private string Diagnostics() => DiagnosticsReport.Create(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), verifyIntegrity: true,
+        reportChannel: "authenticated-named-pipe");
     private IReadOnlyList<HourlySummary> Summary(int days) => store.ReadHourlySummary(DateTimeOffset.UtcNow.AddDays(-days), DateTimeOffset.UtcNow);
     private IReadOnlyList<GlobePoint> Globe(int minutes) => store.ReadGlobePoints(DateTimeOffset.UtcNow.AddMinutes(-minutes), DateTimeOffset.UtcNow);
     private PeriodAnalysis Analysis(int minutes, int offsetMinutes)

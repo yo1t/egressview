@@ -64,6 +64,8 @@
         <RegistryValue Name="AllowedUserSid" Type="string" Value="[UserSID]" KeyPath="yes" />
         <RegistryValue Name="UiPath" Type="string" Value="[UIFOLDER]EgressView.Agent.Ui.exe" />
         <RegistryValue Name="UiAutoStart" Type="integer" Value="1" />
+        <RegistryValue Name="InstallerState" Type="string" Value="installed" />
+        <RegistryValue Name="Version" Type="string" Value="[ProductVersion]" />
       </RegistryKey>
     </Component>
 

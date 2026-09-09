@@ -60,12 +60,20 @@ internal static class Program
         return 0;
     }
 
-    private static int ExportBundle(string[] args)
+    internal static int ExportBundle(string[] args)
     {
         var database = Argument(args, "--data") ?? throw new ArgumentException("--data is required");
         var destination = Argument(args, "--diagnostics-bundle") ?? throw new ArgumentException("--diagnostics-bundle path is required");
-        using var store = new ObservationStore(database);
-        var report = DiagnosticsReport.Create(new CollectorSnapshot("stopped", 0, 0, 0, 0, null, null, 0), store, "0.1.0-dev", verifyIntegrity: true);
+        string report;
+        try
+        {
+            using var store = new ObservationStore(database);
+            report = DiagnosticsReport.Create(new CollectorSnapshot("stopped", 0, 0, 0, 0, null, null, 0), store, DiagnosticsReport.CurrentVersion, verifyIntegrity: true);
+        }
+        catch (Exception exception)
+        {
+            report = DiagnosticsReport.CreateFallback(DiagnosticsReport.CurrentVersion, exception.GetType().Name);
+        }
         DiagnosticsBundle.Create(destination, report);
         return 0;
     }
@@ -75,7 +83,7 @@ internal static class Program
         var database = Argument(args, "--data") ?? throw new ArgumentException("--data is required");
         using var store = new ObservationStore(database);
         Console.WriteLine(DiagnosticsReport.Create(
-            new CollectorSnapshot("stopped", 0, 0, 0, 0, null, null, 0), store, "0.1.0-dev", verifyIntegrity: true));
+            new CollectorSnapshot("stopped", 0, 0, 0, 0, null, null, 0), store, DiagnosticsReport.CurrentVersion, verifyIntegrity: true));
         return 0;
     }
 
@@ -93,7 +101,7 @@ internal static class Program
         await Task.WhenAny(Task.Delay(TimeSpan.FromSeconds(seconds)), pipeline.Completion);
         var snapshotAfterRun = collector.Enrich(pipeline.Snapshot());
         if (snapshotAfterRun.PersistenceFailures == 0) store.EndCoverage(coverageId, DateTimeOffset.UtcNow);
-        var diagnostics = DiagnosticsReport.Create(snapshotAfterRun, store, "0.1.0-dev");
+        var diagnostics = DiagnosticsReport.Create(snapshotAfterRun, store, DiagnosticsReport.CurrentVersion);
         Console.WriteLine(diagnostics);
         if (Argument(args, "--diagnostics") is { } diagnosticsPath)
             File.WriteAllText(diagnosticsPath, diagnostics);
@@ -177,7 +185,7 @@ internal sealed class AgentWindowsService : ServiceBase
         await chartAggregation;
         await maintenance;
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
-            DiagnosticsReport.Create(monitoring.Snapshot(), store, "0.1.0-dev", monitoring.Enabled));
+            DiagnosticsReport.Create(monitoring.Snapshot(), store, DiagnosticsReport.CurrentVersion, monitoring.Enabled));
     }
 
     private static async Task RunChartAggregationAsync(ObservationStore store, CancellationToken cancellationToken)
