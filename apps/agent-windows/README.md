@@ -58,5 +58,9 @@ HKCUへ登録しないよう停止します。管理者が代理導入すると�
 自身のsessionで起動導線を別途登録してください。更新時は既存UIへ`--exit-ui`を送り、10秒以内に終了
 しなければbinaryを上書きせず停止します。UIを終了しても収集Serviceは継続します。
 
-診断bundleはendpoint、process名、credential、raw観測、SQLite DBを含みません。Serviceの収集停止は
-Windows Application Event Logのsource `EgressViewAgent`、event ID 1001にも記録します。
+診断bundleは設定またはtrayの「診断を保存…」から作成でき、plain-text概要と整形済みJSONを含みます。
+endpoint、hostname、process名、credential、API key、Hub endpoint、raw観測、SQLite DBは含みません。
+Service停止、DB起動失敗、IPC拒否時もUIは限定版bundleを保存します。UI自体を開けない場合は、管理者terminalで
+`EgressView.Agent.Service.exe --diagnostics-bundle <zip-path> --data <database-path>`を実行してください。破損DBでも
+環境と分類済み失敗を含む限定版を作ります。Serviceの収集停止はWindows Application Event Logのsource
+`EgressViewAgent`、event ID 1001にも記録します。

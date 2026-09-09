@@ -13,6 +13,15 @@ try
     Assert(AgentSemanticVersion.TryParse("1.2.3", out var stableVersion) &&
         AgentSemanticVersion.TryParse("1.2.3-preview", out var previewVersion) && stableVersion.CompareTo(previewVersion) > 0,
         "release versions compare stable builds after prereleases");
+    var corruptDiagnosticDatabase = Path.Combine(directory, "corrupt-diagnostics.db");
+    File.WriteAllText(corruptDiagnosticDatabase, "not a sqlite database");
+    var fallbackBundle = Path.Combine(directory, "fallback-diagnostics.zip");
+    Assert(EgressView.Agent.Service.Program.ExportBundle(["--data", corruptDiagnosticDatabase, "--diagnostics-bundle", fallbackBundle]) == 0 && File.Exists(fallbackBundle),
+        "the service CLI still creates a limited diagnostic bundle when the database cannot open");
+    using (var fallbackArchive = System.IO.Compression.ZipFile.OpenRead(fallbackBundle))
+    using (var fallbackReader = new StreamReader(fallbackArchive.GetEntry("diagnostics.json")!.Open()))
+        Assert(fallbackReader.ReadToEnd().Contains("reachable\": false", StringComparison.Ordinal),
+            "a database startup failure is explicitly classified without exporting database content");
     var updatePayload = Encoding.UTF8.GetBytes("signed-msi-payload");
     var updateHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(updatePayload));
     var updateManifest = JsonSerializer.Serialize(new
@@ -138,10 +147,18 @@ try
         DiagnosticsBundle.Create(bundle, report);
         using var archive = System.IO.Compression.ZipFile.OpenRead(bundle);
         Assert(archive.Entries.Select(entry => entry.FullName).ToHashSet(StringComparer.Ordinal)
-                .SetEquals(new[] { "README.txt", "diagnostics.json" }),
+                .SetEquals(new[] { "README.txt", "diagnostics.json", "diagnostics.txt" }),
             "diagnostics bundle contains only documented privacy-safe files");
         using var bundleReader = new StreamReader(archive.GetEntry("diagnostics.json")!.Open());
         Assert(!bundleReader.ReadToEnd().Contains("100.64.0.1", StringComparison.Ordinal), "bundle excludes endpoint");
+        using var textReader = new StreamReader(archive.GetEntry("diagnostics.txt")!.Open());
+        Assert(textReader.ReadToEnd().Contains("Database integrity: ok", StringComparison.Ordinal),
+            "diagnostics bundle includes a human-readable summary alongside JSON");
+        var unsafeReport = DiagnosticsReport.Create(
+            new CollectorSnapshot("degraded", 0, 0, 0, 1, null, null, 32, CollectorError: "IOException: C:\\Users\\secret\\agent.db"),
+            reopened, "test");
+        Assert(unsafeReport.Contains("IOException", StringComparison.Ordinal) && !unsafeReport.Contains("secret", StringComparison.Ordinal),
+            "free-text collector failures are reduced to a safe classification before export");
 
         var beforeBackup = reopened.ReadStorageBytes();
         File.WriteAllBytes(database + ".pre-v99.bak", new byte[123]);
@@ -159,6 +176,10 @@ try
 
     var ipcStatus = IpcProtocol.Handle("""{"v":1,"op":"status"}""", () => """{"health":{"status":"healthy"}}""", _ => []);
     Assert(ipcStatus.Contains("\"status\":\"ok\"", StringComparison.Ordinal), "IPC v1 status is accepted");
+    var ipcDiagnostics = IpcProtocol.Handle("""{"v":1,"op":"diagnostics"}""", () => "{}", _ => [],
+        diagnostics: () => """{"privacy":{"includesEndpoints":false}}""");
+    Assert(ipcDiagnostics.Contains("includesEndpoints", StringComparison.Ordinal),
+        "authenticated IPC exposes a separately requested integrity-checked diagnostic report");
     bool? monitoringEnabled = null;
     var monitoringResponse = IpcProtocol.Handle("""{"v":1,"op":"set-monitoring-enabled","enabled":false}""", () => "{}", _ => [],
         setMonitoringEnabled: enabled => { monitoringEnabled = enabled; return enabled; });

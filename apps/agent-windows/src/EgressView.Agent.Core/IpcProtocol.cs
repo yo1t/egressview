@@ -20,7 +20,8 @@ public static class IpcProtocol
         Func<LocalHistoryStatus>? historyStatus = null,
         Func<int, LocalHistoryStatus>? setHistoryRetention = null,
         Func<DateTimeOffset?, int, int, IReadOnlyList<RecentFlow>>? historyExport = null,
-        Func<DateTimeOffset?, LocalHistoryDeletionResult>? deleteHistory = null)
+        Func<DateTimeOffset?, LocalHistoryDeletionResult>? deleteHistory = null,
+        Func<string>? diagnostics = null)
     {
         try
         {
@@ -48,6 +49,7 @@ public static class IpcProtocol
                 "set-history-retention" => SetHistoryRetention(root, setHistoryRetention),
                 "history-export" => HistoryExport(root, historyExport),
                 "delete-history" => DeleteHistory(root, deleteHistory),
+                "diagnostics" => DynamicStatus(diagnostics),
                 _ => Reject("unknown-operation"),
             };
         }

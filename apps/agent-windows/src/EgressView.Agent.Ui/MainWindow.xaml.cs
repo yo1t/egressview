@@ -416,7 +416,7 @@ public partial class MainWindow : Window
         DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 25 => 2, 0 => 3, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
         AutomaticUpdateChecks.IsChecked = AgentSettings.AutomaticUpdateChecks;
-        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "updates" => 5, "hub" => 6, _ => 0 };
+        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "diagnostics" => 5, "updates" => 6, "hub" => 7, _ => 0 };
         DeleteHistoryBefore.SelectedDate = DateTime.Today.AddDays(-30);
         AiProviderChoice.SelectedIndex = AgentSettings.AiProvider switch { "OpenAI" => 1, "Anthropic" => 2, _ => 0 };
         AiEndpoint.Text = AgentSettings.OllamaEndpoint;
@@ -428,7 +428,7 @@ public partial class MainWindow : Window
 
     private void SettingsSectionChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HistorySettingsSection is null || UpdateSettingsSection is null || HubSettingsSection is null ||
+        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HistorySettingsSection is null || DiagnosticsSettingsSection is null || UpdateSettingsSection is null || HubSettingsSection is null ||
             SettingsSectionChoice.SelectedItem is not ListBoxItem item) return;
         var section = item.Tag?.ToString() ?? "general";
         GeneralSettingsSection.Visibility = section == "general" ? Visibility.Visible : Visibility.Collapsed;
@@ -436,6 +436,7 @@ public partial class MainWindow : Window
         EnrichmentSettingsSection.Visibility = section == "enrichment" ? Visibility.Visible : Visibility.Collapsed;
         AiSettingsSection.Visibility = section == "ai" ? Visibility.Visible : Visibility.Collapsed;
         HistorySettingsSection.Visibility = section == "history" ? Visibility.Visible : Visibility.Collapsed;
+        DiagnosticsSettingsSection.Visibility = section == "diagnostics" ? Visibility.Visible : Visibility.Collapsed;
         UpdateSettingsSection.Visibility = section == "updates" ? Visibility.Visible : Visibility.Collapsed;
         HubSettingsSection.Visibility = section == "hub" ? Visibility.Visible : Visibility.Collapsed;
         if (!loadingSettings) AgentSettings.SettingsSection = section;
@@ -501,6 +502,21 @@ public partial class MainWindow : Window
             await app.Updates.LaunchInstallerAsync(lifetime.Token);
     }
 
+    private async void SaveDiagnostics_Click(object sender, RoutedEventArgs e)
+    {
+        if (System.Windows.Application.Current is not App app) return;
+        SaveDiagnosticsButton.IsEnabled = false;
+        DiagnosticsStatus.Text = LocalizationManager.Text("PreparingDiagnostics");
+        try
+        {
+            var result = await app.SaveDiagnosticsAsync();
+            DiagnosticsStatus.Text = result is null ? LocalizationManager.Text("DiagnosticsCancelled") :
+                result.ServiceReportIncluded ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DiagnosticsSavedFormat"), result.Path) :
+                string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DiagnosticsLimitedFormat"), result.Path);
+        }
+        finally { SaveDiagnosticsButton.IsEnabled = true; }
+    }
+
     private void LanguageChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (loadingSettings || LanguageChoice.SelectedItem is not ComboBoxItem item || !Enum.TryParse<AgentLanguage>(item.Tag?.ToString(), out var language)) return;
@@ -548,6 +564,7 @@ public partial class MainWindow : Window
         Name(AiProviderChoice, "Provider");
         Name(AiModelChoice, "Model");
         Name(HistoryRetentionChoice, "KeepHistory");
+        Name(SaveDiagnosticsButton, "SaveDiagnostics");
         Name(AutomaticUpdateChecks, "AutomaticUpdateChecks");
         Name(CheckUpdateButton, "CheckForUpdates");
         Name(InstallUpdateButton, "InstallVerifiedUpdate");

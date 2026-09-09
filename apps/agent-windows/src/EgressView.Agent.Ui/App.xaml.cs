@@ -7,6 +7,8 @@ using Forms = System.Windows.Forms;
 
 namespace EgressView.Agent.Ui;
 
+internal sealed record DiagnosticsSaveResult(string Path, bool ServiceReportIncluded);
+
 public partial class App : System.Windows.Application
 {
     private const string InstanceName = @"Local\EgressView.Agent.Ui";
@@ -237,7 +239,7 @@ public partial class App : System.Windows.Application
         finally { monitoringToggle.Enabled = true; }
     }
 
-    private async Task SaveDiagnosticsAsync()
+    internal async Task<DiagnosticsSaveResult?> SaveDiagnosticsAsync()
     {
         var ja = LocalizationManager.EffectiveLanguage == "ja";
         var dialog = new Microsoft.Win32.SaveFileDialog
@@ -246,15 +248,35 @@ public partial class App : System.Windows.Application
             FileName = $"egressview-diagnostics-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.zip",
             AddExtension = true,
         };
-        if (dialog.ShowDialog(MainWindow) != true) return;
+        if (dialog.ShowDialog(MainWindow) != true) return null;
         try
         {
-            var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"status"}""");
-            using var document = JsonDocument.Parse(response);
-            DiagnosticsBundle.Create(dialog.FileName, document.RootElement.GetProperty("data").GetRawText());
-            System.Windows.MessageBox.Show(ja ? "診断を保存しました。" : "Diagnostics saved.", "EgressView Agent", MessageBoxButton.OK, MessageBoxImage.Information);
+            string report;
+            var serviceReport = true;
+            try
+            {
+                var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"diagnostics"}""");
+                using var document = JsonDocument.Parse(response);
+                if (document.RootElement.GetProperty("status").GetString() != "ok") throw new InvalidOperationException("diagnostics-rejected");
+                report = document.RootElement.GetProperty("data").GetRawText();
+            }
+            catch (Exception exception)
+            {
+                serviceReport = false;
+                report = DiagnosticsReport.CreateFallback(DiagnosticsReport.CurrentVersion, exception.GetType().Name);
+            }
+            DiagnosticsBundle.Create(dialog.FileName, report);
+            var message = serviceReport
+                ? (ja ? "診断を保存しました。" : "Diagnostics saved.")
+                : (ja ? "Serviceへ接続できないため、利用可能な診断だけを保存しました。Windows Event Viewerの確認手順も含まれます。" : "The service was unavailable, so a limited diagnostic was saved with Windows Event Viewer instructions.");
+            System.Windows.MessageBox.Show(message, "EgressView Agent", MessageBoxButton.OK, serviceReport ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            return new(dialog.FileName, serviceReport);
         }
-        catch { System.Windows.MessageBox.Show(ja ? "診断を保存できませんでした。" : "Could not save diagnostics.", "EgressView Agent", MessageBoxButton.OK, MessageBoxImage.Error); }
+        catch
+        {
+            System.Windows.MessageBox.Show(ja ? "診断を保存できませんでした。" : "Could not save diagnostics.", "EgressView Agent", MessageBoxButton.OK, MessageBoxImage.Error);
+            return null;
+        }
     }
 
     private void ShowAbout()

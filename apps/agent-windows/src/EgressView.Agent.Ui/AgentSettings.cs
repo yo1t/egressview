@@ -67,8 +67,8 @@ internal static class AgentSettings
 
     internal static string SettingsSection
     {
-        get => Read("SettingsSection") is { } value && value is "general" or "notifications" or "enrichment" or "ai" or "history" or "updates" or "hub" ? value : "general";
-        set { if (value is "general" or "notifications" or "enrichment" or "ai" or "history" or "updates" or "hub") Write("SettingsSection", value); }
+        get => Read("SettingsSection") is { } value && value is "general" or "notifications" or "enrichment" or "ai" or "history" or "diagnostics" or "updates" or "hub" ? value : "general";
+        set { if (value is "general" or "notifications" or "enrichment" or "ai" or "history" or "diagnostics" or "updates" or "hub") Write("SettingsSection", value); }
     }
 
     internal static bool AutomaticUpdateChecks
