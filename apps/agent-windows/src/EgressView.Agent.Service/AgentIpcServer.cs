@@ -54,9 +54,9 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         }
     }
 
-    private string Status() => DiagnosticsReport.Create(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled());
+    private string Status() => DiagnosticsReport.Create(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), capabilityStatus: delivery.CapabilityStatus);
     private string Diagnostics() => DiagnosticsReport.Create(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), verifyIntegrity: true,
-        reportChannel: "authenticated-named-pipe");
+        reportChannel: "authenticated-named-pipe", capabilityStatus: delivery.CapabilityStatus);
     private IReadOnlyList<HourlySummary> Summary(int days) => store.ReadHourlySummary(DateTimeOffset.UtcNow.AddDays(-days), DateTimeOffset.UtcNow);
     private IReadOnlyList<GlobePoint> Globe(int minutes) => store.ReadGlobePoints(DateTimeOffset.UtcNow.AddMinutes(-minutes), DateTimeOffset.UtcNow);
     private IReadOnlyList<CountryHistoryRow> CountryHistory(int? minutes)
@@ -91,6 +91,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
             lastFailure = runtime.LastFailure,
             lastFailureAt = runtime.LastFailureAt,
             lastStatusCode = runtime.LastStatusCode,
+            capability = delivery.CapabilityStatus,
         });
     }
 

@@ -20,6 +20,7 @@ internal sealed class DeliveryController : IDisposable
     }
 
     internal DeliveryRuntimeStatus Status { get { lock (stateGate) return status; } }
+    internal DeliveryCapabilityStatus CapabilityStatus => sender.CapabilityStatus;
 
     internal void RequestNow()
     {
@@ -73,6 +74,7 @@ internal sealed class DeliveryController : IDisposable
                         DeliveryAttemptKind.Empty => TimeSpan.FromSeconds(15),
                         DeliveryAttemptKind.RateLimited => result.RetryAfter ?? TimeSpan.FromMinutes(1),
                         DeliveryAttemptKind.AuthorizationRequired => TimeSpan.FromMinutes(5),
+                        DeliveryAttemptKind.Incompatible => TimeSpan.FromHours(1),
                         _ => retry,
                     };
                     var state = State(result.Kind);
@@ -116,6 +118,7 @@ internal sealed class DeliveryController : IDisposable
         DeliveryAttemptKind.Retryable => "retryable",
         DeliveryAttemptKind.Rejected => "contract-rejected",
         DeliveryAttemptKind.InvalidAcknowledgement => "invalid-acknowledgement",
+        DeliveryAttemptKind.Incompatible => "hub-incompatible",
         _ => "retryable",
     };
 

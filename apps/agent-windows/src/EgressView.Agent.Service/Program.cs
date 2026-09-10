@@ -185,7 +185,8 @@ internal sealed class AgentWindowsService : ServiceBase
         await chartAggregation;
         await maintenance;
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
-            DiagnosticsReport.Create(monitoring.Snapshot(), store, DiagnosticsReport.CurrentVersion, monitoring.Enabled));
+            DiagnosticsReport.Create(monitoring.Snapshot(), store, DiagnosticsReport.CurrentVersion, monitoring.Enabled,
+                capabilityStatus: deliveryController.CapabilityStatus));
     }
 
     private static async Task RunChartAggregationAsync(ObservationStore store, CancellationToken cancellationToken)

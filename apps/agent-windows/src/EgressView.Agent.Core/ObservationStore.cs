@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 12;
+    private const int CurrentSchemaVersion = 13;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -173,6 +173,9 @@ public sealed partial class ObservationStore : IDisposable
         );
         INSERT OR IGNORE INTO local_history_settings(id) VALUES(1);
         """;
+    private const string Version13Schema = """
+        ALTER TABLE delivery_queue ADD COLUMN remote_hostname TEXT;
+        """;
 
     private readonly object gate = new();
     private nint db;
@@ -201,7 +204,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -221,7 +224,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 8) { MigrateVersion8To9(); version = 9; }
         if (version == 9) { MigrateVersion9To10(); version = 10; }
         if (version == 10) { MigrateVersion10To11(); version = 11; }
-        if (version == 11) MigrateVersion11To12();
+        if (version == 11) { MigrateVersion11To12(); version = 12; }
+        if (version == 12) MigrateVersion12To13();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -311,6 +315,13 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion12To13()
+    {
+        CreateMigrationBackup(13);
+        try { Execute($"BEGIN IMMEDIATE; {Version13Schema} UPDATE schema_version SET version=13 WHERE version=12; COMMIT;"); PruneMigrationBackups(13); }
+        catch { TryRollback(); throw; }
+    }
+
     private string CreateMigrationBackup(int targetVersion)
     {
         var backup = $"{path}.pre-v{targetVersion}.bak";
@@ -370,6 +381,8 @@ public sealed partial class ObservationStore : IDisposable
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing remote hostname columns.");
         if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('delivery_state') WHERE name='delivery_enabled'") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing the delivery opt-in state.");
+        if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('delivery_queue') WHERE name='remote_hostname'") != 1)
+            throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing the delivery hostname column.");
         if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('coverage_sessions') WHERE name='confirmed_at'") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing coverage confirmation timestamps.");
         if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('coverage_sessions') WHERE name='interrupted'") != 1)

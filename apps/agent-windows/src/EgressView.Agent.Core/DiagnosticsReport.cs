@@ -9,7 +9,7 @@ public static class DiagnosticsReport
     public static string CurrentVersion => typeof(DiagnosticsReport).Assembly.GetName().Version?.ToString(3) ?? "unknown";
 
     public static string Create(CollectorSnapshot snapshot, ObservationStore store, string version, bool monitoringEnabled = true,
-        bool verifyIntegrity = false, string reportChannel = "service-internal")
+        bool verifyIntegrity = false, string reportChannel = "service-internal", DeliveryCapabilityStatus? capabilityStatus = null)
     {
         // The service verified the entire database when it opened it. Re-running
         // integrity_check for every 15-second UI status request can take minutes
@@ -32,7 +32,7 @@ public static class DiagnosticsReport
             flows = new { total = flowStats.Total, snapshot = flowStats.Snapshot, etw = flowStats.Etw, both = flowStats.Both, bytesUnknown = flowStats.BytesUnknown, processNames = new { resolved = processNames.Resolved, unresolved = processNames.Unresolved }, byOrigin = store.ReadFlowOrigins() },
             coverage = new { total = coverage.Total, active = coverage.Active, abandoned = coverage.Abandoned },
             monitoringEnabled,
-            delivery = new { pending = delivery.Pending, contractRejected = delivery.ContractRejected, queueOverflow = delivery.QueueOverflow, oldestPendingAt = delivery.OldestPendingAt, lastAcknowledgedAt = delivery.LastAcknowledgedAt },
+            delivery = new { pending = delivery.Pending, contractRejected = delivery.ContractRejected, queueOverflow = delivery.QueueOverflow, oldestPendingAt = delivery.OldestPendingAt, lastAcknowledgedAt = delivery.LastAcknowledgedAt, capability = capabilityStatus },
             deliveryEnabled = store.DeliveryEnabled,
             ipc = new { reportChannel },
             installer = ReadInstallerState(),
