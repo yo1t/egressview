@@ -129,6 +129,49 @@ try
     Assert(NotificationPolicy.Evaluate(true, false, false, 0, 999, null, notificationNow) == NotificationDecision.CategoryDisabled,
         "a disabled category remains suppressed even when the daily limit is unlimited");
 
+    var deliveryNotice = new DeliveryNotificationTracker();
+    var deliveryAck = notificationNow.AddMinutes(-10);
+    var shortFailure = new DeliveryNotificationSample(notificationNow, true, "retryable", 12, notificationNow, deliveryAck);
+    Assert(deliveryNotice.Evaluate(shortFailure) == DeliveryNotificationAction.None &&
+        deliveryNotice.Evaluate(shortFailure with { ObservedAt = notificationNow.AddMinutes(4) }) == DeliveryNotificationAction.None,
+        "a short transient Hub failure does not notify");
+    var longFailure = shortFailure with { ObservedAt = notificationNow.AddMinutes(5) };
+    Assert(deliveryNotice.Evaluate(longFailure) == DeliveryNotificationAction.Outage,
+        "a Hub failure with a five-minute-old pending queue becomes actionable");
+    deliveryNotice.RecordAttempt(DeliveryNotificationAction.Outage, longFailure, false);
+    Assert(deliveryNotice.Evaluate(longFailure with { ObservedAt = notificationNow.AddMinutes(30) }) == DeliveryNotificationAction.None &&
+        deliveryNotice.Evaluate(longFailure with { ObservedAt = notificationNow.AddMinutes(65) }) == DeliveryNotificationAction.Outage,
+        "a suppressed outage is retried after the bounded notification interval");
+    var deliveredFailure = longFailure with { ObservedAt = notificationNow.AddMinutes(65) };
+    deliveryNotice.RecordAttempt(DeliveryNotificationAction.Outage, deliveredFailure, true);
+    Assert(deliveryNotice.Evaluate(deliveredFailure with { ObservedAt = notificationNow.AddMinutes(66), State = "up-to-date", Pending = 0 }) == DeliveryNotificationAction.None &&
+        deliveryNotice.Evaluate(deliveredFailure with { ObservedAt = notificationNow.AddMinutes(66), State = "sending", Pending = 0,
+            LastAcknowledgedAt = deliveryAck.AddMinutes(1) }) == DeliveryNotificationAction.None,
+        "an empty queue or sending state without a confirmed completed ACK is not called a recovery");
+    var acknowledgedRecovery = deliveredFailure with { ObservedAt = notificationNow.AddMinutes(66), State = "up-to-date", Pending = 0,
+        LastAcknowledgedAt = deliveryAck.AddMinutes(1) };
+    Assert(deliveryNotice.Evaluate(acknowledgedRecovery) == DeliveryNotificationAction.Recovery,
+        "recovery requires a real ACK advance after a delivered outage notification");
+    deliveryNotice.RecordAttempt(DeliveryNotificationAction.Recovery, acknowledgedRecovery, true);
+    Assert(deliveryNotice.Evaluate(acknowledgedRecovery with { ObservedAt = notificationNow.AddMinutes(67) }) == DeliveryNotificationAction.None,
+        "a delivered recovery closes the notified outage exactly once");
+
+    var authNotice = new DeliveryNotificationTracker();
+    Assert(authNotice.Evaluate(new(notificationNow, true, "authorization-required", 1, notificationNow, null)) == DeliveryNotificationAction.Outage,
+        "an authorization rejection is actionable immediately");
+    var rateNotice = new DeliveryNotificationTracker();
+    var rateLimited = new DeliveryNotificationSample(notificationNow, true, "rate-limited", 2, notificationNow, null);
+    Assert(rateNotice.Evaluate(rateLimited) == DeliveryNotificationAction.None &&
+        rateNotice.Evaluate(rateLimited with { ObservedAt = notificationNow.AddMinutes(5) }) == DeliveryNotificationAction.Outage,
+        "a 429 is tolerated briefly and reported only when the queue remains stale");
+    var unnotified = new DeliveryNotificationTracker();
+    var unnotifiedFailure = new DeliveryNotificationSample(notificationNow, true, "retryable", 1, notificationNow.AddMinutes(-6), deliveryAck);
+    Assert(unnotified.Evaluate(unnotifiedFailure) == DeliveryNotificationAction.Outage, "a long outage is eligible for delivery");
+    unnotified.RecordAttempt(DeliveryNotificationAction.Outage, unnotifiedFailure, false);
+    Assert(unnotified.Evaluate(unnotifiedFailure with { ObservedAt = notificationNow.AddMinutes(1), State = "acknowledged", Pending = 0,
+        LastAcknowledgedAt = deliveryAck.AddMinutes(1) }) == DeliveryNotificationAction.None,
+        "recovery is never announced for an outage the user was not told about");
+
     var aiFrom = new DateTimeOffset(2026, 9, 8, 0, 0, 0, TimeSpan.Zero);
     PeriodAnalysis AiAnalysis(long connections, string prefix) => new(aiFrom, aiFrom.AddHours(6), connections, 12, 20,
         connections * 100, 3, 1, aiFrom, 100,

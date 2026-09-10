@@ -63,7 +63,11 @@ public partial class App : System.Windows.Application
         var window = new MainWindow();
         MainWindow = window;
         CreateTrayIcon();
-        trayRefresh.Tick += async (_, _) => await RefreshTrayStateAsync();
+        trayRefresh.Tick += async (_, _) =>
+        {
+            await RefreshTrayStateAsync();
+            await RefreshDeliveryNotificationAsync();
+        };
         trayRefresh.Start();
         activationRegistration = ThreadPool.RegisterWaitForSingleObject(
             activationEvent,
@@ -242,6 +246,28 @@ public partial class App : System.Windows.Application
             UpdateTrayState(enabled, healthy, issueCode, issueAction);
         }
         catch { UpdateTrayUnavailable(); }
+    }
+
+    private async Task RefreshDeliveryNotificationAsync()
+    {
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"delivery-status"}""");
+            using var document = JsonDocument.Parse(response);
+            var data = document.RootElement.GetProperty("data");
+            static DateTimeOffset? DateValue(JsonElement source, string property) =>
+                source.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(value.GetString(), out var parsed) ? parsed : null;
+            Notifications.ObserveHubDelivery(new(
+                DateTimeOffset.Now,
+                data.GetProperty("enrolled").GetBoolean() && data.GetProperty("enabled").GetBoolean(),
+                data.GetProperty("state").GetString() ?? "idle",
+                data.GetProperty("pending").GetInt64(),
+                DateValue(data, "oldestPendingAt"),
+                DateValue(data, "lastAcknowledgedAt")),
+                ShowNotification);
+        }
+        catch { /* Status availability is represented separately; it is not a Hub outage. */ }
     }
 
     private async Task ToggleMonitoringAsync()
