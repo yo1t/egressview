@@ -4,6 +4,84 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.59
+
+**A destination now carries the name your Mac actually used.** The Hub could
+already put a name to an address by looking it up backwards, and for a CDN
+that lookup is wrong in the ordinary case — it answers with whatever the
+address block is registered as, not with the service you reached. The agent
+has always known better, because the name is right there in the connection it
+observed, and until now it kept that to itself.
+
+Measured on one Mac over 547,600 observations before the change was written:
+a name is available for **65.8% of connections to public addresses**. The
+figure across all connections is 44.9%, and that number misleads — 60% of the
+unnamed are your own LAN and link-local addresses, where an address is the
+only honest answer.
+
+**It is sent only to a Hub that says it reads it.** The agent asks first. A
+Hub that has not been updated is never sent the field, and the batch it
+receives is byte-for-byte what it always was. [What the agent sends, and
+where](docs/agent-privacy.md) lists it.
+
+**The top figure on the timeline is readable.** The y-axis labels sit centred
+on their gridline, and the topmost one had half its glyphs above the edge of
+the drawing — clipped at every window size, in both metrics. It is the only
+place the chart says how big the tallest hour was.
+
+### Agent for Mac 0.5.57
+
+**The application-to-destination diagram grows with the window.** It was
+given ten rows and kept them however large you made the card, so a bigger
+window bought blank space. How many names you see is now whatever the height
+allows, and the rest is a scroll away.
+
+**Two destinations no longer read the same.** Long host names are shortened to
+fit the column, and the characters that separate one CDN node from another
+were exactly the ones being dropped — four rows reading `ipv6-c…ideo.net`
+between them, 1.04 GB, and no way to tell which was which. Names are now
+shortened around the part that differs.
+
+This took four attempts, each of which passed its tests and failed on the
+screen, and the notes on that are in the repository rather than here.
+
+**A quiet day is visible behind a busy hour.** In the data-volume view a
+single 1.71 GB hour set the scale and flattened the other twenty-three to
+nothing. Confirmed over a week containing a 1.74 GB peak: the rest of the
+week reads.
+
+### Agent for Mac 0.5.52
+
+**An outage that lasted is now reported.** The agent told you when it could
+not reach your Hub, then said nothing for the rest of the outage — and when
+the Hub came back, congratulated you on a recovery from a problem it had
+never mentioned. A rate limit was dropping the first report and nothing
+retried it, so **the longer the outage, the less likely you were to hear about
+it.** Verified across a deliberate eighty-eight minute outage and a seven and
+a half hour one.
+
+**A recovery notice now means observations moved.** It used to mean the
+connection state had changed, which is not the same thing: 7,981 observations
+sat queued while the agent reported eight times that delivery had resumed.
+
+### Agent for Mac 0.5.50
+
+**The agent can explain what it sees, on models you choose.** Local analysis
+through Ollama stays on this Mac. OpenAI and Anthropic are available for
+people who would rather use them, off unless you turn one on, and what is
+sent is stated before you do.
+
+**A threat finding means the same thing here as on the Hub.** The two judged
+confidence differently, so the same destination could be flagged in one place
+and not the other.
+
+---
+
+Agent for Mac 0.5.31 through 0.5.49, 0.5.51, 0.5.53 through 0.5.56 and 0.5.58
+were built and are not listed: each was either a step toward the release above
+it or was withdrawn before publication because it did not work on a real Mac.
+Nothing was installable from them.
+
 ### Agent for Mac 0.5.30
 
 **You can now hand over what is needed to explain a fault.** Until now, when
