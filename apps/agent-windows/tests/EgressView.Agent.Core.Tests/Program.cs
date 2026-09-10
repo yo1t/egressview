@@ -384,15 +384,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 12, "v1 database migrates through v2-v12");
+        Assert(migrated.SchemaVersion == 13, "v1 database migrates through v2-v13");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v12.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v13.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 12, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 13, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -641,6 +641,74 @@ try
         Assert((await sender.SendNextAsync(rejectedStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged,
             "the same durable batch can be accepted after the Hub contract is fixed");
         Assert(handler.BatchIds.Distinct().Count() == 1, "a rejected ACK preserves the idempotent batch ID");
+    }
+
+    var fallback = AgentCapabilityNegotiation.Decide(null);
+    Assert(fallback.Kind == AgentCapabilityOutcomeKind.Unknown && fallback.SchemaVersion == 1 &&
+        fallback.BatchSize == 200 && !fallback.IncludeRemoteHostname,
+        "an unavailable capability endpoint keeps legacy schema v1 without optional fields");
+    var negotiated = AgentCapabilityNegotiation.Decide(new AgentHubCapabilities([1], 2,
+        ObservationFields: ["remoteHostname"]));
+    Assert(negotiated.Kind == AgentCapabilityOutcomeKind.Agreed && negotiated.BatchSize == 2 && negotiated.IncludeRemoteHostname,
+        "capability negotiation honors the Hub batch limit and explicit hostname field");
+    Assert(AgentCapabilityNegotiation.Decide(new AgentHubCapabilities([2])).Kind == AgentCapabilityOutcomeKind.Incompatible,
+        "an explicit capability answer with no common schema is incompatible");
+
+    using (var capableStore = new ObservationStore(Path.Combine(directory, "sender-capable.db")))
+    {
+        for (var index = 0; index < 3; index++)
+            capableStore.QueueForDelivery([new NetworkObservation(deliveryStarted.AddSeconds(index), 120 + index, "TCP",
+                "10.0.0.1", 55000 + index, "203.0.113.20", 443, 10, 20, ObservationLayer.Logical, "if", "etw",
+                "Browser", $"cdn{index}.example")], deliveryStarted.AddSeconds(index));
+        var handler = new DeliveryHandler(200, 200)
+        {
+            CapabilitiesStatus = HttpStatusCode.OK,
+            CapabilitiesJson = """{"schemaVersions":[1],"maxObservationsPerBatch":2,"observationFields":["remoteHostname"]}""",
+        };
+        var clock = new ManualTimeProvider(deliveryStarted);
+        var sender = new DeliverySender(new HttpClient(handler), clock);
+        var credential = new AgentCredential(new Uri("https://hub.example/"), agentId, agentToken, deliveryStarted);
+        var metadata = new DeliveryMetadata("host", "windows", "Windows", "dev");
+        Assert((await sender.SendNextAsync(capableStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged,
+            "a compatible Hub accepts the first bounded batch");
+        Assert(handler.ObservationCounts.Single() == 2 && handler.SawRemoteHostname,
+            "only the negotiated batch limit is sent and stored hostnames reach an accepting Hub");
+        Assert((await sender.SendNextAsync(capableStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged &&
+            handler.CapabilityRequests == 1 && handler.ObservationCounts.Last() == 1,
+            "successful capabilities are cached while later batches preserve the negotiated limit");
+    }
+
+    using (var legacyStore = new ObservationStore(Path.Combine(directory, "sender-legacy.db")))
+    {
+        legacyStore.QueueForDelivery([new NetworkObservation(deliveryStarted, 130, "TCP", "10.0.0.1", 56000,
+            "203.0.113.30", 443, 1, 2, ObservationLayer.Logical, "if", "etw", "Browser", "private.example")], deliveryStarted);
+        var handler = new DeliveryHandler(200);
+        var clock = new ManualTimeProvider(deliveryStarted);
+        var sender = new DeliverySender(new HttpClient(handler), clock);
+        var credential = new AgentCredential(new Uri("https://legacy.example/"), agentId, agentToken, deliveryStarted);
+        Assert((await sender.SendNextAsync(legacyStore, credential, new("host", "windows", "Windows", "dev"))).Kind == DeliveryAttemptKind.Acknowledged &&
+            !handler.SawRemoteHostname && sender.CapabilityStatus.State == "unavailable",
+            "an old Hub 404 keeps delivery working and never receives a hostname");
+        handler.CapabilitiesStatus = HttpStatusCode.OK;
+        handler.CapabilitiesJson = """{"schemaVersions":[1],"maxObservationsPerBatch":200,"observationFields":["remoteHostname"]}""";
+        Assert((await sender.SendNextAsync(legacyStore, credential, new("host", "windows", "Windows", "dev"))).Kind == DeliveryAttemptKind.Empty &&
+            handler.CapabilityRequests == 1, "a failed capability lookup is not retried on every delivery pass");
+        clock.Advance(TimeSpan.FromHours(1) + TimeSpan.FromSeconds(1));
+        await sender.SendNextAsync(legacyStore, credential, new("host", "windows", "Windows", "dev"));
+        Assert(handler.CapabilityRequests == 2 && sender.CapabilityStatus.State == "agreed",
+            "a failed capability lookup is retried on the low-frequency refresh interval");
+    }
+
+    using (var incompatibleStore = new ObservationStore(Path.Combine(directory, "sender-incompatible.db")))
+    {
+        incompatibleStore.QueueForDelivery([new NetworkObservation(deliveryStarted, 140, "TCP", "10.0.0.1", 57000,
+            "203.0.113.40", 443, 1, 2, ObservationLayer.Logical, "if", "etw", "Browser", "blocked.example")], deliveryStarted);
+        var handler = new DeliveryHandler { CapabilitiesStatus = HttpStatusCode.OK, CapabilitiesJson = """{"schemaVersions":[2]}""" };
+        var sender = new DeliverySender(new HttpClient(handler));
+        var result = await sender.SendNextAsync(incompatibleStore,
+            new(new Uri("https://future.example/"), agentId, agentToken, deliveryStarted), new("host", "windows", "Windows", "dev"));
+        Assert(result.Kind == DeliveryAttemptKind.Incompatible && handler.IngestRequests == 0 && incompatibleStore.ReadDeliveryStatus().Pending == 1,
+            "an explicit schema mismatch stops before ingest and preserves the durable queue");
     }
 
     var optInDatabase = Path.Combine(directory, "delivery-opt-in.db");
@@ -1057,32 +1125,57 @@ sealed class DeliveryHandler(params int[] statuses) : HttpMessageHandler
 {
     private readonly Queue<int> statuses = new(statuses);
     public List<Guid> BatchIds { get; } = [];
+    public List<int> ObservationCounts { get; } = [];
     public bool SawEtwCollector { get; private set; }
     public bool SawProcessId { get; private set; }
     public bool SawBearer { get; private set; }
     public bool SawUserAgent { get; private set; }
+    public bool SawRemoteHostname { get; private set; }
+    public int CapabilityRequests { get; private set; }
+    public int IngestRequests { get; private set; }
+    public HttpStatusCode CapabilitiesStatus { get; set; } = HttpStatusCode.NotFound;
+    public string CapabilitiesJson { get; set; } = "{}";
     public int RejectedAcknowledgements { get; set; }
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        SawBearer |= request.Headers.Authorization?.Scheme == "Bearer" && request.Headers.Authorization.Parameter?.StartsWith("egva_", StringComparison.Ordinal) == true;
+        SawUserAgent |= request.Headers.UserAgent.Any(value => value.Product?.Name == "EgressView-Agent-Windows");
+        if (request.Method == HttpMethod.Get)
+        {
+            CapabilityRequests++;
+            return new HttpResponseMessage(CapabilitiesStatus)
+            {
+                Content = new StringContent(CapabilitiesJson, Encoding.UTF8, "application/json"),
+            };
+        }
+        IngestRequests++;
         var body = await request.Content!.ReadAsStringAsync(cancellationToken);
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
         var batchId = root.GetProperty("batchId").GetGuid();
         BatchIds.Add(batchId);
-        var observation = root.GetProperty("observations")[0];
+        var observations = root.GetProperty("observations");
+        ObservationCounts.Add(observations.GetArrayLength());
+        var observation = observations[0];
         SawEtwCollector |= observation.GetProperty("collector").GetString() == "etw";
         SawProcessId |= observation.GetProperty("processID").GetInt32() == 88;
-        SawBearer |= request.Headers.Authorization?.Scheme == "Bearer" && request.Headers.Authorization.Parameter?.StartsWith("egva_", StringComparison.Ordinal) == true;
-        SawUserAgent |= request.Headers.UserAgent.Any(value => value.Product?.Name == "EgressView-Agent-Windows");
+        SawRemoteHostname |= observation.TryGetProperty("remoteHostname", out var hostname) && hostname.GetString()?.EndsWith(".example", StringComparison.Ordinal) == true;
         var status = statuses.Dequeue();
         var response = new HttpResponseMessage((HttpStatusCode)status);
         if (status == 429) response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(7));
         var rejected = status == 200 && RejectedAcknowledgements > 0 ? 1 : 0;
         if (rejected > 0) RejectedAcknowledgements -= 1;
         response.Content = new StringContent(status == 200
-            ? $"{{\"batchId\":\"{batchId}\",\"accepted\":{1 - rejected},\"duplicate\":0,\"rejected\":{rejected},\"replayed\":false}}"
+            ? $"{{\"batchId\":\"{batchId}\",\"accepted\":{observations.GetArrayLength() - rejected},\"duplicate\":0,\"rejected\":{rejected},\"replayed\":false}}"
             : "{}", Encoding.UTF8, "application/json");
         return response;
     }
+}
+
+sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
+{
+    public DateTimeOffset UtcNow { get; private set; } = utcNow;
+    public override DateTimeOffset GetUtcNow() => UtcNow;
+    public void Advance(TimeSpan value) => UtcNow += value;
 }

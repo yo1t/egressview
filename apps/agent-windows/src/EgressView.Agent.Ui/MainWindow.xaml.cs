@@ -387,6 +387,7 @@ public partial class MainWindow : Window
             "retryable" => ja ? "一時失敗・再試行予定" : "Temporary failure; retry scheduled",
             "contract-rejected" => ja ? "Hub契約で拒否" : "Rejected by Hub contract",
             "invalid-acknowledgement" => ja ? "ACKを検証できません" : "Invalid acknowledgement",
+            "hub-incompatible" => ja ? "Hub更新が必要" : "Hub update required",
             _ => ja ? "待機中" : "Idle",
         };
     }
