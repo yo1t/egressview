@@ -30,7 +30,7 @@ public partial class App : System.Windows.Application
     private Forms.ToolStripMenuItem? installUpdateItem;
     private Forms.ToolStripMenuItem? exitItem;
     private readonly DispatcherTimer trayRefresh = new() { Interval = TimeSpan.FromSeconds(15) };
-    private TrayState trayState = TrayState.NeedsAttention;
+    internal MonitoringStatusTracker MonitoringStatus { get; } = new();
     internal LocalNotificationService Notifications { get; } = new();
     internal AgentUpdateController Updates { get; } = new();
 
@@ -133,9 +133,15 @@ public partial class App : System.Windows.Application
         MainWindow.Activate();
     }
 
-    internal void UpdateTrayState(bool enabled, bool healthy)
+    internal void UpdateTrayState(bool enabled, bool healthy, string? issueCode = null, string? issueAction = null)
     {
-        trayState = !enabled ? TrayState.Stopped : healthy ? TrayState.Healthy : TrayState.NeedsAttention;
+        MonitoringStatus.Confirm(enabled, healthy, DateTimeOffset.Now, issueCode, issueAction);
+        RefreshTrayText();
+    }
+
+    internal void UpdateTrayUnavailable()
+    {
+        MonitoringStatus.MarkUnavailable();
         RefreshTrayText();
     }
 
@@ -144,11 +150,24 @@ public partial class App : System.Windows.Application
         if (trayIcon is null || trayStatus is null || monitoringToggle is null || openItem is null || settingsItem is null ||
             diagnosticsItem is null || aboutItem is null || checkUpdatesItem is null || installUpdateItem is null || exitItem is null) return;
         var ja = LocalizationManager.EffectiveLanguage == "ja";
-        trayStatus.Text = trayState switch
+        var state = MonitoringStatus.Current;
+        trayStatus.Text = state.Kind switch
         {
-            TrayState.Healthy => ja ? "状態: 監視中" : "Status: Monitoring",
-            TrayState.Stopped => ja ? "状態: 監視停止" : "Status: Monitoring stopped",
-            _ => ja ? "状態: 要確認" : "Status: Needs attention",
+            MonitoringPresentationKind.Monitoring => ja ? "状態: 監視中" : "Status: Monitoring",
+            MonitoringPresentationKind.Stopped => ja ? "状態: 監視停止" : "Status: Monitoring stopped",
+            MonitoringPresentationKind.NeedsAttention => ja ? "状態: 要確認" : "Status: Needs attention",
+            MonitoringPresentationKind.Unavailable => state.LastConfirmedAt is { } at
+                ? $"{(ja ? "状態取得不可" : "Status unavailable")} · {at.ToLocalTime():g}"
+                : (ja ? "状態取得不可" : "Status unavailable"),
+            _ => ja ? "状態: 確認中" : "Status: Checking",
+        };
+        trayStatus.ToolTipText = state.Kind switch
+        {
+            MonitoringPresentationKind.NeedsAttention when !string.IsNullOrWhiteSpace(state.IssueCode) =>
+                $"{state.IssueCode}{(string.IsNullOrWhiteSpace(state.IssueAction) ? string.Empty : $": {state.IssueAction}")}",
+            MonitoringPresentationKind.Unavailable when state.LastConfirmedAt is { } at =>
+                $"{(ja ? "最終確認" : "Last confirmed")} {at.ToLocalTime():g}",
+            _ => string.Empty,
         };
         openItem.Text = ja ? "EgressView Agentを開く" : "Open EgressView Agent";
         settingsItem.Text = ja ? "設定" : "Settings";
@@ -160,15 +179,18 @@ public partial class App : System.Windows.Application
         installUpdateItem.Enabled = Updates.CanInstall;
         installUpdateItem.Visible = Updates.CanInstall;
         aboutItem.Text = ja ? "EgressView Agentについて" : "About EgressView Agent";
-        monitoringToggle.Text = trayState == TrayState.Stopped
+        monitoringToggle.Text = state.Kind == MonitoringPresentationKind.Stopped
             ? (ja ? "監視を開始…" : "Start monitoring…")
             : (ja ? "監視を停止…" : "Stop monitoring…");
+        monitoringToggle.Enabled = state.Kind is not MonitoringPresentationKind.Checking and not MonitoringPresentationKind.Unavailable;
         exitItem.Text = ja ? "UIを終了（監視は継続）" : "Exit UI (monitoring continues)";
-        trayIcon.Icon = trayState switch
+        trayIcon.Icon = state.Kind switch
         {
-            TrayState.Healthy => System.Drawing.SystemIcons.Information,
-            TrayState.Stopped => System.Drawing.SystemIcons.Application,
-            _ => System.Drawing.SystemIcons.Warning,
+            MonitoringPresentationKind.Monitoring => System.Drawing.SystemIcons.Information,
+            MonitoringPresentationKind.Stopped => System.Drawing.SystemIcons.Application,
+            MonitoringPresentationKind.NeedsAttention => System.Drawing.SystemIcons.Error,
+            MonitoringPresentationKind.Unavailable => System.Drawing.SystemIcons.Warning,
+            _ => System.Drawing.SystemIcons.Application,
         };
         trayIcon.Text = trayStatus.Text.Replace("状態: ", "EgressView Agent — ", StringComparison.Ordinal)
             .Replace("Status: ", "EgressView Agent — ", StringComparison.Ordinal);
@@ -207,16 +229,25 @@ public partial class App : System.Windows.Application
             using var document = JsonDocument.Parse(response);
             var data = document.RootElement.GetProperty("data");
             var enabled = !data.TryGetProperty("monitoringEnabled", out var flag) || flag.GetBoolean();
-            var healthy = data.GetProperty("health").GetProperty("status").GetString() == "healthy";
-            UpdateTrayState(enabled, healthy);
+            var health = data.GetProperty("health");
+            var healthy = health.GetProperty("status").GetString() == "healthy";
+            string? issueCode = null;
+            string? issueAction = null;
+            if (health.TryGetProperty("issues", out var issues) && issues.ValueKind == JsonValueKind.Array && issues.GetArrayLength() > 0)
+            {
+                var first = issues[0];
+                issueCode = first.TryGetProperty("code", out var code) ? code.GetString() : null;
+                issueAction = first.TryGetProperty("action", out var action) ? action.GetString() : null;
+            }
+            UpdateTrayState(enabled, healthy, issueCode, issueAction);
         }
-        catch { UpdateTrayState(true, false); }
+        catch { UpdateTrayUnavailable(); }
     }
 
     private async Task ToggleMonitoringAsync()
     {
         if (monitoringToggle is null) return;
-        var enable = trayState == TrayState.Stopped;
+        var enable = MonitoringStatus.Current.Kind == MonitoringPresentationKind.Stopped;
         var ja = LocalizationManager.EffectiveLanguage == "ja";
         var action = enable ? (ja ? "監視を開始しますか？" : "Start monitoring?") :
             (ja ? "監視を停止しますか？\n\nUIとHub送信サービスは動作を続けます。" : "Stop monitoring?\n\nThe UI and Hub delivery service will keep running.");
@@ -237,7 +268,10 @@ public partial class App : System.Windows.Application
                 "EgressView Agent", MessageBoxButton.OK, MessageBoxImage.Error);
             await RefreshTrayStateAsync();
         }
-        finally { monitoringToggle.Enabled = true; }
+        finally
+        {
+            monitoringToggle.Enabled = MonitoringStatus.Current.Kind is not MonitoringPresentationKind.Checking and not MonitoringPresentationKind.Unavailable;
+        }
     }
 
     internal async Task<DiagnosticsSaveResult?> SaveDiagnosticsAsync()
@@ -325,5 +359,4 @@ public partial class App : System.Windows.Application
         Dispatcher.BeginInvoke(() => ThemeManager.ApplySystemTheme(Resources));
     }
 
-    private enum TrayState { Healthy, NeedsAttention, Stopped }
 }

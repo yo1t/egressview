@@ -319,8 +319,10 @@ public partial class MainWindow : Window
             var data = document.RootElement.GetProperty("data");
             var healthy = data.GetProperty("health").GetProperty("status").GetString() == "healthy";
             var monitoringEnabled = !data.TryGetProperty("monitoringEnabled", out var enabled) || enabled.GetBoolean();
-            SetMonitoringState(healthy, monitoringEnabled);
-            if (System.Windows.Application.Current is App trayApp) trayApp.UpdateTrayState(monitoringEnabled, healthy);
+            var health = data.GetProperty("health");
+            var (issueCode, issueAction) = FirstHealthIssue(health);
+            SetMonitoringState(healthy, monitoringEnabled, issueCode, issueAction);
+            if (System.Windows.Application.Current is App trayApp) trayApp.UpdateTrayState(monitoringEnabled, healthy, issueCode, issueAction);
             var coverage = data.GetProperty("coverage");
             CoverageValue.Text = !monitoringEnabled ? LocalizationManager.Text("MonitoringStopped") :
                 coverage.GetProperty("active").GetInt64() > 0 ? LocalizationManager.Text("Monitoring") : LocalizationManager.Text("NeedsAttention");
@@ -331,7 +333,13 @@ public partial class MainWindow : Window
                 app.Notifications.Notify("Monitoring", "monitoring-health", "EgressView Agent", LocalizationManager.Text("NeedsAttention"), app.ShowNotification);
             await RefreshDeliveryStatusAsync();
         }
-        catch { SetMonitoringState(false); CoverageValue.Text = LocalizationManager.Text("NeedsAttention"); if (System.Windows.Application.Current is App app) app.UpdateTrayState(true, false); }
+        catch
+        {
+            var lastConfirmedAt = (System.Windows.Application.Current as App)?.MonitoringStatus.Current.LastConfirmedAt;
+            SetMonitoringUnavailable(lastConfirmedAt);
+            CoverageValue.Text = LocalizationManager.Text("StatusUnavailable");
+            if (System.Windows.Application.Current is App app) app.UpdateTrayUnavailable();
+        }
     }
 
     private async Task RefreshDeliveryStatusAsync()
@@ -392,12 +400,39 @@ public partial class MainWindow : Window
         };
     }
 
-    private void SetMonitoringState(bool healthy, bool enabled = true)
+    private static (string? Code, string? Action) FirstHealthIssue(JsonElement health)
+    {
+        if (!health.TryGetProperty("issues", out var issues) || issues.ValueKind != JsonValueKind.Array || issues.GetArrayLength() == 0)
+            return (null, null);
+        var first = issues[0];
+        return (
+            first.TryGetProperty("code", out var code) ? code.GetString() : null,
+            first.TryGetProperty("action", out var action) ? action.GetString() : null);
+    }
+
+    private void SetMonitoringState(bool healthy, bool enabled = true, string? issueCode = null, string? issueAction = null)
     {
         MonitoringStatus.Text = enabled ? LocalizationManager.Text(healthy ? "Monitoring" : "NeedsAttention") : LocalizationManager.Text("MonitoringStopped");
-        MonitoringStatus.Foreground = (System.Windows.Media.Brush)FindResource(enabled && healthy ? "SuccessBrush" : "ErrorBrush");
+        var foreground = !enabled ? "TextSecondaryBrush" : healthy ? "SuccessBrush" : "ErrorBrush";
+        var background = !enabled ? "SurfaceSecondaryBrush" : healthy ? "SuccessSoftBrush" : "ErrorSoftBrush";
+        MonitoringStatus.Foreground = (System.Windows.Media.Brush)FindResource(foreground);
         MonitoringDot.Fill = MonitoringStatus.Foreground;
-        MonitoringBadge.Background = (System.Windows.Media.Brush)FindResource(healthy ? "SuccessSoftBrush" : "ErrorSoftBrush");
+        MonitoringBadge.Background = (System.Windows.Media.Brush)FindResource(background);
+        MonitoringBadge.ToolTip = !healthy && !string.IsNullOrWhiteSpace(issueCode)
+            ? $"{issueCode}{(string.IsNullOrWhiteSpace(issueAction) ? string.Empty : $": {issueAction}")}" : null;
+    }
+
+    private void SetMonitoringUnavailable(DateTimeOffset? lastConfirmedAt)
+    {
+        MonitoringStatus.Text = lastConfirmedAt is { } confirmedAt
+            ? $"{LocalizationManager.Text("StatusUnavailable")} · {string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("LastConfirmedFormat"), confirmedAt.ToLocalTime().ToString("g", CultureInfo.CurrentCulture))}"
+            : LocalizationManager.Text("StatusUnavailable");
+        MonitoringStatus.Foreground = (System.Windows.Media.Brush)FindResource("WarningBrush");
+        MonitoringDot.Fill = MonitoringStatus.Foreground;
+        MonitoringBadge.Background = (System.Windows.Media.Brush)FindResource("WarningSoftBrush");
+        MonitoringBadge.ToolTip = lastConfirmedAt is { } at
+            ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("LastConfirmedFormat"), at.ToLocalTime().ToString("g", CultureInfo.CurrentCulture))
+            : LocalizationManager.Text("Checking");
     }
 
     private void Rotate_Click(object sender, RoutedEventArgs e)

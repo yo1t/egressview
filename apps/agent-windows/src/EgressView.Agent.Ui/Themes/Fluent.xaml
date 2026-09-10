@@ -15,6 +15,8 @@
   <Color x:Key="SuccessSoftColor">#E9F5E9</Color>
   <Color x:Key="ErrorColor">#C42B1C</Color>
   <Color x:Key="ErrorSoftColor">#FDE7E9</Color>
+  <Color x:Key="WarningColor">#8A4F00</Color>
+  <Color x:Key="WarningSoftColor">#FFF4CE</Color>
 
   <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource AppBackgroundColor}"/>
   <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}"/>
@@ -31,6 +33,8 @@
   <SolidColorBrush x:Key="SuccessSoftBrush" Color="{StaticResource SuccessSoftColor}"/>
   <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}"/>
   <SolidColorBrush x:Key="ErrorSoftBrush" Color="{StaticResource ErrorSoftColor}"/>
+  <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}"/>
+  <SolidColorBrush x:Key="WarningSoftBrush" Color="{StaticResource WarningSoftColor}"/>
 
   <Style TargetType="Window">
     <Setter Property="FontFamily" Value="Segoe UI Variable Text"/>
