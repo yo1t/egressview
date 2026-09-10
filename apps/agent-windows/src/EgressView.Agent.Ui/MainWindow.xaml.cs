@@ -355,7 +355,8 @@ public partial class MainWindow : Window
             HubDeliveryTarget.Text = enrolled && data.TryGetProperty("hub", out var hub) && hub.ValueKind == JsonValueKind.String
                 ? hub.GetString() ?? LocalizationManager.Text("NotEnrolled") : LocalizationManager.Text("NotEnrolled");
             HubDeliveryState.Text = DeliveryStateText(state);
-            HubPending.Text = data.GetProperty("pending").GetInt64().ToString("N0", CultureInfo.CurrentCulture);
+            var pending = data.GetProperty("pending").GetInt64();
+            HubPending.Text = pending.ToString("N0", CultureInfo.CurrentCulture);
             HubLastAck.Text = DateText(data, "lastAcknowledgedAt");
             HubOldestPending.Text = $"{LocalizationManager.Text("OldestPending")}: {DateText(data, "oldestPendingAt")}";
             HubRetry.Text = $"{LocalizationManager.Text("NextRetry")}: {DateText(data, "nextRetryAt")}";
@@ -365,6 +366,9 @@ public partial class MainWindow : Window
                 ? $" (HTTP {statusValue.GetInt32()})" : string.Empty;
             HubLastFailure.Text = $"{LocalizationManager.Text("LastFailure")}: {failure}{statusCode}";
             SendNowButton.IsEnabled = enrolled && enabled && state != "sending";
+            if (System.Windows.Application.Current is App app)
+                app.Notifications.ObserveHubDelivery(new(DateTimeOffset.Now, enrolled && enabled, state, pending,
+                    DateValue(data, "oldestPendingAt"), DateValue(data, "lastAcknowledgedAt")), app.ShowNotification);
         }
         catch
         {
@@ -375,10 +379,12 @@ public partial class MainWindow : Window
 
     private static string DateText(JsonElement data, string property)
     {
-        if (!data.TryGetProperty(property, out var value) || value.ValueKind != JsonValueKind.String ||
-            !DateTimeOffset.TryParse(value.GetString(), out var date)) return "—";
-        return date.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
+        return DateValue(data, property)?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? "—";
     }
+
+    private static DateTimeOffset? DateValue(JsonElement data, string property) =>
+        data.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String &&
+        DateTimeOffset.TryParse(value.GetString(), out var date) ? date : null;
 
     private static string DeliveryStateText(string state)
     {

@@ -10,13 +10,22 @@ internal sealed class LocalNotificationService
 {
     private readonly string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "EgressView", "Agent", "notification-history.json");
+    private readonly string deliveryStatePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "EgressView", "Agent", "delivery-notification-state.json");
     private readonly List<NotificationHistoryEntry> history;
     private readonly Dictionary<string, DateTimeOffset> cooldowns = [];
+    private readonly DeliveryNotificationTracker deliveryNotifications;
 
     internal LocalNotificationService()
     {
         try { history = JsonSerializer.Deserialize<List<NotificationHistoryEntry>>(File.ReadAllText(path)) ?? []; }
         catch { history = []; }
+        try
+        {
+            var restored = JsonSerializer.Deserialize<DeliveryNotificationState>(File.ReadAllText(deliveryStatePath));
+            deliveryNotifications = new(restored);
+        }
+        catch { deliveryNotifications = new(); }
     }
 
     internal IReadOnlyList<NotificationHistoryEntry> History => history;
@@ -49,6 +58,25 @@ internal sealed class LocalNotificationService
         return delivered;
     }
 
+    internal void ObserveHubDelivery(DeliveryNotificationSample sample, Action<string, string> show)
+    {
+        var action = deliveryNotifications.Evaluate(sample);
+        if (action == DeliveryNotificationAction.None)
+        {
+            SaveDeliveryState();
+            return;
+        }
+        var ja = LocalizationManager.EffectiveLanguage == "ja";
+        var delivered = action == DeliveryNotificationAction.Outage
+            ? Notify("HubDelivery", "hub-delivery-outage", "EgressView Agent",
+                ja ? $"Hubへの送信が完了していません。未送信 {sample.Pending:N0} 件。Agentを開いて確認してください。"
+                   : $"Delivery to the Hub is not completing. {sample.Pending:N0} observations are pending. Open the Agent for details.", show)
+            : Notify("Recovery", "hub-delivery-recovery", "EgressView Agent",
+                ja ? "Hubへの送信が復旧し、ACKを確認しました。" : "Hub delivery recovered and an acknowledgement was confirmed.", show);
+        deliveryNotifications.RecordAttempt(action, sample, delivered);
+        SaveDeliveryState();
+    }
+
     private void Add(NotificationHistoryEntry item)
     {
         history.Insert(0, item);
@@ -77,5 +105,15 @@ internal sealed class LocalNotificationService
             File.WriteAllText(path, JsonSerializer.Serialize(history));
         }
         catch { /* History is useful but must never interfere with monitoring. */ }
+    }
+
+    private void SaveDeliveryState()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(deliveryStatePath)!);
+            File.WriteAllText(deliveryStatePath, JsonSerializer.Serialize(deliveryNotifications.State));
+        }
+        catch { /* Notification state must never interfere with monitoring. */ }
     }
 }
