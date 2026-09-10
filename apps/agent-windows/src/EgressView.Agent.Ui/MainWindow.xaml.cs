@@ -71,6 +71,22 @@ public partial class MainWindow : Window
 
     internal Task RefreshStatusFromTrayAsync() => RefreshStatusAsync();
 
+    internal void ApplyMonitoringStatusFromTray(bool enabled, bool healthy, bool hasActiveCoverage, string? issueCode, string? issueAction)
+    {
+        SetMonitoringState(healthy, enabled, issueCode, issueAction);
+        CoverageValue.Text = !enabled
+            ? LocalizationManager.Text("MonitoringStopped")
+            : hasActiveCoverage
+                ? LocalizationManager.Text("Monitoring")
+                : LocalizationManager.Text("NeedsAttention");
+    }
+
+    internal void ApplyMonitoringUnavailableFromTray(DateTimeOffset? lastConfirmedAt)
+    {
+        SetMonitoringUnavailable(lastConfirmedAt);
+        CoverageValue.Text = LocalizationManager.Text("StatusUnavailable");
+    }
+
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAllAsync();
     private async void PeriodChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
