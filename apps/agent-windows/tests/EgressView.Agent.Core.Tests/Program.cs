@@ -9,6 +9,26 @@ var database = Path.Combine(directory, "agent.db");
 
 try
 {
+    var portableSettings = new AgentSettingsFile(1, "japanese", true, true, false, false, true, true, 12, 5, 360,
+        "bytes", "name", "countries", 30, true);
+    var portableBytes = AgentSettingsFile.Encode(portableSettings);
+    var portableText = Encoding.UTF8.GetString(portableBytes);
+    Assert(portableText.Contains("\"version\"", StringComparison.Ordinal) && portableText.Contains("\"retentionDays\"", StringComparison.Ordinal) &&
+        !portableText.Contains("credential", StringComparison.OrdinalIgnoreCase) && !portableText.Contains("hubUrl", StringComparison.OrdinalIgnoreCase) &&
+        !portableText.Contains("apiKey", StringComparison.OrdinalIgnoreCase) && !portableText.Contains("startup", StringComparison.OrdinalIgnoreCase) &&
+        !portableText.Contains("lookup", StringComparison.OrdinalIgnoreCase),
+        "portable settings are readable and cannot carry machine identity, secrets, startup, or external lookup consent");
+    var forwardSettings = AgentSettingsFile.Decode(Encoding.UTF8.GetBytes("""{"version":1,"language":"english","retentionDays":7,"futureField":{"enabled":true}}"""));
+    Assert(forwardSettings.Language == "english" && forwardSettings.RetentionDays == 7 && AgentSettingsFile.PresentFields(forwardSettings).Count == 2,
+        "settings import accepts the shared Mac field names and ignores unknown future fields");
+    foreach (var invalid in new[] { "{", "{\"version\":2}", "{\"version\":1,\"globeFrameRate\":99}", "{\"version\":1,\"retentionDays\":45}" })
+    {
+        try { AgentSettingsFile.Decode(Encoding.UTF8.GetBytes(invalid)); throw new InvalidOperationException("FAILED: invalid settings file was accepted"); }
+        catch (InvalidDataException) { }
+    }
+    Assert(AgentSettingsFile.SuggestedFileName(new DateTimeOffset(2026, 9, 10, 1, 2, 3, TimeSpan.Zero)) == "egressview-agent-settings-20260910-010203.json",
+        "portable settings use a deterministic UTC file name");
+
     Assert(AgentReleaseKey.MatchesPublishedFingerprint, "the embedded release key matches its published SPKI fingerprint");
     Assert(AgentSemanticVersion.TryParse("1.2.3", out var stableVersion) &&
         AgentSemanticVersion.TryParse("1.2.3-preview", out var previewVersion) && stableVersion.CompareTo(previewVersion) > 0,

@@ -77,6 +77,30 @@ internal static class AgentSettings
         set => Write("AutomaticUpdateChecks", value ? "1" : "0");
     }
 
+    internal static int PeriodMinutes
+    {
+        get => int.TryParse(Read("PeriodMinutes"), out var value) && value is 60 or 360 or 1440 or 10080 or 43200 ? value : 10080;
+        set { if (value is 60 or 360 or 1440 or 10080 or 43200) Write("PeriodMinutes", value.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+    }
+
+    internal static string Metric
+    {
+        get => Read("Metric") is "bytes" ? "bytes" : "connections";
+        set { if (value is "connections" or "bytes") Write("Metric", value); }
+    }
+
+    internal static string DestinationUnit
+    {
+        get => Read("DestinationUnit") is "ip" ? "ip" : "name";
+        set { if (value is "name" or "ip") Write("DestinationUnit", value); }
+    }
+
+    internal static string GlobeView
+    {
+        get => Read("GlobeView") is "countries" ? "countries" : "globe";
+        set { if (value is "globe" or "countries") Write("GlobeView", value); }
+    }
+
     internal static DateTimeOffset? LastUpdateCheck
     {
         get => DateTimeOffset.TryParse(Read("LastUpdateCheck"), System.Globalization.CultureInfo.InvariantCulture,
