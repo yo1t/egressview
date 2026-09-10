@@ -20,6 +20,7 @@ public sealed class WorldGlobeControl : FrameworkElement
     // for motion. Reprojecting the complete atlas and every route at 5 fps
     // is expensive on software-rendered or remote Windows sessions.
     private bool rotating;
+    private double degreesPerSecond = 6;
     private IReadOnlyList<EgressView.Agent.Core.GlobePoint> points = [];
     private readonly (double Latitude, double Longitude) home = EgressView.Agent.Core.HomeLocation.Current();
 
@@ -44,6 +45,12 @@ public sealed class WorldGlobeControl : FrameworkElement
         set { timer.Interval = TimeSpan.FromSeconds(1d / Math.Clamp(value, 1, 30)); ReconcileTimer(); }
     }
 
+    public double DegreesPerSecond
+    {
+        get => degreesPerSecond;
+        set { degreesPerSecond = Math.Clamp(value, 0.5, 30); }
+    }
+
     public void SetPoints(IReadOnlyList<EgressView.Agent.Core.GlobePoint> value)
     {
         points = value;
@@ -63,7 +70,7 @@ public sealed class WorldGlobeControl : FrameworkElement
     private void Advance()
     {
         var now = DateTimeOffset.UtcNow;
-        longitude = (longitude + Math.Max(0, (now - previousFrame).TotalSeconds) * 6) % 360;
+        longitude = (longitude + Math.Max(0, (now - previousFrame).TotalSeconds) * degreesPerSecond) % 360;
         previousFrame = now;
         InvalidateVisual();
     }

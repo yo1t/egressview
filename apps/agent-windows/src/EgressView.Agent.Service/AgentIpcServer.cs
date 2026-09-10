@@ -50,7 +50,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
                     delivery.SettingsChanged();
                 }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled, DeliveryStatus, delivery.RequestNow,
                 enrichment.Status, enrichment.RequestNow, HistoryStatus, SetHistoryRetention, store.ReadHistoryForExport,
-                cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow), Diagnostics, PrepareUninstall));
+                cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow), Diagnostics, PrepareUninstall, CountryHistory));
         }
     }
 
@@ -59,6 +59,11 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         reportChannel: "authenticated-named-pipe");
     private IReadOnlyList<HourlySummary> Summary(int days) => store.ReadHourlySummary(DateTimeOffset.UtcNow.AddDays(-days), DateTimeOffset.UtcNow);
     private IReadOnlyList<GlobePoint> Globe(int minutes) => store.ReadGlobePoints(DateTimeOffset.UtcNow.AddMinutes(-minutes), DateTimeOffset.UtcNow);
+    private IReadOnlyList<CountryHistoryRow> CountryHistory(int? minutes)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return minutes is { } value ? store.ReadCountryHistory(now.AddMinutes(-value), now) : store.ReadCountryHistory();
+    }
     private PeriodAnalysis Analysis(int minutes, int offsetMinutes)
     {
         var to = DateTimeOffset.UtcNow.AddMinutes(-offsetMinutes);

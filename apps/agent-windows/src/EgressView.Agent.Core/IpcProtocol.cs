@@ -22,7 +22,8 @@ public static class IpcProtocol
         Func<DateTimeOffset?, int, int, IReadOnlyList<RecentFlow>>? historyExport = null,
         Func<DateTimeOffset?, LocalHistoryDeletionResult>? deleteHistory = null,
         Func<string>? diagnostics = null,
-        Func<bool, bool, AgentUninstallResult>? prepareUninstall = null)
+        Func<bool, bool, AgentUninstallResult>? prepareUninstall = null,
+        Func<int?, IReadOnlyList<CountryHistoryRow>>? countryHistory = null)
     {
         try
         {
@@ -37,6 +38,7 @@ public static class IpcProtocol
                 "summary" => Summary(root, summary),
                 "recent-flows" => RecentFlows(root, recentFlows),
                 "globe" => Globe(root, globePoints),
+                "country-history" => CountryHistory(root, countryHistory),
                 "analysis" => Analysis(root, analysis),
                 "threats" => Threats(root, threats),
                 "save-enrollment" => SaveEnrollment(root, saveCredential),
@@ -153,6 +155,17 @@ public static class IpcProtocol
         var minutes = ReadRangeMinutes(root);
         if (minutes == 0) return Reject("invalid-range");
         return JsonSerializer.Serialize(new { status = "ok", minutes, data = read(minutes) });
+    }
+
+    private static string CountryHistory(JsonElement root, Func<int?, IReadOnlyList<CountryHistoryRow>>? read)
+    {
+        if (read is null) return Reject("operation-unavailable");
+        var scope = root.TryGetProperty("scope", out var value) ? value.GetString() : "period";
+        if (scope == "all") return JsonSerializer.Serialize(new { status = "ok", scope, data = read(null) });
+        if (scope != "period") return Reject("invalid-country-history-scope");
+        var minutes = ReadRangeMinutes(root);
+        if (minutes == 0) return Reject("invalid-range");
+        return JsonSerializer.Serialize(new { status = "ok", scope, minutes, data = read(minutes) });
     }
 
     private static string Analysis(JsonElement root, Func<int, int, PeriodAnalysis>? read)

@@ -45,6 +45,12 @@ internal static class AgentSettings
         set => Write("GlobeFrameRate", value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
+    internal static string GlobeSpinSpeed
+    {
+        get => Read("GlobeSpinSpeed") is { } value && value is "slow" or "fast" ? value : "normal";
+        set { if (value is "slow" or "normal" or "fast") Write("GlobeSpinSpeed", value); }
+    }
+
     internal static string AiProvider
     {
         get => Read("AiProvider") is "OpenAI" or "Anthropic" ? Read("AiProvider")! : "Ollama";

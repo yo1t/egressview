@@ -119,8 +119,7 @@ public partial class MainWindow : Window
             using var globeDocument = JsonDocument.Parse(globeResponse);
             currentGlobePoints = globeDocument.RootElement.GetProperty("data").Deserialize<List<GlobePoint>>() ?? [];
             Globe.SetPoints(currentGlobePoints);
-            CountryList.ItemsSource = currentGlobePoints.GroupBy(point => point.CountryCode ?? LocalizationManager.Text("Unknown"))
-                .Select(group => new RankedRow(group.Key, group.Sum(point => IsByteMetric ? point.Bytes : point.Connections), IsByteMetric)).OrderByDescending(row => row.RawValue).ToArray();
+            await RefreshCountryHistoryAsync();
             GlobeCaption.Text = currentGlobePoints.Count == 0
                 ? LocalizationManager.Text("GlobeUnavailable")
                 : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeLocations"), currentGlobePoints.Count);
@@ -128,6 +127,18 @@ public partial class MainWindow : Window
             await RefreshThreatsAsync();
         }
         catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
+    }
+
+    private async Task RefreshCountryHistoryAsync()
+    {
+        var all = CountryScopeChoice.SelectedIndex == 1;
+        var request = all
+            ? JsonSerializer.Serialize(new { v = 1, op = "country-history", scope = "all" })
+            : JsonSerializer.Serialize(new { v = 1, op = "country-history", scope = "period", minutes = selectedMinutes });
+        var response = await AgentIpcClient.RequestAsync(request, lifetime.Token);
+        using var document = JsonDocument.Parse(response);
+        var rows = document.RootElement.GetProperty("data").Deserialize<List<CountryHistoryRow>>() ?? [];
+        CountryList.ItemsSource = rows.Select(CountryHistoryDisplayRow.From).ToArray();
     }
 
     private async Task RefreshFlowsAsync()
@@ -280,9 +291,23 @@ public partial class MainWindow : Window
         if (!IsLoaded) return;
         var countries = GlobeViewChoice.SelectedIndex == 1;
         Globe.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
-        CountryList.Visibility = countries ? Visibility.Visible : Visibility.Collapsed;
+        CountryHistoryPanel.Visibility = countries ? Visibility.Visible : Visibility.Collapsed;
         RotateButton.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
+        SpinSpeedChoice.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
         if (!loadingSettings) AgentSettings.GlobeView = countries ? "countries" : "globe";
+    }
+
+    private async void CountryScopeChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (IsLoaded) await RefreshCountryHistoryAsync();
+    }
+
+    private void SpinSpeedChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SpinSpeedChoice.SelectedItem is not ListBoxItem item) return;
+        var speed = item.Tag?.ToString() ?? "normal";
+        Globe.DegreesPerSecond = speed switch { "slow" => 2, "fast" => 14, _ => 6 };
+        if (!loadingSettings) AgentSettings.GlobeSpinSpeed = speed;
     }
 
     private async Task RefreshStatusAsync()
@@ -430,6 +455,7 @@ public partial class MainWindow : Window
         MetricChoice.SelectedIndex = AgentSettings.Metric == "bytes" ? 1 : 0;
         DestinationChoice.SelectedIndex = AgentSettings.DestinationUnit == "ip" ? 1 : 0;
         GlobeViewChoice.SelectedIndex = AgentSettings.GlobeView == "countries" ? 1 : 0;
+        SpinSpeedChoice.SelectedIndex = AgentSettings.GlobeSpinSpeed switch { "slow" => 0, "fast" => 2, _ => 1 };
         SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "diagnostics" => 5, "updates" => 6, "hub" => 7, "uninstall" => 8, _ => 0 };
         DeleteHistoryBefore.SelectedDate = DateTime.Today.AddDays(-30);
         AiProviderChoice.SelectedIndex = AgentSettings.AiProvider switch { "OpenAI" => 1, "Anthropic" => 2, _ => 0 };
@@ -437,6 +463,7 @@ public partial class MainWindow : Window
         AiCloudConsent.IsChecked = AgentSettings.AiCloudConsent(AgentSettings.AiProvider);
         PopulateAiModels();
         Globe.FramesPerSecond = AgentSettings.GlobeFrameRate;
+        Globe.DegreesPerSecond = AgentSettings.GlobeSpinSpeed switch { "slow" => 2, "fast" => 14, _ => 6 };
         loadingSettings = false;
     }
 
@@ -527,7 +554,7 @@ public partial class MainWindow : Window
                 AgentSettings.NotificationCategoryEnabled("HubDelivery"), AgentSettings.NotificationCategoryEnabled("ThreatIntel"),
                 AgentSettings.NotificationCategoryEnabled("Recovery"), AgentSettings.NotificationDailyLimit, AgentSettings.GlobeFrameRate,
                 AgentSettings.PeriodMinutes, AgentSettings.Metric, AgentSettings.DestinationUnit, AgentSettings.GlobeView,
-                history.RetentionDays, AgentSettings.AutomaticUpdateChecks);
+                history.RetentionDays, AgentSettings.AutomaticUpdateChecks, AgentSettings.GlobeSpinSpeed);
             var dialog = new Microsoft.Win32.SaveFileDialog
             {
                 Filter = "EgressView settings (*.json)|*.json",
@@ -592,6 +619,7 @@ public partial class MainWindow : Window
         if (value.Metric is { } metric) AgentSettings.Metric = metric;
         if (value.DestinationUnit is { } destination) AgentSettings.DestinationUnit = destination;
         if (value.GlobeView is { } globeView) AgentSettings.GlobeView = globeView;
+        if (value.GlobeSpinSpeed is { } spinSpeed) AgentSettings.GlobeSpinSpeed = spinSpeed;
         if (value.AutomaticUpdateChecks is { } updates) AgentSettings.AutomaticUpdateChecks = updates;
     }
 
@@ -612,6 +640,7 @@ public partial class MainWindow : Window
         nameof(AgentSettingsFile.GlobeView) => value.GlobeView,
         nameof(AgentSettingsFile.RetentionDays) => value.RetentionDays,
         nameof(AgentSettingsFile.AutomaticUpdateChecks) => value.AutomaticUpdateChecks,
+        nameof(AgentSettingsFile.GlobeSpinSpeed) => value.GlobeSpinSpeed,
         _ => null,
     };
 
@@ -1274,6 +1303,28 @@ internal sealed class RankedRow(string name, long value, bool bytes)
     public long RawValue { get; } = value;
     public string Value { get; } = bytes ? FlowRow.FormatBytes(value) : value.ToString("N0");
     public string Display => $"{Name}    {Value}";
+}
+
+internal sealed class CountryHistoryDisplayRow
+{
+    public required string Country { get; init; }
+    public required string Connections { get; init; }
+    public required string First { get; init; }
+    public required string Last { get; init; }
+
+    internal static CountryHistoryDisplayRow From(CountryHistoryRow value)
+    {
+        string country;
+        try { country = $"{new RegionInfo(value.CountryCode).DisplayName} ({value.CountryCode})"; }
+        catch { country = value.CountryCode; }
+        return new()
+        {
+            Country = country,
+            Connections = value.Connections.ToString("N0", CultureInfo.CurrentCulture),
+            First = value.FirstObservedAt.LocalDateTime.ToString("g", CultureInfo.CurrentCulture),
+            Last = value.LastObservedAt.LocalDateTime.ToString("g", CultureInfo.CurrentCulture),
+        };
+    }
 }
 
 public sealed class ThreatRow(ThreatFinding value)
