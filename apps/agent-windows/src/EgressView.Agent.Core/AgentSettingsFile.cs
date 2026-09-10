@@ -19,7 +19,8 @@ public sealed record AgentSettingsFile(
     [property: JsonPropertyName("destinationUnit")] string? DestinationUnit = null,
     [property: JsonPropertyName("globeView")] string? GlobeView = null,
     [property: JsonPropertyName("retentionDays")] int? RetentionDays = null,
-    [property: JsonPropertyName("automaticUpdateChecks")] bool? AutomaticUpdateChecks = null)
+    [property: JsonPropertyName("automaticUpdateChecks")] bool? AutomaticUpdateChecks = null,
+    [property: JsonPropertyName("globeSpinSpeed")] string? GlobeSpinSpeed = null)
 {
     public const int CurrentSchemaVersion = 1;
     public const int MaximumBytes = 1_048_576;
@@ -65,6 +66,7 @@ public sealed record AgentSettingsFile(
         Add(value.GlobeView is not null, nameof(GlobeView));
         Add(value.RetentionDays is not null, nameof(RetentionDays));
         Add(value.AutomaticUpdateChecks is not null, nameof(AutomaticUpdateChecks));
+        Add(value.GlobeSpinSpeed is not null, nameof(GlobeSpinSpeed));
         return result;
     }
 
@@ -80,6 +82,7 @@ public sealed record AgentSettingsFile(
         if (value.Metric is not null && value.Metric is not ("connections" or "bytes")) Invalid(nameof(Metric));
         if (value.DestinationUnit is not null && value.DestinationUnit is not ("name" or "ip")) Invalid(nameof(DestinationUnit));
         if (value.GlobeView is not null && value.GlobeView is not ("globe" or "countries")) Invalid(nameof(GlobeView));
+        if (value.GlobeSpinSpeed is not null && value.GlobeSpinSpeed is not ("slow" or "normal" or "fast")) Invalid(nameof(GlobeSpinSpeed));
         if (value.RetentionDays is not null && !ObservationStore.AllowedRetentionDays.Contains(value.RetentionDays.Value)) Invalid(nameof(RetentionDays));
     }
 

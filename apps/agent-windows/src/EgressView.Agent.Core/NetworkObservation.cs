@@ -64,6 +64,9 @@ public sealed record GeoCacheState(string? ETag, DateTimeOffset? FetchedAt, long
 public sealed record GlobePoint(double Latitude, double Longitude, string? CountryCode, string? City,
     long Connections, long Bytes);
 
+public sealed record CountryHistoryRow(string CountryCode, long Connections,
+    DateTimeOffset FirstObservedAt, DateTimeOffset LastObservedAt);
+
 public sealed record AppDestinationAggregate(
     string Application, string Destination, string DestinationName, long Connections, long Bytes, long ConnectionsWithoutBytes);
 
