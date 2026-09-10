@@ -87,6 +87,9 @@
   .lede{font-size:1.14rem;color:var(--muted);margin:0 0 34px;max-width:44ch}
   .lede strong{color:var(--text);font-weight:600}
   .cta{display:flex;flex-wrap:wrap;gap:13px;align-items:center}
+  /* Beside the button, not in a footnote: someone on an Intel Mac cannot run
+     this at all, and should learn that before they click. */
+  .cta-note{flex-basis:100%;margin:2px 0 0;font-size:14px;color:var(--muted)}
   .btn{display:inline-flex;align-items:center;gap:9px;background:var(--accent);color:#06101f;font-weight:650;
     padding:13px 24px;border-radius:var(--radius);transition:transform .12s,background .12s}
   .btn:hover{background:var(--accent-hover);color:#06101f;text-decoration:none;transform:translateY(-1px)}
@@ -195,6 +198,7 @@
     <div class="cta">
       <a class="btn" href="https://dl.egressview.com/"><span data-ja="Mac用Agentを入手">Get the Mac agent</span></a>
       <a class="btn ghost" href="https://github.com/yo1t/egressview"><span data-ja="ソースを読む">Read the source</span></a>
+      <p class="cta-note" data-ja="Apple silicon · macOS 13以降">Apple silicon &middot; macOS 13 or later</p>
     </div>
   </div>
 </header>
@@ -347,6 +351,7 @@
   <div class="cta" style="margin-top:26px">
     <a class="btn" href="https://dl.egressview.com/"><span data-ja="Mac用Agentを入手">Get the Mac agent</span></a>
     <a class="btn ghost" href="https://github.com/yo1t/egressview#readme"><span data-ja="Hubを建てる">Set up the Hub</span></a>
+    <p class="cta-note" data-ja="Apple silicon · macOS 13以降">Apple silicon &middot; macOS 13 or later</p>
   </div>
 </section>
 
