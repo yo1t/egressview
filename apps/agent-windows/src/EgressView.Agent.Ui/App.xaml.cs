@@ -233,6 +233,7 @@ public partial class App : System.Windows.Application
             using var document = JsonDocument.Parse(response);
             var data = document.RootElement.GetProperty("data");
             var enabled = !data.TryGetProperty("monitoringEnabled", out var flag) || flag.GetBoolean();
+            var hasActiveCoverage = data.GetProperty("coverage").GetProperty("active").GetInt64() > 0;
             var health = data.GetProperty("health");
             var healthy = health.GetProperty("status").GetString() == "healthy";
             string? issueCode = null;
@@ -244,8 +245,15 @@ public partial class App : System.Windows.Application
                 issueAction = first.TryGetProperty("action", out var action) ? action.GetString() : null;
             }
             UpdateTrayState(enabled, healthy, issueCode, issueAction);
+            if (MainWindow is MainWindow window)
+                window.ApplyMonitoringStatusFromTray(enabled, healthy, hasActiveCoverage, issueCode, issueAction);
         }
-        catch { UpdateTrayUnavailable(); }
+        catch
+        {
+            UpdateTrayUnavailable();
+            if (MainWindow is MainWindow window)
+                window.ApplyMonitoringUnavailableFromTray(MonitoringStatus.Current.LastConfirmedAt);
+        }
     }
 
     private async Task RefreshDeliveryNotificationAsync()
