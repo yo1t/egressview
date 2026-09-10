@@ -140,6 +140,16 @@ final class AgentCapabilityWiringTests: XCTestCase {
             agentID: UUID(),
             token: "egva_" + String(repeating: "a", count: 64)
         )
+        // Spelled out rather than `clock.map { ... } ?? { ... }`. That form
+        // needs the checker to resolve a closure returned from a closure
+        // through `??`, which this toolchain does and the one CI uses does
+        // not -- it built here and failed there.
+        let nowProvider: @Sendable () -> Date
+        if let clock {
+            nowProvider = { clock.now() }
+        } else {
+            nowProvider = { Date() }
+        }
         let sender = AgentIngestSender(
             queue: queue,
             credentialStore: WiringCredentialStore(credential),
@@ -148,7 +158,7 @@ final class AgentCapabilityWiringTests: XCTestCase {
                 hostName: "test-mac", platform: .macOS,
                 osVersion: "26.5.2", agentVersion: "0.5.52"
             ),
-            now: clock.map { c in { c.now() } } ?? { Date() }
+            now: nowProvider
         )
         return (sender, transport, queue)
     }
