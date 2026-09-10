@@ -32,7 +32,7 @@ the agent collects nothing.
 
 | Host | When | What is sent | What comes back |
 |---|---|---|---|
-| **Your Hub** (the address you entered) | Only after you enrol, and only if delivery is on | This Mac's host name and observed connection metadata: local/remote addresses and ports, protocol, process name and ID, bundle ID when available, timestamps, byte counts, collector and confidence. **Never payloads, credentials, command lines, file paths, browser URLs or destination host names** | Acknowledgement; threat feed data; map locations for addresses you have already observed |
+| **Your Hub** (the address you entered) | Only after you enrol, and only if delivery is on | This Mac's host name and observed connection metadata: local/remote addresses and ports, protocol, process name and ID, bundle ID when available, timestamps, byte counts, collector and confidence, and the destination host name when one was observed | Acknowledgement; threat feed data; map locations for addresses you have already observed |
 | **`dl.egressview.com`** | Update check on a schedule, and when you press Check for Updates | An ordinary HTTPS GET. No identifier, no account, no observation data | A release manifest, and the `.pkg` if you choose to install |
 | **`feodotracker.abuse.ch`, `threatfox.abuse.ch`, `urlhaus.abuse.ch`, `www.spamhaus.org`** | **Only if you turn on direct feed download**, which is off when a Hub supplies feeds | An ordinary HTTPS GET for the whole public list. **Your observations are not sent** — matching happens on your Mac, against the downloaded list | The public indicator lists |
 
@@ -52,8 +52,11 @@ installation ID, no account, and no observation data attached.
 
 ## Reading the destination name, and the one thing that is decrypted
 
-Off unless you turn it on, and it changes nothing about what leaves this Mac —
-the name it recovers **stays here**; the Hub is never sent a host name.
+Off unless you turn it on. The name it recovers is used in the local history
+and on this Mac's own screens, and **is also sent to your Hub when that Hub
+says it accepts one** (P3-14 stage 2, agent 0.5.59 and later). An older Hub
+is never sent one: the agent asks first, and sends nothing extra if there is
+no answer.
 
 Over TLS, the client says where it is going in the clear, before any key is
 agreed. Nothing is decrypted to read that.
