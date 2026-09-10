@@ -75,12 +75,18 @@ public partial class MainWindow : Window
     private async void PeriodChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!IsLoaded || PeriodChoice.SelectedItem is not ComboBoxItem item || !int.TryParse(item.Tag?.ToString(), out selectedMinutes)) return;
+        if (!loadingSettings) AgentSettings.PeriodMinutes = selectedMinutes;
         await RefreshVisibleAsync();
     }
 
     private async void AnalysisChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!IsLoaded) return;
+        if (!loadingSettings)
+        {
+            AgentSettings.Metric = MetricChoice.SelectedIndex == 1 ? "bytes" : "connections";
+            AgentSettings.DestinationUnit = DestinationChoice.SelectedIndex == 1 ? "ip" : "name";
+        }
         RenderAnalysis();
         await Task.CompletedTask;
     }
@@ -113,8 +119,7 @@ public partial class MainWindow : Window
             using var globeDocument = JsonDocument.Parse(globeResponse);
             currentGlobePoints = globeDocument.RootElement.GetProperty("data").Deserialize<List<GlobePoint>>() ?? [];
             Globe.SetPoints(currentGlobePoints);
-            CountryList.ItemsSource = currentGlobePoints.GroupBy(point => point.CountryCode ?? LocalizationManager.Text("Unknown"))
-                .Select(group => new RankedRow(group.Key, group.Sum(point => IsByteMetric ? point.Bytes : point.Connections), IsByteMetric)).OrderByDescending(row => row.RawValue).ToArray();
+            await RefreshCountryHistoryAsync();
             GlobeCaption.Text = currentGlobePoints.Count == 0
                 ? LocalizationManager.Text("GlobeUnavailable")
                 : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeLocations"), currentGlobePoints.Count);
@@ -122,6 +127,18 @@ public partial class MainWindow : Window
             await RefreshThreatsAsync();
         }
         catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
+    }
+
+    private async Task RefreshCountryHistoryAsync()
+    {
+        var all = CountryScopeChoice.SelectedIndex == 1;
+        var request = all
+            ? JsonSerializer.Serialize(new { v = 1, op = "country-history", scope = "all" })
+            : JsonSerializer.Serialize(new { v = 1, op = "country-history", scope = "period", minutes = selectedMinutes });
+        var response = await AgentIpcClient.RequestAsync(request, lifetime.Token);
+        using var document = JsonDocument.Parse(response);
+        var rows = document.RootElement.GetProperty("data").Deserialize<List<CountryHistoryRow>>() ?? [];
+        CountryList.ItemsSource = rows.Select(CountryHistoryDisplayRow.From).ToArray();
     }
 
     private async Task RefreshFlowsAsync()
@@ -274,8 +291,23 @@ public partial class MainWindow : Window
         if (!IsLoaded) return;
         var countries = GlobeViewChoice.SelectedIndex == 1;
         Globe.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
-        CountryList.Visibility = countries ? Visibility.Visible : Visibility.Collapsed;
+        CountryHistoryPanel.Visibility = countries ? Visibility.Visible : Visibility.Collapsed;
         RotateButton.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
+        SpinSpeedChoice.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
+        if (!loadingSettings) AgentSettings.GlobeView = countries ? "countries" : "globe";
+    }
+
+    private async void CountryScopeChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (IsLoaded) await RefreshCountryHistoryAsync();
+    }
+
+    private void SpinSpeedChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SpinSpeedChoice.SelectedItem is not ListBoxItem item) return;
+        var speed = item.Tag?.ToString() ?? "normal";
+        Globe.DegreesPerSecond = speed switch { "slow" => 2, "fast" => 14, _ => 6 };
+        if (!loadingSettings) AgentSettings.GlobeSpinSpeed = speed;
     }
 
     private async Task RefreshStatusAsync()
@@ -417,19 +449,27 @@ public partial class MainWindow : Window
         DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 25 => 2, 0 => 3, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
         AutomaticUpdateChecks.IsChecked = AgentSettings.AutomaticUpdateChecks;
-        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "diagnostics" => 5, "updates" => 6, "hub" => 7, "uninstall" => 8, _ => 0 };
+        StartupUiEnabled.IsChecked = AgentStartupRegistration.IsEnabled;
+        selectedMinutes = AgentSettings.PeriodMinutes;
+        PeriodChoice.SelectedItem = PeriodChoice.Items.OfType<ComboBoxItem>().First(item => item.Tag?.ToString() == selectedMinutes.ToString(CultureInfo.InvariantCulture));
+        MetricChoice.SelectedIndex = AgentSettings.Metric == "bytes" ? 1 : 0;
+        DestinationChoice.SelectedIndex = AgentSettings.DestinationUnit == "ip" ? 1 : 0;
+        GlobeViewChoice.SelectedIndex = AgentSettings.GlobeView == "countries" ? 1 : 0;
+        SpinSpeedChoice.SelectedIndex = AgentSettings.GlobeSpinSpeed switch { "slow" => 0, "fast" => 2, _ => 1 };
+        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "diagnostics" => 5, "updates" => 6, "hub" => 7, "uninstall" => 8, "about" => 9, _ => 0 };
         DeleteHistoryBefore.SelectedDate = DateTime.Today.AddDays(-30);
         AiProviderChoice.SelectedIndex = AgentSettings.AiProvider switch { "OpenAI" => 1, "Anthropic" => 2, _ => 0 };
         AiEndpoint.Text = AgentSettings.OllamaEndpoint;
         AiCloudConsent.IsChecked = AgentSettings.AiCloudConsent(AgentSettings.AiProvider);
         PopulateAiModels();
         Globe.FramesPerSecond = AgentSettings.GlobeFrameRate;
+        Globe.DegreesPerSecond = AgentSettings.GlobeSpinSpeed switch { "slow" => 2, "fast" => 14, _ => 6 };
         loadingSettings = false;
     }
 
     private void SettingsSectionChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HistorySettingsSection is null || DiagnosticsSettingsSection is null || UpdateSettingsSection is null || HubSettingsSection is null || UninstallSettingsSection is null ||
+        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HistorySettingsSection is null || DiagnosticsSettingsSection is null || UpdateSettingsSection is null || HubSettingsSection is null || UninstallSettingsSection is null || AboutSettingsSection is null ||
             SettingsSectionChoice.SelectedItem is not ListBoxItem item) return;
         var section = item.Tag?.ToString() ?? "general";
         GeneralSettingsSection.Visibility = section == "general" ? Visibility.Visible : Visibility.Collapsed;
@@ -441,6 +481,7 @@ public partial class MainWindow : Window
         UpdateSettingsSection.Visibility = section == "updates" ? Visibility.Visible : Visibility.Collapsed;
         HubSettingsSection.Visibility = section == "hub" ? Visibility.Visible : Visibility.Collapsed;
         UninstallSettingsSection.Visibility = section == "uninstall" ? Visibility.Visible : Visibility.Collapsed;
+        AboutSettingsSection.Visibility = section == "about" ? Visibility.Visible : Visibility.Collapsed;
         if (!loadingSettings) AgentSettings.SettingsSection = section;
         if (section == "enrichment") _ = RefreshEnrichmentStatusAsync();
         if (section == "history") _ = RefreshHistoryStatusAsync();
@@ -486,6 +527,130 @@ public partial class MainWindow : Window
     private void AutomaticUpdateChecks_Click(object sender, RoutedEventArgs e)
     {
         if (!loadingSettings) AgentSettings.AutomaticUpdateChecks = AutomaticUpdateChecks.IsChecked == true;
+    }
+
+    private void StartupUiEnabled_Click(object sender, RoutedEventArgs e)
+    {
+        if (loadingSettings) return;
+        try
+        {
+            AgentStartupRegistration.SetEnabled(StartupUiEnabled.IsChecked == true);
+            PortableSettingsStatus.Text = LocalizationManager.Text("StartupSettingApplied");
+        }
+        catch (Exception exception)
+        {
+            StartupUiEnabled.IsChecked = AgentStartupRegistration.IsEnabled;
+            PortableSettingsStatus.Text = $"{LocalizationManager.Text("SettingsOperationFailed")} Diagnostic: {exception.GetType().Name}";
+        }
+    }
+
+    private async void ExportSettings_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var history = await ReadHistoryStatusAsync();
+            var value = new AgentSettingsFile(AgentSettingsFile.CurrentSchemaVersion,
+                AgentSettings.Language.ToString().ToLowerInvariant(), AgentSettings.NotificationsEnabled,
+                AgentSettings.NotificationCategoryEnabled("Threat"), AgentSettings.NotificationCategoryEnabled("Monitoring"),
+                AgentSettings.NotificationCategoryEnabled("HubDelivery"), AgentSettings.NotificationCategoryEnabled("ThreatIntel"),
+                AgentSettings.NotificationCategoryEnabled("Recovery"), AgentSettings.NotificationDailyLimit, AgentSettings.GlobeFrameRate,
+                AgentSettings.PeriodMinutes, AgentSettings.Metric, AgentSettings.DestinationUnit, AgentSettings.GlobeView,
+                history.RetentionDays, AgentSettings.AutomaticUpdateChecks, AgentSettings.GlobeSpinSpeed);
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "EgressView settings (*.json)|*.json",
+                FileName = AgentSettingsFile.SuggestedFileName(DateTimeOffset.UtcNow),
+                AddExtension = true,
+                DefaultExt = ".json",
+            };
+            if (dialog.ShowDialog(this) != true) { PortableSettingsStatus.Text = LocalizationManager.Text("SettingsExportCancelled"); return; }
+            await File.WriteAllBytesAsync(dialog.FileName, AgentSettingsFile.Encode(value), lifetime.Token);
+            PortableSettingsStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SettingsExportedFormat"), dialog.FileName);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception) { PortableSettingsStatus.Text = $"{LocalizationManager.Text("SettingsOperationFailed")} Diagnostic: {exception.GetType().Name}"; }
+    }
+
+    private async void ImportSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "EgressView settings (*.json)|*.json", CheckFileExists = true, Multiselect = false };
+        if (dialog.ShowDialog(this) != true) { PortableSettingsStatus.Text = LocalizationManager.Text("SettingsImportCancelled"); return; }
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(dialog.FileName, lifetime.Token);
+            var value = AgentSettingsFile.Decode(bytes);
+            var fields = AgentSettingsFile.PresentFields(value);
+            var preview = string.Join("\r\n", fields.Select(field => $"• {field}: {PortableValue(value, field)}"));
+            var message = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SettingsImportPreviewFormat"), preview);
+            if (System.Windows.MessageBox.Show(this, message, LocalizationManager.Text("ImportSettings"), MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+            { PortableSettingsStatus.Text = LocalizationManager.Text("SettingsImportCancelled"); return; }
+
+            if (value.RetentionDays is { } retentionDays)
+            {
+                var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "set-history-retention", days = retentionDays }), lifetime.Token);
+                using var responseDocument = JsonDocument.Parse(response);
+                EnsureAccepted(responseDocument.RootElement);
+            }
+            ApplyPortableSettings(value);
+            LoadSettings();
+            LocalizationManager.Apply(System.Windows.Application.Current.Resources);
+            ApplyAccessibilityLabels();
+            PortableSettingsStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SettingsImportedFormat"), fields.Count);
+            await RefreshAllAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            PortableSettingsStatus.Text = $"{LocalizationManager.Text("SettingsFileRejected")} Diagnostic: {exception.GetType().Name}";
+        }
+    }
+
+    private static void ApplyPortableSettings(AgentSettingsFile value)
+    {
+        if (value.Language is { } language && Enum.TryParse<AgentLanguage>(language, true, out var parsedLanguage)) AgentSettings.Language = parsedLanguage;
+        if (value.NotificationsEnabled is { } notifications) AgentSettings.NotificationsEnabled = notifications;
+        if (value.NotifyThreat is { } threat) AgentSettings.SetNotificationCategory("Threat", threat);
+        if (value.NotifyMonitoring is { } monitoring) AgentSettings.SetNotificationCategory("Monitoring", monitoring);
+        if (value.NotifyHubDelivery is { } hubDelivery) AgentSettings.SetNotificationCategory("HubDelivery", hubDelivery);
+        if (value.NotifyThreatIntel is { } threatIntel) AgentSettings.SetNotificationCategory("ThreatIntel", threatIntel);
+        if (value.NotifyRecovery is { } recovery) AgentSettings.SetNotificationCategory("Recovery", recovery);
+        if (value.NotificationDailyLimit is { } dailyLimit) AgentSettings.NotificationDailyLimit = dailyLimit;
+        if (value.GlobeFrameRate is { } frameRate) AgentSettings.GlobeFrameRate = frameRate;
+        if (value.PeriodMinutes is { } period) AgentSettings.PeriodMinutes = period;
+        if (value.Metric is { } metric) AgentSettings.Metric = metric;
+        if (value.DestinationUnit is { } destination) AgentSettings.DestinationUnit = destination;
+        if (value.GlobeView is { } globeView) AgentSettings.GlobeView = globeView;
+        if (value.GlobeSpinSpeed is { } spinSpeed) AgentSettings.GlobeSpinSpeed = spinSpeed;
+        if (value.AutomaticUpdateChecks is { } updates) AgentSettings.AutomaticUpdateChecks = updates;
+    }
+
+    private static object? PortableValue(AgentSettingsFile value, string field) => field switch
+    {
+        nameof(AgentSettingsFile.Language) => value.Language,
+        nameof(AgentSettingsFile.NotificationsEnabled) => value.NotificationsEnabled,
+        nameof(AgentSettingsFile.NotifyThreat) => value.NotifyThreat,
+        nameof(AgentSettingsFile.NotifyMonitoring) => value.NotifyMonitoring,
+        nameof(AgentSettingsFile.NotifyHubDelivery) => value.NotifyHubDelivery,
+        nameof(AgentSettingsFile.NotifyThreatIntel) => value.NotifyThreatIntel,
+        nameof(AgentSettingsFile.NotifyRecovery) => value.NotifyRecovery,
+        nameof(AgentSettingsFile.NotificationDailyLimit) => value.NotificationDailyLimit,
+        nameof(AgentSettingsFile.GlobeFrameRate) => value.GlobeFrameRate,
+        nameof(AgentSettingsFile.PeriodMinutes) => value.PeriodMinutes,
+        nameof(AgentSettingsFile.Metric) => value.Metric,
+        nameof(AgentSettingsFile.DestinationUnit) => value.DestinationUnit,
+        nameof(AgentSettingsFile.GlobeView) => value.GlobeView,
+        nameof(AgentSettingsFile.RetentionDays) => value.RetentionDays,
+        nameof(AgentSettingsFile.AutomaticUpdateChecks) => value.AutomaticUpdateChecks,
+        nameof(AgentSettingsFile.GlobeSpinSpeed) => value.GlobeSpinSpeed,
+        _ => null,
+    };
+
+    private async Task<LocalHistoryStatus> ReadHistoryStatusAsync()
+    {
+        var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"history-status"}""", lifetime.Token);
+        using var document = JsonDocument.Parse(response);
+        EnsureAccepted(document.RootElement);
+        return document.RootElement.GetProperty("data").Deserialize<LocalHistoryStatus>() ?? throw new InvalidDataException();
     }
 
     private async void PrepareUninstall_Click(object sender, RoutedEventArgs e)
@@ -1110,6 +1275,11 @@ public partial class MainWindow : Window
         };
     }
     internal static string EnrollmentDiagnostic(AgentEnrollmentException exception) => EnrollmentMessage(exception.Reason) + $"\r\nDiagnostic: {exception.Reason}{(exception.StatusCode is { } status ? $" (HTTP {status})" : string.Empty)}";
+
+    private void OpenAbout_Click(object sender, RoutedEventArgs e)
+    {
+        if (System.Windows.Application.Current is App app) app.ShowAbout();
+    }
 }
 
 public sealed class FlowRow(RecentFlow value)
@@ -1139,6 +1309,29 @@ internal sealed class RankedRow(string name, long value, bool bytes)
     public long RawValue { get; } = value;
     public string Value { get; } = bytes ? FlowRow.FormatBytes(value) : value.ToString("N0");
     public string Display => $"{Name}    {Value}";
+}
+
+internal sealed class CountryHistoryDisplayRow
+{
+    public required string Country { get; init; }
+    public required string Connections { get; init; }
+    public required string First { get; init; }
+    public required string Last { get; init; }
+
+    internal static CountryHistoryDisplayRow From(CountryHistoryRow value)
+    {
+        string country;
+        try { country = $"{new RegionInfo(value.CountryCode).DisplayName} ({value.CountryCode})"; }
+        catch { country = value.CountryCode; }
+        return new()
+        {
+            Country = country,
+            Connections = value.Connections.ToString("N0", CultureInfo.CurrentCulture),
+            First = value.FirstObservedAt.LocalDateTime.ToString("g", CultureInfo.CurrentCulture),
+            Last = value.LastObservedAt.LocalDateTime.ToString("g", CultureInfo.CurrentCulture),
+        };
+    }
+
 }
 
 public sealed class ThreatRow(ThreatFinding value)

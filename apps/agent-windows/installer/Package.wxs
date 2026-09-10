@@ -63,7 +63,6 @@
       <RegistryKey Root="HKLM" Key="SOFTWARE\EgressView\Agent">
         <RegistryValue Name="AllowedUserSid" Type="string" Value="[UserSID]" KeyPath="yes" />
         <RegistryValue Name="UiPath" Type="string" Value="[UIFOLDER]EgressView.Agent.Ui.exe" />
-        <RegistryValue Name="UiAutoStart" Type="integer" Value="1" />
         <RegistryValue Name="InstallerState" Type="string" Value="installed" />
         <RegistryValue Name="Version" Type="string" Value="[ProductVersion]" />
       </RegistryKey>
@@ -78,11 +77,6 @@
         <RegistryValue Name="EventMessageFile" Type="string" Value="[SERVICEFOLDER]EgressView.Agent.Service.exe" KeyPath="yes" />
         <RegistryValue Name="TypesSupported" Type="integer" Value="7" />
       </RegistryKey>
-    </Component>
-
-    <Component Id="UiAutoStart" Directory="UIFOLDER" Guid="*">
-      <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run"
-                     Name="EgressView Agent" Type="string" Value="&quot;[UIFOLDER]EgressView.Agent.Ui.exe&quot;" KeyPath="yes" />
     </Component>
 
     <Component Id="ProgramMenuFolderCleanup" Directory="ProgramMenuEgressView" Guid="*">
@@ -111,7 +105,6 @@
       <ComponentRef Id="MachineConfiguration" />
       <ComponentRef Id="LicenseFile" />
       <ComponentRef Id="EventLogSource" />
-      <ComponentRef Id="UiAutoStart" />
       <ComponentRef Id="ProgramMenuFolderCleanup" />
       <ComponentGroupRef Id="ServicePayload" />
       <ComponentGroupRef Id="UiPayload" />

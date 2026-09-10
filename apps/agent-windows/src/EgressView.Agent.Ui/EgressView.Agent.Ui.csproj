@@ -17,4 +17,8 @@
     <Resource Include="../../../agent-macos/Sources/EgressViewAgentCore/Resources/world-atlas-countries-110m.json"
               Link="Resources/world-atlas-countries-110m.json" />
   </ItemGroup>
+  <ItemGroup>
+    <Resource Include="../../../../LICENSE" Link="Resources/LICENSE.txt" />
+    <Resource Include="../../../../THIRD_PARTY_NOTICES.md" Link="Resources/THIRD_PARTY_NOTICES.md" />
+  </ItemGroup>
 </Project>

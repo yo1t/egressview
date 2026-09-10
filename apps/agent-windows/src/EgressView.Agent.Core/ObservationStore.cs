@@ -1010,6 +1010,34 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    public IReadOnlyList<CountryHistoryRow> ReadCountryHistory(DateTimeOffset? from = null, DateTimeOffset? to = null)
+    {
+        if (from is not null && to is not null && from >= to) throw new ArgumentOutOfRangeException(nameof(from));
+        lock (gate)
+        {
+            var range = from is not null && to is not null
+                ? $" AND f.last_seen>='{from.Value.ToUniversalTime():O}' AND f.first_seen<'{to.Value.ToUniversalTime():O}'"
+                : string.Empty;
+            var sql = $"""
+                SELECT UPPER(g.country_code),COUNT(*),MIN(f.first_seen),MAX(f.last_seen)
+                FROM flows f JOIN geo_locations g ON g.ip=f.remote_address
+                WHERE f.layer='logical' AND g.country_code IS NOT NULL AND TRIM(g.country_code)<>''{range}
+                GROUP BY UPPER(g.country_code)
+                ORDER BY COUNT(*) DESC,UPPER(g.country_code)
+                """;
+            CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+            var result = new List<CountryHistoryRow>();
+            try
+            {
+                while (WinSqlite.Step(statement) == WinSqlite.Row)
+                    result.Add(new CountryHistoryRow(Text(statement, 0), WinSqlite.ColumnInt64(statement, 1),
+                        DateTimeOffset.Parse(Text(statement, 2)), DateTimeOffset.Parse(Text(statement, 3))));
+            }
+            finally { WinSqlite.Finalize(statement); }
+            return result;
+        }
+    }
+
     public PeriodAnalysis ReadPeriodAnalysis(DateTimeOffset from, DateTimeOffset to, int bucketCount = 60)
     {
         if (from >= to) throw new ArgumentOutOfRangeException(nameof(from));

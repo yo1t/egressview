@@ -45,6 +45,12 @@ internal static class AgentSettings
         set => Write("GlobeFrameRate", value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
+    internal static string GlobeSpinSpeed
+    {
+        get => Read("GlobeSpinSpeed") is { } value && value is "slow" or "fast" ? value : "normal";
+        set { if (value is "slow" or "normal" or "fast") Write("GlobeSpinSpeed", value); }
+    }
+
     internal static string AiProvider
     {
         get => Read("AiProvider") is "OpenAI" or "Anthropic" ? Read("AiProvider")! : "Ollama";
@@ -67,14 +73,38 @@ internal static class AgentSettings
 
     internal static string SettingsSection
     {
-        get => Read("SettingsSection") is { } value && value is "general" or "notifications" or "enrichment" or "ai" or "history" or "diagnostics" or "updates" or "hub" or "uninstall" ? value : "general";
-        set { if (value is "general" or "notifications" or "enrichment" or "ai" or "history" or "diagnostics" or "updates" or "hub" or "uninstall") Write("SettingsSection", value); }
+        get => Read("SettingsSection") is { } value && value is "general" or "notifications" or "enrichment" or "ai" or "history" or "diagnostics" or "updates" or "hub" or "uninstall" or "about" ? value : "general";
+        set { if (value is "general" or "notifications" or "enrichment" or "ai" or "history" or "diagnostics" or "updates" or "hub" or "uninstall" or "about") Write("SettingsSection", value); }
     }
 
     internal static bool AutomaticUpdateChecks
     {
         get => ReadBool("AutomaticUpdateChecks", true);
         set => Write("AutomaticUpdateChecks", value ? "1" : "0");
+    }
+
+    internal static int PeriodMinutes
+    {
+        get => int.TryParse(Read("PeriodMinutes"), out var value) && value is 60 or 360 or 1440 or 10080 or 43200 ? value : 10080;
+        set { if (value is 60 or 360 or 1440 or 10080 or 43200) Write("PeriodMinutes", value.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+    }
+
+    internal static string Metric
+    {
+        get => Read("Metric") is "bytes" ? "bytes" : "connections";
+        set { if (value is "connections" or "bytes") Write("Metric", value); }
+    }
+
+    internal static string DestinationUnit
+    {
+        get => Read("DestinationUnit") is "ip" ? "ip" : "name";
+        set { if (value is "name" or "ip") Write("DestinationUnit", value); }
+    }
+
+    internal static string GlobeView
+    {
+        get => Read("GlobeView") is "countries" ? "countries" : "globe";
+        set { if (value is "globe" or "countries") Write("GlobeView", value); }
     }
 
     internal static DateTimeOffset? LastUpdateCheck

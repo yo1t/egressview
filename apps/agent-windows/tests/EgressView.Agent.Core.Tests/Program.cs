@@ -9,6 +9,28 @@ var database = Path.Combine(directory, "agent.db");
 
 try
 {
+    var portableSettings = new AgentSettingsFile(1, "japanese", true, true, false, false, true, true, 12, 5, 360,
+        "bytes", "name", "countries", 30, true, "fast");
+    var portableBytes = AgentSettingsFile.Encode(portableSettings);
+    var portableText = Encoding.UTF8.GetString(portableBytes);
+    Assert(portableText.Contains("\"version\"", StringComparison.Ordinal) && portableText.Contains("\"retentionDays\"", StringComparison.Ordinal) &&
+        !portableText.Contains("credential", StringComparison.OrdinalIgnoreCase) && !portableText.Contains("hubUrl", StringComparison.OrdinalIgnoreCase) &&
+        !portableText.Contains("apiKey", StringComparison.OrdinalIgnoreCase) && !portableText.Contains("startup", StringComparison.OrdinalIgnoreCase) &&
+        !portableText.Contains("lookup", StringComparison.OrdinalIgnoreCase),
+        "portable settings are readable and cannot carry machine identity, secrets, startup, or external lookup consent");
+    var forwardSettings = AgentSettingsFile.Decode(Encoding.UTF8.GetBytes("""{"version":1,"language":"english","retentionDays":7,"futureField":{"enabled":true}}"""));
+    Assert(forwardSettings.Language == "english" && forwardSettings.RetentionDays == 7 && AgentSettingsFile.PresentFields(forwardSettings).Count == 2,
+        "settings import accepts the shared Mac field names and ignores unknown future fields");
+    Assert(portableText.Contains("\"globeSpinSpeed\": \"fast\"", StringComparison.Ordinal),
+        "portable settings keep rotation speed distinct from frame rate");
+    foreach (var invalid in new[] { "{", "{\"version\":2}", "{\"version\":1,\"globeFrameRate\":99}", "{\"version\":1,\"globeSpinSpeed\":\"turbo\"}", "{\"version\":1,\"retentionDays\":45}" })
+    {
+        try { AgentSettingsFile.Decode(Encoding.UTF8.GetBytes(invalid)); throw new InvalidOperationException("FAILED: invalid settings file was accepted"); }
+        catch (InvalidDataException) { }
+    }
+    Assert(AgentSettingsFile.SuggestedFileName(new DateTimeOffset(2026, 9, 10, 1, 2, 3, TimeSpan.Zero)) == "egressview-agent-settings-20260910-010203.json",
+        "portable settings use a deterministic UTC file name");
+
     Assert(AgentReleaseKey.MatchesPublishedFingerprint, "the embedded release key matches its published SPKI fingerprint");
     Assert(AgentSemanticVersion.TryParse("1.2.3", out var stableVersion) &&
         AgentSemanticVersion.TryParse("1.2.3-preview", out var previewVersion) && stableVersion.CompareTo(previewVersion) > 0,
@@ -271,6 +293,17 @@ try
     var globeResponse = IpcProtocol.Handle("""{"v":1,"op":"globe","days":7}""", () => "{}", _ => [],
         globePoints: _ => [new GlobePoint(35.68, 139.76, "JP", "Tokyo", 4, 1024)]);
     Assert(globeResponse.Contains("Tokyo", StringComparison.Ordinal), "IPC returns bounded globe aggregates to the authenticated UI");
+    var countryHistoryResponse = IpcProtocol.Handle("""{"v":1,"op":"country-history","scope":"all"}""", () => "{}", _ => [],
+        countryHistory: minutes =>
+        {
+            Assert(minutes is null, "all-time country history is not silently reduced to a display period");
+            return [new CountryHistoryRow("JP", 4, DateTimeOffset.UnixEpoch, DateTimeOffset.UtcNow)];
+        });
+    Assert(countryHistoryResponse.Contains("\"CountryCode\":\"JP\"", StringComparison.Ordinal),
+        "IPC returns country history without unknown locations");
+    Assert(IpcProtocol.Handle("""{"v":1,"op":"country-history","scope":"week"}""", () => "{}", _ => [],
+        countryHistory: _ => []).Contains("invalid-country-history-scope", StringComparison.Ordinal),
+        "IPC rejects ambiguous country-history scopes");
     var analysisResponse = IpcProtocol.Handle("""{"v":1,"op":"analysis","minutes":360}""", () => "{}", _ => [],
         analysis: (minutes, offset) => new PeriodAnalysis(DateTimeOffset.UtcNow.AddMinutes(-minutes-offset), DateTimeOffset.UtcNow.AddMinutes(-offset),
             12, 2, 3, 4096, 1, 1, DateTimeOffset.UtcNow.AddDays(-1), 20, [], []));
@@ -471,6 +504,10 @@ try
         var globe = geoStore.ReadGlobePoints(observedAt.AddMinutes(-1), DateTimeOffset.UtcNow);
         Assert(globe.Count == 1 && globe[0].City == "Tokyo" && globe[0].Connections == 1 && globe[0].Bytes == 30,
             "geo cache joins locally with observations without exposing the full cache to UI");
+        var countryHistory = geoStore.ReadCountryHistory();
+        Assert(countryHistory.Count == 1 && countryHistory[0].CountryCode == "JP" && countryHistory[0].Connections == 1 &&
+            countryHistory[0].FirstObservedAt == observedAt && countryHistory[0].LastObservedAt == observedAt,
+            "all-time country history includes first and last observation and never counts an unplaced address as a country");
         Assert(geoStore.ReadGeoCacheState() is { ETag: "etag-1", LocationCount: 1 }, "geo cache state reports its version and exact location count");
         Assert(geoStore.ReadRecentFlows(50).Single(flow => flow.RemoteAddress == "203.0.113.8").CountryCode == "JP" &&
             geoStore.ReadRecentFlows(50).Single(flow => flow.RemoteAddress == "198.51.100.7").CountryCode is null,

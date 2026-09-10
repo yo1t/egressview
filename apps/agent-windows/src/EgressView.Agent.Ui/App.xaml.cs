@@ -42,6 +42,7 @@ public partial class App : System.Windows.Application
         ThemeManager.ApplySystemTheme(Resources);
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         LocalizationManager.Apply(Resources);
+        AgentStartupRegistration.InitializeDefault();
         activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationName);
         exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ExitName);
         instanceMutex = new Mutex(true, InstanceName, out var firstInstance);
@@ -279,12 +280,20 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private void ShowAbout()
+    internal async void ShowAbout()
     {
-        var version = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "unknown";
-        System.Windows.MessageBox.Show($"EgressView Agent for Windows\nVersion {version}\n\nAGPL-3.0-or-later",
-            LocalizationManager.EffectiveLanguage == "ja" ? "EgressView Agentについて" : "About EgressView Agent",
-            MessageBoxButton.OK, MessageBoxImage.Information);
+        AgentBuildIdentity? service = null;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"status"}""");
+            using var document = JsonDocument.Parse(response);
+            var build = document.RootElement.GetProperty("data").GetProperty("build");
+            service = new(build.GetProperty("version").GetString() ?? "unknown",
+                build.TryGetProperty("informationalVersion", out var detail) ? detail.GetString() ?? "unknown" : "unknown");
+        }
+        catch { /* About remains useful when the service is unavailable. */ }
+        var dialog = new AboutWindow(AboutWindow.CurrentUi(), service) { Owner = MainWindow };
+        dialog.ShowDialog();
     }
 
     private void ExitUi()
