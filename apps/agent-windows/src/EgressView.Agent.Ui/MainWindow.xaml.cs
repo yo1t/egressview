@@ -456,7 +456,7 @@ public partial class MainWindow : Window
         DestinationChoice.SelectedIndex = AgentSettings.DestinationUnit == "ip" ? 1 : 0;
         GlobeViewChoice.SelectedIndex = AgentSettings.GlobeView == "countries" ? 1 : 0;
         SpinSpeedChoice.SelectedIndex = AgentSettings.GlobeSpinSpeed switch { "slow" => 0, "fast" => 2, _ => 1 };
-        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "diagnostics" => 5, "updates" => 6, "hub" => 7, "uninstall" => 8, _ => 0 };
+        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "diagnostics" => 5, "updates" => 6, "hub" => 7, "uninstall" => 8, "about" => 9, _ => 0 };
         DeleteHistoryBefore.SelectedDate = DateTime.Today.AddDays(-30);
         AiProviderChoice.SelectedIndex = AgentSettings.AiProvider switch { "OpenAI" => 1, "Anthropic" => 2, _ => 0 };
         AiEndpoint.Text = AgentSettings.OllamaEndpoint;
@@ -469,7 +469,7 @@ public partial class MainWindow : Window
 
     private void SettingsSectionChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HistorySettingsSection is null || DiagnosticsSettingsSection is null || UpdateSettingsSection is null || HubSettingsSection is null || UninstallSettingsSection is null ||
+        if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HistorySettingsSection is null || DiagnosticsSettingsSection is null || UpdateSettingsSection is null || HubSettingsSection is null || UninstallSettingsSection is null || AboutSettingsSection is null ||
             SettingsSectionChoice.SelectedItem is not ListBoxItem item) return;
         var section = item.Tag?.ToString() ?? "general";
         GeneralSettingsSection.Visibility = section == "general" ? Visibility.Visible : Visibility.Collapsed;
@@ -481,6 +481,7 @@ public partial class MainWindow : Window
         UpdateSettingsSection.Visibility = section == "updates" ? Visibility.Visible : Visibility.Collapsed;
         HubSettingsSection.Visibility = section == "hub" ? Visibility.Visible : Visibility.Collapsed;
         UninstallSettingsSection.Visibility = section == "uninstall" ? Visibility.Visible : Visibility.Collapsed;
+        AboutSettingsSection.Visibility = section == "about" ? Visibility.Visible : Visibility.Collapsed;
         if (!loadingSettings) AgentSettings.SettingsSection = section;
         if (section == "enrichment") _ = RefreshEnrichmentStatusAsync();
         if (section == "history") _ = RefreshHistoryStatusAsync();
@@ -1274,6 +1275,11 @@ public partial class MainWindow : Window
         };
     }
     internal static string EnrollmentDiagnostic(AgentEnrollmentException exception) => EnrollmentMessage(exception.Reason) + $"\r\nDiagnostic: {exception.Reason}{(exception.StatusCode is { } status ? $" (HTTP {status})" : string.Empty)}";
+
+    private void OpenAbout_Click(object sender, RoutedEventArgs e)
+    {
+        if (System.Windows.Application.Current is App app) app.ShowAbout();
+    }
 }
 
 public sealed class FlowRow(RecentFlow value)
@@ -1325,6 +1331,7 @@ internal sealed class CountryHistoryDisplayRow
             Last = value.LastObservedAt.LocalDateTime.ToString("g", CultureInfo.CurrentCulture),
         };
     }
+
 }
 
 public sealed class ThreatRow(ThreatFinding value)
