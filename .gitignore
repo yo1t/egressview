@@ -1,4 +1,7 @@
-node_modules/
+# No trailing slash: `node_modules/` matches directories only, and a *symlink*
+# named node_modules is not a directory. One slipped into a public commit on
+# 2026-09-10 carrying an absolute path from the machine that made it.
+node_modules
 **/.build/
 .env
 .env.local

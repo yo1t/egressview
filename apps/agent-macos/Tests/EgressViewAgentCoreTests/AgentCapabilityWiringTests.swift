@@ -49,7 +49,7 @@ final class AgentCapabilityWiringTests: XCTestCase {
         XCTAssertGreaterThan(asked, 0, "capability を一度も聞いていない")
     }
 
-    func test一度だけ聞く() async throws {
+    func test答えが得られたらbatchごとには聞き直さない() async throws {
         // A Hub's version list changes when the Hub restarts, not between two
         // batches a second apart.
         let (sender, transport, queue) = try make()
@@ -59,6 +59,33 @@ final class AgentCapabilityWiringTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(600))
         let asked = await transport.capabilityRequests()
         XCTAssertEqual(asked, 1, "batchごとに聞いている（\(asked)回）")
+    }
+
+    func test聞けなかったときは同じプロセスの中でも聞き直す() async throws {
+        // The first version asked once per run and never again. A Hub that was
+        // restarting when the agent started, or that gained a capability
+        // afterwards, was therefore never noticed until the agent restarted --
+        // and a Hub gaining one is exactly what happened the first time
+        // (P3-14 stage 2). Failure must not be permanent.
+        let clock = TestClock()
+        let (sender, transport, queue) = try make(capabilitiesStatus: 503, clock: clock)
+        try queue.enqueue([observation(), observation()])
+        await sender.setConnectivityAvailable(true)
+        await sender.setEnabled(true)
+        try await Task.sleep(for: .milliseconds(300))
+        let first = await transport.capabilityRequests()
+        XCTAssertEqual(first, 1)
+
+        // An hour later, by the sender's own clock.
+        clock.advance(by: 3_601)
+        try queue.enqueue([observation()])
+        // Nudge the loop the way a reconnect would, rather than waiting for
+        // whatever interval it happens to use.
+        await sender.setConnectivityAvailable(false)
+        await sender.setConnectivityAvailable(true)
+        try await Task.sleep(for: .milliseconds(600))
+        let second = await transport.capabilityRequests()
+        XCTAssertGreaterThan(second, first, "失敗したまま二度と聞き直していない")
     }
 
     func testHubの上限を超えて送らない() async throws {
@@ -91,7 +118,18 @@ final class AgentCapabilityWiringTests: XCTestCase {
 
     // MARK: -
 
-    private func make(capabilitiesStatus: Int = 200) throws -> (AgentIngestSender, WiringTransport, AgentDeliveryQueue) {
+    /// A clock the test moves, so an hour can pass without waiting one.
+    private final class TestClock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = Date(timeIntervalSince1970: 1_800_000_000)
+        func now() -> Date { lock.withLock { value } }
+        func advance(by seconds: TimeInterval) { lock.withLock { value += seconds } }
+    }
+
+    private func make(
+        capabilitiesStatus: Int = 200,
+        clock: TestClock? = nil
+    ) throws -> (AgentIngestSender, WiringTransport, AgentDeliveryQueue) {
         let transport = WiringTransport(capabilitiesStatus: capabilitiesStatus)
         let queue = try AgentDeliveryQueue(
             fileURL: FileManager.default.temporaryDirectory
@@ -102,6 +140,16 @@ final class AgentCapabilityWiringTests: XCTestCase {
             agentID: UUID(),
             token: "egva_" + String(repeating: "a", count: 64)
         )
+        // Spelled out rather than `clock.map { ... } ?? { ... }`. That form
+        // needs the checker to resolve a closure returned from a closure
+        // through `??`, which this toolchain does and the one CI uses does
+        // not -- it built here and failed there.
+        let nowProvider: @Sendable () -> Date
+        if let clock {
+            nowProvider = { clock.now() }
+        } else {
+            nowProvider = { Date() }
+        }
         let sender = AgentIngestSender(
             queue: queue,
             credentialStore: WiringCredentialStore(credential),
@@ -109,7 +157,8 @@ final class AgentCapabilityWiringTests: XCTestCase {
             metadata: AgentIngestMetadata(
                 hostName: "test-mac", platform: .macOS,
                 osVersion: "26.5.2", agentVersion: "0.5.52"
-            )
+            ),
+            now: nowProvider
         )
         return (sender, transport, queue)
     }
