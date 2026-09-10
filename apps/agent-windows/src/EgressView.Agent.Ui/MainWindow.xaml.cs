@@ -75,12 +75,18 @@ public partial class MainWindow : Window
     private async void PeriodChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!IsLoaded || PeriodChoice.SelectedItem is not ComboBoxItem item || !int.TryParse(item.Tag?.ToString(), out selectedMinutes)) return;
+        if (!loadingSettings) AgentSettings.PeriodMinutes = selectedMinutes;
         await RefreshVisibleAsync();
     }
 
     private async void AnalysisChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!IsLoaded) return;
+        if (!loadingSettings)
+        {
+            AgentSettings.Metric = MetricChoice.SelectedIndex == 1 ? "bytes" : "connections";
+            AgentSettings.DestinationUnit = DestinationChoice.SelectedIndex == 1 ? "ip" : "name";
+        }
         RenderAnalysis();
         await Task.CompletedTask;
     }
@@ -276,6 +282,7 @@ public partial class MainWindow : Window
         Globe.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
         CountryList.Visibility = countries ? Visibility.Visible : Visibility.Collapsed;
         RotateButton.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
+        if (!loadingSettings) AgentSettings.GlobeView = countries ? "countries" : "globe";
     }
 
     private async Task RefreshStatusAsync()
@@ -417,6 +424,12 @@ public partial class MainWindow : Window
         DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 25 => 2, 0 => 3, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
         AutomaticUpdateChecks.IsChecked = AgentSettings.AutomaticUpdateChecks;
+        StartupUiEnabled.IsChecked = AgentStartupRegistration.IsEnabled;
+        selectedMinutes = AgentSettings.PeriodMinutes;
+        PeriodChoice.SelectedItem = PeriodChoice.Items.OfType<ComboBoxItem>().First(item => item.Tag?.ToString() == selectedMinutes.ToString(CultureInfo.InvariantCulture));
+        MetricChoice.SelectedIndex = AgentSettings.Metric == "bytes" ? 1 : 0;
+        DestinationChoice.SelectedIndex = AgentSettings.DestinationUnit == "ip" ? 1 : 0;
+        GlobeViewChoice.SelectedIndex = AgentSettings.GlobeView == "countries" ? 1 : 0;
         SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "diagnostics" => 5, "updates" => 6, "hub" => 7, "uninstall" => 8, _ => 0 };
         DeleteHistoryBefore.SelectedDate = DateTime.Today.AddDays(-30);
         AiProviderChoice.SelectedIndex = AgentSettings.AiProvider switch { "OpenAI" => 1, "Anthropic" => 2, _ => 0 };
@@ -486,6 +499,128 @@ public partial class MainWindow : Window
     private void AutomaticUpdateChecks_Click(object sender, RoutedEventArgs e)
     {
         if (!loadingSettings) AgentSettings.AutomaticUpdateChecks = AutomaticUpdateChecks.IsChecked == true;
+    }
+
+    private void StartupUiEnabled_Click(object sender, RoutedEventArgs e)
+    {
+        if (loadingSettings) return;
+        try
+        {
+            AgentStartupRegistration.SetEnabled(StartupUiEnabled.IsChecked == true);
+            PortableSettingsStatus.Text = LocalizationManager.Text("StartupSettingApplied");
+        }
+        catch (Exception exception)
+        {
+            StartupUiEnabled.IsChecked = AgentStartupRegistration.IsEnabled;
+            PortableSettingsStatus.Text = $"{LocalizationManager.Text("SettingsOperationFailed")} Diagnostic: {exception.GetType().Name}";
+        }
+    }
+
+    private async void ExportSettings_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var history = await ReadHistoryStatusAsync();
+            var value = new AgentSettingsFile(AgentSettingsFile.CurrentSchemaVersion,
+                AgentSettings.Language.ToString().ToLowerInvariant(), AgentSettings.NotificationsEnabled,
+                AgentSettings.NotificationCategoryEnabled("Threat"), AgentSettings.NotificationCategoryEnabled("Monitoring"),
+                AgentSettings.NotificationCategoryEnabled("HubDelivery"), AgentSettings.NotificationCategoryEnabled("ThreatIntel"),
+                AgentSettings.NotificationCategoryEnabled("Recovery"), AgentSettings.NotificationDailyLimit, AgentSettings.GlobeFrameRate,
+                AgentSettings.PeriodMinutes, AgentSettings.Metric, AgentSettings.DestinationUnit, AgentSettings.GlobeView,
+                history.RetentionDays, AgentSettings.AutomaticUpdateChecks);
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "EgressView settings (*.json)|*.json",
+                FileName = AgentSettingsFile.SuggestedFileName(DateTimeOffset.UtcNow),
+                AddExtension = true,
+                DefaultExt = ".json",
+            };
+            if (dialog.ShowDialog(this) != true) { PortableSettingsStatus.Text = LocalizationManager.Text("SettingsExportCancelled"); return; }
+            await File.WriteAllBytesAsync(dialog.FileName, AgentSettingsFile.Encode(value), lifetime.Token);
+            PortableSettingsStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SettingsExportedFormat"), dialog.FileName);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception) { PortableSettingsStatus.Text = $"{LocalizationManager.Text("SettingsOperationFailed")} Diagnostic: {exception.GetType().Name}"; }
+    }
+
+    private async void ImportSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "EgressView settings (*.json)|*.json", CheckFileExists = true, Multiselect = false };
+        if (dialog.ShowDialog(this) != true) { PortableSettingsStatus.Text = LocalizationManager.Text("SettingsImportCancelled"); return; }
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(dialog.FileName, lifetime.Token);
+            var value = AgentSettingsFile.Decode(bytes);
+            var fields = AgentSettingsFile.PresentFields(value);
+            var preview = string.Join("\r\n", fields.Select(field => $"• {field}: {PortableValue(value, field)}"));
+            var message = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SettingsImportPreviewFormat"), preview);
+            if (System.Windows.MessageBox.Show(this, message, LocalizationManager.Text("ImportSettings"), MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+            { PortableSettingsStatus.Text = LocalizationManager.Text("SettingsImportCancelled"); return; }
+
+            if (value.RetentionDays is { } retentionDays)
+            {
+                var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "set-history-retention", days = retentionDays }), lifetime.Token);
+                using var responseDocument = JsonDocument.Parse(response);
+                EnsureAccepted(responseDocument.RootElement);
+            }
+            ApplyPortableSettings(value);
+            LoadSettings();
+            LocalizationManager.Apply(System.Windows.Application.Current.Resources);
+            ApplyAccessibilityLabels();
+            PortableSettingsStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SettingsImportedFormat"), fields.Count);
+            await RefreshAllAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            PortableSettingsStatus.Text = $"{LocalizationManager.Text("SettingsFileRejected")} Diagnostic: {exception.GetType().Name}";
+        }
+    }
+
+    private static void ApplyPortableSettings(AgentSettingsFile value)
+    {
+        if (value.Language is { } language && Enum.TryParse<AgentLanguage>(language, true, out var parsedLanguage)) AgentSettings.Language = parsedLanguage;
+        if (value.NotificationsEnabled is { } notifications) AgentSettings.NotificationsEnabled = notifications;
+        if (value.NotifyThreat is { } threat) AgentSettings.SetNotificationCategory("Threat", threat);
+        if (value.NotifyMonitoring is { } monitoring) AgentSettings.SetNotificationCategory("Monitoring", monitoring);
+        if (value.NotifyHubDelivery is { } hubDelivery) AgentSettings.SetNotificationCategory("HubDelivery", hubDelivery);
+        if (value.NotifyThreatIntel is { } threatIntel) AgentSettings.SetNotificationCategory("ThreatIntel", threatIntel);
+        if (value.NotifyRecovery is { } recovery) AgentSettings.SetNotificationCategory("Recovery", recovery);
+        if (value.NotificationDailyLimit is { } dailyLimit) AgentSettings.NotificationDailyLimit = dailyLimit;
+        if (value.GlobeFrameRate is { } frameRate) AgentSettings.GlobeFrameRate = frameRate;
+        if (value.PeriodMinutes is { } period) AgentSettings.PeriodMinutes = period;
+        if (value.Metric is { } metric) AgentSettings.Metric = metric;
+        if (value.DestinationUnit is { } destination) AgentSettings.DestinationUnit = destination;
+        if (value.GlobeView is { } globeView) AgentSettings.GlobeView = globeView;
+        if (value.AutomaticUpdateChecks is { } updates) AgentSettings.AutomaticUpdateChecks = updates;
+    }
+
+    private static object? PortableValue(AgentSettingsFile value, string field) => field switch
+    {
+        nameof(AgentSettingsFile.Language) => value.Language,
+        nameof(AgentSettingsFile.NotificationsEnabled) => value.NotificationsEnabled,
+        nameof(AgentSettingsFile.NotifyThreat) => value.NotifyThreat,
+        nameof(AgentSettingsFile.NotifyMonitoring) => value.NotifyMonitoring,
+        nameof(AgentSettingsFile.NotifyHubDelivery) => value.NotifyHubDelivery,
+        nameof(AgentSettingsFile.NotifyThreatIntel) => value.NotifyThreatIntel,
+        nameof(AgentSettingsFile.NotifyRecovery) => value.NotifyRecovery,
+        nameof(AgentSettingsFile.NotificationDailyLimit) => value.NotificationDailyLimit,
+        nameof(AgentSettingsFile.GlobeFrameRate) => value.GlobeFrameRate,
+        nameof(AgentSettingsFile.PeriodMinutes) => value.PeriodMinutes,
+        nameof(AgentSettingsFile.Metric) => value.Metric,
+        nameof(AgentSettingsFile.DestinationUnit) => value.DestinationUnit,
+        nameof(AgentSettingsFile.GlobeView) => value.GlobeView,
+        nameof(AgentSettingsFile.RetentionDays) => value.RetentionDays,
+        nameof(AgentSettingsFile.AutomaticUpdateChecks) => value.AutomaticUpdateChecks,
+        _ => null,
+    };
+
+    private async Task<LocalHistoryStatus> ReadHistoryStatusAsync()
+    {
+        var response = await AgentIpcClient.RequestAsync("""{"v":1,"op":"history-status"}""", lifetime.Token);
+        using var document = JsonDocument.Parse(response);
+        EnsureAccepted(document.RootElement);
+        return document.RootElement.GetProperty("data").Deserialize<LocalHistoryStatus>() ?? throw new InvalidDataException();
     }
 
     private async void PrepareUninstall_Click(object sender, RoutedEventArgs e)

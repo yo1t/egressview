@@ -42,6 +42,7 @@ public partial class App : System.Windows.Application
         ThemeManager.ApplySystemTheme(Resources);
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         LocalizationManager.Apply(Resources);
+        AgentStartupRegistration.InitializeDefault();
         activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationName);
         exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ExitName);
         instanceMutex = new Mutex(true, InstanceName, out var firstInstance);
