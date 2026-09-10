@@ -56,6 +56,8 @@ internal static class ThemeManager
                 ["SuccessSoftBrush"] = "#18351B",
                 ["ErrorBrush"] = "#FF99A4",
                 ["ErrorSoftBrush"] = "#442326",
+                ["WarningBrush"] = "#FCE100",
+                ["WarningSoftBrush"] = "#433519",
             }
             : new Dictionary<string, string>
             {
@@ -74,6 +76,8 @@ internal static class ThemeManager
                 ["SuccessSoftBrush"] = "#E9F5E9",
                 ["ErrorBrush"] = "#C42B1C",
                 ["ErrorSoftBrush"] = "#FDE7E9",
+                ["WarningBrush"] = "#8A4F00",
+                ["WarningSoftBrush"] = "#FFF4CE",
             };
 
         foreach (var (key, value) in palette)

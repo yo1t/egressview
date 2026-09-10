@@ -9,6 +9,24 @@ var database = Path.Combine(directory, "agent.db");
 
 try
 {
+    var monitoringTracker = new MonitoringStatusTracker();
+    Assert(monitoringTracker.Current.Kind == MonitoringPresentationKind.Checking && monitoringTracker.Current.LastConfirmedAt is null,
+        "monitoring presentation starts as checking rather than reporting a false problem");
+    var healthConfirmedAt = new DateTimeOffset(2026, 9, 11, 0, 0, 0, TimeSpan.Zero);
+    monitoringTracker.Confirm(true, true, healthConfirmedAt);
+    var unavailableHealth = monitoringTracker.MarkUnavailable();
+    Assert(unavailableHealth.Kind == MonitoringPresentationKind.Unavailable && unavailableHealth.LastConfirmedAt == healthConfirmedAt &&
+        unavailableHealth.LastConfirmedEnabled == true && unavailableHealth.LastConfirmedHealthy == true,
+        "an IPC failure is distinct from collector failure and retains the last confirmed monitoring state");
+    var degradedHealth = monitoringTracker.Confirm(true, false, healthConfirmedAt.AddMinutes(1), "etw-session-stopped", "Restart the service");
+    Assert(degradedHealth.Kind == MonitoringPresentationKind.NeedsAttention && degradedHealth.IssueCode == "etw-session-stopped" &&
+        degradedHealth.IssueAction == "Restart the service",
+        "a confirmed collector problem remains actionable and distinct from status unavailability");
+    Assert(monitoringTracker.Confirm(false, false, healthConfirmedAt.AddMinutes(2)).Kind == MonitoringPresentationKind.Stopped,
+        "an intentional monitoring stop is not presented as a fault");
+    Assert(AgentIpcClient.RequestTimeout == TimeSpan.FromSeconds(15),
+        "IPC requests bound the complete request and response lifetime");
+
     var portableSettings = new AgentSettingsFile(1, "japanese", true, true, false, false, true, true, 12, 5, 360,
         "bytes", "name", "countries", 30, true, "fast");
     var portableBytes = AgentSettingsFile.Encode(portableSettings);
