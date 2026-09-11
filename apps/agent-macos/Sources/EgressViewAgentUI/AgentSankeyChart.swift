@@ -59,11 +59,7 @@ public struct AgentSankeyChart: View {
                 // are on screen is whatever the height allows, and the rest is
                 // a scroll away. The minimum is three rows, so a short window
                 // still shows a diagram rather than a scroll bar.
-                .frame(
-                    minHeight: AgentSankeyColumn.headerHeight
-                        + 3 * AgentSankeyColumn.rowHeight,
-                    maxHeight: .infinity
-                )
+                .frame(minHeight: SankeyViewport.minimumHeight, maxHeight: .infinity)
                 // On the whole diagram, not on the ribbons alone, and with a
                 // solid hit area: a Canvas is hit-tested where it drew, so the
                 // space between ribbons belongs to nothing and a pointer lands
@@ -104,8 +100,9 @@ public struct AgentSankeyChart: View {
     /// the diagram 210 points tall whatever the window did -- the card grew
     /// with the window and the drawing inside it did not (P3-15).
     private var contentHeight: CGFloat {
-        let rows = max(model.apps.count, model.destinations.count, 1)
-        return AgentSankeyColumn.headerHeight + CGFloat(rows) * AgentSankeyColumn.rowHeight
+        SankeyViewport.contentHeight(
+            rows: max(model.apps.count, model.destinations.count)
+        )
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize) {
@@ -161,8 +158,8 @@ private struct AgentSankeyColumn: View {
     /// points against a caption row that measures about 16, so the canvas was
     /// laid out a third taller than the names beside it and the scroll extent
     /// was wrong by the same third.
-    static let rowHeight: CGFloat = 18
-    static let headerHeight: CGFloat = 17
+    static let rowHeight = SankeyViewport.rowHeight
+    static let headerHeight = SankeyViewport.headerHeight
 
     static let columnWidth: CGFloat = 150
     private static let dotWidth: CGFloat = 7

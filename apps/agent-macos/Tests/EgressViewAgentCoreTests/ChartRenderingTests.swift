@@ -75,3 +75,47 @@ final class ChartRenderingTests: XCTestCase {
         XCTAssertEqual(bitmap.pixelsWide, 840)
     }
 }
+
+/// The sankey's height arithmetic, which used to be unreachable.
+///
+/// P3-15 was `viewportHeight = 10 * rowHeight`: the diagram stayed 210 points
+/// tall however large the window grew. The suite passed throughout, because
+/// the number lived inside a view and the only way to ask it anything was to
+/// draw it and look.
+@MainActor
+final class SankeyViewportTests: XCTestCase {
+    func test行数が高さで変わる() {
+        // The defect, stated as a test: ten rows whatever the height.
+        let short = SankeyViewport.visibleRows(inHeight: 210)
+        let tall = SankeyViewport.visibleRows(inHeight: 500)
+        XCTAssertGreaterThan(tall, short, "高さを増やしても表示行数が変わらない（P3-15）")
+    }
+
+    func test背の低いカードでも三行は出る() {
+        XCTAssertGreaterThanOrEqual(
+            SankeyViewport.visibleRows(inHeight: SankeyViewport.minimumHeight),
+            SankeyViewport.minimumRows,
+            "最小の高さで最小の行数に満たない"
+        )
+    }
+
+    func test中身の高さは行数に比例する() {
+        let one = SankeyViewport.contentHeight(rows: 1)
+        let ten = SankeyViewport.contentHeight(rows: 10)
+        XCTAssertEqual(ten - one, 9 * SankeyViewport.rowHeight, accuracy: 0.01)
+    }
+
+    func test行が無くても高さは負にならない() {
+        XCTAssertGreaterThan(SankeyViewport.contentHeight(rows: 0), 0)
+        XCTAssertEqual(SankeyViewport.visibleRows(inHeight: 0), 0)
+    }
+
+    func test抽出しても数値は変わっていない() {
+        // The values the view used before the arithmetic moved out. If either
+        // constant drifts, the layout drifts with it and this says so.
+        XCTAssertEqual(SankeyViewport.rowHeight, 18)
+        XCTAssertEqual(SankeyViewport.headerHeight, 17)
+        XCTAssertEqual(SankeyViewport.minimumHeight, 17 + 3 * 18)
+        XCTAssertEqual(SankeyViewport.contentHeight(rows: 30), 17 + 30 * 18)
+    }
+}
