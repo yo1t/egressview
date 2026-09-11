@@ -60,20 +60,6 @@ enum AgentMainTab: String, CaseIterable, Identifiable {
 // the sankey cannot drift apart. Three views each holding their own window
 // would make "which app caused that spike, and where was it going"
 // unanswerable.
-extension TimeScale: @retroactive Identifiable {
-    public var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .hour: return L("Last hour")
-        case .sixHours: return L("Last 6 hours")
-        case .day: return L("Last 24 hours")
-        case .week: return L("Last 7 days")
-        case .month: return L("Last 30 days")
-        }
-    }
-}
-
 extension DestinationGrouping: @retroactive Identifiable {
     public var id: String { rawValue }
 

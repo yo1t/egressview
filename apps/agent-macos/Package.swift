@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "EgressViewAgentCore", targets: ["EgressViewAgentCore"]),
         .library(name: "EgressViewNetworkExtension", targets: ["EgressViewNetworkExtension"]),
         .executable(name: "egressview-agent-spike", targets: ["EgressViewAgentSpike"]),
+        .executable(name: "render-check", targets: ["RenderCheck"]),
     ],
     targets: [
         .target(
@@ -32,6 +33,26 @@ let package = Package(
         .target(
             name: "EgressViewNetworkExtension",
             dependencies: ["EgressViewAgentCore", "CLibProcBridge"]
+        ),
+        // The charts, rendered offscreen so their layout can be checked without
+        // installing a build. Sources are listed rather than taken wholesale:
+        // `Xcode/Host` also holds the application's own `main.swift`, and two
+        // entry points cannot share a target.
+        .executableTarget(
+            name: "RenderCheck",
+            dependencies: ["EgressViewAgentCore"],
+            path: "Xcode/Host",
+            // The `.lproj` bundles beside these sources belong to the Xcode
+            // application, not to this tool. Excluding them keeps the manifest
+            // from needing a `defaultLocalization` it has no use for.
+            exclude: ["en.lproj", "ja.lproj", "Assets.xcassets", "Info.plist"],
+            sources: [
+                "RenderCheck.swift",
+                "AgentSankeyChart.swift",
+                "AgentTimelineChart.swift",
+                "AgentChartComponents.swift",
+                "AgentLocalization.swift",
+            ]
         ),
         .executableTarget(
             name: "EgressViewAgentSpike",

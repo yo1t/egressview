@@ -192,3 +192,39 @@ struct AgentEmptyChartNote: View {
             .frame(maxWidth: .infinity, minHeight: 120)
     }
 }
+
+/// How a figure is written on a chart.
+///
+/// Lived in `AgentThreatPanel.swift` under a `// MARK: - Charts` heading,
+/// which is where it was noticed: rendering the charts on their own pulled in
+/// the whole threat screen, and through it the window controller, for eight
+/// lines of formatting.
+func formattedMetric(_ value: Double, _ metric: TrafficMetric) -> String {
+    switch metric {
+    case .sessions:
+        return Int(value).formatted()
+    case .bytes:
+        return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary)
+    }
+}
+
+/// What a period is called on screen.
+///
+/// Lived in `ObservationWindowController.swift`, so drawing a chart pulled in
+/// the whole window -- 974 lines of tabs, pickers and state -- for five
+/// strings. The period menu and the charts both need it; neither needs the
+/// window.
+extension TimeScale: @retroactive Identifiable {
+    public var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .hour: return L("Last hour")
+        case .sixHours: return L("Last 6 hours")
+        case .day: return L("Last 24 hours")
+        case .week: return L("Last 7 days")
+        case .month: return L("Last 30 days")
+        }
+    }
+}
+
