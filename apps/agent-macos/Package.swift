@@ -55,7 +55,7 @@ let package = Package(
         ),
         .testTarget(
             name: "EgressViewAgentCoreTests",
-            dependencies: ["EgressViewAgentCore", "EgressViewNetworkExtension"]
+            dependencies: ["EgressViewAgentCore", "EgressViewNetworkExtension", "EgressViewAgentUI"]
         ),
     ],
     swiftLanguageModes: [.v5]
