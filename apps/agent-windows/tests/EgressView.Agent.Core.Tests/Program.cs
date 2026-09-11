@@ -39,6 +39,23 @@ try
     var fullLabels = SankeyLabelLayout.FitDistinct(["chrome", "codex"], [20, 20], MonospaceMeasure);
     Assert(fullLabels.SequenceEqual(["chrome", "codex"]), "labels that fit are not abbreviated");
 
+    var byteSpike = Enumerable.Repeat(30_000_000L, 23).ToList();
+    byteSpike.Insert(3, 1_710_000_000L);
+    var byteAxis = TimelineAxisScale.Fit(byteSpike, true);
+    Assert(byteAxis.HasClipping && byteAxis.Clipped.SequenceEqual([3]) && byteAxis.Peak == 1_710_000_000L &&
+        byteAxis.Top > 30_000_000 && byteAxis.Top < 171_000_000,
+        "one byte spike is marked and no longer flattens the rest of the period");
+    Assert(!TimelineAxisScale.Fit([100, 250, 400, 180, 320, 90, 500, 210], true).HasClipping,
+        "ordinary byte variation keeps its real maximum");
+    Assert(TimelineAxisScale.Fit([10, 10, 1000, 10, 10, 10, 10, 1000, 10, 10], true).Clipped.SequenceEqual([2, 7]),
+        "equal spikes are both marked against the next genuinely lower bucket");
+    Assert(TimelineAxisScale.Fit([100, 400], true).HasClipping && !TimelineAxisScale.Fit([100, 399], true).HasClipping,
+        "the documented four-times outlier boundary is deterministic");
+    Assert(!TimelineAxisScale.Fit([0, 0, 900, 0], true).HasClipping && TimelineAxisScale.Fit([0, 0, 0], true).Top == 0,
+        "a lone value and an all-zero period are never falsely clipped");
+    Assert(!TimelineAxisScale.Fit([10, 10, 1000], false).HasClipping && TimelineAxisScale.Fit([10, 10, 1000], false).Top == 1000,
+        "connection timelines always retain the actual maximum");
+
     var portableSettings = new AgentSettingsFile(1, "japanese", true, true, false, false, true, true, 12, 5, 360,
         "bytes", "name", "countries", 30, true, "fast");
     var portableBytes = AgentSettingsFile.Encode(portableSettings);
