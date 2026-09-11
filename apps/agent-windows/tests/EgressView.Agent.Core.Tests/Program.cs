@@ -27,6 +27,48 @@ try
     Assert(AgentIpcClient.RequestTimeout == TimeSpan.FromSeconds(15),
         "IPC requests bound the complete request and response lifetime");
 
+    Assert(SankeyLabelLayout.NamedCapacity(340, 14) > SankeyLabelLayout.NamedCapacity(170, 14),
+        "a taller Sankey names more rows instead of retaining a fixed seven-item ceiling");
+    static double MonospaceMeasure(string value) => value.Length;
+    var similarLabels = SankeyLabelLayout.FitDistinct(
+        ["api.cluster-east.example.net", "api.cluster-west.example.net", "2606:4700:4408::ac40:9bd1", "2606:4700:4408::ac40:9bd2"],
+        [18, 18, 18, 18], MonospaceMeasure);
+    Assert(similarLabels.Distinct(StringComparer.Ordinal).Count() == similarLabels.Count &&
+        similarLabels.All(label => MonospaceMeasure(label) <= 18 && label.Count(character => character == '…') <= 1),
+        "similar hostnames and IPv6 addresses remain distinct, fit once, and never receive a double ellipsis");
+    var fullLabels = SankeyLabelLayout.FitDistinct(["chrome", "codex"], [20, 20], MonospaceMeasure);
+    Assert(fullLabels.SequenceEqual(["chrome", "codex"]), "labels that fit are not abbreviated");
+
+    var byteSpike = Enumerable.Repeat(30_000_000L, 23).ToList();
+    byteSpike.Insert(3, 1_710_000_000L);
+    var byteAxis = TimelineAxisScale.Fit(byteSpike, true);
+    Assert(byteAxis.HasClipping && byteAxis.Clipped.SequenceEqual([3]) && byteAxis.Peak == 1_710_000_000L &&
+        byteAxis.Top > 30_000_000 && byteAxis.Top < 171_000_000,
+        "one byte spike is marked and no longer flattens the rest of the period");
+    Assert(!TimelineAxisScale.Fit([100, 250, 400, 180, 320, 90, 500, 210], true).HasClipping,
+        "ordinary byte variation keeps its real maximum");
+    Assert(TimelineAxisScale.Fit([10, 10, 1000, 10, 10, 10, 10, 1000, 10, 10], true).Clipped.SequenceEqual([2, 7]),
+        "equal spikes are both marked against the next genuinely lower bucket");
+    Assert(TimelineAxisScale.Fit([100, 400], true).HasClipping && !TimelineAxisScale.Fit([100, 399], true).HasClipping,
+        "the documented four-times outlier boundary is deterministic");
+    Assert(!TimelineAxisScale.Fit([0, 0, 900, 0], true).HasClipping && TimelineAxisScale.Fit([0, 0, 0], true).Top == 0,
+        "a lone value and an all-zero period are never falsely clipped");
+    Assert(!TimelineAxisScale.Fit([10, 10, 1000], false).HasClipping && TimelineAxisScale.Fit([10, 10, 1000], false).Top == 1000,
+        "connection timelines always retain the actual maximum");
+
+    var relaunchEncoded = UpdateRelaunchCommand.BuildEncodedPowerShell(4242, @"C:\Program Files\EgressView Agent\ui\EgressView.Agent.Ui.exe", "0.1.37", TimeSpan.FromMinutes(15));
+    var relaunchScript = Encoding.Unicode.GetString(Convert.FromBase64String(relaunchEncoded));
+    Assert(relaunchScript.Contains("Get-Process -Id $oldProcessId", StringComparison.Ordinal) &&
+        relaunchScript.Contains("ProductVersion", StringComparison.Ordinal) && relaunchScript.Contains("--tray", StringComparison.Ordinal) &&
+        relaunchScript.Contains("0.1.37", StringComparison.Ordinal),
+        "the unelevated update watcher waits for the old UI and the expected installed version before restoring the tray");
+    try
+    {
+        _ = UpdateRelaunchCommand.BuildEncodedPowerShell(1, @"C:\agent.exe", "1.0'; Stop-Process -Name explorer; #", TimeSpan.FromMinutes(15));
+        throw new InvalidOperationException("FAILED: unsafe update version reached the relaunch script");
+    }
+    catch (ArgumentException) { }
+
     var portableSettings = new AgentSettingsFile(1, "japanese", true, true, false, false, true, true, 12, 5, 360,
         "bytes", "name", "countries", 30, true, "fast");
     var portableBytes = AgentSettingsFile.Encode(portableSettings);

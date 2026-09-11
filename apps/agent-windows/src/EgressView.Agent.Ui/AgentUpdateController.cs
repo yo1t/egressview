@@ -72,6 +72,7 @@ internal sealed class AgentUpdateController : IDisposable
         {
             Set(State with { Kind = UpdateStateKind.Launching });
             await client.ReverifyAsync(verified, cancellationToken);
+            StartRelaunchWatcher(verified.Version);
             Process.Start(new ProcessStartInfo("msiexec.exe", $"/i \"{verified.Path}\"") { UseShellExecute = true, Verb = "runas" });
             return true;
         }
@@ -84,6 +85,25 @@ internal sealed class AgentUpdateController : IDisposable
     }
 
     private void Set(UpdateState value) { State = value; StateChanged?.Invoke(this, EventArgs.Empty); }
+
+    private static void StartRelaunchWatcher(string expectedVersion)
+    {
+        var uiPath = Environment.ProcessPath ?? throw new InvalidOperationException("The UI executable path is unavailable.");
+        var encoded = UpdateRelaunchCommand.BuildEncodedPowerShell(Environment.ProcessId, uiPath, expectedVersion, TimeSpan.FromMinutes(15));
+        var start = new ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+        };
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-NonInteractive");
+        start.ArgumentList.Add("-WindowStyle");
+        start.ArgumentList.Add("Hidden");
+        start.ArgumentList.Add("-EncodedCommand");
+        start.ArgumentList.Add(encoded);
+        _ = Process.Start(start) ?? throw new InvalidOperationException("The update relaunch watcher could not start.");
+    }
 
     private static string Classify(Exception exception) => exception switch
     {
