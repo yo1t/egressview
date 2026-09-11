@@ -27,6 +27,39 @@ try
     Assert(AgentIpcClient.RequestTimeout == TimeSpan.FromSeconds(15),
         "IPC requests bound the complete request and response lifetime");
 
+    using (var ipcLoopStop = new CancellationTokenSource())
+    {
+        var attempts = 0;
+        var failures = 0;
+        await EgressView.Agent.Service.AgentIpcServer.RunResilientLoopAsync(_ =>
+        {
+            attempts++;
+            if (attempts == 1) throw new IOException("client disconnected before response");
+            ipcLoopStop.Cancel();
+            throw new OperationCanceledException(ipcLoopStop.Token);
+        }, () => failures++, ipcLoopStop.Token, TimeSpan.Zero);
+        Assert(attempts == 2 && failures == 1,
+            "a timed-out or disconnected UI ends only its IPC connection and the listener accepts the next client");
+    }
+
+    using (var statusStore = new ObservationStore(Path.Combine(directory, "status.db")))
+    {
+        var statusCoverage = statusStore.BeginCoverage(StartupSnapshot.Capture(), healthConfirmedAt);
+        var statusJson = DiagnosticsReport.CreateStatus(
+            new CollectorSnapshot("healthy", 10, 10, 0, 0, healthConfirmedAt, healthConfirmedAt, 64),
+            statusStore, "9.8.7");
+        using var statusDocument = JsonDocument.Parse(statusJson);
+        var statusRoot = statusDocument.RootElement;
+        Assert(statusRoot.GetProperty("health").GetProperty("status").GetString() == "healthy" &&
+            statusRoot.GetProperty("coverage").GetProperty("active").GetInt64() == 1 &&
+            statusRoot.GetProperty("deliveryEnabled").ValueKind is JsonValueKind.True or JsonValueKind.False,
+            "the polled status retains the UI health, coverage, and delivery contract");
+        Assert(!statusRoot.TryGetProperty("database", out _) && !statusRoot.TryGetProperty("flows", out _) &&
+            !statusJson.Contains("observationCount", StringComparison.Ordinal),
+            "the polled status never scans history-sized diagnostic tables");
+        statusStore.EndCoverage(statusCoverage, healthConfirmedAt.AddMinutes(1));
+    }
+
     Assert(SankeyLabelLayout.NamedCapacity(340, 14) > SankeyLabelLayout.NamedCapacity(170, 14),
         "a taller Sankey names more rows instead of retaining a fixed seven-item ceiling");
     static double MonospaceMeasure(string value) => value.Length;
