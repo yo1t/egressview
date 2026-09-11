@@ -6,6 +6,36 @@
 <title>EgressView — see which app is talking, and to whom</title>
 <meta name="description" content="Every breach ends with something leaving. EgressView shows which application on which machine reached which destination — metadata only, kept on your own hardware.">
 <meta name="color-scheme" content="dark light">
+<link rel="canonical" href="https://www.egressview.com/">
+<!-- Open Graph and the card tags. These decide what a link to this page looks
+     like when someone posts it somewhere -- which is the channel that actually
+     brings people here, search having produced one query in total and that one
+     about listing Bedrock models. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="EgressView">
+<meta property="og:url" content="https://www.egressview.com/">
+<meta property="og:title" content="EgressView — see which app is talking, and to whom">
+<meta property="og:description" content="Every breach ends with something leaving. EgressView records which application, on which machine, reached which destination — metadata only, and the record stays on your own hardware.">
+<meta property="og:image" content="https://www.egressview.com/assets/og.png">
+<meta property="og:image:alt" content="EgressView — outbound connections, per application, kept on your own hardware">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="EgressView — see which app is talking, and to whom">
+<meta name="twitter:description" content="Records which application reached which destination. Metadata only. It never reads what you send.">
+<meta name="twitter:image" content="https://www.egressview.com/assets/og.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "EgressView Agent",
+  "applicationCategory": "SecurityApplication",
+  "operatingSystem": "macOS 13 or later, Apple silicon",
+  "url": "https://www.egressview.com/",
+  "downloadUrl": "https://dl.egressview.com/",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "description": "Records which application on a Mac reached which destination. Metadata only \u2014 it never reads what you send, and the record stays on your own hardware."
+}
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='114' fill='%230b1424'/%3E%3Cg fill='%234d94ff'%3E%3Crect x='86' y='86' width='80' height='340' rx='19'/%3E%3Crect x='86' y='86' width='210' height='80' rx='19'/%3E%3Crect x='86' y='216' width='130' height='80' rx='19'/%3E%3Crect x='86' y='346' width='210' height='80' rx='19'/%3E%3C/g%3E%3Ccircle cx='386' cy='126' r='40' fill='%2324d6a2'/%3E%3Ccircle cx='386' cy='256' r='25' fill='%234d94ff'/%3E%3Ccircle cx='386' cy='386' r='25' fill='%234d94ff'/%3E%3C/svg%3E">
 <style>
   :root{
@@ -338,6 +368,54 @@
       </ul>
     </div>
   </div>
+</section>
+
+<!-- Written for the words people type when they have this problem, which are
+     not the words the page above uses. Search Console on 2026-09-10 showed one
+     query reaching this site -- "AWS bedrock モデルリスト" -- matching a setup
+     document and nobody looking for what the product does. Questions with real
+     answers, phrased as they are asked; not a keyword list. -->
+<section class="wrap">
+  <h2 data-ja="よくある問い">Questions people arrive with</h2>
+
+  <h3 data-ja="Macのどのアプリが、どこへ通信しているか調べたい">
+    How do I find out which app on my Mac is connecting where?</h3>
+  <p data-ja="EgressView Agent を入れると、プロセスごとの外向き接続がそのまま記録されます。<code>lsof</code> や <code>nettop</code> と違い、見ている瞬間だけでなく<strong>過去にさかのぼって</strong>「どのアプリが、いつ、どこへ」を読めます。">
+    Install the EgressView Agent and every outbound connection is recorded per
+    process. Unlike <code>lsof</code> or <code>nettop</code>, which show you the
+    moment you are looking, the record <strong>goes back in time</strong>: which
+    application, when, and to which destination.</p>
+
+  <h3 data-ja="アプリごとの通信先を、あとから確認できますか">
+    Can I check an application's destinations after the fact?</h3>
+  <p data-ja="できます。既定で直近14日ぶんの生の記録を持ち、それより古いものは時間単位に畳んで残します。「先週の火曜にこのアプリはどこへ出ていたか」に答えられます。">
+    Yes. Fourteen days of raw records by default, and everything older folded
+    into hourly totals rather than discarded — so "where was this app going
+    last Tuesday" is a question with an answer.</p>
+
+  <h3 data-ja="通信の中身は読まれますか">Does it read what I send?</h3>
+  <p data-ja="読みません。記録するのは宛先・ポート・プロセス名・時刻・バイト数といったメタデータだけです。ペイロードは復号も保存もしません。">
+    No. It records metadata — destination, port, process name, timestamps, byte
+    counts. Payloads are neither decrypted nor stored.</p>
+
+  <h3 data-ja="知らない宛先に通信していないか知りたい">
+    I want to know if something is talking to a destination I do not recognise</h3>
+  <p data-ja="公開されている脅威情報リストと照合し、一致した接続を印します。照合はこのMacの中で行い、<strong>あなたの通信先を第三者へ送りません</strong>。">
+    Observed destinations are matched against public threat-intelligence lists
+    and flagged. The matching happens on your Mac: <strong>your destinations are
+    never sent to a third party</strong>.</p>
+
+  <h3 data-ja="ファイアウォールと何が違いますか">
+    How is this different from a firewall?</h3>
+  <p data-ja="ファイアウォールは通すか止めるかを決めます。EgressView は<strong>何も止めません</strong>。出ていったものを記録し、あとで読めるようにします。防げなかったときに、何が起きたかを言えるようにするための道具です。">
+    A firewall decides what to allow. EgressView <strong>blocks nothing</strong>.
+    It records what left, so that afterwards you can say what happened — which is
+    the question that matters on the day prevention fails.</p>
+
+  <h3 data-ja="無料ですか、ソースは読めますか">Is it free, and can I read the source?</h3>
+  <p data-ja="どちらもはいです。ソースは GitHub で公開しており、Agent は Developer ID 署名・公証済みです。">
+    Both yes. The source is on GitHub, and the agent is Developer ID signed and
+    notarised.</p>
 </section>
 
 <section class="wrap">
