@@ -32,7 +32,7 @@ enum RenderCheck {
                   sessionCount: 721, bytes: 97_400_112, observationsWithoutBytes: 0),
             .init(processName: "claude", destination: "api.anthropic.com",
                   sessionCount: 268, bytes: 48_700_000, observationsWithoutBytes: 0),
-            .init(processName: "ssh", destination: "10.41.128.183",
+            .init(processName: "ssh", destination: "192.0.2.1",
                   sessionCount: 81, bytes: 46_400_000, observationsWithoutBytes: 12),
         ]
 
