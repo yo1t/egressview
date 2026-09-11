@@ -30,8 +30,7 @@ public struct AgentTimelineChart: View {
                         : L("No connections in this period.")
                 )
             } else {
-                Canvas { context, size in draw(in: &context, size: size) }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                AgentTimelinePlot(model: model, scale: scale, sleepPeriods: sleepPeriods)
                     // A Canvas is hit-tested where it drew, so the gaps
                     // between bars are not part of it and a pointer lands on
                     // nothing. The globe is an NSView and gets a solid frame
@@ -53,10 +52,10 @@ public struct AgentTimelineChart: View {
                     // is worse than no stripe.
                     HStack(spacing: 6) {
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(Self.sleepColor.opacity(0.22))
+                            .fill(AgentTimelinePlot.sleepColor.opacity(0.22))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 2)
-                                    .strokeBorder(Self.sleepColor.opacity(0.6), lineWidth: 1)
+                                    .strokeBorder(AgentTimelinePlot.sleepColor.opacity(0.6), lineWidth: 1)
                             )
                             .frame(width: 18, height: 10)
                         Text(L("Shaded: the Mac was asleep. Traffic during sleep is not recorded."))
@@ -81,6 +80,36 @@ public struct AgentTimelineChart: View {
         )
     }
 
+    /// The card says what was clipped; the plot draws to the same ceiling.
+    /// `TimelineAxis.fit` is a function of the model, so the two cannot
+    /// disagree about it however many times it is asked.
+    private var axis: TimelineAxis { TimelineAxis.fit(totals: model.bucketTotals) }
+}
+
+/// The drawing itself, without the title, the legend or the notes around it.
+///
+/// Separate so it can be rendered on its own and looked at. The card's own
+/// text sits in the same left-hand strip as the axis labels, and a test that
+/// wants to know whether two axis labels ran together (P3-104) cannot tell
+/// them apart from a wrapped legend entry. This is the picture; the card is
+/// the frame around it.
+///
+/// The split does not move past the defect: how many labels there is room for
+/// is decided in `draw`, which is here.
+///
+/// The accessibility layer stays with the card. It is an `NSViewRepresentable`,
+/// and `ImageRenderer` draws one of those as a solid placeholder that covers
+/// the picture -- so a plot carrying it could be rendered but not looked at.
+struct AgentTimelinePlot: View {
+    let model: TimelineModel
+    let scale: TimeScale
+    let sleepPeriods: [DateInterval]
+
+    var body: some View {
+        Canvas { context, size in draw(in: &context, size: size) }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     /// Room for the axis labels. Without them the chart shows a shape but no
     /// magnitude, and "is this a lot?" has no answer.
     private let yAxisWidth: CGFloat = 56
@@ -97,11 +126,13 @@ public struct AgentTimelineChart: View {
     /// looks like, and that nobody checks, is how the sankey row spent four
     /// versions being wrong (P3-89).
     private static let axisLabelFont = NSFont.systemFont(ofSize: 9)
-    private var axisLabelInset: CGFloat {
-        let height = ("0" as NSString)
+    private var axisLabelHeight: CGFloat {
+        ("0" as NSString)
             .size(withAttributes: [.font: Self.axisLabelFont])
             .height
-        return (height / 2).rounded(.up)
+    }
+    private var axisLabelInset: CGFloat {
+        (axisLabelHeight / 2).rounded(.up)
     }
 
     /// Kept in one place so the band and its key cannot drift apart.
@@ -143,8 +174,7 @@ public struct AgentTimelineChart: View {
         }
     }
 
-    /// Computed once for both the drawing and the note under it, so the two
-    /// cannot disagree about what was clipped.
+    /// The same ceiling the card's clipped-peak note talks about.
     private var axis: TimelineAxis { TimelineAxis.fit(totals: model.bucketTotals) }
 
     private func draw(in context: inout GraphicsContext, size: CGSize) {
@@ -170,8 +200,13 @@ public struct AgentTimelineChart: View {
         let step = plot.width / CGFloat(model.bucketStarts.count)
         var baselines = [CGFloat](repeating: plot.maxY, count: model.bucketStarts.count)
 
-        // Gridlines and the values they stand for.
-        for fraction in [0.0, 0.5, 1.0] {
+        // Gridlines and the values they stand for. How many of them there are
+        // depends on the room: three in a card 160 points tall ran into each
+        // other (P3-104), and the top one is the one that must survive.
+        let fractions = TimelineAxisLabels.fractions(
+            plotHeight: plot.height, labelHeight: axisLabelHeight
+        )
+        for fraction in fractions {
             let y = plot.maxY - plot.height * fraction
             var line = Path()
             line.move(to: CGPoint(x: plot.minX, y: y))
