@@ -27,6 +27,18 @@ try
     Assert(AgentIpcClient.RequestTimeout == TimeSpan.FromSeconds(15),
         "IPC requests bound the complete request and response lifetime");
 
+    Assert(SankeyLabelLayout.NamedCapacity(340, 14) > SankeyLabelLayout.NamedCapacity(170, 14),
+        "a taller Sankey names more rows instead of retaining a fixed seven-item ceiling");
+    static double MonospaceMeasure(string value) => value.Length;
+    var similarLabels = SankeyLabelLayout.FitDistinct(
+        ["api.cluster-east.example.net", "api.cluster-west.example.net", "2606:4700:4408::ac40:9bd1", "2606:4700:4408::ac40:9bd2"],
+        [18, 18, 18, 18], MonospaceMeasure);
+    Assert(similarLabels.Distinct(StringComparer.Ordinal).Count() == similarLabels.Count &&
+        similarLabels.All(label => MonospaceMeasure(label) <= 18 && label.Count(character => character == '…') <= 1),
+        "similar hostnames and IPv6 addresses remain distinct, fit once, and never receive a double ellipsis");
+    var fullLabels = SankeyLabelLayout.FitDistinct(["chrome", "codex"], [20, 20], MonospaceMeasure);
+    Assert(fullLabels.SequenceEqual(["chrome", "codex"]), "labels that fit are not abbreviated");
+
     var portableSettings = new AgentSettingsFile(1, "japanese", true, true, false, false, true, true, 12, 5, 360,
         "bytes", "name", "countries", 30, true, "fast");
     var portableBytes = AgentSettingsFile.Encode(portableSettings);
