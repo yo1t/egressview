@@ -1,16 +1,18 @@
 using System.Text.Json;
-using System.Windows;
+using System.Globalization;
 
 namespace EgressView.Agent.Ui;
 
 internal static class WorldAtlas
 {
-    internal static IReadOnlyList<(double Lat, double Lon)[]> Load()
+    internal sealed record Country(string? Code, string Name, IReadOnlyList<(double Lat, double Lon)[]> Rings);
+
+    internal static IReadOnlyList<Country> Load()
     {
         try
         {
             var info = System.Windows.Application.GetResourceStream(
-                new Uri("Resources/world-atlas-countries-110m.json", UriKind.Relative));
+                new Uri("pack://application:,,,/EgressView.Agent.Ui;component/Resources/world-atlas-countries-110m.json", UriKind.Absolute));
             if (info is null) return [];
             using var document = JsonDocument.Parse(info.Stream);
             var root = document.RootElement;
@@ -30,18 +32,51 @@ internal static class WorldAtlas
                 arcs.Add(points.ToArray());
             }
 
-            var result = new List<(double Lat, double Lon)[]>();
+            var result = new List<Country>();
             var geometries = root.GetProperty("objects").GetProperty("countries").GetProperty("geometries");
+            var codesByEnglishName = CountryCodesByEnglishName();
+            var aliases = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["W. Sahara"] = "EH", ["United States of America"] = "US",
+                ["Dem. Rep. Congo"] = "CD", ["Dominican Rep."] = "DO",
+                ["Falkland Is."] = "FK", ["Fr. S. Antarctic Lands"] = "TF",
+                ["Côte d'Ivoire"] = "CI", ["Central African Rep."] = "CF",
+                ["Congo"] = "CG", ["Eq. Guinea"] = "GQ", ["eSwatini"] = "SZ",
+                ["Palestine"] = "PS", ["Myanmar"] = "MM", ["Turkey"] = "TR",
+                ["Solomon Is."] = "SB", ["China"] = "CN", ["Bosnia and Herz."] = "BA",
+                ["Macedonia"] = "MK", ["Trinidad and Tobago"] = "TT", ["S. Sudan"] = "SS",
+            };
             foreach (var geometry in geometries.EnumerateArray())
             {
+                var name = geometry.TryGetProperty("properties", out var properties) &&
+                    properties.TryGetProperty("name", out var nameProperty)
+                    ? nameProperty.GetString() ?? string.Empty : string.Empty;
+                var code = aliases.GetValueOrDefault(name) ?? codesByEnglishName.GetValueOrDefault(name);
+                var rings = new List<(double Lat, double Lon)[]>();
                 var type = geometry.GetProperty("type").GetString();
-                if (type == "Polygon") AddPolygon(geometry.GetProperty("arcs"), arcs, result);
+                if (type == "Polygon") AddPolygon(geometry.GetProperty("arcs"), arcs, rings);
                 else if (type == "MultiPolygon")
-                    foreach (var polygon in geometry.GetProperty("arcs").EnumerateArray()) AddPolygon(polygon, arcs, result);
+                    foreach (var polygon in geometry.GetProperty("arcs").EnumerateArray()) AddPolygon(polygon, arcs, rings);
+                if (rings.Count > 0) result.Add(new Country(code, name, rings));
             }
             return result;
         }
         catch { return []; }
+    }
+
+    private static Dictionary<string, string> CountryCodesByEnglishName()
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var culture in CultureInfo.GetCultures(CultureTypes.SpecificCultures))
+        {
+            try
+            {
+                var region = new RegionInfo(culture.Name);
+                result.TryAdd(region.EnglishName, region.TwoLetterISORegionName);
+            }
+            catch (ArgumentException) { }
+        }
+        return result;
     }
 
     private static void AddPolygon(JsonElement polygon, IReadOnlyList<(double Lat, double Lon)[]> arcs,
