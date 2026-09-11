@@ -4,6 +4,21 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.61
+
+**The vertical axis stops clumping when the window is small.** The timeline
+drew three values -- nothing, half, and the tallest bucket -- at fixed
+fractions of the plot, whatever height the card had. In a short card the three
+ran into each other: measured at 420x40 the gaps were 2px and 1px, and at
+420x34 they merged into a single block. Readable, and no help, because the
+axis is where the chart says how far it goes.
+
+How many labels there is room for now follows the height. What is given up as
+the card shrinks, in order: the middle tick, then the zero. The top is never
+given up -- it is the only place the chart says how big the tallest bucket is.
+
+Found in a rendered PNG rather than on a Mac, by the machinery 0.5.60 shipped.
+
 ### Agent for Mac 0.5.60
 
 **No change you can see, and that is the point of the release.** The four
