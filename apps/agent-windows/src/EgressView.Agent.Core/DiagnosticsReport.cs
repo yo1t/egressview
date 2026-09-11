@@ -8,6 +8,27 @@ public static class DiagnosticsReport
 {
     public static string CurrentVersion => typeof(DiagnosticsReport).Assembly.GetName().Version?.ToString(3) ?? "unknown";
 
+    public static string CreateStatus(CollectorSnapshot snapshot, ObservationStore store, string version,
+        bool monitoringEnabled = true)
+    {
+        // Status is polled by both the tray and the open window. Keep it independent
+        // of history size: full table counts belong to the explicit diagnostics and
+        // analysis operations, and can take longer than the IPC lifetime on a multi-GB DB.
+        var coverage = store.ReadCoverage();
+        var health = AgentHealth.Evaluate(snapshot, "ok");
+        return JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            generatedAt = DateTimeOffset.UtcNow,
+            version,
+            build = new { version, informationalVersion = InformationalVersion(), osVersion = Environment.OSVersion.VersionString, architecture = RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant() },
+            health = new { status = health.Status, issues = health.Issues.Select(issue => new { code = issue.Code, action = issue.Action }) },
+            coverage = new { total = coverage.Total, active = coverage.Active, abandoned = coverage.Abandoned },
+            monitoringEnabled,
+            deliveryEnabled = store.DeliveryEnabled,
+        });
+    }
+
     public static string Create(CollectorSnapshot snapshot, ObservationStore store, string version, bool monitoringEnabled = true,
         bool verifyIntegrity = false, string reportChannel = "service-internal", DeliveryCapabilityStatus? capabilityStatus = null)
     {

@@ -26,35 +26,58 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         return security;
     }
 
-    private async Task ServeAsync()
+    private Task ServeAsync() => RunResilientLoopAsync(ServeOneAsync, () =>
     {
-        while (!stop.IsCancellationRequested)
+        try { store.AddCounter("ipc-connection-failure", 1); } catch { }
+    }, stop.Token);
+
+    private async Task ServeOneAsync(CancellationToken cancellationToken)
+    {
+        await using var pipe = NamedPipeServerStreamAcl.Create(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous, 4096, 4096, BuildSecurity(allowedSid));
+        await pipe.WaitForConnectionAsync(cancellationToken);
+        using var reader = new StreamReader(pipe, Encoding.UTF8, false, 4096, true);
+        await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true) { AutoFlush = true };
+        var line = await reader.ReadLineAsync(cancellationToken);
+        if (line is not null) await writer.WriteLineAsync(IpcProtocol.Handle(line, Status, Summary, credential =>
         {
-            await using var pipe = NamedPipeServerStreamAcl.Create(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous, 4096, 4096, BuildSecurity(allowedSid));
-            try { await pipe.WaitForConnectionAsync(stop.Token); }
-            catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
-            using var reader = new StreamReader(pipe, Encoding.UTF8, false, 4096, true);
-            await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true) { AutoFlush = true };
-            var line = await reader.ReadLineAsync(stop.Token);
-            if (line is not null) await writer.WriteLineAsync(IpcProtocol.Handle(line, Status, Summary, credential =>
-                {
-                    credentialStore.Save(credential);
-                    delivery.SettingsChanged();
-                },
-                enabled =>
-                {
-                    if (enabled && credentialStore.Load() is null)
-                        throw new InvalidOperationException("Enrollment is required before delivery can be enabled.");
-                    store.DeliveryEnabled = enabled;
-                    delivery.SettingsChanged();
-                }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled, DeliveryStatus, delivery.RequestNow,
-                enrichment.Status, enrichment.RequestNow, HistoryStatus, SetHistoryRetention, store.ReadHistoryForExport,
-                cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow), Diagnostics, PrepareUninstall, CountryHistory));
+            credentialStore.Save(credential);
+            delivery.SettingsChanged();
+        },
+        enabled =>
+        {
+            if (enabled && credentialStore.Load() is null)
+                throw new InvalidOperationException("Enrollment is required before delivery can be enabled.");
+            store.DeliveryEnabled = enabled;
+            delivery.SettingsChanged();
+        }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled, DeliveryStatus, delivery.RequestNow,
+        enrichment.Status, enrichment.RequestNow, HistoryStatus, SetHistoryRetention, store.ReadHistoryForExport,
+        cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow), Diagnostics, PrepareUninstall, CountryHistory));
+    }
+
+    internal static async Task RunResilientLoopAsync(Func<CancellationToken, Task> serveOne, Action connectionFailed,
+        CancellationToken cancellationToken, TimeSpan? retryDelay = null)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await serveOne(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            catch (Exception)
+            {
+                // A client can legitimately disappear after its timeout (for example
+                // during sign-in while a large database is warming up). A broken read
+                // or write must end only that connection, never the permanent listener.
+                try { connectionFailed(); } catch { }
+                try { await Task.Delay(retryDelay ?? TimeSpan.FromMilliseconds(100), cancellationToken); }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            }
         }
     }
 
-    private string Status() => DiagnosticsReport.Create(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), capabilityStatus: delivery.CapabilityStatus);
+    private string Status() => DiagnosticsReport.CreateStatus(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled());
     private string Diagnostics() => DiagnosticsReport.Create(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), verifyIntegrity: true,
         reportChannel: "authenticated-named-pipe", capabilityStatus: delivery.CapabilityStatus);
     private IReadOnlyList<HourlySummary> Summary(int days) => store.ReadHourlySummary(DateTimeOffset.UtcNow.AddDays(-days), DateTimeOffset.UtcNow);
