@@ -60,6 +60,8 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        WindowsApplicationRestart.RegisterForInstallerUpdate();
+
         var window = new MainWindow();
         MainWindow = window;
         CreateTrayIcon();
@@ -81,7 +83,7 @@ public partial class App : System.Windows.Application
             null,
             Timeout.Infinite,
             false);
-        window.Show();
+        if (!e.Args.Contains("--tray", StringComparer.Ordinal)) window.Show();
         _ = RefreshTrayStateAsync();
         Updates.StateChanged += UpdateStateChanged;
         _ = Updates.RunIfDueAsync();
