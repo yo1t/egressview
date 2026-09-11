@@ -26,6 +26,15 @@ final class ChartRenderingTests: XCTestCase {
         }
     }
 
+    override func setUp() {
+        super.setUp()
+        AgentStrings.resourceDirectoryOverride = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // EgressViewAgentCoreTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // agent-macos
+            .appendingPathComponent("Xcode/Host")
+    }
+
     private func render(_ view: some View, width: CGFloat, height: CGFloat) throws -> NSBitmapImageRep {
         let renderer = ImageRenderer(content: view.frame(width: width, height: height))
         renderer.scale = 2
@@ -54,17 +63,32 @@ final class ChartRenderingTests: XCTestCase {
         )
     }
 
+    /// Both languages. Japanese text has a different width and height, and a
+    /// label that fits in one can be cut in the other -- the render tool
+    /// showed only English until 2026-09-11, because it found no strings and
+    /// got the keys back, which are English sentences.
+    private func withLanguage(_ language: AgentLanguage, _ body: () throws -> Void) rethrows {
+        let previous = UserDefaults.standard.string(forKey: AgentLanguage.defaultsKey)
+        UserDefaults.standard.set(language.rawValue, forKey: AgentLanguage.defaultsKey)
+        defer { UserDefaults.standard.set(previous, forKey: AgentLanguage.defaultsKey) }
+        try body()
+    }
+
     func test時系列の一番上の軸ラベルが枠に接しない() throws {
-        for metric in [TrafficMetric.sessions, .bytes] {
-            for (width, height) in [(700.0, 260.0), (520.0, 200.0), (420.0, 160.0), (360.0, 130.0)] {
-                let bitmap = try render(
-                    AgentTimelineChart(model: spikyTimeline(metric: metric), scale: .day),
-                    width: width, height: height
-                )
-                XCTAssertFalse(
-                    topRowHasInk(bitmap),
-                    "\(metric) \(Int(width))x\(Int(height)): 何かが上端に接している（軸ラベルが切れている疑い）"
-                )
+        for language in [AgentLanguage.english, .japanese] {
+            try withLanguage(language) {
+                for metric in [TrafficMetric.sessions, .bytes] {
+                    for (width, height) in [(700.0, 260.0), (520.0, 200.0), (420.0, 160.0), (360.0, 130.0)] {
+                        let bitmap = try render(
+                            AgentTimelineChart(model: spikyTimeline(metric: metric), scale: .day),
+                            width: width, height: height
+                        )
+                        XCTAssertFalse(
+                            topRowHasInk(bitmap),
+                            "\(language.rawValue) \(metric) \(Int(width))x\(Int(height)): 何かが上端に接している"
+                        )
+                    }
+                }
             }
         }
     }

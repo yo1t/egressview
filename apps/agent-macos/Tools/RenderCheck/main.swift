@@ -20,6 +20,16 @@ enum RenderCheck {
             atPath: output, withIntermediateDirectories: true
         )
 
+        // Point at the application's `.lproj` folders. Without this the tool
+        // is its own `Bundle.main`, finds no strings, and gets the key back --
+        // which reads as English, because the keys are English sentences. The
+        // output looked right while showing nothing translated.
+        AgentStrings.resourceDirectoryOverride = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // Tools/RenderCheck
+            .deletingLastPathComponent()   // Tools
+            .deletingLastPathComponent()   // agent-macos
+            .appendingPathComponent("Xcode/Host")
+
         // Shaped like the real thing: one destination taking most of the
         // volume, a long tail, names that collide when shortened, and an IPv6
         // literal. Those are the cases that were wrong on the screen.
@@ -55,8 +65,18 @@ enum RenderCheck {
             }
         }
 
+        // Both languages: Japanese text has a different width, and a label
+        // that fits in one can be cut in the other (P3-89).
+        for language in ["en", "ja"] {
+            // Through the same defaults key the application writes, so the
+            // tool takes the path the product takes rather than a back door.
+            UserDefaults.standard.set(
+                language == "ja" ? AgentLanguage.japanese.rawValue : AgentLanguage.english.rawValue,
+                forKey: AgentLanguage.defaultsKey
+            )
+
         for metric in [TrafficMetric.sessions, .bytes] {
-            let name = metric == .bytes ? "bytes" : "connections"
+            let name = "\(language)-" + (metric == .bytes ? "bytes" : "connections")
 
             let sankey = SankeyAggregator().aggregate(pairs, metric: metric)
             for (width, height) in [(700.0, 260.0), (520.0, 200.0), (420.0, 160.0), (360.0, 130.0)] {
@@ -72,6 +92,7 @@ enum RenderCheck {
                      width: width, height: height,
                      to: "\(output)/timeline-\(name)-\(Int(width))x\(Int(height)).png")
             }
+        }
         }
     }
 

@@ -63,7 +63,24 @@ public enum AgentStrings {
         selectedLanguage.locale
     }
 
+    /// Where a tool that is not the application should look for the strings.
+    ///
+    /// `Bundle.main` is the application when the application is running, and
+    /// the executable itself when anything else is. A command-line tool
+    /// therefore found no `.lproj`, fell through to `.main`, and got the key
+    /// back -- which reads as English, because the keys are English sentences.
+    /// The render tool looked correct while showing nothing that had been
+    /// translated, so it could not have caught a layout that only breaks in
+    /// Japanese, where the text has a different width.
+    ///
+    /// Nil in the application, which keeps using `Bundle.main`.
+    public static var resourceDirectoryOverride: URL?
+
     private static var localizationBundle: Bundle {
+        if let root = resourceDirectoryOverride,
+           let bundle = Bundle(url: root.appendingPathComponent("\(effectiveLanguageCode).lproj")) {
+            return bundle
+        }
         guard let path = Bundle.main.path(forResource: effectiveLanguageCode, ofType: "lproj"),
               let bundle = Bundle(path: path) else {
             return .main
