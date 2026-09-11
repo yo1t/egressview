@@ -56,6 +56,19 @@ try
     Assert(!TimelineAxisScale.Fit([10, 10, 1000], false).HasClipping && TimelineAxisScale.Fit([10, 10, 1000], false).Top == 1000,
         "connection timelines always retain the actual maximum");
 
+    var relaunchEncoded = UpdateRelaunchCommand.BuildEncodedPowerShell(4242, @"C:\Program Files\EgressView Agent\ui\EgressView.Agent.Ui.exe", "0.1.37", TimeSpan.FromMinutes(15));
+    var relaunchScript = Encoding.Unicode.GetString(Convert.FromBase64String(relaunchEncoded));
+    Assert(relaunchScript.Contains("Get-Process -Id $oldProcessId", StringComparison.Ordinal) &&
+        relaunchScript.Contains("ProductVersion", StringComparison.Ordinal) && relaunchScript.Contains("--tray", StringComparison.Ordinal) &&
+        relaunchScript.Contains("0.1.37", StringComparison.Ordinal),
+        "the unelevated update watcher waits for the old UI and the expected installed version before restoring the tray");
+    try
+    {
+        _ = UpdateRelaunchCommand.BuildEncodedPowerShell(1, @"C:\agent.exe", "1.0'; Stop-Process -Name explorer; #", TimeSpan.FromMinutes(15));
+        throw new InvalidOperationException("FAILED: unsafe update version reached the relaunch script");
+    }
+    catch (ArgumentException) { }
+
     var portableSettings = new AgentSettingsFile(1, "japanese", true, true, false, false, true, true, 12, 5, 360,
         "bytes", "name", "countries", 30, true, "fast");
     var portableBytes = AgentSettingsFile.Encode(portableSettings);
