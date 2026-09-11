@@ -4,7 +4,7 @@ import SwiftUI
 
 // Which application was talking, and when.
 
-struct AgentTimelineChart: View {
+public struct AgentTimelineChart: View {
     let model: TimelineModel
     let scale: TimeScale
     /// Shaded behind the bars. Without this a night of sleep is an empty
@@ -12,7 +12,13 @@ struct AgentTimelineChart: View {
     /// than "the Mac was not running".
     var sleepPeriods: [DateInterval] = []
 
-    var body: some View {
+    public init(model: TimelineModel, scale: TimeScale, sleepPeriods: [DateInterval] = []) {
+        self.model = model
+        self.scale = scale
+        self.sleepPeriods = sleepPeriods
+    }
+
+    public var body: some View {
         AgentChartCard(
             title: L("When traffic happened"),
             subtitle: L("Stacked by application, %@", scale.title)

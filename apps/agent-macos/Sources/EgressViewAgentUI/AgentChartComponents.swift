@@ -19,10 +19,14 @@ import SwiftUI
 /// covers every folded hour. Measured on a real store -- 91,695 chart rows,
 /// 62,458 of them named, and no rolled-up hour outside them. What ages out is
 /// the individual connections, not what they were called.
-struct AgentRolledUpHistoryNote: View {
-    let applies: Bool
+public struct AgentRolledUpHistoryNote: View {
+    public let applies: Bool
 
-    var body: some View {
+    public init(applies: Bool) {
+        self.applies = applies
+    }
+
+    public var body: some View {
         if applies {
             Label(
                 L("Part of this period is kept as hourly totals. Individual connections there have aged out, so the log and CSV cannot show them and nothing shorter than an hour is separated out. Destinations keep their names."),
@@ -41,10 +45,10 @@ struct AgentRolledUpHistoryNote: View {
 }
 
 /// Says what the chart cannot show, rather than letting the gaps read as quiet.
-struct AgentPartialCoverageNote: View {
+public struct AgentPartialCoverageNote: View {
     let count: Int
 
-    var body: some View {
+    public var body: some View {
         Label(
             L("%lld connections have no byte count yet. Data volume is measured when a connection ends, so anything still open is not included.", count),
             systemImage: "info.circle"
@@ -61,11 +65,11 @@ struct AgentPartialCoverageNote: View {
 /// of a day at nothing (P3-87). Letting the axis stop lower makes the day
 /// readable; **not saying so would make the drawing false**, which is worse
 /// than the crowding it fixes.
-struct AgentClippedPeakNote: View {
+public struct AgentClippedPeakNote: View {
     let count: Int
     let peak: String
 
-    var body: some View {
+    public var body: some View {
         Label(
             L("%1$lld bar(s) run past the top of the axis. The tallest is %2$@, drawn at full height so the rest of the period stays readable.",
               count, peak),
@@ -96,7 +100,7 @@ private struct AgentSectionBackground: ViewModifier {
 }
 
 extension View {
-    func agentSection() -> some View { modifier(AgentSectionBackground()) }
+    public func agentSection() -> some View { modifier(AgentSectionBackground()) }
 }
 
 /// Carries the accessibility element for a drawing that SwiftUI will not give
@@ -109,12 +113,12 @@ extension View {
 /// So this copies the thing that works rather than guessing at another
 /// modifier -- a real view, declaring itself an element, sized to the drawing
 /// it stands behind.
-struct AgentDrawingAccessibility: NSViewRepresentable {
+public struct AgentDrawingAccessibility: NSViewRepresentable {
     let label: String
 
-    func makeNSView(context: Context) -> NSView { Surface() }
+    public func makeNSView(context: Context) -> NSView { Surface() }
 
-    func updateNSView(_ view: NSView, context: Context) {
+    public func updateNSView(_ view: NSView, context: Context) {
         view.setAccessibilityLabel(label)
     }
 
@@ -126,12 +130,12 @@ struct AgentDrawingAccessibility: NSViewRepresentable {
     }
 }
 
-struct AgentChartCard<Content: View>: View {
+public struct AgentChartCard<Content: View>: View {
     let title: String
     let subtitle: String
     @ViewBuilder var content: Content
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.title3.weight(.semibold))
@@ -148,11 +152,11 @@ struct AgentChartCard<Content: View>: View {
     }
 }
 
-let agentSeriesPalette: [Color] = [
+public let agentSeriesPalette: [Color] = [
     .blue, .teal, .indigo, .orange, .pink, .mint, .purple, .brown,
 ]
 
-func agentSeriesColor(_ index: Int, isRemainder: Bool) -> Color {
+public func agentSeriesColor(_ index: Int, isRemainder: Bool) -> Color {
     // The remainder is deliberately grey: it is a residue, not a participant,
     // and colouring it like one invites reading it as a single application.
     isRemainder ? Color.secondary.opacity(0.45)
@@ -163,12 +167,12 @@ struct AgentSeriesLegend: View {
     struct Entry: Identifiable {
         let name: String
         let color: Color
-        var id: String { name }
+        public var id: String { name }
     }
 
     let entries: [Entry]
 
-    var body: some View {
+    public var body: some View {
         HStack(spacing: 12) {
             ForEach(entries) { entry in
                 HStack(spacing: 5) {
@@ -182,13 +186,76 @@ struct AgentSeriesLegend: View {
     }
 }
 
-struct AgentEmptyChartNote: View {
+public struct AgentEmptyChartNote: View {
     let text: String
 
-    var body: some View {
+    public init(text: String) {
+        self.text = text
+    }
+
+    public var body: some View {
         Text(text)
             .font(.callout)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, minHeight: 120)
     }
+}
+
+/// How a figure is written on a chart.
+///
+/// Lived in `AgentThreatPanel.swift` under a `// MARK: - Charts` heading,
+/// which is where it was noticed: rendering the charts on their own pulled in
+/// the whole threat screen, and through it the window controller, for eight
+/// lines of formatting.
+public func formattedMetric(_ value: Double, _ metric: TrafficMetric) -> String {
+    switch metric {
+    case .sessions:
+        return Int(value).formatted()
+    case .bytes:
+        return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary)
+    }
+}
+
+/// What a period is called on screen.
+///
+/// Lived in `ObservationWindowController.swift`, so drawing a chart pulled in
+/// the whole window -- 974 lines of tabs, pickers and state -- for five
+/// strings. The period menu and the charts both need it; neither needs the
+/// window.
+extension TimeScale: @retroactive Identifiable {
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .hour: return L("Last hour")
+        case .sixHours: return L("Last 6 hours")
+        case .day: return L("Last 24 hours")
+        case .week: return L("Last 7 days")
+        case .month: return L("Last 30 days")
+        }
+    }
+}
+
+/// How often the globe redraws.
+///
+/// Lived in `ObservationWindowController.swift` with the rest of the window's
+/// state. The globe reads it every frame; the window only offers it in a menu.
+public enum AgentGlobeFrameRate: Int, CaseIterable, Identifiable {
+    case energySaver = 3
+    case standard = 5
+    case smooth = 15
+
+    public static let defaultsKey = "agentGlobeFrameRate"
+    public static let defaultValue = AgentGlobeFrameRate.standard
+
+    public var id: Int { rawValue }
+
+    public var title: String {
+        switch self {
+        case .energySaver: return L("Energy saver (3 fps)")
+        case .standard: return L("Standard (5 fps)")
+        case .smooth: return L("Smooth (15 fps)")
+        }
+    }
+
 }

@@ -1,3 +1,4 @@
+import EgressViewAgentUI
 import AppKit
 import EgressViewAgentCore
 import SwiftUI
@@ -262,16 +263,5 @@ struct AgentThreatPanel: View {
         formatter.dateStyle = .short
         formatter.timeStyle = .medium
         return formatter.string(from: date)
-    }
-}
-
-// MARK: - Charts
-
-func formattedMetric(_ value: Double, _ metric: TrafficMetric) -> String {
-    switch metric {
-    case .sessions:
-        return Int(value).formatted()
-    case .bytes:
-        return ByteCountFormatter.string(fromByteCount: Int64(value), countStyle: .binary)
     }
 }

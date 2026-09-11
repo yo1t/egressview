@@ -4,13 +4,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { describe, it } = require('node:test');
+const { readAgentSource } = require('../helpers/agent-macos-sources.js');
 
 const root = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const store = read('apps/agent-macos/Sources/EgressViewAgentCore/ObservationStore.swift');
 const atlas = read('apps/agent-macos/Sources/EgressViewAgentCore/WorldAtlas.swift');
-// The globe moved out of ObservationWindowController.swift in P3-40.
-const globe = read('apps/agent-macos/Xcode/Host/AgentGlobeChart.swift');
+// The globe moved out of ObservationWindowController.swift in P3-40, and out
+// of the application target into a library later, so ask by name rather than
+// by directory.
+const globe = readAgentSource('AgentGlobeChart.swift');
 
 describe('macOS Agent all-time country history', () => {
   it('uses a bounded country summary and keeps unresolved addresses separate', () => {

@@ -4,6 +4,22 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.60
+
+**No change you can see, and that is the point of the release.** The four
+charts moved out of the application into a library so that a command-line tool
+and an automated test can draw them without opening the window. Both now do:
+the test fails if an axis label is drawn outside the plot, and the tool renders
+every chart in both languages at four window sizes so a layout defect shows up
+before a build reaches a Mac.
+
+The last four chart defects were all constants nobody had checked -- which end
+of a truncated name differs, how many rows fit, what to measure CPU with, how
+many gaps an HStack puts between its children. Every one of them was invisible
+in the code and obvious in a picture, and every one reached a device first.
+This release is the machinery for catching the next one earlier; the charts
+themselves are unchanged, which is what the install is meant to confirm.
+
 ### Agent for Mac 0.5.59
 
 **A destination now carries the name your Mac actually used.** The Hub could

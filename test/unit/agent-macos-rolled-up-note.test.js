@@ -1,12 +1,10 @@
 'use strict';
 
 const { describe, it } = require('node:test');
+const { readAgentSource } = require('../helpers/agent-macos-sources.js');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 
-const hostDir = path.join(__dirname, '..', '..', 'apps/agent-macos/Xcode/Host');
-const read = (f) => fs.readFileSync(path.join(hostDir, f), 'utf8');
+const read = readAgentSource;
 const window = read('ObservationWindowController.swift');
 const viewModel = read('AgentMainViewModel.swift');
 const components = read('AgentChartComponents.swift');

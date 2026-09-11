@@ -1,12 +1,10 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const { describe, it } = require('node:test');
+const { readAgentSource } = require('../helpers/agent-macos-sources.js');
 
-const hostDir = path.join(__dirname, '..', '..', 'apps/agent-macos/Xcode/Host');
-const read = (f) => fs.readFileSync(path.join(hostDir, f), 'utf8');
+const read = readAgentSource;
 // The observation window is several files since P3-40; the assertions below
 // are about the window's code, not about which file holds it.
 const windowSources = [

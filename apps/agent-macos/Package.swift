@@ -8,7 +8,9 @@ let package = Package(
     products: [
         .library(name: "EgressViewAgentCore", targets: ["EgressViewAgentCore"]),
         .library(name: "EgressViewNetworkExtension", targets: ["EgressViewNetworkExtension"]),
+        .library(name: "EgressViewAgentUI", targets: ["EgressViewAgentUI"]),
         .executable(name: "egressview-agent-spike", targets: ["EgressViewAgentSpike"]),
+        .executable(name: "render-check", targets: ["RenderCheck"]),
     ],
     targets: [
         .target(
@@ -33,13 +35,27 @@ let package = Package(
             name: "EgressViewNetworkExtension",
             dependencies: ["EgressViewAgentCore", "CLibProcBridge"]
         ),
+        // The charts, on their own. They were in the application target, so
+        // drawing one pulled in the window, its tabs and its state -- and a
+        // tool that renders them had to list sources file by file and reach
+        // into `Xcode/Host`. As a library they are something anything can
+        // draw: the application, a tool, a test.
+        .target(
+            name: "EgressViewAgentUI",
+            dependencies: ["EgressViewAgentCore"]
+        ),
+        .executableTarget(
+            name: "RenderCheck",
+            dependencies: ["EgressViewAgentUI"],
+            path: "Tools/RenderCheck"
+        ),
         .executableTarget(
             name: "EgressViewAgentSpike",
             dependencies: ["EgressViewAgentCore"]
         ),
         .testTarget(
             name: "EgressViewAgentCoreTests",
-            dependencies: ["EgressViewAgentCore", "EgressViewNetworkExtension"]
+            dependencies: ["EgressViewAgentCore", "EgressViewNetworkExtension", "EgressViewAgentUI"]
         ),
     ],
     swiftLanguageModes: [.v5]

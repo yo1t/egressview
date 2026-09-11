@@ -1,26 +1,8 @@
+import EgressViewAgentUI
 import AppKit
 import EgressViewAgentCore
 import SwiftUI
 
-enum AgentGlobeFrameRate: Int, CaseIterable, Identifiable {
-    case energySaver = 3
-    case standard = 5
-    case smooth = 15
-
-    static let defaultsKey = "agentGlobeFrameRate"
-    static let defaultValue = AgentGlobeFrameRate.standard
-
-    var id: Int { rawValue }
-
-    var title: String {
-        switch self {
-        case .energySaver: return L("Energy saver (3 fps)")
-        case .standard: return L("Standard (5 fps)")
-        case .smooth: return L("Smooth (15 fps)")
-        }
-    }
-
-}
 
 enum AgentMainTab: String, CaseIterable, Identifiable {
     /// What is happening on the network, and whether the agent is in a state to
@@ -60,20 +42,6 @@ enum AgentMainTab: String, CaseIterable, Identifiable {
 // the sankey cannot drift apart. Three views each holding their own window
 // would make "which app caused that spike, and where was it going"
 // unanswerable.
-extension TimeScale: @retroactive Identifiable {
-    public var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .hour: return L("Last hour")
-        case .sixHours: return L("Last 6 hours")
-        case .day: return L("Last 24 hours")
-        case .week: return L("Last 7 days")
-        case .month: return L("Last 30 days")
-        }
-    }
-}
-
 extension DestinationGrouping: @retroactive Identifiable {
     public var id: String { rawValue }
 
