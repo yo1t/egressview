@@ -69,6 +69,11 @@ internal static class Entry
 
         var globe = new WorldGlobeControl { IsRotating = false };
         VerifyAutomationPeer(globe, "Globe");
+        var atlasCountries = WorldAtlas.Load();
+        if (!atlasCountries.Any(country => country.Code == "JP") || !atlasCountries.Any(country => country.Code == "US"))
+            throw new InvalidOperationException($"Bundled atlas country names did not resolve to ISO codes: count={atlasCountries.Count}, " +
+                string.Join(", ", atlasCountries.Where(country => country.Name is "Japan" or "United States of America").Select(country => $"{country.Name}={country.Code ?? "null"}")));
+        globe.SetVisitedCountries(["JP", "US", "AU", "GB", "BR"]);
         globe.SetPoints(
         [
             new GlobePoint(35.68, 139.69, "JP", "Tokyo", 17900, 0),

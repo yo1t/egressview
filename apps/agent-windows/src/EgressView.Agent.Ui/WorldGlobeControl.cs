@@ -12,9 +12,10 @@ namespace EgressView.Agent.Ui;
 /// <summary>Offline orthographic globe. It never fetches tiles or sends addresses.</summary>
 public sealed class WorldGlobeControl : FrameworkElement
 {
-    private readonly IReadOnlyList<(double Lat, double Lon)[]> atlas = WorldAtlas.Load();
+    private readonly IReadOnlyList<WorldAtlas.Country> atlas = WorldAtlas.Load();
     private readonly DispatcherTimer timer;
-    private double longitude = 140;
+    private readonly (double Latitude, double Longitude) home = EgressView.Agent.Core.HomeLocation.Current();
+    private double longitude;
     private DateTimeOffset previousFrame;
     // Match the Mac Agent and stay still until the person explicitly asks
     // for motion. Reprojecting the complete atlas and every route at 5 fps
@@ -22,10 +23,11 @@ public sealed class WorldGlobeControl : FrameworkElement
     private bool rotating;
     private double degreesPerSecond = 6;
     private IReadOnlyList<EgressView.Agent.Core.GlobePoint> points = [];
-    private readonly (double Latitude, double Longitude) home = EgressView.Agent.Core.HomeLocation.Current();
+    private IReadOnlySet<string> visitedCountryCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     public WorldGlobeControl()
     {
+        longitude = home.Longitude;
         timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         timer.Tick += (_, _) => Advance();
         IsVisibleChanged += (_, _) => ReconcileTimer();
@@ -57,6 +59,14 @@ public sealed class WorldGlobeControl : FrameworkElement
         InvalidateVisual();
     }
 
+    public void SetVisitedCountries(IEnumerable<string> countryCodes)
+    {
+        visitedCountryCodes = countryCodes
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        InvalidateVisual();
+    }
+
     private void ReconcileTimer()
     {
         if (IsVisible && rotating)
@@ -70,7 +80,8 @@ public sealed class WorldGlobeControl : FrameworkElement
     private void Advance()
     {
         var now = DateTimeOffset.UtcNow;
-        longitude = (longitude + Math.Max(0, (now - previousFrame).TotalSeconds) * degreesPerSecond) % 360;
+        longitude = EgressView.Agent.Core.GlobePresentation.AdvanceLongitude(
+            longitude, now - previousFrame, degreesPerSecond);
         previousFrame = now;
         InvalidateVisual();
     }
@@ -93,8 +104,16 @@ public sealed class WorldGlobeControl : FrameworkElement
             DrawLine(drawing, gridPen, Enumerable.Range(-18, 37).Select(i => (i * 5d, meridian)), center, radius);
 
         var landPen = new Pen(accent, 0.9);
-        foreach (var land in atlas)
-            DrawLine(drawing, landPen, land, center, radius);
+        drawing.PushClip(new EllipseGeometry(center, radius, radius));
+        drawing.PushOpacity(0.20);
+        foreach (var country in atlas.Where(country => country.Code is not null && visitedCountryCodes.Contains(country.Code)))
+            foreach (var ring in country.Rings)
+                DrawVisitedLand(drawing, accent, ring, center, radius);
+        drawing.Pop();
+        drawing.Pop();
+        foreach (var country in atlas)
+            foreach (var ring in country.Rings)
+                DrawLine(drawing, landPen, ring, center, radius);
 
         // The globe's subject is the traffic, not the coastline: without a
         // line from here to each place, the markers say where the machine has
@@ -128,6 +147,35 @@ public sealed class WorldGlobeControl : FrameworkElement
         {
             drawing.DrawEllipse(null, new Pen(Brushes.Orange, 1.4), origin, 6, 6);
             drawing.DrawEllipse(Brushes.Orange, null, origin, 2.4, 2.4);
+        }
+    }
+
+    private void DrawVisitedLand(DrawingContext drawing, Brush fill,
+        IReadOnlyList<(double Lat, double Lon)> ring, Point center, double radius)
+    {
+        var geometry = new StreamGeometry { FillRule = FillRule.EvenOdd };
+        using (var context = geometry.Open())
+        {
+            var segment = new List<Point>();
+            foreach (var coordinate in ring)
+            {
+                var projected = Project(coordinate.Lat, coordinate.Lon, center, radius);
+                if (projected is { } point) segment.Add(point);
+                else Flush(segment, context);
+            }
+            Flush(segment, context);
+        }
+        geometry.Freeze();
+        drawing.DrawGeometry(fill, null, geometry);
+
+        static void Flush(List<Point> segment, StreamGeometryContext context)
+        {
+            if (segment.Count >= 3)
+            {
+                context.BeginFigure(segment[0], isFilled: true, isClosed: true);
+                context.PolyLineTo(segment.Skip(1).ToArray(), isStroked: false, isSmoothJoin: true);
+            }
+            segment.Clear();
         }
     }
 
