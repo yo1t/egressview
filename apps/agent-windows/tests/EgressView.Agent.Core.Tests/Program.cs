@@ -56,6 +56,12 @@ try
     Assert(!TimelineAxisScale.Fit([10, 10, 1000], false).HasClipping && TimelineAxisScale.Fit([10, 10, 1000], false).Top == 1000,
         "connection timelines always retain the actual maximum");
 
+    Assert(GlobePresentation.AdvanceLongitude(140, TimeSpan.FromSeconds(2), 6) == 128 &&
+        GlobePresentation.AdvanceLongitude(2, TimeSpan.FromSeconds(1), 6) == 356,
+        "the Windows globe turns eastward with the same decreasing centre longitude and wraparound as Mac");
+    Assert(GlobePresentation.CountryFlag("jp") == "🇯🇵" && GlobePresentation.CountryFlag("USA") == string.Empty,
+        "two-letter destination country codes produce a flag without guessing invalid codes");
+
     var relaunchEncoded = UpdateRelaunchCommand.BuildEncodedPowerShell(4242, @"C:\Program Files\EgressView Agent\ui\EgressView.Agent.Ui.exe", "0.1.37", TimeSpan.FromMinutes(15));
     var relaunchScript = Encoding.Unicode.GetString(Convert.FromBase64String(relaunchEncoded));
     Assert(relaunchScript.Contains("Get-Process -Id $oldProcessId", StringComparison.Ordinal) &&

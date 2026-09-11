@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private PeriodAnalysis? currentAnalysis;
     private PeriodAnalysis? previousAnalysis;
     private IReadOnlyList<GlobePoint> currentGlobePoints = [];
+    private int allTimeCountryCount;
     private readonly AgentAiClient aiClient = new();
     private readonly AiConversationStore aiHistory = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "EgressView", "Agent", "ai-conversations.jsonl"));
     private CancellationTokenSource? aiRequest;
@@ -137,8 +138,9 @@ public partial class MainWindow : Window
             Globe.SetPoints(currentGlobePoints);
             await RefreshCountryHistoryAsync();
             GlobeCaption.Text = currentGlobePoints.Count == 0
-                ? LocalizationManager.Text("GlobeUnavailable")
-                : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeLocations"), currentGlobePoints.Count);
+                ? allTimeCountryCount == 0 ? LocalizationManager.Text("GlobeUnavailable")
+                    : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeHistoryOnly"), allTimeCountryCount)
+                : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeLocationsWithHistory"), currentGlobePoints.Count, allTimeCountryCount);
             AutomationProperties.SetHelpText(Globe, GlobeCaption.Text);
             await RefreshThreatsAsync();
         }
@@ -148,12 +150,20 @@ public partial class MainWindow : Window
     private async Task RefreshCountryHistoryAsync()
     {
         var all = CountryScopeChoice.SelectedIndex == 1;
-        var request = all
-            ? JsonSerializer.Serialize(new { v = 1, op = "country-history", scope = "all" })
-            : JsonSerializer.Serialize(new { v = 1, op = "country-history", scope = "period", minutes = selectedMinutes });
-        var response = await AgentIpcClient.RequestAsync(request, lifetime.Token);
-        using var document = JsonDocument.Parse(response);
-        var rows = document.RootElement.GetProperty("data").Deserialize<List<CountryHistoryRow>>() ?? [];
+        var allResponse = await AgentIpcClient.RequestAsync(
+            JsonSerializer.Serialize(new { v = 1, op = "country-history", scope = "all" }), lifetime.Token);
+        using var allDocument = JsonDocument.Parse(allResponse);
+        var allRows = allDocument.RootElement.GetProperty("data").Deserialize<List<CountryHistoryRow>>() ?? [];
+        allTimeCountryCount = allRows.Count;
+        Globe.SetVisitedCountries(allRows.Select(row => row.CountryCode));
+        var rows = allRows;
+        if (!all)
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                JsonSerializer.Serialize(new { v = 1, op = "country-history", scope = "period", minutes = selectedMinutes }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            rows = document.RootElement.GetProperty("data").Deserialize<List<CountryHistoryRow>>() ?? [];
+        }
         CountryList.ItemsSource = rows.Select(CountryHistoryDisplayRow.From).ToArray();
     }
 
@@ -1371,6 +1381,7 @@ internal sealed class RankedRow(string name, long value, bool bytes)
 
 internal sealed class CountryHistoryDisplayRow
 {
+    public required string Flag { get; init; }
     public required string Country { get; init; }
     public required string Connections { get; init; }
     public required string First { get; init; }
@@ -1383,6 +1394,7 @@ internal sealed class CountryHistoryDisplayRow
         catch { country = value.CountryCode; }
         return new()
         {
+            Flag = GlobePresentation.CountryFlag(value.CountryCode),
             Country = country,
             Connections = value.Connections.ToString("N0", CultureInfo.CurrentCulture),
             First = value.FirstObservedAt.LocalDateTime.ToString("g", CultureInfo.CurrentCulture),
