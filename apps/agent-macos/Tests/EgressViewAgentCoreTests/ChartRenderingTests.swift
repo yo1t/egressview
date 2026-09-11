@@ -43,6 +43,31 @@ final class ChartRenderingTests: XCTestCase {
         return try XCTUnwrap(NSBitmapImageRep(data: data))
     }
 
+    /// The vertical runs of ink in the left gutter, in pixels.
+    ///
+    /// The axis labels are the only thing drawn left of the plot, so each run
+    /// is one label -- unless two of them touch, in which case the runs merge
+    /// and the tallest run doubles. That is P3-104 seen from the pixels.
+    private func gutterInkRuns(_ bitmap: NSBitmapImageRep, gutterWidth: Int) -> [Range<Int>] {
+        var runs: [Range<Int>] = []
+        var current = 0
+        for y in 0..<bitmap.pixelsHigh {
+            let inked = (0..<min(gutterWidth, bitmap.pixelsWide)).contains { x in
+                guard let colour = bitmap.colorAt(x: x, y: y) else { return false }
+                let brightness = colour.redComponent + colour.greenComponent + colour.blueComponent
+                return colour.alphaComponent > 0.1 && brightness < 2.4
+            }
+            if inked {
+                current += 1
+            } else if current > 0 {
+                runs.append((y - current)..<y)
+                current = 0
+            }
+        }
+        if current > 0 { runs.append((bitmap.pixelsHigh - current)..<bitmap.pixelsHigh) }
+        return runs
+    }
+
     private func spikyTimeline(metric: TrafficMetric) -> TimelineModel {
         let apps = ["Google Chrome Helper", "claude", "codex", "vmnet-natd", "ssh"]
         var rows: [AppTimelineTotal] = []
@@ -87,6 +112,56 @@ final class ChartRenderingTests: XCTestCase {
                             topRowHasInk(bitmap),
                             "\(language.rawValue) \(metric) \(Int(width))x\(Int(height)): 何かが上端に接している"
                         )
+                    }
+                }
+            }
+        }
+    }
+
+    /// The sizes the plot is drawn at, from a wide window down to a card with
+    /// almost nothing left. The short end is where P3-104 lived: the labels
+    /// are centred on their gridlines, so the space between them is the space
+    /// between the lines, and that follows the window.
+    private static let plotSizes: [(CGFloat, CGFloat)] = [
+        (700, 260), (520, 200), (420, 160), (360, 130),
+        (360, 96), (360, 70), (420, 64), (420, 56), (420, 48), (420, 40), (420, 34),
+    ]
+
+    func test縦軸のラベルが隣とぶつからない() throws {
+        // Measured 2026-09-11 with the three fixed fractions still in place:
+        // at 420x40 the gaps were 2px and 1px, and at 420x34 the three labels
+        // merged into a single 35px block. Readable, and a clump -- which is
+        // the complaint.
+        let minimumGap = Int(TimelineAxisLabels.minimumGap * 2)  // scale = 2
+        for language in [AgentLanguage.english, .japanese] {
+            try withLanguage(language) {
+                for metric in [TrafficMetric.sessions, .bytes] {
+                    for (width, height) in Self.plotSizes {
+                        let bitmap = try render(
+                            AgentTimelinePlot(model: spikyTimeline(metric: metric),
+                                              scale: .day, sleepPeriods: []),
+                            width: width, height: height
+                        )
+                        let where_ = "\(language.rawValue) \(metric) \(Int(width))x\(Int(height))"
+                        let runs = gutterInkRuns(bitmap, gutterWidth: 110)
+                        // The top value is never given up: without it the
+                        // chart shows a shape and no magnitude.
+                        XCTAssertFalse(runs.isEmpty, "\(where_): 軸ラベルがひとつも無い")
+                        XCTAssertGreaterThan(
+                            runs[0].lowerBound, 0, "\(where_): 一番上のラベルが枠に接している"
+                        )
+                        for run in runs {
+                            XCTAssertLessThanOrEqual(
+                                run.count, 20,
+                                "\(where_): 高さ\(run.count)pxの塊がある。ラベル同士がくっついている"
+                            )
+                        }
+                        for (upper, lower) in zip(runs, runs.dropFirst()) {
+                            XCTAssertGreaterThanOrEqual(
+                                lower.lowerBound - upper.upperBound, minimumGap,
+                                "\(where_): ラベルの間が\(lower.lowerBound - upper.upperBound)pxしかない"
+                            )
+                        }
                     }
                 }
             }
@@ -141,5 +216,66 @@ final class SankeyViewportTests: XCTestCase {
         XCTAssertEqual(SankeyViewport.headerHeight, 17)
         XCTAssertEqual(SankeyViewport.minimumHeight, 17 + 3 * 18)
         XCTAssertEqual(SankeyViewport.contentHeight(rows: 30), 17 + 30 * 18)
+    }
+}
+
+/// Which values the vertical axis says, and how many of them fit.
+///
+/// P3-104 was `[0.0, 0.5, 1.0]` written into the drawing: three labels at
+/// every card height, which in a short card became a clump. As with
+/// `SankeyViewport`, the number that was wrong could only be reached by
+/// drawing it.
+@MainActor
+final class TimelineAxisLabelsTests: XCTestCase {
+    /// A label box measured from the 9pt system font the chart draws with.
+    private let labelHeight: CGFloat = 11
+
+    func test高さが足りなければラベルを減らす() {
+        let tall = TimelineAxisLabels.fractions(plotHeight: 200, labelHeight: labelHeight)
+        let short = TimelineAxisLabels.fractions(plotHeight: 16, labelHeight: labelHeight)
+        let tiny = TimelineAxisLabels.fractions(plotHeight: 8, labelHeight: labelHeight)
+        XCTAssertEqual(tall, [0, 0.5, 1])
+        XCTAssertEqual(short, [0, 1])
+        XCTAssertEqual(tiny, [1])
+    }
+
+    func test最大値のラベルはどの高さでも残る() {
+        // The middle tick is a help; the top is the only place the chart says
+        // how big the tallest bucket is. Giving that up would undo P3-90.
+        for height in stride(from: CGFloat(0), through: 300, by: 1) {
+            let fractions = TimelineAxisLabels.fractions(
+                plotHeight: height, labelHeight: labelHeight
+            )
+            XCTAssertEqual(fractions.last, 1, "高さ\(height)で最大値のラベルが消えた")
+        }
+    }
+
+    func testどの高さでもラベル同士は離れている() {
+        for height in stride(from: CGFloat(0), through: 300, by: 1) {
+            let fractions = TimelineAxisLabels.fractions(
+                plotHeight: height, labelHeight: labelHeight
+            )
+            XCTAssertFalse(
+                TimelineAxisLabels.labelsCollide(
+                    fractions, plotHeight: height, labelHeight: labelHeight
+                ),
+                "高さ\(height)でラベルが重なる"
+            )
+        }
+    }
+
+    func test固定の三つだったころは重なる() {
+        // The defect, stated as a test. Without this the one above could pass
+        // by never returning anything, and a collision check that cannot see
+        // a collision is the check that let P3-104 through.
+        XCTAssertTrue(
+            TimelineAxisLabels.labelsCollide([0, 0.5, 1], plotHeight: 16, labelHeight: labelHeight),
+            "旧来の三つ固定でも重ならないことになっている"
+        )
+    }
+
+    func test間隔はゼロではない() {
+        // Boxes that merely fail to overlap still read as one block.
+        XCTAssertGreaterThan(TimelineAxisLabels.minimumGap, 0)
     }
 }
