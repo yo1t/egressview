@@ -1,14 +1,13 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
 const test = require('node:test');
+const { readAgentSource } = require('../helpers/agent-macos-sources.js');
 
-const dir = 'apps/agent-macos/Xcode/Host/';
-const globe = readFileSync(dir + 'AgentGlobeChart.swift', 'utf8');
-const sankey = readFileSync(dir + 'AgentSankeyChart.swift', 'utf8');
-const timeline = readFileSync(dir + 'AgentTimelineChart.swift', 'utf8');
-const components = readFileSync(dir + 'AgentChartComponents.swift', 'utf8');
+const globe = readAgentSource('AgentGlobeChart.swift');
+const sankey = readAgentSource('AgentSankeyChart.swift');
+const timeline = readAgentSource('AgentTimelineChart.swift');
+const components = readAgentSource('AgentChartComponents.swift');
 
 // Measured 2026-09-03 with the accessibility API, before and after:
 //
