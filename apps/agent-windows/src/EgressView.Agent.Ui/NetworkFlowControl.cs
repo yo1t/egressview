@@ -14,12 +14,6 @@ public sealed class NetworkFlowControl : FrameworkElement
 {
     protected override AutomationPeer OnCreateAutomationPeer() => new FrameworkElementAutomationPeer(this);
 
-    /// The most nodes ever named per side, before the height available cuts
-    /// it further. Past this the ribbons are too thin to read, so the rest is
-    /// summed into one visible band instead of being dropped: a chart that
-    /// silently omits most of its data looks complete while showing a
-    /// fraction.
-    private const int TopNodes = 7;
     private const double LabelWidth = 132;
     private const double NodeWidth = 9;
     private const double NodeGap = 6;
@@ -142,11 +136,9 @@ public sealed class NetworkFlowControl : FrameworkElement
 
         // A proportional node can be a couple of pixels tall, so its label is
         // pushed clear of the previous one rather than drawn on top of it.
-        foreach (var (node, y) in Declutter(apps, appRects, ActualHeight))
-            DrawLabel(drawing, node.Name, FormatValue(node.Value), new Point(0, y), LabelWidth - 10, TextAlignment.Left);
-        foreach (var (node, y) in Declutter(destinations, destinationRects, ActualHeight))
-            DrawLabel(drawing, node.Name, FormatValue(node.Value), new Point(rightX + NodeWidth + 10, y),
-                Math.Max(20, ActualWidth - rightX - NodeWidth - 11), TextAlignment.Right);
+        DrawLabels(drawing, Declutter(apps, appRects, ActualHeight), 0, LabelWidth - 10, TextAlignment.Left);
+        DrawLabels(drawing, Declutter(destinations, destinationRects, ActualHeight), rightX + NodeWidth + 10,
+            Math.Max(20, ActualWidth - rightX - NodeWidth - 11), TextAlignment.Right);
     }
 
     /// The nodes worth naming: the largest few, cut short at the first one
@@ -156,10 +148,12 @@ public sealed class NetworkFlowControl : FrameworkElement
     {
         var ranked = groups.Select(group => new Node(group.Key, group.Sum(entry => entry.Value)))
             .OrderByDescending(node => node.Value)
-            .Take(TopNodes)
             .ToArray();
         var total = ranked.Length == 0 ? 0 : groups.Sum(group => group.Sum(entry => entry.Value));
         if (total <= 0) return [];
+
+        var capacity = SankeyLabelLayout.NamedCapacity(height, LineHeight);
+        if (ranked.Length > capacity) ranked = ranked.Take(capacity).ToArray();
 
         var named = 0;
         for (var index = 0; index < ranked.Length; index++)
@@ -228,14 +222,31 @@ public sealed class NetworkFlowControl : FrameworkElement
         return placed.Where(entry => entry.Y >= 0).ToList();
     }
 
-    private void DrawLabel(DrawingContext drawing, string value, string metric, Point origin, double width, TextAlignment alignment)
+    private void DrawLabels(DrawingContext drawing, IReadOnlyList<(Node Node, double Y)> placed,
+        double originX, double width, TextAlignment alignment)
     {
-        var text = value.Length > 20 ? value[..9] + "…" + value[^8..] : value;
-        var formatted = new FormattedText($"{text}  {metric}", System.Globalization.CultureInfo.CurrentCulture,
-            System.Windows.FlowDirection.LeftToRight, new Typeface("Segoe UI Variable Text"), 10.5,
-            (Brush)FindResource("TextPrimaryBrush"), VisualTreeHelper.GetDpi(this).PixelsPerDip)
-        { MaxTextWidth = Math.Max(20, width), TextAlignment = alignment, Trimming = TextTrimming.CharacterEllipsis };
-        drawing.DrawText(formatted, origin);
+        if (placed.Count == 0) return;
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        var typeface = new Typeface("Segoe UI Variable Text");
+        var brush = (Brush)FindResource("TextPrimaryBrush");
+        var pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        double Measure(string text) => new FormattedText(text, culture, System.Windows.FlowDirection.LeftToRight,
+            typeface, 10.5, brush, pixelsPerDip).WidthIncludingTrailingWhitespace;
+
+        var metrics = placed.Select(entry => FormatValue(entry.Node.Value)).ToArray();
+        var nameWidths = metrics.Select(metric => Math.Max(20, width - Measure($"  {metric}") - 1)).ToArray();
+        var fitted = SankeyLabelLayout.FitDistinct(placed.Select(entry => entry.Node.Name).ToArray(), nameWidths, Measure);
+        for (var index = 0; index < placed.Count; index++)
+        {
+            // Width fitting happens exactly once above with the same font and
+            // DPI. Do not ask WPF to append a second ellipsis here.
+            var formatted = new FormattedText($"{fitted[index]}  {metrics[index]}", culture,
+                System.Windows.FlowDirection.LeftToRight, typeface, 10.5, brush, pixelsPerDip);
+            var x = alignment == TextAlignment.Right
+                ? originX + width - formatted.WidthIncludingTrailingWhitespace
+                : originX;
+            drawing.DrawText(formatted, new Point(Math.Max(originX, x), placed[index].Y));
+        }
     }
 
     private Brush MutedBrush() => (Brush)FindResource("TextSecondaryBrush");
