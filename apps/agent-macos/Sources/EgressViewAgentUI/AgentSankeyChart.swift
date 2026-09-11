@@ -4,10 +4,12 @@ import SwiftUI
 
 // Which application reached which destination, as ribbons between two columns.
 
-struct AgentSankeyChart: View {
-    let model: SankeyModel
+public struct AgentSankeyChart: View {
+    public let model: SankeyModel
 
-    var body: some View {
+    public init(model: SankeyModel) { self.model = model }
+
+    public var body: some View {
         AgentChartCard(
             title: L("Which application went where"),
             subtitle: model.metric == .bytes
@@ -229,7 +231,7 @@ private struct AgentSankeyColumn: View {
         )
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: alignment, spacing: 0) {
             Text(title)
                 .font(.caption.weight(.medium))

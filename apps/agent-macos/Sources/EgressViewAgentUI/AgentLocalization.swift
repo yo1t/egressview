@@ -1,15 +1,15 @@
 import Foundation
 
-enum AgentLanguage: String, CaseIterable, Identifiable {
+public enum AgentLanguage: String, CaseIterable, Identifiable {
     case system
     case english
     case japanese
 
-    static let defaultsKey = "agentLanguage"
+    public static let defaultsKey = "agentLanguage"
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var title: String {
+    public var title: String {
         switch self {
         case .system: return AgentStrings.text("System Default")
         case .english: return "English"
@@ -31,12 +31,12 @@ enum AgentLanguage: String, CaseIterable, Identifiable {
         return preferred.lowercased().hasPrefix("ja") ? "ja" : "en"
     }
 
-    var locale: Locale {
+    public var locale: Locale {
         Locale(identifier: effectiveLanguageCode)
     }
 }
 
-enum AgentStrings {
+public enum AgentStrings {
     static var selectedLanguage: AgentLanguage {
         guard let raw = UserDefaults.standard.string(forKey: AgentLanguage.defaultsKey),
               let language = AgentLanguage(rawValue: raw) else {
@@ -45,11 +45,11 @@ enum AgentStrings {
         return language
     }
 
-    static func text(_ key: String, _ arguments: CVarArg...) -> String {
+    public static func text(_ key: String, _ arguments: CVarArg...) -> String {
         text(key, arguments: arguments)
     }
 
-    static func text(_ key: String, arguments: [CVarArg]) -> String {
+    public static func text(_ key: String, arguments: [CVarArg]) -> String {
         let format = localizationBundle.localizedString(forKey: key, value: key, table: nil)
         guard !arguments.isEmpty else { return format }
         return String(format: format, locale: effectiveLocale, arguments: arguments)
@@ -73,10 +73,10 @@ enum AgentStrings {
 }
 
 @MainActor
-final class AgentLanguageSettings: ObservableObject {
-    static let shared = AgentLanguageSettings()
+public final class AgentLanguageSettings: ObservableObject {
+    public static let shared = AgentLanguageSettings()
 
-    @Published var language: AgentLanguage {
+    @Published public var language: AgentLanguage {
         didSet { UserDefaults.standard.set(language.rawValue, forKey: AgentLanguage.defaultsKey) }
     }
 
@@ -85,6 +85,6 @@ final class AgentLanguageSettings: ObservableObject {
     }
 }
 
-func L(_ key: String, _ arguments: CVarArg...) -> String {
+public func L(_ key: String, _ arguments: CVarArg...) -> String {
     AgentStrings.text(key, arguments: arguments)
 }

@@ -8,6 +8,7 @@ let package = Package(
     products: [
         .library(name: "EgressViewAgentCore", targets: ["EgressViewAgentCore"]),
         .library(name: "EgressViewNetworkExtension", targets: ["EgressViewNetworkExtension"]),
+        .library(name: "EgressViewAgentUI", targets: ["EgressViewAgentUI"]),
         .executable(name: "egressview-agent-spike", targets: ["EgressViewAgentSpike"]),
         .executable(name: "render-check", targets: ["RenderCheck"]),
     ],
@@ -34,25 +35,19 @@ let package = Package(
             name: "EgressViewNetworkExtension",
             dependencies: ["EgressViewAgentCore", "CLibProcBridge"]
         ),
-        // The charts, rendered offscreen so their layout can be checked without
-        // installing a build. Sources are listed rather than taken wholesale:
-        // `Xcode/Host` also holds the application's own `main.swift`, and two
-        // entry points cannot share a target.
+        // The charts, on their own. They were in the application target, so
+        // drawing one pulled in the window, its tabs and its state -- and a
+        // tool that renders them had to list sources file by file and reach
+        // into `Xcode/Host`. As a library they are something anything can
+        // draw: the application, a tool, a test.
+        .target(
+            name: "EgressViewAgentUI",
+            dependencies: ["EgressViewAgentCore"]
+        ),
         .executableTarget(
             name: "RenderCheck",
-            dependencies: ["EgressViewAgentCore"],
-            path: "Xcode/Host",
-            // The `.lproj` bundles beside these sources belong to the Xcode
-            // application, not to this tool. Excluding them keeps the manifest
-            // from needing a `defaultLocalization` it has no use for.
-            exclude: ["en.lproj", "ja.lproj", "Assets.xcassets", "Info.plist"],
-            sources: [
-                "RenderCheck.swift",
-                "AgentSankeyChart.swift",
-                "AgentTimelineChart.swift",
-                "AgentChartComponents.swift",
-                "AgentLocalization.swift",
-            ]
+            dependencies: ["EgressViewAgentUI"],
+            path: "Tools/RenderCheck"
         ),
         .executableTarget(
             name: "EgressViewAgentSpike",

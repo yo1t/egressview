@@ -1,3 +1,4 @@
+import EgressViewAgentUI
 import Combine
 import EgressViewAgentCore
 import Foundation

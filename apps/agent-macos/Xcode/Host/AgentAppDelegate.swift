@@ -1,3 +1,4 @@
+import EgressViewAgentUI
 import AppKit
 import Combine
 import EgressViewAgentCore

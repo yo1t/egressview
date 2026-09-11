@@ -1,5 +1,6 @@
 import AppKit
 import EgressViewAgentCore
+import EgressViewAgentUI
 import SwiftUI
 
 // Renders the charts offscreen and writes PNGs, so their layout can be checked
@@ -11,7 +12,6 @@ import SwiftUI
 // running agent cannot be taken here at all -- the app is `LSUIElement`, which
 // makes it invisible to every screen-control tool -- so the choice was between
 // this and asking a person every time.
-@main
 enum RenderCheck {
     @MainActor
     static func main() {
@@ -90,3 +90,5 @@ enum RenderCheck {
         print("\(path)  \(Int(width))x\(Int(height))")
     }
 }
+
+MainActor.assumeIsolated { RenderCheck.main() }

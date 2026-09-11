@@ -8,9 +8,15 @@ import SwiftUI
 // nothing for VoiceOver to land on, and the rotation cannot live in @State
 // because SwiftUI may discard a state change made during rendering -- and did.
 
-struct AgentGlobeChart: View {
-    let model: GlobeModel
-    let atlas: WorldAtlas?
+public struct AgentGlobeChart: View {
+    public let model: GlobeModel
+    public let atlas: WorldAtlas?
+
+    public init(model: GlobeModel, atlas: WorldAtlas?, isOnScreen: Bool) {
+        self.model = model
+        self.atlas = atlas
+        self.isOnScreen = isOnScreen
+    }
 
     private enum CountryView: String, CaseIterable, Identifiable {
         case globe
@@ -18,7 +24,7 @@ struct AgentGlobeChart: View {
 
         var id: String { rawValue }
 
-        var title: String {
+        public var title: String {
             switch self {
             case .globe: return L("Globe")
             case .destinations: return L("Destination countries")
@@ -44,7 +50,7 @@ struct AgentGlobeChart: View {
             }
         }
 
-        var title: String {
+        public var title: String {
             switch self {
             case .slow: return L("Slow")
             case .normal: return L("Normal")
@@ -74,7 +80,7 @@ struct AgentGlobeChart: View {
     @Environment(\.controlActiveState) private var controlActiveState
 
     /// Whether the window is on screen and this globe's tab is the one showing.
-    let isOnScreen: Bool
+    public let isOnScreen: Bool
 
     private var isAnimating: Bool {
         isOnScreen && isRunning && controlActiveState != .inactive
@@ -115,7 +121,7 @@ struct AgentGlobeChart: View {
         .controlSize(.small)
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .center, spacing: 12) {
@@ -239,7 +245,7 @@ struct AgentGlobeChart: View {
 private struct AgentCountryHistoryList: View {
     let rows: [CountryVisitSummary]
 
-    var body: some View {
+    public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(L("Destination countries"))
@@ -337,11 +343,11 @@ private struct AgentGlobeNativeView: NSViewRepresentable {
     let isRotating: Bool
     let isAnimating: Bool
 
-    func makeNSView(context: Context) -> AgentGlobeDrawingView {
+    public func makeNSView(context: Context) -> AgentGlobeDrawingView {
         AgentGlobeDrawingView()
     }
 
-    func updateNSView(_ view: AgentGlobeDrawingView, context: Context) {
+    public func updateNSView(_ view: AgentGlobeDrawingView, context: Context) {
         view.configure(
             model: model,
             atlas: atlas,
