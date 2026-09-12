@@ -119,8 +119,13 @@ internal sealed class AgentWindowsService : ServiceBase
 {
     private CancellationTokenSource? stop;
     private Task? worker;
+    private ObservationStore? activeStore;
 
-    public AgentWindowsService() => ServiceName = "EgressViewAgent";
+    public AgentWindowsService()
+    {
+        ServiceName = "EgressViewAgent";
+        CanHandlePowerEvent = true;
+    }
 
     protected override void OnStart(string[] args)
     {
@@ -144,11 +149,30 @@ internal sealed class AgentWindowsService : ServiceBase
         stop?.Dispose();
     }
 
-    private static async Task RunAsync(CancellationToken cancellationToken)
+    protected override bool OnPowerEvent(PowerBroadcastStatus powerStatus)
+    {
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (powerStatus == PowerBroadcastStatus.Suspend) activeStore?.BeginSleepPeriod(now);
+            else if (powerStatus is PowerBroadcastStatus.ResumeAutomatic or PowerBroadcastStatus.ResumeSuspend)
+                activeStore?.EndSleepPeriod(now);
+        }
+        catch (Exception exception) { WriteEventLogFailure(exception); }
+        return true;
+    }
+
+    private async Task RunAsync(CancellationToken cancellationToken)
     {
         var root = Path.Combine(AppContext.BaseDirectory, "data");
         Directory.CreateDirectory(root);
         using var store = new ObservationStore(Path.Combine(root, "egressview-agent.db"));
+        activeStore = store;
+        // A hibernate/update sequence can restart the service instead of
+        // delivering Resume. Startup is the conservative end of that sleep.
+        store.EndSleepPeriod(DateTimeOffset.UtcNow);
+        try
+        {
         await using var pipeline = new ObservationPipeline(store, deliveryEnabled: () => store.DeliveryEnabled);
         await using var monitoring = new MonitoringController(store, pipeline, Path.Combine(root, "monitoring.disabled"));
         monitoring.Start();
@@ -187,6 +211,8 @@ internal sealed class AgentWindowsService : ServiceBase
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(monitoring.Snapshot(), store, DiagnosticsReport.CurrentVersion, monitoring.Enabled,
                 capabilityStatus: deliveryController.CapabilityStatus));
+        }
+        finally { activeStore = null; }
     }
 
     private static async Task RunChartAggregationAsync(ObservationStore store, CancellationToken cancellationToken)
@@ -230,6 +256,7 @@ internal sealed class AgentWindowsService : ServiceBase
                     if (result.HourlySummariesDeleted > 0) store.AddCounter("retention-hourly-deleted", result.HourlySummariesDeleted);
                     if (result.ChartSummariesDeleted > 0) store.AddCounter("retention-chart-hourly-deleted", result.ChartSummariesDeleted);
                     if (result.CoverageSessionsDeleted > 0) store.AddCounter("retention-coverage-deleted", result.CoverageSessionsDeleted);
+                    if (result.SleepPeriodsDeleted > 0) store.AddCounter("retention-sleep-periods-deleted", result.SleepPeriodsDeleted);
                     if (result.MayHaveMore(50_000)) await Task.Delay(100, cancellationToken);
                 } while (result.MayHaveMore(50_000) && !cancellationToken.IsCancellationRequested);
                 if (store.CompactIfBeneficial()) store.AddCounter("retention-compactions", 1);
