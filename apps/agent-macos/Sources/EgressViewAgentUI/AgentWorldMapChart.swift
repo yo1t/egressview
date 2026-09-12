@@ -21,7 +21,7 @@ public struct AgentWorldMapChart: View {
         self.visitedCountryCodes = visitedCountryCodes
     }
 
-    private static let projection = EquirectangularProjection()
+    private static let projection = EqualEarthProjection()
 
     public var body: some View {
         Canvas { context, size in
@@ -44,11 +44,17 @@ public struct AgentWorldMapChart: View {
         guard map.width > 0, let atlas else { return }
 
         // The sea, so that a country nobody reached still reads as a place
-        // rather than as a hole in the drawing.
-        context.fill(
-            Path(roundedRect: map, cornerRadius: 4),
-            with: .color(.blue.opacity(0.06))
-        )
+        // rather than as a hole in the drawing. Drawn along the projection's
+        // own outline: Equal Earth's meridians curve in towards the poles, so
+        // a filled rectangle would be the sea of a different map.
+        var sea = Path()
+        let edge = Self.projection.outline(in: map)
+        if let first = edge.first {
+            sea.move(to: first)
+            for point in edge.dropFirst() { sea.addLine(to: point) }
+            sea.closeSubpath()
+        }
+        context.fill(sea, with: .color(.blue.opacity(0.06)))
 
         var unvisited = Path()
         var visited = Path()

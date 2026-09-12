@@ -1,18 +1,47 @@
 import XCTest
 @testable import EgressViewAgentCore
 
-/// The flat map's arithmetic (P3-109).
-final class EquirectangularProjectionTests: XCTestCase {
-    private let projection = EquirectangularProjection()
-    private let map = CGRect(x: 0, y: 0, width: 360, height: 180)
+/// The flat map's arithmetic: Equal Earth (P3-109).
+final class EqualEarthProjectionTests: XCTestCase {
+    private let projection = EqualEarthProjection()
+    private let map = CGRect(x: 0, y: 0, width: 360, height: 360 / EqualEarthProjection.aspectRatio)
 
-    func test四隅が四隅に来る() {
-        XCTAssertEqual(projection.project(latitude: 90, longitude: -180, in: map), CGPoint(x: 0, y: 0))
-        XCTAssertEqual(projection.project(latitude: -90, longitude: 180, in: map), CGPoint(x: 360, y: 180))
+    func test極は赤道より狭い() {
+        // The visible difference from a plate carrée, and the reason for the
+        // choice: Equal Earth's meridians curve in, so a degree of longitude
+        // at the pole takes less width than one at the equator. A rectangle
+        // means the projection was not applied.
+        let equator = projection.project(latitude: 0, longitude: 180, in: map).x
+            - projection.project(latitude: 0, longitude: -180, in: map).x
+        let nearPole = projection.project(latitude: 85, longitude: 180, in: map).x
+            - projection.project(latitude: 85, longitude: -180, in: map).x
+        XCTAssertLessThan(nearPole, equator * 0.6, "極付近が赤道と同じ幅で描かれている")
+        XCTAssertGreaterThan(nearPole, 0)
+    }
+
+    func test上下と左右の端が地図の端に来る() {
+        let top = projection.project(latitude: 90, longitude: 0, in: map)
+        let bottom = projection.project(latitude: -90, longitude: 0, in: map)
+        XCTAssertEqual(top.y, map.minY, accuracy: 0.001)
+        XCTAssertEqual(bottom.y, map.maxY, accuracy: 0.001)
+        XCTAssertEqual(projection.project(latitude: 0, longitude: -180, in: map).x, map.minX, accuracy: 0.001)
+        XCTAssertEqual(projection.project(latitude: 0, longitude: 180, in: map).x, map.maxX, accuracy: 0.001)
+    }
+
+    func test縦横比は式から導かれる() {
+        // Typed in, this would be one more constant nobody checks, and would
+        // go quietly wrong the moment the projection changed.
+        let width = EqualEarthProjection.unitPoint(latitude: 0, longitude: 180).x
+        let height = EqualEarthProjection.unitPoint(latitude: 90, longitude: 0).y
+        XCTAssertEqual(EqualEarthProjection.aspectRatio, CGFloat(width / height), accuracy: 0.000_001)
+        // Equal Earth is a little wider than 2:1; a plate carrée is exactly 2.
+        XCTAssertEqual(EqualEarthProjection.aspectRatio, 2.055, accuracy: 0.01)
     }
 
     func test赤道と本初子午線が中央を通る() {
-        XCTAssertEqual(projection.project(latitude: 0, longitude: 0, in: map), CGPoint(x: 180, y: 90))
+        let centre = projection.project(latitude: 0, longitude: 0, in: map)
+        XCTAssertEqual(centre.x, map.midX, accuracy: 0.001)
+        XCTAssertEqual(centre.y, map.midY, accuracy: 0.001)
     }
 
     func test北が上() {
@@ -35,7 +64,7 @@ final class EquirectangularProjectionTests: XCTestCase {
                        CGRect(x: 0, y: 0, width: 200, height: 1000),
                        CGRect(x: 10, y: 20, width: 640, height: 320)] {
             let rect = projection.mapRect(fitting: bounds)
-            XCTAssertEqual(rect.width / rect.height, EquirectangularProjection.aspectRatio, accuracy: 0.001,
+            XCTAssertEqual(rect.width / rect.height, EqualEarthProjection.aspectRatio, accuracy: 0.001,
                            "\(bounds)で縦横比が崩れた")
             XCTAssertTrue(bounds.insetBy(dx: -0.01, dy: -0.01).contains(rect), "\(bounds)からはみ出した")
         }
@@ -52,7 +81,7 @@ final class EquirectangularProjectionTests: XCTestCase {
 /// Fiji, Russia and Antarctica. Each one drew a line across the whole map
 /// before this existed.
 final class AntimeridianSplitTests: XCTestCase {
-    private let projection = EquirectangularProjection()
+    private let projection = EqualEarthProjection()
 
     func test跨がない環はそのまま() {
         let ring = [(longitude: 10.0, latitude: 0.0), (longitude: 20.0, latitude: 5.0),
