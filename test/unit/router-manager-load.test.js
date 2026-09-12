@@ -6,8 +6,16 @@ const assert = require('node:assert/strict');
 const runtime = require('../../src/runtime');
 const { createRouterManager } = require('../../src/router-manager');
 
-function settle() {
-  return new Promise(resolve => setImmediate(resolve));
+/// Drains the immediate queue until the work has actually finished.
+///
+/// One tick was enough while a poll recorded its connections in a single
+/// synchronous run. It now yields to the event loop between slices (P3-112),
+/// so a cycle takes several ticks -- which is the point of the change, and
+/// what this gate has to wait for rather than assume away.
+async function settle(ticks = 64) {
+  for (let i = 0; i < ticks; i += 1) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
 }
 
 function makeManualTimer() {
@@ -229,5 +237,40 @@ describe('router manager 10-router gate', () => {
     assert.match(byId.get(failedId).lastError, /injected router failure/);
     assert.equal([...byId.values()].filter(status => status.ready && status.sessionCount === 1_000).length, 9);
     manager.stopAll();
+  });
+});
+
+describe('ルーター取り込みが、切って呼ばれている', () => {
+  it('分割する経路があるならそれを使う', async () => {
+    // The shape of defect this guards against is the one found on 2026-08-24
+    // three times over: an implementation that is complete, tested, and never
+    // reached. The slicing is only worth anything if the poller calls it.
+    const history = makeHistory();
+    initRuntime(history);
+    const calls = { sliced: 0, whole: 0 };
+    const stub = {
+      ...runtime,
+      recordConnections: (...args) => { calls.whole += 1; return runtime.recordConnections(...args); },
+      recordConnectionsInSlices: async (...args) => {
+        calls.sliced += 1;
+        return runtime.recordConnectionsInSlices(...args);
+      },
+    };
+    const routerRecords = records().slice(0, 1);
+    const timer = makeManualTimer();
+    const adapters = createDeferredAdapters(new Map([[routerRecords[0].id, sessionsFor(0)]]));
+    const manager = createRouterManager({
+      records: routerRecords,
+      runtime: stub,
+      history,
+      appState: { inspectEnabled: true },
+      createAdapter: adapters.createAdapter,
+      schedulerOptions: { schedulePoll: timer.schedulePoll, cancelPoll: timer.cancelPoll },
+    });
+
+    await runInitialCycles(manager, timer, adapters, 1);
+
+    assert.equal(calls.sliced, 1, '分割する経路が呼ばれていない');
+    assert.equal(calls.whole, 0, '分割しない経路が使われている');
   });
 });
