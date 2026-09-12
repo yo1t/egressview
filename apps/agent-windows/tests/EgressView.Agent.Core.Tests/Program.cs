@@ -551,7 +551,7 @@ try
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v14.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v15.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
         Assert(migratedAgain.SchemaVersion == 15, "migration is idempotent on restart");
