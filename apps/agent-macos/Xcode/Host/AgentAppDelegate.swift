@@ -86,7 +86,7 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
                 // time this runs, so the window re-reads rather than being
                 // handed anything -- and it only does so if it is open and
                 // showing the log (P3-107).
-                self?.observationWindow?.observationsArrived(observations.count)
+                self?.observationWindow?.observationsArrived(observations)
             }
         },
         storageErrorHandler: { [weak self] error in

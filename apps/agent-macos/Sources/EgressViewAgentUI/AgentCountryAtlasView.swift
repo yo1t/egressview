@@ -15,17 +15,26 @@ public struct AgentCountryAtlasView: View {
     let atlas: WorldAtlas?
     let visitedCountryCodes: Set<String>
     let countryHistory: [CountryVisitSummary]
+    /// Countries reached in the last few seconds, fading.
+    var glow = CountryGlow()
+    /// The moment the glow is drawn at; the model advances it while anything
+    /// is still fading.
+    var now = Date()
     let onCollapse: () -> Void
 
     public init(
         atlas: WorldAtlas?,
         visitedCountryCodes: Set<String>,
         countryHistory: [CountryVisitSummary],
+        glow: CountryGlow = CountryGlow(),
+        now: Date = Date(),
         onCollapse: @escaping () -> Void
     ) {
         self.atlas = atlas
         self.visitedCountryCodes = visitedCountryCodes
         self.countryHistory = countryHistory
+        self.glow = glow
+        self.now = now
         self.onCollapse = onCollapse
     }
 
@@ -53,7 +62,7 @@ public struct AgentCountryAtlasView: View {
             }
 
             HStack(alignment: .top, spacing: 16) {
-                AgentWorldMapChart(atlas: atlas, visitedCountryCodes: visitedCountryCodes)
+                AgentWorldMapChart(atlas: atlas, visitedCountryCodes: visitedCountryCodes, glow: glow, now: now)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(12)
                     .agentSection()

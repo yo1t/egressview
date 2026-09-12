@@ -108,6 +108,26 @@ enum RenderCheck {
                     connectionCount: 1_173_996 - index * 100_000
                 )
             }
+            // The afterglow, caught at three points of its fade. A still
+            // picture cannot show that it moves, but it can show that the
+            // brightness is where it should be.
+            let glowAt = Date(timeIntervalSince1970: 1_757_700_000)
+            // Control: the same call site with nothing lit.
+            save(AgentWorldMapChart(atlas: atlas, visitedCountryCodes: visited,
+                                    glow: CountryGlow(), now: Date()),
+                 width: 1100, height: 700,
+                 to: "\(output)/worldmap-control-\(language).png")
+            for seconds in [0.0, 2.0, 5.0] {
+                var glow = CountryGlow()
+                glow.touch(["JP", "BR"], at: glowAt)
+                save(AgentWorldMapChart(
+                        atlas: atlas, visitedCountryCodes: visited, glow: glow,
+                        now: glowAt.addingTimeInterval(seconds)
+                     ),
+                     width: 1100, height: 700,
+                     to: "\(output)/worldmap-glow-\(language)-\(Int(seconds))s.png")
+            }
+
             for (width, height) in [(1440.0, 900.0), (1100.0, 700.0), (820.0, 560.0)] {
                 save(AgentWorldMapChart(atlas: atlas, visitedCountryCodes: visited),
                      width: width, height: height,
@@ -124,7 +144,18 @@ enum RenderCheck {
 
     @MainActor
     private static func save<V: View>(_ view: V, width: CGFloat, height: CGFloat, to path: String) {
-        let renderer = ImageRenderer(content: view.frame(width: width, height: height))
+        // On the window's own background, not on nothing.
+        //
+        // These were transparent, and a chart that draws pale colours at low
+        // opacity then reads as whatever the viewer happens to composite it
+        // over. On 2026-09-12 that cost three rounds chasing a world map that
+        // looked black: the pixels were right the whole time and the backdrop
+        // was not there. A picture meant for checking has to look like the
+        // thing it is checking.
+        let opaque = view
+            .frame(width: width, height: height)
+            .background(Color(nsColor: .windowBackgroundColor))
+        let renderer = ImageRenderer(content: opaque)
         renderer.scale = 2
         guard let image = renderer.nsImage,
               let tiff = image.tiffRepresentation,

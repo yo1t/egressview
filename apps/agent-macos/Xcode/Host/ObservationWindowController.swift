@@ -169,6 +169,8 @@ struct AgentMainView: View {
                     atlas: model.atlas,
                     visitedCountryCodes: model.globe.visitedCountryCodes,
                     countryHistory: model.globe.countryHistory,
+                    glow: model.countryGlow,
+                    now: model.glowNow,
                     onCollapse: { model.collapseCountryAtlas() }
                 )
             )
@@ -982,8 +984,8 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     /// New connections have been recorded. The log follows them if it is the
     /// screen being looked at.
     @MainActor
-    func observationsArrived(_ count: Int) {
-        model.observationsArrived(count)
+    func observationsArrived(_ observations: [ConnectionObservation]) {
+        model.observationsArrived(observations)
     }
 
     @MainActor
