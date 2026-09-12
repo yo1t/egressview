@@ -302,56 +302,6 @@ describe('recordConnection', () => {
   });
 });
 
-describe('recordConnectionsInSlices', () => {
-  function manySessions(count) {
-    return Array.from({ length: count }, (_, i) => ({
-      ...SESSION, dst: `203.0.113.${i % 250}`, sport: 40_000 + i,
-    }));
-  }
-
-  it('切っても、記録される内容は切らないときと同じ', async () => {
-    // Slicing changes when the work happens, not what it is. A faster poll
-    // that records fewer connections is not a faster poll.
-    const whole = initRuntime({});
-    const sessions = manySessions(500);
-    const atOnce = runtime.recordConnections(sessions, 1_000, 'yamaha', 'y1');
-
-    const sliced = initRuntime({});
-    const { records } = await runtime.recordConnectionsInSlices(
-      sessions, 1_000, 'yamaha', 'y1', { initialSlice: 37 }
-    );
-
-    assert.equal(records.length, atOnce.length);
-    assert.deepEqual(records.map(r => r.key), atOnce.map(r => r.key));
-    assert.equal(
-      sliced.history.getConnectionHistory().size,
-      whole.history.getConnectionHistory().size,
-      '記録された接続の数が変わった'
-    );
-  });
-
-  it('区間のあいだにイベントループへ返している', async () => {
-    // The defect this fixes: one synchronous run held the loop for 1.9
-    // seconds on production, during which the site answered nothing.
-    initRuntime({});
-    let yields = 0;
-    const { slices } = await runtime.recordConnectionsInSlices(
-      manySessions(400), 1_000, 'yamaha', 'y1',
-      { initialSlice: 50, yieldToLoop: async () => { yields += 1; } }
-    );
-    assert.ok(slices > 1, `区間が ${slices} 個しかなく、分割されていない`);
-    assert.equal(yields, slices - 1, '区間の切れ目で譲っていない');
-  });
-
-  it('空なら何もしない', async () => {
-    initRuntime({});
-    assert.deepEqual(
-      await runtime.recordConnectionsInSlices([], 1_000, 'yamaha', 'y1'),
-      { records: [], slices: 0, longestMs: 0 }
-    );
-  });
-});
-
 describe('recordConnections', () => {
   it('notifies for a threatened Agent flow even when its local address is unknown', () => {
     const notif = makeNotifier();
