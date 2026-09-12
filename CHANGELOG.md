@@ -4,6 +4,26 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.62
+
+**A row in the connection log now says what period it covers.** There was one
+time column, headed "Observed", holding the time the connection was last seen.
+A row in that table is an aggregate that keeps being updated while the traffic
+continues, so the single number could not say whether the row was a moment or
+an hour -- and a connection that had finished looked exactly like one still
+running.
+
+There are now two columns, first observed and last observed, and a row still
+being seen when the window last read the records says so beside its time.
+
+Neither column is when the connection opened or closed. The agent samples the
+socket table rather than watching connections start and end, so these are the
+first and last samples that found it. Saying "end time" would claim something
+the agent never saw.
+
+This is the first step of a longer change. The window still re-reads every 15
+seconds; showing new rows as they arrive comes later.
+
 ### Agent for Mac 0.5.61
 
 **The vertical axis stops clumping when the window is small.** The timeline

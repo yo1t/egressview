@@ -44,7 +44,6 @@
 "Connection activity" = "Connection activity";
 "Showing the newest 500 records in the shared period" = "Showing the newest 500 records in the shared period";
 "%lld shown" = "%lld shown";
-"Observed" = "Observed";
 "Application" = "Application";
 "Destination" = "Destination";
 "Protocol" = "Protocol";
@@ -705,3 +704,8 @@
 "Anthropic request failed: %@" = "Anthropic request failed: %@";
 "Anthropic API key removed from Keychain." = "Anthropic API key removed from Keychain.";
 "Could not remove the Anthropic API key: %@" = "Could not remove the Anthropic API key: %@";
+
+// The connection log says which rows are still moving (P3-107).
+"not ended" = "not ended";
+"The agent has not recorded this connection ending. Data volume is measured at the end, which is why this row has none yet." = "The agent has not recorded this connection ending. Data volume is measured at the end, which is why this row has none yet.";
+"State" = "State";
