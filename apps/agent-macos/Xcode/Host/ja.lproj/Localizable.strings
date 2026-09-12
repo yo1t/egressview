@@ -44,7 +44,6 @@
 "Connection activity" = "通信ログ";
 "Showing the newest 500 records in the shared period" = "選択期間の新しい通信を最大500件表示します";
 "%lld shown" = "%lld件表示";
-"Observed" = "観測時刻";
 "Application" = "アプリ";
 "Destination" = "宛先";
 "Protocol" = "プロトコル";
@@ -707,3 +706,7 @@
 "Anthropic request failed: %@" = "Anthropicへのリクエストに失敗しました：%@";
 "Anthropic API key removed from Keychain." = "Anthropic APIキーをKeychainから削除しました。";
 "Could not remove the Anthropic API key: %@" = "Anthropic APIキーを削除できませんでした：%@";
+
+// The connection log says which rows are still moving (P3-107).
+"still running" = "継続中";
+"This connection was still being seen when the window last read the records. Its last-seen time keeps moving." = "この通信は、画面が記録を最後に読んだ時点でまだ観測されていました。最終観測の時刻は今後も進みます。";
