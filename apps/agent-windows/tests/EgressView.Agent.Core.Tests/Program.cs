@@ -511,11 +511,19 @@ try
             "abrupt termination stops coverage at the last heartbeat instead of extending to restart");
 
         coverageStore.InterruptCoverage(activeAfterRestart, started.AddSeconds(12));
+        coverageStore.BeginSleepPeriod(started.AddSeconds(12));
+        coverageStore.EndSleepPeriod(started.AddSeconds(20));
         var resumed = coverageStore.BeginCoverage(snapshot, started.AddSeconds(20));
         coverageStore.EndCoverage(resumed, started.AddSeconds(22));
         var suspendWindow = coverageStore.ReadPeriodAnalysis(started.AddSeconds(10), started.AddSeconds(22));
         Assert(Math.Abs(suspendWindow.CoverageRatio - (4d / 12d)) < 0.001,
             "a heartbeat or ETW-loss interruption leaves the unconfirmed gap outside monitoring coverage");
+        Assert(suspendWindow.SleepPeriods.Count == 1 && suspendWindow.SleepPeriods[0] ==
+            new SleepPeriod(started.AddSeconds(12), started.AddSeconds(20)) && suspendWindow.SleepSeconds == 8,
+            "an SCM-confirmed sleep is disclosed over the same interval excluded from monitoring coverage");
+        var clippedSleep = coverageStore.ReadSleepPeriods(started.AddSeconds(14), started.AddSeconds(18));
+        Assert(clippedSleep.SequenceEqual([new SleepPeriod(started.AddSeconds(14), started.AddSeconds(18))]),
+            "sleep disclosure is clipped to the selected chart period");
     }
 
     var liveSnapshot = StartupSnapshot.Capture();
@@ -526,15 +534,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 13, "v1 database migrates through v2-v13");
+        Assert(migrated.SchemaVersion == 14, "v1 database migrates through v2-v14");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v13.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v14.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 13, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 14, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -548,8 +556,10 @@ try
         retentionStore.FoldCompletedHoursForCharts(now);
         var oldCoverage = retentionStore.BeginCoverage([], now.AddDays(-31));
         retentionStore.EndCoverage(oldCoverage, now.AddDays(-31).AddMinutes(1));
+        retentionStore.BeginSleepPeriod(now.AddDays(-31));
+        retentionStore.EndSleepPeriod(now.AddDays(-31).AddMinutes(1));
         var result = retentionStore.PruneRetentionBatch(now, batchSize: 1);
-        Assert(result.ObservationsDeleted == 1 && result.FlowsDeleted == 1 && result.HourlySummariesDeleted == 1 && result.CoverageSessionsDeleted == 1 && result.ChartSummariesDeleted == 1,
+        Assert(result.ObservationsDeleted == 1 && result.FlowsDeleted == 1 && result.HourlySummariesDeleted == 1 && result.CoverageSessionsDeleted == 1 && result.ChartSummariesDeleted == 1 && result.SleepPeriodsDeleted == 1,
             "retention prunes raw data at 14 days and aggregates at 30 days in bounded batches");
         var second = retentionStore.PruneRetentionBatch(now, batchSize: 10);
         Assert(second.ObservationsDeleted == 1 && second.FlowsDeleted == 1,

@@ -237,16 +237,29 @@ public partial class MainWindow : Window
             : $"{Math.Min(data.CoverageRatio, 0.999):P1}";
         StorageSummary.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("StorageSummary"), data.StoredFlows.ToString("N0"), FlowRow.FormatBytes(data.StorageBytes));
         MonitoringSince.Text = data.MonitoringStartedAt is { } started ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("MonitoringSince"), started.LocalDateTime.ToString("g")) : string.Empty;
-        CoverageNote.Text = data.CoverageRatio < 0.999999999
+        var coverageNote = data.CoverageRatio < 0.999999999
             ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("PartialCoverage"), Math.Min(data.CoverageRatio, 0.999))
             : string.Empty;
+        var sleepNote = data.SleepSeconds > 0
+            ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SleepCoverage"), FormatDuration(data.SleepSeconds))
+            : string.Empty;
+        CoverageNote.Text = string.Join(Environment.NewLine, new[] { coverageNote, sleepNote }.Where(value => value.Length > 0));
         var names = DestinationChoice.SelectedIndex == 0;
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
-        Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To);
+        Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To, data.SleepPeriods);
+        SleepLegend.Visibility = data.SleepPeriods.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         FlowCaption.Text = IsByteMetric ? LocalizationManager.Text("RibbonBytes") : LocalizationManager.Text("RibbonConnections");
         TimelineCaption.Text = IsByteMetric ? LocalizationManager.Text("TimelineBytes") : LocalizationManager.Text("TimelineTotal");
         AutomationProperties.SetHelpText(FlowDiagram, FlowCaption.Text);
         AutomationProperties.SetHelpText(Timeline, TimelineCaption.Text);
+    }
+
+    private static string FormatDuration(double seconds)
+    {
+        var minutes = Math.Max(1, (int)Math.Round(seconds / 60, MidpointRounding.AwayFromZero));
+        return minutes >= 60
+            ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DurationHoursMinutes"), minutes / 60, minutes % 60)
+            : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DurationMinutes"), minutes);
     }
 
     private async Task RefreshInsightsAsync()

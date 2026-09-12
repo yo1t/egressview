@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 13;
+    private const int CurrentSchemaVersion = 14;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -176,6 +176,14 @@ public sealed partial class ObservationStore : IDisposable
     private const string Version13Schema = """
         ALTER TABLE delivery_queue ADD COLUMN remote_hostname TEXT;
         """;
+    private const string Version14Schema = """
+        CREATE TABLE IF NOT EXISTS sleep_periods(
+          id INTEGER PRIMARY KEY,
+          started_at TEXT NOT NULL,
+          ended_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS sleep_periods_started ON sleep_periods(started_at);
+        """;
 
     private readonly object gate = new();
     private nint db;
@@ -204,7 +212,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -225,7 +233,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 9) { MigrateVersion9To10(); version = 10; }
         if (version == 10) { MigrateVersion10To11(); version = 11; }
         if (version == 11) { MigrateVersion11To12(); version = 12; }
-        if (version == 12) MigrateVersion12To13();
+        if (version == 12) { MigrateVersion12To13(); version = 13; }
+        if (version == 13) MigrateVersion13To14();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -322,6 +331,13 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion13To14()
+    {
+        CreateMigrationBackup(14);
+        try { Execute($"BEGIN IMMEDIATE; {Version14Schema} UPDATE schema_version SET version=14 WHERE version=13; COMMIT;"); PruneMigrationBackups(14); }
+        catch { TryRollback(); throw; }
+    }
+
     private string CreateMigrationBackup(int targetVersion)
     {
         var backup = $"{path}.pre-v{targetVersion}.bak";
@@ -370,8 +386,8 @@ public sealed partial class ObservationStore : IDisposable
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings')");
-        if (tables != 15)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings','sleep_periods')");
+        if (tables != 16)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
@@ -492,8 +508,9 @@ public sealed partial class ObservationStore : IDisposable
                 var summaries = DeleteBatch("hourly_summary", "rowid", "bucket_start", aggregateCutoff, batchSize);
                 var chartSummaries = DeleteBatch("chart_hourly", "rowid", "bucket_start", aggregateCutoff, batchSize);
                 var coverage = DeleteBatch("coverage_sessions", "id", "COALESCE(ended_at,started_at)", aggregateCutoff, batchSize);
+                var sleeps = DeleteBatch("sleep_periods", "id", "COALESCE(ended_at,started_at)", aggregateCutoff, batchSize);
                 Execute("COMMIT");
-                return new(observations, flows, summaries, coverage, chartSummaries);
+                return new(observations, flows, summaries, coverage, chartSummaries, sleeps);
             }
             catch
             {
@@ -563,6 +580,7 @@ public sealed partial class ObservationStore : IDisposable
                 long hourly;
                 long chart;
                 long coverage;
+                long sleeps;
                 if (before is null)
                 {
                     var result = DeleteLocalHistoryWithinTransaction(cutoff);
@@ -571,6 +589,7 @@ public sealed partial class ObservationStore : IDisposable
                     hourly = result.HourlySummariesDeleted;
                     chart = result.ChartSummariesDeleted;
                     coverage = result.CoverageSessionsDeleted;
+                    sleeps = result.SleepPeriodsDeleted;
                 }
                 else
                 {
@@ -581,10 +600,12 @@ public sealed partial class ObservationStore : IDisposable
                     chart = DeleteWhere("chart_hourly", $"bucket_start<'{value}'");
                     coverage = DeleteMatchingCoverage($"ended_at IS NOT NULL AND ended_at<'{value}'");
                     Execute($"UPDATE coverage_sessions SET started_at='{value}' WHERE started_at<'{value}' AND (ended_at IS NULL OR ended_at>='{value}')");
+                    sleeps = DeleteWhere("sleep_periods", $"ended_at IS NOT NULL AND ended_at<'{value}'");
+                    Execute($"UPDATE sleep_periods SET started_at='{value}' WHERE started_at<'{value}' AND (ended_at IS NULL OR ended_at>='{value}')");
                     RefoldDeletionBoundary(cutoff);
                 }
                 Execute("COMMIT");
-                return new(observations, flows, hourly, chart, coverage);
+                return new(observations, flows, hourly, chart, coverage, sleeps);
             }
             catch
             {
@@ -603,7 +624,9 @@ public sealed partial class ObservationStore : IDisposable
         Execute("DELETE FROM chart_hourly_state");
         var coverage = DeleteMatchingCoverage("ended_at IS NOT NULL");
         Execute($"UPDATE coverage_sessions SET started_at='{cutoff:O}',confirmed_at='{cutoff:O}' WHERE ended_at IS NULL");
-        return new(observations, flows, hourly, chart, coverage);
+        var sleeps = DeleteWhere("sleep_periods", "ended_at IS NOT NULL");
+        Execute($"UPDATE sleep_periods SET started_at='{cutoff:O}' WHERE ended_at IS NULL");
+        return new(observations, flows, hourly, chart, coverage, sleeps);
     }
 
     private long DeleteAllRows(string table) => DeleteWhere(table, "1=1");
@@ -717,6 +740,41 @@ public sealed partial class ObservationStore : IDisposable
             ScalarInt64("SELECT COUNT(*) FROM coverage_sessions"),
             ScalarInt64("SELECT COUNT(*) FROM coverage_sessions WHERE ended_at IS NULL AND id=(SELECT MAX(id) FROM coverage_sessions)"),
             ScalarInt64("SELECT COUNT(*) FROM coverage_sessions WHERE interrupted=1"));
+    }
+
+    public void BeginSleepPeriod(DateTimeOffset at)
+    {
+        lock (gate)
+        {
+            var value = at.ToUniversalTime().ToString("O");
+            Execute($"BEGIN IMMEDIATE; UPDATE sleep_periods SET ended_at='{value}' WHERE ended_at IS NULL; INSERT INTO sleep_periods(started_at) VALUES('{value}'); COMMIT;");
+        }
+    }
+
+    public void EndSleepPeriod(DateTimeOffset at)
+    {
+        lock (gate) Execute($"UPDATE sleep_periods SET ended_at='{at.ToUniversalTime():O}' WHERE ended_at IS NULL");
+    }
+
+    public IReadOnlyList<SleepPeriod> ReadSleepPeriods(DateTimeOffset from, DateTimeOffset to)
+    {
+        lock (gate)
+        {
+            var result = new List<SleepPeriod>();
+            var sql = $"SELECT started_at,COALESCE(ended_at,'{to.ToUniversalTime():O}') FROM sleep_periods WHERE started_at<'{to.ToUniversalTime():O}' AND COALESCE(ended_at,'{to.ToUniversalTime():O}')>'{from.ToUniversalTime():O}' ORDER BY started_at";
+            CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+            try
+            {
+                while (WinSqlite.Step(statement) == WinSqlite.Row)
+                {
+                    var start = DateTimeOffset.Parse(Text(statement, 0));
+                    var end = DateTimeOffset.Parse(Text(statement, 1));
+                    result.Add(new(start < from ? from : start, end > to ? to : end));
+                }
+            }
+            finally { WinSqlite.Finalize(statement); }
+            return result;
+        }
     }
 
     public (long Total, long Snapshot, long Etw, long Both, long BytesUnknown) ReadFlowStats()
@@ -1228,6 +1286,7 @@ public sealed partial class ObservationStore : IDisposable
                 monitoringStartedAt, ScalarInt64("SELECT COUNT(*) FROM flows"), links, timeline)
             {
                 StorageBytes = ReadStorageBytes(),
+                SleepPeriods = ReadSleepPeriods(from, to),
             };
         }
     }

@@ -100,7 +100,8 @@ internal static class Entry
             {
                 var chart = new TrafficTimelineControl();
                 VerifyAutomationPeer(chart, "Traffic timeline");
-                chart.SetItems(timeline, bytes, timelineStart, timelineStart.AddHours(6));
+                chart.SetItems(timeline, bytes, timelineStart, timelineStart.AddHours(6),
+                    [new SleepPeriod(timelineStart.AddHours(1.5), timelineStart.AddHours(2.25))]);
                 Save(chart, w, h, Path.Combine(output, $"timeline-{label}-{w}x{h}.png"));
             }
 
