@@ -18,6 +18,15 @@ function copy() {
   return structuredClone(fixture);
 }
 
+// Ingest no longer correlates as a side effect: it stores, and the periodic
+// runner reconciles. These are the two steps a delivered batch goes through, so
+// a test that cares about links has to ask for both.
+function deliver(envelope = copy(), receivedAt = observedAt + 1_000) {
+  const ack = store.storeBatch(agentId, envelope, { receivedAt });
+  store.reconcileCorrelations({ agentId });
+  return ack;
+}
+
 function addAgent(database, id = agentId) {
   database.prepare(`
     INSERT INTO agents (
@@ -54,7 +63,7 @@ describe('Agent/router correlation read model', () => {
     const database = store._dbForTest();
     addConnection(database);
 
-    store.storeBatch(agentId, copy(), { receivedAt: observedAt + 1_000 });
+    deliver();
 
     const link = database.prepare('SELECT * FROM connection_agent_observations').get();
     assert.equal(link.matchKind, 'exact-5tuple');
@@ -79,7 +88,7 @@ describe('Agent/router correlation read model', () => {
     const database = store._dbForTest();
     addConnection(database, { sport: null, firstSeen: observedAt + 30_000, lastSeen: observedAt + 30_000 });
 
-    store.storeBatch(agentId, copy(), { receivedAt: observedAt + 1_000 });
+    deliver();
 
     const link = database.prepare('SELECT * FROM connection_agent_observations').get();
     assert.equal(link.matchKind, 'unique-4tuple-time');
@@ -92,7 +101,7 @@ describe('Agent/router correlation read model', () => {
     const envelope = copy();
     envelope.observations[0].localPort = 0;
 
-    store.storeBatch(agentId, envelope, { receivedAt: observedAt + 1_000 });
+    deliver(envelope);
 
     const link = database.prepare('SELECT * FROM connection_agent_observations').get();
     assert.equal(link.matchKind, 'unique-4tuple-time');
@@ -106,7 +115,7 @@ describe('Agent/router correlation read model', () => {
     const envelope = copy();
     envelope.observations[0].localPort = 0;
 
-    store.storeBatch(agentId, envelope, { receivedAt: observedAt + 1_000 });
+    deliver(envelope);
 
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM connection_agent_observations').get().n, 0);
     assert.equal(store.getCorrelationDiagnostics().ambiguous, 1);
@@ -124,7 +133,7 @@ describe('Agent/router correlation read model', () => {
     const envelope = copy();
     envelope.observations[0].localPort = 0;
 
-    store.storeBatch(agentId, envelope, { receivedAt: observedAt + 1_000 });
+    deliver(envelope);
 
     const link = database.prepare('SELECT * FROM connection_agent_observations').get();
     assert.equal(link.matchKind, 'unique-4tuple-time');
@@ -135,7 +144,7 @@ describe('Agent/router correlation read model', () => {
     const database = store._dbForTest();
     addConnection(database, { firstSeen: observedAt + 30_000, lastSeen: observedAt + 30_000 });
 
-    store.storeBatch(agentId, copy(), { receivedAt: observedAt + 1_000 });
+    deliver();
 
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM connection_agent_observations').get().n, 0);
     assert.equal(store.queryCorrelationReadModel({ agentId })[0].agentOnly, true);
@@ -177,7 +186,7 @@ describe('Agent/router correlation read model', () => {
       lastSeen: observedAt + 90_001,
     });
 
-    store.storeBatch(agentId, envelope, { receivedAt: observedAt + 1_000 });
+    deliver(envelope);
 
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM connection_agent_observations').get().n, 0);
     const rows = store.queryCorrelationReadModel({ agentId });
@@ -223,7 +232,7 @@ describe('Agent/router correlation read model', () => {
       processID: 126,
       processName: 'AgentOnlyExample',
     });
-    store.storeBatch(agentId, envelope, { receivedAt: observedAt + 1_000 });
+    deliver(envelope);
 
     const rows = store.queryUnifiedReadModel([{
       src: '192.0.2.10', dst: '198.51.100.20', dport: 443, proto: 'TCP',
@@ -257,7 +266,7 @@ describe('Agent/router correlation read model', () => {
   it('removes correlation links before pruning their observations', () => {
     const database = store._dbForTest();
     addConnection(database);
-    store.storeBatch(agentId, copy(), { receivedAt: observedAt + 1_000 });
+    deliver();
 
     const result = store.pruneObservations({ before: observedAt + 1 });
 
