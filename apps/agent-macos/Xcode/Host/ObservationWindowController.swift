@@ -553,25 +553,25 @@ struct AgentMainView: View {
                 }
                 .width(min: 140, ideal: 160)
                 TableColumn(L("Last seen"), value: \.lastObservedAt) { row in
-                    // A row that is still being seen has a last-seen time that
-                    // keeps moving. Saying so is the whole point of having two
-                    // columns: without it, a finished connection and a running
-                    // one look identical (P3-107).
-                    let running = ConnectionLogActivity.isRunning(
-                        lastObservedAt: row.lastObservedAt, snapshotTakenAt: model.rowsLoadedAt
-                    )
-                    HStack(spacing: 6) {
-                        Text(Self.observedFormatter.string(from: row.lastObservedAt))
-                            .monospacedDigit()
-                        if running {
-                            Text(L("still running"))
-                                .font(.caption)
-                                .foregroundStyle(.tint)
-                                .help(L("This connection was still being seen when the window last read the records. Its last-seen time keeps moving."))
-                        }
-                    }
+                    Text(Self.observedFormatter.string(from: row.lastObservedAt))
+                        .monospacedDigit()
                 }
-                .width(min: 140, ideal: 200)
+                .width(min: 140, ideal: 160)
+                // Its own column, not a word beside the time. A cell holding
+                // "12:34:56 still running" is two facts in one value: it sorts
+                // by neither, and anything that copies the table out carries
+                // the pair as a single string. Without the column at all, a
+                // connection that finished and one still running look
+                // identical, which is what P3-107 is about.
+                TableColumn(L("State"), value: \.activityText) { row in
+                    Text(row.activityText)
+                        .font(.caption)
+                        .foregroundStyle(.tint)
+                        .help(row.isOpen
+                              ? L("The agent has not recorded this connection ending. Data volume is measured at the end, which is why this row has none yet.")
+                              : "")
+                }
+                .width(min: 70, ideal: 90)
                 TableColumn(L("Application"), value: \.application) { row in
                     Text(row.application)
                 }

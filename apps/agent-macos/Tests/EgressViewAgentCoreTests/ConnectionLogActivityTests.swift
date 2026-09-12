@@ -1,70 +1,69 @@
 import XCTest
 @testable import EgressViewAgentCore
 
-/// Whether a connection log row is still moving.
+/// Which rows in the connection log have not ended.
 ///
-/// The log's rows are aggregates that keep being updated while traffic
-/// continues, so the last-seen time in a row can be a live number or a
-/// finished one. Saying which is the reason the column can be trusted
-/// (P3-107).
+/// The first version of this asked whether the last-observed time was recent.
+/// On the shipping path that is the opposite of the truth twice over, because
+/// a flow is reported exactly twice -- at open and at close -- and nothing
+/// moves its last-observed time in between (P3-107).
 final class ConnectionLogActivityTests: XCTestCase {
-    private let snapshot = Date(timeIntervalSince1970: 10_000)
-
-    func test直前に観測された行は継続中() {
-        XCTAssertTrue(ConnectionLogActivity.isRunning(
-            lastObservedAt: snapshot.addingTimeInterval(-1), snapshotTakenAt: snapshot
-        ))
-    }
-
-    func test古い行は継続中ではない() {
-        XCTAssertFalse(ConnectionLogActivity.isRunning(
-            lastObservedAt: snapshot.addingTimeInterval(-60), snapshotTakenAt: snapshot
-        ))
-    }
-
-    func test判定は採取間隔から導かれる() {
-        // Written as a number, this would keep the old value when the sampling
-        // rate changed and start calling live connections finished. The same
-        // shape as the four chart defects: a constant nobody checks.
-        XCTAssertEqual(
-            ConnectionLogActivity.runningTolerance,
-            LightweightCollector.defaultInterval * 3,
-            accuracy: 0.001
+    private func observation(
+        bytesIn: UInt64?, bytesOut: UInt64?,
+        collector: CollectorKind = .networkExtension,
+        firstObservedAt: Date = Date(timeIntervalSince1970: 1_000),
+        lastObservedAt: Date = Date(timeIntervalSince1970: 1_000)
+    ) -> ConnectionObservation {
+        ConnectionObservation(
+            networkProtocol: .tcp,
+            localAddress: "192.0.2.10", localPort: 51_000,
+            remoteAddress: "192.0.2.20", remotePort: 443,
+            processID: 501, processName: "curl", bundleID: nil,
+            firstObservedAt: firstObservedAt, lastObservedAt: lastObservedAt,
+            bytesIn: bytesIn, bytesOut: bytesOut,
+            collector: collector, confidence: .exact
         )
-        XCTAssertGreaterThan(LightweightCollector.defaultInterval, 0)
     }
 
-    func test許容範囲の内と外() {
-        let tolerance = ConnectionLogActivity.runningTolerance
-        XCTAssertTrue(ConnectionLogActivity.isRunning(
-            lastObservedAt: snapshot.addingTimeInterval(-tolerance + 0.1), snapshotTakenAt: snapshot
-        ))
-        XCTAssertFalse(ConnectionLogActivity.isRunning(
-            lastObservedAt: snapshot.addingTimeInterval(-tolerance - 0.1), snapshotTakenAt: snapshot
-        ))
+    func test通信量が無い行はまだ終わっていない() {
+        // Byte counts arrive with the close report and only then.
+        XCTAssertTrue(ConnectionLogActivity.isOpen(observation(bytesIn: nil, bytesOut: nil)))
     }
 
-    func test採取が読み取りをまたいでも継続中のまま() {
-        // A sample that lands while the window is reading stamps a row after
-        // the snapshot. That is a running connection, not an impossible one.
-        XCTAssertTrue(ConnectionLogActivity.isRunning(
-            lastObservedAt: snapshot.addingTimeInterval(1), snapshotTakenAt: snapshot
-        ))
+    func test通信量がある行は終わっている() {
+        XCTAssertFalse(ConnectionLogActivity.isOpen(observation(bytesIn: 1_024, bytesOut: 2_048)))
+        XCTAssertFalse(ConnectionLogActivity.isOpen(observation(bytesIn: 0, bytesOut: 0)))
+        XCTAssertFalse(ConnectionLogActivity.isOpen(observation(bytesIn: 1_024, bytesOut: nil)))
     }
 
-    func test壁時計ではなくその画面の時点で判定する() {
-        // The window refreshes on a 15 second timer, so "now" drifts away from
-        // the data between refreshes. Judged against the wall clock, the
-        // marker would switch itself off while nothing changed on the Mac --
-        // reporting the refresh timer rather than the connection.
-        let lastSeen = snapshot.addingTimeInterval(-1)
-        let muchLater = snapshot.addingTimeInterval(600)
-        XCTAssertTrue(ConnectionLogActivity.isRunning(
-            lastObservedAt: lastSeen, snapshotTakenAt: snapshot
+    func test長く開いている通信も終わっていないと言える() {
+        // The defect, stated as a test. Judged by recency, a flow open for an
+        // hour would be called finished because nothing has moved its
+        // last-observed time since it opened.
+        let anHourAgo = Date(timeIntervalSince1970: 1_000)
+        let open = observation(
+            bytesIn: nil, bytesOut: nil,
+            firstObservedAt: anHourAgo, lastObservedAt: anHourAgo
+        )
+        XCTAssertTrue(ConnectionLogActivity.isOpen(open), "1時間開いている通信を終了扱いにした")
+    }
+
+    func test直前に終わった通信を継続中と言わない() {
+        // The other half of the same defect: judged by recency, a flow that
+        // closed a second ago is the most recent thing on screen.
+        let justNow = Date()
+        let closed = observation(
+            bytesIn: 4_096, bytesOut: 512,
+            firstObservedAt: justNow.addingTimeInterval(-30), lastObservedAt: justNow
+        )
+        XCTAssertFalse(ConnectionLogActivity.isOpen(closed), "終わった通信を継続中と言った")
+    }
+
+    func test終了を報告しない収集器には何も言わない() {
+        // Only the Network Extension reports closes. Anything else gets no
+        // claim rather than one that cannot be supported.
+        XCTAssertFalse(ConnectionLogActivity.isOpen(
+            observation(bytesIn: nil, bytesOut: nil, collector: .libproc)
         ))
-        XCTAssertFalse(ConnectionLogActivity.isRunning(
-            lastObservedAt: lastSeen, snapshotTakenAt: muchLater
-        ),
-        "画面の時点が進めば、同じ行は継続中ではなくなる")
     }
 }

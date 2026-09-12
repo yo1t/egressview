@@ -708,5 +708,6 @@
 "Could not remove the Anthropic API key: %@" = "Anthropic APIキーを削除できませんでした：%@";
 
 // The connection log says which rows are still moving (P3-107).
-"still running" = "継続中";
-"This connection was still being seen when the window last read the records. Its last-seen time keeps moving." = "この通信は、画面が記録を最後に読んだ時点でまだ観測されていました。最終観測の時刻は今後も進みます。";
+"not ended" = "継続中";
+"The agent has not recorded this connection ending. Data volume is measured at the end, which is why this row has none yet." = "この通信が終わったことを、Agentはまだ記録していません。データ量は終了時に確定するため、この行にはまだ通信量がありません。";
+"State" = "状態";
