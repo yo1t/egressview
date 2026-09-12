@@ -29,13 +29,13 @@ describe('通信ログが行の期間を語る', () => {
     // selection, a spreadsheet, a later export -- carries the pair glued
     // together.
     assert.match(window, /TableColumn\(L\("State"\), value: \\\.activityText\)/);
-    assert.match(viewModel, /var activityText: String \{ isOpen \? L\("not ended"\) : "" \}/);
+    assert.match(viewModel, /var activityText: String \{ isOpen \? L\("end not seen"\) : "" \}/);
     // The time column holds the time and nothing else. Taken up to the
     // column's own `.width`, so the comment introducing the next column is
     // not mistaken for part of this cell.
     const lastSeen = window.slice(window.indexOf('TableColumn(L("Last seen")'));
     const cell = lastSeen.slice(0, lastSeen.indexOf('.width('));
-    assert.doesNotMatch(cell, /not ended|activityText|isOpen/);
+    assert.doesNotMatch(cell, /end not seen|activityText|isOpen/);
   });
 
   it('終わったかどうかを、時刻の新しさでは判定しない', () => {
@@ -60,14 +60,14 @@ describe('通信ログが行の期間を語る', () => {
     // sentence -- so the failure looks like success.
     for (const language of ['en', 'ja']) {
       const table = strings(language);
-      assert.ok(table.includes('"not ended" ='), `${language}: not ended`);
+      assert.ok(table.includes('"end not seen" ='), `${language}: end not seen`);
       assert.ok(table.includes('"State" ='), `${language}: State`);
       assert.ok(table.includes('"First seen" ='), `${language}: First seen`);
       assert.ok(table.includes('"Last seen" ='), `${language}: Last seen`);
     }
     assert.notEqual(
-      strings('ja').match(/"not ended" = "([^"]*)"/)[1],
-      'not ended',
+      strings('ja').match(/"end not seen" = "([^"]*)"/)[1],
+      'end not seen',
       'ja が英語のまま'
     );
   });

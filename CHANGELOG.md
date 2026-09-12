@@ -4,6 +4,27 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.64
+
+**The connection log follows traffic as it happens.** It used to re-read
+everything every fifteen seconds, so "what is going out right now" was
+answered with a picture up to fifteen seconds old. It now re-reads when
+connections actually arrive, at most once a second -- which is as often as
+this Mac's records can arrive at all.
+
+**A Pause button stops the table moving while you read it.** While paused the
+screen reads nothing and counts what is waiting, so pausing costs nothing to
+run. Only the screen stops; collection carries on exactly as before.
+
+**The log says what it is doing** -- following, with the time of its last
+read, or stopped with the number of connections it has not shown you. A table
+that has quietly stopped updating looks exactly like a quiet network, and that
+is the reading worth preventing.
+
+New rows still arrive by re-reading the page rather than being added to it,
+and there is no control that holds your place while they do. Pausing is what
+there is for now.
+
 ### Agent for Mac 0.5.63
 
 **The connection log has a State column, and it now tells the truth.**

@@ -578,10 +578,10 @@ struct AgentMainView: View {
                         .font(.caption)
                         .foregroundStyle(.tint)
                         .help(row.isOpen
-                              ? L("The agent has not recorded this connection ending. Data volume is measured at the end, which is why this row has none yet.")
+                              ? L("The agent has not recorded this connection ending, so it may still be running or its ending may not have been reported. Data volume is measured at the end, which is why this row has none yet.")
                               : "")
                 }
-                .width(min: 70, ideal: 90)
+                .width(min: 90, ideal: 110)
                 TableColumn(L("Application"), value: \.application) { row in
                     Text(row.application)
                 }
