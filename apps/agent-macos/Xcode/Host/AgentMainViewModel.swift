@@ -19,6 +19,12 @@ struct AgentObservationRow: Identifiable {
     /// What the destination column shows. Held rather than recomputed so that
     /// sorting, filtering and display can never disagree about it.
     let destinationText: String
+    /// When these rows were read out of the store.
+    ///
+    /// Carried on the row so that "still running" is a fact about the row and
+    /// can be a column of its own -- sortable, and copied on its own rather
+    /// than glued onto a timestamp.
+    let snapshotTakenAt: Date
 
     /// When this flow was first seen, and when it was last seen.
     ///
@@ -31,6 +37,19 @@ struct AgentObservationRow: Identifiable {
     /// are the first and last samples that found this flow.
     var firstObservedAt: Date { observation.firstObservedAt }
     var lastObservedAt: Date { observation.lastObservedAt }
+    /// Was this flow still being seen when the rows were read?
+    var isRunning: Bool {
+        ConnectionLogActivity.isRunning(
+            lastObservedAt: observation.lastObservedAt, snapshotTakenAt: snapshotTakenAt
+        )
+    }
+    /// Its own column, and its own value.
+    ///
+    /// This started as a word appended to the last-observed time. One cell
+    /// holding a timestamp and a state is two facts in one value: it sorts by
+    /// neither, and anything that copies the table out -- a selection, a
+    /// spreadsheet, a later export -- carries the pair as a single string.
+    var activityText: String { isRunning ? L("still running") : "" }
     var application: String {
         observation.processName.isEmpty ? "PID \(observation.processID)" : observation.processName
     }
@@ -93,9 +112,6 @@ final class AgentMainViewModel: ObservableObject {
         [], selection: VisualizationSelection()
     )
     @Published private(set) var observationRows: [AgentObservationRow] = []
-    /// When the rows on screen were read. What the log's running marker is
-    /// measured against.
-    @Published private(set) var rowsLoadedAt = Date.distantPast
     @Published var logFilter = ConnectionLogFilter()
     /// Newest activity first. The question the log is opened with is "what is
     /// happening now", so the rows that are still moving are the ones at the
@@ -471,6 +487,10 @@ final class AgentMainViewModel: ObservableObject {
 
                 if tab == .log {
                     let observations = try store.observations(since: from, limit: 500)
+                    // One time for the whole page, taken with it. Each row
+                    // asking the clock separately would let rows read at the
+                    // same moment disagree about what counts as running.
+                    let snapshotTakenAt = Date()
                     let countries = try store.countryCodes(
                         forAddresses: observations.map(\.remoteAddress)
                     )
@@ -479,7 +499,8 @@ final class AgentMainViewModel: ObservableObject {
                             id: "\(observation.stableKey)|\(observation.lastObservedAt.timeIntervalSince1970)|\(index)",
                             observation: observation,
                             countryCode: countries[observation.remoteAddress],
-                            destinationText: Self.destinationText(observation, grouping: grouping)
+                            destinationText: Self.destinationText(observation, grouping: grouping),
+                            snapshotTakenAt: snapshotTakenAt
                         )
                     }
                 }
@@ -535,13 +556,7 @@ final class AgentMainViewModel: ObservableObject {
         if let value = data.coverage { coverage = value }
         if let value = data.sleepPeriods { sleepPeriods = value }
         if let value = data.threats { threats = value }
-        if let value = data.rows {
-            observationRows = value
-            // Stamped here rather than read as `Date()` by the table, so that
-            // "still running" is measured against the data on screen and does
-            // not flicker as the refresh timer runs down (P3-107).
-            rowsLoadedAt = Date()
-        }
+        if let value = data.rows { observationRows = value }
         if let value = data.storage { storage = value }
         if let value = data.usesRolledUpHistory { usesRolledUpHistory = value }
         if let measured = data.measuredBytes {

@@ -22,19 +22,36 @@ describe('通信ログが行の期間を語る', () => {
     assert.match(viewModel, /var lastObservedAt: Date \{ observation\.lastObservedAt \}/);
   });
 
-  it('継続中の行がそうと分かる', () => {
-    // Without the marker a finished connection and a running one look
-    // identical, and the moving number reads as a wrong one.
-    assert.match(window, /ConnectionLogActivity\.isRunning\(/);
-    assert.match(window, /L\("still running"\)/);
+  it('継続中は独立した列である', () => {
+    // Without it, a finished connection and a running one look identical.
+    // Inside the time column, the cell holds a timestamp and a state as one
+    // value: it sorts by neither, and anything copying the table out -- a
+    // selection, a spreadsheet, a later export -- carries the pair glued
+    // together.
+    assert.match(window, /TableColumn\(L\("State"\), value: \\\.activityText\)/);
+    assert.match(viewModel, /var activityText: String \{ isRunning \? L\("still running"\) : "" \}/);
+    // The time column holds the time and nothing else. Taken up to the
+    // column's own `.width`, so the comment introducing the next column is
+    // not mistaken for part of this cell.
+    const lastSeen = window.slice(window.indexOf('TableColumn(L("Last seen")'));
+    const cell = lastSeen.slice(0, lastSeen.indexOf('.width('));
+    assert.doesNotMatch(cell, /still running|activityText|isRunning/);
   });
 
-  it('継続中かどうかを、壁時計ではなく画面の時点で判定する', () => {
-    // Judged against `Date()`, the marker would switch off as the 15 second
-    // refresh timer ran down, reporting the timer rather than the connection.
-    assert.match(window, /snapshotTakenAt: model\.rowsLoadedAt/);
-    assert.doesNotMatch(window, /snapshotTakenAt: Date\(\)/);
-    assert.match(viewModel, /rowsLoadedAt = Date\(\)/);
+  it('継続中かどうかを、壁時計ではなく行を読んだ時点で判定する', () => {
+    // Judged against `Date()` at draw time, the marker would switch off as
+    // the 15 second refresh timer ran down -- reporting the timer rather than
+    // the connection. The row carries the moment the page was read instead.
+    assert.match(viewModel, /let snapshotTakenAt: Date/);
+    assert.match(viewModel, /snapshotTakenAt: snapshotTakenAt/);
+    assert.match(viewModel, /let snapshotTakenAt = Date\(\)/);
+    assert.match(
+      viewModel,
+      /ConnectionLogActivity\.isRunning\(\s*lastObservedAt: observation\.lastObservedAt, snapshotTakenAt: snapshotTakenAt\s*\)/
+    );
+    // One time for the whole page. Rows read together must agree about what
+    // counts as running.
+    assert.equal((viewModel.match(/let snapshotTakenAt = Date\(\)/g) || []).length, 1);
   });
 
   it('既定は最終観測の降順', () => {
@@ -50,6 +67,7 @@ describe('通信ログが行の期間を語る', () => {
     for (const language of ['en', 'ja']) {
       const table = strings(language);
       assert.ok(table.includes('"still running" ='), `${language}: still running`);
+      assert.ok(table.includes('"State" ='), `${language}: State`);
       assert.ok(table.includes('"First seen" ='), `${language}: First seen`);
       assert.ok(table.includes('"Last seen" ='), `${language}: Last seen`);
     }
