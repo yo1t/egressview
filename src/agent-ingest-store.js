@@ -342,6 +342,15 @@ function _initForTest(dbPath = ':memory:') {
       matchKind TEXT NOT NULL, matchedAt INTEGER NOT NULL, timeDeltaMs INTEGER NOT NULL,
       PRIMARY KEY (src, dst, dport, proto, agentId, observationId)
     );
+    -- Mirrors the migration. Attribution names this index with INDEXED BY to
+    -- stop the planner entering the join from the wrong side, and a query that
+    -- names an index does not run at all where the index is absent -- so a
+    -- schema here that drifts from the migration fails the test rather than
+    -- quietly testing a different plan than production runs.
+    CREATE INDEX idx_connection_agent_observation
+      ON connection_agent_observations(agentId, observationId);
+    CREATE INDEX idx_connection_agent_connection
+      ON connection_agent_observations(src, dst, dport, proto);
   `);
 }
 
