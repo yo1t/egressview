@@ -4,6 +4,25 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.65
+
+**Every country your Mac has reached, on one map.** The destination-country
+list sat in a narrow card and read one row at a time, and the globe beside it
+keeps half the world behind the sphere. There is now an Expand button: press
+it and the map fills the window below the tabs, with the same country cards
+down the right.
+
+The map is drawn with the Equal Earth projection, which keeps areas true -- a
+country shaded here takes the share of the picture that it takes of the world.
+A projection that inflates the far north would make a handful of northern
+destinations look like most of the planet.
+
+**Connections that have not been reported as finished now say "end not seen"
+rather than "still running".** The agent is told when a connection opens and
+when it closes, and roughly one closing report in ten never arrives, so a row
+could sit there claiming a connection was alive long after it had ended. The
+word now says what is known: the end has not been seen, which may mean either.
+
 ### Agent for Mac 0.5.64
 
 **The connection log follows traffic as it happens.** It used to re-read
