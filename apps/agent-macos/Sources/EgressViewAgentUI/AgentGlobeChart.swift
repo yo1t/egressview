@@ -12,10 +12,23 @@ public struct AgentGlobeChart: View {
     public let model: GlobeModel
     public let atlas: WorldAtlas?
 
-    public init(model: GlobeModel, atlas: WorldAtlas?, isOnScreen: Bool) {
+    /// What to do when the reader asks for the map full size.
+    ///
+    /// Supplied by the app rather than decided here: this is a chart in a
+    /// package, and it has no window to grow (P3-109). Absent, the button is
+    /// not offered -- an expand control that does nothing is worse than none.
+    var onExpandCountries: (() -> Void)?
+
+    public init(
+        model: GlobeModel,
+        atlas: WorldAtlas?,
+        isOnScreen: Bool,
+        onExpandCountries: (() -> Void)? = nil
+    ) {
         self.model = model
         self.atlas = atlas
         self.isOnScreen = isOnScreen
+        self.onExpandCountries = onExpandCountries
     }
 
     private enum CountryView: String, CaseIterable, Identifiable {
@@ -212,6 +225,13 @@ public struct AgentGlobeChart: View {
                     .help(L("Show destination countries"))
                 }
             } else {
+                if let onExpandCountries {
+                    Button(action: onExpandCountries) {
+                        Label(L("Expand"), systemImage: "arrow.up.left.and.arrow.down.right")
+                    }
+                    .controlSize(.small)
+                    .help(L("Show the world map and every country at full size"))
+                }
                 AgentCountryHistoryList(rows: model.countryHistory)
             }
         }
@@ -242,99 +262,6 @@ public struct AgentGlobeChart: View {
 
 }
 
-private struct AgentCountryHistoryList: View {
-    let rows: [CountryVisitSummary]
-
-    public var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(L("Destination countries"))
-                    .font(.title3.bold())
-                Text(L("This list is local and independent of the selected period."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if rows.isEmpty {
-                AgentEmptyChartNote(text: L("No destination countries have been recorded yet."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(rows) { row in
-                            HStack(alignment: .top, spacing: 10) {
-                                Text(Self.flag(for: row.countryCode))
-                                    .font(.title2)
-                                    .accessibilityHidden(true)
-                                VStack(alignment: .leading, spacing: 5) {
-                                    HStack(alignment: .firstTextBaseline) {
-                                        Text(Self.countryName(for: row.countryCode))
-                                            .font(.headline)
-                                        Spacer(minLength: 8)
-                                        Text(L("%lld times", row.connectionCount))
-                                            .font(.caption.weight(.semibold))
-                                            .monospacedDigit()
-                                            .foregroundStyle(.teal)
-                                    }
-                                    countryHistoryField(
-                                        L("First accessed"),
-                                        date: row.firstObservedAt
-                                    )
-                                    countryHistoryField(
-                                        L("Last accessed"),
-                                        date: row.lastObservedAt
-                                    )
-                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                        Text(L("Latest application"))
-                                            .foregroundStyle(.secondary)
-                                        Text(row.lastProcessName.isEmpty
-                                             ? L("Unknown") : row.lastProcessName)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    }
-                                    .font(.caption)
-                                }
-                            }
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .fill(Color.teal.opacity(0.07))
-                            )
-                        }
-                    }
-                    .padding(.trailing, 4)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private static func countryName(for code: String) -> String {
-        Locale.current.localizedString(forRegionCode: code) ?? code
-    }
-
-    private func countryHistoryField(_ label: String, date: Date) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(label)
-                .foregroundStyle(.secondary)
-            Text(date, format: .dateTime.year().month().day().hour().minute())
-                .monospacedDigit()
-        }
-        .font(.caption)
-    }
-
-    private static func flag(for code: String) -> String {
-        let scalars = code.uppercased().unicodeScalars.compactMap { scalar -> UnicodeScalar? in
-            guard scalar.value >= 65, scalar.value <= 90 else { return nil }
-            return UnicodeScalar(127_397 + scalar.value)
-        }
-        return scalars.count == 2 ? String(String.UnicodeScalarView(scalars)) : ""
-    }
-}
-
-/// Runs the globe clock and renderer outside SwiftUI. A frame invalidates only
-/// this native view instead of re-evaluating the chart card and its controls.
 private struct AgentGlobeNativeView: NSViewRepresentable {
     let model: GlobeModel
     let atlas: WorldAtlas?

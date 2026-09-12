@@ -113,6 +113,16 @@ final class AgentMainViewModel: ObservableObject {
     @Published private(set) var timeline = TimelineAggregator().aggregate(
         [], selection: VisualizationSelection()
     )
+    /// Whether the country map has been opened out (P3-109).
+    ///
+    /// It fills the window's content, below the tabs -- the window itself is
+    /// not resized. Growing an app's window on its own moves the reader's
+    /// furniture around to show them a map, and leaves them to put it back.
+    @Published private(set) var isCountryAtlasExpanded = false
+
+    func expandCountryAtlas() { isCountryAtlasExpanded = true }
+    func collapseCountryAtlas() { isCountryAtlasExpanded = false }
+
     @Published private(set) var observationRows: [AgentObservationRow] = []
     /// Whether the log is following new connections, and what it has to say
     /// about its own currency.

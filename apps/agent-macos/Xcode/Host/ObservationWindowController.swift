@@ -160,6 +160,23 @@ struct AgentMainView: View {
     }
 
     private var analysisView: some View {
+        // Opened out, the country map is the whole window: the period picker
+        // and the metric choice govern the charts underneath, and neither
+        // applies to a map of all-time history (P3-109).
+        if model.isCountryAtlasExpanded {
+            return AnyView(
+                AgentCountryAtlasView(
+                    atlas: model.atlas,
+                    visitedCountryCodes: model.globe.visitedCountryCodes,
+                    countryHistory: model.globe.countryHistory,
+                    onCollapse: { model.collapseCountryAtlas() }
+                )
+            )
+        }
+        return AnyView(collapsedAnalysisView)
+    }
+
+    private var collapsedAnalysisView: some View {
         VStack(spacing: 0) {
             analysisControls
             errorBanner
@@ -170,7 +187,8 @@ struct AgentMainView: View {
                         AgentGlobeChart(
                             model: model.globe,
                             atlas: model.atlas,
-                            isOnScreen: model.isWindowVisible && model.selectedTab == .network
+                            isOnScreen: model.isWindowVisible && model.selectedTab == .network,
+                            onExpandCountries: { model.expandCountryAtlas() }
                         )
                             .frame(width: metrics.globeWidth, height: metrics.topHeight)
                         AgentOverviewPanel(

@@ -93,6 +93,32 @@ enum RenderCheck {
                      to: "\(output)/timeline-\(name)-\(Int(width))x\(Int(height)).png")
             }
         }
+
+            // The expanded country map (P3-109). One drawing per language: it
+            // carries no per-metric content, but its heading and its list do.
+            let atlas = try? WorldAtlas.bundled()
+            let visited: Set<String> = ["JP", "US", "GB", "DE", "SG", "AU", "BR", "ZA"]
+            let history = visited.sorted().enumerated().map { index, code in
+                CountryVisitSummary(
+                    countryCode: code,
+                    firstObservedAt: Date(timeIntervalSince1970: 1_755_200_000),
+                    lastObservedAt: Date(timeIntervalSince1970: 1_757_600_000),
+                    lastSiteName: "",
+                    lastProcessName: "Claude Helper",
+                    connectionCount: 1_173_996 - index * 100_000
+                )
+            }
+            for (width, height) in [(1440.0, 900.0), (1100.0, 700.0), (820.0, 560.0)] {
+                save(AgentWorldMapChart(atlas: atlas, visitedCountryCodes: visited),
+                     width: width, height: height,
+                     to: "\(output)/worldmap-\(language)-\(Int(width))x\(Int(height)).png")
+                save(AgentCountryAtlasView(
+                        atlas: atlas, visitedCountryCodes: visited,
+                        countryHistory: history, onCollapse: {}
+                     ),
+                     width: width, height: height,
+                     to: "\(output)/country-atlas-\(language)-\(Int(width))x\(Int(height)).png")
+            }
         }
     }
 

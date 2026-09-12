@@ -55,11 +55,15 @@ describe('macOS Agent all-time country history', () => {
     assert.match(globe, /L\("Destination countries"\)/);
     assert.match(globe, /countryView = \.destinations/);
     assert.match(globe, /AgentCountryHistoryList\(rows: model\.countryHistory\)/);
-    assert.match(globe, /LazyVStack/);
-    assert.match(globe, /L\("First accessed"\)/);
-    assert.match(globe, /L\("Last accessed"\)/);
-    assert.match(globe, /row\.lastProcessName/);
-    assert.match(globe, /row\.connectionCount/);
+    // The card itself moved into its own file when the expanded atlas started
+    // showing the same one (P3-109). It is asserted where it lives, not where
+    // it used to.
+    const card = readAgentSource('AgentCountryHistoryList.swift');
+    assert.match(card, /LazyVStack/);
+    assert.match(card, /L\("First accessed"\)/);
+    assert.match(card, /L\("Last accessed"\)/);
+    assert.match(card, /row\.lastProcessName/);
+    assert.match(card, /row\.connectionCount/);
   });
 
   it('orders destination countries by access count and keeps globe controls translucent', () => {
