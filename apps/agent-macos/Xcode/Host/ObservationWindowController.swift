@@ -543,6 +543,16 @@ struct AgentMainView: View {
                 if model.logFilter.isActive {
                     Button(L("Clear filters")) { model.logFilter = ConnectionLogFilter() }
                 }
+                // Says what the table is doing. A table that has quietly
+                // stopped updating looks exactly like a quiet network, and the
+                // second reading is the dangerous one (P3-107).
+                Text(liveStateText)
+                    .font(.caption)
+                    .foregroundStyle(model.logIsPaused ? .orange : .secondary)
+                Button(model.logIsPaused ? L("Resume") : L("Pause")) {
+                    model.setLogPaused(!model.logIsPaused)
+                }
+                .help(L("Stops the table moving while you read it. Nothing is collected differently; only this screen stops updating."))
             }
             AgentLogFilterBar(model: model)
             Table(model.visibleRows, sortOrder: $model.logSort) {
@@ -612,6 +622,29 @@ struct AgentMainView: View {
         .padding(16)
         .agentSection()
     }
+
+    /// What the log is doing, in words.
+    ///
+    /// Three states, and none of them is silence: following, following but
+    /// nothing has arrived yet, or stopped by the reader with a count of what
+    /// it has not shown them.
+    private var liveStateText: String {
+        if model.logIsPaused {
+            return model.logPendingArrivals > 0
+                ? L("Paused -- %lld new", model.logPendingArrivals)
+                : L("Paused")
+        }
+        guard let updated = model.logUpdatedAt else { return L("Live") }
+        return L("Live -- updated %@", Self.liveFormatter.string(from: updated))
+    }
+
+    /// Time only. The date is in the rows; this is about the last few seconds.
+    private static let liveFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .medium
+        return formatter
+    }()
 
     /// Date and time to the second. A bare time made two rows a day apart look
     /// like two rows a minute apart.
@@ -926,6 +959,13 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     @MainActor
     func updateMonitoringStatus(_ status: AgentMonitoringStatus) {
         model.setMonitoringStatus(status.label)
+    }
+
+    /// New connections have been recorded. The log follows them if it is the
+    /// screen being looked at.
+    @MainActor
+    func observationsArrived(_ count: Int) {
+        model.observationsArrived(count)
     }
 
     @MainActor
