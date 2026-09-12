@@ -60,6 +60,23 @@ describe('アクセス先の国を広げて見る', () => {
     assert.doesNotMatch(atlasView, /First accessed|Last accessed|Latest application/);
   });
 
+  it('何か国かを左上で言い、地球儀と同じ数え方をする', () => {
+    // The map shows where and the list shows each one; neither answers "how
+    // far does this reach" in a single number.
+    //
+    // `ZZ` -- the placeholder for a destination whose region is unknown -- is
+    // not a country. A country too small for the 110m atlas to draw still is:
+    // it is a place this Mac reached, and one such destination on the
+    // measured Mac carries 9,835 connections.
+    assert.match(atlasView, /L\("%lld countries", CountryCode\.countries\(visitedCountryCodes\)\.count\)/);
+    const globeChart = readAgentSource('AgentGlobeChart.swift');
+    assert.doesNotMatch(globeChart, /visitedCountryCodes\.count/);
+    assert.match(globeChart, /model\.visitedCountryCount/);
+    for (const language of ['en', 'ja']) {
+      assert.ok(strings(language).includes('"%lld countries" ='), `${language}: count`);
+    }
+  });
+
   it('新しい文言が両方の言語にある', () => {
     for (const language of ['en', 'ja']) {
       for (const key of ['"Expand"', '"Shrink"', '"Return to the previous size"']) {
