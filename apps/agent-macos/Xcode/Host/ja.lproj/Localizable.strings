@@ -44,7 +44,6 @@
 "Connection activity" = "通信ログ";
 "Showing the newest 500 records in the shared period" = "選択期間の新しい通信を最大500件表示します";
 "%lld shown" = "%lld件表示";
-"Observed" = "観測時刻";
 "Application" = "アプリ";
 "Destination" = "宛先";
 "Protocol" = "プロトコル";
@@ -707,3 +706,8 @@
 "Anthropic request failed: %@" = "Anthropicへのリクエストに失敗しました：%@";
 "Anthropic API key removed from Keychain." = "Anthropic APIキーをKeychainから削除しました。";
 "Could not remove the Anthropic API key: %@" = "Anthropic APIキーを削除できませんでした：%@";
+
+// The connection log says which rows are still moving (P3-107).
+"not ended" = "継続中";
+"The agent has not recorded this connection ending. Data volume is measured at the end, which is why this row has none yet." = "この通信が終わったことを、Agentはまだ記録していません。データ量は終了時に確定するため、この行にはまだ通信量がありません。";
+"State" = "状態";

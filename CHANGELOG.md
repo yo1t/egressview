@@ -4,6 +4,45 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.63
+
+**The connection log has a State column, and it now tells the truth.**
+
+0.5.62 marked a row as still running when its last observation was a few
+seconds old. On this Mac that is the opposite of the truth, twice: the agent
+reports a connection when it opens and again when it closes, and nothing
+moves the time in between. A connection open for an hour was called finished,
+and one that ended a second ago was called running.
+
+Whether a connection has ended is now decided by whether its data volume has
+arrived, because that arrives with the end and only then. A row with no data
+volume has not been reported as ended -- which is what the charts already say
+about open connections.
+
+The state is also its own column rather than a word beside the time. One cell
+holding a timestamp and a state sorts by neither, and copying it out carries
+the pair glued together.
+
+### Agent for Mac 0.5.62
+
+**A row in the connection log now says what period it covers.** There was one
+time column, headed "Observed", holding the time the connection was last seen.
+A row in that table is an aggregate that keeps being updated while the traffic
+continues, so the single number could not say whether the row was a moment or
+an hour -- and a connection that had finished looked exactly like one still
+running.
+
+There are now two columns, first observed and last observed, and a row still
+being seen when the window last read the records says so beside its time.
+
+Neither column is when the connection opened or closed. The agent samples the
+socket table rather than watching connections start and end, so these are the
+first and last samples that found it. Saying "end time" would claim something
+the agent never saw.
+
+This is the first step of a longer change. The window still re-reads every 15
+seconds; showing new rows as they arrive comes later.
+
 ### Agent for Mac 0.5.61
 
 **The vertical axis stops clumping when the window is small.** The timeline
