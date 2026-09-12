@@ -46,8 +46,22 @@ public struct AgentCountryAtlasView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(L("Destination countries"))
-                        .font(.title2.weight(.semibold))
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(L("Destination countries"))
+                            .font(.title2.weight(.semibold))
+                        // How many, said once and said large. The map shows
+                        // where and the list shows each one; neither answers
+                        // "how far does this reach" in a single number.
+                        //
+                        // Counted the same way as the globe card counts it, so
+                        // the two cannot disagree. A country the 110m atlas is
+                        // too coarse to draw is still one this Mac reached and
+                        // is still counted (2026-09-12).
+                        Text(L("%lld countries", CountryCode.countries(visitedCountryCodes).count))
+                            .font(.title2.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(.teal)
+                    }
                     Text(L("This list is local and independent of the selected period."))
                         .font(.caption)
                         .foregroundStyle(.secondary)

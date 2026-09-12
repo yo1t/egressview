@@ -57,7 +57,7 @@ public struct AgentWorldMapChart: View {
     private var summary: String {
         visitedCountryCodes.isEmpty
             ? L("No destination countries have been recorded yet.")
-            : L("%lld countries are shaded from all-time local history.", visitedCountryCodes.count)
+            : L("%lld countries are shaded from all-time local history.", CountryCode.countries(visitedCountryCodes).count)
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize, at moment: Date) {

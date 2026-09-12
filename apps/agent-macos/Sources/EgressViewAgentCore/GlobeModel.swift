@@ -30,6 +30,15 @@ public struct GlobeModel: Equatable, Sendable {
     /// Countries reached at any time since this history was enabled. This is
     /// independent of the selected period and is used only for the pale fill.
     public let visitedCountryCodes: Set<String>
+
+    /// How many countries the screen says this Mac has reached.
+    ///
+    /// Not `visitedCountryCodes.count`: that set includes `ZZ`, the
+    /// placeholder for a destination whose region could not be determined, and
+    /// counting it reports a country nobody went to. Kept here so the globe
+    /// card and the expanded map cannot answer the same question with two
+    /// different numbers (P3-109).
+    public var visitedCountryCount: Int { CountryCode.countries(visitedCountryCodes).count }
     public let unavailable: GlobeUnavailableReason?
 
     public var isEmpty: Bool { points.isEmpty }

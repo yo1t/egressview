@@ -213,7 +213,7 @@ public struct AgentGlobeChart: View {
                         HStack(spacing: 5) {
                             Image(systemName: "paintbrush.pointed")
                             Text(L("%lld countries are shaded from all-time local history.",
-                                   model.visitedCountryCodes.count))
+                                   model.visitedCountryCount))
                             Image(systemName: "chevron.right")
                                 .font(.caption2.weight(.semibold))
                         }
@@ -252,12 +252,12 @@ public struct AgentGlobeChart: View {
     private var summary: String {
         guard let busiest = model.points.last else {
             return L("No connections in this period. %lld countries are retained in local history.",
-                     model.visitedCountryCodes.count)
+                     model.visitedCountryCount)
         }
         let place = busiest.city ?? busiest.countryCode ?? L("an unnamed place")
         return L("%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@. %4$lld countries are retained in local history.",
                  model.points.count, Int((model.placedShare * 100).rounded()), place,
-                 model.visitedCountryCodes.count)
+                 model.visitedCountryCount)
     }
 
 }
