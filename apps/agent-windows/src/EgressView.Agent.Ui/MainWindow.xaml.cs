@@ -21,7 +21,20 @@ public partial class MainWindow : Window
     /// things derived from it -- what counts as still running, above all --
     /// move with it instead of being left behind.
     internal static readonly TimeSpan LogRefreshInterval = TimeSpan.FromSeconds(15);
+    /// How often the log asks what has happened since it last looked.
+    ///
+    /// Short because the point of the log is to show traffic as it happens,
+    /// and affordable because the question is bounded: events after a cursor,
+    /// capped. The slower full read stays, as reconciliation -- retention and
+    /// enrichment change rows that no event mentions, so a view built only
+    /// from the stream would drift away from the store.
+    internal static readonly TimeSpan LogStreamInterval = TimeSpan.FromSeconds(2);
+    private const int LogStreamBatch = 500;
     private readonly DispatcherTimer refreshTimer = new() { Interval = LogRefreshInterval };
+    private readonly DispatcherTimer logStreamTimer = new() { Interval = LogStreamInterval };
+    private long logCursor;
+    private bool logStreaming;
+    private long logOmitted;
     private bool loadingSettings;
     private bool loadingDeliveryState;
     private int selectedMinutes = 10_080;
@@ -58,6 +71,13 @@ public partial class MainWindow : Window
         Loaded += async (_, _) => { LoadSettings(); await RefreshAllAsync(); refreshTimer.Start(); };
         IsVisibleChanged += (_, _) => { if (IsVisible) refreshTimer.Start(); else refreshTimer.Stop(); };
         refreshTimer.Tick += async (_, _) => { if (IsVisible && IsActive) await RefreshVisibleAsync(); };
+        logStreamTimer.Tick += async (_, _) => await StreamLogAsync();
+        // Nothing streams towards a window nobody is looking at. A background
+        // window that kept asking every two seconds would spend a laptop's
+        // battery to update a picture no one can see.
+        Activated += (_, _) => ReconcileLogStream();
+        Deactivated += (_, _) => ReconcileLogStream();
+        IsVisibleChanged += (_, _) => ReconcileLogStream();
         Closing += SaveWindowSize;
         Closing += HideToTray;
         Closed += (_, _) => { refreshTimer.Stop(); lifetime.Cancel(); aiRequest?.Cancel(); aiClient.Dispose(); };
@@ -185,10 +205,14 @@ public partial class MainWindow : Window
         try
         {
             var limit = SelectedLimit();
-            rawFlows = await ReadLogPageAsync(ObservationGrain ? "recent-observations" : "recent-flows", limit, 0);
+            var snapshot = await ReadLogSnapshotAsync(limit, ObservationGrain);
+            rawFlows = snapshot.Rows;
             rawFlowsReadAt = DateTimeOffset.UtcNow;
+            logCursor = snapshot.Cursor;
+            logOmitted = 0;
             PopulateCountryFilter();
             ApplyLogFilter();
+            ReconcileLogStream();
         }
         catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
     }
@@ -316,6 +340,9 @@ public partial class MainWindow : Window
         MergeRows(filtered.Select(flow => new FlowRow(flow, !ObservationGrain, rawFlowsReadAt)).ToArray());
         var active = new[] { app.Length > 0, destination.Length > 0, port.Length > 0, country != "all", protocol != "all", volume != "all", collector != "all" }.Count(value => value);
         LogStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("LogCountStatus"), filtered.Length, rawFlows.Count, active);
+        if (logOmitted > 0)
+            LogStatus.Text += " · " + string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("LogOmittedStatus"), logOmitted);
         if (logPaused && logPausedAt is { } heldAt)
             LogStatus.Text += " · " + string.Format(CultureInfo.CurrentCulture,
                 LocalizationManager.Text("LogPausedStatus"), heldAt.LocalDateTime.ToString("g"));
@@ -331,6 +358,7 @@ public partial class MainWindow : Window
         logPaused = !logPaused;
         logPausedAt = logPaused ? DateTimeOffset.UtcNow : null;
         PauseLogButton.SetResourceReference(ContentProperty, logPaused ? "ResumeUpdates" : "PauseUpdates");
+        ReconcileLogStream();
         if (logPaused) ApplyLogFilter();
         else await RefreshFlowsAsync();
     }
@@ -551,6 +579,60 @@ public partial class MainWindow : Window
 
     private async void RowLimit_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) await RefreshFlowsAsync(); }
     private int SelectedLimit() => RowLimit.SelectedItem is ComboBoxItem item && int.TryParse(item.Content?.ToString(), out var value) ? value : 100;
+
+    private static async Task<ObservationPage> ReadLogSnapshotAsync(int limit, bool events, CancellationToken cancellationToken = default)
+    {
+        var response = await AgentIpcClient.RequestAsync(
+            JsonSerializer.Serialize(new { v = 1, op = "log-snapshot", limit, events }), cancellationToken);
+        using var document = JsonDocument.Parse(response);
+        var root = document.RootElement;
+        return new(root.GetProperty("cursor").GetInt64(), root.GetProperty("more").GetBoolean(),
+            root.GetProperty("data").Deserialize<List<RecentFlow>>() ?? []);
+    }
+
+    /// Advance the visible log by whatever has happened since it last looked.
+    ///
+    /// The stream carries observations, and the per-conversation reading is
+    /// folded from those same observations by the store's own rule. One stream
+    /// feeds both readings, so the two cannot disagree about what happened --
+    /// only about how it is shown.
+    private async Task StreamLogAsync()
+    {
+        if (logStreaming || logPaused || !IsVisible || !IsActive || MainTabs.SelectedIndex != 2) return;
+        logStreaming = true;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                JsonSerializer.Serialize(new { v = 1, op = "log-delta", cursor = logCursor, limit = LogStreamBatch }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            if (root.GetProperty("status").GetString() != "ok") return;
+            var events = root.GetProperty("data").Deserialize<List<RecentFlow>>() ?? [];
+            logCursor = root.GetProperty("cursor").GetInt64();
+            // A burst larger than one batch is not silently truncated: the
+            // count of what was skipped is shown, and the next full read
+            // restores the whole page.
+            if (root.GetProperty("more").GetBoolean()) logOmitted += events.Count;
+            if (events.Count == 0) return;
+
+            var limit = SelectedLimit();
+            rawFlows = ObservationGrain
+                ? events.AsEnumerable().Reverse().Concat(rawFlows).Take(limit).ToArray()
+                : ObservationFold.Apply(rawFlows, events, limit);
+            rawFlowsReadAt = DateTimeOffset.UtcNow;
+            ApplyLogFilter();
+        }
+        // A stream that cannot reach the service must not shout on every tick;
+        // the slower full read already reports a lasting failure.
+        catch (Exception) { }
+        finally { logStreaming = false; }
+    }
+
+    private void ReconcileLogStream()
+    {
+        var live = IsVisible && IsActive && !logPaused && MainTabs.SelectedIndex == 2;
+        if (live) logStreamTimer.Start(); else logStreamTimer.Stop();
+    }
 
     private static async Task<IReadOnlyList<RecentFlow>> ReadFlowPageAsync(int limit, int offset, CancellationToken cancellationToken = default) =>
         await ReadLogPageAsync("recent-flows", limit, offset, cancellationToken);
@@ -1343,7 +1425,12 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(text)) System.Windows.Clipboard.SetText(text);
     }
 
-    private async void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded && e.Source == MainTabs) await RefreshVisibleAsync(); }
+    private async void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || e.Source != MainTabs) return;
+        ReconcileLogStream();
+        await RefreshVisibleAsync();
+    }
 
     private async void Enroll_Click(object sender, RoutedEventArgs e)
     {

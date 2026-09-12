@@ -948,10 +948,53 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
-    private IReadOnlyList<RecentFlow> ReadRecentFlowQuery(string sql)
+    /// The page, together with the point in the event stream it was taken at.
+    ///
+    /// Both under one lock on purpose. Read separately, anything written
+    /// between the two reads is either counted twice or missed, and a log that
+    /// double-counts is worse than a slow one.
+    public ObservationPage ReadLogSnapshot(int limit, bool asEvents)
+    {
+        if (limit is not (50 or 100 or 200 or 500)) throw new ArgumentOutOfRangeException(nameof(limit));
+        lock (gate)
+        {
+            var cursor = ScalarInt64("SELECT COALESCE(MAX(id),0) FROM observations");
+            return new(cursor, false, asEvents ? ReadRecentObservations(limit) : ReadRecentFlows(limit));
+        }
+    }
+
+    /// What happened after a given point in the stream, oldest first.
+    ///
+    /// Keyed on the rowid rather than on a timestamp. `observed_at` is neither
+    /// unique nor guaranteed to move forwards -- a clock that steps back would
+    /// make rows vanish from the stream -- while the rowid only ever
+    /// increases. It also makes an omission detectable: if the page fills, the
+    /// caller knows there is more rather than quietly showing a fraction.
+    public ObservationPage ReadObservationsSince(long afterId, int limit)
+    {
+        if (afterId < 0) throw new ArgumentOutOfRangeException(nameof(afterId));
+        if (limit is < 1 or > 2_000) throw new ArgumentOutOfRangeException(nameof(limit));
+        lock (gate)
+        {
+            const string columns = "o.observed_at,o.observed_at,o.protocol,o.local_address,o.local_port,o.remote_address," +
+                "o.remote_port,o.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,o.interface_id,o.source,NULL,g.country_code";
+            var sql = $"SELECT {columns},o.id FROM observations o LEFT JOIN geo_locations g ON g.ip=o.remote_address " +
+                $"WHERE o.id>{afterId} ORDER BY o.id LIMIT {limit}";
+            var rows = ReadRecentFlowQuery(sql, out var lastId);
+            var newest = ScalarInt64("SELECT COALESCE(MAX(id),0) FROM observations");
+            // The cursor advances to the newest row even when nothing matched,
+            // so an idle stream does not re-ask the same question forever.
+            return new(rows.Count == 0 ? newest : lastId, rows.Count >= limit && lastId < newest, rows);
+        }
+    }
+
+    private IReadOnlyList<RecentFlow> ReadRecentFlowQuery(string sql) => ReadRecentFlowQuery(sql, out _);
+
+    private IReadOnlyList<RecentFlow> ReadRecentFlowQuery(string sql, out long lastId)
     {
         CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
         var result = new List<RecentFlow>();
+        lastId = 0;
         try
         {
             while (true)
@@ -966,6 +1009,7 @@ public sealed partial class ObservationStore : IDisposable
                     NullableTextValue(statement, 8), NullableInt64(statement, 9), NullableInt64(statement, 10),
                     Text(statement, 11) == "vpn_transport" ? ObservationLayer.VpnTransport : ObservationLayer.Logical,
                     NullableTextValue(statement, 12), Text(statement, 13), NullableTextValue(statement, 14), NullableTextValue(statement, 15)));
+                if (WinSqlite.ColumnCount(statement) > 16) lastId = WinSqlite.ColumnInt64(statement, 16);
             }
         }
         finally { WinSqlite.Finalize(statement); }
