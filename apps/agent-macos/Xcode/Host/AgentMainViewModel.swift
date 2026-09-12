@@ -44,7 +44,14 @@ struct AgentObservationRow: Identifiable {
     /// holding a timestamp and a state is two facts in one value: it sorts by
     /// neither, and anything that copies the table out -- a selection, a
     /// spreadsheet, a later export -- carries the pair as a single string.
-    var activityText: String { isOpen ? L("not ended") : "" }
+    /// Says what is known, which is less than "this connection is alive".
+    ///
+    /// Measured on a Mac 2026-09-12: about one close report in ten never
+    /// arrives, so a row can carry this permanently after the connection has
+    /// finished -- 56,708 of them across fifteen days. The rule is still
+    /// right; the word "still running" was not, and neither OS can honestly
+    /// claim a connection is alive at this instant (P3-108).
+    var activityText: String { isOpen ? L("end not seen") : "" }
     var application: String {
         observation.processName.isEmpty ? "PID \(observation.processID)" : observation.processName
     }
