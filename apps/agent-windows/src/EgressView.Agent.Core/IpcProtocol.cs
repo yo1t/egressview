@@ -23,7 +23,10 @@ public static class IpcProtocol
         Func<DateTimeOffset?, LocalHistoryDeletionResult>? deleteHistory = null,
         Func<string>? diagnostics = null,
         Func<bool, bool, AgentUninstallResult>? prepareUninstall = null,
-        Func<int?, IReadOnlyList<CountryHistoryRow>>? countryHistory = null)
+        Func<int?, IReadOnlyList<CountryHistoryRow>>? countryHistory = null,
+        Func<int, int, IReadOnlyList<RecentFlow>>? recentObservations = null,
+        Func<int, bool, ObservationPage>? logSnapshot = null,
+        Func<long, int, ObservationPage>? observationsSince = null)
     {
         try
         {
@@ -37,6 +40,11 @@ public static class IpcProtocol
                 "status" => Status(status),
                 "summary" => Summary(root, summary),
                 "recent-flows" => RecentFlows(root, recentFlows),
+                // Same shape, different reading of what one row is: a
+                // conversation that spans time, or one event that happened.
+                "recent-observations" => RecentFlows(root, recentObservations),
+                "log-snapshot" => LogSnapshot(root, logSnapshot),
+                "log-delta" => LogDelta(root, observationsSince),
                 "globe" => Globe(root, globePoints),
                 "country-history" => CountryHistory(root, countryHistory),
                 "analysis" => Analysis(root, analysis),
@@ -201,6 +209,30 @@ public static class IpcProtocol
         var offset = root.TryGetProperty("offset", out var offsetValue) ? offsetValue.GetInt32() : 0;
         if (offset is < 0 or > 1_000_000) return Reject("invalid-offset");
         return JsonSerializer.Serialize(new { status = "ok", limit, offset, data = read(limit, offset) });
+    }
+
+    private static string LogSnapshot(JsonElement root, Func<int, bool, ObservationPage>? read)
+    {
+        if (read is null) return Reject("operation-unavailable");
+        var limit = root.TryGetProperty("limit", out var value) ? value.GetInt32() : 0;
+        if (limit is not (50 or 100 or 200 or 500)) return Reject("invalid-limit");
+        var asEvents = root.TryGetProperty("events", out var events) && events.ValueKind == JsonValueKind.True;
+        var page = read(limit, asEvents);
+        return JsonSerializer.Serialize(new { status = "ok", limit, cursor = page.Cursor, more = page.More, data = page.Rows });
+    }
+
+    /// Bounded on purpose. This is the operation the log calls most often, and
+    /// the lesson of the listener stall is that a frequently called operation
+    /// must never be allowed to grow with the size of the history.
+    private static string LogDelta(JsonElement root, Func<long, int, ObservationPage>? read)
+    {
+        if (read is null) return Reject("operation-unavailable");
+        if (!root.TryGetProperty("cursor", out var cursorValue) || !cursorValue.TryGetInt64(out var cursor) || cursor < 0)
+            return Reject("invalid-cursor");
+        var limit = root.TryGetProperty("limit", out var value) ? value.GetInt32() : 0;
+        if (limit is < 1 or > 2_000) return Reject("invalid-limit");
+        var page = read(cursor, limit);
+        return JsonSerializer.Serialize(new { status = "ok", limit, cursor = page.Cursor, more = page.More, data = page.Rows });
     }
 
     private static string SetDeliveryEnabled(JsonElement root, Action<bool>? set)
