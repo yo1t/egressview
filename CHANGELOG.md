@@ -4,6 +4,18 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.66
+
+**Countries light up as your Mac reaches them.** On the expanded map, a country
+glows when traffic arrives and fades over six seconds -- so a map of everywhere
+you have ever been also shows what is happening now. Nothing is drawn when
+nothing is fading, and the countries are only looked up while that map is open.
+
+**The corner of the map says how many countries.** Counted the same way the
+globe card counts them, so the two cannot disagree -- and destinations whose
+country could not be determined are no longer counted as a country, which is
+why the number is one lower than before.
+
 ### Agent for Mac 0.5.65
 
 **Every country your Mac has reached, on one map.** The destination-country
