@@ -2,8 +2,6 @@
 // Dependencies are injected at startup via init() to enable unit testing.
 'use strict';
 
-const { runInSlices } = require('./slice-runner');
-
 // ─── Injected dependencies ────────────────────────────────────────────────────
 let _io, _history, _enrichment, _threatIntel, _notifier, _deviceId, _devices;
 let _asus, _yamaha, _cisco, _dhcpdSyslog;
@@ -232,16 +230,6 @@ function _observeDevices(records, source) {
  */
 function recordConnections(sessions, now = Date.now(), source = 'nat', routerId = '') {
   if (!sessions?.length) return [];
-  return recordConnectionSlice(sessions, now, source, routerId);
-}
-
-/// One uninterrupted piece of the work: prepare, persist, cache, publish.
-///
-/// Split out so it can be called once with everything (the synchronous path
-/// other callers still use) or repeatedly with parts of it. Each call is
-/// self-contained -- what it wrote is in SQLite and in the cache when it
-/// returns -- which is what makes stopping between calls safe (P3-112).
-function recordConnectionSlice(sessions, now, source, routerId) {
   const staged = new Map();
   const sourceMeta = new Map();
   const records = sessions.map(session => _prepareConnection(session, now, source, routerId, staged, sourceMeta));
@@ -262,35 +250,6 @@ function recordConnectionSlice(sessions, now, source, routerId) {
   for (const record of records) _publishConnection(record);
   _observeDevices(records, source);
   return records.map(({ entry, key, isNew }) => ({ entry, key, isNew }));
-}
-
-/// The same work, in slices, with the event loop let through between them.
-///
-/// Measured on production 2026-09-12: one poll held the loop for 1.9 seconds
-/// here, and the site answers nothing while that runs.
-///
-/// **What a stop leaves behind.** Each slice commits its own transaction, so
-/// an interruption partway leaves the earlier connections recorded and the
-/// later ones not. That is recoverable rather than wrong: the next poll reads
-/// the router's whole table again and records what is missing. The failure to
-/// avoid is the opposite -- one transaction so large that a stall in it takes
-/// the site down, which is what this replaces.
-///
-/// **Two polls cannot overlap here.** The router scheduler holds `st.running`
-/// for the whole cycle and will not start another for the same router, so
-/// yielding does not let a second poll in behind this one.
-async function recordConnectionsInSlices(
-  sessions, now = Date.now(), source = 'nat', routerId = '', options = {}
-) {
-  if (!sessions?.length) return { records: [], slices: 0, longestMs: 0 };
-  const records = [];
-  const { slices, longestMs } = await runInSlices(sessions, {
-    ...options,
-    processSlice: (slice) => {
-      for (const record of recordConnectionSlice(slice, now, source, routerId)) records.push(record);
-    },
-  });
-  return { records, slices, longestMs };
 }
 
 // ─── [INSPECT] session handler ────────────────────────────────────────────────
@@ -354,7 +313,6 @@ module.exports = {
   resolveMacByIp,
   recordConnection,
   recordConnections,
-  recordConnectionsInSlices,
   handleInspectSession,
   getKnownMacs,
   setKnownMacs,

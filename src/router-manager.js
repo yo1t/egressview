@@ -55,32 +55,17 @@ function createRouterManager({
       }
     }
 
-    // Sliced, with the event loop let through between slices. Measured on
-    // production 2026-09-12, this one call held the loop for 1.9 seconds and
-    // was 66% of the Hub's CPU; the site answers nothing while it runs
-    // (P3-112). The scheduler holds this router's cycle for the duration, so
-    // yielding cannot let a second poll of the same router in behind it.
-    const updated = await runtimeProfiler.measureAsync(
-      `router.${kind}.poll.recordConnections`,
-      async () => {
-        const result = new Map();
-        signal?.throwIfAborted();
-        let recordedSessions;
-        if (runtime.recordConnectionsInSlices) {
-          ({ records: recordedSessions } = await runtime.recordConnectionsInSlices(
-            sessions, now, kind, id
-          ));
-        } else if (runtime.recordConnections) {
-          recordedSessions = runtime.recordConnections(sessions, now, kind, id);
-        } else {
-          recordedSessions = sessions.map(session => runtime.recordConnection(session, now, kind, id));
-        }
-        for (const recorded of recordedSessions) {
-          result.set(recorded.key, recorded.entry);
-        }
-        return result;
-      },
-    );
+    const updated = runtimeProfiler.measureSync(`router.${kind}.poll.recordConnections`, () => {
+      const result = new Map();
+      signal?.throwIfAborted();
+      const recordedSessions = runtime.recordConnections
+        ? runtime.recordConnections(sessions, now, kind, id)
+        : sessions.map(session => runtime.recordConnection(session, now, kind, id));
+      for (const recorded of recordedSessions) {
+        result.set(recorded.key, recorded.entry);
+      }
+      return result;
+    });
 
     const currentKeys = new Set(sessions.map(s => `${s.src}|${s.dst}|${s.dport}|${s.proto}`));
     const prior = previousKeys.get(id) || new Set();
