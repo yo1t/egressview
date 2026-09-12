@@ -20,7 +20,17 @@ struct AgentObservationRow: Identifiable {
     /// sorting, filtering and display can never disagree about it.
     let destinationText: String
 
-    var observedAt: Date { observation.lastObservedAt }
+    /// When this flow was first seen, and when it was last seen.
+    ///
+    /// Both, because the row is an aggregate that keeps being updated while
+    /// the traffic continues. With one time column the log could not say
+    /// whether a row was a moment or an hour (P3-107).
+    ///
+    /// Neither is when the connection opened or closed. The agent samples the
+    /// socket table rather than watching connections start and end, so these
+    /// are the first and last samples that found this flow.
+    var firstObservedAt: Date { observation.firstObservedAt }
+    var lastObservedAt: Date { observation.lastObservedAt }
     var application: String {
         observation.processName.isEmpty ? "PID \(observation.processID)" : observation.processName
     }
@@ -83,8 +93,15 @@ final class AgentMainViewModel: ObservableObject {
         [], selection: VisualizationSelection()
     )
     @Published private(set) var observationRows: [AgentObservationRow] = []
+    /// When the rows on screen were read. What the log's running marker is
+    /// measured against.
+    @Published private(set) var rowsLoadedAt = Date.distantPast
     @Published var logFilter = ConnectionLogFilter()
-    @Published var logSort = [KeyPathComparator(\AgentObservationRow.observedAt, order: .reverse)]
+    /// Newest activity first. The question the log is opened with is "what is
+    /// happening now", so the rows that are still moving are the ones at the
+    /// top; first-seen ordering would bury them under whatever started
+    /// earliest and is long finished.
+    @Published var logSort = [KeyPathComparator(\AgentObservationRow.lastObservedAt, order: .reverse)]
 
     /// The rows after filtering and sorting, which is what the table shows and
     /// what the count beside it must therefore report.
@@ -518,7 +535,13 @@ final class AgentMainViewModel: ObservableObject {
         if let value = data.coverage { coverage = value }
         if let value = data.sleepPeriods { sleepPeriods = value }
         if let value = data.threats { threats = value }
-        if let value = data.rows { observationRows = value }
+        if let value = data.rows {
+            observationRows = value
+            // Stamped here rather than read as `Date()` by the table, so that
+            // "still running" is measured against the data on screen and does
+            // not flicker as the refresh timer runs down (P3-107).
+            rowsLoadedAt = Date()
+        }
         if let value = data.storage { storage = value }
         if let value = data.usesRolledUpHistory { usesRolledUpHistory = value }
         if let measured = data.measuredBytes {

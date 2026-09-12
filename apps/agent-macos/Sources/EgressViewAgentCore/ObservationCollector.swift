@@ -12,6 +12,14 @@ public final class LightweightCollector: ObservationCollector {
     public private(set) var isRunning = false
 
     private let provider: SocketSnapshotProviding
+    /// How often the socket table is sampled.
+    ///
+    /// Public because it is the floor on how fresh anything downstream can be:
+    /// the connection log cannot show a flow sooner than the sample that found
+    /// it, and `ConnectionLogActivity` measures against this rather than
+    /// repeating the number (P3-107).
+    public static let defaultInterval: TimeInterval = 2
+
     private let interval: TimeInterval
     private let queue: DispatchQueue
     private let handler: ([ConnectionObservation]) -> Void
@@ -20,7 +28,7 @@ public final class LightweightCollector: ObservationCollector {
 
     public init(
         provider: SocketSnapshotProviding = LibProcSocketSnapshotProvider(),
-        interval: TimeInterval = 2,
+        interval: TimeInterval = LightweightCollector.defaultInterval,
         queue: DispatchQueue = DispatchQueue(label: "com.egressview.agent.libproc"),
         handler: @escaping ([ConnectionObservation]) -> Void
     ) {

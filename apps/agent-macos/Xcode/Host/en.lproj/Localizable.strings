@@ -44,7 +44,6 @@
 "Connection activity" = "Connection activity";
 "Showing the newest 500 records in the shared period" = "Showing the newest 500 records in the shared period";
 "%lld shown" = "%lld shown";
-"Observed" = "Observed";
 "Application" = "Application";
 "Destination" = "Destination";
 "Protocol" = "Protocol";
@@ -705,3 +704,7 @@
 "Anthropic request failed: %@" = "Anthropic request failed: %@";
 "Anthropic API key removed from Keychain." = "Anthropic API key removed from Keychain.";
 "Could not remove the Anthropic API key: %@" = "Could not remove the Anthropic API key: %@";
+
+// The connection log says which rows are still moving (P3-107).
+"still running" = "still running";
+"This connection was still being seen when the window last read the records. Its last-seen time keeps moving." = "This connection was still being seen when the window last read the records. Its last-seen time keeps moving.";

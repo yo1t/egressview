@@ -546,11 +546,32 @@ struct AgentMainView: View {
             }
             AgentLogFilterBar(model: model)
             Table(model.visibleRows, sortOrder: $model.logSort) {
-                TableColumn(L("Observed"), value: \.observedAt) { row in
-                    Text(Self.observedFormatter.string(from: row.observedAt))
+                TableColumn(L("First seen"), value: \.firstObservedAt) { row in
+                    Text(Self.observedFormatter.string(from: row.firstObservedAt))
                         .monospacedDigit()
+                        .foregroundStyle(.secondary)
                 }
-                .width(min: 150, ideal: 170)
+                .width(min: 140, ideal: 160)
+                TableColumn(L("Last seen"), value: \.lastObservedAt) { row in
+                    // A row that is still being seen has a last-seen time that
+                    // keeps moving. Saying so is the whole point of having two
+                    // columns: without it, a finished connection and a running
+                    // one look identical (P3-107).
+                    let running = ConnectionLogActivity.isRunning(
+                        lastObservedAt: row.lastObservedAt, snapshotTakenAt: model.rowsLoadedAt
+                    )
+                    HStack(spacing: 6) {
+                        Text(Self.observedFormatter.string(from: row.lastObservedAt))
+                            .monospacedDigit()
+                        if running {
+                            Text(L("still running"))
+                                .font(.caption)
+                                .foregroundStyle(.tint)
+                                .help(L("This connection was still being seen when the window last read the records. Its last-seen time keeps moving."))
+                        }
+                    }
+                }
+                .width(min: 140, ideal: 200)
                 TableColumn(L("Application"), value: \.application) { row in
                     Text(row.application)
                 }
