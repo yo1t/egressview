@@ -58,6 +58,13 @@ public sealed record RecentFlow(
     string? RemoteHostname = null,
     string? CountryCode = null);
 
+/// A page of the log with its place in the event stream.
+///
+/// <param name="Cursor">The newest event this page accounts for.</param>
+/// <param name="More">Whether events after this page were left unread, so the
+/// reader can say so rather than presenting a fraction as the whole.</param>
+public sealed record ObservationPage(long Cursor, bool More, IReadOnlyList<RecentFlow> Rows);
+
 public sealed record GeoLocation(string Ip, double Latitude, double Longitude, string? CountryCode, string? City);
 public sealed record GeoCacheState(string? ETag, DateTimeOffset? FetchedAt, long LocationCount);
 
@@ -73,12 +80,16 @@ public sealed record AppDestinationAggregate(
 public sealed record AppTimelineAggregate(
     int Bucket, string Application, long Connections, long Bytes, long ConnectionsWithoutBytes);
 
+public sealed record SleepPeriod(DateTimeOffset Start, DateTimeOffset End);
+
 public sealed record PeriodAnalysis(
     DateTimeOffset From, DateTimeOffset To, long Connections, int Applications, int Destinations,
     long Bytes, long ConnectionsWithoutBytes, double CoverageRatio, DateTimeOffset? MonitoringStartedAt,
     long StoredFlows, IReadOnlyList<AppDestinationAggregate> Links, IReadOnlyList<AppTimelineAggregate> Timeline)
 {
     public long StorageBytes { get; init; }
+    public IReadOnlyList<SleepPeriod> SleepPeriods { get; init; } = [];
+    public double SleepSeconds => SleepPeriods.Sum(period => Math.Max(0, (period.End - period.Start).TotalSeconds));
 }
 
 public sealed record ThreatIndicator(string Kind, string Value, string? Source, string? Tag, string Confidence);
@@ -94,11 +105,12 @@ public sealed record ThreatReport(string Availability, long IndicatorCount, Date
 }
 
 public sealed record RetentionMaintenanceResult(long ObservationsDeleted, long FlowsDeleted,
-    long HourlySummariesDeleted, long CoverageSessionsDeleted, long ChartSummariesDeleted = 0)
+    long HourlySummariesDeleted, long CoverageSessionsDeleted, long ChartSummariesDeleted = 0,
+    long SleepPeriodsDeleted = 0)
 {
-    public long TotalDeleted => ObservationsDeleted + FlowsDeleted + HourlySummariesDeleted + CoverageSessionsDeleted + ChartSummariesDeleted;
+    public long TotalDeleted => ObservationsDeleted + FlowsDeleted + HourlySummariesDeleted + CoverageSessionsDeleted + ChartSummariesDeleted + SleepPeriodsDeleted;
     public bool MayHaveMore(int batchSize) => ObservationsDeleted == batchSize || FlowsDeleted == batchSize ||
-        HourlySummariesDeleted == batchSize || CoverageSessionsDeleted == batchSize || ChartSummariesDeleted == batchSize;
+        HourlySummariesDeleted == batchSize || CoverageSessionsDeleted == batchSize || ChartSummariesDeleted == batchSize || SleepPeriodsDeleted == batchSize;
 }
 
 public sealed record LocalHistoryStatus(int RetentionDays, int RawDays, long StorageBytes,
@@ -106,9 +118,9 @@ public sealed record LocalHistoryStatus(int RetentionDays, int RawDays, long Sto
     DateTimeOffset? LastCleanupAt, DateTimeOffset NextCleanupAt);
 
 public sealed record LocalHistoryDeletionResult(long ObservationsDeleted, long FlowsDeleted,
-    long HourlySummariesDeleted, long ChartSummariesDeleted, long CoverageSessionsDeleted)
+    long HourlySummariesDeleted, long ChartSummariesDeleted, long CoverageSessionsDeleted, long SleepPeriodsDeleted = 0)
 {
-    public long TotalDeleted => ObservationsDeleted + FlowsDeleted + HourlySummariesDeleted + ChartSummariesDeleted + CoverageSessionsDeleted;
+    public long TotalDeleted => ObservationsDeleted + FlowsDeleted + HourlySummariesDeleted + ChartSummariesDeleted + CoverageSessionsDeleted + SleepPeriodsDeleted;
 }
 
 public sealed record CollectorSnapshot(
