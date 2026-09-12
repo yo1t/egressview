@@ -60,12 +60,23 @@ public sealed class TrafficTimelineControl : FrameworkElement
         var gridBrush = stroke.Clone();
         gridBrush.Opacity = 0.45;
         var gridPen = new Pen(gridBrush, 1);
+        // How many labels the height affords, not how many the axis has.
+        //
+        // Three numbers stacked in a card a hundred pixels tall become one
+        // smudge, and a smudge is worse than two readable numbers: the middle
+        // tick is an aid, while the maximum is what makes any bar mean
+        // anything. So the middle goes first, and the zero after it. The
+        // gridlines stay either way -- they cost no room and still say where
+        // half is.
+        var labelPitch = axisPrototype.Height + 4;
+        var affordable = plotHeight >= labelPitch * 3 ? 3 : plotHeight >= labelPitch * 2 ? 2 : 1;
         for (var step = 0; step <= 2; step++)
         {
             var fraction = step / 2d;
             var y = baseline - plotHeight * fraction;
             drawing.DrawLine(gridPen, new Point(plotLeft, y), new Point(plotRight, y));
-            DrawRightAligned(drawing, FormatAxisValue(axis.Top * fraction), plotLeft - 7, y, secondary, pixelsPerDip);
+            var labelled = affordable switch { 3 => true, 2 => step != 1, _ => step == 2 };
+            if (labelled) DrawRightAligned(drawing, FormatAxisValue(axis.Top * fraction), plotLeft - 7, y, secondary, pixelsPerDip);
         }
 
         DrawTimeAxis(drawing, plotLeft, plotRight, baseline + 3, secondary, pixelsPerDip);

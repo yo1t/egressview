@@ -1,4 +1,5 @@
 using System.Windows;
+using Size = System.Windows.Size;
 using System.Windows.Automation.Peers;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -84,6 +85,20 @@ public sealed class WorldGlobeControl : FrameworkElement
             longitude, now - previousFrame, degreesPerSecond);
         previousFrame = now;
         InvalidateVisual();
+    }
+
+    /// A globe is round, so it asks for a square.
+    ///
+    /// Without this the control takes whatever width it is given and reports
+    /// no height of its own, and the card is then sized by whatever else is in
+    /// it. Asking for the smaller of the two dimensions keeps the card the
+    /// same height whichever view is showing.
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        var width = double.IsInfinity(availableSize.Width) ? MinHeight : availableSize.Width;
+        var height = double.IsInfinity(availableSize.Height) ? MinHeight : availableSize.Height;
+        var side = Math.Max(MinHeight, Math.Min(width, height));
+        return new Size(double.IsInfinity(availableSize.Width) ? side : availableSize.Width, side);
     }
 
     protected override void OnRender(DrawingContext drawing)
