@@ -724,3 +724,4 @@
 "Show the world map and every country at full size" = "世界地図と国の一覧を画面いっぱいに表示します";
 "Shrink" = "縮小";
 "Return to the previous size" = "元の大きさに戻します";
+"%lld countries" = "%lldか国";

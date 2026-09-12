@@ -60,6 +60,15 @@ describe('アクセス先の国を広げて見る', () => {
     assert.doesNotMatch(atlasView, /First accessed|Last accessed|Latest application/);
   });
 
+  it('何か国かを左上で言う', () => {
+    // The map shows where and the list shows each one; neither answers "how
+    // far does this reach" in a single number.
+    assert.match(atlasView, /L\("%lld countries", visitedCountryCodes\.count\)/);
+    for (const language of ['en', 'ja']) {
+      assert.ok(strings(language).includes('"%lld countries" ='), `${language}: count`);
+    }
+  });
+
   it('新しい文言が両方の言語にある', () => {
     for (const language of ['en', 'ja']) {
       for (const key of ['"Expand"', '"Shrink"', '"Return to the previous size"']) {
