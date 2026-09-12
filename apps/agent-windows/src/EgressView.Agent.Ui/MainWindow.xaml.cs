@@ -17,11 +17,16 @@ public partial class MainWindow : Window
 {
     private readonly AgentEnrollmentClient enrollment = new();
     private readonly CancellationTokenSource lifetime = new();
-    private readonly DispatcherTimer refreshTimer = new() { Interval = TimeSpan.FromSeconds(15) };
+    /// How often the visible tab is re-read. Named rather than inlined so the
+    /// things derived from it -- what counts as still running, above all --
+    /// move with it instead of being left behind.
+    internal static readonly TimeSpan LogRefreshInterval = TimeSpan.FromSeconds(15);
+    private readonly DispatcherTimer refreshTimer = new() { Interval = LogRefreshInterval };
     private bool loadingSettings;
     private bool loadingDeliveryState;
     private int selectedMinutes = 10_080;
     private IReadOnlyList<RecentFlow> rawFlows = [];
+    private DateTimeOffset rawFlowsReadAt = DateTimeOffset.UtcNow;
     /// When paused, the log stops reading and says which moment it is showing.
     /// Something that scrolls cannot be read unless it can be held still, and
     /// a held view that does not admit it is held is worse than a stale one.
@@ -181,6 +186,7 @@ public partial class MainWindow : Window
         {
             var limit = SelectedLimit();
             rawFlows = await ReadLogPageAsync(ObservationGrain ? "recent-observations" : "recent-flows", limit, 0);
+            rawFlowsReadAt = DateTimeOffset.UtcNow;
             PopulateCountryFilter();
             ApplyLogFilter();
         }
@@ -307,7 +313,7 @@ public partial class MainWindow : Window
             (protocol == "all" || flow.Protocol == protocol) &&
             (volume == "all" || (volume == "measured" ? flow.BytesSent is not null && flow.BytesReceived is not null : flow.BytesSent is null || flow.BytesReceived is null)) &&
             (collector == "all" || flow.Origin == collector)).ToArray();
-        MergeRows(filtered.Select(flow => new FlowRow(flow, !ObservationGrain)).ToArray());
+        MergeRows(filtered.Select(flow => new FlowRow(flow, !ObservationGrain, rawFlowsReadAt)).ToArray());
         var active = new[] { app.Length > 0, destination.Length > 0, port.Length > 0, country != "all", protocol != "all", volume != "all", collector != "all" }.Count(value => value);
         LogStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("LogCountStatus"), filtered.Length, rawFlows.Count, active);
         if (logPaused && logPausedAt is { } heldAt)
@@ -1428,17 +1434,26 @@ public partial class MainWindow : Window
     }
 }
 
-public sealed class FlowRow(RecentFlow value, bool spansTime = true)
+/// <param name="readAt">
+/// When this page was read from the service. The active mark is judged
+/// against it rather than against the wall clock at paint time, so a row that
+/// has not changed does not lose its mark merely because a timer ticked.
+/// </param>
+public sealed class FlowRow(RecentFlow value, bool spansTime = true, DateTimeOffset readAt = default)
 {
     /// How recently data must have flowed for a row to be called active.
     ///
     /// The collector watches data, not connections: it handles Datasent and
     /// Datareceived and drops Connect and Disconnect. So nothing here knows
     /// that a connection is open -- only that something crossed it lately.
-    /// Two refresh cycles is long enough that a live flow does not flicker
-    /// between states, short enough that a finished one stops claiming to be
-    /// running.
-    internal static readonly TimeSpan ActiveWindow = TimeSpan.FromSeconds(30);
+    ///
+    /// Derived from how often the log is read, not written as a number.
+    /// Between two reads the screen cannot learn anything new, so a window
+    /// shorter than that would drop the mark off flows that are still running.
+    /// A literal would go stale the moment the refresh cadence changed, and
+    /// then live connections would be shown as finished -- the same shape as
+    /// the chart defects.
+    internal static TimeSpan ActiveWindow => MainWindow.LogRefreshInterval * 2;
 
     public DateTimeOffset FirstSeen => value.FirstSeen;
     public string FirstSeenText => value.FirstSeen.LocalDateTime.ToString("g");
@@ -1448,7 +1463,7 @@ public sealed class FlowRow(RecentFlow value, bool spansTime = true)
     /// Empty rather than a second word for finished flows: a column where
     /// most rows say nothing reads as a flag, and one where every row says
     /// something reads as noise.
-    public string StateText => spansTime && DateTimeOffset.UtcNow - value.LastSeen <= ActiveWindow
+    public string StateText { get; } = spansTime && readAt - value.LastSeen <= ActiveWindow
         ? LocalizationManager.Text("StillActive")
         : string.Empty;
 
