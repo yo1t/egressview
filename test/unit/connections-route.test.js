@@ -1,12 +1,12 @@
 // Unit tests for /api/connections route helpers
 'use strict';
 
-const { describe, it } = require('node:test');
+const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
   _attachApplications, _attachThreats, _parseTimestampParam, _parsePaginationOpts,
-  MAX_LIMIT, SERVER_FILTER_COLS,
+  _resetReadCacheForTest, MAX_LIMIT, SERVER_FILTER_COLS,
 } = require('../../src/routes/connections');
 
 describe('connections route: attachThreats', () => {
@@ -602,6 +602,11 @@ describe('connections route: GET /connections/threat-connections', () => {
 // ─── /connections/threat-counts route handler ─────────────────────────────────
 
 describe('connections route: GET /connections/threat-counts', () => {
+  // These cases call the route with the same window and different fixtures, so
+  // they collide on one cache key. The server has a single history behind that
+  // key; a test process does not.
+  beforeEach(() => _resetReadCacheForTest());
+
   const connectionsRoutes = require('../../src/routes/connections');
 
   function callThreatCountsRoute(groups, threatMap, query = {}) {
@@ -655,6 +660,53 @@ describe('connections route: GET /connections/threat-counts', () => {
     assert.equal(res._body.safe,   0);
     assert.equal(res._body.warn,   0);
     assert.equal(res._body.danger, 0);
+  });
+
+  // Opening the log asks for the page, its total, the summary and these counts
+  // at once, and under an agent scope each one re-ran the same scoped scan --
+  // ~1.9s per execution over a 24h window on the Hub, serialised, which is how
+  // one tab reached 8-12s. The grouping is what costs that, so it is what has to
+  // be shared. Verdicts stay outside the cache: feeds change between polls and
+  // re-matching them is free.
+  it('does not repeat the scan behind a second request for the same window', () => {
+    let scans = 0;
+    const history = {
+      queryByTimeRangePaged: () => [],
+      countByTimeRange:      () => 0,
+      summarizeByTimeRange:  () => ({ byDst: [], byDevice: [] }),
+      groupDstByTimeRange:   () => {
+        scans += 1;
+        return [{ dst: '8.8.8.8', dstHost: 'dns.google', cnt: 4 }];
+      },
+    };
+    let threats = {};
+    const router = connectionsRoutes({
+      requireAdmin: (_req, _res, next) => next(),
+      history,
+      threatIntel: { matchThreatIntel: dst => threats[dst] ?? null },
+    });
+    const layer = router.stack.find(l => l.route?.path === '/connections/threat-counts' && l.route?.methods?.get);
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const call = () => {
+      const res = { _status: 200, _body: null };
+      res.status = (code) => { res._status = code; return res; };
+      res.json = (body) => { res._body = body; return res; };
+      handler({ query: {} }, res);
+      return res._body;
+    };
+
+    assert.deepEqual(call(), { safe: 4, warn: 0, danger: 0, serverTime: call().serverTime });
+    assert.equal(scans, 1, 'the second request reused the first scan');
+
+    // A feed that changes within the TTL still changes the answer, because only
+    // the grouping was cached.
+    threats = { '8.8.8.8': { confidence: 'high' } };
+    const after = call();
+    assert.deepEqual(
+      { safe: after.safe, warn: after.warn, danger: after.danger },
+      { safe: 0, warn: 0, danger: 4 }
+    );
+    assert.equal(scans, 1, 'still no rescan');
   });
 
   it('returns 400 for invalid from timestamp', () => {
