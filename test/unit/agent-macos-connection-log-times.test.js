@@ -72,3 +72,63 @@ describe('通信ログが行の期間を語る', () => {
     );
   });
 });
+
+describe('通信ログが新しい通信に追従する', () => {
+  const appDelegate = readAgentSource('AgentAppDelegate.swift');
+
+  it('取り込みの経路から知らされる。問い合わせて回らない', () => {
+    // The rows are already in the store when the collector's delivery runs.
+    // Asking the database every second whether anything changed would be work
+    // that is almost always wasted, and frequent polling of an expensive
+    // answer is what took the Windows IPC listener down in P3-106.
+    assert.match(appDelegate, /observationWindow\?\.observationsArrived\(observations\.count\)/);
+    assert.match(viewModel, /func observationsArrived\(_ count: Int\)/);
+  });
+
+  it('見ていない画面のためには読まない', () => {
+    // Not the log tab, or no window: nothing to update, so nothing is read.
+    assert.match(
+      viewModel,
+      /guard count > 0, selectedTab == \.log, isWindowVisible else \{ return \}/
+    );
+  });
+
+  it('まとめて届いても読み出しは1回', () => {
+    assert.match(viewModel, /private var liveLogPacer = LiveLogPacer\(\)/);
+    assert.match(viewModel, /guard let delay = liveLogPacer\.schedule\(\) else \{ return \}/);
+  });
+
+  it('待っている間に条件が変わったら、予約を取り消したと伝える', () => {
+    // Left as "still pending", the pacer would never schedule another read
+    // and the log would stop updating without saying so.
+    assert.match(viewModel, /self\.liveLogPacer\.cancelled\(\)/);
+    assert.match(viewModel, /self\.liveLogPacer\.refreshed\(\)/);
+  });
+
+  it('止めている間は読まず、数えるだけ', () => {
+    // Pausing the screen and carrying on in the background would spend the
+    // battery on rows nobody is going to see.
+    assert.match(viewModel, /logPendingArrivals \+= count/);
+    assert.match(viewModel, /func setLogPaused\(_ paused: Bool\)/);
+  });
+
+  it('画面がいまの状態を自分で述べる', () => {
+    assert.match(window, /private var liveStateText: String/);
+    assert.match(window, /L\("Live -- updated %@"/);
+    assert.match(window, /L\("Paused -- %lld new"/);
+    assert.match(window, /Button\(model\.logIsPaused \? L\("Resume"\) : L\("Pause"\)\)/);
+    for (const language of ['en', 'ja']) {
+      for (const key of ['"Live"', '"Live -- updated %@"', '"Paused"', '"Paused -- %lld new"', '"Resume"']) {
+        assert.ok(strings(language).includes(`${key} =`), `${language}: ${key}`);
+      }
+    }
+  });
+
+  it('行の同一性が更新で変わらない', () => {
+    // An id holding the last-observed time and the row index changed on every
+    // reload, so every row was a new row. A log that reloads as traffic
+    // arrives would have thrown the table away several times a minute.
+    assert.match(viewModel, /id: observation\.flowID\?\.uuidString/);
+    assert.doesNotMatch(viewModel, /id: "\\\(observation\.stableKey\)\|\\\(observation\.lastObservedAt/);
+  });
+});

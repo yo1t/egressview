@@ -107,6 +107,19 @@ final class AgentMainViewModel: ObservableObject {
         [], selection: VisualizationSelection()
     )
     @Published private(set) var observationRows: [AgentObservationRow] = []
+    /// Whether the log is following new connections, and what it has to say
+    /// about its own currency.
+    ///
+    /// The screen states this rather than leaving it to be inferred. A table
+    /// that has quietly stopped updating looks exactly like a quiet network,
+    /// and the second reading is the dangerous one (P3-95, P3-107).
+    @Published var logIsPaused = false
+    @Published private(set) var logUpdatedAt: Date?
+    /// Counted, not collected. While paused nothing is read from the store --
+    /// pausing the screen and carrying on in the background would spend the
+    /// battery on rows nobody is going to see.
+    @Published private(set) var logPendingArrivals = 0
+
     @Published var logFilter = ConnectionLogFilter()
     /// Newest activity first. The question the log is opened with is "what is
     /// happening now", so the rows that are still moving are the ones at the
@@ -361,6 +374,50 @@ final class AgentMainViewModel: ObservableObject {
         requestRefresh(selectionChanged: true)
     }
 
+    /// Collapses a burst of arrivals into one read. Lives in the package so
+    /// the rule can be asked questions without watching a screen.
+    private var liveLogPacer = LiveLogPacer()
+
+    /// New observations have been written to the store.
+    ///
+    /// Called from the collector's own delivery path rather than found by
+    /// polling: the rows are already there by the time this runs, and asking
+    /// the database every second whether anything changed would be work that
+    /// is almost always wasted.
+    func observationsArrived(_ count: Int) {
+        guard count > 0, selectedTab == .log, isWindowVisible else { return }
+        guard !logIsPaused else {
+            logPendingArrivals += count
+            return
+        }
+        scheduleLiveLogRefresh()
+    }
+
+    /// Resumes, and catches up in one read.
+    func setLogPaused(_ paused: Bool) {
+        logIsPaused = paused
+        guard !paused else { return }
+        logPendingArrivals = 0
+        scheduleLiveLogRefresh()
+    }
+
+    private func scheduleLiveLogRefresh() {
+        guard let delay = liveLogPacer.schedule() else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            // Re-checked here, not only when it was scheduled: the tab, the
+            // window and the pause button can all have changed while waiting.
+            // Telling the pacer which of the two happened is what keeps a
+            // cancelled read from looking like a pending one forever.
+            guard !self.logIsPaused, self.selectedTab == .log, self.isWindowVisible else {
+                self.liveLogPacer.cancelled()
+                return
+            }
+            self.liveLogPacer.refreshed()
+            self.refresh()
+        }
+    }
+
     func refresh() {
         requestRefresh(selectionChanged: false)
     }
@@ -487,7 +544,15 @@ final class AgentMainViewModel: ObservableObject {
                     )
                     data.rows = observations.enumerated().map { index, observation in
                         AgentObservationRow(
-                            id: "\(observation.stableKey)|\(observation.lastObservedAt.timeIntervalSince1970)|\(index)",
+                            // The flow, not its current state or its place in
+                            // the list. An id containing the last-observed
+                            // time and the row index changed on every reload,
+                            // so every row was a new row: the table could not
+                            // keep the reader's place, and a log that reloads
+                            // as traffic arrives would have thrown the view
+                            // away several times a minute (P3-107).
+                            id: observation.flowID?.uuidString
+                                ?? "\(observation.stableKey)|\(observation.firstObservedAt.timeIntervalSince1970)|\(index)",
                             observation: observation,
                             countryCode: countries[observation.remoteAddress],
                             destinationText: Self.destinationText(observation, grouping: grouping)
@@ -546,7 +611,10 @@ final class AgentMainViewModel: ObservableObject {
         if let value = data.coverage { coverage = value }
         if let value = data.sleepPeriods { sleepPeriods = value }
         if let value = data.threats { threats = value }
-        if let value = data.rows { observationRows = value }
+        if let value = data.rows {
+            observationRows = value
+            logUpdatedAt = Date()
+        }
         if let value = data.storage { storage = value }
         if let value = data.usesRolledUpHistory { usesRolledUpHistory = value }
         if let measured = data.measuredBytes {

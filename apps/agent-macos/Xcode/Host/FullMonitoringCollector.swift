@@ -76,7 +76,7 @@ final class FullMonitoringCollector {
         stopOnQueue()
         isRunning = true
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now(), repeating: 1)
+        timer.schedule(deadline: .now(), repeating: FullMonitoringXPC.drainInterval)
         timer.setEventHandler { [weak self] in self?.poll() }
         self.timer = timer
         timer.resume()
