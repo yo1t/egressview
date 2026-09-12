@@ -48,6 +48,10 @@ public static class DiagnosticsReport
             version,
             build = new { version, informationalVersion = InformationalVersion(), osVersion = Environment.OSVersion.VersionString, architecture = RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant() },
             collector = SafeCollector(snapshot),
+            // What happened to the last few runs of each process. A report
+            // that only describes the agent that is running cannot answer the
+            // question people actually ask after a silent gap.
+            runs = SafeRuns(store),
             health = new { status = health.Status, issues = health.Issues.Select(issue => new { code = issue.Code, action = issue.Action }) },
             database = new { observationCount = count, storageBytes = store.ReadStorageBytes(), integrity, schemaVersion = store.SchemaVersion, durableCounters = store.ReadCounters() },
             flows = new { total = flowStats.Total, snapshot = flowStats.Snapshot, etw = flowStats.Etw, both = flowStats.Both, bytesUnknown = flowStats.BytesUnknown, processNames = new { resolved = processNames.Resolved, unresolved = processNames.Unresolved }, byOrigin = store.ReadFlowOrigins() },
@@ -70,6 +74,26 @@ public static class DiagnosticsReport
         installer = ReadInstallerState(),
         privacy = new { includesEndpoints = false, includesHostnames = false, includesProcessNames = false, includesCredentials = false, includesHubEndpoint = false, includesRawObservations = false, includesDatabase = false },
     }, new JsonSerializerOptions { WriteIndented = true });
+
+    /// Component, timing and outcome. No message, no path, no destination --
+    /// the same boundary the rest of this report keeps.
+    private static object[] SafeRuns(ObservationStore store)
+    {
+        try
+        {
+            return store.ReadRunHistory(20).Select(run => (object)new
+            {
+                component = run.Component == RunComponent.Service ? "service" : "ui",
+                version = run.Version,
+                startedAt = run.StartedAt,
+                lastSeenAt = run.HeartbeatAt,
+                endedAt = run.EndedAt,
+                ending = run.Ending,
+                fault = run.Fault,
+            }).ToArray();
+        }
+        catch (Exception) { return []; }
+    }
 
     private static object SafeCollector(CollectorSnapshot value) => new
     {

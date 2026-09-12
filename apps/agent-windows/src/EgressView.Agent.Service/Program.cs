@@ -171,6 +171,14 @@ internal sealed class AgentWindowsService : ServiceBase
         // A hibernate/update sequence can restart the service instead of
         // delivering Resume. Startup is the conservative end of that sleep.
         store.EndSleepPeriod(DateTimeOffset.UtcNow);
+        // Opened before anything else can fail, and closed last. A run that is
+        // still marked open when the next one starts is how a process that was
+        // killed gets to say so, since it cannot say anything itself.
+        var runId = store.BeginRun(RunComponent.Service, DiagnosticsReport.CurrentVersion);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            try { store.FaultRun(runId, (e.ExceptionObject as Exception)?.GetType().FullName ?? "Unknown"); } catch { }
+        };
         try
         {
         await using var pipeline = new ObservationPipeline(store, deliveryEnabled: () => store.DeliveryEnabled);
@@ -188,6 +196,7 @@ internal sealed class AgentWindowsService : ServiceBase
         var chartAggregation = RunChartAggregationAsync(store, cancellationToken);
         var maintenance = RunMaintenanceAsync(store, cancellationToken);
         var coverage = monitoring.RunCoverageHeartbeatAsync(cancellationToken);
+        var runHeartbeat = RunHeartbeatAsync(store, runId, cancellationToken);
         Task lifetime;
         try
         {
@@ -203,6 +212,7 @@ internal sealed class AgentWindowsService : ServiceBase
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         await coverage;
+        await runHeartbeat;
         await delivery;
         await geoCache;
         await threatIntel;
@@ -211,8 +221,24 @@ internal sealed class AgentWindowsService : ServiceBase
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(monitoring.Snapshot(), store, DiagnosticsReport.CurrentVersion, monitoring.Enabled,
                 capabilityStatus: deliveryController.CapabilityStatus));
+        // Last, so that everything above having finished is what "clean" means.
+        store.EndRun(runId);
         }
         finally { activeStore = null; }
+    }
+
+    /// A sign of life, so that a run which ends without warning can be dated
+    /// to when it was last known to be working rather than to whenever the
+    /// next start happened to notice. Without it, a machine left off for a
+    /// week would report a week-long crash.
+    private static async Task RunHeartbeatAsync(ObservationStore store, long runId, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try { await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            try { store.Heartbeat(runId); } catch { /* Losing a heartbeat must not stop collection. */ }
+        }
     }
 
     private static async Task RunChartAggregationAsync(ObservationStore store, CancellationToken cancellationToken)
