@@ -1157,7 +1157,44 @@ try
             "an unknown region falls back rather than landing at null island");
     }
 
-    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, and globe geometry");
+    {
+        // The connection log can be read two ways, and they must not quietly
+        // become the same reading. A conversation observed many times is one
+        // row in `flows` spanning a period, and many rows in `observations`
+        // each fixed to an instant. Collapsing the second into the first is
+        // the mistake that made the timeline read as an accumulation.
+        var logDatabase = Path.Combine(directory, "log-grain.db");
+        var start = DateTimeOffset.UtcNow.AddMinutes(-30);
+        using (var store = new ObservationStore(logDatabase))
+        {
+            await using var pipeline = new ObservationPipeline(store, capacity: 32, batchSize: 4);
+            for (var index = 0; index < 6; index++)
+                Assert(pipeline.TrySubmit(new NetworkObservation(
+                    start.AddMinutes(index * 5), 77, "TCP", "100.64.0.9", 51_000,
+                    "100.64.0.10", 443, 256, 128, ObservationLayer.Logical, "7", "etw", "LongLived", null)),
+                    "observation of one long-running conversation accepted");
+        }
+
+        using var reading = new ObservationStore(logDatabase);
+        var conversations = reading.ReadRecentFlows(50);
+        var events = reading.ReadRecentObservations(50);
+
+        Assert(conversations.Count == 1, "six observations of one conversation stay one row per conversation");
+        Assert(conversations[0].FirstSeen < conversations[0].LastSeen,
+            "a conversation spans time, so its two ends differ");
+        Assert(events.Count == 6, "the same traffic is six rows when a row is one observation");
+        Assert(events.All(row => row.FirstSeen == row.LastSeen),
+            "an event happens at an instant, so both ends of its span are that instant");
+        Assert(events[0].LastSeen > events[^1].LastSeen, "events are newest first");
+        Assert(events.All(row => row.ProcessName == "LongLived" && row.RemotePort == 443),
+            "the per-observation reading carries the same identity as the per-conversation one");
+        Assert(events.Sum(row => row.BytesSent ?? 0) == 6 * 256 && conversations[0].BytesSent == 6 * 256,
+            "both readings account for the same bytes even though the row counts differ");
+        Assert(reading.ReadRecentObservations(50, 4).Count == 2,
+            "the per-observation reading pages like the per-conversation one");
+    }
+
+    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, and connection-log grain");
     return 0;
 }
 finally

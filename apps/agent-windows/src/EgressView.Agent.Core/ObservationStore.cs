@@ -920,6 +920,34 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// The log as events rather than as conversations.
+    ///
+    /// `flows` holds one running row per conversation, so a row there covers a
+    /// span and keeps changing. `observations` is append-only: each row is one
+    /// thing that happened at one instant and never moves again. Both are
+    /// legitimate readings of "the connection log", and they answer different
+    /// questions, so the reader picks.
+    ///
+    /// An observation's span is a point, so both ends of it are the same
+    /// moment. That is not padding to fit the shape -- it is what a single
+    /// event's duration is.
+    public IReadOnlyList<RecentFlow> ReadRecentObservations(int limit, int offset = 0)
+    {
+        if (limit is not (50 or 100 or 200 or 500)) throw new ArgumentOutOfRangeException(nameof(limit));
+        if (offset is < 0 or > 1_000_000) throw new ArgumentOutOfRangeException(nameof(offset));
+        lock (gate)
+        {
+            // observed_at twice: an event begins and ends at the same instant.
+            // No hostname column here -- enrichment lands on the flow, not on
+            // the event, so this reads as unresolved rather than as wrong.
+            const string columns = "o.observed_at,o.observed_at,o.protocol,o.local_address,o.local_port,o.remote_address," +
+                "o.remote_port,o.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,o.interface_id,o.source,NULL,g.country_code";
+            var sql = $"SELECT {columns} FROM observations o LEFT JOIN geo_locations g ON g.ip=o.remote_address " +
+                $"ORDER BY o.observed_at DESC,o.id DESC LIMIT {limit} OFFSET {offset}";
+            return ReadRecentFlowQuery(sql);
+        }
+    }
+
     private IReadOnlyList<RecentFlow> ReadRecentFlowQuery(string sql)
     {
         CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));

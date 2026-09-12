@@ -23,7 +23,8 @@ public static class IpcProtocol
         Func<DateTimeOffset?, LocalHistoryDeletionResult>? deleteHistory = null,
         Func<string>? diagnostics = null,
         Func<bool, bool, AgentUninstallResult>? prepareUninstall = null,
-        Func<int?, IReadOnlyList<CountryHistoryRow>>? countryHistory = null)
+        Func<int?, IReadOnlyList<CountryHistoryRow>>? countryHistory = null,
+        Func<int, int, IReadOnlyList<RecentFlow>>? recentObservations = null)
     {
         try
         {
@@ -37,6 +38,9 @@ public static class IpcProtocol
                 "status" => Status(status),
                 "summary" => Summary(root, summary),
                 "recent-flows" => RecentFlows(root, recentFlows),
+                // Same shape, different reading of what one row is: a
+                // conversation that spans time, or one event that happened.
+                "recent-observations" => RecentFlows(root, recentObservations),
                 "globe" => Globe(root, globePoints),
                 "country-history" => CountryHistory(root, countryHistory),
                 "analysis" => Analysis(root, analysis),
