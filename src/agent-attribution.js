@@ -59,7 +59,17 @@ function createAgentAttribution({ getDb, maxApplications = DEFAULT_MAX_APPLICATI
           o.firstObservedAt, o.lastObservedAt, o.bytesIn, o.bytesOut,
           link.matchKind
         FROM requested r
-        JOIN connection_agent_observations link
+        -- Forced, because the planner gets this backwards as soon as the caller
+        -- scopes to one agent. With an equality on o.agentId present it prefers
+        -- entering through link's (agentId, observationId) index -- selecting every
+        -- correlation that agent ever had, 1.46M rows on the Hub -- and then
+        -- rescans these 200 constant rows for each one. The join it should do is
+        -- the other way round: 200 flows, each looked up by its own address
+        -- tuple. Measured on production data: 34,651ms without this hint, 15ms
+        -- with it, same 475 rows out. The tuple index exists for exactly this
+        -- lookup, so naming it costs nothing when the plan was already right.
+        JOIN connection_agent_observations AS link
+          INDEXED BY idx_connection_agent_connection
           ON link.src = r.src AND link.dst = r.dst
             AND link.dport = r.dport AND link.proto = r.proto
         JOIN agent_observations o
