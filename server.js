@@ -57,6 +57,7 @@ const authAudit      = require('./src/auth-audit');
 const apiIdentities  = require('./src/api-identities');
 const agentIdentities = require('./src/agent-identities');
 const agentIngest    = require('./src/agent-ingest-store');
+const agentCorrelationRunner = require('./src/agent-correlation-runner');
 const { AGENT_INGEST_DEFAULT_RETENTION_MS } = require('./src/agent-ingest-schema');
 const authCookies    = require('./src/auth-cookies');
 const oidcModule = require('./src/oidc-google');
@@ -706,16 +707,8 @@ server.listen(PORT, HOST, () => {
   setInterval(() => {
     agentIngest.pruneObservations({ before: Date.now() - AGENT_INGEST_DEFAULT_RETENTION_MS });
   }, 24 * 60 * 60 * 1000).unref();
-  setInterval(() => {
-    try {
-      const result = agentIngest.reconcileCorrelations({ since: Date.now() - 10 * 60 * 1000 });
-      if (result.linked > 0 || result.ambiguous > 0) {
-        logger.info(`[agent-correlation] reconcile ${JSON.stringify(result)}`);
-      }
-    } catch (error) {
-      logger.error('[agent-correlation] periodic reconcile failed:', error.message);
-    }
-  }, 5 * 60 * 1000).unref();
+  agentCorrelationRunner.init({ agentIngest, logger });
+  agentCorrelationRunner.start();
   authAudit.prune();
   setInterval(() => authAudit.prune(), 24 * 60 * 60 * 1000).unref();
 
@@ -795,6 +788,8 @@ function shutdown(exitCode = 0) {
   logger.info('[shutdown] Saving history...');
   try { routerManager?.stopAll();   } catch {}
   aiNotificationService.stop();
+  // Stop before closeDb, so a pending tick cannot run against a closed handle.
+  agentCorrelationRunner.stop();
   try { runtimeProfiler.measureSync('history.shutdownSnapshot', () => history.snapshotHistory()); } catch {}
   runtimeProfiler.stop();
   try { history.closeDb();         } catch {}

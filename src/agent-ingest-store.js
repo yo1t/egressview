@@ -7,7 +7,6 @@ const {
   createAgentCorrelation,
   DEFAULT_CORRELATION_WINDOW_MS,
 } = require('./agent-correlation');
-const logger = require('./logger');
 
 const DEFAULT_DB_PATH = path.join(__dirname, '..', '.egressview.db');
 const REJECTED_OBSERVATION_CODES = new Set([
@@ -213,17 +212,16 @@ function storeBatch(agentId, envelope, { receivedAt = Date.now() } = {}) {
     }, false, acceptedObservationIds);
   });
 
-  const ack = operation.immediate();
-  if (!ack.replayed && ack.accepted > 0) {
-    try {
-      correlation.reconcile({ agentId });
-    } catch (error) {
-      // The durable ingest ACK remains authoritative. Periodic reconciliation
-      // retries this work without making the Agent resend an accepted batch.
-      logger.error('[agent-correlation] post-ingest reconcile failed:', error.message);
-    }
-  }
-  return ack;
+  // Correlation deliberately does not run here. It used to, once per ingest,
+  // and because it passed no `since` it re-examined the newest 5,000
+  // uncorrelated observations every time. An agent-only flow never gets a link
+  // row, so it never leaves that set: the same rows were reclassified on every
+  // batch forever. With ~1.9M stored observations that turned a small write
+  // into 3-6s of synchronous work, and better-sqlite3 is synchronous, so the
+  // whole server stalled behind an agent's routine upload -- /healthz included.
+  // The ACK only promises durability, and the periodic runner reconciles on its
+  // own schedule, so this side effect never belonged in the response path.
+  return operation.immediate();
 }
 
 function pruneObservations({ before }) {

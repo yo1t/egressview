@@ -183,7 +183,11 @@ describe('Agent ingest store', () => {
     assert.equal(database.prepare('SELECT COUNT(*) AS n FROM agent_observations').get().n, 0);
   });
 
-  it('keeps an accepted batch durable when derived correlation is temporarily unavailable', () => {
+  // Ingest used to correlate inline, which is what made this test necessary:
+  // the point was that a broken correlation table could not lose an accepted
+  // batch. Ingest no longer touches correlation at all, so the stronger
+  // property is asserted instead -- it does not even look.
+  it('does not correlate on the ingest path', () => {
     const database = store._dbForTest();
     database.exec('DROP TABLE connection_agent_observations');
 
