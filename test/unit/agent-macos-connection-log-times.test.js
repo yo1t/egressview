@@ -81,16 +81,17 @@ describe('通信ログが新しい通信に追従する', () => {
     // Asking the database every second whether anything changed would be work
     // that is almost always wasted, and frequent polling of an expensive
     // answer is what took the Windows IPC listener down in P3-106.
-    assert.match(appDelegate, /observationWindow\?\.observationsArrived\(observations\.count\)/);
-    assert.match(viewModel, /func observationsArrived\(_ count: Int\)/);
+    assert.match(appDelegate, /observationWindow\?\.observationsArrived\(observations\)/);
+    assert.match(viewModel, /func observationsArrived\(_ observations: \[ConnectionObservation\]\)/);
   });
 
   it('見ていない画面のためには読まない', () => {
     // Not the log tab, or no window: nothing to update, so nothing is read.
-    assert.match(
-      viewModel,
-      /guard count > 0, selectedTab == \.log, isWindowVisible else \{ return \}/
-    );
+    // The log reads only when the log is the screen being looked at. The map
+    // has its own condition -- it is expanded or it is not (P3-109) -- so the
+    // two are separate guards rather than one.
+    assert.match(viewModel, /guard !observations\.isEmpty, isWindowVisible else \{ return \}/);
+    assert.match(viewModel, /guard selectedTab == \.log else \{ return \}/);
   });
 
   it('まとめて届いても読み出しは1回', () => {
@@ -108,7 +109,7 @@ describe('通信ログが新しい通信に追従する', () => {
   it('止めている間は読まず、数えるだけ', () => {
     // Pausing the screen and carrying on in the background would spend the
     // battery on rows nobody is going to see.
-    assert.match(viewModel, /logPendingArrivals \+= count/);
+    assert.match(viewModel, /logPendingArrivals \+= observations\.count/);
     assert.match(viewModel, /func setLogPaused\(_ paused: Bool\)/);
   });
 

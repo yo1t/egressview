@@ -27,7 +27,7 @@ describe('アクセス先の国を広げて見る', () => {
     // Resizing the app's own window moves the reader's furniture to show them
     // a map, and leaves them to put it back. The tabs stay where they are.
     assert.match(viewModel, /func expandCountryAtlas\(\) \{ isCountryAtlasExpanded = true \}/);
-    assert.match(viewModel, /func collapseCountryAtlas\(\) \{ isCountryAtlasExpanded = false \}/);
+    assert.match(viewModel, /func collapseCountryAtlas\(\) \{\s*isCountryAtlasExpanded = false/);
     assert.doesNotMatch(viewModel, /setWindowZoomed|window\.zoom/);
     assert.doesNotMatch(window, /window\.zoom\(/);
     assert.match(window, /if model\.isCountryAtlasExpanded \{/);
@@ -67,5 +67,42 @@ describe('アクセス先の国を広げて見る', () => {
       }
     }
     assert.notEqual(strings('ja').match(/"Expand" = "([^"]*)"/)[1], 'Expand', 'ja が英語のまま');
+  });
+});
+
+describe('いま届いた通信の国が光る', () => {
+  const appDelegate = readAgentSource('AgentAppDelegate.swift');
+
+  it('光は届いた観測から来る。地図が問い合わせに行かない', () => {
+    assert.match(appDelegate, /observationsArrived\(observations\)/);
+    assert.match(viewModel, /private func lightUpCountries\(for observations: \[ConnectionObservation\]\)/);
+    assert.match(viewModel, /self\.countryGlow\.touch\(Set\(codes\.values\)\)/);
+  });
+
+  it('地図を開いていないときは、国を引きに行かない', () => {
+    // Turning addresses into countries is a database read. Doing it for every
+    // batch the collector delivers, whatever the user is looking at, would be
+    // a read a second for a picture nobody has open.
+    assert.match(viewModel, /guard isCountryAtlasExpanded, let store else \{ return \}/);
+  });
+
+  it('何も光っていなければ描き直さない', () => {
+    // The Windows globe span itself at full rate over a still image and took
+    // 1.11 CPU cores with it (P3-16).
+    assert.match(viewModel, /private static let glowFramesPerSecond: Double = 15/);
+    assert.match(viewModel, /private func stopGlowAnimation\(\)/);
+    assert.match(viewModel, /self\.stopGlowAnimation\(\)\n\s+self\.countryGlow\.prune\(\)/);
+  });
+
+  it('閉じたら消える', () => {
+    // An old glow reopened would say traffic just happened.
+    assert.match(viewModel, /func collapseCountryAtlas\(\) \{[\s\S]*?countryGlow = CountryGlow\(\)/);
+  });
+
+  it('描く時刻は外から渡す', () => {
+    // So the render check can draw a chosen moment of the fade rather than
+    // whenever it happened to run.
+    assert.match(map, /var now = Date\(\)/);
+    assert.match(map, /draw\(in: &context, size: size, at: now\)/);
   });
 });

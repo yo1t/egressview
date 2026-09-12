@@ -119,9 +119,30 @@ final class AgentMainViewModel: ObservableObject {
     /// not resized. Growing an app's window on its own moves the reader's
     /// furniture around to show them a map, and leaves them to put it back.
     @Published private(set) var isCountryAtlasExpanded = false
+    /// Countries reached in the last few seconds, fading (P3-109).
+    @Published private(set) var countryGlow = CountryGlow()
+    /// The moment the map is drawn at, advanced while anything is fading.
+    @Published private(set) var glowNow = Date()
+    private var glowTimer: PeriodicWork?
+    private var glowEndWork: DispatchWorkItem?
+
+    /// Fifteen frames a second while something is fading, and none at all
+    /// otherwise.
+    ///
+    /// Not every frame the display can give: the Windows globe span itself at
+    /// full rate over a still image and took 1.11 CPU cores with it (P3-16).
+    /// A fade has nowhere near that much to say.
+    private static let glowFramesPerSecond: Double = 15
 
     func expandCountryAtlas() { isCountryAtlasExpanded = true }
-    func collapseCountryAtlas() { isCountryAtlasExpanded = false }
+    func collapseCountryAtlas() {
+        isCountryAtlasExpanded = false
+        // Nothing is watching the map, so nothing should be lit when it is
+        // opened again: an old glow would say traffic just happened.
+        glowEndWork?.cancel()
+        stopGlowAnimation()
+        countryGlow = CountryGlow()
+    }
 
     @Published private(set) var observationRows: [AgentObservationRow] = []
     /// Whether the log is following new connections, and what it has to say
@@ -401,13 +422,70 @@ final class AgentMainViewModel: ObservableObject {
     /// polling: the rows are already there by the time this runs, and asking
     /// the database every second whether anything changed would be work that
     /// is almost always wasted.
-    func observationsArrived(_ count: Int) {
-        guard count > 0, selectedTab == .log, isWindowVisible else { return }
+    func observationsArrived(_ observations: [ConnectionObservation]) {
+        guard !observations.isEmpty, isWindowVisible else { return }
+        lightUpCountries(for: observations)
+        guard selectedTab == .log else { return }
         guard !logIsPaused else {
-            logPendingArrivals += count
+            logPendingArrivals += observations.count
             return
         }
         scheduleLiveLogRefresh()
+    }
+
+    /// Lights the countries these connections went to, on the expanded map.
+    ///
+    /// Only while that map is on screen. The addresses have to be turned into
+    /// countries to know what to light, and doing that for every batch the
+    /// collector delivers -- whatever the user is looking at -- would be a
+    /// database read a second, for a picture nobody has open.
+    private func lightUpCountries(for observations: [ConnectionObservation]) {
+        guard isCountryAtlasExpanded, let store else { return }
+        let addresses = observations.map(\.remoteAddress)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let codes = try? store.countryCodes(forAddresses: addresses), !codes.isEmpty
+            else { return }
+            DispatchQueue.main.async {
+                guard let self, self.isCountryAtlasExpanded else { return }
+                self.countryGlow.touch(Set(codes.values))
+                self.startGlowAnimation()
+                self.scheduleGlowEnd()
+            }
+        }
+    }
+
+    private func startGlowAnimation() {
+        guard glowTimer == nil else { return }
+        let timer = PeriodicWork()
+        timer.start(every: 1 / Self.glowFramesPerSecond) { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.glowNow = Date()
+            }
+        }
+        glowTimer = timer
+    }
+
+    /// One wake-up when the last light goes out, rather than a timer left
+    /// running: the map animates only while something is fading, and this is
+    /// what stops it.
+    private func scheduleGlowEnd() {
+        guard let endsAt = countryGlow.endsAt() else { return }
+        let delay = max(0, endsAt.timeIntervalSinceNow) + 0.1
+        glowEndWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.stopGlowAnimation()
+            self.countryGlow.prune()
+            self.glowNow = Date()
+        }
+        glowEndWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func stopGlowAnimation() {
+        glowTimer?.stop()
+        glowTimer = nil
     }
 
     /// Resumes, and catches up in one read.
