@@ -58,6 +58,13 @@ public sealed record RecentFlow(
     string? RemoteHostname = null,
     string? CountryCode = null);
 
+/// A page of the log with its place in the event stream.
+///
+/// <param name="Cursor">The newest event this page accounts for.</param>
+/// <param name="More">Whether events after this page were left unread, so the
+/// reader can say so rather than presenting a fraction as the whole.</param>
+public sealed record ObservationPage(long Cursor, bool More, IReadOnlyList<RecentFlow> Rows);
+
 public sealed record GeoLocation(string Ip, double Latitude, double Longitude, string? CountryCode, string? City);
 public sealed record GeoCacheState(string? ETag, DateTimeOffset? FetchedAt, long LocationCount);
 

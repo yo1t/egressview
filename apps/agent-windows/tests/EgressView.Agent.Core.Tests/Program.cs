@@ -1167,7 +1167,108 @@ try
             "an unknown region falls back rather than landing at null island");
     }
 
-    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, and globe geometry");
+    {
+        // The connection log can be read two ways, and they must not quietly
+        // become the same reading. A conversation observed many times is one
+        // row in `flows` spanning a period, and many rows in `observations`
+        // each fixed to an instant. Collapsing the second into the first is
+        // the mistake that made the timeline read as an accumulation.
+        var logDatabase = Path.Combine(directory, "log-grain.db");
+        var start = DateTimeOffset.UtcNow.AddMinutes(-30);
+        using (var store = new ObservationStore(logDatabase))
+        {
+            await using var pipeline = new ObservationPipeline(store, capacity: 32, batchSize: 4);
+            for (var index = 0; index < 6; index++)
+                Assert(pipeline.TrySubmit(new NetworkObservation(
+                    start.AddMinutes(index * 5), 77, "TCP", "100.64.0.9", 51_000,
+                    "100.64.0.10", 443, 256, 128, ObservationLayer.Logical, "7", "etw", "LongLived", null)),
+                    "observation of one long-running conversation accepted");
+        }
+
+        using var reading = new ObservationStore(logDatabase);
+        var conversations = reading.ReadRecentFlows(50);
+        var events = reading.ReadRecentObservations(50);
+
+        Assert(conversations.Count == 1, "six observations of one conversation stay one row per conversation");
+        Assert(conversations[0].FirstSeen < conversations[0].LastSeen,
+            "a conversation spans time, so its two ends differ");
+        Assert(events.Count == 6, "the same traffic is six rows when a row is one observation");
+        Assert(events.All(row => row.FirstSeen == row.LastSeen),
+            "an event happens at an instant, so both ends of its span are that instant");
+        Assert(events[0].LastSeen > events[^1].LastSeen, "events are newest first");
+        Assert(events.All(row => row.ProcessName == "LongLived" && row.RemotePort == 443),
+            "the per-observation reading carries the same identity as the per-conversation one");
+        Assert(events.Sum(row => row.BytesSent ?? 0) == 6 * 256 && conversations[0].BytesSent == 6 * 256,
+            "both readings account for the same bytes even though the row counts differ");
+        Assert(reading.ReadRecentObservations(50, 4).Count == 2,
+            "the per-observation reading pages like the per-conversation one");
+    }
+
+    {
+        // Streaming the log means reading events after a cursor and folding
+        // them into conversations on the client. The fold must be the store's
+        // fold: if the two rules differ, the same traffic is two different
+        // pictures depending on which view is open.
+        var streamDatabase = Path.Combine(directory, "log-stream.db");
+        var start = DateTimeOffset.UtcNow.AddMinutes(-10);
+        using var streaming = new ObservationStore(streamDatabase);
+
+        var snapshot = streaming.ReadLogSnapshot(50, asEvents: false);
+        Assert(snapshot.Cursor == 0 && snapshot.Rows.Count == 0, "an empty log starts at the beginning of the stream");
+
+        await using (var pipeline = new ObservationPipeline(streaming, capacity: 64, batchSize: 4))
+        {
+            // Two peers over UDP from one local socket, which the store keeps
+            // as a single conversation, plus a TCP pair it keeps apart.
+            for (var index = 0; index < 4; index++)
+                Assert(pipeline.TrySubmit(new NetworkObservation(
+                    start.AddSeconds(index), 91, "UDP", "100.64.0.5", 5353,
+                    index % 2 == 0 ? "100.64.0.6" : "100.64.0.7", 5353, 100, 50,
+                    ObservationLayer.Logical, "3", "etw", "Responder", null)), "udp observation accepted");
+            for (var index = 0; index < 3; index++)
+                Assert(pipeline.TrySubmit(new NetworkObservation(
+                    start.AddSeconds(index), 92, "TCP", "100.64.0.5", 40_000 + index,
+                    "100.64.0.8", 443, 200, null, ObservationLayer.Logical, "3", "etw", "Client", null)),
+                    "tcp observation accepted");
+        }
+
+        var delta = streaming.ReadObservationsSince(snapshot.Cursor, 100);
+        Assert(delta.Rows.Count == 7 && !delta.More, "every event after the cursor arrives once");
+        Assert(delta.Cursor > snapshot.Cursor, "the cursor advances past what was read");
+        Assert(streaming.ReadObservationsSince(delta.Cursor, 100).Rows.Count == 0,
+            "asking again after the cursor returns nothing rather than repeating");
+
+        var folded = ObservationFold.Apply(snapshot.Rows, delta.Rows, 50);
+        var stored = streaming.ReadRecentFlows(50);
+        Assert(folded.Count == stored.Count,
+            "folding the stream on the client yields the conversations the store recorded");
+        Assert(stored.Count == 4, "one UDP socket is one conversation and three TCP ports are three");
+        foreach (var row in folded)
+        {
+            var match = stored.Single(other =>
+                StartupSnapshot.FlowKey(other.Protocol, other.LocalAddress, other.LocalPort, other.RemoteAddress, other.RemotePort, other.ProcessId) ==
+                StartupSnapshot.FlowKey(row.Protocol, row.LocalAddress, row.LocalPort, row.RemoteAddress, row.RemotePort, row.ProcessId));
+            Assert(match.BytesSent == row.BytesSent && match.BytesReceived == row.BytesReceived,
+                "the client fold accounts for the same bytes as the store");
+            Assert(match.FirstSeen == row.FirstSeen && match.LastSeen == row.LastSeen,
+                "the client fold spans the same period as the store");
+        }
+
+        // A burst larger than one page must announce itself, not silently
+        // present a fraction as the whole.
+        var partial = streaming.ReadObservationsSince(snapshot.Cursor, 3);
+        Assert(partial.Rows.Count == 3 && partial.More, "a full page says there is more behind it");
+        Assert(streaming.ReadObservationsSince(partial.Cursor, 100).Rows.Count == 4,
+            "resuming from a partial page continues where it stopped");
+
+        // A conversation never measured must not be reported as measuring zero.
+        var unmeasured = new RecentFlow(start, start, "UDP", "100.64.0.5", 9_999, "100.64.0.6", 53, 5, "App",
+            null, null, ObservationLayer.Logical, null, "etw");
+        Assert(ObservationFold.Apply([unmeasured], [unmeasured], 50)[0].BytesSent is null,
+            "folding two unmeasured sightings leaves the volume unknown rather than zero");
+    }
+
+    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, connection-log grain, and log streaming");
     return 0;
 }
 finally

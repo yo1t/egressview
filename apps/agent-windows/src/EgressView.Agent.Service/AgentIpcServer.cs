@@ -52,7 +52,8 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
             delivery.SettingsChanged();
         }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled, DeliveryStatus, delivery.RequestNow,
         enrichment.Status, enrichment.RequestNow, HistoryStatus, SetHistoryRetention, store.ReadHistoryForExport,
-        cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow), Diagnostics, PrepareUninstall, CountryHistory));
+        cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow), Diagnostics, PrepareUninstall, CountryHistory,
+        store.ReadRecentObservations, store.ReadLogSnapshot, store.ReadObservationsSince));
     }
 
     internal static async Task RunResilientLoopAsync(Func<CancellationToken, Task> serveOne, Action connectionFailed,
