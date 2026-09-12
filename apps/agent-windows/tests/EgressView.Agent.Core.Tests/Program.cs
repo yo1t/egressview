@@ -546,7 +546,7 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 14, "v1 database migrates through v2-v14");
+        Assert(migrated.SchemaVersion == 15, "v1 database migrates through v2-v15");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
@@ -554,7 +554,7 @@ try
     Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v14.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 14, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 15, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -1180,6 +1180,69 @@ try
     }
 
     {
+        // A process that crashes writes nothing, so its fate has to be decided
+        // by the next start. The failure mode to avoid is the opposite one:
+        // reporting a crash that never happened is a lie the user will act on.
+        var runDatabase = Path.Combine(directory, "run-history.db");
+        using (var first = new ObservationStore(runDatabase))
+        {
+            var run = first.BeginRun(RunComponent.Service, "0.1.0");
+            first.Heartbeat(run);
+            first.EndRun(run);
+        }
+        using (var second = new ObservationStore(runDatabase))
+        {
+            var clean = second.ReadRunHistory();
+            Assert(clean.Count == 1 && clean[0].Ending == "clean",
+                "a run that closed itself is recorded as clean");
+            // Opened and abandoned, the way a killed process leaves it.
+            second.BeginRun(RunComponent.Service, "0.1.0");
+        }
+        using (var third = new ObservationStore(runDatabase))
+        {
+            third.BeginRun(RunComponent.Service, "0.1.0");
+            var history = third.ReadRunHistory();
+            Assert(history.Count == 3, "each start is its own run");
+            Assert(history[0].Ending == "running", "the current run is open");
+            Assert(history[1].Ending == "unexpected",
+                "a run still open when the next one starts is recorded as an unexpected end");
+            Assert(history[2].Ending == "clean",
+                "settling the abandoned run does not disturb the one that ended properly");
+            Assert(history[1].EndedAt == history[1].HeartbeatAt,
+                "an unexpected end is dated to the last sign of life, not to when it was noticed");
+
+            // The two processes are told apart, and one ending does not settle
+            // the other: the user's first question is which half stopped.
+            var ui = third.BeginRun(RunComponent.Ui, "0.1.0");
+            Assert(third.ReadRunHistory()[1].Ending == "running",
+                "starting the window does not close the service's run");
+            third.FaultRun(ui, "System.InvalidOperationException");
+            var faulted = third.ReadRunHistory()[0];
+            Assert(faulted.Component == RunComponent.Ui && faulted.Ending == "faulted" &&
+                faulted.Fault == "System.InvalidOperationException",
+                "a caught crash records which process it was and what kind of failure");
+
+            // A message can carry a path with an account name in it, a host
+            // name, or a destination. The bundle promises to carry none.
+            var poisoned = third.BeginRun(RunComponent.Ui, "0.1.0");
+            third.FaultRun(poisoned, @"System.IO.IOException: C:\Users\person\secret to 10.1.2.3");
+            Assert(third.ReadRunHistory()[0].Fault == "System.IO.IOException",
+                "a fault record keeps the type name and drops everything a message could carry");
+
+
+            var report = DiagnosticsReport.Create(
+                new CollectorSnapshot("healthy", 0, 0, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0),
+                third, "0.1.0");
+            Assert(report.Contains("unexpected", StringComparison.Ordinal) &&
+                report.Contains("faulted", StringComparison.Ordinal),
+                "the diagnostics bundle carries what happened to previous runs");
+            Assert(!report.Contains("person", StringComparison.Ordinal) &&
+                !report.Contains("10.1.2.3", StringComparison.Ordinal),
+                "the diagnostics bundle carries no path, account or destination from a crash");
+        }
+    }
+
+    {
         // The connection log can be read two ways, and they must not quietly
         // become the same reading. A conversation observed many times is one
         // row in `flows` spanning a period, and many rows in `observations`
@@ -1280,7 +1343,7 @@ try
             "folding two unmeasured sightings leaves the volume unknown rather than zero");
     }
 
-    Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, connection-log grain, and log streaming");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, and log streaming");
     return 0;
 }
 finally

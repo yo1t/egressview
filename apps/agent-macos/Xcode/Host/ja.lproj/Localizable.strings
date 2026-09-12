@@ -708,8 +708,8 @@
 "Could not remove the Anthropic API key: %@" = "Anthropic APIキーを削除できませんでした：%@";
 
 // The connection log says which rows are still moving (P3-107).
-"not ended" = "継続中";
-"The agent has not recorded this connection ending. Data volume is measured at the end, which is why this row has none yet." = "この通信が終わったことを、Agentはまだ記録していません。データ量は終了時に確定するため、この行にはまだ通信量がありません。";
+"end not seen" = "終了未確認";
+"The agent has not recorded this connection ending, so it may still be running or its ending may not have been reported. Data volume is measured at the end, which is why this row has none yet." = "この通信が終わったことを、Agentは記録していません。まだ続いているか、終了の報告が届かなかったかのどちらかです。データ量は終了時に確定するため、この行にはまだ通信量がありません。";
 "State" = "状態";
 
 // The connection log says whether it is following new traffic (P3-107).
