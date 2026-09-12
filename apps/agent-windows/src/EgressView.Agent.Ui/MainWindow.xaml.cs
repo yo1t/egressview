@@ -17,11 +17,34 @@ public partial class MainWindow : Window
 {
     private readonly AgentEnrollmentClient enrollment = new();
     private readonly CancellationTokenSource lifetime = new();
-    private readonly DispatcherTimer refreshTimer = new() { Interval = TimeSpan.FromSeconds(15) };
+    /// How often the visible tab is re-read. Named rather than inlined so the
+    /// things derived from it -- what counts as still running, above all --
+    /// move with it instead of being left behind.
+    internal static readonly TimeSpan LogRefreshInterval = TimeSpan.FromSeconds(15);
+    /// How often the log asks what has happened since it last looked.
+    ///
+    /// Short because the point of the log is to show traffic as it happens,
+    /// and affordable because the question is bounded: events after a cursor,
+    /// capped. The slower full read stays, as reconciliation -- retention and
+    /// enrichment change rows that no event mentions, so a view built only
+    /// from the stream would drift away from the store.
+    internal static readonly TimeSpan LogStreamInterval = TimeSpan.FromSeconds(2);
+    private const int LogStreamBatch = 500;
+    private readonly DispatcherTimer refreshTimer = new() { Interval = LogRefreshInterval };
+    private readonly DispatcherTimer logStreamTimer = new() { Interval = LogStreamInterval };
+    private long logCursor;
+    private bool logStreaming;
+    private long logOmitted;
     private bool loadingSettings;
     private bool loadingDeliveryState;
     private int selectedMinutes = 10_080;
     private IReadOnlyList<RecentFlow> rawFlows = [];
+    private DateTimeOffset rawFlowsReadAt = DateTimeOffset.UtcNow;
+    /// When paused, the log stops reading and says which moment it is showing.
+    /// Something that scrolls cannot be read unless it can be held still, and
+    /// a held view that does not admit it is held is worse than a stale one.
+    private bool logPaused;
+    private DateTimeOffset? logPausedAt;
     private PeriodAnalysis? currentAnalysis;
     private PeriodAnalysis? previousAnalysis;
     private IReadOnlyList<GlobePoint> currentGlobePoints = [];
@@ -48,6 +71,13 @@ public partial class MainWindow : Window
         Loaded += async (_, _) => { LoadSettings(); await RefreshAllAsync(); refreshTimer.Start(); };
         IsVisibleChanged += (_, _) => { if (IsVisible) refreshTimer.Start(); else refreshTimer.Stop(); };
         refreshTimer.Tick += async (_, _) => { if (IsVisible && IsActive) await RefreshVisibleAsync(); };
+        logStreamTimer.Tick += async (_, _) => await StreamLogAsync();
+        // Nothing streams towards a window nobody is looking at. A background
+        // window that kept asking every two seconds would spend a laptop's
+        // battery to update a picture no one can see.
+        Activated += (_, _) => ReconcileLogStream();
+        Deactivated += (_, _) => ReconcileLogStream();
+        IsVisibleChanged += (_, _) => ReconcileLogStream();
         Closing += SaveWindowSize;
         Closing += HideToTray;
         Closed += (_, _) => { refreshTimer.Stop(); lifetime.Cancel(); aiRequest?.Cancel(); aiClient.Dispose(); };
@@ -169,12 +199,20 @@ public partial class MainWindow : Window
 
     private async Task RefreshFlowsAsync()
     {
+        // Paused means paused: no read, no query, no work. Holding the picture
+        // while still asking for it would spend the same effort to show less.
+        if (logPaused) return;
         try
         {
             var limit = SelectedLimit();
-            rawFlows = await ReadFlowPageAsync(limit, 0);
+            var snapshot = await ReadLogSnapshotAsync(limit, ObservationGrain);
+            rawFlows = snapshot.Rows;
+            rawFlowsReadAt = DateTimeOffset.UtcNow;
+            logCursor = snapshot.Cursor;
+            logOmitted = 0;
             PopulateCountryFilter();
             ApplyLogFilter();
+            ReconcileLogStream();
         }
         catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
     }
@@ -199,16 +237,29 @@ public partial class MainWindow : Window
             : $"{Math.Min(data.CoverageRatio, 0.999):P1}";
         StorageSummary.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("StorageSummary"), data.StoredFlows.ToString("N0"), FlowRow.FormatBytes(data.StorageBytes));
         MonitoringSince.Text = data.MonitoringStartedAt is { } started ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("MonitoringSince"), started.LocalDateTime.ToString("g")) : string.Empty;
-        CoverageNote.Text = data.CoverageRatio < 0.999999999
+        var coverageNote = data.CoverageRatio < 0.999999999
             ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("PartialCoverage"), Math.Min(data.CoverageRatio, 0.999))
             : string.Empty;
+        var sleepNote = data.SleepSeconds > 0
+            ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SleepCoverage"), FormatDuration(data.SleepSeconds))
+            : string.Empty;
+        CoverageNote.Text = string.Join(Environment.NewLine, new[] { coverageNote, sleepNote }.Where(value => value.Length > 0));
         var names = DestinationChoice.SelectedIndex == 0;
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
-        Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To);
+        Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To, data.SleepPeriods);
+        SleepLegend.Visibility = data.SleepPeriods.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         FlowCaption.Text = IsByteMetric ? LocalizationManager.Text("RibbonBytes") : LocalizationManager.Text("RibbonConnections");
         TimelineCaption.Text = IsByteMetric ? LocalizationManager.Text("TimelineBytes") : LocalizationManager.Text("TimelineTotal");
         AutomationProperties.SetHelpText(FlowDiagram, FlowCaption.Text);
         AutomationProperties.SetHelpText(Timeline, TimelineCaption.Text);
+    }
+
+    private static string FormatDuration(double seconds)
+    {
+        var minutes = Math.Max(1, (int)Math.Round(seconds / 60, MidpointRounding.AwayFromZero));
+        return minutes >= 60
+            ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DurationHoursMinutes"), minutes / 60, minutes % 60)
+            : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DurationMinutes"), minutes);
     }
 
     private async Task RefreshInsightsAsync()
@@ -268,6 +319,18 @@ public partial class MainWindow : Window
     }
 
     private void LogFilter_Changed(object sender, RoutedEventArgs e) { if (IsLoaded) ApplyLogFilter(); }
+
+    /// True when one row is one observation rather than one conversation.
+    private bool ObservationGrain => SelectedTag(LogGrain) == "observations";
+
+    /// Switching the reading keeps the filters and the paused state: a switch
+    /// that quietly resets the view is one nobody uses twice.
+    private async void LogGrain_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        if (logPaused) { logPaused = false; logPausedAt = null; PauseLogButton.SetResourceReference(ContentProperty, "PauseUpdates"); }
+        await RefreshFlowsAsync();
+    }
     private void ApplyLogFilter()
     {
         var app = AppFilter.Text.Trim();
@@ -287,9 +350,63 @@ public partial class MainWindow : Window
             (protocol == "all" || flow.Protocol == protocol) &&
             (volume == "all" || (volume == "measured" ? flow.BytesSent is not null && flow.BytesReceived is not null : flow.BytesSent is null || flow.BytesReceived is null)) &&
             (collector == "all" || flow.Origin == collector)).ToArray();
-        RecentFlows.Clear(); foreach (var flow in filtered) RecentFlows.Add(new FlowRow(flow));
+        MergeRows(filtered.Select(flow => new FlowRow(flow, !ObservationGrain, rawFlowsReadAt)).ToArray());
         var active = new[] { app.Length > 0, destination.Length > 0, port.Length > 0, country != "all", protocol != "all", volume != "all", collector != "all" }.Count(value => value);
         LogStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("LogCountStatus"), filtered.Length, rawFlows.Count, active);
+        if (logOmitted > 0)
+            LogStatus.Text += " · " + string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("LogOmittedStatus"), logOmitted);
+        if (logPaused && logPausedAt is { } heldAt)
+            LogStatus.Text += " · " + string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("LogPausedStatus"), heldAt.LocalDateTime.ToString("g"));
+        else if (ObservationGrain)
+            LogStatus.Text += " · " + LocalizationManager.Text("LogGrainObservationsHint");
+        else if (RecentFlows.Any(row => row.StateText.Length > 0))
+            LogStatus.Text += " · " + string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("StillActiveHint"), (int)FlowRow.ActiveWindow.TotalSeconds);
+    }
+
+    private async void PauseLog_Click(object sender, RoutedEventArgs e)
+    {
+        logPaused = !logPaused;
+        logPausedAt = logPaused ? DateTimeOffset.UtcNow : null;
+        PauseLogButton.SetResourceReference(ContentProperty, logPaused ? "ResumeUpdates" : "PauseUpdates");
+        ReconcileLogStream();
+        if (logPaused) ApplyLogFilter();
+        else await RefreshFlowsAsync();
+    }
+
+    /// Bring the visible list to the given rows without rebuilding it.
+    ///
+    /// Rows are matched by key: ones that are gone are removed, new ones are
+    /// inserted where they belong, and ones that are still there are replaced
+    /// only when something a reader can see has changed. What survives is the
+    /// selection and the scroll position -- the two things that make a list
+    /// possible to read while it updates underneath.
+    private void MergeRows(IReadOnlyList<FlowRow> rows)
+    {
+        var selected = (ConnectionGrid.SelectedItem as FlowRow)?.Key;
+        var incoming = rows.Select(row => row.Key).ToHashSet(StringComparer.Ordinal);
+        for (var index = RecentFlows.Count - 1; index >= 0; index--)
+            if (!incoming.Contains(RecentFlows[index].Key)) RecentFlows.RemoveAt(index);
+
+        for (var index = 0; index < rows.Count; index++)
+        {
+            if (index >= RecentFlows.Count) { RecentFlows.Add(rows[index]); continue; }
+            if (string.Equals(RecentFlows[index].Key, rows[index].Key, StringComparison.Ordinal))
+            {
+                // Same conversation, later numbers: a running flow changes its
+                // end time and its bytes while keeping its identity.
+                if (!RecentFlows[index].LooksSameAs(rows[index])) RecentFlows[index] = rows[index];
+                continue;
+            }
+            RecentFlows.Insert(index, rows[index]);
+        }
+        while (RecentFlows.Count > rows.Count) RecentFlows.RemoveAt(RecentFlows.Count - 1);
+
+        if (selected is null) return;
+        var restored = RecentFlows.FirstOrDefault(row => string.Equals(row.Key, selected, StringComparison.Ordinal));
+        if (restored is not null) ConnectionGrid.SelectedItem = restored;
     }
 
     private static string SelectedTag(System.Windows.Controls.ComboBox combo) => combo.SelectedItem is ComboBoxItem item ? item.Tag?.ToString() ?? "all" : "all";
@@ -476,9 +593,66 @@ public partial class MainWindow : Window
     private async void RowLimit_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded) await RefreshFlowsAsync(); }
     private int SelectedLimit() => RowLimit.SelectedItem is ComboBoxItem item && int.TryParse(item.Content?.ToString(), out var value) ? value : 100;
 
-    private static async Task<IReadOnlyList<RecentFlow>> ReadFlowPageAsync(int limit, int offset, CancellationToken cancellationToken = default)
+    private static async Task<ObservationPage> ReadLogSnapshotAsync(int limit, bool events, CancellationToken cancellationToken = default)
     {
-        var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "recent-flows", limit, offset }), cancellationToken);
+        var response = await AgentIpcClient.RequestAsync(
+            JsonSerializer.Serialize(new { v = 1, op = "log-snapshot", limit, events }), cancellationToken);
+        using var document = JsonDocument.Parse(response);
+        var root = document.RootElement;
+        return new(root.GetProperty("cursor").GetInt64(), root.GetProperty("more").GetBoolean(),
+            root.GetProperty("data").Deserialize<List<RecentFlow>>() ?? []);
+    }
+
+    /// Advance the visible log by whatever has happened since it last looked.
+    ///
+    /// The stream carries observations, and the per-conversation reading is
+    /// folded from those same observations by the store's own rule. One stream
+    /// feeds both readings, so the two cannot disagree about what happened --
+    /// only about how it is shown.
+    private async Task StreamLogAsync()
+    {
+        if (logStreaming || logPaused || !IsVisible || !IsActive || MainTabs.SelectedIndex != 2) return;
+        logStreaming = true;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                JsonSerializer.Serialize(new { v = 1, op = "log-delta", cursor = logCursor, limit = LogStreamBatch }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            if (root.GetProperty("status").GetString() != "ok") return;
+            var events = root.GetProperty("data").Deserialize<List<RecentFlow>>() ?? [];
+            logCursor = root.GetProperty("cursor").GetInt64();
+            // A burst larger than one batch is not silently truncated: the
+            // count of what was skipped is shown, and the next full read
+            // restores the whole page.
+            if (root.GetProperty("more").GetBoolean()) logOmitted += events.Count;
+            if (events.Count == 0) return;
+
+            var limit = SelectedLimit();
+            rawFlows = ObservationGrain
+                ? events.AsEnumerable().Reverse().Concat(rawFlows).Take(limit).ToArray()
+                : ObservationFold.Apply(rawFlows, events, limit);
+            rawFlowsReadAt = DateTimeOffset.UtcNow;
+            ApplyLogFilter();
+        }
+        // A stream that cannot reach the service must not shout on every tick;
+        // the slower full read already reports a lasting failure.
+        catch (Exception) { }
+        finally { logStreaming = false; }
+    }
+
+    private void ReconcileLogStream()
+    {
+        var live = IsVisible && IsActive && !logPaused && MainTabs.SelectedIndex == 2;
+        if (live) logStreamTimer.Start(); else logStreamTimer.Stop();
+    }
+
+    private static async Task<IReadOnlyList<RecentFlow>> ReadFlowPageAsync(int limit, int offset, CancellationToken cancellationToken = default) =>
+        await ReadLogPageAsync("recent-flows", limit, offset, cancellationToken);
+
+    private static async Task<IReadOnlyList<RecentFlow>> ReadLogPageAsync(string operation, int limit, int offset, CancellationToken cancellationToken = default)
+    {
+        var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = operation, limit, offset }), cancellationToken);
         using var document = JsonDocument.Parse(response);
         return document.RootElement.GetProperty("data").Deserialize<List<RecentFlow>>() ?? [];
     }
@@ -494,7 +668,7 @@ public partial class MainWindow : Window
             var export = new List<RecentFlow>();
             for (var offset = 0; offset <= 1_000_000; offset += 500)
             {
-                var page = await ReadFlowPageAsync(500, offset, lifetime.Token);
+                var page = await ReadLogPageAsync(ObservationGrain ? "recent-observations" : "recent-flows", 500, offset, lifetime.Token);
                 export.AddRange(page.Where(item => item.LastSeen >= from && item.LastSeen <= now));
                 if (page.Count < 500 || page[^1].LastSeen < from) break;
             }
@@ -814,6 +988,9 @@ public partial class MainWindow : Window
         LocalizationManager.Apply(System.Windows.Application.Current.Resources);
         if (System.Windows.Application.Current is App app) app.RefreshTrayText();
         ApplyAccessibilityLabels();
+        // The log's status line is composed in code, so it does not follow the
+        // resource swap on its own.
+        if (IsLoaded) ApplyLogFilter();
         _ = RefreshStatusAsync();
         RefreshNotifications();
     }
@@ -822,6 +999,8 @@ public partial class MainWindow : Window
     {
         static void Name(FrameworkElement element, string key) => AutomationProperties.SetName(element, LocalizationManager.Text(key));
         Name(PeriodChoice, "Period");
+        Name(LogGrain, "LogGrain");
+        Name(PauseLogButton, logPaused ? "ResumeUpdates" : "PauseUpdates");
         Name(MetricChoice, "Measure");
         Name(DestinationChoice, "DestinationsBy");
         Name(GlobeViewChoice, "CommunicationDestinations");
@@ -1259,7 +1438,12 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(text)) System.Windows.Clipboard.SetText(text);
     }
 
-    private async void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e) { if (IsLoaded && e.Source == MainTabs) await RefreshVisibleAsync(); }
+    private async void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || e.Source != MainTabs) return;
+        ReconcileLogStream();
+        await RefreshVisibleAsync();
+    }
 
     private async void Enroll_Click(object sender, RoutedEventArgs e)
     {
@@ -1350,10 +1534,46 @@ public partial class MainWindow : Window
     }
 }
 
-public sealed class FlowRow(RecentFlow value)
+/// <param name="readAt">
+/// When this page was read from the service. The active mark is judged
+/// against it rather than against the wall clock at paint time, so a row that
+/// has not changed does not lose its mark merely because a timer ticked.
+/// </param>
+public sealed class FlowRow(RecentFlow value, bool spansTime = true, DateTimeOffset readAt = default)
 {
+    /// How recently data must have flowed for a row to be called active.
+    ///
+    /// The collector watches data, not connections: it handles Datasent and
+    /// Datareceived and drops Connect and Disconnect. So nothing here knows
+    /// that a connection is open -- only that something crossed it lately.
+    ///
+    /// Derived from how often the log is read, not written as a number.
+    /// Between two reads the screen cannot learn anything new, so a window
+    /// shorter than that would drop the mark off flows that are still running.
+    /// A literal would go stale the moment the refresh cadence changed, and
+    /// then live connections would be shown as finished -- the same shape as
+    /// the chart defects.
+    internal static TimeSpan ActiveWindow => MainWindow.LogRefreshInterval * 2;
+
+    public DateTimeOffset FirstSeen => value.FirstSeen;
+    public string FirstSeenText => value.FirstSeen.LocalDateTime.ToString("g");
     public DateTimeOffset LastSeen => value.LastSeen;
     public string LastSeenText => value.LastSeen.LocalDateTime.ToString("g");
+
+    /// Empty rather than a second word for finished flows: a column where
+    /// most rows say nothing reads as a flag, and one where every row says
+    /// something reads as noise.
+    public string StateText { get; } = spansTime && readAt - value.LastSeen <= ActiveWindow
+        ? LocalizationManager.Text("StillActive")
+        : string.Empty;
+
+    /// Identifies the same row across refreshes so the list can be updated in
+    /// place. Rebuilding it wholesale throws away the selection and the scroll
+    /// position every time, which at fifteen seconds is an irritation and at
+    /// one second would make the log unreadable.
+    public string Key { get; } = spansTime
+        ? $"{value.Protocol}|{value.LocalAddress}|{value.LocalPort}|{value.RemoteAddress}|{value.RemotePort}|{value.ProcessId}"
+        : $"{value.LastSeen.UtcTicks}|{value.Protocol}|{value.LocalAddress}|{value.LocalPort}|{value.RemoteAddress}|{value.RemotePort}|{value.ProcessId}";
     public string ProcessName => value.ProcessName ?? $"PID {value.ProcessId}";
     public string Destination
     {
@@ -1368,6 +1588,12 @@ public sealed class FlowRow(RecentFlow value)
     public string BytesReceivedText => FormatBytes(value.BytesReceived);
     public string BytesSentText => FormatBytes(value.BytesSent);
     public string Origin => value.Origin;
+    /// Whether a reader would see any difference between the two rows.
+    internal bool LooksSameAs(FlowRow other) =>
+        LastSeenText == other.LastSeenText && FirstSeenText == other.FirstSeenText && StateText == other.StateText &&
+        BytesSentText == other.BytesSentText && BytesReceivedText == other.BytesReceivedText &&
+        Destination == other.Destination && Country == other.Country && ProcessName == other.ProcessName;
+
     internal static string FormatBytes(long? bytes) => bytes is null ? "—" : bytes < 1024 ? $"{bytes} B" : bytes < 1_048_576 ? $"{bytes / 1024d:N1} KiB" : bytes < 1_073_741_824 ? $"{bytes / 1_048_576d:N1} MiB" : $"{bytes / 1_073_741_824d:N1} GiB";
 }
 

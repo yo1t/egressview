@@ -18,13 +18,16 @@ public sealed class TrafficTimelineControl : FrameworkElement
     private bool useBytes;
     private DateTimeOffset from;
     private DateTimeOffset to;
+    private IReadOnlyList<SleepPeriod> sleepPeriods = [];
 
-    public void SetItems(IReadOnlyList<AppTimelineAggregate> value, bool bytes, DateTimeOffset periodFrom, DateTimeOffset periodTo)
+    public void SetItems(IReadOnlyList<AppTimelineAggregate> value, bool bytes, DateTimeOffset periodFrom, DateTimeOffset periodTo,
+        IReadOnlyList<SleepPeriod>? sleeps = null)
     {
         items = value;
         useBytes = bytes;
         from = periodFrom;
         to = periodTo;
+        sleepPeriods = sleeps ?? [];
         InvalidateVisual();
     }
 
@@ -70,6 +73,24 @@ public sealed class TrafficTimelineControl : FrameworkElement
         var width = plotWidth / bucketCount;
         var palette = new[] { (Brush)FindResource("AccentBrush"), Brushes.Turquoise, Brushes.MediumSlateBlue, Brushes.DarkOrange, Brushes.Crimson, Brushes.MediumAquamarine, Brushes.DimGray };
         drawing.PushClip(new RectangleGeometry(new Rect(plotLeft, plotTop, plotWidth, plotHeight)));
+        if (to > from)
+        {
+            var sleepFill = Brushes.DodgerBlue.Clone();
+            sleepFill.Opacity = 0.22;
+            var sleepEdge = Brushes.DodgerBlue.Clone();
+            sleepEdge.Opacity = 0.60;
+            var sleepPen = new Pen(sleepEdge, 1);
+            var totalSeconds = (to - from).TotalSeconds;
+            foreach (var period in sleepPeriods)
+            {
+                var start = Math.Clamp((period.Start - from).TotalSeconds / totalSeconds, 0, 1);
+                var end = Math.Clamp((period.End - from).TotalSeconds / totalSeconds, 0, 1);
+                if (end <= start) continue;
+                var x = plotLeft + plotWidth * start;
+                drawing.DrawRectangle(sleepFill, sleepPen,
+                    new Rect(x, plotTop, Math.Max(1, plotWidth * (end - start)), plotHeight));
+            }
+        }
         for (var bucket = 0; bucket < bucketCount; bucket++)
         {
             var y = baseline;
