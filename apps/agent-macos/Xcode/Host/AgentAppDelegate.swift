@@ -81,6 +81,12 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
                 if self?.isPreparedForRemoval == false {
                     self?.hubDelivery.enqueue(observations)
                 }
+                // The same delivery tells the connection log there is
+                // something new. The rows are already in the store by the
+                // time this runs, so the window re-reads rather than being
+                // handed anything -- and it only does so if it is open and
+                // showing the log (P3-107).
+                self?.observationWindow?.observationsArrived(observations.count)
             }
         },
         storageErrorHandler: { [weak self] error in
