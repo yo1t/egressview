@@ -718,3 +718,9 @@
 "Paused -- %lld new" = "停止中・新着%lld件";
 "Resume" = "再開";
 "Stops the table moving while you read it. Nothing is collected differently; only this screen stops updating." = "読んでいる間、表が動かないようにします。収集は変わりません。止まるのはこの画面の更新だけです。";
+
+// The expanded country map (P3-109).
+"Expand" = "拡大";
+"Show the world map and every country at full size" = "世界地図と国の一覧を画面いっぱいに表示します";
+"Shrink" = "縮小";
+"Return to the previous size" = "元の大きさに戻します";

@@ -716,3 +716,9 @@
 "Paused -- %lld new" = "Paused -- %lld new";
 "Resume" = "Resume";
 "Stops the table moving while you read it. Nothing is collected differently; only this screen stops updating." = "Stops the table moving while you read it. Nothing is collected differently; only this screen stops updating.";
+
+// The expanded country map (P3-109).
+"Expand" = "Expand";
+"Show the world map and every country at full size" = "Show the world map and every country at full size";
+"Shrink" = "Shrink";
+"Return to the previous size" = "Return to the previous size";
