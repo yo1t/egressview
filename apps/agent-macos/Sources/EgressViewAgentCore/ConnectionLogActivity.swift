@@ -1,42 +1,49 @@
 import Foundation
 
-/// Whether a row in the connection log is still happening.
+/// Whether a connection in the log has finished.
 ///
-/// The log shows one row per flow, and that row keeps being updated while the
-/// traffic continues: its last-observed time moves forward. A column headed
-/// with an end time that silently keeps changing is worse than no column --
-/// a connection that finished and one that is still running would look the
-/// same (P3-107).
+/// ## What the agent actually knows
 ///
-/// What can honestly be said is narrower than "the connection is open". The
-/// agent does not watch connections open and close; it samples the socket
-/// table, so the only fact available is **when this flow was last seen**. A
-/// flow last seen in the most recent sample was still there when the snapshot
-/// was taken, and that is what this reports.
+/// The Network Extension reports a flow **twice**: once when it opens, and
+/// once when it closes. Periodic statistics reports in between are discarded
+/// on purpose -- whether their counters are cumulative or per-interval is
+/// undocumented and unmeasured, and a byte count nobody has verified is worse
+/// than none.
+///
+/// So a row's last-observed time does **not** track a running connection. It
+/// is the open time until the flow closes, and the close time afterwards. A
+/// connection open for an hour has a last-observed time an hour old, and one
+/// that ended a second ago has a very recent one.
+///
+/// ## The rule that was wrong
+///
+/// The first version of this marked a row as running when its last-observed
+/// time was within a few seconds of the read. On the shipping path that says
+/// the opposite of the truth twice over: **a flow that has been open for an
+/// hour is not marked, and a flow that ended a second ago is.** It was
+/// derived from the two-second sampling interval of `LightweightCollector`,
+/// which is disabled in every shipped build.
+///
+/// ## The rule that holds
+///
+/// Byte counts arrive with the close report and only then. **A flow with no
+/// byte counts has not been reported closed**, which is the same fact the
+/// coverage note on the charts already states to the user. That is a property
+/// of the record, needs no clock, and cannot be made wrong by how often the
+/// window refreshes.
+///
+/// It is not a claim that the connection is alive this instant. If a close
+/// report never arrives -- the extension is replaced, the registry evicts the
+/// entry at 10,000 open flows -- the row keeps saying open. What it says
+/// precisely is: **the agent has not seen this end.**
 public enum ConnectionLogActivity {
-    /// How far behind the snapshot a flow may be and still count as running.
+    /// Has this flow's end not been recorded?
     ///
-    /// Three sampling intervals. One would be the theoretical answer and is
-    /// the wrong one: the sampler is a `DispatchSourceTimer`, a sample takes
-    /// time to walk the socket table, and the timestamp written is from
-    /// inside that walk. Three leaves room for that without reaching so far
-    /// back that a finished connection stays lit.
-    ///
-    /// Derived from the sampler's own interval rather than written as a
-    /// number, so changing the sampling rate cannot leave this behind.
-    public static var runningTolerance: TimeInterval { LightweightCollector.defaultInterval * 3 }
-
-    /// Was this flow still being seen when the snapshot was taken?
-    ///
-    /// Measured against the snapshot, never against the wall clock. The window
-    /// refreshes on its own timer, so "now" drifts up to a whole refresh
-    /// interval away from the data -- and a marker that switched off while
-    /// nothing changed on the Mac would be reporting the refresh timer, not
-    /// the connection.
-    public static func isRunning(lastObservedAt: Date, snapshotTakenAt: Date) -> Bool {
-        let age = snapshotTakenAt.timeIntervalSince(lastObservedAt)
-        // A negative age is a flow stamped after the snapshot was taken, which
-        // happens when a sample lands mid-read. It is running, not impossible.
-        return age >= -runningTolerance && age <= runningTolerance
+    /// Restricted to the Network Extension, which is the collector that
+    /// reports closes at all. A row from any other collector gets no claim
+    /// made about it rather than a claim that cannot be supported.
+    public static func isOpen(_ observation: ConnectionObservation) -> Bool {
+        guard observation.collector == .networkExtension else { return false }
+        return observation.bytesIn == nil && observation.bytesOut == nil
     }
 }

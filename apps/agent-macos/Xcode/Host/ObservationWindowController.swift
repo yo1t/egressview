@@ -567,8 +567,8 @@ struct AgentMainView: View {
                     Text(row.activityText)
                         .font(.caption)
                         .foregroundStyle(.tint)
-                        .help(row.isRunning
-                              ? L("This connection was still being seen when the window last read the records. Its last-seen time keeps moving.")
+                        .help(row.isOpen
+                              ? L("The agent has not recorded this connection ending. Data volume is measured at the end, which is why this row has none yet.")
                               : "")
                 }
                 .width(min: 70, ideal: 90)

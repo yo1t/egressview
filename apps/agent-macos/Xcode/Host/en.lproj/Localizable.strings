@@ -706,6 +706,6 @@
 "Could not remove the Anthropic API key: %@" = "Could not remove the Anthropic API key: %@";
 
 // The connection log says which rows are still moving (P3-107).
-"still running" = "still running";
-"This connection was still being seen when the window last read the records. Its last-seen time keeps moving." = "This connection was still being seen when the window last read the records. Its last-seen time keeps moving.";
+"not ended" = "not ended";
+"The agent has not recorded this connection ending. Data volume is measured at the end, which is why this row has none yet." = "The agent has not recorded this connection ending. Data volume is measured at the end, which is why this row has none yet.";
 "State" = "State";
