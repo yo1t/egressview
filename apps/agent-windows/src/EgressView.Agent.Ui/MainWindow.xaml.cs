@@ -243,10 +243,20 @@ public partial class MainWindow : Window
         var sleepNote = data.SleepSeconds > 0
             ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SleepCoverage"), FormatDuration(data.SleepSeconds))
             : string.Empty;
-        CoverageNote.Text = string.Join(Environment.NewLine, new[] { coverageNote, sleepNote }.Where(value => value.Length > 0));
+        // Said once, beside the totals it affects. A bare "+ N not measured"
+        // tells someone a number is short without telling them whether to wait
+        // for it, and the reason here is not the reason the Mac gives: on
+        // Windows every observed flow carries its bytes, and the ones that do
+        // not are the connections that were already open when monitoring began.
+        var unmeasuredNote = data.ConnectionsWithoutBytes > 0
+            ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("UnmeasuredReason"), data.ConnectionsWithoutBytes)
+            : string.Empty;
+        CoverageNote.Text = string.Join(Environment.NewLine,
+            new[] { coverageNote, sleepNote, unmeasuredNote }.Where(value => value.Length > 0));
         var names = DestinationChoice.SelectedIndex == 0;
         FlowDiagram.SetItems(data.Links, IsByteMetric, names);
         Timeline.SetItems(data.Timeline, IsByteMetric, data.From, data.To, data.SleepPeriods);
+        DescribeCharts(data);
         SleepLegend.Visibility = data.SleepPeriods.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         FlowCaption.Text = IsByteMetric ? LocalizationManager.Text("RibbonBytes") : LocalizationManager.Text("RibbonConnections");
         TimelineCaption.Text = IsByteMetric ? LocalizationManager.Text("TimelineBytes") : LocalizationManager.Text("TimelineTotal");
@@ -1405,7 +1415,7 @@ public partial class MainWindow : Window
         { AiStatus.Text = LocalizationManager.Text("ConfigureAiFirst"); return; }
         var provider = SelectedAiProvider(); var model = SelectedAiModel(); var question = AiQuestion.Text.Trim();
         try { AiPreview.Text = aiClient.BuildPreview(provider, model, context, CurrentConversation(), question); }
-        catch (Exception exception) { AiStatus.Text = exception.Message; return; }
+        catch (Exception exception) { AiStatus.Text = DescribeAiFailure(exception, provider); return; }
         if (provider != AiProviderKind.Ollama && System.Windows.MessageBox.Show(
             LocalizationManager.Text("ConfirmCloudSend"), LocalizationManager.Text("ExactPreview"),
             MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
@@ -1415,6 +1425,10 @@ public partial class MainWindow : Window
         try
         {
             var key = provider == AiProviderKind.Ollama ? null : WindowsCredentialVault.Load(provider.ToString());
+            // Said here rather than left to the provider to refuse: a missing
+            // key and a rejected one need different actions from the reader.
+            if (provider != AiProviderKind.Ollama && string.IsNullOrWhiteSpace(key))
+                throw new AiRequestException(AiFailureKind.MissingKey, "No API key is stored for this provider.");
             var prior = CurrentConversation();
             var reply = await aiClient.ChatAsync(provider, model, key, AgentSettings.OllamaEndpoint, context, prior, question, aiRequest.Token);
             var requestId = Guid.NewGuid(); var now = DateTimeOffset.UtcNow;
@@ -1424,8 +1438,99 @@ public partial class MainWindow : Window
             AiQuestion.Clear(); AiStatus.Text = LocalizationManager.Text("AnalysisComplete"); RefreshAiSurface();
         }
         catch (OperationCanceledException) { AiStatus.Text = LocalizationManager.Text("AnalysisStopped"); }
-        catch (Exception exception) { AiStatus.Text = exception.Message; }
+        catch (Exception exception) { AiStatus.Text = DescribeAiFailure(exception, provider); }
         finally { AskAiButton.IsEnabled = true; StopAiButton.IsEnabled = false; }
+    }
+
+    /// What happened, in the reader's language, without the exception's words.
+    ///
+    /// A raw message is written once in English by whoever threw it, and can
+    /// carry an endpoint, a model name or a path -- none of which belong on a
+    /// status line. The same nine kinds are used for every provider, so the
+    /// experience does not change depending on which one is configured.
+    private static string DescribeAiFailure(Exception exception, AiProviderKind provider)
+    {
+        var name = provider.ToString();
+        var kind = AiRequestException.Classify(exception);
+        var status = (exception as AiRequestException)?.StatusCode;
+        var key = kind switch
+        {
+            AiFailureKind.Timeout => "AiTimeout",
+            AiFailureKind.Empty => "AiEmpty",
+            AiFailureKind.HttpStatus => "AiHttpStatus",
+            AiFailureKind.TooLarge => "AiTooLarge",
+            AiFailureKind.InvalidKey => "AiInvalidKey",
+            AiFailureKind.MissingKey => "AiMissingKey",
+            AiFailureKind.ModelUnavailable => "AiModelUnavailable",
+            AiFailureKind.RequestRejected => "AiRequestRejected",
+            _ => "AiUnreadable",
+        };
+        return kind == AiFailureKind.HttpStatus && status is { } code
+            ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text(key), name, code)
+            : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text(key), name);
+    }
+
+    /// Say what each chart shows, in numbers, for a reader who cannot see it.
+    ///
+    /// A drawn control has nothing a screen reader can read: it is one opaque
+    /// rectangle. A name alone ("Network flow") says what the picture is about
+    /// and none of what it says, which is the part worth having. The summary is
+    /// rebuilt whenever the data is, because a description that stops matching
+    /// the picture is worse than none.
+    private void DescribeCharts(PeriodAnalysis data)
+    {
+        var metric = IsByteMetric
+            ? FlowRow.FormatBytes(data.Bytes)
+            : string.Format(CultureInfo.CurrentCulture, "{0:N0}", data.Connections);
+
+        static void Describe(FrameworkElement element, string text) =>
+            AutomationProperties.SetName(element, text);
+
+        if (data.Links.Count == 0)
+        {
+            Describe(FlowDiagram, string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("ChartSummaryEmpty"), LocalizationManager.Text("WhichAppWhere")));
+        }
+        else
+        {
+            var top = data.Links
+                .GroupBy(link => LocalizationManager.Application(link.Application))
+                .Select(group => (Name: group.Key, Value: group.Sum(link => IsByteMetric ? link.Bytes : link.Connections)))
+                .OrderByDescending(entry => entry.Value).First();
+            var total = Math.Max(1, data.Links.Sum(link => IsByteMetric ? link.Bytes : link.Connections));
+            Describe(FlowDiagram, string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("ChartSummaryFlow"),
+                metric, data.Applications, data.Destinations, top.Name, top.Value / (double)total));
+        }
+
+        if (data.Timeline.Count == 0)
+        {
+            Describe(Timeline, string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("ChartSummaryEmpty"), LocalizationManager.Text("WhenTraffic")));
+        }
+        else
+        {
+            var buckets = data.Timeline.GroupBy(item => item.Bucket)
+                .Select(group => (Bucket: group.Key, Value: group.Sum(item => IsByteMetric ? item.Bytes : item.Connections)))
+                .ToArray();
+            var busiest = buckets.OrderByDescending(bucket => bucket.Value).First();
+            var span = (data.To - data.From).TotalSeconds / Math.Max(1, buckets.Length);
+            var at = data.From.AddSeconds(span * busiest.Bucket).LocalDateTime;
+            Describe(Timeline, string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("ChartSummaryTimeline"),
+                metric, buckets.Length, at.ToString("g", CultureInfo.CurrentCulture)));
+        }
+
+        if (currentGlobePoints.Count == 0)
+        {
+            Describe(Globe, string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("ChartSummaryEmpty"), LocalizationManager.Text("CommunicationDestinations")));
+        }
+        else
+        {
+            var top = currentGlobePoints.OrderByDescending(point => point.Connections).First();
+            Describe(Globe, string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("ChartSummaryGlobe"),
+                currentGlobePoints.Count, top.City ?? top.CountryCode ?? LocalizationManager.Text("Unknown"),
+                top.Connections.ToString("N0", CultureInfo.CurrentCulture)));
+        }
     }
 
     private void StopAi_Click(object sender, RoutedEventArgs e) => aiRequest?.Cancel();

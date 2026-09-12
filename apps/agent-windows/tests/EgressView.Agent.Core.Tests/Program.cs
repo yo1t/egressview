@@ -267,7 +267,19 @@ try
     Assert(AgentAiClient.ValidateOllamaEndpoint("http://127.0.0.1:11434").IsLoopback,
         "Ollama accepts a loopback HTTP endpoint");
     try { AgentAiClient.ValidateOllamaEndpoint("https://example.com"); throw new InvalidOperationException("FAILED: Ollama accepted a remote endpoint"); }
-    catch (ArgumentException) { }
+    catch (AiRequestException rejected) { Assert(rejected.Kind == AiFailureKind.RequestRejected, "a remote Ollama endpoint is refused as a rejected request"); }
+
+    // A failure the reader sees must be a kind, not a sentence: the screen has
+    // to say it in their language, and a message can carry an endpoint, a model
+    // name or a path that does not belong on a status line.
+    Assert(AiRequestException.Classify(new TaskCanceledException()) == AiFailureKind.Timeout,
+        "a request that ran out of time is a timeout");
+    Assert(AiRequestException.Classify(new AiRequestException(AiFailureKind.HttpStatus, "refused", 429)) == AiFailureKind.HttpStatus,
+        "a refusal keeps its kind");
+    Assert(new AiRequestException(AiFailureKind.HttpStatus, "refused", 429).StatusCode == 429,
+        "the status code survives, because 401 and 429 need different actions");
+    Assert(AiRequestException.Classify(new InvalidOperationException("something else")) == AiFailureKind.Unreadable,
+        "an unrecognised failure is reported as unreadable rather than guessed at");
     var aiHistoryPath = Path.Combine(directory, "ai-history.jsonl");
     var aiStore = new AiConversationStore(aiHistoryPath); var aiConversation = Guid.NewGuid();
     aiStore.Append(new AiConversationMessage(Guid.NewGuid(), aiConversation, "user", "what changed", aiFrom, "Ollama", "local"));

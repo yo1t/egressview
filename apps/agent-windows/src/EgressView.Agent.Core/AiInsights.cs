@@ -114,7 +114,7 @@ public sealed class AgentAiClient : IDisposable
             !(string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
               IPAddress.TryParse(uri.Host, out var address) && IPAddress.IsLoopback(address)) ||
             !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
-            throw new ArgumentException("Ollama endpoint must be an HTTP loopback address.", nameof(endpoint));
+            throw new AiRequestException(AiFailureKind.RequestRejected, "Ollama endpoint must be an HTTP loopback address.");
         return uri;
     }
 
@@ -125,18 +125,18 @@ public sealed class AgentAiClient : IDisposable
             AiProviderKind.Ollama => new HttpRequestMessage(HttpMethod.Get, new Uri(ValidateOllamaEndpoint(ollamaEndpoint), "/api/tags")),
             AiProviderKind.OpenAI when OpenAiModels.Contains(model) => Authorized(HttpMethod.Get, $"https://api.openai.com/v1/models/{model}", apiKey, provider),
             AiProviderKind.Anthropic when AnthropicModels.Contains(model) => Authorized(HttpMethod.Get, $"https://api.anthropic.com/v1/models/{model}", apiKey, provider),
-            _ => throw new ArgumentException("Select a supported model."),
+            _ => throw new AiRequestException(AiFailureKind.ModelUnavailable, "Select a supported model."),
         };
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         var data = await EnsureSuccessAsync(response, cancellationToken);
         if (provider == AiProviderKind.Ollama)
         {
-            if (string.IsNullOrWhiteSpace(model) || model.Length > 200) throw new ArgumentException("Select an Ollama model.");
+            if (string.IsNullOrWhiteSpace(model) || model.Length > 200) throw new AiRequestException(AiFailureKind.ModelUnavailable, "Select an Ollama model.");
             using var document = JsonDocument.Parse(data);
             var available = document.RootElement.GetProperty("models").EnumerateArray()
                 .Select(item => item.GetProperty("name").GetString()).Where(name => name is not null);
             if (!available.Any(name => string.Equals(name, model, StringComparison.Ordinal) || name!.StartsWith(model + ":", StringComparison.Ordinal)))
-                throw new InvalidOperationException($"Ollama model '{model}' is not installed.");
+                throw new AiRequestException(AiFailureKind.ModelUnavailable, "The selected Ollama model is not installed.");
         }
     }
 
@@ -155,7 +155,7 @@ public sealed class AgentAiClient : IDisposable
         AiInsightContext context, IReadOnlyList<AiConversationMessage> history, string question, CancellationToken cancellationToken)
     {
         var contextJson = AiInsightContextBuilder.Preview(context);
-        if (Encoding.UTF8.GetByteCount(contextJson) > MaximumContextBytes) throw new ArgumentException("The bounded insight context is too large.");
+        if (Encoding.UTF8.GetByteCount(contextJson) > MaximumContextBytes) throw new AiRequestException(AiFailureKind.RequestRejected, "The bounded insight context is too large.");
         var cleanQuestion = ValidateQuestion(question);
         var prior = history.Where(item => string.Equals(item.Provider, provider.ToString(), StringComparison.OrdinalIgnoreCase))
             .TakeLast(20).Select(item => new { role = item.Role, content = Limit(item.Body, 8_000) }).ToArray();
@@ -164,7 +164,7 @@ public sealed class AgentAiClient : IDisposable
         HttpRequestMessage request;
         if (provider == AiProviderKind.Ollama)
         {
-            if (string.IsNullOrWhiteSpace(model) || model.Length > 200) throw new ArgumentException("Select an Ollama model.");
+            if (string.IsNullOrWhiteSpace(model) || model.Length > 200) throw new AiRequestException(AiFailureKind.ModelUnavailable, "Select an Ollama model.");
             var messages = new List<object> { new { role = "system", content = DeveloperInstruction } };
             messages.AddRange(prior.Cast<object>()); messages.Add(new { role = "user", content = prompt });
             request = JsonRequest(new Uri(ValidateOllamaEndpoint(ollamaEndpoint), "/api/chat"), new { model, stream = false, messages });
@@ -183,7 +183,7 @@ public sealed class AgentAiClient : IDisposable
             request = JsonRequest(new Uri("https://api.anthropic.com/v1/messages"), new { model, max_tokens = 384, system = DeveloperInstruction, messages });
             Authorize(request, apiKey, provider);
         }
-        else throw new ArgumentException("Select a supported model.");
+        else throw new AiRequestException(AiFailureKind.ModelUnavailable, "Select a supported model.");
 
         using (request)
         using (var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
@@ -216,7 +216,7 @@ public sealed class AgentAiClient : IDisposable
             if (root.TryGetProperty("usage", out var usage)) { input = usage.GetProperty("input_tokens").GetInt32(); output = usage.GetProperty("output_tokens").GetInt32(); }
         }
         text = text.Trim();
-        if (text.Length == 0) throw new InvalidDataException("AI provider returned an empty response.");
+        if (text.Length == 0) throw new AiRequestException(AiFailureKind.Empty, "AI provider returned an empty response.");
         return new AiReply(text, input, output, Estimate(provider, model, input, output));
     }
 
@@ -246,24 +246,24 @@ public sealed class AgentAiClient : IDisposable
     private static void Authorize(HttpRequestMessage request, string? key, AiProviderKind provider)
     {
         var clean = key?.Trim() ?? "";
-        if (clean.Length is 0 or > 512 || clean.Any(char.IsWhiteSpace)) throw new ArgumentException("Enter a valid API key.");
+        if (clean.Length is 0 or > 512 || clean.Any(char.IsWhiteSpace)) throw new AiRequestException(AiFailureKind.InvalidKey, "Enter a valid API key.");
         if (provider == AiProviderKind.OpenAI) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", clean);
         else { request.Headers.Add("x-api-key", clean); request.Headers.Add("anthropic-version", "2023-06-01"); }
     }
 
     private static async Task<byte[]> EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        if (response.Content.Headers.ContentLength > MaximumResponseBytes) throw new InvalidDataException("AI provider response exceeded 1 MB.");
+        if (response.Content.Headers.ContentLength > MaximumResponseBytes) throw new AiRequestException(AiFailureKind.TooLarge, "AI provider response exceeded 1 MB.");
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var output = new MemoryStream(); var buffer = new byte[16_384];
-        while (true) { var read = await stream.ReadAsync(buffer, cancellationToken); if (read == 0) break; if (output.Length + read > MaximumResponseBytes) throw new InvalidDataException("AI provider response exceeded 1 MB."); output.Write(buffer, 0, read); }
+        while (true) { var read = await stream.ReadAsync(buffer, cancellationToken); if (read == 0) break; if (output.Length + read > MaximumResponseBytes) throw new AiRequestException(AiFailureKind.TooLarge, "AI provider response exceeded 1 MB."); output.Write(buffer, 0, read); }
         var data = output.ToArray();
-        if (!response.IsSuccessStatusCode) throw new HttpRequestException($"AI provider request failed (HTTP {(int)response.StatusCode}).");
+        if (!response.IsSuccessStatusCode) throw new AiRequestException(AiFailureKind.HttpStatus, "AI provider request failed.", (int)response.StatusCode);
         return data;
     }
 
     private static string ValidateQuestion(string value)
-    { var clean = value.Trim(); if (clean.Length is 0 or > 2_000) throw new ArgumentException("Enter a question of 2,000 characters or fewer."); return clean; }
+    { var clean = value.Trim(); if (clean.Length is 0 or > 2_000) throw new AiRequestException(AiFailureKind.RequestRejected, "Enter a question of 2,000 characters or fewer."); return clean; }
     private static string Limit(string value, int limit) => value[..Math.Min(value.Length, limit)];
     public void Dispose() => http.Dispose();
 }
