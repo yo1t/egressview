@@ -144,6 +144,34 @@ function setSummaryCache(key, body) {
   }
 }
 
+/**
+ * Reads that share the same expensive scan, cached on the same terms.
+ *
+ * Opening the connection log fires several requests at once, and under an agent
+ * scope each one rebuilds the same thing: `connectionSource()` unions the
+ * agent's uncorrelated observations, grouped per flow, before any LIMIT applies.
+ * Measured on the Hub over a 24h window, that CTE costs ~1.9s per execution --
+ * and one page view ran it in `/connections` (twice: the page and its total),
+ * `/connections/summary`, and `/connections/threat-counts`. better-sqlite3 is
+ * synchronous, so those do not overlap; they add up, which is why a single tab
+ * took 8-12s while each query on its own looked survivable.
+ *
+ * The window bound is quantised to the TTL, so requests that arrive together
+ * share a key rather than being told apart by their microsecond of arrival.
+ * This changes nothing about staleness: the TTL already permits an answer that
+ * old. `null` is preserved because "up to now" already means the same thing on
+ * every request.
+ */
+function cachedRead(kind, keyParts, compute) {
+  const key = JSON.stringify({ kind, ...keyParts });
+  const cached = getSummaryCache(key);
+  summaryCacheStats[cached ? 'hits' : 'misses'] += 1;
+  if (cached) return { body: cached, cached: true };
+  const body = compute();
+  setSummaryCache(key, body);
+  return { body, cached: false };
+}
+
 function attachThreats(connections, threatIntel) {
   if (!threatIntel || typeof threatIntel.matchThreatIntel !== 'function') return connections;
   return connections.map(c => ({
@@ -279,27 +307,22 @@ function connectionsRoutes(ctx) {
     // answer may be: the TTL already permits serving one that old. It only
     // stops two requests that would have shared an answer from being told
     // apart by their microsecond of arrival.
-    const cacheKey = JSON.stringify({
+    // Counted, because the cache was serving nothing at all and the response's
+    // own `cached` field is the only place that said so -- and nobody reads a
+    // field on a response nobody kept. Measured 2026-09-06: 369 responses over
+    // three seconds in six hours, every one of them this route.
+    const { body: summary, cached } = cachedRead('summary', {
       from: quantiseForCache(from),
       to: quantiseForCache(to),
       src,
       buckets,
       sourceScope,
-    });
-    const cached = getSummaryCache(cacheKey);
-    // Counted, because the cache was serving nothing at all and the response's
-    // own `cached` field is the only place that said so -- and nobody reads a
-    // field on a response nobody kept. Measured 2026-09-06: 369 responses over
-    // three seconds in six hours, every one of them this route (P3-67).
-    summaryCacheStats[cached ? 'hits' : 'misses'] += 1;
-    if (cached) return res.json({ ...cached, serverTime: Date.now(), cached: true });
-    const summary = history.summarizeByTimeRange(from, to, {
+    }, () => history.summarizeByTimeRange(from, to, {
       src,
       buckets,
       ...(sourceScope ? { sourceScope } : {}),
-    });
-    setSummaryCache(cacheKey, summary);
-    res.json({ ...summary, serverTime: Date.now(), cached: false });
+    }));
+    res.json({ ...summary, serverTime: Date.now(), cached });
   });
 
   router.get('/connections/new-nodes', requireAdmin, (req, res) => {
@@ -362,7 +385,15 @@ function connectionsRoutes(ctx) {
     const { ts: to, err: e2 } = parseTimestampParam(query.to, 'to', res);
     if (e2) return;
     const { filters } = parsePaginationOpts(query);
-    const groups = history.groupDstByTimeRange(from, to, { filters, sourceScope: scoped.scope });
+    // Threat counts are derived from the same scoped scan the log itself runs,
+    // and the tab asks for both at once. Cache the grouping, not the verdicts:
+    // the feeds can change between polls and re-matching them is cheap.
+    const { body: groups } = cachedRead('threat-counts', {
+      from: quantiseForCache(from),
+      to: quantiseForCache(to),
+      filters,
+      sourceScope: scoped.scope,
+    }, () => history.groupDstByTimeRange(from, to, { filters, sourceScope: scoped.scope }));
     let safe = 0, warn = 0, danger = 0;
     for (const { dst, dstHost, cnt } of groups) {
       const threat = threatIntel?.matchThreatIntel(dst, dstHost || dst);
@@ -443,7 +474,18 @@ function connectionsRoutes(ctx) {
           serverTime: Date.now(),
         });
       }
-      const total = history.countByTimeRange(from, to, { filters: opts.filters, sourceScope: opts.sourceScope });
+      // The total exists to size the pager, and it repeats the page's own scan
+      // to produce one number. Paging through a log re-asks it per page with an
+      // unchanged answer, so it is cached on the terms that decide it -- window,
+      // filters, and scope -- and deliberately not on the page offset.
+      const { body: total } = cachedRead('connections-total', {
+        from: quantiseForCache(from),
+        to: quantiseForCache(to),
+        filters: opts.filters,
+        sourceScope: opts.sourceScope,
+      }, () => history.countByTimeRange(from, to, {
+        filters: opts.filters, sourceScope: opts.sourceScope,
+      }));
       const connections = attachApplications(attachThreats(
         history.queryByTimeRangePaged(from, to, clampedLimit, offset, opts), threatIntel
       ), history, opts.sourceScope, from, to);
@@ -478,4 +520,12 @@ module.exports._parsePaginationOpts = parsePaginationOpts;
 module.exports.MAX_LIMIT = MAX_LIMIT;
 module.exports.SERVER_FILTER_COLS = SERVER_FILTER_COLS;
 module.exports.summaryCacheSnapshot = summaryCacheSnapshot;
+// The cache is module state, so it outlives any one app instance. That is
+// correct in the server, which has exactly one history, and wrong in a test
+// process that builds several with different fixtures behind the same key.
+module.exports._resetReadCacheForTest = () => {
+  summaryCache.clear();
+  summaryCacheStats.hits = 0;
+  summaryCacheStats.misses = 0;
+};
 module.exports._sendLargeJson = sendLargeJson;
