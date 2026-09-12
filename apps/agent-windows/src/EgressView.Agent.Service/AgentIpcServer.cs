@@ -31,6 +31,19 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         try { store.AddCounter("ipc-connection-failure", 1); } catch { }
     }, stop.Token);
 
+    /// The window's run id, held here because the window cannot hold one.
+    private long uiRunId;
+
+    private void RecordUiRun(string stage, string? fault)
+    {
+        switch (stage)
+        {
+            case "begin": uiRunId = store.BeginRun(RunComponent.Ui, DiagnosticsReport.CurrentVersion); break;
+            case "end" when uiRunId != 0: store.EndRun(uiRunId); uiRunId = 0; break;
+            case "fault" when uiRunId != 0: store.FaultRun(uiRunId, fault ?? "Unknown"); uiRunId = 0; break;
+        }
+    }
+
     private async Task ServeOneAsync(CancellationToken cancellationToken)
     {
         await using var pipe = NamedPipeServerStreamAcl.Create(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,

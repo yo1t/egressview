@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 13;
+    private const int CurrentSchemaVersion = 14;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -177,6 +177,27 @@ public sealed partial class ObservationStore : IDisposable
         ALTER TABLE delivery_queue ADD COLUMN remote_hostname TEXT;
         """;
 
+    /// Why each run of each process ended.
+    ///
+    /// Diagnostics describe the agent that is running. A agent that has
+    /// stopped writes nothing, so the one question a user has after a silent
+    /// gap -- what happened -- is the one question the diagnostics cannot
+    /// answer. This is written at the start of a run rather than at the end,
+    /// because a process that crashes does not get to write anything.
+    private const string Version14Schema = """
+        CREATE TABLE IF NOT EXISTS run_history(
+          id INTEGER PRIMARY KEY,
+          component TEXT NOT NULL CHECK(component IN ('service','ui')),
+          version TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          heartbeat_at TEXT,
+          ended_at TEXT,
+          ending TEXT NOT NULL CHECK(ending IN ('running','clean','unexpected','faulted')),
+          fault TEXT
+        );
+        CREATE INDEX IF NOT EXISTS run_history_component ON run_history(component,id);
+        """;
+
     private readonly object gate = new();
     private nint db;
     private bool disposed;
@@ -204,7 +225,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -225,7 +246,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 9) { MigrateVersion9To10(); version = 10; }
         if (version == 10) { MigrateVersion10To11(); version = 11; }
         if (version == 11) { MigrateVersion11To12(); version = 12; }
-        if (version == 12) MigrateVersion12To13();
+        if (version == 12) { MigrateVersion12To13(); version = 13; }
+        if (version == 13) MigrateVersion13To14();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -366,12 +388,19 @@ public sealed partial class ObservationStore : IDisposable
         lastVerifiedIntegrity = integrity;
     }
 
+    private void MigrateVersion13To14()
+    {
+        CreateMigrationBackup(14);
+        try { Execute($"BEGIN IMMEDIATE; {Version14Schema} UPDATE schema_version SET version=14 WHERE version=13; COMMIT;"); PruneMigrationBackups(14); }
+        catch { TryRollback(); throw; }
+    }
+
     private void ValidateSchema()
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings')");
-        if (tables != 15)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings','run_history')");
+        if (tables != 16)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
@@ -734,6 +763,96 @@ public sealed partial class ObservationStore : IDisposable
         lock (gate) return (
             ScalarInt64("SELECT COUNT(*) FROM flows WHERE process_name IS NOT NULL"),
             ScalarInt64("SELECT COUNT(*) FROM flows WHERE process_name IS NULL"));
+    }
+
+    /// Open a run, and settle what happened to the last one.
+    ///
+    /// A crashed process writes nothing, so the previous run's fate has to be
+    /// decided here, by the next start: a row still marked running when a new
+    /// run begins is a run that never got to say goodbye. Its end is recorded
+    /// as its last heartbeat rather than as now -- claiming it ran until this
+    /// moment would invent the whole gap.
+    public long BeginRun(RunComponent component, string version)
+    {
+        var name = component == RunComponent.Service ? "service" : "ui";
+        lock (gate)
+        {
+            Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
+                $"WHERE component='{name}' AND ending='running'");
+            Execute($"INSERT INTO run_history(component,version,started_at,heartbeat_at,ending) " +
+                $"VALUES('{name}','{Sql(Trim(version, 64))}','{DateTimeOffset.UtcNow:O}','{DateTimeOffset.UtcNow:O}','running')");
+            var id = ScalarInt64("SELECT last_insert_rowid()");
+            // Bounded: a machine that restarts often must not turn its own
+            // history into the thing that fills the disk.
+            Execute($"DELETE FROM run_history WHERE component='{name}' AND id<=(SELECT MIN(id) FROM (SELECT id FROM run_history WHERE component='{name}' ORDER BY id DESC LIMIT 50))-1");
+            return id;
+        }
+    }
+
+    public void Heartbeat(long runId)
+    {
+        lock (gate) Execute($"UPDATE run_history SET heartbeat_at='{DateTimeOffset.UtcNow:O}' WHERE id={runId} AND ending='running'");
+    }
+
+    public void EndRun(long runId)
+    {
+        lock (gate) Execute($"UPDATE run_history SET ending='clean',ended_at='{DateTimeOffset.UtcNow:O}' WHERE id={runId} AND ending='running'");
+    }
+
+    /// <param name="faultType">
+    /// The exception's type name and nothing else. A message can carry a file
+    /// path with the account name in it, a host name, or a destination, and
+    /// the diagnostics bundle promises to carry none of those. The type is
+    /// what distinguishes one crash from another anyway.
+    /// </param>
+    public void FaultRun(long runId, string faultType)
+    {
+        lock (gate) Execute($"UPDATE run_history SET ending='faulted',ended_at='{DateTimeOffset.UtcNow:O}'," +
+            $"fault='{Sql(SafeTypeName(faultType))}' WHERE id={runId} AND ending='running'");
+    }
+
+    public IReadOnlyList<AgentRun> ReadRunHistory(int limit = 20)
+    {
+        if (limit is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(limit));
+        lock (gate)
+        {
+            CheckOperation(WinSqlite.Prepare(db, $"SELECT component,version,started_at,heartbeat_at,ended_at,ending,fault FROM run_history ORDER BY id DESC LIMIT {limit}", -1, out var statement, 0));
+            var result = new List<AgentRun>();
+            try
+            {
+                while (WinSqlite.Step(statement) == WinSqlite.Row)
+                    result.Add(new AgentRun(
+                        Text(statement, 0) == "service" ? RunComponent.Service : RunComponent.Ui,
+                        Text(statement, 1), DateTimeOffset.Parse(Text(statement, 2)),
+                        Parse(NullableTextValue(statement, 3)), Parse(NullableTextValue(statement, 4)),
+                        Text(statement, 5), NullableTextValue(statement, 6)));
+            }
+            finally { WinSqlite.Finalize(statement); }
+            return result;
+        }
+    }
+
+    private static DateTimeOffset? Parse(string? value) =>
+        value is null ? null : DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
+
+    private static string Trim(string value, int length) =>
+        value.Length <= length ? value : value[..length];
+
+    /// The leading type name, and nothing after it.
+    ///
+    /// Removing the offending characters is not enough: strip the spaces,
+    /// colons and slashes out of "IOException: C:\Users\person\secret to
+    /// 10.1.2.3" and the account name and the address are still in there, just
+    /// harder to read. What is safe is to keep only the run of characters at
+    /// the front that could be a type name and drop everything from the first
+    /// character that could not be -- which is exactly where a message starts.
+    private static string SafeTypeName(string value)
+    {
+        var end = 0;
+        while (end < value.Length && (char.IsAsciiLetterOrDigit(value[end]) || value[end] is '.' or '_' or '+' or '`'))
+            end++;
+        var kept = value[..end];
+        return kept.Length == 0 || !(char.IsAsciiLetter(kept[0]) || kept[0] == '_') ? "Unknown" : Trim(kept, 128);
     }
 
     public void AddCounter(string name, long amount)

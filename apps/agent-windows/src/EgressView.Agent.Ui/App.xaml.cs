@@ -39,6 +39,13 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // Before anything that can throw. A window that dies reports nothing,
+        // so what makes the crash visible is that this run was opened and the
+        // next start finds it still open.
+        ReportRun("begin");
+        DispatcherUnhandledException += (_, args) => ReportRun("fault", args.Exception.GetType().FullName);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            ReportRun("fault", (args.ExceptionObject as Exception)?.GetType().FullName);
         ThemeManager.ApplySystemTheme(Resources);
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         LocalizationManager.Apply(Resources);
@@ -372,9 +379,25 @@ public partial class App : System.Windows.Application
         Shutdown();
     }
 
+    /// Reported over IPC because the window has no database of its own, and
+    /// swallowed on failure: the service being unreachable is the service's
+    /// problem to report, not a reason to stop the window from starting or
+    /// from closing.
+    private static void ReportRun(string stage, string? fault = null)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            AgentIpcClient.RequestAsync(System.Text.Json.JsonSerializer.Serialize(
+                new { v = 1, op = "ui-run", stage, fault }), timeout.Token).GetAwaiter().GetResult();
+        }
+        catch (Exception) { }
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
         IsExiting = true;
+        ReportRun("end");
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged;
         trayRefresh.Stop();
         Updates.StateChanged -= UpdateStateChanged;
