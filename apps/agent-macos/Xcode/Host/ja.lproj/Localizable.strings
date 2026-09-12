@@ -711,3 +711,10 @@
 "not ended" = "継続中";
 "The agent has not recorded this connection ending. Data volume is measured at the end, which is why this row has none yet." = "この通信が終わったことを、Agentはまだ記録していません。データ量は終了時に確定するため、この行にはまだ通信量がありません。";
 "State" = "状態";
+
+// The connection log says whether it is following new traffic (P3-107).
+"Live" = "自動更新中";
+"Live -- updated %@" = "自動更新中・%@ 更新";
+"Paused -- %lld new" = "停止中・新着%lld件";
+"Resume" = "再開";
+"Stops the table moving while you read it. Nothing is collected differently; only this screen stops updating." = "読んでいる間、表が動かないようにします。収集は変わりません。止まるのはこの画面の更新だけです。";

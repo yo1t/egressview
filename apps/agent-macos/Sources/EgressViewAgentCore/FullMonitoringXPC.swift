@@ -11,6 +11,14 @@ import Foundation
 }
 
 public enum FullMonitoringXPC {
+    /// How often the app collects what the Extension has gathered.
+    ///
+    /// Public because it is the floor on how fresh anything downstream can be:
+    /// the connection log cannot show a connection sooner than the drain that
+    /// carried it across, so the live log paces itself by this rather than
+    /// repeating the number (P3-107).
+    public static let drainInterval: TimeInterval = 1
+
     // NetworkExtension requires this name to begin with an App Group
     // entitlement. The build suffix is also required: launchd retains the old
     // provider's endpoint while a System Extension update is being completed,
