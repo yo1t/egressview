@@ -135,12 +135,12 @@ public sealed class TrafficTimelineControl : FrameworkElement
         }
         var legendX = plotLeft;
         var legendY = Math.Min(ActualHeight - 10, baseline + xAxisHeight + 2);
-        for (var index = 0; index < series.Length && legendX < ActualWidth - 45; index++)
+        for (var index = 0; index < series.Length && legendX + 35 < ActualWidth; index++)
         {
             drawing.DrawRoundedRectangle(palette[index % palette.Length], null, new Rect(legendX, legendY - 3, 9, 9), 2, 2);
             var label = new FormattedText(LocalizationManager.Application(series[index]), CultureInfo.CurrentCulture, System.Windows.FlowDirection.LeftToRight,
                 new Typeface("Segoe UI Variable Text"), 9.5, secondary, pixelsPerDip)
-            { MaxTextWidth = 82, Trimming = TextTrimming.CharacterEllipsis };
+            { MaxTextWidth = Math.Max(1, Math.Min(82, ActualWidth - legendX - 14)), Trimming = TextTrimming.CharacterEllipsis };
             drawing.DrawText(label, new Point(legendX + 13, legendY - 6));
             legendX += Math.Min(100, 20 + label.Width);
         }
