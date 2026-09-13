@@ -321,8 +321,8 @@ private final class AgentSettingsViewModel: ObservableObject {
     @Published var message: String?
     /// Off unless the user turns it on: this is the one setting that would send
     /// the destinations the agent is watching to somebody else.
-    @Published var thirdPartyGeoLookupEnabled = GeoCachePreferences().thirdPartyLookupEnabled {
-        didSet { GeoCachePreferences().thirdPartyLookupEnabled = thirdPartyGeoLookupEnabled }
+    @Published var geoLookupSource = GeoCachePreferences().lookupSource {
+        didSet { GeoCachePreferences().lookupSource = geoLookupSource }
     }
     @Published var readsServerName = ServerNamePreferences().isEnabled {
         didSet {
@@ -1105,16 +1105,41 @@ private struct AgentSettingsView: View {
                 .disabled(geo.status == .fetching)
                 Text(geoStatusText).font(.caption).foregroundStyle(.secondary)
             }
-            Toggle(isOn: $model.thirdPartyGeoLookupEnabled) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(L("Look up locations without a Hub"))
-                    // Said plainly: this is the one place the agent would send
-                    // the very destinations it is watching to someone else.
-                    Text(L("Sends destination IP addresses to ip-api.com. Off unless you turn it on."))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            // The daily fetch cannot show a country reached for the first
+            // time: it is not in the cache yet, so the map stays grey until
+            // tomorrow (P3-115). This is what to do about that.
+            VStack(alignment: .leading, spacing: 4) {
+                Picker(L("When an address is not in the cache"), selection: $model.geoLookupSource) {
+                    ForEach(GeoLookupSource.allCases, id: \.self) { source in
+                        Text(Self.title(for: source)).tag(source)
+                    }
                 }
+                .pickerStyle(.radioGroup)
+                // Said plainly: one of these sends the very destinations this
+                // Mac is watching to someone else.
+                Text(Self.explanation(for: model.geoLookupSource))
+                    .font(.caption)
+                    .foregroundStyle(model.geoLookupSource.usesThirdParty ? .orange : .secondary)
             }
+        }
+    }
+
+    private static func title(for source: GeoLookupSource) -> String {
+        switch source {
+        case .cacheOnly: return L("Do not look it up")
+        case .hub: return L("Ask the Hub")
+        case .hubThenThirdParty: return L("Ask the Hub, then ip-api.com")
+        }
+    }
+
+    private static func explanation(for source: GeoLookupSource) -> String {
+        switch source {
+        case .cacheOnly:
+            return L("Countries reached for the first time stay off the map until the next daily fetch.")
+        case .hub:
+            return L("Asks your Hub again when a destination has no country yet. Nothing leaves the network your Hub is on.")
+        case .hubThenThirdParty:
+            return L("Sends destination IP addresses to ip-api.com when your Hub cannot place them. This is the only setting that sends a watched address outside.")
         }
     }
 
@@ -1641,6 +1666,53 @@ final class GeoCacheController: ObservableObject {
         let credential = await credentialStore.loadDetached()
         guard preferences.shouldFetch(now: Date(), hasHub: credential != nil) else { return }
         await refresh()
+    }
+
+    /// New destinations have been seen. Fill in the ones nothing can name.
+    ///
+    /// The daily fetch is what the map normally runs on, and it is why a
+    /// country reached for the first time did not appear until the next one:
+    /// measured 2026-09-13, three countries were resolved by the Hub within
+    /// seconds of the visit and were still missing from the map eight hours
+    /// later (P3-115).
+    ///
+    /// Asking needs a reason and a gap. The reason is an address in the
+    /// pending queue; the gap keeps a page full of new destinations to one
+    /// request.
+    func resolveNewDestinations() async {
+        guard let store else { return }
+        let source = preferences.lookupSource
+        guard source.usesHub else { return }
+        let pending = (try? store.pendingCountryAddresses(limit: 200)) ?? []
+        guard !pending.isEmpty else { return }
+        let credential = await credentialStore.loadDetached()
+        guard preferences.shouldFetchOnDemand(
+            now: Date(), hasHub: credential != nil, hasUnknownAddresses: true
+        ) else { return }
+        preferences.lastOnDemandAt = Date()
+        await refresh()
+
+        guard source.usesThirdParty else { return }
+        // Whatever the Hub still cannot name. This is the only path that sends
+        // a watched address out of the network, and it runs only because
+        // someone chose it in settings.
+        let remaining = (try? store.pendingCountryAddresses(limit: ThirdPartyGeoLookup.batchSize)) ?? []
+        guard !remaining.isEmpty else { return }
+        do {
+            let located = try await ThirdPartyGeoLookup(
+                transport: URLSessionThirdPartyGeoTransport()
+            ).locate(remaining)
+            guard !located.isEmpty else { return }
+            try store.addGeoLocations(located.map {
+                GeoLocation(
+                    ip: $0.ip, latitude: $0.latitude, longitude: $0.longitude,
+                    countryCode: $0.countryCode, city: $0.city
+                )
+            })
+            status = .updated(count: located.count, at: Date())
+        } catch {
+            status = .failed(Self.describe(error))
+        }
     }
 
     /// The settings screen calls this directly. Someone who has just enrolled,
