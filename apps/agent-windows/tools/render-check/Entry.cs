@@ -156,6 +156,48 @@ internal static class Entry
             dashboard.FindName("ExpandedCountryList") is not ItemsControl)
             throw new InvalidOperationException("The expandable country atlas is missing from the Windows dashboard.");
 
+        ThemeManager.ApplyTheme(application.Resources, true, Color.FromRgb(0x4D, 0x94, 0xFF));
+        foreach (var width in new[] { 630, 340 })
+        {
+            var countryDashboard = new MainWindow();
+            var card = (Border)countryDashboard.FindName("CountryGlobeCard")!;
+            var panel = (Grid)countryDashboard.FindName("CountryHistoryPanel")!;
+            var globeInCard = (WorldGlobeControl)countryDashboard.FindName("Globe")!;
+            var list = (ItemsControl)countryDashboard.FindName("CountryList")!;
+            var listScroll = (ScrollViewer)countryDashboard.FindName("CountryListScroll")!;
+            var footer = (TextBlock)countryDashboard.FindName("GlobeCaption")!;
+            var controls = (StackPanel)countryDashboard.FindName("GlobeControls")!;
+            if (listScroll.HorizontalScrollBarVisibility != ScrollBarVisibility.Disabled)
+                throw new InvalidOperationException("The country list must not scroll horizontally.");
+            list.ItemsSource = Enumerable.Range(0, 20).Select(index => new CountryHistoryDisplayRow
+            {
+                Code = index == 1 ? "GB" : "IE",
+                Country = index == 1 ? "グレートブリテンおよび北アイルランド連合王国" : "アイルランド",
+                CountWithUnit = $"{index + 1}回",
+                First = "2026/09/13 18:50",
+                Last = "2026/09/13 19:34",
+                RecentApp = "Creative Cloud UI Helper",
+            }).ToArray();
+            globeInCard.Visibility = Visibility.Collapsed;
+            panel.Visibility = Visibility.Visible;
+            controls.Visibility = Visibility.Collapsed;
+            footer.Text = "宛先48地点 · ローカルの全期間履歴にある33か国を薄く表示";
+            ((Grid)card.Parent).Children.Remove(card);
+            Save(card, width, 510, Path.Combine(output, $"country-list-{width}x510.png"));
+            var viewportBottom = listScroll.TransformToAncestor(card).Transform(new System.Windows.Point(0, listScroll.ActualHeight)).Y;
+            var footerTop = footer.TransformToAncestor(card).Transform(new System.Windows.Point(0, 0)).Y;
+            var footerBottom = footerTop + footer.ActualHeight;
+            Console.WriteLine($"country-list-{width}: viewportBottom={viewportBottom:F1} footerTop={footerTop:F1} footerBottom={footerBottom:F1} cardHeight={card.ActualHeight:F1}");
+            if (viewportBottom > footerTop)
+                throw new InvalidOperationException($"Country list overlaps footer at width {width}: {viewportBottom} > {footerTop}");
+            if (footerBottom > card.ActualHeight - 12)
+                throw new InvalidOperationException($"Country list footer is clipped at width {width}: {footerBottom} > {card.ActualHeight - 12}");
+        }
+
+        if (CountryHistoryDisplayRow.LocalizedCountryName("IE", "ja") != "アイルランド" ||
+            CountryHistoryDisplayRow.LocalizedCountryName("IE", "en") != "Ireland")
+            throw new InvalidOperationException("Country names do not follow the selected UI language.");
+
         Console.WriteLine($"wrote {output}");
         return 0;
     }
