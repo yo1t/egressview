@@ -1683,7 +1683,12 @@ final class GeoCacheController: ObservableObject {
         guard let store else { return }
         let source = preferences.lookupSource
         guard source.usesHub else { return }
-        let pending = (try? store.pendingCountryAddresses(limit: 200)) ?? []
+        // The same exclusion the third-party path needs applies here. The Hub
+        // refuses these addresses itself, so asking it about the LAN is a round
+        // trip that cannot succeed -- and on an Agent-only install, or between
+        // daily fetches, it is the reason the Hub is woken at all.
+        let pending = ((try? store.pendingCountryAddresses(limit: 200)) ?? [])
+            .filter { !NonPublicAddress.isNonPublic($0) }
         guard !pending.isEmpty else { return }
         let credential = await credentialStore.loadDetached()
         guard preferences.shouldFetchOnDemand(
@@ -1703,13 +1708,26 @@ final class GeoCacheController: ObservableObject {
             perRun: ThirdPartyGeoLookup.batchSize
         )
         guard budget > 0 else { return }
-        let remaining = (try? store.pendingCountryAddresses(limit: budget)) ?? []
+        // This is the boundary a watched address crosses on its way out of the
+        // network, so the filter is applied again here rather than trusted from
+        // the read above. A private address reaching this line is the bug that
+        // spent 400 of one Mac's 500 daily requests on its own LAN.
+        let remaining = ((try? store.pendingCountryAddresses(limit: budget)) ?? [])
+            .filter { !NonPublicAddress.isNonPublic($0) }
         guard !remaining.isEmpty else { return }
         preferences.recordThirdPartySpend(remaining.count, on: day)
         do {
             let located = try await ThirdPartyGeoLookup(
                 transport: URLSessionThirdPartyGeoTransport()
             ).locate(remaining, budget: budget)
+            // Whatever was asked about and did not come back placed. Recording
+            // it is what stops the next run re-sending the same head of the
+            // queue: these addresses are read newest-first, so an address the
+            // service cannot place would otherwise be asked about every run
+            // until it stops being contacted.
+            let placed = Set(located.map(\.ip))
+            let unplaced = remaining.filter { !placed.contains($0) }
+            try? store.recordCountryLookupFailures(unplaced)
             guard !located.isEmpty else { return }
             try store.addGeoLocations(located.map {
                 GeoLocation(
@@ -1722,7 +1740,13 @@ final class GeoCacheController: ObservableObject {
             // Nobody asked for this lookup, so nobody is waiting to read that
             // it failed. The free tier carries no availability guarantee, and
             // a banner that appears on its own and stays is how 0.5.68
-            // greeted its first user. The addresses stay in the queue.
+            // greeted its first user.
+            //
+            // The attempt is still recorded. The budget was already spent, and
+            // a service that is down answers no faster on the next run, so
+            // retrying immediately is what turned one outage into a day with no
+            // lookups left.
+            try? store.recordCountryLookupFailures(remaining)
             NSLog("EgressView: third-party location lookup failed: %@", String(describing: error))
         }
     }
