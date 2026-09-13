@@ -13,6 +13,7 @@ using Color = System.Windows.Media.Color;
 using Size = System.Windows.Size;
 using Control = System.Windows.Controls.Control;
 using DataGrid = System.Windows.Controls.DataGrid;
+using ListBox = System.Windows.Controls.ListBox;
 
 namespace RenderCheck;
 
@@ -157,6 +158,32 @@ internal static class Entry
         if (dashboard.FindName("ExpandedCountryAtlas") is not Grid ||
             dashboard.FindName("ExpandedCountryList") is not ItemsControl)
             throw new InvalidOperationException("The expandable country atlas is missing from the Windows dashboard.");
+        if (MainWindow.LogRefreshInterval != TimeSpan.FromSeconds(5) ||
+            MainWindow.LogStreamInterval > TimeSpan.FromSeconds(5))
+            throw new InvalidOperationException("The visible dashboard and log must refresh within five seconds.");
+
+        var flowScroll = (ScrollViewer)dashboard.FindName("FlowDiagramScroll")!;
+        var dashboardFlow = (NetworkFlowControl)dashboard.FindName("FlowDiagram")!;
+        if (flowScroll.VerticalScrollBarVisibility != ScrollBarVisibility.Auto ||
+            flowScroll.HorizontalScrollBarVisibility != ScrollBarVisibility.Disabled)
+            throw new InvalidOperationException("The application-to-destination chart must scroll vertically, not horizontally.");
+        dashboardFlow.SetItems(links, false, false);
+        ((Grid)flowScroll.Parent).Children.Remove(flowScroll);
+        flowScroll.Margin = new Thickness(0);
+        Save(flowScroll, 630, 220, Path.Combine(output, "dashboard-flow-scroll-630x220.png"));
+        if (flowScroll.ScrollableHeight < 100)
+            throw new InvalidOperationException("The application-to-destination chart has no usable vertical scroll extent.");
+
+        var globeDashboard = new MainWindow();
+        var globeCard = (Border)globeDashboard.FindName("CountryGlobeCard")!;
+        var globeFooter = (TextBlock)globeDashboard.FindName("GlobeCaption")!;
+        var globeControls = (StackPanel)globeDashboard.FindName("GlobeControls")!;
+        var spinSpeed = (ListBox)globeDashboard.FindName("SpinSpeedChoice")!;
+        globeFooter.Text = "宛先48地点 · ローカルの全期間履歴にある33か国を薄く表示。位置情報がない宛先も含みます。";
+        ((Grid)globeCard.Parent).Children.Remove(globeCard);
+        Save(globeCard, 340, 510, Path.Combine(output, "globe-controls-340x510.png"));
+        if (globeControls.ActualHeight > 41 || spinSpeed.ActualHeight > 41)
+            throw new InvalidOperationException("Globe rotation segments stretched with the caption.");
 
         ThemeManager.ApplyTheme(application.Resources, true, Color.FromRgb(0x4D, 0x94, 0xFF));
         foreach (var width in new[] { 630, 340 })
@@ -257,7 +284,10 @@ internal static class Entry
             DateTimeOffset.Now.AddHours(-2), DateTimeOffset.Now, "domain", "github.com", "Sample feed", "listed", "low")) };
         ((TextBlock)threatWindow.FindName("ThreatStatus")!).Text = "脅威情報と一致する通信を1件確認しました。";
         ((TextBlock)threatWindow.FindName("ThreatStatus")!).Visibility = Visibility.Visible;
-        ((TextBlock)threatWindow.FindName("ThreatDetail")!).Text = "api.github.com\naddress: 20.27.177.116\napplication: chrome\nmatched: github.com";
+        ((DataGrid)threatWindow.FindName("ThreatGrid")!).SelectedIndex = 0;
+        var threatFields = (ItemsControl)threatWindow.FindName("ThreatDetailFields")!;
+        if (threatFields.Items.Count != 11 || threatFields.Visibility != Visibility.Visible)
+            throw new InvalidOperationException("Threat evidence must render as eleven vertical fields.");
         threatTab.Content = null;
         threatPage.SetResourceReference(Control.ForegroundProperty, "TextPrimaryBrush");
         threatPage.SetResourceReference(Control.BackgroundProperty, "AppBackgroundBrush");

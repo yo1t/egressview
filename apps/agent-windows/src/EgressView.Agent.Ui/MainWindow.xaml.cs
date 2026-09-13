@@ -21,7 +21,7 @@ public partial class MainWindow : Window
     /// How often the visible tab is re-read. Named rather than inlined so the
     /// things derived from it -- what counts as still running, above all --
     /// move with it instead of being left behind.
-    internal static readonly TimeSpan LogRefreshInterval = TimeSpan.FromSeconds(15);
+    internal static readonly TimeSpan LogRefreshInterval = TimeSpan.FromSeconds(5);
     /// How often the log asks what has happened since it last looked.
     ///
     /// Short because the point of the log is to show traffic as it happens,
@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     /// enrichment change rows that no event mentions, so a view built only
     /// from the stream would drift away from the store.
     internal static readonly TimeSpan LogStreamInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan EnrichmentRefreshInterval = TimeSpan.FromSeconds(30);
     private const int LogStreamBatch = 500;
     private readonly DispatcherTimer refreshTimer = new() { Interval = LogRefreshInterval };
     private readonly DispatcherTimer logStreamTimer = new() { Interval = LogStreamInterval };
@@ -39,6 +40,8 @@ public partial class MainWindow : Window
     private bool countryAtlasStreaming;
     private IReadOnlySet<string> allCountryCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private bool logStreaming;
+    private bool logSnapshotReading;
+    private bool refreshingVisible;
     private long logOmitted;
     private bool loadingSettings;
     private bool loadingDeliveryState;
@@ -54,6 +57,8 @@ public partial class MainWindow : Window
     private PeriodAnalysis? previousAnalysis;
     private IReadOnlyList<GlobePoint> currentGlobePoints = [];
     private int allTimeCountryCount;
+    private DateTimeOffset countryHistoryReadAt = DateTimeOffset.MinValue;
+    private DateTimeOffset threatReadAt = DateTimeOffset.MinValue;
     private readonly AgentAiClient aiClient = new();
     private readonly AiConversationStore aiHistory = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "EgressView", "Agent", "ai-conversations.jsonl"));
     private CancellationTokenSource? aiRequest;
@@ -77,7 +82,15 @@ public partial class MainWindow : Window
         DataContext = this;
         Loaded += async (_, _) => { LoadSettings(); await RefreshAllAsync(); refreshTimer.Start(); };
         IsVisibleChanged += (_, _) => { if (IsVisible) refreshTimer.Start(); else refreshTimer.Stop(); };
-        refreshTimer.Tick += async (_, _) => { if (IsVisible && IsActive) await RefreshVisibleAsync(); };
+        refreshTimer.Tick += async (_, _) =>
+        {
+            if (!IsVisible || WindowState == WindowState.Minimized || refreshingVisible) return;
+            refreshingVisible = true;
+            try { await RefreshVisibleAsync(); }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+            catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
+            finally { refreshingVisible = false; }
+        };
         logStreamTimer.Tick += async (_, _) => await StreamLogAsync();
         countryAtlasTimer.Tick += async (_, _) => await StreamCountryAtlasAsync();
         // Nothing streams towards a window nobody is looking at. A background
@@ -86,9 +99,11 @@ public partial class MainWindow : Window
         Activated += (_, _) => ReconcileLogStream();
         Deactivated += (_, _) => ReconcileLogStream();
         IsVisibleChanged += (_, _) => ReconcileLogStream();
+        StateChanged += (_, _) => ReconcileLogStream();
         Activated += (_, _) => ReconcileCountryAtlasStream();
         Deactivated += (_, _) => ReconcileCountryAtlasStream();
         IsVisibleChanged += (_, _) => ReconcileCountryAtlasStream();
+        StateChanged += (_, _) => ReconcileCountryAtlasStream();
         Closing += SaveWindowSize;
         Closing += HideToTray;
         Closed += (_, _) => { refreshTimer.Stop(); countryAtlasTimer.Stop(); lifetime.Cancel(); aiRequest?.Cancel(); aiClient.Dispose(); };
@@ -134,6 +149,7 @@ public partial class MainWindow : Window
     {
         if (!IsLoaded || PeriodChoice.SelectedItem is not ComboBoxItem item || !int.TryParse(item.Tag?.ToString(), out selectedMinutes)) return;
         if (!loadingSettings) AgentSettings.PeriodMinutes = selectedMinutes;
+        threatReadAt = DateTimeOffset.MinValue;
         await RefreshVisibleAsync();
     }
 
@@ -163,7 +179,7 @@ public partial class MainWindow : Window
         0 => RefreshNetworkAsync(),
         1 => RefreshInsightsAsync(),
         2 => RefreshFlowsAsync(),
-        3 => RefreshThreatsAsync(),
+        3 => DateTimeOffset.UtcNow - threatReadAt >= EnrichmentRefreshInterval ? RefreshThreatsAsync() : Task.CompletedTask,
         _ => RefreshStatusAsync(),
     };
 
@@ -177,15 +193,23 @@ public partial class MainWindow : Window
             using var globeDocument = JsonDocument.Parse(globeResponse);
             currentGlobePoints = globeDocument.RootElement.GetProperty("data").Deserialize<List<GlobePoint>>() ?? [];
             Globe.SetPoints(currentGlobePoints);
-            await RefreshCountryHistoryAsync();
+            if (DateTimeOffset.UtcNow - countryHistoryReadAt >= EnrichmentRefreshInterval)
+                await RefreshCountryHistoryAsync();
             GlobeCaption.Text = currentGlobePoints.Count == 0
                 ? allTimeCountryCount == 0 ? LocalizationManager.Text("GlobeUnavailable")
                     : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeHistoryOnly"), allTimeCountryCount)
                 : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("GlobeLocationsWithHistory"), currentGlobePoints.Count, allTimeCountryCount);
             AutomationProperties.SetHelpText(Globe, GlobeCaption.Text);
-            await RefreshThreatsAsync();
+            if (DateTimeOffset.UtcNow - threatReadAt >= EnrichmentRefreshInterval)
+                await RefreshThreatsAsync();
+            NetworkLastUpdated.Text = string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("NetworkUpdatedAt"), DateTime.Now.ToString("T", CultureInfo.CurrentCulture));
         }
-        catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
+        catch (Exception exception)
+        {
+            NetworkLastUpdated.Text = LocalizationManager.Text("CannotConnect");
+            LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}";
+        }
     }
 
     private async Task RefreshCountryHistoryAsync()
@@ -204,13 +228,15 @@ public partial class MainWindow : Window
         AutomationProperties.SetHelpText(CountryMap, ExpandedCountryCount.Text);
         CountryList.ItemsSource = allRows.Select(CountryHistoryDisplayRow.From).ToArray();
         CountryEmptyNote.Visibility = allRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        countryHistoryReadAt = DateTimeOffset.UtcNow;
     }
 
     private async Task RefreshFlowsAsync()
     {
         // Paused means paused: no read, no query, no work. Holding the picture
         // while still asking for it would spend the same effort to show less.
-        if (logPaused) return;
+        if (logPaused || logSnapshotReading || logStreaming) return;
+        logSnapshotReading = true;
         try
         {
             var limit = SelectedLimit();
@@ -224,6 +250,7 @@ public partial class MainWindow : Window
             ReconcileLogStream();
         }
         catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
+        finally { logSnapshotReading = false; }
     }
 
     private async Task<PeriodAnalysis> ReadAnalysisAsync(int minutes)
@@ -341,7 +368,11 @@ public partial class MainWindow : Window
             var response = await AgentIpcClient.RequestAsync(JsonSerializer.Serialize(new { v = 1, op = "threats", minutes = selectedMinutes }), lifetime.Token);
             using var document = JsonDocument.Parse(response);
             var report = document.RootElement.GetProperty("data").Deserialize<ThreatReport>() ?? throw new InvalidDataException();
+            var selected = ThreatGrid.SelectedItem as ThreatRow;
             ThreatRows.Clear(); foreach (var finding in report.Findings) ThreatRows.Add(new(finding));
+            if (selected is not null)
+                ThreatGrid.SelectedItem = ThreatRows.FirstOrDefault(row => row.Address == selected.Address &&
+                    row.IndicatorKind == selected.IndicatorKind && row.MatchedValue == selected.MatchedValue);
             var high = report.Findings.Where(item => item.Confidence == "high").Select(item => item.Destination).Distinct().Count();
             var low = report.Findings.Select(item => item.Destination).Distinct().Count() - high;
             ThreatCount.Text = report.Availability == "available" ? (high + low).ToString("N0") : "—";
@@ -359,6 +390,7 @@ public partial class MainWindow : Window
             ThreatEmptyNote.Visibility = showMatches ? Visibility.Collapsed : Visibility.Visible;
             ThreatTableCard.Visibility = showMatches ? Visibility.Visible : Visibility.Collapsed;
             ThreatDetailCard.Visibility = showMatches ? Visibility.Visible : Visibility.Collapsed;
+            threatReadAt = DateTimeOffset.UtcNow;
         }
         catch
         {
@@ -372,10 +404,30 @@ public partial class MainWindow : Window
 
     private void ThreatGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (ThreatGrid.SelectedItem is not ThreatRow row) { ThreatDetail.Text = LocalizationManager.Text("SelectThreat"); return; }
-        ThreatDetail.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("ThreatDetailFormat"),
-            row.Address, row.RequestedName, row.Application, row.IndicatorKind, row.MatchedValue, row.Feed, row.Reason,
-            row.Connections, row.DataVolume, row.FirstSeen, row.LastSeen);
+        if (ThreatGrid.SelectedItem is not ThreatRow row)
+        {
+            ThreatDetail.Text = LocalizationManager.Text("SelectThreat");
+            ThreatDetail.Visibility = Visibility.Visible;
+            ThreatDetailFields.Visibility = Visibility.Collapsed;
+            ThreatDetailFields.ItemsSource = null;
+            return;
+        }
+        ThreatDetail.Visibility = Visibility.Collapsed;
+        ThreatDetailFields.ItemsSource = new[]
+        {
+            new KeyValuePair<string, string>(LocalizationManager.Text("IpAddress"), row.Address),
+            new KeyValuePair<string, string>(LocalizationManager.Text("ThreatRequestedName"), row.RequestedName),
+            new KeyValuePair<string, string>(LocalizationManager.Text("Process"), row.Application),
+            new KeyValuePair<string, string>(LocalizationManager.Text("ThreatIndicatorKind"), row.IndicatorKind),
+            new KeyValuePair<string, string>(LocalizationManager.Text("MatchedValue"), row.MatchedValue),
+            new KeyValuePair<string, string>(LocalizationManager.Text("Feed"), row.Feed),
+            new KeyValuePair<string, string>(LocalizationManager.Text("Reason"), row.Reason),
+            new KeyValuePair<string, string>(LocalizationManager.Text("Connections"), row.Connections),
+            new KeyValuePair<string, string>(LocalizationManager.Text("DataVolume"), row.DataVolume),
+            new KeyValuePair<string, string>(LocalizationManager.Text("FirstSeen"), row.FirstSeen),
+            new KeyValuePair<string, string>(LocalizationManager.Text("LastSeen"), row.LastSeen),
+        };
+        ThreatDetailFields.Visibility = Visibility.Visible;
     }
 
     private void LogFilter_Changed(object sender, RoutedEventArgs e) { if (IsLoaded) ApplyLogFilter(); }
@@ -413,6 +465,9 @@ public partial class MainWindow : Window
         MergeRows(filtered.Select(flow => new FlowRow(flow, !ObservationGrain, rawFlowsReadAt)).ToArray());
         var active = new[] { app.Length > 0, destination.Length > 0, port.Length > 0, country != "all", protocol != "all", volume != "all", collector != "all" }.Count(value => value);
         LogStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("LogCountStatus"), filtered.Length, rawFlows.Count, active);
+        if (!logPaused)
+            LogStatus.Text += " · " + string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("NetworkUpdatedAt"), rawFlowsReadAt.LocalDateTime.ToString("T", CultureInfo.CurrentCulture));
         if (logOmitted > 0)
             LogStatus.Text += " · " + string.Format(CultureInfo.CurrentCulture,
                 LocalizationManager.Text("LogOmittedStatus"), logOmitted);
@@ -548,7 +603,7 @@ public partial class MainWindow : Window
 
     private void ReconcileCountryAtlasStream()
     {
-        var live = IsVisible && IsActive && MainTabs.SelectedIndex == 0 &&
+        var live = IsVisible && WindowState != WindowState.Minimized && MainTabs.SelectedIndex == 0 &&
             ExpandedCountryAtlas.Visibility == Visibility.Visible;
         if (live) countryAtlasTimer.Start(); else countryAtlasTimer.Stop();
     }
@@ -719,7 +774,7 @@ public partial class MainWindow : Window
     /// only about how it is shown.
     private async Task StreamLogAsync()
     {
-        if (logStreaming || logPaused || !IsVisible || !IsActive || MainTabs.SelectedIndex != 2) return;
+        if (logStreaming || logSnapshotReading || logPaused || !IsVisible || WindowState == WindowState.Minimized || MainTabs.SelectedIndex != 2) return;
         logStreaming = true;
         try
         {
@@ -743,15 +798,15 @@ public partial class MainWindow : Window
             rawFlowsReadAt = DateTimeOffset.UtcNow;
             ApplyLogFilter();
         }
-        // A stream that cannot reach the service must not shout on every tick;
-        // the slower full read already reports a lasting failure.
-        catch (Exception) { }
+        // Surface stream failure rather than silently leaving a stale table.
+        // The five-second snapshot read can then reconcile when IPC recovers.
+        catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
         finally { logStreaming = false; }
     }
 
     private void ReconcileLogStream()
     {
-        var live = IsVisible && IsActive && !logPaused && MainTabs.SelectedIndex == 2;
+        var live = IsVisible && WindowState != WindowState.Minimized && !logPaused && MainTabs.SelectedIndex == 2;
         if (live) logStreamTimer.Start(); else logStreamTimer.Stop();
     }
 
