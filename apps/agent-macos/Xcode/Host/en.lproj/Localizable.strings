@@ -329,7 +329,7 @@
 "%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@." = "%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@.";
 "an unnamed place" = "an unnamed place";
 "Destination locations" = "Destination locations";
-"Used to place traffic on the map. Fetched from the Hub once a day; the request contains no destinations." = "Used to place traffic on the map. Fetched from the Hub once a day; the request contains no destinations.";
+"Used to place traffic on the map. The whole cache comes from the Hub once a day, and that request contains no destinations." = "Used to place traffic on the map. The whole cache comes from the Hub once a day, and that request contains no destinations.";
 "Fetch now" = "Fetch now";
 "Fetching..." = "Fetching...";
 "%lld locations" = "%lld locations";
@@ -727,7 +727,10 @@
 "When an address is not in the cache" = "When an address is not in the cache";
 "Do not look it up" = "Do not look it up";
 "Ask the Hub" = "Ask the Hub";
-"Ask the Hub, then ip-api.com" = "Ask the Hub, then ip-api.com";
+"Ask the Hub, then ipwho.is" = "Ask the Hub, then ipwho.is";
 "Countries reached for the first time stay off the map until the next daily fetch." = "Countries reached for the first time stay off the map until the next daily fetch.";
 "Asks your Hub again when a destination has no country yet. Nothing leaves the network your Hub is on." = "Asks your Hub again when a destination has no country yet. Nothing leaves the network your Hub is on.";
-"Sends destination IP addresses to ip-api.com when your Hub cannot place them. This is the only setting that sends a watched address outside." = "Sends destination IP addresses to ip-api.com when your Hub cannot place them. This is the only setting that sends a watched address outside.";
+"Sends destination IP addresses to ipwho.is when your Hub cannot place them, at most %lld a day. This is the only setting that sends a watched address outside." = "Sends destination IP addresses to ipwho.is when your Hub cannot place them, at most %lld a day. This is the only setting that sends a watched address outside.";
+"The location service returned HTTP %lld." = "The location service returned HTTP %lld.";
+"The location service sent a reply this agent does not understand." = "The location service sent a reply this agent does not understand.";
+"Could not fetch locations: %@" = "Could not fetch locations: %@";
