@@ -35,12 +35,25 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Checked before the build, not after it. The notarisation profile has gone
-# missing five times, and finding out at the end costs the whole build --
-# twice on 2026-08-19. Its cause is not worth chasing; the wait is.
+# Checked before the build, not after it. Finding out at the end costs the
+# whole build -- twice on 2026-08-19.
+#
+# `notarytool` keeps its credentials in the data protection keychain, and when
+# that is locked a non-interactive shell gets `errSecInteractionNotAllowed`,
+# which `notarytool` reports as "No Keychain password item found". **The
+# profile is almost never actually missing.** It was re-registered six times
+# between 2026-08 and 2026-09-13 on the strength of that message, and the two
+# reconstructed "lifetimes" -- about 22 hours and about 20 hours -- were the
+# gap until the keychain next locked, not an expiry.
+#
+# So say what the message means, and put the cheap fix first.
 if [[ -n "$NOTARY_PROFILE" ]]; then
   if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
-    printf 'Notarisation profile "%s" is not usable. Register it and run this again:\n' "$NOTARY_PROFILE" >&2
+    printf 'Notarisation profile "%s" cannot be read.\n' "$NOTARY_PROFILE" >&2
+    printf '\nUsually the profile is there and the keychain is locked: notarytool\n' >&2
+    printf 'reports both as the same error. Unlock it and run this again:\n' >&2
+    printf '  security unlock-keychain\n' >&2
+    printf '\nOnly if that does not help, register the profile again:\n' >&2
     printf '  xcrun notarytool store-credentials %s --apple-id <apple-id> --team-id <team-id>\n' "$NOTARY_PROFILE" >&2
     exit 2
   fi
