@@ -65,9 +65,23 @@ public struct OpenFlowRegistry: Sendable {
     /// its own networking, and that one is authoritative. This covers the
     /// applications that bring their own stack -- about half the connections on
     /// a real machine, including every browser measured.
-    public mutating func noteServerName(_ name: String, flowID: UUID) {
-        guard var entry = entries[flowID] else { return }
-        guard entry.metadata.remoteHostname?.isEmpty ?? true else { return }
+    /// Records the name this flow asked for, and returns an observation to
+    /// send when the flow has already been reported without it.
+    ///
+    /// A ClientHello that fits in one datagram is read before the opening
+    /// observation is built, so the name rides along and this returns nil.
+    /// One split across two datagrams is not: the opening observation has
+    /// already gone, carrying no name, and nothing else would carry it until
+    /// the flow closed. Measured 2026-09-13 on one Mac: the Extension read a
+    /// name for 4,568 of 4,579 QUIC flows and the store held one for 72.8% of
+    /// them, because 4,760 of the reads arrived a datagram late. Flows that
+    /// never close -- about one in ten -- lost the name for good (P3-114).
+    @discardableResult
+    public mutating func noteServerName(
+        _ name: String, flowID: UUID, observedAt: Date = Date()
+    ) -> ConnectionObservation? {
+        guard var entry = entries[flowID] else { return nil }
+        guard entry.metadata.remoteHostname?.isEmpty ?? true else { return nil }
         entry.metadata = SocketFlowMetadata(
             networkProtocol: entry.metadata.networkProtocol,
             localAddress: entry.metadata.localAddress,
@@ -80,6 +94,18 @@ public struct OpenFlowRegistry: Sendable {
             remoteHostname: name
         )
         entries[flowID] = entry
+        guard entry.hasReportedOpening else { return nil }
+        // No byte counts: this is the same flow said again with the name
+        // filled in, not an ending. The store merges it onto the existing row
+        // by flow id, and a row that has bytes keeps them.
+        return observation(
+            flowID: flowID,
+            metadata: entry.metadata,
+            firstObservedAt: entry.startedAt,
+            lastObservedAt: observedAt,
+            bytesIn: nil,
+            bytesOut: nil
+        )
     }
 
     /// Emits the opening observation once, after the first outbound bytes have
