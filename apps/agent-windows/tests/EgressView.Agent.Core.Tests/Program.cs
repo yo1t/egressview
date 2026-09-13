@@ -120,6 +120,12 @@ try
     Assert(seamPieces.Count >= 2 && seamPieces.All(piece => piece.Zip(piece.Skip(1))
         .All(pair => Math.Abs(pair.First.Lon - pair.Second.Lon) <= 180)),
         "rings crossing the antimeridian do not draw a line across the map");
+    var glowAt = new DateTimeOffset(2026, 9, 13, 0, 0, 0, TimeSpan.Zero);
+    Assert(CountryGlow.Intensity(glowAt, glowAt) == 1 &&
+        Math.Abs(CountryGlow.Intensity(glowAt, glowAt.AddSeconds(3)) - 0.5) < 0.000001 &&
+        CountryGlow.Intensity(glowAt, glowAt.AddSeconds(6)) == 0 &&
+        CountryGlow.Intensity(glowAt, glowAt.AddSeconds(7)) == 0,
+        "new-country glow follows a six-second cosine fade and stops drawing after expiry");
 
     var relaunchEncoded = UpdateRelaunchCommand.BuildEncodedPowerShell(4242, @"C:\Program Files\EgressView Agent\ui\EgressView.Agent.Ui.exe", "0.1.37", TimeSpan.FromMinutes(15));
     var relaunchScript = Encoding.Unicode.GetString(Convert.FromBase64String(relaunchEncoded));

@@ -33,7 +33,11 @@ public partial class MainWindow : Window
     private const int LogStreamBatch = 500;
     private readonly DispatcherTimer refreshTimer = new() { Interval = LogRefreshInterval };
     private readonly DispatcherTimer logStreamTimer = new() { Interval = LogStreamInterval };
+    private readonly DispatcherTimer countryAtlasTimer = new() { Interval = LogStreamInterval };
     private long logCursor;
+    private long countryAtlasCursor;
+    private bool countryAtlasStreaming;
+    private IReadOnlySet<string> allCountryCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private bool logStreaming;
     private long logOmitted;
     private bool loadingSettings;
@@ -81,15 +85,19 @@ public partial class MainWindow : Window
         IsVisibleChanged += (_, _) => { if (IsVisible) refreshTimer.Start(); else refreshTimer.Stop(); };
         refreshTimer.Tick += async (_, _) => { if (IsVisible && IsActive) await RefreshVisibleAsync(); };
         logStreamTimer.Tick += async (_, _) => await StreamLogAsync();
+        countryAtlasTimer.Tick += async (_, _) => await StreamCountryAtlasAsync();
         // Nothing streams towards a window nobody is looking at. A background
         // window that kept asking every two seconds would spend a laptop's
         // battery to update a picture no one can see.
         Activated += (_, _) => ReconcileLogStream();
         Deactivated += (_, _) => ReconcileLogStream();
         IsVisibleChanged += (_, _) => ReconcileLogStream();
+        Activated += (_, _) => ReconcileCountryAtlasStream();
+        Deactivated += (_, _) => ReconcileCountryAtlasStream();
+        IsVisibleChanged += (_, _) => ReconcileCountryAtlasStream();
         Closing += SaveWindowSize;
         Closing += HideToTray;
-        Closed += (_, _) => { refreshTimer.Stop(); lifetime.Cancel(); aiRequest?.Cancel(); aiClient.Dispose(); };
+        Closed += (_, _) => { refreshTimer.Stop(); countryAtlasTimer.Stop(); lifetime.Cancel(); aiRequest?.Cancel(); aiClient.Dispose(); };
     }
 
     private void HideToTray(object? sender, CancelEventArgs e)
@@ -194,6 +202,7 @@ public partial class MainWindow : Window
         using var allDocument = JsonDocument.Parse(allResponse);
         var allRows = allDocument.RootElement.GetProperty("data").Deserialize<List<CountryHistoryRow>>() ?? [];
         allTimeCountryCount = allRows.Count;
+        allCountryCodes = allRows.Select(row => row.CountryCode).ToHashSet(StringComparer.OrdinalIgnoreCase);
         Globe.SetVisitedCountries(allRows.Select(row => row.CountryCode));
         CountryMap.SetVisitedCountries(allRows.Select(row => row.CountryCode));
         ExpandedCountryList.ItemsSource = allRows.Select(CountryHistoryDisplayRow.From).ToArray();
@@ -468,15 +477,56 @@ public partial class MainWindow : Window
 
     private async void ExpandCountryAtlas_Click(object sender, RoutedEventArgs e)
     {
-        await RefreshCountryHistoryAsync();
-        NetworkDashboard.Visibility = Visibility.Collapsed;
-        ExpandedCountryAtlas.Visibility = Visibility.Visible;
+        try
+        {
+            var snapshot = await ReadLogSnapshotAsync(50, true, lifetime.Token);
+            countryAtlasCursor = snapshot.Cursor;
+            await RefreshCountryHistoryAsync();
+            NetworkDashboard.Visibility = Visibility.Collapsed;
+            ExpandedCountryAtlas.Visibility = Visibility.Visible;
+            ReconcileCountryAtlasStream();
+        }
+        catch (Exception) { ExpandedCountryCount.Text = LocalizationManager.Text("CannotConnect"); }
     }
 
     private void CollapseCountryAtlas_Click(object sender, RoutedEventArgs e)
     {
         ExpandedCountryAtlas.Visibility = Visibility.Collapsed;
         NetworkDashboard.Visibility = Visibility.Visible;
+        ReconcileCountryAtlasStream();
+    }
+
+    private async Task StreamCountryAtlasAsync()
+    {
+        if (countryAtlasStreaming || !countryAtlasTimer.IsEnabled) return;
+        countryAtlasStreaming = true;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                JsonSerializer.Serialize(new { v = 1, op = "log-delta", cursor = countryAtlasCursor, limit = LogStreamBatch }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            if (root.GetProperty("status").GetString() != "ok") return;
+            var events = root.GetProperty("data").Deserialize<List<RecentFlow>>() ?? [];
+            countryAtlasCursor = root.GetProperty("cursor").GetInt64();
+            var countries = events.Where(item => item.Layer == ObservationLayer.Logical &&
+                !string.IsNullOrWhiteSpace(item.CountryCode) &&
+                CountryGlow.Intensity(item.LastSeen, DateTimeOffset.UtcNow) > 0)
+                .GroupBy(item => item.CountryCode!, StringComparer.OrdinalIgnoreCase)
+                .Select(group => (Code: group.Key, At: group.Max(item => item.LastSeen))).ToArray();
+            if (countries.Any(item => !allCountryCodes.Contains(item.Code)))
+                await RefreshCountryHistoryAsync(); // Only new countries trigger the full all-time read.
+            foreach (var (code, at) in countries) CountryMap.MarkActivity(code, at);
+        }
+        catch (Exception) { /* The normal network refresh reports persistent IPC errors. */ }
+        finally { countryAtlasStreaming = false; }
+    }
+
+    private void ReconcileCountryAtlasStream()
+    {
+        var live = IsVisible && IsActive && MainTabs.SelectedIndex == 0 &&
+            ExpandedCountryAtlas.Visibility == Visibility.Visible;
+        if (live) countryAtlasTimer.Start(); else countryAtlasTimer.Stop();
     }
 
     private async void CountryScopeChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1576,6 +1626,7 @@ public partial class MainWindow : Window
     {
         if (!IsLoaded || e.Source != MainTabs) return;
         ReconcileLogStream();
+        ReconcileCountryAtlasStream();
         await RefreshVisibleAsync();
     }
 
