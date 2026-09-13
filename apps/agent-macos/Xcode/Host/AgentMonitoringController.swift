@@ -173,6 +173,7 @@ final class AgentMonitoringController {
     private let extensionController: SystemExtensionController
     private let gateState: MonitoringGateState
     private let healthProbe: SystemExtensionHealthProbe
+    private let modePreference = MonitoringModePreference()
 
     /// What macOS last said is enabled, for the diagnostics export. Nil until
     /// a probe has been answered, which is itself worth reporting.
@@ -570,6 +571,7 @@ final class AgentMonitoringController {
     }
 
     func selectLightweightMonitoring() {
+        rememberChosenMode(.lightweight)
         guard ensureStorageAvailable() else { return }
         guard isLightweightMonitoringAvailable else {
             statusHandler(.failed(L(
@@ -598,6 +600,25 @@ final class AgentMonitoringController {
     }
 
     func restoreMonitoringState() {
+        // Follow the setting, not the state macOS happens to be in. Quitting
+        // takes the filter down on purpose and leaves the setting alone, so
+        // "Network monitoring" comes back; "Pause" is a choice and stays
+        // (P3-121). With nothing stored -- a first run, or an upgrade from a
+        // version that never wrote it -- fall through and ask macOS.
+        switch modePreference.storedMode {
+        case AgentMonitoringMode.full.rawValue:
+            statusHandler(.fullActivationRequested)
+            activateFullMonitoring()
+            return
+        case AgentMonitoringMode.lightweight.rawValue:
+            selectLightweightMonitoring()
+            return
+        case AgentMonitoringMode.paused.rawValue:
+            statusHandler(.paused)
+            return
+        default:
+            break
+        }
         extensionController.isFilterEnabled { [weak self] result in
             switch result {
             case .success(true):
@@ -611,8 +632,18 @@ final class AgentMonitoringController {
         }
     }
 
+    /// Records what was chosen, so the next launch can follow it.
+    ///
+    /// Called from the places a person chooses a mode -- the menu bar and the
+    /// Settings window -- and from nowhere else. Quitting must not call it:
+    /// that is the whole point (P3-121).
+    func rememberChosenMode(_ mode: AgentMonitoringMode) {
+        modePreference.storedMode = mode.rawValue
+    }
+
     func selectFullMonitoring() {
         guard ensureStorageAvailable() else { return }
+        rememberChosenMode(.full)
         lightweightCollector?.stop()
         lightweightCollector = nil
         statusHandler(.fullActivationRequested)
@@ -637,6 +668,9 @@ final class AgentMonitoringController {
     /// Stops both collectors, disables the filter, then asks macOS to unregister
     /// the System Extension. `true` means removal is accepted but needs reboot.
     func prepareForUninstall(completion: @escaping (Result<Bool, Error>) -> Void) {
+        // Leaving "monitor" behind would have a half-removed agent asking to
+        // approve an extension on its way out.
+        rememberChosenMode(.paused)
         lightweightCollector?.stop()
         lightweightCollector = nil
         fullMonitoringCollector?.stop()

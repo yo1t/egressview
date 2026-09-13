@@ -401,10 +401,16 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func selectPaused() {
         guard !isPreparedForRemoval else { return }
+        // A choice, unlike the pause that quitting performs.
+        controller.rememberChosenMode(.paused)
         controller.pause()
     }
 
     @objc private func quit() {
+        // Stops monitoring -- an agent that is not running has no business
+        // leaving a filter inspecting traffic with nothing to show for it --
+        // but deliberately does not touch the setting. The next launch reads
+        // that setting and puts monitoring back (P3-121).
         controller.pause()
         NSApplication.shared.terminate(nil)
     }
