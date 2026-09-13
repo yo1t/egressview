@@ -100,6 +100,37 @@ describe('キャッシュに無い国を取りに行く', () => {
     }
   });
 
+
+  it('今日あと何件外へ出せるかが、画面に出ている', () => {
+    // The budget was invisible until it mattered: a defect sent one Mac's own
+    // LAN to the location service and spent 400 of 500 requests in about two
+    // minutes, and nothing on the screen said so (2026-09-13, P3-119).
+    assert.match(settings, /@Published private\(set\) var thirdPartyRemainingToday/);
+    assert.match(settings, /Text\(Self\.budgetText\(remaining: geo\.thirdPartyRemainingToday\)\)/);
+    assert.match(settings, /\.onAppear \{ geo\.refreshRemainingBudget\(\) \}/);
+    assert.match(settings, /preferences\.recordThirdPartySpend\(remaining\.count, on: day\)\n\s*refreshRemainingBudget\(\)/);
+  });
+
+  it('使い切ったことが、失敗ではなく上限として書かれている', () => {
+    assert.match(settings, /guard remaining > 0 else \{/);
+    for (const language of ['en', 'ja']) {
+      assert.ok(
+        strings(language).includes(
+          '"Today\'s %lld lookups are used up. Locations resume tomorrow; nothing else is affected." ='
+        ),
+        language
+      );
+      assert.ok(strings(language).includes('"%lld of today\'s %lld lookups left." ='), language);
+    }
+    assert.match(strings('ja'), /今日の %lld 件を使い切りました。位置情報の取得は明日再開します。/);
+  });
+
+  it('外へ出さない設定では、残量を見せない', () => {
+    // Nothing is spent, so a figure would be noise on the two choices that
+    // never leave the network.
+    assert.match(settings, /if model\.geoLookupSource\.usesThirdParty \{\n\s*Text\(Self\.budgetText/);
+  });
+
   it('使われなくなった文言を残さない', () => {
     for (const language of ['en', 'ja']) {
       assert.doesNotMatch(strings(language), /"Look up locations without a Hub" =/);
