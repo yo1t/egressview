@@ -86,12 +86,21 @@ describe('通信ログが新しい通信に追従する', () => {
   });
 
   it('見ていない画面のためには読まない', () => {
-    // Not the log tab, or no window: nothing to update, so nothing is read.
-    // The log reads only when the log is the screen being looked at. The map
-    // has its own condition -- it is expanded or it is not (P3-109) -- so the
-    // two are separate guards rather than one.
+    // No window: nothing to update, so nothing is read. The map has its own
+    // condition -- it is expanded or it is not (P3-109) -- so the two are
+    // separate guards rather than one.
     assert.match(viewModel, /guard !observations\.isEmpty, isWindowVisible else \{ return \}/);
-    assert.match(viewModel, /guard selectedTab == \.log else \{ return \}/);
+    // Only the tab in front follows arrivals, and only while the app is the
+    // one being used. Reading for a screen nobody is looking at is the work
+    // that made this app the busiest process on the Mac in 0.4.x, and the
+    // timer already slows to a quarter in the background -- following arrivals
+    // there would undo that. A tab not listed here falls through to `default`
+    // and reads nothing.
+    assert.match(viewModel, /guard NSApp\.isActive else \{ return \}/);
+    assert.match(viewModel, /switch selectedTab \{/);
+    assert.match(viewModel, /case \.log:/);
+    assert.match(viewModel, /case \.network:\s*\n\s*scheduleNetworkRefresh\(\)/);
+    assert.match(viewModel, /default:\s*\n\s*return/);
   });
 
   it('まとめて届いても読み出しは1回', () => {
@@ -104,6 +113,36 @@ describe('通信ログが新しい通信に追従する', () => {
     // and the log would stop updating without saying so.
     assert.match(viewModel, /self\.liveLogPacer\.cancelled\(\)/);
     assert.match(viewModel, /self\.liveLogPacer\.refreshed\(\)/);
+  });
+
+  it('ネットワーク状況も同じ規則で、独自の間隔で追従する', () => {
+    // "This period at a glance" and the app-to-destination ribbon redrew on
+    // the 15-second timer, so a connection just made could be missing from a
+    // screen being watched. They follow arrivals now -- through the same
+    // pacer, at a slower pace, because totals are not read line by line the
+    // way individual connections are.
+    assert.match(viewModel, /static let networkFollowInterval: TimeInterval = 5/);
+    assert.match(
+      viewModel,
+      /private var networkPacer = LiveLogPacer\(interval: AgentMainViewModel\.networkFollowInterval\)/
+    );
+    // The same cancel/refresh pair the log needs, for the same reason: a read
+    // abandoned when the tab changes must not leave the pacer believing one is
+    // still coming.
+    assert.match(viewModel, /self\.networkPacer\.cancelled\(\)/);
+    assert.match(viewModel, /self\.networkPacer\.refreshed\(\)/);
+    assert.match(
+      viewModel,
+      /guard self\.selectedTab == \.network, self\.isWindowVisible, NSApp\.isActive else \{/
+    );
+  });
+
+  it('通信が無い間もタイマーが下限として残る', () => {
+    // An idle network still has to move "the last hour" forward. A tab that
+    // only redrew on traffic would freeze on a quiet machine, which is why
+    // following arrivals is added to the timer rather than replacing it.
+    assert.match(viewModel, /refreshTimer\.start\(every: 15\)/);
+    assert.match(viewModel, /guard self\.ticksSinceRefresh >= 4 else \{ return \}/);
   });
 
   it('止めている間は読まず、数えるだけ', () => {

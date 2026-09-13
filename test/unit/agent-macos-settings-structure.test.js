@@ -60,18 +60,30 @@ describe('macOS Agent settings structure', () => {
     assert.doesNotMatch(hub, /geoSection|serverNameSection|threatSection/);
   });
 
-  it('places local destination-name inspection in General', () => {
+  it('keeps General about the app, not about the observed data', () => {
+    // Destination names used to sit here, between the monitoring mode and
+    // launch-at-login, as the only setting concerning what was collected
+    // rather than how the app behaves.
     const general = section('private var general:', 'private var hubSettings:');
-    assert.match(general, /serverNameSection/);
-    const destinationNames = section('private var serverNameSection:', 'private var diagnosticsSettings:');
-    assert.doesNotMatch(destinationNames, /quicDiagnostics|Refresh QUIC check counters/);
+    assert.doesNotMatch(general, /serverNameSection/);
+    assert.match(general, /settingsGroup\(L\("Startup"\)\)/);
   });
 
-  it('groups location and threat context under Data Enrichment', () => {
-    const enrichment = section('private var enrichmentSettings:', 'private var geoSection:');
-    assert.match(enrichment, /geoSection/);
-    assert.match(enrichment, /threatSection/);
-    assert.doesNotMatch(enrichment, /serverNameSection/);
+  it('groups naming, location and threat context under Data Enrichment', () => {
+    // Naming an address, placing it and judging it are the same question --
+    // what else is known about this destination -- and they read in that
+    // order, the name first because it is the only one the Mac can answer
+    // without asking anyone.
+    const enrichment = section('private var enrichmentSettings:', 'private var aiSettings:');
+    const order = ['serverNameSection', 'geoSection', 'threatSection']
+      .map((name) => enrichment.indexOf(name));
+    assert.ok(order.every((index) => index >= 0), 'a section is missing from Data Enrichment');
+    assert.deepEqual([...order].sort((left, right) => left - right), order, 'name comes first');
+  });
+
+  it('keeps the destination-name section clear of the QUIC counters', () => {
+    const destinationNames = section('private var serverNameSection:', 'private var diagnosticsSettings:');
+    assert.doesNotMatch(destinationNames, /quicDiagnostics|Refresh QUIC check counters/);
   });
 
   it('offers explicit Hub fallback controls with feed disclosure', () => {
