@@ -189,7 +189,12 @@
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="TabRoot" Property="Background" Value="{DynamicResource SurfaceBrush}"/></Trigger>
             <Trigger Property="IsSelected" Value="True">
-              <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+              <!-- On the header, not on the TabItem. Foreground inherits down
+                   the visual tree, and the TabItem contains the whole page, so
+                   setting it here painted every heading inside the selected tab
+                   accent-blue unless it named a colour of its own. The accent
+                   belongs to the tab that is selected, not to its contents. -->
+              <Setter TargetName="TabRoot" Property="TextElement.Foreground" Value="{DynamicResource AccentBrush}"/>
               <Setter TargetName="TabRoot" Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
             </Trigger>
             <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="TabRoot" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/><Setter TargetName="TabRoot" Property="BorderThickness" Value="1"/></Trigger>
