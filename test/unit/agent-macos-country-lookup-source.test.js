@@ -20,8 +20,8 @@ describe('キャッシュに無い国を取りに行く', () => {
     // the setting: the string "ip-api.com" appeared only in the UI text. A
     // setting that is wired to nothing is the defect found three times over
     // on 2026-08-24 (P3-115).
-    assert.match(lookup, /func locate\(_ addresses: \[String\]\) async throws -> \[Located\]/);
-    assert.match(lookup, /ip-api\.com/);
+    assert.match(lookup, /func locate\(_ addresses: \[String\], budget: Int/);
+    assert.match(lookup, /ipwho\.is/);
     assert.match(settings, /ThirdPartyGeoLookup\(/);
   });
 
@@ -57,12 +57,47 @@ describe('キャッシュに無い国を取りに行く', () => {
     assert.match(settings, /Picker\(L\("When an address is not in the cache"\)/);
     assert.match(settings, /model\.geoLookupSource\.usesThirdParty \? \.orange : \.secondary/);
     for (const language of ['en', 'ja']) {
-      for (const key of ['"Do not look it up"', '"Ask the Hub"', '"Ask the Hub, then ip-api.com"']) {
+      for (const key of ['"Do not look it up"', '"Ask the Hub"', '"Ask the Hub, then ipwho.is"']) {
         assert.ok(strings(language).includes(`${key} =`), `${language}: ${key}`);
       }
     }
     const japanese = strings('ja');
     assert.match(japanese, /監視対象のアドレスを外部へ送るのは、この設定だけです/);
+    assert.doesNotMatch(strings('ja'), /ip-api\.com/);
+  });
+
+
+  it('平文HTTPでは問い合わせない', () => {
+    // ip-api.com's free tier answers over plain HTTP only, so App Transport
+    // Security refused every request and the settings screen showed a raw
+    // NSError before the user had touched anything (2026-09-13). Sending
+    // watched addresses in clear text was never the alternative.
+    assert.match(lookup, /base: URL = URL\(string: "https:\/\/ipwho\.is"\)!/);
+    assert.doesNotMatch(lookup, /http:\/\//);
+  });
+
+  it('一日に外へ出す件数に上限がある', () => {
+    // The free tier is 1,000 requests a day with no bulk endpoint: one
+    // request is one address.
+    assert.match(lookup, /public static let dailyBudget = 500/);
+    assert.match(settings, /preferences\.thirdPartyBudget\(/);
+    assert.match(settings, /preferences\.recordThirdPartySpend\(/);
+    assert.match(fetcher, /func thirdPartyBudget\(on day: String, limit: Int, perRun: Int\) -> Int/);
+  });
+
+  it('誰も頼んでいない失敗を画面に貼り付けない', () => {
+    // The lookup runs on its own when an observation arrives, so a failure
+    // has no reader waiting for it. The free tier carries no uptime
+    // guarantee; the addresses stay in the queue.
+    assert.match(settings, /NSLog\("EgressView: third-party location lookup failed/);
+  });
+
+  it('生のNSErrorを読ませない', () => {
+    assert.doesNotMatch(settings, /return String\(describing: error\)/);
+    assert.match(settings, /localizedDescription/);
+    for (const language of ['en', 'ja']) {
+      assert.ok(strings(language).includes('"Could not fetch locations: %@" ='), language);
+    }
   });
 
   it('使われなくなった文言を残さない', () => {

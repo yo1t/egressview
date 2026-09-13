@@ -107,9 +107,12 @@ is a design constraint, not a setting.
 Without a Hub the agent has no locations and no threat feeds, so it can offer to
 fetch them itself. Both are off unless you switch them on, in Settings.
 
-- **Location lookups** send destination IP addresses to `ip-api.com`. This is the
-  one place the agent would send the addresses it is watching to someone else,
-  which is why it is off.
+- **Location lookups** send destination IP addresses to `ipwho.is`, at most 500
+  a day, and only for addresses your Hub could not place. This is the one place
+  the agent would send the addresses it is watching to someone else, which is
+  why it is off. (Through 0.5.68 this setting named `ip-api.com`, whose free
+  tier answers over plain HTTP only; macOS refused every such request, so no
+  lookup ever happened and no address ever left the Mac.)
 - **Threat feed downloads** fetch public block lists from `abuse.ch` and
   `spamhaus.org`. These are plain downloads, not lookup services: **no address of
   yours is sent**. What they learn is that your Mac asked at all. You download
