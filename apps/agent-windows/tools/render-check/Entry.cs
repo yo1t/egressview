@@ -84,6 +84,13 @@ internal static class Entry
         ]);
         Save(globe, 330, 260, Path.Combine(output, "globe.png"));
 
+        var countryMap = new WorldCountryMapControl();
+        VerifyAutomationPeer(countryMap, "All-time destination countries");
+        countryMap.SetVisitedCountries(["JP", "US", "AU", "GB", "BR"]);
+        if (countryMap.MappedCountryCount != 5)
+            throw new InvalidOperationException("The map and all-time country list disagree on mapped countries.");
+        Save(countryMap, 700, 360, Path.Combine(output, "country-atlas.png"));
+
         var timelineStart = new DateTimeOffset(2026, 9, 6, 10, 0, 0, TimeSpan.FromHours(9));
         var timeline = new List<AppTimelineAggregate>();
         var applications = new[] { "chrome", "codex", "svchost", "tailscaled", "zabbix_agent2", "Other" };
@@ -134,6 +141,11 @@ internal static class Entry
         lightSegmented.Items.Add(new ListBoxItem { Content = "Connections" });
         lightSegmented.Items.Add(new ListBoxItem { Content = "Data volume" });
         Save(lightSegmented, 210, 40, Path.Combine(output, "segmented-light-accent.png"));
+
+        var dashboard = new MainWindow();
+        if (dashboard.FindName("ExpandedCountryAtlas") is not Grid ||
+            dashboard.FindName("ExpandedCountryList") is not ItemsControl)
+            throw new InvalidOperationException("The expandable country atlas is missing from the Windows dashboard.");
 
         Console.WriteLine($"wrote {output}");
         return 0;
