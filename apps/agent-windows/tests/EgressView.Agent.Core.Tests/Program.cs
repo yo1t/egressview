@@ -26,6 +26,12 @@ try
         "an intentional monitoring stop is not presented as a fault");
     Assert(AgentIpcClient.RequestTimeout == TimeSpan.FromSeconds(15),
         "IPC requests bound the complete request and response lifetime");
+    Assert(EtwConnectionEvents.Classify("TcpConnectionattempted") == EtwConnectionEventKind.Attempted &&
+        EtwConnectionEvents.Classify("TcpConnectionaccepted") == EtwConnectionEventKind.Accepted &&
+        EtwConnectionEvents.Classify("TcpDisconnectissued") == EtwConnectionEventKind.Disconnect &&
+        EtwConnectionEvents.Classify("TcpClose") == EtwConnectionEventKind.Close &&
+        EtwConnectionEvents.Classify("TcpDatasent") == EtwConnectionEventKind.Other,
+        "ETW connection lifecycle event counters distinguish starts and endings from data events");
 
     using (var ipcLoopStop = new CancellationTokenSource())
     {

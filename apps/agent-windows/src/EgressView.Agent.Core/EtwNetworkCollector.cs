@@ -7,6 +7,20 @@ using Microsoft.Diagnostics.Tracing.Session;
 
 namespace EgressView.Agent.Core;
 
+public enum EtwConnectionEventKind { Other, Attempted, Accepted, Disconnect, Close }
+
+public static class EtwConnectionEvents
+{
+    public static EtwConnectionEventKind Classify(string eventName) => eventName switch
+    {
+        var name when name.Contains("Connectionattempted", StringComparison.OrdinalIgnoreCase) => EtwConnectionEventKind.Attempted,
+        var name when name.Contains("Connectionaccepted", StringComparison.OrdinalIgnoreCase) => EtwConnectionEventKind.Accepted,
+        var name when name.Contains("Disconnect", StringComparison.OrdinalIgnoreCase) => EtwConnectionEventKind.Disconnect,
+        var name when name.Contains("Close", StringComparison.OrdinalIgnoreCase) => EtwConnectionEventKind.Close,
+        _ => EtwConnectionEventKind.Other,
+    };
+}
+
 public sealed class EtwNetworkCollector : IAsyncDisposable
 {
     private static readonly Guid KernelNetwork = new("7DD42A49-5329-4832-8DFD-43D979153A88");
@@ -28,6 +42,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     private TraceEventSession? session;
     private Task? processing;
     private long eventsSeen, eventsIgnored, interfaceUnresolved, inboundMulticastIgnored;
+    private long connectionAttempted, connectionAccepted, connectionDisconnected, connectionClosed;
     private string? error;
     private string? processNameSourceError;
     private string? hostnameSourceError;
@@ -43,6 +58,10 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     public bool IsActive => session is not null && error is null;
     public long EventsSeen => Interlocked.Read(ref eventsSeen);
     public long EventsIgnored => Interlocked.Read(ref eventsIgnored);
+    public long ConnectionAttempted => Interlocked.Read(ref connectionAttempted);
+    public long ConnectionAccepted => Interlocked.Read(ref connectionAccepted);
+    public long ConnectionDisconnected => Interlocked.Read(ref connectionDisconnected);
+    public long ConnectionClosed => Interlocked.Read(ref connectionClosed);
     public long InterfaceUnresolved => Interlocked.Read(ref interfaceUnresolved);
     /// Inbound group datagrams, dropped before storage. Counted rather
     /// than discarded quietly: the number says how much is being left out
@@ -120,6 +139,10 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         EtwSessionActive = IsActive,
         EtwEventsSeen = EventsSeen,
         EtwEventsIgnored = EventsIgnored,
+        EtwConnectionAttempted = ConnectionAttempted,
+        EtwConnectionAccepted = ConnectionAccepted,
+        EtwConnectionDisconnected = ConnectionDisconnected,
+        EtwConnectionClosed = ConnectionClosed,
         InterfaceUnresolved = InterfaceUnresolved,
         InboundMulticastIgnored = InboundMulticastIgnored,
         EtwEventsLost = EventsLost,
@@ -231,7 +254,18 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     {
         Interlocked.Increment(ref eventsSeen);
         var direction = DirectionOf(e.EventName);
-        if (direction == Direction.Neutral) { Interlocked.Increment(ref eventsIgnored); return; }
+        if (direction == Direction.Neutral)
+        {
+            switch (EtwConnectionEvents.Classify(e.EventName))
+            {
+                case EtwConnectionEventKind.Attempted: Interlocked.Increment(ref connectionAttempted); break;
+                case EtwConnectionEventKind.Accepted: Interlocked.Increment(ref connectionAccepted); break;
+                case EtwConnectionEventKind.Disconnect: Interlocked.Increment(ref connectionDisconnected); break;
+                case EtwConnectionEventKind.Close: Interlocked.Increment(ref connectionClosed); break;
+            }
+            Interlocked.Increment(ref eventsIgnored);
+            return;
+        }
         var sourceAddress = Address(Raw(e, "saddr"));
         var destinationAddress = Address(Raw(e, "daddr"));
         if (sourceAddress is null || destinationAddress is null) { Interlocked.Increment(ref eventsIgnored); return; }

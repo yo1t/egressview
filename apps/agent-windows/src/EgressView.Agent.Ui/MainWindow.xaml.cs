@@ -62,6 +62,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // The truthful state label is longer than the former "Active" flag.
+        ConnectionGrid.Columns[2].Width = new DataGridLength(110);
         if (aiHistory.Read().OrderByDescending(item => item.CreatedAt).FirstOrDefault() is { } latest)
             activeConversationId = latest.ConversationId;
         Width = Math.Min(AgentSettings.WindowWidth, SystemParameters.WorkArea.Width);
