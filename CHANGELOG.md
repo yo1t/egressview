@@ -4,6 +4,21 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.74
+
+**Quitting no longer looks like a pause you never chose.**
+
+Quitting stops monitoring — an agent that is not running has no business
+leaving a filter inspecting traffic with nothing on screen to show for it. But
+until now that was indistinguishable from picking Pause: nothing recorded what
+you had asked for, so the next login read the filter's state as your wish and
+monitoring stayed off, with Settings showing 一時停止 as though you had
+selected it.
+
+The monitoring mode is now a setting. Quitting leaves it alone, so the next
+launch puts monitoring back. Pause stores itself and stays paused. Closing the
+window still changes nothing.
+
 ### Agent for Mac 0.5.73
 
 **Nothing on the network tab is cut off when the window is narrow.**
