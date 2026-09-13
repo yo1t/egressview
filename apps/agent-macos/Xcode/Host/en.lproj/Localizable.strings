@@ -153,7 +153,7 @@
 "History" = "History";
 "Diagnostics" = "Diagnostics";
 "Collection and startup behavior for this Mac." = "Collection and startup behavior for this Mac.";
-"Add location and threat context to observed destinations." = "Add location and threat context to observed destinations.";
+"Add names, location and threat context to observed destinations." = "Add names, location and threat context to observed destinations.";
 "Technical counters for troubleshooting network monitoring." = "Technical counters for troubleshooting network monitoring.";
 "QUIC destination-name diagnostics" = "QUIC destination-name diagnostics";
 "These aggregate counters help determine whether QUIC Initial packets reach the network extension. They do not retain packet content, IP addresses, host names, or application identity." = "These aggregate counters help determine whether QUIC Initial packets reach the network extension. They do not retain packet content, IP addresses, host names, or application identity.";

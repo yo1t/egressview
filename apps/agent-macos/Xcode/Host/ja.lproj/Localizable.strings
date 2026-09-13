@@ -153,7 +153,7 @@
 "History" = "履歴";
 "Diagnostics" = "診断";
 "Collection and startup behavior for this Mac." = "このMacでの収集方法と起動方法を設定します。";
-"Add location and threat context to observed destinations." = "観測した宛先に位置情報と脅威情報を補います。";
+"Add names, location and threat context to observed destinations." = "観測した宛先に名前・位置情報・脅威情報を補います。";
 "Technical counters for troubleshooting network monitoring." = "ネットワーク監視の問題調査に使う技術情報です。";
 "QUIC destination-name diagnostics" = "QUIC通信先名の診断";
 "These aggregate counters help determine whether QUIC Initial packets reach the network extension. They do not retain packet content, IP addresses, host names, or application identity." = "QUIC InitialパケットがNetwork Extensionへ届いているかを確認するための集計値です。パケット内容、IPアドレス、ホスト名、アプリの識別情報は保持しません。";
