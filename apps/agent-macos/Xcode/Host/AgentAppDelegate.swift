@@ -405,7 +405,14 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quit() {
-        controller.pause()
+        // Quitting stops monitoring, and says so by putting it back next time.
+        // Until 2026-09-13 this called the same pause() the menu item calls,
+        // so a quit was indistinguishable from a pause nobody had chosen
+        // (P3-121).
+        let resumable = monitoringMode(for: currentMonitoringStatus)
+        controller.pauseForQuit(
+            mode: resumable == .paused ? nil : resumable?.rawValue
+        )
         NSApplication.shared.terminate(nil)
     }
 

@@ -173,6 +173,7 @@ final class AgentMonitoringController {
     private let extensionController: SystemExtensionController
     private let gateState: MonitoringGateState
     private let healthProbe: SystemExtensionHealthProbe
+    private let resumeState = MonitoringResumeState()
 
     /// What macOS last said is enabled, for the diagnostics export. Nil until
     /// a probe has been answered, which is itself worth reporting.
@@ -598,6 +599,22 @@ final class AgentMonitoringController {
     }
 
     func restoreMonitoringState() {
+        // Put back what quitting stopped, and only that. Pause leaves no note,
+        // so it stays paused; turning the extension off in System Settings
+        // leaves no note either, so nobody is asked to approve it again at the
+        // next login -- which matters, because that is how uninstalling starts
+        // (P3-121).
+        switch resumeState.takeModeBeforeQuit() {
+        case "full":
+            statusHandler(.fullActivationRequested)
+            activateFullMonitoring()
+            return
+        case "lightweight":
+            selectLightweightMonitoring()
+            return
+        default:
+            break
+        }
         extensionController.isFilterEnabled { [weak self] result in
             switch result {
             case .success(true):
@@ -611,6 +628,18 @@ final class AgentMonitoringController {
         }
     }
 
+    /// Stops monitoring because the agent is quitting -- not because anyone
+    /// asked for it to stay stopped.
+    ///
+    /// The filter goes down either way: a filter inspecting traffic with no
+    /// agent running has nothing to show for it, and this product is the wrong
+    /// one to leave watching invisibly. What changes is that the agent writes
+    /// down what it was doing first, so the next launch puts it back.
+    func pauseForQuit(mode: String?) {
+        resumeState.modeBeforeQuit = mode
+        pause()
+    }
+
     func selectFullMonitoring() {
         guard ensureStorageAvailable() else { return }
         lightweightCollector?.stop()
@@ -620,6 +649,8 @@ final class AgentMonitoringController {
     }
 
     func pause() {
+        // Whatever the last quit left behind, this is a choice and it wins.
+        resumeState.modeBeforeQuit = nil
         lightweightCollector?.stop()
         lightweightCollector = nil
         fullMonitoringCollector?.stop()
