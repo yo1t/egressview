@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using EgressView.Agent.Core;
 
 var directory = Path.Combine(Path.GetTempPath(), $"egressview-agent-tests-{Guid.NewGuid():N}");
@@ -843,6 +845,39 @@ try
             "a compatible Hub accepts the first bounded batch");
         Assert(handler.ObservationCounts.Single() == 2 && handler.SawRemoteHostname,
             "only the negotiated batch limit is sent and stored hostnames reach an accepting Hub");
+        using (var payload = JsonDocument.Parse(handler.LastIngestBody!))
+        {
+            var root = payload.RootElement;
+            var sentKeys = root.EnumerateObject().Select(item => item.Name)
+                .Concat(root.GetProperty("agent").EnumerateObject().Select(item => item.Name))
+                .Concat(root.GetProperty("observations")[0].EnumerateObject().Select(item => item.Name))
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var language in new[] { "en", "ja" })
+            {
+                var resource = XDocument.Load(Path.Combine("src", "EgressView.Agent.Ui", "Resources", $"Strings.{language}.xaml"));
+                var disclosure = resource.Descendants().Single(node =>
+                    (string?)node.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")) == "HubExplanation").Value;
+                var disclosedKeys = Regex.Matches(disclosure, @"\[([A-Za-z][A-Za-z0-9]*)\]")
+                    .Select(match => match.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+                Assert(disclosedKeys.SetEquals(sentKeys),
+                    $"{language} Hub disclosure must match the actual serialized sender payload, including optional hostname");
+            }
+            foreach (var path in new[] { "README.md", "README.en.md" })
+            {
+                var guide = File.ReadAllText(path);
+                Assert(sentKeys.All(key => guide.Contains($"`{key}`", StringComparison.Ordinal)),
+                    $"{path} lists every key in the sent JSON payload");
+            }
+            var downloadPage = File.ReadAllText(Path.Combine("..", "..", "site", "dl", "index.html"));
+            Assert(sentKeys.All(key => downloadPage.Contains(key, StringComparison.Ordinal)),
+                "the download page lists every key in the sent JSON payload");
+            var updateAgent = WindowsAgentUpdateClient.UserAgent("1.2.3", "11.0");
+            Assert(updateAgent.Contains("1.2.3", StringComparison.Ordinal) && updateAgent.Contains("11.0", StringComparison.Ordinal) &&
+                downloadPage.Contains("dl.egressview.com", StringComparison.Ordinal) &&
+                File.ReadAllText("README.md").Contains("dl.egressview.com", StringComparison.Ordinal) &&
+                File.ReadAllText("README.en.md").Contains("dl.egressview.com", StringComparison.Ordinal),
+                "update-check disclosure names the actual origin and User-Agent version fields");
+        }
         Assert((await sender.SendNextAsync(capableStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged &&
             handler.CapabilityRequests == 1 && handler.ObservationCounts.Last() == 1,
             "successful capabilities are cached while later batches preserve the negotiated limit");
@@ -1467,6 +1502,7 @@ sealed class DeliveryHandler(params int[] statuses) : HttpMessageHandler
     public bool SawRemoteHostname { get; private set; }
     public int CapabilityRequests { get; private set; }
     public int IngestRequests { get; private set; }
+    public string? LastIngestBody { get; private set; }
     public HttpStatusCode CapabilitiesStatus { get; set; } = HttpStatusCode.NotFound;
     public string CapabilitiesJson { get; set; } = "{}";
     public int RejectedAcknowledgements { get; set; }
@@ -1485,6 +1521,7 @@ sealed class DeliveryHandler(params int[] statuses) : HttpMessageHandler
         }
         IngestRequests++;
         var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+        LastIngestBody = body;
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
         var batchId = root.GetProperty("batchId").GetGuid();

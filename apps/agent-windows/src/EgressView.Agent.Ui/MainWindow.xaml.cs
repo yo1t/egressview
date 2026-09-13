@@ -15,6 +15,7 @@ namespace EgressView.Agent.Ui;
 
 public partial class MainWindow : Window
 {
+    public const double MinimumWindowWidth = 1020;
     private readonly AgentEnrollmentClient enrollment = new();
     private readonly CancellationTokenSource lifetime = new();
     /// How often the visible tab is re-read. Named rather than inlined so the
