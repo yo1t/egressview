@@ -1409,7 +1409,42 @@ try
             "folding two unmeasured sightings leaves the volume unknown rather than zero");
     }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, and log streaming");
+{
+    // A caller that blocks on an IPC request must not deadlock.
+    //
+    // The window does exactly that on the way out, and it did it on the way in
+    // too. If the request resumes on the caller's context, the continuation
+    // waits for a thread that is waiting for the continuation -- and the
+    // timeout cannot fire either, because firing it needs the same thread. The
+    // whole application then never opens, which is what a user saw: an agent
+    // installed, running, and invisible.
+    //
+    // The context here accepts work and never runs it, which is what a blocked
+    // dispatcher amounts to.
+    var blocked = new RefusingSynchronizationContext();
+    var previous = SynchronizationContext.Current;
+    SynchronizationContext.SetSynchronizationContext(blocked);
+    try
+    {
+        var completed = Task.Run(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(blocked);
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                AgentIpcClient.RequestAsync("{}", timeout.Token).GetAwaiter().GetResult();
+            }
+            // No agent is listening in this test, so failing is expected.
+            // Returning at all is the thing being asserted.
+            catch (Exception) { }
+        }).Wait(TimeSpan.FromSeconds(20));
+        Assert(completed, "an IPC request does not deadlock a caller that blocks on it");
+        Assert(blocked.Posted == 0, "an IPC request resumes on the thread pool, not on its caller's context");
+    }
+    finally { SynchronizationContext.SetSynchronizationContext(previous); }
+}
+
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, and IPC context independence");
     return 0;
 }
 finally
@@ -1574,4 +1609,15 @@ sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
     public DateTimeOffset UtcNow { get; private set; } = utcNow;
     public override DateTimeOffset GetUtcNow() => UtcNow;
     public void Advance(TimeSpan value) => UtcNow += value;
+}
+
+
+/// A context that accepts work and never runs it, the way a dispatcher waiting
+/// on a blocking call does.
+internal sealed class RefusingSynchronizationContext : SynchronizationContext
+{
+    private int posted;
+    public int Posted => Volatile.Read(ref posted);
+    public override void Post(SendOrPostCallback d, object? state) => Interlocked.Increment(ref posted);
+    public override void Send(SendOrPostCallback d, object? state) => Interlocked.Increment(ref posted);
 }

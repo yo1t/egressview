@@ -383,15 +383,27 @@ public partial class App : System.Windows.Application
     /// swallowed on failure: the service being unreachable is the service's
     /// problem to report, not a reason to stop the window from starting or
     /// from closing.
+    ///
+    /// Never waited on from the UI thread. Recording that the window opened is
+    /// worth nothing beside the window opening, and the service can be busy for
+    /// minutes at startup -- migrating a multi-gigabyte database, for one -- so
+    /// a wait here is a wait for the whole application. It runs on the thread
+    /// pool and is left to finish on its own.
     private static void ReportRun(string stage, string? fault = null)
     {
-        try
+        var request = System.Text.Json.JsonSerializer.Serialize(new { v = 1, op = "ui-run", stage, fault });
+        var reported = Task.Run(async () =>
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            AgentIpcClient.RequestAsync(System.Text.Json.JsonSerializer.Serialize(
-                new { v = 1, op = "ui-run", stage, fault }), timeout.Token).GetAwaiter().GetResult();
-        }
-        catch (Exception) { }
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await AgentIpcClient.RequestAsync(request, timeout.Token).ConfigureAwait(false);
+            }
+            catch (Exception) { }
+        });
+        // On the way out there is no later, so the report is given a bounded
+        // moment to leave -- bounded because a closing window must close.
+        if (stage != "begin") reported.Wait(TimeSpan.FromSeconds(2));
     }
 
     protected override void OnExit(ExitEventArgs e)
