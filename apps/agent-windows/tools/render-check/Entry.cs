@@ -90,6 +90,15 @@ internal static class Entry
         if (countryMap.MappedCountryCount != 5)
             throw new InvalidOperationException("The map and all-time country list disagree on mapped countries.");
         Save(countryMap, 700, 360, Path.Combine(output, "country-atlas.png"));
+        var glowAt = DateTimeOffset.UtcNow;
+        foreach (var (label, elapsed) in new[] { ("full", 0), ("half", 3), ("ended", 6) })
+        {
+            var glowingMap = new WorldCountryMapControl();
+            glowingMap.SetVisitedCountries(["JP", "US", "AU", "GB", "BR"]);
+            glowingMap.MarkActivity("JP", glowAt);
+            glowingMap.RenderMoment = glowAt.AddSeconds(elapsed);
+            Save(glowingMap, 700, 360, Path.Combine(output, $"country-atlas-glow-{label}.png"));
+        }
 
         var timelineStart = new DateTimeOffset(2026, 9, 6, 10, 0, 0, TimeSpan.FromHours(9));
         var timeline = new List<AppTimelineAggregate>();

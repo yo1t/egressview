@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Media;
+using System.Windows.Threading;
 using EgressView.Agent.Core;
 using Point = System.Windows.Point;
 using Brush = System.Windows.Media.Brush;
@@ -13,6 +14,19 @@ public sealed class WorldCountryMapControl : FrameworkElement
 {
     private readonly IReadOnlyList<WorldAtlas.Country> atlas = WorldAtlas.Load();
     private IReadOnlySet<string> visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> recent = new(StringComparer.OrdinalIgnoreCase);
+    private readonly DispatcherTimer glowTimer;
+
+    public WorldCountryMapControl()
+    {
+        glowTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1d / 15) };
+        glowTimer.Tick += (_, _) => { InvalidateVisual(); ReconcileGlowTimer(); };
+        IsVisibleChanged += (_, _) => ReconcileGlowTimer();
+        Unloaded += (_, _) => glowTimer.Stop();
+    }
+
+    // The render check selects a precise moment, including the final fade.
+    internal DateTimeOffset? RenderMoment { get; set; }
 
     protected override AutomationPeer OnCreateAutomationPeer() => new FrameworkElementAutomationPeer(this);
 
@@ -23,6 +37,23 @@ public sealed class WorldCountryMapControl : FrameworkElement
         visited = countryCodes.Where(code => !string.IsNullOrWhiteSpace(code))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         InvalidateVisual();
+    }
+
+    public void MarkActivity(string countryCode, DateTimeOffset observedAt)
+    {
+        if (!visited.Contains(countryCode)) return;
+        if (!recent.TryGetValue(countryCode, out var previous) || observedAt > previous)
+            recent[countryCode] = observedAt;
+        InvalidateVisual();
+        ReconcileGlowTimer();
+    }
+
+    private void ReconcileGlowTimer()
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var code in recent.Where(item => CountryGlow.Intensity(item.Value, now) == 0)
+            .Select(item => item.Key).ToArray()) recent.Remove(code);
+        if (IsVisible && recent.Count > 0) glowTimer.Start(); else glowTimer.Stop();
     }
 
     protected override void OnRender(DrawingContext drawing)
@@ -80,5 +111,31 @@ public sealed class WorldCountryMapControl : FrameworkElement
         selectedFill.Opacity = 0.72;
         drawing.DrawGeometry(land, new Pen(border, 0.4), unvisited);
         drawing.DrawGeometry(selectedFill, new Pen(selected, 0.7), reached);
+
+        // Reproject only the few countries that are currently glowing. The
+        // normal all-time map is a still picture with no frame timer at all.
+        var now = RenderMoment ?? DateTimeOffset.UtcNow;
+        foreach (var country in atlas.Where(country => country.Code is not null &&
+            recent.TryGetValue(country.Code, out var seen) && CountryGlow.Intensity(seen, now) > 0.01))
+        {
+            var intensity = CountryGlow.Intensity(recent[country.Code!], now);
+            var shape = new StreamGeometry { FillRule = FillRule.EvenOdd };
+            using (var path = shape.Open())
+                foreach (var ring in country.Rings)
+                    foreach (var piece in EqualEarthProjection.Split(ring))
+                    {
+                        if (piece.Count < 3) continue;
+                        path.BeginFigure(Project(piece[0].Lat, piece[0].Lon), true, true);
+                        foreach (var coordinate in piece.Skip(1))
+                            path.LineTo(Project(coordinate.Lat, coordinate.Lon), true, false);
+                    }
+            shape.Freeze();
+            var halo = System.Windows.Media.Brushes.Cyan.Clone();
+            halo.Opacity = 0.55 * intensity;
+            var glowFill = System.Windows.Media.Brushes.Cyan.Clone();
+            glowFill.Opacity = 0.85 * intensity;
+            drawing.DrawGeometry(null, new Pen(halo, 1 + 7 * intensity), shape);
+            drawing.DrawGeometry(glowFill, null, shape);
+        }
     }
 }
