@@ -501,6 +501,67 @@ public final class ObservationStore: @unchecked Sendable {
             }
             try execute("PRAGMA user_version=11")
         }
+        if version < 12 {
+            // Two reasons an address should stop being asked about.
+            //
+            // The first is that nothing outside this network can place it. Those
+            // rows were queued before `upsertPendingDestinationsLocked` learned
+            // to refuse them, so they are still here and still being sent; the
+            // delete is what stops an existing install spending tomorrow's
+            // budget on its own LAN.
+            //
+            // The second is that it was asked and could not be answered. The
+            // queue is read newest-first, so without a record of that the same
+            // unplaceable addresses are re-sent every run, forever, and a
+            // permanently unknown destination consumes the whole daily
+            // allowance. `last_lookup_failed_at` is that record, and the reader
+            // skips a row for `pendingCountryRetryInterval` after it.
+            //
+            // The sweep is done in Swift rather than as a `LIKE` pattern
+            // because the ranges do not fall on decimal boundaries: `172.1%`
+            // would also match the public 172.1.0.0/16, and deleting a public
+            // address here means a destination silently loses its country.
+            try purgeNonPublicPendingLocked()
+            if try !columnExists(
+                table: "pending_destination_country", column: "last_lookup_failed_at"
+            ) {
+                try execute(
+                    "ALTER TABLE pending_destination_country "
+                    + "ADD COLUMN last_lookup_failed_at REAL"
+                )
+            }
+            try execute("PRAGMA user_version=12")
+        }
+    }
+
+    /// Removes queued addresses nothing outside this network can place.
+    ///
+    /// Exact, one address at a time, using the same test that now keeps them
+    /// out. A pattern match would be shorter and would take public addresses
+    /// with it.
+    private func purgeNonPublicPendingLocked() throws {
+        let read = try prepare("SELECT remote_address FROM pending_destination_country")
+        var doomed: [String] = []
+        while sqlite3_step(read) == SQLITE_ROW {
+            if let address = text(read, 0), NonPublicAddress.isNonPublic(address) {
+                doomed.append(address)
+            }
+        }
+        sqlite3_finalize(read)
+        guard !doomed.isEmpty else { return }
+        for start in stride(from: 0, to: doomed.count, by: 400) {
+            let chunk = Array(doomed[start..<min(start + 400, doomed.count)])
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let deletion = try prepare(
+                "DELETE FROM pending_destination_country WHERE remote_address IN (\(placeholders))"
+            )
+            for (index, address) in chunk.enumerated() {
+                bindText(deletion, Int32(index + 1), address)
+            }
+            let stepped = sqlite3_step(deletion)
+            sqlite3_finalize(deletion)
+            guard stepped == SQLITE_DONE else { throw ObservationStoreError.statement(lastMessage) }
+        }
     }
 
     // MARK: - Coverage
@@ -1204,19 +1265,63 @@ public final class ObservationStore: @unchecked Sendable {
     /// The queue already existed and nothing read it: 373 addresses were
     /// waiting on one Mac on 2026-09-13, including three countries the Hub had
     /// resolved within seconds of the visit (P3-115).
-    public func pendingCountryAddresses(limit: Int = 100) throws -> [String] {
+    public func pendingCountryAddresses(limit: Int = 100, now: Date = Date()) throws -> [String] {
         try lock.withLock {
+            // Newest first, minus anything asked about recently and not
+            // answered. Without the second clause this returns the same head of
+            // the queue on every run: an address no service can place stays at
+            // the top for as long as it keeps being contacted, and a daily
+            // budget of 500 is spent re-asking about it.
             let statement = try prepare("""
             SELECT remote_address FROM pending_destination_country
+            WHERE last_lookup_failed_at IS NULL OR last_lookup_failed_at < ?
             ORDER BY last_observed_at DESC LIMIT ?
             """)
             defer { sqlite3_finalize(statement) }
-            sqlite3_bind_int64(statement, 1, Int64(max(0, limit)))
+            sqlite3_bind_double(
+                statement, 1,
+                now.addingTimeInterval(-Self.pendingCountryRetryInterval).timeIntervalSince1970
+            )
+            sqlite3_bind_int64(statement, 2, Int64(max(0, limit)))
             var addresses: [String] = []
             while sqlite3_step(statement) == SQLITE_ROW {
                 if let value = text(statement, 0) { addresses.append(value) }
             }
             return addresses
+        }
+    }
+
+    /// How long an address that could not be placed is left alone.
+    ///
+    /// Long enough that a permanently unknown destination costs one lookup a
+    /// week instead of one a run; short enough that a service that was simply
+    /// down, or a range that has since been registered, is tried again without
+    /// anyone intervening.
+    public static let pendingCountryRetryInterval: TimeInterval = 7 * 86_400
+
+    /// Records that these addresses were asked about and not placed.
+    ///
+    /// Called with the addresses a lookup did not return, which includes the
+    /// case of the whole run failing: a service that is down has still consumed
+    /// the attempt, and retrying it immediately is what exhausted the budget.
+    public func recordCountryLookupFailures(_ addresses: [String], now: Date = Date()) throws {
+        guard !addresses.isEmpty else { return }
+        try lock.withLock {
+            let statement = try prepare("""
+            UPDATE pending_destination_country
+            SET last_lookup_failed_at = ?
+            WHERE remote_address = ?
+            """)
+            defer { sqlite3_finalize(statement) }
+            for address in addresses {
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+                sqlite3_bind_double(statement, 1, now.timeIntervalSince1970)
+                bindText(statement, 2, address)
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    throw ObservationStoreError.statement(lastMessage)
+                }
+            }
         }
     }
 
@@ -1871,6 +1976,14 @@ public final class ObservationStore: @unchecked Sendable {
     private func upsertPendingDestinationsLocked(
         _ rows: [String: CountryVisitAccumulator]
     ) throws {
+        // The queue exists to hold addresses waiting for an answer. A private,
+        // loopback, link-local or multicast address is not waiting for one: no
+        // service outside this network can place it, so queuing it only spends
+        // the day's lookup budget on a question with no answer. Measured on one
+        // Mac 2026-09-13: 400 of 500 requests gone minutes after install, on
+        // the LAN and on six `fe80::` addresses.
+        let rows = rows.filter { !NonPublicAddress.isNonPublic($0.key) }
+        guard !rows.isEmpty else { return }
         let statement = try prepare("""
         INSERT INTO pending_destination_country (
             remote_address, last_site_name, last_process_name,
