@@ -180,12 +180,17 @@ open class PassOnlyFilterDataProvider: NEFilterDataProvider {
             }
             didObserveQUICFeasibility(.assembly(outcome))
         }
+        var lateName: ConnectionObservation?
         if let name {
             lock.withLock {
-                openFlows.noteServerName(name, flowID: socketFlow.identifier)
+                lateName = openFlows.noteServerName(name, flowID: socketFlow.identifier)
                 quicAssemblers.finish(flowID: socketFlow.identifier.uuidString)
             }
         }
+        // A name that arrived after the flow was already reported has to be
+        // sent on its own, or nothing carries it until the flow closes -- and
+        // about one flow in ten never does (P3-114).
+        if let lateName { didObserve(lateName) }
         let opening = lock.withLock {
             openFlows.openingObservation(
                 flowID: socketFlow.identifier,

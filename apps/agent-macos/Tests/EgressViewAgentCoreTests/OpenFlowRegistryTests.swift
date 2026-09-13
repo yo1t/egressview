@@ -179,3 +179,83 @@ final class OpenFlowRegistryTests: XCTestCase {
         XCTAssertNil(observation.bytesOut)
     }
 }
+
+/// The name a QUIC client asked for, and when it reaches the store (P3-114).
+///
+/// Measured on one Mac 2026-09-13: the Extension read a name for 4,568 of
+/// 4,579 QUIC flows, and the store held one for 72.8% of them. The gap was
+/// entirely flows whose ClientHello spanned two datagrams -- the opening
+/// observation had already gone without a name, and nothing carried it until
+/// the flow closed. About one flow in ten never closes, so those names were
+/// lost for good.
+final class OpenFlowServerNameTests: XCTestCase {
+    private let start = Date(timeIntervalSince1970: 1_800_000_000)
+    private let flowID = UUID()
+
+    private func registered() -> OpenFlowRegistry {
+        var registry = OpenFlowRegistry()
+        registry.register(flowID: flowID, metadata: metadata(), startedAt: start)
+        return registry
+    }
+
+    func test一発で読めた名前は開始の観測に乗る() {
+        var registry = registered()
+        let extra = registry.noteServerName("example.test", flowID: flowID, observedAt: start)
+        XCTAssertNil(extra, "開始前に読めているのに、余分な観測を出した")
+        let opening = registry.openingObservation(flowID: flowID, observedAt: start)
+        XCTAssertEqual(opening?.remoteHostname, "example.test")
+    }
+
+    func test遅れて読めた名前はその場で観測として出る() {
+        // The defect, stated as a test. Without this the name waits for the
+        // flow to close, and a flow that never closes never carries it.
+        var registry = registered()
+        let opening = registry.openingObservation(flowID: flowID, observedAt: start)
+        XCTAssertNil(opening?.remoteHostname, "前提が崩れている: 開始時点で名前があった")
+
+        let late = registry.noteServerName(
+            "example.test", flowID: flowID, observedAt: start.addingTimeInterval(0.2)
+        )
+        let observation = try? XCTUnwrap(late)
+        XCTAssertEqual(observation?.remoteHostname, "example.test", "遅れた名前が出ていない")
+        XCTAssertEqual(observation?.flowID, flowID)
+    }
+
+    func test遅れて出す観測は終了とは読めない形にする() {
+        // Byte counts arrive with the close report and only then, and the
+        // screen decides "not ended" from their absence (P3-108). A late name
+        // carrying zeros would report an ending that did not happen.
+        var registry = registered()
+        _ = registry.openingObservation(flowID: flowID, observedAt: start)
+        let late = registry.noteServerName("example.test", flowID: flowID, observedAt: start)
+        XCTAssertNil(late?.bytesIn)
+        XCTAssertNil(late?.bytesOut)
+        XCTAssertEqual(late?.firstObservedAt, start, "開始時刻が書き換わった")
+    }
+
+    func test同じ名前を二度書かない() {
+        var registry = registered()
+        _ = registry.openingObservation(flowID: flowID, observedAt: start)
+        XCTAssertNotNil(registry.noteServerName("example.test", flowID: flowID))
+        XCTAssertNil(
+            registry.noteServerName("other.test", flowID: flowID),
+            "一度付いた名前を上書きして、二度目も出した"
+        )
+    }
+
+    func test知らないflowには何もしない() {
+        var registry = registered()
+        XCTAssertNil(registry.noteServerName("example.test", flowID: UUID()))
+    }
+
+    func test閉じたときにも名前は残る() {
+        var registry = registered()
+        _ = registry.openingObservation(flowID: flowID, observedAt: start)
+        _ = registry.noteServerName("example.test", flowID: flowID)
+        let closed = registry.complete(
+            flowID: flowID, kind: .flowClosed, bytesIn: 10, bytesOut: 20,
+            metadata: nil, reportedAt: start.addingTimeInterval(5)
+        )
+        XCTAssertEqual(closed?.remoteHostname, "example.test")
+    }
+}
