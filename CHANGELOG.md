@@ -4,6 +4,21 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.68
+
+**A country you have never reached before appears on the map right away.**
+
+The agent learned countries only by downloading the Hub's whole cache once a
+day, so a destination in a country you had not visited stayed blank -- for up
+to 24 hours, which is precisely when you are looking at it. Measured on one
+Mac: the agent held 75,363 locations against the Hub's 78,884.
+
+Settings now offer three choices for an address the cache cannot place: do not
+look it up, ask your Hub, or ask your Hub and then ip-api.com. Asking a third
+party is the only way a watched address leaves your machine, it is not the
+default, and the setting says so. The previous "look up locations without a
+Hub" switch carries over to the matching choice.
+
 ### Agent for Mac 0.5.67
 
 **A connection that is happening right now shows its destination by name.**
