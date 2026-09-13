@@ -736,3 +736,7 @@
 "The location service returned HTTP %lld." = "位置情報サービスが HTTP %lld を返しました。";
 "The location service sent a reply this agent does not understand." = "位置情報サービスの応答を解釈できませんでした。";
 "Could not fetch locations: %@" = "位置情報を取得できませんでした: %@";
+
+// What is left of today's third-party lookups (P3-119).
+"%lld of today's %lld lookups left." = "今日の残り %1$lld 件 / %2$lld 件。";
+"Today's %lld lookups are used up. Locations resume tomorrow; nothing else is affected." = "今日の %lld 件を使い切りました。位置情報の取得は明日再開します。他の動作には影響しません。";
