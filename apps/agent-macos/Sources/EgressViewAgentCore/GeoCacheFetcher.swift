@@ -135,11 +135,47 @@ public struct GeoCacheFetcher: Sendable {
     }
 }
 
+/// Where a country comes from when the cache does not have the address.
+///
+/// The cache is fetched from the Hub once a day, so a destination reached for
+/// the first time is not in it: measured 2026-09-13, three countries visited
+/// at 15:47 were resolved by the Hub within seconds and still absent from the
+/// Mac's map, because the next scheduled fetch was eight hours away. The
+/// moment worth seeing -- a country reached for the first time -- was the one
+/// the map could not show (P3-115).
+public enum GeoLookupSource: String, CaseIterable, Sendable {
+    /// Only what the last fetch brought. Nothing is asked for.
+    case cacheOnly
+    /// Ask the Hub again, off-schedule. It has usually resolved the address
+    /// already -- it enriches what the agents send it -- and asking it sends
+    /// nothing outside the network the Hub is on.
+    case hub
+    /// The Hub first, then a third party for what the Hub does not know.
+    ///
+    /// **This is the only path that sends a watched address out of the
+    /// network.** It stays off unless someone chooses it.
+    case hubThenThirdParty
+
+    public var usesHub: Bool { self != .cacheOnly }
+    public var usesThirdParty: Bool { self == .hubThenThirdParty }
+}
+
 /// When the agent last fetched locations, and the tag it holds.
 public struct GeoCachePreferences: @unchecked Sendable {
     public static let etagKey = "geoCacheETag"
     public static let lastFetchKey = "geoCacheLastFetchedAt"
     public static let thirdPartyLookupKey = "geoThirdPartyLookupEnabled"
+    public static let lookupSourceKey = "geoLookupSource"
+    public static let lastOnDemandKey = "geoCacheLastOnDemandAt"
+
+    /// The least time between off-schedule fetches.
+    ///
+    /// The Hub answers the whole cache, not one address, so asking is a few
+    /// megabytes when the tag has moved and a 304 when it has not. A minute is
+    /// short enough that a country appears while the person is still looking
+    /// at the map, and long enough that a burst of new destinations is one
+    /// request rather than hundreds.
+    public static let onDemandInterval: TimeInterval = 60
 
     /// Same cadence as the update check: the Hub's cache moves by a handful of
     /// rows a day.
@@ -168,6 +204,44 @@ public struct GeoCachePreferences: @unchecked Sendable {
     public var thirdPartyLookupEnabled: Bool {
         get { defaults.bool(forKey: Self.thirdPartyLookupKey) }
         nonmutating set { defaults.set(newValue, forKey: Self.thirdPartyLookupKey) }
+    }
+
+    /// Where to look when the cache does not have an address.
+    ///
+    /// Reads the old boolean when no choice has been stored, so someone who
+    /// had turned third-party lookups on keeps them on rather than having the
+    /// setting silently revert.
+    public var lookupSource: GeoLookupSource {
+        get {
+            if let raw = defaults.string(forKey: Self.lookupSourceKey),
+               let source = GeoLookupSource(rawValue: raw) {
+                return source
+            }
+            return thirdPartyLookupEnabled ? .hubThenThirdParty : .hub
+        }
+        nonmutating set {
+            defaults.set(newValue.rawValue, forKey: Self.lookupSourceKey)
+            // Kept in step so the older key cannot disagree with the newer one.
+            defaults.set(newValue.usesThirdParty, forKey: Self.thirdPartyLookupKey)
+        }
+    }
+
+    public var lastOnDemandAt: Date? {
+        get { defaults.object(forKey: Self.lastOnDemandKey) as? Date }
+        nonmutating set { defaults.set(newValue, forKey: Self.lastOnDemandKey) }
+    }
+
+    /// May the agent ask the Hub again, outside the daily schedule?
+    ///
+    /// Asking needs a reason -- an address nobody can name -- and a gap since
+    /// the last ask. Without the gap, a page that opens fifty new destinations
+    /// would ask fifty times for the same answer.
+    public func shouldFetchOnDemand(
+        now: Date, hasHub: Bool, hasUnknownAddresses: Bool
+    ) -> Bool {
+        guard hasHub, hasUnknownAddresses, lookupSource.usesHub else { return false }
+        guard let last = lastOnDemandAt, last <= now else { return true }
+        return now.timeIntervalSince(last) >= Self.onDemandInterval
     }
 
     public func shouldFetch(now: Date, hasHub: Bool) -> Bool {

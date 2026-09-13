@@ -1199,6 +1199,68 @@ public final class ObservationStore: @unchecked Sendable {
     }
 
     /// Replaces the stored locations with what the Hub supplied.
+    /// Addresses seen but not yet placed, newest first.
+    ///
+    /// The queue already existed and nothing read it: 373 addresses were
+    /// waiting on one Mac on 2026-09-13, including three countries the Hub had
+    /// resolved within seconds of the visit (P3-115).
+    public func pendingCountryAddresses(limit: Int = 100) throws -> [String] {
+        try lock.withLock {
+            let statement = try prepare("""
+            SELECT remote_address FROM pending_destination_country
+            ORDER BY last_observed_at DESC LIMIT ?
+            """)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_int64(statement, 1, Int64(max(0, limit)))
+            var addresses: [String] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if let value = text(statement, 0) { addresses.append(value) }
+            }
+            return addresses
+        }
+    }
+
+    /// Adds locations without discarding the ones already held.
+    ///
+    /// `replaceGeoLocations` is the daily wholesale swap from the Hub. This is
+    /// for the few addresses looked up one at a time, which must not take the
+    /// rest of the cache with them.
+    public func addGeoLocations(_ entries: [GeoLocation], receivedAt: Date = Date()) throws {
+        guard !entries.isEmpty else { return }
+        try lock.withLock {
+            try execute("BEGIN IMMEDIATE")
+            do {
+                let statement = try prepare("""
+                INSERT OR REPLACE INTO geo_locations
+                    (ip, latitude, longitude, country_code, city, received_at)
+                VALUES (?,?,?,?,?,?)
+                """)
+                defer { sqlite3_finalize(statement) }
+                for entry in entries {
+                    sqlite3_reset(statement)
+                    bindText(statement, 1, entry.ip)
+                    sqlite3_bind_double(statement, 2, entry.latitude)
+                    sqlite3_bind_double(statement, 3, entry.longitude)
+                    bindOptionalText(statement, 4, entry.countryCode)
+                    bindOptionalText(statement, 5, entry.city)
+                    sqlite3_bind_double(statement, 6, receivedAt.timeIntervalSince1970)
+                    guard sqlite3_step(statement) == SQLITE_DONE else {
+                        throw ObservationStoreError.statement(lastMessage)
+                    }
+                }
+                for entry in entries {
+                    countryByAddressCache.removeValue(forKey: entry.ip)
+                    unresolvedCountryAddresses.remove(entry.ip)
+                }
+                try resolvePendingCountriesLocked()
+                try execute("COMMIT")
+            } catch {
+                try? execute("ROLLBACK")
+                throw error
+            }
+        }
+    }
+
     public func replaceGeoLocations(_ entries: [GeoLocation], receivedAt: Date = Date()) throws {
         try lock.withLock {
             let countriesBefore = knownVisitedCountries

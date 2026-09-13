@@ -335,8 +335,6 @@
 "%lld locations" = "%lld件の位置情報";
 "Already up to date" = "最新です";
 "Not enrolled with a Hub" = "Hubに登録されていません";
-"Look up locations without a Hub" = "Hubを使わずに位置情報を取得する";
-"Sends destination IP addresses to ip-api.com. Off unless you turn it on." = "宛先のIPアドレスを ip-api.com へ送信します。有効にしない限り送信しません。";
 "The Hub address is not HTTPS, so locations were not requested." = "HubのアドレスがHTTPSではないため、位置情報を取得しませんでした。";
 "The Hub refused the request. Re-enrol this Mac to fetch locations." = "Hubがリクエストを拒否しました。位置情報を取得するには、このMacを登録し直してください。";
 "The Hub returned HTTP %lld." = "Hubが HTTP %lld を返しました。";
@@ -726,3 +724,12 @@
 "Return to the previous size" = "元の大きさに戻します";
 ", " = "、";
 "%lld countries" = "%lldか国";
+
+// Where a country comes from when the cache lacks the address (P3-115).
+"When an address is not in the cache" = "キャッシュに無いアドレスの扱い";
+"Do not look it up" = "取得しない";
+"Ask the Hub" = "Hubに問い合わせる";
+"Ask the Hub, then ip-api.com" = "Hubに問い合わせ、無ければ ip-api.com";
+"Countries reached for the first time stay off the map until the next daily fetch." = "初めてアクセスした国は、次回の定期取得まで地図に出ません。";
+"Asks your Hub again when a destination has no country yet. Nothing leaves the network your Hub is on." = "国が分からない宛先があるとき、Hubに問い合わせ直します。Hubのあるネットワークの外へは何も出ません。";
+"Sends destination IP addresses to ip-api.com when your Hub cannot place them. This is the only setting that sends a watched address outside." = "Hubが場所を特定できない宛先のIPアドレスを ip-api.com へ送信します。監視対象のアドレスを外部へ送るのは、この設定だけです。";
