@@ -11,6 +11,8 @@ using Application = System.Windows.Application;
 using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
 using Size = System.Windows.Size;
+using Control = System.Windows.Controls.Control;
+using DataGrid = System.Windows.Controls.DataGrid;
 
 namespace RenderCheck;
 
@@ -197,6 +199,85 @@ internal static class Entry
         if (CountryHistoryDisplayRow.LocalizedCountryName("IE", "ja") != "アイルランド" ||
             CountryHistoryDisplayRow.LocalizedCountryName("IE", "en") != "Ireland")
             throw new InvalidOperationException("Country names do not follow the selected UI language.");
+
+        foreach (var (width, height) in new[] { (1400, 930), (960, 680) })
+        {
+            var insightsWindow = new MainWindow();
+            var insightsTab = (TabItem)insightsWindow.MainTabs.Items[1];
+            var insights = (ScrollViewer)insightsTab.Content;
+            if (insights.HorizontalScrollBarVisibility != ScrollBarVisibility.Disabled)
+                throw new InvalidOperationException("Insights must not scroll horizontally.");
+            ((TextBlock)insightsWindow.FindName("InsightConnections")!).Text = "11,415";
+            ((TextBlock)insightsWindow.FindName("InsightApplications")!).Text = "44";
+            ((TextBlock)insightsWindow.FindName("InsightDestinations")!).Text = "188";
+            ((TextBlock)insightsWindow.FindName("InsightBytes")!).Text = "359.9 MiB";
+            ((TextBlock)insightsWindow.FindName("InsightConnectionsDelta")!).Text = "前期間比 -31%";
+            ((TextBlock)insightsWindow.FindName("InsightApplicationsDelta")!).Text = "前期間比 +4%";
+            ((TextBlock)insightsWindow.FindName("InsightDestinationsDelta")!).Text = "前期間比 +12%";
+            ((TextBlock)insightsWindow.FindName("InsightUnmeasured")!).Text = "123件はデータ量未計測";
+            ((TextBlock)insightsWindow.FindName("InsightChangeSummary")!).Text = "接続数は前期間より31%減りました。";
+            ((TextBlock)insightsWindow.FindName("InsightTopApp")!).Text = "接続が最も多いアプリ：svchost（5,120件）。";
+            ((TextBlock)insightsWindow.FindName("InsightTopDestination")!).Text = "接続が最も多い通信先：edge-mqtt.facebook.com（2,311件）。";
+            ((ItemsControl)insightsWindow.FindName("TopApplicationsList")!).ItemsSource =
+                new[] { new RankedRow("svchost", 5_120, false), new RankedRow("Creative Cloud UI Helper", 1_420, false) };
+            ((ItemsControl)insightsWindow.FindName("TopDestinationsList")!).ItemsSource =
+                new[] { new RankedRow("edge-mqtt.facebook.com", 2_311, false), new RankedRow("takizawa.egressview.com", 1_043, false) };
+            insightsTab.Content = null;
+            insights.SetResourceReference(Control.ForegroundProperty, "TextPrimaryBrush");
+            insights.SetResourceReference(Control.BackgroundProperty, "AppBackgroundBrush");
+            Save(insights, width, height, Path.Combine(output, $"insights-{width}x{height}.png"));
+        }
+
+        var logWindow = new MainWindow();
+        var logTab = (TabItem)logWindow.MainTabs.Items[2];
+        var logPage = (Grid)logTab.Content;
+        var logRows = Enumerable.Range(0, 60).Select(index => new FlowRow(new RecentFlow(
+            new DateTimeOffset(2026, 9, 13, 11, 28, index % 60, TimeSpan.FromHours(9)),
+            new DateTimeOffset(2026, 9, 13, 19, 51, index % 60, TimeSpan.FromHours(9)),
+            index % 2 == 0 ? "UDP" : "TCP", "192.0.2.1", 50_000, "224.0.0.251", 5353, index,
+            index % 3 == 0 ? "Creative Cloud UI Helper" : "ChatGPT", 256 + index, 1_024 + index,
+            ObservationLayer.Logical, null, "etw", "edge-mqtt.facebook.com", "IE"))).ToArray();
+        ((DataGrid)logWindow.FindName("ConnectionGrid")!).ItemsSource = logRows;
+        ((TextBlock)logWindow.FindName("LogStatus")!).Text = "表示中 60 / 読込対象 60 件 · 有効なfilter 0";
+        logTab.Content = null;
+        logPage.SetValue(System.Windows.Documents.TextElement.ForegroundProperty, application.Resources["TextPrimaryBrush"]);
+        Save(logPage, 1400, 900, Path.Combine(output, "connection-log-1400x900.png"));
+        if (logRows[0].Country != CountryHistoryDisplayRow.LocalizedCountryName("IE", LocalizationManager.EffectiveLanguage)
+            || logRows[0].DataVolumeText == "—")
+            throw new InvalidOperationException("The log must show localized country names and total data volume.");
+
+        var threatWindow = new MainWindow();
+        var threatTab = (TabItem)threatWindow.MainTabs.Items[3];
+        var threatPage = (ScrollViewer)threatTab.Content;
+        ((Border)threatWindow.FindName("ThreatEmptyNote")!).Visibility = Visibility.Collapsed;
+        ((Border)threatWindow.FindName("ThreatTableCard")!).Visibility = Visibility.Visible;
+        ((Border)threatWindow.FindName("ThreatDetailCard")!).Visibility = Visibility.Visible;
+        ((DataGrid)threatWindow.FindName("ThreatGrid")!).ItemsSource = new[] { new ThreatRow(new ThreatFinding(
+            "api.github.com", "20.27.177.116", "api.github.com", "chrome", 12, 28_672, 0,
+            DateTimeOffset.Now.AddHours(-2), DateTimeOffset.Now, "domain", "github.com", "Sample feed", "listed", "low")) };
+        ((TextBlock)threatWindow.FindName("ThreatStatus")!).Text = "脅威情報と一致する通信を1件確認しました。";
+        ((TextBlock)threatWindow.FindName("ThreatStatus")!).Visibility = Visibility.Visible;
+        ((TextBlock)threatWindow.FindName("ThreatDetail")!).Text = "api.github.com\naddress: 20.27.177.116\napplication: chrome\nmatched: github.com";
+        threatTab.Content = null;
+        threatPage.SetResourceReference(Control.ForegroundProperty, "TextPrimaryBrush");
+        threatPage.SetResourceReference(Control.BackgroundProperty, "AppBackgroundBrush");
+        Save(threatPage, 1400, 900, Path.Combine(output, "threats-1400x900.png"));
+
+        var notificationWindow = new MainWindow();
+        var notificationTab = (TabItem)notificationWindow.MainTabs.Items[4];
+        var notificationPage = (ScrollViewer)notificationTab.Content;
+        ((TextBlock)notificationWindow.FindName("NotificationSentToday")!).Text = "3";
+        ((TextBlock)notificationWindow.FindName("NotificationSuppressedToday")!).Text = "1";
+        ((TextBlock)notificationWindow.FindName("NotificationPermissionCard")!).Text = "有効";
+        ((TextBlock)notificationWindow.FindName("NotificationSummary")!).Text = "今日の試行: 4 · 今日の表示: 3 · 今日の抑制: 1";
+        ((ItemsControl)notificationWindow.FindName("NotificationList")!).ItemsSource = Enumerable.Range(0, 6).Select(index =>
+            new NotificationRow(new NotificationHistoryEntry(DateTimeOffset.Now.AddMinutes(-index * 25),
+                "HubDelivery", "EgressView Agent", $"Hubへの送信が完了していません。未送信 {index + 97} 件。",
+                false, "suppressed-daily-limit"))).ToArray();
+        notificationTab.Content = null;
+        notificationPage.SetResourceReference(Control.ForegroundProperty, "TextPrimaryBrush");
+        notificationPage.SetResourceReference(Control.BackgroundProperty, "AppBackgroundBrush");
+        Save(notificationPage, 1400, 900, Path.Combine(output, "notifications-1400x900.png"));
 
         Console.WriteLine($"wrote {output}");
         return 0;
