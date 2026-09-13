@@ -1095,7 +1095,7 @@ private struct AgentSettingsView: View {
     @ViewBuilder
     private var geoSection: some View {
         settingsGroup(L("Destination locations")) {
-            Text(L("Used to place traffic on the map. Fetched from the Hub once a day; the request contains no destinations."))
+            Text(L("Used to place traffic on the map. The whole cache comes from the Hub once a day, and that request contains no destinations."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack(spacing: 10) {
@@ -1128,7 +1128,7 @@ private struct AgentSettingsView: View {
         switch source {
         case .cacheOnly: return L("Do not look it up")
         case .hub: return L("Ask the Hub")
-        case .hubThenThirdParty: return L("Ask the Hub, then ip-api.com")
+        case .hubThenThirdParty: return L("Ask the Hub, then ipwho.is")
         }
     }
 
@@ -1139,7 +1139,7 @@ private struct AgentSettingsView: View {
         case .hub:
             return L("Asks your Hub again when a destination has no country yet. Nothing leaves the network your Hub is on.")
         case .hubThenThirdParty:
-            return L("Sends destination IP addresses to ip-api.com when your Hub cannot place them. This is the only setting that sends a watched address outside.")
+            return L("Sends destination IP addresses to ipwho.is when your Hub cannot place them, at most %lld a day. This is the only setting that sends a watched address outside.", ThirdPartyGeoLookup.dailyBudget)
         }
     }
 
@@ -1683,7 +1683,12 @@ final class GeoCacheController: ObservableObject {
         guard let store else { return }
         let source = preferences.lookupSource
         guard source.usesHub else { return }
-        let pending = (try? store.pendingCountryAddresses(limit: 200)) ?? []
+        // The same exclusion the third-party path needs applies here. The Hub
+        // refuses these addresses itself, so asking it about the LAN is a round
+        // trip that cannot succeed -- and on an Agent-only install, or between
+        // daily fetches, it is the reason the Hub is woken at all.
+        let pending = ((try? store.pendingCountryAddresses(limit: 200)) ?? [])
+            .filter { !NonPublicAddress.isNonPublic($0) }
         guard !pending.isEmpty else { return }
         let credential = await credentialStore.loadDetached()
         guard preferences.shouldFetchOnDemand(
@@ -1696,12 +1701,33 @@ final class GeoCacheController: ObservableObject {
         // Whatever the Hub still cannot name. This is the only path that sends
         // a watched address out of the network, and it runs only because
         // someone chose it in settings.
-        let remaining = (try? store.pendingCountryAddresses(limit: ThirdPartyGeoLookup.batchSize)) ?? []
+        let day = GeoCachePreferences.day(for: Date())
+        let budget = preferences.thirdPartyBudget(
+            on: day,
+            limit: ThirdPartyGeoLookup.dailyBudget,
+            perRun: ThirdPartyGeoLookup.batchSize
+        )
+        guard budget > 0 else { return }
+        // This is the boundary a watched address crosses on its way out of the
+        // network, so the filter is applied again here rather than trusted from
+        // the read above. A private address reaching this line is the bug that
+        // spent 400 of one Mac's 500 daily requests on its own LAN.
+        let remaining = ((try? store.pendingCountryAddresses(limit: budget)) ?? [])
+            .filter { !NonPublicAddress.isNonPublic($0) }
         guard !remaining.isEmpty else { return }
+        preferences.recordThirdPartySpend(remaining.count, on: day)
         do {
             let located = try await ThirdPartyGeoLookup(
                 transport: URLSessionThirdPartyGeoTransport()
-            ).locate(remaining)
+            ).locate(remaining, budget: budget)
+            // Whatever was asked about and did not come back placed. Recording
+            // it is what stops the next run re-sending the same head of the
+            // queue: these addresses are read newest-first, so an address the
+            // service cannot place would otherwise be asked about every run
+            // until it stops being contacted.
+            let placed = Set(located.map(\.ip))
+            let unplaced = remaining.filter { !placed.contains($0) }
+            try? store.recordCountryLookupFailures(unplaced)
             guard !located.isEmpty else { return }
             try store.addGeoLocations(located.map {
                 GeoLocation(
@@ -1711,7 +1737,17 @@ final class GeoCacheController: ObservableObject {
             })
             status = .updated(count: located.count, at: Date())
         } catch {
-            status = .failed(Self.describe(error))
+            // Nobody asked for this lookup, so nobody is waiting to read that
+            // it failed. The free tier carries no availability guarantee, and
+            // a banner that appears on its own and stays is how 0.5.68
+            // greeted its first user.
+            //
+            // The attempt is still recorded. The budget was already spent, and
+            // a service that is down answers no faster on the next run, so
+            // retrying immediately is what turned one outage into a day with no
+            // lookups left.
+            try? store.recordCountryLookupFailures(remaining)
+            NSLog("EgressView: third-party location lookup failed: %@", String(describing: error))
         }
     }
 
@@ -1762,8 +1798,18 @@ final class GeoCacheController: ObservableObject {
             return L("This Hub sends location data this agent does not understand (version %lld).", version)
         case let GeoCacheFetchError.transport(reason):
             return L("Could not reach the Hub: %@", reason)
+        case let failure as ThirdPartyGeoLookup.Failure:
+            switch failure {
+            case let .httpStatus(code):
+                return L("The location service returned HTTP %lld.", code)
+            case .malformedResponse:
+                return L("The location service sent a reply this agent does not understand.")
+            }
         default:
-            return String(describing: error)
+            // An NSError's description is a paragraph of keys and pointers.
+            // Someone reading a settings screen needs a sentence and a verb.
+            let reason = (error as NSError).localizedDescription
+            return L("Could not fetch locations: %@", reason)
         }
     }
 }

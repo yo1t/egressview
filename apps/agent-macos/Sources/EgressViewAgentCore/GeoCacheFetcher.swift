@@ -167,6 +167,8 @@ public struct GeoCachePreferences: @unchecked Sendable {
     public static let thirdPartyLookupKey = "geoThirdPartyLookupEnabled"
     public static let lookupSourceKey = "geoLookupSource"
     public static let lastOnDemandKey = "geoCacheLastOnDemandAt"
+    public static let thirdPartySpentDayKey = "geoThirdPartySpentDay"
+    public static let thirdPartySpentKey = "geoThirdPartySpentCount"
 
     /// The least time between off-schedule fetches.
     ///
@@ -224,6 +226,36 @@ public struct GeoCachePreferences: @unchecked Sendable {
             // Kept in step so the older key cannot disagree with the newer one.
             defaults.set(newValue.usesThirdParty, forKey: Self.thirdPartyLookupKey)
         }
+    }
+
+    /// How many third-party lookups have been spent today, and on which day.
+    ///
+    /// The free tier is a thousand requests a day with no bulk endpoint, so
+    /// one request is one address and the count is real money. The agent keeps
+    /// its own tally rather than discovering the limit as a wall of failures.
+    public func thirdPartySpent(on day: String) -> Int {
+        guard defaults.string(forKey: Self.thirdPartySpentDayKey) == day else { return 0 }
+        return defaults.integer(forKey: Self.thirdPartySpentKey)
+    }
+
+    public func recordThirdPartySpend(_ count: Int, on day: String) {
+        let total = thirdPartySpent(on: day) + max(0, count)
+        defaults.set(day, forKey: Self.thirdPartySpentDayKey)
+        defaults.set(total, forKey: Self.thirdPartySpentKey)
+    }
+
+    /// What is left of today's allowance, never more than one run's worth.
+    public func thirdPartyBudget(on day: String, limit: Int, perRun: Int) -> Int {
+        max(0, min(perRun, limit - thirdPartySpent(on: day)))
+    }
+
+    /// The day a spend belongs to, in the Mac's own time zone -- the tally is
+    /// only ever compared against itself.
+    public static func day(for date: Date, calendar: Calendar = .current) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0
+        )
     }
 
     public var lastOnDemandAt: Date? {

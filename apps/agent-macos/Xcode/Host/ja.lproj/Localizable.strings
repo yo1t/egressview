@@ -329,7 +329,7 @@
 "%1$lld places, %2$lld%% of traffic placed. The busiest is %3$@." = "%1$lld地点、通信の%2$lld%%を配置。最も多いのは%3$@です。";
 "an unnamed place" = "名前の分からない場所";
 "Destination locations" = "宛先の位置情報";
-"Used to place traffic on the map. Fetched from the Hub once a day; the request contains no destinations." = "通信を地図に配置するために使います。1日1回Hubから取得し、リクエストに宛先は含みません。";
+"Used to place traffic on the map. The whole cache comes from the Hub once a day, and that request contains no destinations." = "通信を地図に配置するために使います。キャッシュ全体は1日1回Hubから取得し、その要求に宛先は含みません。";
 "Fetch now" = "今すぐ取得";
 "Fetching..." = "取得中...";
 "%lld locations" = "%lld件の位置情報";
@@ -729,7 +729,10 @@
 "When an address is not in the cache" = "キャッシュに無いアドレスの扱い";
 "Do not look it up" = "取得しない";
 "Ask the Hub" = "Hubに問い合わせる";
-"Ask the Hub, then ip-api.com" = "Hubに問い合わせ、無ければ ip-api.com";
+"Ask the Hub, then ipwho.is" = "Hubに問い合わせ、無ければ ipwho.is";
 "Countries reached for the first time stay off the map until the next daily fetch." = "初めてアクセスした国は、次回の定期取得まで地図に出ません。";
 "Asks your Hub again when a destination has no country yet. Nothing leaves the network your Hub is on." = "国が分からない宛先があるとき、Hubに問い合わせ直します。Hubのあるネットワークの外へは何も出ません。";
-"Sends destination IP addresses to ip-api.com when your Hub cannot place them. This is the only setting that sends a watched address outside." = "Hubが場所を特定できない宛先のIPアドレスを ip-api.com へ送信します。監視対象のアドレスを外部へ送るのは、この設定だけです。";
+"Sends destination IP addresses to ipwho.is when your Hub cannot place them, at most %lld a day. This is the only setting that sends a watched address outside." = "Hubが場所を特定できない宛先のIPアドレスを ipwho.is へ送信します（1日あたり最大%lld件）。監視対象のアドレスを外部へ送るのは、この設定だけです。";
+"The location service returned HTTP %lld." = "位置情報サービスが HTTP %lld を返しました。";
+"The location service sent a reply this agent does not understand." = "位置情報サービスの応答を解釈できませんでした。";
+"Could not fetch locations: %@" = "位置情報を取得できませんでした: %@";

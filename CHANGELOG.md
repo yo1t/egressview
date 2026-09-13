@@ -4,6 +4,72 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.70
+
+**Your own network is no longer sent to a location service.**
+
+0.5.69 asked `ipwho.is` about addresses your Hub could not place. It did not
+check which addresses those were, so it asked about the local network:
+routers, private subnets, link-local `fe80::` addresses, multicast. Measured on
+one Mac minutes after installing, **400 of the day's 500 lookups were already
+gone** and one address had been placed. Nothing was learned, the allowance was
+spent, and the addresses of a private network were sent to a third party.
+
+The Hub has always refused these -- private, loopback, link-local, multicast
+and the other ranges nothing outside a network can place. The agent now uses
+the same list. Such an address is never queued and never asked about, of
+anyone, including your Hub; the ones already queued are removed on upgrade.
+
+An address that *was* asked about and could not be placed is now remembered and
+left alone for a week, instead of being re-sent on every run. A queue read
+newest-first meant one unplaceable destination could consume an entire day's
+allowance by itself.
+
+**If you had the setting on, upgrading stops the sending and clears the
+backlog. Payloads were never involved: this was addresses, one at a time.**
+
+### Agent for Mac 0.5.69
+
+**The location setting works, and says less in the way of error dumps.**
+
+0.5.68 added a setting for looking a country up when the cache does not have
+one, and named `ip-api.com`, as the README had for months. That service
+answers over plain HTTP on its free tier, macOS refuses plain HTTP, and the
+settings screen showed the refusal as a paragraph of `NSError` before anyone
+had touched it. **No lookup ever happened and no address ever left the Mac.**
+
+Lookups now ask `ipwho.is` over HTTPS, at most 500 addresses a day, and only
+for addresses your Hub could not place. A failure goes to the log instead of
+onto the screen; the addresses stay in the queue for the next try.
+
+### Agent for Mac 0.5.68
+
+**A country you have never reached before appears on the map right away.**
+
+The agent learned countries only by downloading the Hub's whole cache once a
+day, so a destination in a country you had not visited stayed blank -- for up
+to 24 hours, which is precisely when you are looking at it. Measured on one
+Mac: the agent held 75,363 locations against the Hub's 78,884.
+
+Settings now offer three choices for an address the cache cannot place: do not
+look it up, ask your Hub, or ask your Hub and then ip-api.com. Asking a third
+party is the only way a watched address leaves your machine, it is not the
+default, and the setting says so. The previous "look up locations without a
+Hub" switch carries over to the matching choice.
+
+### Agent for Mac 0.5.67
+
+**A connection that is happening right now shows its destination by name.**
+
+The agent could already read the name for 99.8% of QUIC connections -- it just
+did not save it until the connection ended. So the screen showed an address
+for exactly the connections you open it to look at, and for the roughly one in
+ten that never report an ending, the name was read and then thrown away.
+
+Measured on one Mac: 4,568 names read, and a name stored for 72.8% of
+connections. Closed connections had one 99.9% of the time; connections still
+open, 18.0%.
+
 ### Agent for Mac 0.5.66
 
 **Countries light up as your Mac reaches them.** On the expanded map, a country

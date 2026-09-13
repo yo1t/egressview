@@ -36,5 +36,11 @@
   <system:String x:Key="ExpandCountryAtlas">Expand country atlas</system:String>
   <system:String x:Key="ReturnToDashboard">Return to dashboard</system:String>
   <system:String x:Key="CountryAtlasCount">Map: {0} shaded · all-time list: {1}</system:String>
-  <system:String x:Key="RecentApplication">Recent application</system:String>
+  <system:String x:Key="RecentApplication">Latest application</system:String>
+  <system:String x:Key="CountryHistoryLocalHint">This list is local and independent of the selected period.</system:String>
+  <system:String x:Key="NoCountryHistory">No destination countries have been recorded yet.</system:String>
+  <system:String x:Key="CountryFirstAccess">First accessed</system:String>
+  <system:String x:Key="CountryLastAccess">Last accessed</system:String>
+  <system:String x:Key="CountryTimes">{0:N0} times</system:String>
+  <system:String x:Key="Expand">Expand</system:String>
 </ResourceDictionary>

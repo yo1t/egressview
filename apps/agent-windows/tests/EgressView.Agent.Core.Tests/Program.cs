@@ -10,6 +10,45 @@ Directory.CreateDirectory(directory);
 var database = Path.Combine(directory, "agent.db");
 var windowsRoot = FindWindowsRoot(Directory.GetCurrentDirectory());
 
+// Shared product language is defined by the Mac UI. Keep the explicitly
+// reviewed cross-platform terms synchronized without constraining Windows-only
+// controls (ETW, Service, MSI, UAC, tray, and so on).
+var sharedWording = new (string WindowsKey, string MacEnglish)[]
+{
+    ("Connections", "Connections"), ("DeleteAllConversations", "Delete all"),
+    ("DeleteBefore", "Delete records from before"), ("Destinations", "Destinations"),
+    ("Hub", "Hub"), ("HubDelivery", "Hub delivery"), ("Insights", "Insights"),
+    ("Last30Days", "Last 30 days"), ("Last7Days", "Last 7 days"),
+    ("Model", "Model"), ("Monitoring", "Monitoring"),
+    ("NoNotifications", "No notifications have been attempted yet."),
+    ("PacketPrivacy", "Packet contents are never collected."),
+    ("Port", "Port"), ("Provider", "Provider"), ("Retention", "Retention"),
+    ("RibbonBytes", "Ribbon width is data volume"),
+    ("RibbonConnections", "Ribbon width is the number of connections"),
+    ("SaveCopyBeforeDeleting", "Save a copy before deleting"),
+    ("SaveTest", "Save and test"), ("SuppressedToday", "Suppressed today"),
+    ("TopApplications", "Top applications"),
+    ("WhenTraffic", "When traffic happened"),
+    ("WhichAppWhere", "Which application went where")
+};
+var resourceRoot = Path.Combine(windowsRoot, "src", "EgressView.Agent.Ui", "Resources");
+var windowsEnglish = XDocument.Load(Path.Combine(resourceRoot, "Strings.en.xaml"));
+var windowsJapanese = XDocument.Load(Path.Combine(resourceRoot, "Strings.ja.xaml"));
+var macJapaneseSource = File.ReadAllText(Path.Combine(windowsRoot, "..", "agent-macos", "Xcode", "Host", "ja.lproj", "Localizable.strings"));
+var macJapanese = new Dictionary<string, string>(StringComparer.Ordinal);
+foreach (Match match in Regex.Matches(macJapaneseSource, "^\\s*\"(?<key>[^\"]+)\"\\s*=\\s*\"(?<value>.*)\";\\s*$", RegexOptions.Multiline))
+    macJapanese[match.Groups["key"].Value] = match.Groups["value"].Value;
+static string SharedResource(XDocument document, string key) => document.Descendants()
+    .Single(element => element.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value == key).Value;
+foreach (var (windowsKey, macEnglish) in sharedWording)
+{
+    Assert(SharedResource(windowsEnglish, windowsKey) == macEnglish,
+        $"Shared wording English drifted: {windowsKey}");
+    Assert(macJapanese.TryGetValue(macEnglish, out var macValue) &&
+        SharedResource(windowsJapanese, windowsKey) == macValue,
+        $"Shared wording Japanese drifted: {windowsKey}");
+}
+
 static string FindWindowsRoot(string start)
 {
     for (var path = start; path is not null; path = Directory.GetParent(path)?.FullName)
@@ -1409,7 +1448,42 @@ try
             "folding two unmeasured sightings leaves the volume unknown rather than zero");
     }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, and log streaming");
+{
+    // A caller that blocks on an IPC request must not deadlock.
+    //
+    // The window does exactly that on the way out, and it did it on the way in
+    // too. If the request resumes on the caller's context, the continuation
+    // waits for a thread that is waiting for the continuation -- and the
+    // timeout cannot fire either, because firing it needs the same thread. The
+    // whole application then never opens, which is what a user saw: an agent
+    // installed, running, and invisible.
+    //
+    // The context here accepts work and never runs it, which is what a blocked
+    // dispatcher amounts to.
+    var blocked = new RefusingSynchronizationContext();
+    var previous = SynchronizationContext.Current;
+    SynchronizationContext.SetSynchronizationContext(blocked);
+    try
+    {
+        var completed = Task.Run(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(blocked);
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                AgentIpcClient.RequestAsync("{}", timeout.Token).GetAwaiter().GetResult();
+            }
+            // No agent is listening in this test, so failing is expected.
+            // Returning at all is the thing being asserted.
+            catch (Exception) { }
+        }).Wait(TimeSpan.FromSeconds(20));
+        Assert(completed, "an IPC request does not deadlock a caller that blocks on it");
+        Assert(blocked.Posted == 0, "an IPC request resumes on the thread pool, not on its caller's context");
+    }
+    finally { SynchronizationContext.SetSynchronizationContext(previous); }
+}
+
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, and IPC context independence");
     return 0;
 }
 finally
@@ -1574,4 +1648,15 @@ sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
     public DateTimeOffset UtcNow { get; private set; } = utcNow;
     public override DateTimeOffset GetUtcNow() => UtcNow;
     public void Advance(TimeSpan value) => UtcNow += value;
+}
+
+
+/// A context that accepts work and never runs it, the way a dispatcher waiting
+/// on a blocking call does.
+internal sealed class RefusingSynchronizationContext : SynchronizationContext
+{
+    private int posted;
+    public int Posted => Volatile.Read(ref posted);
+    public override void Post(SendOrPostCallback d, object? state) => Interlocked.Increment(ref posted);
+    public override void Send(SendOrPostCallback d, object? state) => Interlocked.Increment(ref posted);
 }
