@@ -335,8 +335,6 @@
 "%lld locations" = "%lld locations";
 "Already up to date" = "Already up to date";
 "Not enrolled with a Hub" = "Not enrolled with a Hub";
-"Look up locations without a Hub" = "Look up locations without a Hub";
-"Sends destination IP addresses to ip-api.com. Off unless you turn it on." = "Sends destination IP addresses to ip-api.com. Off unless you turn it on.";
 "The Hub address is not HTTPS, so locations were not requested." = "The Hub address is not HTTPS, so locations were not requested.";
 "The Hub refused the request. Re-enrol this Mac to fetch locations." = "The Hub refused the request. Re-enrol this Mac to fetch locations.";
 "The Hub returned HTTP %lld." = "The Hub returned HTTP %lld.";
@@ -724,3 +722,12 @@
 "Return to the previous size" = "Return to the previous size";
 ", " = ", ";
 "%lld countries" = "%lld countries";
+
+// Where a country comes from when the cache lacks the address (P3-115).
+"When an address is not in the cache" = "When an address is not in the cache";
+"Do not look it up" = "Do not look it up";
+"Ask the Hub" = "Ask the Hub";
+"Ask the Hub, then ip-api.com" = "Ask the Hub, then ip-api.com";
+"Countries reached for the first time stay off the map until the next daily fetch." = "Countries reached for the first time stay off the map until the next daily fetch.";
+"Asks your Hub again when a destination has no country yet. Nothing leaves the network your Hub is on." = "Asks your Hub again when a destination has no country yet. Nothing leaves the network your Hub is on.";
+"Sends destination IP addresses to ip-api.com when your Hub cannot place them. This is the only setting that sends a watched address outside." = "Sends destination IP addresses to ip-api.com when your Hub cannot place them. This is the only setting that sends a watched address outside.";

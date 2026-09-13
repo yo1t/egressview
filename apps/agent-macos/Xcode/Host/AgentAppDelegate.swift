@@ -87,6 +87,10 @@ final class AgentAppDelegate: NSObject, NSApplicationDelegate {
                 // handed anything -- and it only does so if it is open and
                 // showing the log (P3-107).
                 self?.observationWindow?.observationsArrived(observations)
+                // A destination nothing can name is the reason to ask again
+                // (P3-115). The controller decides whether asking is allowed
+                // and where to ask; this only says that something new arrived.
+                Task { await self?.geoCacheController.resolveNewDestinations() }
             }
         },
         storageErrorHandler: { [weak self] error in
