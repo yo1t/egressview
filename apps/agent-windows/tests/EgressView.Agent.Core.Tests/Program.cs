@@ -10,6 +10,45 @@ Directory.CreateDirectory(directory);
 var database = Path.Combine(directory, "agent.db");
 var windowsRoot = FindWindowsRoot(Directory.GetCurrentDirectory());
 
+// Shared product language is defined by the Mac UI. Keep the explicitly
+// reviewed cross-platform terms synchronized without constraining Windows-only
+// controls (ETW, Service, MSI, UAC, tray, and so on).
+var sharedWording = new (string WindowsKey, string MacEnglish)[]
+{
+    ("Connections", "Connections"), ("DeleteAllConversations", "Delete all"),
+    ("DeleteBefore", "Delete records from before"), ("Destinations", "Destinations"),
+    ("Hub", "Hub"), ("HubDelivery", "Hub delivery"), ("Insights", "Insights"),
+    ("Last30Days", "Last 30 days"), ("Last7Days", "Last 7 days"),
+    ("Model", "Model"), ("Monitoring", "Monitoring"),
+    ("NoNotifications", "No notifications have been attempted yet."),
+    ("PacketPrivacy", "Packet contents are never collected."),
+    ("Port", "Port"), ("Provider", "Provider"), ("Retention", "Retention"),
+    ("RibbonBytes", "Ribbon width is data volume"),
+    ("RibbonConnections", "Ribbon width is the number of connections"),
+    ("SaveCopyBeforeDeleting", "Save a copy before deleting"),
+    ("SaveTest", "Save and test"), ("SuppressedToday", "Suppressed today"),
+    ("TopApplications", "Top applications"),
+    ("WhenTraffic", "When traffic happened"),
+    ("WhichAppWhere", "Which application went where")
+};
+var resourceRoot = Path.Combine(windowsRoot, "src", "EgressView.Agent.Ui", "Resources");
+var windowsEnglish = XDocument.Load(Path.Combine(resourceRoot, "Strings.en.xaml"));
+var windowsJapanese = XDocument.Load(Path.Combine(resourceRoot, "Strings.ja.xaml"));
+var macJapaneseSource = File.ReadAllText(Path.Combine(windowsRoot, "..", "agent-macos", "Xcode", "Host", "ja.lproj", "Localizable.strings"));
+var macJapanese = new Dictionary<string, string>(StringComparer.Ordinal);
+foreach (Match match in Regex.Matches(macJapaneseSource, "^\\s*\"(?<key>[^\"]+)\"\\s*=\\s*\"(?<value>.*)\";\\s*$", RegexOptions.Multiline))
+    macJapanese[match.Groups["key"].Value] = match.Groups["value"].Value;
+static string SharedResource(XDocument document, string key) => document.Descendants()
+    .Single(element => element.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value == key).Value;
+foreach (var (windowsKey, macEnglish) in sharedWording)
+{
+    Assert(SharedResource(windowsEnglish, windowsKey) == macEnglish,
+        $"Shared wording English drifted: {windowsKey}");
+    Assert(macJapanese.TryGetValue(macEnglish, out var macValue) &&
+        SharedResource(windowsJapanese, windowsKey) == macValue,
+        $"Shared wording Japanese drifted: {windowsKey}");
+}
+
 static string FindWindowsRoot(string start)
 {
     for (var path = start; path is not null; path = Directory.GetParent(path)?.FullName)
