@@ -103,32 +103,56 @@ public struct AgentGlobeChart: View {
         AgentGlobeFrameRate(rawValue: frameRateRaw) ?? .defaultValue
     }
 
-    private var spinControls: some View {
-        HStack(spacing: 10) {
-            Button {
-                isRunning.toggle()
-            } label: {
-                Label(
-                    isRunning ? L("Stop") : L("Rotate"),
-                    systemImage: isRunning ? "pause.fill" : "play.fill"
-                )
-            }
-            .help(isRunning
-                  ? L("Stop the globe where it is")
-                  : L("Turn the globe so the far side comes round"))
+    private var spinButton: some View {
+        Button {
+            isRunning.toggle()
+        } label: {
+            Label(
+                isRunning ? L("Stop") : L("Rotate"),
+                systemImage: isRunning ? "pause.fill" : "play.fill"
+            )
+        }
+        .help(isRunning
+              ? L("Stop the globe where it is")
+              : L("Turn the globe so the far side comes round"))
+    }
 
-            Picker(L("Speed"), selection: Binding(
-                get: { speed },
-                set: { speed = $0 }
-            )) {
-                ForEach(SpinSpeed.allCases) { value in
-                    Text(value.title).tag(value)
-                }
+    private var speedPicker: some View {
+        Picker(L("Speed"), selection: Binding(
+            get: { speed },
+            set: { speed = $0 }
+        )) {
+            ForEach(SpinSpeed.allCases) { value in
+                Text(value.title).tag(value)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 170)
-            .disabled(!isRunning)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .disabled(!isRunning)
+    }
+
+    /// Stop/rotate, and the speed, in whatever fits.
+    ///
+    /// These used to be one fixed-width row overlaid on the globe. The card is
+    /// sized from the window, so on a narrow window the row was wider than the
+    /// card and ran off its leading edge -- the Stop button sat outside the
+    /// card, cut by the window (seen 2026-09-13, P3-109). A control that
+    /// leaves its card is worse than a control that is not offered: the first
+    /// looks like a broken window, the second looks like a small one.
+    ///
+    /// So the speed loses width first, then goes, and the button that stops a
+    /// moving globe is the last thing standing.
+    private var spinControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                spinButton
+                speedPicker.frame(width: 170)
+            }
+            HStack(spacing: 8) {
+                spinButton
+                speedPicker.frame(width: 116)
+            }
+            spinButton
         }
         .font(.caption)
         .controlSize(.small)
@@ -187,7 +211,6 @@ public struct AgentGlobeChart: View {
                         // The native view redraws independently, but fixed sizing
                         // also keeps these controls stable while the card resizes.
                         spinControls
-                            .fixedSize()
                             .padding(8)
                             .background(
                                 RoundedRectangle(cornerRadius: 9, style: .continuous)
