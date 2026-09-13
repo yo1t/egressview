@@ -174,7 +174,11 @@ public sealed record CollectorSnapshot(
     long HostnamesResolved = 0,
     long HostnamesUnavailable = 0,
     long DnsEventsSeen = 0,
-    string? HostnameSourceError = null);
+    string? HostnameSourceError = null,
+    long EtwConnectionAttempted = 0,
+    long EtwConnectionAccepted = 0,
+    long EtwConnectionDisconnected = 0,
+    long EtwConnectionClosed = 0);
 
 public enum StoreFailureKind
 {
