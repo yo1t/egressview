@@ -1281,7 +1281,8 @@ public sealed partial class ObservationStore : IDisposable
                 ? $" AND f.last_seen>='{from.Value.ToUniversalTime():O}' AND f.first_seen<'{to.Value.ToUniversalTime():O}'"
                 : string.Empty;
             var sql = $"""
-                SELECT UPPER(g.country_code),COUNT(*),MIN(f.first_seen),MAX(f.last_seen)
+                SELECT UPPER(g.country_code),COUNT(*),MIN(f.first_seen),MAX(f.last_seen),
+                       MAX(f.last_seen || CHAR(31) || COALESCE(f.process_name,''))
                 FROM flows f JOIN geo_locations g ON g.ip=f.remote_address
                 WHERE f.layer='logical' AND g.country_code IS NOT NULL AND TRIM(g.country_code)<>''{range}
                 GROUP BY UPPER(g.country_code)
@@ -1292,8 +1293,14 @@ public sealed partial class ObservationStore : IDisposable
             try
             {
                 while (WinSqlite.Step(statement) == WinSqlite.Row)
+                {
+                    var latest = Text(statement, 4);
+                    var separator = latest.IndexOf((char)31);
+                    var recentApp = separator >= 0 ? latest[(separator + 1)..] : string.Empty;
                     result.Add(new CountryHistoryRow(Text(statement, 0), WinSqlite.ColumnInt64(statement, 1),
-                        DateTimeOffset.Parse(Text(statement, 2)), DateTimeOffset.Parse(Text(statement, 3))));
+                        DateTimeOffset.Parse(Text(statement, 2)), DateTimeOffset.Parse(Text(statement, 3)),
+                        string.IsNullOrWhiteSpace(recentApp) ? null : recentApp));
+                }
             }
             finally { WinSqlite.Finalize(statement); }
             return result;

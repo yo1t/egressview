@@ -50,6 +50,7 @@ public partial class MainWindow : Window
     private PeriodAnalysis? previousAnalysis;
     private IReadOnlyList<GlobePoint> currentGlobePoints = [];
     private int allTimeCountryCount;
+    private System.Windows.Controls.Button? expandCountryAtlasButton;
     private readonly AgentAiClient aiClient = new();
     private readonly AiConversationStore aiHistory = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "EgressView", "Agent", "ai-conversations.jsonl"));
     private CancellationTokenSource? aiRequest;
@@ -63,6 +64,11 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        expandCountryAtlasButton = new System.Windows.Controls.Button { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 8, 0) };
+        expandCountryAtlasButton.SetResourceReference(ContentControl.ContentProperty, "ExpandCountryAtlas");
+        expandCountryAtlasButton.SetResourceReference(StyleProperty, "FluentButtonStyle");
+        expandCountryAtlasButton.Click += ExpandCountryAtlas_Click;
+        ((StackPanel)RotateButton.Parent).Children.Insert(0, expandCountryAtlasButton);
         if (aiHistory.Read().OrderByDescending(item => item.CreatedAt).FirstOrDefault() is { } latest)
             activeConversationId = latest.ConversationId;
         Width = Math.Min(AgentSettings.WindowWidth, SystemParameters.WorkArea.Width);
@@ -187,6 +193,11 @@ public partial class MainWindow : Window
         var allRows = allDocument.RootElement.GetProperty("data").Deserialize<List<CountryHistoryRow>>() ?? [];
         allTimeCountryCount = allRows.Count;
         Globe.SetVisitedCountries(allRows.Select(row => row.CountryCode));
+        CountryMap.SetVisitedCountries(allRows.Select(row => row.CountryCode));
+        ExpandedCountryList.ItemsSource = allRows.Select(CountryHistoryDisplayRow.From).ToArray();
+        ExpandedCountryCount.Text = string.Format(CultureInfo.CurrentCulture,
+            LocalizationManager.Text("CountryAtlasCount"), CountryMap.MappedCountryCount, allRows.Count);
+        AutomationProperties.SetHelpText(CountryMap, ExpandedCountryCount.Text);
         var rows = allRows;
         if (!all)
         {
@@ -448,7 +459,22 @@ public partial class MainWindow : Window
         CountryHistoryPanel.Visibility = countries ? Visibility.Visible : Visibility.Collapsed;
         RotateButton.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
         SpinSpeedChoice.Visibility = countries ? Visibility.Collapsed : Visibility.Visible;
+        if (expandCountryAtlasButton is not null)
+            expandCountryAtlasButton.Visibility = countries ? Visibility.Visible : Visibility.Collapsed;
         if (!loadingSettings) AgentSettings.GlobeView = countries ? "countries" : "globe";
+    }
+
+    private async void ExpandCountryAtlas_Click(object sender, RoutedEventArgs e)
+    {
+        await RefreshCountryHistoryAsync();
+        NetworkDashboard.Visibility = Visibility.Collapsed;
+        ExpandedCountryAtlas.Visibility = Visibility.Visible;
+    }
+
+    private void CollapseCountryAtlas_Click(object sender, RoutedEventArgs e)
+    {
+        ExpandedCountryAtlas.Visibility = Visibility.Collapsed;
+        NetworkDashboard.Visibility = Visibility.Visible;
     }
 
     private async void CountryScopeChoice_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1718,6 +1744,7 @@ internal sealed class CountryHistoryDisplayRow
     public required string Connections { get; init; }
     public required string First { get; init; }
     public required string Last { get; init; }
+    public required string RecentApp { get; init; }
 
     internal static CountryHistoryDisplayRow From(CountryHistoryRow value)
     {
@@ -1731,6 +1758,7 @@ internal sealed class CountryHistoryDisplayRow
             Connections = value.Connections.ToString("N0", CultureInfo.CurrentCulture),
             First = value.FirstObservedAt.LocalDateTime.ToString("g", CultureInfo.CurrentCulture),
             Last = value.LastObservedAt.LocalDateTime.ToString("g", CultureInfo.CurrentCulture),
+            RecentApp = $"{LocalizationManager.Text("RecentApplication")}: {value.RecentApplication ?? "—"}",
         };
     }
 

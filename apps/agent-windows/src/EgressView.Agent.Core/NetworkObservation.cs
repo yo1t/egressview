@@ -83,7 +83,7 @@ public sealed record GlobePoint(double Latitude, double Longitude, string? Count
     long Connections, long Bytes);
 
 public sealed record CountryHistoryRow(string CountryCode, long Connections,
-    DateTimeOffset FirstObservedAt, DateTimeOffset LastObservedAt);
+    DateTimeOffset FirstObservedAt, DateTimeOffset LastObservedAt, string? RecentApplication = null);
 
 public sealed record AppDestinationAggregate(
     string Application, string Destination, string DestinationName, long Connections, long Bytes, long ConnectionsWithoutBytes);

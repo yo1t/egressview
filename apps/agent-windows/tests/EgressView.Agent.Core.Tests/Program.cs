@@ -96,6 +96,14 @@ try
         "the Windows globe turns eastward with the same decreasing centre longitude and wraparound as Mac");
     Assert(GlobePresentation.CountryFlag("jp") == "🇯🇵" && GlobePresentation.CountryFlag("USA") == string.Empty,
         "two-letter destination country codes produce a flag without guessing invalid codes");
+    Assert(EqualEarthProjection.AspectRatio is > 2 and < 2.1 &&
+        EqualEarthProjection.Project(0, 0) is (0.5, 0.5) &&
+        EqualEarthProjection.Project(0, 180).X is > 0.99 and <= 1,
+        "Equal Earth keeps the whole world on one equal-area map without a hidden hemisphere");
+    var seamPieces = EqualEarthProjection.Split([(10, 179), (15, -179), (5, -178), (10, 179)]);
+    Assert(seamPieces.Count >= 2 && seamPieces.All(piece => piece.Zip(piece.Skip(1))
+        .All(pair => Math.Abs(pair.First.Lon - pair.Second.Lon) <= 180)),
+        "rings crossing the antimeridian do not draw a line across the map");
 
     var relaunchEncoded = UpdateRelaunchCommand.BuildEncodedPowerShell(4242, @"C:\Program Files\EgressView Agent\ui\EgressView.Agent.Ui.exe", "0.1.37", TimeSpan.FromMinutes(15));
     var relaunchScript = Encoding.Unicode.GetString(Convert.FromBase64String(relaunchEncoded));
@@ -672,8 +680,9 @@ try
             "geo cache joins locally with observations without exposing the full cache to UI");
         var countryHistory = geoStore.ReadCountryHistory();
         Assert(countryHistory.Count == 1 && countryHistory[0].CountryCode == "JP" && countryHistory[0].Connections == 1 &&
-            countryHistory[0].FirstObservedAt == observedAt && countryHistory[0].LastObservedAt == observedAt,
-            "all-time country history includes first and last observation and never counts an unplaced address as a country");
+            countryHistory[0].FirstObservedAt == observedAt && countryHistory[0].LastObservedAt == observedAt &&
+            countryHistory[0].RecentApplication == "Browser",
+            "all-time country history includes the latest app and dates without counting an unplaced address");
         Assert(geoStore.ReadGeoCacheState() is { ETag: "etag-1", LocationCount: 1 }, "geo cache state reports its version and exact location count");
         Assert(geoStore.ReadRecentFlows(50).Single(flow => flow.RemoteAddress == "203.0.113.8").CountryCode == "JP" &&
             geoStore.ReadRecentFlows(50).Single(flow => flow.RemoteAddress == "198.51.100.7").CountryCode is null,
