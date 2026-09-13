@@ -4,6 +4,20 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.69
+
+**The location setting works, and says less in the way of error dumps.**
+
+0.5.68 added a setting for looking a country up when the cache does not have
+one, and named `ip-api.com`, as the README had for months. That service
+answers over plain HTTP on its free tier, macOS refuses plain HTTP, and the
+settings screen showed the refusal as a paragraph of `NSError` before anyone
+had touched it. **No lookup ever happened and no address ever left the Mac.**
+
+Lookups now ask `ipwho.is` over HTTPS, at most 500 addresses a day, and only
+for addresses your Hub could not place. A failure goes to the log instead of
+onto the screen; the addresses stay in the queue for the next try.
+
 ### Agent for Mac 0.5.68
 
 **A country you have never reached before appears on the map right away.**
