@@ -206,6 +206,13 @@
   </div>
 </section>
 
+<section class="wrap" id="windows-disclosure">
+  <h2 data-ja="Windows Agent: Hub送信と更新確認">Windows Agent: Hub delivery and update checks</h2>
+  <p data-ja="Windows版の配布リンクは現在準備中です。Hub登録だけでは観測データを送信せず、アプリ内で明示的に有効にした場合のみ送ります。通信内容・パケット本体は送りません。">The Windows download link is being prepared. Hub enrollment alone does not send observations; delivery starts only after you explicitly enable it in the app. Packet contents are never sent.</p>
+  <p data-ja="送信するJSON項目: schemaVersion, batchId, sentAt, agent (hostName, platform, osVersion, agentVersion), observations (observationId, networkProtocol, localAddress, localPort, remoteAddress, remotePort, processID, processName, bundleID, firstObservedAt, lastObservedAt, bytesIn, bytesOut, collector, confidence)。remoteHostnameはHubが対応を通知したときだけ追加します。認証用Bearer tokenはそのHubへ送ります。">JSON fields sent: schemaVersion, batchId, sentAt, agent (hostName, platform, osVersion, agentVersion), observations (observationId, networkProtocol, localAddress, localPort, remoteAddress, remotePort, processID, processName, bundleID, firstObservedAt, lastObservedAt, bytesIn, bytesOut, collector, confidence). remoteHostname is added only when the Hub advertises support. The Bearer token authenticates to that Hub.</p>
+  <p data-ja="別途の更新確認はdl.egressview.comへ接続し、User-AgentにAgentとWindowsのバージョンを含めます。送信元IPは接続先に見えますが、観測データとHub資格情報は送りません。">Separate update checks contact dl.egressview.com and include the Agent and Windows versions in User-Agent. The server sees the source IP, but receives no observations or Hub credentials.</p>
+</section>
+
 <section class="wrap">
   <h2 data-ja="インストール">Installing</h2>
   <ol class="steps">
