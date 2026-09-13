@@ -83,7 +83,7 @@ public sealed record GlobePoint(double Latitude, double Longitude, string? Count
     long Connections, long Bytes);
 
 public sealed record CountryHistoryRow(string CountryCode, long Connections,
-    DateTimeOffset FirstObservedAt, DateTimeOffset LastObservedAt);
+    DateTimeOffset FirstObservedAt, DateTimeOffset LastObservedAt, string? RecentApplication = null);
 
 public sealed record AppDestinationAggregate(
     string Application, string Destination, string DestinationName, long Connections, long Bytes, long ConnectionsWithoutBytes);
@@ -174,7 +174,11 @@ public sealed record CollectorSnapshot(
     long HostnamesResolved = 0,
     long HostnamesUnavailable = 0,
     long DnsEventsSeen = 0,
-    string? HostnameSourceError = null);
+    string? HostnameSourceError = null,
+    long EtwConnectionAttempted = 0,
+    long EtwConnectionAccepted = 0,
+    long EtwConnectionDisconnected = 0,
+    long EtwConnectionClosed = 0);
 
 public enum StoreFailureKind
 {

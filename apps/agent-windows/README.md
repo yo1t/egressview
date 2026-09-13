@@ -1,5 +1,18 @@
 # EgressView Agent for Windows
 
+[English: Hub delivery and update-check disclosure](README.en.md)
+
+## Hub送信と更新確認で送るもの
+
+Hub登録ではPC名、Windowsのバージョン、Agentのバージョンを送ります。観測データのHub送信は登録だけでは始まらず、アプリ内で明示的に有効にする必要があります。有効化後は認証用Bearer tokenをそのHubへ送り、次のJSONメタデータを送ります。通信内容・パケット本体は収集も送信もしません。
+
+- バッチ: `schemaVersion`, `batchId`, `sentAt`, `agent`, `observations`。
+- Agent: `hostName`, `platform`, `osVersion`, `agentVersion`。
+- 各観測: `observationId`, `networkProtocol`, `localAddress`, `localPort`, `remoteAddress`, `remotePort`, `processID`, `processName`, `bundleID`, `firstObservedAt`, `lastObservedAt`, `bytesIn`, `bytesOut`, `collector`, `confidence`。取得できない値はnullです。
+- `remoteHostname`（宛先ホスト名）はHubのcapabilities応答が対応を通知した場合だけ追加します。旧Hubへは送りません。
+
+更新確認は観測データの送信とは別で、`dl.egressview.com`の`/windows/manifest.json`と署名を取得します。HTTP User-AgentにはAgentバージョンとWindowsバージョンが含まれます。通常のHTTP通信と同様、接続先サーバーには送信元IPアドレスが見えます。更新確認で観測データやHub資格情報は送りません。
+
 Phase 1の最小vertical sliceです。ネットワーク観測をbounded channelで受け、Windows標準SQLiteへ
 batch保存し、再起動後の整合性とprivacy-safeな診断を確認します。
 

@@ -59,7 +59,7 @@ internal static class Entry
         // The card is half the window wide and only just taller than its
         // minimum, so the tight sizes are the ones that have to hold.
         foreach (var (label, bytes) in new[] { ("connections", false), ("bytes", true) })
-            foreach (var (w, h) in new[] { (700, 200), (520, 170), (420, 150), (360, 120) })
+            foreach (var (w, h) in ChartSizes())
             {
                 var flow = new NetworkFlowControl();
                 VerifyAutomationPeer(flow, "Application to destination flow");
@@ -84,6 +84,22 @@ internal static class Entry
         ]);
         Save(globe, 330, 260, Path.Combine(output, "globe.png"));
 
+        var countryMap = new WorldCountryMapControl();
+        VerifyAutomationPeer(countryMap, "All-time destination countries");
+        countryMap.SetVisitedCountries(["JP", "US", "AU", "GB", "BR"]);
+        if (countryMap.MappedCountryCount != 5)
+            throw new InvalidOperationException("The map and all-time country list disagree on mapped countries.");
+        Save(countryMap, 700, 360, Path.Combine(output, "country-atlas.png"));
+        var glowAt = DateTimeOffset.UtcNow;
+        foreach (var (label, elapsed) in new[] { ("full", 0), ("half", 3), ("ended", 6) })
+        {
+            var glowingMap = new WorldCountryMapControl();
+            glowingMap.SetVisitedCountries(["JP", "US", "AU", "GB", "BR"]);
+            glowingMap.MarkActivity("JP", glowAt);
+            glowingMap.RenderMoment = glowAt.AddSeconds(elapsed);
+            Save(glowingMap, 700, 360, Path.Combine(output, $"country-atlas-glow-{label}.png"));
+        }
+
         var timelineStart = new DateTimeOffset(2026, 9, 6, 10, 0, 0, TimeSpan.FromHours(9));
         var timeline = new List<AppTimelineAggregate>();
         var applications = new[] { "chrome", "codex", "svchost", "tailscaled", "zabbix_agent2", "Other" };
@@ -96,7 +112,7 @@ internal static class Entry
                         connections * (32_768L + index * 8_192L), 0));
             }
         foreach (var (label, bytes) in new[] { ("connections", false), ("bytes", true) })
-            foreach (var (w, h) in new[] { (700, 200), (520, 170), (420, 150), (360, 120) })
+            foreach (var (w, h) in ChartSizes())
             {
                 var chart = new TrafficTimelineControl();
                 VerifyAutomationPeer(chart, "Traffic timeline");
@@ -135,6 +151,11 @@ internal static class Entry
         lightSegmented.Items.Add(new ListBoxItem { Content = "Data volume" });
         Save(lightSegmented, 210, 40, Path.Combine(output, "segmented-light-accent.png"));
 
+        var dashboard = new MainWindow();
+        if (dashboard.FindName("ExpandedCountryAtlas") is not Grid ||
+            dashboard.FindName("ExpandedCountryList") is not ItemsControl)
+            throw new InvalidOperationException("The expandable country atlas is missing from the Windows dashboard.");
+
         Console.WriteLine($"wrote {output}");
         return 0;
     }
@@ -150,6 +171,16 @@ internal static class Entry
 
     /// Whether anything was painted outside the control's own bounds, in
     /// pixels. Reading it off a picture is guesswork; counting it is not.
+    private static IReadOnlyList<(int Width, int Height)> ChartSizes()
+    {
+        // The lower bound comes from the window's actual MinWidth and the
+        // two equally sized bottom cards (outer margin, gap and card padding).
+        // The remaining cases exercise larger windows and compressed heights.
+        var minimumCardWidth = (MainWindow.MinimumWindowWidth - 64 - 14) / 2 - 48;
+        var minimum = (int)Math.Floor(minimumCardWidth);
+        return [(minimum, 170), (minimum - 30, 150), (minimum - 90, 120), (minimum + 240, 200)];
+    }
+
     private static void Report(RenderTargetBitmap bitmap, int width, int height, int bleed, string name)
     {
         var stride = bitmap.PixelWidth * 4;
@@ -174,6 +205,8 @@ internal static class Entry
                 if (x >= bleed + width) right = Math.Max(right, x - (bleed + width) + 1);
             }
         Console.WriteLine($"{name}: {width}x{height} overflow above={above} below={below} left={left} right={right}");
+        if (above != 0 || below != 0 || left != 0 || right != 0)
+            throw new InvalidOperationException($"{name} painted outside its {width}x{height} bounds");
     }
 
     private static void Save(FrameworkElement element, int width, int height, string path)

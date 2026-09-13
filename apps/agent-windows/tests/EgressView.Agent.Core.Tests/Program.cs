@@ -1,11 +1,23 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using EgressView.Agent.Core;
 
 var directory = Path.Combine(Path.GetTempPath(), $"egressview-agent-tests-{Guid.NewGuid():N}");
 Directory.CreateDirectory(directory);
 var database = Path.Combine(directory, "agent.db");
+var windowsRoot = FindWindowsRoot(Directory.GetCurrentDirectory());
+
+static string FindWindowsRoot(string start)
+{
+    for (var path = start; path is not null; path = Directory.GetParent(path)?.FullName)
+        foreach (var candidate in new[] { path, Path.Combine(path, "apps", "agent-windows") })
+            if (File.Exists(Path.Combine(candidate, "src", "EgressView.Agent.Ui", "Resources", "Strings.en.xaml")))
+                return candidate;
+    throw new DirectoryNotFoundException("Windows Agent source root was not found.");
+}
 
 try
 {
@@ -26,6 +38,12 @@ try
         "an intentional monitoring stop is not presented as a fault");
     Assert(AgentIpcClient.RequestTimeout == TimeSpan.FromSeconds(15),
         "IPC requests bound the complete request and response lifetime");
+    Assert(EtwConnectionEvents.Classify("TcpConnectionattempted") == EtwConnectionEventKind.Attempted &&
+        EtwConnectionEvents.Classify("TcpConnectionaccepted") == EtwConnectionEventKind.Accepted &&
+        EtwConnectionEvents.Classify("TcpDisconnectissued") == EtwConnectionEventKind.Disconnect &&
+        EtwConnectionEvents.Classify("TcpClose") == EtwConnectionEventKind.Close &&
+        EtwConnectionEvents.Classify("TcpDatasent") == EtwConnectionEventKind.Other,
+        "ETW connection lifecycle event counters distinguish starts and endings from data events");
 
     using (var ipcLoopStop = new CancellationTokenSource())
     {
@@ -94,6 +112,20 @@ try
         "the Windows globe turns eastward with the same decreasing centre longitude and wraparound as Mac");
     Assert(GlobePresentation.CountryFlag("jp") == "🇯🇵" && GlobePresentation.CountryFlag("USA") == string.Empty,
         "two-letter destination country codes produce a flag without guessing invalid codes");
+    Assert(EqualEarthProjection.AspectRatio is > 2 and < 2.1 &&
+        EqualEarthProjection.Project(0, 0) is (0.5, 0.5) &&
+        EqualEarthProjection.Project(0, 180).X is > 0.99 and <= 1,
+        "Equal Earth keeps the whole world on one equal-area map without a hidden hemisphere");
+    var seamPieces = EqualEarthProjection.Split([(10, 179), (15, -179), (5, -178), (10, 179)]);
+    Assert(seamPieces.Count >= 2 && seamPieces.All(piece => piece.Zip(piece.Skip(1))
+        .All(pair => Math.Abs(pair.First.Lon - pair.Second.Lon) <= 180)),
+        "rings crossing the antimeridian do not draw a line across the map");
+    var glowAt = new DateTimeOffset(2026, 9, 13, 0, 0, 0, TimeSpan.Zero);
+    Assert(CountryGlow.Intensity(glowAt, glowAt) == 1 &&
+        Math.Abs(CountryGlow.Intensity(glowAt, glowAt.AddSeconds(3)) - 0.5) < 0.000001 &&
+        CountryGlow.Intensity(glowAt, glowAt.AddSeconds(6)) == 0 &&
+        CountryGlow.Intensity(glowAt, glowAt.AddSeconds(7)) == 0,
+        "new-country glow follows a six-second cosine fade and stops drawing after expiry");
 
     var relaunchEncoded = UpdateRelaunchCommand.BuildEncodedPowerShell(4242, @"C:\Program Files\EgressView Agent\ui\EgressView.Agent.Ui.exe", "0.1.37", TimeSpan.FromMinutes(15));
     var relaunchScript = Encoding.Unicode.GetString(Convert.FromBase64String(relaunchEncoded));
@@ -670,8 +702,9 @@ try
             "geo cache joins locally with observations without exposing the full cache to UI");
         var countryHistory = geoStore.ReadCountryHistory();
         Assert(countryHistory.Count == 1 && countryHistory[0].CountryCode == "JP" && countryHistory[0].Connections == 1 &&
-            countryHistory[0].FirstObservedAt == observedAt && countryHistory[0].LastObservedAt == observedAt,
-            "all-time country history includes first and last observation and never counts an unplaced address as a country");
+            countryHistory[0].FirstObservedAt == observedAt && countryHistory[0].LastObservedAt == observedAt &&
+            countryHistory[0].RecentApplication == "Browser",
+            "all-time country history includes the latest app and dates without counting an unplaced address");
         Assert(geoStore.ReadGeoCacheState() is { ETag: "etag-1", LocationCount: 1 }, "geo cache state reports its version and exact location count");
         Assert(geoStore.ReadRecentFlows(50).Single(flow => flow.RemoteAddress == "203.0.113.8").CountryCode == "JP" &&
             geoStore.ReadRecentFlows(50).Single(flow => flow.RemoteAddress == "198.51.100.7").CountryCode is null,
@@ -837,6 +870,39 @@ try
             "a compatible Hub accepts the first bounded batch");
         Assert(handler.ObservationCounts.Single() == 2 && handler.SawRemoteHostname,
             "only the negotiated batch limit is sent and stored hostnames reach an accepting Hub");
+        using (var payload = JsonDocument.Parse(handler.LastIngestBody!))
+        {
+            var root = payload.RootElement;
+            var sentKeys = root.EnumerateObject().Select(item => item.Name)
+                .Concat(root.GetProperty("agent").EnumerateObject().Select(item => item.Name))
+                .Concat(root.GetProperty("observations")[0].EnumerateObject().Select(item => item.Name))
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var language in new[] { "en", "ja" })
+            {
+                var resource = XDocument.Load(Path.Combine(windowsRoot, "src", "EgressView.Agent.Ui", "Resources", $"Strings.{language}.xaml"));
+                var disclosure = resource.Descendants().Single(node =>
+                    (string?)node.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")) == "HubExplanation").Value;
+                var disclosedKeys = Regex.Matches(disclosure, @"\[([A-Za-z][A-Za-z0-9]*)\]")
+                    .Select(match => match.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+                Assert(disclosedKeys.SetEquals(sentKeys),
+                    $"{language} Hub disclosure must match the actual serialized sender payload, including optional hostname");
+            }
+            foreach (var path in new[] { "README.md", "README.en.md" })
+            {
+                var guide = File.ReadAllText(Path.Combine(windowsRoot, path));
+                Assert(sentKeys.All(key => guide.Contains($"`{key}`", StringComparison.Ordinal)),
+                    $"{path} lists every key in the sent JSON payload");
+            }
+            var downloadPage = File.ReadAllText(Path.Combine(windowsRoot, "..", "..", "site", "dl", "index.html"));
+            Assert(sentKeys.All(key => downloadPage.Contains(key, StringComparison.Ordinal)),
+                "the download page lists every key in the sent JSON payload");
+            var updateAgent = WindowsAgentUpdateClient.UserAgent("1.2.3", "11.0");
+            Assert(updateAgent.Contains("1.2.3", StringComparison.Ordinal) && updateAgent.Contains("11.0", StringComparison.Ordinal) &&
+                downloadPage.Contains("dl.egressview.com", StringComparison.Ordinal) &&
+                File.ReadAllText(Path.Combine(windowsRoot, "README.md")).Contains("dl.egressview.com", StringComparison.Ordinal) &&
+                File.ReadAllText(Path.Combine(windowsRoot, "README.en.md")).Contains("dl.egressview.com", StringComparison.Ordinal),
+                "update-check disclosure names the actual origin and User-Agent version fields");
+        }
         Assert((await sender.SendNextAsync(capableStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged &&
             handler.CapabilityRequests == 1 && handler.ObservationCounts.Last() == 1,
             "successful capabilities are cached while later batches preserve the negotiated limit");
@@ -1461,6 +1527,7 @@ sealed class DeliveryHandler(params int[] statuses) : HttpMessageHandler
     public bool SawRemoteHostname { get; private set; }
     public int CapabilityRequests { get; private set; }
     public int IngestRequests { get; private set; }
+    public string? LastIngestBody { get; private set; }
     public HttpStatusCode CapabilitiesStatus { get; set; } = HttpStatusCode.NotFound;
     public string CapabilitiesJson { get; set; } = "{}";
     public int RejectedAcknowledgements { get; set; }
@@ -1479,6 +1546,7 @@ sealed class DeliveryHandler(params int[] statuses) : HttpMessageHandler
         }
         IngestRequests++;
         var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+        LastIngestBody = body;
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
         var batchId = root.GetProperty("batchId").GetGuid();
