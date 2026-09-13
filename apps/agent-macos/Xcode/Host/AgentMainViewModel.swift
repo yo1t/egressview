@@ -245,26 +245,24 @@ final class AgentMainViewModel: ObservableObject {
 
     func start() {
         refresh()
-        // Four seconds, and only while the window is on screen. Eight queries
-        // over a 39 MB database every two seconds, republishing every value the
-        // analysis tab is built from, made the app the busiest process on the
-        // Mac -- while showing numbers that change slowly and, half the time,
-        // to nobody.
-        // Fifteen seconds, not five. Measured on this Mac: each grouped scan
-        // over the 358,000-row observations table costs 200-260 ms, and the
-        // network tab needs six of them, so a refresh is over a second of
-        // SQLite work. At five seconds that is a fifth of a core, permanently,
-        // to re-answer questions whose answers barely moved.
+        // The timer is the floor, not the mechanism. While the network tab is
+        // in front it follows arrivals instead -- see `networkPacer` -- and
+        // this remains for the case nothing arrives at all: an idle network
+        // still has to move "the last hour" forward, and a tab that only
+        // redrew on traffic would freeze on a quiet machine.
         //
-        // This was a mitigation. The fix -- `chart_hourly`, updated as
-        // observations arrive -- shipped in 0.5.0 and took the query from
-        // 473ms to 31ms. The interval stays because there is nothing to gain
-        // from redrawing faster than the eye reads.
+        // Fifteen seconds, historically, because the tab was expensive: each
+        // grouped scan over the 358,000-row observations table cost 200-260 ms
+        // and the tab needed six of them, so one refresh was over a second of
+        // SQLite work. `chart_hourly`, updated as observations arrive, took that
+        // to 31 ms in 0.5.0, which is what makes following arrivals affordable
+        // now.
         refreshTimer.start(every: 15) { [weak self] in
             Task { @MainActor in
                 guard let self, self.isWindowVisible else { return }
                 // Four times slower again when the app is not the one being
-                // used: nobody is reading numbers they cannot see.
+                // used: nobody is reading numbers they cannot see. Arrivals do
+                // not drive a redraw then either, for the same reason.
                 if !NSApp.isActive {
                     self.ticksSinceRefresh += 1
                     guard self.ticksSinceRefresh >= 4 else { return }
@@ -416,6 +414,18 @@ final class AgentMainViewModel: ObservableObject {
     /// the rule can be asked questions without watching a screen.
     private var liveLogPacer = LiveLogPacer()
 
+    /// The same rule for the network tab, at its own pace.
+    ///
+    /// The log shows individual connections, so it follows the rate they can
+    /// arrive at -- one second, the System Extension's drain. This tab shows
+    /// totals and a chart of them, which nobody reads line by line, so a
+    /// slower pace is not a worse screen. It is one read per interval either
+    /// way; the interval is the only difference.
+    private var networkPacer = LiveLogPacer(interval: AgentMainViewModel.networkFollowInterval)
+
+    /// How often the network tab re-reads while following traffic.
+    static let networkFollowInterval: TimeInterval = 5
+
     /// New observations have been written to the store.
     ///
     /// Called from the collector's own delivery path rather than found by
@@ -425,12 +435,44 @@ final class AgentMainViewModel: ObservableObject {
     func observationsArrived(_ observations: [ConnectionObservation]) {
         guard !observations.isEmpty, isWindowVisible else { return }
         lightUpCountries(for: observations)
-        guard selectedTab == .log else { return }
-        guard !logIsPaused else {
-            logPendingArrivals += observations.count
+        // Only the tab in front follows arrivals. The others are still served
+        // by the timer, and reading for a screen nobody is looking at is the
+        // work 0.4.x spent making the app the busiest process on the Mac.
+        //
+        // Nor while the app is in the background: a window that is visible
+        // behind another app is not being read, and the timer already slows to
+        // a quarter there. Following arrivals would undo that.
+        guard NSApp.isActive else { return }
+        switch selectedTab {
+        case .log:
+            guard !logIsPaused else {
+                logPendingArrivals += observations.count
+                return
+            }
+            scheduleLiveLogRefresh()
+        case .network:
+            scheduleNetworkRefresh()
+        default:
             return
         }
-        scheduleLiveLogRefresh()
+    }
+
+    private func scheduleNetworkRefresh() {
+        guard let delay = networkPacer.schedule() else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            // Re-checked on arrival at the deadline, not only when it was
+            // scheduled: the tab and the window can both have changed while
+            // waiting. Telling the pacer which of the two happened is what
+            // keeps an abandoned read from looking pending forever, which is
+            // how a live screen quietly stops being live.
+            guard self.selectedTab == .network, self.isWindowVisible, NSApp.isActive else {
+                self.networkPacer.cancelled()
+                return
+            }
+            self.networkPacer.refreshed()
+            self.refresh()
+        }
     }
 
     /// Lights the countries these connections went to, on the expanded map.

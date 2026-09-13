@@ -4,6 +4,46 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.72
+
+**You can see how many location lookups today has left.**
+
+The setting that asks a third party where a destination is has a daily
+ceiling. Until now that number was invisible, which is how 0.5.69 spent 400 of
+its 500 requests on this Mac's own LAN in about two minutes without anything on
+the screen saying so. The defect was fixed in 0.5.70; this is the part that let
+it run unseen.
+
+The figure appears under that setting only. Running out reads as a limit rather
+than a failure, and says that lookups resume tomorrow.
+
+### Agent for Mac 0.5.71
+
+**The network view keeps up with the traffic it is showing.**
+
+"This period at a glance" and "Which application went where" redrew on a
+15-second timer, so a connection you had just made could be missing from a
+screen you were watching. They now follow arrivals instead: the collector
+already reports when observations land, and the view reads once per five
+seconds at most, however many arrive in that time. A burst — a page load is
+dozens of flows inside a second — is still one read.
+
+The timer stays as the floor, because an idle network still has to move "the
+last hour" forward. When the app is not in front, the pace stays at 20 seconds
+and arrivals do not drive a redraw: nobody is reading numbers they cannot see.
+
+This is affordable now because of a fix that shipped in 0.5.0. The view used to
+cost over a second of database work per refresh, which is why the timer was 15
+seconds; the hourly chart table took that to 31 ms.
+
+**Destination names moved to Data Enrichment.**
+
+The setting sat under General, next to the monitoring mode and launch-at-login,
+where it was the only setting about the observed data rather than about the
+app. Naming a destination, placing it and judging it are the same question —
+what else is known about this address — so they are now in one place, in that
+order.
+
 ### Agent for Mac 0.5.70
 
 **Your own network is no longer sent to a location service.**

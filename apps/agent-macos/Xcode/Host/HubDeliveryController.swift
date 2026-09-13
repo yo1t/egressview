@@ -725,7 +725,6 @@ private struct AgentSettingsView: View {
                 .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
                 Text(model.monitoringStatus).font(.callout).foregroundStyle(.secondary)
             }
-            serverNameSection
             settingsGroup(L("Startup")) {
                 Toggle(L("Launch EgressView Agent at login"), isOn: launchBinding)
                 Text(model.launchAtLoginDetail).font(.callout).foregroundStyle(.secondary)
@@ -912,8 +911,16 @@ private struct AgentSettingsView: View {
         VStack(alignment: .leading, spacing: 22) {
             settingsTitle(
                 L("Data Enrichment"),
-                subtitle: L("Add location and threat context to observed destinations.")
+                subtitle: L("Add names, location and threat context to observed destinations.")
             )
+            // Naming a destination, placing it, and judging it are the same
+            // kind of question -- what else is known about this address --
+            // and they read as a sequence: the name first, since it is the
+            // one thing the Mac can answer without asking anyone. This
+            // section sat under General, next to the monitoring mode and
+            // launch-at-login, where it was the only setting about the data
+            // rather than about the app.
+            serverNameSection
             geoSection
             threatSection
         }
@@ -1120,7 +1127,14 @@ private struct AgentSettingsView: View {
                 Text(Self.explanation(for: model.geoLookupSource))
                     .font(.caption)
                     .foregroundStyle(model.geoLookupSource.usesThirdParty ? .orange : .secondary)
+                // Only the setting that spends it shows the figure.
+                if model.geoLookupSource.usesThirdParty {
+                    Text(Self.budgetText(remaining: geo.thirdPartyRemainingToday))
+                        .font(.caption)
+                        .foregroundStyle(geo.thirdPartyRemainingToday == 0 ? .orange : .secondary)
+                }
             }
+            .onAppear { geo.refreshRemainingBudget() }
         }
     }
 
@@ -1130,6 +1144,16 @@ private struct AgentSettingsView: View {
         case .hub: return L("Ask the Hub")
         case .hubThenThirdParty: return L("Ask the Hub, then ipwho.is")
         }
+    }
+
+    /// Says what is left, and -- when there is nothing left -- that this is a
+    /// limit rather than a failure, and when it lifts.
+    static func budgetText(remaining: Int) -> String {
+        guard remaining > 0 else {
+            return L("Today's %lld lookups are used up. Locations resume tomorrow; nothing else is affected.",
+                     ThirdPartyGeoLookup.dailyBudget)
+        }
+        return L("%lld of today's %lld lookups left.", remaining, ThirdPartyGeoLookup.dailyBudget)
     }
 
     private static func explanation(for source: GeoLookupSource) -> String {
@@ -1634,6 +1658,14 @@ final class GeoCacheController: ObservableObject {
 
     @Published private(set) var status: Status = .idle
 
+    /// What is left of today's third-party allowance.
+    ///
+    /// The budget was invisible until it mattered: on 2026-09-13 a defect sent
+    /// one Mac's own LAN to the location service and spent 400 of 500 requests
+    /// in about two minutes, and nothing on the screen said so. A number that
+    /// only exists in preferences cannot be noticed going wrong.
+    @Published private(set) var thirdPartyRemainingToday = ThirdPartyGeoLookup.dailyBudget
+
     private let store: ObservationStore?
     private let credentialStore: any AgentCredentialStoring
     private let preferences = GeoCachePreferences()
@@ -1644,6 +1676,17 @@ final class GeoCacheController: ObservableObject {
         self.store = store
         self.credentialStore = credentialStore
         self.agentVersion = agentVersion
+        refreshRemainingBudget()
+    }
+
+    /// Read the tally back. Called when the screen opens and after every run,
+    /// so the figure is the one the next lookup would actually get.
+    func refreshRemainingBudget() {
+        thirdPartyRemainingToday = max(
+            0,
+            ThirdPartyGeoLookup.dailyBudget
+                - preferences.thirdPartySpent(on: GeoCachePreferences.day(for: Date()))
+        )
     }
 
     func start() {
@@ -1716,6 +1759,7 @@ final class GeoCacheController: ObservableObject {
             .filter { !NonPublicAddress.isNonPublic($0) }
         guard !remaining.isEmpty else { return }
         preferences.recordThirdPartySpend(remaining.count, on: day)
+        refreshRemainingBudget()
         do {
             let located = try await ThirdPartyGeoLookup(
                 transport: URLSessionThirdPartyGeoTransport()
