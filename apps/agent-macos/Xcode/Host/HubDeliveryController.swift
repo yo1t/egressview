@@ -725,7 +725,6 @@ private struct AgentSettingsView: View {
                 .disabled(uninstall.isRunning || uninstall.isReadyToRemoveApplication)
                 Text(model.monitoringStatus).font(.callout).foregroundStyle(.secondary)
             }
-            serverNameSection
             settingsGroup(L("Startup")) {
                 Toggle(L("Launch EgressView Agent at login"), isOn: launchBinding)
                 Text(model.launchAtLoginDetail).font(.callout).foregroundStyle(.secondary)
@@ -912,8 +911,16 @@ private struct AgentSettingsView: View {
         VStack(alignment: .leading, spacing: 22) {
             settingsTitle(
                 L("Data Enrichment"),
-                subtitle: L("Add location and threat context to observed destinations.")
+                subtitle: L("Add names, location and threat context to observed destinations.")
             )
+            // Naming a destination, placing it, and judging it are the same
+            // kind of question -- what else is known about this address --
+            // and they read as a sequence: the name first, since it is the
+            // one thing the Mac can answer without asking anyone. This
+            // section sat under General, next to the monitoring mode and
+            // launch-at-login, where it was the only setting about the data
+            // rather than about the app.
+            serverNameSection
             geoSection
             threatSection
         }

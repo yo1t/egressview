@@ -50,4 +50,20 @@ final class LiveLogPacerTests: XCTestCase {
         XCTAssertEqual(LiveLogPacer.defaultInterval, FullMonitoringXPC.drainInterval)
         XCTAssertGreaterThan(FullMonitoringXPC.drainInterval, 0)
     }
+
+    /// The network tab follows arrivals through the same rule at its own pace.
+    ///
+    /// It used to redraw on a 15-second timer alone, which is what "this period
+    /// at a glance" being 15 seconds stale meant. Following arrivals is what
+    /// makes it live; a slower interval than the log's is what keeps that from
+    /// becoming a read per second for totals nobody reads line by line.
+    func test概要は独自の間隔でまとめて読む() {
+        var pacer = LiveLogPacer(interval: 5, lastRefreshAt: now)
+        let delay = pacer.schedule(now: now.addingTimeInterval(1))
+        XCTAssertEqual(try XCTUnwrap(delay), 4, accuracy: 0.001)
+        // Still one read for a burst, which is the whole point of reusing this.
+        for _ in 0..<50 {
+            XCTAssertNil(pacer.schedule(now: now.addingTimeInterval(1)))
+        }
+    }
 }
