@@ -9,9 +9,9 @@ import Foundation
 /// The Agent grew its own third-party lookup without that check, and the
 /// omission was not theoretical: measured on one Mac 2026-09-13, minutes after
 /// install, **400 of the day's 500 requests had been spent** and the head of
-/// the queue was `10.41.128.183`, `192.168.41.1`, `192.168.41.22`, six
-/// `fe80::` addresses and `ff02::1:2` -- the local network, sent to a third
-/// party, one address at a time.
+/// the queue was that machine's own router and subnet, six link-local `fe80::`
+/// addresses and a multicast `ff02::` address -- the local network, sent to a
+/// third party, one address at a time.
 ///
 /// Two things follow from a range being listed here:
 ///

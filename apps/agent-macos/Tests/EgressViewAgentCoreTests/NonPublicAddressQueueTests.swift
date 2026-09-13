@@ -7,12 +7,12 @@ import XCTest
 /// since it first had a geo lookup. The Agent's own lookup shipped without that
 /// check, and the result was not subtle: measured on one Mac 2026-09-13, minutes
 /// after install, 400 of the day's 500 requests were gone and the queue was
-/// headed by the LAN -- `10.41.128.183`, `192.168.41.1`, six `fe80::` addresses,
-/// `ff02::1:2`.
+/// headed by that machine's own router and subnet, six link-local `fe80::`
+/// addresses and a multicast `ff02::` address.
 final class NonPublicAddressTests: XCTestCase {
     func test_ローカルなアドレスは公開先ではない() {
         for address in [
-            "10.41.128.183", "192.168.41.1", "172.16.0.1", "172.31.255.254",
+            "10.0.0.1", "10.255.255.254", "192.168.0.1", "172.16.0.1", "172.31.255.254",
             "127.0.0.1", "169.254.169.254", "100.64.0.1", "0.0.0.0",
             "224.0.0.251", "255.255.255.255",
             "192.0.2.1", "198.51.100.7", "203.0.113.9",   // documentation
@@ -87,7 +87,8 @@ final class PendingCountryQueueTests: XCTestCase {
     }
 
     func test_ローカルなアドレスは待ち行列に入らない() throws {
-        try observe("10.41.128.183")
+        try observe("10.0.0.1")
+        try observe("192.168.0.1")
         try observe("fe80::1")
         try observe("ff02::1:2")
         try observe("8.8.8.8")
