@@ -89,7 +89,7 @@ struct AgentMainView: View {
             .id(language.language.rawValue)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 900, minHeight: 620)
+        .frame(minWidth: AgentWindowMetrics.minimumWidth, minHeight: AgentWindowMetrics.minimumHeight)
         .background(Color(nsColor: .windowBackgroundColor))
         .environment(\.locale, language.language.locale)
         // The two directions, kept next to each other so neither is added
@@ -788,6 +788,25 @@ struct AgentLogFilterBar: View {
 }
 
 /// The top-right panel: how much was seen, and how much of it can be trusted.
+/// Lets content scroll when its box is too small for it, and otherwise leaves
+/// it exactly as it was -- no scroll bars, no bounce, no change in layout.
+struct AgentFitsOrScrolls: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let scroller = ScrollView(.vertical) {
+            content.frame(maxWidth: .infinity, alignment: .leading)
+        }
+        // Ventura is still supported, and the "do not bounce when it already
+        // fits" behaviour arrived in 13.3. Without it the panel is still
+        // whole; it just rubber-bands when there is nothing to scroll to.
+        if #available(macOS 13.3, *) {
+            scroller.scrollBounceBehavior(.basedOnSize)
+        } else {
+            scroller
+        }
+    }
+}
+
 struct AgentOverviewPanel: View {
     let summary: AgentPeriodSummary
     let coverage: CoverageSummary
@@ -876,6 +895,15 @@ struct AgentOverviewPanel: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
+        // The row gives this panel a fixed height so it lines up with the
+        // globe beside it. On a narrow window the tiles wrap onto more rows
+        // and the content needs more than that -- and what fell off the
+        // bottom was "Packet contents are never collected.", the one line on
+        // this screen that makes a promise (seen 2026-09-13, P3-109).
+        //
+        // Scrolling only when it does not fit: the height contract with the
+        // globe is kept, and nothing is silently cut.
+        .modifier(AgentFitsOrScrolls())
         .agentSection()
     }
 
@@ -921,6 +949,24 @@ struct AgentOverviewPanel: View {
     }
 }
 
+/// The smallest the window may be made.
+///
+/// Measured, not chosen. At the old 900x620 two things were cut off: the
+/// globe's speed controls ran off the leading edge of the card that holds
+/// them, and "Packet contents are never collected." fell out of the bottom of
+/// the summary card. The user resized the window until nothing was clipped,
+/// and that size was read back from the window server: 1169x765 on
+/// 2026-09-13.
+///
+/// The layout no longer breaks below this -- the controls fold and the
+/// summary scrolls -- so this is where the window is *comfortable*, not where
+/// it stops working. It fits a 13-inch built-in display (1372x892 points,
+/// less the menu bar).
+enum AgentWindowMetrics {
+    static let minimumWidth: CGFloat = 1170
+    static let minimumHeight: CGFloat = 765
+}
+
 final class ObservationWindowController: NSWindowController, NSWindowDelegate {
     private static let retentionDefaultsKey = "localHistoryRetentionDays"
 
@@ -954,7 +1000,9 @@ final class ObservationWindowController: NSWindowController, NSWindowDelegate {
         // Bigger than before: the analysis tab now shows five panels at once,
         // and the old default made each of them too short to read.
         window.setContentSize(NSSize(width: 1180, height: 820))
-        window.minSize = NSSize(width: 900, height: 620)
+        window.minSize = NSSize(
+            width: AgentWindowMetrics.minimumWidth, height: AgentWindowMetrics.minimumHeight
+        )
         super.init(window: window)
         window.delegate = self
     }
