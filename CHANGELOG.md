@@ -4,6 +4,30 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.70
+
+**Your own network is no longer sent to a location service.**
+
+0.5.69 asked `ipwho.is` about addresses your Hub could not place. It did not
+check which addresses those were, so it asked about the local network:
+routers, private subnets, link-local `fe80::` addresses, multicast. Measured on
+one Mac minutes after installing, **400 of the day's 500 lookups were already
+gone** and one address had been placed. Nothing was learned, the allowance was
+spent, and the addresses of a private network were sent to a third party.
+
+The Hub has always refused these -- private, loopback, link-local, multicast
+and the other ranges nothing outside a network can place. The agent now uses
+the same list. Such an address is never queued and never asked about, of
+anyone, including your Hub; the ones already queued are removed on upgrade.
+
+An address that *was* asked about and could not be placed is now remembered and
+left alone for a week, instead of being re-sent on every run. A queue read
+newest-first meant one unplaceable destination could consume an entire day's
+allowance by itself.
+
+**If you had the setting on, upgrading stops the sending and clears the
+backlog. Payloads were never involved: this was addresses, one at a time.**
+
 ### Agent for Mac 0.5.69
 
 **The location setting works, and says less in the way of error dumps.**
