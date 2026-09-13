@@ -20,7 +20,7 @@ describe('窓を狭めても、中身が外へ出ない', () => {
 
   it('最後まで残るのは、動きを止めるボタン', () => {
     // A moving globe someone cannot stop is the worst of the three states.
-    const body = /ViewThatFits\(in: \.horizontal\) \{([\s\S]*?)\n        \}/.exec(globe)[1];
+    const body = /ViewThatFits\(in: \.horizontal\) \{([\s\S]*?)\n {8}\}/.exec(globe)[1];
     const candidates = body.split('\n').filter(line => line.trim().length > 0);
     assert.equal(candidates[candidates.length - 1].trim(), 'spinButton');
     assert.ok(body.indexOf('170') < body.indexOf('116'), '広い候補が先に来ていない');
