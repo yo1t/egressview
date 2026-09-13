@@ -37,4 +37,10 @@
   <system:String x:Key="ReturnToDashboard">元の画面へ戻る</system:String>
   <system:String x:Key="CountryAtlasCount">地図で塗った国: {0} · 全期間の一覧: {1}</system:String>
   <system:String x:Key="RecentApplication">直近のアプリ</system:String>
+  <system:String x:Key="CountryHistoryLocalHint">この一覧はローカルに保存され、選択中の期間には左右されません。</system:String>
+  <system:String x:Key="NoCountryHistory">アクセス先の国はまだ記録されていません。</system:String>
+  <system:String x:Key="CountryFirstAccess">初回アクセス</system:String>
+  <system:String x:Key="CountryLastAccess">最終アクセス</system:String>
+  <system:String x:Key="CountryTimes">{0:N0}回</system:String>
+  <system:String x:Key="Expand">拡大</system:String>
 </ResourceDictionary>
