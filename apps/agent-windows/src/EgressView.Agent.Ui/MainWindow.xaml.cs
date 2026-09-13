@@ -296,13 +296,42 @@ public partial class MainWindow : Window
             InsightApplications.Text = current.Applications.ToString("N0");
             InsightDestinations.Text = current.Destinations.ToString("N0");
             InsightBytes.Text = FlowRow.FormatBytes(current.Bytes);
-            InsightConnectionsDelta.Text = previous is null || previous.Connections == 0 ? LocalizationManager.Text("NoPreviousData") : $"{(current.Connections - previous.Connections) / (double)previous.Connections:+0%;-0%;0%} {LocalizationManager.Text("VersusPrevious")}";
-            TopApplicationsList.ItemsSource = current.Links.GroupBy(link => link.Application).Select(group => new RankedRow(group.Key, group.Sum(link => IsByteMetric ? link.Bytes : link.Connections), IsByteMetric)).OrderByDescending(row => row.RawValue).Take(10).ToArray();
-            var names = DestinationChoice.SelectedIndex == 0;
-            TopDestinationsList.ItemsSource = current.Links.GroupBy(link => names ? link.DestinationName : link.Destination).Select(group => new RankedRow(group.Key, group.Sum(link => IsByteMetric ? link.Bytes : link.Connections), IsByteMetric)).OrderByDescending(row => row.RawValue).Take(10).ToArray();
+            InsightConnectionsDelta.Text = InsightDelta(current.Connections, previous?.Connections ?? 0);
+            InsightApplicationsDelta.Text = InsightDelta(current.Applications, previous?.Applications ?? 0);
+            InsightDestinationsDelta.Text = InsightDelta(current.Destinations, previous?.Destinations ?? 0);
+            InsightUnmeasured.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("InsightUnmeasuredFormat"), current.ConnectionsWithoutBytes);
+            InsightChangeSummary.Text = InsightChangeSummaryText(current.Connections, previous?.Connections ?? 0);
+            var applications = current.Links.GroupBy(link => link.Application, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new RankedRow(group.Key, group.Sum(link => link.Connections), false))
+                .OrderByDescending(row => row.RawValue).ThenBy(row => row.Name, StringComparer.CurrentCultureIgnoreCase).Take(10).ToArray();
+            var destinations = current.Links.GroupBy(link => link.DestinationName, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new RankedRow(group.Key, group.Sum(link => link.Connections), false))
+                .OrderByDescending(row => row.RawValue).ThenBy(row => row.Name, StringComparer.CurrentCultureIgnoreCase).Take(10).ToArray();
+            TopApplicationsList.ItemsSource = applications;
+            TopDestinationsList.ItemsSource = destinations;
+            InsightTopApp.Text = applications.FirstOrDefault() is { } topApp
+                ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("InsightTopAppFormat"), topApp.Name, topApp.RawValue) : string.Empty;
+            InsightTopDestination.Text = destinations.FirstOrDefault() is { } topDestination
+                ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("InsightTopDestinationFormat"), topDestination.Name, topDestination.RawValue) : string.Empty;
             RefreshAiSurface();
         }
-        catch (Exception exception) { LogStatus.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
+        catch (Exception exception) { InsightChangeSummary.Text = $"{LocalizationManager.Text("CannotConnect")}: {exception.Message}"; }
+    }
+
+    internal static string InsightDelta(long current, long previous)
+    {
+        if (previous <= 0) return LocalizationManager.Text(current > 0 ? "NoPreviousData" : "InsightNoChange");
+        var percent = (long)Math.Round((current - previous) * 100d / previous, MidpointRounding.AwayFromZero);
+        return percent == 0 ? LocalizationManager.Text("InsightNoChangePrevious")
+            : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("InsightDeltaFormat"), percent);
+    }
+
+    internal static string InsightChangeSummaryText(long current, long previous)
+    {
+        if (previous <= 0) return LocalizationManager.Text(current > 0 ? "InsightNoBaseline" : "InsightNoConnections");
+        var percent = (long)Math.Round((current - previous) * 100d / previous, MidpointRounding.AwayFromZero);
+        var key = Math.Abs(percent) < 10 ? "InsightStable" : percent > 0 ? "InsightIncreased" : "InsightDecreased";
+        return string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text(key), key == "InsightDecreased" ? Math.Abs(percent) : percent);
     }
 
     private async Task RefreshThreatsAsync()
@@ -325,8 +354,20 @@ public partial class MainWindow : Window
             ThreatStatus.Text = report.Availability == "available"
                 ? $"{status} {string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("DomainCoverage"), report.DomainCheckedDestinations, report.DomainUncheckedDestinations)}"
                 : status;
+            var showMatches = report.Availability == "available" && report.Findings.Count > 0;
+            ThreatStatus.Visibility = showMatches ? Visibility.Visible : Visibility.Collapsed;
+            ThreatEmptyNote.Visibility = showMatches ? Visibility.Collapsed : Visibility.Visible;
+            ThreatTableCard.Visibility = showMatches ? Visibility.Visible : Visibility.Collapsed;
+            ThreatDetailCard.Visibility = showMatches ? Visibility.Visible : Visibility.Collapsed;
         }
-        catch { ThreatStatus.Text = LocalizationManager.Text("ThreatNotChecked"); ThreatCount.Text = "—"; }
+        catch
+        {
+            ThreatStatus.Text = LocalizationManager.Text("ThreatNotChecked"); ThreatCount.Text = "—";
+            ThreatStatus.Visibility = Visibility.Collapsed;
+            ThreatEmptyNote.Visibility = Visibility.Visible;
+            ThreatTableCard.Visibility = Visibility.Collapsed;
+            ThreatDetailCard.Visibility = Visibility.Collapsed;
+        }
     }
 
     private void ThreatGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1199,6 +1240,12 @@ public partial class MainWindow : Window
         if (System.Windows.Application.Current is not App app) return;
         NotificationPermission.Text = AgentSettings.NotificationsEnabled ? LocalizationManager.Text("NotificationPermissionOn") : LocalizationManager.Text("NotificationPermissionOff");
         NotificationSummary.Text = $"{LocalizationManager.Text("AttemptsToday")}: {app.Notifications.AttemptsToday:N0} · {LocalizationManager.Text("NotificationsToday")}: {app.Notifications.SentToday:N0} · {LocalizationManager.Text("SuppressedToday")}: {app.Notifications.SuppressedToday:N0}";
+        NotificationSentToday.Text = app.Notifications.SentToday.ToString("N0", CultureInfo.CurrentCulture);
+        NotificationSuppressedToday.Text = app.Notifications.History.Count(item =>
+            item.Date.LocalDateTime.Date == DateTime.Today && item.Outcome == "suppressed-daily-limit").ToString("N0", CultureInfo.CurrentCulture);
+        NotificationPermissionCard.Text = AgentSettings.NotificationsEnabled
+            ? LocalizationManager.Text("NotificationPermissionOn") : LocalizationManager.Text("NotificationPermissionOff");
+        NotificationEmptyNote.Visibility = app.Notifications.History.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         NotificationList.ItemsSource = app.Notifications.History.Select(item => new NotificationRow(item)).ToArray();
     }
 
@@ -1434,9 +1481,11 @@ public partial class MainWindow : Window
 
     private void RefreshAiPreview()
     {
-        if (AiPreview is null || AiQuestion is null || string.IsNullOrWhiteSpace(AiQuestion.Text) || CurrentAiContext() is not { } context)
+        if (AiPreview is null || AiQuestion is null || CurrentAiContext() is not { } context)
         { if (AiPreview is not null) AiPreview.Text = string.Empty; return; }
-        try { AiPreview.Text = aiClient.BuildPreview(SelectedAiProvider(), SelectedAiModel(), context, CurrentConversation(), AiQuestion.Text); }
+        try { AiPreview.Text = string.IsNullOrWhiteSpace(AiQuestion.Text)
+            ? AiInsightContextBuilder.Preview(context)
+            : aiClient.BuildPreview(SelectedAiProvider(), SelectedAiModel(), context, CurrentConversation(), AiQuestion.Text); }
         catch (Exception exception) { AiPreview.Text = exception.Message; }
     }
 
@@ -1446,7 +1495,7 @@ public partial class MainWindow : Window
         var provider = SelectedAiProvider();
         AiProviderStatus.Text = AgentSettings.AiEnabled(provider.ToString())
             ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("AiReady"), provider, AgentSettings.AiModel(provider.ToString()))
-            : LocalizationManager.Text("AiDisabled");
+            : LocalizationManager.Text("AiOffNotSent");
         var all = aiHistory.Read();
         var choices = all.GroupBy(item => item.ConversationId).Select(group => new AiConversationRow(
             group.Key, group.OrderBy(item => item.CreatedAt).First().Body, group.Max(item => item.CreatedAt)))
@@ -1456,7 +1505,10 @@ public partial class MainWindow : Window
         AiConversationChoice.ItemsSource = choices;
         AiConversationChoice.SelectedItem = choices.First(item => item.Id == activeConversationId);
         loadingAiConversation = false;
-        AiConversation.ItemsSource = all.Where(item => item.ConversationId == activeConversationId).OrderBy(item => item.CreatedAt).Select(item => new AiMessageRow(item)).ToArray();
+        var messages = all.Where(item => item.ConversationId == activeConversationId).OrderBy(item => item.CreatedAt).Select(item => new AiMessageRow(item)).ToArray();
+        AiConversation.ItemsSource = messages;
+        AiConversation.Visibility = messages.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        AiConversationEmptyNote.Visibility = messages.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         RefreshAiPreview();
     }
 
@@ -1719,9 +1771,9 @@ public sealed class FlowRow(RecentFlow value, bool spansTime = true, DateTimeOff
     internal static TimeSpan ActiveWindow => MainWindow.LogRefreshInterval * 2;
 
     public DateTimeOffset FirstSeen => value.FirstSeen;
-    public string FirstSeenText => value.FirstSeen.LocalDateTime.ToString("g");
+    public string FirstSeenText => value.FirstSeen.LocalDateTime.ToString("G", CultureInfo.CurrentCulture);
     public DateTimeOffset LastSeen => value.LastSeen;
-    public string LastSeenText => value.LastSeen.LocalDateTime.ToString("g");
+    public string LastSeenText => value.LastSeen.LocalDateTime.ToString("G", CultureInfo.CurrentCulture);
 
     /// Empty rather than a second word for finished flows: a column where
     /// most rows say nothing reads as a flag, and one where every row says
@@ -1746,10 +1798,21 @@ public sealed class FlowRow(RecentFlow value, bool spansTime = true, DateTimeOff
         }
     }
     public int Port => value.RemotePort;
-    public string Country => value.CountryCode ?? LocalizationManager.Text("Unknown");
+    public string Country => value.CountryCode is { Length: 2 } code
+        ? CountryHistoryDisplayRow.LocalizedCountryName(code, LocalizationManager.EffectiveLanguage)
+        : LocalizationManager.Text("Unknown");
     public string Protocol => value.Protocol;
     public string BytesReceivedText => FormatBytes(value.BytesReceived);
     public string BytesSentText => FormatBytes(value.BytesSent);
+    public long DataVolumeSort => value.BytesSent is { } sent && value.BytesReceived is { } received
+        ? sent > long.MaxValue - received ? long.MaxValue : sent + received : -1;
+    public string DataVolumeText => (value.BytesSent, value.BytesReceived) switch
+    {
+        (null, null) => "—",
+        ({ } sent, null) => $"≥ {FormatBytes(sent)}",
+        (null, { } received) => $"≥ {FormatBytes(received)}",
+        _ => FormatBytes(DataVolumeSort),
+    };
     public string Origin => value.Origin;
     /// Whether a reader would see any difference between the two rows.
     internal bool LooksSameAs(FlowRow other) =>
@@ -1822,10 +1885,27 @@ public sealed class ThreatRow(ThreatFinding value)
 internal sealed class NotificationRow(NotificationHistoryEntry value)
 {
     public string DateText => value.Date.LocalDateTime.ToString("g");
-    public string Kind => value.Kind;
+    public string Kind => value.Kind switch
+    {
+        "Threat" => LocalizationManager.Text("NotificationKindThreat"),
+        "Monitoring" => LocalizationManager.Text("NotificationKindMonitoring"),
+        "HubDelivery" => LocalizationManager.Text("NotificationKindHubDelivery"),
+        "ThreatIntelChange" => LocalizationManager.Text("NotificationKindThreatIntelChange"),
+        "Recovery" => LocalizationManager.Text("NotificationKindRecovery"),
+        _ => value.Kind,
+    };
     public string Title => value.Title;
     public string Body => value.Body;
-    public string Outcome => LocalizationManager.Text(value.Outcome switch { "shown" => "Delivered", "delivery-failed" => "NotDelivered", _ => "Suppressed" });
+    public string Outcome => LocalizationManager.Text(value.Outcome switch
+    {
+        "shown" => "Delivered",
+        "delivery-failed" => "NotDelivered",
+        "suppressed-disabled" => "NotificationSuppressedDisabled",
+        "suppressed-category" => "NotificationSuppressedCategory",
+        "suppressed-cooldown" => "NotificationSuppressedCooldown",
+        "suppressed-daily-limit" => "NotificationSuppressedDailyLimit",
+        _ => "Suppressed",
+    });
 }
 
 internal sealed class AiMessageRow(AiConversationMessage value)
