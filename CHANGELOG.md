@@ -4,6 +4,20 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.73
+
+**Nothing on the network tab is cut off when the window is narrow.**
+
+At the smallest window size the globe's speed controls sat outside the card
+that holds them -- the Stop button was clipped by the window's own edge -- and
+"Packet contents are never collected." fell out of the bottom of the summary
+card.
+
+The controls now fold as the card narrows, keeping the button that stops a
+moving globe until last. The summary scrolls only when it does not fit, so it
+still lines up with the globe beside it. The smallest the window can be made
+is now a size that reads comfortably rather than one that merely opens.
+
 ### Agent for Mac 0.5.72
 
 **You can see how many location lookups today has left.**
