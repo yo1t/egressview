@@ -44,6 +44,9 @@ describe('終了は、選んでいない一時停止に見えてはいけない'
     // A first run, or an upgrade from a version that never wrote the setting.
     // Inventing "paused" there would turn monitoring off for people who had it.
     assert.match(monitoring, /default:\n\s*break\n\s*\}\n\s*extensionController\.isFilterEnabled/);
+    // Which is why "nobody has chosen" has to be a value the setting can hold.
+    assert.match(preference, /public var storedMode: String\?/);
+    assert.match(preference, /guard let value = defaults\.string\(forKey: Self\.key\), !value\.isEmpty else \{ return nil \}/);
   });
 
   it('アンインストールに入るときは監視を残さない', () => {
