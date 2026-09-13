@@ -4,6 +4,19 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.72
+
+**You can see how many location lookups today has left.**
+
+The setting that asks a third party where a destination is has a daily
+ceiling. Until now that number was invisible, which is how 0.5.69 spent 400 of
+its 500 requests on this Mac's own LAN in about two minutes without anything on
+the screen saying so. The defect was fixed in 0.5.70; this is the part that let
+it run unseen.
+
+The figure appears under that setting only. Running out reads as a limit rather
+than a failure, and says that lookups resume tomorrow.
+
 ### Agent for Mac 0.5.71
 
 **The network view keeps up with the traffic it is showing.**
