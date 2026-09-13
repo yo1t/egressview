@@ -8,6 +8,16 @@ using EgressView.Agent.Core;
 var directory = Path.Combine(Path.GetTempPath(), $"egressview-agent-tests-{Guid.NewGuid():N}");
 Directory.CreateDirectory(directory);
 var database = Path.Combine(directory, "agent.db");
+var windowsRoot = FindWindowsRoot(Directory.GetCurrentDirectory());
+
+static string FindWindowsRoot(string start)
+{
+    for (var path = start; path is not null; path = Directory.GetParent(path)?.FullName)
+        foreach (var candidate in new[] { path, Path.Combine(path, "apps", "agent-windows") })
+            if (File.Exists(Path.Combine(candidate, "src", "EgressView.Agent.Ui", "Resources", "Strings.en.xaml")))
+                return candidate;
+    throw new DirectoryNotFoundException("Windows Agent source root was not found.");
+}
 
 try
 {
@@ -863,7 +873,7 @@ try
                 .ToHashSet(StringComparer.Ordinal);
             foreach (var language in new[] { "en", "ja" })
             {
-                var resource = XDocument.Load(Path.Combine("src", "EgressView.Agent.Ui", "Resources", $"Strings.{language}.xaml"));
+                var resource = XDocument.Load(Path.Combine(windowsRoot, "src", "EgressView.Agent.Ui", "Resources", $"Strings.{language}.xaml"));
                 var disclosure = resource.Descendants().Single(node =>
                     (string?)node.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")) == "HubExplanation").Value;
                 var disclosedKeys = Regex.Matches(disclosure, @"\[([A-Za-z][A-Za-z0-9]*)\]")
@@ -873,18 +883,18 @@ try
             }
             foreach (var path in new[] { "README.md", "README.en.md" })
             {
-                var guide = File.ReadAllText(path);
+                var guide = File.ReadAllText(Path.Combine(windowsRoot, path));
                 Assert(sentKeys.All(key => guide.Contains($"`{key}`", StringComparison.Ordinal)),
                     $"{path} lists every key in the sent JSON payload");
             }
-            var downloadPage = File.ReadAllText(Path.Combine("..", "..", "site", "dl", "index.html"));
+            var downloadPage = File.ReadAllText(Path.Combine(windowsRoot, "..", "..", "site", "dl", "index.html"));
             Assert(sentKeys.All(key => downloadPage.Contains(key, StringComparison.Ordinal)),
                 "the download page lists every key in the sent JSON payload");
             var updateAgent = WindowsAgentUpdateClient.UserAgent("1.2.3", "11.0");
             Assert(updateAgent.Contains("1.2.3", StringComparison.Ordinal) && updateAgent.Contains("11.0", StringComparison.Ordinal) &&
                 downloadPage.Contains("dl.egressview.com", StringComparison.Ordinal) &&
-                File.ReadAllText("README.md").Contains("dl.egressview.com", StringComparison.Ordinal) &&
-                File.ReadAllText("README.en.md").Contains("dl.egressview.com", StringComparison.Ordinal),
+                File.ReadAllText(Path.Combine(windowsRoot, "README.md")).Contains("dl.egressview.com", StringComparison.Ordinal) &&
+                File.ReadAllText(Path.Combine(windowsRoot, "README.en.md")).Contains("dl.egressview.com", StringComparison.Ordinal),
                 "update-check disclosure names the actual origin and User-Agent version fields");
         }
         Assert((await sender.SendNextAsync(capableStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged &&
