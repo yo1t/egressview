@@ -186,6 +186,20 @@ internal static class Entry
             throw new InvalidOperationException("Globe rotation segments stretched with the caption.");
 
         ThemeManager.ApplyTheme(application.Resources, true, Color.FromRgb(0x4D, 0x94, 0xFF));
+        var darkInputSample = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, Margin = new Thickness(8) };
+        var darkTextBox = new System.Windows.Controls.TextBox { Text = "質問を入力", Width = 170, Height = 36 };
+        var darkChoice = new System.Windows.Controls.ComboBox { Width = 150, Height = 36, Margin = new Thickness(8, 0, 0, 0) };
+        darkChoice.Items.Add(new ComboBoxItem { Content = "7日以内" });
+        darkChoice.Items.Add(new ComboBoxItem { Content = "30日以内" });
+        darkChoice.SelectedIndex = 0;
+        darkInputSample.Children.Add(darkTextBox);
+        darkInputSample.Children.Add(darkChoice);
+        Save(darkInputSample, 350, 60, Path.Combine(output, "dark-input-controls.png"));
+        var darkSurface = ((SolidColorBrush)application.Resources["SurfaceSecondaryBrush"]).Color;
+        if (((SolidColorBrush)darkTextBox.Background).Color != darkSurface ||
+            ((SolidColorBrush)darkChoice.Background).Color != darkSurface ||
+            darkChoice.SelectedIndex != 0)
+            throw new InvalidOperationException("Input controls lost their dark theme or selection.");
         foreach (var width in new[] { 630, 340 })
         {
             var countryDashboard = new MainWindow();

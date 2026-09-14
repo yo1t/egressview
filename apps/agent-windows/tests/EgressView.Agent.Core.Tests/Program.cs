@@ -29,7 +29,15 @@ var sharedWording = new (string WindowsKey, string MacEnglish)[]
     ("SaveTest", "Save and test"), ("SuppressedToday", "Suppressed today"),
     ("TopApplications", "Top applications"),
     ("WhenTraffic", "When traffic happened"),
-    ("WhichAppWhere", "Which application went where")
+    ("WhichAppWhere", "Which application went where"),
+    ("NotificationsToday", "Notifications today"),
+    ("ClearHistory", "Clear notification history"),
+    ("ThreatAlerts", "New threat matches"),
+    ("ThreatIntelAlerts", "Threat information changes"),
+    ("NotificationsAfterChecks", "After category and cooldown checks"),
+    ("NotificationsDailyLimitOnly", "Daily limit only; duplicates are not counted"),
+    ("NoNotificationAttempts", "No notifications have been attempted yet."),
+    ("NotificationKindHubDelivery", "Hub delivery")
 };
 var resourceRoot = Path.Combine(windowsRoot, "src", "EgressView.Agent.Ui", "Resources");
 var windowsEnglish = XDocument.Load(Path.Combine(resourceRoot, "Strings.en.xaml"));
@@ -47,6 +55,21 @@ foreach (var (windowsKey, macEnglish) in sharedWording)
     Assert(macJapanese.TryGetValue(macEnglish, out var macValue) &&
         SharedResource(windowsJapanese, windowsKey) == macValue,
         $"Shared wording Japanese drifted: {windowsKey}");
+}
+// Check every exact shared English string, not only the historical review list.
+// These two keys have different contexts: a Windows language preference and
+// the ETW collection method are not macOS system settings or traffic source.
+var contextualExceptions = new HashSet<string>(StringComparer.Ordinal)
+{
+    "SystemDefault", "LogSource"
+};
+foreach (var entry in windowsEnglish.Descendants().Where(element => element.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")) is not null))
+{
+    var key = entry.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml"))!.Value;
+    if (contextualExceptions.Contains(key) || !macJapanese.TryGetValue(entry.Value, out var expectedJapanese))
+        continue;
+    Assert(SharedResource(windowsJapanese, key) == expectedJapanese,
+        $"Shared English has different Japanese wording: {key}");
 }
 
 static string FindWindowsRoot(string start)

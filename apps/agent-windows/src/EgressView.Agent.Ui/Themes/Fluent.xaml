@@ -70,8 +70,8 @@
     <Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/>
     <Setter Property="BorderBrush" Value="{DynamicResource StrokeBrush}"/>
     <Setter Property="BorderThickness" Value="1"/>
-    <Setter Property="CornerRadius" Value="10"/>
-    <Setter Property="Padding" Value="18"/>
+    <Setter Property="CornerRadius" Value="8"/>
+    <Setter Property="Padding" Value="16"/>
   </Style>
   <Style x:Key="MetricCardStyle" TargetType="Border" BasedOn="{StaticResource CardStyle}">
     <Setter Property="Padding" Value="12"/>
@@ -98,6 +98,51 @@
     <Setter Property="FontWeight" Value="SemiBold"/>
     <Setter Property="Cursor" Value="Hand"/>
   </Style>
+  <Style TargetType="Button" BasedOn="{StaticResource FluentButtonStyle}"/>
+  <Style TargetType="TextBox">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSecondaryBrush}"/>
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource StrokeBrush}"/>
+    <Setter Property="CaretBrush" Value="{DynamicResource TextPrimaryBrush}"/>
+    <Setter Property="Padding" Value="8,5"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
+  </Style>
+  <Style TargetType="ComboBox">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSecondaryBrush}"/>
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource StrokeBrush}"/>
+    <Setter Property="Padding" Value="8,5"/>
+    <Setter Property="MinHeight" Value="32"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBox">
+          <Grid>
+            <Border x:Name="ComboSurface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6"/>
+            <ContentPresenter Margin="10,0,27,0" VerticalAlignment="Center" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" TextElement.Foreground="{TemplateBinding Foreground}"/>
+            <ToggleButton x:Name="DropDownToggle" Background="Transparent" BorderThickness="0" Focusable="False" HorizontalContentAlignment="Right" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+              <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><ContentPresenter Content="{TemplateBinding Content}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/></ControlTemplate></ToggleButton.Template>
+              <Path Data="M 0 0 L 4 4 L 8 0" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,11,0"/>
+            </ToggleButton>
+            <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True" IsOpen="{TemplateBinding IsDropDownOpen}" Focusable="False" PopupAnimation="Fade">
+              <Border MinWidth="{Binding ActualWidth, ElementName=ComboSurface}" MaxHeight="300" Background="{DynamicResource SurfaceSecondaryBrush}" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1" CornerRadius="6" TextElement.Foreground="{DynamicResource TextPrimaryBrush}">
+                <ScrollViewer CanContentScroll="True" VerticalScrollBarVisibility="Auto"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer>
+              </Border>
+            </Popup>
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ComboSurface" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ComboSurface" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style TargetType="ComboBoxItem">
+    <Setter Property="Background" Value="{DynamicResource SurfaceSecondaryBrush}"/>
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    <Setter Property="Padding" Value="9,5"/>
+  </Style>
   <Style x:Key="PrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource FluentButtonStyle}">
     <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
     <Setter Property="Foreground" Value="{DynamicResource PrimaryButtonTextBrush}"/>
@@ -117,8 +162,8 @@
     <Setter Property="FontWeight" Value="SemiBold"/>
     <Setter Property="HorizontalContentAlignment" Value="Center"/>
     <Setter Property="VerticalContentAlignment" Value="Center"/>
-    <Setter Property="Padding" Value="12,6"/>
-    <Setter Property="MinHeight" Value="34"/>
+    <Setter Property="Padding" Value="10,4"/>
+    <Setter Property="MinHeight" Value="32"/>
     <Setter Property="Margin" Value="1"/>
     <Setter Property="Cursor" Value="Hand"/>
     <Setter Property="Template">
@@ -132,7 +177,7 @@
             <Trigger Property="IsSelected" Value="True">
               <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
               <Setter TargetName="Segment" Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
-              <Setter TargetName="Segment" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+              <Setter TargetName="Segment" Property="BorderBrush" Value="{DynamicResource StrokeBrush}"/>
             </Trigger>
             <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Segment" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
@@ -170,7 +215,7 @@
         <ControlTemplate TargetType="TabControl">
           <Grid KeyboardNavigation.TabNavigation="Local">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <Border Grid.Row="0" Background="{DynamicResource SurfaceSecondaryBrush}" CornerRadius="8" HorizontalAlignment="Center" Margin="0,0,0,22" Padding="3"><TabPanel IsItemsHost="True"/></Border>
+            <Border Grid.Row="0" Background="{DynamicResource SurfaceSecondaryBrush}" CornerRadius="8" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="3"><TabPanel IsItemsHost="True"/></Border>
             <ContentPresenter Grid.Row="1" ContentSource="SelectedContent"/>
           </Grid>
         </ControlTemplate>
@@ -183,7 +228,7 @@
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="TabItem">
-          <Border x:Name="TabRoot" Background="Transparent" CornerRadius="6" Padding="18,8" Margin="0">
+          <Border x:Name="TabRoot" Background="Transparent" CornerRadius="6" Padding="15,7" Margin="0">
             <ContentPresenter ContentSource="Header"/>
           </Border>
           <ControlTemplate.Triggers>
