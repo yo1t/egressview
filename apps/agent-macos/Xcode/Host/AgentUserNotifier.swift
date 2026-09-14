@@ -483,9 +483,15 @@ final class AgentNotificationCoordinator {
         scanQueue.async { [weak self] in
             let result: Result<OutboundAnomalyFinding?, Error> = Result {
                 guard let captured = try store.captureOutboundTrafficWindow() else { return nil }
-                return OutboundAnomalyDetector().evaluate(
+                let finding = OutboundAnomalyDetector().evaluate(
                     current: captured.current, baseline: captured.baseline
                 )
+                if let finding {
+                    try store.recordOutboundAnomaly(
+                        windowStart: finding.window.startedAt, kind: finding.kind
+                    )
+                }
+                return finding
             }
             DispatchQueue.main.async { self?.handleOutboundAnomaly(result) }
         }

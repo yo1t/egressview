@@ -126,6 +126,23 @@ public struct ObservationStoreStatistics: Equatable, Sendable {
     public let fileSizeBytes: Int64
 }
 
+/// Directional byte totals for one selected period.
+///
+/// Unknown observations are reported separately. A zero-byte counter and an
+/// unmeasured flow are different facts, so the UI can mark these totals as a
+/// lower bound instead of presenting missing close reports as no traffic.
+public struct PeriodTrafficSummary: Equatable, Sendable {
+    public let bytesIn: UInt64
+    public let bytesOut: UInt64
+    public let observationsWithoutBytes: Int
+
+    public init(bytesIn: UInt64, bytesOut: UInt64, observationsWithoutBytes: Int) {
+        self.bytesIn = bytesIn
+        self.bytesOut = bytesOut
+        self.observationsWithoutBytes = observationsWithoutBytes
+    }
+}
+
 /// The durable, period-independent record used to shade countries on the globe.
 ///
 /// One row represents one country, not one destination. This keeps the table
@@ -549,6 +566,49 @@ public final class ObservationStore: @unchecked Sendable {
             )
             """)
             try execute("PRAGMA user_version=13")
+        }
+        if version < 14 {
+            // One row per hour keeps directional overview cards independent
+            // of the raw retention window. `chart_hourly` predates those cards
+            // and stores only combined bytes, which cannot be split later.
+            try execute("""
+            CREATE TABLE IF NOT EXISTS traffic_hourly (
+                hour_start REAL PRIMARY KEY,
+                bytes_in INTEGER NOT NULL,
+                bytes_out INTEGER NOT NULL,
+                observations_without_bytes INTEGER NOT NULL
+            )
+            """)
+            // Compaction deletes each raw row after adding it to
+            // `hourly_rollup`, so the two sources are disjoint even when a
+            // retention cutoff passes through the middle of an hour. Sum both
+            // before grouping; preferring either source would undercount that
+            // boundary hour during this one-time migration.
+            try execute("""
+            INSERT INTO traffic_hourly (
+                hour_start, bytes_in, bytes_out, observations_without_bytes
+            )
+            SELECT hour_start, SUM(bytes_in), SUM(bytes_out), SUM(unknown)
+            FROM (
+                SELECT CAST(last_observed_at / 3600 AS INTEGER) * 3600.0 AS hour_start,
+                       COALESCE(bytes_in, 0) AS bytes_in,
+                       COALESCE(bytes_out, 0) AS bytes_out,
+                       CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END AS unknown
+                FROM observations
+                UNION ALL
+                SELECT hour_start, bytes_in, bytes_out, 0 AS unknown
+                FROM hourly_rollup
+            )
+            GROUP BY hour_start
+            ON CONFLICT(hour_start) DO UPDATE SET
+                bytes_in = excluded.bytes_in,
+                bytes_out = excluded.bytes_out,
+                observations_without_bytes = excluded.observations_without_bytes
+            """)
+            if try !columnExists(table: "outbound_traffic_windows", column: "anomaly_kind") {
+                try execute("ALTER TABLE outbound_traffic_windows ADD COLUMN anomaly_kind TEXT")
+            }
+            try execute("PRAGMA user_version=14")
         }
     }
 
@@ -1003,6 +1063,78 @@ public final class ObservationStore: @unchecked Sendable {
         return rows
     }
 
+    /// Persists a detector result independently of notification delivery.
+    /// Daily limits and user notification settings must not change the number
+    /// shown in the period overview.
+    public func recordOutboundAnomaly(
+        windowStart: Date, kind: OutboundAnomalyKind
+    ) throws {
+        try lock.withLock {
+            let statement = try prepare("""
+            UPDATE outbound_traffic_windows SET anomaly_kind = ? WHERE window_start = ?
+            """)
+            defer { sqlite3_finalize(statement) }
+            bindText(statement, 1, kind.rawValue)
+            sqlite3_bind_double(statement, 2, windowStart.timeIntervalSince1970)
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw ObservationStoreError.statement(lastMessage)
+            }
+        }
+    }
+
+    public func outboundAnomalyCount(from: Date, to: Date) throws -> Int {
+        try lock.withLock {
+            let statement = try prepare("""
+            SELECT COUNT(*) FROM outbound_traffic_windows
+            WHERE window_start >= ? AND window_start < ? AND anomaly_kind IS NOT NULL
+            """)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, from.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 2, to.timeIntervalSince1970)
+            guard sqlite3_step(statement) == SQLITE_ROW else {
+                throw ObservationStoreError.statement(lastMessage)
+            }
+            return Int(sqlite3_column_int64(statement, 0))
+        }
+    }
+
+    /// Directional totals using whole-hour aggregates plus only the raw rows
+    /// at the ragged period edges and in the current unfinished hour.
+    public func periodTrafficSummary(from: Date, to: Date) throws -> PeriodTrafficSummary {
+        try lock.withLock {
+            let watermark = try scalarDouble("SELECT folded_through FROM chart_hourly_state") ?? 0
+            let ranges = chartRanges(from: from, to: to, watermark: watermark)
+            let statement = try prepare("""
+            SELECT COALESCE(SUM(bytes_in), 0), COALESCE(SUM(bytes_out), 0),
+                   COALESCE(SUM(unknown), 0)
+            FROM (
+                SELECT bytes_in, bytes_out, observations_without_bytes AS unknown
+                FROM traffic_hourly
+                WHERE hour_start >= ?3 AND hour_start < ?4
+                UNION ALL
+                SELECT COALESCE(bytes_in, 0), COALESCE(bytes_out, 0),
+                       CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END
+                FROM observations
+                WHERE last_observed_at >= ?1 AND last_observed_at < ?2
+                  AND (last_observed_at < ?3 OR last_observed_at >= ?4)
+            )
+            """)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, from.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 2, to.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 3, ranges.aggregateStart)
+            sqlite3_bind_double(statement, 4, ranges.aggregateEnd)
+            guard sqlite3_step(statement) == SQLITE_ROW else {
+                throw ObservationStoreError.statement(lastMessage)
+            }
+            return PeriodTrafficSummary(
+                bytesIn: UInt64(max(0, sqlite3_column_int64(statement, 0))),
+                bytesOut: UInt64(max(0, sqlite3_column_int64(statement, 1))),
+                observationsWithoutBytes: Int(sqlite3_column_int64(statement, 2))
+            )
+        }
+    }
+
     /// Individual sessions, newest first. Only the traffic-log table needs
     /// these, and only within the raw window.
     public func observations(since: Date? = nil, limit: Int = 500) throws -> [ConnectionObservation] {
@@ -1204,6 +1336,29 @@ public final class ObservationStore: @unchecked Sendable {
                 try execute("""
                 INSERT INTO chart_hourly_state (id, folded_through) VALUES (1, \(currentHour))
                 ON CONFLICT(id) DO UPDATE SET folded_through = excluded.folded_through
+                """)
+                // Replaces the hour, where `chart_hourly` above adds to it.
+                // The asymmetry is deliberate: the v14 migration fills this
+                // table for every hour it can see, including hours after the
+                // fold watermark that the next fold will compute again from
+                // the same raw rows. Adding there would double them. Folding
+                // only ever covers whole hours from the watermark forward, so
+                // recomputing an hour yields the same total -- which makes
+                // replace the idempotent choice here and add the wrong one.
+                try execute("""
+                INSERT INTO traffic_hourly (
+                    hour_start, bytes_in, bytes_out, observations_without_bytes
+                )
+                SELECT CAST(last_observed_at / 3600 AS INTEGER) * 3600.0,
+                       SUM(COALESCE(bytes_in, 0)), SUM(COALESCE(bytes_out, 0)),
+                       SUM(CASE WHEN bytes_in IS NULL AND bytes_out IS NULL THEN 1 ELSE 0 END)
+                FROM observations
+                WHERE last_observed_at >= \(watermark) AND last_observed_at < \(currentHour)
+                GROUP BY 1
+                ON CONFLICT(hour_start) DO UPDATE SET
+                    bytes_in = excluded.bytes_in,
+                    bytes_out = excluded.bytes_out,
+                    observations_without_bytes = excluded.observations_without_bytes
                 """)
                 try execute("COMMIT")
             } catch {
@@ -1807,6 +1962,7 @@ public final class ObservationStore: @unchecked Sendable {
     private func deleteHistoryLocked(before seconds: Double) throws {
         try execute("DELETE FROM hourly_rollup WHERE hour_start < \(seconds)")
         try execute("DELETE FROM chart_hourly WHERE hour_start < \(seconds)")
+        try execute("DELETE FROM traffic_hourly WHERE hour_start < \(seconds)")
         try execute("DELETE FROM outbound_traffic_windows WHERE window_start < \(seconds)")
         try execute(
             "DELETE FROM pending_destination_country WHERE last_observed_at < \(seconds)"
@@ -1925,6 +2081,7 @@ public final class ObservationStore: @unchecked Sendable {
             try execute("DELETE FROM hourly_rollup")
             try execute("DELETE FROM chart_hourly")
             try execute("DELETE FROM chart_hourly_state")
+            try execute("DELETE FROM traffic_hourly")
             try execute("DELETE FROM outbound_traffic_windows")
             try execute("DELETE FROM country_visit_summary")
             try execute("DELETE FROM pending_destination_country")

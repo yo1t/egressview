@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import EgressViewAgentCore
 
@@ -67,6 +68,102 @@ final class ChartAggregateTests: XCTestCase {
         try store.foldCompletedHoursForCharts(now: now)
 
         XCTAssertEqual(try sessions(from: hour, to: now), 3)
+    }
+
+    func test_方向別データ量も畳んだ時間を二重に数えない() throws {
+        for i in 0..<3 { try observe(at: hour.addingTimeInterval(Double(i) * 60)) }
+        let now = hour.addingTimeInterval(3600)
+        try store.foldCompletedHoursForCharts(now: now)
+        try store.foldCompletedHoursForCharts(now: now)
+
+        let traffic = try store.periodTrafficSummary(from: hour, to: now)
+        XCTAssertEqual(traffic.bytesIn, 30)
+        XCTAssertEqual(traffic.bytesOut, 60)
+        XCTAssertEqual(traffic.observationsWithoutBytes, 0)
+    }
+
+    func test_方向別データ量は期間端と進行中の時間を正確に読む() throws {
+        try observe(at: hour.addingTimeInterval(600))
+        try observe(at: hour.addingTimeInterval(2_400))
+        try observe(at: hour.addingTimeInterval(3_600 + 600))
+        let now = hour.addingTimeInterval(3_600 + 1_200)
+        try store.foldCompletedHoursForCharts(now: now)
+
+        let traffic = try store.periodTrafficSummary(
+            from: hour.addingTimeInterval(1_200), to: now
+        )
+        XCTAssertEqual(traffic.bytesIn, 20)
+        XCTAssertEqual(traffic.bytesOut, 40)
+    }
+
+    /// Compaction can split one hour between `hourly_rollup` and the raw
+    /// table. The v14 migration must combine those disjoint rows rather than
+    /// choosing one representation and silently losing the other half.
+    func test_v14移行は保持期限境界の生データと時間集計を合算する() throws {
+        store = nil
+        store = try ObservationStore(
+            fileURL: url, retention: ObservationRetention(retentionDays: 30, rawDays: 1)
+        )
+        try observe(at: hour.addingTimeInterval(600))
+        try observe(at: hour.addingTimeInterval(2_400))
+        try store.foldCompletedHoursForCharts(now: hour.addingTimeInterval(3_600))
+        try store.compact(now: hour.addingTimeInterval(86_400 + 1_800))
+        store = nil
+
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &database), SQLITE_OK)
+        XCTAssertEqual(
+            sqlite3_exec(
+                database,
+                "DROP TABLE traffic_hourly; PRAGMA user_version=13;",
+                nil, nil, nil
+            ),
+            SQLITE_OK
+        )
+        sqlite3_close(database)
+
+        store = try ObservationStore(
+            fileURL: url, retention: ObservationRetention(retentionDays: 30, rawDays: 1)
+        )
+        let traffic = try store.periodTrafficSummary(
+            from: hour, to: hour.addingTimeInterval(3_600)
+        )
+        XCTAssertEqual(traffic.bytesIn, 20)
+        XCTAssertEqual(traffic.bytesOut, 40)
+    }
+
+    /// The migration fills hours the next fold will compute again from the
+    /// same raw rows. Measured on a copy of one Mac's 560,223-row store
+    /// (2026-09-14): 694 hours, and the totals matched the sources exactly --
+    /// but only because the fold replaces an hour rather than adding to it.
+    func test_v14移行の直後に畳んでも二重にならない() throws {
+        store = nil
+        store = try ObservationStore(
+            fileURL: url, retention: ObservationRetention(retentionDays: 30, rawDays: 7)
+        )
+        try observe(at: hour.addingTimeInterval(600))
+        try observe(at: hour.addingTimeInterval(2_400))
+        store = nil
+
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &database), SQLITE_OK)
+        XCTAssertEqual(
+            sqlite3_exec(
+                database, "DROP TABLE traffic_hourly; PRAGMA user_version=13;", nil, nil, nil
+            ),
+            SQLITE_OK
+        )
+        sqlite3_close(database)
+
+        store = try ObservationStore(
+            fileURL: url, retention: ObservationRetention(retentionDays: 30, rawDays: 7)
+        )
+        let now = hour.addingTimeInterval(3_600)
+        try store.foldCompletedHoursForCharts(now: now)
+
+        let traffic = try store.periodTrafficSummary(from: hour, to: now)
+        XCTAssertEqual(traffic.bytesIn, 20, "移行で入れた時間を、畳み込みが足し直した")
+        XCTAssertEqual(traffic.bytesOut, 40)
     }
 
     func test_進行中の時間は畳まない() throws {

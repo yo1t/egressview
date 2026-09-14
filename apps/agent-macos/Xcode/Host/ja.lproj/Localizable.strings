@@ -745,6 +745,9 @@
 "Unusual outbound traffic" = "通常と異なる外向き通信";
 "Large changes from this Mac's recent baseline, including transfers spread across several applications and destinations." = "このMacの最近の傾向から大きく増えた送信を通知します。複数のアプリと宛先へ分散した送信も対象です。";
 "Outbound anomaly" = "外向き通信の異常";
+"Outbound anomalies" = "送信異常";
+"Received" = "受信量";
+"Sent" = "送信量";
 "Unusual outbound traffic detected" = "通常と異なる外向き通信を検出しました";
 "Outbound traffic was %@ in 15 minutes, compared with a usual %@. This is a behavioural anomaly, not a malware verdict." = "15分間の送信量は%1$@で、通常の%2$@を大きく上回りました。これは動作の変化であり、マルウェアと断定するものではありません。";
 "Outbound traffic was %@ across %lld applications and %lld destinations in 15 minutes, compared with a usual %@. No single application dominated it. This is a behavioural anomaly, not a malware verdict." = "15分間に%2$lld個のアプリから%3$lld件の宛先へ%1$@を送信し、通常の%4$@を大きく上回りました。単一のアプリに偏らない動作の変化であり、マルウェアと断定するものではありません。";

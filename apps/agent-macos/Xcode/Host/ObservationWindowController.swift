@@ -865,6 +865,19 @@ struct AgentOverviewPanel: View {
                      "point.3.connected.trianglepath.dotted")
                 tile(L("Applications"), summary.applicationCount.formatted(), "app.dashed")
                 tile(L("Destinations"), summary.destinationCount.formatted(), "network")
+                tile(
+                    L("Received"), trafficValue(summary.bytesIn),
+                    "arrow.down.circle"
+                )
+                tile(
+                    L("Sent"), trafficValue(summary.bytesOut),
+                    "arrow.up.circle"
+                )
+                tile(
+                    L("Outbound anomalies"), summary.outboundAnomalyCount.formatted(),
+                    summary.outboundAnomalyCount > 0
+                        ? "exclamationmark.arrow.triangle.2.circlepath" : "checkmark.shield"
+                )
                 tile(L("Monitored"), "\(Int((coverage.share * 100).rounded()))%", "clock.badge.checkmark")
                 // A dash, not a zero, when nothing checked. Zero is an answer
                 // and this would not be one.
@@ -929,6 +942,16 @@ struct AgentOverviewPanel: View {
 
     private func monitoringStartDescription(_ date: Date) -> String {
         L("Monitoring started: %@", Self.monitoringStartFormatter.string(from: date))
+    }
+
+    private func trafficValue(_ bytes: UInt64) -> String {
+        let value = ByteCountFormatter.string(
+            fromByteCount: Int64(clamping: bytes), countStyle: .binary
+        )
+        // A close report carries the byte counters. If even one close report
+        // is missing, the measured total is a lower bound rather than an exact
+        // zero for that flow.
+        return summary.observationsWithoutBytes > 0 ? "≥ \(value)" : value
     }
 
     private func tile(_ title: String, _ value: String, _ symbol: String) -> some View {
