@@ -4,6 +4,22 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.75
+
+**How much left this Mac, and how much came back.**
+
+The overview counted connections and said nothing about volume. It now carries
+three more cards — Received, Sent, and Outbound anomalies — which follow the
+period selector like the rest of the screen.
+
+A connection that never reported its byte counters is unknown, not zero, so
+the totals read as a lower bound rather than quietly presenting missing
+reports as no traffic. The anomaly count comes from the detector's own record,
+so a notification limit or a settings toggle cannot change the number shown.
+
+Measured on a copy of a real store: the one-time database upgrade takes 0.19
+seconds and adds 36 KB.
+
 ### Agent for Mac 0.5.74
 
 **Quitting no longer looks like a pause you never chose.**
