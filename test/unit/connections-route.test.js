@@ -695,7 +695,23 @@ describe('connections route: GET /connections/threat-counts', () => {
       return res._body;
     };
 
-    assert.deepEqual(call(), { safe: 4, warn: 0, danger: 0, serverTime: call().serverTime });
+    // Not `deepEqual(call(), { ..., serverTime: call().serverTime })`: that
+    // takes the expected timestamp from a second response, and every response
+    // stamps its own `Date.now()`. Measured 2026-09-14 on an M1: the two calls
+    // land on different milliseconds 19 times in 20,000 (0.10%), which is
+    // enough to redden CI now and then -- it did on Node 22 and 26 for #491,
+    // and passed on rerun. Two responses differing in `serverTime` is the
+    // correct behaviour; expecting them to match was the defect (P3-123).
+    const first = call();
+    assert.deepEqual(
+      { safe: first.safe, warn: first.warn, danger: first.danger },
+      { safe: 4, warn: 0, danger: 0 }
+    );
+    assert.equal(typeof first.serverTime, 'number');
+
+    // The second request is the subject of this test: it must answer from the
+    // first scan rather than running another one.
+    call();
     assert.equal(scans, 1, 'the second request reused the first scan');
 
     // A feed that changes within the TTL still changes the answer, because only
