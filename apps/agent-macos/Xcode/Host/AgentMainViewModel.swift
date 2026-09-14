@@ -10,6 +10,10 @@ struct AgentPeriodSummary: Equatable {
     var sessionCount = 0
     var applicationCount = 0
     var destinationCount = 0
+    var bytesIn: UInt64 = 0
+    var bytesOut: UInt64 = 0
+    var observationsWithoutBytes = 0
+    var outboundAnomalyCount = 0
 }
 
 struct AgentObservationRow: Identifiable {
@@ -611,10 +615,15 @@ final class AgentMainViewModel: ObservableObject {
                     // partial hour and legacy rollups. Running hourlyRollup()
                     // as well scanned and sorted the same seven-day raw range
                     // only to derive these three numbers.
+                    let traffic = try store.periodTrafficSummary(from: from, to: to)
                     data.summary = AgentPeriodSummary(
                         sessionCount: pairs.reduce(0) { $0 + $1.sessionCount },
                         applicationCount: Set(pairs.map(\.processName)).count,
-                        destinationCount: Set(pairs.map(\.destination)).count
+                        destinationCount: Set(pairs.map(\.destination)).count,
+                        bytesIn: traffic.bytesIn,
+                        bytesOut: traffic.bytesOut,
+                        observationsWithoutBytes: traffic.observationsWithoutBytes,
+                        outboundAnomalyCount: try store.outboundAnomalyCount(from: from, to: to)
                     )
                     let buckets = try store.appTimeline(
                         from: from, to: to, buckets: VisualizationSelection.bucketCount

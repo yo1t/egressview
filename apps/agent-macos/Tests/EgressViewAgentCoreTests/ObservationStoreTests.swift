@@ -80,6 +80,41 @@ final class ObservationStoreTests: XCTestCase {
         XCTAssertNil(try reopened.captureOutboundTrafficWindow(now: captureTime))
     }
 
+    func testOutboundAnomalyCountUsesDetectionTimeAndSurvivesRestart() throws {
+        let url = directory.appendingPathComponent("history.sqlite")
+        let window = Date(timeIntervalSince1970: 1_800_000_000)
+        do {
+            let store = try ObservationStore(fileURL: url)
+            try store.append([observation(at: window.addingTimeInterval(30))])
+            let captured = try XCTUnwrap(
+                store.captureOutboundTrafficWindow(now: window.addingTimeInterval(901))
+            )
+            try store.recordOutboundAnomaly(
+                windowStart: captured.current.startedAt, kind: .distributedTransfer
+            )
+            XCTAssertEqual(
+                try store.outboundAnomalyCount(
+                    from: window.addingTimeInterval(-1), to: window.addingTimeInterval(900)
+                ),
+                1
+            )
+            XCTAssertEqual(
+                try store.outboundAnomalyCount(
+                    from: window.addingTimeInterval(1), to: window.addingTimeInterval(900)
+                ),
+                0
+            )
+        }
+
+        let reopened = try ObservationStore(fileURL: url)
+        XCTAssertEqual(
+            try reopened.outboundAnomalyCount(
+                from: window.addingTimeInterval(-1), to: window.addingTimeInterval(900)
+            ),
+            1
+        )
+    }
+
     func testCountryHistoryIsBoundedByCountryAndSurvivesRetention() throws {
         let store = try makeStore(retention: ObservationRetention(retentionDays: 1, rawDays: 1))
         let now = Date(timeIntervalSince1970: 1_800_000_000)
