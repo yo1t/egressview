@@ -23,7 +23,7 @@
 	<key>NetworkExtension</key>
 	<dict>
 		<key>NEMachServiceName</key>
-		<string>group.com.egressview.agent.xpc.146</string>
+		<string>group.com.egressview.agent.xpc.147</string>
 		<key>NEProviderClasses</key>
 		<dict>
 			<key>com.apple.networkextension.filter-data</key>
