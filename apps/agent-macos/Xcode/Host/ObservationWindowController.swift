@@ -412,6 +412,7 @@ struct AgentMainView: View {
         case .monitoring: return L("Monitoring")
         case .hubDelivery: return L("Hub delivery")
         case .threatIntelChange: return L("Threat information")
+        case .outboundAnomaly: return L("Outbound anomaly")
         case .recovery: return L("Recovery")
         }
     }
@@ -422,6 +423,7 @@ struct AgentMainView: View {
         case .monitoring: return "waveform.path.ecg"
         case .hubDelivery: return "arrow.up.circle"
         case .threatIntelChange: return "shield.lefthalf.filled"
+        case .outboundAnomaly: return "arrow.up.right.circle"
         case .recovery: return "checkmark.circle"
         }
     }
@@ -432,6 +434,7 @@ struct AgentMainView: View {
         case .monitoring: return .orange
         case .hubDelivery: return .blue
         case .threatIntelChange: return .teal
+        case .outboundAnomaly: return .orange
         case .recovery: return .green
         }
     }

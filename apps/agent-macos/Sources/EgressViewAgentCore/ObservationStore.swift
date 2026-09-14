@@ -532,6 +532,24 @@ public final class ObservationStore: @unchecked Sendable {
             }
             try execute("PRAGMA user_version=12")
         }
+        if version < 13 {
+            // A bounded baseline for outbound anomaly detection. One row per
+            // completed 15-minute window keeps detection off the collection
+            // hot path and makes a restart unable to evaluate the same window
+            // twice.
+            try execute("""
+            CREATE TABLE IF NOT EXISTS outbound_traffic_windows (
+                window_start REAL PRIMARY KEY,
+                bytes_out INTEGER NOT NULL,
+                observation_count INTEGER NOT NULL,
+                observations_with_bytes INTEGER NOT NULL,
+                application_count INTEGER NOT NULL,
+                destination_count INTEGER NOT NULL,
+                largest_application_bytes_out INTEGER NOT NULL
+            )
+            """)
+            try execute("PRAGMA user_version=13")
+        }
     }
 
     /// Removes queued addresses nothing outside this network can place.
@@ -873,6 +891,117 @@ public final class ObservationStore: @unchecked Sendable {
     }
 
     // MARK: - Reading
+
+    /// Captures the last completed 15-minute window and returns its preceding
+    /// seven-day baseline. A window already captured by this or an earlier run
+    /// returns nil, preventing duplicate notifications after restart.
+    public func captureOutboundTrafficWindow(
+        now: Date = Date()
+    ) throws -> (current: OutboundTrafficWindow, baseline: [OutboundTrafficWindow])? {
+        try lock.withLock {
+            let duration: TimeInterval = 15 * 60
+            let end = floor(now.timeIntervalSince1970 / duration) * duration
+            let start = end - duration
+            guard (try scalar(
+                "SELECT COUNT(*) FROM outbound_traffic_windows WHERE window_start = ?",
+                bindDouble: start
+            ) ?? 0) == 0 else { return nil }
+            try execute("BEGIN IMMEDIATE")
+            do {
+                let current = try outboundTrafficWindowLocked(start: start, end: end)
+                let insert = try prepare("""
+                INSERT INTO outbound_traffic_windows (
+                    window_start, bytes_out, observation_count, observations_with_bytes,
+                    application_count, destination_count, largest_application_bytes_out
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """)
+                defer { sqlite3_finalize(insert) }
+                sqlite3_bind_double(insert, 1, start)
+                sqlite3_bind_int64(insert, 2, Int64(clamping: current.bytesOut))
+                sqlite3_bind_int64(insert, 3, Int64(current.observationCount))
+                sqlite3_bind_int64(insert, 4, Int64(current.observationsWithBytes))
+                sqlite3_bind_int64(insert, 5, Int64(current.applicationCount))
+                sqlite3_bind_int64(insert, 6, Int64(current.destinationCount))
+                sqlite3_bind_int64(insert, 7, Int64(clamping: current.largestApplicationBytesOut))
+                guard sqlite3_step(insert) == SQLITE_DONE else {
+                    throw ObservationStoreError.statement(lastMessage)
+                }
+
+                let cutoff = start - 7 * 24 * 60 * 60
+                let baseline = try outboundTrafficWindowsLocked(from: cutoff, before: start)
+                try execute("DELETE FROM outbound_traffic_windows WHERE window_start < \(cutoff)")
+                try execute("COMMIT")
+                return (current, baseline)
+            } catch {
+                try? execute("ROLLBACK")
+                throw error
+            }
+        }
+    }
+
+    private func outboundTrafficWindowLocked(start: Double, end: Double) throws -> OutboundTrafficWindow {
+        let summary = try prepare("""
+        SELECT COALESCE(SUM(bytes_out), 0), COUNT(*), COUNT(bytes_out),
+               COUNT(DISTINCT process_name), COUNT(DISTINCT remote_address)
+        FROM observations
+        WHERE last_observed_at >= ? AND last_observed_at < ?
+        """)
+        defer { sqlite3_finalize(summary) }
+        sqlite3_bind_double(summary, 1, start)
+        sqlite3_bind_double(summary, 2, end)
+        guard sqlite3_step(summary) == SQLITE_ROW else {
+            throw ObservationStoreError.statement(lastMessage)
+        }
+        let largest = try prepare("""
+        SELECT COALESCE(MAX(app_bytes), 0) FROM (
+            SELECT SUM(COALESCE(bytes_out, 0)) AS app_bytes
+            FROM observations
+            WHERE last_observed_at >= ? AND last_observed_at < ?
+            GROUP BY process_name
+        )
+        """)
+        defer { sqlite3_finalize(largest) }
+        sqlite3_bind_double(largest, 1, start)
+        sqlite3_bind_double(largest, 2, end)
+        guard sqlite3_step(largest) == SQLITE_ROW else {
+            throw ObservationStoreError.statement(lastMessage)
+        }
+        return OutboundTrafficWindow(
+            startedAt: Date(timeIntervalSince1970: start),
+            bytesOut: UInt64(max(0, sqlite3_column_int64(summary, 0))),
+            observationCount: Int(sqlite3_column_int64(summary, 1)),
+            observationsWithBytes: Int(sqlite3_column_int64(summary, 2)),
+            applicationCount: Int(sqlite3_column_int64(summary, 3)),
+            destinationCount: Int(sqlite3_column_int64(summary, 4)),
+            largestApplicationBytesOut: UInt64(max(0, sqlite3_column_int64(largest, 0)))
+        )
+    }
+
+    private func outboundTrafficWindowsLocked(from: Double, before: Double) throws -> [OutboundTrafficWindow] {
+        let statement = try prepare("""
+        SELECT window_start, bytes_out, observation_count, observations_with_bytes,
+               application_count, destination_count, largest_application_bytes_out
+        FROM outbound_traffic_windows
+        WHERE window_start >= ? AND window_start < ?
+        ORDER BY window_start
+        """)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, from)
+        sqlite3_bind_double(statement, 2, before)
+        var rows: [OutboundTrafficWindow] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            rows.append(OutboundTrafficWindow(
+                startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)),
+                bytesOut: UInt64(max(0, sqlite3_column_int64(statement, 1))),
+                observationCount: Int(sqlite3_column_int64(statement, 2)),
+                observationsWithBytes: Int(sqlite3_column_int64(statement, 3)),
+                applicationCount: Int(sqlite3_column_int64(statement, 4)),
+                destinationCount: Int(sqlite3_column_int64(statement, 5)),
+                largestApplicationBytesOut: UInt64(max(0, sqlite3_column_int64(statement, 6)))
+            ))
+        }
+        return rows
+    }
 
     /// Individual sessions, newest first. Only the traffic-log table needs
     /// these, and only within the raw window.
@@ -1678,6 +1807,7 @@ public final class ObservationStore: @unchecked Sendable {
     private func deleteHistoryLocked(before seconds: Double) throws {
         try execute("DELETE FROM hourly_rollup WHERE hour_start < \(seconds)")
         try execute("DELETE FROM chart_hourly WHERE hour_start < \(seconds)")
+        try execute("DELETE FROM outbound_traffic_windows WHERE window_start < \(seconds)")
         try execute(
             "DELETE FROM pending_destination_country WHERE last_observed_at < \(seconds)"
         )
@@ -1795,6 +1925,7 @@ public final class ObservationStore: @unchecked Sendable {
             try execute("DELETE FROM hourly_rollup")
             try execute("DELETE FROM chart_hourly")
             try execute("DELETE FROM chart_hourly_state")
+            try execute("DELETE FROM outbound_traffic_windows")
             try execute("DELETE FROM country_visit_summary")
             try execute("DELETE FROM pending_destination_country")
             try execute("DELETE FROM country_visit_state")
