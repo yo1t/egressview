@@ -5,6 +5,7 @@ public enum AgentNotificationKind: String, CaseIterable, Codable, Sendable {
     case monitoring
     case hubDelivery
     case threatIntelChange
+    case outboundAnomaly
     case recovery
 }
 

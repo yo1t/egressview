@@ -809,6 +809,11 @@ private struct AgentSettingsView: View {
                     $notifications.threatIntelChangesEnabled
                 )
                 notificationToggle(
+                    L("Unusual outbound traffic"),
+                    L("Large changes from this Mac's recent baseline, including transfers spread across several applications and destinations."),
+                    $notifications.outboundAnomaliesEnabled
+                )
+                notificationToggle(
                     L("Recovery"),
                     L("Monitoring or Hub delivery returning to normal. Off by default."),
                     $notifications.recoveryEnabled

@@ -738,3 +738,12 @@
 // What is left of today's third-party lookups (P3-119).
 "%lld of today's %lld lookups left." = "%1$lld of today's %2$lld lookups left.";
 "Today's %lld lookups are used up. Locations resume tomorrow; nothing else is affected." = "Today's %lld lookups are used up. Locations resume tomorrow; nothing else is affected.";
+
+// Local behavioural detection for unusual outbound traffic (P3-122).
+"Unusual outbound traffic" = "Unusual outbound traffic";
+"Large changes from this Mac's recent baseline, including transfers spread across several applications and destinations." = "Large changes from this Mac's recent baseline, including transfers spread across several applications and destinations.";
+"Outbound anomaly" = "Outbound anomaly";
+"Unusual outbound traffic detected" = "Unusual outbound traffic detected";
+"Outbound traffic was %@ in 15 minutes, compared with a usual %@. This is a behavioural anomaly, not a malware verdict." = "Outbound traffic was %@ in 15 minutes, compared with a usual %@. This is a behavioural anomaly, not a malware verdict.";
+"Outbound traffic was %@ across %lld applications and %lld destinations in 15 minutes, compared with a usual %@. No single application dominated it. This is a behavioural anomaly, not a malware verdict." = "Outbound traffic was %1$@ across %2$lld applications and %3$lld destinations in 15 minutes, compared with a usual %4$@. No single application dominated it. This is a behavioural anomaly, not a malware verdict.";
+"Open Network status or Connection log to review the applications and destinations involved." = "Open Network status or Connection log to review the applications and destinations involved.";

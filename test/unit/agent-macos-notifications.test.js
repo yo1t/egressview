@@ -34,6 +34,7 @@ describe('macOS Agent notifications', () => {
       'monitoringEnabled',
       'hubDeliveryEnabled',
       'threatIntelChangesEnabled',
+      'outboundAnomaliesEnabled',
       'recoveryEnabled',
     ]) assert.match(settings, new RegExp(key));
   });
@@ -83,6 +84,17 @@ describe('macOS Agent notifications', () => {
     assert.match(scan, /previously unnotified destinations that matched threat information/);
     assert.doesNotMatch(scan, /candidate\.address[^\n]*body:/);
     assert.doesNotMatch(scan, /candidate\.hostname[^\n]*body:/);
+  });
+
+  it('evaluates outbound anomalies locally on a bounded schedule', () => {
+    assert.match(notifier, /anomalyTimer\.start\(every: 300, runNow: true\)/);
+    assert.match(notifier, /captureOutboundTrafficWindow\(\)/);
+    assert.match(notifier, /OutboundAnomalyDetector\(\)\.evaluate/);
+    assert.match(notifier, /This is a behavioural anomaly, not a malware verdict/);
+    assert.doesNotMatch(
+      notifier.slice(notifier.indexOf('private func handleOutboundAnomaly')),
+      /remoteAddress|remoteHostname/
+    );
   });
 
   it('uses macOS notifications without adding a remote notification credential', () => {

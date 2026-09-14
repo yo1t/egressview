@@ -47,6 +47,39 @@ final class ObservationStoreTests: XCTestCase {
         )
     }
 
+    func testOutboundTrafficWindowIsCapturedOnceAndSurvivesRestart() throws {
+        let url = directory.appendingPathComponent("history.sqlite")
+        let completedWindowStart = Date(timeIntervalSince1970: 1_800_000_000)
+        let captureTime = completedWindowStart.addingTimeInterval(901)
+        do {
+            let store = try ObservationStore(fileURL: url)
+            try store.append([
+                observation(
+                    process: "Safari", remote: "203.0.113.5",
+                    at: completedWindowStart.addingTimeInterval(100), bytesOut: 40
+                ),
+                observation(
+                    process: "Mail", remote: "198.51.100.8",
+                    at: completedWindowStart.addingTimeInterval(200), bytesOut: 60
+                ),
+            ])
+
+            let captured = try XCTUnwrap(store.captureOutboundTrafficWindow(now: captureTime))
+            XCTAssertEqual(captured.current.startedAt, completedWindowStart)
+            XCTAssertEqual(captured.current.bytesOut, 100)
+            XCTAssertEqual(captured.current.observationCount, 2)
+            XCTAssertEqual(captured.current.observationsWithBytes, 2)
+            XCTAssertEqual(captured.current.applicationCount, 2)
+            XCTAssertEqual(captured.current.destinationCount, 2)
+            XCTAssertEqual(captured.current.largestApplicationBytesOut, 60)
+            XCTAssertTrue(captured.baseline.isEmpty)
+            XCTAssertNil(try store.captureOutboundTrafficWindow(now: captureTime))
+        }
+
+        let reopened = try ObservationStore(fileURL: url)
+        XCTAssertNil(try reopened.captureOutboundTrafficWindow(now: captureTime))
+    }
+
     func testCountryHistoryIsBoundedByCountryAndSurvivesRetention() throws {
         let store = try makeStore(retention: ObservationRetention(retentionDays: 1, rawDays: 1))
         let now = Date(timeIntervalSince1970: 1_800_000_000)

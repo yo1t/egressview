@@ -31,6 +31,7 @@ final class AgentUserNotifier: ObservableObject {
     @Published var monitoringEnabled: Bool { didSet { save(monitoringEnabled, Keys.monitoring) } }
     @Published var hubDeliveryEnabled: Bool { didSet { save(hubDeliveryEnabled, Keys.hub) } }
     @Published var threatIntelChangesEnabled: Bool { didSet { save(threatIntelChangesEnabled, Keys.intel) } }
+    @Published var outboundAnomaliesEnabled: Bool { didSet { save(outboundAnomaliesEnabled, Keys.anomaly) } }
     @Published var recoveryEnabled: Bool { didSet { save(recoveryEnabled, Keys.recovery) } }
     @Published var dailyLimit: AgentNotificationDailyLimit {
         didSet { defaults.set(dailyLimit.rawValue, forKey: Keys.dailyLimit) }
@@ -45,6 +46,7 @@ final class AgentUserNotifier: ObservableObject {
         static let monitoring = "agentNotifications.monitoring"
         static let hub = "agentNotifications.hub"
         static let intel = "agentNotifications.intel"
+        static let anomaly = "agentNotifications.outboundAnomaly"
         static let recovery = "agentNotifications.recovery"
         static let dailyLimit = "agentNotifications.dailyLimit"
         static let limiter = "agentNotifications.limiter"
@@ -60,6 +62,7 @@ final class AgentUserNotifier: ObservableObject {
         monitoringEnabled = Self.bool(defaults, Keys.monitoring, true)
         hubDeliveryEnabled = Self.bool(defaults, Keys.hub, true)
         threatIntelChangesEnabled = Self.bool(defaults, Keys.intel, false)
+        outboundAnomaliesEnabled = Self.bool(defaults, Keys.anomaly, true)
         recoveryEnabled = Self.bool(defaults, Keys.recovery, false)
         dailyLimit = defaults.object(forKey: Keys.dailyLimit) == nil
             ? .defaultValue
@@ -173,6 +176,7 @@ final class AgentUserNotifier: ObservableObject {
         case .monitoring: return monitoringEnabled
         case .hubDelivery: return hubDeliveryEnabled
         case .threatIntelChange: return threatIntelChangesEnabled
+        case .outboundAnomaly: return outboundAnomaliesEnabled
         case .recovery: return recoveryEnabled
         }
     }
@@ -222,6 +226,7 @@ final class AgentNotificationCoordinator {
     private let notifier: AgentUserNotifier
     private let scanTimer = PeriodicWork()
     private let hubRetryTimer = PeriodicWork()
+    private let anomalyTimer = PeriodicWork()
     /// Says whether an outage was announced or refused, and whether the retry
     /// is running.
     ///
@@ -266,11 +271,15 @@ final class AgentNotificationCoordinator {
         // subscription above fires once and never again. This is what gives an
         // outage a second chance after its cooldown expires.
         hubRetryTimer.start(every: 60) { [weak self] in self?.retryHubAnnouncement() }
+        anomalyTimer.start(every: 300, runNow: true) { [weak self] in
+            self?.scanForOutboundAnomaly()
+        }
     }
 
     func stop() {
         scanTimer.stop()
         hubRetryTimer.stop()
+        anomalyTimer.stop()
         cancellables.removeAll()
     }
 
@@ -467,6 +476,53 @@ final class AgentNotificationCoordinator {
             }
             DispatchQueue.main.async { self?.handleThreatReport(report, since: from, now: to) }
         }
+    }
+
+    private func scanForOutboundAnomaly() {
+        guard let store else { return }
+        scanQueue.async { [weak self] in
+            let result: Result<OutboundAnomalyFinding?, Error> = Result {
+                guard let captured = try store.captureOutboundTrafficWindow() else { return nil }
+                return OutboundAnomalyDetector().evaluate(
+                    current: captured.current, baseline: captured.baseline
+                )
+            }
+            DispatchQueue.main.async { self?.handleOutboundAnomaly(result) }
+        }
+    }
+
+    private func handleOutboundAnomaly(
+        _ result: Result<OutboundAnomalyFinding?, Error>
+    ) {
+        guard case .success(let finding?) = result else { return }
+        let bytes = ByteCountFormatter.string(
+            fromByteCount: Int64(clamping: finding.window.bytesOut), countStyle: .file
+        )
+        let baseline = ByteCountFormatter.string(
+            fromByteCount: Int64(clamping: finding.baselineMedianBytesOut), countStyle: .file
+        )
+        let reason: String
+        switch finding.kind {
+        case .largeTransfer:
+            reason = L(
+                "Outbound traffic was %@ in 15 minutes, compared with a usual %@. This is a behavioural anomaly, not a malware verdict.",
+                bytes, baseline
+            )
+        case .distributedTransfer:
+            reason = L(
+                "Outbound traffic was %@ across %lld applications and %lld destinations in 15 minutes, compared with a usual %@. No single application dominated it. This is a behavioural anomaly, not a malware verdict.",
+                bytes, finding.window.applicationCount, finding.window.destinationCount, baseline
+            )
+        }
+        _ = notifier.notify(
+            kind: .outboundAnomaly,
+            key: "outbound-anomaly-\(finding.kind.rawValue)",
+            title: L("Unusual outbound traffic detected"),
+            body: notificationExplanation(
+                reason: reason,
+                action: L("Open Network status or Connection log to review the applications and destinations involved.")
+            )
+        )
     }
 
     private func handleThreatReport(
