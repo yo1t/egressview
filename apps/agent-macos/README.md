@@ -197,8 +197,10 @@ installation. With your own account, the agreement stays where it belongs.
 5. Press **Read GeoIP.conf…** and choose the file. Only the account ID and the
    licence key are read from it, and the download starts.
 
-You can type the two values instead, but the key is forty characters and is
-shown only once, so reading the file is the surer path.
+That file is the only way in. There is no field for typing the key: forty
+characters carried by hand from a page you cannot revisit is a step that goes
+wrong quietly. Whether it is set shows as the account ID alone — "Using MaxMind
+account 1411827." — and never the key.
 
 #### After that
 

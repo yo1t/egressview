@@ -321,15 +321,11 @@ private final class AgentSettingsViewModel: ObservableObject {
     @Published var message: String?
     /// Off unless the user turns it on: this is the one setting that would send
     /// the destinations the agent is watching to somebody else.
-    /// The country table on this Mac, and the account it needs.
-    ///
-    /// The key is held only long enough to save it; the Keychain is where it
-    /// lives, and the field is cleared once it is there.
+    /// The country table on this Mac. The MaxMind account behind it comes
+    /// from the file MaxMind hands out, and lives in the Keychain.
     @Published var usesLocalCountryTable = GeoCachePreferences().localTableEnabled {
         didSet { GeoCachePreferences().localTableEnabled = usesLocalCountryTable }
     }
-    @Published var maxMindAccountID = ""
-    @Published var maxMindLicenseKey = ""
 
     @Published var geoLookupSource = GeoCachePreferences().lookupSource {
         didSet { GeoCachePreferences().lookupSource = geoLookupSource }
@@ -1149,7 +1145,10 @@ private struct AgentSettingsView: View {
                         .foregroundStyle(geo.thirdPartyRemainingToday == 0 ? .orange : .secondary)
                 }
             }
-            .onAppear { geo.refreshRemainingBudget() }
+            .onAppear {
+                geo.refreshRemainingBudget()
+                geo.refreshConfiguredAccount()
+            }
             Divider()
 
             // The table on this Mac. Off until someone turns it on, because it
@@ -1165,37 +1164,27 @@ private struct AgentSettingsView: View {
                     }
                 }
                 if model.usesLocalCountryTable {
-                    Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
-                        GridRow {
-                            Text(L("Account ID"))
-                            TextField("", text: $model.maxMindAccountID)
-                                .frame(maxWidth: 220)
-                        }
-                        GridRow {
-                            Text(L("Licence key"))
-                            SecureField("", text: $model.maxMindLicenseKey)
-                                .frame(maxWidth: 220)
-                        }
-                    }
-                    .font(.caption)
+                    // One way in. The licence key is forty characters and
+                    // MaxMind shows it once, so the file it hands out is the
+                    // reliable path -- and a second, typed path is a second
+                    // way to get it wrong, which is exactly what happened on
+                    // 2026-09-16 (P3-117).
+                    //
+                    // The account is shown so the setting can be read at a
+                    // glance. The key never is.
+                    Text(Self.accountLine(geo.configuredAccountID))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     HStack(spacing: 10) {
-                        // The licence key is shown once, and is forty
-                        // characters. MaxMind hands out a GeoIP.conf with both
-                        // values already in it, so reading that beats
-                        // retyping -- which is how the first attempt failed
-                        // (P3-117).
                         Button(L("Read GeoIP.conf...")) {
                             guard let url = Self.chooseConfiguration() else { return }
                             Task { await geo.importConfiguration(at: url) }
                         }
                         .disabled(geo.localTableStatus == .fetching)
                         Button(L("Fetch the table")) {
-                            Task { await geo.saveAndRefreshLocalTable(
-                                accountID: model.maxMindAccountID,
-                                licenseKey: model.maxMindLicenseKey
-                            ) }
+                            Task { await geo.refreshLocalTable() }
                         }
-                        .disabled(geo.localTableStatus == .fetching)
+                        .disabled(geo.localTableStatus == .fetching || geo.configuredAccountID == nil)
                         Text(Self.localTableText(geo.localTableStatus, answered: geo.localTableAnswered))
                             .font(.caption)
                             .foregroundStyle(Self.localTableIsWrong(geo.localTableStatus) ? .orange : .secondary)
@@ -1220,6 +1209,14 @@ private struct AgentSettingsView: View {
         case .hub: return L("Ask the Hub")
         case .hubThenThirdParty: return L("Ask the Hub, then ipwho.is")
         }
+    }
+
+    /// "Account 1411827." -- or that there is none yet.
+    static func accountLine(_ accountID: String?) -> String {
+        guard let accountID, !accountID.isEmpty else {
+            return L("No MaxMind account yet. Read the GeoIP.conf that MaxMind gave you.")
+        }
+        return L("Using MaxMind account %@.", accountID)
     }
 
     /// Asks for MaxMind's `GeoIP.conf`.
@@ -1801,6 +1798,9 @@ final class GeoCacheController: ObservableObject {
     /// How many addresses this Mac answered on its own. Shown so the setting
     /// can be judged by what it did, not by what it promised.
     @Published private(set) var localTableAnswered = 0
+    /// The account the table is fetched with, for the screen to show. Never
+    /// the key.
+    @Published private(set) var configuredAccountID: String?
 
     let localTable: LocalCountryDatabase? = LocalCountryDatabase.defaultURL()
         .map { LocalCountryDatabase(url: $0) }
@@ -1918,6 +1918,11 @@ final class GeoCacheController: ObservableObject {
 
     /// Saves what was typed, then fetches. One button, because typing a key
     /// and not fetching leaves the setting looking on while nothing happened.
+    /// Reads back which account is configured, so the screen can say so.
+    func refreshConfiguredAccount() {
+        configuredAccountID = (try? credentialsForLocalTable.load())?.accountID
+    }
+
     func saveAndRefreshLocalTable(accountID: String, licenseKey: String) async {
         let credentials = GeoLite2Updater.Credentials(
             accountID: accountID, licenseKey: licenseKey
@@ -1929,6 +1934,7 @@ final class GeoCacheController: ObservableObject {
                 localTableStatus = .failed(Self.describeLocalTable(error))
                 return
             }
+            refreshConfiguredAccount()
         }
         await refreshLocalTable()
     }
