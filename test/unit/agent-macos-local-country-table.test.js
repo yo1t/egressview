@@ -83,6 +83,24 @@ describe('このMacの国テーブル', () => {
     assert.match(settings, /reason\.isEmpty\n\s*\? L\("MaxMind refused that account ID and licence key\."\)/);
   });
 
+  it('入り口はGeoIP.confだけ、鍵は画面に出さない', () => {
+    // Two ways in means two ways to get it wrong, and the typed one is what
+    // failed on 2026-09-16. The account is shown so the setting can be read
+    // at a glance; the key never is.
+    assert.doesNotMatch(settings, /SecureField\("", text: \$model\.maxMindLicenseKey\)/);
+    assert.doesNotMatch(settings, /TextField\("", text: \$model\.maxMindAccountID\)/);
+    assert.match(settings, /Text\(Self\.accountLine\(geo\.configuredAccountID\)\)/);
+    assert.match(settings, /static func accountLine\(_ accountID: String\?\) -> String/);
+    assert.match(settings, /Using MaxMind account %@/);
+  });
+
+  it('アカウントが無いうちは取得ボタンを押させない', () => {
+    assert.match(
+      settings,
+      /\.disabled\(geo\.localTableStatus == \.fetching \|\| geo\.configuredAccountID == nil\)/
+    );
+  });
+
   it('MaxMindのGeoIP.confをそのまま読める', () => {
     // The key is forty characters and is shown once. Retyping it is where the
     // first real attempt failed (2026-09-16).

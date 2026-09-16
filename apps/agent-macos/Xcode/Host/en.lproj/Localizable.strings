@@ -784,3 +784,7 @@
 "Choose the GeoIP.conf that MaxMind gave you. Only the account ID and licence key are read from it." = "Choose the GeoIP.conf that MaxMind gave you. Only the account ID and licence key are read from it.";
 "Could not read that file: %@" = "Could not read that file: %@";
 "That file has no AccountID and LicenseKey in it." = "That file has no AccountID and LicenseKey in it.";
+
+// Which MaxMind account the table is fetched with (P3-117).
+"Using MaxMind account %@." = "Using MaxMind account %@.";
+"No MaxMind account yet. Read the GeoIP.conf that MaxMind gave you." = "No MaxMind account yet. Read the GeoIP.conf that MaxMind gave you.";

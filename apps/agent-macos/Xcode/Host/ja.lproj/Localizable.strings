@@ -786,3 +786,7 @@
 "Choose the GeoIP.conf that MaxMind gave you. Only the account ID and licence key are read from it." = "MaxMindから受け取った GeoIP.conf を選んでください。読み取るのはアカウントIDとライセンスキーだけです。";
 "Could not read that file: %@" = "そのファイルを読めませんでした: %@";
 "That file has no AccountID and LicenseKey in it." = "そのファイルに AccountID と LicenseKey がありません。";
+
+// Which MaxMind account the table is fetched with (P3-117).
+"Using MaxMind account %@." = "MaxMindアカウント %@ を使います。";
+"No MaxMind account yet. Read the GeoIP.conf that MaxMind gave you." = "MaxMindアカウントが未設定です。MaxMindから受け取った GeoIP.conf を読み込んでください。";
