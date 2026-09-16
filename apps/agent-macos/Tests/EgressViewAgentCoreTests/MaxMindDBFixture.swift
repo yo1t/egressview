@@ -136,7 +136,7 @@ enum MaxMindDBFixture {
     private static func metadata(
         nodeCount: UInt32, ipVersion: Int, databaseType: String, buildEpoch: UInt64
     ) -> Data {
-        var data = Data([0xE0 | 7])                    // map, 7 pairs
+        var data = Data([0xE7])                        // map, 7 pairs
         data.append(string("node_count"));   data.append(uint(UInt64(nodeCount)))
         data.append(string("record_size"));  data.append(uint(24))
         data.append(string("ip_version"));   data.append(uint(UInt64(ipVersion)))
