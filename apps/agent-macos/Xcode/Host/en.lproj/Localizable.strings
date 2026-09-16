@@ -773,3 +773,7 @@
 "Mostly %@ (%@)." = "Mostly %@ (%@).";
 "Mostly %@ (%@), to %@." = "Mostly %@ (%@), to %@.";
 "Mostly %@ (%@), to %@ and %lld other destinations." = "Mostly %1$@ (%2$@), to %3$@ and %4$lld other destinations.";
+
+// What MaxMind itself said about a refusal (P3-117).
+"MaxMind refused it: %@" = "MaxMind refused it: %@";
+"MaxMind returned HTTP %lld: %@" = "MaxMind returned HTTP %1$lld: %2$@";

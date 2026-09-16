@@ -102,15 +102,61 @@ final class GeoLite2UpdaterTests: XCTestCase {
         XCTAssertFalse(called, "資格情報が無いのに外部へ接続した")
     }
 
-    func test鍵が違えばそう言う() async throws {
+    func test鍵が違えばMaxMindの言い分をそのまま伝える() async throws {
+        // Seen on 2026-09-16: the agent said only "MaxMind refused that account
+        // ID and licence key", which cannot tell a mistyped key from an account
+        // without access to this edition. MaxMind distinguishes them in one
+        // sentence, and it used to be thrown away.
         let updater = GeoLite2Updater(transport: StubTransport(
-            body: Data(), status: 401, seen: { _ in }
+            body: Data("Your account ID or license key could not be authenticated.".utf8),
+            status: 401, seen: { _ in }
         ))
         do {
             _ = try await updater.fetch(credentials: credentials)
             XCTFail("401が例外にならなかった")
         } catch {
-            XCTAssertEqual(error as? GeoLite2Updater.Failure, .unauthorised)
+            XCTAssertEqual(
+                error as? GeoLite2Updater.Failure,
+                .unauthorised("Your account ID or license key could not be authenticated.")
+            )
+        }
+    }
+
+    func test言い分が無ければ空で返す() async throws {
+        let updater = GeoLite2Updater(transport: StubTransport(
+            body: Data(), status: 403, seen: { _ in }
+        ))
+        do {
+            _ = try await updater.fetch(credentials: credentials)
+            XCTFail("403が例外にならなかった")
+        } catch {
+            XCTAssertEqual(error as? GeoLite2Updater.Failure, .unauthorised(""))
+        }
+    }
+
+    func testエラーページは見せない() {
+        // An HTML error page from a proxy is not a sentence anyone wants read
+        // back to them, and neither is a body of bytes.
+        XCTAssertEqual(GeoLite2Updater.reason(from: Data("<html>oops</html>".utf8)), "")
+        XCTAssertEqual(GeoLite2Updater.reason(from: Data(repeating: 0xFF, count: 40)), "")
+        XCTAssertEqual(GeoLite2Updater.reason(from: Data(repeating: 0x41, count: 5_000)), "")
+        XCTAssertEqual(
+            GeoLite2Updater.reason(from: Data("  Invalid license key\n".utf8)),
+            "Invalid license key"
+        )
+    }
+
+    func testその他のHTTPも言い分を運ぶ() async throws {
+        let updater = GeoLite2Updater(transport: StubTransport(
+            body: Data("Rate limit exceeded".utf8), status: 429, seen: { _ in }
+        ))
+        do {
+            _ = try await updater.fetch(credentials: credentials)
+            XCTFail("429が例外にならなかった")
+        } catch {
+            XCTAssertEqual(
+                error as? GeoLite2Updater.Failure, .httpStatus(429, "Rate limit exceeded")
+            )
         }
     }
 

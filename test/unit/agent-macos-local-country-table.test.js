@@ -73,6 +73,16 @@ describe('このMacの国テーブル', () => {
     assert.match(store, /WHERE g\.ip = c\.remote_address AND g\.latitude IS NOT NULL/);
   });
 
+  it('断られた理由を、MaxMindの言葉で伝える', () => {
+    // Seen on 2026-09-16: the agent said only "MaxMind refused that account ID
+    // and licence key", which cannot tell a mistyped key from an account that
+    // cannot reach this edition. MaxMind says which, in one sentence.
+    assert.match(updater, /case unauthorised\(String\)/);
+    assert.match(updater, /case httpStatus\(Int, String\)/);
+    assert.match(updater, /static func reason\(from data: Data\) -> String/);
+    assert.match(settings, /reason\.isEmpty\n\s*\? L\("MaxMind refused that account ID and licence key\."\)/);
+  });
+
   it('既存の経路は残っている', () => {
     assert.match(settings, /When an address is not in the cache/);
     assert.match(settings, /ThirdPartyGeoLookup\(/);
