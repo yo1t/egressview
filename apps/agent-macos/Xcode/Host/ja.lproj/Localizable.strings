@@ -779,3 +779,10 @@
 // What MaxMind itself said about a refusal (P3-117).
 "MaxMind refused it: %@" = "MaxMindに断られました: %@";
 "MaxMind returned HTTP %lld: %@" = "MaxMindが HTTP %1$lld を返しました: %2$@";
+
+// Reading MaxMind's GeoIP.conf instead of retyping the key (P3-117).
+"Read GeoIP.conf..." = "GeoIP.conf を読み込む…";
+"Read GeoIP.conf" = "GeoIP.conf を読み込む";
+"Choose the GeoIP.conf that MaxMind gave you. Only the account ID and licence key are read from it." = "MaxMindから受け取った GeoIP.conf を選んでください。読み取るのはアカウントIDとライセンスキーだけです。";
+"Could not read that file: %@" = "そのファイルを読めませんでした: %@";
+"That file has no AccountID and LicenseKey in it." = "そのファイルに AccountID と LicenseKey がありません。";

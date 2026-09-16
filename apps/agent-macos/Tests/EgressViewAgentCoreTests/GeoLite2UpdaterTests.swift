@@ -256,3 +256,62 @@ final class GzipTarTests: XCTestCase {
         }
     }
 }
+
+/// Reading MaxMind's own `GeoIP.conf`, because the licence key is shown once
+/// and forty characters retyped by hand is where this went wrong (P3-117).
+final class GeoIPConfigurationTests: XCTestCase {
+    private let real = """
+    # GeoIP.conf file for `geoipupdate` program, for versions >= 3.1.1.
+    # Used to update GeoIP databases from https://www.maxmind.com.
+
+    # `AccountID` is from your MaxMind account.
+    AccountID 1411827
+
+    # `LicenseKey` is from your MaxMind account.
+    LicenseKey EXAMPLEKEYEXAMPLEKEYEXAMPLEKEYEXAMPLEKEY
+
+    # `EditionIDs` is from your MaxMind account.
+    EditionIDs GeoLite2-ASN GeoLite2-City GeoLite2-Country
+    """
+
+    func test配布されている形をそのまま読む() throws {
+        let credentials = try XCTUnwrap(GeoLite2Updater.Credentials(configuration: real))
+        XCTAssertEqual(credentials.accountID, "1411827")
+        XCTAssertEqual(credentials.licenseKey, "EXAMPLEKEYEXAMPLEKEYEXAMPLEKEYEXAMPLEKEY")
+    }
+
+    func testEditionIDsは読み捨てる() throws {
+        // Which databases to fetch is the updater tool's business, not this
+        // agent's: it asks for the country edition and nothing else.
+        let credentials = try XCTUnwrap(GeoLite2Updater.Credentials(configuration: real))
+        XCTAssertTrue(credentials.isComplete)
+    }
+
+    func test古い名前のUserIDも読む() throws {
+        let credentials = try XCTUnwrap(GeoLite2Updater.Credentials(
+            configuration: "UserID 42\nLicenseKey abcdefghijklmnop"
+        ))
+        XCTAssertEqual(credentials.accountID, "42")
+    }
+
+    func test行末のコメントを値に混ぜない() throws {
+        let credentials = try XCTUnwrap(GeoLite2Updater.Credentials(
+            configuration: "AccountID 7 # mine\nLicenseKey key123 # secret"
+        ))
+        XCTAssertEqual(credentials.accountID, "7")
+        XCTAssertEqual(credentials.licenseKey, "key123")
+    }
+
+    func test足りない設定は受け取らない() {
+        // Half a configuration would be saved, then refused by MaxMind with a
+        // message about the half that is there.
+        XCTAssertNil(GeoLite2Updater.Credentials(configuration: "AccountID 7"))
+        XCTAssertNil(GeoLite2Updater.Credentials(configuration: "LicenseKey abc"))
+        XCTAssertNil(GeoLite2Updater.Credentials(configuration: ""))
+        XCTAssertNil(GeoLite2Updater.Credentials(configuration: "# only a comment"))
+    }
+
+    func test別のファイルを読ませても受け取らない() {
+        XCTAssertNil(GeoLite2Updater.Credentials(configuration: "{\"json\": true}"))
+    }
+}

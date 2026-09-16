@@ -166,6 +166,72 @@ Feodo Tracker is excluded from that warning. It has published an empty list
 since March 2026, which is a fact about the world rather than a fault, and a
 warning that never clears is one nobody reads.
 
+### Knowing the country without asking anyone (MaxMind GeoLite2)
+
+**What you get**: destinations are placed in a country by a table on this Mac.
+Neither your Hub nor any third party is told the address being watched.
+
+**Who can skip this**: anyone with a Hub who is content to let it answer.
+Nothing changes if you leave this off.
+
+**How long it takes**: about five minutes, including making a free MaxMind
+account.
+
+#### Why it uses your own account
+
+GeoLite2 is free, but **the licence is between you and MaxMind**. If EgressView
+shipped a copy, we would take on its obligations — adopt each new build
+promptly, destroy anything more than thirty days behind it — on behalf of every
+installation. With your own account, the agreement stays where it belongs.
+
+#### Steps
+
+1. **Make an account** at https://www.maxmind.com/en/geolite2/signup and set a
+   password from the email.
+2. **Generate a licence key**: "Manage License Keys" → "Generate new license
+   key". Any description will do. **The key is shown once.**
+3. **Download the `GeoIP.conf`** offered on that page. It already contains your
+   `AccountID` and `LicenseKey`.
+4. In EgressView Agent, open **Settings → Enrichment** and switch on **Use a
+   country table on this Mac**.
+5. Press **Read GeoIP.conf…** and choose the file. Only the account ID and the
+   licence key are read from it, and the download starts.
+
+You can type the two values instead, but the key is forty characters and is
+shown only once, so reading the file is the surer path.
+
+#### After that
+
+- **It refreshes weekly.** MaxMind publishes a new build each week, and the
+  licence does not allow using one more than thirty days old.
+- **A table older than thirty days stops answering**, rather than quietly
+  breaking the terms it arrived under. The other routes carry on.
+- **A refusal shows MaxMind's own words**, so a mistyped key and an account
+  without access to that edition read differently.
+- You can delete `GeoIP.conf` afterwards. The credentials live in the Keychain.
+
+#### What leaves the Mac
+
+**Only your account ID and licence key are sent to MaxMind.** No watched
+address is sent — that is the entire point of keeping a table locally.
+
+#### What the country edition cannot do
+
+The free country edition knows **which country**, not where inside it. So a
+destination placed only by this table:
+
+- **colours the map**, and glows on arrival
+- **does not get a point on the globe**. It is counted among the traffic the
+  globe could not place, rather than disappearing from the total.
+
+Where coordinates are needed, locations from your Hub are used as before.
+
+#### Attribution
+
+The licence requires it, so the settings screen carries:
+
+> This product includes GeoLite Data created by MaxMind, available from https://www.maxmind.com
+
 ## Reading the screen
 
 - **Network status** — the globe, the flow diagram, the timeline, and how much of

@@ -1179,6 +1179,16 @@ private struct AgentSettingsView: View {
                     }
                     .font(.caption)
                     HStack(spacing: 10) {
+                        // The licence key is shown once, and is forty
+                        // characters. MaxMind hands out a GeoIP.conf with both
+                        // values already in it, so reading that beats
+                        // retyping -- which is how the first attempt failed
+                        // (P3-117).
+                        Button(L("Read GeoIP.conf...")) {
+                            guard let url = Self.chooseConfiguration() else { return }
+                            Task { await geo.importConfiguration(at: url) }
+                        }
+                        .disabled(geo.localTableStatus == .fetching)
                         Button(L("Fetch the table")) {
                             Task { await geo.saveAndRefreshLocalTable(
                                 accountID: model.maxMindAccountID,
@@ -1210,6 +1220,20 @@ private struct AgentSettingsView: View {
         case .hub: return L("Ask the Hub")
         case .hubThenThirdParty: return L("Ask the Hub, then ipwho.is")
         }
+    }
+
+    /// Asks for MaxMind's `GeoIP.conf`.
+    ///
+    /// An open panel rather than a path field: it works inside the sandbox,
+    /// and it is the file the portal already put in Downloads.
+    static func chooseConfiguration() -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = L("Read GeoIP.conf")
+        panel.message = L("Choose the GeoIP.conf that MaxMind gave you. Only the account ID and licence key are read from it.")
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        return panel.runModal() == .OK ? panel.url : nil
     }
 
     /// What the local table is doing, in a line.
@@ -1865,6 +1889,31 @@ final class GeoCacheController: ObservableObject {
         // clock.
         preferences.localTableAttemptedAt = Date()
         await refreshLocalTable()
+    }
+
+    /// Takes the account and key out of MaxMind's own file, then fetches.
+    ///
+    /// The file itself is not kept: the Keychain holds the credentials, and a
+    /// copy of them sitting in Downloads is the reader's to delete.
+    func importConfiguration(at url: URL) async {
+        let text: String
+        do {
+            text = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            localTableStatus = .failed(
+                L("Could not read that file: %@", (error as NSError).localizedDescription)
+            )
+            return
+        }
+        guard let credentials = GeoLite2Updater.Credentials(configuration: text) else {
+            localTableStatus = .failed(
+                L("That file has no AccountID and LicenseKey in it.")
+            )
+            return
+        }
+        await saveAndRefreshLocalTable(
+            accountID: credentials.accountID, licenseKey: credentials.licenseKey
+        )
     }
 
     /// Saves what was typed, then fetches. One button, because typing a key
