@@ -1128,6 +1128,57 @@ public final class ObservationStore: @unchecked Sendable {
         }
     }
 
+    /// Who sent the traffic in one 15-minute window, and where to.
+    ///
+    /// A notice that says only "845.6 MB against a usual 674 KB" leaves the
+    /// reader with no way to tell a speed test from something to worry about.
+    /// The names are what make it a judgement they can actually make, and they
+    /// are already in the store -- the window has only just closed, so its raw
+    /// rows are still there (P3-122).
+    public func outboundWindowContributors(
+        windowStart: Date, windowLength: TimeInterval = 900, limit: Int = 3
+    ) throws -> (applications: [(name: String, bytesOut: UInt64)],
+                 destinations: [(name: String, bytesOut: UInt64)],
+                 destinationCount: Int) {
+        try lock.withLock {
+            func top(_ column: String) throws -> [(String, UInt64)] {
+                let statement = try prepare("""
+                SELECT \(column) AS name, SUM(COALESCE(bytes_out, 0)) AS sent
+                FROM observations
+                WHERE last_observed_at >= ? AND last_observed_at < ?
+                GROUP BY name
+                HAVING sent > 0
+                ORDER BY sent DESC
+                LIMIT ?
+                """)
+                defer { sqlite3_finalize(statement) }
+                sqlite3_bind_double(statement, 1, windowStart.timeIntervalSince1970)
+                sqlite3_bind_double(statement, 2, windowStart.timeIntervalSince1970 + windowLength)
+                sqlite3_bind_int64(statement, 3, Int64(max(1, limit)))
+                var rows: [(String, UInt64)] = []
+                while sqlite3_step(statement) == SQLITE_ROW {
+                    guard let name = text(statement, 0), !name.isEmpty else { continue }
+                    rows.append((name, UInt64(max(0, sqlite3_column_int64(statement, 1)))))
+                }
+                return rows
+            }
+            let applications = try top("process_name")
+            let destinations = try top("COALESCE(NULLIF(remote_hostname, \'\'), remote_address)")
+
+            let counter = try prepare("""
+            SELECT COUNT(DISTINCT COALESCE(NULLIF(remote_hostname, ''), remote_address))
+            FROM observations
+            WHERE last_observed_at >= ? AND last_observed_at < ?
+              AND COALESCE(bytes_out, 0) > 0
+            """)
+            defer { sqlite3_finalize(counter) }
+            sqlite3_bind_double(counter, 1, windowStart.timeIntervalSince1970)
+            sqlite3_bind_double(counter, 2, windowStart.timeIntervalSince1970 + windowLength)
+            let total = sqlite3_step(counter) == SQLITE_ROW ? Int(sqlite3_column_int64(counter, 0)) : 0
+            return (applications, destinations, total)
+        }
+    }
+
     public func outboundAnomalyCount(from: Date, to: Date) throws -> Int {
         try lock.withLock {
             let statement = try prepare("""
