@@ -4,6 +4,27 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.76
+
+**A country table you can keep on this Mac, so the question stops leaving it.**
+
+Until now, a country the cache did not hold was fetched from your Hub -- which
+asks a service of its own -- or, if you chose it, from a third party that is
+told the address being watched. A tool for seeing what leaves your machine was
+asking someone else about it.
+
+Settings can now use a MaxMind GeoLite2 country table stored on this Mac. It
+answers first, and anything it cannot place still falls through to exactly the
+routes that worked before. It is off until you turn it on, because it uses your
+own free MaxMind account -- that way the licence stays between you and MaxMind.
+Only your account ID and licence key are sent; no watched address leaves the
+Mac. A table more than thirty days old stops answering rather than quietly
+breaking the terms it came under.
+
+The country edition knows which country, not where inside it, so those
+destinations colour the map without placing a point on the globe -- and their
+traffic is still counted as unplaced rather than disappearing from the total.
+
 ### Agent for Mac 0.5.75
 
 **How much left this Mac, and how much came back.**
