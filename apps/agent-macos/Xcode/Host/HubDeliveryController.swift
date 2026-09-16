@@ -1860,6 +1860,10 @@ final class GeoCacheController: ObservableObject {
     /// MaxMind account. Only the credentials leave this Mac.
     func refreshLocalTableIfDue() async {
         guard preferences.shouldFetchLocalTable(now: Date()) else { return }
+        // Written before the attempt, not after it: a failure has to hold the
+        // next automatic try back too, and only a success moves the weekly
+        // clock.
+        preferences.localTableAttemptedAt = Date()
         await refreshLocalTable()
     }
 
@@ -1892,6 +1896,7 @@ final class GeoCacheController: ObservableObject {
             let result = try await updater.fetch(credentials: credentials)
             try GeoLite2Updater.install(result.data, at: url)
             preferences.localTableFetchedAt = Date()
+            preferences.localTableAttemptedAt = nil
             localTable?.reload()
             localTableStatus = .ready(builtAt: result.metadata.builtAt)
         } catch {
@@ -1903,10 +1908,16 @@ final class GeoCacheController: ObservableObject {
         switch error {
         case GeoLite2Updater.Failure.missingCredentials:
             return L("Add your MaxMind account ID and licence key to download the table.")
-        case GeoLite2Updater.Failure.unauthorised:
-            return L("MaxMind refused that account ID and licence key.")
-        case let GeoLite2Updater.Failure.httpStatus(code):
-            return L("MaxMind returned HTTP %lld.", code)
+        case let GeoLite2Updater.Failure.unauthorised(reason):
+            // MaxMind's own sentence tells a mistyped key from an account that
+            // cannot reach this edition. Ours cannot.
+            return reason.isEmpty
+                ? L("MaxMind refused that account ID and licence key.")
+                : L("MaxMind refused it: %@", reason)
+        case let GeoLite2Updater.Failure.httpStatus(code, reason):
+            return reason.isEmpty
+                ? L("MaxMind returned HTTP %lld.", code)
+                : L("MaxMind returned HTTP %lld: %@", code, reason)
         case let GeoLite2Updater.Failure.notADatabase(reason):
             return L("What arrived is not a MaxMind database, so the old table was kept: %@", reason)
         case let GeoLite2Updater.Failure.archive(reason):

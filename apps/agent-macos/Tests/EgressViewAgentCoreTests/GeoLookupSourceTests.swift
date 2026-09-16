@@ -270,3 +270,80 @@ final class ThirdPartyGeoLookupTests: XCTestCase {
         }
     }
 }
+
+/// When the agent goes and gets the country table by itself (P3-117).
+final class LocalCountryTableScheduleTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var suite: String!
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    override func setUp() {
+        super.setUp()
+        suite = "local-table-\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suite)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suite)
+        super.tearDown()
+    }
+
+    private func preferences() -> GeoCachePreferences {
+        let preferences = GeoCachePreferences(defaults: defaults)
+        preferences.localTableEnabled = true
+        return preferences
+    }
+
+    func test使わない設定なら取りに行かない() {
+        let preferences = GeoCachePreferences(defaults: defaults)
+        XCTAssertFalse(preferences.localTableEnabled)
+        XCTAssertFalse(preferences.shouldFetchLocalTable(now: now))
+    }
+
+    func test一度も取っていなければ取りに行く() {
+        XCTAssertTrue(preferences().shouldFetchLocalTable(now: now))
+    }
+
+    func test週に一度だけ取りに行く() {
+        // The licence asks for the current build promptly; MaxMind publishes
+        // weekly.
+        let preferences = self.preferences()
+        preferences.localTableFetchedAt = now
+        XCTAssertFalse(preferences.shouldFetchLocalTable(now: now.addingTimeInterval(86_400)))
+        XCTAssertTrue(
+            preferences.shouldFetchLocalTable(
+                now: now.addingTimeInterval(GeoCachePreferences.localTableFetchInterval + 1)
+            )
+        )
+    }
+
+    func test失敗したら間を置く() {
+        // Only a success moves the weekly clock, so without this a wrong
+        // licence key would have the agent knocking on MaxMind's door every
+        // hour, forever, because of a typo.
+        let preferences = self.preferences()
+        preferences.localTableAttemptedAt = now
+        XCTAssertFalse(preferences.shouldFetchLocalTable(now: now.addingTimeInterval(3_600)))
+        XCTAssertTrue(
+            preferences.shouldFetchLocalTable(
+                now: now.addingTimeInterval(GeoCachePreferences.localTableRetryInterval + 1)
+            )
+        )
+    }
+
+    func test成功したら間を置くのをやめる() {
+        let preferences = self.preferences()
+        preferences.localTableAttemptedAt = now
+        preferences.localTableFetchedAt = now
+        preferences.localTableAttemptedAt = nil
+        XCTAssertFalse(
+            preferences.shouldFetchLocalTable(now: now.addingTimeInterval(3_600)),
+            "取ったばかりなのに取りに行こうとしている"
+        )
+        XCTAssertTrue(
+            preferences.shouldFetchLocalTable(
+                now: now.addingTimeInterval(GeoCachePreferences.localTableFetchInterval + 1)
+            )
+        )
+    }
+}

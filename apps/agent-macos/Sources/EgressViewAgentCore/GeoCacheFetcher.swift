@@ -169,6 +169,7 @@ public struct GeoCachePreferences: @unchecked Sendable {
     public static let lastOnDemandKey = "geoCacheLastOnDemandAt"
     public static let localTableEnabledKey = "geoLocalCountryTableEnabled"
     public static let localTableFetchedKey = "geoLocalCountryTableFetchedAt"
+    public static let localTableAttemptedKey = "geoLocalCountryTableAttemptedAt"
     public static let thirdPartySpentDayKey = "geoThirdPartySpentDay"
     public static let thirdPartySpentKey = "geoThirdPartySpentCount"
 
@@ -280,8 +281,27 @@ public struct GeoCachePreferences: @unchecked Sendable {
         nonmutating set { defaults.set(newValue, forKey: Self.localTableFetchedKey) }
     }
 
+    /// When an automatic attempt failed. Only the automatic path is held
+    /// back by it; the button in Settings always tries.
+    public var localTableAttemptedAt: Date? {
+        get { defaults.object(forKey: Self.localTableAttemptedKey) as? Date }
+        nonmutating set { defaults.set(newValue, forKey: Self.localTableAttemptedKey) }
+    }
+
+    /// How long to wait after a failed attempt before trying again.
+    ///
+    /// Only a success moves the weekly clock, so without this a wrong licence
+    /// key would have the agent asking MaxMind every hour, for as long as it
+    /// stayed wrong. An hourly knock on someone else's door, forever, because
+    /// of a typo.
+    public static let localTableRetryInterval: TimeInterval = 6 * 60 * 60
+
     public func shouldFetchLocalTable(now: Date) -> Bool {
         guard localTableEnabled else { return false }
+        if let attempted = localTableAttemptedAt, attempted <= now,
+           now.timeIntervalSince(attempted) < Self.localTableRetryInterval {
+            return false
+        }
         guard let last = localTableFetchedAt, last <= now else { return true }
         return now.timeIntervalSince(last) >= Self.localTableFetchInterval
     }

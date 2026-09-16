@@ -775,3 +775,7 @@
 "Mostly %@ (%@)." = "主に %@（%@）。";
 "Mostly %@ (%@), to %@." = "主に %@（%@）から %@ へ。";
 "Mostly %@ (%@), to %@ and %lld other destinations." = "主に %1$@（%2$@）から %3$@ ほか %4$lld 件の宛先へ。";
+
+// What MaxMind itself said about a refusal (P3-117).
+"MaxMind refused it: %@" = "MaxMindに断られました: %@";
+"MaxMind returned HTTP %lld: %@" = "MaxMindが HTTP %1$lld を返しました: %2$@";
