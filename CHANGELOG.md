@@ -4,6 +4,19 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.79
+
+**Hand the country table setting MaxMind's own file.**
+
+The licence key is forty characters and MaxMind shows it once. Settings can now
+read the `GeoIP.conf` that MaxMind gives you when you create the key, instead
+of asking you to carry the key across by hand. Typing the two values still
+works.
+
+Both READMEs now carry the whole procedure -- what it gets you, who can skip
+it, the five steps, the weekly refresh, and the thirty-day limit the licence
+sets.
+
 ### Agent for Mac 0.5.78
 
 **When MaxMind turns the download down, it now says why.**
