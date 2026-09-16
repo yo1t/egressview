@@ -4,6 +4,19 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.77
+
+**The unusual-traffic notice now says what sent it, and where.**
+
+The first real detection on a Mac read "845.6 MB in 15 minutes, compared with a
+usual 674 KB" and stopped there. It was a speed test and a film, but two
+numbers gave no way to tell that from something worth investigating.
+
+The notice now adds the application that sent most of it, how much, the
+destination it went to, and how many destinations there were in total. A
+destination with no name appears as its address. It still says plainly that
+this is a change in behaviour and not a verdict about malware.
+
 ### Agent for Mac 0.5.76
 
 **A country table you can keep on this Mac, so the question stops leaving it.**
