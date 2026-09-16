@@ -768,3 +768,8 @@
 "What arrived is not a MaxMind database, so the old table was kept: %@" = "What arrived is not a MaxMind database, so the old table was kept: %@";
 "The downloaded archive could not be opened: %@" = "The downloaded archive could not be opened: %@";
 "Could not fetch the country table: %@" = "Could not fetch the country table: %@";
+
+// Who sent it and where, in the outbound-anomaly notice (P3-122).
+"Mostly %@ (%@)." = "Mostly %@ (%@).";
+"Mostly %@ (%@), to %@." = "Mostly %@ (%@), to %@.";
+"Mostly %@ (%@), to %@ and %lld other destinations." = "Mostly %1$@ (%2$@), to %3$@ and %4$lld other destinations.";

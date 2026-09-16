@@ -770,3 +770,8 @@
 "What arrived is not a MaxMind database, so the old table was kept: %@" = "届いたものがMaxMindのデータベースではないため、前のテーブルを残しました: %@";
 "The downloaded archive could not be opened: %@" = "取得した書庫を開けませんでした: %@";
 "Could not fetch the country table: %@" = "国テーブルを取得できませんでした: %@";
+
+// Who sent it and where, in the outbound-anomaly notice (P3-122).
+"Mostly %@ (%@)." = "主に %@（%@）。";
+"Mostly %@ (%@), to %@." = "主に %@（%@）から %@ へ。";
+"Mostly %@ (%@), to %@ and %lld other destinations." = "主に %1$@（%2$@）から %3$@ ほか %4$lld 件の宛先へ。";
