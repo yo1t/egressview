@@ -321,6 +321,16 @@ private final class AgentSettingsViewModel: ObservableObject {
     @Published var message: String?
     /// Off unless the user turns it on: this is the one setting that would send
     /// the destinations the agent is watching to somebody else.
+    /// The country table on this Mac, and the account it needs.
+    ///
+    /// The key is held only long enough to save it; the Keychain is where it
+    /// lives, and the field is cleared once it is there.
+    @Published var usesLocalCountryTable = GeoCachePreferences().localTableEnabled {
+        didSet { GeoCachePreferences().localTableEnabled = usesLocalCountryTable }
+    }
+    @Published var maxMindAccountID = ""
+    @Published var maxMindLicenseKey = ""
+
     @Published var geoLookupSource = GeoCachePreferences().lookupSource {
         didSet { GeoCachePreferences().lookupSource = geoLookupSource }
     }
@@ -1140,6 +1150,57 @@ private struct AgentSettingsView: View {
                 }
             }
             .onAppear { geo.refreshRemainingBudget() }
+            Divider()
+
+            // The table on this Mac. Off until someone turns it on, because it
+            // works only with their own MaxMind account -- the licence is
+            // between them and MaxMind, and that is the point (P3-117).
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(isOn: $model.usesLocalCountryTable) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("Use a country table on this Mac"))
+                        Text(L("Answers without asking anyone. Needs a free MaxMind account, because the licence is between you and MaxMind."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if model.usesLocalCountryTable {
+                    Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
+                        GridRow {
+                            Text(L("Account ID"))
+                            TextField("", text: $model.maxMindAccountID)
+                                .frame(maxWidth: 220)
+                        }
+                        GridRow {
+                            Text(L("Licence key"))
+                            SecureField("", text: $model.maxMindLicenseKey)
+                                .frame(maxWidth: 220)
+                        }
+                    }
+                    .font(.caption)
+                    HStack(spacing: 10) {
+                        Button(L("Fetch the table")) {
+                            Task { await geo.saveAndRefreshLocalTable(
+                                accountID: model.maxMindAccountID,
+                                licenseKey: model.maxMindLicenseKey
+                            ) }
+                        }
+                        .disabled(geo.localTableStatus == .fetching)
+                        Text(Self.localTableText(geo.localTableStatus, answered: geo.localTableAnswered))
+                            .font(.caption)
+                            .foregroundStyle(Self.localTableIsWrong(geo.localTableStatus) ? .orange : .secondary)
+                    }
+                    // What crosses the network here, said in the same plain way
+                    // as the third-party setting above.
+                    Text(L("Only your account ID and licence key are sent to MaxMind. No watched address leaves this Mac."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(LocalCountryDatabase.attribution)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
         }
     }
 
@@ -1148,6 +1209,38 @@ private struct AgentSettingsView: View {
         case .cacheOnly: return L("Do not look it up")
         case .hub: return L("Ask the Hub")
         case .hubThenThirdParty: return L("Ask the Hub, then ipwho.is")
+        }
+    }
+
+    /// What the local table is doing, in a line.
+    static func localTableText(
+        _ status: GeoCacheController.LocalTableStatus, answered: Int
+    ) -> String {
+        switch status {
+        case .idle:
+            return answered > 0
+                ? L("%lld destinations placed without asking anyone.", answered)
+                : L("No table yet.")
+        case .needsCredentials:
+            return L("Add your MaxMind account ID and licence key to download the table.")
+        case .fetching:
+            return L("Downloading...")
+        case let .ready(builtAt):
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            // The build date, not the download date: the licence counts from
+            // when MaxMind published it.
+            return L("Table built %@.", formatter.string(from: builtAt))
+        case let .failed(message):
+            return message
+        }
+    }
+
+    static func localTableIsWrong(_ status: GeoCacheController.LocalTableStatus) -> Bool {
+        switch status {
+        case .failed, .needsCredentials: return true
+        default: return false
         }
     }
 
@@ -1671,6 +1764,24 @@ final class GeoCacheController: ObservableObject {
     /// only exists in preferences cannot be noticed going wrong.
     @Published private(set) var thirdPartyRemainingToday = ThirdPartyGeoLookup.dailyBudget
 
+    /// The country table kept on this Mac, when there is one.
+    enum LocalTableStatus: Equatable {
+        case idle
+        case needsCredentials
+        case fetching
+        case ready(builtAt: Date)
+        case failed(String)
+    }
+
+    @Published private(set) var localTableStatus: LocalTableStatus = .idle
+    /// How many addresses this Mac answered on its own. Shown so the setting
+    /// can be judged by what it did, not by what it promised.
+    @Published private(set) var localTableAnswered = 0
+
+    let localTable: LocalCountryDatabase? = LocalCountryDatabase.defaultURL()
+        .map { LocalCountryDatabase(url: $0) }
+    private let credentialsForLocalTable = GeoLite2CredentialStore()
+
     private let store: ObservationStore?
     private let credentialStore: any AgentCredentialStoring
     private let preferences = GeoCachePreferences()
@@ -1701,8 +1812,15 @@ final class GeoCacheController: ObservableObject {
             }
         }
         Task { await self.refreshIfDue() }
+        Task { await self.refreshLocalTableIfDue() }
         timer.start(every: 3_600) { [weak self] in
-            Task { @MainActor in await self?.refreshIfDue() }
+            Task { @MainActor in
+                await self?.refreshIfDue()
+                // Weekly, checked hourly: the licence asks for the current
+                // build promptly, and a Mac that is asleep at the appointed
+                // hour would otherwise wait another week.
+                await self?.refreshLocalTableIfDue()
+            }
         }
     }
 
@@ -1714,6 +1832,88 @@ final class GeoCacheController: ObservableObject {
         let credential = await credentialStore.loadDetached()
         guard preferences.shouldFetch(now: Date(), hasHub: credential != nil) else { return }
         await refresh()
+    }
+
+    /// Answers what the local country table can, and reports whether anything
+    /// is still unplaced.
+    ///
+    /// Returns true when the other routes still have work to do -- including
+    /// when there is no table at all, which is the ordinary case.
+    @discardableResult
+    private func resolveFromLocalTable() -> Bool {
+        guard let store else { return false }
+        let pending = ((try? store.pendingCountryAddresses(limit: 500)) ?? [])
+            .filter { !NonPublicAddress.isNonPublic($0) }
+        guard !pending.isEmpty else { return false }
+        guard preferences.localTableEnabled, let localTable else { return true }
+        let found = pending.compactMap { address in
+            localTable.countryCode(for: address).map { GeoLocation.country($0, ip: address) }
+        }
+        guard !found.isEmpty else { return true }
+        try? store.addGeoLocations(found)
+        localTableAnswered += found.count
+        // Anything the table could not place is still someone else's question.
+        return found.count < pending.count
+    }
+
+    /// Downloads the country table when it is due, using the reader's own
+    /// MaxMind account. Only the credentials leave this Mac.
+    func refreshLocalTableIfDue() async {
+        guard preferences.shouldFetchLocalTable(now: Date()) else { return }
+        await refreshLocalTable()
+    }
+
+    /// Saves what was typed, then fetches. One button, because typing a key
+    /// and not fetching leaves the setting looking on while nothing happened.
+    func saveAndRefreshLocalTable(accountID: String, licenseKey: String) async {
+        let credentials = GeoLite2Updater.Credentials(
+            accountID: accountID, licenseKey: licenseKey
+        )
+        if credentials.isComplete {
+            do {
+                try credentialsForLocalTable.save(credentials)
+            } catch {
+                localTableStatus = .failed(Self.describeLocalTable(error))
+                return
+            }
+        }
+        await refreshLocalTable()
+    }
+
+    func refreshLocalTable() async {
+        guard let url = LocalCountryDatabase.defaultURL() else { return }
+        do {
+            guard let credentials = try credentialsForLocalTable.load() else {
+                localTableStatus = .needsCredentials
+                return
+            }
+            localTableStatus = .fetching
+            let updater = GeoLite2Updater(transport: URLSessionGeoLite2Transport())
+            let result = try await updater.fetch(credentials: credentials)
+            try GeoLite2Updater.install(result.data, at: url)
+            preferences.localTableFetchedAt = Date()
+            localTable?.reload()
+            localTableStatus = .ready(builtAt: result.metadata.builtAt)
+        } catch {
+            localTableStatus = .failed(Self.describeLocalTable(error))
+        }
+    }
+
+    static func describeLocalTable(_ error: any Error) -> String {
+        switch error {
+        case GeoLite2Updater.Failure.missingCredentials:
+            return L("Add your MaxMind account ID and licence key to download the table.")
+        case GeoLite2Updater.Failure.unauthorised:
+            return L("MaxMind refused that account ID and licence key.")
+        case let GeoLite2Updater.Failure.httpStatus(code):
+            return L("MaxMind returned HTTP %lld.", code)
+        case let GeoLite2Updater.Failure.notADatabase(reason):
+            return L("What arrived is not a MaxMind database, so the old table was kept: %@", reason)
+        case let GeoLite2Updater.Failure.archive(reason):
+            return L("The downloaded archive could not be opened: %@", reason)
+        default:
+            return L("Could not fetch the country table: %@", (error as NSError).localizedDescription)
+        }
     }
 
     /// New destinations have been seen. Fill in the ones nothing can name.
@@ -1729,8 +1929,13 @@ final class GeoCacheController: ObservableObject {
     /// request.
     func resolveNewDestinations() async {
         guard let store else { return }
+        // The table on this Mac answers first, because it asks nobody. What it
+        // cannot place falls through to exactly the routes that existed
+        // before (P3-117).
+        let stillUnknown = resolveFromLocalTable()
         let source = preferences.lookupSource
         guard source.usesHub else { return }
+        guard stillUnknown else { return }
         // The same exclusion the third-party path needs applies here. The Hub
         // refuses these addresses itself, so asking it about the LAN is a round
         // trip that cannot succeed -- and on an Agent-only install, or between

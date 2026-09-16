@@ -3,6 +3,15 @@ import SQLite3
 
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
+/// Binds a coordinate, or SQL NULL when the source had none.
+private func bindOptionalDouble(_ statement: OpaquePointer?, _ index: Int32, _ value: Double?) {
+    if let value {
+        sqlite3_bind_double(statement, index, value)
+    } else {
+        sqlite3_bind_null(statement, index)
+    }
+}
+
 public enum ObservationStoreError: Error, Equatable {
     case open(String)
     case statement(String)
@@ -72,12 +81,24 @@ public struct AppDestinationTotal: Equatable, Sendable {
 
 public struct GeoLocation: Equatable, Sendable {
     public let ip: String
-    public let latitude: Double
-    public let longitude: Double
+    /// Absent when the source knows the country but not where in it.
+    ///
+    /// The country table kept on this Mac is the country edition: it places an
+    /// address in a country and says nothing about where. The map and the glow
+    /// need only that; the globe draws arcs and cannot use such a row, which is
+    /// the stated limit of the country edition rather than something to paper
+    /// over with a centroid (P3-117).
+    public let latitude: Double?
+    public let longitude: Double?
     public let countryCode: String?
     public let city: String?
 
-    public init(ip: String, latitude: Double, longitude: Double, countryCode: String?, city: String?) {
+    /// A country, with no position inside it.
+    public static func country(_ code: String, ip: String) -> GeoLocation {
+        GeoLocation(ip: ip, latitude: nil, longitude: nil, countryCode: code, city: nil)
+    }
+
+    public init(ip: String, latitude: Double?, longitude: Double?, countryCode: String?, city: String?) {
         self.ip = ip
         self.latitude = latitude
         self.longitude = longitude
@@ -609,6 +630,31 @@ public final class ObservationStore: @unchecked Sendable {
                 try execute("ALTER TABLE outbound_traffic_windows ADD COLUMN anomaly_kind TEXT")
             }
             try execute("PRAGMA user_version=14")
+        }
+        if version < 15 {
+            // Coordinates become optional. A country table kept on this Mac
+            // answers "which country" and nothing else, and SQLite cannot drop
+            // a NOT NULL constraint in place -- so the table is rebuilt. It
+            // holds tens of thousands of rows, not millions (P3-117).
+            try execute("""
+            CREATE TABLE IF NOT EXISTS geo_locations_v15 (
+                ip TEXT PRIMARY KEY,
+                latitude REAL,
+                longitude REAL,
+                country_code TEXT,
+                city TEXT,
+                received_at REAL NOT NULL
+            )
+            """)
+            try execute("""
+            INSERT OR REPLACE INTO geo_locations_v15
+                (ip, latitude, longitude, country_code, city, received_at)
+            SELECT ip, latitude, longitude, country_code, city, received_at
+            FROM geo_locations
+            """)
+            try execute("DROP TABLE geo_locations")
+            try execute("ALTER TABLE geo_locations_v15 RENAME TO geo_locations")
+            try execute("PRAGMA user_version=15")
         }
     }
 
@@ -1628,8 +1674,8 @@ public final class ObservationStore: @unchecked Sendable {
                 for entry in entries {
                     sqlite3_reset(statement)
                     bindText(statement, 1, entry.ip)
-                    sqlite3_bind_double(statement, 2, entry.latitude)
-                    sqlite3_bind_double(statement, 3, entry.longitude)
+                    bindOptionalDouble(statement, 2, entry.latitude)
+                    bindOptionalDouble(statement, 3, entry.longitude)
                     bindOptionalText(statement, 4, entry.countryCode)
                     bindOptionalText(statement, 5, entry.city)
                     sqlite3_bind_double(statement, 6, receivedAt.timeIntervalSince1970)
@@ -1666,8 +1712,8 @@ public final class ObservationStore: @unchecked Sendable {
                 for entry in entries {
                     sqlite3_reset(statement)
                     bindText(statement, 1, entry.ip)
-                    sqlite3_bind_double(statement, 2, entry.latitude)
-                    sqlite3_bind_double(statement, 3, entry.longitude)
+                    bindOptionalDouble(statement, 2, entry.latitude)
+                    bindOptionalDouble(statement, 3, entry.longitude)
                     bindOptionalText(statement, 4, entry.countryCode)
                     bindOptionalText(statement, 5, entry.city)
                     sqlite3_bind_double(statement, 6, receivedAt.timeIntervalSince1970)
@@ -1797,7 +1843,7 @@ public final class ObservationStore: @unchecked Sendable {
                        SUM(c.session_count) AS sessions,
                        SUM(c.bytes) AS total
                 FROM chart_hourly c
-                JOIN geo_locations g ON g.ip = c.remote_address
+                JOIN geo_locations g ON g.ip = c.remote_address AND g.latitude IS NOT NULL
                 WHERE c.hour_start >= ?3 AND c.hour_start < ?4
                 GROUP BY g.latitude, g.longitude, g.country_code, g.city
                 UNION ALL
@@ -1805,7 +1851,7 @@ public final class ObservationStore: @unchecked Sendable {
                        COUNT(*) AS sessions,
                        COALESCE(SUM(COALESCE(o.bytes_in,0) + COALESCE(o.bytes_out,0)), 0) AS total
                 FROM observations o
-                JOIN geo_locations g ON g.ip = o.remote_address
+                JOIN geo_locations g ON g.ip = o.remote_address AND g.latitude IS NOT NULL
                 WHERE o.last_observed_at >= ?1 AND o.last_observed_at < ?2
                   AND (o.last_observed_at < ?3 OR o.last_observed_at >= ?4)
                 GROUP BY g.latitude, g.longitude, g.country_code, g.city
@@ -1814,7 +1860,7 @@ public final class ObservationStore: @unchecked Sendable {
                        SUM(r.session_count) AS sessions,
                        SUM(r.bytes_in + r.bytes_out) AS total
                 FROM hourly_rollup r
-                JOIN geo_locations g ON g.ip = r.remote_address
+                JOIN geo_locations g ON g.ip = r.remote_address AND g.latitude IS NOT NULL
                 WHERE r.hour_start >= ?1 AND r.hour_start < ?2
                   AND r.hour_start NOT IN (SELECT hour_start FROM chart_hourly)
                 GROUP BY g.latitude, g.longitude, g.country_code, g.city
@@ -1845,21 +1891,30 @@ public final class ObservationStore: @unchecked Sendable {
                        COALESCE(SUM(c.bytes), 0) AS total
                 FROM chart_hourly c
                 WHERE c.hour_start >= ?3 AND c.hour_start < ?4
-                  AND NOT EXISTS (SELECT 1 FROM geo_locations g WHERE g.ip = c.remote_address)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM geo_locations g
+                      WHERE g.ip = c.remote_address AND g.latitude IS NOT NULL
+                  )
                 UNION ALL
                 SELECT COUNT(*) AS sessions,
                        COALESCE(SUM(COALESCE(bytes_in,0) + COALESCE(bytes_out,0)), 0) AS total
                 FROM observations o
                 WHERE o.last_observed_at >= ?1 AND o.last_observed_at < ?2
                   AND (o.last_observed_at < ?3 OR o.last_observed_at >= ?4)
-                  AND NOT EXISTS (SELECT 1 FROM geo_locations g WHERE g.ip = o.remote_address)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM geo_locations g
+                      WHERE g.ip = o.remote_address AND g.latitude IS NOT NULL
+                  )
                 UNION ALL
                 SELECT COALESCE(SUM(r.session_count), 0) AS sessions,
                        COALESCE(SUM(r.bytes_in + r.bytes_out), 0) AS total
                 FROM hourly_rollup r
                 WHERE r.hour_start >= ?1 AND r.hour_start < ?2
                   AND r.hour_start NOT IN (SELECT hour_start FROM chart_hourly)
-                  AND NOT EXISTS (SELECT 1 FROM geo_locations g WHERE g.ip = r.remote_address)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM geo_locations g
+                      WHERE g.ip = r.remote_address AND g.latitude IS NOT NULL
+                  )
             )
             """)
             defer { sqlite3_finalize(unplaced) }
@@ -2327,14 +2382,14 @@ public final class ObservationStore: @unchecked Sendable {
                    c.process_name AS process_name,
                    c.session_count AS connection_count
             FROM chart_hourly c
-            JOIN geo_locations g ON g.ip = c.remote_address
+            JOIN geo_locations g ON g.ip = c.remote_address AND g.latitude IS NOT NULL
             CROSS JOIN watermark w
             WHERE g.country_code IS NOT NULL AND c.hour_start < w.folded_through
             UNION ALL
             SELECT upper(g.country_code), o.first_observed_at, o.last_observed_at,
                    COALESCE(o.remote_hostname, ''), o.process_name, 1
             FROM observations o
-            JOIN geo_locations g ON g.ip = o.remote_address
+            JOIN geo_locations g ON g.ip = o.remote_address AND g.latitude IS NOT NULL
             CROSS JOIN watermark w
             WHERE g.country_code IS NOT NULL AND o.last_observed_at >= w.folded_through
         ), ranked AS (
