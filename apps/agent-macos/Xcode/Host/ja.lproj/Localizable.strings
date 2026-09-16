@@ -752,3 +752,21 @@
 "Outbound traffic was %@ in 15 minutes, compared with a usual %@. This is a behavioural anomaly, not a malware verdict." = "15分間の送信量は%1$@で、通常の%2$@を大きく上回りました。これは動作の変化であり、マルウェアと断定するものではありません。";
 "Outbound traffic was %@ across %lld applications and %lld destinations in 15 minutes, compared with a usual %@. No single application dominated it. This is a behavioural anomaly, not a malware verdict." = "15分間に%2$lld個のアプリから%3$lld件の宛先へ%1$@を送信し、通常の%4$@を大きく上回りました。単一のアプリに偏らない動作の変化であり、マルウェアと断定するものではありません。";
 "Open Network status or Connection log to review the applications and destinations involved." = "「ネットワーク状況」または「通信ログ」で、関係するアプリと宛先を確認してください。";
+
+// The country table kept on this Mac (P3-117).
+"Use a country table on this Mac" = "このMacの国テーブルを使う";
+"Answers without asking anyone. Needs a free MaxMind account, because the licence is between you and MaxMind." = "誰にも聞かずに国が分かります。無料のMaxMindアカウントが必要です（ライセンスはあなたとMaxMindの間のものだからです）。";
+"Account ID" = "アカウントID";
+"Licence key" = "ライセンスキー";
+"Fetch the table" = "テーブルを取得";
+"Only your account ID and licence key are sent to MaxMind. No watched address leaves this Mac." = "MaxMindへ送るのはアカウントIDとライセンスキーだけです。監視対象のアドレスはこのMacから出ません。";
+"No table yet." = "まだテーブルがありません。";
+"Downloading..." = "取得しています…";
+"Table built %@." = "テーブルの版: %@";
+"%lld destinations placed without asking anyone." = "誰にも聞かずに %lld 件の宛先を特定しました。";
+"Add your MaxMind account ID and licence key to download the table." = "テーブルを取得するには、MaxMindのアカウントIDとライセンスキーを入れてください。";
+"MaxMind refused that account ID and licence key." = "MaxMindがそのアカウントIDとライセンスキーを受け付けませんでした。";
+"MaxMind returned HTTP %lld." = "MaxMindが HTTP %lld を返しました。";
+"What arrived is not a MaxMind database, so the old table was kept: %@" = "届いたものがMaxMindのデータベースではないため、前のテーブルを残しました: %@";
+"The downloaded archive could not be opened: %@" = "取得した書庫を開けませんでした: %@";
+"Could not fetch the country table: %@" = "国テーブルを取得できませんでした: %@";

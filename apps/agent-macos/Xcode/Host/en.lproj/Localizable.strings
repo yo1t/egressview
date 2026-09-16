@@ -750,3 +750,21 @@
 "Outbound traffic was %@ in 15 minutes, compared with a usual %@. This is a behavioural anomaly, not a malware verdict." = "Outbound traffic was %@ in 15 minutes, compared with a usual %@. This is a behavioural anomaly, not a malware verdict.";
 "Outbound traffic was %@ across %lld applications and %lld destinations in 15 minutes, compared with a usual %@. No single application dominated it. This is a behavioural anomaly, not a malware verdict." = "Outbound traffic was %1$@ across %2$lld applications and %3$lld destinations in 15 minutes, compared with a usual %4$@. No single application dominated it. This is a behavioural anomaly, not a malware verdict.";
 "Open Network status or Connection log to review the applications and destinations involved." = "Open Network status or Connection log to review the applications and destinations involved.";
+
+// The country table kept on this Mac (P3-117).
+"Use a country table on this Mac" = "Use a country table on this Mac";
+"Answers without asking anyone. Needs a free MaxMind account, because the licence is between you and MaxMind." = "Answers without asking anyone. Needs a free MaxMind account, because the licence is between you and MaxMind.";
+"Account ID" = "Account ID";
+"Licence key" = "Licence key";
+"Fetch the table" = "Fetch the table";
+"Only your account ID and licence key are sent to MaxMind. No watched address leaves this Mac." = "Only your account ID and licence key are sent to MaxMind. No watched address leaves this Mac.";
+"No table yet." = "No table yet.";
+"Downloading..." = "Downloading...";
+"Table built %@." = "Table built %@.";
+"%lld destinations placed without asking anyone." = "%lld destinations placed without asking anyone.";
+"Add your MaxMind account ID and licence key to download the table." = "Add your MaxMind account ID and licence key to download the table.";
+"MaxMind refused that account ID and licence key." = "MaxMind refused that account ID and licence key.";
+"MaxMind returned HTTP %lld." = "MaxMind returned HTTP %lld.";
+"What arrived is not a MaxMind database, so the old table was kept: %@" = "What arrived is not a MaxMind database, so the old table was kept: %@";
+"The downloaded archive could not be opened: %@" = "The downloaded archive could not be opened: %@";
+"Could not fetch the country table: %@" = "Could not fetch the country table: %@";

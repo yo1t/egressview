@@ -167,6 +167,8 @@ public struct GeoCachePreferences: @unchecked Sendable {
     public static let thirdPartyLookupKey = "geoThirdPartyLookupEnabled"
     public static let lookupSourceKey = "geoLookupSource"
     public static let lastOnDemandKey = "geoCacheLastOnDemandAt"
+    public static let localTableEnabledKey = "geoLocalCountryTableEnabled"
+    public static let localTableFetchedKey = "geoLocalCountryTableFetchedAt"
     public static let thirdPartySpentDayKey = "geoThirdPartySpentDay"
     public static let thirdPartySpentKey = "geoThirdPartySpentCount"
 
@@ -256,6 +258,32 @@ public struct GeoCachePreferences: @unchecked Sendable {
         return String(
             format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0
         )
+    }
+
+    /// Whether to consult the country table kept on this Mac.
+    ///
+    /// Off until someone turns it on, because it only works once they have put
+    /// their own MaxMind account in: the licence is between them and MaxMind,
+    /// not between MaxMind and us (P3-117).
+    public var localTableEnabled: Bool {
+        get { defaults.bool(forKey: Self.localTableEnabledKey) }
+        nonmutating set { defaults.set(newValue, forKey: Self.localTableEnabledKey) }
+    }
+
+    /// When the table was last downloaded. The licence requires moving to a
+    /// new build promptly, so the agent checks weekly rather than waiting to
+    /// be asked.
+    public static let localTableFetchInterval: TimeInterval = 7 * 24 * 60 * 60
+
+    public var localTableFetchedAt: Date? {
+        get { defaults.object(forKey: Self.localTableFetchedKey) as? Date }
+        nonmutating set { defaults.set(newValue, forKey: Self.localTableFetchedKey) }
+    }
+
+    public func shouldFetchLocalTable(now: Date) -> Bool {
+        guard localTableEnabled else { return false }
+        guard let last = localTableFetchedAt, last <= now else { return true }
+        return now.timeIntervalSince(last) >= Self.localTableFetchInterval
     }
 
     public var lastOnDemandAt: Date? {
