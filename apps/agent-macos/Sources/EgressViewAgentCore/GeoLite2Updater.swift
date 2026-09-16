@@ -25,6 +25,36 @@ public struct GeoLite2Updater: Sendable {
         }
 
         public var isComplete: Bool { !accountID.isEmpty && !licenseKey.isEmpty }
+
+        /// Reads MaxMind's own `GeoIP.conf`.
+        ///
+        /// The portal hands one out already filled in when a licence key is
+        /// created, and the key is shown exactly once. Retyping forty
+        /// characters from a page you cannot revisit is where this goes wrong
+        /// -- it did on 2026-09-16 -- so the file itself is accepted.
+        ///
+        /// The format is `Key Value` a line at a time, `#` starts a comment.
+        /// Everything but the account and the key is ignored: `EditionIDs` is
+        /// the updater tool's business, not this agent's.
+        public init?(configuration: String) {
+            var accountID = ""
+            var licenseKey = ""
+            for line in configuration.split(whereSeparator: \.isNewline) {
+                let stripped = line.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
+                let parts = stripped.split(
+                    separator: " ", maxSplits: 1, omittingEmptySubsequences: true
+                )
+                guard parts.count == 2 else { continue }
+                let value = parts[1].trimmingCharacters(in: .whitespaces)
+                switch parts[0].lowercased() {
+                case "accountid", "userid": accountID = value
+                case "licensekey": licenseKey = value
+                default: continue
+                }
+            }
+            self.init(accountID: accountID, licenseKey: licenseKey)
+            guard isComplete else { return nil }
+        }
     }
 
     public enum Failure: Error, Equatable {

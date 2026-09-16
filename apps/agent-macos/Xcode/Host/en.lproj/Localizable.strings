@@ -777,3 +777,10 @@
 // What MaxMind itself said about a refusal (P3-117).
 "MaxMind refused it: %@" = "MaxMind refused it: %@";
 "MaxMind returned HTTP %lld: %@" = "MaxMind returned HTTP %1$lld: %2$@";
+
+// Reading MaxMind's GeoIP.conf instead of retyping the key (P3-117).
+"Read GeoIP.conf..." = "Read GeoIP.conf...";
+"Read GeoIP.conf" = "Read GeoIP.conf";
+"Choose the GeoIP.conf that MaxMind gave you. Only the account ID and licence key are read from it." = "Choose the GeoIP.conf that MaxMind gave you. Only the account ID and licence key are read from it.";
+"Could not read that file: %@" = "Could not read that file: %@";
+"That file has no AccountID and LicenseKey in it." = "That file has no AccountID and LicenseKey in it.";

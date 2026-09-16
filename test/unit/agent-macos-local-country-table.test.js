@@ -83,6 +83,28 @@ describe('このMacの国テーブル', () => {
     assert.match(settings, /reason\.isEmpty\n\s*\? L\("MaxMind refused that account ID and licence key\."\)/);
   });
 
+  it('MaxMindのGeoIP.confをそのまま読める', () => {
+    // The key is forty characters and is shown once. Retyping it is where the
+    // first real attempt failed (2026-09-16).
+    assert.match(updater, /public init\?\(configuration: String\)/);
+    assert.match(settings, /Button\(L\("Read GeoIP\.conf\.\.\."\)\)/);
+    assert.match(settings, /func importConfiguration\(at url: URL\) async/);
+    assert.match(settings, /GeoLite2Updater\.Credentials\(configuration: text\)/);
+  });
+
+  it('手順が両方のREADMEに書いてある', () => {
+    const root = path.join(agentRoot, '..', '..');
+    const ja = fs.readFileSync(path.join(agentRoot, 'README.ja.md'), 'utf8');
+    const en = fs.readFileSync(path.join(agentRoot, 'README.md'), 'utf8');
+    assert.match(ja, /GeoIP\.conf を読み込む/);
+    assert.match(ja, /週に1回、自動で取り直します/);
+    assert.match(ja, /監視対象のアドレスは\*\*1件も送りません\*\*/);
+    assert.match(en, /Read GeoIP\.conf/);
+    assert.match(en, /It refreshes weekly/);
+    assert.match(en, /No watched\naddress is sent/);
+    assert.ok(root);
+  });
+
   it('既存の経路は残っている', () => {
     assert.match(settings, /When an address is not in the cache/);
     assert.match(settings, /ThirdPartyGeoLookup\(/);
