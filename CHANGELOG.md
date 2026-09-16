@@ -4,6 +4,19 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.78
+
+**When MaxMind turns the download down, it now says why.**
+
+The country table setting reported "MaxMind refused that account ID and licence
+key" whatever had happened, which cannot tell a mistyped key from an account
+without access to that edition. MaxMind answers with one plain sentence, and it
+now reaches the screen.
+
+A refusal also used to be retried every hour for as long as it lasted, because
+only a success moved the weekly clock. A failed attempt now waits six hours.
+The button in Settings still tries immediately -- pressing it means now.
+
 ### Agent for Mac 0.5.77
 
 **The unusual-traffic notice now says what sent it, and where.**
