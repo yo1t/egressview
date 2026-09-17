@@ -4,6 +4,20 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.80
+
+**What the country table works out now lasts.**
+
+The daily fetch of locations from your Hub cleared the table first, which also
+removed every country the table on this Mac had placed. Those countries
+disappeared once a day and were worked out again the next time each address was
+seen -- on one Mac, 593 answers had left eleven of them. The daily fetch now
+replaces only what your Hub supplies.
+
+**One way to set up the MaxMind account.** The account ID and licence key fields
+are gone; the GeoIP.conf that MaxMind gives you is the way in. Which account is
+in use is shown, and never the key.
+
 ### Agent for Mac 0.5.79
 
 **Hand the country table setting MaxMind's own file.**
