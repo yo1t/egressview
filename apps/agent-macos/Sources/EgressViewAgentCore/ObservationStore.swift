@@ -1753,7 +1753,18 @@ public final class ObservationStore: @unchecked Sendable {
             let updatesBefore = pendingCountryUpdates
             try execute("BEGIN IMMEDIATE")
             do {
-                try execute("DELETE FROM geo_locations")
+                // Only what the Hub supplied. A row with no coordinates came
+                // from the country table on this Mac, and the Hub's cache has
+                // nothing to say about it -- wiping those made every locally
+                // answered country vanish once a day and be worked out again
+                // the next time the address was seen. Measured 2026-09-18:
+                // 593 answers had left 11 rows, the oldest of them five
+                // seconds younger than the daily fetch (P3-117).
+                //
+                // A country-only row for an address the Hub does place is
+                // replaced below, which is right: coordinates are more than a
+                // country.
+                try execute("DELETE FROM geo_locations WHERE latitude IS NOT NULL")
                 let statement = try prepare("""
                 INSERT OR REPLACE INTO geo_locations
                     (ip, latitude, longitude, country_code, city, received_at)
