@@ -215,7 +215,16 @@ COMPONENT_PKG="$WORK_DIR/component.pkg"
 # somewhere other than /Applications, or to stop it entirely.
 COMPONENT_PLIST="$WORK_DIR/component.plist"
 pkgbuild --analyze --root "$PAYLOAD_DIR" "$COMPONENT_PLIST" >/dev/null
-/usr/libexec/PlistBuddy -c 'Set :0:BundleIsRelocatable false' "$COMPONENT_PLIST"
+# Set it if pkgbuild wrote it, add it if pkgbuild did not. macOS 27's pkgbuild
+# stopped emitting the key at all, and `Set` on a missing entry fails -- which
+# stopped the release build on 2026-09-18. Either way the value is written, so
+# the decision does not depend on what this version of pkgbuild happens to
+# leave out.
+if /usr/libexec/PlistBuddy -c 'Print :0:BundleIsRelocatable' "$COMPONENT_PLIST" >/dev/null 2>&1; then
+  /usr/libexec/PlistBuddy -c 'Set :0:BundleIsRelocatable false' "$COMPONENT_PLIST"
+else
+  /usr/libexec/PlistBuddy -c 'Add :0:BundleIsRelocatable bool false' "$COMPONENT_PLIST"
+fi
 if /usr/libexec/PlistBuddy -c 'Print :0:BundleIsRelocatable' "$COMPONENT_PLIST" | grep -q true; then
   fail 'The component plist still allows relocation; the package would install over an unrelated copy.'
 fi
