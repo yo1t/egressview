@@ -232,6 +232,7 @@ internal sealed class AgentWindowsService : ServiceBase
         var threatIntel = enrichmentController.RunThreatAsync(cancellationToken);
         var chartAggregation = RunChartAggregationAsync(store, cancellationToken);
         var maintenance = RunMaintenanceAsync(store, cancellationToken);
+        var outboundAnomalies = RunOutboundAnomalyAsync(store, cancellationToken);
         var coverage = monitoring.RunCoverageHeartbeatAsync(cancellationToken);
         var runHeartbeat = RunHeartbeatAsync(store, runId, cancellationToken);
         Task lifetime;
@@ -255,6 +256,7 @@ internal sealed class AgentWindowsService : ServiceBase
         await threatIntel;
         await chartAggregation;
         await maintenance;
+        await outboundAnomalies;
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(monitoring.Snapshot(), store, DiagnosticsReport.CurrentVersion, monitoring.Enabled,
                 capabilityStatus: deliveryController.CapabilityStatus));
@@ -304,6 +306,43 @@ internal sealed class AgentWindowsService : ServiceBase
             catch
             {
                 try { store.AddCounter("chart-hourly-fold-failure", 1); }
+                catch { /* The original store failure remains visible through diagnostics. */ }
+            }
+            try { await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+        }
+    }
+
+    /// Watches for outbound traffic that does not look like this machine.
+    ///
+    /// The detector is the Mac Agent's, thresholds and all, and it needs a
+    /// full day of measured windows before it will say anything. Until then
+    /// it returns nothing -- which is not the same as "nothing unusual", and
+    /// the counter names keep the two apart.
+    private static async Task RunOutboundAnomalyAsync(ObservationStore store, CancellationToken cancellationToken)
+    {
+        var detector = new OutboundAnomalyDetector();
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                // Capturing is idempotent per window, so checking more often
+                // than the window length costs a COUNT and finds the window
+                // sooner after a restart.
+                if (store.CaptureOutboundTrafficWindow(DateTimeOffset.UtcNow) is { } captured)
+                {
+                    store.AddCounter("outbound-windows-captured", 1);
+                    if (detector.Evaluate(captured.Current, captured.Baseline) is { } finding)
+                    {
+                        store.RecordOutboundAnomaly(finding.Window.StartedAt, finding.Kind);
+                        store.AddCounter(finding.Kind == OutboundAnomalyKind.DistributedTransfer
+                            ? "outbound-anomaly-distributed" : "outbound-anomaly-large", 1);
+                    }
+                }
+            }
+            catch
+            {
+                try { store.AddCounter("outbound-anomaly-failure", 1); }
                 catch { /* The original store failure remains visible through diagnostics. */ }
             }
             try { await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken); }

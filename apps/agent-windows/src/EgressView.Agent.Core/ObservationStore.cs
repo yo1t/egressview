@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 16;
+    private const int CurrentSchemaVersion = 17;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -232,6 +232,26 @@ public sealed partial class ObservationStore : IDisposable
         CREATE INDEX IF NOT EXISTS run_history_component ON run_history(component,id);
         """;
 
+    /// One row per completed fifteen-minute window, so "unusual" is measured
+    /// against what this machine actually does rather than against a number
+    /// someone picked.
+    ///
+    /// The windows are kept, not the observations they came from: a baseline
+    /// has to outlive the raw retention window, and seven days of summaries is
+    /// a few hundred rows where seven days of observations is millions.
+    private const string Version17Schema = """
+        CREATE TABLE IF NOT EXISTS outbound_traffic_windows(
+          window_start TEXT PRIMARY KEY,
+          bytes_out INTEGER NOT NULL,
+          observation_count INTEGER NOT NULL,
+          observations_with_bytes INTEGER NOT NULL,
+          application_count INTEGER NOT NULL,
+          destination_count INTEGER NOT NULL,
+          largest_application_bytes_out INTEGER NOT NULL,
+          anomaly_kind TEXT CHECK(anomaly_kind IN ('large-transfer','distributed-transfer'))
+        );
+        """;
+
     private readonly object gate = new();
     private nint db;
     private bool disposed;
@@ -259,7 +279,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -283,7 +303,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 12) { MigrateVersion12To13(); version = 13; }
         if (version == 13) { MigrateVersion13To14(); version = 14; }
         if (version == 14) { MigrateVersion14To15(); version = 15; }
-        if (version == 15) MigrateVersion15To16();
+        if (version == 15) { MigrateVersion15To16(); version = 16; }
+        if (version == 16) MigrateVersion16To17();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -445,12 +466,19 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion16To17()
+    {
+        CreateMigrationBackup(17);
+        try { Execute($"BEGIN IMMEDIATE; {Version17Schema} UPDATE schema_version SET version=17 WHERE version=16; COMMIT;"); PruneMigrationBackups(17); }
+        catch { TryRollback(); throw; }
+    }
+
     private void ValidateSchema()
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings','sleep_periods','run_history')");
-        if (tables != 17)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings','sleep_periods','run_history','outbound_traffic_windows')");
+        if (tables != 18)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
@@ -921,6 +949,94 @@ public sealed partial class ObservationStore : IDisposable
     {
         lock (gate) Execute($"UPDATE run_history SET ending='faulted',ended_at='{DateTimeOffset.UtcNow:O}'," +
             $"fault='{Sql(SafeTypeName(faultType))}' WHERE id={runId} AND ending='running'");
+    }
+
+    /// Captures the last completed fifteen-minute window and returns the seven
+    /// days before it. A window this run or an earlier one already captured
+    /// returns null, so a restart cannot raise the same alert twice.
+    public (OutboundTrafficWindow Current, IReadOnlyList<OutboundTrafficWindow> Baseline)? CaptureOutboundTrafficWindow(DateTimeOffset now)
+    {
+        var duration = TimeSpan.FromMinutes(15);
+        var end = new DateTimeOffset(now.UtcTicks - now.UtcTicks % duration.Ticks, TimeSpan.Zero);
+        var start = end - duration;
+        lock (gate)
+        {
+            if (ScalarInt64($"SELECT COUNT(*) FROM outbound_traffic_windows WHERE window_start='{start:O}'") != 0) return null;
+            Execute("BEGIN IMMEDIATE;");
+            try
+            {
+                var current = ReadOutboundWindow(start, end);
+                Execute("INSERT INTO outbound_traffic_windows(window_start,bytes_out,observation_count," +
+                    "observations_with_bytes,application_count,destination_count,largest_application_bytes_out) " +
+                    $"VALUES('{start:O}',{current.BytesOut},{current.ObservationCount},{current.ObservationsWithBytes}," +
+                    $"{current.ApplicationCount},{current.DestinationCount},{current.LargestApplicationBytesOut});");
+                var cutoff = start - TimeSpan.FromDays(7);
+                var baseline = ReadOutboundWindows(cutoff, start);
+                Execute($"DELETE FROM outbound_traffic_windows WHERE window_start < '{cutoff:O}';");
+                Execute("COMMIT;");
+                return (current, baseline);
+            }
+            catch { TryRollback(); throw; }
+        }
+    }
+
+    /// Byte counts arrive only when a flow reports its final statistics, so
+    /// observations_with_bytes is counted separately from observations: a
+    /// window nobody could measure must not read as a quiet one.
+    private OutboundTrafficWindow ReadOutboundWindow(DateTimeOffset start, DateTimeOffset end)
+    {
+        var range = $"WHERE observed_at >= '{start:O}' AND observed_at < '{end:O}'";
+        ulong bytesOut = 0; var observations = 0; var withBytes = 0; var applications = 0; var destinations = 0;
+        CheckOperation(WinSqlite.Prepare(db, "SELECT COALESCE(SUM(bytes_sent),0), COUNT(*), COUNT(bytes_sent), " +
+            $"COUNT(DISTINCT COALESCE(process_name,'')), COUNT(DISTINCT remote_address) FROM observations {range}", -1, out var summary, 0));
+        try
+        {
+            if (WinSqlite.Step(summary) == WinSqlite.Row)
+            {
+                bytesOut = (ulong)Math.Max(0, WinSqlite.ColumnInt64(summary, 0));
+                observations = (int)WinSqlite.ColumnInt64(summary, 1);
+                withBytes = (int)WinSqlite.ColumnInt64(summary, 2);
+                applications = (int)WinSqlite.ColumnInt64(summary, 3);
+                destinations = (int)WinSqlite.ColumnInt64(summary, 4);
+            }
+        }
+        finally { WinSqlite.Finalize(summary); }
+
+        var largest = (ulong)Math.Max(0, ScalarInt64("SELECT COALESCE(MAX(app_bytes),0) FROM (SELECT SUM(COALESCE(bytes_sent,0)) " +
+            $"AS app_bytes FROM observations {range} GROUP BY COALESCE(process_name,''))"));
+        return new OutboundTrafficWindow(start, bytesOut, observations, withBytes, applications, destinations, largest);
+    }
+
+    private IReadOnlyList<OutboundTrafficWindow> ReadOutboundWindows(DateTimeOffset from, DateTimeOffset before)
+    {
+        CheckOperation(WinSqlite.Prepare(db, "SELECT window_start,bytes_out,observation_count,observations_with_bytes," +
+            "application_count,destination_count,largest_application_bytes_out FROM outbound_traffic_windows " +
+            $"WHERE window_start >= '{from:O}' AND window_start < '{before:O}' ORDER BY window_start", -1, out var statement, 0));
+        var result = new List<OutboundTrafficWindow>();
+        try
+        {
+            while (WinSqlite.Step(statement) == WinSqlite.Row)
+                result.Add(new OutboundTrafficWindow(
+                    DateTimeOffset.Parse(Text(statement, 0)),
+                    (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 1)),
+                    (int)WinSqlite.ColumnInt64(statement, 2), (int)WinSqlite.ColumnInt64(statement, 3),
+                    (int)WinSqlite.ColumnInt64(statement, 4), (int)WinSqlite.ColumnInt64(statement, 5),
+                    (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 6))));
+        }
+        finally { WinSqlite.Finalize(statement); }
+        return result;
+    }
+
+    public void RecordOutboundAnomaly(DateTimeOffset windowStart, OutboundAnomalyKind kind)
+    {
+        var name = kind == OutboundAnomalyKind.DistributedTransfer ? "distributed-transfer" : "large-transfer";
+        lock (gate) Execute($"UPDATE outbound_traffic_windows SET anomaly_kind='{name}' WHERE window_start='{windowStart:O}'");
+    }
+
+    public int ReadOutboundAnomalyCount(DateTimeOffset from, DateTimeOffset to)
+    {
+        lock (gate) return (int)ScalarInt64("SELECT COUNT(*) FROM outbound_traffic_windows " +
+            $"WHERE window_start >= '{from:O}' AND window_start < '{to:O}' AND anomaly_kind IS NOT NULL");
     }
 
     public IReadOnlyList<AgentRun> ReadRunHistory(int limit = 20)

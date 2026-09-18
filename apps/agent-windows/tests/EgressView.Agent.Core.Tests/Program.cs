@@ -656,15 +656,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 16, "v1 database migrates through v2-v16");
+        Assert(migrated.SchemaVersion == 17, "v1 database migrates through v2-v17");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v16.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v17.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 16, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 17, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -1387,6 +1387,91 @@ try
     }
 
     {
+        // Ported from the Mac Agent with its thresholds intact. The same
+        // laptop must not be called unusual on one platform and ordinary on
+        // the other, so these assertions mirror the Swift tests case for case.
+        const ulong mib = 1024 * 1024;
+        static OutboundTrafficWindow Window(int index, ulong megabytes, int observationsWithBytes = 100,
+            int applications = 2, int destinations = 5, ulong? largestAppMegabytes = null) =>
+            new(new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero).AddSeconds(index * 900),
+                megabytes * 1024 * 1024, 100, observationsWithBytes, applications, destinations,
+                (largestAppMegabytes ?? megabytes) * 1024 * 1024);
+
+        var detector = new OutboundAnomalyDetector();
+
+        // Under a day of history, "normal" has not been observed, only
+        // guessed at. Refusing to decide is the answer, not a missing one.
+        Assert(detector.Evaluate(Window(96, 500), Enumerable.Range(0, 95).Select(i => Window(i, 10)).ToArray()) is null,
+            "no opinion is offered before a full day of measured baseline");
+
+        var steady = Enumerable.Range(0, 96).Select(index => Window(index, 20)).ToArray();
+        var large = detector.Evaluate(Window(96, 200), steady);
+        Assert(large is { Kind: OutboundAnomalyKind.LargeTransfer } &&
+            large.BaselineMedianBytesOut == 20 * mib && large.AlertThresholdBytesOut == 100 * mib,
+            "a large send against a steady baseline is reported with the median and threshold that decided it");
+
+        // Twelve destinations across five applications, none of them dominant:
+        // the shape nobody finds by sorting a list by size.
+        Assert(detector.Evaluate(Window(96, 300, applications: 5, destinations: 30, largestAppMegabytes: 120), steady)
+            is { Kind: OutboundAnomalyKind.DistributedTransfer },
+            "traffic spread across applications and destinations is told apart from one big sender");
+
+        // A quiet baseline must not turn a small upload into an alarm: three
+        // times almost nothing is still almost nothing.
+        Assert(detector.Evaluate(Window(96, 40), Enumerable.Range(0, 96).Select(index => Window(index, 1)).ToArray()) is null,
+            "the absolute floor keeps a quiet machine from alarming over a small upload");
+
+        // A window that could not be measured is not evidence of a quiet
+        // period. It must not alert, and it must not lower the baseline.
+        var lenient = new OutboundAnomalyDetector(new OutboundAnomalyDetector.Configuration { MinimumBaselineWindows = 2 });
+        Assert(lenient.Evaluate(Window(2, 500), [Window(0, 1, observationsWithBytes: 5), Window(1, 1)]) is null,
+            "a baseline window without byte coverage is not counted towards having enough history");
+        Assert(lenient.Evaluate(Window(2, 500, observationsWithBytes: 5), [Window(0, 1), Window(1, 1)]) is null,
+            "a current window without byte coverage never raises an alert");
+
+        // The detector is only worth having if something calls it. A store
+        // that captures windows, a caller that evaluates them and a row that
+        // records the verdict are three separate things, and the last time
+        // two of three were present the third went missing for weeks.
+        var anomalyDatabase = Path.Combine(directory, "outbound-anomaly.db");
+        using (var store = new ObservationStore(anomalyDatabase))
+        {
+            Assert(store.SchemaVersion == 17, "the traffic-window table arrives with schema 17");
+            var now = DateTimeOffset.UtcNow;
+            var window = new DateTimeOffset(now.UtcTicks - now.UtcTicks % TimeSpan.FromMinutes(15).Ticks, TimeSpan.Zero);
+            var previous = window - TimeSpan.FromMinutes(15);
+            store.WriteBatch(Enumerable.Range(0, 12).Select(index => new NetworkObservation(
+                previous.AddMinutes(1), 500 + index, "TCP", "10.0.0.5", 50_000 + index,
+                $"203.0.113.{index}", 443, 8 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw",
+                $"sender{index}")).ToArray());
+
+            var captured = store.CaptureOutboundTrafficWindow(now);
+            Assert(captured is { } first && first.Current.StartedAt == previous &&
+                first.Current.BytesOut == 12UL * 8 * 1024 * 1024 && first.Current.ObservationCount == 12 &&
+                first.Current.ObservationsWithBytes == 12 && first.Current.ApplicationCount == 12 &&
+                first.Current.DestinationCount == 12 && first.Current.LargestApplicationBytesOut == 8 * 1024 * 1024,
+                "a captured window measures bytes, coverage, applications and the largest single sender");
+
+            // Capturing twice would let a restart raise the same alert again.
+            Assert(store.CaptureOutboundTrafficWindow(now) is null,
+                "a window already captured is not captured a second time");
+
+            Assert(store.ReadOutboundAnomalyCount(previous, now) == 0,
+                "a captured window carries no verdict until one is recorded");
+            store.RecordOutboundAnomaly(previous, OutboundAnomalyKind.DistributedTransfer);
+            Assert(store.ReadOutboundAnomalyCount(previous, now) == 1 &&
+                store.ReadOutboundAnomalyCount(previous.AddDays(-2), previous.AddDays(-1)) == 0,
+                "a recorded anomaly is counted inside its period and not outside it");
+        }
+
+        // One overnight backup in the baseline must not become the new normal.
+        var withSpike = new ulong[] { 10, 10, 11, 12, 900 }.Select((value, index) => Window(index, value)).ToArray();
+        Assert(new OutboundAnomalyDetector(new OutboundAnomalyDetector.Configuration { MinimumBaselineWindows = 5 })
+            .Evaluate(Window(5, 150), withSpike) is not null,
+            "median and MAD keep one huge baseline window from hiding the next one");
+    }
+
+    {
         // An OS shutdown and a crash both leave a run that never wrote its own
         // ending. Filing them under one word means the machine being restarted
         // outnumbers, and hides, the run that really did fail.
@@ -1425,7 +1510,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 16 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 17 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
@@ -1599,7 +1684,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, and window run reports");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, and outbound anomalies");
     return 0;
 }
 finally
