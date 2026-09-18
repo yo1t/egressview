@@ -8,11 +8,4 @@ public static class GlobePresentation
         var next = current - Math.Max(0, elapsed.TotalSeconds) * Math.Clamp(degreesPerSecond, 0.5, 30);
         return (next % 360 + 360) % 360;
     }
-
-    public static string CountryFlag(string? code)
-    {
-        var normalized = code?.Trim().ToUpperInvariant() ?? string.Empty;
-        if (normalized.Length != 2 || normalized.Any(letter => letter is < 'A' or > 'Z')) return string.Empty;
-        return string.Concat(normalized.Select(letter => char.ConvertFromUtf32(0x1F1E6 + letter - 'A')));
-    }
 }

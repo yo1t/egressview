@@ -136,8 +136,10 @@ apps/agent-macos/EgressViewAgent.xcodeproj/xcuserdata/
 # Windows Agent local build and runtime state
 apps/agent-windows/**/bin/
 apps/agent-windows/**/obj/
-apps/agent-windows/.publish/
-apps/agent-windows/.publish-msi/
+# Every publish directory, not two named ones. They were listed one at a time,
+# so .publish-p380 and its dozens of siblings were never ignored -- and a bare
+# `git add -A` swept 3,063 files, including 70 MB installers, into a commit.
+apps/agent-windows/.publish*/
 apps/agent-windows/artifacts/
 apps/agent-windows/*.db
 apps/agent-windows/*.db-wal
@@ -151,4 +153,4 @@ design/icons/build/
 apps/agent-macos/Xcode/Host/Assets.xcassets/
 
 # Offscreen render output from apps/agent-windows/tools/render-check.
-apps/agent-windows/.render-check/
+apps/agent-windows/.render-check*/
