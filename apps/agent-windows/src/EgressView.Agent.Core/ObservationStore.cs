@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 15;
+    private const int CurrentSchemaVersion = 16;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -206,6 +206,32 @@ public sealed partial class ObservationStore : IDisposable
         CREATE INDEX IF NOT EXISTS run_history_component ON run_history(component,id);
         """;
 
+    /// An OS shutdown and a crash both leave a run that never wrote its own
+    /// ending, and v15 had no way to tell them apart: every restart of the
+    /// machine filed one more "unexpected". On a laptop rebooted five times a
+    /// week that buries the one run that really did crash.
+    ///
+    /// SQLite cannot widen a CHECK constraint in place, so the table is
+    /// rebuilt. The copy carries every existing row: what was recorded under
+    /// the old vocabulary stays exactly as it was recorded.
+    private const string Version16Schema = """
+        CREATE TABLE IF NOT EXISTS run_history_next(
+          id INTEGER PRIMARY KEY,
+          component TEXT NOT NULL CHECK(component IN ('service','ui')),
+          version TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          heartbeat_at TEXT,
+          ended_at TEXT,
+          ending TEXT NOT NULL CHECK(ending IN ('running','clean','unexpected','faulted','system-shutdown')),
+          fault TEXT
+        );
+        INSERT INTO run_history_next(id,component,version,started_at,heartbeat_at,ended_at,ending,fault)
+          SELECT id,component,version,started_at,heartbeat_at,ended_at,ending,fault FROM run_history;
+        DROP TABLE run_history;
+        ALTER TABLE run_history_next RENAME TO run_history;
+        CREATE INDEX IF NOT EXISTS run_history_component ON run_history(component,id);
+        """;
+
     private readonly object gate = new();
     private nint db;
     private bool disposed;
@@ -233,7 +259,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -256,7 +282,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 11) { MigrateVersion11To12(); version = 12; }
         if (version == 12) { MigrateVersion12To13(); version = 13; }
         if (version == 13) { MigrateVersion13To14(); version = 14; }
-        if (version == 14) MigrateVersion14To15();
+        if (version == 14) { MigrateVersion14To15(); version = 15; }
+        if (version == 15) MigrateVersion15To16();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -411,6 +438,13 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion15To16()
+    {
+        CreateMigrationBackup(16);
+        try { Execute($"BEGIN IMMEDIATE; {Version16Schema} UPDATE schema_version SET version=16 WHERE version=15; COMMIT;"); PruneMigrationBackups(16); }
+        catch { TryRollback(); throw; }
+    }
+
     private void ValidateSchema()
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
@@ -432,6 +466,11 @@ public sealed partial class ObservationStore : IDisposable
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing coverage confirmation timestamps.");
         if (ScalarInt64("SELECT COUNT(*) FROM pragma_table_info('coverage_sessions') WHERE name='interrupted'") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is missing coverage interruption state.");
+        // The rebuild in v16 is the whole of that migration; if it were
+        // skipped, writing a system shutdown would fail the CHECK at the one
+        // moment the process has no time left to handle it.
+        if (ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='run_history' AND sql LIKE '%system-shutdown%'") != 1)
+            throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema cannot record a system shutdown ending.");
     }
 
     public void WriteBatch(IReadOnlyList<NetworkObservation> observations, bool queueForDelivery = false)
@@ -855,6 +894,21 @@ public sealed partial class ObservationStore : IDisposable
     public void EndRun(long runId)
     {
         lock (gate) Execute($"UPDATE run_history SET ending='clean',ended_at='{DateTimeOffset.UtcNow:O}' WHERE id={runId} AND ending='running'");
+    }
+
+    /// Windows tells a service when the machine itself is going down, and the
+    /// grace it gives afterwards is short enough that the process is often
+    /// killed before it can finish. Recording the ending on notification, not
+    /// on completion, is what makes the difference survive being killed.
+    ///
+    /// This deliberately wins over <see cref="EndRun"/>: a stop that drained
+    /// cleanly on the way down is still a stop the machine chose, and that is
+    /// the thing worth counting separately. A run that is never notified stays
+    /// "unexpected" -- the notification is evidence, and its absence is not
+    /// evidence of the opposite.
+    public void EndSystemShutdownRun(long runId)
+    {
+        lock (gate) Execute($"UPDATE run_history SET ending='system-shutdown',ended_at='{DateTimeOffset.UtcNow:O}' WHERE id={runId} AND ending='running'");
     }
 
     /// <param name="faultType">

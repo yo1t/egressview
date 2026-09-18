@@ -638,15 +638,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 15, "v1 database migrates through v2-v15");
+        Assert(migrated.SchemaVersion == 16, "v1 database migrates through v2-v16");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v15.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v16.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 15, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 16, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -1369,6 +1369,50 @@ try
     }
 
     {
+        // An OS shutdown and a crash both leave a run that never wrote its own
+        // ending. Filing them under one word means the machine being restarted
+        // outnumbers, and hides, the run that really did fail.
+        var shutdownDatabase = Path.Combine(directory, "run-shutdown.db");
+        using (var store = new ObservationStore(shutdownDatabase))
+        {
+            var stopped = store.BeginRun(RunComponent.Service, "0.1.0");
+            store.EndSystemShutdownRun(stopped);
+            Assert(store.ReadRunHistory()[0].Ending == "system-shutdown",
+                "a run Windows warned about is recorded as a system shutdown, not as a crash");
+
+            // The notification arrives before the tear-down, and the tear-down
+            // may still finish. Finishing does not make it an ordinary stop:
+            // the machine chose it, and that is what is worth counting.
+            store.EndRun(stopped);
+            Assert(store.ReadRunHistory()[0].Ending == "system-shutdown",
+                "draining successfully on the way down does not overwrite why it was going down");
+
+            // No notification, no inference. A killed process must keep
+            // reading as killed, or the distinction buys nothing.
+            store.BeginRun(RunComponent.Service, "0.1.0");
+            store.BeginRun(RunComponent.Service, "0.1.0");
+            Assert(store.ReadRunHistory()[1].Ending == "unexpected",
+                "a run that was never notified stays unexpected rather than being guessed at");
+
+            var report = DiagnosticsReport.Create(
+                new CollectorSnapshot("healthy", 0, 0, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0),
+                store, "0.1.0");
+            Assert(report.Contains("\"systemShutdown\": 1", StringComparison.Ordinal) &&
+                report.Contains("\"unexpected\": 1", StringComparison.Ordinal),
+                "the bundle counts the two kinds apart instead of reporting one total");
+        }
+
+        // The widened constraint has to survive the upgrade path, not just a
+        // fresh database: an existing install is exactly where the old rows
+        // and the new ending have to coexist.
+        using (var reopened = new ObservationStore(shutdownDatabase))
+        {
+            Assert(reopened.SchemaVersion == 16 && reopened.ReadRunHistory().Count == 3,
+                "reopening keeps every run recorded under the older vocabulary");
+        }
+    }
+
+    {
         // The connection log can be read two ways, and they must not quietly
         // become the same reading. A conversation observed many times is one
         // row in `flows` spanning a period, and many rows in `observations`
@@ -1537,7 +1581,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, and shutdown drain reporting");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, and system-shutdown endings");
     return 0;
 }
 finally
