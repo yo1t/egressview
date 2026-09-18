@@ -120,11 +120,15 @@ internal sealed class AgentWindowsService : ServiceBase
     private CancellationTokenSource? stop;
     private Task? worker;
     private ObservationStore? activeStore;
+    private long activeRunId;
 
     public AgentWindowsService()
     {
         ServiceName = "EgressViewAgent";
         CanHandlePowerEvent = true;
+        // Without this, Windows never calls OnShutdown, and every restart of
+        // the machine is indistinguishable from a crash.
+        CanShutdown = true;
     }
 
     protected override void OnStart(string[] args)
@@ -158,6 +162,24 @@ internal sealed class AgentWindowsService : ServiceBase
         stop?.Dispose();
     }
 
+    /// The machine is going down, which is not the same event as this service
+    /// being stopped, and the record should not say it is.
+    ///
+    /// The ending is written first and the stop attempted afterwards: Windows
+    /// gives a shutting-down service only seconds, and being killed partway
+    /// through the tear-down is the expected case rather than the exception.
+    /// Whatever else is lost, the reason is already on disk.
+    protected override void OnShutdown()
+    {
+        var runId = Interlocked.Read(ref activeRunId);
+        if (runId != 0)
+        {
+            try { activeStore?.EndSystemShutdownRun(runId); }
+            catch (Exception exception) { WriteEventLogFailure(exception); }
+        }
+        OnStop();
+    }
+
     protected override bool OnPowerEvent(PowerBroadcastStatus powerStatus)
     {
         try
@@ -184,6 +206,7 @@ internal sealed class AgentWindowsService : ServiceBase
         // still marked open when the next one starts is how a process that was
         // killed gets to say so, since it cannot say anything itself.
         var runId = store.BeginRun(RunComponent.Service, DiagnosticsReport.CurrentVersion);
+        Interlocked.Exchange(ref activeRunId, runId);
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
             try { store.FaultRun(runId, (e.ExceptionObject as Exception)?.GetType().FullName ?? "Unknown"); } catch { }
@@ -249,7 +272,7 @@ internal sealed class AgentWindowsService : ServiceBase
             if (bodyCompleted) throw new ShutdownIncompleteException(exception);
             throw;
         }
-        finally { activeStore = null; }
+        finally { activeStore = null; Interlocked.Exchange(ref activeRunId, 0); }
     }
 
     /// A sign of life, so that a run which ends without warning can be dated

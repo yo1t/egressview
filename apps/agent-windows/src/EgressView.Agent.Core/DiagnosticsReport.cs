@@ -52,6 +52,11 @@ public static class DiagnosticsReport
             // that only describes the agent that is running cannot answer the
             // question people actually ask after a silent gap.
             runs = SafeRuns(store),
+            // "three unexpected endings" and "one crash, two reboots" are the
+            // same number and different news. Without the split, the one run
+            // that really failed is read at the same weight as the machine
+            // being restarted, and on a laptop the restarts always win.
+            runSummary = SafeRunSummary(store),
             health = new { status = health.Status, issues = health.Issues.Select(issue => new { code = issue.Code, action = issue.Action }) },
             database = new { observationCount = count, storageBytes = store.ReadStorageBytes(), integrity, schemaVersion = store.SchemaVersion, durableCounters = store.ReadCounters() },
             flows = new { total = flowStats.Total, snapshot = flowStats.Snapshot, etw = flowStats.Etw, both = flowStats.Both, bytesUnknown = flowStats.BytesUnknown, processNames = new { resolved = processNames.Resolved, unresolved = processNames.Unresolved }, byOrigin = store.ReadFlowOrigins() },
@@ -74,6 +79,39 @@ public static class DiagnosticsReport
         installer = ReadInstallerState(),
         privacy = new { includesEndpoints = false, includesHostnames = false, includesProcessNames = false, includesCredentials = false, includesHubEndpoint = false, includesRawObservations = false, includesDatabase = false },
     }, new JsonSerializerOptions { WriteIndented = true });
+
+    /// How the recorded runs ended, counted by kind and by component.
+    ///
+    /// Reading the list and counting it are different jobs: the list is capped
+    /// at 20 rows, so a count taken from it would silently describe only the
+    /// part that fitted. This counts what the history holds.
+    private static object SafeRunSummary(ObservationStore store)
+    {
+        try
+        {
+            var runs = store.ReadRunHistory(200);
+            return new
+            {
+                service = CountEndings(runs, RunComponent.Service),
+                ui = CountEndings(runs, RunComponent.Ui),
+            };
+        }
+        catch (Exception) { return new { }; }
+    }
+
+    private static object CountEndings(IReadOnlyList<AgentRun> runs, RunComponent component)
+    {
+        var mine = runs.Where(run => run.Component == component).ToArray();
+        return new
+        {
+            total = mine.Length,
+            running = mine.Count(run => run.Ending == "running"),
+            clean = mine.Count(run => run.Ending == "clean"),
+            systemShutdown = mine.Count(run => run.Ending == "system-shutdown"),
+            unexpected = mine.Count(run => run.Ending == "unexpected"),
+            faulted = mine.Count(run => run.Ending == "faulted"),
+        };
+    }
 
     /// Component, timing and outcome. No message, no path, no destination --
     /// the same boundary the rest of this report keeps.

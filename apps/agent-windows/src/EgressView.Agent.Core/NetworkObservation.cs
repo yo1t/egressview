@@ -62,9 +62,11 @@ public enum RunComponent { Service, Ui }
 
 /// One run of one of the agent's two processes, and how it ended.
 ///
-/// <param name="Ending">running, clean, unexpected, or faulted. "unexpected"
-/// is decided by the next start finding this one still marked running, which
-/// is the only way a process that died can be described at all.</param>
+/// <param name="Ending">running, clean, system-shutdown, unexpected, or
+/// faulted. "unexpected" is decided by the next start finding this one still
+/// marked running, which is the only way a process that died can be described
+/// at all -- and why "system-shutdown" exists: without it, every restart of
+/// the machine reads as one more crash.</param>
 /// <param name="Fault">The exception type name, when one was caught. Never a
 /// message: those carry paths, host names and destinations.</param>
 public sealed record AgentRun(RunComponent Component, string Version, DateTimeOffset StartedAt,
