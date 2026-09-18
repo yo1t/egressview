@@ -422,6 +422,11 @@ export function updateStatsMaps(selIp, mapPoints) {
   stSelIp = nextSelIp;
   if (!stGlobeSvg) { initStatsMaps(); return; }
   if (renderSignature && stMapRenderSignature === renderSignature) {
+    // The picture is already right, but the motion may not be: leaving the
+    // stats tab cancels the flat map's animation and throws its particles
+    // away, and only a render builds them again. Restarting an empty
+    // animation would leave the map still.
+    if (!stFlatParticles.length) stRenderFlatData();
     stStartSpin();
     return;
   }
