@@ -26,7 +26,8 @@ public static class IpcProtocol
         Func<int?, IReadOnlyList<CountryHistoryRow>>? countryHistory = null,
         Func<int, int, IReadOnlyList<RecentFlow>>? recentObservations = null,
         Func<int, bool, ObservationPage>? logSnapshot = null,
-        Func<long, int, ObservationPage>? observationsSince = null)
+        Func<long, int, ObservationPage>? observationsSince = null,
+        Action<string, string?>? recordUiRun = null)
     {
         try
         {
@@ -61,6 +62,7 @@ public static class IpcProtocol
                 "history-export" => HistoryExport(root, historyExport),
                 "delete-history" => DeleteHistory(root, deleteHistory),
                 "diagnostics" => DynamicStatus(diagnostics),
+                "ui-run" => UiRun(root, recordUiRun),
                 "prepare-uninstall" => PrepareUninstall(root, prepareUninstall),
                 _ => Reject("unknown-operation"),
             };
@@ -265,6 +267,25 @@ public static class IpcProtocol
         var days = root.TryGetProperty("days", out var value) ? value.GetInt32() : 0;
         if (days is not (7 or 30)) return Reject("invalid-range");
         return JsonSerializer.Serialize(new { status = "ok", days, data = read(days) });
+    }
+
+    /// The window cannot hold its own run id across a crash, so the service
+    /// holds it and the window reports the three moments that change it.
+    ///
+    /// An unknown stage is rejected rather than ignored: "begin" arriving as
+    /// "start" would leave every window run open forever, and each new one
+    /// would settle the last as an unexpected end. Silence would make that
+    /// look like the window really was crashing.
+    private static string UiRun(JsonElement root, Action<string, string?>? record)
+    {
+        if (record is null) return Reject("operation-unavailable");
+        var stage = root.TryGetProperty("stage", out var value) ? value.GetString() : null;
+        if (stage is not ("begin" or "end" or "fault")) return Reject("invalid-run-stage");
+        var fault = root.TryGetProperty("fault", out var name) && name.ValueKind == JsonValueKind.String
+            ? name.GetString() : null;
+        try { record(stage, fault); }
+        catch { return Reject("run-record-failed"); }
+        return JsonSerializer.Serialize(new { status = "ok", stage });
     }
 
     private static string Reject(string reason) => JsonSerializer.Serialize(new { status = "rejected", reason });

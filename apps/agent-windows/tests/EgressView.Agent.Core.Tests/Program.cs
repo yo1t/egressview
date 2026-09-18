@@ -495,6 +495,24 @@ try
     Assert(IpcProtocol.Handle("""{"v":1,"op":"set-monitoring-enabled","enabled":"no"}""", () => "{}", _ => [],
         setMonitoringEnabled: enabled => enabled).Contains("invalid-monitoring-setting", StringComparison.Ordinal),
         "IPC rejects a non-boolean monitoring state");
+
+    // RecordUiRun existed and compiled for weeks with nothing calling it,
+    // because the protocol had no case for the op the window was sending. The
+    // window swallows the rejection, so the only evidence was run_history
+    // holding zero rows for the UI on a machine that had run it all day.
+    var uiStages = new List<(string Stage, string? Fault)>();
+    var uiBegin = IpcProtocol.Handle("""{"v":1,"op":"ui-run","stage":"begin"}""", () => "{}", _ => [],
+        recordUiRun: (stage, fault) => uiStages.Add((stage, fault)));
+    IpcProtocol.Handle("""{"v":1,"op":"ui-run","stage":"fault","fault":"System.InvalidOperationException"}""", () => "{}", _ => [],
+        recordUiRun: (stage, fault) => uiStages.Add((stage, fault)));
+    Assert(uiStages.SequenceEqual([("begin", (string?)null), ("fault", "System.InvalidOperationException")]) &&
+        uiBegin.Contains("\"status\":\"ok\"", StringComparison.Ordinal),
+        "the window's run reports reach the service that holds its run id");
+    // An unrecognised stage must be refused, not dropped: a begin that never
+    // registers leaves the run open, and the next start files it as a crash.
+    Assert(IpcProtocol.Handle("""{"v":1,"op":"ui-run","stage":"start"}""", () => "{}", _ => [],
+        recordUiRun: (_, _) => { }).Contains("invalid-run-stage", StringComparison.Ordinal),
+        "an unknown run stage is rejected rather than silently ignored");
     var deliveryStatusResponse = IpcProtocol.Handle("""{"v":1,"op":"delivery-status"}""", () => "{}", _ => [],
         deliveryStatus: () => """{"enrolled":true,"pending":4,"state":"rate-limited"}""");
     Assert(deliveryStatusResponse.Contains("\"pending\":4", StringComparison.Ordinal) && deliveryStatusResponse.Contains("rate-limited", StringComparison.Ordinal),
@@ -1581,7 +1599,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, and system-shutdown endings");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, and window run reports");
     return 0;
 }
 finally
