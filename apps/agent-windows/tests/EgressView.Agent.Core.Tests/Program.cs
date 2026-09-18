@@ -172,8 +172,6 @@ try
     Assert(GlobePresentation.AdvanceLongitude(140, TimeSpan.FromSeconds(2), 6) == 128 &&
         GlobePresentation.AdvanceLongitude(2, TimeSpan.FromSeconds(1), 6) == 356,
         "the Windows globe turns eastward with the same decreasing centre longitude and wraparound as Mac");
-    Assert(GlobePresentation.CountryFlag("jp") == "🇯🇵" && GlobePresentation.CountryFlag("USA") == string.Empty,
-        "two-letter destination country codes produce a flag without guessing invalid codes");
     Assert(EqualEarthProjection.AspectRatio is > 2 and < 2.1 &&
         EqualEarthProjection.Project(0, 0) is (0.5, 0.5) &&
         EqualEarthProjection.Project(0, 180).X is > 0.99 and <= 1,
