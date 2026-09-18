@@ -106,11 +106,13 @@ public sealed class WorldCountryMapControl : FrameworkElement
         var border = (Brush)FindResource("StrokeBrush");
         var land = border.Clone();
         land.Opacity = 0.22;
-        var selected = (Brush)FindResource("AccentBrush");
+        land.Freeze();
+        var selected = ((Brush)FindResource("AccentBrush")).Frozen();
         var selectedFill = selected.Clone();
         selectedFill.Opacity = 0.72;
-        drawing.DrawGeometry(land, new Pen(border, 0.4), unvisited);
-        drawing.DrawGeometry(selectedFill, new Pen(selected, 0.7), reached);
+        selectedFill.Freeze();
+        drawing.DrawGeometry(land, new Pen(border.Frozen(), 0.4).Frozen(), unvisited);
+        drawing.DrawGeometry(selectedFill, new Pen(selected, 0.7).Frozen(), reached);
 
         // Reproject only the few countries that are currently glowing. The
         // normal all-time map is a still picture with no frame timer at all.
@@ -132,9 +134,11 @@ public sealed class WorldCountryMapControl : FrameworkElement
             shape.Freeze();
             var halo = System.Windows.Media.Brushes.Cyan.Clone();
             halo.Opacity = 0.55 * intensity;
+            halo.Freeze();
             var glowFill = System.Windows.Media.Brushes.Cyan.Clone();
             glowFill.Opacity = 0.85 * intensity;
-            drawing.DrawGeometry(null, new Pen(halo, 1 + 7 * intensity), shape);
+            glowFill.Freeze();
+            drawing.DrawGeometry(null, new Pen(halo, 1 + 7 * intensity).Frozen(), shape);
             drawing.DrawGeometry(glowFill, null, shape);
         }
     }

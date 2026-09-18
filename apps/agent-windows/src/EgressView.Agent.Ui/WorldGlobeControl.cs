@@ -107,18 +107,18 @@ public sealed class WorldGlobeControl : FrameworkElement
         var radius = Math.Max(0, Math.Min(ActualWidth, ActualHeight) / 2 - 8);
         if (radius <= 0) return;
         var center = new Point(ActualWidth / 2, ActualHeight / 2);
-        var accent = (Brush)FindResource("AccentBrush");
-        var stroke = (Brush)FindResource("StrokeBrush");
-        var surface = (Brush)FindResource("SurfaceSecondaryBrush");
-        drawing.DrawEllipse(surface, new Pen(accent, 1.5), center, radius, radius);
+        var accent = ((Brush)FindResource("AccentBrush")).Frozen();
+        var stroke = ((Brush)FindResource("StrokeBrush")).Frozen();
+        var surface = ((Brush)FindResource("SurfaceSecondaryBrush")).Frozen();
+        drawing.DrawEllipse(surface, new Pen(accent, 1.5).Frozen(), center, radius, radius);
 
-        var gridPen = new Pen(stroke, 0.8);
+        var gridPen = new Pen(stroke, 0.8).Frozen();
         foreach (var latitude in new[] { -60d, -30d, 0d, 30d, 60d })
             DrawLine(drawing, gridPen, Enumerable.Range(-180, 73).Select(i => (latitude, i * 5d)), center, radius);
         foreach (var meridian in Enumerable.Range(0, 12).Select(i => i * 30d))
             DrawLine(drawing, gridPen, Enumerable.Range(-18, 37).Select(i => (i * 5d, meridian)), center, radius);
 
-        var landPen = new Pen(accent, 0.9);
+        var landPen = new Pen(accent, 0.9).Frozen();
         drawing.PushClip(new EllipseGeometry(center, radius, radius));
         drawing.PushOpacity(0.20);
         foreach (var country in atlas.Where(country => country.Code is not null && visitedCountryCodes.Contains(country.Code)))
@@ -133,8 +133,8 @@ public sealed class WorldGlobeControl : FrameworkElement
         // The globe's subject is the traffic, not the coastline: without a
         // line from here to each place, the markers say where the machine has
         // been talking but not that it was this machine doing the talking.
-        var arcPen = new Pen(Brushes.Orange, 0.9) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-        var farSidePen = new Pen(Brushes.Orange, 0.7);
+        var arcPen = new Pen(Brushes.Orange, 0.9) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }.Frozen();
+        var farSidePen = new Pen(Brushes.Orange, 0.7).Frozen();
         foreach (var item in points)
         {
             var arc = EgressView.Agent.Core.GreatCircle.Path(home, (item.Latitude, item.Longitude));
@@ -150,17 +150,18 @@ public sealed class WorldGlobeControl : FrameworkElement
         }
 
         // Largest last, so the busiest place is drawn on top of its neighbours.
+        var markerPen = new Pen(surface, 1).Frozen();
         foreach (var item in points.OrderBy(point => point.Connections))
         {
             var point = Project(item.Latitude, item.Longitude, center, radius);
             if (point is null) continue;
             var size = Math.Clamp(2.5 + Math.Log10(item.Connections + 1) * 2.2, 3, 10);
-            drawing.DrawEllipse(accent, new Pen(surface, 1), point.Value, size, size);
+            drawing.DrawEllipse(accent, markerPen, point.Value, size, size);
         }
 
         if (Project(home.Latitude, home.Longitude, center, radius) is { } origin)
         {
-            drawing.DrawEllipse(null, new Pen(Brushes.Orange, 1.4), origin, 6, 6);
+            drawing.DrawEllipse(null, new Pen(Brushes.Orange, 1.4).Frozen(), origin, 6, 6);
             drawing.DrawEllipse(Brushes.Orange, null, origin, 2.4, 2.4);
         }
     }
