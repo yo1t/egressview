@@ -89,7 +89,15 @@ internal static class Entry
         // The globe was 123 ms a frame because its pens were not frozen, and
         // nothing said so: it built, it drew the right picture, and it ate a
         // core. A budget is the only part of this that can fail.
-        const double budget = 40;
+        //
+        // 80 ms, not 40: the same globe measures 13 ms on a 20-core developer
+        // machine and 38 ms on the two-core CI runner, so a budget close to
+        // the healthy CI figure would fail on a slow morning. A gate that
+        // fails at random gets switched off, and then it gates nothing -- the
+        // exact way render-check spent months not being a gate. The defect
+        // this is here to catch was nine times over, and it stays caught:
+        // unfrozen pens put the runner near 350 ms.
+        const double budget = 80;
         var over = results.Where(result => result.Milliseconds > budget).ToArray();
         if (over.Length == 0) return 0;
         Console.Error.WriteLine();
