@@ -365,12 +365,30 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         lock (interfaceGate) interfaces = updated;
     }
 
+    /// How long a stop waits for the trace session's processing loop.
+    ///
+    /// The point past which the stop finishes anyway, not an estimate of how
+    /// long the loop takes. Going past it is recorded rather than raised.
+    public static readonly TimeSpan StopLimit = TimeSpan.FromSeconds(10);
+
+    /// Whether the last stop gave up waiting for the processing loop.
+    public bool StopTimedOut { get; private set; }
+
     public async Task StopAsync()
     {
         if (session is null) return;
         try { eventsLost = session.EventsLost; } catch { }
         try { session.Stop(); } catch { }
-        if (processing is not null) await processing.WaitAsync(TimeSpan.FromSeconds(10));
+        // Said, not thrown. This runs during tear-down, and an exception here
+        // leaves the service through the start handler, which reports a failed
+        // start -- so Windows records a stop that worked as a crash that did
+        // not happen. Whoever owns the store writes the count; this only has
+        // to remember that it happened.
+        if (processing is not null)
+        {
+            try { await processing.WaitAsync(StopLimit); }
+            catch (TimeoutException) { StopTimedOut = true; }
+        }
         Submit(deferredNames.Drain());
         session.Dispose();
         session = null;

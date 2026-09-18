@@ -16,6 +16,16 @@ internal sealed class MonitoringController : IAsyncDisposable
     private DateTimeOffset lastConfirmedAt;
     private int lastEventsLost;
 
+    /// Stop the collector, and record it when the trace session would not let
+    /// go in time. The count is what anyone can act on; the wait itself is
+    /// already over by the time it is known.
+    private void StopCollector()
+    {
+        collector.StopAsync().GetAwaiter().GetResult();
+        if (!collector.StopTimedOut) return;
+        try { store.AddCounter("shutdown-collector-stop-timeout", 1); } catch (Exception) { }
+    }
+
     internal MonitoringController(ObservationStore store, ObservationPipeline pipeline, string disabledMarker)
     {
         this.store = store;
@@ -53,7 +63,7 @@ internal sealed class MonitoringController : IAsyncDisposable
                 try { File.Delete(disabledMarker); }
                 catch
                 {
-                    collector.StopAsync().GetAwaiter().GetResult();
+                    StopCollector();
                     throw;
                 }
                 Enabled = true;
@@ -64,7 +74,7 @@ internal sealed class MonitoringController : IAsyncDisposable
                 File.WriteAllText(disabledMarker, "Monitoring was paused from the EgressView Agent UI.\r\n");
                 Enabled = false;
                 EndCoverage(DateTimeOffset.UtcNow, interrupted: false);
-                collector.StopAsync().GetAwaiter().GetResult();
+                StopCollector();
             }
             return Enabled;
         }
