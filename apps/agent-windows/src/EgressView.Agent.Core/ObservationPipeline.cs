@@ -87,11 +87,35 @@ public sealed class ObservationPipeline : IAsyncDisposable
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
     }
 
+    /// How long a stop waits for the writer to finish what it is holding.
+    ///
+    /// Not a guess at how long draining takes -- it is the point past which a
+    /// stop is made to finish rather than be waited on further. What matters
+    /// is that going past it is recorded rather than thrown away, because the
+    /// observations still in hand are lost either way and only the count says
+    /// how many.
+    public static readonly TimeSpan DrainLimit = TimeSpan.FromSeconds(10);
+
     public async ValueTask DisposeAsync()
     {
         channel.Writer.TryComplete();
-        await writer.WaitAsync(TimeSpan.FromSeconds(10));
-        if (Volatile.Read(ref persistenceStopped) == 0) FlushCounters();
+        var drained = true;
+        try { await writer.WaitAsync(DrainLimit); }
+        catch (TimeoutException)
+        {
+            // Said, not thrown. A stop that could not drain is worth knowing
+            // about, and the number of observations abandoned is the part that
+            // can be acted on; raising it here turned a slow stop into what
+            // Windows records as an unexpected termination.
+            drained = false;
+            try
+            {
+                store.AddCounter("shutdown-drain-timeout", 1);
+                store.AddCounter("shutdown-abandoned-observations", channel.Reader.Count);
+            }
+            catch (Exception) { }
+        }
+        if (drained && Volatile.Read(ref persistenceStopped) == 0) FlushCounters();
         stop.Dispose();
     }
 

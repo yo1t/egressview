@@ -133,6 +133,15 @@ internal sealed class AgentWindowsService : ServiceBase
         worker = Task.Run(async () =>
         {
             try { await RunAsync(stop.Token); }
+            catch (ShutdownIncompleteException incomplete)
+            {
+                // The body finished; only the tear-down did not. The service
+                // stopped, so reporting a failed start would put an untrue
+                // "terminated unexpectedly" in the event log for what was a
+                // successful, if slow, shutdown. What was not written is worth
+                // recording; a false alarm is not.
+                WriteStartupFailure(incomplete);
+            }
             catch (Exception ex)
             {
                 WriteStartupFailure(ex);
@@ -179,7 +188,12 @@ internal sealed class AgentWindowsService : ServiceBase
         {
             try { store.FaultRun(runId, (e.ExceptionObject as Exception)?.GetType().FullName ?? "Unknown"); } catch { }
         };
+        var bodyCompleted = false;
         try
+        {
+        // A scope of its own, so everything in it is torn down before the run
+        // is recorded. Disposing after the record meant a shutdown that failed
+        // to drain was still filed as clean.
         {
         await using var pipeline = new ObservationPipeline(store, deliveryEnabled: () => store.DeliveryEnabled);
         await using var monitoring = new MonitoringController(store, pipeline, Path.Combine(root, "monitoring.disabled"));
@@ -221,8 +235,19 @@ internal sealed class AgentWindowsService : ServiceBase
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(monitoring.Snapshot(), store, DiagnosticsReport.CurrentVersion, monitoring.Enabled,
                 capabilityStatus: deliveryController.CapabilityStatus));
-        // Last, so that everything above having finished is what "clean" means.
+        bodyCompleted = true;
+        }
+        // Everything above has been disposed by here, so this is the first
+        // point at which "clean" is a true thing to say.
         store.EndRun(runId);
+        }
+        catch (Exception exception)
+        {
+            try { store.FaultRun(runId, exception.GetType().FullName ?? "Unknown"); } catch { }
+            // The work finished and only the tear-down failed. That is a slow
+            // stop, not a crash, and the caller must not report it as one.
+            if (bodyCompleted) throw new ShutdownIncompleteException(exception);
+            throw;
         }
         finally { activeStore = null; }
     }
