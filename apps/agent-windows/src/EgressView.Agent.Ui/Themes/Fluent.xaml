@@ -216,7 +216,12 @@
           <Grid KeyboardNavigation.TabNavigation="Local">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
             <Border Grid.Row="0" Background="{DynamicResource SurfaceSecondaryBrush}" CornerRadius="8" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="3"><TabPanel IsItemsHost="True"/></Border>
-            <ContentPresenter Grid.Row="1" ContentSource="SelectedContent"/>
+            <!-- The name is not decoration. WPF finds the selected tab's content by
+                 looking up PART_SelectedContentHost, and that is how the content
+                 reaches the automation tree. Without it the window draws exactly
+                 the same and every control inside every tab is invisible to a
+                 screen reader: the tree stops at the tab headers. -->
+            <ContentPresenter x:Name="PART_SelectedContentHost" Grid.Row="1" ContentSource="SelectedContent"/>
           </Grid>
         </ControlTemplate>
       </Setter.Value>
