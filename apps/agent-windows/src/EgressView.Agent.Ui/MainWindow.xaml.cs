@@ -1513,7 +1513,7 @@ public partial class MainWindow : Window
             AgentSettings.SetAiEnabled(provider.ToString(), true); AiApiKey.Clear();
             AiSettingsStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("AiReady"), provider, model);
         }
-        catch (Exception exception) { AgentSettings.SetAiEnabled(provider.ToString(), false); AiSettingsStatus.Text = exception.Message; }
+        catch (Exception exception) { AgentSettings.SetAiEnabled(provider.ToString(), false); AiSettingsStatus.Text = DescribeAiFailure(exception, provider); }
         RefreshAiSurface();
     }
 
@@ -1521,7 +1521,10 @@ public partial class MainWindow : Window
     {
         var provider = SelectedAiProvider();
         try { if (provider != AiProviderKind.Ollama) WindowsCredentialVault.Delete(provider.ToString()); }
-        catch (Exception exception) { AiSettingsStatus.Text = exception.Message; return; }
+        // Not an AI failure: the credential store refused. The exception's own
+        // text names the vault and the entry, which is the kind of detail the
+        // status line is supposed to keep out.
+        catch (Exception) { AiSettingsStatus.Text = LocalizationManager.Text("AiRemoveFailed"); return; }
         AgentSettings.SetAiEnabled(provider.ToString(), false); AgentSettings.SetAiCloudConsent(provider.ToString(), false); AiCloudConsent.IsChecked = false; AiApiKey.Clear();
         AiSettingsStatus.Text = LocalizationManager.Text("AiRemoved"); RefreshAiSurface();
     }
@@ -1541,7 +1544,9 @@ public partial class MainWindow : Window
         try { AiPreview.Text = string.IsNullOrWhiteSpace(AiQuestion.Text)
             ? AiInsightContextBuilder.Preview(context)
             : aiClient.BuildPreview(SelectedAiProvider(), SelectedAiModel(), context, CurrentConversation(), AiQuestion.Text); }
-        catch (Exception exception) { AiPreview.Text = exception.Message; }
+        // This box shows exactly what would be sent. A .NET message in it reads
+        // as part of that payload, which is the one thing it must never do.
+        catch (Exception exception) { AiPreview.Text = DescribeAiFailure(exception, SelectedAiProvider()); }
     }
 
     private void RefreshAiSurface()
