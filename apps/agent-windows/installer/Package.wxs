@@ -38,7 +38,27 @@
                       Type="ownProcess"
                       Start="auto"
                       ErrorControl="normal"
-                      Account="NT AUTHORITY\LocalService" />
+                      Account="NT AUTHORITY\LocalService">
+        <!-- Without this the service has no failure actions at all, and a
+             crash leaves it Stopped until the machine is rebooted. Nothing
+             says so: the tray icon is the window's, not the service's, and
+             the window goes on showing the last period it managed to read.
+             An agent whose whole claim is continuous observation must not
+             stop observing quietly.
+
+             Confirmed on 2026-09-18 by killing the service on 0.1.52: SCM
+             logged 7034 and the service stayed Stopped.
+
+             Sixty seconds, three times, counted over a day. A service that
+             cannot start will retry once a minute and say so in run_history
+             and the event log each time, which is noisy on purpose; the
+             alternative was silence. -->
+        <util:ServiceConfig FirstFailureActionType="restart"
+                            SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart"
+                            RestartServiceDelayInSeconds="60"
+                            ResetPeriodInDays="1" />
+      </ServiceInstall>
       <ServiceControl Id="AgentServiceControl" Name="EgressViewAgent"
                       Start="install" Stop="both" Remove="uninstall" Wait="yes" />
     </Component>
