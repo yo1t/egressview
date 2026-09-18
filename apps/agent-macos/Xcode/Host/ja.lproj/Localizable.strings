@@ -770,3 +770,23 @@
 "What arrived is not a MaxMind database, so the old table was kept: %@" = "届いたものがMaxMindのデータベースではないため、前のテーブルを残しました: %@";
 "The downloaded archive could not be opened: %@" = "取得した書庫を開けませんでした: %@";
 "Could not fetch the country table: %@" = "国テーブルを取得できませんでした: %@";
+
+// Who sent it and where, in the outbound-anomaly notice (P3-122).
+"Mostly %@ (%@)." = "主に %@（%@）。";
+"Mostly %@ (%@), to %@." = "主に %@（%@）から %@ へ。";
+"Mostly %@ (%@), to %@ and %lld other destinations." = "主に %1$@（%2$@）から %3$@ ほか %4$lld 件の宛先へ。";
+
+// What MaxMind itself said about a refusal (P3-117).
+"MaxMind refused it: %@" = "MaxMindに断られました: %@";
+"MaxMind returned HTTP %lld: %@" = "MaxMindが HTTP %1$lld を返しました: %2$@";
+
+// Reading MaxMind's GeoIP.conf instead of retyping the key (P3-117).
+"Read GeoIP.conf..." = "GeoIP.conf を読み込む…";
+"Read GeoIP.conf" = "GeoIP.conf を読み込む";
+"Choose the GeoIP.conf that MaxMind gave you. Only the account ID and licence key are read from it." = "MaxMindから受け取った GeoIP.conf を選んでください。読み取るのはアカウントIDとライセンスキーだけです。";
+"Could not read that file: %@" = "そのファイルを読めませんでした: %@";
+"That file has no AccountID and LicenseKey in it." = "そのファイルに AccountID と LicenseKey がありません。";
+
+// Which MaxMind account the table is fetched with (P3-117).
+"Using MaxMind account %@." = "MaxMindアカウント %@ を使います。";
+"No MaxMind account yet. Read the GeoIP.conf that MaxMind gave you." = "MaxMindアカウントが未設定です。MaxMindから受け取った GeoIP.conf を読み込んでください。";

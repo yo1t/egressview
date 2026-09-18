@@ -768,3 +768,23 @@
 "What arrived is not a MaxMind database, so the old table was kept: %@" = "What arrived is not a MaxMind database, so the old table was kept: %@";
 "The downloaded archive could not be opened: %@" = "The downloaded archive could not be opened: %@";
 "Could not fetch the country table: %@" = "Could not fetch the country table: %@";
+
+// Who sent it and where, in the outbound-anomaly notice (P3-122).
+"Mostly %@ (%@)." = "Mostly %@ (%@).";
+"Mostly %@ (%@), to %@." = "Mostly %@ (%@), to %@.";
+"Mostly %@ (%@), to %@ and %lld other destinations." = "Mostly %1$@ (%2$@), to %3$@ and %4$lld other destinations.";
+
+// What MaxMind itself said about a refusal (P3-117).
+"MaxMind refused it: %@" = "MaxMind refused it: %@";
+"MaxMind returned HTTP %lld: %@" = "MaxMind returned HTTP %1$lld: %2$@";
+
+// Reading MaxMind's GeoIP.conf instead of retyping the key (P3-117).
+"Read GeoIP.conf..." = "Read GeoIP.conf...";
+"Read GeoIP.conf" = "Read GeoIP.conf";
+"Choose the GeoIP.conf that MaxMind gave you. Only the account ID and licence key are read from it." = "Choose the GeoIP.conf that MaxMind gave you. Only the account ID and licence key are read from it.";
+"Could not read that file: %@" = "Could not read that file: %@";
+"That file has no AccountID and LicenseKey in it." = "That file has no AccountID and LicenseKey in it.";
+
+// Which MaxMind account the table is fetched with (P3-117).
+"Using MaxMind account %@." = "Using MaxMind account %@.";
+"No MaxMind account yet. Read the GeoIP.conf that MaxMind gave you." = "No MaxMind account yet. Read the GeoIP.conf that MaxMind gave you.";

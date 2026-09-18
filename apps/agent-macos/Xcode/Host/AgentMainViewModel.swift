@@ -425,10 +425,10 @@ final class AgentMainViewModel: ObservableObject {
     /// totals and a chart of them, which nobody reads line by line, so a
     /// slower pace is not a worse screen. It is one read per interval either
     /// way; the interval is the only difference.
-    private var networkPacer = LiveLogPacer(interval: AgentMainViewModel.networkFollowInterval)
-
-    /// How often the network tab re-reads while following traffic.
-    static let networkFollowInterval: TimeInterval = 5
+    /// Rebuilt when the period changes, because what a refresh costs depends
+    /// on the period -- see `TimeScale.liveFollowInterval`.
+    private var networkPacer = LiveLogPacer(interval: TimeScale.hour.liveFollowInterval)
+    private var networkPacerScale = TimeScale.hour
 
     /// New observations have been written to the store.
     ///
@@ -462,6 +462,13 @@ final class AgentMainViewModel: ObservableObject {
     }
 
     private func scheduleNetworkRefresh() {
+        if networkPacerScale != scale {
+            // A week's refresh costs thirty-five times an hour's, so the pace
+            // changes with the period rather than being one compromise for
+            // all of them.
+            networkPacerScale = scale
+            networkPacer = LiveLogPacer(interval: scale.liveFollowInterval)
+        }
         guard let delay = networkPacer.schedule() else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }

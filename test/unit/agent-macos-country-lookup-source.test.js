@@ -107,7 +107,7 @@ describe('キャッシュに無い国を取りに行く', () => {
     // minutes, and nothing on the screen said so (2026-09-13, P3-119).
     assert.match(settings, /@Published private\(set\) var thirdPartyRemainingToday/);
     assert.match(settings, /Text\(Self\.budgetText\(remaining: geo\.thirdPartyRemainingToday\)\)/);
-    assert.match(settings, /\.onAppear \{ geo\.refreshRemainingBudget\(\) \}/);
+    assert.match(settings, /\.onAppear \{\n\s*geo\.refreshRemainingBudget\(\)/);
     assert.match(settings, /preferences\.recordThirdPartySpend\(remaining\.count, on: day\)\n\s*refreshRemainingBudget\(\)/);
   });
 

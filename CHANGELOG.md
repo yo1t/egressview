@@ -4,6 +4,73 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.81
+
+**Network status keeps up with the hour you are watching.**
+
+While the tab is in front and traffic is arriving it re-read every five
+seconds, whatever period was showing. Measured against a real store, one
+refresh costs 4.3 ms for an hour and 151.7 ms for a week -- thirty-five times
+apart -- so a single interval was either too slow for the short view or too
+expensive for the long one.
+
+It now follows the period: one second for the last hour, three seconds for six
+hours and a day, five for a week and a month. Nothing is read for a screen
+nobody is looking at, exactly as before.
+
+### Agent for Mac 0.5.80
+
+**What the country table works out now lasts.**
+
+The daily fetch of locations from your Hub cleared the table first, which also
+removed every country the table on this Mac had placed. Those countries
+disappeared once a day and were worked out again the next time each address was
+seen -- on one Mac, 593 answers had left eleven of them. The daily fetch now
+replaces only what your Hub supplies.
+
+**One way to set up the MaxMind account.** The account ID and licence key fields
+are gone; the GeoIP.conf that MaxMind gives you is the way in. Which account is
+in use is shown, and never the key.
+
+### Agent for Mac 0.5.79
+
+**Hand the country table setting MaxMind's own file.**
+
+The licence key is forty characters and MaxMind shows it once. Settings can now
+read the `GeoIP.conf` that MaxMind gives you when you create the key, instead
+of asking you to carry the key across by hand. Typing the two values still
+works.
+
+Both READMEs now carry the whole procedure -- what it gets you, who can skip
+it, the five steps, the weekly refresh, and the thirty-day limit the licence
+sets.
+
+### Agent for Mac 0.5.78
+
+**When MaxMind turns the download down, it now says why.**
+
+The country table setting reported "MaxMind refused that account ID and licence
+key" whatever had happened, which cannot tell a mistyped key from an account
+without access to that edition. MaxMind answers with one plain sentence, and it
+now reaches the screen.
+
+A refusal also used to be retried every hour for as long as it lasted, because
+only a success moved the weekly clock. A failed attempt now waits six hours.
+The button in Settings still tries immediately -- pressing it means now.
+
+### Agent for Mac 0.5.77
+
+**The unusual-traffic notice now says what sent it, and where.**
+
+The first real detection on a Mac read "845.6 MB in 15 minutes, compared with a
+usual 674 KB" and stopped there. It was a speed test and a film, but two
+numbers gave no way to tell that from something worth investigating.
+
+The notice now adds the application that sent most of it, how much, the
+destination it went to, and how many destinations there were in total. A
+destination with no name appears as its address. It still says plainly that
+this is a change in behaviour and not a verdict about malware.
+
 ### Agent for Mac 0.5.76
 
 **A country table you can keep on this Mac, so the question stops leaving it.**

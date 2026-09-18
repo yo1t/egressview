@@ -481,26 +481,37 @@ final class AgentNotificationCoordinator {
     private func scanForOutboundAnomaly() {
         guard let store else { return }
         scanQueue.async { [weak self] in
-            let result: Result<OutboundAnomalyFinding?, Error> = Result {
+            let result: Result<OutboundAnomalyReport?, Error> = Result {
                 guard let captured = try store.captureOutboundTrafficWindow() else { return nil }
                 let finding = OutboundAnomalyDetector().evaluate(
                     current: captured.current, baseline: captured.baseline
                 )
-                if let finding {
-                    try store.recordOutboundAnomaly(
-                        windowStart: finding.window.startedAt, kind: finding.kind
-                    )
-                }
-                return finding
+                guard let finding else { return nil }
+                try store.recordOutboundAnomaly(
+                    windowStart: finding.window.startedAt, kind: finding.kind
+                )
+                // Read who and where while the window's raw rows are still
+                // there. Without the names, the notice is a number the reader
+                // cannot act on (P3-122).
+                let contributors = try? store.outboundWindowContributors(
+                    windowStart: finding.window.startedAt
+                )
+                return OutboundAnomalyReport(
+                    finding: finding,
+                    applications: contributors?.applications ?? [],
+                    destinations: contributors?.destinations ?? [],
+                    destinationCount: contributors?.destinationCount ?? 0
+                )
             }
             DispatchQueue.main.async { self?.handleOutboundAnomaly(result) }
         }
     }
 
     private func handleOutboundAnomaly(
-        _ result: Result<OutboundAnomalyFinding?, Error>
+        _ result: Result<OutboundAnomalyReport?, Error>
     ) {
-        guard case .success(let finding?) = result else { return }
+        guard case .success(let report?) = result else { return }
+        let finding = report.finding
         let bytes = ByteCountFormatter.string(
             fromByteCount: Int64(clamping: finding.window.bytesOut), countStyle: .file
         )
@@ -520,12 +531,13 @@ final class AgentNotificationCoordinator {
                 bytes, finding.window.applicationCount, finding.window.destinationCount, baseline
             )
         }
+        let culprits = OutboundAnomalyWording.contributorLine(report)
         _ = notifier.notify(
             kind: .outboundAnomaly,
             key: "outbound-anomaly-\(finding.kind.rawValue)",
             title: L("Unusual outbound traffic detected"),
             body: notificationExplanation(
-                reason: reason,
+                reason: culprits.isEmpty ? reason : reason + "\n" + culprits,
                 action: L("Open Network status or Connection log to review the applications and destinations involved.")
             )
         )
@@ -589,5 +601,40 @@ private extension ThreatIntelController.Status {
         case .failed: return "failed"
         default: return "state"
         }
+    }
+}
+
+/// The window's findings, with the names that make it judgeable.
+struct OutboundAnomalyReport {
+    let finding: OutboundAnomalyFinding
+    let applications: [(name: String, bytesOut: UInt64)]
+    let destinations: [(name: String, bytesOut: UInt64)]
+    let destinationCount: Int
+}
+
+enum OutboundAnomalyWording {
+    /// "Mostly Google Chrome Helper (804.9 MB), to speedtest.example.net and
+    /// 194 other destinations."
+    ///
+    /// A notice that gives only the totals leaves the reader unable to tell a
+    /// speed test from something worth investigating. The names are the part
+    /// they can act on, so they belong in the notification rather than only
+    /// behind a click (P3-122).
+    static func contributorLine(_ report: OutboundAnomalyReport) -> String {
+        guard let application = report.applications.first else { return "" }
+        let sent = ByteCountFormatter.string(
+            fromByteCount: Int64(clamping: application.bytesOut), countStyle: .file
+        )
+        guard let destination = report.destinations.first else {
+            return L("Mostly %@ (%@).", application.name, sent)
+        }
+        let others = max(0, report.destinationCount - 1)
+        if others == 0 {
+            return L("Mostly %@ (%@), to %@.", application.name, sent, destination.name)
+        }
+        return L(
+            "Mostly %@ (%@), to %@ and %lld other destinations.",
+            application.name, sent, destination.name, others
+        )
     }
 }

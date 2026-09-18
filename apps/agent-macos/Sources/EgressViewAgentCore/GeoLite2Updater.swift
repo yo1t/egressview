@@ -25,12 +25,49 @@ public struct GeoLite2Updater: Sendable {
         }
 
         public var isComplete: Bool { !accountID.isEmpty && !licenseKey.isEmpty }
+
+        /// Reads MaxMind's own `GeoIP.conf`.
+        ///
+        /// The portal hands one out already filled in when a licence key is
+        /// created, and the key is shown exactly once. Retyping forty
+        /// characters from a page you cannot revisit is where this goes wrong
+        /// -- it did on 2026-09-16 -- so the file itself is accepted.
+        ///
+        /// The format is `Key Value` a line at a time, `#` starts a comment.
+        /// Everything but the account and the key is ignored: `EditionIDs` is
+        /// the updater tool's business, not this agent's.
+        public init?(configuration: String) {
+            var accountID = ""
+            var licenseKey = ""
+            for line in configuration.split(whereSeparator: \.isNewline) {
+                let stripped = line.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
+                let parts = stripped.split(
+                    separator: " ", maxSplits: 1, omittingEmptySubsequences: true
+                )
+                guard parts.count == 2 else { continue }
+                let value = parts[1].trimmingCharacters(in: .whitespaces)
+                switch parts[0].lowercased() {
+                case "accountid", "userid": accountID = value
+                case "licensekey": licenseKey = value
+                default: continue
+                }
+            }
+            self.init(accountID: accountID, licenseKey: licenseKey)
+            guard isComplete else { return nil }
+        }
     }
 
     public enum Failure: Error, Equatable {
         case missingCredentials
-        case unauthorised
-        case httpStatus(Int)
+        /// Carries what MaxMind said, because MaxMind says it plainly and the
+        /// agent used to throw it away.
+        ///
+        /// On 2026-09-16 a reader saw only "MaxMind refused that account ID and
+        /// licence key" and had no way to tell a mistyped key from an account
+        /// without access to this edition. The service distinguishes them in
+        /// one short sentence; passing it through costs nothing.
+        case unauthorised(String)
+        case httpStatus(Int, String)
         case notADatabase(String)
         case archive(String)
     }
@@ -70,6 +107,25 @@ public struct GeoLite2Updater: Sendable {
         return request
     }
 
+    /// What the service said, when it said something a person can read.
+    ///
+    /// MaxMind answers a refusal with one plain sentence -- "Your account ID or
+    /// license key could not be authenticated." for a bad key, something else
+    /// for an edition the account cannot reach. An error page or a body of
+    /// bytes is not worth showing, so those come back empty and the caller
+    /// falls back to its own words.
+    static func reason(from data: Data) -> String {
+        guard !data.isEmpty, data.count <= 4096,
+              let text = String(data: data, encoding: .utf8)
+        else { return "" }
+        let collapsed = text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !collapsed.isEmpty, !collapsed.hasPrefix("<") else { return "" }
+        return String(collapsed.prefix(300))
+    }
+
     /// Downloads the current build and returns the `.mmdb` bytes.
     ///
     /// The bytes are parsed before they are returned. A file that does not read
@@ -81,8 +137,8 @@ public struct GeoLite2Updater: Sendable {
         let (payload, response) = try await transport.get(request)
         switch response.statusCode {
         case 200: break
-        case 401, 403: throw Failure.unauthorised
-        default: throw Failure.httpStatus(response.statusCode)
+        case 401, 403: throw Failure.unauthorised(Self.reason(from: payload))
+        default: throw Failure.httpStatus(response.statusCode, Self.reason(from: payload))
         }
         let database: Data
         do {
@@ -121,10 +177,14 @@ public struct URLSessionGeoLite2Transport: GeoLite2Updater.Transport {
 
     public init(session: URLSession = .shared) { self.session = session }
 
+    /// The permalink answers 302 and the file itself comes from object
+    /// storage, so the session follows the redirect. Verified end to end on
+    /// 2026-09-16: `download.maxmind.com` redirected to Cloudflare R2 and
+    /// returned the 4.3 MB archive.
     public func get(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
-            throw GeoLite2Updater.Failure.httpStatus(0)
+            throw GeoLite2Updater.Failure.httpStatus(0, "")
         }
         return (data, http)
     }

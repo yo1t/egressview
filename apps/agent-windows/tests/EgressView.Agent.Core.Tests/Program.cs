@@ -1506,7 +1506,40 @@ try
     finally { SynchronizationContext.SetSynchronizationContext(previous); }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, and IPC context independence");
+{
+    // A stop that cannot drain in time must not be thrown out of the tear-down.
+    //
+    // It was. The body had already recorded the run as clean, the drain then
+    // timed out, the exception left the service, and Windows filed the stop as
+    // an unexpected termination -- so the agent's own record and the operating
+    // system's said opposite things about the same stop. What is worth keeping
+    // is not the exception but the count: those observations are lost either
+    // way, and only the number says how many.
+    var drainDatabase = Path.Combine(directory, "drain.db");
+    using (var drainStore = new ObservationStore(drainDatabase))
+    {
+        var pipeline = new ObservationPipeline(drainStore, capacity: 8, batchSize: 4);
+        Assert(pipeline.TrySubmit(new NetworkObservation(
+            DateTimeOffset.UtcNow, 5, "TCP", "100.64.0.1", 2000, "100.64.0.2", 443, 16, 16,
+            ObservationLayer.Logical, "1", "etw", "Drain", null)), "observation accepted before the stop");
+        await pipeline.DisposeAsync();
+        Assert(ObservationPipeline.DrainLimit > TimeSpan.Zero, "the drain limit is a named value, not a literal");
+    }
+
+    using (var reopened = new ObservationStore(drainDatabase))
+    {
+        var counters = reopened.ReadCounters();
+        long Counter(string name) => counters.TryGetValue(name, out var value) ? value : 0;
+        // Nothing was abandoned here, so nothing should claim it was: the
+        // counter exists to be believed when it is not zero.
+        Assert(Counter("shutdown-drain-timeout") == 0,
+            "a stop that drained does not report that it could not");
+        Assert(Counter("shutdown-abandoned-observations") == 0,
+            "a stop that drained abandons nothing");
+    }
+}
+
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, and shutdown drain reporting");
     return 0;
 }
 finally
