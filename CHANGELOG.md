@@ -4,6 +4,20 @@ All notable changes to EgressView are documented here.
 
 ## [Unreleased]
 
+### Agent for Mac 0.5.81
+
+**Network status keeps up with the hour you are watching.**
+
+While the tab is in front and traffic is arriving it re-read every five
+seconds, whatever period was showing. Measured against a real store, one
+refresh costs 4.3 ms for an hour and 151.7 ms for a week -- thirty-five times
+apart -- so a single interval was either too slow for the short view or too
+expensive for the long one.
+
+It now follows the period: one second for the last hour, three seconds for six
+hours and a day, five for a week and a month. Nothing is read for a screen
+nobody is looking at, exactly as before.
+
 ### Agent for Mac 0.5.80
 
 **What the country table works out now lasts.**
