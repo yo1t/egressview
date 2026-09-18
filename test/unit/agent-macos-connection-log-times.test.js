@@ -121,11 +121,12 @@ describe('通信ログが新しい通信に追従する', () => {
     // screen being watched. They follow arrivals now -- through the same
     // pacer, at a slower pace, because totals are not read line by line the
     // way individual connections are.
-    assert.match(viewModel, /static let networkFollowInterval: TimeInterval = 5/);
     assert.match(
       viewModel,
-      /private var networkPacer = LiveLogPacer\(interval: AgentMainViewModel\.networkFollowInterval\)/
+      /private var networkPacer = LiveLogPacer\(interval: TimeScale\.hour\.liveFollowInterval\)/
     );
+    // And the pace follows the period, because what a refresh costs does.
+    assert.match(viewModel, /networkPacer = LiveLogPacer\(interval: scale\.liveFollowInterval\)/);
     // The same cancel/refresh pair the log needs, for the same reason: a read
     // abandoned when the tab changes must not leave the pacer believing one is
     // still coming.
