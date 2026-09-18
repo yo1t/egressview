@@ -252,6 +252,12 @@ async function updateStats() {
       statsRenderedSummary.data === summary &&
       statsRenderedSummary.mode === getChartMode()
     ) {
+      // Nothing to draw again, but something may still have to be put back.
+      // Leaving this tab stops the globe and empties the flat map's particles,
+      // and within the summary cache's lifetime coming back lands exactly
+      // here -- so the maps arrived frozen and bare, and stayed that way until
+      // the cache expired. Reported 2026-09-18: stats, graph map, stats.
+      updateStatsMaps(selIp, mapPointsFromSummary(summary));
       statsMapSummaryKey = summaryKey;
       return;
     }
