@@ -59,7 +59,7 @@ public sealed class TrafficTimelineControl : FrameworkElement
         var plotWidth = Math.Max(1, plotRight - plotLeft);
         var gridBrush = stroke.Clone();
         gridBrush.Opacity = 0.45;
-        var gridPen = new Pen(gridBrush, 1);
+        var gridPen = new Pen(gridBrush.Frozen(), 1).Frozen();
         // How many labels the height affords, not how many the axis has.
         //
         // Three numbers stacked in a card a hundred pixels tall become one
@@ -90,7 +90,7 @@ public sealed class TrafficTimelineControl : FrameworkElement
             sleepFill.Opacity = 0.22;
             var sleepEdge = Brushes.DodgerBlue.Clone();
             sleepEdge.Opacity = 0.60;
-            var sleepPen = new Pen(sleepEdge, 1);
+            var sleepPen = new Pen(sleepEdge.Frozen(), 1).Frozen();
             var totalSeconds = (to - from).TotalSeconds;
             foreach (var period in sleepPeriods)
             {
