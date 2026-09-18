@@ -3,4 +3,5 @@
   <Project Path="src/EgressView.Agent.Service/EgressView.Agent.Service.csproj" />
   <Project Path="src/EgressView.Agent.Ui/EgressView.Agent.Ui.csproj" />
   <Project Path="tests/EgressView.Agent.Core.Tests/EgressView.Agent.Core.Tests.csproj" />
+  <Project Path="tools/render-cost/render-cost.csproj" />
 </Solution>

@@ -56,6 +56,10 @@ jobs:
         working-directory: apps/agent-windows
         run: dotnet run --project tools/render-check -c Release -- .render-check-ci
 
+      - name: Check Windows chart render cost
+        working-directory: apps/agent-windows
+        run: dotnet run --project tools/render-cost -c Release -- 40
+
       - name: Upload Windows chart render images
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
