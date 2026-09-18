@@ -117,21 +117,37 @@
       <Setter.Value>
         <ControlTemplate TargetType="ComboBox">
           <Grid>
-            <Border x:Name="ComboSurface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6"/>
-            <ContentPresenter Margin="10,0,27,0" VerticalAlignment="Center" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" TextElement.Foreground="{TemplateBinding Foreground}"/>
-            <ToggleButton x:Name="DropDownToggle" Background="Transparent" BorderThickness="0" Focusable="False" HorizontalContentAlignment="Right" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
-              <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="Transparent"><ContentPresenter Content="{TemplateBinding Content}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/></Border></ControlTemplate></ToggleButton.Template>
-              <Path Data="M 0 0 L 4 4 L 8 0" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,11,0"/>
+            <!-- The toggle is the root of the template and holds everything
+                 else, so a click anywhere on the control necessarily lands on
+                 it. As a sibling laid over the surface it was never hit at
+                 all: the mouse event reached the ComboBox, passed through the
+                 Grid to the surface Border, and the toggle's Click never
+                 fired once; keyboard opened the list, a mouse never did. -->
+            <ToggleButton x:Name="DropDownToggle" ClickMode="Press" Focusable="False" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                          Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                          Foreground="{TemplateBinding Foreground}"
+                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+              <ToggleButton.Template>
+                <ControlTemplate TargetType="ToggleButton">
+                  <Border x:Name="ComboSurface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6">
+                    <Grid>
+                      <ContentPresenter Margin="10,0,27,0" VerticalAlignment="Center" HorizontalAlignment="Stretch" Content="{TemplateBinding Content}"/>
+                      <Path Data="M 0 0 L 4 4 L 8 0" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,11,0"/>
+                    </Grid>
+                  </Border>
+                </ControlTemplate>
+              </ToggleButton.Template>
+              <ContentPresenter VerticalAlignment="Center" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" TextElement.Foreground="{TemplateBinding Foreground}"/>
             </ToggleButton>
             <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True" IsOpen="{TemplateBinding IsDropDownOpen}" Focusable="False" PopupAnimation="Fade">
-              <Border MinWidth="{Binding ActualWidth, ElementName=ComboSurface}" MaxHeight="300" Background="{DynamicResource SurfaceSecondaryBrush}" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1" CornerRadius="6" TextElement.Foreground="{DynamicResource TextPrimaryBrush}">
+              <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="300" Background="{DynamicResource SurfaceSecondaryBrush}" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1" CornerRadius="6" TextElement.Foreground="{DynamicResource TextPrimaryBrush}">
                 <ScrollViewer CanContentScroll="True" VerticalScrollBarVisibility="Auto"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer>
               </Border>
             </Popup>
           </Grid>
           <ControlTemplate.Triggers>
-            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ComboSurface" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
-            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ComboSurface" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+            <Trigger Property="IsMouseOver" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
