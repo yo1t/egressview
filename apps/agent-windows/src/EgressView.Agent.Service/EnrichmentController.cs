@@ -174,7 +174,7 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
         if (!CountryTableEnabled || !countryTable.Status(now).IsUsable) return;
         try
         {
-            var unplaced = store.ReadAddressesWithoutCountry(now.AddDays(-30));
+            var unplaced = PrivateAddress.Routable(store.ReadAddressesWithoutCountry(now.AddDays(-30)));
             if (unplaced.Count == 0) return;
             var answers = new List<(string Ip, string CountryCode)>();
             foreach (var address in unplaced)
@@ -264,14 +264,18 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
         if (!source.UsesHub()) return;
 
         var now = DateTimeOffset.UtcNow;
-        var unknown = store.ReadAddressesWithoutLocation(now.AddDays(-2), ThirdPartyGeoLookup.BatchSize);
+        // A wider read than the batch, because most of what comes back is
+        // usually unaskable: measured on one PC, 129 of 200 recent
+        // destinations were private or reserved. Taking twenty-five rows and
+        // filtering afterwards would spend whole runs on nothing.
+        var unknown = Askable(store.ReadAddressesWithoutLocation(now.AddDays(-2), 500));
         if (unknown.Count == 0) return;
 
         if (credentials.Load() is not null && now - lastOnDemandHubFetch >= OnDemandInterval)
         {
             lastOnDemandHubFetch = now;
             await FetchGeoAsync(client, token);
-            unknown = store.ReadAddressesWithoutLocation(now.AddDays(-2), ThirdPartyGeoLookup.BatchSize);
+            unknown = Askable(store.ReadAddressesWithoutLocation(now.AddDays(-2), 500));
             if (unknown.Count == 0) return;
         }
 
@@ -287,6 +291,16 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (Exception exception) { SetState(true, "failed", Classify(exception)); }
     }
+
+    /// Only the addresses anyone could answer about.
+    ///
+    /// A router, a printer, a work subnet: nothing outside this network can
+    /// place them, and sending them to a third party would hand over the shape
+    /// of the reader's own network in exchange for nothing. They are kept away
+    /// from the Hub's on-demand lookups too, because a set that can never be
+    /// emptied would ask again every minute for ever.
+    private static IReadOnlyList<string> Askable(IReadOnlyList<string> addresses) =>
+        [.. PrivateAddress.Routable(addresses).Take(ThirdPartyGeoLookup.BatchSize)];
 
     /// The budget is per day, and the day is the one the clock says now.
     ///
