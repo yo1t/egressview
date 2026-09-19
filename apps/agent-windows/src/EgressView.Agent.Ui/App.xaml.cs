@@ -96,6 +96,37 @@ public partial class App : System.Windows.Application
         _ = Updates.RunIfDueAsync();
     }
 
+    /// The Agent's own mark, in the four states the tray distinguishes.
+    ///
+    /// These were Windows' stock symbols -- an information "i" for monitoring,
+    /// a red cross for a problem -- which say nothing about which application
+    /// they belong to. A tray with a dozen icons in it is exactly where that
+    /// matters.
+    ///
+    /// The shapes are the Mac's menu bar shapes: a filled dot, a hollow ring, a
+    /// ring around a dot. macOS paints its menu bar images one colour, so the
+    /// Mac had to work in shape alone; Windows does not, so these carry colour
+    /// as well. Shape is what makes them the same product.
+    ///
+    /// Held rather than reloaded: the tray asks for one on every status change.
+    private readonly Dictionary<string, System.Drawing.Icon> trayIcons = new(StringComparer.Ordinal);
+
+    private System.Drawing.Icon TrayIcon(string name)
+    {
+        if (trayIcons.TryGetValue(name, out var held)) return held;
+        System.Drawing.Icon icon;
+        try
+        {
+            var stream = GetResourceStream(new Uri($"Assets/{name}.ico", UriKind.Relative))?.Stream;
+            // A missing asset must not take the tray with it: no icon at all is
+            // worse than a stock one.
+            icon = stream is null ? System.Drawing.SystemIcons.Application : new System.Drawing.Icon(stream, 16, 16);
+        }
+        catch (Exception) { icon = System.Drawing.SystemIcons.Application; }
+        trayIcons[name] = icon;
+        return icon;
+    }
+
     private void CreateTrayIcon()
     {
         var menu = new Forms.ContextMenuStrip();
@@ -123,7 +154,7 @@ public partial class App : System.Windows.Application
         menu.Items.Add(exitItem);
         trayIcon = new Forms.NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Information,
+            Icon = TrayIcon("tray-stopped"),
             Text = "EgressView Agent — monitoring continues",
             ContextMenuStrip = menu,
             Visible = true,
@@ -197,14 +228,13 @@ public partial class App : System.Windows.Application
             : (ja ? "監視を停止…" : "Stop monitoring…");
         monitoringToggle.Enabled = state.Kind is not MonitoringPresentationKind.Checking and not MonitoringPresentationKind.Unavailable;
         exitItem.Text = ja ? "UIを終了（監視は継続）" : "Exit UI (monitoring continues)";
-        trayIcon.Icon = state.Kind switch
+        trayIcon.Icon = TrayIcon(state.Kind switch
         {
-            MonitoringPresentationKind.Monitoring => System.Drawing.SystemIcons.Information,
-            MonitoringPresentationKind.Stopped => System.Drawing.SystemIcons.Application,
-            MonitoringPresentationKind.NeedsAttention => System.Drawing.SystemIcons.Error,
-            MonitoringPresentationKind.Unavailable => System.Drawing.SystemIcons.Warning,
-            _ => System.Drawing.SystemIcons.Application,
-        };
+            MonitoringPresentationKind.Monitoring => "tray-monitoring",
+            MonitoringPresentationKind.NeedsAttention => "tray-attention",
+            MonitoringPresentationKind.Unavailable => "tray-unavailable",
+            _ => "tray-stopped",
+        });
         trayIcon.Text = trayStatus.Text.Replace("状態: ", "EgressView Agent — ", StringComparison.Ordinal)
             .Replace("Status: ", "EgressView Agent — ", StringComparison.Ordinal);
     }

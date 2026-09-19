@@ -56,6 +56,50 @@ foreach (var (windowsKey, macEnglish) in sharedWording)
         SharedResource(windowsJapanese, windowsKey) == macValue,
         $"Shared wording Japanese drifted: {windowsKey}");
 }
+// The icons still match the artwork they were drawn from.
+//
+// design/icons holds the mark both agents build from; the .ico files beside
+// the Windows UI are generated from it by tools/make-icons and committed,
+// because the build needs them and CI cannot run a macOS render script.
+// Committed output drifts the moment the source is edited and nobody
+// remembers, so the colours are tied back here: change the SVG and this fails
+// until the icons are regenerated.
+{
+    var iconRoot = Path.Combine(windowsRoot, "src", "EgressView.Agent.Ui", "Assets");
+    var markSvg = File.ReadAllText(Path.Combine(windowsRoot, "..", "..", "design", "icons", "egressview-mark.svg"));
+    foreach (var colour in new[] { "#0b1424", "#4d94ff", "#24d6a2" })
+        Assert(markSvg.Contains(colour, StringComparison.OrdinalIgnoreCase),
+            $"the mark still uses {colour}; if the artwork moved on, regenerate the icons with tools/make-icons");
+
+    string[] expected = ["egressview", "tray-monitoring", "tray-stopped", "tray-attention", "tray-unavailable"];
+    foreach (var name in expected)
+    {
+        var path = Path.Combine(iconRoot, name + ".ico");
+        Assert(File.Exists(path), $"{name}.ico is present, because the window and the tray load it by name");
+        var bytes = File.ReadAllBytes(path);
+        Assert(bytes.Length > 1000 && bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 1 && bytes[3] == 0,
+            $"{name}.ico is an icon container rather than whatever else ended up at that path");
+        var frames = bytes[4] | (bytes[5] << 8);
+        Assert(frames >= 7, $"{name}.ico carries every size it is asked for, rather than one that gets scaled");
+
+        // Sizes are declared in the directory, one entry every sixteen bytes.
+        var sizes = Enumerable.Range(0, frames).Select(index => (int)bytes[6 + index * 16]).ToArray();
+        Assert(sizes.Contains(16) && sizes.Contains(32),
+            $"{name}.ico has the sizes the tray and the title bar actually draw");
+        // 256 is written as 0, which is the format's way of saying it.
+        if (name == "egressview")
+            Assert(sizes.Contains(0), "the app icon has the 256 size Explorer shows at its largest");
+    }
+
+    // The tray states are told apart by shape, as on the Mac, so they cannot
+    // all be the same drawing.
+    var monitoring = File.ReadAllBytes(Path.Combine(iconRoot, "tray-monitoring.ico"));
+    var stopped = File.ReadAllBytes(Path.Combine(iconRoot, "tray-stopped.ico"));
+    var attention = File.ReadAllBytes(Path.Combine(iconRoot, "tray-attention.ico"));
+    Assert(!monitoring.SequenceEqual(stopped) && !stopped.SequenceEqual(attention) && !monitoring.SequenceEqual(attention),
+        "the three tray states are three different icons, not one icon under three names");
+}
+
 // Every string that takes a value in one language takes it in the other.
 //
 // A sed that was meant for one string replaced "{0}" with the word PLACEHOLDER

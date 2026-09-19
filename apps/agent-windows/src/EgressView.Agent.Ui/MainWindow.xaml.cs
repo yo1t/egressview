@@ -124,6 +124,10 @@ public partial class MainWindow : Window
     internal void SelectTab(int index)
     {
         MainTabs.SelectedIndex = Math.Clamp(index, 0, MainTabs.Items.Count - 1);
+        // The change handler stops early before the window has loaded, and a
+        // restored tab arrives that way, so the period would be left showing
+        // on a tab it does not act on until the reader changed tabs once.
+        ShowPeriodWhereItApplies();
     }
 
     internal Task RefreshStatusFromTrayAsync() => RefreshStatusAsync();
@@ -473,8 +477,11 @@ public partial class MainWindow : Window
         MergeRows(filtered.Select(flow => new FlowRow(flow, !ObservationGrain, rawFlowsReadAt)).ToArray());
         var active = new[] { app.Length > 0, destination.Length > 0, port.Length > 0, country != "all", protocol != "all", volume != "all", collector != "all" }.Count(value => value);
         LogStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("LogCountStatus"), filtered.Length, rawFlows.Count, active);
+        // "Updated 20:41" alone does not say whether more will arrive. Paused
+        // said so and following did not, so the two states read as one.
         if (!logPaused)
-            LogStatus.Text += " · " + string.Format(CultureInfo.CurrentCulture,
+            LogStatus.Text += " · " + LocalizationManager.Text("LogFollowing")
+                + " · " + string.Format(CultureInfo.CurrentCulture,
                 LocalizationManager.Text("NetworkUpdatedAt"), rawFlowsReadAt.LocalDateTime.ToString("T", CultureInfo.CurrentCulture));
         if (logOmitted > 0)
             LogStatus.Text += " · " + string.Format(CultureInfo.CurrentCulture,
@@ -1157,12 +1164,13 @@ public partial class MainWindow : Window
         DestinationChoice.SelectedIndex = AgentSettings.DestinationUnit == "ip" ? 1 : 0;
         GlobeViewChoice.SelectedIndex = AgentSettings.GlobeView == "countries" ? 1 : 0;
         SpinSpeedChoice.SelectedIndex = AgentSettings.GlobeSpinSpeed switch { "slow" => 0, "fast" => 2, _ => 1 };
-        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "enrichment" => 2, "ai" => 3, "history" => 4, "diagnostics" => 5, "updates" => 6, "hub" => 7, "uninstall" => 8, "about" => 9, _ => 0 };
+        SettingsSectionChoice.SelectedIndex = AgentSettings.SettingsSection switch { "notifications" => 1, "hub" => 2, "enrichment" => 3, "ai" => 4, "history" => 5, "diagnostics" => 6, "updates" => 7, "uninstall" => 8, "about" => 9, _ => 0 };
         DeleteHistoryBefore.SelectedDate = DateTime.Today.AddDays(-30);
         AiProviderChoice.SelectedIndex = AgentSettings.AiProvider switch { "OpenAI" => 1, "Anthropic" => 2, _ => 0 };
         AiEndpoint.Text = AgentSettings.OllamaEndpoint;
         AiCloudConsent.IsChecked = AgentSettings.AiCloudConsent(AgentSettings.AiProvider);
         PopulateAiModels();
+        ShowAgentVersion();
         Globe.FramesPerSecond = AgentSettings.GlobeFrameRate;
         Globe.DegreesPerSecond = AgentSettings.GlobeSpinSpeed switch { "slow" => 2, "fast" => 14, _ => 6 };
         loadingSettings = false;
@@ -1516,6 +1524,19 @@ public partial class MainWindow : Window
         AutomationProperties.SetName(HubUrl, "Hub URL");
         foreach (var status in new[] { MonitoringStatus, CoverageNote, LogStatus, ThreatStatus, NotificationSummary, EnrollmentStatus })
             AutomationProperties.SetLiveSetting(status, AutomationLiveSetting.Polite);
+    }
+
+    /// The build someone is actually running, on the screen they open to find
+    /// out. It was only in the diagnostics bundle and the update section --
+    /// neither of which is where a person looks to answer "which version is
+    /// this?", and both of which are a worse place to be told.
+    private void ShowAgentVersion()
+    {
+        if (AboutVersion is null) return;
+        // The same number the update check compares against, read the same
+        // way, so the screen cannot disagree with it.
+        var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+        AboutVersion.Text = string.Format(LocalizationManager.Text("VersionFormat"), version);
     }
 
     private async Task RefreshEnrichmentStatusAsync()
@@ -2249,16 +2270,56 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(text)) System.Windows.Clipboard.SetText(text);
     }
 
+    /// The period picker is hidden on the tab it does not act on.
+    ///
+    /// Notification history is the newest hundred entries, whatever period is
+    /// selected. Leaving a working-looking control above a list it does not
+    /// filter is the same fault as a privacy note that no longer matches the
+    /// setting under it: the reader has no way to tell it is being ignored.
+    /// Hidden rather than disabled, because a greyed-out control still reads
+    /// as belonging to this screen and merely unavailable right now.
+    private void ShowPeriodWhereItApplies()
+    {
+        if (PeriodChoice is null || PeriodNotApplicable is null) return;
+        // Notification history is the last tab. Its list is the newest
+        // hundred entries and no period narrows it.
+        var notifications = MainTabs.SelectedIndex == 4;
+        PeriodChoice.Visibility = notifications ? Visibility.Collapsed : Visibility.Visible;
+        PeriodLabel.Visibility = PeriodChoice.Visibility;
+        PeriodNotApplicable.Visibility = notifications ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private async void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!IsLoaded || e.Source != MainTabs) return;
+        ShowPeriodWhereItApplies();
         ReconcileLogStream();
         ReconcileCountryAtlasStream();
         await RefreshVisibleAsync();
     }
 
+    /// Enrolling is the moment this PC starts sending anything anywhere, so it
+    /// is the moment to ask.
+    ///
+    /// The list of fields was already on the screen; reading it was optional
+    /// and enrolling was one click. The Mac has required this tick since
+    /// before the Windows Agent existed, and the cloud AI provider here
+    /// already requires one -- so the only path that sent data off this PC
+    /// without an explicit yes was the Hub.
+    ///
+    /// Not remembered: the tick is about this enrolment, and an Agent that
+    /// re-enrolled later would ask again.
+    private void HubConsent_Click(object sender, RoutedEventArgs e)
+    {
+        if (EnrollButton is null) return;
+        EnrollButton.IsEnabled = HubConsent.IsChecked == true;
+        if (EnrollButton.IsEnabled && EnrollmentStatus.Text == LocalizationManager.Text("HubConsentRequired"))
+            EnrollmentStatus.Text = LocalizationManager.Text("NotEnrolled");
+    }
+
     private async void Enroll_Click(object sender, RoutedEventArgs e)
     {
+        if (HubConsent.IsChecked != true) { EnrollmentStatus.Text = LocalizationManager.Text("HubConsentRequired"); return; }
         if (!Uri.TryCreate(HubUrl.Text.Trim(), UriKind.Absolute, out var hubUrl)) { EnrollmentStatus.Text = EnrollmentMessage("invalid-hub-url"); return; }
         EnrollButton.IsEnabled = HubUrl.IsEnabled = EnrollmentCode.IsEnabled = false;
         try
