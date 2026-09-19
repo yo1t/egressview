@@ -1449,6 +1449,28 @@ try
         Assert(lenient.Evaluate(Window(2, 500, observationsWithBytes: 5), [Window(0, 1), Window(1, 1)]) is null,
             "a current window without byte coverage never raises an alert");
 
+        // Sent and received answer different questions, and the overview
+        // shows them apart. A single total mixes what left the machine with
+        // everything that arrived and answers neither.
+        var directionDatabase = Path.Combine(directory, "period-direction.db");
+        using (var store = new ObservationStore(directionDatabase))
+        {
+            var now = DateTimeOffset.UtcNow;
+            store.WriteBatch([
+                new NetworkObservation(now.AddMinutes(-5), 11, "TCP", "10.0.0.7", 51_100, "203.0.113.50", 443,
+                    3_000_000, 500_000, ObservationLayer.Logical, null, "etw", "uploader"),
+                new NetworkObservation(now.AddMinutes(-4), 12, "TCP", "10.0.0.7", 51_101, "203.0.113.51", 443,
+                    1_000_000, 9_000_000, ObservationLayer.Logical, null, "etw", "downloader"),
+            ]);
+            var period = store.ReadPeriodAnalysis(now.AddMinutes(-30), now.AddMinutes(1));
+            Assert(period.BytesSent == 4_000_000 && period.BytesReceived == 9_500_000,
+                "the period reports what left and what arrived as two numbers");
+            Assert(period.Bytes == period.BytesSent + period.BytesReceived,
+                "the existing total stays the sum of the two directions");
+            Assert(!period.OutboundBaselineReady && period.OutboundAnomalies == 0,
+                "a fresh database says it cannot judge yet rather than reporting no anomalies");
+        }
+
         // The detector is only worth having if something calls it. A store
         // that captures windows, a caller that evaluates them and a row that
         // records the verdict are three separate things, and the last time
@@ -1704,7 +1726,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, and portable settings");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, and directional period totals");
     return 0;
 }
 finally
