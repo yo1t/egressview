@@ -527,15 +527,19 @@ asus.configure({
   onNetworkUpdate: (data) => {
     // Deduplicate by IP: ASUS sometimes returns multiple entries for the same IP
     // (e.g. AiMesh node + main router, or 2.4GHz + 5GHz transient overlap).
-    // Keep the entry with the strongest RSSI; this prevents vendor/asusName from
-    // flip-flopping on every poll and causing observation count explosion.
+    // Keep whichever entry carries the MAC this IP is already recorded with;
+    // RSSI only breaks a tie stickiness cannot. Choosing on RSSI alone made the
+    // winner flip on every poll, which is what this deduplication was added to
+    // prevent -- see devices.chooseForIp.
     const byIp = new Map();
     for (const c of data.clients) {
       if (!c.ip) continue;
-      const prev = byIp.get(c.ip);
-      if (!prev || (c.rssi || 0) > (prev.rssi || 0)) byIp.set(c.ip, c);
+      if (!byIp.has(c.ip)) byIp.set(c.ip, []);
+      byIp.get(c.ip).push(c);
     }
-    for (const c of byIp.values()) {
+    for (const [ip, candidates] of byIp) {
+      const c = devices.chooseForIp(ip, candidates, entry => entry.mac,
+        (a, b) => ((b.rssi || 0) > (a.rssi || 0) ? b : a));
       const ipv6 = yamaha.getNdpByMac(c.mac);
       c.ipv6Addrs = ipv6 || null;
       devices.observeDevice({

@@ -830,6 +830,16 @@ describe('Connection Log pagination/filter invariants', () => {
 });
 
 describe('Server runtime invariants', () => {
+  // P3-138: choosing the ASUS client entry by RSSI alone made the winner flip
+  // on every poll when two MACs shared an IP, which is what that deduplication
+  // was added to prevent.
+  it('ASUSのクライアント重複は、記録済みのMACを優先して選ぶ', () => {
+    assert.match(serverJs, /devices\.chooseForIp\(ip, candidates, entry => entry\.mac,/,
+      'the ASUS handler must go through the shared chooser');
+    assert.doesNotMatch(serverJs, /if \(!prev \|\| \(c\.rssi \|\| 0\) > \(prev\.rssi \|\| 0\)\) byIp\.set/,
+      'RSSI must not be the only thing deciding which entry wins');
+  });
+
   it('Yamaha polling reschedules with POLL_INTERVAL, not a hard-coded 60 seconds', () => {
     assert.match(pollSchedulerJs, /_schedulePoll\(pollYamahaConnections,\s*_pollIntervalMs\)/,
       'pollYamahaConnections should honor the injected scheduler and pollIntervalMs');
