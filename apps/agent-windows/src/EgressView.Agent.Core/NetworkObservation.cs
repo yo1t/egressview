@@ -170,6 +170,7 @@ public sealed record CollectorSnapshot(
     // Inbound group datagrams left out on purpose. Not a collection gap.
     long InboundMulticastIgnored = 0,
     int EtwEventsLost = 0,
+    int EtwEventsLostAtStart = 0,
     string? CollectorError = null,
     string? PersistenceError = null,
     // How process names were arrived at. The counts say whether a nameless

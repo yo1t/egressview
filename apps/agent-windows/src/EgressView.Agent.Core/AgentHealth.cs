@@ -10,8 +10,11 @@ public sealed record AgentHealth(string Status, IReadOnlyList<HealthIssue> Issue
             issues.Add(new("database-corrupt", "Restore the pre-migration backup or contact support; do not delete the database."));
         if (collector.PersistenceFailures > 0)
             issues.Add(new(collector.PersistenceError ?? "persistence-failed", "Free disk space or restore database access, then restart the EgressView Agent service."));
-        if (collector.EtwEventsLost > 0)
-            issues.Add(new("etw-events-lost", "Export diagnostics and restart the EgressView Agent service."));
+        // Only what is being lost now. Events dropped while the trace session
+        // was starting are already history, and restarting -- the advice this
+        // used to give -- would only produce another start and another loss.
+        if (collector.EtwEventsLost - collector.EtwEventsLostAtStart > 0)
+            issues.Add(new("etw-events-lost", "Export diagnostics; the machine is producing more network events than the Agent can read."));
         if (collector.CollectorError is not null)
             issues.Add(new("collector-error", "Export diagnostics and check the Windows Application event log."));
         var status = issues.Count == 0 ? collector.State : collector.PersistenceFailures > 0 ? "stopped" : "degraded";

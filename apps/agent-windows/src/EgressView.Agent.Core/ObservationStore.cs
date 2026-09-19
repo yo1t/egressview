@@ -502,7 +502,11 @@ public sealed partial class ObservationStore : IDisposable
             IntegrityCheckMilliseconds = 0;
             IntegrityCheckWasDeep = false;
             BackgroundIntegrityCheckDue = IsDeepIntegrityCheckOverdue();
-            lastVerifiedIntegrity = "unverified";
+            // Not "unverified". A full read did happen; it happened earlier,
+            // and LastDeepIntegrityCheckAt says when. Throwing the answer away
+            // at every open made the bundle report "unverified" beside a
+            // timestamp -- two statements that cannot both be true.
+            lastVerifiedIntegrity = LastDeepIntegrityCheckAtLocked() is null ? "unverified" : "ok";
             return;
         }
         var integrity = ScalarText("PRAGMA integrity_check");
@@ -547,6 +551,27 @@ public sealed partial class ObservationStore : IDisposable
 
     /// Whether a full read is owed but has not been done.
     public bool BackgroundIntegrityCheckDue { get; private set; }
+
+    /// What the last full read found, and when it happened.
+    ///
+    /// Reported rather than recomputed. Running the check inside a request
+    /// held the shared lock for thirty seconds, and the pipe serves one caller
+    /// at a time, so saving a diagnostics bundle made the Agent unreachable --
+    /// the window polls status every five seconds and showed "status
+    /// unavailable" the whole time.
+    public string LastVerifiedIntegrity { get { lock (gate) return lastVerifiedIntegrity; } }
+
+    public DateTimeOffset? LastDeepIntegrityCheckAt { get { lock (gate) return LastDeepIntegrityCheckAtLocked(); } }
+
+    private DateTimeOffset? LastDeepIntegrityCheckAtLocked()
+    {
+        try
+        {
+            var at = ScalarInt64("SELECT COALESCE((SELECT value FROM collector_counters WHERE name='integrity-deep-checked-at'),0)");
+            return at > 0 ? DateTimeOffset.FromUnixTimeSeconds(at) : null;
+        }
+        catch (Exception) { return null; }
+    }
 
     /// Reads every page on a connection of its own, so the rest of the Agent
     /// keeps working while it happens.

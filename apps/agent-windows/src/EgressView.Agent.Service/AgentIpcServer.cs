@@ -93,7 +93,11 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
     }
 
     private string Status() => DiagnosticsReport.CreateStatus(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), readsHostnames());
-    private string Diagnostics() => DiagnosticsReport.Create(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), verifyIntegrity: true,
+    /// Reports the last full read rather than performing one. Performing it
+    /// here held the lock for thirty seconds and the pipe serves one caller at
+    /// a time, so saving a bundle made the window show "status unavailable"
+    /// for the whole of it.
+    private string Diagnostics() => DiagnosticsReport.Create(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), verifyIntegrity: false,
         reportChannel: "authenticated-named-pipe", capabilityStatus: delivery.CapabilityStatus);
     private IReadOnlyList<HourlySummary> Summary(int days) => store.ReadHourlySummary(DateTimeOffset.UtcNow.AddDays(-days), DateTimeOffset.UtcNow);
     private IReadOnlyList<GlobePoint> Globe(int minutes) => store.ReadGlobePoints(DateTimeOffset.UtcNow.AddMinutes(-minutes), DateTimeOffset.UtcNow);
