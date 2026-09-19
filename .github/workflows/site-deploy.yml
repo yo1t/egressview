@@ -62,7 +62,7 @@ jobs:
           set -euo pipefail
           for page in index.html index.ja.html 404.html robots.txt \
                       sitemap.xml docs/architecture.html \
-                      docs/agent-privacy.html docs/agent-privacy.ja.html; do
+                      docs/agent-privacy.html docs/agent-privacy.ja.html                       docs/agent-privacy-windows.html docs/agent-privacy-windows.ja.html; do
             test -s "_site/$page" || { echo "missing or empty: $page" >&2; exit 1; }
           done
 
@@ -95,7 +95,7 @@ jobs:
             echo "sitemap lists only $count URLs; the docs are missing" >&2; exit 1; }
           for required in 'https://www.egressview.com/' \
                           'https://www.egressview.com/docs/agent-privacy.html' \
-                          'https://www.egressview.com/docs/agent-privacy.ja.html'; do
+                          'https://www.egressview.com/docs/agent-privacy.ja.html'                           'https://www.egressview.com/docs/agent-privacy-windows.html'                           'https://www.egressview.com/docs/agent-privacy-windows.ja.html'; do
             grep -q "<loc>$required</loc>" _site/sitemap.xml || {
               echo "sitemap is missing $required" >&2; exit 1; }
           done

@@ -94,5 +94,10 @@ describe('product site Jekyll configuration', () => {
     const yaml = fs.readFileSync(workflow, 'utf8');
     assert.match(yaml, /docs\/agent-privacy\.html/);
     assert.match(yaml, /docs\/agent-privacy\.ja\.html/);
+    // The Windows agent has its own note: it decrypts nothing, which the
+    // macOS one cannot say. Publishing one and not the other would leave
+    // Windows readers on a page describing a different product.
+    assert.match(yaml, /docs\/agent-privacy-windows\.html/);
+    assert.match(yaml, /docs\/agent-privacy-windows\.ja\.html/);
   });
 });

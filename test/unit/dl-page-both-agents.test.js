@@ -9,6 +9,8 @@ const read = (...parts) => fs.readFileSync(path.join(__dirname, '..', '..', ...p
 const page = read('site', 'dl', 'index.html');
 const privacyEn = read('docs', 'agent-privacy.md');
 const privacyJa = read('docs', 'agent-privacy.ja.md');
+const windowsEn = read('docs', 'agent-privacy-windows.md');
+const windowsJa = read('docs', 'agent-privacy-windows.ja.md');
 
 describe('the distribution page offers both agents', () => {
   it('両方のプラットフォームを、どちらも隠さずに出す', () => {
@@ -66,5 +68,51 @@ describe('what the agent sends', () => {
     const references = page.match(/agent-privacy\.html/g) || [];
     assert.ok(references.length >= 2,
       'the privacy note is linked from the body as well as the footer');
+  });
+});
+
+describe('the Windows privacy note', () => {
+  it('復号しないと述べる。macOS版の文言を流用しない', () => {
+    // The macOS note's centre is that it decrypts one QUIC packet, and says
+    // the setting's trustworthiness rests on that admission. The Windows
+    // agent reads DNS metadata and decrypts nothing. Carrying the macOS
+    // sentence over would claim a capability this agent does not have --
+    // the wrong direction, but still wrong.
+    for (const doc of [windowsEn, windowsJa]) {
+      assert.doesNotMatch(doc, /RFC 9001/);
+    }
+    assert.match(windowsEn, /decrypts nothing/i);
+    assert.match(windowsEn, /never reads a packet's contents/i);
+    assert.match(windowsJa, /復号しません/);
+    assert.match(windowsJa, /パケットの本体を一度も読みません/);
+    // And it names what it does read instead.
+    for (const doc of [windowsEn, windowsJa]) {
+      assert.match(doc, /DNS-Client/);
+      assert.match(doc, /3008/);
+    }
+  });
+
+  it('外部へ宛先を送る唯一の経路を名指しする', () => {
+    // ipwho.is is the only row in the table that sends a watched address
+    // outside. A privacy note that lists it among the others without saying
+    // so would be technically complete and practically useless.
+    for (const doc of [windowsEn, windowsJa]) {
+      assert.match(doc, /ipwho\.is/);
+      assert.match(doc, /download\.maxmind\.com/);
+    }
+    assert.match(windowsEn, /only one that \*\*sends a destination you\s+observed out of this network/);
+    assert.match(windowsJa, /観測した宛先そのものを外部へ送ります/);
+  });
+
+  it('未署名であることを述べる', () => {
+    assert.match(windowsEn, /not currently code-signed/);
+    assert.match(windowsJa, /コード署名されていません/);
+  });
+
+  it('二つのノートは互いを指す', () => {
+    assert.match(privacyEn, /agent-privacy-windows\.md/);
+    assert.match(privacyJa, /agent-privacy-windows\.ja\.md/);
+    assert.match(windowsEn, /agent-privacy\.md/);
+    assert.match(windowsJa, /agent-privacy\.ja\.md/);
   });
 });

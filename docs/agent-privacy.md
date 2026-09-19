@@ -1,5 +1,9 @@
 # What the EgressView Agent for macOS sends, and where
 
+This page lists **every** outbound connection the macOS agent makes. For
+Windows, see [the other one](agent-privacy-windows.md). They are the same
+product, but **they read destination names differently**.
+
 > [Japanese / 日本語](agent-privacy.ja.md)
 
 The agent watches outbound connections on your Mac. A tool with that job has to
