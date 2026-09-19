@@ -44,6 +44,13 @@ function createRuntimeProfiler(deps = {}) {
   const gauges = new Map();
   // Completed operations worth attributing a stall to, newest last.
   let recentOperations = [];
+  // Operations that have started and not returned. The ring below only learns
+  // about an operation when it finishes, so without this a long one that was
+  // still running when the watchdog fired -- a router poll, say -- could never
+  // appear in a stall report. That blind spot made four minutes of production
+  // reports come back empty on a Hub where the poll was the obvious suspect.
+  const inFlight = new Map();
+  let inFlightSeq = 0;
   let gcPauses = [];
   let gcObserver = null;
   let watchdogTimer = null;
@@ -71,13 +78,22 @@ function createRuntimeProfiler(deps = {}) {
    * the loop is not instrumented.
    */
   function whatOverlapped(gapStart, gapEnd) {
-    return recentOperations
+    const finished = recentOperations
       .filter(entry => entry.endedAt > gapStart && entry.startedAt < gapEnd)
       .map(entry => ({
         name: entry.name,
         ms: round(entry.endedAt - entry.startedAt),
         coversMs: round(Math.min(entry.endedAt, gapEnd) - Math.max(entry.startedAt, gapStart)),
-      }))
+      }));
+    const running = [...inFlight.values()]
+      .filter(entry => entry.startedAt < gapEnd)
+      .map(entry => ({
+        name: entry.name,
+        ms: round(gapEnd - entry.startedAt),
+        coversMs: round(gapEnd - Math.max(entry.startedAt, gapStart)),
+        stillRunning: true,
+      }));
+    return [...finished, ...running]
       .sort((a, b) => b.coversMs - a.coversMs)
       .slice(0, 5);
   }
@@ -129,9 +145,12 @@ function createRuntimeProfiler(deps = {}) {
     if (!enabled) return fn();
     const startedAt = now();
     const cpuStart = cpuUsage();
+    const token = ++inFlightSeq;
+    inFlight.set(token, { name, startedAt });
     try {
       return fn();
     } finally {
+      inFlight.delete(token);
       const cpu = cpuUsage(cpuStart);
       const endedAt = now();
       record(name, endedAt - startedAt, (cpu.user + cpu.system) / 1000);
@@ -142,9 +161,12 @@ function createRuntimeProfiler(deps = {}) {
   async function measureAsync(name, fn) {
     if (!enabled) return fn();
     const startedAt = now();
+    const token = ++inFlightSeq;
+    inFlight.set(token, { name, startedAt });
     try {
       return await fn();
     } finally {
+      inFlight.delete(token);
       const endedAt = now();
       record(name, endedAt - startedAt);
       noteOperation(name, startedAt, endedAt);
@@ -250,6 +272,7 @@ function createRuntimeProfiler(deps = {}) {
     gcObserver = null;
     recentOperations = [];
     gcPauses = [];
+    inFlight.clear();
     stallCount = 0;
     histogram?.disable?.();
     histogram = null;
