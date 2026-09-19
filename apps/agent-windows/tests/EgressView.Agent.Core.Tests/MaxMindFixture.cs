@@ -94,14 +94,57 @@ internal static class MaxMindFixture
         return file.ToArray();
     }
 
-    /// <c>{"country": {"iso_code": "XX"}}</c>
+    /// A record shaped like a real one, not like the reader.
+    ///
+    /// The published databases put "continent" and "registered_country"
+    /// beside "country", and a boolean inside the country map. The reader has
+    /// to walk past all of it to reach the one field it wants, so the fixture
+    /// writes all of it. An earlier version wrote only what the reader already
+    /// handled, which is how a decoder that could not skip a boolean passed
+    /// every test and then failed on the first real download.
     private static byte[] CountryRecord(string code)
     {
-        var data = new List<byte> { 0xE1 };          // map, 1 pair
+        var data = new List<byte> { 0xE3 };          // map, 3 pairs
+        data.AddRange(Utf8("continent"));
+        data.Add(0xE2);                              // map, 2 pairs
+        data.AddRange(Utf8("code"));
+        data.AddRange(Utf8("AS"));
+        data.AddRange(Utf8("geoname_id"));
+        data.AddRange(Unsigned(6_255_147));
+
         data.AddRange(Utf8("country"));
-        data.Add(0xE1);                              // map, 1 pair
+        data.Add(0xE3);                              // map, 3 pairs
+        data.AddRange(Utf8("is_in_european_union"));
+        data.AddRange(Boolean(true));
         data.AddRange(Utf8("iso_code"));
         data.AddRange(Utf8(code));
+        data.AddRange(Utf8("names"));
+        data.Add(0xE1);                              // map, 1 pair
+        data.AddRange(Utf8("en"));
+        data.AddRange(Utf8("Somewhere"));
+
+        data.AddRange(Utf8("registered_country"));
+        data.Add(0xE1);                              // map, 1 pair
+        data.AddRange(Utf8("iso_code"));
+        data.AddRange(Utf8("ZZ"));
+        return data.ToArray();
+    }
+
+    /// The boolean carries its value in the control byte and occupies no
+    /// bytes of its own, so a reader that treats the length as a byte count
+    /// walks one byte too far.
+    private static byte[] Boolean(bool value) => [(byte)(value ? 0x01 : 0x00), 14 - 7];
+
+    /// An array's length is a count of elements, not a count of bytes. A
+    /// reader that skips "length" bytes lands in the middle of the next value
+    /// and every field after it is read from the wrong offset.
+    private static byte[] Array(params byte[][] elements)
+    {
+        var data = new List<byte>();
+        if (elements.Length >= 29) throw new InvalidOperationException("The test builder only writes short arrays.");
+        data.Add((byte)elements.Length);              // extended: length in the control byte
+        data.Add(11 - 7);                             // array
+        foreach (var element in elements) data.AddRange(element);
         return data.ToArray();
     }
 
@@ -122,15 +165,34 @@ internal static class MaxMindFixture
 
     private static byte[] Metadata(uint nodeCount, int ipVersion, string databaseType, ulong buildEpoch)
     {
-        var data = new List<byte> { 0xE7 };           // map, 7 pairs
+        // Nine keys, in the order and of the kinds the published databases
+        // carry. "languages" is an array and "description" is a map; both sit
+        // before the version numbers, so a reader that mis-skips either one
+        // reads the rest of this map from the wrong place.
+        var data = new List<byte> { 0xE9 };           // map, 9 pairs
         void Pair(string key, byte[] value) { data.AddRange(Utf8(key)); data.AddRange(value); }
-        Pair("node_count", Unsigned(nodeCount));
-        Pair("record_size", Unsigned(24));
-        Pair("ip_version", Unsigned((ulong)ipVersion));
-        Pair("database_type", Utf8(databaseType));
-        Pair("build_epoch", Unsigned(buildEpoch));
+        // Alphabetical, as the published databases write it. The order is what
+        // makes the array matter: "description" and "languages" sit before
+        // "node_count" and "record_size", so a reader that mis-skips either one
+        // reads the two fields it cannot do without from the wrong offset. A
+        // fixture that put them last hid exactly this.
         Pair("binary_format_major_version", Unsigned(2));
         Pair("binary_format_minor_version", Unsigned(0));
+        Pair("build_epoch", Unsigned(buildEpoch));
+        Pair("database_type", Utf8(databaseType));
+        Pair("description", DescriptionMap(databaseType));
+        Pair("ip_version", Unsigned((ulong)ipVersion));
+        Pair("languages", Array(Utf8("en"), Utf8("ja"), Utf8("pt-BR")));
+        Pair("node_count", Unsigned(nodeCount));
+        Pair("record_size", Unsigned(24));
+        return data.ToArray();
+    }
+
+    private static byte[] DescriptionMap(string databaseType)
+    {
+        var data = new List<byte> { 0xE1 };           // map, 1 pair
+        data.AddRange(Utf8("en"));
+        data.AddRange(Utf8(databaseType));
         return data.ToArray();
     }
 }

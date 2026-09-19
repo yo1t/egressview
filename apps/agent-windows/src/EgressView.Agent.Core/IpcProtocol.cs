@@ -165,7 +165,7 @@ public static class IpcProtocol
     private static string RefreshEnrichment(JsonElement root, Action<string>? refresh)
     {
         var kind = root.TryGetProperty("kind", out var value) ? value.GetString() : null;
-        if (refresh is null || kind is not ("geo" or "threat" or "all")) return Reject("invalid-enrichment-kind");
+        if (refresh is null || kind is not ("geo" or "threat" or "country" or "all")) return Reject("invalid-enrichment-kind");
         try { refresh(kind); return JsonSerializer.Serialize(new { status = "ok", kind }); }
         catch { return Reject("enrichment-refresh-failed"); }
     }

@@ -1672,7 +1672,10 @@ try
             Assert(unplaced.Contains("1.2.3.4") && !unplaced.Contains("8.8.8.8"),
                 "an address the Hub already placed is not asked about again");
 
+            Assert(store.ReadLocalCountryCount() == 0, "nothing has been placed on this PC yet");
             store.SaveLocalCountries([("1.2.3.4", "JP")]);
+            Assert(store.ReadLocalCountryCount() == 1,
+                "the screen can say whether the table is doing anything, not only that it loaded");
             var countries = store.ReadCountryHistory().ToDictionary(row => row.CountryCode, row => row.Connections);
             Assert(countries.ContainsKey("JP") && countries.ContainsKey("US"),
                 "a country worked out on this PC counts beside one the Hub supplied");
@@ -1682,6 +1685,7 @@ try
             store.ForgetLocalCountries();
             Assert(!store.ReadCountryHistory().Any(row => row.CountryCode == "JP"),
                 "withdrawing the table withdraws the answers that came from it");
+            Assert(store.ReadLocalCountryCount() == 0, "and the count goes with them");
         }
 
         // Handing the account over, and taking it back.
@@ -1716,6 +1720,13 @@ try
             Assert(Ask(JsonSerializer.Serialize(new { v = 1, op = "set-country-table-account", configuration = new string('x', 70_000) }))
                 .Contains("invalid-configuration", StringComparison.Ordinal) && calls == before,
                 "a file far too large to be a GeoIP.conf is refused before the service reads it");
+
+            var kinds = new List<string>();
+            foreach (var kind in new[] { "geo", "threat", "country", "all", "weather" })
+                IpcProtocol.Handle(JsonSerializer.Serialize(new { v = 1, op = "refresh-enrichment", kind }),
+                    () => "{}", _ => [], requestEnrichmentNow: accepted => kinds.Add(accepted));
+            Assert(kinds is ["geo", "threat", "country", "all"],
+                "the country table can be refreshed by hand like the other two, and nothing else can");
 
             Assert(IpcProtocol.Handle("""{"v":1,"op":"set-country-table-account"}""", () => "{}", _ => [])
                 .Contains("operation-unavailable", StringComparison.Ordinal),

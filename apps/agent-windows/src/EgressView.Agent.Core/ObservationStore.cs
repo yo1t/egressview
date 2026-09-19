@@ -1673,6 +1673,17 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// How many addresses this PC placed without asking anyone.
+    ///
+    /// Reported so the screen can say whether the table is doing anything. A
+    /// table that loads, reports "in use", and answers nothing looks identical
+    /// to one that is working, and that is the shape of the failure this
+    /// feature is most likely to have.
+    public long ReadLocalCountryCount()
+    {
+        lock (gate) return ScalarInt64("SELECT COUNT(*) FROM local_country_cache");
+    }
+
     /// Thrown away when the table is replaced or withdrawn, because an answer
     /// from a table nobody has any more is an answer nobody can check.
     public void ForgetLocalCountries()

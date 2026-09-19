@@ -910,6 +910,8 @@ public partial class MainWindow : Window
         else text = table switch
         {
             "ready" => $"{LocalizationManager.Text("CountryTableReady")} · " +
+                       $"{LocalizationManager.Text("CountryTablePlaced")}: " +
+                       $"{(item.TryGetProperty("placed", out var placedCount) ? placedCount.GetInt64() : 0):N0} · " +
                        $"{LocalizationManager.Text("CountryTableBuilt")}: {DateText(item, "builtAt")} · " +
                        $"{LocalizationManager.Text("CountryTableExpires")}: {DateText(item, "expiresAt")}",
             "expired" => LocalizationManager.Text("CountryTableExpired"),

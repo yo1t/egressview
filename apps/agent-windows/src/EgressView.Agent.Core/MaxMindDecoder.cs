@@ -16,6 +16,8 @@ internal sealed class MaxMindDecoder(byte[] bytes, int sectionStart)
     private const int TypeUint32 = 6;
     private const int TypeMap = 7;
     private const int TypeUint64 = 9;
+    private const int TypeArray = 11;
+    private const int TypeBoolean = 14;
 
     /// Reads `country.iso_code` and nothing else.
     ///
@@ -66,9 +68,23 @@ internal sealed class MaxMindDecoder(byte[] bytes, int sectionStart)
                 return ReadUnsigned(cursor, length);
             case TypeMap:
                 return ReadPairs(length, cursor, out next);
+            case TypeArray:
+                // The length is a count of elements, not of bytes. Treating it
+                // as bytes lands the cursor inside the next value, and every
+                // field after it is read from the wrong offset -- which is how
+                // "languages" in the metadata made a real database unreadable.
+                return ReadElements(length, cursor, out next);
+            case TypeBoolean:
+                // The value is the length field. A boolean occupies no bytes of
+                // its own, so advancing by "length" walks one byte too far for
+                // every true.
+                next = cursor;
+                return length != 0;
             default:
                 // Skipped rather than decoded: a country lookup never needs it,
-                // and the cursor still has to land in the right place.
+                // and the cursor still has to land in the right place. The
+                // remaining types -- doubles, floats, bytes, the wider integers
+                // -- all state their size in bytes, so this is correct for them.
                 next = cursor + length;
                 return null;
         }
@@ -124,6 +140,21 @@ internal sealed class MaxMindDecoder(byte[] bytes, int sectionStart)
         var value = 0UL;
         for (var index = 0; index < length; index++) value = (value << 8) | bytes[offset + index];
         return value;
+    }
+
+    /// Walked rather than collected: nothing a country lookup wants lives in
+    /// an array, but the cursor has to come out the far side in the right
+    /// place for the fields that follow.
+    private object? ReadElements(int count, int cursor, out int next)
+    {
+        var values = new List<object?>(count);
+        for (var index = 0; index < count; index++)
+        {
+            if (cursor >= bytes.Length) break;
+            values.Add(Read(cursor, out cursor));
+        }
+        next = cursor;
+        return values;
     }
 
     private Dictionary<string, object>? ReadPairs(int pairs, int cursor, out int next)

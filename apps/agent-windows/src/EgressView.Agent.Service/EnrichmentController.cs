@@ -97,6 +97,7 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
             expiresAt = table.BuiltAt?.Add(LocalCountryTable.MaximumAge),
             maximumAgeDays = (int)LocalCountryTable.MaximumAge.TotalDays,
             attribution = LocalCountryTable.Attribution,
+            placed = store.ReadLocalCountryCount(),
             lastFailure = failure ?? table.Failure,
         };
     }
@@ -145,7 +146,11 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
             SetCountryState("idle", null);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-        catch (GeoLite2Exception exception) { SetCountryState("failed", exception.Kind.ToString()); }
+        // The kind alone says "not a database" and stops there. The reason says
+        // which part could not be read, and that difference is what turns a
+        // screen saying "it failed" into one worth acting on.
+        catch (GeoLite2Exception exception)
+        { SetCountryState("failed", $"{exception.Kind}: {exception.Reason}".TrimEnd(':', ' ')); }
         catch (Exception exception) { SetCountryState("failed", Classify(exception)); }
     }
 
