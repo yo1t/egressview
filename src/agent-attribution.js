@@ -33,27 +33,73 @@ function createAgentAttribution({ getDb, maxApplications = DEFAULT_MAX_APPLICATI
       throw new RangeError(`Agent attribution is limited to ${MAX_PAGE_ROWS} connection rows`);
     }
 
+    // The window each row is judged against, shared by both branches.
+    const windowFor = row => [
+      Math.max(row.firstSeen || 0, Number.isFinite(from) ? from : 0),
+      Math.min(
+        row.lastSeen || Number.MAX_SAFE_INTEGER,
+        Number.isFinite(to) ? to : Number.MAX_SAFE_INTEGER
+      ),
+    ];
+
     const values = [];
     const params = [];
+    // Rows no router observed. They go in a CTE of their own -- see below.
+    const agentOnlyValues = [];
+    const agentOnlyParams = [];
     rows.forEach((row, rowIndex) => {
-      values.push('(?, ?, ?, ?, ?, ?, ?, ?)');
-      params.push(
-        rowIndex, row.src, row.dst, row.dport, String(row.proto || '').toUpperCase(),
-        Math.max(row.firstSeen || 0, Number.isFinite(from) ? from : 0),
-        Math.min(
-          row.lastSeen || Number.MAX_SAFE_INTEGER,
-          Number.isFinite(to) ? to : Number.MAX_SAFE_INTEGER
-        ),
-        Array.isArray(row.observedBy) && row.observedBy.length === 0 ? 1 : 0
-      );
+      const [windowStart, windowEnd] = windowFor(row);
+      const proto = String(row.proto || '').toUpperCase();
+      values.push('(?, ?, ?, ?, ?, ?, ?)');
+      params.push(rowIndex, row.src, row.dst, row.dport, proto, windowStart, windowEnd);
+      if (Array.isArray(row.observedBy) && row.observedBy.length === 0) {
+        agentOnlyValues.push('(?, ?, ?, ?, ?, ?, ?)');
+        agentOnlyParams.push(rowIndex, row.src, row.dst, row.dport, proto, windowStart, windowEnd);
+      }
     });
 
     const agentFilter = sourceScope?.sourceKind === 'agent' ? 'AND o.agentId = ?' : '';
     const agentParams = sourceScope?.sourceKind === 'agent' ? [sourceScope.sourceId] : [];
+
+    // The agent-only rows used to ride along in the same CTE, selected by an
+    // `r.agentOnly = 1` condition inside the join. SQLite answered that by
+    // scanning agent_observations -- all 1,536,341 rows on the Hub this was
+    // measured against -- and only then checking which of the 200 constant rows
+    // qualified. It spent 3,759 ms per page to return nothing at all, because
+    // on a typical page nothing is agent-only, and 31,461 ms when everything
+    // was. An index hint did not move it; the planner has to be given rows it
+    // can drive from.
+    //
+    // Passing only the qualifying rows does that: 4 of 200 answered in 0.5 ms,
+    // all 200 in 107 ms, and a page with none skips the branch entirely.
+    const agentOnlyBranch = agentOnlyValues.length ? `
+        UNION ALL
+
+        SELECT r.rowIndex, o.agentId, a.hostName AS agentHost,
+          o.processId, o.processName, o.bundleId,
+          o.firstObservedAt, o.lastObservedAt, o.bytesIn, o.bytesOut,
+          'agent-only' AS matchKind
+        FROM agentOnlyRows r
+        JOIN agent_observations o
+          ON o.localAddress = r.src AND o.remoteAddress = r.dst
+            AND o.remotePort = r.dport AND o.networkProtocol = LOWER(r.proto)
+            AND o.lastObservedAt >= r.firstSeen - ${CORRELATION_WINDOW_MS}
+            AND o.firstObservedAt <= r.lastSeen + ${CORRELATION_WINDOW_MS}
+        JOIN agents a ON a.agentId = o.agentId
+        WHERE NOT EXISTS (
+          SELECT 1 FROM connection_agent_observations link
+          WHERE link.agentId = o.agentId AND link.observationId = o.observationId
+        ) ${agentFilter}` : '';
+
+    const agentOnlyCte = agentOnlyValues.length ? `,
+      agentOnlyRows(rowIndex, src, dst, dport, proto, firstSeen, lastSeen) AS (
+        VALUES ${agentOnlyValues.join(', ')}
+      )` : '';
+
     const sql = `
-      WITH requested(rowIndex, src, dst, dport, proto, firstSeen, lastSeen, agentOnly) AS (
+      WITH requested(rowIndex, src, dst, dport, proto, firstSeen, lastSeen) AS (
         VALUES ${values.join(', ')}
-      ), attributions AS (
+      )${agentOnlyCte}, attributions AS (
         SELECT r.rowIndex, o.agentId, a.hostName AS agentHost,
           o.processId, o.processName, o.bundleId,
           o.firstObservedAt, o.lastObservedAt, o.bytesIn, o.bytesOut,
@@ -77,29 +123,14 @@ function createAgentAttribution({ getDb, maxApplications = DEFAULT_MAX_APPLICATI
         JOIN agents a ON a.agentId = o.agentId
         WHERE o.lastObservedAt >= r.firstSeen - ${CORRELATION_WINDOW_MS}
           AND o.firstObservedAt <= r.lastSeen + ${CORRELATION_WINDOW_MS}
-          ${agentFilter}
-        UNION ALL
-
-        SELECT r.rowIndex, o.agentId, a.hostName AS agentHost,
-          o.processId, o.processName, o.bundleId,
-          o.firstObservedAt, o.lastObservedAt, o.bytesIn, o.bytesOut,
-          'agent-only' AS matchKind
-        FROM requested r
-        JOIN agent_observations o
-          ON r.agentOnly = 1
-            AND o.localAddress = r.src AND o.remoteAddress = r.dst
-            AND o.remotePort = r.dport AND o.networkProtocol = LOWER(r.proto)
-            AND o.lastObservedAt >= r.firstSeen - ${CORRELATION_WINDOW_MS}
-            AND o.firstObservedAt <= r.lastSeen + ${CORRELATION_WINDOW_MS}
-        JOIN agents a ON a.agentId = o.agentId
-        WHERE NOT EXISTS (
-          SELECT 1 FROM connection_agent_observations link
-          WHERE link.agentId = o.agentId AND link.observationId = o.observationId
-        ) ${agentFilter}
+          ${agentFilter}${agentOnlyBranch}
       )
       SELECT * FROM attributions ORDER BY rowIndex, lastObservedAt DESC
     `;
-    const found = getDb().prepare(sql).all(...params, ...agentParams, ...agentParams);
+    const bindings = agentOnlyValues.length
+      ? [...params, ...agentOnlyParams, ...agentParams, ...agentParams]
+      : [...params, ...agentParams];
+    const found = getDb().prepare(sql).all(...bindings);
     const byRow = new Map();
     for (const attribution of found) {
       let identities = byRow.get(attribution.rowIndex);
