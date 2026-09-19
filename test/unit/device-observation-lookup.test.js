@@ -75,3 +75,25 @@ describe('端末の最終観測の引き方', () => {
     assert.doesNotMatch(plan, /TEMP B-TREE/i, `並べ替えが索引で解けていない: ${plan}`);
   });
 });
+
+// The 2-minute safety net exists so a source that reports conflicting data on
+// consecutive polls cannot fill the table. It was silently dead: the query
+// above did not select observedAt, so the comparison was NaN and never
+// suppressed anything. Measured on one Hub 2026-09-19: 99.3% of a day's 35,889
+// observations were written inside that window.
+describe('同じ端末・同じ経路の連続書き込み', () => {
+  it('2分以内は属性が変わっても追記しない', () => {
+    const ip = '10.77.0.1';
+    devices.observeDevice({ ip, mac: 'aa:bb:cc:00:00:01', vendor: 'First', source: 'asus' });
+    devices.observeDevice({ ip, mac: 'aa:bb:cc:00:00:01', vendor: 'Second', source: 'asus' });
+    devices.observeDevice({ ip, mac: 'aa:bb:cc:00:00:01', vendor: 'Third', source: 'asus' });
+
+    const deviceId = devices.getByIp(ip).deviceId;
+    const db = new Database(dbPath, { readonly: true });
+    const count = db.prepare(
+      'SELECT COUNT(*) n FROM device_observations WHERE deviceId = ? AND source = ?'
+    ).get(deviceId, 'asus').n;
+    db.close();
+    assert.equal(count, 1, `2分以内の追記が抑止されていない: ${count} 行`);
+  });
+});
