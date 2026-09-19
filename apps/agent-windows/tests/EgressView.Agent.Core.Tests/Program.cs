@@ -56,6 +56,27 @@ foreach (var (windowsKey, macEnglish) in sharedWording)
         SharedResource(windowsJapanese, windowsKey) == macValue,
         $"Shared wording Japanese drifted: {windowsKey}");
 }
+// Every string that takes a value in one language takes it in the other.
+//
+// A sed that was meant for one string replaced "{0}" with the word PLACEHOLDER
+// in four Japanese ones. Nothing failed: the text still rendered, and the
+// window simply showed "最終確認 PLACEHOLDER" where a timestamp belonged. It
+// shipped, because no test compared the two files for the slots they carry.
+foreach (var entry in windowsEnglish.Descendants().Where(element => element.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml")) is not null))
+{
+    var key = entry.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml"))!.Value;
+    var japanese = windowsJapanese.Descendants()
+        .SingleOrDefault(element => element.Attribute(XName.Get("Key", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value == key);
+    if (japanese is null) continue;
+    static SortedSet<string> Slots(string text) =>
+        new(Regex.Matches(text, @"\{\d+[^}]*\}").Select(match => match.Value), StringComparer.Ordinal);
+    var english = Slots(entry.Value);
+    Assert(english.SetEquals(Slots(japanese.Value)),
+        $"the value slots differ between languages: {key}");
+    Assert(!japanese.Value.Contains("PLACEHOLDER", StringComparison.Ordinal),
+        $"a placeholder word was left in the Japanese wording: {key}");
+}
+
 // The privacy note is composed, not fixed, so its placeholder has to survive
 // translation. A missing {0} would not fail to build or throw: it would print
 // a sentence that quietly omits which services this PC contacts, which is the
