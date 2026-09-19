@@ -9,7 +9,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- WPF's built-in Fluent ThemeMode is the supported .NET 10 path, but its API remains marked experimental. -->
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
-  </PropertyGroup>
+    <ApplicationIcon>Assets\egressview.ico</ApplicationIcon>
+</PropertyGroup>
   <ItemGroup><ProjectReference Include="../EgressView.Agent.Core/EgressView.Agent.Core.csproj" /></ItemGroup>
   <ItemGroup><InternalsVisibleTo Include="render-check" /><InternalsVisibleTo Include="render-cost" /></ItemGroup>
   <ItemGroup>
@@ -20,5 +21,10 @@
   <ItemGroup>
     <Resource Include="../../../../LICENSE" Link="Resources/LICENSE.txt" />
     <Resource Include="../../../../THIRD_PARTY_NOTICES.md" Link="Resources/THIRD_PARTY_NOTICES.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Read at runtime for the tray, which needs a System.Drawing.Icon
+         rather than a WPF image. -->
+    <Resource Include="Assets\*.ico"/>
   </ItemGroup>
 </Project>

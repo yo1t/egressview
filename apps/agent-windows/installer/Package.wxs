@@ -72,6 +72,15 @@
                      Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
+    <!-- Installed apps shows the product's own mark instead of the generic
+         installer box. Taken from the UI executable, so it cannot drift from
+         the icon on the window and in the tray. -->
+    <!-- The id carries the source's extension because Windows Installer
+         decides how to read the icon stream from it; without ".exe" the
+         entry installed with an empty DisplayIcon. -->
+    <Icon Id="AgentIcon.ico" SourceFile="..\src\EgressView.Agent.Ui\Assets\egressview.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AgentIcon.ico" />
+
     <Component Id="UiExecutable" Directory="UIFOLDER" Guid="*">
       <File Id="UiExe" Source="$(var.UiPublishDir)\EgressView.Agent.Ui.exe" KeyPath="yes">
         <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuEgressView" Name="EgressView Agent"
