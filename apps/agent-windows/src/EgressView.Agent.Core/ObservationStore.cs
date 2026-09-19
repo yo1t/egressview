@@ -260,14 +260,28 @@ public sealed partial class ObservationStore : IDisposable
 
     public long SchemaVersion { get { lock (gate) return ScalarInt64("SELECT version FROM schema_version"); } }
 
+    /// How long opening this database took, and how much of that was the
+    /// integrity check.
+    ///
+    /// After a reboot the agent answered nothing for 132 seconds and the
+    /// tray icon took 115, so the machine looked like it had not come back
+    /// (P3-134). Which part of the startup that is has to be measured rather
+    /// than guessed, and measured on the database people actually have --
+    /// this one is 6.5 GB -- so the product records it on every start.
+    public long OpenMilliseconds { get; private set; }
+
+    public long IntegrityCheckMilliseconds { get; private set; }
+
     public ObservationStore(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         this.path = Path.GetFullPath(path);
         Directory.CreateDirectory(Path.GetDirectoryName(this.path)!);
         Check(WinSqlite.Open(this.path, out db, WinSqlite.OpenReadWrite | WinSqlite.OpenCreate | WinSqlite.OpenFullMutex, 0));
+        var opened = System.Diagnostics.Stopwatch.StartNew();
         try { Initialize(); }
         catch { if (db != 0) WinSqlite.Close(db); db = 0; throw; }
+        OpenMilliseconds = opened.ElapsedMilliseconds;
     }
 
     private void Initialize()
@@ -446,7 +460,9 @@ public sealed partial class ObservationStore : IDisposable
 
     private void EnsureIntegrity()
     {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
         var integrity = ScalarText("PRAGMA integrity_check");
+        IntegrityCheckMilliseconds = timer.ElapsedMilliseconds;
         if (!string.Equals(integrity, "ok", StringComparison.Ordinal))
             throw new ObservationStoreException(StoreFailureKind.Corrupt, $"Database integrity check failed: {integrity}");
         lastVerifiedIntegrity = integrity;
@@ -904,6 +920,15 @@ public sealed partial class ObservationStore : IDisposable
         {
             Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
                 $"WHERE component='{name}' AND ending='running'");
+            // A window whose run began before this service did is not running:
+            // the service restarting means the machine or the install changed
+            // under it. Only the window can settle its own run, and a window
+            // that never comes back would leave the row marked running for
+            // ever -- saying a dead process is alive, which is worse than
+            // saying nothing.
+            if (component == RunComponent.Service)
+                Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
+                    $"WHERE component='ui' AND ending='running' AND started_at < '{DateTimeOffset.UtcNow:O}'");
             Execute($"INSERT INTO run_history(component,version,started_at,heartbeat_at,ending) " +
                 $"VALUES('{name}','{Sql(Trim(version, 64))}','{DateTimeOffset.UtcNow:O}','{DateTimeOffset.UtcNow:O}','running')");
             var id = ScalarInt64("SELECT last_insert_rowid()");
@@ -1120,6 +1145,18 @@ public sealed partial class ObservationStore : IDisposable
             var safeName = name.Replace("'", "''", StringComparison.Ordinal);
             Execute($"INSERT INTO collector_counters(name,value) VALUES('{safeName}',{amount}) " +
                     "ON CONFLICT(name) DO UPDATE SET value=value+excluded.value");
+        }
+    }
+
+    /// Replaces rather than adds, for values that are a measurement and not a
+    /// tally. A duration accumulated across restarts is not a duration.
+    public void SetCounter(string name, long value)
+    {
+        lock (gate)
+        {
+            var safeName = name.Replace("'", "''", StringComparison.Ordinal);
+            Execute($"INSERT INTO collector_counters(name,value) VALUES('{safeName}',{value}) " +
+                    "ON CONFLICT(name) DO UPDATE SET value=excluded.value");
         }
     }
 

@@ -197,6 +197,7 @@ internal sealed class AgentWindowsService : ServiceBase
     {
         var root = Path.Combine(AppContext.BaseDirectory, "data");
         Directory.CreateDirectory(root);
+        var startup = System.Diagnostics.Stopwatch.StartNew();
         using var store = new ObservationStore(Path.Combine(root, "egressview-agent.db"));
         activeStore = store;
         // A hibernate/update sequence can restart the service instead of
@@ -228,6 +229,19 @@ internal sealed class AgentWindowsService : ServiceBase
             () => monitoring.Enabled, monitoring.SetEnabled, () => monitoring.ReadsHostnames, monitoring.SetReadsHostnames,
             deliveryController, enrichmentController);
         ipc.Start();
+        // Written once per start, because a machine that answers nothing for
+        // two minutes after a reboot looks like a machine that did not come
+        // back, and the only way to shorten that is to know which part of it
+        // is long. Counters rather than a log line: they reach the diagnostics
+        // bundle, so the numbers come from the machine that was slow.
+        try
+        {
+            store.SetCounter("startup-ms-store-open", store.OpenMilliseconds);
+            store.SetCounter("startup-ms-integrity-check", store.IntegrityCheckMilliseconds);
+            store.SetCounter("startup-ms-until-ipc", startup.ElapsedMilliseconds);
+            store.AddCounter("startup-count", 1);
+        }
+        catch { /* Timing the start must never be what stops it. */ }
         var delivery = deliveryController.RunAsync(cancellationToken);
         var geoCache = enrichmentController.RunGeoAsync(cancellationToken);
         var threatIntel = enrichmentController.RunThreatAsync(cancellationToken);

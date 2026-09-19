@@ -1514,6 +1514,24 @@ try
     }
 
     {
+        // A window that was running when the service restarted is not running.
+        // Only the window can close its own run, so a window that never comes
+        // back used to leave the row marked running for ever -- and after a
+        // reboot on 2026-09-19 it did exactly that, claiming a process killed
+        // by the reboot had been alive since the previous evening.
+        var strandedDatabase = Path.Combine(directory, "stranded-ui-run.db");
+        using (var store = new ObservationStore(strandedDatabase))
+        {
+            store.BeginRun(RunComponent.Ui, "0.1.0");
+            Assert(store.ReadRunHistory()[0].Ending == "running", "the window's run starts open");
+            store.BeginRun(RunComponent.Service, "0.1.0");
+            var rows = store.ReadRunHistory();
+            Assert(rows.Single(run => run.Component == RunComponent.Ui).Ending == "unexpected",
+                "a service start settles a window run left open by a restart");
+            Assert(rows.Single(run => run.Component == RunComponent.Service).Ending == "running",
+                "settling the window's run does not disturb the service's own");
+        }
+
         // An OS shutdown and a crash both leave a run that never wrote its own
         // ending. Filing them under one word means the machine being restarted
         // outnumbers, and hides, the run that really did fail.
