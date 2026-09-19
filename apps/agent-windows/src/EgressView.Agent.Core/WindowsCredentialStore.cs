@@ -1,7 +1,3 @@
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 namespace EgressView.Agent.Core;
@@ -9,80 +5,47 @@ namespace EgressView.Agent.Core;
 public sealed class WindowsCredentialStore
 {
     private const string Target = "EgressView.Agent.HubCredential";
-    private const int Generic = 1;
-    private const int PersistLocalMachine = 2;
 
     public void Save(AgentCredential credential)
     {
         if (!AgentEnrollmentClient.IsValidCredential(credential)) throw new ArgumentException("Invalid Agent credential.", nameof(credential));
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(credential);
-        var blob = Marshal.AllocHGlobal(bytes.Length);
-        try
-        {
-            Marshal.Copy(bytes, 0, blob, bytes.Length);
-            var native = new NativeCredential
-            {
-                Type = Generic, TargetName = Target, CredentialBlobSize = bytes.Length,
-                CredentialBlob = blob, Persist = PersistLocalMachine, UserName = credential.AgentId.ToString("D"),
-            };
-            if (!CredWrite(ref native, 0)) throw new Win32Exception(Marshal.GetLastWin32Error());
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(bytes);
-            Marshal.Copy(new byte[bytes.Length], 0, blob, bytes.Length);
-            Marshal.FreeHGlobal(blob);
-        }
+        WindowsCredentialVault.Write(Target, credential.AgentId.ToString("D"), JsonSerializer.SerializeToUtf8Bytes(credential));
     }
 
-    public AgentCredential? Load()
+    public AgentCredential? Load() => WindowsCredentialVault.Read<AgentCredential>(Target, (_, bytes) =>
     {
-        if (!CredRead(Target, Generic, 0, out var pointer))
-        {
-            var error = Marshal.GetLastWin32Error();
-            if (error == 1168) return null;
-            throw new Win32Exception(error);
-        }
-        try
-        {
-            var native = Marshal.PtrToStructure<NativeCredential>(pointer);
-            var bytes = new byte[native.CredentialBlobSize];
-            Marshal.Copy(native.CredentialBlob, bytes, 0, bytes.Length);
-            try
-            {
-                var credential = JsonSerializer.Deserialize<AgentCredential>(bytes);
-                return credential is not null && AgentEnrollmentClient.IsValidCredential(credential)
-                    ? credential : throw new InvalidDataException("Stored Agent credential is invalid.");
-            }
-            finally { CryptographicOperations.ZeroMemory(bytes); }
-        }
-        finally { CredFree(pointer); }
-    }
+        var credential = JsonSerializer.Deserialize<AgentCredential>(bytes);
+        return credential is not null && AgentEnrollmentClient.IsValidCredential(credential)
+            ? credential : throw new InvalidDataException("Stored Agent credential is invalid.");
+    });
 
-    public void Delete()
+    public void Delete() => WindowsCredentialVault.Delete(Target);
+}
+
+/// The reader's MaxMind account, kept where Windows keeps secrets.
+///
+/// It is stored apart from the Hub credential on purpose: a PC with no Hub is
+/// exactly the case a local country table exists for, so the two must be able
+/// to exist without each other. Deleting one never disturbs the other.
+///
+/// The account id is not a secret and goes in the user name, where Credential
+/// Manager will show it; the licence key is the blob.
+public sealed class MaxMindCredentialStore
+{
+    private const string Target = "EgressView.Agent.MaxMindAccount";
+
+    public void Save(GeoLite2Credentials credentials)
     {
-        if (CredDelete(Target, Generic, 0)) return;
-        var error = Marshal.GetLastWin32Error();
-        if (error != 1168) throw new Win32Exception(error);
+        if (!credentials.IsComplete) throw new ArgumentException("Incomplete MaxMind credentials.", nameof(credentials));
+        WindowsCredentialVault.Write(Target, credentials.AccountId,
+            System.Text.Encoding.UTF8.GetBytes(credentials.LicenseKey));
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct NativeCredential
+    public GeoLite2Credentials? Load() => WindowsCredentialVault.Read<GeoLite2Credentials>(Target, (accountId, bytes) =>
     {
-        public int Flags; public int Type;
-        [MarshalAs(UnmanagedType.LPWStr)] public string TargetName;
-        [MarshalAs(UnmanagedType.LPWStr)] public string? Comment;
-        public long LastWritten; public int CredentialBlobSize; public nint CredentialBlob; public int Persist;
-        public int AttributeCount; public nint Attributes;
-        [MarshalAs(UnmanagedType.LPWStr)] public string? TargetAlias;
-        [MarshalAs(UnmanagedType.LPWStr)] public string UserName;
-    }
+        var credentials = new GeoLite2Credentials(accountId, System.Text.Encoding.UTF8.GetString(bytes));
+        return credentials.IsComplete ? credentials : null;
+    });
 
-    [DllImport("advapi32.dll", EntryPoint = "CredWriteW", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CredWrite(ref NativeCredential credential, int flags);
-    [DllImport("advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CredRead(string target, int type, int flags, out nint credential);
-    [DllImport("advapi32.dll", EntryPoint = "CredDeleteW", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CredDelete(string target, int type, int flags);
-    [DllImport("advapi32.dll")] private static extern void CredFree(nint credential);
+    public void Delete() => WindowsCredentialVault.Delete(Target);
 }

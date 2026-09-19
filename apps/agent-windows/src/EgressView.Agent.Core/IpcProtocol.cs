@@ -29,7 +29,11 @@ public static class IpcProtocol
         Func<long, int, ObservationPage>? observationsSince = null,
         Action<string, string?>? recordUiRun = null,
         Func<bool, bool>? setReadsHostnames = null,
-        Func<bool, bool>? setPublicThreatFeeds = null)
+        Func<bool, bool>? setPublicThreatFeeds = null,
+        Func<string?, bool>? setCountryTableAccount = null,
+        Func<bool, bool>? setCountryTableEnabled = null,
+        Action? fetchPublicFeedsOnce = null,
+        Func<GeoLookupSource, string>? setGeoLookupSource = null)
     {
         try
         {
@@ -67,11 +71,75 @@ public static class IpcProtocol
                 "ui-run" => UiRun(root, recordUiRun),
                 "set-hostname-observation" => SetHostnameObservation(root, setReadsHostnames),
                 "set-public-threat-feeds" => SetPublicThreatFeeds(root, setPublicThreatFeeds),
+                "set-country-table-account" => SetCountryTableAccount(root, setCountryTableAccount),
+                "set-country-table-enabled" => SetSwitch(root, setCountryTableEnabled, "country-table-setting-failed"),
+                "fetch-public-feeds-once" => Invoke(fetchPublicFeedsOnce, "public-feeds-unavailable"),
+                "set-geo-lookup-source" => SetGeoLookupSource(root, setGeoLookupSource),
                 "prepare-uninstall" => PrepareUninstall(root, prepareUninstall),
                 _ => Reject("unknown-operation"),
             };
         }
         catch (Exception) { return Reject("malformed-request"); }
+    }
+
+    /// Hands over the contents of MaxMind's own GeoIP.conf, or withdraws the
+    /// account when nothing is sent.
+    ///
+    /// The file's text crosses the pipe rather than a parsed account, because
+    /// parsing it in the window would mean the window holds the licence key in
+    /// its own memory for longer than the one call it takes to pass it on. The
+    /// pipe is already restricted to the signed-in user and the service.
+    ///
+    /// Nothing is echoed back but a yes or a no: a reply that repeated the key
+    /// would put it somewhere it has no reason to be.
+    /// A switch the person flipped, answered with what it is now rather than
+    /// with what was asked for: the two differ when the setting could not be
+    /// written, and a screen that shows the request rather than the result
+    /// tells the person something they cannot act on.
+    /// Where to look when the cache has no location for an address.
+    ///
+    /// The value is checked against the three the Agent knows rather than
+    /// parsed leniently: one of them sends watched addresses to a third party,
+    /// and a misspelling that quietly fell through to a default would be the
+    /// worst possible way to choose it -- in either direction.
+    private static string SetGeoLookupSource(JsonElement root, Func<GeoLookupSource, string>? set)
+    {
+        if (set is null) return Reject("operation-unavailable");
+        var wire = root.TryGetProperty("source", out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() : null;
+        if (wire is not ("cache-only" or "hub" or "hub-then-third-party")) return Reject("invalid-lookup-source");
+        try { return JsonSerializer.Serialize(new { status = "ok", source = set(GeoLookupSources.Parse(wire)) }); }
+        catch { return Reject("lookup-source-failed"); }
+    }
+
+    private static string SetSwitch(JsonElement root, Func<bool, bool>? set, string failureReason)
+    {
+        if (set is null) return Reject("operation-unavailable");
+        if (!root.TryGetProperty("enabled", out var value) ||
+            value.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return Reject("invalid-request");
+        try { return JsonSerializer.Serialize(new { status = "ok", enabled = set(value.GetBoolean()) }); }
+        catch { return Reject(failureReason); }
+    }
+
+    private static string SetCountryTableAccount(JsonElement root, Func<string?, bool>? set)
+    {
+        if (set is null) return Reject("operation-unavailable");
+        string? configuration = null;
+        if (root.TryGetProperty("configuration", out var value))
+        {
+            if (value.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)) return Reject("invalid-configuration");
+            configuration = value.GetString();
+        }
+        // A file this large is not a GeoIP.conf, and reading one into the
+        // service is a cost a wrong path should not be able to impose.
+        if (configuration is { Length: > 64 * 1024 }) return Reject("invalid-configuration");
+        try
+        {
+            return set(configuration)
+                ? JsonSerializer.Serialize(new { status = "ok", configured = configuration is not null })
+                : Reject("no-maxmind-account");
+        }
+        catch { return Reject("country-table-account-failed"); }
     }
 
     private static string PrepareUninstall(JsonElement root, Func<bool, bool, AgentUninstallResult>? prepare)
@@ -132,7 +200,7 @@ public static class IpcProtocol
     private static string RefreshEnrichment(JsonElement root, Action<string>? refresh)
     {
         var kind = root.TryGetProperty("kind", out var value) ? value.GetString() : null;
-        if (refresh is null || kind is not ("geo" or "threat" or "all")) return Reject("invalid-enrichment-kind");
+        if (refresh is null || kind is not ("geo" or "threat" or "country" or "all")) return Reject("invalid-enrichment-kind");
         try { refresh(kind); return JsonSerializer.Serialize(new { status = "ok", kind }); }
         catch { return Reject("enrichment-refresh-failed"); }
     }

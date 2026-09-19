@@ -56,6 +56,18 @@ foreach (var (windowsKey, macEnglish) in sharedWording)
         SharedResource(windowsJapanese, windowsKey) == macValue,
         $"Shared wording Japanese drifted: {windowsKey}");
 }
+// The privacy note is composed, not fixed, so its placeholder has to survive
+// translation. A missing {0} would not fail to build or throw: it would print
+// a sentence that quietly omits which services this PC contacts, which is the
+// one fact the line exists to carry.
+foreach (var document in new[] { windowsEnglish, windowsJapanese })
+{
+    Assert(SharedResource(document, "EnrichmentPrivacyDirect").Contains("{0}", StringComparison.Ordinal),
+        "the direct-source privacy note keeps the slot the source names go in");
+    foreach (var key in new[] { "SourcePublicFeeds", "SourceMaxMind", "EnrichmentPrivacy" })
+        Assert(SharedResource(document, key).Trim().Length > 0, $"the privacy note has wording for {key}");
+}
+
 // Check every exact shared English string, not only the historical review list.
 // These two keys have different contexts: a Windows language preference and
 // the ETW collection method are not macOS system settings or traffic source.
@@ -656,15 +668,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 17, "v1 database migrates through v2-v17");
+        Assert(migrated.SchemaVersion == 19, "v1 database migrates through v2-v19");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v17.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v19.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 17, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 19, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -1478,7 +1490,7 @@ try
         var anomalyDatabase = Path.Combine(directory, "outbound-anomaly.db");
         using (var store = new ObservationStore(anomalyDatabase))
         {
-            Assert(store.SchemaVersion == 17, "the traffic-window table arrives with schema 17");
+            Assert(store.SchemaVersion >= 17, "the traffic-window table arrives with schema 17");
             var now = DateTimeOffset.UtcNow;
             var window = new DateTimeOffset(now.UtcTicks - now.UtcTicks % TimeSpan.FromMinutes(15).Ticks, TimeSpan.Zero);
             var previous = window - TimeSpan.FromMinutes(15);
@@ -1613,6 +1625,215 @@ try
             Assert(MaxMindDatabase.Open(installed).Metadata.BuildEpoch == 1_800_000_000 &&
                 Directory.GetFiles(Path.GetDirectoryName(installed)!).Length == 1,
                 "the new table replaces the old one and leaves nothing half-written beside it");
+        }
+
+        // The table has an expiry, and it is not advisory.
+        //
+        // MaxMind's licence requires moving to a new build promptly and
+        // destroying anything more than thirty days behind it. A copy that old
+        // is not merely stale -- using it breaks the terms it came under -- so
+        // it stops answering rather than quietly carrying on.
+        {
+            var tablePath = Path.Combine(directory, "country", "GeoLite2-Country.mmdb");
+            var table = new LocalCountryTable(tablePath);
+            Assert(table.Status(DateTimeOffset.UtcNow).State == LocalCountryTableState.Absent &&
+                table.CountryCode("8.8.8.8", DateTimeOffset.UtcNow) is null,
+                "no table means no answer, which is a state rather than a failure");
+
+            var built = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+            GeoLite2Updater.Install(EgressView.Agent.Core.Tests.MaxMindFixture.CountryDatabase((ulong)built.ToUnixTimeSeconds()), tablePath);
+            table.Reload();
+            Assert(table.Status(built.AddDays(1)).IsUsable && table.CountryCode("8.8.8.8", built.AddDays(1)) == "US",
+                "a fresh table answers");
+            Assert(table.Status(built.AddDays(31)).State == LocalCountryTableState.Expired &&
+                table.CountryCode("8.8.8.8", built.AddDays(31)) is null,
+                "a table past the licence's thirty days stops answering, and says why it stopped");
+
+            Assert(LocalCountryTable.Attribution.Contains("MaxMind", StringComparison.Ordinal),
+                "the attribution the licence requires travels with the code that uses the data");
+        }
+
+        // Only addresses nobody has placed, so a Hub's richer answer is never
+        // replaced by a country-only one.
+        {
+            var countryDatabase = Path.Combine(directory, "local-country.db");
+            using var store = new ObservationStore(countryDatabase);
+            Assert(store.SchemaVersion >= 18, "the local country cache arrives with schema 18");
+            var now = DateTimeOffset.UtcNow;
+            store.WriteBatch([
+                new NetworkObservation(now.AddMinutes(-1), 21, "TCP", "10.0.0.3", 52_000, "8.8.8.8", 443,
+                    10, 10, ObservationLayer.Logical, null, "etw", "resolver"),
+                new NetworkObservation(now.AddMinutes(-1), 22, "TCP", "10.0.0.3", 52_001, "1.2.3.4", 443,
+                    10, 10, ObservationLayer.Logical, null, "etw", "resolver"),
+            ]);
+            store.ReplaceGeoLocations([new GeoLocation("8.8.8.8", 37.4, -122.0, "US", "Mountain View")], null, now);
+
+            var unplaced = store.ReadAddressesWithoutCountry(now.AddHours(-1));
+            Assert(unplaced.Contains("1.2.3.4") && !unplaced.Contains("8.8.8.8"),
+                "an address the Hub already placed is not asked about again");
+
+            Assert(store.ReadLocalCountryCount() == 0, "nothing has been placed on this PC yet");
+            store.SaveLocalCountries([("1.2.3.4", "JP")]);
+            Assert(store.ReadLocalCountryCount() == 1,
+                "the screen can say whether the table is doing anything, not only that it loaded");
+            var countries = store.ReadCountryHistory().ToDictionary(row => row.CountryCode, row => row.Connections);
+            Assert(countries.ContainsKey("JP") && countries.ContainsKey("US"),
+                "a country worked out on this PC counts beside one the Hub supplied");
+            Assert(store.ReadAddressesWithoutCountry(now.AddHours(-1)).Count == 0,
+                "an address placed locally is not asked about again either");
+
+            store.ForgetLocalCountries();
+            Assert(!store.ReadCountryHistory().Any(row => row.CountryCode == "JP"),
+                "withdrawing the table withdraws the answers that came from it");
+            Assert(store.ReadLocalCountryCount() == 0, "and the count goes with them");
+        }
+
+        // Handing the account over, and taking it back.
+        {
+            string? received = "unset";
+            var calls = 0;
+            string Ask(string request) => IpcProtocol.Handle(request, () => "{}", _ => [],
+                setCountryTableAccount: configuration =>
+                {
+                    received = configuration;
+                    calls++;
+                    return configuration is null || configuration.Contains("LicenseKey", StringComparison.Ordinal);
+                });
+
+            var conf = "# GeoIP.conf" + Environment.NewLine + "AccountID 123456" + Environment.NewLine +
+                "LicenseKey abcdefghijklmnop" + Environment.NewLine + "EditionIDs GeoLite2-Country" + Environment.NewLine;
+            var accepted = Ask(JsonSerializer.Serialize(new { v = 1, op = "set-country-table-account", configuration = conf }));
+            Assert(accepted.Contains("\"status\":\"ok\"", StringComparison.Ordinal) && received == conf,
+                "the file's own text reaches the service, which is the only thing that stores it");
+            Assert(!accepted.Contains("abcdefghijklmnop", StringComparison.Ordinal),
+                "the reply never repeats the licence key back");
+
+            Assert(Ask(JsonSerializer.Serialize(new { v = 1, op = "set-country-table-account", configuration = "hello" }))
+                .Contains("no-maxmind-account", StringComparison.Ordinal),
+                "a file with no account is named as such, not reported as a connection problem");
+
+            var cleared = Ask("""{"v":1,"op":"set-country-table-account"}""");
+            Assert(cleared.Contains("\"configured\":false", StringComparison.Ordinal) && received is null,
+                "sending nothing withdraws the account");
+
+            var before = calls;
+            Assert(Ask(JsonSerializer.Serialize(new { v = 1, op = "set-country-table-account", configuration = new string('x', 70_000) }))
+                .Contains("invalid-configuration", StringComparison.Ordinal) && calls == before,
+                "a file far too large to be a GeoIP.conf is refused before the service reads it");
+
+            var kinds = new List<string>();
+            foreach (var kind in new[] { "geo", "threat", "country", "all", "weather" })
+                IpcProtocol.Handle(JsonSerializer.Serialize(new { v = 1, op = "refresh-enrichment", kind }),
+                    () => "{}", _ => [], requestEnrichmentNow: accepted => kinds.Add(accepted));
+            Assert(kinds is ["geo", "threat", "country", "all"],
+                "the country table can be refreshed by hand like the other two, and nothing else can");
+
+            Assert(IpcProtocol.Handle("""{"v":1,"op":"set-country-table-account"}""", () => "{}", _ => [])
+                .Contains("operation-unavailable", StringComparison.Ordinal),
+                "a build without the country table says so rather than silently accepting");
+        }
+
+        // Where the indicators came from is remembered, because a count and a
+        // timestamp never said it.
+        {
+            var sourced = Path.Combine(directory, "threat-source.db");
+            using var store = new ObservationStore(sourced);
+            Assert(store.ReadThreatCacheState().Source == "none",
+                "a database that has fetched nothing says so, rather than naming a source it never used");
+
+            var now = DateTimeOffset.UtcNow;
+            store.ReplaceThreatIndicators(true, [new ThreatIndicator("ip", "203.0.113.9", "feodo", "malware", "high")],
+                "etag-1", now, "hub");
+            Assert(store.ReadThreatCacheState().Source == "hub", "the Hub is named when the Hub answered");
+
+            store.ReplaceThreatIndicators(true, [new ThreatIndicator("ip", "203.0.113.9", "feodo", "malware", "high")],
+                null, now, "public-feeds-fallback");
+            var state = store.ReadThreatCacheState();
+            Assert(state.Source == "public-feeds-fallback",
+                "falling back is not the same as choosing the public lists, and the screen can tell them apart");
+            Assert(state.IndicatorCount == 1, "the indicators themselves are unaffected by where they came from");
+
+            store.MarkThreatCacheFetched("etag-1", now, "hub");
+            Assert(store.ReadThreatCacheState().Source == "hub",
+                "a 304 means the data in use is still the Hub's, so the screen must not fall back to saying none");
+        }
+
+        // The switch that turns the country table off, which is not the switch
+        // that forgets the account.
+        {
+            var replies = new List<string>();
+            var wanted = new List<bool>();
+            string Ask(string request) => IpcProtocol.Handle(request, () => "{}", _ => [],
+                setCountryTableEnabled: enabled => { wanted.Add(enabled); return enabled; });
+
+            replies.Add(Ask("""{"v":1,"op":"set-country-table-enabled","enabled":true}"""));
+            replies.Add(Ask("""{"v":1,"op":"set-country-table-enabled","enabled":false}"""));
+            Assert(wanted is [true, false] && replies[0].Contains("\"enabled\":true", StringComparison.Ordinal)
+                && replies[1].Contains("\"enabled\":false", StringComparison.Ordinal),
+                "the reply says what the setting is now, not what was asked for");
+
+            Assert(Ask("""{"v":1,"op":"set-country-table-enabled"}""")
+                .Contains("invalid-request", StringComparison.Ordinal) && wanted.Count == 2,
+                "a switch with nothing to set is refused rather than read as off");
+
+            var fetched = 0;
+            Assert(IpcProtocol.Handle("""{"v":1,"op":"fetch-public-feeds-once"}""", () => "{}", _ => [],
+                fetchPublicFeedsOnce: () => fetched++).Contains("\"status\":\"ok\"", StringComparison.Ordinal) && fetched == 1,
+                "fetching once asks for exactly one fetch");
+            Assert(IpcProtocol.Handle("""{"v":1,"op":"fetch-public-feeds-once"}""", () => "{}", _ => [])
+                .Contains("operation-unavailable", StringComparison.Ordinal),
+                "a build without the public feeds says so rather than silently accepting");
+        }
+
+        // The one path that sends a watched address outside.
+        {
+            var asked = new List<string>();
+            var handler = new StubHandler(request =>
+            {
+                asked.Add(request.RequestUri!.ToString());
+                var address = request.RequestUri!.AbsolutePath.Trim('/');
+                return address == "198.51.100.7"
+                    ? """{"success":true,"ip":"198.51.100.7","country_code":"DE","latitude":52.5,"longitude":13.4,"city":"Berlin"}"""
+                    : """{"success":false,"message":"Reserved range"}""";
+            });
+            var lookup = new ThirdPartyGeoLookup(new HttpClient(handler), new Uri("https://ipwho.is"),
+                (_, _) => Task.CompletedTask);
+
+            var located = await lookup.LookUpAsync(["198.51.100.7", "10.0.0.1"], budget: 10);
+            Assert(located.Count == 1 && located[0].Ip == "198.51.100.7" && located[0].CountryCode == "DE",
+                "an address the service cannot place is left out, because a wrong country is worse than none");
+            Assert(located[0].Latitude == 52.5 && located[0].City == "Berlin",
+                "the coordinates the globe needs come back with it");
+            Assert(lookup.Spent == 2, "the budget is spent by asking, not by being answered");
+
+            Assert(asked.All(url => url.StartsWith("https://", StringComparison.Ordinal)),
+                "watched addresses are never sent in clear text by a tool whose purpose is showing what leaves");
+            Assert(asked[0].Contains("198.51.100.7", StringComparison.Ordinal) &&
+                !asked[0].Contains("10.0.0.1", StringComparison.Ordinal),
+                "one address per request, and only the address being asked about");
+
+            asked.Clear();
+            await lookup.LookUpAsync(["198.51.100.7", "198.51.100.8", "198.51.100.9"], budget: 2);
+            Assert(asked.Count == 2, "the day's budget stops the run, rather than being checked afterwards");
+        }
+
+        // A source nobody recognises is refused, in either direction.
+        {
+            var chosen = new List<GeoLookupSource>();
+            string Ask(string wire) => IpcProtocol.Handle(
+                JsonSerializer.Serialize(new { v = 1, op = "set-geo-lookup-source", source = wire }),
+                () => "{}", _ => [], setGeoLookupSource: source => { chosen.Add(source); return source.ToWire(); });
+
+            Assert(Ask("hub-then-third-party").Contains("hub-then-third-party", StringComparison.Ordinal)
+                && chosen is [GeoLookupSource.HubThenThirdParty],
+                "the choice that sends addresses outside is passed through exactly as asked");
+            Assert(Ask("cache-only").Contains("cache-only", StringComparison.Ordinal), "so is the one that sends nothing");
+            Assert(Ask("hub-then-ipwho").Contains("invalid-lookup-source", StringComparison.Ordinal)
+                && chosen.Count == 3 - 1,
+                "a misspelling is refused rather than falling through to a default, in either direction");
+            Assert(GeoLookupSources.Parse("nonsense") == GeoLookupSource.Hub
+                && !GeoLookupSource.Hub.UsesThirdParty() && GeoLookupSource.Hub.UsesHub(),
+                "an unreadable stored setting means the Hub, which sends nothing outside the network");
         }
 
         // The public-feed switch is a decision, so it is rejected unless the
@@ -1881,7 +2102,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 17 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 19 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
@@ -2055,7 +2276,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, and its update");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, its update, its expiry, handing over the account, where threat data came from, and looking an address up outside");
     return 0;
 }
 finally
@@ -2286,4 +2507,15 @@ internal sealed class RefusingSynchronizationContext : SynchronizationContext
     public int Posted => Volatile.Read(ref posted);
     public override void Post(SendOrPostCallback d, object? state) => Interlocked.Increment(ref posted);
     public override void Send(SendOrPostCallback d, object? state) => Interlocked.Increment(ref posted);
+}
+
+/// Answers HTTP requests from a function, so a lookup can be tested without a
+/// network and without a third party learning anything.
+file sealed class StubHandler(Func<HttpRequestMessage, string> reply) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(reply(request), System.Text.Encoding.UTF8, "application/json"),
+        });
 }
