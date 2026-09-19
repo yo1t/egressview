@@ -266,6 +266,37 @@ function initDb(dbPath) {
     LIMIT  1
   `);
 
+  // Keep the newest @maxPerPair rows of each (deviceId, source), drop the rest.
+  stmtPruneByCount = db.prepare(`
+    DELETE FROM device_observations
+    WHERE id IN (
+      SELECT id FROM (
+        SELECT id, ROW_NUMBER() OVER (
+          PARTITION BY deviceId, source ORDER BY observedAt DESC, id DESC
+        ) AS rank
+        FROM device_observations
+      )
+      WHERE rank > @maxPerPair
+      LIMIT @batchSize
+    )
+  `);
+
+  // Drop what is older than the cutoff, except each pair's newest row -- that
+  // one is the baseline the write-on-change check reads.
+  stmtPruneByAge = db.prepare(`
+    DELETE FROM device_observations
+    WHERE id IN (
+      SELECT id FROM (
+        SELECT id, observedAt, ROW_NUMBER() OVER (
+          PARTITION BY deviceId, source ORDER BY observedAt DESC, id DESC
+        ) AS rank
+        FROM device_observations
+      )
+      WHERE rank > 1 AND observedAt < @cutoff
+      LIMIT @batchSize
+    )
+  `);
+
   stmtInsertObservation = db.prepare(`
     INSERT INTO device_observations
       (deviceId, observedAt, source, ip, mac, ipv6, hostname, mdnsName, netbiosName, asusName, vendor)
@@ -699,6 +730,78 @@ function checkStaleMergeCandidates() {
   return staleDevices.length;
 }
 
+// ─── Observation retention ────────────────────────────────────────────────────
+
+// Nothing reads this table except the write-on-change check, which asks for one
+// row: the newest observation of a device from a source. Measured on one Hub
+// 2026-09-19 -- 3,671,407 rows and 586 MB with indexes, the largest table in a
+// 4 GB database, five times the size of `connections`, serving a query that
+// needs 780 rows. What it holds beyond that is a record of how a device's
+// identity changed, which is worth keeping, but not without a ceiling.
+//
+// Age alone is not a ceiling: a source that reports conflicting data can write
+// 720 rows a day for one device and stay inside any retention window. Capping
+// each (deviceId, source) is what bounds the table -- 780 pairs at 200 rows is
+// 156,000 rows however badly a source misbehaves.
+const OBS_MAX_PER_PAIR = 200;
+const OBS_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+
+// Deleting everything over the cap in one statement would block the event loop
+// for far longer than anything this Hub has been stalling on: measured on one
+// Hub 2026-09-19, just scanning 3,671,415 rows to find the 3,626,901 victims
+// took 4,826 ms, before a single row was deleted. So the work is done in
+// bounded batches under a time budget, and the caller comes back for the rest.
+//
+// The batch size was measured against a copy of that table rather than guessed.
+// Deleting the whole backlog took 1,209 batches: at 3,000 rows a batch ran 74 ms
+// at the median, 108 ms at p90 and 380 ms at worst -- in line with the periodic
+// history snapshot. At 10,000 the worst batch was 806 ms, which is a stall
+// someone would notice.
+const OBS_PRUNE_BATCH = 3000;
+const OBS_PRUNE_BUDGET_MS = 200;
+
+let stmtPruneByCount = null;
+let stmtPruneByAge   = null;
+
+/**
+ * Bound device_observations. Safe to call on a schedule.
+ *
+ * The newest row of every (deviceId, source) survives both rules regardless of
+ * age: it is the baseline the write-on-change check compares against, and
+ * deleting it would make the next observation look like a change and start the
+ * writes over again.
+ *
+ * @returns {{ byCount: number, byAge: number }} rows deleted
+ */
+function pruneObservations({
+  maxPerPair = OBS_MAX_PER_PAIR,
+  maxAgeMs   = OBS_MAX_AGE_MS,
+  batchSize  = OBS_PRUNE_BATCH,
+  budgetMs   = OBS_PRUNE_BUDGET_MS,
+} = {}) {
+  if (!db) return { byCount: 0, byAge: 0, more: false };
+  const cutoff = Date.now() - maxAgeMs;
+  const startedAt = Date.now();
+  const result = { byCount: 0, byAge: 0, more: false };
+
+  const drain = (statement, params, key) => {
+    for (;;) {
+      const deleted = db.transaction(() => statement.run({ ...params, batchSize }).changes)();
+      result[key] += deleted;
+      if (deleted < batchSize) return true;            // nothing left for this rule
+      if (Date.now() - startedAt >= budgetMs) {
+        result.more = true;
+        return false;                                  // out of budget, resume next call
+      }
+    }
+  };
+
+  if (drain(stmtPruneByCount, { maxPerPair }, 'byCount')) {
+    drain(stmtPruneByAge, { cutoff }, 'byAge');
+  }
+  return result;
+}
+
 // ─── Populate from existing connection history ─────────────────────────────
 
 function seedFromConnectionHistory(connectionHistory) {
@@ -734,6 +837,22 @@ function closeDb() {
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
+/**
+ * Every stored observation of one (deviceId, source), newest first.
+ *
+ * Production has no reader for this -- the write-on-change check asks for a
+ * single row -- so it exists for tests, which otherwise cannot see whether a
+ * row was written or pruned at all.
+ */
+function _observationsForTest(deviceId, source) {
+  if (!db) return [];
+  return db.prepare(`
+    SELECT * FROM device_observations
+    WHERE deviceId = ? AND source = ?
+    ORDER BY observedAt DESC, id DESC
+  `).all(deviceId, source);
+}
+
 function _initForTest() {
   if (db) { try { db.close(); } catch {} db = null; }
   OBS_MIN_INTERVAL_MS = 0;   // disable cooldown so back-to-back test observations work
@@ -764,7 +883,9 @@ module.exports = {
   rejectCandidate,
   seedFromConnectionHistory,
   checkStaleMergeCandidates,
+  pruneObservations,
   getDiscardedRedirects,
   chooseForIp,
   _initForTest,
+  _observationsForTest,
 };
