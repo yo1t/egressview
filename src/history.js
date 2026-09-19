@@ -426,6 +426,9 @@ function loadIntoMemory() {
   const cutoff = Date.now() - historyTtlMs;
   const rows = hydrateConnectionRows(stmtSelectAll.all(cutoff, hotCache.limit));
   hotCache.replace(rows, row => `${row.src}|${row.dst}|${row.dport}|${row.proto}`);
+  // These rows came out of SQLite, so they are already there. Without this the
+  // first snapshot after startup would write the whole cache back for nothing.
+  lastSnapshotAt = Date.now();
   logger.info(`[history] Loaded ${connectionHistory.size} hot sessions from SQLite (max ${hotCache.limit})`);
 }
 
@@ -482,11 +485,38 @@ function appendHistoryLogs(entries) {
   }
 }
 
-// Batch sync: write all current in-memory entries to SQLite
+// Overlap on the window below. It costs a few extra rows and removes any
+// dependence on the two clocks agreeing, or on a write landing before the
+// snapshot that is already running reads the map.
+const SNAPSHOT_OVERLAP_MS = 60 * 1000;
+let lastSnapshotAt = 0;
+
+/**
+ * Persist the entries whose lastSeen moved since the previous snapshot.
+ *
+ * What this exists for is the plain lastSeen/count bump: recordConnections
+ * writes new and observer-changed entries inline, but not those, so without a
+ * snapshot they would live only in memory.
+ *
+ * It used to write the whole hot cache. Measured on one Hub 2026-09-19: 99,698
+ * entries rewritten every ten minutes to save about 100 that had changed,
+ * blocking the event loop for 5 to 9.8 seconds each time -- the device list,
+ * the connection log and every static file waited behind it. Anything that
+ * changes an entry some other way (enrichment, threat re-match) persists it
+ * itself.
+ */
 function snapshotHistory() {
   if (!db || connectionHistory.size === 0) return;
-  appendHistoryLogs([...connectionHistory.values()]);
-  logger.info(`[history] Snapshot ${connectionHistory.size} entries to SQLite`);
+  const startedAt = Date.now();
+  const since = lastSnapshotAt ? lastSnapshotAt - SNAPSHOT_OVERLAP_MS : 0;
+  const pending = [];
+  for (const entry of connectionHistory.values()) {
+    if ((entry.lastSeen || 0) >= since) pending.push(entry);
+  }
+  lastSnapshotAt = startedAt;
+  if (!pending.length) return;
+  appendHistoryLogs(pending);
+  logger.info(`[history] Snapshot ${pending.length}/${connectionHistory.size} entries to SQLite`);
 }
 
 // Delete old entries from SQLite (junction rows go in the same transaction

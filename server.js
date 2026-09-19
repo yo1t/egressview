@@ -387,6 +387,10 @@ async function reMatchAndNotify() {
     }
   }
   if (updated.length) {
+    // These entries were changed in place without their lastSeen moving, so the
+    // periodic snapshot no longer covers them. Whoever changes an entry
+    // persists it -- the same rule the enrichment queue follows.
+    history.appendHistoryLogs(updated);
     logger.info(`[threat-intel] Re-matched ${updated.length} connections, notifying clients`);
     io.emit('connections-update', { connections: updated, serverTime: Date.now(), partial: true, delta: true });
   } else {
