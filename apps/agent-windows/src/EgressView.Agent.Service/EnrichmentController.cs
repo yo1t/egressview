@@ -74,6 +74,7 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
             lookupSource = LookupSource.ToWire(),
             thirdPartyBudget = ThirdPartyGeoLookup.DailyBudget,
             thirdPartyRemaining = Math.Max(0, ThirdPartyGeoLookup.DailyBudget - SpentToday(now)),
+            thirdPartyPlaced = store.ReadLookedUpLocationCount(),
             geo = new { state = gs, lastSuccessAt = geo.FetchedAt, count = geo.LocationCount,
                 freshness = EnrichmentFreshness.Classify(geo.FetchedAt, TimeSpan.FromHours(24), now), lastFailure = gf },
             threat = new { state = ts, lastSuccessAt = threat.FetchedAt, count = threat.IndicatorCount,

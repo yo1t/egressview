@@ -1593,10 +1593,15 @@ public partial class MainWindow : Window
         GeoLookupSourceNote.Foreground = (System.Windows.Media.Brush)FindResource(
             source == "hub-then-third-party" ? "WarningBrush" : "TextSecondaryBrush");
 
+        var placed = data.TryGetProperty("thirdPartyPlaced", out var bought) ? bought.GetInt64() : 0;
+        // What the allowance bought, beside what is left of it. A number that
+        // only counts down says how much was spent and never whether it
+        // worked, and those are the two different ways this goes wrong.
         ThirdPartyBudgetNote.Text = source != "hub-then-third-party" ? string.Empty
-            : remaining > 0
+            : (remaining > 0
                 ? string.Format(LocalizationManager.Text("LookupsLeft"), remaining, budget)
-                : string.Format(LocalizationManager.Text("LookupsUsedUp"), budget);
+                : string.Format(LocalizationManager.Text("LookupsUsedUp"), budget))
+              + " " + string.Format(LocalizationManager.Text("LookupsPlaced"), placed);
     }
 
     private async void GeoLookupSource_Click(object sender, RoutedEventArgs e)
