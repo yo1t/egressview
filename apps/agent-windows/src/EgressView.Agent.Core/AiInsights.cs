@@ -102,10 +102,43 @@ public sealed class AgentAiClient : IDisposable
     public static readonly IReadOnlyList<string> AnthropicModels = ["claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5", "claude-fable-5-1"];
     private readonly HttpClient http;
 
+    /// A cloud provider that has not answered in thirty seconds is not going
+    /// to: the work happens on their hardware and the wait is network.
+    public static readonly TimeSpan CloudDeadline = TimeSpan.FromSeconds(30);
+
+    /// A local model's wait is arithmetic on this PC, not a stalled network,
+    /// and the first request also reads the weights off disk: measured here,
+    /// nineteen seconds to load a 17 GB model and thirty more to answer with
+    /// it. Thirty seconds meant the first question to a large local model
+    /// always failed and the second one worked, which reads as a broken
+    /// feature rather than a slow one.
+    ///
+    /// Bounded rather than unlimited, and the window has a Stop button, so a
+    /// model that is genuinely stuck is still the person's to end.
+    public static readonly TimeSpan LocalModelDeadline = TimeSpan.FromMinutes(10);
+
     public AgentAiClient(HttpMessageHandler? handler = null)
     {
+        // The deadline is applied per request instead, because it differs by
+        // provider. Nothing may call SendAsync without going through Send.
         http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
-        { Timeout = TimeSpan.FromSeconds(30) };
+        { Timeout = Timeout.InfiniteTimeSpan };
+    }
+
+    /// Every request goes through here, so every request has a deadline.
+    private async Task<HttpResponseMessage> Send(HttpRequestMessage request, AiProviderKind provider, CancellationToken cancellationToken)
+    {
+        var deadline = provider == AiProviderKind.Ollama ? LocalModelDeadline : CloudDeadline;
+        using var timer = new CancellationTokenSource(deadline);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timer.Token);
+        try { return await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token); }
+        catch (OperationCanceledException) when (timer.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            // Said as a timeout rather than as a cancellation, because nobody
+            // cancelled it: the deadline did.
+            throw new AiRequestException(AiFailureKind.Timeout,
+                $"{provider} did not answer within {deadline.TotalSeconds:F0} seconds.");
+        }
     }
 
     public static Uri ValidateOllamaEndpoint(string endpoint)
@@ -118,6 +151,29 @@ public sealed class AgentAiClient : IDisposable
         return uri;
     }
 
+    /// The models installed on this PC.
+    ///
+    /// Asked for rather than typed. The names carry a tag -- "qwen:latest",
+    /// "gemma4:26b" -- and a person choosing from a list cannot get one
+    /// slightly wrong, which is the only way the old text box could be used
+    /// correctly. An unreachable Ollama returns an empty list and the caller
+    /// says so; it must not look the same as an Ollama with no models.
+    public async Task<IReadOnlyList<string>> ListOllamaModelsAsync(string ollamaEndpoint, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(ValidateOllamaEndpoint(ollamaEndpoint), "/api/tags"));
+        using var response = await Send(request, AiProviderKind.Ollama, cancellationToken);
+        var data = await EnsureSuccessAsync(response, cancellationToken);
+        using var document = JsonDocument.Parse(data);
+        if (!document.RootElement.TryGetProperty("models", out var models) || models.ValueKind != JsonValueKind.Array)
+            throw new AiRequestException(AiFailureKind.Unreadable, "Ollama did not list its models.");
+        return [.. models.EnumerateArray()
+            .Select(item => item.TryGetProperty("name", out var name) ? name.GetString() : null)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)];
+    }
+
     public async Task ValidateAsync(AiProviderKind provider, string model, string? apiKey, string ollamaEndpoint, CancellationToken cancellationToken)
     {
         using var request = provider switch
@@ -127,7 +183,7 @@ public sealed class AgentAiClient : IDisposable
             AiProviderKind.Anthropic when AnthropicModels.Contains(model) => Authorized(HttpMethod.Get, $"https://api.anthropic.com/v1/models/{model}", apiKey, provider),
             _ => throw new AiRequestException(AiFailureKind.ModelUnavailable, "Select a supported model."),
         };
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await Send(request, provider, cancellationToken);
         var data = await EnsureSuccessAsync(response, cancellationToken);
         if (provider == AiProviderKind.Ollama)
         {
@@ -186,7 +242,7 @@ public sealed class AgentAiClient : IDisposable
         else throw new AiRequestException(AiFailureKind.ModelUnavailable, "Select a supported model.");
 
         using (request)
-        using (var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
+        using (var response = await Send(request, provider, cancellationToken))
         {
             var data = await EnsureSuccessAsync(response, cancellationToken);
             using var document = JsonDocument.Parse(data);

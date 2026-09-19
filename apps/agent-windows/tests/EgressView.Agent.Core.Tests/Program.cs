@@ -1847,6 +1847,87 @@ try
                 "a placed address leaves the list without discarding the locations already held");
         }
 
+        // The conversation handed to the model runs forwards, whatever order
+        // the screen shows it in.
+        {
+            var conversation = Guid.NewGuid();
+            var start = new DateTimeOffset(2026, 9, 19, 20, 0, 0, TimeSpan.Zero);
+            AiConversationMessage Say(string role, string body, int minute) =>
+                new(Guid.NewGuid(), conversation, role, body, start.AddMinutes(minute), "Ollama", "qwen:latest");
+            IReadOnlyList<AiConversationMessage> history =
+            [
+                Say("user", "first question", 0), Say("assistant", "first answer", 1),
+                Say("user", "second question", 2), Say("assistant", "second answer", 3),
+            ];
+
+            using var client = new AgentAiClient(new StubHandler(_ => "{}"));
+            var counts = new AiInsightCounts(1, 1, 1, 1, 0);
+            var context = new AiInsightContext(1, start, start.AddHours(-1), start, counts, counts, [], []);
+            var preview = client.BuildPreview(AiProviderKind.Ollama, "qwen:latest", context, history, "third question");
+            var first = preview.IndexOf("first question", StringComparison.Ordinal);
+            var second = preview.IndexOf("second question", StringComparison.Ordinal);
+            Assert(first >= 0 && second > first,
+                "what the model is told stays in the order it was said, however the window lists it");
+        }
+
+        // A local model gets longer than a cloud one, because the wait is a
+        // different thing.
+        {
+            Assert(AgentAiClient.LocalModelDeadline > AgentAiClient.CloudDeadline,
+                "arithmetic on this PC is given more time than a stalled network");
+            Assert(AgentAiClient.CloudDeadline == TimeSpan.FromSeconds(30),
+                "a cloud provider that has not answered in thirty seconds is not going to");
+            Assert(AgentAiClient.LocalModelDeadline >= TimeSpan.FromMinutes(1),
+                "long enough that loading a large model off disk is not reported as a failure");
+
+            // The deadline is the client's, not the handler's, so a handler
+            // that never answers must still end the request.
+            using var stalling = new AgentAiClient(new HangingHandler());
+            var kind = AiFailureKind.Empty;
+            using var giveUp = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try { await stalling.ListOllamaModelsAsync("http://127.0.0.1:11434", giveUp.Token); }
+            catch (AiRequestException exception) { kind = exception.Kind; }
+            catch (OperationCanceledException) { kind = AiFailureKind.Timeout; }
+            Assert(kind == AiFailureKind.Timeout, "a request that never comes back ends rather than waiting for ever");
+        }
+
+        // The models this PC has, asked for rather than typed.
+        {
+            var handler = new StubHandler(request =>
+            {
+                Assert(request.RequestUri!.AbsolutePath == "/api/tags",
+                    "the model list comes from Ollama's own tags endpoint");
+                return """
+                {"models":[
+                  {"name":"qwen:latest","size":1},
+                  {"name":"gemma4:26b","size":2},
+                  {"name":"qwen:latest","size":1},
+                  {"name":"","size":3}
+                ]}
+                """;
+            });
+            using var client = new AgentAiClient(handler);
+            var models = await client.ListOllamaModelsAsync("http://127.0.0.1:11434", CancellationToken.None);
+            Assert(models is ["gemma4:26b", "qwen:latest"],
+                "every installed model is offered once, in an order a person can scan");
+
+            var rejected = false;
+            try { await client.ListOllamaModelsAsync("http://example.com:11434", CancellationToken.None); }
+            catch (AiRequestException exception) { rejected = exception.Kind == AiFailureKind.RequestRejected; }
+            Assert(rejected, "the model list is only ever asked of this PC, never of a host somewhere else");
+
+            using var empty = new AgentAiClient(new StubHandler(_ => """{"models":[]}"""));
+            Assert((await empty.ListOllamaModelsAsync("http://127.0.0.1:11434", CancellationToken.None)).Count == 0,
+                "an Ollama with nothing installed answers with nothing, which is a state and not a failure");
+
+            using var broken = new AgentAiClient(new StubHandler(_ => """{"ok":true}"""));
+            var unreadable = false;
+            try { await broken.ListOllamaModelsAsync("http://127.0.0.1:11434", CancellationToken.None); }
+            catch (AiRequestException exception) { unreadable = exception.Kind == AiFailureKind.Unreadable; }
+            Assert(unreadable,
+                "a reply without a model list is a fault, not an empty list, so the screen does not say there are none");
+        }
+
         // The addresses that must never be asked about.
         //
         // Measured on one PC while this was being written: 129 of 200 recent
@@ -2372,7 +2453,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, its update, its expiry, handing over the account, where threat data came from, looking an address up outside, the addresses that are never asked about, not asking twice, and not paying twice");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, its update, its expiry, handing over the account, where threat data came from, looking an address up outside, the addresses that are never asked about, not asking twice, not paying twice, the models on this PC, how long a local one is given, and the order a conversation is handed over in");
     return 0;
 }
 finally
@@ -2614,4 +2695,14 @@ file sealed class StubHandler(Func<HttpRequestMessage, string> reply) : HttpMess
         {
             Content = new StringContent(reply(request), System.Text.Encoding.UTF8, "application/json"),
         });
+}
+
+/// Never answers, so a deadline is the only thing that can end the request.
+file sealed class HangingHandler : HttpMessageHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        await Task.Delay(Timeout.Infinite, cancellationToken);
+        throw new InvalidOperationException("unreachable");
+    }
 }

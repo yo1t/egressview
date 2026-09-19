@@ -1898,16 +1898,94 @@ public partial class MainWindow : Window
     private void PopulateAiModels()
     {
         if (AiModelChoice is null) return;
-        var saved = AgentSettings.AiModel(SelectedAiProvider().ToString());
-        var models = SelectedAiProvider() switch
+        var provider = SelectedAiProvider();
+        var saved = AgentSettings.AiModel(provider.ToString());
+        var models = provider switch
         {
             AiProviderKind.OpenAI => AgentAiClient.OpenAiModels,
             AiProviderKind.Anthropic => AgentAiClient.AnthropicModels,
             _ => Array.Empty<string>(),
         };
         AiModelChoice.ItemsSource = models;
-        AiModelChoice.IsEditable = SelectedAiProvider() == AiProviderKind.Ollama;
+        // Still typable for Ollama: a model can be pulled while this window is
+        // open, and refusing a name the list has not caught up with would be
+        // worse than accepting one that turns out not to exist -- the save
+        // button checks it either way.
+        AiModelChoice.IsEditable = provider == AiProviderKind.Ollama;
         AiModelChoice.Text = saved.Length > 0 ? saved : models.FirstOrDefault() ?? string.Empty;
+        if (provider != AiProviderKind.Ollama) return;
+        lastOllamaEndpointLoaded = (AiEndpoint?.Text ?? string.Empty).Trim();
+        _ = LoadOllamaModelsAsync(saved);
+    }
+
+    /// Fills the list with what this PC actually has.
+    ///
+    /// Until now the box was empty and editable, so using it correctly meant
+    /// typing "qwen:latest" -- tag and all -- from memory, and a name one
+    /// character out failed the connection test with nothing to compare it
+    /// against. The names are on the machine; asking for them is one request
+    /// to a loopback address.
+    private async Task LoadOllamaModelsAsync(string preferred)
+    {
+        var endpoint = (AiEndpoint?.Text ?? string.Empty).Trim();
+        if (endpoint.Length == 0) return;
+        var generation = ++ollamaModelGeneration;
+        try
+        {
+            var models = await aiClient.ListOllamaModelsAsync(endpoint, lifetime.Token);
+            // A slower earlier request must not overwrite a newer answer, for
+            // example after the endpoint was edited twice.
+            if (generation != ollamaModelGeneration || SelectedAiProvider() != AiProviderKind.Ollama) return;
+            // Whatever is in the box wins over the saved setting. Clicking the
+            // model list takes focus off the endpoint, which reloads the list;
+            // preferring the saved value here put the old model back the
+            // instant a new one was chosen.
+            //
+            // Read before ItemsSource is assigned, because assigning it clears
+            // the text of an editable box.
+            var chosen = (AiModelChoice.Text ?? string.Empty).Trim();
+            if (chosen.Length == 0) chosen = preferred;
+            // Replacing the list with an identical one is not harmless: the
+            // items become different objects, and if the drop-down is open --
+            // which it is, because opening it is what took focus off the
+            // endpoint and started this reload -- the item the person is
+            // reaching for is swapped out from under the click.
+            var unchanged = AiModelChoice.ItemsSource is IEnumerable<string> existing && existing.SequenceEqual(models);
+            if (!unchanged && !AiModelChoice.IsDropDownOpen)
+            {
+                AiModelChoice.ItemsSource = models;
+                AiModelChoice.Text = chosen.Length > 0 ? chosen : models.FirstOrDefault() ?? string.Empty;
+            }
+            if (models.Count == 0) AiSettingsStatus.Text = LocalizationManager.Text("OllamaNoModels");
+            else if (!AgentSettings.AiEnabled(AiProviderKind.Ollama.ToString()))
+                AiSettingsStatus.Text = string.Format(LocalizationManager.Text("OllamaModelsFound"), models.Count);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception)
+        {
+            if (generation != ollamaModelGeneration || SelectedAiProvider() != AiProviderKind.Ollama) return;
+            // Said plainly, because an empty list from an Ollama that is not
+            // running looks exactly like an Ollama with nothing installed.
+            AiSettingsStatus.Text = LocalizationManager.Text("OllamaUnreachable");
+        }
+    }
+
+    private int ollamaModelGeneration;
+
+    /// The endpoint is the address the list comes from, so changing it changes
+    /// the list. Leaving the box without changing it changes nothing, and
+    /// reloading anyway is work that can only do harm: clicking the model
+    /// drop-down is what takes focus off this box.
+    private string lastOllamaEndpointLoaded = string.Empty;
+
+    private void AiEndpoint_LostKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e)
+    {
+        InvalidateSelectedAiConfiguration();
+        if (loadingSettings || SelectedAiProvider() != AiProviderKind.Ollama) return;
+        var endpoint = (AiEndpoint.Text ?? string.Empty).Trim();
+        if (string.Equals(endpoint, lastOllamaEndpointLoaded, StringComparison.Ordinal)) return;
+        lastOllamaEndpointLoaded = endpoint;
+        _ = LoadOllamaModelsAsync(AgentSettings.AiModel(AiProviderKind.Ollama.ToString()));
     }
 
     private void InvalidateSelectedAiConfiguration()
@@ -1963,6 +2041,32 @@ public partial class MainWindow : Window
     private AiInsightContext? CurrentAiContext() => currentAnalysis is not null && previousAnalysis is not null
         ? AiInsightContextBuilder.Build(currentAnalysis, previousAnalysis) : null;
 
+    /// The latest exchange on top, so the answer just given is the one on
+    /// screen rather than the one at the end of a scroll.
+    ///
+    /// Exchanges are reversed, not messages. Reversing messages would put
+    /// every answer above the question it answers, which reads as nonsense the
+    /// longer a conversation gets. An exchange is a question and whatever came
+    /// back for it, and inside one the order still runs forwards.
+    ///
+    /// Only the display is reordered. What is sent to the model comes from
+    /// CurrentConversation, which stays in the order things were actually
+    /// said; a conversation handed over backwards is a different conversation.
+    private static AiMessageRow[] NewestExchangeFirst(IEnumerable<AiConversationMessage> chronological)
+    {
+        var exchanges = new List<List<AiConversationMessage>>();
+        foreach (var message in chronological)
+        {
+            // Anything before the first question -- a reply whose question was
+            // deleted, say -- still needs somewhere to go.
+            if (exchanges.Count == 0 || string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase))
+                exchanges.Add([]);
+            exchanges[^1].Add(message);
+        }
+        exchanges.Reverse();
+        return [.. exchanges.SelectMany(exchange => exchange).Select(message => new AiMessageRow(message))];
+    }
+
     private IReadOnlyList<AiConversationMessage> CurrentConversation() =>
         aiHistory.Read().Where(item => item.ConversationId == activeConversationId).OrderBy(item => item.CreatedAt).ToArray();
 
@@ -1994,7 +2098,8 @@ public partial class MainWindow : Window
         AiConversationChoice.ItemsSource = choices;
         AiConversationChoice.SelectedItem = choices.First(item => item.Id == activeConversationId);
         loadingAiConversation = false;
-        var messages = all.Where(item => item.ConversationId == activeConversationId).OrderBy(item => item.CreatedAt).Select(item => new AiMessageRow(item)).ToArray();
+        var messages = NewestExchangeFirst(
+            all.Where(item => item.ConversationId == activeConversationId).OrderBy(item => item.CreatedAt));
         AiConversation.ItemsSource = messages;
         AiConversation.Visibility = messages.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         AiConversationEmptyNote.Visibility = messages.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -2053,7 +2158,10 @@ public partial class MainWindow : Window
         var status = (exception as AiRequestException)?.StatusCode;
         var key = kind switch
         {
-            AiFailureKind.Timeout => "AiTimeout",
+            // A local model that has not answered is usually still reading its
+            // weights off disk, and telling someone to check their connection
+            // would send them looking in the wrong place.
+            AiFailureKind.Timeout => provider == AiProviderKind.Ollama ? "AiTimeoutOllama" : "AiTimeout",
             AiFailureKind.Empty => "AiEmpty",
             AiFailureKind.HttpStatus => "AiHttpStatus",
             AiFailureKind.TooLarge => "AiTooLarge",
