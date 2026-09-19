@@ -31,7 +31,7 @@ const {
 } = require('./router-id');
 const { checkObservationConsistency } = require('./observation-consistency');
 
-const SCHEMA_VERSION = 23;
+const SCHEMA_VERSION = 24;
 
 // Backup copy (1x DB size) plus WAL growth and migration workspace headroom.
 const MIN_FREE_DISK_FACTOR = 2;
@@ -1019,6 +1019,31 @@ const MIGRATIONS = [
         `);
         logger.info('[migrate] v23 added agent_observations.remoteHostname');
       }
+    },
+  },
+  {
+    version: 24,
+    description: 'index the observations the correlation sweep picks up (P3-139)',
+    up(db) {
+      // The periodic reconcile asks for the newest unmatched observations
+      // across every agent, so it cannot use idx_agent_observations_time,
+      // which leads with agentId. SQLite scanned all 1,536,341 rows and sorted
+      // the survivors in a temp B-tree.
+      //
+      // Measured on a copy of one Hub's tables, 2026-09-19: the ten-minute
+      // pass took 254-277 ms and the hourly twenty-four-hour sweep 2,397-2,422
+      // ms, all of it synchronous on the loop that also serves the device list
+      // and the connection log -- on the live Hub that sweep was the single
+      // longest event-loop stall recorded, at 16,795 ms. With this index the
+      // planner walks newest-first and stops at the limit: 2-4 ms for both.
+      const hasTable = db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get('agent_observations');
+      if (!hasTable) return;
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_agent_observations_lastObservedAt
+          ON agent_observations(lastObservedAt DESC);
+      `);
     },
   },
 ];
