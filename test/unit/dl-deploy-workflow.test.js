@@ -49,14 +49,14 @@ describe('distribution page deploy', () => {
   it('ページが描く版をHTMLから読もうとしない', () => {
     // The version is drawn by script from the manifest, so it is not in the
     // served HTML. A check that grepped for it would fail every time.
-    assert.match(page, /fetch\('\/macos\/manifest\.json'/);
+    assert.match(page, /fetch\('\/' \+ platform \+ '\/manifest\.json'/);
     assert.equal(
       /grep -q "\$version"/.test(workflow), false,
       'the workflow greps the served HTML for a version it cannot contain'
     );
     // What it checks instead: the page still asks the manifest, and what the
     // manifest offers can actually be downloaded.
-    assert.match(workflow, /grep -q "\/macos\/manifest\.json" served-page\.html/);
+    assert.match(workflow, /grep -q "load\('\$platform'\)" served-page\.html/);
     assert.match(workflow, /packages"\]\[0\]\["url"\]/);
   });
 

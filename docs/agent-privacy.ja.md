@@ -1,5 +1,7 @@
 # EgressView Agent for macOS が何を、どこへ送るか
 
+このページは、macOS版エージェントが行う外向き通信を**すべて**書き出したものです。Windows版については[こちら](agent-privacy-windows.ja.md)。両者は同じ製品ですが、**名前の読み取り方がはっきり違います**。
+
 > [English / 英語](agent-privacy.md)
 
 エージェントはあなたのMacの外向き通信を見張ります。**その役目のツールは、自分自身の外向き通信について具体的でなければなりません。**「信用してください」は、利用者が確かめられる答えではないからです。
@@ -30,6 +32,16 @@
 `dl.egressview.com` への接続は、任意のWebサイトを訪れるのと同じように、あなたのIPアドレスをそのホストのCDNに知らせ、CloudFrontはアクセスログを書きます。**これはHTTPSリクエストを行うこと自体の性質であり、エージェントが上乗せしているものではありません。** ここに書いているのは、都合の良い事実しか書かないプライバシーページは読む価値がないからです。
 
 そのリクエストには、リクエスト自体を超えてあなたを特定するものは含まれません。インストールIDもアカウントも観測データも付いていません。
+
+### Hubへ送る項目の一覧
+
+上の表は「何を送るか」を言葉で述べています。実際に送られるJSONの項目名は次のとおりです。**macOS版とWindows版は同じ項目を送ります。**
+
+`schemaVersion`, `batchId`, `sentAt`, `agent` (`hostName`, `platform`, `osVersion`, `agentVersion`), `observations` (`observationId`, `networkProtocol`, `localAddress`, `localPort`, `remoteAddress`, `remotePort`, `processID`, `processName`, `bundleID`, `firstObservedAt`, `lastObservedAt`, `bytesIn`, `bytesOut`, `collector`, `confidence`)
+
+`remoteHostname` は、Hubが対応を通知したときだけ追加されます。認証情報はBearer tokenとして、そのHubへ送られます。
+
+この一覧は、エージェントが登録前に画面へ表示するものと同じです。登録は、その内容を読んだことを確認しない限り開始できません。
 
 ## 宛先の名前を読むこと、そして唯一復号するもの
 

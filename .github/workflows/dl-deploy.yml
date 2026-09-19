@@ -39,13 +39,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Check the page still reads its version from the manifest
-        # The page draws the version, size and download URL from
-        # /macos/manifest.json at load. If that ever became a literal, this
-        # page would start advertising a version nobody published.
+      - name: Check the page still reads its versions from the manifests
+        # The page draws each version, size and download URL from that
+        # platform's manifest at load. If either became a literal, the page
+        # would start advertising a version nobody published.
+        #
+        # The fetch is built from the platform name, so this checks the call
+        # and the two names it is called with, rather than a URL that no
+        # longer appears in the source.
         run: |
           set -euo pipefail
-          grep -q "fetch('/macos/manifest.json'" site/dl/index.html
+          grep -q "fetch('/' + platform + '/manifest.json'" site/dl/index.html
+          grep -q "load('macos')" site/dl/index.html
+          grep -q "load('windows')" site/dl/index.html
+          # A version written into the page would defeat all of the above.
+          ! grep -nE "Download [0-9]+\.[0-9]+\.[0-9]+" site/dl/index.html
           test -s site/dl/robots.txt
           test -s site/dl/sitemap.xml
 
@@ -100,8 +108,13 @@ jobs:
           # python3 is the shape of the pattern that would be, and --fail means
           # an error page is a failure instead of something to parse.
           curl -sS --fail --max-time 30 "$base/" -o served-page.html
-          grep -q "/macos/manifest.json" served-page.html || {
-            echo 'the served page no longer reads the manifest' >&2; exit 1; }
+          # The page builds the URL from the platform name, so the literal
+          # "/macos/manifest.json" is no longer in the HTML. What must still be
+          # true is that it asks for both.
+          for platform in macos windows; do
+            grep -q "load('$platform')" served-page.html || {
+              echo "the served page no longer reads the $platform manifest" >&2; exit 1; }
+          done
 
           curl -sS --fail --max-time 30 "$base/macos/manifest.json" -o served-manifest.json
           url=$(python3 -c 'import json; print(json.load(open("served-manifest.json"))["packages"][0]["url"])')

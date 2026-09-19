@@ -7,7 +7,7 @@ using EgressView.Agent.Core;
 
 namespace EgressView.Agent.Ui;
 
-internal enum UpdateStateKind { Idle, Checking, UpToDate, Downloading, Verified, Failed, Launching }
+internal enum UpdateStateKind { Idle, Checking, UpToDate, Downloading, Verified, Failed, Launching, DownloadManually }
 
 internal sealed record UpdateState(UpdateStateKind Kind, string CurrentVersion, string? AvailableVersion = null,
     string? Publisher = null, string? Detail = null, DateTimeOffset? CheckedAt = null);
@@ -25,6 +25,7 @@ internal sealed class AgentUpdateController : IDisposable
     }
 
     internal string CurrentVersion => Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+    internal Uri DownloadPage => client.DownloadPage;
     internal UpdateState State { get; private set; }
     internal bool CanInstall => State.Kind == UpdateStateKind.Verified && verified is not null;
     internal event EventHandler? StateChanged;
@@ -46,6 +47,13 @@ internal sealed class AgentUpdateController : IDisposable
             {
                 verified = null;
                 Set(new(UpdateStateKind.UpToDate, CurrentVersion, decision.PublishedVersion, CheckedAt: checkedAt));
+                return;
+            }
+
+            if (decision.Kind == AgentUpdateDecisionKind.DownloadManually)
+            {
+                verified = null;
+                Set(new(UpdateStateKind.DownloadManually, CurrentVersion, decision.PublishedVersion, CheckedAt: checkedAt));
                 return;
             }
 

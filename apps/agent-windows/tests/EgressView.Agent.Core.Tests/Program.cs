@@ -338,6 +338,57 @@ try
             "update checks disclose only the Agent and Windows versions and never send cookies");
     }
 
+    // A release nobody signed: the Agent says where to get it rather than
+    // installing it. Until the packages carry an Authenticode signature this
+    // is the only honest answer -- anyone able to answer for the update origin
+    // could otherwise hand this machine an installer to run as administrator.
+    {
+        var manifestWithoutPackages = JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            platform = "windows",
+            version = "9.8.7",
+            releasedAt = DateTimeOffset.UtcNow,
+            packages = Array.Empty<object>(),
+        });
+        var verifier = new TestPackageVerifier();
+        using var client = new WindowsAgentUpdateClient(new UpdateHandler(manifestWithoutPackages, []),
+            verifier: verifier, manifestVerifier: new AcceptManifestVerifier());
+        var decision = await client.CheckAsync("1.0.0", "10.0.26100");
+        Assert(decision.Kind == AgentUpdateDecisionKind.DownloadManually && decision.PublishedVersion == "9.8.7",
+            "a release with nothing to install still reports the version that exists");
+        Assert(decision.Candidate is null && verifier.Calls == 0,
+            "nothing is downloaded and nothing is verified, because there is nothing being offered");
+        Assert(client.DownloadPage.Scheme == "https" && client.DownloadPage.Host == "dl.egressview.com",
+            "the page offered is the origin the manifest came from, over HTTPS");
+
+        var older = await client.CheckAsync("9.9.9", "10.0.26100");
+        Assert(older.Kind == AgentUpdateDecisionKind.UpToDate,
+            "and a build that is already newer is still simply up to date");
+    }
+
+    // The relaxation goes exactly this far. A package that IS offered has to
+    // be wholly valid: turning a malformed or unsigned one into "fetch it
+    // yourself" would hide a manifest fault behind a helpful-looking message.
+    {
+        var unsigned = JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            platform = "windows",
+            version = "9.8.7",
+            releasedAt = DateTimeOffset.UtcNow,
+            packages = new[] { new { arch = WindowsAgentUpdateClient.HostArch, packageType = "msi",
+                url = "https://dl.egressview.com/windows/EgressView.msi",
+                sha256 = new string('a', 64), sizeBytes = 1024, publisher = "" } },
+        });
+        using var client = new WindowsAgentUpdateClient(new UpdateHandler(unsigned, []),
+            verifier: new TestPackageVerifier(), manifestVerifier: new AcceptManifestVerifier());
+        var rejected = false;
+        try { await client.CheckAsync("1.0.0", "10.0.26100"); }
+        catch (InvalidDataException exception) { rejected = exception.Message == "package-publisher-invalid"; }
+        Assert(rejected, "a package offered without a publisher is a fault, not an invitation to download by hand");
+    }
+
     var uninstallCredential = new AgentCredential(new Uri("https://hub.example/"), Guid.NewGuid(), $"egva_{new string('a', 64)}", DateTimeOffset.UtcNow);
     var uninstallHandler = new UninstallHandler(HttpStatusCode.OK);
     using (var uninstallClient = new AgentUninstallClient(uninstallHandler))
@@ -1049,8 +1100,20 @@ try
                     $"{path} lists every key in the sent JSON payload");
             }
             var downloadPage = File.ReadAllText(Path.Combine(windowsRoot, "..", "..", "site", "dl", "index.html"));
-            Assert(sentKeys.All(key => downloadPage.Contains(key, StringComparison.Ordinal)),
-                "the download page lists every key in the sent JSON payload");
+            // The list used to be on the download page. It moved to the privacy
+            // note, which is where the page and the footer now point and where
+            // someone auditing would look; the page reads better without a
+            // column of JSON keys in it. What must not change is that every key
+            // the sender actually serialises is disclosed somewhere a reader
+            // can reach, which is what this has always checked.
+            foreach (var note in new[] { "agent-privacy-windows.md", "agent-privacy-windows.ja.md" })
+            {
+                var text = File.ReadAllText(Path.Combine(windowsRoot, "..", "..", "docs", note));
+                Assert(sentKeys.All(key => text.Contains($"`{key}`", StringComparison.Ordinal)),
+                    $"docs/{note} lists every key in the sent JSON payload");
+            }
+            Assert(!sentKeys.Contains("schemaVersion") || !downloadPage.Contains("schemaVersion", StringComparison.Ordinal),
+                "and the download page no longer carries the list, so the two cannot drift apart");
             var updateAgent = WindowsAgentUpdateClient.UserAgent("1.2.3", "11.0");
             Assert(updateAgent.Contains("1.2.3", StringComparison.Ordinal) && updateAgent.Contains("11.0", StringComparison.Ordinal) &&
                 downloadPage.Contains("dl.egressview.com", StringComparison.Ordinal) &&
