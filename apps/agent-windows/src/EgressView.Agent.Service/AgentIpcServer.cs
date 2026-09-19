@@ -68,7 +68,8 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         enrichment.Status, enrichment.RequestNow, HistoryStatus, SetHistoryRetention, store.ReadHistoryForExport,
         cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow), Diagnostics, PrepareUninstall, CountryHistory,
         store.ReadRecentObservations, store.ReadLogSnapshot, store.ReadObservationsSince, RecordUiRun, setReadsHostnames,
-        enrichment.SetPublicFeedsEnabled, SetCountryTableAccount));
+        enrichment.SetPublicFeedsEnabled, SetCountryTableAccount, enrichment.SetCountryTableEnabled,
+        () => _ = enrichment.FetchPublicFeedsOnceAsync(CancellationToken.None)));
     }
 
     /// Either the text of a GeoIP.conf, or nothing at all to withdraw.

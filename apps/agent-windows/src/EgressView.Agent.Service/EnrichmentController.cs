@@ -4,7 +4,8 @@ using EgressView.Agent.Core;
 namespace EgressView.Agent.Service;
 
 internal sealed class EnrichmentController(ObservationStore store, WindowsCredentialStore credentials,
-    string publicFeedsMarker, MaxMindCredentialStore maxMind, string countryTablePath) : IDisposable
+    string publicFeedsMarker, MaxMindCredentialStore maxMind, string countryTablePath,
+    string countryTableMarker) : IDisposable
 {
     private readonly SemaphoreSlim geoWake = new(0, 1);
     private readonly SemaphoreSlim threatWake = new(0, 1);
@@ -69,7 +70,8 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
             geo = new { state = gs, lastSuccessAt = geo.FetchedAt, count = geo.LocationCount,
                 freshness = EnrichmentFreshness.Classify(geo.FetchedAt, TimeSpan.FromHours(24), now), lastFailure = gf },
             threat = new { state = ts, lastSuccessAt = threat.FetchedAt, count = threat.IndicatorCount,
-                availability = threat.Availability, freshness = EnrichmentFreshness.Classify(threat.FetchedAt, TimeSpan.FromHours(6), now), lastFailure = tf },
+                availability = threat.Availability, freshness = EnrichmentFreshness.Classify(threat.FetchedAt, TimeSpan.FromHours(6), now),
+                source = threat.Source, lastFailure = tf },
             countryTable = CountryTableStatus(now),
         });
     }
@@ -88,6 +90,7 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
         lock (gate) { state = countryState; failure = countryFailure; }
         return new
         {
+            enabled = CountryTableEnabled,
             configured = account is not null,
             accountId = account?.AccountId,
             state,
@@ -125,6 +128,7 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
 
     private async Task RefreshCountryTableAsync(CancellationToken token)
     {
+        if (!CountryTableEnabled) { SetCountryState("off", null); return; }
         var account = LoadMaxMindAccount();
         if (account is null) { SetCountryState("not-configured", null); return; }
 
@@ -160,7 +164,7 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
     private void ResolveLocalCountries()
     {
         var now = DateTimeOffset.UtcNow;
-        if (!countryTable.Status(now).IsUsable) return;
+        if (!CountryTableEnabled || !countryTable.Status(now).IsUsable) return;
         try
         {
             var unplaced = store.ReadAddressesWithoutCountry(now.AddDays(-30));
@@ -181,6 +185,7 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
         var parsed = GeoLite2Credentials.FromConfiguration(configuration);
         if (parsed is null) return false;
         maxMind.Save(parsed);
+        SetCountryTableEnabled(true);
         lastCountryFetchAttempt = default;
         SetCountryState("queued", null);
         RequestNow("country");
@@ -231,6 +236,52 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
     /// asked, and that is not a thing to decide on someone's behalf.
     internal bool PublicFeedsEnabled => File.Exists(publicFeedsMarker);
 
+    /// Whether this PC may use a country table at all.
+    ///
+    /// Separate from whether an account is stored: switching the feature off
+    /// for a while should not cost someone their licence key, and removing the
+    /// account is its own button.
+    /// The file holds "on" or "off" rather than existing or not.
+    ///
+    /// Absence has to mean something too, and the useful meaning is "nobody
+    /// has said": an installation that already had a MaxMind account before
+    /// this switch existed is one where the person asked for the table, and
+    /// an upgrade that silently turned it off would be an upgrade that took a
+    /// working feature away without saying so.
+    internal bool CountryTableEnabled
+    {
+        get
+        {
+            try
+            {
+                if (File.Exists(countryTableMarker))
+                    return File.ReadAllText(countryTableMarker).TrimStart().StartsWith("on", StringComparison.Ordinal);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            return LoadMaxMindAccount() is not null;
+        }
+    }
+
+    internal bool SetCountryTableEnabled(bool enabled)
+    {
+        File.WriteAllText(countryTableMarker, (enabled ? "on" : "off") + Environment.NewLine +
+            "Written by the EgressView Agent UI." + Environment.NewLine);
+        if (enabled)
+        {
+            lastCountryFetchAttempt = default;
+            RequestNow("country");
+        }
+        else
+        {
+            // The answers go with it. An answer from a table this PC is no
+            // longer allowed to consult is an answer nobody can check.
+            store.ForgetLocalCountries();
+            SetCountryState("off", null);
+        }
+        return CountryTableEnabled;
+    }
+
     internal bool SetPublicFeedsEnabled(bool enabled)
     {
         if (enabled) File.WriteAllText(publicFeedsMarker, "Public threat feeds were enabled from the EgressView Agent UI." + Environment.NewLine);
@@ -239,15 +290,23 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
         return PublicFeedsEnabled;
     }
 
+    /// The Hub is tried first, always.
+    ///
+    /// The public lists are a fallback, not an alternative. Falling back the
+    /// moment the Hub is slow would mean telling four feed operators that this
+    /// PC exists over a blip, so it waits until the saved indicators are a day
+    /// old -- by which point the Hub is not coming back on its own.
+    private static readonly TimeSpan FallbackAfter = TimeSpan.FromHours(24);
+
     private async Task FetchThreatAsync(ThreatIntelClient client, CancellationToken token)
     {
         var credential = credentials.Load();
         if (credential is null)
         {
-            // No Hub. Either the person asked this PC to fetch the lists
-            // itself, or there is nothing to match against and the screen
-            // should say so rather than showing an empty threat tab.
-            if (PublicFeedsEnabled) { await FetchPublicFeedsAsync(token); return; }
+            // No Hub at all. The lists are the only source there is, so the
+            // switch means "use them" rather than "use them when the Hub is
+            // down": there is no Hub to be down.
+            if (PublicFeedsEnabled) { await FetchPublicFeedsAsync(token, "public-feeds"); return; }
             SetState(false, "not-enrolled", null);
             return;
         }
@@ -257,12 +316,28 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
             var state = store.ReadThreatCacheState();
             var result = await client.FetchAsync(credential, state.ETag, token);
             if (result.NotModified) store.MarkThreatCacheFetched(result.ETag, DateTimeOffset.UtcNow);
-            else store.ReplaceThreatIndicators(result.Available, result.Indicators, result.ETag, result.FetchedAt ?? DateTimeOffset.UtcNow);
+            else store.ReplaceThreatIndicators(result.Available, result.Indicators, result.ETag,
+                result.FetchedAt ?? DateTimeOffset.UtcNow, "hub");
             SetState(false, "idle", null);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-        catch (Exception ex) { SetState(false, "failed", Classify(ex)); }
+        catch (Exception ex)
+        {
+            SetState(false, "failed", Classify(ex));
+            if (PublicFeedsEnabled && StaleEnoughToFallBack()) await FetchPublicFeedsAsync(token, "public-feeds-fallback");
+        }
     }
+
+    private bool StaleEnoughToFallBack()
+    {
+        var state = store.ReadThreatCacheState();
+        return state.FetchedAt is null || DateTimeOffset.UtcNow - state.FetchedAt >= FallbackAfter;
+    }
+
+    /// One fetch, asked for by hand, which is not the same as agreeing to
+    /// fetch from now on. The switch is left exactly as it was.
+    internal async Task FetchPublicFeedsOnceAsync(CancellationToken token) =>
+        await FetchPublicFeedsAsync(token, "public-feeds");
 
     /// The same lists the Hub reads, fetched directly.
     ///
@@ -271,13 +346,13 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
     /// moved -- and both are named rather than folded into a total, because on
     /// the Mac three of four feeds returned nothing for months behind a number
     /// that looked fine.
-    private async Task FetchPublicFeedsAsync(CancellationToken token)
+    private async Task FetchPublicFeedsAsync(CancellationToken token, string source)
     {
         SetState(false, "fetching", null);
         try
         {
             var result = await publicFeeds.DownloadAsync(token);
-            store.ReplaceThreatIndicators(true, result.Indicators, null, DateTimeOffset.UtcNow);
+            store.ReplaceThreatIndicators(true, result.Indicators, null, DateTimeOffset.UtcNow, source);
             SetState(false, result.IsComplete ? "idle" : "partial",
                 result.IsComplete ? null : "missing-feeds:" + string.Join('+', result.MissingSources));
         }

@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 18;
+    private const int CurrentSchemaVersion = 19;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -138,6 +138,9 @@ public sealed partial class ObservationStore : IDisposable
           fetched_at TEXT
         );
         INSERT OR IGNORE INTO threat_cache_state(id) VALUES(1);
+        """;
+    private const string Version19Schema = """
+        ALTER TABLE threat_cache_state ADD COLUMN source TEXT NOT NULL DEFAULT 'none';
         """;
     private const string Version9Schema = """
         ALTER TABLE observations ADD COLUMN remote_hostname TEXT;
@@ -311,7 +314,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -337,9 +340,28 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 14) { MigrateVersion14To15(); version = 15; }
         if (version == 15) { MigrateVersion15To16(); version = 16; }
         if (version == 16) { MigrateVersion16To17(); version = 17; }
-        if (version == 17) MigrateVersion17To18();
+        if (version == 17) { MigrateVersion17To18(); version = 18; }
+        if (version == 18) MigrateVersion18To19();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
+    }
+
+    /// Threat information gains the source it came from.
+    ///
+    /// A count and a timestamp never said whether the indicators in use were
+    /// the Hub's, the public lists', or a cache left over from days ago. The
+    /// existing row is set to 'none' rather than guessed at: the Agent does
+    /// not know where data fetched before this column existed came from, and
+    /// saying so is better than picking the likeliest answer.
+    private void MigrateVersion18To19()
+    {
+        CreateMigrationBackup(19);
+        try
+        {
+            Execute("BEGIN IMMEDIATE; " + Version19Schema + " UPDATE schema_version SET version=19 WHERE version=18; COMMIT;");
+            PruneMigrationBackups(19);
+        }
+        catch { TryRollback(); throw; }
     }
 
     private void MigrateVersion1To2()
@@ -1944,19 +1966,21 @@ public sealed partial class ObservationStore : IDisposable
     {
         lock (gate)
         {
-            CheckOperation(WinSqlite.Prepare(db, "SELECT availability,etag,fetched_at,(SELECT COUNT(*) FROM threat_indicators) FROM threat_cache_state WHERE id=1", -1, out var statement, 0));
+            CheckOperation(WinSqlite.Prepare(db, "SELECT availability,etag,fetched_at,(SELECT COUNT(*) FROM threat_indicators),source FROM threat_cache_state WHERE id=1", -1, out var statement, 0));
             try
             {
                 CheckQueryRow(WinSqlite.Step(statement));
                 var fetched = NullableTextValue(statement, 2);
                 return new(Text(statement, 0), NullableTextValue(statement, 1),
-                    fetched is null ? null : DateTimeOffset.Parse(fetched), WinSqlite.ColumnInt64(statement, 3));
+                    fetched is null ? null : DateTimeOffset.Parse(fetched), WinSqlite.ColumnInt64(statement, 3),
+                    Text(statement, 4));
             }
             finally { WinSqlite.Finalize(statement); }
         }
     }
 
-    public void ReplaceThreatIndicators(bool available, IReadOnlyList<ThreatIndicator> indicators, string? etag, DateTimeOffset fetchedAt)
+    public void ReplaceThreatIndicators(bool available, IReadOnlyList<ThreatIndicator> indicators, string? etag,
+        DateTimeOffset fetchedAt, string source = "hub")
     {
         lock (gate)
         {
@@ -1977,7 +2001,7 @@ public sealed partial class ObservationStore : IDisposable
                     }
                 }
                 finally { WinSqlite.Finalize(statement); }
-                Execute($"UPDATE threat_cache_state SET availability='{(available ? "available" : "unavailable")}',etag={(etag is null ? "NULL" : $"'{Sql(etag)}'")},fetched_at='{fetchedAt.ToUniversalTime():O}' WHERE id=1");
+                Execute($"UPDATE threat_cache_state SET availability='{(available ? "available" : "unavailable")}',etag={(etag is null ? "NULL" : $"'{Sql(etag)}'")},fetched_at='{fetchedAt.ToUniversalTime():O}',source='{Sql(source)}' WHERE id=1");
                 Execute("COMMIT");
             }
             catch { TryRollback(); throw; }

@@ -124,7 +124,12 @@ public sealed record PeriodAnalysis(
 }
 
 public sealed record ThreatIndicator(string Kind, string Value, string? Source, string? Tag, string Confidence);
-public sealed record ThreatCacheState(string Availability, string? ETag, DateTimeOffset? FetchedAt, long IndicatorCount);
+/// <param name="Source">
+/// Where the indicators in use came from: "hub", "public-feeds",
+/// "public-feeds-fallback", or "none" when nothing has been fetched.
+/// </param>
+public sealed record ThreatCacheState(string Availability, string? ETag, DateTimeOffset? FetchedAt,
+    long IndicatorCount, string Source = "none");
 public sealed record ThreatFinding(string Destination, string Address, string? RequestedName, string Application,
     long Connections, long Bytes, long ConnectionsWithoutBytes, DateTimeOffset FirstSeen, DateTimeOffset LastSeen,
     string IndicatorKind, string MatchedValue, string? Source, string? Tag, string Confidence);

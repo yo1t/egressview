@@ -668,15 +668,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 18, "v1 database migrates through v2-v18");
+        Assert(migrated.SchemaVersion == 19, "v1 database migrates through v2-v19");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v18.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v19.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 18, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 19, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -1490,7 +1490,7 @@ try
         var anomalyDatabase = Path.Combine(directory, "outbound-anomaly.db");
         using (var store = new ObservationStore(anomalyDatabase))
         {
-            Assert(store.SchemaVersion == 17 || store.SchemaVersion == 18, "the traffic-window table arrives with schema 17");
+            Assert(store.SchemaVersion >= 17, "the traffic-window table arrives with schema 17");
             var now = DateTimeOffset.UtcNow;
             var window = new DateTimeOffset(now.UtcTicks - now.UtcTicks % TimeSpan.FromMinutes(15).Ticks, TimeSpan.Zero);
             var previous = window - TimeSpan.FromMinutes(15);
@@ -1658,7 +1658,7 @@ try
         {
             var countryDatabase = Path.Combine(directory, "local-country.db");
             using var store = new ObservationStore(countryDatabase);
-            Assert(store.SchemaVersion == 18, "the local country cache arrives with schema 18");
+            Assert(store.SchemaVersion >= 18, "the local country cache arrives with schema 18");
             var now = DateTimeOffset.UtcNow;
             store.WriteBatch([
                 new NetworkObservation(now.AddMinutes(-1), 21, "TCP", "10.0.0.3", 52_000, "8.8.8.8", 443,
@@ -1731,6 +1731,54 @@ try
             Assert(IpcProtocol.Handle("""{"v":1,"op":"set-country-table-account"}""", () => "{}", _ => [])
                 .Contains("operation-unavailable", StringComparison.Ordinal),
                 "a build without the country table says so rather than silently accepting");
+        }
+
+        // Where the indicators came from is remembered, because a count and a
+        // timestamp never said it.
+        {
+            var sourced = Path.Combine(directory, "threat-source.db");
+            using var store = new ObservationStore(sourced);
+            Assert(store.ReadThreatCacheState().Source == "none",
+                "a database that has fetched nothing says so, rather than naming a source it never used");
+
+            var now = DateTimeOffset.UtcNow;
+            store.ReplaceThreatIndicators(true, [new ThreatIndicator("ip", "203.0.113.9", "feodo", "malware", "high")],
+                "etag-1", now, "hub");
+            Assert(store.ReadThreatCacheState().Source == "hub", "the Hub is named when the Hub answered");
+
+            store.ReplaceThreatIndicators(true, [new ThreatIndicator("ip", "203.0.113.9", "feodo", "malware", "high")],
+                null, now, "public-feeds-fallback");
+            var state = store.ReadThreatCacheState();
+            Assert(state.Source == "public-feeds-fallback",
+                "falling back is not the same as choosing the public lists, and the screen can tell them apart");
+            Assert(state.IndicatorCount == 1, "the indicators themselves are unaffected by where they came from");
+        }
+
+        // The switch that turns the country table off, which is not the switch
+        // that forgets the account.
+        {
+            var replies = new List<string>();
+            var wanted = new List<bool>();
+            string Ask(string request) => IpcProtocol.Handle(request, () => "{}", _ => [],
+                setCountryTableEnabled: enabled => { wanted.Add(enabled); return enabled; });
+
+            replies.Add(Ask("""{"v":1,"op":"set-country-table-enabled","enabled":true}"""));
+            replies.Add(Ask("""{"v":1,"op":"set-country-table-enabled","enabled":false}"""));
+            Assert(wanted is [true, false] && replies[0].Contains("\"enabled\":true", StringComparison.Ordinal)
+                && replies[1].Contains("\"enabled\":false", StringComparison.Ordinal),
+                "the reply says what the setting is now, not what was asked for");
+
+            Assert(Ask("""{"v":1,"op":"set-country-table-enabled"}""")
+                .Contains("invalid-request", StringComparison.Ordinal) && wanted.Count == 2,
+                "a switch with nothing to set is refused rather than read as off");
+
+            var fetched = 0;
+            Assert(IpcProtocol.Handle("""{"v":1,"op":"fetch-public-feeds-once"}""", () => "{}", _ => [],
+                fetchPublicFeedsOnce: () => fetched++).Contains("\"status\":\"ok\"", StringComparison.Ordinal) && fetched == 1,
+                "fetching once asks for exactly one fetch");
+            Assert(IpcProtocol.Handle("""{"v":1,"op":"fetch-public-feeds-once"}""", () => "{}", _ => [])
+                .Contains("operation-unavailable", StringComparison.Ordinal),
+                "a build without the public feeds says so rather than silently accepting");
         }
 
         // The public-feed switch is a decision, so it is rejected unless the
@@ -1999,7 +2047,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 18 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 19 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
@@ -2173,7 +2221,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, its update, its expiry, and handing over the account");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, its update, its expiry, handing over the account, and where threat data came from");
     return 0;
 }
 finally

@@ -30,7 +30,9 @@ public static class IpcProtocol
         Action<string, string?>? recordUiRun = null,
         Func<bool, bool>? setReadsHostnames = null,
         Func<bool, bool>? setPublicThreatFeeds = null,
-        Func<string?, bool>? setCountryTableAccount = null)
+        Func<string?, bool>? setCountryTableAccount = null,
+        Func<bool, bool>? setCountryTableEnabled = null,
+        Action? fetchPublicFeedsOnce = null)
     {
         try
         {
@@ -69,6 +71,8 @@ public static class IpcProtocol
                 "set-hostname-observation" => SetHostnameObservation(root, setReadsHostnames),
                 "set-public-threat-feeds" => SetPublicThreatFeeds(root, setPublicThreatFeeds),
                 "set-country-table-account" => SetCountryTableAccount(root, setCountryTableAccount),
+                "set-country-table-enabled" => SetSwitch(root, setCountryTableEnabled, "country-table-setting-failed"),
+                "fetch-public-feeds-once" => Invoke(fetchPublicFeedsOnce, "public-feeds-unavailable"),
                 "prepare-uninstall" => PrepareUninstall(root, prepareUninstall),
                 _ => Reject("unknown-operation"),
             };
@@ -86,6 +90,19 @@ public static class IpcProtocol
     ///
     /// Nothing is echoed back but a yes or a no: a reply that repeated the key
     /// would put it somewhere it has no reason to be.
+    /// A switch the person flipped, answered with what it is now rather than
+    /// with what was asked for: the two differ when the setting could not be
+    /// written, and a screen that shows the request rather than the result
+    /// tells the person something they cannot act on.
+    private static string SetSwitch(JsonElement root, Func<bool, bool>? set, string failureReason)
+    {
+        if (set is null) return Reject("operation-unavailable");
+        if (!root.TryGetProperty("enabled", out var value) ||
+            value.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return Reject("invalid-request");
+        try { return JsonSerializer.Serialize(new { status = "ok", enabled = set(value.GetBoolean()) }); }
+        catch { return Reject(failureReason); }
+    }
+
     private static string SetCountryTableAccount(JsonElement root, Func<string?, bool>? set)
     {
         if (set is null) return Reject("operation-unavailable");

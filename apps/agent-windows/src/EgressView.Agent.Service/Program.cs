@@ -226,7 +226,8 @@ internal sealed class AgentWindowsService : ServiceBase
         using var deliveryController = new DeliveryController(store, credentialStore);
         using var enrichmentController = new EnrichmentController(store, credentialStore,
             Path.Combine(root, "public-threat-feeds.enabled"), new MaxMindCredentialStore(),
-            Path.Combine(root, "country", GeoLite2Updater.EditionId + ".mmdb"));
+            Path.Combine(root, "country", GeoLite2Updater.EditionId + ".mmdb"),
+            Path.Combine(root, "country-table.enabled"));
         await using var ipc = new AgentIpcServer(store, monitoring.Snapshot, ReadAllowedUserSid(), credentialStore,
             () => monitoring.Enabled, monitoring.SetEnabled, () => monitoring.ReadsHostnames, monitoring.SetReadsHostnames,
             deliveryController, enrichmentController);
