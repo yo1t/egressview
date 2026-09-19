@@ -830,6 +830,104 @@ public partial class MainWindow : Window
         finally { PublicThreatFeedsEnabled.IsEnabled = true; }
     }
 
+    /// Reads the GeoIP.conf the MaxMind portal hands out.
+    ///
+    /// A file rather than two text boxes: the licence key is shown once, on a
+    /// page you cannot revisit, and retyping forty characters from memory is
+    /// where this goes wrong. The file is read here and passed straight to the
+    /// service, which is what stores it; the window keeps no copy.
+    private async void ChooseGeoIpConf_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Filter = "GeoIP.conf|GeoIP.conf;*.conf|" + LocalizationManager.Text("AllFiles") + "|*.*",
+            FileName = "GeoIP.conf",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        ChooseGeoIpConfButton.IsEnabled = false;
+        try
+        {
+            string configuration;
+            try { configuration = await File.ReadAllTextAsync(dialog.FileName, lifetime.Token); }
+            catch (Exception)
+            {
+                CountryTableFailure.Text = LocalizationManager.Text("CannotReadFile");
+                return;
+            }
+            await SendCountryTableAccountAsync(configuration);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        finally { ChooseGeoIpConfButton.IsEnabled = true; }
+    }
+
+    private async void RemoveCountryTable_Click(object sender, RoutedEventArgs e)
+    {
+        RemoveCountryTableButton.IsEnabled = false;
+        try { await SendCountryTableAccountAsync(null); }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        finally { RemoveCountryTableButton.IsEnabled = true; }
+    }
+
+    private async Task SendCountryTableAccountAsync(string? configuration)
+    {
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                JsonSerializer.Serialize(new { v = 1, op = "set-country-table-account", configuration }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            if (root.TryGetProperty("status", out var status) && status.GetString() == "rejected")
+            {
+                var reason = root.TryGetProperty("reason", out var value) ? value.GetString() : null;
+                CountryTableFailure.Text = LocalizationManager.Text(
+                    reason == "no-maxmind-account" ? "CountryTableNoAccount" : "CannotConnect");
+                return;
+            }
+            EnsureAccepted(root);
+            CountryTableFailure.Text = string.Empty;
+            await RefreshEnrichmentStatusAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception) { CountryTableFailure.Text = LocalizationManager.Text("CannotConnect"); }
+    }
+
+    /// Says which of the two questions is unanswered: no account, or an
+    /// account with no working table. One line for both would leave the reader
+    /// unable to tell "you have not set this up" from "it is broken".
+    private void RenderCountryTable(JsonElement item)
+    {
+        if (CountryTableStatus is null) return;
+        var configured = item.TryGetProperty("configured", out var set) && set.GetBoolean();
+        var table = item.TryGetProperty("table", out var kind) ? kind.GetString() ?? "absent" : "absent";
+        var state = item.TryGetProperty("state", out var value) ? value.GetString() ?? "idle" : "idle";
+        RemoveCountryTableButton.IsEnabled = configured;
+
+        string text;
+        if (!configured) text = LocalizationManager.Text("CountryTableNotConfigured");
+        else if (state == "fetching") text = LocalizationManager.Text("CountryTableFetching");
+        else text = table switch
+        {
+            "ready" => $"{LocalizationManager.Text("CountryTableReady")} · " +
+                       $"{LocalizationManager.Text("CountryTableBuilt")}: {DateText(item, "builtAt")} · " +
+                       $"{LocalizationManager.Text("CountryTableExpires")}: {DateText(item, "expiresAt")}",
+            "expired" => LocalizationManager.Text("CountryTableExpired"),
+            "unreadable" => LocalizationManager.Text("CountryTableUnreadable"),
+            _ => LocalizationManager.Text("CountryTableAbsent"),
+        };
+        CountryTableStatus.Text = text;
+
+        var failure = item.TryGetProperty("lastFailure", out var reason) && reason.ValueKind == JsonValueKind.String
+            ? reason.GetString() : null;
+        CountryTableFailure.Text = state == "failed" && failure is not null ? failure : string.Empty;
+
+        // The licence requires this wherever the data is shown, and it is the
+        // service that knows whether there is any data to attribute.
+        CountryTableAttribution.Text = configured && item.TryGetProperty("attribution", out var credit)
+            ? credit.GetString() ?? string.Empty : string.Empty;
+    }
+
     private void SetMonitoringState(bool healthy, bool enabled = true, string? issueCode = null, string? issueAction = null)
     {
         MonitoringStatus.Text = enabled ? LocalizationManager.Text(healthy ? "Monitoring" : "NeedsAttention") : LocalizationManager.Text("MonitoringStopped");
@@ -1353,6 +1451,7 @@ public partial class MainWindow : Window
             EnrichmentSource.Text = $"{LocalizationManager.Text("ActiveSource")}: {source}";
             RenderEnrichment(data.GetProperty("geo"), GeoEnrichmentStatus, GeoEnrichmentFailure);
             RenderEnrichment(data.GetProperty("threat"), ThreatEnrichmentStatus, ThreatEnrichmentFailure);
+            if (data.TryGetProperty("countryTable", out var countryTable)) RenderCountryTable(countryTable);
             publicThreatFeeds = data.TryGetProperty("publicFeedsEnabled", out var feeds) && feeds.GetBoolean();
             if (PublicThreatFeedsEnabled is not null) PublicThreatFeedsEnabled.IsChecked = publicThreatFeeds;
             // Refreshing by hand needs somewhere to refresh from: a Hub, or

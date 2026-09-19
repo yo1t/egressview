@@ -29,7 +29,8 @@ public static class IpcProtocol
         Func<long, int, ObservationPage>? observationsSince = null,
         Action<string, string?>? recordUiRun = null,
         Func<bool, bool>? setReadsHostnames = null,
-        Func<bool, bool>? setPublicThreatFeeds = null)
+        Func<bool, bool>? setPublicThreatFeeds = null,
+        Func<string?, bool>? setCountryTableAccount = null)
     {
         try
         {
@@ -67,11 +68,43 @@ public static class IpcProtocol
                 "ui-run" => UiRun(root, recordUiRun),
                 "set-hostname-observation" => SetHostnameObservation(root, setReadsHostnames),
                 "set-public-threat-feeds" => SetPublicThreatFeeds(root, setPublicThreatFeeds),
+                "set-country-table-account" => SetCountryTableAccount(root, setCountryTableAccount),
                 "prepare-uninstall" => PrepareUninstall(root, prepareUninstall),
                 _ => Reject("unknown-operation"),
             };
         }
         catch (Exception) { return Reject("malformed-request"); }
+    }
+
+    /// Hands over the contents of MaxMind's own GeoIP.conf, or withdraws the
+    /// account when nothing is sent.
+    ///
+    /// The file's text crosses the pipe rather than a parsed account, because
+    /// parsing it in the window would mean the window holds the licence key in
+    /// its own memory for longer than the one call it takes to pass it on. The
+    /// pipe is already restricted to the signed-in user and the service.
+    ///
+    /// Nothing is echoed back but a yes or a no: a reply that repeated the key
+    /// would put it somewhere it has no reason to be.
+    private static string SetCountryTableAccount(JsonElement root, Func<string?, bool>? set)
+    {
+        if (set is null) return Reject("operation-unavailable");
+        string? configuration = null;
+        if (root.TryGetProperty("configuration", out var value))
+        {
+            if (value.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)) return Reject("invalid-configuration");
+            configuration = value.GetString();
+        }
+        // A file this large is not a GeoIP.conf, and reading one into the
+        // service is a cost a wrong path should not be able to impose.
+        if (configuration is { Length: > 64 * 1024 }) return Reject("invalid-configuration");
+        try
+        {
+            return set(configuration)
+                ? JsonSerializer.Serialize(new { status = "ok", configured = configuration is not null })
+                : Reject("no-maxmind-account");
+        }
+        catch { return Reject("country-table-account-failed"); }
     }
 
     private static string PrepareUninstall(JsonElement root, Func<bool, bool, AgentUninstallResult>? prepare)

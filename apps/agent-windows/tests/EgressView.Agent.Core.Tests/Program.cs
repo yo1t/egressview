@@ -656,15 +656,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 17, "v1 database migrates through v2-v17");
+        Assert(migrated.SchemaVersion == 18, "v1 database migrates through v2-v18");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v17.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v18.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 17, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 18, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -1478,7 +1478,7 @@ try
         var anomalyDatabase = Path.Combine(directory, "outbound-anomaly.db");
         using (var store = new ObservationStore(anomalyDatabase))
         {
-            Assert(store.SchemaVersion == 17, "the traffic-window table arrives with schema 17");
+            Assert(store.SchemaVersion == 17 || store.SchemaVersion == 18, "the traffic-window table arrives with schema 17");
             var now = DateTimeOffset.UtcNow;
             var window = new DateTimeOffset(now.UtcTicks - now.UtcTicks % TimeSpan.FromMinutes(15).Ticks, TimeSpan.Zero);
             var previous = window - TimeSpan.FromMinutes(15);
@@ -1613,6 +1613,101 @@ try
             Assert(MaxMindDatabase.Open(installed).Metadata.BuildEpoch == 1_800_000_000 &&
                 Directory.GetFiles(Path.GetDirectoryName(installed)!).Length == 1,
                 "the new table replaces the old one and leaves nothing half-written beside it");
+        }
+
+        // The table has an expiry, and it is not advisory.
+        //
+        // MaxMind's licence requires moving to a new build promptly and
+        // destroying anything more than thirty days behind it. A copy that old
+        // is not merely stale -- using it breaks the terms it came under -- so
+        // it stops answering rather than quietly carrying on.
+        {
+            var tablePath = Path.Combine(directory, "country", "GeoLite2-Country.mmdb");
+            var table = new LocalCountryTable(tablePath);
+            Assert(table.Status(DateTimeOffset.UtcNow).State == LocalCountryTableState.Absent &&
+                table.CountryCode("8.8.8.8", DateTimeOffset.UtcNow) is null,
+                "no table means no answer, which is a state rather than a failure");
+
+            var built = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+            GeoLite2Updater.Install(EgressView.Agent.Core.Tests.MaxMindFixture.CountryDatabase((ulong)built.ToUnixTimeSeconds()), tablePath);
+            table.Reload();
+            Assert(table.Status(built.AddDays(1)).IsUsable && table.CountryCode("8.8.8.8", built.AddDays(1)) == "US",
+                "a fresh table answers");
+            Assert(table.Status(built.AddDays(31)).State == LocalCountryTableState.Expired &&
+                table.CountryCode("8.8.8.8", built.AddDays(31)) is null,
+                "a table past the licence's thirty days stops answering, and says why it stopped");
+
+            Assert(LocalCountryTable.Attribution.Contains("MaxMind", StringComparison.Ordinal),
+                "the attribution the licence requires travels with the code that uses the data");
+        }
+
+        // Only addresses nobody has placed, so a Hub's richer answer is never
+        // replaced by a country-only one.
+        {
+            var countryDatabase = Path.Combine(directory, "local-country.db");
+            using var store = new ObservationStore(countryDatabase);
+            Assert(store.SchemaVersion == 18, "the local country cache arrives with schema 18");
+            var now = DateTimeOffset.UtcNow;
+            store.WriteBatch([
+                new NetworkObservation(now.AddMinutes(-1), 21, "TCP", "10.0.0.3", 52_000, "8.8.8.8", 443,
+                    10, 10, ObservationLayer.Logical, null, "etw", "resolver"),
+                new NetworkObservation(now.AddMinutes(-1), 22, "TCP", "10.0.0.3", 52_001, "1.2.3.4", 443,
+                    10, 10, ObservationLayer.Logical, null, "etw", "resolver"),
+            ]);
+            store.ReplaceGeoLocations([new GeoLocation("8.8.8.8", 37.4, -122.0, "US", "Mountain View")], null, now);
+
+            var unplaced = store.ReadAddressesWithoutCountry(now.AddHours(-1));
+            Assert(unplaced.Contains("1.2.3.4") && !unplaced.Contains("8.8.8.8"),
+                "an address the Hub already placed is not asked about again");
+
+            store.SaveLocalCountries([("1.2.3.4", "JP")]);
+            var countries = store.ReadCountryHistory().ToDictionary(row => row.CountryCode, row => row.Connections);
+            Assert(countries.ContainsKey("JP") && countries.ContainsKey("US"),
+                "a country worked out on this PC counts beside one the Hub supplied");
+            Assert(store.ReadAddressesWithoutCountry(now.AddHours(-1)).Count == 0,
+                "an address placed locally is not asked about again either");
+
+            store.ForgetLocalCountries();
+            Assert(!store.ReadCountryHistory().Any(row => row.CountryCode == "JP"),
+                "withdrawing the table withdraws the answers that came from it");
+        }
+
+        // Handing the account over, and taking it back.
+        {
+            string? received = "unset";
+            var calls = 0;
+            string Ask(string request) => IpcProtocol.Handle(request, () => "{}", _ => [],
+                setCountryTableAccount: configuration =>
+                {
+                    received = configuration;
+                    calls++;
+                    return configuration is null || configuration.Contains("LicenseKey", StringComparison.Ordinal);
+                });
+
+            var conf = "# GeoIP.conf" + Environment.NewLine + "AccountID 123456" + Environment.NewLine +
+                "LicenseKey abcdefghijklmnop" + Environment.NewLine + "EditionIDs GeoLite2-Country" + Environment.NewLine;
+            var accepted = Ask(JsonSerializer.Serialize(new { v = 1, op = "set-country-table-account", configuration = conf }));
+            Assert(accepted.Contains("\"status\":\"ok\"", StringComparison.Ordinal) && received == conf,
+                "the file's own text reaches the service, which is the only thing that stores it");
+            Assert(!accepted.Contains("abcdefghijklmnop", StringComparison.Ordinal),
+                "the reply never repeats the licence key back");
+
+            Assert(Ask(JsonSerializer.Serialize(new { v = 1, op = "set-country-table-account", configuration = "hello" }))
+                .Contains("no-maxmind-account", StringComparison.Ordinal),
+                "a file with no account is named as such, not reported as a connection problem");
+
+            var cleared = Ask("""{"v":1,"op":"set-country-table-account"}""");
+            Assert(cleared.Contains("\"configured\":false", StringComparison.Ordinal) && received is null,
+                "sending nothing withdraws the account");
+
+            var before = calls;
+            Assert(Ask(JsonSerializer.Serialize(new { v = 1, op = "set-country-table-account", configuration = new string('x', 70_000) }))
+                .Contains("invalid-configuration", StringComparison.Ordinal) && calls == before,
+                "a file far too large to be a GeoIP.conf is refused before the service reads it");
+
+            Assert(IpcProtocol.Handle("""{"v":1,"op":"set-country-table-account"}""", () => "{}", _ => [])
+                .Contains("operation-unavailable", StringComparison.Ordinal),
+                "a build without the country table says so rather than silently accepting");
         }
 
         // The public-feed switch is a decision, so it is rejected unless the
@@ -1881,7 +1976,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 17 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 18 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
@@ -2055,7 +2150,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, and its update");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, its update, its expiry, and handing over the account");
     return 0;
 }
 finally

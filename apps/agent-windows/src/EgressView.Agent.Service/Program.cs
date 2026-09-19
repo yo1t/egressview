@@ -224,7 +224,9 @@ internal sealed class AgentWindowsService : ServiceBase
         monitoring.Start();
         var credentialStore = new WindowsCredentialStore();
         using var deliveryController = new DeliveryController(store, credentialStore);
-        using var enrichmentController = new EnrichmentController(store, credentialStore, Path.Combine(root, "public-threat-feeds.enabled"));
+        using var enrichmentController = new EnrichmentController(store, credentialStore,
+            Path.Combine(root, "public-threat-feeds.enabled"), new MaxMindCredentialStore(),
+            Path.Combine(root, "country", GeoLite2Updater.EditionId + ".mmdb"));
         await using var ipc = new AgentIpcServer(store, monitoring.Snapshot, ReadAllowedUserSid(), credentialStore,
             () => monitoring.Enabled, monitoring.SetEnabled, () => monitoring.ReadsHostnames, monitoring.SetReadsHostnames,
             deliveryController, enrichmentController);
@@ -246,6 +248,7 @@ internal sealed class AgentWindowsService : ServiceBase
         var delivery = deliveryController.RunAsync(cancellationToken);
         var geoCache = enrichmentController.RunGeoAsync(cancellationToken);
         var threatIntel = enrichmentController.RunThreatAsync(cancellationToken);
+        var countryTable = enrichmentController.RunCountryTableAsync(cancellationToken);
         var chartAggregation = RunChartAggregationAsync(store, cancellationToken);
         var maintenance = RunMaintenanceAsync(store, cancellationToken);
         var outboundAnomalies = RunOutboundAnomalyAsync(store, cancellationToken);
@@ -271,6 +274,7 @@ internal sealed class AgentWindowsService : ServiceBase
         await delivery;
         await geoCache;
         await threatIntel;
+        await countryTable;
         await chartAggregation;
         await maintenance;
         await outboundAnomalies;

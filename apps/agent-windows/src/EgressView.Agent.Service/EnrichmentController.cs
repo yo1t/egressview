@@ -3,10 +3,17 @@ using EgressView.Agent.Core;
 
 namespace EgressView.Agent.Service;
 
-internal sealed class EnrichmentController(ObservationStore store, WindowsCredentialStore credentials, string publicFeedsMarker) : IDisposable
+internal sealed class EnrichmentController(ObservationStore store, WindowsCredentialStore credentials,
+    string publicFeedsMarker, MaxMindCredentialStore maxMind, string countryTablePath) : IDisposable
 {
     private readonly SemaphoreSlim geoWake = new(0, 1);
     private readonly SemaphoreSlim threatWake = new(0, 1);
+    private readonly SemaphoreSlim countryWake = new(0, 1);
+    private readonly LocalCountryTable countryTable = new(countryTablePath);
+    private readonly GeoLite2Updater updater = new();
+    private DateTimeOffset lastCountryFetchAttempt;
+    private string countryState = "idle";
+    private string? countryFailure;
     private readonly object gate = new();
     private string geoState = "idle", threatState = "idle";
     private string? geoFailure, threatFailure;
@@ -15,7 +22,8 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
     {
         if (kind is "geo" or "all") { lock (gate) geoState = "queued"; TryRelease(geoWake); }
         if (kind is "threat" or "all") { lock (gate) threatState = "queued"; TryRelease(threatWake); }
-        if (kind is not ("geo" or "threat" or "all")) throw new ArgumentOutOfRangeException(nameof(kind));
+        if (kind is "country" or "all") TryRelease(countryWake);
+        if (kind is not ("geo" or "threat" or "country" or "all")) throw new ArgumentOutOfRangeException(nameof(kind));
     }
 
     public async Task RunGeoAsync(CancellationToken cancellationToken)
@@ -62,7 +70,136 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
                 freshness = EnrichmentFreshness.Classify(geo.FetchedAt, TimeSpan.FromHours(24), now), lastFailure = gf },
             threat = new { state = ts, lastSuccessAt = threat.FetchedAt, count = threat.IndicatorCount,
                 availability = threat.Availability, freshness = EnrichmentFreshness.Classify(threat.FetchedAt, TimeSpan.FromHours(6), now), lastFailure = tf },
+            countryTable = CountryTableStatus(now),
         });
+    }
+
+    /// The country table on this PC, and what it is allowed to say.
+    ///
+    /// "configured" and "state" answer different questions: an account can be
+    /// set with no table yet downloaded, and a table can exist with the account
+    /// since removed. Reporting one number for both is how "enabled" ends up
+    /// meaning "working".
+    private object CountryTableStatus(DateTimeOffset now)
+    {
+        var account = LoadMaxMindAccount();
+        var table = countryTable.Status(now);
+        string state; string? failure;
+        lock (gate) { state = countryState; failure = countryFailure; }
+        return new
+        {
+            configured = account is not null,
+            accountId = account?.AccountId,
+            state,
+            table = table.State.ToString().ToLowerInvariant(),
+            builtAt = table.BuiltAt,
+            databaseType = table.DatabaseType,
+            expiresAt = table.BuiltAt?.Add(LocalCountryTable.MaximumAge),
+            maximumAgeDays = (int)LocalCountryTable.MaximumAge.TotalDays,
+            attribution = LocalCountryTable.Attribution,
+            lastFailure = failure ?? table.Failure,
+        };
+    }
+
+    private GeoLite2Credentials? LoadMaxMindAccount()
+    {
+        try { return maxMind.Load(); }
+        catch (Exception) { return null; }
+    }
+
+    /// Keeps the table current and places the addresses nobody else placed.
+    ///
+    /// Two jobs on one timer because they are the same job seen from either
+    /// end: a table that is never refreshed stops being allowed to answer after
+    /// thirty days, and a table nobody consults answers nothing regardless.
+    public async Task RunCountryTableAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            await RefreshCountryTableAsync(cancellationToken);
+            ResolveLocalCountries();
+            await WaitAsync(countryWake, TimeSpan.FromMinutes(15), cancellationToken);
+        }
+    }
+
+    private async Task RefreshCountryTableAsync(CancellationToken token)
+    {
+        var account = LoadMaxMindAccount();
+        if (account is null) { SetCountryState("not-configured", null); return; }
+
+        var now = DateTimeOffset.UtcNow;
+        var status = countryTable.Status(now);
+        // MaxMind rebuilds this edition weekly, so a table a couple of days old
+        // is the current one and downloading it again would just be traffic.
+        var current = status.IsUsable && status.BuiltAt is { } built && now - built < TimeSpan.FromDays(2);
+        if (current) { SetCountryState("idle", null); return; }
+        if (now - lastCountryFetchAttempt < TimeSpan.FromHours(6)) return;
+        lastCountryFetchAttempt = now;
+
+        SetCountryState("fetching", null);
+        try
+        {
+            var (data, _) = await updater.FetchAsync(account, token);
+            GeoLite2Updater.Install(data, countryTablePath);
+            countryTable.Reload();
+            SetCountryState("idle", null);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (GeoLite2Exception exception) { SetCountryState("failed", exception.Kind.ToString()); }
+        catch (Exception exception) { SetCountryState("failed", Classify(exception)); }
+    }
+
+    /// Only the addresses nothing has placed, so a Hub's richer answer -- with
+    /// coordinates the globe can draw -- is never overwritten by a country on
+    /// its own.
+    private void ResolveLocalCountries()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (!countryTable.Status(now).IsUsable) return;
+        try
+        {
+            var unplaced = store.ReadAddressesWithoutCountry(now.AddDays(-30));
+            if (unplaced.Count == 0) return;
+            var answers = new List<(string Ip, string CountryCode)>();
+            foreach (var address in unplaced)
+                if (countryTable.CountryCode(address, now) is { } code) answers.Add((address, code));
+            if (answers.Count > 0) store.SaveLocalCountries(answers);
+        }
+        catch (Exception exception) { SetCountryState("failed", Classify(exception)); }
+    }
+
+    /// Accepts MaxMind own GeoIP.conf, and nothing else.
+    ///
+    /// <returns>False when the file carries no usable account.</returns>
+    internal bool SetMaxMindAccountFromConfiguration(string configuration)
+    {
+        var parsed = GeoLite2Credentials.FromConfiguration(configuration);
+        if (parsed is null) return false;
+        maxMind.Save(parsed);
+        lastCountryFetchAttempt = default;
+        SetCountryState("queued", null);
+        RequestNow("country");
+        return true;
+    }
+
+    /// Withdrawing the account withdraws the answers that came from it.
+    ///
+    /// The table itself is deleted too. Leaving a licensed database on disk
+    /// after its reader has been switched off is the kind of copy the licence
+    /// thirty-day rule exists to prevent.
+    internal void ClearMaxMindAccount()
+    {
+        maxMind.Delete();
+        countryTable.Reload();
+        try { File.Delete(countryTablePath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        countryTable.Reload();
+        store.ForgetLocalCountries();
+        SetCountryState("not-configured", null);
+    }
+
+    private void SetCountryState(string state, string? failure)
+    {
+        lock (gate) { countryState = state; countryFailure = failure; }
     }
 
     private async Task FetchGeoAsync(GeoCacheClient client, CancellationToken token)
@@ -159,5 +296,5 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
         try { await semaphore.WaitAsync(delay, token); }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }
-    public void Dispose() { geoWake.Dispose(); threatWake.Dispose(); }
+    public void Dispose() { geoWake.Dispose(); threatWake.Dispose(); countryWake.Dispose(); }
 }
