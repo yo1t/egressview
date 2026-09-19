@@ -214,14 +214,22 @@ function _observeDevices(records, source) {
   const byIp = new Map();
   for (const { entry } of records) {
     const next = _deviceObservation(entry, source);
-    const previous = byIp.get(next.ip);
-    if (previous) {
-      next.firstSeen = Math.min(previous.firstSeen, next.firstSeen);
-      next.lastSeen = Math.max(previous.lastSeen, next.lastSeen);
-    }
-    byIp.set(next.ip, next);
+    if (!byIp.has(next.ip)) byIp.set(next.ip, []);
+    byIp.get(next.ip).push(next);
   }
-  const observations = [...byIp.values()];
+  const observations = [];
+  for (const [ip, candidates] of byIp) {
+    // Taking the last record for an IP means the router's ordering decides the
+    // device's identity, and that ordering moves. Keep the MAC this IP already
+    // has when it is among them -- see devices.chooseForIp.
+    const chosen = _devices.chooseForIp
+      ? _devices.chooseForIp(ip, candidates, observation => observation.mac, (a, b) => b)
+      : candidates[candidates.length - 1];
+    // The window the device was seen in spans every record, not just the winner.
+    chosen.firstSeen = Math.min(...candidates.map(c => c.firstSeen));
+    chosen.lastSeen = Math.max(...candidates.map(c => c.lastSeen));
+    observations.push(chosen);
+  }
   if (_devices.observeDevices) _devices.observeDevices(observations);
   else for (const observation of observations) _devices.observeDevice(observation);
 }

@@ -373,6 +373,43 @@ describe('recordConnections', () => {
     assert.equal(hist._batches[0][0].sport, 54321);
   });
 
+  // P3-138: taking the last record for an IP let the router's ordering decide
+  // the device's identity, and that ordering moves. Measured on one Hub
+  // 2026-09-19: two MACs on one IP, reported 1141 and 1134 times, alternating.
+  it('同一IPに複数MACが来たら、記録済みのMACを選ぶ', () => {
+    const chosen = [];
+    const devs = makeDevices();
+    devs.chooseForIp = (ip, candidates, macOf, pickBetween) => {
+      chosen.push(candidates.map(macOf));
+      return candidates.find(c => macOf(c) === 'aa:00:00:00:00:01') || candidates.reduce(pickBetween);
+    };
+    initRuntime({ devices: devs, yamaha: makeYamaha('aa:00:00:00:00:01') });
+
+    runtime.recordConnections([
+      SESSION,
+      { ...SESSION, dst: '1.1.1.1', sport: 54321 },
+    ], Date.now(), 'yamaha', 'yamaha1');
+
+    assert.equal(chosen.length, 1, '1つのIPにつき一度だけ選ぶ');
+    assert.equal(devs._upserted.length, 1);
+    assert.equal(devs._upserted[0].mac, 'aa:00:00:00:00:01');
+  });
+
+  it('観測の期間は、選ばれなかった候補も含めた全体になる', () => {
+    const devs = makeDevices();
+    initRuntime({ devices: devs, yamaha: makeYamaha('aa:00:00:00:00:02') });
+    const now = Date.now();
+
+    runtime.recordConnections([
+      SESSION,
+      { ...SESSION, dst: '1.1.1.1', sport: 54321 },
+    ], now, 'yamaha', 'yamaha1');
+
+    assert.equal(devs._upserted.length, 1);
+    assert.equal(devs._upserted[0].firstSeen, now);
+    assert.equal(devs._upserted[0].lastSeen, now);
+  });
+
   it('resolves source identity once per IP within a poll', () => {
     let macLookups = 0;
     let metaLookups = 0;

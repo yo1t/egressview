@@ -13,7 +13,7 @@ import { loadNotifLog } from './notif-log.js?v=__ASSET_VERSION__';
 import { refreshCurrentTimeFilterView } from './time-filter.js?v=__ASSET_VERSION__';
 import { loadBeacons } from './beacon.js?v=__ASSET_VERSION__';
 import './router-settings.js?v=__ASSET_VERSION__';
-import { startAiInsights, stopAiInsights, refreshAiInsights } from './ai-insights.js?v=__ASSET_VERSION__';
+import { startAiInsights, stopAiInsights, refreshAiInsights, aiInsightsLiveTick } from './ai-insights.js?v=__ASSET_VERSION__';
 import { getDisplayScope, initDisplayScopeSelector } from './display-scope.js?v=__ASSET_VERSION__';
 
 // ─── Cross-module reference injection ────────────────────────────────────────
@@ -167,6 +167,10 @@ socket.on('connections-update', data => {
   // 2 s and throw away the scroll position. It decides for itself whether
   // following is safe, and otherwise holds the new rows behind a badge.
   applyLiveConnections(incoming);
+  // The AI cards decide for themselves whether to recompute: their queries cost
+  // 68 ms for an hour of traffic and 885 ms for two weeks, so the pace follows
+  // the selected period rather than the socket.
+  aiInsightsLiveTick();
   // Immediately update the panel for the currently selected device
   const selNode = nodes.find(n => n.id === selectedMac);
   const selIp   = selNode?.client?.ip || null;
