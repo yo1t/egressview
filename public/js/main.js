@@ -8,7 +8,7 @@ import { nodes, selectedMac, buildGraph, buildGraphFromConnections, updateOrgGra
 import { updateStats, stStopSpin, stStopFlatAnim } from './stats.js?v=__ASSET_VERSION__';
 import { openSettings, showStatus } from './settings.js?v=__ASSET_VERSION__';
 import { devicesData, setDevicesData, loadDevicesView, setOnDevicesLoaded, refreshDetailPanelNote } from './devices.js?v=__ASSET_VERSION__';
-import { updateLogView } from './log.js?v=__ASSET_VERSION__';
+import { updateLogView, applyLiveConnections } from './log.js?v=__ASSET_VERSION__';
 import { loadNotifLog } from './notif-log.js?v=__ASSET_VERSION__';
 import { refreshCurrentTimeFilterView } from './time-filter.js?v=__ASSET_VERSION__';
 import { loadBeacons } from './beacon.js?v=__ASSET_VERSION__';
@@ -163,8 +163,10 @@ socket.on('connections-update', data => {
   if (data.serverTime) setServerTimeOffset(data.serverTime - Date.now());
   refreshGraphSummary({ delayedData: !!data.initialLoad });
   if (statsMode) updateStats();
-  // Log view fetches independently from the API on tab-switch and filter changes;
-  // calling updateLogView() here would reset pagination every 2 s and break scroll.
+  // The log view cannot simply re-fetch here: that would reset pagination every
+  // 2 s and throw away the scroll position. It decides for itself whether
+  // following is safe, and otherwise holds the new rows behind a badge.
+  applyLiveConnections(incoming);
   // Immediately update the panel for the currently selected device
   const selNode = nodes.find(n => n.id === selectedMac);
   const selIp   = selNode?.client?.ip || null;
