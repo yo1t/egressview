@@ -86,12 +86,37 @@ describe('db-migrate: fresh database', () => {
       'idx_agent_observations_time',
       'idx_agent_observations_flow_time',
       'idx_agent_observations_batch',
+      'idx_agent_observations_lastObservedAt',
       'idx_connection_agent_observation',
       'idx_connection_agent_connection',
     ]) {
       assert.ok(indexes.has(index), `missing ${index}`);
     }
     db.close();
+  });
+
+  // The periodic reconcile asks for the newest unmatched observations across
+  // every agent, so it cannot use idx_agent_observations_time, which leads with
+  // agentId. Measured on a copy of one Hub's tables 2026-09-19: without this
+  // index the twenty-four-hour sweep scanned 1,536,341 rows and sorted them in
+  // a temp B-tree, taking 2,397-2,422 ms on the loop that also serves the
+  // device list; with it, 2-4 ms.
+  it('相関の掃除が拾う観測に、索引が効いている', () => {
+    const db = openDb(':memory:');
+    runMigrations(db, ':memory:');
+    const plan = db.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT o.* FROM agent_observations o
+      WHERE NOT EXISTS (
+        SELECT 1 FROM connection_agent_observations link
+        WHERE link.agentId = o.agentId AND link.observationId = o.observationId)
+        AND o.lastObservedAt >= ?
+      ORDER BY o.lastObservedAt DESC LIMIT 500
+    `).all(0).map(row => row.detail).join(' | ');
+    db.close();
+    assert.match(plan, /USING INDEX idx_agent_observations_lastObservedAt/, plan);
+    assert.doesNotMatch(plan, /TEMP B-TREE FOR ORDER BY/, `並べ替えに一時B木を作っている: ${plan}`);
+    assert.doesNotMatch(plan, /SCAN o\b/, `全表走査になっている: ${plan}`);
   });
 
   it('creates the additive v14 AI message scope table', () => {
