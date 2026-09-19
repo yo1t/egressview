@@ -28,7 +28,8 @@ public static class IpcProtocol
         Func<int, bool, ObservationPage>? logSnapshot = null,
         Func<long, int, ObservationPage>? observationsSince = null,
         Action<string, string?>? recordUiRun = null,
-        Func<bool, bool>? setReadsHostnames = null)
+        Func<bool, bool>? setReadsHostnames = null,
+        Func<bool, bool>? setPublicThreatFeeds = null)
     {
         try
         {
@@ -65,6 +66,7 @@ public static class IpcProtocol
                 "diagnostics" => DynamicStatus(diagnostics),
                 "ui-run" => UiRun(root, recordUiRun),
                 "set-hostname-observation" => SetHostnameObservation(root, setReadsHostnames),
+                "set-public-threat-feeds" => SetPublicThreatFeeds(root, setPublicThreatFeeds),
                 "prepare-uninstall" => PrepareUninstall(root, prepareUninstall),
                 _ => Reject("unknown-operation"),
             };
@@ -296,6 +298,14 @@ public static class IpcProtocol
             return Reject("invalid-hostname-setting");
         try { return JsonSerializer.Serialize(new { status = "ok", enabled = set(value.GetBoolean()) }); }
         catch { return Reject("hostname-setting-failed"); }
+    }
+
+    private static string SetPublicThreatFeeds(JsonElement root, Func<bool, bool>? set)
+    {
+        if (set is null || !root.TryGetProperty("enabled", out var value) || value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            return Reject("invalid-threat-feed-setting");
+        try { return JsonSerializer.Serialize(new { status = "ok", enabled = set(value.GetBoolean()) }); }
+        catch { return Reject("threat-feed-setting-failed"); }
     }
 
     private static string Reject(string reason) => JsonSerializer.Serialize(new { status = "rejected", reason });
