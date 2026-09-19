@@ -39,13 +39,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Check the page still reads its version from the manifest
-        # The page draws the version, size and download URL from
-        # /macos/manifest.json at load. If that ever became a literal, this
-        # page would start advertising a version nobody published.
+      - name: Check the page still reads its versions from the manifests
+        # The page draws each version, size and download URL from that
+        # platform's manifest at load. If either became a literal, the page
+        # would start advertising a version nobody published.
+        #
+        # The fetch is built from the platform name, so this checks the call
+        # and the two names it is called with, rather than a URL that no
+        # longer appears in the source.
         run: |
           set -euo pipefail
-          grep -q "fetch('/macos/manifest.json'" site/dl/index.html
+          grep -q "fetch('/' + platform + '/manifest.json'" site/dl/index.html
+          grep -q "load('macos')" site/dl/index.html
+          grep -q "load('windows')" site/dl/index.html
+          # A version written into the page would defeat all of the above.
+          ! grep -nE "Download [0-9]+\.[0-9]+\.[0-9]+" site/dl/index.html
           test -s site/dl/robots.txt
           test -s site/dl/sitemap.xml
 

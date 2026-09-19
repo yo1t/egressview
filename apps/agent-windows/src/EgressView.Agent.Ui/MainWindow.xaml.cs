@@ -1223,6 +1223,8 @@ public partial class MainWindow : Window
             UpdateStateKind.UpToDate => ja ? "最新です。" : "Up to date.",
             UpdateStateKind.Verified => ja ? "更新を検証しました。インストールできます。" : "The update is verified and ready to install.",
             UpdateStateKind.Launching => ja ? "Windows Installerを起動しています…" : "Starting Windows Installer…",
+            UpdateStateKind.DownloadManually => string.Format(CultureInfo.CurrentCulture,
+                LocalizationManager.Text("UpdateDownloadManually"), state.AvailableVersion ?? "—"),
             UpdateStateKind.Failed => state.Detail switch
             {
                 "verification-failed" => ja ? "署名またはSHA-256の検証に失敗しました。インストールしません。" : "Signature or SHA-256 verification failed. Nothing will be installed.",
@@ -1237,6 +1239,21 @@ public partial class MainWindow : Window
             : $"{(ja ? "最終確認" : "Last checked")}: {checkedText}";
         CheckUpdateButton.IsEnabled = state.Kind is not UpdateStateKind.Checking and not UpdateStateKind.Downloading and not UpdateStateKind.Launching;
         InstallUpdateButton.IsEnabled = app.Updates.CanInstall;
+        // Offered only when there is something to fetch. A button that opens a
+        // page with nothing newer on it wastes the one action the reader has.
+        OpenDownloadPageButton.Visibility = state.Kind == UpdateStateKind.DownloadManually
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// Opens the page the manifest was read from, not a address typed here.
+    ///
+    /// The origin is pinned to HTTPS in the update client, so this cannot be
+    /// pointed somewhere else by anything the manifest says.
+    private void OpenDownloadPage_Click(object sender, RoutedEventArgs e)
+    {
+        if (System.Windows.Application.Current is not App app) return;
+        try { Process.Start(new ProcessStartInfo(app.Updates.DownloadPage.AbsoluteUri) { UseShellExecute = true }); }
+        catch (Exception) { }
     }
 
     private void AutomaticUpdateChecks_Click(object sender, RoutedEventArgs e)
