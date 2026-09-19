@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 20;
+    private const int CurrentSchemaVersion = 21;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -138,6 +138,9 @@ public sealed partial class ObservationStore : IDisposable
           fetched_at TEXT
         );
         INSERT OR IGNORE INTO threat_cache_state(id) VALUES(1);
+        """;
+    private const string Version21Schema = """
+        ALTER TABLE geo_locations ADD COLUMN source TEXT NOT NULL DEFAULT 'hub';
         """;
     private const string Version20Schema = """
         CREATE TABLE IF NOT EXISTS geo_lookup_misses(
@@ -320,7 +323,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -348,7 +351,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 16) { MigrateVersion16To17(); version = 17; }
         if (version == 17) { MigrateVersion17To18(); version = 18; }
         if (version == 18) { MigrateVersion18To19(); version = 19; }
-        if (version == 19) MigrateVersion19To20();
+        if (version == 19) { MigrateVersion19To20(); version = 20; }
+        if (version == 20) MigrateVersion20To21();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -385,6 +389,28 @@ public sealed partial class ObservationStore : IDisposable
         {
             Execute("BEGIN IMMEDIATE; " + Version20Schema + " UPDATE schema_version SET version=20 WHERE version=19; COMMIT;");
             PruneMigrationBackups(20);
+        }
+        catch { TryRollback(); throw; }
+    }
+
+    /// Locations gain the source that supplied them.
+    ///
+    /// The daily cache arrives as a whole and replaces what was there, which
+    /// was right while the Hub was the only source. It is not right now: an
+    /// address looked up one at a time, and paid for out of a daily allowance,
+    /// was thrown away on the next cache fetch and bought again. Measured on
+    /// one PC, that spent 132 of 500 in an afternoon on addresses already
+    /// placed once.
+    ///
+    /// Rows that predate this column are the Hub's, which is what the default
+    /// says, because until now nothing else could write one.
+    private void MigrateVersion20To21()
+    {
+        CreateMigrationBackup(21);
+        try
+        {
+            Execute("BEGIN IMMEDIATE; " + Version21Schema + " UPDATE schema_version SET version=21 WHERE version=20; COMMIT;");
+            PruneMigrationBackups(21);
         }
         catch { TryRollback(); throw; }
     }
@@ -1760,6 +1786,14 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// How many locations were bought one at a time rather than arriving in
+    /// the Hub's cache. Reported so that paying for the same address twice is
+    /// visible rather than merely expensive.
+    public long ReadLookedUpLocationCount()
+    {
+        lock (gate) return ScalarInt64("SELECT COUNT(*) FROM geo_locations WHERE source='lookup'");
+    }
+
     /// How long an address that could not be placed is left alone.
     ///
     /// Allocations move, so this is a delay and not a verdict.
@@ -1808,9 +1842,9 @@ public sealed partial class ObservationStore : IDisposable
             Execute("BEGIN IMMEDIATE");
             try
             {
-                const string sql = "INSERT INTO geo_locations(ip,latitude,longitude,country_code,city) VALUES(?,?,?,?,?) " +
+                const string sql = "INSERT INTO geo_locations(ip,latitude,longitude,country_code,city,source) VALUES(?,?,?,?,?,'lookup') " +
                     "ON CONFLICT(ip) DO UPDATE SET latitude=excluded.latitude,longitude=excluded.longitude," +
-                    "country_code=excluded.country_code,city=excluded.city";
+                    "country_code=excluded.country_code,city=excluded.city,source='lookup'";
                 CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
                 try
                 {
@@ -1858,8 +1892,16 @@ public sealed partial class ObservationStore : IDisposable
             Execute("BEGIN IMMEDIATE");
             try
             {
-                Execute("DELETE FROM geo_locations");
-                const string sql = "INSERT INTO geo_locations(ip,latitude,longitude,country_code,city) VALUES(?,?,?,?,?)";
+                // Only the Hub's own rows. An address looked up one at a time
+                // is not part of the cache the Hub sends, so replacing the
+                // cache must not take it away -- it was paid for out of a
+                // daily allowance, and losing it means buying it again.
+                Execute("DELETE FROM geo_locations WHERE source='hub'");
+                // The Hub's answer carries a city and is the better one, so it
+                // takes over an address a lookup had placed.
+                const string sql = "INSERT INTO geo_locations(ip,latitude,longitude,country_code,city,source) VALUES(?,?,?,?,?,'hub') " +
+                    "ON CONFLICT(ip) DO UPDATE SET latitude=excluded.latitude,longitude=excluded.longitude," +
+                    "country_code=excluded.country_code,city=excluded.city,source='hub'";
                 CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
                 try
                 {

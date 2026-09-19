@@ -668,15 +668,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 20, "v1 database migrates through v2-v20");
+        Assert(migrated.SchemaVersion == 21, "v1 database migrates through v2-v21");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v20.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v21.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 20, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 21, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -1785,6 +1785,37 @@ try
                 "a build without the public feeds says so rather than silently accepting");
         }
 
+        // An address bought one at a time is not thrown away by the next
+        // cache fetch. It came out of a daily allowance of five hundred;
+        // losing it means buying it again, which is how 132 of that allowance
+        // went on addresses already placed once.
+        {
+            var keepDatabase = Path.Combine(directory, "keep-lookups.db");
+            using var store = new ObservationStore(keepDatabase);
+            var now = DateTimeOffset.UtcNow;
+
+            store.ReplaceGeoLocations([new GeoLocation("8.8.8.8", 37.4, -122.0, "US", "Mountain View")], "etag-a", now);
+            store.SaveGeoLocations([new GeoLocation("9.9.9.9", 47.6, -122.3, "US", null)]);
+            Assert(store.ReadGeoCacheState().LocationCount == 2 && store.ReadLookedUpLocationCount() == 1,
+                "both sources sit in the same table, and the bought ones can be counted");
+
+            // A new cache arrives that knows nothing about the bought address.
+            store.ReplaceGeoLocations([new GeoLocation("1.1.1.1", -33.8, 151.2, "AU", "Sydney")], "etag-b", now);
+            var kept = store.ReadGlobePoints(now.AddHours(-1), now.AddHours(1));
+            Assert(store.ReadLookedUpLocationCount() == 1,
+                "replacing the Hub's cache does not take away an address the Agent paid to place");
+            Assert(store.ReadGeoCacheState().LocationCount == 2,
+                "and the Hub's own rows are still replaced rather than accumulated");
+
+            // The Hub catching up on an address wins: it carries a city.
+            store.ReplaceGeoLocations([
+                new GeoLocation("1.1.1.1", -33.8, 151.2, "AU", "Sydney"),
+                new GeoLocation("9.9.9.9", 47.6, -122.3, "US", "Seattle"),
+            ], "etag-c", now);
+            Assert(store.ReadLookedUpLocationCount() == 0 && store.ReadGeoCacheState().LocationCount == 2,
+                "the Hub's richer answer takes over the address, rather than colliding with it");
+        }
+
         // An address a lookup could not place is not asked about again, for a
         // while. Without this, the addresses that can never be placed are
         // exactly the ones asked about on every run, for ever -- and they
@@ -1792,7 +1823,7 @@ try
         {
             var missDatabase = Path.Combine(directory, "geo-misses.db");
             using var store = new ObservationStore(missDatabase);
-            Assert(store.SchemaVersion == 20, "the lookup-miss memory arrives with schema 20");
+            Assert(store.SchemaVersion >= 20, "the lookup-miss memory arrives with schema 20");
             var now = DateTimeOffset.UtcNow;
             store.WriteBatch([
                 new NetworkObservation(now.AddMinutes(-1), 41, "TCP", "10.0.0.4", 53_000, "8.8.4.4", 443,
@@ -2167,7 +2198,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 20 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 21 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
@@ -2341,7 +2372,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, its update, its expiry, handing over the account, where threat data came from, looking an address up outside, the addresses that are never asked about, and not asking twice");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, its update, its expiry, handing over the account, where threat data came from, looking an address up outside, the addresses that are never asked about, not asking twice, and not paying twice");
     return 0;
 }
 finally
