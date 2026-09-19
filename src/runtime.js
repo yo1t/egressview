@@ -2,6 +2,8 @@
 // Dependencies are injected at startup via init() to enable unit testing.
 'use strict';
 
+const runtimeProfiler = require('./runtime-profiler');
+
 // ─── Injected dependencies ────────────────────────────────────────────────────
 let _io, _history, _enrichment, _threatIntel, _notifier, _deviceId, _devices;
 let _asus, _yamaha, _cisco, _dhcpdSyslog;
@@ -230,9 +232,15 @@ function _observeDevices(records, source) {
  */
 function recordConnections(sessions, now = Date.now(), source = 'nat', routerId = '') {
   if (!sessions?.length) return [];
+  // Measured per phase because the whole call is three seconds of synchronous
+  // CPU on one Mac's Hub, and the profile could only say that much: every
+  // request behind it -- the device list, the connection log, even a static
+  // file -- waits for it (2026-09-19).
+  runtimeProfiler.setGauge('recordConnections.sessions', sessions.length);
   const staged = new Map();
   const sourceMeta = new Map();
-  const records = sessions.map(session => _prepareConnection(session, now, source, routerId, staged, sourceMeta));
+  const records = runtimeProfiler.measureSync('recordConnections.prepare', () =>
+    sessions.map(session => _prepareConnection(session, now, source, routerId, staged, sourceMeta)));
   const persistByKey = new Map();
   for (const record of records) {
     if (record.isNew || record.observerAdded || persistByKey.has(record.key)) {
@@ -241,14 +249,21 @@ function recordConnections(sessions, now = Date.now(), source = 'nat', routerId 
   }
 
   const entries = [...persistByKey.values()];
+  runtimeProfiler.setGauge('recordConnections.persisted', entries.length);
   if (entries.length) {
-    if (_history.appendHistoryLogs) _history.appendHistoryLogs(entries);
-    else for (const entry of entries) _history.appendHistoryLog(entry);
+    runtimeProfiler.measureSync('recordConnections.persist', () => {
+      if (_history.appendHistoryLogs) _history.appendHistoryLogs(entries);
+      else for (const entry of entries) _history.appendHistoryLog(entry);
+    });
   }
 
-  for (const [key, entry] of staged) _cacheConnection(key, entry);
-  for (const record of records) _publishConnection(record);
-  _observeDevices(records, source);
+  runtimeProfiler.measureSync('recordConnections.cache', () => {
+    for (const [key, entry] of staged) _cacheConnection(key, entry);
+  });
+  runtimeProfiler.measureSync('recordConnections.publish', () => {
+    for (const record of records) _publishConnection(record);
+  });
+  runtimeProfiler.measureSync('recordConnections.devices', () => _observeDevices(records, source));
   return records.map(({ entry, key, isNew }) => ({ entry, key, isNew }));
 }
 
