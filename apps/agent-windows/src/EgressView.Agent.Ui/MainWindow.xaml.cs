@@ -268,6 +268,14 @@ public partial class MainWindow : Window
         ConnectionCount.Text = data.Connections.ToString("N0");
         ApplicationCount.Text = data.Applications.ToString("N0");
         DestinationCount.Text = data.Destinations.ToString("N0");
+        SentVolumeValue.Text = FlowRow.FormatBytes(data.BytesSent);
+        ReceivedVolumeValue.Text = FlowRow.FormatBytes(data.BytesReceived);
+        // A dash, not a zero, until the detector has a day of measured
+        // windows: "none found" and "not yet able to say" are different
+        // answers and a 0 would present the second as the first.
+        OutboundAnomalyCount.Text = data.OutboundAnomalies > 0
+            ? data.OutboundAnomalies.ToString("N0")
+            : data.OutboundBaselineReady ? "0" : "—";
         CoverageValue.Text = data.CoverageRatio >= 0.999999999
             ? "100%"
             : $"{Math.Min(data.CoverageRatio, 0.999):P1}";

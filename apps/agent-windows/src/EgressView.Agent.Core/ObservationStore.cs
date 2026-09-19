@@ -1054,9 +1054,20 @@ public sealed partial class ObservationStore : IDisposable
 
     public int ReadOutboundAnomalyCount(DateTimeOffset from, DateTimeOffset to)
     {
-        lock (gate) return (int)ScalarInt64("SELECT COUNT(*) FROM outbound_traffic_windows " +
-            $"WHERE window_start >= '{from:O}' AND window_start < '{to:O}' AND anomaly_kind IS NOT NULL");
+        lock (gate) return ReadOutboundAnomalyCountLocked(from, to);
     }
+
+    /// The lock in this class is not reentrant, so the version called from
+    /// inside an existing hold must not take it again.
+    /// Counted with the same coverage gate the detector applies, so the screen
+    /// and the detector agree about whether there is a baseline. A row whose
+    /// bytes were never measured is not evidence of a quiet fifteen minutes.
+    private int ReadUsableBaselineWindowsLocked() => (int)ScalarInt64(
+        "SELECT COUNT(*) FROM outbound_traffic_windows WHERE observation_count >= 10 " +
+        "AND observations_with_bytes * 10 >= observation_count * 8");
+
+    private int ReadOutboundAnomalyCountLocked(DateTimeOffset from, DateTimeOffset to) => (int)ScalarInt64("SELECT COUNT(*) FROM outbound_traffic_windows " +
+            $"WHERE window_start >= '{from:O}' AND window_start < '{to:O}' AND anomaly_kind IS NOT NULL");
 
     public IReadOnlyList<AgentRun> ReadRunHistory(int limit = 20)
     {
@@ -1510,9 +1521,9 @@ public sealed partial class ObservationStore : IDisposable
             // into one bucket the reader can see and question instead.
             const string app = "COALESCE(NULLIF(process_name,''),'Unknown')";
             var where = $"last_seen>='{fromText}' AND first_seen<'{toText}' AND layer='logical'";
-            var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),COALESCE(SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),0),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows WHERE {where}";
+            var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),COALESCE(SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),0),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END),COALESCE(SUM(COALESCE(bytes_sent,0)),0),COALESCE(SUM(COALESCE(bytes_received,0)),0) FROM flows WHERE {where}";
             CheckOperation(WinSqlite.Prepare(db, totalsSql, -1, out var totalsStatement, 0));
-            long connections; int applications; int destinations; long bytes; long unknown;
+            long connections; int applications; int destinations; long bytes; long unknown; long sent; long received;
             try
             {
                 CheckQueryRow(WinSqlite.Step(totalsStatement));
@@ -1521,6 +1532,8 @@ public sealed partial class ObservationStore : IDisposable
                 destinations = (int)WinSqlite.ColumnInt64(totalsStatement, 2);
                 bytes = WinSqlite.ColumnInt64(totalsStatement, 3);
                 unknown = WinSqlite.ColumnInt64(totalsStatement, 4);
+                sent = WinSqlite.ColumnInt64(totalsStatement, 5);
+                received = WinSqlite.ColumnInt64(totalsStatement, 6);
             }
             finally { WinSqlite.Finalize(totalsStatement); }
 
@@ -1601,6 +1614,10 @@ public sealed partial class ObservationStore : IDisposable
                 monitoringStartedAt, ScalarInt64("SELECT COUNT(*) FROM flows"), links, timeline)
             {
                 StorageBytes = ReadStorageBytes(),
+                BytesSent = sent,
+                BytesReceived = received,
+                OutboundAnomalies = ReadOutboundAnomalyCountLocked(from, to),
+                OutboundBaselineReady = ReadUsableBaselineWindowsLocked() >= 96,
                 SleepPeriods = ReadSleepPeriods(from, to),
             };
         }

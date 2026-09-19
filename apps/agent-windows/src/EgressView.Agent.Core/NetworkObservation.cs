@@ -101,6 +101,24 @@ public sealed record PeriodAnalysis(
     long StoredFlows, IReadOnlyList<AppDestinationAggregate> Links, IReadOnlyList<AppTimelineAggregate> Timeline)
 {
     public long StorageBytes { get; init; }
+
+    /// Sent and received kept apart, because they answer different questions.
+    /// "How much left this machine" is the product's subject; a single total
+    /// mixes it with everything that arrived and answers neither.
+    public long BytesSent { get; init; }
+    public long BytesReceived { get; init; }
+
+    /// How many completed windows in this period were judged unusual. Zero and
+    /// "not enough history to judge" are different states, and the detector
+    /// needs a day of measured windows before it will say anything at all.
+    public int OutboundAnomalies { get; init; }
+
+    /// Whether the detector has enough measured history to have an opinion at
+    /// all. Without this the screen cannot tell "nothing unusual happened"
+    /// from "not yet able to say", and a zero would state the first while
+    /// meaning the second.
+    public bool OutboundBaselineReady { get; init; }
+
     public IReadOnlyList<SleepPeriod> SleepPeriods { get; init; } = [];
     public double SleepSeconds => SleepPeriods.Sum(period => Math.Max(0, (period.End - period.Start).TotalSeconds));
 }
