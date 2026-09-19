@@ -761,3 +761,60 @@ describe('devices: P3-138 — 別ハードウェアのマージ先へのリダ�
     assert.equal(result, keepId, '片方がランダム化MACなら従来どおり');
   });
 });
+
+// ─── P3-138: 同一IPに複数の候補が来たときの選び方 ─────────────────────────────
+
+describe('devices: chooseForIp — 記録済みのMACを優先する', () => {
+  beforeEach(() => devicesModule._initForTest());
+
+  const macOf = c => c.mac;
+  const byRssi = (a, b) => ((b.rssi || 0) > (a.rssi || 0) ? b : a);
+
+  it('候補が1つなら、そのまま返す', () => {
+    const only = { mac: 'aa:bb:cc:00:00:01', rssi: -70 };
+    assert.equal(devicesModule.chooseForIp('10.6.0.1', [only], macOf, byRssi), only);
+  });
+
+  it('記録済みのMACを持つ候補を選ぶ（RSSIが弱くても）', () => {
+    devicesModule.observeDevice({ ip: '10.6.1.1', mac: '3c:a9:ab:09:77:f1', source: 'asus' });
+    const recorded = { mac: '3c:a9:ab:09:77:f1', rssi: -80 };
+    const other    = { mac: 'be:41:8d:68:a8:ec', rssi: -40 };
+
+    assert.equal(devicesModule.chooseForIp('10.6.1.1', [other, recorded], macOf, byRssi), recorded);
+    // Order must not change the answer: that was the flapping.
+    assert.equal(devicesModule.chooseForIp('10.6.1.1', [recorded, other], macOf, byRssi), recorded);
+  });
+
+  it('MACの大文字小文字は同じものとして扱う', () => {
+    devicesModule.observeDevice({ ip: '10.6.2.1', mac: '3c:a9:ab:09:77:f1', source: 'asus' });
+    const upper = { mac: '3C:A9:AB:09:77:F1', rssi: -90 };
+    const other = { mac: 'be:41:8d:68:a8:ec', rssi: -40 };
+    assert.equal(devicesModule.chooseForIp('10.6.2.1', [other, upper], macOf, byRssi), upper);
+  });
+
+  it('記録済みのMACが候補に無ければ、従来どおりの決め方に落ちる', () => {
+    devicesModule.observeDevice({ ip: '10.6.3.1', mac: '3c:a9:ab:09:77:f1', source: 'asus' });
+    const weak   = { mac: 'aa:bb:cc:00:00:01', rssi: -80 };
+    const strong = { mac: 'aa:bb:cc:00:00:02', rssi: -40 };
+    assert.equal(devicesModule.chooseForIp('10.6.3.1', [weak, strong], macOf, byRssi), strong);
+  });
+
+  it('その IP の端末をまだ知らなければ、従来どおりの決め方に落ちる', () => {
+    const weak   = { mac: 'aa:bb:cc:00:00:01', rssi: -80 };
+    const strong = { mac: 'aa:bb:cc:00:00:02', rssi: -40 };
+    assert.equal(devicesModule.chooseForIp('10.6.4.1', [weak, strong], macOf, byRssi), strong);
+  });
+
+  it('毎回同じ候補が選ばれ続ける（往復しない）', () => {
+    devicesModule.observeDevice({ ip: '10.6.5.1', mac: '56:e6:22:b8:68:35', source: 'asus' });
+    const recorded = { mac: '56:e6:22:b8:68:35' };
+    const other    = { mac: '8c:bf:ea:8c:be:2c' };
+    const picks = [];
+    for (let poll = 0; poll < 10; poll++) {
+      // The source's ordering flips every poll, as the real ASUS list does.
+      const candidates = poll % 2 ? [recorded, other] : [other, recorded];
+      picks.push(devicesModule.chooseForIp('10.6.5.1', candidates, macOf, (a, b) => b).mac);
+    }
+    assert.deepEqual([...new Set(picks)], ['56:e6:22:b8:68:35'], '10回とも同じMACが選ばれる');
+  });
+});

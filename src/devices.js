@@ -44,6 +44,46 @@ function isStableMac(mac) {
   return (first & 0x02) === 0;
 }
 
+// ─── Choosing between candidates that claim the same IP ───────────────────────
+
+/** Case-insensitive MAC comparison; a missing value never matches. */
+function _sameMac(a, b) {
+  return !!a && !!b && a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * Pick the one observation to keep when a single poll reports several for one IP.
+ *
+ * A source can legitimately see two MACs on one address -- a device using MAC
+ * randomisation alongside its hardware address, or a stale entry beside the
+ * live one. Something has to choose, and the choice used to be made on data
+ * that moves: strongest RSSI, or simply the last record in the list. Measured
+ * on one Hub 2026-09-19: two independent sources each reported two MACs for the
+ * same IP in almost exactly equal numbers (1285/1284 and 1141/1134), because
+ * whichever way the tie fell flipped on every poll. The device's vendor and
+ * name then alternated once a minute, and each flip wrote another observation
+ * row. The deduplication added to stop the flapping was producing it.
+ *
+ * So prefer the MAC this IP is already recorded with. A device keeps its
+ * identity as long as that identity is still being reported; only when it stops
+ * appearing does the fallback get to choose a new one.
+ *
+ * @param {string}   ip
+ * @param {Array}    candidates   every observation this poll has for the IP
+ * @param {Function} macOf        candidate -> MAC string or null
+ * @param {Function} pickBetween  reducer used only when stickiness cannot decide
+ */
+function chooseForIp(ip, candidates, macOf, pickBetween) {
+  if (!candidates?.length) return null;
+  if (candidates.length === 1) return candidates[0];
+  const recorded = getByIp(ip)?.mac || null;
+  if (recorded) {
+    const sticky = candidates.find(candidate => _sameMac(macOf(candidate), recorded));
+    if (sticky) return sticky;
+  }
+  return candidates.reduce(pickBetween);
+}
+
 // ─── Merge redirect conflict detection ────────────────────────────────────────
 
 /**
@@ -725,5 +765,6 @@ module.exports = {
   seedFromConnectionHistory,
   checkStaleMergeCandidates,
   getDiscardedRedirects,
+  chooseForIp,
   _initForTest,
 };
