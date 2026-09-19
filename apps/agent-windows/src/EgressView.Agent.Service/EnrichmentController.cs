@@ -5,13 +5,15 @@ namespace EgressView.Agent.Service;
 
 internal sealed class EnrichmentController(ObservationStore store, WindowsCredentialStore credentials,
     string publicFeedsMarker, MaxMindCredentialStore maxMind, string countryTablePath,
-    string countryTableMarker) : IDisposable
+    string countryTableMarker, string geoLookupSourceFile) : IDisposable
 {
     private readonly SemaphoreSlim geoWake = new(0, 1);
     private readonly SemaphoreSlim threatWake = new(0, 1);
     private readonly SemaphoreSlim countryWake = new(0, 1);
     private readonly LocalCountryTable countryTable = new(countryTablePath);
     private readonly GeoLite2Updater updater = new();
+    private readonly ThirdPartyGeoLookup thirdParty = new();
+    private DateTimeOffset lastOnDemandHubFetch;
     private DateTimeOffset lastCountryFetchAttempt;
     private string countryState = "idle";
     private string? countryFailure;
@@ -35,6 +37,7 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
             var state = store.ReadGeoCacheState();
             if (state.FetchedAt is null || DateTimeOffset.UtcNow - state.FetchedAt >= TimeSpan.FromHours(24))
                 await FetchGeoAsync(client, cancellationToken);
+            await PlaceUnknownAddressesAsync(client, cancellationToken);
             await WaitAsync(geoWake, TimeSpan.FromMinutes(15), cancellationToken);
             if (geoWake.CurrentCount == 0 && GetState(true) == "queued") await FetchGeoAsync(client, cancellationToken);
         }
@@ -66,7 +69,11 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
             enrolled = credential is not null,
             source = credential is null ? null : credential.HubUrl.GetLeftPart(UriPartial.Authority),
             policy = credential is null && PublicFeedsEnabled ? "public-feeds" : "hub-only",
+            thirdPartyLookup = LookupSource.UsesThirdParty(),
             publicFeedsEnabled = PublicFeedsEnabled,
+            lookupSource = LookupSource.ToWire(),
+            thirdPartyBudget = ThirdPartyGeoLookup.DailyBudget,
+            thirdPartyRemaining = Math.Max(0, ThirdPartyGeoLookup.DailyBudget - SpentToday(now)),
             geo = new { state = gs, lastSuccessAt = geo.FetchedAt, count = geo.LocationCount,
                 freshness = EnrichmentFreshness.Classify(geo.FetchedAt, TimeSpan.FromHours(24), now), lastFailure = gf },
             threat = new { state = ts, lastSuccessAt = threat.FetchedAt, count = threat.IndicatorCount,
@@ -210,6 +217,96 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
     private void SetCountryState(string state, string? failure)
     {
         lock (gate) { countryState = state; countryFailure = failure; }
+    }
+
+    /// Where to look when the cache does not have an address.
+    ///
+    /// The Hub is the default: it has usually resolved the address already,
+    /// and asking it sends nothing outside the network the Hub is on. The
+    /// third party is not a default anyone gets by accident.
+    internal GeoLookupSource LookupSource
+    {
+        get
+        {
+            try
+            {
+                if (File.Exists(geoLookupSourceFile))
+                    return GeoLookupSources.Parse(File.ReadAllText(geoLookupSourceFile).Trim());
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            return GeoLookupSource.Hub;
+        }
+    }
+
+    internal string SetLookupSource(GeoLookupSource source)
+    {
+        File.WriteAllText(geoLookupSourceFile, source.ToWire() + Environment.NewLine);
+        RequestNow("geo");
+        return LookupSource.ToWire();
+    }
+
+    /// The Hub answers the whole cache rather than one address, so asking is a
+    /// few megabytes when the tag has moved and a 304 when it has not. A
+    /// minute is short enough that a country appears while the person is still
+    /// looking at the map, and long enough that a burst of new destinations is
+    /// one request rather than hundreds.
+    private static readonly TimeSpan OnDemandInterval = TimeSpan.FromMinutes(1);
+
+    /// The addresses the daily cache did not have.
+    ///
+    /// The cache is fetched once a day, so a destination reached for the first
+    /// time is not in it -- and a country reached for the first time is the
+    /// moment most worth seeing. That is the gap this closes.
+    private async Task PlaceUnknownAddressesAsync(GeoCacheClient client, CancellationToken token)
+    {
+        var source = LookupSource;
+        if (!source.UsesHub()) return;
+
+        var now = DateTimeOffset.UtcNow;
+        var unknown = store.ReadAddressesWithoutLocation(now.AddDays(-2), ThirdPartyGeoLookup.BatchSize);
+        if (unknown.Count == 0) return;
+
+        if (credentials.Load() is not null && now - lastOnDemandHubFetch >= OnDemandInterval)
+        {
+            lastOnDemandHubFetch = now;
+            await FetchGeoAsync(client, token);
+            unknown = store.ReadAddressesWithoutLocation(now.AddDays(-2), ThirdPartyGeoLookup.BatchSize);
+            if (unknown.Count == 0) return;
+        }
+
+        if (!source.UsesThirdParty()) return;
+        var remaining = (int)Math.Min(int.MaxValue, ThirdPartyGeoLookup.DailyBudget - SpentToday(now));
+        if (remaining <= 0) return;
+        try
+        {
+            var located = await thirdParty.LookUpAsync(unknown, remaining, token);
+            RecordSpend(now, thirdParty.Spent);
+            if (located.Count > 0) store.SaveGeoLocations(located);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception exception) { SetState(true, "failed", Classify(exception)); }
+    }
+
+    /// The budget is per day, and the day is the one the clock says now.
+    ///
+    /// The day is stored beside the count so that yesterday's spend cannot be
+    /// read as today's: a counter alone would keep the map blank for a second
+    /// day after one busy one.
+    private long SpentToday(DateTimeOffset now)
+    {
+        var today = now.UtcDateTime.DayOfYear + now.UtcDateTime.Year * 1000;
+        return store.ReadCounter("third-party-lookup-day") == today
+            ? store.ReadCounter("third-party-lookups") : 0;
+    }
+
+    private void RecordSpend(DateTimeOffset now, int spent)
+    {
+        if (spent <= 0) return;
+        var today = now.UtcDateTime.DayOfYear + now.UtcDateTime.Year * 1000;
+        var already = SpentToday(now);
+        store.SetCounter("third-party-lookup-day", today);
+        store.SetCounter("third-party-lookups", already + spent);
     }
 
     private async Task FetchGeoAsync(GeoCacheClient client, CancellationToken token)

@@ -1752,6 +1752,10 @@ try
             Assert(state.Source == "public-feeds-fallback",
                 "falling back is not the same as choosing the public lists, and the screen can tell them apart");
             Assert(state.IndicatorCount == 1, "the indicators themselves are unaffected by where they came from");
+
+            store.MarkThreatCacheFetched("etag-1", now, "hub");
+            Assert(store.ReadThreatCacheState().Source == "hub",
+                "a 304 means the data in use is still the Hub's, so the screen must not fall back to saying none");
         }
 
         // The switch that turns the country table off, which is not the switch
@@ -1779,6 +1783,57 @@ try
             Assert(IpcProtocol.Handle("""{"v":1,"op":"fetch-public-feeds-once"}""", () => "{}", _ => [])
                 .Contains("operation-unavailable", StringComparison.Ordinal),
                 "a build without the public feeds says so rather than silently accepting");
+        }
+
+        // The one path that sends a watched address outside.
+        {
+            var asked = new List<string>();
+            var handler = new StubHandler(request =>
+            {
+                asked.Add(request.RequestUri!.ToString());
+                var address = request.RequestUri!.AbsolutePath.Trim('/');
+                return address == "198.51.100.7"
+                    ? """{"success":true,"ip":"198.51.100.7","country_code":"DE","latitude":52.5,"longitude":13.4,"city":"Berlin"}"""
+                    : """{"success":false,"message":"Reserved range"}""";
+            });
+            var lookup = new ThirdPartyGeoLookup(new HttpClient(handler), new Uri("https://ipwho.is"),
+                (_, _) => Task.CompletedTask);
+
+            var located = await lookup.LookUpAsync(["198.51.100.7", "10.0.0.1"], budget: 10);
+            Assert(located.Count == 1 && located[0].Ip == "198.51.100.7" && located[0].CountryCode == "DE",
+                "an address the service cannot place is left out, because a wrong country is worse than none");
+            Assert(located[0].Latitude == 52.5 && located[0].City == "Berlin",
+                "the coordinates the globe needs come back with it");
+            Assert(lookup.Spent == 2, "the budget is spent by asking, not by being answered");
+
+            Assert(asked.All(url => url.StartsWith("https://", StringComparison.Ordinal)),
+                "watched addresses are never sent in clear text by a tool whose purpose is showing what leaves");
+            Assert(asked[0].Contains("198.51.100.7", StringComparison.Ordinal) &&
+                !asked[0].Contains("10.0.0.1", StringComparison.Ordinal),
+                "one address per request, and only the address being asked about");
+
+            asked.Clear();
+            await lookup.LookUpAsync(["198.51.100.7", "198.51.100.8", "198.51.100.9"], budget: 2);
+            Assert(asked.Count == 2, "the day's budget stops the run, rather than being checked afterwards");
+        }
+
+        // A source nobody recognises is refused, in either direction.
+        {
+            var chosen = new List<GeoLookupSource>();
+            string Ask(string wire) => IpcProtocol.Handle(
+                JsonSerializer.Serialize(new { v = 1, op = "set-geo-lookup-source", source = wire }),
+                () => "{}", _ => [], setGeoLookupSource: source => { chosen.Add(source); return source.ToWire(); });
+
+            Assert(Ask("hub-then-third-party").Contains("hub-then-third-party", StringComparison.Ordinal)
+                && chosen is [GeoLookupSource.HubThenThirdParty],
+                "the choice that sends addresses outside is passed through exactly as asked");
+            Assert(Ask("cache-only").Contains("cache-only", StringComparison.Ordinal), "so is the one that sends nothing");
+            Assert(Ask("hub-then-ipwho").Contains("invalid-lookup-source", StringComparison.Ordinal)
+                && chosen.Count == 3 - 1,
+                "a misspelling is refused rather than falling through to a default, in either direction");
+            Assert(GeoLookupSources.Parse("nonsense") == GeoLookupSource.Hub
+                && !GeoLookupSource.Hub.UsesThirdParty() && GeoLookupSource.Hub.UsesHub(),
+                "an unreadable stored setting means the Hub, which sends nothing outside the network");
         }
 
         // The public-feed switch is a decision, so it is rejected unless the
@@ -2221,7 +2276,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, its update, its expiry, handing over the account, and where threat data came from");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, its update, its expiry, handing over the account, where threat data came from, and looking an address up outside");
     return 0;
 }
 finally
@@ -2452,4 +2507,15 @@ internal sealed class RefusingSynchronizationContext : SynchronizationContext
     public int Posted => Volatile.Read(ref posted);
     public override void Post(SendOrPostCallback d, object? state) => Interlocked.Increment(ref posted);
     public override void Send(SendOrPostCallback d, object? state) => Interlocked.Increment(ref posted);
+}
+
+/// Answers HTTP requests from a function, so a lookup can be tested without a
+/// network and without a third party learning anything.
+file sealed class StubHandler(Func<HttpRequestMessage, string> reply) : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(reply(request), System.Text.Encoding.UTF8, "application/json"),
+        });
 }

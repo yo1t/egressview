@@ -1343,6 +1343,18 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// One counter, for the callers that need a single value rather than the
+    /// whole set. Reading them all to look at one is cheap on a small table
+    /// and misleading in a profile.
+    public long ReadCounter(string name)
+    {
+        lock (gate)
+        {
+            var safeName = name.Replace("'", "''", StringComparison.Ordinal);
+            return ScalarInt64($"SELECT COALESCE((SELECT value FROM collector_counters WHERE name='{safeName}'),0)");
+        }
+    }
+
     /// Replaces rather than adds, for values that are a measurement and not a
     /// tally. A duration accumulated across restarts is not a duration.
     public void SetCounter(string name, long value)
@@ -1695,6 +1707,67 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// Addresses with no location at all, for the paths that can fetch one.
+    ///
+    /// Distinct from ReadAddressesWithoutCountry: a country worked out from
+    /// the local table is an answer for the country list but not for the
+    /// globe, which needs coordinates. An address placed only locally is
+    /// therefore still worth asking about here.
+    public IReadOnlyList<string> ReadAddressesWithoutLocation(DateTimeOffset since, int limit = 25)
+    {
+        if (limit is < 1 or > 5000) throw new ArgumentOutOfRangeException(nameof(limit));
+        lock (gate)
+        {
+            var sql = "SELECT DISTINCT f.remote_address FROM flows f " +
+                "LEFT JOIN geo_locations g ON g.ip=f.remote_address " +
+                $"WHERE f.layer='logical' AND f.last_seen>='{since:O}' AND g.ip IS NULL " +
+                $"ORDER BY f.last_seen DESC LIMIT {limit}";
+            CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+            var result = new List<string>();
+            try { while (WinSqlite.Step(statement) == WinSqlite.Row) result.Add(Text(statement, 0)); }
+            finally { WinSqlite.Finalize(statement); }
+            return result;
+        }
+    }
+
+    /// Adds locations without discarding the ones already held.
+    ///
+    /// ReplaceGeoLocations empties the table first, which is right for the
+    /// daily cache and wrong for an answer about a single address: using it
+    /// here would throw away eighty thousand rows to record one.
+    public void SaveGeoLocations(IReadOnlyList<GeoLocation> locations)
+    {
+        if (locations.Count == 0) return;
+        lock (gate)
+        {
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                const string sql = "INSERT INTO geo_locations(ip,latitude,longitude,country_code,city) VALUES(?,?,?,?,?) " +
+                    "ON CONFLICT(ip) DO UPDATE SET latitude=excluded.latitude,longitude=excluded.longitude," +
+                    "country_code=excluded.country_code,city=excluded.city";
+                CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+                try
+                {
+                    foreach (var location in locations)
+                    {
+                        Bind(statement, 1, location.Ip);
+                        Check(WinSqlite.BindDouble(statement, 2, location.Latitude));
+                        Check(WinSqlite.BindDouble(statement, 3, location.Longitude));
+                        BindNullable(statement, 4, location.CountryCode);
+                        BindNullable(statement, 5, location.City);
+                        CheckDone(WinSqlite.Step(statement));
+                        Check(WinSqlite.Reset(statement));
+                        Check(WinSqlite.ClearBindings(statement));
+                    }
+                }
+                finally { WinSqlite.Finalize(statement); }
+                Execute("COMMIT");
+            }
+            catch { TryRollback(); throw; }
+        }
+    }
+
     /// How many addresses this PC placed without asking anyone.
     ///
     /// Reported so the screen can say whether the table is doing anything. A
@@ -2008,9 +2081,13 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
-    public void MarkThreatCacheFetched(string? etag, DateTimeOffset fetchedAt)
+    public void MarkThreatCacheFetched(string? etag, DateTimeOffset fetchedAt, string source = "hub")
     {
-        lock (gate) Execute($"UPDATE threat_cache_state SET etag={(etag is null ? "etag" : $"'{Sql(etag)}'")},fetched_at='{fetchedAt.ToUniversalTime():O}' WHERE id=1");
+        // "Not modified" means the data in use is still whatever answered
+        // last, so the source is recorded here too. Leaving it alone made the
+        // screen say "none" for as long as the Hub kept returning 304 -- which
+        // is most of the time, and exactly when everything is working.
+        lock (gate) Execute($"UPDATE threat_cache_state SET etag={(etag is null ? "etag" : $"'{Sql(etag)}'")},fetched_at='{fetchedAt.ToUniversalTime():O}',source='{Sql(source)}' WHERE id=1");
     }
 
     public ThreatReport ReadThreatReport(DateTimeOffset from, DateTimeOffset to)

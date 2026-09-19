@@ -1541,8 +1541,10 @@ public partial class MainWindow : Window
 
             publicThreatFeeds = data.TryGetProperty("publicFeedsEnabled", out var feeds) && feeds.GetBoolean();
             if (PublicThreatFeedsEnabled is not null) PublicThreatFeedsEnabled.IsChecked = publicThreatFeeds;
-            RenderEnrichmentPrivacy(publicThreatFeeds, countryTableOn);
+            RenderEnrichmentPrivacy(publicThreatFeeds, countryTableOn,
+                data.TryGetProperty("thirdPartyLookup", out var outside) && outside.GetBoolean());
             RenderThreatSource(data);
+            RenderGeoLookupSource(data);
 
             // The Hub is what "retry" retries. Fetching once from the public
             // lists is its own button and does not need one.
@@ -1554,6 +1556,62 @@ public partial class MainWindow : Window
             EnrichmentSource.Text = LocalizationManager.Text("CannotConnect");
             RefreshGeoButton.IsEnabled = RefreshThreatButton.IsEnabled = false;
         }
+    }
+
+    /// The three answers to "what should happen to an address the cache does
+    /// not have", and what each one costs.
+    ///
+    /// The note under the choice is part of the choice, not decoration: one of
+    /// these three sends watched destinations to a company neither the reader
+    /// nor EgressView controls, and that sentence is the only place the screen
+    /// says so.
+    private void RenderGeoLookupSource(JsonElement data)
+    {
+        if (LookupHub is null) return;
+        var source = data.TryGetProperty("lookupSource", out var value) ? value.GetString() ?? "hub" : "hub";
+        var budget = data.TryGetProperty("thirdPartyBudget", out var total) ? total.GetInt64() : 0;
+        var remaining = data.TryGetProperty("thirdPartyRemaining", out var left) ? left.GetInt64() : 0;
+
+        loadingSettings = true;
+        try
+        {
+            LookupCacheOnly.IsChecked = source == "cache-only";
+            LookupHub.IsChecked = source == "hub";
+            LookupHubThenThirdParty.IsChecked = source == "hub-then-third-party";
+        }
+        finally { loadingSettings = false; }
+
+        GeoLookupSourceNote.Text = source switch
+        {
+            "cache-only" => LocalizationManager.Text("LookupCacheOnlyNote"),
+            "hub-then-third-party" => string.Format(LocalizationManager.Text("LookupThirdPartyNote"), budget),
+            _ => LocalizationManager.Text("LookupHubNote"),
+        };
+        // Only the third-party choice is a warning. Saying "nothing leaves
+        // your network" in the same colour as "this sends addresses outside"
+        // would make the colour mean nothing.
+        GeoLookupSourceNote.Foreground = (System.Windows.Media.Brush)FindResource(
+            source == "hub-then-third-party" ? "WarningBrush" : "TextSecondaryBrush");
+
+        ThirdPartyBudgetNote.Text = source != "hub-then-third-party" ? string.Empty
+            : remaining > 0
+                ? string.Format(LocalizationManager.Text("LookupsLeft"), remaining, budget)
+                : string.Format(LocalizationManager.Text("LookupsUsedUp"), budget);
+    }
+
+    private async void GeoLookupSource_Click(object sender, RoutedEventArgs e)
+    {
+        if (loadingSettings || sender is not System.Windows.Controls.RadioButton { Tag: string source }) return;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                JsonSerializer.Serialize(new { v = 1, op = "set-geo-lookup-source", source }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            EnsureAccepted(document.RootElement);
+            await RefreshEnrichmentStatusAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception) { GeoEnrichmentFailure.Text = LocalizationManager.Text("CannotConnect"); }
     }
 
     /// Where the threat information in use right now actually came from.
@@ -1584,10 +1642,11 @@ public partial class MainWindow : Window
     /// Agent fetch from abuse.ch, Spamhaus or MaxMind itself -- and a privacy
     /// note that stays the same while the behaviour changes underneath it is
     /// worse than none, because it is the line a reader would rely on.
-    private void RenderEnrichmentPrivacy(bool publicFeeds, bool countryTable)
+    private void RenderEnrichmentPrivacy(bool publicFeeds, bool countryTable, bool thirdPartyLookup = false)
     {
         if (EnrichmentPrivacyNote is null) return;
         var sources = new List<string>();
+        if (thirdPartyLookup) sources.Add(LocalizationManager.Text("SourceIpwho"));
         if (publicFeeds) sources.Add(LocalizationManager.Text("SourcePublicFeeds"));
         if (countryTable) sources.Add(LocalizationManager.Text("SourceMaxMind"));
         EnrichmentPrivacyNote.Text = sources.Count == 0

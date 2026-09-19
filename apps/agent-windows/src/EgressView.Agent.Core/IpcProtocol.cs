@@ -32,7 +32,8 @@ public static class IpcProtocol
         Func<bool, bool>? setPublicThreatFeeds = null,
         Func<string?, bool>? setCountryTableAccount = null,
         Func<bool, bool>? setCountryTableEnabled = null,
-        Action? fetchPublicFeedsOnce = null)
+        Action? fetchPublicFeedsOnce = null,
+        Func<GeoLookupSource, string>? setGeoLookupSource = null)
     {
         try
         {
@@ -73,6 +74,7 @@ public static class IpcProtocol
                 "set-country-table-account" => SetCountryTableAccount(root, setCountryTableAccount),
                 "set-country-table-enabled" => SetSwitch(root, setCountryTableEnabled, "country-table-setting-failed"),
                 "fetch-public-feeds-once" => Invoke(fetchPublicFeedsOnce, "public-feeds-unavailable"),
+                "set-geo-lookup-source" => SetGeoLookupSource(root, setGeoLookupSource),
                 "prepare-uninstall" => PrepareUninstall(root, prepareUninstall),
                 _ => Reject("unknown-operation"),
             };
@@ -94,6 +96,22 @@ public static class IpcProtocol
     /// with what was asked for: the two differ when the setting could not be
     /// written, and a screen that shows the request rather than the result
     /// tells the person something they cannot act on.
+    /// Where to look when the cache has no location for an address.
+    ///
+    /// The value is checked against the three the Agent knows rather than
+    /// parsed leniently: one of them sends watched addresses to a third party,
+    /// and a misspelling that quietly fell through to a default would be the
+    /// worst possible way to choose it -- in either direction.
+    private static string SetGeoLookupSource(JsonElement root, Func<GeoLookupSource, string>? set)
+    {
+        if (set is null) return Reject("operation-unavailable");
+        var wire = root.TryGetProperty("source", out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() : null;
+        if (wire is not ("cache-only" or "hub" or "hub-then-third-party")) return Reject("invalid-lookup-source");
+        try { return JsonSerializer.Serialize(new { status = "ok", source = set(GeoLookupSources.Parse(wire)) }); }
+        catch { return Reject("lookup-source-failed"); }
+    }
+
     private static string SetSwitch(JsonElement root, Func<bool, bool>? set, string failureReason)
     {
         if (set is null) return Reject("operation-unavailable");
