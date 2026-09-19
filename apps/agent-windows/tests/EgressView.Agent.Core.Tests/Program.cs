@@ -1514,6 +1514,34 @@ try
     }
 
     {
+        // A country table on this PC, so the question never leaves it.
+        //
+        // The fixture is built from the published specification rather than
+        // from the reader, so this checks the reader against the format and
+        // not against a copy of itself.
+        {
+            var db = new MaxMindDatabase(EgressView.Agent.Core.Tests.MaxMindFixture.CountryDatabase());
+            Assert(db.Metadata.NodeCount > 0 && db.Metadata.RecordSize == 24 &&
+                db.Metadata.IpVersion == 4 && db.Metadata.DatabaseType == "GeoLite2-Country",
+                "the file says what it is, and the reader believes the file rather than its own defaults");
+            Assert(db.CountryCode("8.8.8.8") == "US" && db.CountryCode("1.2.3.4") == "JP" &&
+                db.CountryCode("203.0.113.9") == "AU",
+                "an address inside a listed prefix is placed in its country");
+            Assert(db.CountryCode("9.9.9.9") is null && db.CountryCode("not an address") is null,
+                "an address the table does not cover is answered with nothing, not with a guess");
+
+            // The licence requires moving to a new build within thirty days,
+            // so how old the copy is has to be answerable.
+            var built = new MaxMindDatabase(EgressView.Agent.Core.Tests.MaxMindFixture.CountryDatabase(1_700_000_000));
+            Assert(built.Metadata.BuiltAt == DateTimeOffset.FromUnixTimeSeconds(1_700_000_000) &&
+                built.Metadata.Age(built.Metadata.BuiltAt.AddDays(31)).TotalDays > 30,
+                "the table can say how old it is");
+
+            AssertMaxMindFailure(() => new MaxMindDatabase("not a database"u8.ToArray()),
+                MaxMindFailureKind.NoMetadata,
+                "a file with no metadata marker is refused rather than read as an empty table");
+        }
+
         // The public-feed switch is a decision, so it is rejected unless the
         // request actually carries one.
         {
@@ -1954,7 +1982,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, and startup event loss");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, and the local country table");
     return 0;
 }
 finally
@@ -1965,6 +1993,13 @@ finally
 static void Assert(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException($"FAILED: {message}");
+}
+
+static void AssertMaxMindFailure(Func<MaxMindDatabase> open, MaxMindFailureKind expected, string message)
+{
+    try { open(); }
+    catch (MaxMindException exception) when (exception.Kind == expected) { return; }
+    throw new InvalidOperationException($"FAILED: {message}");
 }
 
 static void AssertStoreFailure(Action action, StoreFailureKind expected, string message)
