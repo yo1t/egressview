@@ -155,11 +155,19 @@ function scheduleLiveRefresh() {
   const wait = Math.max(0, liveIntervalMs() - (Date.now() - lastRefreshAt));
   liveTimer = setTimeout(() => {
     liveTimer = null;
-    refreshAiInsights();
+    refreshAiInsights({ live: true });
   }, wait);
 }
 
-async function refreshAiInsights() {
+/**
+ * @param {object} [options]
+ * @param {boolean} [options.live] true for a socket-driven pass. Those are
+ *   frequent, so they leave AI spend alone unless it has been a while. An
+ *   explicit refresh -- opening the tab, the refresh button, changing the
+ *   period, finishing an analysis -- always fetches it, because that is exactly
+ *   when someone is looking at what the analysis cost.
+ */
+async function refreshAiInsights({ live = false } = {}) {
   const requestGeneration = ++generation;
   const now = Date.now();
   lastRefreshAt = now;
@@ -179,7 +187,7 @@ async function refreshAiInsights() {
     const data = await response.json();
     if (requestGeneration !== generation) return;
     renderFacts(data);
-    if (Date.now() - lastUsageAt >= USAGE_REFRESH_MS) {
+    if (!live || Date.now() - lastUsageAt >= USAGE_REFRESH_MS) {
       lastUsageAt = Date.now();
       await refreshAiUsage();
     }
@@ -432,7 +440,7 @@ function startAiInsights() {
   updateProviderLabel();
   loadConversations().catch(() => {});
   loadNotificationSettings().catch(() => {});
-  if (!refreshTimer) refreshTimer = setInterval(refreshAiInsights, FALLBACK_REFRESH_MS);
+  if (!refreshTimer) refreshTimer = setInterval(() => refreshAiInsights({ live: true }), FALLBACK_REFRESH_MS);
 }
 
 function stopAiInsights() {
@@ -449,7 +457,8 @@ function aiInsightsLiveTick() {
 }
 
 function initAiInsights() {
-  document.getElementById('ai-refresh-btn').addEventListener('click', refreshAiInsights);
+  // Wrapped: the click event must not arrive as the options argument.
+  document.getElementById('ai-refresh-btn').addEventListener('click', () => refreshAiInsights());
   document.getElementById('ai-analyze-btn').addEventListener('click', analyzeCurrentRange);
   document.getElementById('ai-cancel-btn').addEventListener('click', () => analysisController?.abort());
   document.getElementById('ai-chat-send-btn').addEventListener('click', sendChatMessage);
