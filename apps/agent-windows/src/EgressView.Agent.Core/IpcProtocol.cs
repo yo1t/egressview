@@ -27,7 +27,8 @@ public static class IpcProtocol
         Func<int, int, IReadOnlyList<RecentFlow>>? recentObservations = null,
         Func<int, bool, ObservationPage>? logSnapshot = null,
         Func<long, int, ObservationPage>? observationsSince = null,
-        Action<string, string?>? recordUiRun = null)
+        Action<string, string?>? recordUiRun = null,
+        Func<bool, bool>? setReadsHostnames = null)
     {
         try
         {
@@ -63,6 +64,7 @@ public static class IpcProtocol
                 "delete-history" => DeleteHistory(root, deleteHistory),
                 "diagnostics" => DynamicStatus(diagnostics),
                 "ui-run" => UiRun(root, recordUiRun),
+                "set-hostname-observation" => SetHostnameObservation(root, setReadsHostnames),
                 "prepare-uninstall" => PrepareUninstall(root, prepareUninstall),
                 _ => Reject("unknown-operation"),
             };
@@ -286,6 +288,14 @@ public static class IpcProtocol
         try { record(stage, fault); }
         catch { return Reject("run-record-failed"); }
         return JsonSerializer.Serialize(new { status = "ok", stage });
+    }
+
+    private static string SetHostnameObservation(JsonElement root, Func<bool, bool>? set)
+    {
+        if (set is null || !root.TryGetProperty("enabled", out var value) || value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            return Reject("invalid-hostname-setting");
+        try { return JsonSerializer.Serialize(new { status = "ok", enabled = set(value.GetBoolean()) }); }
+        catch { return Reject("hostname-setting-failed"); }
     }
 
     private static string Reject(string reason) => JsonSerializer.Serialize(new { status = "rejected", reason });

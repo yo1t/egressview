@@ -8,6 +8,7 @@ namespace EgressView.Agent.Service;
 
 internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnapshot> snapshot, string allowedSid,
     WindowsCredentialStore credentialStore, Func<bool> monitoringEnabled, Func<bool, bool> setMonitoringEnabled,
+    Func<bool> readsHostnames, Func<bool, bool> setReadsHostnames,
     DeliveryController delivery, EnrichmentController enrichment) : IAsyncDisposable
 {
     public const string PipeName = "egressview-agent-v1";
@@ -66,7 +67,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         }, store.ReadRecentFlows, Globe, Analysis, Threats, setMonitoringEnabled, DeliveryStatus, delivery.RequestNow,
         enrichment.Status, enrichment.RequestNow, HistoryStatus, SetHistoryRetention, store.ReadHistoryForExport,
         cutoff => store.DeleteLocalHistory(cutoff, DateTimeOffset.UtcNow), Diagnostics, PrepareUninstall, CountryHistory,
-        store.ReadRecentObservations, store.ReadLogSnapshot, store.ReadObservationsSince, RecordUiRun));
+        store.ReadRecentObservations, store.ReadLogSnapshot, store.ReadObservationsSince, RecordUiRun, setReadsHostnames));
     }
 
     internal static async Task RunResilientLoopAsync(Func<CancellationToken, Task> serveOne, Action connectionFailed,
@@ -91,7 +92,7 @@ internal sealed class AgentIpcServer(ObservationStore store, Func<CollectorSnaps
         }
     }
 
-    private string Status() => DiagnosticsReport.CreateStatus(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled());
+    private string Status() => DiagnosticsReport.CreateStatus(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), readsHostnames());
     private string Diagnostics() => DiagnosticsReport.Create(snapshot(), store, DiagnosticsReport.CurrentVersion, monitoringEnabled(), verifyIntegrity: true,
         reportChannel: "authenticated-named-pipe", capabilityStatus: delivery.CapabilityStatus);
     private IReadOnlyList<HourlySummary> Summary(int days) => store.ReadHourlySummary(DateTimeOffset.UtcNow.AddDays(-days), DateTimeOffset.UtcNow);

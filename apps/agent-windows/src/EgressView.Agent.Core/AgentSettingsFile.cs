@@ -31,7 +31,19 @@ public sealed record AgentSettingsFile(
         return JsonSerializer.SerializeToUtf8Bytes(value, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    public static AgentSettingsFile Decode(ReadOnlySpan<byte> bytes)
+    public static AgentSettingsFile Decode(ReadOnlySpan<byte> bytes) => Read(bytes).Settings;
+
+    /// <returns>
+    /// What was applied, and the names of everything in the file that was not.
+    /// </returns>
+    /// <remarks>
+    /// A value that is neither applied nor named as ignored must not exist.
+    /// The Mac Agent writes that rule in its own settings file and carries
+    /// fields this one has never had -- hubDeliveryEnabled and
+    /// readServerNameFromHandshake -- and the Windows Agent used to drop them
+    /// without a word while reporting how many settings it had applied.
+    /// </remarks>
+    public static (AgentSettingsFile Settings, IReadOnlyList<string> Ignored) Read(ReadOnlySpan<byte> bytes)
     {
         if (bytes.Length is 0 or > MaximumBytes) throw new InvalidDataException("Settings file size is invalid.");
         try
@@ -42,9 +54,28 @@ public sealed record AgentSettingsFile(
                 UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Skip,
             }) ?? throw new InvalidDataException("Settings file is empty.");
             Validate(value);
-            return value;
+            return (value, UnknownFields(bytes));
         }
         catch (JsonException exception) { throw new InvalidDataException("Settings file is not valid JSON.", exception); }
+    }
+
+    /// Named rather than counted, because "one setting was ignored" leaves the
+    /// reader to guess which of their preferences did not travel.
+    private static IReadOnlyList<string> UnknownFields(ReadOnlySpan<byte> bytes)
+    {
+        var known = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "version", "language", "notificationsEnabled", "notifyThreat", "notifyMonitoring",
+            "notifyHubDelivery", "notifyThreatIntel", "notifyRecovery", "notificationDailyLimit",
+            "globeFrameRate", "periodMinutes", "metric", "destinationUnit", "globeView",
+            "retentionDays", "automaticUpdateChecks", "globeSpinSpeed",
+        };
+        using var document = JsonDocument.Parse(bytes.ToArray());
+        if (document.RootElement.ValueKind != JsonValueKind.Object) return [];
+        var ignored = new List<string>();
+        foreach (var property in document.RootElement.EnumerateObject())
+            if (!known.Contains(property.Name)) ignored.Add(property.Name);
+        return ignored;
     }
 
     public static IReadOnlyList<string> PresentFields(AgentSettingsFile value)

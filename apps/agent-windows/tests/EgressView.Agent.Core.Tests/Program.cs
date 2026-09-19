@@ -1387,6 +1387,26 @@ try
     }
 
     {
+        // The Mac Agent's settings file carries fields this one has never had,
+        // and its own source says a value that is neither applied nor named as
+        // ignored must not exist. Windows used to drop them silently while
+        // reporting how many settings it had applied.
+        var fromMac = System.Text.Encoding.UTF8.GetBytes("""
+            {"version":1,"language":"japanese","retentionDays":30,
+             "hubDeliveryEnabled":true,"readServerNameFromHandshake":false}
+            """);
+        var (settings, ignored) = AgentSettingsFile.Read(fromMac);
+        Assert(settings.Language == "japanese" && settings.RetentionDays == 30,
+            "a settings file written elsewhere still applies the fields this Agent shares");
+        Assert(ignored.SequenceEqual(["hubDeliveryEnabled", "readServerNameFromHandshake"]),
+            "fields this Agent has no setting for are named, not dropped in silence");
+
+        var ours = AgentSettingsFile.Encode(new AgentSettingsFile(AgentSettingsFile.CurrentSchemaVersion, Language: "english"));
+        Assert(AgentSettingsFile.Read(ours).Ignored.Count == 0,
+            "a file this Agent wrote itself reports nothing ignored");
+    }
+
+    {
         // Ported from the Mac Agent with its thresholds intact. The same
         // laptop must not be called unusual on one platform and ordinary on
         // the other, so these assertions mirror the Swift tests case for case.
@@ -1684,7 +1704,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, and outbound anomalies");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, and portable settings");
     return 0;
 }
 finally

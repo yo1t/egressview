@@ -33,11 +33,20 @@ internal static class AgentSettings
         "HubDelivery" => ReadBool("NotifyHubDelivery", false),
         "ThreatIntel" => ReadBool("NotifyThreatIntel", true),
         "Recovery" => ReadBool("NotifyRecovery", true),
+        "OutboundAnomaly" => ReadBool("NotifyOutboundAnomaly", true),
         _ => true,
     };
 
+    /// The newest anomaly window already announced, so a finding is mentioned
+    /// once rather than at every poll and again after every restart.
+    internal static DateTimeOffset LastAnnouncedAnomalyAt
+    {
+        get => DateTimeOffset.TryParse(Read("LastAnnouncedAnomalyAt"), out var value) ? value : DateTimeOffset.MinValue;
+        set => Write("LastAnnouncedAnomalyAt", value.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+    }
+
     internal static void SetNotificationCategory(string kind, bool enabled) =>
-        Write(kind switch { "Threat" => "NotifyThreat", "Monitoring" => "NotifyMonitoring", "HubDelivery" => "NotifyHubDelivery", "ThreatIntel" => "NotifyThreatIntel", "Recovery" => "NotifyRecovery", _ => throw new ArgumentOutOfRangeException(nameof(kind)) }, enabled ? "1" : "0");
+        Write(kind switch { "Threat" => "NotifyThreat", "Monitoring" => "NotifyMonitoring", "HubDelivery" => "NotifyHubDelivery", "ThreatIntel" => "NotifyThreatIntel", "Recovery" => "NotifyRecovery", "OutboundAnomaly" => "NotifyOutboundAnomaly", _ => throw new ArgumentOutOfRangeException(nameof(kind)) }, enabled ? "1" : "0");
 
     internal static int GlobeFrameRate
     {
