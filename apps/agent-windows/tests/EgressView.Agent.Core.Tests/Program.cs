@@ -1567,6 +1567,15 @@ try
                 "a full read that has never happened is owed, and said to be owed");
             Assert(store.VerifyIntegrityInBackground() == "ok",
                 "the full read runs on its own connection and answers");
+            // Reopening must not forget the answer: a bundle that says
+            // "unverified" beside the time it was verified states two things
+            // that cannot both be true.
+            store.Dispose();
+        }
+        using (var store = new ObservationStore(depthDatabase))
+        {
+            Assert(store.LastVerifiedIntegrity == "ok" && store.LastDeepIntegrityCheckAt is not null,
+                "an open that trusts the last run still reports what the last full read found");
             Assert(!store.BackgroundIntegrityCheckDue,
                 "once the full read has happened it is no longer owed");
             store.BeginRun(RunComponent.Service, "0.1.0");
