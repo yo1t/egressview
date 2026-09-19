@@ -56,6 +56,50 @@ foreach (var (windowsKey, macEnglish) in sharedWording)
         SharedResource(windowsJapanese, windowsKey) == macValue,
         $"Shared wording Japanese drifted: {windowsKey}");
 }
+// The icons still match the artwork they were drawn from.
+//
+// design/icons holds the mark both agents build from; the .ico files beside
+// the Windows UI are generated from it by tools/make-icons and committed,
+// because the build needs them and CI cannot run a macOS render script.
+// Committed output drifts the moment the source is edited and nobody
+// remembers, so the colours are tied back here: change the SVG and this fails
+// until the icons are regenerated.
+{
+    var iconRoot = Path.Combine(windowsRoot, "src", "EgressView.Agent.Ui", "Assets");
+    var markSvg = File.ReadAllText(Path.Combine(windowsRoot, "..", "..", "design", "icons", "egressview-mark.svg"));
+    foreach (var colour in new[] { "#0b1424", "#4d94ff", "#24d6a2" })
+        Assert(markSvg.Contains(colour, StringComparison.OrdinalIgnoreCase),
+            $"the mark still uses {colour}; if the artwork moved on, regenerate the icons with tools/make-icons");
+
+    string[] expected = ["egressview", "tray-monitoring", "tray-stopped", "tray-attention", "tray-unavailable"];
+    foreach (var name in expected)
+    {
+        var path = Path.Combine(iconRoot, name + ".ico");
+        Assert(File.Exists(path), $"{name}.ico is present, because the window and the tray load it by name");
+        var bytes = File.ReadAllBytes(path);
+        Assert(bytes.Length > 1000 && bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 1 && bytes[3] == 0,
+            $"{name}.ico is an icon container rather than whatever else ended up at that path");
+        var frames = bytes[4] | (bytes[5] << 8);
+        Assert(frames >= 7, $"{name}.ico carries every size it is asked for, rather than one that gets scaled");
+
+        // Sizes are declared in the directory, one entry every sixteen bytes.
+        var sizes = Enumerable.Range(0, frames).Select(index => (int)bytes[6 + index * 16]).ToArray();
+        Assert(sizes.Contains(16) && sizes.Contains(32),
+            $"{name}.ico has the sizes the tray and the title bar actually draw");
+        // 256 is written as 0, which is the format's way of saying it.
+        if (name == "egressview")
+            Assert(sizes.Contains(0), "the app icon has the 256 size Explorer shows at its largest");
+    }
+
+    // The tray states are told apart by shape, as on the Mac, so they cannot
+    // all be the same drawing.
+    var monitoring = File.ReadAllBytes(Path.Combine(iconRoot, "tray-monitoring.ico"));
+    var stopped = File.ReadAllBytes(Path.Combine(iconRoot, "tray-stopped.ico"));
+    var attention = File.ReadAllBytes(Path.Combine(iconRoot, "tray-attention.ico"));
+    Assert(!monitoring.SequenceEqual(stopped) && !stopped.SequenceEqual(attention) && !monitoring.SequenceEqual(attention),
+        "the three tray states are three different icons, not one icon under three names");
+}
+
 // Every string that takes a value in one language takes it in the other.
 //
 // A sed that was meant for one string replaced "{0}" with the word PLACEHOLDER
@@ -292,6 +336,57 @@ try
         Assert(packageVerifier.Calls == 2, "the verified MSI is hashed and signature-checked again immediately before launch");
         Assert(updateHandler.UserAgents.All(value => value == "EgressViewAgent/1.0.0 (Windows 10.0.26100)") && !updateHandler.SawCookie,
             "update checks disclose only the Agent and Windows versions and never send cookies");
+    }
+
+    // A release nobody signed: the Agent says where to get it rather than
+    // installing it. Until the packages carry an Authenticode signature this
+    // is the only honest answer -- anyone able to answer for the update origin
+    // could otherwise hand this machine an installer to run as administrator.
+    {
+        var manifestWithoutPackages = JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            platform = "windows",
+            version = "9.8.7",
+            releasedAt = DateTimeOffset.UtcNow,
+            packages = Array.Empty<object>(),
+        });
+        var verifier = new TestPackageVerifier();
+        using var client = new WindowsAgentUpdateClient(new UpdateHandler(manifestWithoutPackages, []),
+            verifier: verifier, manifestVerifier: new AcceptManifestVerifier());
+        var decision = await client.CheckAsync("1.0.0", "10.0.26100");
+        Assert(decision.Kind == AgentUpdateDecisionKind.DownloadManually && decision.PublishedVersion == "9.8.7",
+            "a release with nothing to install still reports the version that exists");
+        Assert(decision.Candidate is null && verifier.Calls == 0,
+            "nothing is downloaded and nothing is verified, because there is nothing being offered");
+        Assert(client.DownloadPage.Scheme == "https" && client.DownloadPage.Host == "dl.egressview.com",
+            "the page offered is the origin the manifest came from, over HTTPS");
+
+        var older = await client.CheckAsync("9.9.9", "10.0.26100");
+        Assert(older.Kind == AgentUpdateDecisionKind.UpToDate,
+            "and a build that is already newer is still simply up to date");
+    }
+
+    // The relaxation goes exactly this far. A package that IS offered has to
+    // be wholly valid: turning a malformed or unsigned one into "fetch it
+    // yourself" would hide a manifest fault behind a helpful-looking message.
+    {
+        var unsigned = JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            platform = "windows",
+            version = "9.8.7",
+            releasedAt = DateTimeOffset.UtcNow,
+            packages = new[] { new { arch = WindowsAgentUpdateClient.HostArch, packageType = "msi",
+                url = "https://dl.egressview.com/windows/EgressView.msi",
+                sha256 = new string('a', 64), sizeBytes = 1024, publisher = "" } },
+        });
+        using var client = new WindowsAgentUpdateClient(new UpdateHandler(unsigned, []),
+            verifier: new TestPackageVerifier(), manifestVerifier: new AcceptManifestVerifier());
+        var rejected = false;
+        try { await client.CheckAsync("1.0.0", "10.0.26100"); }
+        catch (InvalidDataException exception) { rejected = exception.Message == "package-publisher-invalid"; }
+        Assert(rejected, "a package offered without a publisher is a fault, not an invitation to download by hand");
     }
 
     var uninstallCredential = new AgentCredential(new Uri("https://hub.example/"), Guid.NewGuid(), $"egva_{new string('a', 64)}", DateTimeOffset.UtcNow);
@@ -1005,8 +1100,20 @@ try
                     $"{path} lists every key in the sent JSON payload");
             }
             var downloadPage = File.ReadAllText(Path.Combine(windowsRoot, "..", "..", "site", "dl", "index.html"));
-            Assert(sentKeys.All(key => downloadPage.Contains(key, StringComparison.Ordinal)),
-                "the download page lists every key in the sent JSON payload");
+            // The list used to be on the download page. It moved to the privacy
+            // note, which is where the page and the footer now point and where
+            // someone auditing would look; the page reads better without a
+            // column of JSON keys in it. What must not change is that every key
+            // the sender actually serialises is disclosed somewhere a reader
+            // can reach, which is what this has always checked.
+            foreach (var note in new[] { "agent-privacy-windows.md", "agent-privacy-windows.ja.md" })
+            {
+                var text = File.ReadAllText(Path.Combine(windowsRoot, "..", "..", "docs", note));
+                Assert(sentKeys.All(key => text.Contains($"`{key}`", StringComparison.Ordinal)),
+                    $"docs/{note} lists every key in the sent JSON payload");
+            }
+            Assert(!sentKeys.Contains("schemaVersion") || !downloadPage.Contains("schemaVersion", StringComparison.Ordinal),
+                "and the download page no longer carries the list, so the two cannot drift apart");
             var updateAgent = WindowsAgentUpdateClient.UserAgent("1.2.3", "11.0");
             Assert(updateAgent.Contains("1.2.3", StringComparison.Ordinal) && updateAgent.Contains("11.0", StringComparison.Ordinal) &&
                 downloadPage.Contains("dl.egressview.com", StringComparison.Ordinal) &&

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EgressView Agent for macOS — Downloads</title>
-<meta name="description" content="Download the EgressView Agent for macOS. Signed, notarised, and verifiable against a published checksum.">
+<title>EgressView Agent — Downloads for macOS and Windows</title>
+<meta name="description" content="Download the EgressView Agent for macOS or Windows. Records every outbound destination, metadata only, and the record stays on your machine.">
 <meta name="color-scheme" content="dark light">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='114' fill='%230b1424'/%3E%3Cg fill='%234d94ff'%3E%3Crect x='86' y='86' width='80' height='340' rx='19'/%3E%3Crect x='86' y='86' width='210' height='80' rx='19'/%3E%3Crect x='86' y='216' width='130' height='80' rx='19'/%3E%3Crect x='86' y='346' width='210' height='80' rx='19'/%3E%3C/g%3E%3Ccircle cx='386' cy='126' r='40' fill='%2324d6a2'/%3E%3Ccircle cx='386' cy='256' r='25' fill='%234d94ff'/%3E%3Ccircle cx='386' cy='386' r='25' fill='%234d94ff'/%3E%3C/svg%3E">
 <style>
@@ -79,7 +79,27 @@
     transform:translateY(-1px)}
   .btn:active{transform:translateY(0)}
   .btn svg{width:18px;height:18px;flex:none}
+  .btn-secondary{background:transparent; color:var(--text);
+    border-color:var(--border)}
+  .btn-secondary:hover{background:var(--surface-2); color:var(--text)}
+  /* A platform with nothing published yet: still shown, so the page says
+     which platforms exist, but not pretending to be a link. */
+  .btn[aria-disabled="true"]{opacity:.5; pointer-events:none}
+  .cta-meta{margin-top:12px; gap:14px}
   .btn-meta{color:var(--muted); font-size:.9rem}
+  /* Two columns of steps, one per platform, side by side where there is room
+     and stacked where there is not. */
+  .platforms{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+  .platform{background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); padding:20px 22px}
+  .platform h3{margin:0 0 4px; font-size:1rem; font-weight:620}
+  .platform .req{margin:0 0 14px; color:var(--muted); font-size:.87rem}
+  .platform ol{margin:0; padding-left:1.15rem; color:var(--muted); font-size:.93rem}
+  .platform li{margin-bottom:9px}
+  .platform strong{color:var(--text); font-weight:600}
+  .note{border-left:3px solid #d29922; padding:2px 0 2px 14px; margin:20px 0 0;
+    color:var(--muted); font-size:.92rem}
+  .note strong{color:var(--text)}
   .btn-meta code{font-family:var(--mono); color:var(--text)}
 
   section{padding:56px 0}
@@ -149,7 +169,7 @@
         <circle cx="386" cy="256" r="25" fill="#4d94ff"/>
         <circle cx="386" cy="386" r="25" fill="#4d94ff"/>
       </svg>
-      <b>EgressView</b><span data-en="Agent for macOS" data-ja="Agent for macOS">Agent for macOS</span>
+      <b>EgressView</b><span data-en="Agent" data-ja="Agent">Agent</span>
       <div class="lang" role="group" aria-label="Language">
         <button type="button" data-lang="en" aria-pressed="true">English</button>
         <button type="button" data-lang="ja" aria-pressed="false">日本語</button>
@@ -157,19 +177,33 @@
     </div>
 
     <h1 data-ja="あなたの使っているアプリは<br>誰と通信していますか？">The apps you use —<br>who are they talking to?</h1>
-    <p class="lede" data-ja="あなたの使っているMacにEgressView Agentをインストールすると、外向きの接続先をすべて記録します。&lt;strong&gt;メタデータのみ。通信内容は読みません。&lt;/strong&gt;そして、&lt;strong&gt;その記録はあなた自身が管理します。&lt;/strong&gt;">Install EgressView Agent on your Mac and it records every outbound
-      destination. <strong>Metadata only — it never reads what you send.</strong>
+    <p class="lede" data-ja="あなたの使っているMacやPCにEgressView Agentをインストールすると、外向きの接続先をすべて記録します。&lt;strong&gt;メタデータのみ。通信内容は読みません。&lt;/strong&gt;そして、&lt;strong&gt;その記録はあなた自身が管理します。&lt;/strong&gt;">Install EgressView Agent on your Mac or your PC and it records every
+      outbound destination. <strong>Metadata only — it never reads what you send.</strong>
       And <strong>the record stays yours to keep.</strong></p>
 
-    <div class="cta">
-      <a class="btn" id="download" href="/macos/manifest.json">
+    <!-- Both platforms, always both visible. The one you are on is the filled
+         button; the other is still a button and not a footnote, because
+         someone downloading for a machine they are not sitting at is the
+         ordinary case in a fleet. -->
+    <div class="cta" id="downloads">
+      <a class="btn" id="download-macos" href="/macos/manifest.json">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M4 21h16"/>
         </svg>
-        <span id="download-label">Download for macOS</span>
+        <span id="download-macos-label">Download for macOS</span>
       </a>
-      <span class="btn-meta" id="meta">Apple silicon · macOS 13 or later</span>
+      <a class="btn btn-secondary" id="download-windows" href="/windows/manifest.json">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M4 21h16"/>
+        </svg>
+        <span id="download-windows-label">Download for Windows</span>
+      </a>
+    </div>
+    <div class="cta cta-meta">
+      <span class="btn-meta" id="meta-macos">Apple silicon · macOS 13 or later</span>
+      <span class="btn-meta" id="meta-windows">x64 · Windows 10 or later</span>
     </div>
   </div>
 </header>
@@ -197,7 +231,7 @@
     </div>
     <div class="card">
       <h3 data-ja="問い合わせのために何も送りません">Nothing is sent to be looked up</h3>
-      <p data-ja="脅威情報も位置情報も、一覧ごとこのMacへ届き、照合はここで行います。あなたの通信先を、身元確認のために外へ送ることはありません。">Threat lists and locations come to your Mac and the matching happens here. No destination of yours is sent anywhere to be identified.</p>
+      <p data-ja="脅威情報も位置情報も、一覧ごとこの端末へ届き、照合はここで行います。あなたの通信先を、身元確認のために外へ送ることはありません。Hubへ送る項目の一覧を含め、何をどこへ送るかは全て書いてあります: &lt;a href=&quot;https://www.egressview.com/docs/agent-privacy.ja.html&quot;&gt;macOS版&lt;/a&gt; · &lt;a href=&quot;https://www.egressview.com/docs/agent-privacy-windows.ja.html&quot;&gt;Windows版&lt;/a&gt;。">Threat lists and locations come to your machine and the matching happens there. No destination of yours is sent anywhere to be identified. What is sent, and where, for <a href="https://www.egressview.com/docs/agent-privacy.html">macOS</a> and <a href="https://www.egressview.com/docs/agent-privacy-windows.html">Windows</a>: every connection the agent makes and every field a Hub receives.</p>
     </div>
     <div class="card">
       <h3 data-ja="単体でも使えます">Works on its own</h3>
@@ -206,31 +240,49 @@
   </div>
 </section>
 
-<section class="wrap" id="windows-disclosure">
-  <h2 data-ja="Windows Agent: Hub送信と更新確認">Windows Agent: Hub delivery and update checks</h2>
-  <p data-ja="Windows版の配布リンクは現在準備中です。Hub登録だけでは観測データを送信せず、アプリ内で明示的に有効にした場合のみ送ります。通信内容・パケット本体は送りません。">The Windows download link is being prepared. Hub enrollment alone does not send observations; delivery starts only after you explicitly enable it in the app. Packet contents are never sent.</p>
-  <p data-ja="送信するJSON項目: schemaVersion, batchId, sentAt, agent (hostName, platform, osVersion, agentVersion), observations (observationId, networkProtocol, localAddress, localPort, remoteAddress, remotePort, processID, processName, bundleID, firstObservedAt, lastObservedAt, bytesIn, bytesOut, collector, confidence)。remoteHostnameはHubが対応を通知したときだけ追加します。認証用Bearer tokenはそのHubへ送ります。">JSON fields sent: schemaVersion, batchId, sentAt, agent (hostName, platform, osVersion, agentVersion), observations (observationId, networkProtocol, localAddress, localPort, remoteAddress, remotePort, processID, processName, bundleID, firstObservedAt, lastObservedAt, bytesIn, bytesOut, collector, confidence). remoteHostname is added only when the Hub advertises support. The Bearer token authenticates to that Hub.</p>
-  <p data-ja="別途の更新確認はdl.egressview.comへ接続し、User-AgentにAgentとWindowsのバージョンを含めます。送信元IPは接続先に見えますが、観測データとHub資格情報は送りません。">Separate update checks contact dl.egressview.com and include the Agent and Windows versions in User-Agent. The server sees the source IP, but receives no observations or Hub credentials.</p>
-</section>
+
 
 <section class="wrap">
   <h2 data-ja="インストール">Installing</h2>
-  <ol class="steps">
-    <li data-ja="&lt;strong&gt;.pkg&lt;/strong&gt;を開き、インストーラに従ってください。アプリケーションへ配置され、そのまま起動します。">Open the <strong>.pkg</strong> and follow the installer. It places the agent in Applications and starts it.</li>
-    <li data-ja="メニューバーのアイコンから&lt;strong&gt;ネットワーク監視&lt;/strong&gt;を選びます。macOSがSystem Extensionの承認を求めます（初回のみ）。">Choose <strong>Network monitoring</strong> from the menu bar icon. macOS asks you to approve a System Extension — once.</li>
-    <li data-ja="任意: EgressView Hubが自分の環境にインストールされているのであれば、Agentを登録できます。&lt;strong&gt;Agentは単独でも動作するので、なくても問題ありません。&lt;/strong&gt;EgressView Hubに登録を終えるまで&lt;strong&gt;外部への送信は無効&lt;/strong&gt;で、送信先と「何を送り、何を送らないか」を先に画面で示します。">Optional: if you run an EgressView Hub, you can enrol this agent with it. <strong>The agent works on its own, so you do not need one.</strong> Until you finish enrolling, <strong>nothing is sent anywhere</strong>, and the agent shows you the destination and exactly what will and will not be sent before anything leaves.</li>
-  </ol>
-  <p style="color:var(--muted); margin:22px 0 0" data-ja="更新はAgent自身が提示し、同じ手順で入ります。System Extensionの再承認は不要です。詳しい手順は&lt;a href=&quot;https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.ja.md&quot;&gt;導入ガイド&lt;/a&gt;にあります。">Updates are offered by the agent
-    itself and install the same way. Approving the System Extension again is not
-    required. Full instructions are in the
-    <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.md">install
-    guide</a>.</p>
+  <div class="platforms">
+    <div class="platform">
+      <h3>macOS</h3>
+      <p class="req" data-ja="Apple silicon · macOS 13以降">Apple silicon · macOS 13 or later</p>
+      <ol>
+        <li data-ja="&lt;strong&gt;.pkg&lt;/strong&gt;を開き、インストーラに従ってください。アプリケーションへ配置され、そのまま起動します。">Open the <strong>.pkg</strong> and follow the installer. It places the agent in Applications and starts it.</li>
+        <li data-ja="メニューバーのアイコンから&lt;strong&gt;ネットワーク監視&lt;/strong&gt;を選びます。macOSがSystem Extensionの承認を求めます（初回のみ）。">Choose <strong>Network monitoring</strong> from the menu bar icon. macOS asks you to approve a System Extension — once.</li>
+        <li data-ja="更新はAgent自身が提示し、同じ手順で入ります。System Extensionの再承認は不要です。">Updates are offered by the agent itself and install the same way. Approving the System Extension again is not required.</li>
+      </ol>
+    </div>
+    <div class="platform">
+      <h3>Windows</h3>
+      <p class="req" data-ja="x64 · Windows 10以降 · .NETの事前導入は不要">x64 · Windows 10 or later · no .NET runtime to install first</p>
+      <ol>
+        <li data-ja="&lt;strong&gt;.msi&lt;/strong&gt;を実行します。管理者への昇格を求められます。監視はWindowsサービスとして動くため、承認はこの一度だけです。">Run the <strong>.msi</strong>. Windows asks for administrator approval once: monitoring runs as a Windows service.</li>
+        <li data-ja="通信の記録はサービスが行い、画面は別のアプリです。&lt;strong&gt;画面を閉じても記録は続きます。&lt;/strong&gt;">The service does the recording and the window is a separate application. <strong>Closing the window does not stop the recording.</strong></li>
+        <li data-ja="現時点では、新しい版はこのページから取得して実行してください。Agentは新しい版があることを知らせますが、自分ではインストールしません。">For now, new versions are downloaded from this page and run by hand. The agent tells you when one exists; it does not install it for you.</li>
+      </ol>
+    </div>
+  </div>
+  <div class="platforms" style="margin-top:16px">
+    <div class="platform">
+      <h3 data-ja="任意: Hubへの登録">Optional: enrolling with a Hub</h3>
+      <p class="req" data-ja="macOS版・Windows版とも同じ">The same on both</p>
+      <ol>
+        <li data-ja="EgressView Hubが自分の環境にあるなら、Agentを登録できます。&lt;strong&gt;Agentは単独でも動作するので、なくても問題ありません。&lt;/strong&gt;">If you run an EgressView Hub, you can enrol this agent with it. <strong>The agent works on its own, so you do not need one.</strong></li>
+        <li data-ja="登録を終えるまで&lt;strong&gt;外部への送信は無効&lt;/strong&gt;です。送信先と「何を送り、何を送らないか」を先に画面で示し、&lt;strong&gt;内容を理解したことを確認してから&lt;/strong&gt;でなければ登録できません。">Until you finish enrolling, <strong>nothing is sent anywhere</strong>. The agent shows the destination and exactly what will and will not be sent, and <strong>you confirm you have read it</strong> before enrolment can start.</li>
+      </ol>
+    </div>
+  </div>
+  <p style="color:var(--muted); margin:22px 0 0" data-ja="詳しい手順: &lt;a href=&quot;https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.ja.md&quot;&gt;macOS版&lt;/a&gt; · &lt;a href=&quot;https://github.com/yo1t/egressview/blob/main/apps/agent-windows/README.md&quot;&gt;Windows版&lt;/a&gt;">Full instructions:
+    <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.md">macOS</a> ·
+    <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-windows/README.en.md">Windows</a>.</p>
 </section>
 <section class="wrap">
   <h2 data-ja="このアプリの検証方法">How to verify this app</h2>
   <div class="verify">
     <div class="verify-head"><span class="dot"></span>
-      <span data-ja="Developer IDで署名し、Appleの公証を受け、staple済みです。">Signed by Developer ID, notarised by Apple, and stapled.</span></div>
+      <span data-ja="macOS版: Developer IDで署名し、Appleの公証を受け、staple済みです。">macOS: signed by Developer ID, notarised by Apple, and stapled.</span></div>
 <pre><span class="c"># the checksum published in the update manifest</span>
 curl -s https://dl.egressview.com/macos/manifest.json
 
@@ -240,6 +292,20 @@ shasum -a 256 ~/Downloads/egressview-agent-<span id="v">VERSION</span>.pkg
 <span class="c"># and what macOS itself thinks of it</span>
 spctl --assess --type install --verbose=4 ~/Downloads/egressview-agent-<span id="v2">VERSION</span>.pkg</pre>
   </div>
+
+  <!-- Said plainly rather than left for someone to discover at the SmartScreen
+       prompt. A page that shows a verification recipe for one platform and
+       goes quiet about the other invites the reader to assume both were
+       checked the same way. -->
+  <div class="verify" style="margin-top:20px">
+    <div class="verify-head"><span class="dot" style="background:#d29922"></span>
+      <span data-ja="Windows版はまだコード署名していません。ダウンロード時にSmartScreenが「発行元不明」と警告します。照合はSHA-256で行ってください。">Windows: these builds are not yet code-signed. SmartScreen will warn that the publisher is unknown. Check the SHA-256 instead.</span></div>
+<pre><span class="c"># the checksum published in the update manifest</span>
+curl.exe -s https://dl.egressview.com/windows/manifest.json
+
+<span class="c"># the file you actually downloaded — the two must match</span>
+Get-FileHash -Algorithm SHA256 $HOME\Downloads\EgressView-Agent-Windows-<span id="vw">VERSION</span>-x64.msi</pre>
+  </div>
 </section>
 
 </main>
@@ -248,7 +314,8 @@ spctl --assess --type install --verbose=4 ~/Downloads/egressview-agent-<span id=
   <div class="wrap">
     <span>EgressView</span>
     <a href="https://www.egressview.com/" data-ja="EgressViewとは">What EgressView is</a>
-    <a href="https://www.egressview.com/docs/agent-privacy.html" data-ja="このAgentが送るもの">What this agent sends</a>
+    <a href="https://www.egressview.com/docs/agent-privacy.html" data-ja="Agentが送るもの（macOS）">What the macOS agent sends</a>
+    <a href="https://www.egressview.com/docs/agent-privacy-windows.html" data-ja="Agentが送るもの（Windows）">What the Windows agent sends</a>
     <a href="https://github.com/yo1t/egressview" data-ja="ソースコード">Source</a>
     <a href="https://github.com/yo1t/egressview/releases" data-ja="リリースノート">Release notes</a>
     <a href="https://github.com/yo1t/egressview/blob/main/apps/agent-macos/README.md" data-ja="導入ガイド">Install guide</a>
@@ -275,8 +342,8 @@ spctl --assess --type install --verbose=4 ~/Downloads/egressview-agent-<span id=
     buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
     document.documentElement.lang = lang;
     document.title = lang === 'ja'
-      ? 'EgressView Agent for macOS — ダウンロード'
-      : 'EgressView Agent for macOS — Downloads';
+      ? 'EgressView Agent — macOS / Windows ダウンロード'
+      : 'EgressView Agent — Downloads for macOS and Windows';
     try { localStorage.setItem('egressview.lang', lang); } catch (e) { /* private mode */ }
     setMeta(lang);
   }
@@ -294,35 +361,94 @@ spctl --assess --type install --verbose=4 ~/Downloads/egressview-agent-<span id=
   if (initial === 'ja') apply('ja');
 })();
 
-// The version, size and link come from the manifest the agent itself polls, so
-// this page cannot drift from what is actually being served.
-fetch('/macos/manifest.json', {cache: 'no-store'})
-  .then(r => r.ok ? r.json() : Promise.reject(r.status))
-  .then(m => {
-    const pkg = (m.packages || []).find(p => p.arch === 'arm64') || (m.packages || [])[0];
-    if (!pkg) return;
-    const a = document.getElementById('download');
-    a.href = pkg.url;
-    const mb = (pkg.sizeBytes / 1048576).toFixed(1);
-    const label = document.getElementById('download-label');
-    const meta = document.getElementById('meta');
-    const paint = lang => {
-      label.textContent = lang === 'ja'
-        ? m.version + ' をダウンロード'
-        : 'Download ' + m.version + ' for macOS';
-      meta.textContent = lang === 'ja'
-        ? 'Apple silicon · macOS 13以降 · ' + mb + ' MB'
-        : 'Apple silicon · macOS 13 or later · ' + mb + ' MB';
+// The version, size and link come from the manifest each agent itself polls,
+// so this page cannot drift from what is actually being served. One platform
+// can be published while the other is not, and the page says so rather than
+// offering a link to nothing.
+(function () {
+  const strings = {
+    macos: {
+      en: v => 'Download ' + v + ' for macOS',
+      ja: v => v + ' をダウンロード（macOS）',
+      metaEn: mb => 'Apple silicon · macOS 13 or later' + (mb ? ' · ' + mb + ' MB' : ''),
+      metaJa: mb => 'Apple silicon · macOS 13以降' + (mb ? ' · ' + mb + ' MB' : ''),
+      soonEn: 'macOS build in preparation', soonJa: 'macOS版は準備中',
+      arch: p => p.arch === 'arm64',
+    },
+    windows: {
+      en: v => 'Download ' + v + ' for Windows',
+      ja: v => v + ' をダウンロード（Windows）',
+      metaEn: mb => 'x64 · Windows 10 or later' + (mb ? ' · ' + mb + ' MB' : ''),
+      metaJa: mb => 'x64 · Windows 10以降' + (mb ? ' · ' + mb + ' MB' : ''),
+      soonEn: 'Windows build in preparation', soonJa: 'Windows版は準備中',
+      arch: p => p.arch === 'x64',
+    },
+  };
+  const painters = [];
+
+  function load(platform) {
+    const t = strings[platform];
+    const link = document.getElementById('download-' + platform);
+    const label = document.getElementById('download-' + platform + '-label');
+    const meta = document.getElementById('meta-' + platform);
+    if (!link || !label || !meta) return;
+
+    // Until a manifest answers, the button says what it is rather than
+    // pretending to be ready. Nothing here invents a version number.
+    const unavailable = () => {
+      link.setAttribute('aria-disabled', 'true');
+      link.removeAttribute('href');
+      const paint = lang => {
+        label.textContent = lang === 'ja' ? t.soonJa : t.soonEn;
+        meta.textContent = lang === 'ja' ? t.metaJa(null) : t.metaEn(null);
+      };
+      painters.push(paint);
+      paint(document.documentElement.lang === 'ja' ? 'ja' : 'en');
     };
-    paint(document.documentElement.lang === 'ja' ? 'ja' : 'en');
-    if (window.__egvSetMetaHook) window.__egvSetMetaHook(paint);
-    document.getElementById('v').textContent = m.version;
-    document.getElementById('v2').textContent = m.version;
-  })
-  .catch(() => {
-    // Leave the fallback text. A page that invents a version number when it
-    // cannot reach the manifest would be worse than one that says nothing.
-  });
+
+    fetch('/' + platform + '/manifest.json', {cache: 'no-store'})
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(m => {
+        const pkg = (m.packages || []).find(t.arch) || (m.packages || [])[0];
+        if (!pkg) { unavailable(); return; }
+        link.href = pkg.url;
+        const mb = (pkg.sizeBytes / 1048576).toFixed(1);
+        const paint = lang => {
+          label.textContent = lang === 'ja' ? t.ja(m.version) : t.en(m.version);
+          meta.textContent = lang === 'ja' ? t.metaJa(mb) : t.metaEn(mb);
+        };
+        painters.push(paint);
+        paint(document.documentElement.lang === 'ja' ? 'ja' : 'en');
+        const version = id => { const n = document.getElementById(id); if (n) n.textContent = m.version; };
+        if (platform === 'macos') { version('v'); version('v2'); } else { version('vw'); }
+      })
+      .catch(unavailable);
+  }
+
+  load('macos');
+  load('windows');
+  if (window.__egvSetMetaHook) window.__egvSetMetaHook(lang => painters.forEach(p => p(lang)));
+
+  // The machine you are on goes first. Both stay visible: downloading for a
+  // machine you are not sitting at is ordinary in a fleet, and hiding the
+  // other platform would make the page look like it supports one.
+  const ua = navigator.userAgent || '';
+  const windowsFirst = /Windows NT/i.test(ua);
+  if (windowsFirst) {
+    const row = document.getElementById('downloads');
+    const win = document.getElementById('download-windows');
+    const mac = document.getElementById('download-macos');
+    if (row && win && mac) {
+      row.insertBefore(win, mac);
+      win.classList.remove('btn-secondary');
+      mac.classList.add('btn-secondary');
+      const metaRow = document.querySelector('.cta-meta');
+      const metaWin = document.getElementById('meta-windows');
+      const metaMac = document.getElementById('meta-macos');
+      if (metaRow && metaWin && metaMac) metaRow.insertBefore(metaWin, metaMac);
+    }
+  }
+})();
 </script>
 </body>
 </html>

@@ -16,7 +16,19 @@ public sealed record AgentUpdateManifest(int SchemaVersion, string Platform, str
 public sealed record AgentUpdateCandidate(string Version, AgentUpdatePackage Package, string UserAgent);
 public sealed record VerifiedAgentUpdate(string Version, string Path, string Publisher, long SizeBytes, string Sha256);
 
-public enum AgentUpdateDecisionKind { UpToDate, UpdateAvailable }
+/// <summary>What the update check concluded.</summary>
+/// <remarks>
+/// DownloadManually exists because a build that is not Authenticode-signed
+/// cannot be installed by the Agent: DownloadAndVerifyAsync refuses an
+/// unsigned package, and rightly so -- anyone able to answer for the update
+/// origin could otherwise hand this machine an installer to run as
+/// administrator. Until the packages are signed, the Agent can still say
+/// truthfully that a newer version exists and where to get it.
+///
+/// The manifest itself is signed either way, so the version being reported is
+/// not something an attacker can invent.
+/// </remarks>
+public enum AgentUpdateDecisionKind { UpToDate, UpdateAvailable, DownloadManually }
 public sealed record AgentUpdateDecision(AgentUpdateDecisionKind Kind, string PublishedVersion, AgentUpdateCandidate? Candidate);
 
 public readonly record struct AgentSemanticVersion(int Major, int Minor, int Patch, string? Prerelease) : IComparable<AgentSemanticVersion>
@@ -93,6 +105,10 @@ public sealed class WindowsAgentUpdateClient : IDisposable
 
     public static string CurrentVersion => Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "0.0.0";
     public static string HostArch => RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64";
+    /// The page a manual download comes from. The same origin the manifest was
+    /// read from, so the two cannot point at different places.
+    public Uri DownloadPage => new(origin, "windows/");
+
     public static string UserAgent(string version, string osVersion) => $"EgressViewAgent/{version} (Windows {osVersion})";
 
     public async Task<AgentUpdateDecision> CheckAsync(string currentVersion, string osVersion, CancellationToken cancellationToken = default)
@@ -110,8 +126,13 @@ public sealed class WindowsAgentUpdateClient : IDisposable
             throw new InvalidDataException("manifest-version-invalid");
         if (published.CompareTo(installed) <= 0) return new(AgentUpdateDecisionKind.UpToDate, manifest.Version, null);
         var package = manifest.Packages.SingleOrDefault(item => string.Equals(item.Arch, HostArch, StringComparison.Ordinal));
+        // No package offered for this machine is not a fault: it is a release
+        // the reader installs themselves. A package that is offered must still
+        // be wholly valid -- degrading a malformed or unsigned one into "go and
+        // fetch it yourself" would turn a manifest fault into silence.
+        if (package is null) return new(AgentUpdateDecisionKind.DownloadManually, manifest.Version, null);
         ValidatePackage(package);
-        return new(AgentUpdateDecisionKind.UpdateAvailable, manifest.Version, new(manifest.Version, package!, userAgent));
+        return new(AgentUpdateDecisionKind.UpdateAvailable, manifest.Version, new(manifest.Version, package, userAgent));
     }
 
     public async Task<VerifiedAgentUpdate> DownloadAndVerifyAsync(AgentUpdateCandidate candidate, string directory, CancellationToken cancellationToken = default)

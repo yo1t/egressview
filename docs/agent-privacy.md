@@ -1,5 +1,9 @@
 # What the EgressView Agent for macOS sends, and where
 
+This page lists **every** outbound connection the macOS agent makes. For
+Windows, see [the other one](agent-privacy-windows.md). They are the same
+product, but **they read destination names differently**.
+
 > [Japanese / 日本語](agent-privacy.ja.md)
 
 The agent watches outbound connections on your Mac. A tool with that job has to
@@ -49,6 +53,19 @@ not worth reading.
 
 Nothing in that request identifies you beyond the request itself: there is no
 installation ID, no account, and no observation data attached.
+
+### The fields sent to a Hub
+
+The table above says what is sent in words. These are the JSON field names
+actually sent. **The macOS and Windows agents send the same ones.**
+
+`schemaVersion`, `batchId`, `sentAt`, `agent` (`hostName`, `platform`, `osVersion`, `agentVersion`), `observations` (`observationId`, `networkProtocol`, `localAddress`, `localPort`, `remoteAddress`, `remotePort`, `processID`, `processName`, `bundleID`, `firstObservedAt`, `lastObservedAt`, `bytesIn`, `bytesOut`, `collector`, `confidence`)
+
+`remoteHostname` is added only when the Hub advertises support for it. The
+credential is sent as a Bearer token to that Hub.
+
+This is the same list the agent shows before enrolling. Enrolment cannot start
+until you confirm you have read it.
 
 ## Reading the destination name, and the one thing that is decrypted
 
