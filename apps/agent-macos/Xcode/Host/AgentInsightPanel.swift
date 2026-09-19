@@ -123,6 +123,21 @@ struct AgentInsightPanel: View {
             .labelsHidden()
             .frame(width: 190)
             .disabled(ollama.isRunning)
+
+            // The list is fetched when this screen appears, so a model pulled
+            // while it stayed open was invisible until the screen was closed
+            // and opened again.
+            if ollama.provider == .ollama {
+                Button {
+                    ollama.refreshAvailableModels(userInitiated: true)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(ollama.isRunning)
+                .help(L("Ask Ollama which models are installed now"))
+                .accessibilityLabel(L("Refresh model list"))
+            }
         }
         .controlSize(.small)
     }
