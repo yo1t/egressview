@@ -830,6 +830,184 @@ public partial class MainWindow : Window
         finally { PublicThreatFeedsEnabled.IsEnabled = true; }
     }
 
+    /// Reads the GeoIP.conf the MaxMind portal hands out.
+    ///
+    /// A file rather than two text boxes: the licence key is shown once, on a
+    /// page you cannot revisit, and retyping forty characters from memory is
+    /// where this goes wrong. The file is read here and passed straight to the
+    /// service, which is what stores it; the window keeps no copy.
+    private async void ChooseGeoIpConf_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Filter = "GeoIP.conf|GeoIP.conf;*.conf|" + LocalizationManager.Text("AllFiles") + "|*.*",
+            FileName = "GeoIP.conf",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        ChooseGeoIpConfButton.IsEnabled = false;
+        try
+        {
+            string configuration;
+            try { configuration = await File.ReadAllTextAsync(dialog.FileName, lifetime.Token); }
+            catch (Exception)
+            {
+                CountryTableFailure.Text = LocalizationManager.Text("CannotReadFile");
+                return;
+            }
+            await SendCountryTableAccountAsync(configuration);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        finally { ChooseGeoIpConfButton.IsEnabled = true; }
+    }
+
+    private async void RemoveCountryTable_Click(object sender, RoutedEventArgs e)
+    {
+        RemoveCountryTableButton.IsEnabled = false;
+        try { await SendCountryTableAccountAsync(null); }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        finally { RemoveCountryTableButton.IsEnabled = true; }
+    }
+
+    private async Task SendCountryTableAccountAsync(string? configuration)
+    {
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                JsonSerializer.Serialize(new { v = 1, op = "set-country-table-account", configuration }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            var root = document.RootElement;
+            if (root.TryGetProperty("status", out var status) && status.GetString() == "rejected")
+            {
+                var reason = root.TryGetProperty("reason", out var value) ? value.GetString() : null;
+                CountryTableFailure.Text = LocalizationManager.Text(
+                    reason == "no-maxmind-account" ? "CountryTableNoAccount" : "CannotConnect");
+                return;
+            }
+            EnsureAccepted(root);
+            CountryTableFailure.Text = string.Empty;
+            await RefreshEnrichmentStatusAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception) { CountryTableFailure.Text = LocalizationManager.Text("CannotConnect"); }
+    }
+
+    /// Says which of the two questions is unanswered: no account, or an
+    /// account with no working table. One line for both would leave the reader
+    /// unable to tell "you have not set this up" from "it is broken".
+    private void RenderCountryTable(JsonElement item)
+    {
+        if (CountryTableStatus is null) return;
+        var configured = item.TryGetProperty("configured", out var set) && set.GetBoolean();
+        var table = item.TryGetProperty("table", out var kind) ? kind.GetString() ?? "absent" : "absent";
+        var state = item.TryGetProperty("state", out var value) ? value.GetString() ?? "idle" : "idle";
+        var enabled = item.TryGetProperty("enabled", out var on) && on.GetBoolean();
+        var placed = item.TryGetProperty("placed", out var count) ? count.GetInt64() : 0;
+
+        loadingSettings = true;
+        try { CountryTableEnabled.IsChecked = enabled; }
+        finally { loadingSettings = false; }
+
+        CountryTableActions.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        RemoveCountryTableButton.IsEnabled = configured;
+        FetchCountryTableButton.IsEnabled = configured && state != "fetching";
+
+        var accountId = item.TryGetProperty("accountId", out var id) && id.ValueKind == JsonValueKind.String
+            ? id.GetString() : null;
+        CountryTableAccount.Text = !enabled ? string.Empty
+            : string.IsNullOrEmpty(accountId)
+                ? LocalizationManager.Text("NoMaxMindAccount")
+                : string.Format(LocalizationManager.Text("UsingMaxMindAccount"), accountId);
+
+        string status;
+        if (!enabled || !configured) status = string.Empty;
+        else if (state == "fetching") status = LocalizationManager.Text("CountryTableFetching");
+        else status = table switch
+        {
+            "ready" => $"{string.Format(LocalizationManager.Text("TableBuilt"), DateText(item, "builtAt"))} " +
+                       $"{LocalizationManager.Text("CountryTableExpires")}: {DateText(item, "expiresAt")}",
+            "expired" => LocalizationManager.Text("CountryTableExpired"),
+            "unreadable" => LocalizationManager.Text("CountryTableUnreadable"),
+            _ => LocalizationManager.Text("NoTableYet"),
+        };
+        CountryTableStatus.Text = status;
+
+        // Said as a sentence of its own, not folded into the status line:
+        // whether the table answers anything is a different question from
+        // whether it loaded, and it is the one that goes wrong quietly.
+        CountryTablePlacedNote.Text = enabled && table == "ready"
+            ? string.Format(LocalizationManager.Text("PlacedWithoutAsking"), placed) : string.Empty;
+
+        var failure = item.TryGetProperty("lastFailure", out var reason) && reason.ValueKind == JsonValueKind.String
+            ? reason.GetString() : null;
+        CountryTableFailure.Text = state == "failed" && failure is not null ? failure : string.Empty;
+
+        // The licence requires this wherever the data is shown.
+        CountryTableAttribution.Text = enabled && item.TryGetProperty("attribution", out var credit)
+            ? credit.GetString() ?? string.Empty : string.Empty;
+    }
+
+    /// Turning the table off leaves the account alone.
+    ///
+    /// Removing the account is a separate button, because someone switching
+    /// the feature off for a week should not have to find their licence key
+    /// again afterwards.
+    private async void CountryTableEnabled_Click(object sender, RoutedEventArgs e)
+    {
+        if (loadingSettings) return;
+        var wanted = CountryTableEnabled.IsChecked == true;
+        CountryTableEnabled.IsEnabled = false;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                JsonSerializer.Serialize(new { v = 1, op = "set-country-table-enabled", enabled = wanted }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            EnsureAccepted(document.RootElement);
+            await RefreshEnrichmentStatusAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception) { CountryTableEnabled.IsChecked = !wanted; }
+        finally { CountryTableEnabled.IsEnabled = true; }
+    }
+
+    private async void FetchCountryTable_Click(object sender, RoutedEventArgs e)
+    {
+        FetchCountryTableButton.IsEnabled = false;
+        try
+        {
+            await AgentIpcClient.RequestAsync("""{"v":1,"op":"refresh-enrichment","kind":"country"}""", lifetime.Token);
+            await RefreshEnrichmentStatusAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception) { CountryTableFailure.Text = LocalizationManager.Text("CannotConnect"); }
+        finally { FetchCountryTableButton.IsEnabled = true; }
+    }
+
+    /// One fetch now, which is not the same as agreeing to fetch from now on.
+    private async void FetchPublicFeedsOnce_Click(object sender, RoutedEventArgs e)
+    {
+        FetchPublicFeedsOnceButton.IsEnabled = false;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                """{"v":1,"op":"fetch-public-feeds-once"}""", lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            EnsureAccepted(document.RootElement);
+            await RefreshEnrichmentStatusAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception) { ThreatEnrichmentFailure.Text = LocalizationManager.Text("CannotConnect"); }
+        finally { FetchPublicFeedsOnceButton.IsEnabled = true; }
+    }
+
+    private void Hyperlink_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+    {
+        try { Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true }); }
+        catch (Exception) { }
+        e.Handled = true;
+    }
+
     private void SetMonitoringState(bool healthy, bool enabled = true, string? issueCode = null, string? issueAction = null)
     {
         MonitoringStatus.Text = enabled ? LocalizationManager.Text(healthy ? "Monitoring" : "NeedsAttention") : LocalizationManager.Text("MonitoringStopped");
@@ -1334,7 +1512,7 @@ public partial class MainWindow : Window
         Name(InstallUpdateButton, "InstallVerifiedUpdate");
         Name(DeleteHistoryBefore, "DeleteBefore");
         Name(RefreshGeoButton, "FetchNow");
-        Name(RefreshThreatButton, "FetchNow");
+        Name(RefreshThreatButton, "RetryHub");
         AutomationProperties.SetName(HubUrl, "Hub URL");
         foreach (var status in new[] { MonitoringStatus, CoverageNote, LogStatus, ThreatStatus, NotificationSummary, EnrollmentStatus })
             AutomationProperties.SetLiveSetting(status, AutomationLiveSetting.Polite);
@@ -1353,11 +1531,24 @@ public partial class MainWindow : Window
             EnrichmentSource.Text = $"{LocalizationManager.Text("ActiveSource")}: {source}";
             RenderEnrichment(data.GetProperty("geo"), GeoEnrichmentStatus, GeoEnrichmentFailure);
             RenderEnrichment(data.GetProperty("threat"), ThreatEnrichmentStatus, ThreatEnrichmentFailure);
+
+            var countryTableOn = false;
+            if (data.TryGetProperty("countryTable", out var countryTable))
+            {
+                RenderCountryTable(countryTable);
+                countryTableOn = countryTable.TryGetProperty("enabled", out var on) && on.GetBoolean();
+            }
+
             publicThreatFeeds = data.TryGetProperty("publicFeedsEnabled", out var feeds) && feeds.GetBoolean();
             if (PublicThreatFeedsEnabled is not null) PublicThreatFeedsEnabled.IsChecked = publicThreatFeeds;
-            // Refreshing by hand needs somewhere to refresh from: a Hub, or
-            // the public lists this PC has been allowed to fetch.
-            RefreshThreatButton.IsEnabled = enrolled || publicThreatFeeds;
+            RenderEnrichmentPrivacy(publicThreatFeeds, countryTableOn,
+                data.TryGetProperty("thirdPartyLookup", out var outside) && outside.GetBoolean());
+            RenderThreatSource(data);
+            RenderGeoLookupSource(data);
+
+            // The Hub is what "retry" retries. Fetching once from the public
+            // lists is its own button and does not need one.
+            RefreshThreatButton.IsEnabled = enrolled;
             RefreshGeoButton.IsEnabled = enrolled;
         }
         catch
@@ -1365,6 +1556,102 @@ public partial class MainWindow : Window
             EnrichmentSource.Text = LocalizationManager.Text("CannotConnect");
             RefreshGeoButton.IsEnabled = RefreshThreatButton.IsEnabled = false;
         }
+    }
+
+    /// The three answers to "what should happen to an address the cache does
+    /// not have", and what each one costs.
+    ///
+    /// The note under the choice is part of the choice, not decoration: one of
+    /// these three sends watched destinations to a company neither the reader
+    /// nor EgressView controls, and that sentence is the only place the screen
+    /// says so.
+    private void RenderGeoLookupSource(JsonElement data)
+    {
+        if (LookupHub is null) return;
+        var source = data.TryGetProperty("lookupSource", out var value) ? value.GetString() ?? "hub" : "hub";
+        var budget = data.TryGetProperty("thirdPartyBudget", out var total) ? total.GetInt64() : 0;
+        var remaining = data.TryGetProperty("thirdPartyRemaining", out var left) ? left.GetInt64() : 0;
+
+        loadingSettings = true;
+        try
+        {
+            LookupCacheOnly.IsChecked = source == "cache-only";
+            LookupHub.IsChecked = source == "hub";
+            LookupHubThenThirdParty.IsChecked = source == "hub-then-third-party";
+        }
+        finally { loadingSettings = false; }
+
+        GeoLookupSourceNote.Text = source switch
+        {
+            "cache-only" => LocalizationManager.Text("LookupCacheOnlyNote"),
+            "hub-then-third-party" => string.Format(LocalizationManager.Text("LookupThirdPartyNote"), budget),
+            _ => LocalizationManager.Text("LookupHubNote"),
+        };
+        // Only the third-party choice is a warning. Saying "nothing leaves
+        // your network" in the same colour as "this sends addresses outside"
+        // would make the colour mean nothing.
+        GeoLookupSourceNote.Foreground = (System.Windows.Media.Brush)FindResource(
+            source == "hub-then-third-party" ? "WarningBrush" : "TextSecondaryBrush");
+
+        ThirdPartyBudgetNote.Text = source != "hub-then-third-party" ? string.Empty
+            : remaining > 0
+                ? string.Format(LocalizationManager.Text("LookupsLeft"), remaining, budget)
+                : string.Format(LocalizationManager.Text("LookupsUsedUp"), budget);
+    }
+
+    private async void GeoLookupSource_Click(object sender, RoutedEventArgs e)
+    {
+        if (loadingSettings || sender is not System.Windows.Controls.RadioButton { Tag: string source }) return;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                JsonSerializer.Serialize(new { v = 1, op = "set-geo-lookup-source", source }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            EnsureAccepted(document.RootElement);
+            await RefreshEnrichmentStatusAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception) { GeoEnrichmentFailure.Text = LocalizationManager.Text("CannotConnect"); }
+    }
+
+    /// Where the threat information in use right now actually came from.
+    ///
+    /// A count and a timestamp do not say this, and the difference matters:
+    /// indicators from a saved cache, from the Hub, and from the public lists
+    /// after the Hub could not be reached are three different situations that
+    /// otherwise look identical on this screen.
+    private void RenderThreatSource(JsonElement data)
+    {
+        if (ThreatSource is null) return;
+        var source = data.TryGetProperty("threat", out var threat)
+            && threat.TryGetProperty("source", out var value) ? value.GetString() : null;
+        ThreatSource.Text = LocalizationManager.Text(source switch
+        {
+            "hub" => "CurrentSourceHub",
+            "public-feeds" => "CurrentSourcePublic",
+            "public-feeds-fallback" => "CurrentSourcePublicFallback",
+            "cache" => "CurrentSourceCache",
+            _ => "CurrentSourceNone",
+        });
+    }
+
+    /// Says what this PC contacts directly, because sometimes it does.
+    ///
+    /// The line above this used to read "Hub only" whatever the settings said.
+    /// Turning on the public feeds, or setting a MaxMind account, makes this
+    /// Agent fetch from abuse.ch, Spamhaus or MaxMind itself -- and a privacy
+    /// note that stays the same while the behaviour changes underneath it is
+    /// worse than none, because it is the line a reader would rely on.
+    private void RenderEnrichmentPrivacy(bool publicFeeds, bool countryTable, bool thirdPartyLookup = false)
+    {
+        if (EnrichmentPrivacyNote is null) return;
+        var sources = new List<string>();
+        if (thirdPartyLookup) sources.Add(LocalizationManager.Text("SourceIpwho"));
+        if (publicFeeds) sources.Add(LocalizationManager.Text("SourcePublicFeeds"));
+        if (countryTable) sources.Add(LocalizationManager.Text("SourceMaxMind"));
+        EnrichmentPrivacyNote.Text = sources.Count == 0
+            ? LocalizationManager.Text("EnrichmentPrivacy")
+            : string.Format(LocalizationManager.Text("EnrichmentPrivacyDirect"), string.Join(" / ", sources));
     }
 
     private static void RenderEnrichment(JsonElement item, TextBlock status, TextBlock failure)

@@ -154,3 +154,6 @@ apps/agent-macos/Xcode/Host/Assets.xcassets/
 
 # Offscreen render output from apps/agent-windows/tools/render-check.
 apps/agent-windows/.render-check*/
+# The tool also writes a dot-less directory when run from the solution root,
+# which the dotted pattern above does not cover.
+apps/agent-windows/render-check*/

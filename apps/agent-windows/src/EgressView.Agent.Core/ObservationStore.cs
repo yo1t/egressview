@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 17;
+    private const int CurrentSchemaVersion = 19;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -139,6 +139,9 @@ public sealed partial class ObservationStore : IDisposable
         );
         INSERT OR IGNORE INTO threat_cache_state(id) VALUES(1);
         """;
+    private const string Version19Schema = """
+        ALTER TABLE threat_cache_state ADD COLUMN source TEXT NOT NULL DEFAULT 'none';
+        """;
     private const string Version9Schema = """
         ALTER TABLE observations ADD COLUMN remote_hostname TEXT;
         ALTER TABLE flows ADD COLUMN remote_hostname TEXT;
@@ -252,6 +255,20 @@ public sealed partial class ObservationStore : IDisposable
         );
         """;
 
+    /// Countries worked out on this PC, from a table on this PC.
+    ///
+    /// Kept apart from geo_locations because that table's coordinates are NOT
+    /// NULL and a country database has no coordinates to put there. Inventing
+    /// a latitude to satisfy a column would put a made-up place on the globe,
+    /// which is worse than a country with no pin.
+    private const string Version18Schema = """
+        CREATE TABLE IF NOT EXISTS local_country_cache(
+          ip TEXT PRIMARY KEY,
+          country_code TEXT NOT NULL,
+          resolved_at TEXT NOT NULL
+        );
+        """;
+
     private readonly object gate = new();
     private nint db;
     private bool disposed;
@@ -297,7 +314,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -322,9 +339,29 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 13) { MigrateVersion13To14(); version = 14; }
         if (version == 14) { MigrateVersion14To15(); version = 15; }
         if (version == 15) { MigrateVersion15To16(); version = 16; }
-        if (version == 16) MigrateVersion16To17();
+        if (version == 16) { MigrateVersion16To17(); version = 17; }
+        if (version == 17) { MigrateVersion17To18(); version = 18; }
+        if (version == 18) MigrateVersion18To19();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
+    }
+
+    /// Threat information gains the source it came from.
+    ///
+    /// A count and a timestamp never said whether the indicators in use were
+    /// the Hub's, the public lists', or a cache left over from days ago. The
+    /// existing row is set to 'none' rather than guessed at: the Agent does
+    /// not know where data fetched before this column existed came from, and
+    /// saying so is better than picking the likeliest answer.
+    private void MigrateVersion18To19()
+    {
+        CreateMigrationBackup(19);
+        try
+        {
+            Execute("BEGIN IMMEDIATE; " + Version19Schema + " UPDATE schema_version SET version=19 WHERE version=18; COMMIT;");
+            PruneMigrationBackups(19);
+        }
+        catch { TryRollback(); throw; }
     }
 
     private void MigrateVersion1To2()
@@ -640,12 +677,19 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion17To18()
+    {
+        CreateMigrationBackup(18);
+        try { Execute($"BEGIN IMMEDIATE; {Version18Schema} UPDATE schema_version SET version=18 WHERE version=17; COMMIT;"); PruneMigrationBackups(18); }
+        catch { TryRollback(); throw; }
+    }
+
     private void ValidateSchema()
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings','sleep_periods','run_history','outbound_traffic_windows')");
-        if (tables != 18)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings','sleep_periods','run_history','outbound_traffic_windows','local_country_cache')");
+        if (tables != 19)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
@@ -821,9 +865,9 @@ public sealed partial class ObservationStore : IDisposable
         if (offset is < 0 or > 10_000_000) throw new ArgumentOutOfRangeException(nameof(offset));
         lock (gate)
         {
-            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,g.country_code";
+            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,COALESCE(g.country_code,lc.country_code)";
             var cutoff = before is null ? string.Empty : $"WHERE f.last_seen<'{Sql(before.Value.ToUniversalTime().ToString("O"))}'";
-            var sql = $"SELECT {columns} FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address {cutoff} ORDER BY f.last_seen DESC,f.flow_key LIMIT {limit} OFFSET {offset}";
+            var sql = $"SELECT {columns} FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address LEFT JOIN local_country_cache lc ON lc.ip=f.remote_address {cutoff} ORDER BY f.last_seen DESC,f.flow_key LIMIT {limit} OFFSET {offset}";
             return ReadRecentFlowQuery(sql);
         }
     }
@@ -1299,6 +1343,18 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// One counter, for the callers that need a single value rather than the
+    /// whole set. Reading them all to look at one is cheap on a small table
+    /// and misleading in a profile.
+    public long ReadCounter(string name)
+    {
+        lock (gate)
+        {
+            var safeName = name.Replace("'", "''", StringComparison.Ordinal);
+            return ScalarInt64($"SELECT COALESCE((SELECT value FROM collector_counters WHERE name='{safeName}'),0)");
+        }
+    }
+
     /// Replaces rather than adds, for values that are a measurement and not a
     /// tally. A duration accumulated across restarts is not a duration.
     public void SetCounter(string name, long value)
@@ -1479,8 +1535,8 @@ public sealed partial class ObservationStore : IDisposable
         if (offset is < 0 or > 1_000_000) throw new ArgumentOutOfRangeException(nameof(offset));
         lock (gate)
         {
-            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,g.country_code";
-            var sql = $"SELECT {columns} FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address ORDER BY f.last_seen DESC,f.flow_key LIMIT {limit} OFFSET {offset}";
+            const string columns = "f.first_seen,f.last_seen,f.protocol,f.local_address,f.local_port,f.remote_address,f.remote_port,f.process_id,f.process_name,f.bytes_sent,f.bytes_received,f.layer,f.interface_id,f.origin,f.remote_hostname,COALESCE(g.country_code,lc.country_code)";
+            var sql = $"SELECT {columns} FROM flows f LEFT JOIN geo_locations g ON g.ip=f.remote_address LEFT JOIN local_country_cache lc ON lc.ip=f.remote_address ORDER BY f.last_seen DESC,f.flow_key LIMIT {limit} OFFSET {offset}";
             return ReadRecentFlowQuery(sql);
         }
     }
@@ -1506,8 +1562,8 @@ public sealed partial class ObservationStore : IDisposable
             // No hostname column here -- enrichment lands on the flow, not on
             // the event, so this reads as unresolved rather than as wrong.
             const string columns = "o.observed_at,o.observed_at,o.protocol,o.local_address,o.local_port,o.remote_address," +
-                "o.remote_port,o.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,o.interface_id,o.source,NULL,g.country_code";
-            var sql = $"SELECT {columns} FROM observations o LEFT JOIN geo_locations g ON g.ip=o.remote_address " +
+                "o.remote_port,o.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,o.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code)";
+            var sql = $"SELECT {columns} FROM observations o LEFT JOIN geo_locations g ON g.ip=o.remote_address LEFT JOIN local_country_cache lc ON lc.ip=o.remote_address " +
                 $"ORDER BY o.observed_at DESC,o.id DESC LIMIT {limit} OFFSET {offset}";
             return ReadRecentFlowQuery(sql);
         }
@@ -1542,8 +1598,8 @@ public sealed partial class ObservationStore : IDisposable
         lock (gate)
         {
             const string columns = "o.observed_at,o.observed_at,o.protocol,o.local_address,o.local_port,o.remote_address," +
-                "o.remote_port,o.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,o.interface_id,o.source,NULL,g.country_code";
-            var sql = $"SELECT {columns},o.id FROM observations o LEFT JOIN geo_locations g ON g.ip=o.remote_address " +
+                "o.remote_port,o.process_id,o.process_name,o.bytes_sent,o.bytes_received,o.layer,o.interface_id,o.source,NULL,COALESCE(g.country_code,lc.country_code)";
+            var sql = $"SELECT {columns},o.id FROM observations o LEFT JOIN geo_locations g ON g.ip=o.remote_address LEFT JOIN local_country_cache lc ON lc.ip=o.remote_address " +
                 $"WHERE o.id>{afterId} ORDER BY o.id LIMIT {limit}";
             var rows = ReadRecentFlowQuery(sql, out var lastId);
             var newest = ScalarInt64("SELECT COALESCE(MAX(id),0) FROM observations");
@@ -1595,6 +1651,139 @@ public sealed partial class ObservationStore : IDisposable
             }
             finally { WinSqlite.Finalize(statement); }
         }
+    }
+
+    /// Destinations seen recently that nobody has placed yet.
+    ///
+    /// The Hub's cache is asked first and this only covers what it did not
+    /// answer, so a machine with a Hub keeps the richer result -- coordinates
+    /// and a city -- and a machine without one stops having nothing.
+    public IReadOnlyList<string> ReadAddressesWithoutCountry(DateTimeOffset since, int limit = 500)
+    {
+        if (limit is < 1 or > 5000) throw new ArgumentOutOfRangeException(nameof(limit));
+        lock (gate)
+        {
+            var sql = "SELECT DISTINCT f.remote_address FROM flows f " +
+                "LEFT JOIN geo_locations g ON g.ip=f.remote_address " +
+                "LEFT JOIN local_country_cache lc ON lc.ip=f.remote_address " +
+                $"WHERE f.layer='logical' AND f.last_seen>='{since:O}' " +
+                "AND (g.country_code IS NULL OR TRIM(g.country_code)='') AND lc.ip IS NULL " +
+                $"LIMIT {limit}";
+            CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+            var result = new List<string>();
+            try { while (WinSqlite.Step(statement) == WinSqlite.Row) result.Add(Text(statement, 0)); }
+            finally { WinSqlite.Finalize(statement); }
+            return result;
+        }
+    }
+
+    public void SaveLocalCountries(IReadOnlyList<(string Ip, string CountryCode)> answers)
+    {
+        if (answers.Count == 0) return;
+        lock (gate)
+        {
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                const string sql = "INSERT INTO local_country_cache(ip,country_code,resolved_at) VALUES(?,?,?) " +
+                    "ON CONFLICT(ip) DO UPDATE SET country_code=excluded.country_code,resolved_at=excluded.resolved_at";
+                CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+                try
+                {
+                    var now = DateTimeOffset.UtcNow.ToString("O");
+                    foreach (var (ip, country) in answers)
+                    {
+                        Bind(statement, 1, ip);
+                        Bind(statement, 2, country);
+                        Bind(statement, 3, now);
+                        CheckDone(WinSqlite.Step(statement));
+                        Check(WinSqlite.Reset(statement));
+                    }
+                }
+                finally { WinSqlite.Finalize(statement); }
+                Execute("COMMIT");
+            }
+            catch { TryRollback(); throw; }
+        }
+    }
+
+    /// Addresses with no location at all, for the paths that can fetch one.
+    ///
+    /// Distinct from ReadAddressesWithoutCountry: a country worked out from
+    /// the local table is an answer for the country list but not for the
+    /// globe, which needs coordinates. An address placed only locally is
+    /// therefore still worth asking about here.
+    public IReadOnlyList<string> ReadAddressesWithoutLocation(DateTimeOffset since, int limit = 25)
+    {
+        if (limit is < 1 or > 5000) throw new ArgumentOutOfRangeException(nameof(limit));
+        lock (gate)
+        {
+            var sql = "SELECT DISTINCT f.remote_address FROM flows f " +
+                "LEFT JOIN geo_locations g ON g.ip=f.remote_address " +
+                $"WHERE f.layer='logical' AND f.last_seen>='{since:O}' AND g.ip IS NULL " +
+                $"ORDER BY f.last_seen DESC LIMIT {limit}";
+            CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+            var result = new List<string>();
+            try { while (WinSqlite.Step(statement) == WinSqlite.Row) result.Add(Text(statement, 0)); }
+            finally { WinSqlite.Finalize(statement); }
+            return result;
+        }
+    }
+
+    /// Adds locations without discarding the ones already held.
+    ///
+    /// ReplaceGeoLocations empties the table first, which is right for the
+    /// daily cache and wrong for an answer about a single address: using it
+    /// here would throw away eighty thousand rows to record one.
+    public void SaveGeoLocations(IReadOnlyList<GeoLocation> locations)
+    {
+        if (locations.Count == 0) return;
+        lock (gate)
+        {
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                const string sql = "INSERT INTO geo_locations(ip,latitude,longitude,country_code,city) VALUES(?,?,?,?,?) " +
+                    "ON CONFLICT(ip) DO UPDATE SET latitude=excluded.latitude,longitude=excluded.longitude," +
+                    "country_code=excluded.country_code,city=excluded.city";
+                CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+                try
+                {
+                    foreach (var location in locations)
+                    {
+                        Bind(statement, 1, location.Ip);
+                        Check(WinSqlite.BindDouble(statement, 2, location.Latitude));
+                        Check(WinSqlite.BindDouble(statement, 3, location.Longitude));
+                        BindNullable(statement, 4, location.CountryCode);
+                        BindNullable(statement, 5, location.City);
+                        CheckDone(WinSqlite.Step(statement));
+                        Check(WinSqlite.Reset(statement));
+                        Check(WinSqlite.ClearBindings(statement));
+                    }
+                }
+                finally { WinSqlite.Finalize(statement); }
+                Execute("COMMIT");
+            }
+            catch { TryRollback(); throw; }
+        }
+    }
+
+    /// How many addresses this PC placed without asking anyone.
+    ///
+    /// Reported so the screen can say whether the table is doing anything. A
+    /// table that loads, reports "in use", and answers nothing looks identical
+    /// to one that is working, and that is the shape of the failure this
+    /// feature is most likely to have.
+    public long ReadLocalCountryCount()
+    {
+        lock (gate) return ScalarInt64("SELECT COUNT(*) FROM local_country_cache");
+    }
+
+    /// Thrown away when the table is replaced or withdrawn, because an answer
+    /// from a table nobody has any more is an answer nobody can check.
+    public void ForgetLocalCountries()
+    {
+        lock (gate) Execute("DELETE FROM local_country_cache");
     }
 
     public void ReplaceGeoLocations(IReadOnlyList<GeoLocation> locations, string? etag, DateTimeOffset fetchedAt)
@@ -1669,12 +1858,14 @@ public sealed partial class ObservationStore : IDisposable
                 ? $" AND f.last_seen>='{from.Value.ToUniversalTime():O}' AND f.first_seen<'{to.Value.ToUniversalTime():O}'"
                 : string.Empty;
             var sql = $"""
-                SELECT UPPER(g.country_code),COUNT(*),MIN(f.first_seen),MAX(f.last_seen),
+                SELECT UPPER(COALESCE(g.country_code,lc.country_code)),COUNT(*),MIN(f.first_seen),MAX(f.last_seen),
                        MAX(f.last_seen || CHAR(31) || COALESCE(f.process_name,''))
-                FROM flows f JOIN geo_locations g ON g.ip=f.remote_address
-                WHERE f.layer='logical' AND g.country_code IS NOT NULL AND TRIM(g.country_code)<>''{range}
-                GROUP BY UPPER(g.country_code)
-                ORDER BY COUNT(*) DESC,UPPER(g.country_code)
+                FROM flows f
+                LEFT JOIN geo_locations g ON g.ip=f.remote_address
+                LEFT JOIN local_country_cache lc ON lc.ip=f.remote_address
+                WHERE f.layer='logical' AND COALESCE(g.country_code,lc.country_code) IS NOT NULL AND TRIM(COALESCE(g.country_code,lc.country_code))<>''{range}
+                GROUP BY UPPER(COALESCE(g.country_code,lc.country_code))
+                ORDER BY COUNT(*) DESC,UPPER(COALESCE(g.country_code,lc.country_code))
                 """;
             CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
             var result = new List<CountryHistoryRow>();
@@ -1848,19 +2039,21 @@ public sealed partial class ObservationStore : IDisposable
     {
         lock (gate)
         {
-            CheckOperation(WinSqlite.Prepare(db, "SELECT availability,etag,fetched_at,(SELECT COUNT(*) FROM threat_indicators) FROM threat_cache_state WHERE id=1", -1, out var statement, 0));
+            CheckOperation(WinSqlite.Prepare(db, "SELECT availability,etag,fetched_at,(SELECT COUNT(*) FROM threat_indicators),source FROM threat_cache_state WHERE id=1", -1, out var statement, 0));
             try
             {
                 CheckQueryRow(WinSqlite.Step(statement));
                 var fetched = NullableTextValue(statement, 2);
                 return new(Text(statement, 0), NullableTextValue(statement, 1),
-                    fetched is null ? null : DateTimeOffset.Parse(fetched), WinSqlite.ColumnInt64(statement, 3));
+                    fetched is null ? null : DateTimeOffset.Parse(fetched), WinSqlite.ColumnInt64(statement, 3),
+                    Text(statement, 4));
             }
             finally { WinSqlite.Finalize(statement); }
         }
     }
 
-    public void ReplaceThreatIndicators(bool available, IReadOnlyList<ThreatIndicator> indicators, string? etag, DateTimeOffset fetchedAt)
+    public void ReplaceThreatIndicators(bool available, IReadOnlyList<ThreatIndicator> indicators, string? etag,
+        DateTimeOffset fetchedAt, string source = "hub")
     {
         lock (gate)
         {
@@ -1881,16 +2074,20 @@ public sealed partial class ObservationStore : IDisposable
                     }
                 }
                 finally { WinSqlite.Finalize(statement); }
-                Execute($"UPDATE threat_cache_state SET availability='{(available ? "available" : "unavailable")}',etag={(etag is null ? "NULL" : $"'{Sql(etag)}'")},fetched_at='{fetchedAt.ToUniversalTime():O}' WHERE id=1");
+                Execute($"UPDATE threat_cache_state SET availability='{(available ? "available" : "unavailable")}',etag={(etag is null ? "NULL" : $"'{Sql(etag)}'")},fetched_at='{fetchedAt.ToUniversalTime():O}',source='{Sql(source)}' WHERE id=1");
                 Execute("COMMIT");
             }
             catch { TryRollback(); throw; }
         }
     }
 
-    public void MarkThreatCacheFetched(string? etag, DateTimeOffset fetchedAt)
+    public void MarkThreatCacheFetched(string? etag, DateTimeOffset fetchedAt, string source = "hub")
     {
-        lock (gate) Execute($"UPDATE threat_cache_state SET etag={(etag is null ? "etag" : $"'{Sql(etag)}'")},fetched_at='{fetchedAt.ToUniversalTime():O}' WHERE id=1");
+        // "Not modified" means the data in use is still whatever answered
+        // last, so the source is recorded here too. Leaving it alone made the
+        // screen say "none" for as long as the Hub kept returning 304 -- which
+        // is most of the time, and exactly when everything is working.
+        lock (gate) Execute($"UPDATE threat_cache_state SET etag={(etag is null ? "etag" : $"'{Sql(etag)}'")},fetched_at='{fetchedAt.ToUniversalTime():O}',source='{Sql(source)}' WHERE id=1");
     }
 
     public ThreatReport ReadThreatReport(DateTimeOffset from, DateTimeOffset to)
