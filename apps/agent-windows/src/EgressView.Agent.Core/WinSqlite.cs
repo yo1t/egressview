@@ -10,6 +10,7 @@ internal static partial class WinSqlite
     internal const int Corrupt = 11;
     internal const int Full = 13;
     internal const int NotADatabase = 26;
+    internal const int OpenReadOnly = 0x00000001;
     internal const int OpenReadWrite = 0x00000002;
     internal const int OpenCreate = 0x00000004;
     internal const int OpenFullMutex = 0x00010000;

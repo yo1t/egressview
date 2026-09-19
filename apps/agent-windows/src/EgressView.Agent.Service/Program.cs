@@ -197,6 +197,7 @@ internal sealed class AgentWindowsService : ServiceBase
     {
         var root = Path.Combine(AppContext.BaseDirectory, "data");
         Directory.CreateDirectory(root);
+        var startup = System.Diagnostics.Stopwatch.StartNew();
         using var store = new ObservationStore(Path.Combine(root, "egressview-agent.db"));
         activeStore = store;
         // A hibernate/update sequence can restart the service instead of
@@ -225,13 +226,30 @@ internal sealed class AgentWindowsService : ServiceBase
         using var deliveryController = new DeliveryController(store, credentialStore);
         using var enrichmentController = new EnrichmentController(store, credentialStore);
         await using var ipc = new AgentIpcServer(store, monitoring.Snapshot, ReadAllowedUserSid(), credentialStore,
-            () => monitoring.Enabled, monitoring.SetEnabled, deliveryController, enrichmentController);
+            () => monitoring.Enabled, monitoring.SetEnabled, () => monitoring.ReadsHostnames, monitoring.SetReadsHostnames,
+            deliveryController, enrichmentController);
         ipc.Start();
+        // Written once per start, because a machine that answers nothing for
+        // two minutes after a reboot looks like a machine that did not come
+        // back, and the only way to shorten that is to know which part of it
+        // is long. Counters rather than a log line: they reach the diagnostics
+        // bundle, so the numbers come from the machine that was slow.
+        try
+        {
+            store.SetCounter("startup-ms-store-open", store.OpenMilliseconds);
+            store.SetCounter("startup-ms-integrity-check", store.IntegrityCheckMilliseconds);
+            store.SetCounter("startup-integrity-was-deep", store.IntegrityCheckWasDeep ? 1 : 0);
+            store.SetCounter("startup-ms-until-ipc", startup.ElapsedMilliseconds);
+            store.AddCounter("startup-count", 1);
+        }
+        catch { /* Timing the start must never be what stops it. */ }
         var delivery = deliveryController.RunAsync(cancellationToken);
         var geoCache = enrichmentController.RunGeoAsync(cancellationToken);
         var threatIntel = enrichmentController.RunThreatAsync(cancellationToken);
         var chartAggregation = RunChartAggregationAsync(store, cancellationToken);
         var maintenance = RunMaintenanceAsync(store, cancellationToken);
+        var outboundAnomalies = RunOutboundAnomalyAsync(store, cancellationToken);
+        var integrity = RunBackgroundIntegrityAsync(store, cancellationToken);
         var coverage = monitoring.RunCoverageHeartbeatAsync(cancellationToken);
         var runHeartbeat = RunHeartbeatAsync(store, runId, cancellationToken);
         Task lifetime;
@@ -255,6 +273,8 @@ internal sealed class AgentWindowsService : ServiceBase
         await threatIntel;
         await chartAggregation;
         await maintenance;
+        await outboundAnomalies;
+        await integrity;
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(monitoring.Snapshot(), store, DiagnosticsReport.CurrentVersion, monitoring.Enabled,
                 capabilityStatus: deliveryController.CapabilityStatus));
@@ -304,6 +324,75 @@ internal sealed class AgentWindowsService : ServiceBase
             catch
             {
                 try { store.AddCounter("chart-hourly-fold-failure", 1); }
+                catch { /* The original store failure remains visible through diagnostics. */ }
+            }
+            try { await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+        }
+    }
+
+    /// Watches for outbound traffic that does not look like this machine.
+    ///
+    /// The detector is the Mac Agent's, thresholds and all, and it needs a
+    /// full day of measured windows before it will say anything. Until then
+    /// it returns nothing -- which is not the same as "nothing unusual", and
+    /// the counter names keep the two apart.
+    /// Reads the whole database, after the Agent is already answering.
+    ///
+    /// It used to happen before anything else, and on a 7 GB database from a
+    /// cold disk that was 118 seconds during which the service existed and
+    /// replied to nothing -- so a person checking whether their agent survived
+    /// the reboot found nothing there (P3-134). The check is still worth
+    /// doing; it is the waiting that was not.
+    ///
+    /// Only when one is owed: after a run that did not end cleanly the open
+    /// has already read every page, synchronously, before trusting the file.
+    private static async Task RunBackgroundIntegrityAsync(ObservationStore store, CancellationToken cancellationToken)
+    {
+        if (!store.BackgroundIntegrityCheckDue) return;
+        // Let the start settle first. Nothing here is urgent, and competing
+        // with the first minute of collection would trade one slow start for
+        // another.
+        try { await Task.Delay(TimeSpan.FromMinutes(2), cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var answer = await Task.Run(store.VerifyIntegrityInBackground, cancellationToken);
+        try
+        {
+            store.SetCounter("integrity-background-ms", timer.ElapsedMilliseconds);
+            // Loud on purpose. A database found damaged here has been written
+            // to since the start, and that is worth saying plainly rather than
+            // leaving as an absence.
+            store.SetCounter("integrity-background-ok", string.Equals(answer, "ok", StringComparison.Ordinal) ? 1 : 0);
+            if (answer is null) store.AddCounter("integrity-background-unavailable", 1);
+        }
+        catch { /* Recording the check must not be what stops the agent. */ }
+    }
+
+    private static async Task RunOutboundAnomalyAsync(ObservationStore store, CancellationToken cancellationToken)
+    {
+        var detector = new OutboundAnomalyDetector();
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                // Capturing is idempotent per window, so checking more often
+                // than the window length costs a COUNT and finds the window
+                // sooner after a restart.
+                if (store.CaptureOutboundTrafficWindow(DateTimeOffset.UtcNow) is { } captured)
+                {
+                    store.AddCounter("outbound-windows-captured", 1);
+                    if (detector.Evaluate(captured.Current, captured.Baseline) is { } finding)
+                    {
+                        store.RecordOutboundAnomaly(finding.Window.StartedAt, finding.Kind);
+                        store.AddCounter(finding.Kind == OutboundAnomalyKind.DistributedTransfer
+                            ? "outbound-anomaly-distributed" : "outbound-anomaly-large", 1);
+                    }
+                }
+            }
+            catch
+            {
+                try { store.AddCounter("outbound-anomaly-failure", 1); }
                 catch { /* The original store failure remains visible through diagnostics. */ }
             }
             try { await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken); }

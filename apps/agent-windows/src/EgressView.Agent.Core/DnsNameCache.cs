@@ -31,6 +31,18 @@ internal sealed class DnsNameCache(TimeSpan? ttl = null, int capacity = 50_000)
         }
     }
 
+    /// Drops what has been learned so far.
+    ///
+    /// Someone turning destination-name reading off is asking for names not to
+    /// be collected. Keeping a cache of the ones already collected and going
+    /// on labelling new connections with them honours the letter of that and
+    /// not the request: turning it off left new flows still being named, two
+    /// in the first forty-six, from what the cache remembered.
+    public void Forget()
+    {
+        lock (gate) entries.Clear();
+    }
+
     public string? Resolve(int processId, string address, DateTimeOffset observedAt)
     {
         var canonical = CanonicalAddress(address);

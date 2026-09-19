@@ -287,6 +287,11 @@ public partial class App : System.Windows.Application
         catch { /* Status availability is represented separately; it is not a Hub outage. */ }
     }
 
+    /// Settings asks for the same toggle the tray menu uses. The tray item is
+    /// disabled around the request, which is harmless when the caller is the
+    /// settings page instead.
+    internal Task ToggleMonitoringFromSettingsAsync() => ToggleMonitoringAsync();
+
     private async Task ToggleMonitoringAsync()
     {
         if (monitoringToggle is null) return;
@@ -394,12 +399,30 @@ public partial class App : System.Windows.Application
         var request = System.Text.Json.JsonSerializer.Serialize(new { v = 1, op = "ui-run", stage, fault });
         var reported = Task.Run(async () =>
         {
-            try
+            // "begin" is retried; "end" and "fault" are not.
+            //
+            // The window and the service start together after an update or a
+            // reboot, and the service can take two minutes to answer on a
+            // large database (P3-134), so the one report that matters most is
+            // the one most likely to be lost. It is also the report that
+            // settles the previous run, so losing it leaves a dead window
+            // marked running -- not missing information, wrong information.
+            //
+            // Bounded and spaced out, because hammering a listener that is not
+            // there is the shape of the outage P3-106 was about.
+            var attempts = string.Equals(stage, "begin", StringComparison.Ordinal) ? 6 : 1;
+            for (var attempt = 0; attempt < attempts; attempt++)
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                await AgentIpcClient.RequestAsync(request, timeout.Token).ConfigureAwait(false);
+                try
+                {
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    await AgentIpcClient.RequestAsync(request, timeout.Token).ConfigureAwait(false);
+                    return;
+                }
+                catch (Exception) { }
+                if (attempt + 1 < attempts)
+                    await Task.Delay(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
             }
-            catch (Exception) { }
         });
         // On the way out there is no later, so the report is given a bounded
         // moment to leave -- bounded because a closing window must close.

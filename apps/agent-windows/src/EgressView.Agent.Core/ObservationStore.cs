@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 16;
+    private const int CurrentSchemaVersion = 17;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -232,6 +232,26 @@ public sealed partial class ObservationStore : IDisposable
         CREATE INDEX IF NOT EXISTS run_history_component ON run_history(component,id);
         """;
 
+    /// One row per completed fifteen-minute window, so "unusual" is measured
+    /// against what this machine actually does rather than against a number
+    /// someone picked.
+    ///
+    /// The windows are kept, not the observations they came from: a baseline
+    /// has to outlive the raw retention window, and seven days of summaries is
+    /// a few hundred rows where seven days of observations is millions.
+    private const string Version17Schema = """
+        CREATE TABLE IF NOT EXISTS outbound_traffic_windows(
+          window_start TEXT PRIMARY KEY,
+          bytes_out INTEGER NOT NULL,
+          observation_count INTEGER NOT NULL,
+          observations_with_bytes INTEGER NOT NULL,
+          application_count INTEGER NOT NULL,
+          destination_count INTEGER NOT NULL,
+          largest_application_bytes_out INTEGER NOT NULL,
+          anomaly_kind TEXT CHECK(anomaly_kind IN ('large-transfer','distributed-transfer'))
+        );
+        """;
+
     private readonly object gate = new();
     private nint db;
     private bool disposed;
@@ -240,14 +260,32 @@ public sealed partial class ObservationStore : IDisposable
 
     public long SchemaVersion { get { lock (gate) return ScalarInt64("SELECT version FROM schema_version"); } }
 
+    /// How long opening this database took, and how much of that was the
+    /// integrity check.
+    ///
+    /// After a reboot the agent answered nothing for 132 seconds and the
+    /// tray icon took 115, so the machine looked like it had not come back
+    /// (P3-134). Which part of the startup that is has to be measured rather
+    /// than guessed, and measured on the database people actually have --
+    /// this one is 6.5 GB -- so the product records it on every start.
+    public long OpenMilliseconds { get; private set; }
+
+    public long IntegrityCheckMilliseconds { get; private set; }
+
+    /// Whether the check at open read every page or only the structure, so the
+    /// diagnostics say which question was actually answered.
+    public bool IntegrityCheckWasDeep { get; private set; }
+
     public ObservationStore(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         this.path = Path.GetFullPath(path);
         Directory.CreateDirectory(Path.GetDirectoryName(this.path)!);
         Check(WinSqlite.Open(this.path, out db, WinSqlite.OpenReadWrite | WinSqlite.OpenCreate | WinSqlite.OpenFullMutex, 0));
+        var opened = System.Diagnostics.Stopwatch.StartNew();
         try { Initialize(); }
         catch { if (db != 0) WinSqlite.Close(db); db = 0; throw; }
+        OpenMilliseconds = opened.ElapsedMilliseconds;
     }
 
     private void Initialize()
@@ -259,7 +297,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -283,7 +321,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 12) { MigrateVersion12To13(); version = 13; }
         if (version == 13) { MigrateVersion13To14(); version = 14; }
         if (version == 14) { MigrateVersion14To15(); version = 15; }
-        if (version == 15) MigrateVersion15To16();
+        if (version == 15) { MigrateVersion15To16(); version = 16; }
+        if (version == 16) MigrateVersion16To17();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -423,12 +462,136 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// Checks the database before using it, at a depth that depends on how
+    /// the last run ended.
+    ///
+    /// The full check reads every page. On this machine's 6.5 GB database that
+    /// measured 26,567 ms of a 26,576 ms open -- everything else in the whole
+    /// service startup came to 1.8 seconds -- and after a reboot, from a cold
+    /// disk, it was over two minutes during which the Agent answered nothing
+    /// and looked like it had not come back (P3-134).
+    ///
+    /// So the depth follows the risk. A run that said goodbye closed the
+    /// database properly, and that is the case SQLite's durability is for: a
+    /// structural quick check is enough. A run that was killed, crashed or
+    /// faulted is the case where a torn write is actually plausible, and that
+    /// one still pays for the full read. Speed is given up exactly where the
+    /// doubt is.
+    ///
+    /// A full check is also forced when none has run for a week, so slow
+    /// damage that no crash announced still surfaces without every boot paying
+    /// for it.
     private void EnsureIntegrity()
     {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        if (!NeedsDeepIntegrityCheck())
+        {
+            // Nothing is read here at all.
+            //
+            // Making the check shallow was not enough: quick_check still reads
+            // every page, and on a 7 GB database from a cold disk that
+            // measured 118,649 ms -- against 26,567 ms for the full check when
+            // the file was already in the page cache. The cost is the read,
+            // not the depth, and no pragma avoids it.
+            //
+            // So when the last run said goodbye, the open trusts it and the
+            // full check runs later, off the startup path. The Agent is
+            // reachable in a second instead of two minutes, and the database
+            // is still read in full -- just not while someone is waiting to
+            // find out whether their agent came back.
+            IntegrityCheckMilliseconds = 0;
+            IntegrityCheckWasDeep = false;
+            BackgroundIntegrityCheckDue = IsDeepIntegrityCheckOverdue();
+            lastVerifiedIntegrity = "unverified";
+            return;
+        }
         var integrity = ScalarText("PRAGMA integrity_check");
+        IntegrityCheckMilliseconds = timer.ElapsedMilliseconds;
+        IntegrityCheckWasDeep = true;
         if (!string.Equals(integrity, "ok", StringComparison.Ordinal))
             throw new ObservationStoreException(StoreFailureKind.Corrupt, $"Database integrity check failed: {integrity}");
         lastVerifiedIntegrity = integrity;
+        RecordDeepIntegrityCheck();
+    }
+
+    /// <remarks>
+    /// Anything unreadable here answers yes. A missing table, an unparseable
+    /// timestamp or a query that throws all mean the same thing -- that the
+    /// last run cannot be shown to have ended cleanly -- and the safe reading
+    /// of "cannot tell" is the slow one.
+    /// </remarks>
+    private bool NeedsDeepIntegrityCheck()
+    {
+        try
+        {
+            if (ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='run_history'") != 1) return true;
+            var ending = ScalarText("SELECT ending FROM run_history WHERE component='service' ORDER BY id DESC LIMIT 1");
+            if (ending is not ("clean" or "system-shutdown")) return true;
+            if (ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='collector_counters'") != 1) return true;
+            return false;
+        }
+        catch (Exception) { return true; }
+    }
+
+    /// Whether a full read is owed, without deciding when it happens.
+    private bool IsDeepIntegrityCheckOverdue()
+    {
+        try
+        {
+            if (ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='collector_counters'") != 1) return true;
+            var last = ScalarInt64("SELECT COALESCE((SELECT value FROM collector_counters WHERE name='integrity-deep-checked-at'),0)");
+            return last <= 0 || DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(last) >= TimeSpan.FromDays(7);
+        }
+        catch (Exception) { return true; }
+    }
+
+    /// Whether a full read is owed but has not been done.
+    public bool BackgroundIntegrityCheckDue { get; private set; }
+
+    /// Reads every page on a connection of its own, so the rest of the Agent
+    /// keeps working while it happens.
+    ///
+    /// A separate read-only connection rather than the shared one: the shared
+    /// one is guarded by a lock that everything else waits on, and holding it
+    /// for two minutes would be the startup pause again by another name. WAL
+    /// lets a reader run beside the writer.
+    ///
+    /// <returns>The pragma's answer, or null when it could not be run.</returns>
+    public string? VerifyIntegrityInBackground()
+    {
+        nint reader = 0;
+        try
+        {
+            if (WinSqlite.Open(path, out reader, WinSqlite.OpenReadOnly | WinSqlite.OpenFullMutex, 0) != WinSqlite.Ok) return null;
+            var answer = ScalarTextOn(reader, "PRAGMA integrity_check");
+            if (!string.Equals(answer, "ok", StringComparison.Ordinal)) return answer;
+            lock (gate)
+            {
+                RecordDeepIntegrityCheck();
+                lastVerifiedIntegrity = "ok";
+                BackgroundIntegrityCheckDue = false;
+            }
+            return "ok";
+        }
+        catch (Exception) { return null; }
+        finally { if (reader != 0) WinSqlite.Close(reader); }
+    }
+
+    private static string? ScalarTextOn(nint connection, string sql)
+    {
+        if (WinSqlite.Prepare(connection, sql, -1, out var statement, 0) != WinSqlite.Ok) return null;
+        try { return WinSqlite.Step(statement) == WinSqlite.Row ? Text(statement, 0) : null; }
+        finally { WinSqlite.Finalize(statement); }
+    }
+
+    private void RecordDeepIntegrityCheck()
+    {
+        try
+        {
+            Execute($"INSERT INTO collector_counters(name,value) VALUES('integrity-deep-checked-at',{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}) " +
+                    "ON CONFLICT(name) DO UPDATE SET value=excluded.value");
+        }
+        catch (Exception) { /* Recording the check must not be what fails the open. */ }
     }
 
     private void MigrateVersion14To15()
@@ -445,12 +608,19 @@ public sealed partial class ObservationStore : IDisposable
         catch { TryRollback(); throw; }
     }
 
+    private void MigrateVersion16To17()
+    {
+        CreateMigrationBackup(17);
+        try { Execute($"BEGIN IMMEDIATE; {Version17Schema} UPDATE schema_version SET version=17 WHERE version=16; COMMIT;"); PruneMigrationBackups(17); }
+        catch { TryRollback(); throw; }
+    }
+
     private void ValidateSchema()
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings','sleep_periods','run_history')");
-        if (tables != 17)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings','sleep_periods','run_history','outbound_traffic_windows')");
+        if (tables != 18)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
@@ -876,6 +1046,15 @@ public sealed partial class ObservationStore : IDisposable
         {
             Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
                 $"WHERE component='{name}' AND ending='running'");
+            // A window whose run began before this service did is not running:
+            // the service restarting means the machine or the install changed
+            // under it. Only the window can settle its own run, and a window
+            // that never comes back would leave the row marked running for
+            // ever -- saying a dead process is alive, which is worse than
+            // saying nothing.
+            if (component == RunComponent.Service)
+                Execute($"UPDATE run_history SET ending='unexpected',ended_at=COALESCE(heartbeat_at,started_at) " +
+                    $"WHERE component='ui' AND ending='running' AND started_at < '{DateTimeOffset.UtcNow:O}'");
             Execute($"INSERT INTO run_history(component,version,started_at,heartbeat_at,ending) " +
                 $"VALUES('{name}','{Sql(Trim(version, 64))}','{DateTimeOffset.UtcNow:O}','{DateTimeOffset.UtcNow:O}','running')");
             var id = ScalarInt64("SELECT last_insert_rowid()");
@@ -922,6 +1101,124 @@ public sealed partial class ObservationStore : IDisposable
         lock (gate) Execute($"UPDATE run_history SET ending='faulted',ended_at='{DateTimeOffset.UtcNow:O}'," +
             $"fault='{Sql(SafeTypeName(faultType))}' WHERE id={runId} AND ending='running'");
     }
+
+    /// Captures the last completed fifteen-minute window and returns the seven
+    /// days before it. A window this run or an earlier one already captured
+    /// returns null, so a restart cannot raise the same alert twice.
+    public (OutboundTrafficWindow Current, IReadOnlyList<OutboundTrafficWindow> Baseline)? CaptureOutboundTrafficWindow(DateTimeOffset now)
+    {
+        var duration = TimeSpan.FromMinutes(15);
+        var end = new DateTimeOffset(now.UtcTicks - now.UtcTicks % duration.Ticks, TimeSpan.Zero);
+        var start = end - duration;
+        lock (gate)
+        {
+            if (ScalarInt64($"SELECT COUNT(*) FROM outbound_traffic_windows WHERE window_start='{start:O}'") != 0) return null;
+            Execute("BEGIN IMMEDIATE;");
+            try
+            {
+                var current = ReadOutboundWindow(start, end);
+                Execute("INSERT INTO outbound_traffic_windows(window_start,bytes_out,observation_count," +
+                    "observations_with_bytes,application_count,destination_count,largest_application_bytes_out) " +
+                    $"VALUES('{start:O}',{current.BytesOut},{current.ObservationCount},{current.ObservationsWithBytes}," +
+                    $"{current.ApplicationCount},{current.DestinationCount},{current.LargestApplicationBytesOut});");
+                var cutoff = start - TimeSpan.FromDays(7);
+                var baseline = ReadOutboundWindows(cutoff, start);
+                Execute($"DELETE FROM outbound_traffic_windows WHERE window_start < '{cutoff:O}';");
+                Execute("COMMIT;");
+                return (current, baseline);
+            }
+            catch { TryRollback(); throw; }
+        }
+    }
+
+    /// Byte counts arrive only when a flow reports its final statistics, so
+    /// observations_with_bytes is counted separately from observations: a
+    /// window nobody could measure must not read as a quiet one.
+    private OutboundTrafficWindow ReadOutboundWindow(DateTimeOffset start, DateTimeOffset end)
+    {
+        var range = $"WHERE observed_at >= '{start:O}' AND observed_at < '{end:O}'";
+        ulong bytesOut = 0; var observations = 0; var withBytes = 0; var applications = 0; var destinations = 0;
+        CheckOperation(WinSqlite.Prepare(db, "SELECT COALESCE(SUM(bytes_sent),0), COUNT(*), COUNT(bytes_sent), " +
+            $"COUNT(DISTINCT COALESCE(process_name,'')), COUNT(DISTINCT remote_address) FROM observations {range}", -1, out var summary, 0));
+        try
+        {
+            if (WinSqlite.Step(summary) == WinSqlite.Row)
+            {
+                bytesOut = (ulong)Math.Max(0, WinSqlite.ColumnInt64(summary, 0));
+                observations = (int)WinSqlite.ColumnInt64(summary, 1);
+                withBytes = (int)WinSqlite.ColumnInt64(summary, 2);
+                applications = (int)WinSqlite.ColumnInt64(summary, 3);
+                destinations = (int)WinSqlite.ColumnInt64(summary, 4);
+            }
+        }
+        finally { WinSqlite.Finalize(summary); }
+
+        var largest = (ulong)Math.Max(0, ScalarInt64("SELECT COALESCE(MAX(app_bytes),0) FROM (SELECT SUM(COALESCE(bytes_sent,0)) " +
+            $"AS app_bytes FROM observations {range} GROUP BY COALESCE(process_name,''))"));
+        return new OutboundTrafficWindow(start, bytesOut, observations, withBytes, applications, destinations, largest);
+    }
+
+    private IReadOnlyList<OutboundTrafficWindow> ReadOutboundWindows(DateTimeOffset from, DateTimeOffset before)
+    {
+        CheckOperation(WinSqlite.Prepare(db, "SELECT window_start,bytes_out,observation_count,observations_with_bytes," +
+            "application_count,destination_count,largest_application_bytes_out FROM outbound_traffic_windows " +
+            $"WHERE window_start >= '{from:O}' AND window_start < '{before:O}' ORDER BY window_start", -1, out var statement, 0));
+        var result = new List<OutboundTrafficWindow>();
+        try
+        {
+            while (WinSqlite.Step(statement) == WinSqlite.Row)
+                result.Add(new OutboundTrafficWindow(
+                    DateTimeOffset.Parse(Text(statement, 0)),
+                    (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 1)),
+                    (int)WinSqlite.ColumnInt64(statement, 2), (int)WinSqlite.ColumnInt64(statement, 3),
+                    (int)WinSqlite.ColumnInt64(statement, 4), (int)WinSqlite.ColumnInt64(statement, 5),
+                    (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 6))));
+        }
+        finally { WinSqlite.Finalize(statement); }
+        return result;
+    }
+
+    public void RecordOutboundAnomaly(DateTimeOffset windowStart, OutboundAnomalyKind kind)
+    {
+        var name = kind == OutboundAnomalyKind.DistributedTransfer ? "distributed-transfer" : "large-transfer";
+        lock (gate) Execute($"UPDATE outbound_traffic_windows SET anomaly_kind='{name}' WHERE window_start='{windowStart:O}'");
+    }
+
+    /// The newest window that was judged unusual, so the window can notice a
+    /// new one rather than a count that says only how many there have been.
+    public (DateTimeOffset WindowStart, OutboundAnomalyKind Kind, ulong BytesOut)? ReadLatestOutboundAnomaly()
+    {
+        lock (gate)
+        {
+            CheckOperation(WinSqlite.Prepare(db, "SELECT window_start,anomaly_kind,bytes_out FROM outbound_traffic_windows " +
+                "WHERE anomaly_kind IS NOT NULL ORDER BY window_start DESC LIMIT 1", -1, out var statement, 0));
+            try
+            {
+                if (WinSqlite.Step(statement) != WinSqlite.Row) return null;
+                return (DateTimeOffset.Parse(Text(statement, 0)),
+                    Text(statement, 1) == "distributed-transfer" ? OutboundAnomalyKind.DistributedTransfer : OutboundAnomalyKind.LargeTransfer,
+                    (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 2)));
+            }
+            finally { WinSqlite.Finalize(statement); }
+        }
+    }
+
+    public int ReadOutboundAnomalyCount(DateTimeOffset from, DateTimeOffset to)
+    {
+        lock (gate) return ReadOutboundAnomalyCountLocked(from, to);
+    }
+
+    /// The lock in this class is not reentrant, so the version called from
+    /// inside an existing hold must not take it again.
+    /// Counted with the same coverage gate the detector applies, so the screen
+    /// and the detector agree about whether there is a baseline. A row whose
+    /// bytes were never measured is not evidence of a quiet fifteen minutes.
+    private int ReadUsableBaselineWindowsLocked() => (int)ScalarInt64(
+        "SELECT COUNT(*) FROM outbound_traffic_windows WHERE observation_count >= 10 " +
+        "AND observations_with_bytes * 10 >= observation_count * 8");
+
+    private int ReadOutboundAnomalyCountLocked(DateTimeOffset from, DateTimeOffset to) => (int)ScalarInt64("SELECT COUNT(*) FROM outbound_traffic_windows " +
+            $"WHERE window_start >= '{from:O}' AND window_start < '{to:O}' AND anomaly_kind IS NOT NULL");
 
     public IReadOnlyList<AgentRun> ReadRunHistory(int limit = 20)
     {
@@ -974,6 +1271,18 @@ public sealed partial class ObservationStore : IDisposable
             var safeName = name.Replace("'", "''", StringComparison.Ordinal);
             Execute($"INSERT INTO collector_counters(name,value) VALUES('{safeName}',{amount}) " +
                     "ON CONFLICT(name) DO UPDATE SET value=value+excluded.value");
+        }
+    }
+
+    /// Replaces rather than adds, for values that are a measurement and not a
+    /// tally. A duration accumulated across restarts is not a duration.
+    public void SetCounter(string name, long value)
+    {
+        lock (gate)
+        {
+            var safeName = name.Replace("'", "''", StringComparison.Ordinal);
+            Execute($"INSERT INTO collector_counters(name,value) VALUES('{safeName}',{value}) " +
+                    "ON CONFLICT(name) DO UPDATE SET value=excluded.value");
         }
     }
 
@@ -1375,9 +1684,9 @@ public sealed partial class ObservationStore : IDisposable
             // into one bucket the reader can see and question instead.
             const string app = "COALESCE(NULLIF(process_name,''),'Unknown')";
             var where = $"last_seen>='{fromText}' AND first_seen<'{toText}' AND layer='logical'";
-            var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),COALESCE(SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),0),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows WHERE {where}";
+            var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),COALESCE(SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),0),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END),COALESCE(SUM(COALESCE(bytes_sent,0)),0),COALESCE(SUM(COALESCE(bytes_received,0)),0) FROM flows WHERE {where}";
             CheckOperation(WinSqlite.Prepare(db, totalsSql, -1, out var totalsStatement, 0));
-            long connections; int applications; int destinations; long bytes; long unknown;
+            long connections; int applications; int destinations; long bytes; long unknown; long sent; long received;
             try
             {
                 CheckQueryRow(WinSqlite.Step(totalsStatement));
@@ -1386,6 +1695,8 @@ public sealed partial class ObservationStore : IDisposable
                 destinations = (int)WinSqlite.ColumnInt64(totalsStatement, 2);
                 bytes = WinSqlite.ColumnInt64(totalsStatement, 3);
                 unknown = WinSqlite.ColumnInt64(totalsStatement, 4);
+                sent = WinSqlite.ColumnInt64(totalsStatement, 5);
+                received = WinSqlite.ColumnInt64(totalsStatement, 6);
             }
             finally { WinSqlite.Finalize(totalsStatement); }
 
@@ -1466,6 +1777,10 @@ public sealed partial class ObservationStore : IDisposable
                 monitoringStartedAt, ScalarInt64("SELECT COUNT(*) FROM flows"), links, timeline)
             {
                 StorageBytes = ReadStorageBytes(),
+                BytesSent = sent,
+                BytesReceived = received,
+                OutboundAnomalies = ReadOutboundAnomalyCountLocked(from, to),
+                OutboundBaselineReady = ReadUsableBaselineWindowsLocked() >= 96,
                 SleepPeriods = ReadSleepPeriods(from, to),
             };
         }

@@ -268,6 +268,14 @@ public partial class MainWindow : Window
         ConnectionCount.Text = data.Connections.ToString("N0");
         ApplicationCount.Text = data.Applications.ToString("N0");
         DestinationCount.Text = data.Destinations.ToString("N0");
+        SentVolumeValue.Text = FlowRow.FormatBytes(data.BytesSent);
+        ReceivedVolumeValue.Text = FlowRow.FormatBytes(data.BytesReceived);
+        // A dash, not a zero, until the detector has a day of measured
+        // windows: "none found" and "not yet able to say" are different
+        // answers and a 0 would present the second as the first.
+        OutboundAnomalyCount.Text = data.OutboundAnomalies > 0
+            ? data.OutboundAnomalies.ToString("N0")
+            : data.OutboundBaselineReady ? "0" : "—";
         CoverageValue.Text = data.CoverageRatio >= 0.999999999
             ? "100%"
             : $"{Math.Min(data.CoverageRatio, 0.999):P1}";
@@ -633,10 +641,17 @@ public partial class MainWindow : Window
             CoverageValue.Text = !monitoringEnabled ? LocalizationManager.Text("MonitoringStopped") :
                 coverage.GetProperty("active").GetInt64() > 0 ? LocalizationManager.Text("Monitoring") : LocalizationManager.Text("NeedsAttention");
             loadingDeliveryState = true;
+            // Remembered as well as applied: the settings tab is built the
+            // first time it is shown, so the control does not exist yet when
+            // the first status arrives, and a box left at its XAML default
+            // would tell the person that name reading is off when it is on.
+            readsHostnames = !data.TryGetProperty("readsHostnames", out var reads) || reads.GetBoolean();
+            if (HostnameObservationEnabled is not null) HostnameObservationEnabled.IsChecked = readsHostnames;
             DeliveryEnabled.IsChecked = data.GetProperty("deliveryEnabled").GetBoolean();
             loadingDeliveryState = false;
             if (!healthy && System.Windows.Application.Current is App app)
                 app.Notifications.Notify("Monitoring", "monitoring-health", "EgressView Agent", LocalizationManager.Text("NeedsAttention"), app.ShowNotification);
+            AnnounceOutboundAnomaly(data);
             await RefreshDeliveryStatusAsync();
         }
         catch
@@ -722,6 +737,73 @@ public partial class MainWindow : Window
             first.TryGetProperty("action", out var action) ? action.GetString() : null);
     }
 
+    /// The same action the tray menu offers, in the place people look first.
+    ///
+    /// It delegates rather than repeating the request, so the confirmation,
+    /// the failure message and the refresh stay in one piece of code.
+    private async void MonitoringSettingToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (System.Windows.Application.Current is not App app) return;
+        MonitoringSettingToggle.IsEnabled = false;
+        try { await app.ToggleMonitoringFromSettingsAsync(); }
+        finally { MonitoringSettingToggle.IsEnabled = true; }
+    }
+
+    /// Tells the person when their machine sent something unlike what it
+    /// usually sends.
+    ///
+    /// The detector has no way to reach a person by itself: it runs in the
+    /// service and writes a row. Without this, an anomaly was recorded, shown
+    /// nowhere, and read by nobody -- the state P3-102 was already once in.
+    ///
+    /// Keyed on the window, so the same finding is announced once however
+    /// often the status is polled, and a window seen before a restart is not
+    /// announced again.
+    private void AnnounceOutboundAnomaly(JsonElement data)
+    {
+        if (System.Windows.Application.Current is not App app) return;
+        if (!data.TryGetProperty("outboundAnomaly", out var anomaly) || anomaly.ValueKind != JsonValueKind.Object) return;
+        if (!anomaly.TryGetProperty("windowStart", out var startValue) ||
+            !DateTimeOffset.TryParse(startValue.GetString(), out var windowStart)) return;
+        if (windowStart <= AgentSettings.LastAnnouncedAnomalyAt) return;
+        AgentSettings.LastAnnouncedAnomalyAt = windowStart;
+
+        var distributed = anomaly.TryGetProperty("kind", out var kind) && kind.GetString() == "distributed-transfer";
+        var bytes = anomaly.TryGetProperty("bytesOut", out var value) && value.TryGetUInt64(out var sent) ? sent : 0;
+        var body = string.Format(CultureInfo.CurrentCulture,
+            LocalizationManager.Text(distributed ? "OutboundAnomalyDistributedFormat" : "OutboundAnomalyLargeFormat"),
+            windowStart.ToLocalTime().ToString("t", CultureInfo.CurrentCulture), FlowRow.FormatBytes((long)Math.Min(bytes, long.MaxValue)));
+        app.Notifications.Notify("OutboundAnomaly", $"outbound-anomaly-{windowStart:O}", "EgressView Agent", body, app.ShowNotification);
+    }
+
+    /// Turning destination-name reading off is a request not to collect the
+    /// names, so the service stops subscribing rather than collecting and
+    /// discarding. That means restarting the trace session, which the wording
+    /// beside the box says plainly.
+    private async void HostnameObservationEnabled_Click(object sender, RoutedEventArgs e)
+    {
+        if (loadingDeliveryState || loadingSettings) return;
+        var wanted = HostnameObservationEnabled.IsChecked == true;
+        HostnameObservationEnabled.IsEnabled = false;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                JsonSerializer.Serialize(new { v = 1, op = "set-hostname-observation", enabled = wanted }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            EnsureAccepted(document.RootElement);
+            HostnameObservationStatus.Text = LocalizationManager.Text(wanted ? "ReadingNames" : "NotReadingNames");
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception)
+        {
+            HostnameObservationEnabled.IsChecked = !wanted;
+            HostnameObservationStatus.Text = LocalizationManager.Text("CannotConnect");
+        }
+        finally { HostnameObservationEnabled.IsEnabled = true; }
+    }
+
+    private bool readsHostnames = true;
+
     private void SetMonitoringState(bool healthy, bool enabled = true, string? issueCode = null, string? issueAction = null)
     {
         MonitoringStatus.Text = enabled ? LocalizationManager.Text(healthy ? "Monitoring" : "NeedsAttention") : LocalizationManager.Text("MonitoringStopped");
@@ -730,6 +812,14 @@ public partial class MainWindow : Window
         MonitoringStatus.Foreground = (System.Windows.Media.Brush)FindResource(foreground);
         MonitoringDot.Fill = MonitoringStatus.Foreground;
         MonitoringBadge.Background = (System.Windows.Media.Brush)FindResource(background);
+        // The settings page shows the same state the badge and the tray show,
+        // because there is only one. A second control with its own idea of
+        // whether monitoring is on would eventually disagree with the first.
+        if (MonitoringSettingState is not null)
+        {
+            MonitoringSettingState.Text = MonitoringStatus.Text;
+            MonitoringSettingToggle.SetResourceReference(ContentProperty, enabled ? "StopMonitoring" : "StartMonitoring");
+        }
         MonitoringBadge.ToolTip = !healthy && !string.IsNullOrWhiteSpace(issueCode)
             ? $"{issueCode}{(string.IsNullOrWhiteSpace(issueAction) ? string.Empty : $": {issueAction}")}" : null;
     }
@@ -844,6 +934,7 @@ public partial class MainWindow : Window
     private void LoadSettings()
     {
         loadingSettings = true;
+        if (HostnameObservationEnabled is not null) HostnameObservationEnabled.IsChecked = readsHostnames;
         LanguageChoice.SelectedIndex = (int)AgentSettings.Language;
         NotificationsEnabled.IsChecked = AgentSettings.NotificationsEnabled;
         NotifyThreat.IsChecked = AgentSettings.NotificationCategoryEnabled("Threat");
@@ -851,6 +942,7 @@ public partial class MainWindow : Window
         NotifyHubDelivery.IsChecked = AgentSettings.NotificationCategoryEnabled("HubDelivery");
         NotifyThreatIntel.IsChecked = AgentSettings.NotificationCategoryEnabled("ThreatIntel");
         NotifyRecovery.IsChecked = AgentSettings.NotificationCategoryEnabled("Recovery");
+        NotifyOutboundAnomaly.IsChecked = AgentSettings.NotificationCategoryEnabled("OutboundAnomaly");
         DailyLimitChoice.SelectedIndex = AgentSettings.NotificationDailyLimit switch { 5 => 0, 25 => 2, 0 => 3, _ => 1 };
         FrameRateChoice.SelectedIndex = AgentSettings.GlobeFrameRate switch { 3 => 0, 15 => 2, _ => 1 };
         AutomaticUpdateChecks.IsChecked = AgentSettings.AutomaticUpdateChecks;
@@ -877,6 +969,10 @@ public partial class MainWindow : Window
         if (GeneralSettingsSection is null || NotificationSettingsSection is null || EnrichmentSettingsSection is null || AiSettingsSection is null || HistorySettingsSection is null || DiagnosticsSettingsSection is null || UpdateSettingsSection is null || HubSettingsSection is null || UninstallSettingsSection is null || AboutSettingsSection is null ||
             SettingsSectionChoice.SelectedItem is not ListBoxItem item) return;
         var section = item.Tag?.ToString() ?? "general";
+        // Sections are built when first shown, so a control that was not
+        // there for the last status has to be told the state now.
+        if (section == "general" && HostnameObservationEnabled is not null)
+            HostnameObservationEnabled.IsChecked = readsHostnames;
         GeneralSettingsSection.Visibility = section == "general" ? Visibility.Visible : Visibility.Collapsed;
         NotificationSettingsSection.Visibility = section == "notifications" ? Visibility.Visible : Visibility.Collapsed;
         EnrichmentSettingsSection.Visibility = section == "enrichment" ? Visibility.Visible : Visibility.Collapsed;
@@ -983,9 +1079,14 @@ public partial class MainWindow : Window
         try
         {
             var bytes = await File.ReadAllBytesAsync(dialog.FileName, lifetime.Token);
-            var value = AgentSettingsFile.Decode(bytes);
+            var (value, ignored) = AgentSettingsFile.Read(bytes);
             var fields = AgentSettingsFile.PresentFields(value);
             var preview = string.Join("\r\n", fields.Select(field => $"• {field}: {PortableValue(value, field)}"));
+            // Named before the file is applied, not after: someone deciding
+            // whether to go ahead needs to know what will not travel.
+            if (ignored.Count > 0)
+                preview += Environment.NewLine + Environment.NewLine + string.Format(CultureInfo.CurrentCulture,
+                    LocalizationManager.Text("SettingsImportIgnoredFormat"), string.Join(", ", ignored));
             var message = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SettingsImportPreviewFormat"), preview);
             if (System.Windows.MessageBox.Show(this, message, LocalizationManager.Text("ImportSettings"), MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
             { PortableSettingsStatus.Text = LocalizationManager.Text("SettingsImportCancelled"); return; }
@@ -1000,7 +1101,10 @@ public partial class MainWindow : Window
             LoadSettings();
             LocalizationManager.Apply(System.Windows.Application.Current.Resources);
             ApplyAccessibilityLabels();
-            PortableSettingsStatus.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SettingsImportedFormat"), fields.Count);
+            PortableSettingsStatus.Text = ignored.Count == 0
+                ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SettingsImportedFormat"), fields.Count)
+                : string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("SettingsImportedWithIgnoredFormat"),
+                    fields.Count, string.Join(", ", ignored));
             await RefreshAllAsync();
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
@@ -1270,7 +1374,7 @@ public partial class MainWindow : Window
     {
         if (loadingSettings) return;
         AgentSettings.NotificationsEnabled = NotificationsEnabled.IsChecked == true;
-        foreach (var box in new[] { NotifyThreat, NotifyMonitoring, NotifyHubDelivery, NotifyThreatIntel, NotifyRecovery })
+        foreach (var box in new[] { NotifyThreat, NotifyMonitoring, NotifyHubDelivery, NotifyThreatIntel, NotifyRecovery, NotifyOutboundAnomaly })
             if (box.Tag is string kind) AgentSettings.SetNotificationCategory(kind, box.IsChecked == true);
         if (DailyLimitChoice.SelectedItem is ComboBoxItem item && int.TryParse(item.Tag?.ToString(), out var value)) AgentSettings.NotificationDailyLimit = value;
         RefreshNotifications();

@@ -656,15 +656,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 16, "v1 database migrates through v2-v16");
+        Assert(migrated.SchemaVersion == 17, "v1 database migrates through v2-v17");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v16.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v17.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 16, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 17, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -1387,6 +1387,231 @@ try
     }
 
     {
+        // The Mac Agent's settings file carries fields this one has never had,
+        // and its own source says a value that is neither applied nor named as
+        // ignored must not exist. Windows used to drop them silently while
+        // reporting how many settings it had applied.
+        var fromMac = System.Text.Encoding.UTF8.GetBytes("""
+            {"version":1,"language":"japanese","retentionDays":30,
+             "hubDeliveryEnabled":true,"readServerNameFromHandshake":false}
+            """);
+        var (settings, ignored) = AgentSettingsFile.Read(fromMac);
+        Assert(settings.Language == "japanese" && settings.RetentionDays == 30,
+            "a settings file written elsewhere still applies the fields this Agent shares");
+        Assert(ignored.SequenceEqual(["hubDeliveryEnabled", "readServerNameFromHandshake"]),
+            "fields this Agent has no setting for are named, not dropped in silence");
+
+        var ours = AgentSettingsFile.Encode(new AgentSettingsFile(AgentSettingsFile.CurrentSchemaVersion, Language: "english"));
+        Assert(AgentSettingsFile.Read(ours).Ignored.Count == 0,
+            "a file this Agent wrote itself reports nothing ignored");
+    }
+
+    {
+        // Ported from the Mac Agent with its thresholds intact. The same
+        // laptop must not be called unusual on one platform and ordinary on
+        // the other, so these assertions mirror the Swift tests case for case.
+        const ulong mib = 1024 * 1024;
+        static OutboundTrafficWindow Window(int index, ulong megabytes, int observationsWithBytes = 100,
+            int applications = 2, int destinations = 5, ulong? largestAppMegabytes = null) =>
+            new(new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero).AddSeconds(index * 900),
+                megabytes * 1024 * 1024, 100, observationsWithBytes, applications, destinations,
+                (largestAppMegabytes ?? megabytes) * 1024 * 1024);
+
+        var detector = new OutboundAnomalyDetector();
+
+        // Under a day of history, "normal" has not been observed, only
+        // guessed at. Refusing to decide is the answer, not a missing one.
+        Assert(detector.Evaluate(Window(96, 500), Enumerable.Range(0, 95).Select(i => Window(i, 10)).ToArray()) is null,
+            "no opinion is offered before a full day of measured baseline");
+
+        var steady = Enumerable.Range(0, 96).Select(index => Window(index, 20)).ToArray();
+        var large = detector.Evaluate(Window(96, 200), steady);
+        Assert(large is { Kind: OutboundAnomalyKind.LargeTransfer } &&
+            large.BaselineMedianBytesOut == 20 * mib && large.AlertThresholdBytesOut == 100 * mib,
+            "a large send against a steady baseline is reported with the median and threshold that decided it");
+
+        // Twelve destinations across five applications, none of them dominant:
+        // the shape nobody finds by sorting a list by size.
+        Assert(detector.Evaluate(Window(96, 300, applications: 5, destinations: 30, largestAppMegabytes: 120), steady)
+            is { Kind: OutboundAnomalyKind.DistributedTransfer },
+            "traffic spread across applications and destinations is told apart from one big sender");
+
+        // A quiet baseline must not turn a small upload into an alarm: three
+        // times almost nothing is still almost nothing.
+        Assert(detector.Evaluate(Window(96, 40), Enumerable.Range(0, 96).Select(index => Window(index, 1)).ToArray()) is null,
+            "the absolute floor keeps a quiet machine from alarming over a small upload");
+
+        // A window that could not be measured is not evidence of a quiet
+        // period. It must not alert, and it must not lower the baseline.
+        var lenient = new OutboundAnomalyDetector(new OutboundAnomalyDetector.Configuration { MinimumBaselineWindows = 2 });
+        Assert(lenient.Evaluate(Window(2, 500), [Window(0, 1, observationsWithBytes: 5), Window(1, 1)]) is null,
+            "a baseline window without byte coverage is not counted towards having enough history");
+        Assert(lenient.Evaluate(Window(2, 500, observationsWithBytes: 5), [Window(0, 1), Window(1, 1)]) is null,
+            "a current window without byte coverage never raises an alert");
+
+        // Sent and received answer different questions, and the overview
+        // shows them apart. A single total mixes what left the machine with
+        // everything that arrived and answers neither.
+        var directionDatabase = Path.Combine(directory, "period-direction.db");
+        using (var store = new ObservationStore(directionDatabase))
+        {
+            var now = DateTimeOffset.UtcNow;
+            store.WriteBatch([
+                new NetworkObservation(now.AddMinutes(-5), 11, "TCP", "10.0.0.7", 51_100, "203.0.113.50", 443,
+                    3_000_000, 500_000, ObservationLayer.Logical, null, "etw", "uploader"),
+                new NetworkObservation(now.AddMinutes(-4), 12, "TCP", "10.0.0.7", 51_101, "203.0.113.51", 443,
+                    1_000_000, 9_000_000, ObservationLayer.Logical, null, "etw", "downloader"),
+            ]);
+            var period = store.ReadPeriodAnalysis(now.AddMinutes(-30), now.AddMinutes(1));
+            Assert(period.BytesSent == 4_000_000 && period.BytesReceived == 9_500_000,
+                "the period reports what left and what arrived as two numbers");
+            Assert(period.Bytes == period.BytesSent + period.BytesReceived,
+                "the existing total stays the sum of the two directions");
+            Assert(!period.OutboundBaselineReady && period.OutboundAnomalies == 0,
+                "a fresh database says it cannot judge yet rather than reporting no anomalies");
+        }
+
+        // The detector is only worth having if something calls it. A store
+        // that captures windows, a caller that evaluates them and a row that
+        // records the verdict are three separate things, and the last time
+        // two of three were present the third went missing for weeks.
+        var anomalyDatabase = Path.Combine(directory, "outbound-anomaly.db");
+        using (var store = new ObservationStore(anomalyDatabase))
+        {
+            Assert(store.SchemaVersion == 17, "the traffic-window table arrives with schema 17");
+            var now = DateTimeOffset.UtcNow;
+            var window = new DateTimeOffset(now.UtcTicks - now.UtcTicks % TimeSpan.FromMinutes(15).Ticks, TimeSpan.Zero);
+            var previous = window - TimeSpan.FromMinutes(15);
+            store.WriteBatch(Enumerable.Range(0, 12).Select(index => new NetworkObservation(
+                previous.AddMinutes(1), 500 + index, "TCP", "10.0.0.5", 50_000 + index,
+                $"203.0.113.{index}", 443, 8 * 1024 * 1024, 0, ObservationLayer.Logical, null, "etw",
+                $"sender{index}")).ToArray());
+
+            var captured = store.CaptureOutboundTrafficWindow(now);
+            Assert(captured is { } first && first.Current.StartedAt == previous &&
+                first.Current.BytesOut == 12UL * 8 * 1024 * 1024 && first.Current.ObservationCount == 12 &&
+                first.Current.ObservationsWithBytes == 12 && first.Current.ApplicationCount == 12 &&
+                first.Current.DestinationCount == 12 && first.Current.LargestApplicationBytesOut == 8 * 1024 * 1024,
+                "a captured window measures bytes, coverage, applications and the largest single sender");
+
+            // Capturing twice would let a restart raise the same alert again.
+            Assert(store.CaptureOutboundTrafficWindow(now) is null,
+                "a window already captured is not captured a second time");
+
+            Assert(store.ReadOutboundAnomalyCount(previous, now) == 0,
+                "a captured window carries no verdict until one is recorded");
+            store.RecordOutboundAnomaly(previous, OutboundAnomalyKind.DistributedTransfer);
+            Assert(store.ReadOutboundAnomalyCount(previous, now) == 1 &&
+                store.ReadOutboundAnomalyCount(previous.AddDays(-2), previous.AddDays(-1)) == 0,
+                "a recorded anomaly is counted inside its period and not outside it");
+        }
+
+        // One overnight backup in the baseline must not become the new normal.
+        var withSpike = new ulong[] { 10, 10, 11, 12, 900 }.Select((value, index) => Window(index, value)).ToArray();
+        Assert(new OutboundAnomalyDetector(new OutboundAnomalyDetector.Configuration { MinimumBaselineWindows = 5 })
+            .Evaluate(Window(5, 150), withSpike) is not null,
+            "median and MAD keep one huge baseline window from hiding the next one");
+    }
+
+    {
+        // The check at open happens only when the last run cannot vouch for
+        // the file.
+        //
+        // Making it shallow was not enough: quick_check still reads every
+        // page, and on a 7 GB database from a cold disk that measured 118,649
+        // ms -- against 26,567 ms for the full check when the file was already
+        // cached. The cost is the read, not the depth. So a run that said
+        // goodbye is trusted at open and the full read happens afterwards,
+        // off the path someone is waiting on.
+        var depthDatabase = Path.Combine(directory, "integrity-depth.db");
+        using (var store = new ObservationStore(depthDatabase))
+        {
+            Assert(!store.IntegrityCheckWasDeep && store.IntegrityCheckMilliseconds == 0,
+                "creating a database does not check it");
+            var run = store.BeginRun(RunComponent.Service, "0.1.0");
+            store.EndRun(run);
+        }
+        using (var store = new ObservationStore(depthDatabase))
+        {
+            Assert(!store.IntegrityCheckWasDeep && store.IntegrityCheckMilliseconds == 0,
+                "after a clean run the open reads nothing and starts immediately");
+            Assert(store.BackgroundIntegrityCheckDue,
+                "a full read that has never happened is owed, and said to be owed");
+            Assert(store.VerifyIntegrityInBackground() == "ok",
+                "the full read runs on its own connection and answers");
+            Assert(!store.BackgroundIntegrityCheckDue,
+                "once the full read has happened it is no longer owed");
+            store.BeginRun(RunComponent.Service, "0.1.0");
+        }
+        using (var store = new ObservationStore(depthDatabase))
+        {
+            // The previous line left a run open, so this start settles it as
+            // unexpected -- the case worth waiting for.
+            Assert(store.IntegrityCheckWasDeep,
+                "after a run that did not say goodbye the open reads every page before trusting it");
+        }
+
+        // The shallow path must not be a blind path. A quick check still
+        // reads page structure, and the risk-led policy is only worth having
+        // if damage is still found when it takes the cheap route.
+        var damagedDatabase = Path.Combine(directory, "integrity-damaged.db");
+        using (var store = new ObservationStore(damagedDatabase))
+        {
+            store.WriteBatch(Enumerable.Range(0, 400).Select(index => new NetworkObservation(
+                DateTimeOffset.UtcNow.AddSeconds(-index), 900 + index, "TCP", "10.0.0.9", 40_000 + index,
+                $"198.51.100.{index % 250}", 443, 100, 100, ObservationLayer.Logical, null, "etw", "filler")).ToArray());
+            var run = store.BeginRun(RunComponent.Service, "0.1.0");
+            store.EndRun(run);
+        }
+        using (var store = new ObservationStore(damagedDatabase))
+        {
+            // Opened and abandoned, the way a killed service leaves it.
+            store.BeginRun(RunComponent.Service, "0.1.0");
+        }
+        // Left deliberately unsettled, so the next open is the synchronous
+        // full read rather than the trusting one.
+        foreach (var suffix in new[] { "-wal", "-shm" }) File.Delete(damagedDatabase + suffix);
+        var damaged = File.ReadAllBytes(damagedDatabase);
+        // Well past the header, in the middle of the content.
+        for (var offset = damaged.Length / 2; offset < damaged.Length / 2 + 512 && offset < damaged.Length; offset++)
+            damaged[offset] ^= 0xFF;
+        File.WriteAllBytes(damagedDatabase, damaged);
+        AssertStoreOpenFails(() => new ObservationStore(damagedDatabase), StoreFailureKind.Corrupt,
+            "damage is found before a database that cannot vouch for itself is used");
+
+        // Turning destination-name reading off has to forget what was already
+        // learned. On 2026-09-19 it did not, and two of the first forty-six
+        // connections after the switch were still named from the cache -- the
+        // request was to stop collecting names, not to stop reading them out.
+        {
+            var dns = new DnsNameCache();
+            var at = DateTimeOffset.UtcNow;
+            dns.Observe(4242, "example.test", "203.0.113.77", at);
+            Assert(dns.Resolve(4242, "203.0.113.77", at) == "example.test",
+                "a name observed for a process is used for that process's connections");
+            dns.Forget();
+            Assert(dns.Resolve(4242, "203.0.113.77", at) is null,
+                "forgetting leaves nothing to name a later connection with");
+        }
+
+        // A window that was running when the service restarted is not running.
+        // Only the window can close its own run, so a window that never comes
+        // back used to leave the row marked running for ever -- and after a
+        // reboot on 2026-09-19 it did exactly that, claiming a process killed
+        // by the reboot had been alive since the previous evening.
+        var strandedDatabase = Path.Combine(directory, "stranded-ui-run.db");
+        using (var store = new ObservationStore(strandedDatabase))
+        {
+            store.BeginRun(RunComponent.Ui, "0.1.0");
+            Assert(store.ReadRunHistory()[0].Ending == "running", "the window's run starts open");
+            store.BeginRun(RunComponent.Service, "0.1.0");
+            var rows = store.ReadRunHistory();
+            Assert(rows.Single(run => run.Component == RunComponent.Ui).Ending == "unexpected",
+                "a service start settles a window run left open by a restart");
+            Assert(rows.Single(run => run.Component == RunComponent.Service).Ending == "running",
+                "settling the window's run does not disturb the service's own");
+        }
+
         // An OS shutdown and a crash both leave a run that never wrote its own
         // ending. Filing them under one word means the machine being restarted
         // outnumbers, and hides, the run that really did fail.
@@ -1425,7 +1650,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 16 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 17 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
@@ -1599,7 +1824,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, and window run reports");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, and risk-led integrity checks");
     return 0;
 }
 finally
@@ -1616,6 +1841,21 @@ static void AssertStoreFailure(Action action, StoreFailureKind expected, string 
 {
     try { action(); }
     catch (ObservationStoreException exception) when (exception.Kind == expected) { return; }
+    throw new InvalidOperationException($"FAILED: {message}");
+}
+
+/// The same, for a call that returns a store when it should have thrown.
+///
+/// Leaving that store open made the run die later, in the temp-directory
+/// cleanup, with a file-in-use error naming neither the assertion nor the
+/// reason -- so a real regression would have been reported as a tidying
+/// problem.
+static void AssertStoreOpenFails(Func<ObservationStore> open, StoreFailureKind expected, string message)
+{
+    ObservationStore? opened = null;
+    try { opened = open(); }
+    catch (ObservationStoreException exception) when (exception.Kind == expected) { return; }
+    finally { opened?.Dispose(); }
     throw new InvalidOperationException($"FAILED: {message}");
 }
 
