@@ -35,7 +35,19 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     /// addresses, and threat matching by domain has nothing to match on.
     /// Matching by address, locations and countries are unaffected, because
     /// those are worked out from the address.
-    public bool ReadsHostnames { get; set; } = true;
+    public bool ReadsHostnames
+    {
+        get => readsHostnames;
+        set
+        {
+            readsHostnames = value;
+            // Turning it off forgets what was already learned, so no new
+            // connection is named from names collected before the request.
+            if (!value) dnsNames.Forget();
+        }
+    }
+
+    private bool readsHostnames = true;
     private const ulong ProcessKeyword = 0x10;
     private static readonly HashSet<string> VpnProcesses = new(StringComparer.OrdinalIgnoreCase)
     {

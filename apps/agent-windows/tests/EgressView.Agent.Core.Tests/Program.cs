@@ -1514,6 +1514,21 @@ try
     }
 
     {
+        // Turning destination-name reading off has to forget what was already
+        // learned. On 2026-09-19 it did not, and two of the first forty-six
+        // connections after the switch were still named from the cache -- the
+        // request was to stop collecting names, not to stop reading them out.
+        {
+            var dns = new DnsNameCache();
+            var at = DateTimeOffset.UtcNow;
+            dns.Observe(4242, "example.test", "203.0.113.77", at);
+            Assert(dns.Resolve(4242, "203.0.113.77", at) == "example.test",
+                "a name observed for a process is used for that process's connections");
+            dns.Forget();
+            Assert(dns.Resolve(4242, "203.0.113.77", at) is null,
+                "forgetting leaves nothing to name a later connection with");
+        }
+
         // A window that was running when the service restarted is not running.
         // Only the window can close its own run, so a window that never comes
         // back used to leave the row marked running for ever -- and after a
