@@ -24,6 +24,7 @@ const mainJs   = fs.readFileSync(path.join(jsDir, 'main.js'), 'utf8');
 const serverJs = fs.readFileSync(path.join(__dirname, '..', '..', 'server.js'), 'utf8');
 const httpAppJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'http-app.js'), 'utf8');
 const serverAndHttpAppJs = `${serverJs}\n${httpAppJs}`;
+const routerManagerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'router-manager.js'), 'utf8');
 const pollSchedulerJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'poll-scheduler.js'), 'utf8');
 const yamahaJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'pollers', 'yamaha.js'), 'utf8');
 const asusJs = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'pollers', 'asus.js'), 'utf8');
@@ -858,6 +859,22 @@ describe('Server runtime invariants', () => {
       'the ASUS handler must go through the shared chooser');
     assert.doesNotMatch(serverJs, /if \(!prev \|\| \(c\.rssi \|\| 0\) > \(prev\.rssi \|\| 0\)\) byIp\.set/,
       'RSSI must not be the only thing deciding which entry wins');
+  });
+
+  // The watchdog reported ~2,000 ms every poll interval on this Hub with no GC
+  // and no measured operation spanning it, which meant the cause was somewhere
+  // nothing was looking. The tail of the poll cycle was that somewhere.
+  it('ポーリングの後半も計測されている', () => {
+    const tail = routerManagerJs.slice(routerManagerJs.indexOf('const currentKeys'));
+    for (const [what, pattern] of [
+      ['ビーコンの走査', /measureSync\(`router\.\$\{kind\}\.poll\.beacons`/],
+      ['履歴の剪定', /measureSync\('history\.prune'/],
+      ['ソケット配信', /measureSync\(`router\.\$\{kind\}\.poll\.emit`/],
+    ]) {
+      assert.match(tail, pattern, `${what} が計測されていない`);
+    }
+    assert.match(tail, /setGauge\('poll\.emit\.connections'/,
+      '配信した件数が分からないと、遅さを件数で説明できない');
   });
 
   it('Yamaha polling reschedules with POLL_INTERVAL, not a hard-coded 60 seconds', () => {
