@@ -1100,8 +1100,20 @@ try
                     $"{path} lists every key in the sent JSON payload");
             }
             var downloadPage = File.ReadAllText(Path.Combine(windowsRoot, "..", "..", "site", "dl", "index.html"));
-            Assert(sentKeys.All(key => downloadPage.Contains(key, StringComparison.Ordinal)),
-                "the download page lists every key in the sent JSON payload");
+            // The list used to be on the download page. It moved to the privacy
+            // note, which is where the page and the footer now point and where
+            // someone auditing would look; the page reads better without a
+            // column of JSON keys in it. What must not change is that every key
+            // the sender actually serialises is disclosed somewhere a reader
+            // can reach, which is what this has always checked.
+            foreach (var note in new[] { "agent-privacy-windows.md", "agent-privacy-windows.ja.md" })
+            {
+                var text = File.ReadAllText(Path.Combine(windowsRoot, "..", "..", "docs", note));
+                Assert(sentKeys.All(key => text.Contains($"`{key}`", StringComparison.Ordinal)),
+                    $"docs/{note} lists every key in the sent JSON payload");
+            }
+            Assert(!sentKeys.Contains("schemaVersion") || !downloadPage.Contains("schemaVersion", StringComparison.Ordinal),
+                "and the download page no longer carries the list, so the two cannot drift apart");
             var updateAgent = WindowsAgentUpdateClient.UserAgent("1.2.3", "11.0");
             Assert(updateAgent.Contains("1.2.3", StringComparison.Ordinal) && updateAgent.Contains("11.0", StringComparison.Ordinal) &&
                 downloadPage.Contains("dl.egressview.com", StringComparison.Ordinal) &&
