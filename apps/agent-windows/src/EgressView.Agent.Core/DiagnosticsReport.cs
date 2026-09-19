@@ -54,7 +54,15 @@ public static class DiagnosticsReport
         // The service verified the entire database when it opened it. Re-running
         // integrity_check for every 15-second UI status request can take minutes
         // on a multi-GB history and monopolizes the single authenticated pipe.
-        var (count, integrity) = store.Inspect(verifyIntegrity);
+        // Verifying reads every page: thirty seconds warm, two minutes cold,
+        // all of it holding the lock every other request needs, on a pipe that
+        // takes one caller at a time. The offline bundle -- run when the
+        // service will not start, with nobody waiting on it -- asks for that.
+        // A request over IPC must not, and reports what the last full read
+        // found and when instead.
+        var (count, verified) = store.Inspect(verifyIntegrity);
+        var integrity = verifyIntegrity ? verified : store.LastVerifiedIntegrity;
+        var integrityCheckedAt = store.LastDeepIntegrityCheckAt;
         var coverage = store.ReadCoverage();
         var flowStats = store.ReadFlowStats();
         var processNames = store.ReadProcessNameStats();
@@ -77,7 +85,7 @@ public static class DiagnosticsReport
             // being restarted, and on a laptop the restarts always win.
             runSummary = SafeRunSummary(store),
             health = new { status = health.Status, issues = health.Issues.Select(issue => new { code = issue.Code, action = issue.Action }) },
-            database = new { observationCount = count, storageBytes = store.ReadStorageBytes(), integrity, schemaVersion = store.SchemaVersion, durableCounters = store.ReadCounters() },
+            database = new { observationCount = count, storageBytes = store.ReadStorageBytes(), integrity, integrityCheckedAt, schemaVersion = store.SchemaVersion, durableCounters = store.ReadCounters() },
             flows = new { total = flowStats.Total, snapshot = flowStats.Snapshot, etw = flowStats.Etw, both = flowStats.Both, bytesUnknown = flowStats.BytesUnknown, processNames = new { resolved = processNames.Resolved, unresolved = processNames.Unresolved }, byOrigin = store.ReadFlowOrigins() },
             coverage = new { total = coverage.Total, active = coverage.Active, abandoned = coverage.Abandoned },
             monitoringEnabled,
