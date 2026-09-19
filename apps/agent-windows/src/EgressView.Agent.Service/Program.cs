@@ -249,6 +249,7 @@ internal sealed class AgentWindowsService : ServiceBase
         var chartAggregation = RunChartAggregationAsync(store, cancellationToken);
         var maintenance = RunMaintenanceAsync(store, cancellationToken);
         var outboundAnomalies = RunOutboundAnomalyAsync(store, cancellationToken);
+        var integrity = RunBackgroundIntegrityAsync(store, cancellationToken);
         var coverage = monitoring.RunCoverageHeartbeatAsync(cancellationToken);
         var runHeartbeat = RunHeartbeatAsync(store, runId, cancellationToken);
         Task lifetime;
@@ -273,6 +274,7 @@ internal sealed class AgentWindowsService : ServiceBase
         await chartAggregation;
         await maintenance;
         await outboundAnomalies;
+        await integrity;
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(monitoring.Snapshot(), store, DiagnosticsReport.CurrentVersion, monitoring.Enabled,
                 capabilityStatus: deliveryController.CapabilityStatus));
@@ -335,6 +337,38 @@ internal sealed class AgentWindowsService : ServiceBase
     /// full day of measured windows before it will say anything. Until then
     /// it returns nothing -- which is not the same as "nothing unusual", and
     /// the counter names keep the two apart.
+    /// Reads the whole database, after the Agent is already answering.
+    ///
+    /// It used to happen before anything else, and on a 7 GB database from a
+    /// cold disk that was 118 seconds during which the service existed and
+    /// replied to nothing -- so a person checking whether their agent survived
+    /// the reboot found nothing there (P3-134). The check is still worth
+    /// doing; it is the waiting that was not.
+    ///
+    /// Only when one is owed: after a run that did not end cleanly the open
+    /// has already read every page, synchronously, before trusting the file.
+    private static async Task RunBackgroundIntegrityAsync(ObservationStore store, CancellationToken cancellationToken)
+    {
+        if (!store.BackgroundIntegrityCheckDue) return;
+        // Let the start settle first. Nothing here is urgent, and competing
+        // with the first minute of collection would trade one slow start for
+        // another.
+        try { await Task.Delay(TimeSpan.FromMinutes(2), cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var answer = await Task.Run(store.VerifyIntegrityInBackground, cancellationToken);
+        try
+        {
+            store.SetCounter("integrity-background-ms", timer.ElapsedMilliseconds);
+            // Loud on purpose. A database found damaged here has been written
+            // to since the start, and that is worth saying plainly rather than
+            // leaving as an absence.
+            store.SetCounter("integrity-background-ok", string.Equals(answer, "ok", StringComparison.Ordinal) ? 1 : 0);
+            if (answer is null) store.AddCounter("integrity-background-unavailable", 1);
+        }
+        catch { /* Recording the check must not be what stops the agent. */ }
+    }
+
     private static async Task RunOutboundAnomalyAsync(ObservationStore store, CancellationToken cancellationToken)
     {
         var detector = new OutboundAnomalyDetector();
