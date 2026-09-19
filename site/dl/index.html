@@ -231,7 +231,7 @@
     </div>
     <div class="card">
       <h3 data-ja="問い合わせのために何も送りません">Nothing is sent to be looked up</h3>
-      <p data-ja="脅威情報も位置情報も、一覧ごとこの端末へ届き、照合はここで行います。あなたの通信先を、身元確認のために外へ送ることはありません。">Threat lists and locations come to your machine and the matching happens there. No destination of yours is sent anywhere to be identified.</p>
+      <p data-ja="脅威情報も位置情報も、一覧ごとこの端末へ届き、照合はここで行います。あなたの通信先を、身元確認のために外へ送ることはありません。Hubへ送る項目の一覧を含め、&lt;a href=&quot;https://www.egressview.com/docs/agent-privacy.html&quot;&gt;何をどこへ送るか&lt;/a&gt;に全て書いてあります。">Threat lists and locations come to your machine and the matching happens there. No destination of yours is sent anywhere to be identified. <a href="https://www.egressview.com/docs/agent-privacy.html">What is sent, and where</a> lists every connection the agent makes and every field a Hub receives.</p>
     </div>
     <div class="card">
       <h3 data-ja="単体でも使えます">Works on its own</h3>
@@ -240,12 +240,7 @@
   </div>
 </section>
 
-<section class="wrap" id="windows-disclosure">
-  <h2 data-ja="Hubへ送るもの、更新確認で送るもの">What is sent to a Hub, and what an update check sends</h2>
-  <p data-ja="macOS版・Windows版とも同じ項目を送ります。Hub登録だけでは観測データを送信せず、アプリ内で明示的に有効にした場合のみ送ります。通信内容・パケット本体は送りません。">Both the macOS and the Windows agent send the same fields. Hub enrolment alone does not send observations; delivery starts only after you explicitly enable it in the app. Packet contents are never sent.</p>
-  <p data-ja="送信するJSON項目: schemaVersion, batchId, sentAt, agent (hostName, platform, osVersion, agentVersion), observations (observationId, networkProtocol, localAddress, localPort, remoteAddress, remotePort, processID, processName, bundleID, firstObservedAt, lastObservedAt, bytesIn, bytesOut, collector, confidence)。remoteHostnameはHubが対応を通知したときだけ追加します。認証用Bearer tokenはそのHubへ送ります。">JSON fields sent: schemaVersion, batchId, sentAt, agent (hostName, platform, osVersion, agentVersion), observations (observationId, networkProtocol, localAddress, localPort, remoteAddress, remotePort, processID, processName, bundleID, firstObservedAt, lastObservedAt, bytesIn, bytesOut, collector, confidence). remoteHostname is added only when the Hub advertises support. The Bearer token authenticates to that Hub.</p>
-  <p data-ja="別途の更新確認はdl.egressview.comへ接続し、User-AgentにAgentとOSのバージョンを含めます。送信元IPは接続先に見えますが、観測データとHub資格情報は送りません。">Separate update checks contact dl.egressview.com and include the Agent and OS versions in User-Agent. The server sees the source IP, but receives no observations or Hub credentials.</p>
-</section>
+
 
 <section class="wrap">
   <h2 data-ja="インストール">Installing</h2>

@@ -31,6 +31,16 @@
 
 そのリクエストには、リクエスト自体を超えてあなたを特定するものは含まれません。インストールIDもアカウントも観測データも付いていません。
 
+### Hubへ送る項目の一覧
+
+上の表は「何を送るか」を言葉で述べています。実際に送られるJSONの項目名は次のとおりです。**macOS版とWindows版は同じ項目を送ります。**
+
+`schemaVersion`, `batchId`, `sentAt`, `agent` (`hostName`, `platform`, `osVersion`, `agentVersion`), `observations` (`observationId`, `networkProtocol`, `localAddress`, `localPort`, `remoteAddress`, `remotePort`, `processID`, `processName`, `bundleID`, `firstObservedAt`, `lastObservedAt`, `bytesIn`, `bytesOut`, `collector`, `confidence`)
+
+`remoteHostname` は、Hubが対応を通知したときだけ追加されます。認証情報はBearer tokenとして、そのHubへ送られます。
+
+この一覧は、エージェントが登録前に画面へ表示するものと同じです。登録は、その内容を読んだことを確認しない限り開始できません。
+
 ## 宛先の名前を読むこと、そして唯一復号するもの
 
 **既定では無効。** 取り出した名前はローカルの履歴と画面で使い、**Hubが受け付けると答えた場合はHubへも送ります**（[P3-14](https://github.com/yo1t/egressview)段階2、Agent 0.5.59以降）。古いHubには送りません —— 送る前に受け付けるかを尋ね、答えが無ければ送らないためです。
