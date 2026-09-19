@@ -988,6 +988,19 @@ private struct AgentSettingsView: View {
                         .disabled(ollama.isRunning)
                     }
                     .frame(width: 220)
+
+                    // Without this, listing models again meant pressing "Save
+                    // and test", which also decides whether AI stays enabled.
+                    // Asking what is installed should not carry that weight.
+                    Button {
+                        ollama.refreshAvailableModels(userInitiated: true)
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(ollama.isRunning)
+                    .help(L("Ask Ollama which models are installed now"))
+                    .accessibilityLabel(L("Refresh model list"))
                 }
                 Button(ollama.isRunning ? L("Checking...") : L("Save and test")) {
                     ollama.saveAndTest()

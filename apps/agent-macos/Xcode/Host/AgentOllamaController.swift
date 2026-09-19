@@ -441,8 +441,14 @@ final class AgentOllamaController: ObservableObject {
     /// Read-only and quiet: it lists models, changes no setting, and leaves
     /// the status line alone so it cannot overwrite the result of something
     /// the person actually did.
-    func refreshAvailableModels() {
-        guard isEnabled, !isRunning else { return }
+    ///
+    /// - Parameter userInitiated: pass true when the person pressed something.
+    ///   The `isEnabled` guard exists so that opening a screen cannot probe a
+    ///   Mac that never set Ollama up; pressing a button is not that. Without
+    ///   this, a model installed while the screen was open stayed invisible
+    ///   until the screen was closed and opened again.
+    func refreshAvailableModels(userInitiated: Bool = false) {
+        guard userInitiated || isEnabled, !isRunning else { return }
         guard let url = try? AgentOllamaConfiguration.validatedEndpoint(endpoint) else { return }
         Task { [weak self] in
             guard let self else { return }

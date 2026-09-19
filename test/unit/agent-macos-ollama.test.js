@@ -113,8 +113,33 @@ describe('macOS Agent Ollama Phase 2 safety boundary', () => {
     // probing on screen appearance would probe every Mac. The automatic
     // refresh runs only once the person has enabled it.
     const refresh = controller.slice(controller.indexOf('func refreshAvailableModels'));
-    assert.match(refresh.slice(0, 200), /guard isEnabled/);
+    assert.match(refresh.slice(0, 300), /guard userInitiated \|\| isEnabled/);
     assert.match(panel, /\.task\(id: ollama\.isEnabled\) \{ ollama\.refreshAvailableModels\(\) \}/);
+    assert.doesNotMatch(panel, /\.task\([^)]*\)\s*\{ ollama\.refreshAvailableModels\(userInitiated: true\)/,
+      'an automatic refresh must never claim to be user-initiated');
+  });
+
+  it('モデル一覧は、押せば取り直せる', () => {
+    // The list was fetched when the screen appeared, so a model pulled while
+    // it stayed open was invisible until the screen was closed and reopened.
+    // Pressing a button is not "a screen opened", so it bypasses the guard
+    // that keeps an unconfigured Mac from being probed.
+    for (const [name, source] of [['洞察パネル', panel], ['設定', settings]]) {
+      assert.match(source, /ollama\.refreshAvailableModels\(userInitiated: true\)/,
+        `${name} に再取得の手段が無い`);
+      assert.match(source, /Refresh model list/, `${name} のボタンに読み上げ名が無い`);
+    }
+  });
+
+  it('モデル一覧の取り直しは、有効状態を変えない', () => {
+    // "Save and test" also decides whether AI stays enabled. Asking what is
+    // installed must not carry that weight.
+    const refresh = controller.slice(
+      controller.indexOf('func refreshAvailableModels'),
+      controller.indexOf('func analyze(snapshot:')
+    );
+    assert.doesNotMatch(refresh, /setEnabled\(/, '有効状態を触ってはいけない');
+    assert.doesNotMatch(refresh, /statusState = /, 'ステータス行を上書きしてはいけない');
   });
 
   it('keeps a question above its own answer while showing the newest first', () => {
