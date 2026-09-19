@@ -69,6 +69,11 @@ function createRouterManager({
 
     const currentKeys = new Set(sessions.map(s => `${s.src}|${s.dst}|${s.dport}|${s.proto}`));
     const prior = previousKeys.get(id) || new Set();
+    // Everything from here to the end of the cycle used to be unmeasured, and
+    // it is where the last stall on this Hub is hiding: the watchdog reports
+    // roughly two seconds every poll interval with no garbage collection and
+    // no measured operation spanning it (2026-09-19).
+    runtimeProfiler.measureSync(`router.${kind}.poll.beacons`, () => {
     if (!appState?.inspectEnabled) {
       for (const session of sessions) {
         const key = `${session.src}|${session.dst}|${session.dport}|${session.proto}`;
@@ -81,12 +86,18 @@ function createRouterManager({
         }
       }
     }
+    });
     signal?.throwIfAborted();
     previousKeys.set(id, currentKeys);
-    history.pruneHistory();
-    if (updated.size) io?.emit('connections-update', {
-      connections: [...updated.values()], serverTime: now, partial: true, delta: true,
-    });
+    runtimeProfiler.measureSync('history.prune', () => history.pruneHistory());
+    if (updated.size) {
+      runtimeProfiler.setGauge('poll.emit.connections', updated.size);
+      // The emit serialises this payload for every connected client, on this
+      // loop. It is measured as one operation because that is how it blocks.
+      runtimeProfiler.measureSync(`router.${kind}.poll.emit`, () => io?.emit('connections-update', {
+        connections: [...updated.values()], serverTime: now, partial: true, delta: true,
+      }));
+    }
     if (appState?.autoInvestigate) {
       for (const ip of new Set(sessions.map(s => s.src))) investigation?.enqueue(ip, runtime.resolveMacByIp(ip));
     }
