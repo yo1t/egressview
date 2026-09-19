@@ -3,7 +3,7 @@ using EgressView.Agent.Core;
 
 namespace EgressView.Agent.Service;
 
-internal sealed class EnrichmentController(ObservationStore store, WindowsCredentialStore credentials) : IDisposable
+internal sealed class EnrichmentController(ObservationStore store, WindowsCredentialStore credentials, string publicFeedsMarker) : IDisposable
 {
     private readonly SemaphoreSlim geoWake = new(0, 1);
     private readonly SemaphoreSlim threatWake = new(0, 1);
@@ -56,7 +56,8 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
         {
             enrolled = credential is not null,
             source = credential is null ? null : credential.HubUrl.GetLeftPart(UriPartial.Authority),
-            policy = "hub-only",
+            policy = credential is null && PublicFeedsEnabled ? "public-feeds" : "hub-only",
+            publicFeedsEnabled = PublicFeedsEnabled,
             geo = new { state = gs, lastSuccessAt = geo.FetchedAt, count = geo.LocationCount,
                 freshness = EnrichmentFreshness.Classify(geo.FetchedAt, TimeSpan.FromHours(24), now), lastFailure = gf },
             threat = new { state = ts, lastSuccessAt = threat.FetchedAt, count = threat.IndicatorCount,
@@ -81,10 +82,33 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
         catch (Exception ex) { SetState(true, "failed", Classify(ex)); }
     }
 
+    /// Whether this PC may fetch the public threat feeds itself.
+    ///
+    /// Off until someone says otherwise. The download sends no destination
+    /// anywhere -- it is a plain list fetch -- but it does reveal that this PC
+    /// asked, and that is not a thing to decide on someone's behalf.
+    internal bool PublicFeedsEnabled => File.Exists(publicFeedsMarker);
+
+    internal bool SetPublicFeedsEnabled(bool enabled)
+    {
+        if (enabled) File.WriteAllText(publicFeedsMarker, "Public threat feeds were enabled from the EgressView Agent UI." + Environment.NewLine);
+        else File.Delete(publicFeedsMarker);
+        RequestNow("threat");
+        return PublicFeedsEnabled;
+    }
+
     private async Task FetchThreatAsync(ThreatIntelClient client, CancellationToken token)
     {
         var credential = credentials.Load();
-        if (credential is null) { SetState(false, "not-enrolled", null); return; }
+        if (credential is null)
+        {
+            // No Hub. Either the person asked this PC to fetch the lists
+            // itself, or there is nothing to match against and the screen
+            // should say so rather than showing an empty threat tab.
+            if (PublicFeedsEnabled) { await FetchPublicFeedsAsync(token); return; }
+            SetState(false, "not-enrolled", null);
+            return;
+        }
         SetState(false, "fetching", null);
         try
         {
@@ -97,6 +121,30 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (Exception ex) { SetState(false, "failed", Classify(ex)); }
     }
+
+    /// The same lists the Hub reads, fetched directly.
+    ///
+    /// A feed that is down is ordinary and the rest still apply. A feed that
+    /// downloads and parses to nothing is not ordinary -- it means the format
+    /// moved -- and both are named rather than folded into a total, because on
+    /// the Mac three of four feeds returned nothing for months behind a number
+    /// that looked fine.
+    private async Task FetchPublicFeedsAsync(CancellationToken token)
+    {
+        SetState(false, "fetching", null);
+        try
+        {
+            var result = await publicFeeds.DownloadAsync(token);
+            store.ReplaceThreatIndicators(true, result.Indicators, null, DateTimeOffset.UtcNow);
+            SetState(false, result.IsComplete ? "idle" : "partial",
+                result.IsComplete ? null : "missing-feeds:" + string.Join('+', result.MissingSources));
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (ThreatFeedException) { SetState(false, "failed", "all-feeds-failed"); }
+        catch (Exception ex) { SetState(false, "failed", Classify(ex)); }
+    }
+
+    private readonly ThreatFeedDownloader publicFeeds = new();
 
     private string GetState(bool geo) { lock (gate) return geo ? geoState : threatState; }
     private void SetState(bool geo, string state, string? failure)

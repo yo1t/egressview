@@ -1514,6 +1514,19 @@ try
     }
 
     {
+        // The public-feed switch is a decision, so it is rejected unless the
+        // request actually carries one.
+        {
+            bool? asked = null;
+            var accepted = IpcProtocol.Handle("""{"v":1,"op":"set-public-threat-feeds","enabled":true}""", () => "{}", _ => [],
+                setPublicThreatFeeds: enabled => { asked = enabled; return enabled; });
+            Assert(asked == true && accepted.Contains("\"enabled\":true", StringComparison.Ordinal),
+                "turning on public threat feeds reaches the service and reports what it did");
+            Assert(IpcProtocol.Handle("""{"v":1,"op":"set-public-threat-feeds"}""", () => "{}", _ => [],
+                setPublicThreatFeeds: enabled => enabled).Contains("invalid-threat-feed-setting", StringComparison.Ordinal),
+                "a request without a choice in it is refused rather than guessed at");
+        }
+
         // Health must judge what is being lost now, not what starting cost.
         //
         // On 0.1.58 the session lost 1,210,217 events in the gap between
