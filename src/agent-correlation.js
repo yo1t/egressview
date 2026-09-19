@@ -90,14 +90,29 @@ function createAgentCorrelation({ getDb, windowMs = DEFAULT_CORRELATION_WINDOW_M
     return db;
   }
 
+  // Compiled once per database rather than once per observation. A reconcile
+  // pass calls this for every row it examines, and compiling the same statement
+  // 500 times cost 30 ms against a real database where the lookups themselves
+  // cost 4 ms.
+  let candidateDb = null;
+  let candidateStatement = null;
+  function candidateQuery() {
+    const db = database();
+    if (candidateDb !== db) {
+      candidateDb = db;
+      candidateStatement = db.prepare(`
+        SELECT src, dst, dport, proto, sport, firstSeen, lastSeen
+        FROM connections
+        WHERE src = ? AND dst = ? AND dport = ?
+          AND LOWER(proto) = ?
+          AND lastSeen >= ? AND firstSeen <= ?
+      `);
+    }
+    return candidateStatement;
+  }
+
   function candidatesFor(observation) {
-    return database().prepare(`
-      SELECT src, dst, dport, proto, sport, firstSeen, lastSeen
-      FROM connections
-      WHERE src = ? AND dst = ? AND dport = ?
-        AND LOWER(proto) = ?
-        AND lastSeen >= ? AND firstSeen <= ?
-    `).all(
+    return candidateQuery().all(
       observation.localAddress,
       observation.remoteAddress,
       observation.remotePort,
