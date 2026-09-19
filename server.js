@@ -767,6 +767,22 @@ server.listen(PORT, HOST, () => {
     10 * 60 * 1000);
   setInterval(() => runtimeProfiler.measureSync('history.compact', () => history.compactHistoryLog()),
     30 * 60 * 1000);
+  // Each pass deletes what it can inside a time budget and says whether more is
+  // waiting. A Hub with a backlog -- 3.6 million rows on the one this was
+  // measured against -- comes back every minute until it is clear, then settles
+  // into the half-hourly pace the other maintenance uses.
+  const PRUNE_IDLE_MS = 30 * 60 * 1000;
+  const PRUNE_CATCHUP_MS = 60 * 1000;
+  const prunePass = () => {
+    const pruned = runtimeProfiler.measureSync('devices.pruneObservations',
+      () => devices.pruneObservations());
+    if (pruned.byCount || pruned.byAge) {
+      logger.info(`[devices] Pruned ${pruned.byCount} observations over the per-source cap, `
+        + `${pruned.byAge} past retention${pruned.more ? ' (more to come)' : ''}`);
+    }
+    setTimeout(prunePass, pruned.more ? PRUNE_CATCHUP_MS : PRUNE_IDLE_MS).unref?.();
+  };
+  setTimeout(prunePass, PRUNE_CATCHUP_MS).unref?.();
 
   threatIntel.fetchThreatIntel()
     .then(() => reMatchAndNotify())
