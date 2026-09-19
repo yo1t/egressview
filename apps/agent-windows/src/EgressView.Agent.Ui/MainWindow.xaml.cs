@@ -2257,8 +2257,28 @@ public partial class MainWindow : Window
         await RefreshVisibleAsync();
     }
 
+    /// Enrolling is the moment this PC starts sending anything anywhere, so it
+    /// is the moment to ask.
+    ///
+    /// The list of fields was already on the screen; reading it was optional
+    /// and enrolling was one click. The Mac has required this tick since
+    /// before the Windows Agent existed, and the cloud AI provider here
+    /// already requires one -- so the only path that sent data off this PC
+    /// without an explicit yes was the Hub.
+    ///
+    /// Not remembered: the tick is about this enrolment, and an Agent that
+    /// re-enrolled later would ask again.
+    private void HubConsent_Click(object sender, RoutedEventArgs e)
+    {
+        if (EnrollButton is null) return;
+        EnrollButton.IsEnabled = HubConsent.IsChecked == true;
+        if (EnrollButton.IsEnabled && EnrollmentStatus.Text == LocalizationManager.Text("HubConsentRequired"))
+            EnrollmentStatus.Text = LocalizationManager.Text("NotEnrolled");
+    }
+
     private async void Enroll_Click(object sender, RoutedEventArgs e)
     {
+        if (HubConsent.IsChecked != true) { EnrollmentStatus.Text = LocalizationManager.Text("HubConsentRequired"); return; }
         if (!Uri.TryCreate(HubUrl.Text.Trim(), UriKind.Absolute, out var hubUrl)) { EnrollmentStatus.Text = EnrollmentMessage("invalid-hub-url"); return; }
         EnrollButton.IsEnabled = HubUrl.IsEnabled = EnrollmentCode.IsEnabled = false;
         try
