@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 19;
+    private const int CurrentSchemaVersion = 20;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -138,6 +138,12 @@ public sealed partial class ObservationStore : IDisposable
           fetched_at TEXT
         );
         INSERT OR IGNORE INTO threat_cache_state(id) VALUES(1);
+        """;
+    private const string Version20Schema = """
+        CREATE TABLE IF NOT EXISTS geo_lookup_misses(
+          ip TEXT PRIMARY KEY,
+          missed_at TEXT NOT NULL
+        );
         """;
     private const string Version19Schema = """
         ALTER TABLE threat_cache_state ADD COLUMN source TEXT NOT NULL DEFAULT 'none';
@@ -314,7 +320,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -341,7 +347,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 15) { MigrateVersion15To16(); version = 16; }
         if (version == 16) { MigrateVersion16To17(); version = 17; }
         if (version == 17) { MigrateVersion17To18(); version = 18; }
-        if (version == 18) MigrateVersion18To19();
+        if (version == 18) { MigrateVersion18To19(); version = 19; }
+        if (version == 19) MigrateVersion19To20();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -360,6 +367,24 @@ public sealed partial class ObservationStore : IDisposable
         {
             Execute("BEGIN IMMEDIATE; " + Version19Schema + " UPDATE schema_version SET version=19 WHERE version=18; COMMIT;");
             PruneMigrationBackups(19);
+        }
+        catch { TryRollback(); throw; }
+    }
+
+    /// Remembers the addresses a lookup could not place.
+    ///
+    /// Without this the same addresses are asked about on every run, for ever:
+    /// a destination no service can place is exactly the destination that
+    /// stays in the "not placed" list. Measured on one PC, that spent the
+    /// whole daily allowance on addresses that were never going to be
+    /// answered, so the ones that would have been went unplaced instead.
+    private void MigrateVersion19To20()
+    {
+        CreateMigrationBackup(20);
+        try
+        {
+            Execute("BEGIN IMMEDIATE; " + Version20Schema + " UPDATE schema_version SET version=20 WHERE version=19; COMMIT;");
+            PruneMigrationBackups(20);
         }
         catch { TryRollback(); throw; }
     }
@@ -688,8 +713,8 @@ public sealed partial class ObservationStore : IDisposable
     {
         if (ScalarInt64("SELECT COUNT(*) FROM schema_version") != 1)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database must contain exactly one schema version row.");
-        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings','sleep_periods','run_history','outbound_traffic_windows','local_country_cache')");
-        if (tables != 19)
+        var tables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_version','observations','collector_counters','flows','coverage_sessions','hourly_summary','delivery_queue','delivery_state','geo_locations','geo_cache_state','threat_indicators','threat_cache_state','chart_hourly','chart_hourly_state','local_history_settings','sleep_periods','run_history','outbound_traffic_windows','local_country_cache','geo_lookup_misses')");
+        if (tables != 20)
             throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database schema is incomplete; refusing to recreate missing customer data tables.");
         var processNameColumns = ScalarInt64("SELECT (SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name='process_name') + (SELECT COUNT(*) FROM pragma_table_info('flows') WHERE name='process_name')");
         if (processNameColumns != 2)
@@ -1718,15 +1743,55 @@ public sealed partial class ObservationStore : IDisposable
         if (limit is < 1 or > 5000) throw new ArgumentOutOfRangeException(nameof(limit));
         lock (gate)
         {
+            // An address a lookup already failed on is left alone for a week.
+            // Allocations do move, so this is a delay rather than a verdict.
+            var retryFrom = DateTimeOffset.UtcNow - MissRetryAfter;
             var sql = "SELECT DISTINCT f.remote_address FROM flows f " +
                 "LEFT JOIN geo_locations g ON g.ip=f.remote_address " +
+                "LEFT JOIN geo_lookup_misses m ON m.ip=f.remote_address " +
                 $"WHERE f.layer='logical' AND f.last_seen>='{since:O}' AND g.ip IS NULL " +
+                $"AND (m.ip IS NULL OR m.missed_at < '{retryFrom:O}') " +
                 $"ORDER BY f.last_seen DESC LIMIT {limit}";
             CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
             var result = new List<string>();
             try { while (WinSqlite.Step(statement) == WinSqlite.Row) result.Add(Text(statement, 0)); }
             finally { WinSqlite.Finalize(statement); }
             return result;
+        }
+    }
+
+    /// How long an address that could not be placed is left alone.
+    ///
+    /// Allocations move, so this is a delay and not a verdict.
+    public static readonly TimeSpan MissRetryAfter = TimeSpan.FromDays(7);
+
+    /// Records that a lookup was made and found nothing.
+    public void RecordGeoLookupMisses(IReadOnlyList<string> addresses, DateTimeOffset at)
+    {
+        if (addresses.Count == 0) return;
+        lock (gate)
+        {
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                const string sql = "INSERT INTO geo_lookup_misses(ip,missed_at) VALUES(?,?) " +
+                    "ON CONFLICT(ip) DO UPDATE SET missed_at=excluded.missed_at";
+                CheckOperation(WinSqlite.Prepare(db, sql, -1, out var statement, 0));
+                try
+                {
+                    foreach (var address in addresses)
+                    {
+                        Bind(statement, 1, address);
+                        Bind(statement, 2, at.ToUniversalTime().ToString("O"));
+                        CheckDone(WinSqlite.Step(statement));
+                        Check(WinSqlite.Reset(statement));
+                        Check(WinSqlite.ClearBindings(statement));
+                    }
+                }
+                finally { WinSqlite.Finalize(statement); }
+                Execute("COMMIT");
+            }
+            catch { TryRollback(); throw; }
         }
     }
 

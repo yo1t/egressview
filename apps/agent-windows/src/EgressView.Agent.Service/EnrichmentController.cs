@@ -287,6 +287,11 @@ internal sealed class EnrichmentController(ObservationStore store, WindowsCreden
             var located = await thirdParty.LookUpAsync(unknown, remaining, token);
             RecordSpend(now, thirdParty.Spent);
             if (located.Count > 0) store.SaveGeoLocations(located);
+            // Only the ones actually asked about. A run that stopped early
+            // must not mark the addresses it never reached as unplaceable.
+            var placed = located.Select(location => location.Ip).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            store.RecordGeoLookupMisses(
+                [.. unknown.Take(thirdParty.Spent).Where(address => !placed.Contains(address))], now);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (Exception exception) { SetState(true, "failed", Classify(exception)); }
