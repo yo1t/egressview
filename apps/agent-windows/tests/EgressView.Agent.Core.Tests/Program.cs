@@ -1822,10 +1822,15 @@ try
         // destinations were private or reserved. Sending those to a third
         // party would hand over the shape of the reader's own network, one
         // address at a time, in exchange for nothing an answer could give.
+        //
+        // The examples below are documentation ranges on purpose. The
+        // addresses that prompted this were somebody's real subnet, and a test
+        // file is published: writing them down here would have been a smaller
+        // version of the same mistake.
         {
             string[] unaskable =
             [
-                "10.41.128.183", "192.168.41.93", "192.168.41.255", "172.16.0.1", "172.31.255.254",
+                "10.0.0.1", "192.168.0.1", "192.168.0.255", "172.16.0.1", "172.31.255.254",
                 "127.0.0.1", "169.254.1.1", "100.64.0.1", "0.0.0.0", "224.0.0.251", "255.255.255.255",
                 "::1", "fe80::1", "fd00::1", "198.51.100.7", "203.0.113.9", "192.0.2.1",
             ];
