@@ -238,6 +238,7 @@ internal sealed class AgentWindowsService : ServiceBase
         {
             store.SetCounter("startup-ms-store-open", store.OpenMilliseconds);
             store.SetCounter("startup-ms-integrity-check", store.IntegrityCheckMilliseconds);
+            store.SetCounter("startup-integrity-was-deep", store.IntegrityCheckWasDeep ? 1 : 0);
             store.SetCounter("startup-ms-until-ipc", startup.ElapsedMilliseconds);
             store.AddCounter("startup-count", 1);
         }
