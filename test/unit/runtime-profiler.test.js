@@ -8,7 +8,7 @@ const { createRuntimeProfiler } = require('../../src/runtime-profiler');
 function createHarness() {
   let currentTime = 0;
   let totalCpu = { user: 0, system: 0 };
-  let intervalCallback = null;
+  const intervalCallbacks = [];
   const logs = [];
   const histogram = {
     max: 8_000_000,
@@ -25,12 +25,15 @@ function createHarness() {
     memoryUsage: () => ({ rss: 128 * 1024 * 1024, heapUsed: 32 * 1024 * 1024 }),
     createHistogram: () => histogram,
     scheduleInterval: callback => {
-      intervalCallback = callback;
+      intervalCallbacks.push(callback);
       return { unref: () => {} };
     },
     clearScheduledInterval: () => {},
   });
-  profiler.start({ logger: { info: (...args) => logs.push(args) } });
+  profiler.start({
+    logger: { info: (...args) => logs.push(args), warn: (...args) => logs.push(args) },
+    observeGc: false,
+  });
   return {
     profiler,
     logs,
@@ -39,7 +42,9 @@ function createHarness() {
       totalCpu.user += userUs;
       totalCpu.system += systemUs;
     },
-    emit: () => intervalCallback(),
+    // start() schedules the window summary first and the stall watchdog second.
+    emit: () => intervalCallbacks[0](),
+    watchdogTick: () => intervalCallbacks[1](),
   };
 }
 
@@ -93,5 +98,82 @@ describe('runtime profiler', () => {
     assert.equal(profiler.measureSync('unused', () => 'ok'), 'ok');
     assert.equal(profiler.isEnabled(), false);
     assert.equal(scheduled, false);
+  });
+});
+
+// ─── P3-139: stall watchdog ───────────────────────────────────────────────────
+//
+// The window summary can say the loop stopped for two seconds; it cannot say
+// when, or what was running. These pin the two things it adds.
+
+describe('停止の見張り', () => {
+  function stallLogs(logs) {
+    return logs.filter(([tag]) => tag === '[runtime-stall]').map(([, body]) => body);
+  }
+
+  it('時間どおりに動いている間は何も言わない', () => {
+    const h = createHarness();
+    h.advance({ wallMs: 100 });
+    h.watchdogTick();
+    h.advance({ wallMs: 100 });
+    h.watchdogTick();
+    assert.deepEqual(stallLogs(h.logs), [], '正常時に警告を出している');
+  });
+
+  it('閾値を超えて遅れたときだけ報告する', () => {
+    const h = createHarness();
+    h.advance({ wallMs: 400 });   // 100ms のはずが 400ms
+    h.watchdogTick();
+    assert.deepEqual(stallLogs(h.logs), [], '閾値未満は報告しない');
+
+    h.advance({ wallMs: 2000 });
+    h.watchdogTick();
+    const stalls = stallLogs(h.logs);
+    assert.equal(stalls.length, 1);
+    assert.ok(stalls[0].atMs >= 1900, `遅れの大きさが出ていない: ${stalls[0].atMs}`);
+  });
+
+  it('止まっていた時間と重なっていた処理を名指しする', () => {
+    const h = createHarness();
+    // A long synchronous operation, then the watchdog notices it was blocked.
+    h.profiler.measureSync('slow.thing', () => h.advance({ wallMs: 1800 }));
+    h.advance({ wallMs: 100 });
+    h.watchdogTick();
+
+    const [stall] = stallLogs(h.logs);
+    assert.ok(stall, '停止が報告されていない');
+    assert.equal(stall.overlapping[0].name, 'slow.thing');
+    assert.ok(stall.overlapping[0].coversMs > 1000,
+      `重なりが小さすぎる: ${stall.overlapping[0].coversMs}`);
+  });
+
+  it('計測していない処理が犯人なら、重なりは空で返る', () => {
+    // An empty list is the finding: whatever stopped the loop is not measured.
+    const h = createHarness();
+    h.advance({ wallMs: 2000 });
+    h.watchdogTick();
+    const [stall] = stallLogs(h.logs);
+    assert.deepEqual(stall.overlapping, [], '身に覚えのない処理を挙げている');
+    assert.equal(stall.gc.count, 0);
+  });
+
+  it('短い処理は覚えておかない', () => {
+    // A poll records hundreds of sub-millisecond operations and none of them
+    // stopped anything; keeping them would cost more than it explains.
+    const h = createHarness();
+    h.profiler.measureSync('tiny.thing', () => h.advance({ wallMs: 1 }));
+    h.advance({ wallMs: 2000 });
+    h.watchdogTick();
+    const [stall] = stallLogs(h.logs);
+    assert.deepEqual(stall.overlapping.map(o => o.name), []);
+  });
+
+  it('窓の要約に、その窓で何回止まったかを載せる', () => {
+    const h = createHarness();
+    h.advance({ wallMs: 2000 });
+    h.watchdogTick();
+    h.emit();
+    const [, snapshot] = h.logs.find(([tag]) => tag === '[runtime-profile]');
+    assert.equal(snapshot.stalls, 1);
   });
 });
