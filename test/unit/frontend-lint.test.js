@@ -697,6 +697,13 @@ describe('通信ログのライブ追従', () => {
     return logJs.slice(s, e);
   }
 
+  it('AI洞察カードも socket の更新を受け取る', () => {
+    assert.match(mainJs, /aiInsightsLiveTick\(\)/,
+      'connections-update must reach the AI cards');
+    assert.doesNotMatch(mainJs, /socket\.on\('connections-update'[\s\S]*?refreshAiInsights\(\)/,
+      'the socket must not force a refresh: one costs up to 885 ms of synchronous DB work');
+  });
+
   it('socket の更新はログ画面に渡される', () => {
     assert.match(mainJs, /applyLiveConnections\(incoming\)/,
       'connections-update must reach the log view');

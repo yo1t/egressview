@@ -33,10 +33,29 @@ import {
   updateNotificationRuleFields,
 } from './ai-notification-settings.js?v=__ASSET_VERSION__';
 
-const REFRESH_MS = 15_000;
+// One card refresh runs two aggregates over the selected window and two more
+// over the window before it, synchronously on the loop that also serves the
+// device list and the connection log. Measured on one Hub 2026-09-19 against
+// 473,806 connections: 68 ms for an hour, 328 ms for a day, 667 ms for a week,
+// 885 ms for two. Refreshing a two-week view every two seconds would spend
+// nearly half the loop on these five cards, so the pace follows the period --
+// short ranges keep up with the traffic, long ones cannot and do not pretend to.
+const LIVE_INTERVAL_BY_SPAN = [
+  [3600_000,   2_000],   // up to an hour
+  [86400_000,  5_000],   // up to a day
+  [Infinity,  15_000],   // longer: the query is too expensive to go faster
+];
+// Runs even when nothing arrives: collection health changes on its own, and the
+// period boundary keeps moving whether or not there is traffic.
+const FALLBACK_REFRESH_MS = 15_000;
+// Spend against the AI budget does not move with network traffic.
+const USAGE_REFRESH_MS = 60_000;
 const METRICS = ['connections', 'devices', 'destinations', 'warn', 'danger'];
 
 let refreshTimer = null;
+let liveTimer = null;
+let lastRefreshAt = 0;
+let lastUsageAt = 0;
 let generation = 0;
 let analysisController = null;
 let activeConversationId = null;
@@ -92,12 +111,59 @@ function renderFacts(data) {
   }
 }
 
+// An open-ended period has no "to", so its width is measured against a clock
+// that has moved on since getTimeRange read it, and against a server-time
+// offset besides. Without slack, "the last hour" comes out a few milliseconds
+// over an hour and falls into the next bucket: measured in a browser, the
+// one-hour view was pacing itself at five seconds and the one-day view at
+// fifteen. A minute is far less than the gap between any two selectable
+// periods, so it can only correct this drift.
+const SPAN_SLACK_MS = 60_000;
+
+// The endpoint refuses a window wider than this, and the two clocks involved
+// disagree: getTimeRange measures from the server's, the caller from the
+// browser's. "The last two weeks" therefore came out a few milliseconds over
+// fourteen days and was rejected outright -- observed in a browser, where every
+// refresh of the two-week view answered 400 and the five cards showed an error
+// instead of numbers.
+const MAX_FACTS_RANGE_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** The selected period, never wider than the API will accept. */
+function selectedFactsRange(now = Date.now()) {
+  const range = getTimeRange();
+  const to = range.to ?? now;
+  return { from: Math.max(range.from ?? now - 3600_000, to - MAX_FACTS_RANGE_MS), to };
+}
+
+/** How often the cards may be recomputed, given how much the period costs. */
+function liveIntervalMs() {
+  const { from, to } = getTimeRange();
+  const span = (to ?? Date.now()) - (from ?? 0);
+  for (const [limit, interval] of LIVE_INTERVAL_BY_SPAN) {
+    if (span - SPAN_SLACK_MS <= limit) return interval;
+  }
+  return FALLBACK_REFRESH_MS;
+}
+
+/**
+ * Recompute the cards because traffic arrived, no sooner than the period allows.
+ * Called for every connections-update; it decides for itself whether to act, so
+ * a quiet network costs nothing at all.
+ */
+function scheduleLiveRefresh() {
+  if (liveTimer || !refreshTimer) return;   // refreshTimer is set only while the tab is open
+  const wait = Math.max(0, liveIntervalMs() - (Date.now() - lastRefreshAt));
+  liveTimer = setTimeout(() => {
+    liveTimer = null;
+    refreshAiInsights();
+  }, wait);
+}
+
 async function refreshAiInsights() {
   const requestGeneration = ++generation;
   const now = Date.now();
-  const range = getTimeRange();
-  const from = range.from ?? now - 3600_000;
-  const to = range.to ?? now;
+  lastRefreshAt = now;
+  const { from, to } = selectedFactsRange(now);
   const period = document.getElementById('ai-period');
   if (period) period.textContent = formatRange(from, to);
   const error = document.getElementById('ai-error');
@@ -113,7 +179,10 @@ async function refreshAiInsights() {
     const data = await response.json();
     if (requestGeneration !== generation) return;
     renderFacts(data);
-    await refreshAiUsage();
+    if (Date.now() - lastUsageAt >= USAGE_REFRESH_MS) {
+      lastUsageAt = Date.now();
+      await refreshAiUsage();
+    }
   } catch (cause) {
     if (requestGeneration !== generation) return;
     error.textContent = cause.message || t('ai.error');
@@ -242,9 +311,7 @@ async function sendChatMessage() {
   const message = input.value.trim();
   if (!message) return;
   const now = Date.now();
-  const range = getTimeRange();
-  const from = range.from ?? now - 3600_000;
-  const to = range.to ?? now;
+  const { from, to } = selectedFactsRange(now);
   chatController = new AbortController();
   const button = document.getElementById('ai-chat-send-btn');
   button.disabled = true;
@@ -313,9 +380,7 @@ async function sendChatMessage() {
 async function analyzeCurrentRange() {
   if (analysisController) return;
   const now = Date.now();
-  const range = getTimeRange();
-  const from = range.from ?? now - 3600_000;
-  const to = range.to ?? now;
+  const { from, to } = selectedFactsRange(now);
   const result = document.getElementById('ai-analysis-result');
   const meta = document.getElementById('ai-analysis-meta');
   const error = document.getElementById('ai-error');
@@ -367,13 +432,20 @@ function startAiInsights() {
   updateProviderLabel();
   loadConversations().catch(() => {});
   loadNotificationSettings().catch(() => {});
-  if (!refreshTimer) refreshTimer = setInterval(refreshAiInsights, REFRESH_MS);
+  if (!refreshTimer) refreshTimer = setInterval(refreshAiInsights, FALLBACK_REFRESH_MS);
 }
 
 function stopAiInsights() {
   generation++;
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = null;
+  if (liveTimer) clearTimeout(liveTimer);
+  liveTimer = null;
+}
+
+/** Entry point for the socket: traffic arrived, the cards may be stale. */
+function aiInsightsLiveTick() {
+  scheduleLiveRefresh();
 }
 
 function initAiInsights() {
@@ -420,6 +492,7 @@ function initAiInsights() {
 initAiInsights();
 
 export {
+  aiInsightsLiveTick,
   analyzeCurrentRange,
   deltaSummary,
   loadConversations,

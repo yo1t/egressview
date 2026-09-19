@@ -76,7 +76,7 @@ function harness({ apiFetch = async () => { throw new Error('Unexpected request'
       },
       querySelectorAll: () => [],
     },
-    setInterval, clearInterval,
+    setInterval, clearInterval, setTimeout, clearTimeout,
   };
   vm.createContext(context);
   vm.runInContext(source, context, { filename: 'public/js/ai-insights.js' });
@@ -344,5 +344,106 @@ describe('AI insights view', () => {
     assert.equal(get('ai-chat-input').value, 'Can I retry this?');
     assert.equal(get('ai-chat-messages').children.length, 0);
     assert.equal(get('ai-error').textContent, 'network unavailable');
+  });
+});
+
+// ─── P3-142: 期間に応じた更新間隔 ─────────────────────────────────────────────
+//
+// One refresh runs two aggregates over the selected window and two more over
+// the window before it, synchronously on the loop that also serves the device
+// list and the connection log. Measured on one Hub 2026-09-19 against 473,806
+// connections: 68 ms for an hour, 885 ms for two weeks. A two-week view
+// refreshed every two seconds would spend nearly half the loop on five cards.
+
+describe('AI洞察カードの更新間隔', () => {
+  const HOUR = 3600_000;
+  const DAY = 86400_000;
+
+  function withSpan(context, span) {
+    const now = Date.now();
+    context.getTimeRange = () => ({ from: now - span, to: now });
+  }
+
+  it('期間が短いほど速く、長いほど遅くなる', () => {
+    const { context } = harness();
+    withSpan(context, HOUR);
+    assert.equal(context.liveIntervalMs(), 2_000, '1時間: 68 ms なので2秒でよい');
+    withSpan(context, DAY);
+    assert.equal(context.liveIntervalMs(), 5_000, '24時間: 328 ms');
+    withSpan(context, 14 * DAY);
+    assert.equal(context.liveIntervalMs(), 15_000, '2週間: 885 ms、これ以上は詰められない');
+  });
+
+  it('期間がわずかに長く測れても、同じ間隔のままでいる', () => {
+    // An open-ended period is measured against a clock that has already moved
+    // on. Without slack the one-hour view paced itself at five seconds -- found
+    // in a browser, not here, because these spans used to be exact.
+    const { context } = harness();
+    withSpan(context, HOUR + 12);
+    assert.equal(context.liveIntervalMs(), 2_000, '1時間ちょうどを数ミリ秒超えても2秒のまま');
+    withSpan(context, DAY + 12);
+    assert.equal(context.liveIntervalMs(), 5_000, '24時間も同じ');
+  });
+
+  it('隣の期間まで引きずられはしない', () => {
+    const { context } = harness();
+    withSpan(context, 3 * HOUR);
+    assert.equal(context.liveIntervalMs(), 5_000, '3時間は1時間の枠には入らない');
+    withSpan(context, 7 * DAY);
+    assert.equal(context.liveIntervalMs(), 15_000, '1週間は24時間の枠には入らない');
+  });
+
+  it('2週間表示でも、APIが受け付ける幅を超えない', () => {
+    // getTimeRange measures from the server's clock and the caller from the
+    // browser's, so this came out a few milliseconds over fourteen days and the
+    // endpoint answered 400 -- five cards showing an error instead of numbers.
+    const { context } = harness();
+    const now = Date.now();
+    const FOURTEEN_DAYS = 14 * DAY;
+    context.getTimeRange = () => ({ from: now - FOURTEEN_DAYS - 3, to: null });
+    const range = context.selectedFactsRange(now);
+    assert.ok(range.to - range.from <= FOURTEEN_DAYS,
+      `幅が上限を超えている: ${range.to - range.from}`);
+  });
+
+  it('上限より狭い期間はそのまま渡す', () => {
+    const { context } = harness();
+    const now = Date.now();
+    context.getTimeRange = () => ({ from: now - HOUR, to: null });
+    const range = context.selectedFactsRange(now);
+    assert.equal(range.from, now - HOUR, '狭い期間は切り詰めない');
+    assert.equal(range.to, now);
+  });
+
+  it('期間の下限が無い場合も、最も遅い間隔に落ちる', () => {
+    const { context } = harness();
+    context.getTimeRange = () => ({ from: null, to: null });
+    assert.equal(context.liveIntervalMs(), 15_000);
+  });
+
+  it('タブを開いていなければ、通信が来ても何もしない', () => {
+    const { context } = harness();
+    let scheduled = 0;
+    context.setTimeout = () => { scheduled++; return 1; };
+    withSpan(context, HOUR);
+    context.aiInsightsLiveTick();
+    assert.equal(scheduled, 0, '閉じているタブのために集計は走らせない');
+  });
+
+  it('間隔より早くは再計算しない', () => {
+    const { context } = harness();
+    const delays = [];
+    context.setTimeout = (_fn, delay) => { delays.push(delay); return delays.length; };
+    context.setInterval = () => 1;
+    withSpan(context, HOUR);
+    // startAiInsights marks the tab as open; its first refresh sets the clock.
+    context.startAiInsights();
+
+    context.aiInsightsLiveTick();
+    assert.equal(delays.length, 1, '1回だけ予約される');
+    assert.ok(delays[0] > 0 && delays[0] <= 2_000, `直後の更新は待たされる: ${delays[0]}`);
+
+    context.aiInsightsLiveTick();
+    assert.equal(delays.length, 1, '予約が残っている間は重ねて予約しない');
   });
 });
