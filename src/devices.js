@@ -115,6 +115,19 @@ function initDb(dbPath) {
       ON device_observations(deviceId, observedAt DESC);
     CREATE INDEX IF NOT EXISTS idx_obs_source
       ON device_observations(source, observedAt DESC);
+    -- The write-on-change check asks for one row: the latest observation of
+    -- this device from this source. With only the two indexes above, SQLite
+    -- chose the source one and walked every observation of that source,
+    -- newest first, until it found the device -- which on a table that has
+    -- grown to millions of rows is most of the table.
+    --
+    -- Measured on one Hub 2026-09-19, 3,666,245 observations across 432
+    -- devices: 148-183 ms per lookup, against 0-2 ms when the deviceId index
+    -- was forced. A poll asks this for every device it saw, so the router
+    -- poll spent about three seconds of synchronous CPU here, and every
+    -- request behind it waited -- a static file took 5.7 s in the same window.
+    CREATE INDEX IF NOT EXISTS idx_obs_device_source
+      ON device_observations(deviceId, source, observedAt DESC);
   `);
 
   // Step 6: device_merge_candidates table ──────────────────────────────────────
