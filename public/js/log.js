@@ -710,6 +710,7 @@ const LIVE_TOP_SLACK_PX = 8;        // "at the top" tolerance
 
 let liveRefreshTimer = null;
 let liveLastRefreshAt = 0;
+let liveRefreshInFlight = false;
 let liveLastThreatRefreshAt = 0;
 let livePendingKeys = new Set();    // new keys seen while not following
 
@@ -824,7 +825,13 @@ function reconcileLogRows(conns) {
 }
 
 async function refreshTopPageLive() {
-  if (!isFollowingLive() || logFetchingPage) return;
+  // logFetchingPage belongs to the paginated fetch and is never set here, so
+  // without a flag of its own a slow response let the next tick start another
+  // query on top of it. Measured on one Hub 2026-09-19: /api/connections was
+  // answering in 6.4 to 7.7 seconds while this fired every two, which put three
+  // copies of the server's slowest query on one another.
+  if (!isFollowingLive() || logFetchingPage || liveRefreshInFlight) return;
+  liveRefreshInFlight = true;
   const gen = logFetchGeneration;
   const params = buildLogQueryParams({ page: 0, allMode: false });
   try {
@@ -848,6 +855,12 @@ async function refreshTopPageLive() {
     }
   } catch (e) {
     console.warn('[log] live refresh failed:', e);
+  } finally {
+    liveRefreshInFlight = false;
+    // Measured from when the answer arrived, not from when it was asked for.
+    // Pacing from the request start means a slow Hub is asked again the moment
+    // it finishes, which is the wrong way round.
+    liveLastRefreshAt = Date.now();
   }
 }
 

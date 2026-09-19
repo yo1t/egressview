@@ -740,6 +740,19 @@ describe('通信ログのライブ追従', () => {
       'rows must be reconciled, not rebuilt wholesale');
   });
 
+  it('前の問い合わせが返るまで、次を重ねない', () => {
+    // logFetchingPage belongs to the paginated fetch and is never set by the
+    // live path. Measured on one Hub 2026-09-19: /api/connections answered in
+    // 6.4-7.7 s while the live refresh fired every 2 s, so three copies of the
+    // server's slowest query ran on top of one another.
+    const fn = snippetBetween('async function refreshTopPageLive()', 'function scheduleLiveRefresh');
+    assert.match(fn, /liveRefreshInFlight\) return;/, '多重実行のガードが無い');
+    assert.match(fn, /liveRefreshInFlight = true;/);
+    assert.match(fn, /finally \{[\s\S]*liveRefreshInFlight = false;/, '失敗しても必ず解除する');
+    assert.match(fn, /finally \{[\s\S]*liveLastRefreshAt = Date\.now\(\);/,
+      '次の間隔は、答えが返ってから数える');
+  });
+
   it('追従していないときは行を動かさずバッジに溜める', () => {
     const fn = snippetBetween('export function applyLiveConnections', 'function returnToLive');
     assert.match(fn, /if\s*\(isFollowingLive\(\)\)/, 'following is decided before anything is shown');
