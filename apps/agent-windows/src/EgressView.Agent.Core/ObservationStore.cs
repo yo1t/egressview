@@ -484,14 +484,34 @@ public sealed partial class ObservationStore : IDisposable
     private void EnsureIntegrity()
     {
         var timer = System.Diagnostics.Stopwatch.StartNew();
-        var deep = NeedsDeepIntegrityCheck();
-        var integrity = ScalarText(deep ? "PRAGMA integrity_check" : "PRAGMA quick_check");
+        if (!NeedsDeepIntegrityCheck())
+        {
+            // Nothing is read here at all.
+            //
+            // Making the check shallow was not enough: quick_check still reads
+            // every page, and on a 7 GB database from a cold disk that
+            // measured 118,649 ms -- against 26,567 ms for the full check when
+            // the file was already in the page cache. The cost is the read,
+            // not the depth, and no pragma avoids it.
+            //
+            // So when the last run said goodbye, the open trusts it and the
+            // full check runs later, off the startup path. The Agent is
+            // reachable in a second instead of two minutes, and the database
+            // is still read in full -- just not while someone is waiting to
+            // find out whether their agent came back.
+            IntegrityCheckMilliseconds = 0;
+            IntegrityCheckWasDeep = false;
+            BackgroundIntegrityCheckDue = IsDeepIntegrityCheckOverdue();
+            lastVerifiedIntegrity = "unverified";
+            return;
+        }
+        var integrity = ScalarText("PRAGMA integrity_check");
         IntegrityCheckMilliseconds = timer.ElapsedMilliseconds;
-        IntegrityCheckWasDeep = deep;
+        IntegrityCheckWasDeep = true;
         if (!string.Equals(integrity, "ok", StringComparison.Ordinal))
             throw new ObservationStoreException(StoreFailureKind.Corrupt, $"Database integrity check failed: {integrity}");
         lastVerifiedIntegrity = integrity;
-        if (deep) RecordDeepIntegrityCheck();
+        RecordDeepIntegrityCheck();
     }
 
     /// <remarks>
@@ -508,10 +528,60 @@ public sealed partial class ObservationStore : IDisposable
             var ending = ScalarText("SELECT ending FROM run_history WHERE component='service' ORDER BY id DESC LIMIT 1");
             if (ending is not ("clean" or "system-shutdown")) return true;
             if (ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='collector_counters'") != 1) return true;
+            return false;
+        }
+        catch (Exception) { return true; }
+    }
+
+    /// Whether a full read is owed, without deciding when it happens.
+    private bool IsDeepIntegrityCheckOverdue()
+    {
+        try
+        {
+            if (ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='collector_counters'") != 1) return true;
             var last = ScalarInt64("SELECT COALESCE((SELECT value FROM collector_counters WHERE name='integrity-deep-checked-at'),0)");
             return last <= 0 || DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(last) >= TimeSpan.FromDays(7);
         }
         catch (Exception) { return true; }
+    }
+
+    /// Whether a full read is owed but has not been done.
+    public bool BackgroundIntegrityCheckDue { get; private set; }
+
+    /// Reads every page on a connection of its own, so the rest of the Agent
+    /// keeps working while it happens.
+    ///
+    /// A separate read-only connection rather than the shared one: the shared
+    /// one is guarded by a lock that everything else waits on, and holding it
+    /// for two minutes would be the startup pause again by another name. WAL
+    /// lets a reader run beside the writer.
+    ///
+    /// <returns>The pragma's answer, or null when it could not be run.</returns>
+    public string? VerifyIntegrityInBackground()
+    {
+        nint reader = 0;
+        try
+        {
+            if (WinSqlite.Open(path, out reader, WinSqlite.OpenReadOnly | WinSqlite.OpenFullMutex, 0) != WinSqlite.Ok) return null;
+            var answer = ScalarTextOn(reader, "PRAGMA integrity_check");
+            if (!string.Equals(answer, "ok", StringComparison.Ordinal)) return answer;
+            lock (gate)
+            {
+                RecordDeepIntegrityCheck();
+                lastVerifiedIntegrity = "ok";
+                BackgroundIntegrityCheckDue = false;
+            }
+            return "ok";
+        }
+        catch (Exception) { return null; }
+        finally { if (reader != 0) WinSqlite.Close(reader); }
+    }
+
+    private static string? ScalarTextOn(nint connection, string sql)
+    {
+        if (WinSqlite.Prepare(connection, sql, -1, out var statement, 0) != WinSqlite.Ok) return null;
+        try { return WinSqlite.Step(statement) == WinSqlite.Row ? Text(statement, 0) : null; }
+        finally { WinSqlite.Finalize(statement); }
     }
 
     private void RecordDeepIntegrityCheck()

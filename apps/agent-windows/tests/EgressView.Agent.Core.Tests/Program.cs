@@ -1514,16 +1514,18 @@ try
     }
 
     {
-        // How deep the check at open goes follows how the last run ended.
-        // Reading every page of a 6.5 GB database took 26.5 of the 26.6
-        // seconds an open cost, and after a reboot that was two minutes with
-        // the Agent answering nothing. A run that said goodbye closed the file
-        // properly; a run that was killed is where a torn write is actually
-        // plausible, and that one still pays.
+        // The check at open happens only when the last run cannot vouch for
+        // the file.
+        //
+        // Making it shallow was not enough: quick_check still reads every
+        // page, and on a 7 GB database from a cold disk that measured 118,649
+        // ms -- against 26,567 ms for the full check when the file was already
+        // cached. The cost is the read, not the depth. So a run that said
+        // goodbye is trusted at open and the full read happens afterwards,
+        // off the path someone is waiting on.
         var depthDatabase = Path.Combine(directory, "integrity-depth.db");
         using (var store = new ObservationStore(depthDatabase))
         {
-            // A database this call just created has nothing to check.
             Assert(!store.IntegrityCheckWasDeep && store.IntegrityCheckMilliseconds == 0,
                 "creating a database does not check it");
             var run = store.BeginRun(RunComponent.Service, "0.1.0");
@@ -1531,24 +1533,22 @@ try
         }
         using (var store = new ObservationStore(depthDatabase))
         {
-            // Clean, but never read in full before: the weekly rule wins.
-            Assert(store.IntegrityCheckWasDeep,
-                "a database that has never been read in full is read in full once");
-            var run = store.BeginRun(RunComponent.Service, "0.1.0");
-            store.EndRun(run);
-        }
-        using (var store = new ObservationStore(depthDatabase))
-        {
-            Assert(!store.IntegrityCheckWasDeep,
-                "after a clean run and a recent full read the open checks structure only");
+            Assert(!store.IntegrityCheckWasDeep && store.IntegrityCheckMilliseconds == 0,
+                "after a clean run the open reads nothing and starts immediately");
+            Assert(store.BackgroundIntegrityCheckDue,
+                "a full read that has never happened is owed, and said to be owed");
+            Assert(store.VerifyIntegrityInBackground() == "ok",
+                "the full read runs on its own connection and answers");
+            Assert(!store.BackgroundIntegrityCheckDue,
+                "once the full read has happened it is no longer owed");
             store.BeginRun(RunComponent.Service, "0.1.0");
         }
         using (var store = new ObservationStore(depthDatabase))
         {
             // The previous line left a run open, so this start settles it as
-            // unexpected -- the case the full read exists for.
+            // unexpected -- the case worth waiting for.
             Assert(store.IntegrityCheckWasDeep,
-                "after a run that did not say goodbye the open reads every page");
+                "after a run that did not say goodbye the open reads every page before trusting it");
         }
 
         // The shallow path must not be a blind path. A quick check still
@@ -1563,12 +1563,13 @@ try
             var run = store.BeginRun(RunComponent.Service, "0.1.0");
             store.EndRun(run);
         }
-        // One open to spend the weekly full read, so the next one is shallow.
         using (var store = new ObservationStore(damagedDatabase))
         {
-            var run = store.BeginRun(RunComponent.Service, "0.1.0");
-            store.EndRun(run);
+            // Opened and abandoned, the way a killed service leaves it.
+            store.BeginRun(RunComponent.Service, "0.1.0");
         }
+        // Left deliberately unsettled, so the next open is the synchronous
+        // full read rather than the trusting one.
         foreach (var suffix in new[] { "-wal", "-shm" }) File.Delete(damagedDatabase + suffix);
         var damaged = File.ReadAllBytes(damagedDatabase);
         // Well past the header, in the middle of the content.
@@ -1576,7 +1577,7 @@ try
             damaged[offset] ^= 0xFF;
         File.WriteAllBytes(damagedDatabase, damaged);
         AssertStoreOpenFails(() => new ObservationStore(damagedDatabase), StoreFailureKind.Corrupt,
-            "damage is still found when the open takes the cheap route");
+            "damage is found before a database that cannot vouch for itself is used");
 
         // Turning destination-name reading off has to forget what was already
         // learned. On 2026-09-19 it did not, and two of the first forty-six
