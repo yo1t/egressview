@@ -168,6 +168,46 @@ describe('停止の見張り', () => {
     assert.deepEqual(stall.overlapping.map(o => o.name), []);
   });
 
+  it('まだ終わっていない処理も名指しする', () => {
+    // The ring only learns about an operation when it returns, so a long one
+    // still running when the watchdog fires -- a router poll, say -- could
+    // never appear. Four minutes of production reports came back empty on a
+    // Hub where that poll was the obvious suspect.
+    const h = createHarness();
+    let seen = null;
+    h.profiler.measureSync('outer.long', () => {
+      h.advance({ wallMs: 2000 });
+      h.watchdogTick();                       // fires while outer.long is open
+      seen = h.logs.filter(([tag]) => tag === '[runtime-stall]').map(([, body]) => body);
+    });
+    assert.equal(seen.length, 1, '停止が報告されていない');
+    const [entry] = seen[0].overlapping;
+    assert.equal(entry.name, 'outer.long');
+    assert.equal(entry.stillRunning, true, '実行中であることが分からない');
+    assert.ok(entry.coversMs > 1000, `重なりが小さすぎる: ${entry.coversMs}`);
+  });
+
+  it('終わった処理と実行中の処理を、重なりの大きい順に並べる', () => {
+    const h = createHarness();
+    h.profiler.measureSync('finished.short', () => h.advance({ wallMs: 300 }));
+    h.profiler.measureSync('outer.long', () => {
+      h.advance({ wallMs: 2000 });
+      h.watchdogTick();
+    });
+    const [stall] = h.logs.filter(([tag]) => tag === '[runtime-stall]').map(([, b]) => b);
+    assert.equal(stall.overlapping[0].name, 'outer.long', '大きい方が先に来ていない');
+  });
+
+  it('終わった処理は実行中として報告しない', () => {
+    const h = createHarness();
+    h.profiler.measureSync('done.thing', () => h.advance({ wallMs: 1800 }));
+    h.advance({ wallMs: 100 });
+    h.watchdogTick();
+    const [stall] = h.logs.filter(([tag]) => tag === '[runtime-stall]').map(([, b]) => b);
+    assert.equal(stall.overlapping[0].name, 'done.thing');
+    assert.equal(stall.overlapping[0].stillRunning, undefined);
+  });
+
   it('窓の要約に、その窓で何回止まったかを載せる', () => {
     const h = createHarness();
     h.advance({ wallMs: 2000 });
