@@ -108,11 +108,26 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
 
     public int EventsLostSinceStart => Math.Max(0, EventsLost - startingEventsLost);
 
-    /// Called once the session has been running long enough that anything lost
-    /// after it is a real shortfall rather than the cost of starting.
-    internal void MarkStartupSettled() => startingEventsLost = EventsLost;
+    /// Draws the line between what starting cost and what is being lost now.
+    ///
+    /// Called from every snapshot rather than by a caller who has to remember:
+    /// the last time a method like this existed and nothing called it, half of
+    /// P3-102 was missing for weeks and the compiler said nothing.
+    private void SettleStartupIfDue()
+    {
+        if (startupSettled || sessionStartedAt == default) return;
+        if (DateTimeOffset.UtcNow - sessionStartedAt < StartupSettlingPeriod) return;
+        startingEventsLost = EventsLost;
+        startupSettled = true;
+    }
+
+    /// Thirty seconds. Long enough for a trace session to reach steady state,
+    /// short enough that a real shortfall is not hidden for long.
+    private static readonly TimeSpan StartupSettlingPeriod = TimeSpan.FromSeconds(30);
 
     private int startingEventsLost;
+    private bool startupSettled;
+    private DateTimeOffset sessionStartedAt;
     public string? Error => error;
     /// Why process start events are unavailable, when they are. Network
     /// collection continues without them; names just fall back to querying,
@@ -147,6 +162,9 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
                 catch (Exception ex) { error = $"{ex.GetType().Name}: {ex.Message}"; }
             });
             session.EnableProvider(KernelNetwork, TraceEventLevel.Verbose, ulong.MaxValue);
+            sessionStartedAt = DateTimeOffset.UtcNow;
+            startupSettled = false;
+            startingEventsLost = 0;
             // Process starts are an enrichment, not the collection itself. If
             // they cannot be enabled the Agent still observes traffic, so this
             // failure is recorded and carried on from rather than thrown.
@@ -186,7 +204,13 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         }
     }
 
-    public CollectorSnapshot Enrich(CollectorSnapshot snapshot) => snapshot with
+    public CollectorSnapshot Enrich(CollectorSnapshot snapshot)
+    {
+        SettleStartupIfDue();
+        return Describe(snapshot);
+    }
+
+    private CollectorSnapshot Describe(CollectorSnapshot snapshot) => snapshot with
     {
         EtwSessionActive = IsActive,
         EtwEventsSeen = EventsSeen,

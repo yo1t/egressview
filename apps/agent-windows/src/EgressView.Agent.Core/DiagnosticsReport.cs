@@ -166,7 +166,7 @@ public static class DiagnosticsReport
         value.LastObservedAt, value.LastPersistedAt, value.QueueCapacity, value.EtwSessionActive, value.EtwEventsSeen,
         value.EtwEventsIgnored, value.EtwConnectionAttempted, value.EtwConnectionAccepted,
         value.EtwConnectionDisconnected, value.EtwConnectionClosed,
-        value.InterfaceUnresolved, value.InboundMulticastIgnored, value.EtwEventsLost,
+        value.InterfaceUnresolved, value.InboundMulticastIgnored, value.EtwEventsLost, value.EtwEventsLostAtStart,
         collectorError = SafeCode(value.CollectorError), persistenceError = SafeCode(value.PersistenceError),
         value.NamesFromStartEvents, value.NamesFromCache, value.NamesNeverSeen, value.NamesNeverSeenAtStartup,
         value.NamesNeverSeenAfterStartup, value.NamesNeverSeenAfterStartProbeMiss, value.NamesNeverSeenWithoutStartEvent,
