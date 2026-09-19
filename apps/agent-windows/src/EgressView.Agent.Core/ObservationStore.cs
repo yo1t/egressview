@@ -272,6 +272,10 @@ public sealed partial class ObservationStore : IDisposable
 
     public long IntegrityCheckMilliseconds { get; private set; }
 
+    /// Whether the check at open read every page or only the structure, so the
+    /// diagnostics say which question was actually answered.
+    public bool IntegrityCheckWasDeep { get; private set; }
+
     public ObservationStore(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -458,14 +462,66 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// Checks the database before using it, at a depth that depends on how
+    /// the last run ended.
+    ///
+    /// The full check reads every page. On this machine's 6.5 GB database that
+    /// measured 26,567 ms of a 26,576 ms open -- everything else in the whole
+    /// service startup came to 1.8 seconds -- and after a reboot, from a cold
+    /// disk, it was over two minutes during which the Agent answered nothing
+    /// and looked like it had not come back (P3-134).
+    ///
+    /// So the depth follows the risk. A run that said goodbye closed the
+    /// database properly, and that is the case SQLite's durability is for: a
+    /// structural quick check is enough. A run that was killed, crashed or
+    /// faulted is the case where a torn write is actually plausible, and that
+    /// one still pays for the full read. Speed is given up exactly where the
+    /// doubt is.
+    ///
+    /// A full check is also forced when none has run for a week, so slow
+    /// damage that no crash announced still surfaces without every boot paying
+    /// for it.
     private void EnsureIntegrity()
     {
         var timer = System.Diagnostics.Stopwatch.StartNew();
-        var integrity = ScalarText("PRAGMA integrity_check");
+        var deep = NeedsDeepIntegrityCheck();
+        var integrity = ScalarText(deep ? "PRAGMA integrity_check" : "PRAGMA quick_check");
         IntegrityCheckMilliseconds = timer.ElapsedMilliseconds;
+        IntegrityCheckWasDeep = deep;
         if (!string.Equals(integrity, "ok", StringComparison.Ordinal))
             throw new ObservationStoreException(StoreFailureKind.Corrupt, $"Database integrity check failed: {integrity}");
         lastVerifiedIntegrity = integrity;
+        if (deep) RecordDeepIntegrityCheck();
+    }
+
+    /// <remarks>
+    /// Anything unreadable here answers yes. A missing table, an unparseable
+    /// timestamp or a query that throws all mean the same thing -- that the
+    /// last run cannot be shown to have ended cleanly -- and the safe reading
+    /// of "cannot tell" is the slow one.
+    /// </remarks>
+    private bool NeedsDeepIntegrityCheck()
+    {
+        try
+        {
+            if (ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='run_history'") != 1) return true;
+            var ending = ScalarText("SELECT ending FROM run_history WHERE component='service' ORDER BY id DESC LIMIT 1");
+            if (ending is not ("clean" or "system-shutdown")) return true;
+            if (ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='collector_counters'") != 1) return true;
+            var last = ScalarInt64("SELECT COALESCE((SELECT value FROM collector_counters WHERE name='integrity-deep-checked-at'),0)");
+            return last <= 0 || DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeSeconds(last) >= TimeSpan.FromDays(7);
+        }
+        catch (Exception) { return true; }
+    }
+
+    private void RecordDeepIntegrityCheck()
+    {
+        try
+        {
+            Execute($"INSERT INTO collector_counters(name,value) VALUES('integrity-deep-checked-at',{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}) " +
+                    "ON CONFLICT(name) DO UPDATE SET value=excluded.value");
+        }
+        catch (Exception) { /* Recording the check must not be what fails the open. */ }
     }
 
     private void MigrateVersion14To15()

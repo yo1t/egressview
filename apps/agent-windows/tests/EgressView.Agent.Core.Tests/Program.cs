@@ -1514,6 +1514,70 @@ try
     }
 
     {
+        // How deep the check at open goes follows how the last run ended.
+        // Reading every page of a 6.5 GB database took 26.5 of the 26.6
+        // seconds an open cost, and after a reboot that was two minutes with
+        // the Agent answering nothing. A run that said goodbye closed the file
+        // properly; a run that was killed is where a torn write is actually
+        // plausible, and that one still pays.
+        var depthDatabase = Path.Combine(directory, "integrity-depth.db");
+        using (var store = new ObservationStore(depthDatabase))
+        {
+            // A database this call just created has nothing to check.
+            Assert(!store.IntegrityCheckWasDeep && store.IntegrityCheckMilliseconds == 0,
+                "creating a database does not check it");
+            var run = store.BeginRun(RunComponent.Service, "0.1.0");
+            store.EndRun(run);
+        }
+        using (var store = new ObservationStore(depthDatabase))
+        {
+            // Clean, but never read in full before: the weekly rule wins.
+            Assert(store.IntegrityCheckWasDeep,
+                "a database that has never been read in full is read in full once");
+            var run = store.BeginRun(RunComponent.Service, "0.1.0");
+            store.EndRun(run);
+        }
+        using (var store = new ObservationStore(depthDatabase))
+        {
+            Assert(!store.IntegrityCheckWasDeep,
+                "after a clean run and a recent full read the open checks structure only");
+            store.BeginRun(RunComponent.Service, "0.1.0");
+        }
+        using (var store = new ObservationStore(depthDatabase))
+        {
+            // The previous line left a run open, so this start settles it as
+            // unexpected -- the case the full read exists for.
+            Assert(store.IntegrityCheckWasDeep,
+                "after a run that did not say goodbye the open reads every page");
+        }
+
+        // The shallow path must not be a blind path. A quick check still
+        // reads page structure, and the risk-led policy is only worth having
+        // if damage is still found when it takes the cheap route.
+        var damagedDatabase = Path.Combine(directory, "integrity-damaged.db");
+        using (var store = new ObservationStore(damagedDatabase))
+        {
+            store.WriteBatch(Enumerable.Range(0, 400).Select(index => new NetworkObservation(
+                DateTimeOffset.UtcNow.AddSeconds(-index), 900 + index, "TCP", "10.0.0.9", 40_000 + index,
+                $"198.51.100.{index % 250}", 443, 100, 100, ObservationLayer.Logical, null, "etw", "filler")).ToArray());
+            var run = store.BeginRun(RunComponent.Service, "0.1.0");
+            store.EndRun(run);
+        }
+        // One open to spend the weekly full read, so the next one is shallow.
+        using (var store = new ObservationStore(damagedDatabase))
+        {
+            var run = store.BeginRun(RunComponent.Service, "0.1.0");
+            store.EndRun(run);
+        }
+        foreach (var suffix in new[] { "-wal", "-shm" }) File.Delete(damagedDatabase + suffix);
+        var damaged = File.ReadAllBytes(damagedDatabase);
+        // Well past the header, in the middle of the content.
+        for (var offset = damaged.Length / 2; offset < damaged.Length / 2 + 512 && offset < damaged.Length; offset++)
+            damaged[offset] ^= 0xFF;
+        File.WriteAllBytes(damagedDatabase, damaged);
+        AssertStoreOpenFails(() => new ObservationStore(damagedDatabase), StoreFailureKind.Corrupt,
+            "damage is still found when the open takes the cheap route");
+
         // Turning destination-name reading off has to forget what was already
         // learned. On 2026-09-19 it did not, and two of the first forty-six
         // connections after the switch were still named from the cache -- the
@@ -1759,7 +1823,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, and directional period totals");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, and risk-led integrity checks");
     return 0;
 }
 finally
@@ -1776,6 +1840,21 @@ static void AssertStoreFailure(Action action, StoreFailureKind expected, string 
 {
     try { action(); }
     catch (ObservationStoreException exception) when (exception.Kind == expected) { return; }
+    throw new InvalidOperationException($"FAILED: {message}");
+}
+
+/// The same, for a call that returns a store when it should have thrown.
+///
+/// Leaving that store open made the run die later, in the temp-directory
+/// cleanup, with a file-in-use error naming neither the assertion nor the
+/// reason -- so a real regression would have been reported as a tidying
+/// problem.
+static void AssertStoreOpenFails(Func<ObservationStore> open, StoreFailureKind expected, string message)
+{
+    ObservationStore? opened = null;
+    try { opened = open(); }
+    catch (ObservationStoreException exception) when (exception.Kind == expected) { return; }
+    finally { opened?.Dispose(); }
     throw new InvalidOperationException($"FAILED: {message}");
 }
 
