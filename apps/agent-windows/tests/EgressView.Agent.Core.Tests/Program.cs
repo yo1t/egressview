@@ -668,15 +668,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 19, "v1 database migrates through v2-v19");
+        Assert(migrated.SchemaVersion == 20, "v1 database migrates through v2-v20");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v19.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v20.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 19, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 20, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -1785,6 +1785,71 @@ try
                 "a build without the public feeds says so rather than silently accepting");
         }
 
+        // An address a lookup could not place is not asked about again, for a
+        // while. Without this, the addresses that can never be placed are
+        // exactly the ones asked about on every run, for ever -- and they
+        // spend the whole daily allowance the placeable ones needed.
+        {
+            var missDatabase = Path.Combine(directory, "geo-misses.db");
+            using var store = new ObservationStore(missDatabase);
+            Assert(store.SchemaVersion == 20, "the lookup-miss memory arrives with schema 20");
+            var now = DateTimeOffset.UtcNow;
+            store.WriteBatch([
+                new NetworkObservation(now.AddMinutes(-1), 41, "TCP", "10.0.0.4", 53_000, "8.8.4.4", 443,
+                    10, 10, ObservationLayer.Logical, null, "etw", "resolver"),
+                new NetworkObservation(now.AddMinutes(-1), 42, "TCP", "10.0.0.4", 53_001, "9.9.9.9", 443,
+                    10, 10, ObservationLayer.Logical, null, "etw", "resolver"),
+            ]);
+
+            Assert(store.ReadAddressesWithoutLocation(now.AddHours(-1)).Count == 2, "both start out unplaced");
+            store.RecordGeoLookupMisses(["9.9.9.9"], now);
+            var asked = store.ReadAddressesWithoutLocation(now.AddHours(-1));
+            Assert(asked.Contains("8.8.4.4") && !asked.Contains("9.9.9.9"),
+                "the one that could not be placed is left alone; the one never tried is still asked about");
+
+            store.RecordGeoLookupMisses(["9.9.9.9"], now - ObservationStore.MissRetryAfter.Add(TimeSpan.FromMinutes(1)));
+            Assert(store.ReadAddressesWithoutLocation(now.AddHours(-1)).Contains("9.9.9.9"),
+                "after a week it is tried again, because allocations move and this is a delay not a verdict");
+
+            store.SaveGeoLocations([new GeoLocation("8.8.4.4", 37.4, -122.0, "US", "Mountain View")]);
+            Assert(!store.ReadAddressesWithoutLocation(now.AddHours(-1)).Contains("8.8.4.4"),
+                "a placed address leaves the list without discarding the locations already held");
+        }
+
+        // The addresses that must never be asked about.
+        //
+        // Measured on one PC while this was being written: 129 of 200 recent
+        // destinations were private or reserved. Sending those to a third
+        // party would hand over the shape of the reader's own network, one
+        // address at a time, in exchange for nothing an answer could give.
+        //
+        // The examples below are documentation ranges on purpose. The
+        // addresses that prompted this were somebody's real subnet, and a test
+        // file is published: writing them down here would have been a smaller
+        // version of the same mistake.
+        {
+            string[] unaskable =
+            [
+                "10.0.0.1", "192.168.0.1", "192.168.0.255", "172.16.0.1", "172.31.255.254",
+                "127.0.0.1", "169.254.1.1", "100.64.0.1", "0.0.0.0", "224.0.0.251", "255.255.255.255",
+                "::1", "fe80::1", "fd00::1", "198.51.100.7", "203.0.113.9", "192.0.2.1",
+            ];
+            foreach (var address in unaskable)
+                Assert(PrivateAddress.IsPrivateOrReserved(address),
+                    $"{address} is never sent anywhere, because nothing outside this network can place it");
+
+            string[] askable = ["8.8.8.8", "1.1.1.1", "172.15.0.1", "172.32.0.1", "100.63.255.255",
+                "100.128.0.1", "192.167.1.1", "2606:4700:4700::1111"];
+            foreach (var address in askable)
+                Assert(!PrivateAddress.IsPrivateOrReserved(address),
+                    $"{address} is a real destination and must not be filtered away with the private ones");
+
+            Assert(PrivateAddress.Routable(["10.0.0.1", "8.8.8.8", "192.168.1.1", "1.1.1.1"]) is ["8.8.8.8", "1.1.1.1"],
+                "filtering keeps the routable ones in the order they arrived");
+            Assert(!PrivateAddress.IsPrivateOrReserved("not-an-address"),
+                "something that is not an address is left to the caller rather than silently dropped");
+        }
+
         // The one path that sends a watched address outside.
         {
             var asked = new List<string>();
@@ -2102,7 +2167,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 19 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 20 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
@@ -2276,7 +2341,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, its update, its expiry, handing over the account, where threat data came from, and looking an address up outside");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, its update, its expiry, handing over the account, where threat data came from, looking an address up outside, the addresses that are never asked about, and not asking twice");
     return 0;
 }
 finally
