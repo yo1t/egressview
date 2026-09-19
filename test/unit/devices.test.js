@@ -694,3 +694,70 @@ describe('devices: P2-11 — observeDevice redirect via mergedInto', () => {
     assert.equal(result, null, 'keep もアーカイブ済みなら null');
   });
 });
+
+// ─── P3-138: flapping observations ────────────────────────────────────────────
+
+describe('devices: P3-138 — 別ハードウェアのマージ先へのリダイレクト抑止', () => {
+  beforeEach(() => devicesModule._initForTest());
+
+  it('マージ元が別の安定MACで生きている場合 → リダイレクトせず null', () => {
+    const keepId = devicesModule.observeDevice({ ip: '10.8.0.1', mac: '3c:a9:ab:09:77:f1', source: 'asus' });
+    const dropId = devicesModule.observeDevice({ ip: '10.8.0.2', mac: '7c:df:a1:5d:e7:2c', source: 'asus' });
+    devicesModule.approveMerge(keepId, dropId);
+
+    const result = devicesModule.observeDevice({ ip: '10.8.0.2', mac: '7c:df:a1:5d:e7:2c', source: 'asus' });
+    assert.equal(result, null, '別ハードウェアの観測は keep に書かれない');
+  });
+
+  it('リダイレクト抑止が起きても keep の属性は書き換わらない', () => {
+    const keepId = devicesModule.observeDevice({ ip: '10.8.1.1', mac: '3c:a9:ab:09:77:f1', vendor: 'Nintendo', source: 'asus' });
+    const dropId = devicesModule.observeDevice({ ip: '10.8.1.2', mac: '7c:df:a1:5d:e7:2c', vendor: 'Espressif', source: 'asus' });
+    devicesModule.approveMerge(keepId, dropId);
+
+    devicesModule.observeDevice({ ip: '10.8.1.2', mac: '7c:df:a1:5d:e7:2c', vendor: 'Espressif', source: 'asus' });
+    assert.equal(devicesModule.getByDeviceId(keepId).mac, '3c:a9:ab:09:77:f1', 'keep の MAC は保たれる');
+  });
+
+  it('抑止された観測は getDiscardedRedirects で数えられる', () => {
+    const keepId = devicesModule.observeDevice({ ip: '10.8.2.1', mac: '3c:a9:ab:09:77:f1', source: 'asus' });
+    const dropId = devicesModule.observeDevice({ ip: '10.8.2.2', mac: '7c:df:a1:5d:e7:2c', source: 'asus' });
+    devicesModule.approveMerge(keepId, dropId);
+
+    devicesModule.observeDevice({ ip: '10.8.2.2', mac: '7c:df:a1:5d:e7:2c', source: 'asus' });
+    devicesModule.observeDevice({ ip: '10.8.2.2', mac: '7c:df:a1:5d:e7:2c', source: 'asus' });
+
+    const [entry] = devicesModule.getDiscardedRedirects();
+    assert.ok(entry, '抑止されたペアが記録される');
+    assert.equal(entry.keepId, keepId, 'keepId が記録される');
+    assert.equal(entry.discarded, 2, '抑止回数が数えられる');
+  });
+
+  it('MAC が同じ（DHCP でIPが戻ったケース）は従来どおりリダイレクトされる', () => {
+    const keepId = devicesModule.observeDevice({ ip: '10.8.3.1', mac: '3c:a9:ab:09:77:f1', source: 'asus' });
+    // upsert() bypasses the stable-MAC auto-link, which would otherwise fold
+    // this row into keep before the merge under test can happen.
+    const dropId = devicesModule.upsert({ ip: '10.8.3.2', mac: '3c:a9:ab:09:77:f1', source: 'asus' });
+    devicesModule.approveMerge(keepId, dropId);
+
+    const result = devicesModule.observeDevice({ ip: '10.8.3.2', mac: '3c:a9:ab:09:77:f1', source: 'asus' });
+    assert.equal(result, keepId, '同一ハードウェアならリダイレクトは維持される');
+  });
+
+  it('MAC 不明（NAT 由来など）は従来どおりリダイレクトされる', () => {
+    const keepId = devicesModule.observeDevice({ ip: '10.8.4.1', mac: '3c:a9:ab:09:77:f1', source: 'asus' });
+    const dropId = devicesModule.observeDevice({ ip: '10.8.4.2', source: 'nat' });
+    devicesModule.approveMerge(keepId, dropId);
+
+    const result = devicesModule.observeDevice({ ip: '10.8.4.2', source: 'nat' });
+    assert.equal(result, keepId, 'MAC が無ければ判定材料が無いので従来どおり');
+  });
+
+  it('ランダム化MAC（ローカル管理）は衝突の根拠にしない', () => {
+    const keepId = devicesModule.observeDevice({ ip: '10.8.5.1', mac: 'be:41:8d:68:a8:ec', source: 'asus' });
+    const dropId = devicesModule.observeDevice({ ip: '10.8.5.2', mac: '3c:a9:ab:09:77:f1', source: 'asus' });
+    devicesModule.approveMerge(keepId, dropId);
+
+    const result = devicesModule.observeDevice({ ip: '10.8.5.2', mac: '3c:a9:ab:09:77:f1', source: 'asus' });
+    assert.equal(result, keepId, '片方がランダム化MACなら従来どおり');
+  });
+});

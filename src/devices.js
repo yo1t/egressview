@@ -44,6 +44,43 @@ function isStableMac(mac) {
   return (first & 0x02) === 0;
 }
 
+// ─── Merge redirect conflict detection ────────────────────────────────────────
+
+/**
+ * True when two MACs are both globally unique and name different hardware.
+ * A null/privacy MAC on either side is not evidence of a conflict, so it
+ * returns false and the caller keeps its previous behaviour.
+ */
+function _isConflictingHardware(macA, macB) {
+  if (!isStableMac(macA) || !isStableMac(macB)) return false;
+  return macA.toLowerCase() !== macB.toLowerCase();
+}
+
+// Observations dropped because a merged-away device is still live and is
+// different hardware from the device that absorbed it. Key: "dropId>keepId".
+const discardedRedirects = new Map();
+
+function _countDiscardedRedirect(dropId, keepId) {
+  const key = `${dropId}>${keepId}`;
+  discardedRedirects.set(key, (discardedRedirects.get(key) || 0) + 1);
+}
+
+/**
+ * Merge pairs whose observations are being discarded, most frequent first.
+ * A non-empty result means those devices were merged by mistake and should be
+ * restored from the archived list.
+ *
+ * @returns {Array<{ dropId: string, keepId: string, discarded: number }>}
+ */
+function getDiscardedRedirects() {
+  return [...discardedRedirects.entries()]
+    .map(([key, discarded]) => {
+      const [dropId, keepId] = key.split('>');
+      return { dropId, keepId, discarded };
+    })
+    .sort((a, b) => b.discarded - a.discarded);
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 function initDb(dbPath) {
@@ -182,7 +219,7 @@ function initDb(dbPath) {
   stmtSelectDeviceId = db.prepare('SELECT * FROM devices WHERE deviceId = ?');     // includes archived (needed for approveMerge)
 
   stmtLastObservation = db.prepare(`
-    SELECT ip, mac, ipv6, hostname, mdnsName, netbiosName, asusName, vendor
+    SELECT observedAt, ip, mac, ipv6, hostname, mdnsName, netbiosName, asusName, vendor
     FROM   device_observations
     WHERE  deviceId = ? AND source = ?
     ORDER  BY observedAt DESC
@@ -270,6 +307,16 @@ function observeDevice(d) {
     if (existingDevice.mergedInto) {
       const keepDevice = stmtSelectDeviceId.get(existingDevice.mergedInto);
       if (keepDevice && keepDevice.archivedAt == null && keepDevice.ip) {
+        if (_isConflictingHardware(d.mac, keepDevice.mac)) {
+          // The merged-away device is still live and is different hardware, so
+          // the merge that produced this redirect was wrong. Redirecting anyway
+          // makes the surviving device alternate between two identities on every
+          // poll -- the user sees its vendor and name change once a minute, and
+          // each flip writes another observation row. Drop it instead and count
+          // it, so the bad merge is visible rather than silently corrupting.
+          _countDiscardedRedirect(existingDevice.deviceId, keepDevice.deviceId);
+          return null;
+        }
         // Redirect: treat this observation as if it arrived for the keep device.
         existingDevice = keepDevice;
         d = { ...d, ip: keepDevice.ip };
@@ -354,6 +401,8 @@ function _hasObservationChanged(deviceId, source, attrs) {
   if (!last) return true;
   // Safety net: suppress writes within the minimum interval even if attrs differ.
   // This prevents observation explosions when a source emits conflicting data rapidly.
+  // observedAt must stay in the SELECT above: without it this comparison is
+  // NaN < interval, which is false, and the safety net never fires at all.
   if (OBS_MIN_INTERVAL_MS > 0 && (Date.now() - last.observedAt) < OBS_MIN_INTERVAL_MS) return false;
   const keys = ['ip', 'mac', 'ipv6', 'hostname', 'mdnsName', 'netbiosName', 'asusName', 'vendor'];
   return keys.some(k => (attrs[k] || null) !== (last[k] || null));
@@ -648,6 +697,7 @@ function closeDb() {
 function _initForTest() {
   if (db) { try { db.close(); } catch {} db = null; }
   OBS_MIN_INTERVAL_MS = 0;   // disable cooldown so back-to-back test observations work
+  discardedRedirects.clear();
   initDb(':memory:');
 }
 
@@ -674,5 +724,6 @@ module.exports = {
   rejectCandidate,
   seedFromConnectionHistory,
   checkStaleMergeCandidates,
+  getDiscardedRedirects,
   _initForTest,
 };
