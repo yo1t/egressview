@@ -1514,6 +1514,139 @@ try
     }
 
     {
+        // A country table on this PC, so the question never leaves it.
+        //
+        // The fixture is built from the published specification rather than
+        // from the reader, so this checks the reader against the format and
+        // not against a copy of itself.
+        {
+            var db = new MaxMindDatabase(EgressView.Agent.Core.Tests.MaxMindFixture.CountryDatabase());
+            Assert(db.Metadata.NodeCount > 0 && db.Metadata.RecordSize == 24 &&
+                db.Metadata.IpVersion == 4 && db.Metadata.DatabaseType == "GeoLite2-Country",
+                "the file says what it is, and the reader believes the file rather than its own defaults");
+            Assert(db.CountryCode("8.8.8.8") == "US" && db.CountryCode("1.2.3.4") == "JP" &&
+                db.CountryCode("203.0.113.9") == "AU",
+                "an address inside a listed prefix is placed in its country");
+            Assert(db.CountryCode("9.9.9.9") is null && db.CountryCode("not an address") is null,
+                "an address the table does not cover is answered with nothing, not with a guess");
+
+            // The licence requires moving to a new build within thirty days,
+            // so how old the copy is has to be answerable.
+            var built = new MaxMindDatabase(EgressView.Agent.Core.Tests.MaxMindFixture.CountryDatabase(1_700_000_000));
+            Assert(built.Metadata.BuiltAt == DateTimeOffset.FromUnixTimeSeconds(1_700_000_000) &&
+                built.Metadata.Age(built.Metadata.BuiltAt.AddDays(31)).TotalDays > 30,
+                "the table can say how old it is");
+
+            AssertMaxMindFailure(() => new MaxMindDatabase("not a database"u8.ToArray()),
+                MaxMindFailureKind.NoMetadata,
+                "a file with no metadata marker is refused rather than read as an empty table");
+        }
+
+        // Fetching the country table with the reader's own MaxMind account.
+        {
+            // MaxMind hands out a filled-in GeoIP.conf when a key is created,
+            // and shows the key exactly once. Retyping forty characters from a
+            // page you cannot revisit is where this goes wrong, so the file is
+            // what gets accepted.
+            var conf = string.Join(Environment.NewLine,
+                "# GeoIP.conf as the portal writes it",
+                "AccountID 123456",
+                "LicenseKey abcdefghijklmnop   # keep this secret",
+                "EditionIDs GeoLite2-Country GeoLite2-City");
+            var parsed = GeoLite2Credentials.FromConfiguration(conf);
+            Assert(parsed is { AccountId: "123456", LicenseKey: "abcdefghijklmnop" },
+                "the account and the key are read from the file, and the rest of it is not this Agent's business");
+            Assert(GeoLite2Credentials.FromConfiguration("UserId 7" + Environment.NewLine + "LicenseKey k") is { AccountId: "7" },
+                "the older UserId spelling is accepted too");
+            Assert(GeoLite2Credentials.FromConfiguration("AccountID 123456") is null,
+                "half a credential is refused rather than sent");
+
+            var archive = BuildGeoArchive(EgressView.Agent.Core.Tests.MaxMindFixture.CountryDatabase());
+            var ok = new GeoLite2Handler(HttpStatusCode.OK, archive);
+            var fetched = await new GeoLite2Updater(new HttpClient(ok)).FetchAsync(parsed!);
+            Assert(new MaxMindDatabase(fetched.Data).CountryCode("8.8.8.8") == "US" &&
+                fetched.Metadata.DatabaseType == "GeoLite2-Country",
+                "the database is pulled out of the archive and read before it is trusted");
+            Assert(ok.Authorization is { Scheme: "Basic" } &&
+                !(ok.RequestedUri?.Query.Contains("abcdefghijklmnop", StringComparison.Ordinal) ?? true),
+                "the key travels in a header, never in a query string that ends up in logs");
+
+            // MaxMind says why in one plain sentence. Throwing it away leaves
+            // a reader unable to tell a mistyped key from an account without
+            // access to this edition.
+            var refusal = System.Text.Encoding.UTF8.GetBytes("Your account ID or license key could not be authenticated.");
+            var denied = new GeoLite2Updater(new HttpClient(new GeoLite2Handler(HttpStatusCode.Unauthorized, refusal)));
+            try
+            {
+                await denied.FetchAsync(parsed!);
+                Assert(false, "a refused download does not come back as success");
+            }
+            catch (GeoLite2Exception exception)
+            {
+                Assert(exception.Kind == GeoLite2FailureKind.Unauthorised &&
+                    exception.Reason.Contains("could not be authenticated", StringComparison.Ordinal),
+                    "what MaxMind said is passed on rather than replaced with our own guess");
+            }
+
+            // A page of HTML is not an explanation.
+            Assert(GeoLite2Updater.Reason("<html><body>Error</body></html>"u8.ToArray()).Length == 0,
+                "an error page is not shown to anyone as a reason");
+
+            var rubbish = new GeoLite2Updater(new HttpClient(new GeoLite2Handler(HttpStatusCode.OK,
+                BuildGeoArchive("this is not a database"u8.ToArray()))));
+            try
+            {
+                await rubbish.FetchAsync(parsed!);
+                Assert(false, "a download that is not a database does not come back as success");
+            }
+            catch (GeoLite2Exception exception)
+            {
+                Assert(exception.Kind == GeoLite2FailureKind.NotADatabase,
+                    "a file that does not read as a database never reaches where the working one is kept");
+            }
+
+            // Installing replaces in one step: a half-written file reads as
+            // corrupt, and keeping the old table beats briefly having neither.
+            var installed = Path.Combine(directory, "geo", "GeoLite2-Country.mmdb");
+            GeoLite2Updater.Install(EgressView.Agent.Core.Tests.MaxMindFixture.CountryDatabase(1_700_000_000), installed);
+            GeoLite2Updater.Install(EgressView.Agent.Core.Tests.MaxMindFixture.CountryDatabase(1_800_000_000), installed);
+            Assert(MaxMindDatabase.Open(installed).Metadata.BuildEpoch == 1_800_000_000 &&
+                Directory.GetFiles(Path.GetDirectoryName(installed)!).Length == 1,
+                "the new table replaces the old one and leaves nothing half-written beside it");
+        }
+
+        // The public-feed switch is a decision, so it is rejected unless the
+        // request actually carries one.
+        {
+            bool? asked = null;
+            var accepted = IpcProtocol.Handle("""{"v":1,"op":"set-public-threat-feeds","enabled":true}""", () => "{}", _ => [],
+                setPublicThreatFeeds: enabled => { asked = enabled; return enabled; });
+            Assert(asked == true && accepted.Contains("\"enabled\":true", StringComparison.Ordinal),
+                "turning on public threat feeds reaches the service and reports what it did");
+            Assert(IpcProtocol.Handle("""{"v":1,"op":"set-public-threat-feeds"}""", () => "{}", _ => [],
+                setPublicThreatFeeds: enabled => enabled).Contains("invalid-threat-feed-setting", StringComparison.Ordinal),
+                "a request without a choice in it is refused rather than guessed at");
+        }
+
+        // Health must judge what is being lost now, not what starting cost.
+        //
+        // On 0.1.58 the session lost 1,210,217 events in the gap between
+        // enabling the providers and reading the buffers, then not one more
+        // for the rest of the run -- and a rule that degrades on any loss at
+        // all left the agent marked "needs attention" for hours, advising a
+        // restart that would only repeat the loss.
+        {
+            var startup = new CollectorSnapshot("healthy", 100, 100, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0)
+            { EtwEventsLost = 1_210_217, EtwEventsLostAtStart = 1_210_217 };
+            Assert(AgentHealth.Evaluate(startup, "ok").Issues.Count == 0,
+                "events lost while the trace session was starting do not make the agent unhealthy");
+
+            var losing = startup with { EtwEventsLost = 1_210_300 };
+            var issue = AgentHealth.Evaluate(losing, "ok").Issues.SingleOrDefault();
+            Assert(issue is { Code: "etw-events-lost" } && !issue.Action.Contains("restart", StringComparison.OrdinalIgnoreCase),
+                "events lost since then do, and the advice is not the restart that causes them");
+        }
+
         // Public threat feeds, for agents with no Hub.
         //
         // The parsers are the Mac's and the Hub's. An Agent that disagrees
@@ -1922,7 +2055,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, and public threat feeds");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, startup event loss, the local country table, and its update");
     return 0;
 }
 finally
@@ -1933,6 +2066,31 @@ finally
 static void Assert(bool condition, string message)
 {
     if (!condition) throw new InvalidOperationException($"FAILED: {message}");
+}
+
+/// Wraps a database in the tar.gz MaxMind serves, so the extraction is tested
+/// against the shape of the real thing rather than around it.
+static byte[] BuildGeoArchive(byte[] database)
+{
+    using var tarBytes = new MemoryStream();
+    using (var writer = new System.Formats.Tar.TarWriter(tarBytes, leaveOpen: true))
+    {
+        var entry = new System.Formats.Tar.PaxTarEntry(System.Formats.Tar.TarEntryType.RegularFile,
+            "GeoLite2-Country_20260919/GeoLite2-Country.mmdb")
+        { DataStream = new MemoryStream(database) };
+        writer.WriteEntry(entry);
+    }
+    using var gzipped = new MemoryStream();
+    using (var gzip = new System.IO.Compression.GZipStream(gzipped, System.IO.Compression.CompressionMode.Compress, leaveOpen: true))
+        gzip.Write(tarBytes.ToArray());
+    return gzipped.ToArray();
+}
+
+static void AssertMaxMindFailure(Func<MaxMindDatabase> open, MaxMindFailureKind expected, string message)
+{
+    try { open(); }
+    catch (MaxMindException exception) when (exception.Kind == expected) { return; }
+    throw new InvalidOperationException($"FAILED: {message}");
 }
 
 static void AssertStoreFailure(Action action, StoreFailureKind expected, string message)
@@ -1962,6 +2120,21 @@ static async Task AssertEnrollmentFailure(Func<Task> action, string reason, stri
     try { await action(); }
     catch (AgentEnrollmentException exception) when (exception.Reason == reason) { return; }
     throw new InvalidOperationException($"FAILED: {message}");
+}
+
+/// Answers one download with bytes rather than a string, and remembers how it
+/// was asked.
+sealed class GeoLite2Handler(HttpStatusCode status, byte[] body) : HttpMessageHandler
+{
+    public System.Net.Http.Headers.AuthenticationHeaderValue? Authorization { get; private set; }
+    public Uri? RequestedUri { get; private set; }
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        Authorization = request.Headers.Authorization;
+        RequestedUri = request.RequestUri;
+        return Task.FromResult(new HttpResponseMessage(status) { Content = new ByteArrayContent(body) });
+    }
 }
 
 sealed class EnrollmentHandler(params (HttpStatusCode Status, string Body)[] responses) : HttpMessageHandler

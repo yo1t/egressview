@@ -804,6 +804,32 @@ public partial class MainWindow : Window
 
     private bool readsHostnames = true;
 
+    private bool publicThreatFeeds;
+
+    /// Turning this on lets this PC fetch the public lists itself.
+    ///
+    /// Off by default and asked for explicitly, because the fetch reveals that
+    /// this PC asked -- not what it asked about, but that is still a fact
+    /// about the person, and the wording beside the box says so.
+    private async void PublicThreatFeedsEnabled_Click(object sender, RoutedEventArgs e)
+    {
+        if (loadingSettings) return;
+        var wanted = PublicThreatFeedsEnabled.IsChecked == true;
+        PublicThreatFeedsEnabled.IsEnabled = false;
+        try
+        {
+            var response = await AgentIpcClient.RequestAsync(
+                JsonSerializer.Serialize(new { v = 1, op = "set-public-threat-feeds", enabled = wanted }), lifetime.Token);
+            using var document = JsonDocument.Parse(response);
+            EnsureAccepted(document.RootElement);
+            publicThreatFeeds = wanted;
+            await RefreshEnrichmentStatusAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception) { PublicThreatFeedsEnabled.IsChecked = !wanted; }
+        finally { PublicThreatFeedsEnabled.IsEnabled = true; }
+    }
+
     private void SetMonitoringState(bool healthy, bool enabled = true, string? issueCode = null, string? issueAction = null)
     {
         MonitoringStatus.Text = enabled ? LocalizationManager.Text(healthy ? "Monitoring" : "NeedsAttention") : LocalizationManager.Text("MonitoringStopped");
@@ -973,6 +999,8 @@ public partial class MainWindow : Window
         // there for the last status has to be told the state now.
         if (section == "general" && HostnameObservationEnabled is not null)
             HostnameObservationEnabled.IsChecked = readsHostnames;
+        if (section == "enrichment" && PublicThreatFeedsEnabled is not null)
+            PublicThreatFeedsEnabled.IsChecked = publicThreatFeeds;
         GeneralSettingsSection.Visibility = section == "general" ? Visibility.Visible : Visibility.Collapsed;
         NotificationSettingsSection.Visibility = section == "notifications" ? Visibility.Visible : Visibility.Collapsed;
         EnrichmentSettingsSection.Visibility = section == "enrichment" ? Visibility.Visible : Visibility.Collapsed;
@@ -1325,7 +1353,12 @@ public partial class MainWindow : Window
             EnrichmentSource.Text = $"{LocalizationManager.Text("ActiveSource")}: {source}";
             RenderEnrichment(data.GetProperty("geo"), GeoEnrichmentStatus, GeoEnrichmentFailure);
             RenderEnrichment(data.GetProperty("threat"), ThreatEnrichmentStatus, ThreatEnrichmentFailure);
-            RefreshGeoButton.IsEnabled = RefreshThreatButton.IsEnabled = enrolled;
+            publicThreatFeeds = data.TryGetProperty("publicFeedsEnabled", out var feeds) && feeds.GetBoolean();
+            if (PublicThreatFeedsEnabled is not null) PublicThreatFeedsEnabled.IsChecked = publicThreatFeeds;
+            // Refreshing by hand needs somewhere to refresh from: a Hub, or
+            // the public lists this PC has been allowed to fetch.
+            RefreshThreatButton.IsEnabled = enrolled || publicThreatFeeds;
+            RefreshGeoButton.IsEnabled = enrolled;
         }
         catch
         {

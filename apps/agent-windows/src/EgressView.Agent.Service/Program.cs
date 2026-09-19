@@ -224,7 +224,7 @@ internal sealed class AgentWindowsService : ServiceBase
         monitoring.Start();
         var credentialStore = new WindowsCredentialStore();
         using var deliveryController = new DeliveryController(store, credentialStore);
-        using var enrichmentController = new EnrichmentController(store, credentialStore);
+        using var enrichmentController = new EnrichmentController(store, credentialStore, Path.Combine(root, "public-threat-feeds.enabled"));
         await using var ipc = new AgentIpcServer(store, monitoring.Snapshot, ReadAllowedUserSid(), credentialStore,
             () => monitoring.Enabled, monitoring.SetEnabled, () => monitoring.ReadsHostnames, monitoring.SetReadsHostnames,
             deliveryController, enrichmentController);
