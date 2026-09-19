@@ -1514,6 +1514,34 @@ try
     }
 
     {
+        // A diagnostics request must not re-read the database.
+        //
+        // It used to, under the lock every other request needs, on a pipe that
+        // serves one caller at a time: measured on 0.1.57, a diagnostics call
+        // took 30.7 seconds and every status request during it failed to even
+        // connect, while a status call on its own takes 1 ms. The window polls
+        // status every five seconds, so saving a bundle read as "status
+        // unavailable" for half a minute.
+        var reportDatabase = Path.Combine(directory, "diagnostics-speed.db");
+        using (var store = new ObservationStore(reportDatabase))
+        {
+            var run = store.BeginRun(RunComponent.Service, "0.1.0");
+            store.EndRun(run);
+            Assert(store.VerifyIntegrityInBackground() == "ok", "a full read establishes what the file is");
+            var snapshot = new CollectorSnapshot("healthy", 0, 0, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0);
+
+            var live = DiagnosticsReport.Create(snapshot, store, "0.1.0", verifyIntegrity: false);
+            Assert(live.Contains("\"integrity\": \"ok\"", StringComparison.Ordinal) &&
+                live.Contains("integrityCheckedAt", StringComparison.Ordinal),
+                "a report that did not re-read says what the last full read found, and when");
+
+            // The offline bundle is the one place that may take its time:
+            // it runs when the service will not start and nobody waits on it.
+            Assert(DiagnosticsReport.Create(snapshot, store, "0.1.0", verifyIntegrity: true)
+                .Contains("\"integrity\": \"ok\"", StringComparison.Ordinal),
+                "the offline bundle still reads the database itself");
+        }
+
         // The check at open happens only when the last run cannot vouch for
         // the file.
         //
