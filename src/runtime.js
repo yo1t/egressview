@@ -297,6 +297,7 @@ function handleInspectSession(session) {
     ]).then(() => {
       const e = connectionHistory.get(key);
       if (!e) return;
+      const before = `${e.dstHost}|${e.country}|${e.org}|${e.lat}|${e.lon}|${e.city}`;
       const dc2  = _enrichment.getDnsCache().get(dst);
       const now2 = Date.now();
       if (dc2 && dc2.expires > now2) {
@@ -309,6 +310,12 @@ function handleInspectSession(session) {
       e.lat     = g2?.lat  ?? e.lat;
       e.lon     = g2?.lon  ?? e.lon;
       e.city    = g2?.city ?? e.city;
+      // Persist here rather than leaning on the periodic snapshot: that now
+      // writes only entries seen since the last one, and a slow lookup can land
+      // after this connection has gone quiet.
+      if (`${e.dstHost}|${e.country}|${e.org}|${e.lat}|${e.lon}|${e.city}` !== before) {
+        _history.appendHistoryLog?.(e);
+      }
     }).catch(() => {});
   }
 

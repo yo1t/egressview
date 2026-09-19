@@ -1220,3 +1220,77 @@ describe('groupSrcByTimeRange', () => {
     assert.equal(rows[0].srcMac, 'AA:BB:CC:00:11:22');
   });
 });
+
+// ─── P3-139: snapshotHistory writes only what changed ─────────────────────────
+//
+// It used to rewrite the whole hot cache. Measured on one Hub 2026-09-19:
+// 99,698 entries every ten minutes to persist about 100 that had moved,
+// blocking the event loop for 5 to 9.8 seconds each time.
+
+describe('snapshotHistory', () => {
+  function cache(dst, lastSeen) {
+    // Memory only -- the state a plain lastSeen bump leaves behind, since
+    // recordConnections persists only new and observer-changed entries.
+    const key = `192.168.5.1|${dst}|443|TCP`;
+    history.cacheConnection(key, {
+      src: '192.168.5.1', dst, dport: 443, proto: 'TCP', firstSeen: lastSeen, lastSeen,
+    });
+    return key;
+  }
+
+  /** Read straight from SQLite, bypassing the in-memory map. */
+  function persistedDsts() {
+    return history.queryByTimeRange(null, null).map(row => row.dst).sort();
+  }
+
+  it('直近に見た接続だけを書く', () => {
+    const now = Date.now();
+    cache('10.5.0.1', now);
+    history.snapshotHistory();
+    assert.deepEqual(persistedDsts(), ['10.5.0.1'], '直近の接続は保存される');
+
+    // Already identical in SQLite: last seen long before the previous snapshot.
+    cache('10.5.0.2', now - 60 * 60 * 1000);
+    history.snapshotHistory();
+    assert.deepEqual(persistedDsts(), ['10.5.0.1'], '前回のsnapshotより古い接続は書き直さない');
+  });
+
+  it('何も動いていなければ1行も書かない', () => {
+    const now = Date.now();
+    const key = cache('10.5.1.1', now);
+    history.snapshotHistory();
+
+    // Change a field without moving lastSeen, and push the entry out of the
+    // window. A snapshot that still wrote everything would carry this to
+    // SQLite; one that writes only what moved leaves the stored row alone.
+    const entry = history.getConnectionHistory().get(key);
+    entry.org = 'rewritten-by-snapshot';
+    entry.lastSeen = now - 10 * 60 * 1000;
+    history.snapshotHistory();
+
+    const row = history.queryByTimeRange(null, null).find(r => r.dst === '10.5.1.1');
+    assert.notEqual(row.org, 'rewritten-by-snapshot', '動いていない行は書き直されない');
+  });
+
+  it('見え続けている接続は毎回書き直される', () => {
+    const key = cache('10.5.2.1', Date.now());
+    history.snapshotHistory();
+
+    const later = Date.now() + 5000;
+    history.getConnectionHistory().get(key).lastSeen = later;
+    history.snapshotHistory();
+    const row = history.queryByTimeRange(null, null).find(r => r.dst === '10.5.2.1');
+    assert.equal(row.lastSeen, later, '更新後のlastSeenが保存される');
+  });
+
+  it('起動直後のsnapshotは、DBから読んだ分を書き戻さない', () => {
+    // loadIntoMemory marks everything as already persisted; without that the
+    // first snapshot after startup rewrites the whole cache for nothing.
+    const now = Date.now();
+    history._appendAndLoad({ src: '192.168.5.9', dst: '10.5.3.1', dport: 443, proto: 'TCP', firstSeen: now, lastSeen: now });
+    history.loadConnectionHistory();
+    const before = persistedDsts();
+    history.snapshotHistory();
+    assert.deepEqual(persistedDsts(), before, '読み込んだ行は書き戻さない');
+  });
+});

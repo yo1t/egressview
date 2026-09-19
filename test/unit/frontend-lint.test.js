@@ -688,6 +688,70 @@ describe('Disconnect banner behavior invariants', () => {
   });
 });
 
+describe('通信ログのライブ追従', () => {
+  function snippetBetween(start, end) {
+    const s = logJs.indexOf(start);
+    assert.notEqual(s, -1, `start marker not found: ${start}`);
+    const e = logJs.indexOf(end, s);
+    assert.notEqual(e, -1, `end marker not found: ${end}`);
+    return logJs.slice(s, e);
+  }
+
+  it('socket の更新はログ画面に渡される', () => {
+    assert.match(mainJs, /applyLiveConnections\(incoming\)/,
+      'connections-update must reach the log view');
+    assert.doesNotMatch(mainJs, /socket\.on\('connections-update'[\s\S]*?updateLogView\(\)/,
+      'the socket handler must not re-fetch the whole log: that resets pagination');
+  });
+
+  it('追従するのは先頭ページ・既定の並べ替え・最上部のときだけ', () => {
+    const fn = snippetBetween('function isFollowingLive()', 'function renderLiveBadge');
+    assert.match(fn, /logPage\s*!==\s*0/,        'later pages loaded: offsets would shift');
+    assert.match(fn, /logFetchAllMode/,           'full-fetch mode has no server paging');
+    assert.match(fn, /logSortState\.col\s*!==\s*['"]lastSeen['"]/, 'only the newest-first order can prepend');
+    assert.match(fn, /liveScrollOffset\(\)\s*<=\s*LIVE_TOP_SLACK_PX/, 'must be scrolled to the top');
+  });
+
+  it('狭いウィンドウではページ側のスクロール量を見る', () => {
+    // A narrow layout lets the table grow to full height and scrolls the
+    // document instead, so the wrapper's own scrollTop stays 0 and reading only
+    // that would move rows under someone who is halfway down the page.
+    const fn = snippetBetween('function liveScrollOffset()', 'function isFollowingLive');
+    assert.match(fn, /scrollHeight\s*>\s*scroller\.clientHeight/,
+      'must detect whether the wrapper is the element that actually scrolls');
+    assert.match(fn, /getBoundingClientRect\(\)\.top/,
+      'otherwise the offset comes from where the table sits in the viewport');
+  });
+
+  it('ライブ更新はソケットの生データを挿さず API を引き直す', () => {
+    const fn = snippetBetween('async function refreshTopPageLive()', 'function scheduleLiveRefresh');
+    assert.match(fn, /buildLogQueryParams\(\{ page: 0, allMode: false \}\)/,
+      'the live refresh must use the same server-side filters as the view');
+    assert.match(fn, /api\/connections/,
+      'only the API attaches the Agent application attribution');
+    assert.match(fn, /reconcileLogRows\(/,
+      'rows must be reconciled, not rebuilt wholesale');
+  });
+
+  it('追従していないときは行を動かさずバッジに溜める', () => {
+    const fn = snippetBetween('export function applyLiveConnections', 'function returnToLive');
+    assert.match(fn, /if\s*\(isFollowingLive\(\)\)/, 'following is decided before anything is shown');
+    assert.match(fn, /livePendingKeys\.add\(key\)/,   'new rows are held, not inserted');
+    assert.doesNotMatch(fn, /reconcileLogRows\(/,       'nothing may move while the user is reading');
+  });
+
+  it('内容が変わらない行の DOM は作り直さない', () => {
+    const fn = snippetBetween('function reconcileLogRows(', 'async function refreshTopPageLive');
+    assert.match(fn, /dataset\.sig\s*===\s*connectionSignature\(connection\)/,
+      'an unchanged row must keep its node, or text selection is lost every 2 s');
+  });
+
+  it('並べ替え・フィルタのやり直しでは溜まった分を捨てる', () => {
+    const fn = snippetBetween('function resetAndFetch()', 'function updateLogView');
+    assert.match(fn, /clearLiveBadge\(\)/, 'a refetch already shows the newest rows');
+  });
+});
+
 describe('Connection Log pagination/filter invariants', () => {
   function snippetBetween(start, end) {
     const s = logJs.indexOf(start);
@@ -712,18 +776,23 @@ describe('Connection Log pagination/filter invariants', () => {
   });
 
   it('full-fetch mode omits limit/offset so client-side filters see all matching rows', () => {
-    const fn = snippetBetween('async function fetchLogPage()', '// ── Render');
+    const fn = snippetBetween('async function fetchLogPage()', '// ── Infinite-scroll observer');
     assert.match(fn, /logFetchAllMode\s*=\s*hasClientSideOnlyFilter\(\)/,
       'fetchLogPage must recompute whether a full fetch is required');
-    assert.match(fn, /if\s*\(!logFetchAllMode\)\s*{[\s\S]*params\.set\(['"]limit['"][\s\S]*params\.set\(['"]offset['"]/,
+    // The query itself is built in buildLogQueryParams, which the live refresh
+    // shares, so the pagination guard is asserted there.
+    const builder = snippetBetween('function buildLogQueryParams(', 'async function fetchLogPage()');
+    assert.match(builder, /allMode\s*=\s*logFetchAllMode/,
+      'the query builder must default to the current full-fetch mode');
+    assert.match(builder, /if\s*\(!allMode\)\s*{[\s\S]*params\.set\(['"]limit['"][\s\S]*params\.set\(['"]offset['"]/,
       'limit/offset should only be added when full-fetch mode is off');
   });
 
   it('threat badge filters are sent to the server while keeping pagination', () => {
-    const fn = snippetBetween('async function fetchLogPage()', '// Device filter:');
+    const fn = snippetBetween('function buildLogQueryParams(', '// Device filter:');
     assert.match(fn, /if\s*\(logThreatFilter\)\s*params\.set\(['"]fThreat['"],\s*logThreatFilter\)/,
       'threat badge filters must be passed to /api/connections as fThreat');
-    assert.match(fn, /if\s*\(!logFetchAllMode\)\s*{[\s\S]*params\.set\(['"]limit['"][\s\S]*params\.set\(['"]offset['"]/,
+    assert.match(fn, /if\s*\(!allMode\)\s*{[\s\S]*params\.set\(['"]limit['"][\s\S]*params\.set\(['"]offset['"]/,
       'server-side threat filters should preserve normal pagination');
   });
 
