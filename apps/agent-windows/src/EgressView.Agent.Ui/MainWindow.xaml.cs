@@ -1451,9 +1451,12 @@ public partial class MainWindow : Window
             EnrichmentSource.Text = $"{LocalizationManager.Text("ActiveSource")}: {source}";
             RenderEnrichment(data.GetProperty("geo"), GeoEnrichmentStatus, GeoEnrichmentFailure);
             RenderEnrichment(data.GetProperty("threat"), ThreatEnrichmentStatus, ThreatEnrichmentFailure);
-            if (data.TryGetProperty("countryTable", out var countryTable)) RenderCountryTable(countryTable);
+            var countryTableConfigured = data.TryGetProperty("countryTable", out var countryTable)
+                && countryTable.TryGetProperty("configured", out var placed) && placed.GetBoolean();
+            if (data.TryGetProperty("countryTable", out countryTable)) RenderCountryTable(countryTable);
             publicThreatFeeds = data.TryGetProperty("publicFeedsEnabled", out var feeds) && feeds.GetBoolean();
             if (PublicThreatFeedsEnabled is not null) PublicThreatFeedsEnabled.IsChecked = publicThreatFeeds;
+            RenderEnrichmentPrivacy(publicThreatFeeds, countryTableConfigured);
             // Refreshing by hand needs somewhere to refresh from: a Hub, or
             // the public lists this PC has been allowed to fetch.
             RefreshThreatButton.IsEnabled = enrolled || publicThreatFeeds;
@@ -1464,6 +1467,24 @@ public partial class MainWindow : Window
             EnrichmentSource.Text = LocalizationManager.Text("CannotConnect");
             RefreshGeoButton.IsEnabled = RefreshThreatButton.IsEnabled = false;
         }
+    }
+
+    /// Says what this PC contacts directly, because sometimes it does.
+    ///
+    /// The line above this used to read "Hub only" whatever the settings said.
+    /// Turning on the public feeds, or setting a MaxMind account, makes this
+    /// Agent fetch from abuse.ch, Spamhaus or MaxMind itself -- and a privacy
+    /// note that stays the same while the behaviour changes underneath it is
+    /// worse than none, because it is the line a reader would rely on.
+    private void RenderEnrichmentPrivacy(bool publicFeeds, bool countryTable)
+    {
+        if (EnrichmentPrivacyNote is null) return;
+        var sources = new List<string>();
+        if (publicFeeds) sources.Add(LocalizationManager.Text("SourcePublicFeeds"));
+        if (countryTable) sources.Add(LocalizationManager.Text("SourceMaxMind"));
+        EnrichmentPrivacyNote.Text = sources.Count == 0
+            ? LocalizationManager.Text("EnrichmentPrivacy")
+            : string.Format(LocalizationManager.Text("EnrichmentPrivacyDirect"), string.Join(" / ", sources));
     }
 
     private static void RenderEnrichment(JsonElement item, TextBlock status, TextBlock failure)

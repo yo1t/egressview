@@ -56,6 +56,18 @@ foreach (var (windowsKey, macEnglish) in sharedWording)
         SharedResource(windowsJapanese, windowsKey) == macValue,
         $"Shared wording Japanese drifted: {windowsKey}");
 }
+// The privacy note is composed, not fixed, so its placeholder has to survive
+// translation. A missing {0} would not fail to build or throw: it would print
+// a sentence that quietly omits which services this PC contacts, which is the
+// one fact the line exists to carry.
+foreach (var document in new[] { windowsEnglish, windowsJapanese })
+{
+    Assert(SharedResource(document, "EnrichmentPrivacyDirect").Contains("{0}", StringComparison.Ordinal),
+        "the direct-source privacy note keeps the slot the source names go in");
+    foreach (var key in new[] { "SourcePublicFeeds", "SourceMaxMind", "EnrichmentPrivacy" })
+        Assert(SharedResource(document, key).Trim().Length > 0, $"the privacy note has wording for {key}");
+}
+
 // Check every exact shared English string, not only the historical review list.
 // These two keys have different contexts: a Windows language preference and
 // the ETW collection method are not macOS system settings or traffic source.
