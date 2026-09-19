@@ -96,6 +96,23 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             catch { return eventsLost; }
         }
     }
+
+    /// What was lost before the session settled, and what has been lost since.
+    ///
+    /// One lost event used to mark the agent as needing attention for the rest
+    /// of the run, with the advice "restart the service" -- which produced
+    /// another start, and another loss. The two numbers answer different
+    /// questions: the first is history, the second is whether collection is
+    /// healthy right now.
+    public int EventsLostAtStart => startingEventsLost;
+
+    public int EventsLostSinceStart => Math.Max(0, EventsLost - startingEventsLost);
+
+    /// Called once the session has been running long enough that anything lost
+    /// after it is a real shortfall rather than the cost of starting.
+    internal void MarkStartupSettled() => startingEventsLost = EventsLost;
+
+    private int startingEventsLost;
     public string? Error => error;
     /// Why process start events are unavailable, when they are. Network
     /// collection continues without them; names just fall back to querying,
@@ -115,6 +132,20 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         try
         {
             session = new TraceEventSession(sessionName) { StopOnDispose = true };
+            // The consumer starts before anything is turned on.
+            //
+            // Enabling the providers first and reading afterwards leaves a gap
+            // in which the kernel fills the buffers and nobody empties them.
+            // Measured on this machine: 1,210,217 events lost in that gap, and
+            // then not one more for the rest of the run -- the session sat at
+            // exactly that number while it went on seeing 300 events a second.
+            // The loss was never a capacity problem; it was an ordering one.
+            session.Source.Dynamic.All += Dispatch;
+            processing = Task.Run(() =>
+            {
+                try { session.Source.Process(); }
+                catch (Exception ex) { error = $"{ex.GetType().Name}: {ex.Message}"; }
+            });
             session.EnableProvider(KernelNetwork, TraceEventLevel.Verbose, ulong.MaxValue);
             // Process starts are an enrichment, not the collection itself. If
             // they cannot be enabled the Agent still observes traffic, so this
@@ -145,12 +176,6 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
                     hostnameSourceError = $"{ex.GetType().Name}: {ex.Message}";
                 }
             }
-            session.Source.Dynamic.All += Dispatch;
-            processing = Task.Run(() =>
-            {
-                try { session.Source.Process(); }
-                catch (Exception ex) { error = $"{ex.GetType().Name}: {ex.Message}"; }
-            });
         }
         catch (Exception ex)
         {
@@ -173,6 +198,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         InterfaceUnresolved = InterfaceUnresolved,
         InboundMulticastIgnored = InboundMulticastIgnored,
         EtwEventsLost = EventsLost,
+        EtwEventsLostAtStart = EventsLostAtStart,
         CollectorError = Error,
         NamesFromStartEvents = processNames.ObservedStarts,
         NamesFromCache = processNames.CacheHits,
@@ -194,7 +220,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         HostnamesUnavailable = dnsNames.CacheMisses,
         DnsEventsSeen = dnsNames.EventsSeen,
         HostnameSourceError = hostnameSourceError,
-        State = Error is not null || EventsLost > 0 || snapshot.PersistenceFailures > 0 || hostnameSourceError is not null ? "degraded" : snapshot.State,
+        State = Error is not null || EventsLostSinceStart > 0 || snapshot.PersistenceFailures > 0 || hostnameSourceError is not null ? "degraded" : snapshot.State,
     };
 
     private void Dispatch(TraceEvent e)

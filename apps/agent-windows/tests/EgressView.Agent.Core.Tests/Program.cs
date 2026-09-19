@@ -1514,6 +1514,67 @@ try
     }
 
     {
+        // Public threat feeds, for agents with no Hub.
+        //
+        // The parsers are the Mac's and the Hub's. An Agent that disagrees
+        // with its Hub about the same destination is the defect P3-19 exists
+        // to prevent, and two platforms disagreeing is the same defect twice.
+        {
+            // CRLF on purpose. Three of the four feeds ship it, and on the Mac
+            // splitting on a bare newline made the whole download one line that
+            // started with a comment marker: zero indicators, no error, for
+            // months.
+            var feodo = "first_seen_utc,dst_ip,dst_port,c2_status,last_online,malware\r\n" +
+                "2026-01-01,203.0.113.5,443,online,2026-01-02,Emotet\r\n";
+            var parsedFeodo = ThreatFeedDownloader.Parse(feodo, "feodo", "feodo");
+            Assert(parsedFeodo.Count == 1 && parsedFeodo[0].Value == "203.0.113.5" &&
+                parsedFeodo[0].Kind == "ip" && parsedFeodo[0].Tag == "Emotet C2",
+                "a CRLF feed is read line by line and names the malware from its own header");
+
+            var threatFox = "first_seen_utc,ioc_id,ioc_value,ioc_type,threat_type,malware\r\n" +
+                "2026-01-01,1,198.51.100.7:8080,ip:port,botnet_cc,Qakbot\r\n";
+            var parsedFox = ThreatFeedDownloader.Parse(threatFox, "threatfox", "threatfox");
+            Assert(parsedFox.Count == 1 && parsedFox[0].Value == "198.51.100.7" && parsedFox[0].Tag == "Qakbot",
+                "the port is stripped, and the malware comes from the column that holds it");
+
+            // The Mac counts commas instead, and for this exact shape takes
+            // last_online as the malware family: its indicators read
+            // "2026-01-02 C2". Its tests assert the address and the kind and
+            // never the tag, so nothing noticed.
+            var extraColumn = "first_seen_utc,dst_ip,dst_port,c2_status,last_online,malware,reference\r\n" +
+                "2026-01-01,203.0.113.5,443,online,2026-01-02,TrickBot,https://example.test\r\n";
+            Assert(ThreatFeedDownloader.Parse(extraColumn, "feodo", "feodo")[0].Tag == "TrickBot C2",
+                "a feed that adds a column does not shift the malware name");
+
+            var urlhaus = "# comment\r\n" +
+                "1,2026-01-01,http://203.0.113.9/payload.exe,online,malware_download\r\n" +
+                "2,2026-01-01,https://raw.githubusercontent.com/x/y/z.exe,online,malware_download\r\n";
+            var parsedHaus = ThreatFeedDownloader.Parse(urlhaus, "urlhaus", "urlhaus");
+            Assert(parsedHaus.Count == 2 &&
+                parsedHaus[0] is { Kind: "ip", Confidence: "high" } &&
+                parsedHaus[1] is { Kind: "domain", Value: "raw.githubusercontent.com", Confidence: "low" },
+                "a file-hosting service is low confidence; an address serving malware is not");
+
+            var spamhaus = "; comment\n1.2.3.0/24 ; SBL123456\n";
+            var parsedDrop = ThreatFeedDownloader.Parse(spamhaus, "spamhausDrop", "spamhaus");
+            Assert(parsedDrop.Count == 1 && parsedDrop[0].Kind == "cidr" && parsedDrop[0].Value == "1.2.3.0/24",
+                "a hijacked network is kept as a range rather than a single address");
+
+            Assert(ThreatFeedDownloader.ConfidenceForHost("gist.githubusercontent.com") == "low" &&
+                ThreatFeedDownloader.ConfidenceForHost("x.amazonaws.com") == "low" &&
+                ThreatFeedDownloader.ConfidenceForHost("evil.test") == "high",
+                "confidence looks at the host and at its last two labels, as the Hub does");
+
+            Assert(ThreatFeedDownloader.CsvFields("a,\"b,c\",d").SequenceEqual(["a", "b,c", "d"]),
+                "a quoted field keeps its commas");
+
+            // Feodo has published nothing since 2026-03-04. A feed that is
+            // empty on purpose must not become a warning that never clears.
+            Assert(ThreatFeedDownloader.PublishesEmptyLists.Contains("feodo") &&
+                !ThreatFeedDownloader.PublishesEmptyLists.Contains("spamhaus"),
+                "a feed that legitimately publishes nothing is not reported as missing");
+        }
+
         // A diagnostics request must not re-read the database.
         //
         // It used to, under the lock every other request needs, on a pipe that
@@ -1861,7 +1922,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, and risk-led integrity checks");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, and public threat feeds");
     return 0;
 }
 finally
