@@ -33,9 +33,43 @@ internal sealed class MonitoringController : IAsyncDisposable
         this.disabledMarker = disabledMarker;
         collector = new EtwNetworkCollector(pipeline);
         Enabled = !File.Exists(disabledMarker);
+        // A marker file like the monitoring one, so the choice survives a
+        // restart of the service without the service having to ask the window.
+        hostnamesMarker = Path.Combine(Path.GetDirectoryName(disabledMarker) ?? ".", "hostnames.disabled");
+        collector.ReadsHostnames = !File.Exists(hostnamesMarker);
     }
 
+    private readonly string hostnamesMarker;
+
     internal bool Enabled { get; private set; }
+
+    internal bool ReadsHostnames => collector.ReadsHostnames;
+
+    /// Changing this restarts the trace session, because the subscription is
+    /// decided when the session is opened. Monitoring stops for the moment it
+    /// takes, and the gap is recorded as an interruption rather than hidden:
+    /// a coverage figure that quietly ignores its own restarts is worth less
+    /// than one that counts them.
+    internal bool SetReadsHostnames(bool reads)
+    {
+        gate.Wait();
+        try
+        {
+            if (reads == collector.ReadsHostnames) return reads;
+            if (reads) File.Delete(hostnamesMarker);
+            else File.WriteAllText(hostnamesMarker, "Destination-name reading was turned off from the EgressView Agent UI." + Environment.NewLine);
+            collector.ReadsHostnames = reads;
+            if (Enabled)
+            {
+                EndCoverage(DateTimeOffset.UtcNow, interrupted: true);
+                StopCollector();
+                collector.Start();
+                BeginCoverage(DateTimeOffset.UtcNow);
+            }
+            return reads;
+        }
+        finally { gate.Release(); }
+    }
 
     internal void Start()
     {

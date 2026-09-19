@@ -225,7 +225,8 @@ internal sealed class AgentWindowsService : ServiceBase
         using var deliveryController = new DeliveryController(store, credentialStore);
         using var enrichmentController = new EnrichmentController(store, credentialStore);
         await using var ipc = new AgentIpcServer(store, monitoring.Snapshot, ReadAllowedUserSid(), credentialStore,
-            () => monitoring.Enabled, monitoring.SetEnabled, deliveryController, enrichmentController);
+            () => monitoring.Enabled, monitoring.SetEnabled, () => monitoring.ReadsHostnames, monitoring.SetReadsHostnames,
+            deliveryController, enrichmentController);
         ipc.Start();
         var delivery = deliveryController.RunAsync(cancellationToken);
         var geoCache = enrichmentController.RunGeoAsync(cancellationToken);

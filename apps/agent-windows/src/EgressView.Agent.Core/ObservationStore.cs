@@ -1033,6 +1033,25 @@ public sealed partial class ObservationStore : IDisposable
         lock (gate) Execute($"UPDATE outbound_traffic_windows SET anomaly_kind='{name}' WHERE window_start='{windowStart:O}'");
     }
 
+    /// The newest window that was judged unusual, so the window can notice a
+    /// new one rather than a count that says only how many there have been.
+    public (DateTimeOffset WindowStart, OutboundAnomalyKind Kind, ulong BytesOut)? ReadLatestOutboundAnomaly()
+    {
+        lock (gate)
+        {
+            CheckOperation(WinSqlite.Prepare(db, "SELECT window_start,anomaly_kind,bytes_out FROM outbound_traffic_windows " +
+                "WHERE anomaly_kind IS NOT NULL ORDER BY window_start DESC LIMIT 1", -1, out var statement, 0));
+            try
+            {
+                if (WinSqlite.Step(statement) != WinSqlite.Row) return null;
+                return (DateTimeOffset.Parse(Text(statement, 0)),
+                    Text(statement, 1) == "distributed-transfer" ? OutboundAnomalyKind.DistributedTransfer : OutboundAnomalyKind.LargeTransfer,
+                    (ulong)Math.Max(0, WinSqlite.ColumnInt64(statement, 2)));
+            }
+            finally { WinSqlite.Finalize(statement); }
+        }
+    }
+
     public int ReadOutboundAnomalyCount(DateTimeOffset from, DateTimeOffset to)
     {
         lock (gate) return (int)ScalarInt64("SELECT COUNT(*) FROM outbound_traffic_windows " +

@@ -9,7 +9,7 @@ public static class DiagnosticsReport
     public static string CurrentVersion => typeof(DiagnosticsReport).Assembly.GetName().Version?.ToString(3) ?? "unknown";
 
     public static string CreateStatus(CollectorSnapshot snapshot, ObservationStore store, string version,
-        bool monitoringEnabled = true)
+        bool monitoringEnabled = true, bool readsHostnames = true)
     {
         // Status is polled by both the tray and the open window. Keep it independent
         // of history size: full table counts belong to the explicit diagnostics and
@@ -25,8 +25,27 @@ public static class DiagnosticsReport
             health = new { status = health.Status, issues = health.Issues.Select(issue => new { code = issue.Code, action = issue.Action }) },
             coverage = new { total = coverage.Total, active = coverage.Active, abandoned = coverage.Abandoned },
             monitoringEnabled,
+            readsHostnames,
             deliveryEnabled = store.DeliveryEnabled,
+            // Cheap: one indexed row. The window needs to know that something
+            // was judged unusual, and a count alone cannot tell a new finding
+            // from an old one already seen.
+            outboundAnomaly = SafeLatestAnomaly(store),
         });
+    }
+
+    private static object? SafeLatestAnomaly(ObservationStore store)
+    {
+        try
+        {
+            return store.ReadLatestOutboundAnomaly() is not { } latest ? null : new
+            {
+                windowStart = latest.WindowStart,
+                kind = latest.Kind == OutboundAnomalyKind.DistributedTransfer ? "distributed-transfer" : "large-transfer",
+                bytesOut = latest.BytesOut,
+            };
+        }
+        catch (Exception) { return null; }
     }
 
     public static string Create(CollectorSnapshot snapshot, ObservationStore store, string version, bool monitoringEnabled = true,

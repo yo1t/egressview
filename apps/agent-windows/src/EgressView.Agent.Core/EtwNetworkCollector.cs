@@ -28,6 +28,14 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     // thread and image-load events would multiply the volume for nothing.
     private static readonly Guid KernelProcess = new("22FB2CD6-0E7B-422B-A0C7-2FAD1FD0E716");
     private static readonly Guid DnsClient = new("1C95126E-7EEA-49A9-A3FE-A378B03DDB4D");
+
+    /// Whether destination names are read from Windows DNS metadata.
+    ///
+    /// Turning this off costs more than the names: destinations show as
+    /// addresses, and threat matching by domain has nothing to match on.
+    /// Matching by address, locations and countries are unaffected, because
+    /// those are worked out from the address.
+    public bool ReadsHostnames { get; set; } = true;
     private const ulong ProcessKeyword = 0x10;
     private static readonly HashSet<string> VpnProcesses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -107,16 +115,23 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             {
                 processNameSourceError = $"{ex.GetType().Name}: {ex.Message}";
             }
-            try
+            // Off means the provider is never enabled, not that names are
+            // enabled and then discarded: a person who turns this off is
+            // asking for the names not to be collected, and a subscription
+            // that collects them anyway would not honour that.
+            if (ReadsHostnames)
             {
-                // Event 3008 contains the requesting PID, query name and the
-                // resolved addresses. This is metadata Windows already has;
-                // no packet payload is captured and reverse DNS is never used.
-                session.EnableProvider(DnsClient, TraceEventLevel.Informational, ulong.MaxValue);
-            }
-            catch (Exception ex)
-            {
-                hostnameSourceError = $"{ex.GetType().Name}: {ex.Message}";
+                try
+                {
+                    // Event 3008 contains the requesting PID, query name and the
+                    // resolved addresses. This is metadata Windows already has;
+                    // no packet payload is captured and reverse DNS is never used.
+                    session.EnableProvider(DnsClient, TraceEventLevel.Informational, ulong.MaxValue);
+                }
+                catch (Exception ex)
+                {
+                    hostnameSourceError = $"{ex.GetType().Name}: {ex.Message}";
+                }
             }
             session.Source.Dynamic.All += Dispatch;
             processing = Task.Run(() =>

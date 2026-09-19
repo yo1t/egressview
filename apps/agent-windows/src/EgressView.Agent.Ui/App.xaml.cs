@@ -287,6 +287,11 @@ public partial class App : System.Windows.Application
         catch { /* Status availability is represented separately; it is not a Hub outage. */ }
     }
 
+    /// Settings asks for the same toggle the tray menu uses. The tray item is
+    /// disabled around the request, which is harmless when the caller is the
+    /// settings page instead.
+    internal Task ToggleMonitoringFromSettingsAsync() => ToggleMonitoringAsync();
+
     private async Task ToggleMonitoringAsync()
     {
         if (monitoringToggle is null) return;
