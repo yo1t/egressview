@@ -84,6 +84,86 @@ describe('Agent application attribution join order', () => {
   });
 });
 
+describe('Agent-only 行の枝', () => {
+  // The agent-only rows used to ride in the same CTE, picked out by an
+  // `r.agentOnly = 1` condition inside the join. SQLite answered that by
+  // scanning agent_observations -- 1,536,341 rows on the Hub this was measured
+  // against -- and checking the 200 constant rows afterwards. It cost 3,759 ms
+  // per page of the connection log to return nothing, because on a typical page
+  // nothing is agent-only, and 31,461 ms when everything was. An index hint did
+  // not move it. Passing only the qualifying rows did: 0.5 ms for 4 of 200.
+  function prepareSpy(db) {
+    const prepared = [];
+    const realPrepare = db.prepare.bind(db);
+    return {
+      prepared,
+      getDb: () => ({ prepare: (sql) => { prepared.push(sql); return realPrepare(sql); } }),
+    };
+  }
+
+  it('router が見た行しかないページでは、その枝を作らない', () => {
+    const { db, observation, link } = fixture();
+    observation.run('safari-1', 10, 'Safari', 'com.apple.Safari', '1', '2');
+    link.run('safari-1');
+    const spy = prepareSpy(db);
+
+    createAgentAttribution({ getDb: spy.getDb }).attach([{
+      src: '192.0.2.10', dst: '198.51.100.10', dport: 443, proto: 'TCP',
+      firstSeen: 1000, lastSeen: 2000, observedBy: ['router-a'],
+    }]);
+
+    assert.equal(spy.prepared.length, 1);
+    assert.doesNotMatch(spy.prepared[0], /agentOnlyRows/,
+      'agent-only の行が無いのに枝を作っている');
+    assert.doesNotMatch(spy.prepared[0], /agent-only/,
+      'agent-only の枝そのものを外していない');
+    db.close();
+  });
+
+  it('agent-only の行だけを、専用のCTEに渡す', () => {
+    const { db, observation } = fixture();
+    observation.run('solo-1', 11, 'Mail', 'com.apple.mail', '3', '4');
+    const spy = prepareSpy(db);
+
+    const rows = createAgentAttribution({ getDb: spy.getDb }).attach([
+      { src: '192.0.2.10', dst: '198.51.100.10', dport: 443, proto: 'TCP',
+        firstSeen: 1000, lastSeen: 2000, observedBy: [] },
+      { src: '192.0.2.99', dst: '198.51.100.99', dport: 80, proto: 'TCP',
+        firstSeen: 1000, lastSeen: 2000, observedBy: ['router-a'] },
+    ]);
+
+    assert.match(spy.prepared[0], /agentOnlyRows\(rowIndex, src, dst, dport, proto, firstSeen, lastSeen\)/);
+    // One row qualifies, so the branch carries one tuple while `requested`
+    // carries both. Counting the placeholders is what proves the filtering
+    // happened before SQLite saw the rows.
+    const sql = spy.prepared[0];
+    const cte = sql.slice(sql.indexOf('agentOnlyRows('), sql.indexOf(', attributions AS'));
+    const tuples = cte.match(/\(\?, \?, \?, \?, \?, \?, \?\)/g) || [];
+    assert.equal(tuples.length, 1, `渡した組数が合わない: ${tuples.length}\n${cte}`);
+    const all = sql.match(/\(\?, \?, \?, \?, \?, \?, \?\)/g) || [];
+    assert.equal(all.length, 3, 'requested に2行、agent-only に1行のはず');
+    // And the answer is still the agent-only attribution.
+    assert.equal(rows[0].applications[0].processName, 'Mail');
+    assert.equal(rows[0].applications[0].matchKind, 'agent-only');
+    db.close();
+  });
+
+  it('router が見ていない行を、取りこぼさない', () => {
+    const { db, observation } = fixture();
+    observation.run('solo-1', 11, 'Mail', 'com.apple.mail', '3', '4');
+    const attribution = createAgentAttribution({ getDb: () => db });
+
+    const rows = attribution.attach([{
+      src: '192.0.2.10', dst: '198.51.100.10', dport: 443, proto: 'TCP',
+      firstSeen: 1000, lastSeen: 2000, observedBy: [],
+    }]);
+
+    assert.equal(rows[0].applicationCount, 1);
+    assert.equal(rows[0].applications[0].processName, 'Mail');
+    db.close();
+  });
+});
+
 describe('Agent application byte attribution', () => {
   it('adds decimal uint64 values without Number precision loss or replay duplication', () => {
     const { db, observation, link } = fixture();

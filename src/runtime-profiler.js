@@ -1,9 +1,25 @@
 'use strict';
 
-const { monitorEventLoopDelay, performance } = require('node:perf_hooks');
+const { monitorEventLoopDelay, performance, PerformanceObserver } = require('node:perf_hooks');
 
 const DEFAULT_INTERVAL_MS = 60_000;
 const NS_PER_MS = 1e6;
+
+// The window summary can say the loop stopped for two seconds; it cannot say
+// when, or what was running. Chasing a stall with it means guessing, and a
+// whole afternoon of guessing on one Hub produced three wrong answers before
+// the profiler was extended instead. This watchdog answers the two questions
+// the summary cannot.
+const DEFAULT_WATCHDOG_INTERVAL_MS = 100;
+const DEFAULT_STALL_THRESHOLD_MS = 500;
+// Only operations worth naming go in the ring: a poll records hundreds of
+// sub-millisecond ones, and none of them stopped anything.
+const RECENT_OPERATION_MIN_MS = 5;
+const RECENT_OPERATION_LIMIT = 200;
+// Node emits a scavenge every few milliseconds, and 200 of them at 0.02 ms each
+// would push the one collection that mattered out of the ring before anything
+// read it. Only pauses long enough to be part of a stall are worth keeping.
+const GC_PAUSE_MIN_MS = 1;
 
 function round(value, digits = 1) {
   const factor = 10 ** digits;
@@ -26,6 +42,75 @@ function createRuntimeProfiler(deps = {}) {
   let windowCpuStart = null;
   let operations = new Map();
   const gauges = new Map();
+  // Completed operations worth attributing a stall to, newest last.
+  let recentOperations = [];
+  let gcPauses = [];
+  let gcObserver = null;
+  let watchdogTimer = null;
+  let watchdogExpectedAt = 0;
+  let watchdogIntervalMs = DEFAULT_WATCHDOG_INTERVAL_MS;
+  let stallThresholdMs = DEFAULT_STALL_THRESHOLD_MS;
+  let stallCount = 0;
+
+  function remember(list, entry, limit) {
+    list.push(entry);
+    if (list.length > limit) list.splice(0, list.length - limit);
+  }
+
+  function noteOperation(name, startedAt, endedAt) {
+    if (endedAt - startedAt < RECENT_OPERATION_MIN_MS) return;
+    remember(recentOperations, { name, startedAt, endedAt }, RECENT_OPERATION_LIMIT);
+  }
+
+  /**
+   * What overlapped the gap the loop spent not running.
+   *
+   * A blocking call cannot be caught in the act -- the watchdog is exactly what
+   * it was blocking -- so the question is which operations were in flight
+   * across that span. An empty answer is a finding in itself: whatever stopped
+   * the loop is not instrumented.
+   */
+  function whatOverlapped(gapStart, gapEnd) {
+    return recentOperations
+      .filter(entry => entry.endedAt > gapStart && entry.startedAt < gapEnd)
+      .map(entry => ({
+        name: entry.name,
+        ms: round(entry.endedAt - entry.startedAt),
+        coversMs: round(Math.min(entry.endedAt, gapEnd) - Math.max(entry.startedAt, gapStart)),
+      }))
+      .sort((a, b) => b.coversMs - a.coversMs)
+      .slice(0, 5);
+  }
+
+  function gcInWindow(gapStart, gapEnd) {
+    const inside = gcPauses.filter(pause => pause.endedAt > gapStart && pause.startedAt < gapEnd);
+    return {
+      count: inside.length,
+      totalMs: round(inside.reduce((total, pause) => total + (pause.endedAt - pause.startedAt), 0)),
+      maxMs: round(inside.reduce((max, pause) => Math.max(max, pause.endedAt - pause.startedAt), 0)),
+    };
+  }
+
+  function watchdogTick() {
+    const firedAt = now();
+    const lateBy = firedAt - watchdogExpectedAt;
+    watchdogExpectedAt = firedAt + watchdogIntervalMs;
+    if (lateBy < stallThresholdMs) return;
+    stallCount += 1;
+    // The loop was unavailable from roughly one interval before it should have
+    // fired until now.
+    const gapStart = firedAt - lateBy - watchdogIntervalMs;
+    // A diagnostic must never be the thing that breaks the server, so it does
+    // not assume the logger has every level.
+    const warn = typeof logger.warn === 'function' ? logger.warn : logger.info;
+    warn.call(logger, '[runtime-stall]', {
+      atMs: round(lateBy),
+      at: new Date().toISOString(),
+      gc: gcInWindow(gapStart, firedAt),
+      overlapping: whatOverlapped(gapStart, firedAt),
+      rssMb: round(memoryUsage().rss / 1024 / 1024),
+    });
+  }
 
   function record(name, wallMs, cpuMs = null) {
     if (!enabled) return;
@@ -48,7 +133,9 @@ function createRuntimeProfiler(deps = {}) {
       return fn();
     } finally {
       const cpu = cpuUsage(cpuStart);
-      record(name, now() - startedAt, (cpu.user + cpu.system) / 1000);
+      const endedAt = now();
+      record(name, endedAt - startedAt, (cpu.user + cpu.system) / 1000);
+      noteOperation(name, startedAt, endedAt);
     }
   }
 
@@ -58,7 +145,9 @@ function createRuntimeProfiler(deps = {}) {
     try {
       return await fn();
     } finally {
-      record(name, now() - startedAt);
+      const endedAt = now();
+      record(name, endedAt - startedAt);
+      noteOperation(name, startedAt, endedAt);
     }
   }
 
@@ -98,10 +187,15 @@ function createRuntimeProfiler(deps = {}) {
       rssMb: round(memory.rss / 1024 / 1024),
       heapUsedMb: round(memory.heapUsed / 1024 / 1024),
       gauges: Object.fromEntries([...gauges].sort(([a], [b]) => a.localeCompare(b))),
+      stalls: stallCount,
       operations: operationSummary(),
     };
     logger.info('[runtime-profile]', snapshot);
     operations = new Map();
+    stallCount = 0;
+    // Kept across windows on purpose: a stall detected just after a boundary
+    // has to be explained by what ran just before it.
+    gcPauses = gcPauses.slice(-RECENT_OPERATION_LIMIT);
     histogram.reset();
     windowStartedAt = endedAt;
     windowCpuStart = cpuUsage();
@@ -120,11 +214,43 @@ function createRuntimeProfiler(deps = {}) {
     const intervalMs = options.intervalMs || DEFAULT_INTERVAL_MS;
     timer = scheduleInterval(emit, intervalMs);
     timer?.unref?.();
+
+    watchdogIntervalMs = options.watchdogIntervalMs || DEFAULT_WATCHDOG_INTERVAL_MS;
+    stallThresholdMs = options.stallThresholdMs || DEFAULT_STALL_THRESHOLD_MS;
+    stallCount = 0;
+    recentOperations = [];
+    gcPauses = [];
+    // Rules garbage collection in or out without another deploy. A major
+    // collection is one of the few things that can stop the loop for seconds
+    // while using almost no CPU of its own in the profile.
+    if (options.observeGc !== false && typeof PerformanceObserver === 'function') {
+      try {
+        gcObserver = new PerformanceObserver(list => {
+          for (const entry of list.getEntries()) {
+            if (entry.duration < GC_PAUSE_MIN_MS) continue;
+            remember(gcPauses,
+              { startedAt: entry.startTime, endedAt: entry.startTime + entry.duration },
+              RECENT_OPERATION_LIMIT);
+          }
+        });
+        gcObserver.observe({ entryTypes: ['gc'] });
+      } catch { gcObserver = null; }
+    }
+    watchdogExpectedAt = now() + watchdogIntervalMs;
+    watchdogTimer = scheduleInterval(watchdogTick, watchdogIntervalMs);
+    watchdogTimer?.unref?.();
   }
 
   function stop() {
     if (timer) clearScheduledInterval(timer);
     timer = null;
+    if (watchdogTimer) clearScheduledInterval(watchdogTimer);
+    watchdogTimer = null;
+    try { gcObserver?.disconnect(); } catch { /* already gone */ }
+    gcObserver = null;
+    recentOperations = [];
+    gcPauses = [];
+    stallCount = 0;
     histogram?.disable?.();
     histogram = null;
     enabled = false;
@@ -136,7 +262,10 @@ function createRuntimeProfiler(deps = {}) {
     return enabled;
   }
 
-  return { start, stop, emit, isEnabled, measureSync, measureAsync, recordWall, setGauge };
+  return {
+    start, stop, emit, isEnabled, measureSync, measureAsync, recordWall, setGauge,
+    _watchdogTick: watchdogTick, _noteOperation: noteOperation,
+  };
 }
 
 const profiler = createRuntimeProfiler();
