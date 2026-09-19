@@ -1,12 +1,12 @@
 # EgressView コード品質レポート
 
-- **評価日**: 2026-09-01
-- **評価基準**: `8caee36`（前回レポート、v1.9.0）。本サイクルは現在の `main` までを評価
-- **バージョン**: Hub 1.10.0 ・ Agent for Mac 0.5.49 ・ Agent for Windows（Phase 1、進行中）・ EgressView pack 2.0.3 + `[Unreleased]`
-- **Node.js**: >=22（CI: 22 / 24 / 26）。**macOSエージェント**: Swift 6 toolchain、最小 macOS 13。**Windowsエージェント**: .NET（C#）、初期のvertical slice
-- **評価方法**: 自動テスト、V8 coverage、静的解析、依存・secret scan、browser smoke、parser fuzzing、手動コードレビュー。macOSエージェントはMacアプリ品質フレームワーク（§6）で評価
+- **評価日**: 2026-09-19
+- **評価基準**: 前回レポートは `8caee36`。本サイクルは `95e4ef0` までを評価（150コミット）
+- **バージョン**: Hub 1.10.0 ・ Agent for Mac 0.5.81 ・ Agent for Windows（3プロジェクト、MSI、CIゲート済み）・ EgressView pack 2.0.3 + `[Unreleased]`
+- **Node.js**: >=22（CI: 22 / 24 / 26）。**macOSエージェント**: Swift 6 toolchain、最小 macOS 13。**Windowsエージェント**: .NET 10（C#）、WPF tray UI、Windowsサービス
+- **評価方法**: 自動テスト、V8 coverage、静的解析、依存・secret scan、browser smoke、parser fuzzing、手動コードレビュー。各クライアントは*それぞれのプラットフォーム*の基準で評価します: macOSエージェントはMacアプリ品質フレームワーク（§6）、WindowsエージェントはWindowsアプリ品質フレームワーク（§7）
 
-> 本レポートは現在のmainを評価します。SonarQubeとOpenSSFのスコアはリポジトリ内容からの推定で、公式scannerは実行していません。penetration testも対象外です。macOS/Windowsエージェントはプラットフォーム固有ビルド（Network Extension / ETW、keychain / credential store、コード署名）であり、ネイティブテスト群と署名パイプラインは本Linuxレビュー環境では実行できないため、ソースとCIの証跡から評価しています。本環境には `openssl` が無く、Hub側の署名/provenanceテスト2件もローカルでは実行できませんでした（実測結果を参照）。
+> 本レポートは現在のmainを評価します。SonarQubeとOpenSSFのスコアはリポジトリ内容からの推定で、公式scannerは実行していません。penetration testも対象外です。macOS/Windowsエージェントはプラットフォーム固有ビルド（Network Extension / ETW、keychain / Credential Manager、コード署名）のため、ネイティブ群と署名パイプラインは実行ではなくソースとCIの証跡から評価しています — ただしmacOSエージェントのSwiftテスト群は本レビューのためmacOS上で実行しました。Windows側のテスト、MSIビルド、Authenticode署名は `windows-latest` のCIでのみ実行されます。
 
 ---
 
@@ -14,13 +14,15 @@
 
 **総合グレード: A**
 
-CriticalまたはHighの不具合は見つかりませんでした。今回は*クライアントエージェント*のサイクルです。大きな筋は、**macOSエージェント**が「行を吐くだけのヘッドレス収集器」から**第一級のMacアプリ**へ成熟したこと — globe・Sankey・timeline・mapを備えたメニューバーアプリ、フィルタ可能な接続ログ、CSVエクスポート、ローカルでの脅威照合、署名済みインストーラーパッケージ、アプリ内自己更新、記録が止まったら警告を上げるヘルスチェック、そして機械可読なプライバシーマニフェストです。並行して、**初期のWindowsエージェント**（`apps/agent-windows`、.NET）がPhase 1のvertical sliceとして始まりました: ETWによる観測、durable delivery queue、Hub enrollment、tray UIです。Hub自体は1度だけ（1.10.0へ）動き、エージェント向けの読み取り専用エンドポイントを提供し、*リリースと署名を1つの行為*にしました。それ以外のほぼすべては `apps/` の内側で起きています。
+CriticalまたはHighの不具合は見つかりませんでした。今回は*クライアントエージェント*のサイクルです。大きな筋は、**macOSエージェント**が「行を吐くだけのヘッドレス収集器」から**第一級のMacアプリ**へ成熟したこと — globe・Sankey・timeline・mapを備えたメニューバーアプリ、フィルタ可能な接続ログ、CSVエクスポート、ローカルでの脅威照合、署名済みインストーラーパッケージ、アプリ内自己更新、記録が止まったら警告を上げるヘルスチェック、そして機械可読なプライバシーマニフェストです。並行して、**Windowsエージェント**（`apps/agent-windows`、.NET 10）がvertical sliceから実体あるアプリへ育ちました: C#は約2,568行から**14,447行**へ、`Core`/`Service`/`Ui` の3プロジェクト、`LocalService` で動くサービス、ACL付き名前付きパイプ、WPF tray UI、**per-machine MSI**、そして独自の6つのCIチェック。ただし配布チェーンは未完で、MSIは無署名です（§7）。Hub自体は1度だけ（1.10.0へ）動き、エージェント向けの読み取り専用エンドポイントを提供し、*リリースと署名を1つの行為*にしました。それ以外のほぼすべては `apps/` の内側で起きています。
+
+そのため本レポートは、各クライアントを1つに混ぜたチェックリストではなく、*それぞれのプラットフォーム*の基準で2つのフレームワーク（§6 Mac、§7 Windows）に分けて評価します。両者が守る境界は異なり — macOSはサンドボックス・entitlement・公証、WindowsはサービスID・ローカルIPC面・インストーラー — 一方を他方の問いで採点すれば、各々が実際に正しくできている点も誤っている点も見落とします。
 
 macOS作業を定義づけるのは「**Macから何を外へ出さないか**についての抑制」です。エージェントは**pass-only（通過専用）のNetwork Extension content filter**で外向き接続を観測し、トラフィックを一切ブロックせず、既定では接続の中身を何も読みません。宛先名はmacOSから無償で得られ、唯一「読む」ことを頼めるもの — 接続冒頭のTLS ClientHello内のサーバ名 — は明示的なopt-inで、境界検査済み、上限4KB、Macの外へは決して出ません。QUICは**意図的に復号しません**: udp/443から名前が取れるか調べるためにデコーダを作るのではなく、それらのコールバックを構造的に分類して**数える**だけで、バイト列・アドレス・プロセスidを保持しません。脅威インテリジェンスも同じ原則です — 指標セット全体をHub（またはopt-inで同じ公開フィードを直接）から取得し**ローカルで**照合するため、「このアドレスは危険か？」を誰かに尋ねません。0.5.29からはアプリとその拡張の双方が `PrivacyInfo.xcprivacy` を同梱し、**トラッキングなし・収集データ一覧は空**を宣言します。これはプライバシー関連APIを宣言なしに使うとビルドを失敗させるリポジトリテストで裏打ちされています。
 
 第二の筋は、**サンドボックス化された自己更新Macアプリ**と、**署名を忘れられないリリース工程**を誠実に作り込んだことです。一連の修正（P3-24、続くP3-31）は実在の制約と格闘しました: macOSはサンドボックスアプリが書いたものすべてを検疫し、そのような場所から取り出したアプリの**起動を拒否**します。ゆえにディスクイメージのアプリ内更新は成立しませんが、インストーラー**パッケージ**なら成立します（`installd` が `.pkg` をインストールするのは「起動」ではない）。いまエージェントは更新をダウンロードし、埋め込みEd25519鍵で署名されたマニフェストを（JSON解析の**前に**）検証し、パッケージのTeam IDを実行中ビルドと（サンドボックスで失敗する `spctl` ではなく）プロセス内で照合し、黙って入れ替えず検証済みパッケージで止まります。Hub側では2.0.3がリリースと署名を1コマンド（`npm run release:publish`）にしました: dirtyなツリーでは起動を拒み、改ざん3ケースの失敗を証明し、鍵fingerprintをDNSアンカーとregistryの双方に照合し、**draft**へアップロードし、資産を*リリースページからダウンロードした形*で検証し、そうして初めて公開します — 2.0.0–2.0.2が署名資産なしで公開されていた（署名が別工程で誰かの記憶頼みだった）ことが判明した後の対応です。
 
-**Coverageはコマンドが出力する単一スコープで報告します。** `npm run test:coverage` はいま、計装されたサーバサイドツリー全体で**line 92.40%、branch 88.45%、function 89.55%**を出力し、CI gate（83/79/80）を余裕をもって上回ります。permission matrixは**122件**（HTTP route 111 + MCP tool 11）で、`agent` アクセス種別は**6ルート**、macOSと新しいWindowsエージェントの双方が共有します。
+**Coverageはコマンドが出力する単一スコープで報告します。** `npm run test:coverage` は計装されたサーバサイドツリー全体で**line 84.59%、branch 80.11%、function 81.96%**を出力し、CI gate（83/79/80）に対する差はわずかです。そしてこれが実際の値です: 前回レポートは 92.40/88.45/89.55 と記載していましたが、本レビューで同じコマンドを実行しても再現できませんでした。ここに載せるのはgateが強制する値であり、gateとの差は「祝う」より「注視する」べき幅です。permission matrixは**122件**（HTTP route 111 + MCP tool 11）で、`agent` アクセス種別は**6ルート**、macOSとWindowsのエージェントがプラットフォームごとに複製せず共有します。
 
 | 評価軸 | 結果 | 判定 |
 |---|---:|---|
@@ -29,6 +31,7 @@ macOS作業を定義づけるのは「**Macから何を外へ出さないか**�
 | ISO/IEC 25010 | 平均9.1/10 | 高品質 |
 | Node.js Best Practices | 47/50 | 優秀 |
 | Macアプリ品質（Appleプラットフォーム） | 推定9.2/10 | 良好なプラットフォーム市民 |
+| Windowsアプリ品質（Microsoftプラットフォーム） | 推定8.3/10 | サービス設計は健全、配布チェーンが未完 |
 | SonarQube相当gate | 合格、coverageはA | High以上のblockerなし |
 
 ## レビュー結果
@@ -44,7 +47,7 @@ macOS作業を定義づけるのは「**Macから何を外へ出さないか**�
 | macOS署名インストーラー + アプリ内更新 | 署名付きリリース公開、検証済みパッケージで止まるスケジュール更新、`.pkg` でのサンドボックス自己更新解決、relaunch失敗時のインストールログ | P3-24/P3-31 |
 | macOS宛先の命名 | アプリが要求した名前（macOS提供 + opt-inのTLS ClientHello SNI）をローカルのみで。QUICはデコードせず可否を数える | P3-14/P3-29/P3-33 |
 | macOS信頼性・コスト・privacy manifest | 「記録停止」の検知・告知、keychain処理のメインスレッド外移動、App Nap、cooldownと日次上限付きの通知種別、アプリ/拡張の `PrivacyInfo.xcprivacy`（リポジトリテストで強制） | P3-23 |
-| Windowsエージェント（Phase 1） | serviceでのETWトラフィック収集、DB障害でfail-closedする永続化コア、時間集約、認証付きIPC、tray UI、Hub enrollment境界 + UI、durable delivery queue、opt-in Hub delivery | P3-2 |
+| Windowsエージェント: sliceからアプリへ | `LocalService` サービスでのETW収集、DB障害でfail-closedする永続化、ACL付き名前付きパイプIPC、チャート/render check/render-cost budgetを備えたWPF tray UI、Credential Manager保管、**per-machine WiX MSI**（プラットフォーム障害復旧とdev→MSI移行付き）、Mac文言とのテストによる共通語彙固定。C#は約2,568行から**14,447行**へ | P3-2 |
 | Hub: リリース・脅威フィード・整備 | リリースと署名を1つの行為に（draft→検証）、オフラインバンドルがLinuxで展開可能に（拡張属性修正）、脅威指標の再起動越え永続化、起動時整合性報告、肥大2モジュールの分割 | P2-88/P2-96/P2-97, 2.0.3 |
 | ダウンロードサイト・ドキュメント | `dl.egressview.com` の玄関口、`docs/agent-privacy.md`、roadmap/README更新 | — |
 
@@ -54,17 +57,19 @@ macOS作業を定義づけるのは「**Macから何を外へ出さないか**�
 - **Macから出ない問い、そして機械が読める約束。** エージェントの脅威照合はHubと完全に同じ3段の順序、いまや同じconfidence採点も辿り、ダウンロードした指標セットに対しローカルで実行します。画面はHub / キャッシュ / 公開フィードのどれが応答したかを名指しします。`PrivacyInfo.xcprivacy` はトラッキングなし・トラッキングドメインなし・収集データ一覧は空を宣言し、プライバシー関連APIを宣言なしに使うとビルドを失敗させるリポジトリテストがコードとの乖離を防ぎます。
 - **自己更新できるサンドボックスアプリと、署名を忘れられないリリース。** アプリ内更新は出荷し、実機で4回連続で壊れ（いずれもテスト通過）、動くまで直しました。解決策 — `installd` は起動できないものをインストールできるため公証済み `.pkg` を配る — は理由とともにコードに記録されています。更新整合性は多層です: DNSアンカー付きfingerprintの埋め込みEd25519鍵、JSON解析前の署名検証、ダウングレード拒否、size + SHA-256、独立したTeam-ID照合。Hubでは `release:publish` がリリースと署名を統合し、資産を*ダウンロードした形*で検証し、失敗時はdraftを残します — 署名なしリリースを3回出してしまった隙を塞ぐものです。
 - **静かになったら白状し、再起動できなければ痕跡を残すエージェント。** あるMacはヘルスチェックが約800回「healthy」と報告する間、13.5時間何も記録しませんでした。いまはmacOSが「正常」と言うのに何も届かない状態を検知し、起きていた時間だけを数え、状態をメニューバーに明記し、通知します — 監視アラートは**通知の日次上限から除外**されます。更新のrelaunchが失敗すると、インストーラーは `/var/log/egressview-agent-install.log` に2回の時間差チェックを書き、「一度も起動していない」と「起動して即死した」を区別できます。
-- **同じ流儀で始まったWindowsエージェント。** Phase 1のWindows sliceはserviceでETWによりトラフィックを収集し、DB障害でfail-closedしながらSQLiteへ永続化し、認証付きIPCとヘルス診断を公開し、Hubの既存 `agent` enrollment/ingest境界を再利用してdurableかつopt-inのdelivery queueを持ちます — 新しい面を開くのではなく、macOSエージェントが確立したdeny-by-default・hash-only資格情報の姿勢を踏襲します。
+- **Windowsに実在する境界を守るWindowsエージェント。** 新しい面を開くのではなくHubの既存 `agent` enrollment/ingest境界を再利用し、クライアント側では急ぎの移植が取り違えがちな選択を正しく取っています: サービスは `LocalSystem` ではなく **`NT AUTHORITY\LocalService`** でインストール。名前付きパイプは **Network SIDを明示的にDeny**してから `LocalSystem` と特定SID1つだけを許可します（既定のままのパイプはSMB経由で到達可能なため）。Hubのbearerはサービスが書くファイルではなく **Credential Manager** へ。MSIは `perMachine` で実体ある `ServiceInstall`、Windows自身の障害復旧、そして手で入れたサービスを影として残さず除去する移行を持ちます。CIには独自の6チェックがあり、チャートの**render-cost budget**まで含みます。未完なのは配布チェーンです — §7を参照。
+- **非公開アドレスが、どちらのエージェントからも出なくなりました。** macOSエージェントの第三者位置情報照会がローカルネットワークを問い合わせていました: あるMacでインストール数分後に実測して、**その日の500件のうち400件**がルーター・プライベートサブネット・link-local・multicastに費やされていました。Hubは最初の地理照会の時点からこれらを拒否していたので、エージェントも同じIANAレンジ表を使い、そうしたアドレスを待ち行列に入れず誰にも（Hubにも）尋ねず、既に並んでいた分を掃除し、引けなかった照会を1週間記憶して毎回の再送をやめます。
 
 ### 残余リスク
 
-- **低・第二クライアントは初期段階**: Windowsエージェントは明示的なPhase 1 vertical slice（テストプロジェクトはまだ1つ）であり、出荷可能な署名済みアプリではありません。macOSエージェントの成熟度と同一視すべきではありません。
-- **低・プラットフォーム専用の検証**: エージェントのビルド・署名・公証・ネイティブテスト群はmacOS/Windowsでしか実行できません。本レビューはソースとCIから検証しており実行はしていません。ローカルに `openssl` が無いためHub側の署名/provenanceテスト2件もブロックされました。
+- **中・Windows MSIが未署名**: CIの手順名は文字どおり「Build unsigned Windows MSI」で、Authenticode署名・タイムスタンプ・署名検証がなく、Windows向けの更新マニフェストもありません。したがってWindowsの利用者はSmartScreen警告を受け、出所を検証する手段がありません — Macの利用者が公証・staple済みパッケージを得るのとは対照的です。本レポートで唯一Lowを超える評価の項目であり、次に着手すべき最も明確な作業です（§7）。
+- **低・Windowsのテスト厳格さが他に届いていない**: ソース14,447行に対しテスト2,906行で、テストフレームワークではなく約450アサーションの素の `Program.cs` が実行します — テストごとの分離がなく、失敗一覧も出ず、最初の失敗で実行が終わります。
+- **低・プラットフォーム専用の検証**: Windowsのビルド・MSI・署名は `windows-latest` でのみ実行されるため、§7は実行ではなくソースとCIから評価しています。macOSエージェントのSwiftテスト群は本レビューのためmacOS上で**実行しました**（730件）。
 - **低・App Store非経由の配布**: macOSエージェントはDeveloper ID署名・公証されたDMG/PKGとして出荷し `dl.egressview.com` から自己更新するため、ストアの仕組みを継承せず独自の更新整合性チェーンを持ちます。
 - **低・運用**: hardware/external service依存のintegration testはdefault CI workflowに含まれません。
 - **低・信頼性の監督**: Hubのevent-loop watchdogは固まったプロセスを強制終了しますが、復帰は外部service managerに依存します。正式なservice unitはまだありません。
 - **低・ecosystem**: OpenAPI契約はなく、正式な本番向けOCI imageもありません。
-- **低・保守性**: 肥大した2ファイルを分割した後、最大は `src/db-migrate.js`（885行、migration v1--v19）とフロントエンドの `public/js/log.js`（824行）です。
+- **低・保守性**: 今サイクルで2モジュールが1,000行を超えました。`src/db-migrate.js`（1,202行、migration v1--v24）と `public/js/log.js`（1,050行）で、`src/devices.js`（891行）も34%伸びています。
 - **低・supply chain**: `npm audit`はbetter-sqlite3のamalgamation内SQLite CVEを検出できません。盲点は手動検証手順と共に文書化済み。install scriptは無効のまま。
 
 ---
@@ -73,45 +78,50 @@ macOS作業を定義づけるのは「**Macから何を外へ出さないか**�
 
 | 検査 | 結果 |
 |---|---|
-| Coverage付きunit test | 2,429件中2,417件成功（542 suite）。非成功は本Linuxレビュー環境**固有** — 1件はrootでは失敗させられないfail-closed backup、残りは本環境に無い `openssl` でオフラインバンドルやrelease-provenance証跡に署名するもの。いずれも製品の不具合ではなくCIでは合格 |
-| V8 coverage（`npm run test:coverage`、計装されたサーバサイドツリー） | line 92.40%、branch 88.45%、function 89.55% |
-| CI coverage下限 | line 83%、branch 79%、function 80% — 合格 |
-| Parser fuzz test | 合格（CIで短campaign。加えて6時間ごとに20分の継続campaignが走り、発見入力をcorpusにcommit） |
+| Hub unit test | **2,654件成功、失敗0**（576 suite）。本レビューで実行 |
+| macOSエージェントテスト | **730件成功、失敗0**（skip 2）。本レビューのためmacOS上で `swift test` を実行 |
+| Windowsエージェントテスト | 単一のコンソールランナーに約450アサーション。`windows-latest` のCIでのみ実行。永続化、上限付きドロップ、プライバシー安全な診断、Mac文言との共通語彙を検証 |
+| V8 coverage（`npm run test:coverage`、計装されたサーバサイドツリー） | **line 84.59%、branch 80.11%、function 81.96%** |
+| CI coverage下限 | line 83%、branch 79%、function 80% — 合格（差は 1.6 / 1.1 / 2.0 ポイント） |
+| Parser fuzz test | **32件成功、失敗0**（短campaign。加えて6時間ごとに20分の継続campaignが走り、発見入力をcorpusにcommit） |
 | Playwright browser smoke | CI gate合格 |
-| ESLint | 合格 |
-| Frontend HTML挿入監査 | `innerHTML` / `insertAdjacentHTML` 0件 |
-| Production依存監査 | 脆弱性0件 |
-| Secret scan | 高確度secret・環境固有LAN IPなし |
-| GitHub Actions SHA pinning | 38/38をfull commit SHAへpinned、0 unpinned |
-| macOSエージェントCI | `macos-agent.yml`（macOS）: `swift test`、app + System Extension の無署名 `xcodebuild`、System Extension identity gate — workflowから検証。本Linux環境では実行不可 |
+| ESLint + Frontend HTML挿入監査 | 合格。`innerHTML` / `insertAdjacentHTML` 0件 |
+| Production依存監査 | **脆弱性0件** |
+| Secret scan | 高確度secret・環境固有LAN IPなし。追跡DB・追跡symlinkの検査も合格 |
+| ASH（Automated Security Helper） | **actionable finding 0件**（suppressed 134） |
+| GitHub Actions SHA pinning | **39/39**をfull commit SHAへpinned、0 unpinned |
+| macOSエージェントCI | `macos-agent.yml`（macOS）: `swift test`、app + System Extension の無署名 `xcodebuild`、System Extension identity gate |
+| WindowsエージェントCI | `windows-latest`: solutionの `dotnet build`、**無署名MSIビルド**、全スクリプトのPowerShell構文検査、コアテストランナー、チャートのrender check、**render-cost budget** |
 | リリース検証 | `release-gate.yml` が公開時・編集時・週次で公開リリースを検査。`release:publish` は資産をダウンロードした形で検証し失敗時はdraftを残す。macOSエージェントリリースはDeveloper ID署名・公証・staple済み |
 
 ### コードベースメトリクス
 
 | メトリクス | 値 |
 |---|---:|
-| Hub source行数（server、mcp、src、public/js） | 37,617（34,890） |
-| Hub test行数（unit、integration、smoke、fuzz、portability） | 40,587（35,011） |
-| macOSエージェント source行数（Swift、`Sources` + `Xcode`） | 19,243 |
-| macOSエージェント Swiftソースファイル | 83 |
-| macOSエージェント test行数 / file | 8,645 / 53 |
-| Windowsエージェント source行数（C#） | 約2,568（Phase 1） |
-| Unit test file（Hub） | 193（151） |
-| `src/` module | 132（124） |
-| HTTP route（permission matrix） | 111（108） |
+| Hub source行数（server、mcp、src、public/js） | 39,497（37,617） |
+| Hub test行数（unit、integration、smoke、fuzz、portability） | 44,116（40,587） |
+| macOSエージェント source行数（Swift、`Sources` + `Xcode`） | 25,587（19,243） |
+| macOSエージェント test行数 / file | 12,379 / 80（8,645 / 53） |
+| **Windowsエージェント source行数（C#）** | **14,447行 / 72ファイル**（約2,568） |
+| **Windowsエージェント test行数（C#）** | **2,906** |
+| Windowsエージェント XAML / PowerShell行数 | 572 / 375 |
+| Windowsエージェント プロジェクト数 | 3（`Core`、`Service`、`Ui`）+ render tool 2 + テスト1 |
+| Unit test file（Hub） | 218（193） |
+| `src/` module | 134（132） |
+| HTTP route（permission matrix） | 111 |
 | MCP tool | 11 |
-| Permission matrix entries | 122（119） |
+| Permission matrix entries | 122 |
 | ルートのaccess内訳 | permission 94、authenticated 1、agent 6、public 10 |
 | Agent認証ルート | ingest、token rotation、registration revoke、capabilities、geo-cache、threat-intel |
 | 定義済みpermission | 8 |
 | ロール | 3（viewer、operator、admin） |
 | Production依存package | 13 |
-| `docs/`配下のドキュメント | markdown 42 |
-| DB schemaバージョン | 19（16） |
+| `docs/`配下のドキュメント | 53（42） |
+| DB schemaバージョン | **24**（19） |
 | CI workflow | 7（ci、pages、macos-agent、dl-deploy、site-deploy、release-gate、fuzz-continuous） |
 | `eval` / `new Function` ・ `innerHTML` / `insertAdjacentHTML` | 0 ・ 0 |
 | CI Node.jsバージョン | 22、24、26 |
-| macOSエージェントバージョン | 0.5.49、最小 macOS 13 |
+| macOSエージェントバージョン | **0.5.81**、最小 macOS 13 |
 
 括弧内は前回レポートの値です（変化があった項目のみ）。
 
@@ -208,7 +218,7 @@ Default hardware integration CI、正式process manager/OCI成果物、OpenAPI�
 | Reliability | Critical/Highの既知不具合なし。エージェントの「黙って停止」障害は検知・告知され、relaunch失敗は痕跡を残す | A |
 | Security | 高確度secret・dependency findingなし。独立agent種別を含む完全なRBAC、監査、SSRF保護、KMS Hub署名、統合された署名リリース工程、独立検証されるエージェント更新チェーン | A |
 | Maintainability | 今サイクルの成長はクライアントエージェント。肥大した2つのHubモジュールを分割 | A |
-| Coverage | line 92.40% / branch 88.45% / function 89.55%（CI gateが検査するスコープ） | A |
+| Coverage | line 84.59% / branch 80.11% / function 81.96%（CI gateが検査するスコープ） | A |
 | Duplication | 手動・静的reviewで重大な新規重複なし | A（推定） |
 
 **Quality gate: 合格。**
@@ -217,19 +227,19 @@ Default hardware integration CI、正式process manager/OCI成果物、OpenAPI�
 
 | File | 行数 | 評価 |
 |---|---:|---|
-| `src/db-migrate.js` | 885 | schema migration v1--v19 |
-| `public/js/log.js` | 824 | pagination、filter、renderが同居 |
-| `server.js` | 823 | bootstrapとdependency wiring |
-| `src/history.js` | 773 | `history-queries.js` 抽出後のstore orchestration |
-| `src/routes/agents.js` | 707 | エージェントのenrollment、承認、ingest、capabilities、geo-cache、threat-intelルート |
+| `src/db-migrate.js` | 1,202（885） | schema migration v1--v24 |
+| `public/js/log.js` | 1,050（824） | pagination、filter、renderが同居 |
+| `src/devices.js` | 891（665） | device identity、persistence、merge lifecycle |
+| `server.js` | 842（823） | bootstrapとdependency wiring |
+| `src/history.js` | 803（773） | `history-queries.js` 抽出後のstore orchestration |
+| `src/routes/agents.js` | 731（707） | エージェントのenrollment、承認、ingest、capabilities、geo-cache、threat-intelルート |
 | `public/js/graph.js` | 679 | 抽出済みhelper/panel/rendererのorchestration |
-| `src/devices.js` | 665 | device identity、persistence、merge lifecycle |
 | `src/pollers/cisco.js` | 661 | parser/handshake抽出後のstateful SSH lifecycle |
 | `src/mcp-publication-gate.js` | 639 | 公開判断、client release timing、diagnostics |
 | `src/pollers/yamaha.js` | 627 | adapter parser周辺のstateful SSH lifecycle |
-| `src/history-queries.js` | 612 | 今サイクルで `history.js` から分離したクエリ層 |
+| `src/history-queries.js` | 612 | `history.js` から分離したクエリ層 |
 
-`history.js`/`history-queries.js` の分割（P2-97）により、従来の `ai-insights.js` / `history.js` のペアはこの一覧の先頭から外れました。
+今サイクルで2モジュールが1,000行を超えました。`db-migrate.js` は設計上伸びるもの（append-onlyのmigrationが5本追加）ですが、`log.js` は分割されないまま27%、`devices.js` は34%伸びています。どちらも手に負えない域ではありませんが、この一覧に再び手を入れるなら明白な候補です。
 
 ---
 
@@ -249,7 +259,7 @@ Default hardware integration CI、正式process manager/OCI成果物、OpenAPI�
 | Privacy by design & privacy manifest | 10 | 復号せず既定では接続の中身を読まない。opt-inのSNIは4KBで打ち切りオンデバイス保持。QUICはデコードせず数える。脅威照合はローカル。更新チェックはデバイス識別子を送らない。0.5.29からアプリと拡張の双方が `PrivacyInfo.xcprivacy`（トラッキングなし・収集データ空）を同梱し、リポジトリテストと接触ホストを列挙した公開の `docs/agent-privacy.md` で裏打ち | -- |
 | HIG & アクセシビリティ | 8 | `LSUIElement` メニューバーアプリ。色ではなく**形**で区別するtemplateアイコン、完全な文言を最初のメニュー行に置きVoiceOverラベルにも設定、ローカライズ（en/ja）、アイコン欠落時のテキストfallback | メニューバー専用面は本質的に簡素。より深いアクセシビリティ監査は今後 |
 | Reliability & observability | 9 | 黙った「記録停止」を検知・告知（起きていた時間のみ）、予行用の自己クリアスイッチ、cooldownと日次上限を持つ通知種別（監視アラートは除外）、App Nap、keychain読み取りのメインスレッド外移動、relaunch失敗を診断する時間差インストールログ | 完全な挙動検証はmacOS専用 |
-| テスト容易性 | 8 | 更新チェーン、パッケージ同一性、資格情報/enrollment、脅威照合とconfidence、フローマッピング、TLS/QUIC分類、storage/migration、charts/coverage、通知、launch-at-loginを覆う53のSwift test file（約8,600行）、CIのSystem Extension identity gate | 署名/公証の手順とオンデバイス挙動はunit testできない |
+| テスト容易性 | 9 | 更新チェーン、パッケージ同一性、資格情報/enrollment、脅威照合とconfidence、フローマッピング、TLS/QUIC分類、storage/migration、charts/coverage、通知、launch-at-loginを覆う**80のSwift test file（12,379行）、本レビューで730件を実行**、CIのSystem Extension identity gate | 署名/公証の手順とオンデバイス挙動はunit testできない |
 
 **際立つ点。** エージェントは注意深いプラットフォーム市民です: サンドボックスが許す最小限だけを行い、ネットワークから読むのを最小限にし、利便性をリスクに変えることを拒み、いまやその抑制をビルドテストが誠実に保つ機械可読マニフェストで宣言します。署名の筋は、署名なしリリースが漏れた後にHubがリリースと署名を1つの自己検証する行為へ統合したことで、さらに引き締まりました。
 
@@ -257,10 +267,38 @@ Default hardware integration CI、正式process manager/OCI成果物、OpenAPI�
 
 ---
 
+## 7. Windowsアプリ品質（Microsoftプラットフォーム）
+
+本節はWindowsエージェントを*Windowsアプリとして*評価します。サービスをインストールする配布型デスクトップエージェントにプラットフォームが期待すること — 最小権限のサービスID、守られたIPC境界、正しい資格情報保管、綺麗に入って綺麗に消えるper-machine MSI、Authenticode署名と信頼できる更新チェーン、privacy by design、WindowsのUX・アクセシビリティ慣習、サービス監督下での信頼性、テスト容易性 — を軸にします。
+
+これは§6の再採点ではなく、意図的に**別の**フレームワークです。2つのプラットフォームが守る境界は違います: Macエージェントの難所はサンドボックス・entitlement・公証であり、Windowsエージェントの難所は独自アカウントで動くサービス、他のローカルユーザーに到達させてはならない名前付きパイプ、そして配布チェーンそのものであるインストーラーです。WindowsをAppleのチェックリスト（あるいは「サンドボックスがあるか」）で測れば、間違ったものを採点し、実際に正しくできている点を見落とします。
+
+**推定スコア: 8.3/10。** Macエージェントより低く、理由はほぼ1つです: コードは健全ですが、配布チェーンが完成していません。
+
+| 評価軸 | Score | 根拠 | Gap |
+|---|---:|---|---|
+| サービスIDと最小権限 | 10 | サービスは `LocalSystem` ではなく **`NT AUTHORITY\LocalService`** でインストールされます。組み込みアカウントのうち弱い側で、マシン全体の権限を持たずネットワーク資格情報はnullです。収集に管理者は要らないので、要求しません | -- |
+| IPC境界 | 10 | 名前付きパイプを既定のままにせずACLを与えます。`BuildSecurity` は **Network SIDを明示的にDeny**（パイプは拒否しない限りSMB経由で到達可能）し、`LocalSystem` を許可し、明示的に渡された1つのSIDにのみread/write/synchronizeを与えます。多くの実装が省略するのはこのDenyです | -- |
+| 資格情報保管 | 9 | Hubのbearerは **Windows Credential Manager** に `CRED_PERSIST_LOCAL_MACHINE` で保管します。サービスが書くファイルでもなく、レジストリの平文でもありません | 同じ関心事の実装が2つ（UIとCore）あり、まとめるべき縫い目 |
+| インストーラーの正しさ | 9 | WiX、**`Scope="perMachine"`**、`Start="auto"` / `ErrorControl="normal"` の明示的な `ServiceInstall`、インストールで開始しインストールとアンインストールの双方で停止する `ServiceControl`、データディレクトリを `LocalService` にのみ与える `util:PermissionEx`、そして手で入れたサービスを影として残さず除去する **dev→MSI移行スクリプト**。CIは全PRでMSIをビルドするため、壊れたインストーラーはマージ前に落ちます | CIでは無署名ビルド |
+| サービス回復性 | 9 | `util:ServiceConfig` がWindows自身の障害復旧（60秒待って再起動）を設定するため、監督は自前watchdogではなくプラットフォームの仕事です。devスクリプトも同じ3段復旧と失敗フラグを設定します | 復旧挙動はマニフェストからの確認で、実走では未検証 |
+| Authenticodeと更新チェーン | **5** | MSIは**無署名でビルド**されます。CIの手順名は「Build unsigned Windows MSI」で、署名・タイムスタンプ・`Get-AuthenticodeSignature` 検証がありません。Windows向け更新マニフェストも未公開で、macOSエージェントの署名済みマニフェストチェーンに対応するものがWindowsにはまだありません | **本節最大のギャップ。** 無署名MSIを実行する利用者はSmartScreen警告を受け、出所を検証する手段がありません — Macビルドが与える保証の正反対です |
+| Privacy by design | 10 | Macエージェントと同じ抑制、Hub側も同じ境界です: パケット内容は決して収集せず、診断は**テストでプライバシー安全を保証**し、Hubの `agent` アクセス種別を再利用して第二の面を開きません。非公開アドレスは位置情報サービスへ送りません（0.5.70でプラットフォーム横断に修正） | -- |
+| WindowsのUXとアクセシビリティ | 8 | Fluentテーマを持つWPF trayアプリ、en/jaローカライズ、そしてMac英語文言に対し**テストで固定された共通語彙** — 読者が目にする用語で両製品が乖離できません。CIではrender checkと**render-cost budget**が走り、デスクトップのチャートとしては異例の厳格さです | UI Automation / スクリーンリーダーの自動検証がなく、ハイコントラストとDPI挙動は本レビューで未確認 |
+| テスト容易性 | 7 | ソース14,447行に対しテスト2,906行で、永続化、上限付きドロップ、プライバシー安全な診断、クロスプラットフォーム語彙を覆います。ランナーはテストフレームワークではなく**約450アサーションの素の `Program.cs`** で、テストごとの分離も報告もなく、1件の失敗で実行が終わります | フレームワーク（xUnit/NUnit）なら分離と失敗一覧が得られます。比率はHubおよびMacエージェントを大きく下回ります |
+
+**際立つ点。** セキュリティに関わる選択は、急いだWindows移植が取り違えがちなところで、ここは正しく取っています: `LocalSystem` ではなく `LocalService`、パイプへのNetwork SID明示Deny、設定ファイルではなくCredential Manager、実体ある `ServiceInstall` とプラットフォーム障害復旧を伴う `perMachine`、そして以前手で入れたサービスを片付ける移行。共通語彙テストは本当に良い着想です — 「2つのエージェントが同じことを言う」を翻訳レビューではなくビルド時の性質にしています。
+
+**さらに進める余地。** 重要なギャップは署名です: 無署名MSIはMacの `.pkg` より第一印象が悪く、macOS側が譲れないとしている検証を欠いたまま更新チェーンを残します。次にテストランナーを本物のフレームワークへ、そして2つの `WindowsCredentialVault` 実装を1つに。
+
+---
+
 ## 結論
 
-現在のmainは、文書化されたself-hostedデプロイモデルに対して十分な多人数運用向けセキュリティ制御を備え、macOSエージェントは行儀のよいMacアプリへ成熟し、Windowsエージェントも同じ流儀で始まりました。自動品質ゲートは広く、データ変更操作はfail-closed、deny-by-defaultのRBACが全面適用され、MCPはOAuth保護・rate limit・監査付きで、Critical/Highの問題は残っていません。
+現在のmainは、文書化されたself-hostedデプロイモデルに対して十分な多人数運用向けセキュリティ制御を備えています。macOSエージェントは行儀のよいMacアプリであり、Windowsエージェントはvertical sliceから実体あるアプリへ育ちました — 14,447行、3プロジェクト、per-machine MSI、独自の6つのCIチェック — しかも第二の面を開かずHubの既存 `agent` 境界を再利用しています。自動品質ゲートは広く、データ変更操作はfail-closed、deny-by-defaultのRBACが全面適用され、MCPはOAuth保護・rate limit・監査付きで、Critical/Highの問題は残っていません。
 
-今サイクルを定義づけた作業はクライアントエージェントに宿り、注目すべきはmacOSエージェントが一貫して**抑制**を選んだことです: ブロックしないpass-onlyフィルタ、境界化されオンデバイスに留まるopt-in読み取り、デコードせず数えるQUIC、ローカルで答える脅威問い合わせ、4通りで検証してなおユーザーのクリックを待って止まる自己更新、そしてビルドテストが誠実に保つprivacy manifest。最難関の2問 — サンドボックスアプリの更新と、二度と署名なしリリースを出さないこと — はいずれも、実機の実走で真の失敗を発見し、コードだけでなく工程を直すことで解きました。新しいWindowsエージェントは第二の面を開くのではなく既存の `agent` 境界を再利用しており、これはプラットフォームを増やす正しいやり方です。
+Macのフレームワークを拡張せずWindows用（§7）を追加したことで、レビューが見えるものが変わりました。自分のプラットフォームの基準で採点すると、Windowsエージェントのセキュリティ設計はよく読めます — `LocalSystem` より `LocalService`、名前付きパイプへのNetwork SID明示Deny、設定ファイルよりCredential Manager、プラットフォーム障害復旧を伴う `perMachine` — そして汎用チェックリストなら埋もれていたギャップが1つ際立ちます: **MSIは無署名でビルドされ、Windows向け更新マニフェストが無い**ことです。macOSでは「署名なしでリリースは出せない」を痛い形で学び、1つのコマンドに強制しました。Windows側はその地点に達しておらず、達するまで、Macの利用者が検証可能なパッケージを得るところでWindowsの利用者はSmartScreen警告を受けます。次に直すべき最も価値ある一点です。
 
-CoverageはA評価を十分に上回り、コマンドが出力しgateが強制する単一スコープで報告しています。保守性は想定どおりの方向へ動きました — 成長はエージェントにあり、肥大した2つのHubモジュールを分割しました。残る改善余地は種類として不変で、SLSA provenance（Signed-Releasesの残り1点）、リポジトリ内継続campaignを超えたcoverage誘導fuzzing、OpenAPI契約、正式なOCI/serviceの成果物 — いずれもリリースのblockerではなく需要駆動の拡張です。本当に新しい留保は検証上のもので、エージェントは各自のプラットフォームでしかビルド・テストできず、ローカルの `openssl` 欠如で署名テスト2件がブロックされたため、それらの部分は実行ではなくソースとCIから評価しています。
+前回レポートへの訂正が2つあります。coverageの数値（92.40/88.45/89.55）は、引用されているコマンドを実行しても再現できませんでした。実測値は **84.59/80.11/81.96** で、gateを 1.6/1.1/2.0 ポイント上回ります。また「2,429件中2,417件、残りは環境固有」は、いまや **2,654件中2,654件** です — Hubのテスト群は本環境で完全に通り、macOS側（730件）はCIからの推定ではなく本レビューのためmacOS上で実行しました。
+
+保守性は想定どおりの方向へ動きました — 成長はエージェントにあります。残る改善余地は、Windowsに対するAuthenticode署名と更新マニフェスト、Windowsランナーの本物のテストフレームワーク化、SLSA provenance（Signed-Releasesの残り1点）、リポジトリ内campaignを超えたcoverage誘導fuzzing、OpenAPI契約、正式なOCI/serviceの成果物です。リリースに関わるのは最初の1つだけで、残りは需要駆動の拡張です。据え置きの留保は検証上のもので、Windowsのテスト・MSI・署名は Windows でしか走らないため、§7は実行ではなくソースとCIから評価しています。
