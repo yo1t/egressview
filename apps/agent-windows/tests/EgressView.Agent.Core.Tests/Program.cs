@@ -1514,6 +1514,25 @@ try
     }
 
     {
+        // Health must judge what is being lost now, not what starting cost.
+        //
+        // On 0.1.58 the session lost 1,210,217 events in the gap between
+        // enabling the providers and reading the buffers, then not one more
+        // for the rest of the run -- and a rule that degrades on any loss at
+        // all left the agent marked "needs attention" for hours, advising a
+        // restart that would only repeat the loss.
+        {
+            var startup = new CollectorSnapshot("healthy", 100, 100, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0)
+            { EtwEventsLost = 1_210_217, EtwEventsLostAtStart = 1_210_217 };
+            Assert(AgentHealth.Evaluate(startup, "ok").Issues.Count == 0,
+                "events lost while the trace session was starting do not make the agent unhealthy");
+
+            var losing = startup with { EtwEventsLost = 1_210_300 };
+            var issue = AgentHealth.Evaluate(losing, "ok").Issues.SingleOrDefault();
+            Assert(issue is { Code: "etw-events-lost" } && !issue.Action.Contains("restart", StringComparison.OrdinalIgnoreCase),
+                "events lost since then do, and the advice is not the restart that causes them");
+        }
+
         // Public threat feeds, for agents with no Hub.
         //
         // The parsers are the Mac's and the Hub's. An Agent that disagrees
@@ -1922,7 +1941,7 @@ try
     }
 }
 
-Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, and public threat feeds");
+Console.WriteLine("PASS: persistence, migration backup, corruption/disk-full gates, snapshot upsert, coverage, bounded drops, and privacy-safe diagnostics, process-name retention, rejection reasons, globe geometry, run history, connection-log grain, log streaming, IPC context independence, shutdown drain reporting, system-shutdown endings, window run reports, outbound anomalies, portable settings, directional period totals, risk-led integrity checks, public threat feeds, and startup event loss");
     return 0;
 }
 finally
