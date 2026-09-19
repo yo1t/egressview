@@ -818,3 +818,112 @@ describe('devices: chooseForIp — 記録済みのMACを優先する', () => {
     assert.deepEqual([...new Set(picks)], ['56:e6:22:b8:68:35'], '10回とも同じMACが選ばれる');
   });
 });
+
+// ─── P3-138: 観測記録の上限 ───────────────────────────────────────────────────
+//
+// Nothing reads this table except the write-on-change check, which asks for one
+// row per (deviceId, source). Measured on one Hub 2026-09-19: 3,671,407 rows
+// and 586 MB with indexes -- the largest table in a 4 GB database -- serving a
+// query that needs 780 rows.
+
+describe('devices: pruneObservations', () => {
+  beforeEach(() => devicesModule._initForTest());
+
+  function observe(ip, vendor) {
+    // OBS_MIN_INTERVAL_MS is 0 in tests, so each differing call appends a row.
+    return devicesModule.observeDevice({ ip, vendor, source: 'asus' });
+  }
+  function countFor(deviceId) {
+    return devicesModule._observationsForTest(deviceId, 'asus').length;
+  }
+
+  it('組ごとに上限を超えた古い行を消す', () => {
+    let deviceId = null;
+    for (let i = 0; i < 12; i++) deviceId = observe('10.7.0.1', `v${i}`);
+    assert.equal(countFor(deviceId), 12, '前提: 12行ある');
+
+    const pruned = devicesModule.pruneObservations({ maxPerPair: 5 });
+    assert.equal(pruned.byCount, 7, '上限を超えた7行が消える');
+    assert.equal(countFor(deviceId), 5);
+  });
+
+  it('残るのは新しい方である', () => {
+    let deviceId = null;
+    for (let i = 0; i < 6; i++) deviceId = observe('10.7.1.1', `v${i}`);
+    devicesModule.pruneObservations({ maxPerPair: 2 });
+    const vendors = devicesModule._observationsForTest(deviceId, 'asus').map(r => r.vendor);
+    assert.deepEqual(vendors, ['v5', 'v4'], '新しい2行だけが残る');
+  });
+
+  it('上限以下なら何も消さない', () => {
+    const deviceId = observe('10.7.2.1', 'only');
+    const pruned = devicesModule.pruneObservations({ maxPerPair: 200 });
+    assert.equal(pruned.byCount, 0);
+    assert.equal(countFor(deviceId), 1);
+  });
+
+  // These rows are written in the same millisecond, so the cutoff has to be
+  // pushed past them for the age rule to see anything at all. Without the wait
+  // the assertion passes while testing nothing.
+  const olderThanEverything = () => new Promise(resolve => setTimeout(resolve, 5));
+
+  it('保持期間を過ぎても、組ごとの最新1行は必ず残す', async () => {
+    // Losing it would erase the baseline the write-on-change check compares
+    // against, and the next observation would look like a change.
+    const deviceId = observe('10.7.3.1', 'quiet-device');
+    await olderThanEverything();
+    const pruned = devicesModule.pruneObservations({ maxPerPair: 200, maxAgeMs: 1 });
+    assert.equal(pruned.byAge, 0, '最新1行は年齢で消さない');
+    assert.equal(countFor(deviceId), 1);
+  });
+
+  it('保持期間を過ぎた古い行は、最新1行を残して消える', async () => {
+    let deviceId = null;
+    for (let i = 0; i < 4; i++) deviceId = observe('10.7.4.1', `v${i}`);
+    await olderThanEverything();
+    const pruned = devicesModule.pruneObservations({ maxPerPair: 200, maxAgeMs: 1 });
+    assert.equal(pruned.byAge, 3, '最新1行を除く3行が消える');
+    assert.equal(countFor(deviceId), 1);
+  });
+
+  it('別の端末の行を巻き込まない', () => {
+    let a = null, b = null;
+    for (let i = 0; i < 6; i++) a = observe('10.7.5.1', `a${i}`);
+    for (let i = 0; i < 2; i++) b = observe('10.7.5.2', `b${i}`);
+    devicesModule.pruneObservations({ maxPerPair: 3 });
+    assert.equal(countFor(a), 3, '超えていた端末だけ削られる');
+    assert.equal(countFor(b), 2, '超えていない端末はそのまま');
+  });
+
+  it('予算を超えたら途中で止め、続きがあると申告する', () => {
+    // One statement over the whole table would block the loop: scanning
+    // 3,671,415 rows to find the victims took 4,826 ms on one Hub before a
+    // single row was deleted.
+    let deviceId = null;
+    for (let i = 0; i < 20; i++) deviceId = observe('10.7.7.1', `v${i}`);
+
+    const first = devicesModule.pruneObservations({ maxPerPair: 2, batchSize: 3, budgetMs: 0 });
+    assert.equal(first.byCount, 3, '1回ぶんだけ消す');
+    assert.equal(first.more, true, '続きがあると申告する');
+    assert.equal(countFor(deviceId), 17);
+  });
+
+  it('呼び直せば最後まで終わる', () => {
+    let deviceId = null;
+    for (let i = 0; i < 20; i++) deviceId = observe('10.7.8.1', `v${i}`);
+    let guard = 0;
+    let pruned;
+    do {
+      pruned = devicesModule.pruneObservations({ maxPerPair: 2, batchSize: 3, budgetMs: 0 });
+    } while (pruned.more && ++guard < 50);
+    assert.ok(guard < 50, '有限回で終わる');
+    assert.equal(countFor(deviceId), 2);
+  });
+
+  it('剪定しても write-on-change の判定が変わらない', () => {
+    const deviceId = observe('10.7.6.1', 'stable');
+    devicesModule.pruneObservations({ maxPerPair: 1, maxAgeMs: 0 });
+    observe('10.7.6.1', 'stable');   // same attributes as the surviving row
+    assert.equal(countFor(deviceId), 1, '同じ属性なら追記されない');
+  });
+});
