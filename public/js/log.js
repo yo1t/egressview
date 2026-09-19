@@ -262,19 +262,14 @@ function hasClientSideOnlyFilter() {
 let logFetchAllMode = false; // true while a client-side-only filter is active
 
 // ── Server fetch ──────────────────────────────────────────────────────────────
-async function fetchLogPage() {
-  if (!logMode) return;
-  if (logFetchingPage) return;
-  logFetchingPage = true;
-  const gen = logFetchGeneration;
-  logFetchAllMode = hasClientSideOnlyFilter();
+function buildLogQueryParams({ page = logPage, allMode = logFetchAllMode } = {}) {
   const { from, to } = getTimeRange();
   const params = new URLSearchParams();
   appendDisplayScope(params);
   // Paginate only when no client-side-only filters are active
-  if (!logFetchAllMode) {
+  if (!allMode) {
     params.set('limit',  LOG_PAGE_SIZE);
-    params.set('offset', logPage * LOG_PAGE_SIZE);
+    params.set('offset', page * LOG_PAGE_SIZE);
   }
 
   // Time range — narrow further if lastSeen column has a dateRange filter
@@ -320,6 +315,17 @@ async function fetchLogPage() {
       params.set(LOG_FILTER_MODE_PARAM[col], filter.mode || 'contains');
     }
   }
+
+  return params;
+}
+
+async function fetchLogPage() {
+  if (!logMode) return;
+  if (logFetchingPage) return;
+  logFetchingPage = true;
+  const gen = logFetchGeneration;
+  logFetchAllMode = hasClientSideOnlyFilter();
+  const params = buildLogQueryParams();
 
   setFetching(+1);
   try {
@@ -522,6 +528,11 @@ function createLogRow(connection) {
     : '';
 
   const row = document.createElement('tr');
+  // Identity and content fingerprint, so a live refresh can leave an unchanged
+  // row's DOM node alone instead of rebuilding the whole table every two
+  // seconds and throwing away the user's text selection.
+  row.dataset.key = connectionKey(connection);
+  row.dataset.sig = connectionSignature(connection);
   if (isThreat) {
     row.classList.add(isLowConfidence ? 'warn-row' : 'threat-row', 'threat-clickable');
     row.dataset.threat = JSON.stringify({
@@ -678,6 +689,212 @@ function renderLogView(appendRows) {
   }
 }
 
+// ── Live follow ───────────────────────────────────────────────────────────────
+//
+// The log used to update only on tab switch, filter change, sort and scroll,
+// because re-fetching on every connections-update reset pagination and broke
+// the scroll position. So it follows only while following is safe -- first
+// page, default newest-first order, scrolled to the top -- and otherwise holds
+// the new rows behind a badge the user can click. Nothing moves under the
+// cursor of someone who is reading.
+//
+// It refreshes page 0 from the API rather than inserting the socket payload
+// directly: only the API applies the server-side filters this view was built
+// with and attaches the Agent's application attribution, so an inserted raw
+// row would ignore an active filter and show a guessed app name next to rows
+// that carry the real one.
+
+const LIVE_REFRESH_MS = 2000;       // floor between live refreshes
+const LIVE_THREAT_REFRESH_MS = 10000; // threat badges are an aggregate; slower is fine
+const LIVE_TOP_SLACK_PX = 8;        // "at the top" tolerance
+
+let liveRefreshTimer = null;
+let liveLastRefreshAt = 0;
+let liveLastThreatRefreshAt = 0;
+let livePendingKeys = new Set();    // new keys seen while not following
+
+function connectionKey(c) {
+  return `${c.src}|${c.dst}|${c.dport}|${c.proto}`;
+}
+
+function connectionSignature(c) {
+  return [
+    c.lastSeen || 0,
+    c.count || 0,
+    c.bytes || 0,
+    c.threat?.tag || '',
+    appLabel(c),
+    c.country || '',
+    c.org || '',
+    c.dstHost || '',
+  ].join('|');
+}
+
+function logScrollElement() {
+  return document.querySelector('#log-container .log-table-wrap');
+}
+
+/**
+ * How far the user has scrolled past the top of the log, in pixels.
+ *
+ * On a wide window the table wrapper scrolls. On a narrow one it grows to its
+ * full height and the document scrolls instead, so the wrapper's own scrollTop
+ * stays 0 -- reading only that would report "at the top" while someone is
+ * halfway down the page, and rows would move under them.
+ */
+function liveScrollOffset() {
+  const scroller = logScrollElement();
+  if (!scroller) return 0;
+  if (scroller.scrollHeight > scroller.clientHeight + 1) return scroller.scrollTop;
+  return Math.max(0, -scroller.getBoundingClientRect().top);
+}
+
+/** True while inserting rows at the top cannot disturb what the user is doing. */
+function isFollowingLive() {
+  if (!logMode) return false;
+  if (logPage !== 0) return false;        // later pages loaded: offsets would shift
+  if (logFetchAllMode) return false;      // client-side-only filter: no server paging
+  if (logSortState.col !== 'lastSeen' || logSortState.dir !== 'desc') return false;
+  return liveScrollOffset() <= LIVE_TOP_SLACK_PX;
+}
+
+/**
+ * Cheap gate on the socket payload: would this row be visible here at all?
+ * Only the columns the payload actually carries are checked, so it can say yes
+ * to a row the server would filter out. That costs one extra refresh, never a
+ * wrong row on screen -- the refresh itself re-asks the API.
+ */
+function couldAffectCurrentView(c) {
+  if (selectedMac) { if (c.srcMac !== selectedMac) return false; }
+  else if (selectedIp && c.src !== selectedIp) return false;
+
+  const { from, to } = getTimeRange();
+  const seen = c.lastSeen || 0;
+  if (from != null && seen < from) return false;
+  if (to != null && seen > to) return false;
+
+  for (const [col, filter] of Object.entries(logFilters)) {
+    if (!filter || !LOG_SERVER_FILTER_COLS.has(col)) continue;
+    if (col === 'src' && (selectedMac || selectedIp)) continue;
+    if (!logMatchFilter(getLogCellValue(c, col), filter)) return false;
+  }
+  return true;
+}
+
+function renderLiveBadge() {
+  const el = document.getElementById('log-live-new');
+  if (!el) return;
+  const count = livePendingKeys.size;
+  if (!count || !logMode) { el.hidden = true; return; }
+  el.hidden = false;
+  el.textContent = tVars('log.live.new', { count });
+  el.title = t('log.live.new.title');
+}
+
+function clearLiveBadge() {
+  livePendingKeys.clear();
+  renderLiveBadge();
+}
+
+/** Replace only the rows whose content actually changed, keyed by connection. */
+function reconcileLogRows(conns) {
+  const tbody = document.getElementById('log-tbody');
+  if (!tbody) return;
+  const sentinel = document.getElementById('log-scroll-sentinel');
+  const existing = new Map();
+  for (const row of tbody.querySelectorAll('tr[data-key]')) existing.set(row.dataset.key, row);
+
+  let anchor = tbody.firstChild;
+  for (const connection of conns) {
+    const key = connectionKey(connection);
+    const current = existing.get(key);
+    let row;
+    if (current && current.dataset.sig === connectionSignature(connection)) {
+      row = current;                       // unchanged: keep the node as it is
+    } else {
+      row = createLogRow(connection);
+      current?.remove();
+    }
+    existing.delete(key);
+    if (anchor === row) { anchor = row.nextSibling; continue; }
+    tbody.insertBefore(row, anchor);
+  }
+  for (const stale of existing.values()) stale.remove();
+  if (sentinel) tbody.appendChild(sentinel);
+}
+
+async function refreshTopPageLive() {
+  if (!isFollowingLive() || logFetchingPage) return;
+  const gen = logFetchGeneration;
+  const params = buildLogQueryParams({ page: 0, allMode: false });
+  try {
+    const res = await apiFetch(`${_BASE}/api/connections?${params}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (gen !== logFetchGeneration || !isFollowingLive()) return;
+
+    logAllData = data.connections || [];
+    logTotal = typeof data.total === 'number' ? data.total : logAllData.length;
+    if (data.serverTime) setServerTimeOffset(data.serverTime - Date.now());
+
+    reconcileLogRows(logAllData);
+    const countEl = document.getElementById('log-count');
+    if (countEl) countEl.textContent = `${logTotal} ${t('log.sessions')}`;
+    updateScrollStatus();
+
+    if (Date.now() - liveLastThreatRefreshAt >= LIVE_THREAT_REFRESH_MS) {
+      liveLastThreatRefreshAt = Date.now();
+      fetchThreatCounts();
+    }
+  } catch (e) {
+    console.warn('[log] live refresh failed:', e);
+  }
+}
+
+function scheduleLiveRefresh() {
+  if (liveRefreshTimer) return;
+  const wait = Math.max(0, LIVE_REFRESH_MS - (Date.now() - liveLastRefreshAt));
+  liveRefreshTimer = setTimeout(() => {
+    liveRefreshTimer = null;
+    liveLastRefreshAt = Date.now();
+    refreshTopPageLive();
+  }, wait);
+}
+
+/**
+ * Feed a connections-update payload into the log view.
+ * Called for every socket update; decides on its own whether to follow.
+ */
+export function applyLiveConnections(incoming) {
+  if (!logMode || !Array.isArray(incoming) || !incoming.length) return;
+  const relevant = incoming.filter(couldAffectCurrentView);
+  if (!relevant.length) return;
+
+  if (isFollowingLive()) {
+    clearLiveBadge();
+    scheduleLiveRefresh();
+    return;
+  }
+  const shown = new Set(logAllData.map(connectionKey));
+  for (const c of relevant) {
+    const key = connectionKey(c);
+    if (!shown.has(key)) livePendingKeys.add(key);
+  }
+  renderLiveBadge();
+}
+
+/** Jump back to the newest rows and take everything that piled up. */
+function returnToLive() {
+  clearLiveBadge();
+  const scroller = logScrollElement();
+  if (scroller) {
+    scroller.scrollTo({ top: 0 });
+    // Narrow layouts scroll the document, so bring the table's top into view too.
+    scroller.scrollIntoView({ block: 'start' });
+  }
+  resetAndFetch();
+}
+
 // ── Public entry point: reset to page 0 and re-fetch ─────────────────────────
 function resetAndFetch() {
   if (!logMode) return;
@@ -688,6 +905,8 @@ function resetAndFetch() {
   logThreatCounts = null;
   logFetchGeneration++;
   logFetchingPage = false; // cancel any in-flight scroll fetch
+  if (liveRefreshTimer) { clearTimeout(liveRefreshTimer); liveRefreshTimer = null; }
+  clearLiveBadge();
   fetchLogPage();          // rows (paginated / full-fetch)
   fetchThreatCounts();     // threat aggregate (runs in parallel)
 }
@@ -700,6 +919,13 @@ function initLog() {
   if (initLog._done) return;
   initLog._done = true;
   document.getElementById('log-export-btn').addEventListener('click', downloadConnectionExport);
+  document.getElementById('log-live-new')?.addEventListener('click', returnToLive);
+  // Scrolling back to the top is itself a request to see the newest rows.
+  // Both targets are needed: the wrapper scrolls on a wide window, the document
+  // on a narrow one.
+  const backToTop = () => { if (livePendingKeys.size && isFollowingLive()) returnToLive(); };
+  logScrollElement()?.addEventListener('scroll', backToTop, { passive: true });
+  document.addEventListener('scroll', backToTop, { passive: true });
 
 // ── Sort: click on column header ──────────────────────────────────────────────
 document.querySelectorAll('#log-table th[data-col]').forEach(th => {
