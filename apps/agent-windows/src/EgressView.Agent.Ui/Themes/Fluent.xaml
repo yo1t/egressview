@@ -137,8 +137,27 @@
                   </Border>
                 </ControlTemplate>
               </ToggleButton.Template>
-              <ContentPresenter VerticalAlignment="Center" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" TextElement.Foreground="{TemplateBinding Foreground}"/>
+              <ContentPresenter x:Name="SelectionSite" VerticalAlignment="Center" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" TextElement.Foreground="{TemplateBinding Foreground}"/>
             </ToggleButton>
+            <!-- An editable ComboBox renders its text through a TextBox
+                 the template must supply under this exact name. This
+                 template had none, so an editable one drew nothing: the
+                 value was set and readable through automation, and the
+                 box looked empty. Whatever was typed there was invisible
+                 too, which is how a model name had to be entered.
+
+                 It sits over the toggle rather than inside it, because a
+                 caret needs the click that the toggle would otherwise
+                 swallow. The arrow is left uncovered, so the list still
+                 opens from there, and the box stays collapsed when the
+                 ComboBox is not editable, which keeps a plain one
+                 clickable across its whole surface. -->
+            <TextBox x:Name="PART_EditableTextBox" Visibility="Collapsed" Margin="1,1,28,1" Padding="9,0,0,0"
+                     VerticalAlignment="Stretch" VerticalContentAlignment="Center" Background="Transparent"
+                     BorderThickness="0" Foreground="{TemplateBinding Foreground}"
+                     CaretBrush="{DynamicResource TextPrimaryBrush}"
+                     SelectionBrush="{DynamicResource AccentBrush}"
+                     IsReadOnly="{TemplateBinding IsReadOnly}"/>
             <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True" IsOpen="{TemplateBinding IsDropDownOpen}" Focusable="False" PopupAnimation="Fade">
               <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="300" Background="{DynamicResource SurfaceSecondaryBrush}" BorderBrush="{DynamicResource StrokeBrush}" BorderThickness="1" CornerRadius="6" TextElement.Foreground="{DynamicResource TextPrimaryBrush}">
                 <ScrollViewer CanContentScroll="True" VerticalScrollBarVisibility="Auto"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer>
@@ -149,6 +168,11 @@
             <Trigger Property="IsMouseOver" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
             <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+            <Trigger Property="IsEditable" Value="True">
+              <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/>
+              <!-- Both would draw the same text, a pixel apart. -->
+              <Setter TargetName="SelectionSite" Property="Visibility" Value="Collapsed"/>
+            </Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>
