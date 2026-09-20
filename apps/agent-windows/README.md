@@ -2,6 +2,10 @@
 
 [English: Hub delivery and update-check disclosure](README.en.md)
 
+![ネットワーク状況タブ。地球儀、どのアプリがどこへ通信したかのサンキー図、いつ通信があったかの時系列](../../docs/assets/egressview-agent-windows.png)
+
+実機の画面です。宛先のうち2件は、このリポジトリが公開されるため、documentation用のドメインに置き換えてあります。
+
 ## Hub送信と更新確認で送るもの
 
 Hub登録ではPC名、Windowsのバージョン、Agentのバージョンを送ります。観測データのHub送信は登録だけでは始まらず、アプリ内で明示的に有効にする必要があります。有効化後は認証用Bearer tokenをそのHubへ送り、次のJSONメタデータを送ります。通信内容・パケット本体は収集も送信もしません。
