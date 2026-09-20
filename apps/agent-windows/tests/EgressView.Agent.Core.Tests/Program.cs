@@ -459,6 +459,55 @@ try
     Assert(NotificationPolicy.Evaluate(true, false, false, 0, 999, null, notificationNow) == NotificationDecision.CategoryDisabled,
         "a disabled category remains suppressed even when the daily limit is unlimited");
 
+    // A notification that can never say anything.
+    //
+    // The rule was "any '.' or ':'", which is not a test for a destination.
+    // The outbound-anomaly notice is built from a clock time and a byte size,
+    // so it matched every time: a real 2.10 GiB detection at 12:15 was
+    // announced as "status changed", and could not have been announced as
+    // anything else in any language. The same rule emptied every English body
+    // in the product, because English sentences end in a period.
+    Assert(NotificationRedaction.Apply("外向き通信が 12:15 に 2.10 GiB ありました。") == "外向き通信が 12:15 に 2.10 GiB ありました。",
+        "a clock time and a byte size are not a destination and are left alone");
+    Assert(NotificationRedaction.Apply("Outbound traffic at 12:15 was 2.10 GiB. Open the Agent for details.")
+            == "Outbound traffic at 12:15 was 2.10 GiB. Open the Agent for details.",
+        "and an English sentence is not redacted for ending in a full stop");
+    Assert(NotificationRedaction.Apply("Delivery to the Hub is not completing. 10,000 observations are pending.")
+            != NotificationRedaction.Replacement,
+        "the Hub delivery notice survives in English as well as Japanese");
+
+    // What the rule is actually for. Redacted whole, not patched, so nothing
+    // is left to reconstruct the rest from.
+    foreach (var named in new[]
+    {
+        "chrome talked to ads.example.com",
+        "203.0.113.42 received 2 GiB",
+        "2606:4700:10::1 received 2 GiB",
+        "a connection to fe80::1 was seen",
+    })
+        Assert(NotificationRedaction.Apply(named) == NotificationRedaction.Replacement,
+            $"a destination is kept off the desktop: {named}");
+
+    // Suppressed attempts crowd out the ones that were shown.
+    //
+    // A degraded agent is re-evaluated on the UI's five-second refresh, and
+    // every suppressed attempt was its own row in a list capped at a hundred.
+    // Measured on a real machine: 94 of 100 slots held the same suppressed
+    // message and a real outbound-anomaly notice was three rows from being
+    // evicted by its own agent's noise.
+    Assert(NotificationHistoryPolicy.RepeatsNewest("Monitoring", "要確認", "suppressed-cooldown",
+            "Monitoring", "要確認", "suppressed-cooldown"),
+        "the same suppressed attempt twice running is one entry with a count");
+    Assert(!NotificationHistoryPolicy.RepeatsNewest("Monitoring", "要確認", "suppressed-cooldown",
+            "HubDelivery", "要確認", "suppressed-cooldown"),
+        "a different category is a different entry");
+    Assert(!NotificationHistoryPolicy.RepeatsNewest("Monitoring", "要確認", "shown",
+            "Monitoring", "要確認", "shown"),
+        "two notifications actually shown are two events, because each one interrupted the reader");
+    Assert(!NotificationHistoryPolicy.RepeatsNewest("Monitoring", "要確認", "suppressed-cooldown",
+            "Monitoring", "要確認", "shown"),
+        "and a suppressed attempt never folds into one that was shown");
+
     var deliveryNotice = new DeliveryNotificationTracker();
     var deliveryAck = notificationNow.AddMinutes(-10);
     var shortFailure = new DeliveryNotificationSample(notificationNow, true, "retryable", 12, notificationNow, deliveryAck);
@@ -813,15 +862,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 22, "v1 database migrates through v2-v22");
+        Assert(migrated.SchemaVersion == 23, "v1 database migrates through v2-v23");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v22.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v23.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 22, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 23, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -1113,6 +1162,59 @@ try
         Assert(reopenedDelivery.PrepareDeliveryBatch(deliveryStarted.AddSeconds(4))!.BatchId == activeBatchId, "active batch survives service restart");
         reopenedDelivery.AcknowledgeDelivery(activeBatchId, deliveryStarted.AddSeconds(5));
         Assert(reopenedDelivery.ReadDeliveryStatus().Pending == 0 && reopenedDelivery.ReadDeliveryStatus().LastAcknowledgedAt == deliveryStarted.AddSeconds(5), "ACK removes only the matching durable batch");
+    }
+
+    // A batch the Hub will never accept must not stop the ones behind it.
+    //
+    // Preparing a batch reuses any that is still outstanding, which is what
+    // keeps an interrupted send from orphaning data. It also means a refusal
+    // that will repeat blocks the queue for ever. Measured on a real machine:
+    // one batch of 107 observations claimed at 01:34:33Z was still claimed
+    // three hours later, the queue behind it sat at its 10,000 ceiling, and
+    // 17,813 observations had been dropped to make room for arrivals. Giving
+    // up on the 107 is the smaller loss by two orders of magnitude, and unlike
+    // the other it ends.
+    using (var poisonStore = new ObservationStore(Path.Combine(directory, "poison-batch.db")))
+    {
+        var refused = new NetworkObservation(deliveryStarted, 91, "TCP", "10.0.0.1", 50001, "203.0.113.11", 443,
+            10, 20, ObservationLayer.Logical, "if", "etw", "Refused");
+        poisonStore.QueueForDelivery([refused], deliveryStarted);
+        var stuck = poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(1))!;
+
+        for (var attempt = 1; attempt < ObservationStore.AbandonBatchAfterRejections; attempt++)
+            Assert(!poisonStore.RecordDeliveryBatchRejection(stuck.BatchId) &&
+                poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(1 + attempt))!.BatchId == stuck.BatchId,
+                $"a refused batch is kept and retried on attempt {attempt}");
+
+        Assert(poisonStore.RecordDeliveryBatchRejection(stuck.BatchId),
+            "and is given up on once the refusals have been answered enough times");
+        Assert(poisonStore.ReadDeliveryStatus().Pending == 0 &&
+            poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(30)) is null,
+            "the queue is free afterwards rather than handing back the same batch");
+        var counters = poisonStore.ReadCounters();
+        Assert(counters.TryGetValue("delivery-batch-abandoned", out var batches) && batches == 1 &&
+            counters.TryGetValue("delivery-observations-abandoned", out var lost) && lost == 1,
+            "what was given up on is counted, because silently dropping it is the failure that started this");
+
+        // A transport failure says nothing about the batch. An Agent offline
+        // for an afternoon has to come back with its queue intact, so those
+        // refusals must not spend the batch's lives.
+        poisonStore.QueueForDelivery([refused with { RemotePort = 8443 }], deliveryStarted.AddSeconds(31));
+        var offline = poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(32))!;
+        for (var attempt = 0; attempt < ObservationStore.AbandonBatchAfterRejections * 3; attempt++)
+            Assert(poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(33 + attempt))!.BatchId == offline.BatchId,
+                "a batch nobody has refused is still there after any number of transport failures");
+        Assert(poisonStore.ReadDeliveryStatus().Pending == 1, "and still holds its observation");
+
+        // The tally is kept against the batch's own id, so an acknowledgement
+        // cannot leave it charged to the next batch: batch ids are fresh
+        // GUIDs, and a different id restarts the count on its own. The reset
+        // in AcknowledgeDelivery is belt-and-braces, and is deliberately not
+        // asserted here -- a test of it could not fail, and a green light that
+        // cannot go red is worse than no light.
+        poisonStore.AcknowledgeDelivery(offline.BatchId, deliveryStarted.AddSeconds(60));
+        Assert(poisonStore.ReadDeliveryStatus().Pending == 0,
+            "an acknowledged batch leaves the queue however many transport failures preceded it");
     }
     using (var senderStore = new ObservationStore(Path.Combine(directory, "sender.db")))
     {
@@ -2698,7 +2800,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 22 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 23 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }

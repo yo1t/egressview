@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 22;
+    private const int CurrentSchemaVersion = 23;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -153,6 +153,10 @@ public sealed partial class ObservationStore : IDisposable
         "THEN protocol||CHAR(31)||local_address||CHAR(31)||local_port||CHAR(31)||process_id " +
         "ELSE protocol||CHAR(31)||local_address||CHAR(31)||local_port||CHAR(31)||remote_address||CHAR(31)||remote_port||CHAR(31)||process_id END";
 
+    private const string Version23Schema = """
+        ALTER TABLE delivery_state ADD COLUMN blocked_batch_id TEXT;
+        ALTER TABLE delivery_state ADD COLUMN blocked_batch_rejections INTEGER NOT NULL DEFAULT 0;
+        """;
     private const string Version22Schema = """
         ALTER TABLE chart_hourly ADD COLUMN flow_count INTEGER NOT NULL DEFAULT 0;
         """;
@@ -340,7 +344,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -370,7 +374,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 18) { MigrateVersion18To19(); version = 19; }
         if (version == 19) { MigrateVersion19To20(); version = 20; }
         if (version == 20) { MigrateVersion20To21(); version = 21; }
-        if (version == 21) MigrateVersion21To22();
+        if (version == 21) { MigrateVersion21To22(); version = 22; }
+        if (version == 22) MigrateVersion22To23();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -470,6 +475,26 @@ public sealed partial class ObservationStore : IDisposable
             Execute("UPDATE schema_version SET version=22 WHERE version=21");
             Execute("COMMIT");
             PruneMigrationBackups(22);
+        }
+        catch { TryRollback(); throw; }
+    }
+
+    /// Delivery remembers which batch keeps being refused.
+    ///
+    /// A batch the Hub will never accept was retried for ever, and because the
+    /// next batch cannot be prepared while one is outstanding, everything
+    /// behind it stopped. Measured on a real machine: one batch of 107
+    /// observations claimed at 01:34:33Z was still claimed three hours later,
+    /// the queue behind it sat at its 10,000 ceiling, and 17,813 observations
+    /// had been dropped to make room. Losing 107 that the Hub refuses is the
+    /// smaller loss by two orders of magnitude, and the only one that ends.
+    private void MigrateVersion22To23()
+    {
+        CreateMigrationBackup(23);
+        try
+        {
+            Execute("BEGIN IMMEDIATE; " + Version23Schema + " UPDATE schema_version SET version=23 WHERE version=22; COMMIT;");
+            PruneMigrationBackups(23);
         }
         catch { TryRollback(); throw; }
     }

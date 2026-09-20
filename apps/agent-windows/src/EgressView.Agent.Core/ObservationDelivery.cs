@@ -90,6 +90,54 @@ public sealed partial class ObservationStore
         }
     }
 
+    /// How many times a batch may be refused before it is given up on.
+    ///
+    /// Small, because every attempt costs the whole queue behind it the time
+    /// it takes. Not one, because "rejected" has arrived from a Hub that was
+    /// mid-deploy, and throwing data away on a single answer would make a
+    /// restart of the other side into data loss here.
+    public const int AbandonBatchAfterRejections = 5;
+
+    /// Records that the Hub refused this batch, and gives up on it once that
+    /// has happened often enough.
+    ///
+    /// Only for refusals of the content itself. A network failure, a rate
+    /// limit or an expired credential says nothing about the batch and must
+    /// not consume its lives: an Agent offline for an afternoon has to come
+    /// back with its queue intact.
+    ///
+    /// <returns>Whether the batch was abandoned.</returns>
+    public bool RecordDeliveryBatchRejection(Guid batchId)
+    {
+        lock (gate)
+        {
+            Execute("BEGIN IMMEDIATE");
+            try
+            {
+                var blocked = ScalarTextOrNull("SELECT blocked_batch_id FROM delivery_state WHERE id=1");
+                var rejections = string.Equals(blocked, batchId.ToString("D"), StringComparison.OrdinalIgnoreCase)
+                    ? ScalarInt64("SELECT blocked_batch_rejections FROM delivery_state WHERE id=1") + 1
+                    : 1;
+                if (rejections < AbandonBatchAfterRejections)
+                {
+                    Execute($"UPDATE delivery_state SET blocked_batch_id='{batchId:D}',blocked_batch_rejections={rejections} WHERE id=1");
+                    Execute("COMMIT");
+                    return false;
+                }
+                // Said in the durable counters, not dropped quietly. The number
+                // of observations given up on is the part that can be acted on.
+                var abandoned = ScalarInt64($"SELECT COUNT(*) FROM delivery_queue WHERE batch_id='{batchId:D}'");
+                Execute($"DELETE FROM delivery_queue WHERE batch_id='{batchId:D}'");
+                Execute("UPDATE delivery_state SET blocked_batch_id=NULL,blocked_batch_rejections=0 WHERE id=1");
+                Execute("COMMIT");
+                AddCounter("delivery-batch-abandoned", 1);
+                AddCounter("delivery-observations-abandoned", abandoned);
+                return true;
+            }
+            catch { TryRollback(); throw; }
+        }
+    }
+
     public void AcknowledgeDelivery(Guid batchId, DateTimeOffset acknowledgedAt)
     {
         lock (gate)
@@ -100,7 +148,7 @@ public sealed partial class ObservationStore
                 if (ScalarInt64($"SELECT COUNT(*) FROM delivery_queue WHERE batch_id='{batchId:D}'") == 0)
                     throw new InvalidOperationException("Acknowledgement does not match the active delivery batch.");
                 Execute($"DELETE FROM delivery_queue WHERE batch_id='{batchId:D}'");
-                Execute($"UPDATE delivery_state SET last_acknowledged_at='{acknowledgedAt.ToUniversalTime():O}' WHERE id=1");
+                Execute($"UPDATE delivery_state SET last_acknowledged_at='{acknowledgedAt.ToUniversalTime():O}',blocked_batch_id=NULL,blocked_batch_rejections=0 WHERE id=1");
                 Execute("COMMIT");
             }
             catch { TryRollback(); throw; }
