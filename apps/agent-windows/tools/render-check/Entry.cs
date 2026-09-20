@@ -58,6 +58,14 @@ internal static class Entry
             new("tiny", "1.1.1.1", "Sydney", 3, 40, 0),
             new("tinier", "8.8.8.8", "Mountain View", 1, 1, 0),
         };
+        // Past the thirty names the card keeps on each side, so the scroll
+        // extent asserted below is exercised rather than assumed. Thirteen
+        // fitted the old fixed-height card with room to spare, which is why
+        // the check passed while the card could not scroll at all.
+        // Documentation ranges: this file is published.
+        for (var filler = 0; filler < 22; filler++)
+            links.Add(new($"filler{filler:D2}", $"198.51.100.{filler + 1}", $"host{filler:D2}.example",
+                60 - filler, 800_000 - filler * 10_000, 0));
 
         // The card is half the window wide and only just taller than its
         // minimum, so the tight sizes are the ones that have to hold.
@@ -177,13 +185,20 @@ internal static class Entry
         var globeDashboard = new MainWindow();
         var globeCard = (Border)globeDashboard.FindName("CountryGlobeCard")!;
         var globeFooter = (TextBlock)globeDashboard.FindName("GlobeCaption")!;
-        var globeControls = (StackPanel)globeDashboard.FindName("GlobeControls")!;
+        var globeControls = (Border)globeDashboard.FindName("GlobeControls")!;
         var spinSpeed = (ListBox)globeDashboard.FindName("SpinSpeedChoice")!;
         globeFooter.Text = "宛先48地点 · ローカルの全期間履歴にある33か国を薄く表示。位置情報がない宛先も含みます。";
         ((Grid)globeCard.Parent).Children.Remove(globeCard);
         Save(globeCard, 340, 510, Path.Combine(output, "globe-controls-340x510.png"));
-        if (globeControls.ActualHeight > 41 || spinSpeed.ActualHeight > 41)
-            throw new InvalidOperationException("Globe rotation segments stretched with the caption.");
+        // The segments must not stretch, and the panel that holds them must
+        // stay a panel: it is overlaid on the globe now, and a control that
+        // grows to the height of what it is laid over covers the thing it is
+        // meant to sit on.
+        if (spinSpeed.ActualHeight > 41 || globeControls.ActualHeight > 64)
+            throw new InvalidOperationException("Globe rotation controls stretched to the card they are overlaid on.");
+        if (globeControls.HorizontalAlignment != System.Windows.HorizontalAlignment.Right ||
+            globeControls.VerticalAlignment != VerticalAlignment.Bottom)
+            throw new InvalidOperationException("Globe rotation controls must sit in a corner of the globe, not fill it.");
 
         ThemeManager.ApplyTheme(application.Resources, true, Color.FromRgb(0x4D, 0x94, 0xFF));
         var darkInputSample = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, Margin = new Thickness(8) };
@@ -209,7 +224,7 @@ internal static class Entry
             var list = (ItemsControl)countryDashboard.FindName("CountryList")!;
             var listScroll = (ScrollViewer)countryDashboard.FindName("CountryListScroll")!;
             var footer = (TextBlock)countryDashboard.FindName("GlobeCaption")!;
-            var controls = (StackPanel)countryDashboard.FindName("GlobeControls")!;
+            var controls = (Border)countryDashboard.FindName("GlobeControls")!;
             if (listScroll.HorizontalScrollBarVisibility != ScrollBarVisibility.Disabled)
                 throw new InvalidOperationException("The country list must not scroll horizontally.");
             list.ItemsSource = Enumerable.Range(0, 20).Select(index => new CountryHistoryDisplayRow
