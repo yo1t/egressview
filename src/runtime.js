@@ -76,6 +76,10 @@ function _resetInspectEmitTime(t) { lastInspectEmitTime = t ?? Date.now(); }
  */
 function resolveMacByIp(ip) {
   if (!ip) return null;
+  // The DHCP server's lease comes first: it is the only source that says who
+  // the address was given to, rather than who answered for it. See P3-138.
+  const leaseMac = _yamaha.getDhcpMac?.(ip);
+  if (leaseMac) return leaseMac;
   const asusMac = _asus.getClientMac(ip);
   if (asusMac) return asusMac;
   const dhcpdMac = _dhcpdSyslog.getMacByIp(ip);

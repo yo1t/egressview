@@ -43,6 +43,30 @@ function createRouterManager({
       );
       signal?.throwIfAborted();
     }
+    // The DHCP server's own ledger, where there is one. It answers a question
+    // ARP cannot: not who replied at this address a moment ago, but who the
+    // address was actually given to. On this network ARP alternated between
+    // two machines for one address every poll and the device list followed it
+    // (P3-138); the lease table never did. It also carries the hostname the
+    // client asked for, which nothing else here has.
+    if (typeof adapter.refreshDhcp === 'function' && adapter.needsDhcpRefresh?.()) {
+      await runtimeProfiler.measureAsync(
+        `router.${kind}.poll.refreshDhcp`,
+        () => adapter.refreshDhcp({ signal }),
+      );
+      signal?.throwIfAborted();
+      for (const [ip, lease] of adapter.getDhcpCache()) {
+        devices?.observeDevice({
+          ip,
+          mac: lease.mac,
+          // The name the client gave when it asked for the address. It is the
+          // device's own claim, like every other name here.
+          dnsName: lease.host || undefined,
+          lastSeen: now,
+          source: `dhcp:${id}`,
+        });
+      }
+    }
     if (adapter.needsNdpRefresh()) {
       await runtimeProfiler.measureAsync(
         `router.${kind}.poll.refreshNdp`,
