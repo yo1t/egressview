@@ -301,9 +301,19 @@ function parseDhcpStatus(raw) {
 
 const YAMAHA_ARP_REFRESH_MS = 60 * 1000;
 const YAMAHA_NDP_REFRESH_MS = 120 * 1000; // every 2 min
-// Leases last days, so there is nothing to gain from asking more often than
-// the ARP table -- and the command prints every lease, so it is not free.
-const YAMAHA_DHCP_REFRESH_MS = 120 * 1000;
+// Ten minutes, because nothing is lost by waiting.
+//
+// Leases here last about three days and the table only changes when a device
+// joins, leaves, or moves address. Asking costs a round trip to the router
+// that measured 1,736 ms on production -- the command prints every lease --
+// and at two minutes that was 1.4% of the router session, for a table that
+// had not changed in three consecutive reads.
+//
+// What waiting delays is the hostname for a device that just joined. The
+// device itself is still found within the minute by ARP; only its name is
+// late. The first poll after a connect always fetches, because the timestamp
+// starts at zero.
+const YAMAHA_DHCP_REFRESH_MS = 10 * 60 * 1000;
 
 /**
  * Create an isolated Yamaha RTX poller instance. Every piece of mutable
