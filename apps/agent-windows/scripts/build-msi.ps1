@@ -6,14 +6,23 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $agentRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$publishRoot = Join-Path $agentRoot '.publish-msi'
+$publishRoot = Join-Path $agentRoot ".publish-msi-$Runtime"
 $servicePublish = Join-Path $publishRoot 'service'
 $uiPublish = Join-Path $publishRoot 'ui'
 $licenseRtf = Join-Path $publishRoot 'license.rtf'
 $outputPath = [System.IO.Path]::GetFullPath($Output)
 
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Version must be numeric major.minor.patch: $Version" }
-if ($Runtime -ne 'win-x64') { throw "Only the verified win-x64 runtime is supported: $Runtime" }
+# win-x64 is the one this project has been measured on. win-arm64 builds
+# from the same sources and is offered so an ARM machine has something to
+# install at all -- the alternative is emulating x64, which is the worst place
+# to put a collector whose hot path is parsing ETW callbacks. It has not been
+# run on ARM hardware here; the release notes say so.
+$arch = switch ($Runtime) {
+    'win-x64'   { 'x64' }
+    'win-arm64' { 'arm64' }
+    default     { throw "Supported runtimes are win-x64 and win-arm64: $Runtime" }
+}
 $parsedVersion = [version]$Version
 # Early development builds shipped with the .NET default 1.0.0.0. A direct
 # 0.1.x.0 file version would compare lower and could never replace them. Keep
@@ -62,9 +71,10 @@ dotnet build (Join-Path $agentRoot 'installer\EgressView.Agent.Installer.wixproj
     -p:ServicePublishDir=$servicePublish `
     -p:UiPublishDir=$uiPublish `
     -p:LicenseRtf=$licenseRtf `
+    -p:PackageArch=$arch `
     -p:OutputPath=$outputPath
 if ($LASTEXITCODE -ne 0) { throw "MSI build failed: $LASTEXITCODE" }
 
-$msi = Join-Path $outputPath "EgressView-Agent-Windows-$Version-unsigned.msi"
+$msi = Join-Path $outputPath "EgressView-Agent-Windows-$Version-$arch-unsigned.msi"
 if (-not (Test-Path -LiteralPath $msi -PathType Leaf)) { throw "MSI was not produced: $msi" }
 Get-FileHash -Algorithm SHA256 -LiteralPath $msi | Select-Object Path, Hash
