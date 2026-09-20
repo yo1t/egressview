@@ -106,7 +106,7 @@ Get-NetTCPConnection -State Established |
 配布ページに公開されているSHA-256と照合してください。
 
 ```powershell
-Get-FileHash -Algorithm SHA256 $HOME\Downloads\EgressView-Agent-Windows-<version>-x64.msi
+Get-FileHash -Algorithm SHA256 $HOME\Downloads\EgressView-Agent-Windows-<version>-<arch>.msi
 ```
 
 これは署名の代わりにはなりません。**署名が無い間、アプリ内の自動更新は動きません** —— 検証できないものをインストールしないためです。新しい版があることはエージェントが知らせますが、取得と実行はあなたが行います。
