@@ -1164,47 +1164,73 @@ try
         Assert(reopenedDelivery.ReadDeliveryStatus().Pending == 0 && reopenedDelivery.ReadDeliveryStatus().LastAcknowledgedAt == deliveryStarted.AddSeconds(5), "ACK removes only the matching durable batch");
     }
 
-    // A batch the Hub will never accept must not stop the ones behind it.
+    // A batch the Hub will never accept must not stop the ones behind it,
+    // and must not take them with it either.
     //
     // Preparing a batch reuses any that is still outstanding, which is what
     // keeps an interrupted send from orphaning data. It also means a refusal
     // that will repeat blocks the queue for ever. Measured on a real machine:
     // one batch of 107 observations claimed at 01:34:33Z was still claimed
     // three hours later, the queue behind it sat at its 10,000 ceiling, and
-    // 17,813 observations had been dropped to make room for arrivals. Giving
-    // up on the 107 is the smaller loss by two orders of magnitude, and unlike
-    // the other it ends.
+    // 17,813 observations had been dropped to make room for arrivals.
+    //
+    // Discarding the refused batch was the first answer and was too blunt: it
+    // unblocked delivery and then shed 200 observations every two and a half
+    // minutes, because one record the Hub would not take condemned the 199
+    // travelling with it. Halving finds the one.
     using (var poisonStore = new ObservationStore(Path.Combine(directory, "poison-batch.db")))
     {
-        var refused = new NetworkObservation(deliveryStarted, 91, "TCP", "10.0.0.1", 50001, "203.0.113.11", 443,
-            10, 20, ObservationLayer.Logical, "if", "etw", "Refused");
-        poisonStore.QueueForDelivery([refused], deliveryStarted);
-        var stuck = poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(1))!;
+        NetworkObservation Refused(int port) =>
+            new(deliveryStarted.AddSeconds(port), 91, "TCP", "10.0.0.1", 50000 + port, "203.0.113.11", port,
+                10, 20, ObservationLayer.Logical, "if", "etw", "Refused");
+        for (var port = 1; port <= 8; port++)
+            poisonStore.QueueForDelivery([Refused(port)], deliveryStarted.AddSeconds(port));
+        Assert(poisonStore.ReadDeliveryStatus().Pending == 8, "eight distinct flows queue as eight observations");
 
+        var batch = poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(20))!;
+        Assert(batch.Observations.Count == 8, "and are claimed as one batch");
+
+        // Halving, not discarding. Every refusal hands the younger half back
+        // to the queue and carries on with the older one.
+        foreach (var remaining in new[] { 4, 2, 1 })
+        {
+            Assert(poisonStore.RecordDeliveryBatchRejection(batch.BatchId) == DeliveryRefusal.Split,
+                $"a refused batch of more than one is halved, leaving {remaining}");
+            var carried = poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(21))!;
+            Assert(carried.BatchId == batch.BatchId && carried.Observations.Count == remaining,
+                $"the batch carries on with {remaining} observation(s) under the same id");
+            Assert(poisonStore.ReadDeliveryStatus().Pending == 8,
+                "and nothing has been lost: the released half is back in the queue");
+        }
+
+        // Down to one, the refusal is about that observation and nothing else.
+        // Still not thrown away on the first answer -- a Hub mid-deploy says
+        // "rejected" too.
         for (var attempt = 1; attempt < ObservationStore.AbandonBatchAfterRejections; attempt++)
-            Assert(!poisonStore.RecordDeliveryBatchRejection(stuck.BatchId) &&
-                poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(1 + attempt))!.BatchId == stuck.BatchId,
-                $"a refused batch is kept and retried on attempt {attempt}");
+            Assert(poisonStore.RecordDeliveryBatchRejection(batch.BatchId) == DeliveryRefusal.Retained &&
+                poisonStore.ReadDeliveryStatus().Pending == 8,
+                $"a single refused observation is kept on attempt {attempt}");
 
-        Assert(poisonStore.RecordDeliveryBatchRejection(stuck.BatchId),
+        Assert(poisonStore.RecordDeliveryBatchRejection(batch.BatchId) == DeliveryRefusal.Abandoned,
             "and is given up on once the refusals have been answered enough times");
-        Assert(poisonStore.ReadDeliveryStatus().Pending == 0 &&
-            poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(30)) is null,
-            "the queue is free afterwards rather than handing back the same batch");
+        Assert(poisonStore.ReadDeliveryStatus().Pending == 7,
+            "exactly one observation is lost, not the batch it arrived in");
+        Assert(poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(40))!.Observations.Count == 7,
+            "and the other seven are claimable again");
+
         var counters = poisonStore.ReadCounters();
-        Assert(counters.TryGetValue("delivery-batch-abandoned", out var batches) && batches == 1 &&
+        Assert(counters.TryGetValue("delivery-batches-split", out var splits) && splits == 3 &&
             counters.TryGetValue("delivery-observations-abandoned", out var lost) && lost == 1,
-            "what was given up on is counted, because silently dropping it is the failure that started this");
+            "the halvings and the single loss are both counted, because a loss nobody can count is the failure that started this");
 
         // A transport failure says nothing about the batch. An Agent offline
         // for an afternoon has to come back with its queue intact, so those
-        // refusals must not spend the batch's lives.
-        poisonStore.QueueForDelivery([refused with { RemotePort = 8443 }], deliveryStarted.AddSeconds(31));
-        var offline = poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(32))!;
+        // failures must not halve it or spend its lives.
+        var offline = poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(41))!;
         for (var attempt = 0; attempt < ObservationStore.AbandonBatchAfterRejections * 3; attempt++)
-            Assert(poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(33 + attempt))!.BatchId == offline.BatchId,
-                "a batch nobody has refused is still there after any number of transport failures");
-        Assert(poisonStore.ReadDeliveryStatus().Pending == 1, "and still holds its observation");
+            Assert(poisonStore.PrepareDeliveryBatch(deliveryStarted.AddSeconds(42 + attempt))!.BatchId == offline.BatchId,
+                "a batch nobody has refused is still whole after any number of transport failures");
+        Assert(poisonStore.ReadDeliveryStatus().Pending == 7, "and still holds every observation");
 
         // The tally is kept against the batch's own id, so an acknowledgement
         // cannot leave it charged to the next batch: batch ids are fresh
@@ -1212,9 +1238,13 @@ try
         // in AcknowledgeDelivery is belt-and-braces, and is deliberately not
         // asserted here -- a test of it could not fail, and a green light that
         // cannot go red is worse than no light.
-        poisonStore.AcknowledgeDelivery(offline.BatchId, deliveryStarted.AddSeconds(60));
+        poisonStore.AcknowledgeDelivery(offline.BatchId, deliveryStarted.AddSeconds(90));
         Assert(poisonStore.ReadDeliveryStatus().Pending == 0,
             "an acknowledged batch leaves the queue however many transport failures preceded it");
+
+        // A refusal that arrives after the batch has gone is late, not wrong.
+        Assert(poisonStore.RecordDeliveryBatchRejection(offline.BatchId) == DeliveryRefusal.Unknown,
+            "and a refusal naming a batch that no longer exists changes nothing");
     }
     using (var senderStore = new ObservationStore(Path.Combine(directory, "sender.db")))
     {
@@ -1246,6 +1276,39 @@ try
         Assert((await sender.SendNextAsync(rejectedStore, credential, metadata)).Kind == DeliveryAttemptKind.Acknowledged,
             "the same durable batch can be accepted after the Hub contract is fixed");
         Assert(handler.BatchIds.Distinct().Count() == 1, "a rejected ACK preserves the idempotent batch ID");
+    }
+
+    // A refusal that halved the batch must not be answered with a longer wait.
+    //
+    // The controller backs off on every refusal, which is right for a server in
+    // trouble and wrong for one that answered. Measured before the two were
+    // separated: an eight-step bisection ran at the 300-second retry ceiling,
+    // and the queue reached its own 10,000 ceiling and began dropping at the
+    // far end while it waited -- trading the loss the halving had just
+    // prevented for a different one. The sender says which refusals changed the
+    // payload so the controller can tell the two apart.
+    using (var narrowStore = new ObservationStore(Path.Combine(directory, "narrowing.db")))
+    {
+        for (var port = 1; port <= 4; port++)
+            narrowStore.QueueForDelivery([new NetworkObservation(deliveryStarted.AddSeconds(port), 88, "UDP",
+                "10.0.0.1", 53000 + port, "203.0.113.9", port, 42, 24, ObservationLayer.Logical, "if", "etw", "Browser")],
+                deliveryStarted.AddSeconds(port));
+        var refusing = new DeliveryHandler(400, 400, 400, 400, 400, 400, 400, 400);
+        var narrowSender = new DeliverySender(new HttpClient(refusing));
+        var narrowCredential = new AgentCredential(new Uri("https://hub.example/"), agentId, agentToken, deliveryStarted);
+        var narrowMetadata = new DeliveryMetadata("host", "windows", "Windows", "dev");
+
+        foreach (var remaining in new[] { 2, 1 })
+        {
+            var narrowed = await narrowSender.SendNextAsync(narrowStore, narrowCredential, narrowMetadata);
+            Assert(narrowed.Kind == DeliveryAttemptKind.Rejected && narrowed.Narrowed,
+                $"a refusal that halves the batch says so, leaving {remaining}");
+        }
+        var single = await narrowSender.SendNextAsync(narrowStore, narrowCredential, narrowMetadata);
+        Assert(single.Kind == DeliveryAttemptKind.Rejected && !single.Narrowed,
+            "and a refusal of a single observation does not, because waiting is then the right answer");
+        Assert(narrowStore.ReadDeliveryStatus().Pending == 4,
+            "nothing has been given up on while the refusal is still being narrowed");
     }
 
     var fallback = AgentCapabilityNegotiation.Decide(null);
