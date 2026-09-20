@@ -109,3 +109,47 @@ describe('連続する要約要求がキャッシュを共有する（P3-67）',
     assert.ok(after.hitRate > 0, 'ヒット率が出ていない');
   });
 });
+
+// P3-139. The key for the all-time summary never moves -- `from` and `to` are
+// both null -- so the only thing that decided whether the cache served it was
+// the TTL. A fixed ten seconds against a request that arrives once a minute
+// meant the entry had always expired: hits=2 misses=393 on production, and
+// every miss blocked the event loop for 3.7 seconds.
+describe('高くついた答えほど長く使い回す（P3-139）', () => {
+  const ttl = connectionsRoutes._summaryCacheTtl;
+
+  it('3.7秒かかった答えは、次の要求が来る64秒後にもまだ生きている', () => {
+    // The measured all-time summary: five GROUP BY scans of 478,424 rows.
+    const earned = ttl(3677);
+    assert.ok(earned > 64_000, `全範囲の答えのTTLが短すぎる: ${earned} ms`);
+    assert.equal(earned, 110_310);
+    // ...but not unbounded. Two minutes is as stale as this may ever get.
+    assert.equal(ttl(60_000), 120_000);
+  });
+
+  it('安く済んだ答えには、最低限のTTLしか与えない', () => {
+    // A one-hour range measured 26.7 ms on production. Nothing is bought by
+    // holding that answer longer, so it keeps the short TTL it always had.
+    assert.equal(ttl(26.7), 10_000);
+    assert.equal(ttl(0), 10_000);
+    assert.equal(ttl(undefined), 10_000);
+  });
+
+  it('その間のコストには、比例したTTLを与える', () => {
+    assert.equal(ttl(1000), 30_000);
+    assert.equal(ttl(2000), 60_000);
+  });
+
+  it('全範囲の要約は、2回目に作り直さない', async () => {
+    let calls = 0;
+    const app = mount({
+      summarizeByTimeRange: () => {
+        calls += 1;
+        return { byDst: [], byDevice: [], total: 0 };
+      },
+    });
+    assert.equal((await request(app, '/api/connections/summary')).body.cached, false);
+    assert.equal((await request(app, '/api/connections/summary')).body.cached, true);
+    assert.equal(calls, 1);
+  });
+});
