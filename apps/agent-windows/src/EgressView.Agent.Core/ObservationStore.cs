@@ -2320,9 +2320,17 @@ public sealed partial class ObservationStore : IDisposable
                   WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
                     AND NOT EXISTS(SELECT 1 FROM chart_hourly c WHERE c.bucket_start=h.bucket_start AND c.layer=h.layer)
                   UNION ALL
+                  -- The hours the fold has not reached, as two ranges rather
+                  -- than one range with a hole in it. Written as a hole, the
+                  -- index serves the outer range and the OR is a filter over
+                  -- every row inside it: measured on a month, 2.67 seconds to
+                  -- find 27,000 rows among 34 million. As two ranges it is
+                  -- 0.02, because each one is an index seek.
                   SELECT COALESCE(bytes_sent,0),COALESCE(bytes_received,0) FROM observations
-                  WHERE observed_at>='{fromText}' AND observed_at<'{toText}' AND layer='logical'
-                    AND (observed_at<'{aggregateStart:O}' OR observed_at>='{aggregateEnd:O}')
+                  WHERE observed_at>='{fromText}' AND observed_at<'{aggregateStart:O}' AND layer='logical'
+                  UNION ALL
+                  SELECT COALESCE(bytes_sent,0),COALESCE(bytes_received,0) FROM observations
+                  WHERE observed_at>='{aggregateEnd:O}' AND observed_at<'{toText}' AND layer='logical'
                 )
                 """;
             CheckOperation(WinSqlite.Prepare(db, bytesSql, -1, out var bytesStatement, 0));
@@ -2354,8 +2362,11 @@ public sealed partial class ObservationStore : IDisposable
                   UNION ALL
                   SELECT {app},remote_address,COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)
                   FROM observations
-                  WHERE observed_at>='{fromText}' AND observed_at<'{toText}' AND layer='logical'
-                    AND (observed_at<'{aggregateStart:O}' OR observed_at>='{aggregateEnd:O}')
+                  WHERE observed_at>='{fromText}' AND observed_at<'{aggregateStart:O}' AND layer='logical'
+                  UNION ALL
+                  SELECT {app},remote_address,COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)
+                  FROM observations
+                  WHERE observed_at>='{aggregateEnd:O}' AND observed_at<'{toText}' AND layer='logical'
                 ), measured AS (
                   SELECT application,remote_address,SUM(bytes) AS bytes FROM parts GROUP BY 1,2
                 )
@@ -2429,8 +2440,15 @@ public sealed partial class ObservationStore : IDisposable
                          SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),
                          SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
                   FROM observations
-                  WHERE observed_at>='{fromText}' AND observed_at<'{toText}' AND layer='logical'
-                    AND (observed_at<'{aggregateStart:O}' OR observed_at>='{aggregateEnd:O}')
+                  WHERE observed_at>='{fromText}' AND observed_at<'{aggregateStart:O}' AND layer='logical'
+                  GROUP BY bucket,2
+                  UNION ALL
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST((CAST(strftime('%s',observed_at) AS INTEGER)-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
+                         {app},COUNT(DISTINCT {FlowIdentity}),
+                         SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),
+                         SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
+                  FROM observations
+                  WHERE observed_at>='{aggregateEnd:O}' AND observed_at<'{toText}' AND layer='logical'
                   GROUP BY bucket,2
                   UNION ALL
                   -- Hours the per-application fold never covered. There is no

@@ -1040,7 +1040,40 @@ try
             "timeline combines folded complete hours with the current raw hour without gaps or duplicates");
     }
 
-        // Per-destination bytes come from an aggregate, not from a day of rows.
+        // A period that starts mid-hour still counts the part-hour it starts in.
+    //
+    // The folded hours are whole hours inside the period, so a period starting
+    // at half past has a leading stretch that only the raw observations can
+    // answer for, and a trailing one for the hours not folded yet. Asked for
+    // as one range with a hole in it, the index serves the outer range and the
+    // hole becomes a filter over every row inside it: measured on a month,
+    // 2.67 seconds to find 27,000 rows among 34 million, against 0.02 for the
+    // two ranges named separately. Every fixture above starts on the hour, so
+    // the leading range was never exercised and could have been dropped
+    // entirely without a test noticing.
+    using (var partialStore = new ObservationStore(Path.Combine(directory, "partial-hours.db")))
+    {
+        var hour = new DateTimeOffset(2026, 9, 24, 0, 0, 0, TimeSpan.Zero);
+        NetworkObservation At(DateTimeOffset when, long sent) =>
+            new(when, 77, "TCP", "10.0.0.1", 50003, "203.0.113.50", 443, sent, 0,
+                ObservationLayer.Logical, null, "etw", "Straddler");
+        partialStore.WriteBatch([
+            At(hour.AddMinutes(40), 1),        // before the first whole hour
+            At(hour.AddHours(1).AddMinutes(30), 10),
+            At(hour.AddHours(2).AddMinutes(30), 100),
+            At(hour.AddHours(3).AddMinutes(2), 1000),   // after the fold reaches
+        ]);
+        while (partialStore.PendingChartFoldHours(hour.AddHours(3).AddMinutes(10)) > 0)
+            partialStore.FoldCompletedHoursForCharts(hour.AddHours(3).AddMinutes(10));
+
+        var period = partialStore.ReadPeriodAnalysis(hour.AddMinutes(30), hour.AddHours(3).AddMinutes(5));
+        Assert(period.Bytes == 1111,
+            "a period starting mid-hour counts the part-hour before the folded hours, and the part-hour after them");
+        Assert(period.Links.Single().Bytes == 1111,
+            "and its destinations are made of the same three stretches");
+    }
+
+    // Per-destination bytes come from an aggregate, not from a day of rows.
     //
     // The links query had no aggregate to read, so a period scanned every raw
     // observation in it. Measured on one machine, a day held 6,500,653 of them
