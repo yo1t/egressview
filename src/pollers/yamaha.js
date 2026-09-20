@@ -263,10 +263,47 @@ async function detectYamaha({ ip, user, pass, expectedHostFp, natCandidates } = 
   }
 }
 
+/**
+ * Leases from `show status dhcp` on a Yamaha RTX.
+ *
+ * This is the DHCP server's own ledger, which makes it better evidence than
+ * ARP for who holds an address. ARP says which machine answered for an IP a
+ * moment ago, and on this network that alternated between two machines every
+ * poll: a device kept answering at an address whose lease belongs to something
+ * else, and the device list followed it (P3-138). The lease table never did --
+ * measured 2026-09-20, 69 leases, no MAC holding two of them.
+ *
+ * It also carries the hostname the client asked for, which nothing else here
+ * has: 41 of those 69 leases named themselves.
+ *
+ * The output is a block per lease and the pager splits lines mid-label, so the
+ * parse runs over a whitespace-normalised stream rather than line by line.
+ */
+function parseDhcpStatus(raw) {
+  const text = String(raw || '')
+    .replace(/\r/g, '')
+    .replace(/---つづく---/g, ' ')
+    .replace(/[ \t]+/g, ' ');
+  const leases = [];
+  const blocks = text.split(/割り当て中アドレス:\s*/).slice(1);
+  for (const block of blocks) {
+    const ip = (block.match(/^(\d{1,3}(?:\.\d{1,3}){3})/) || [])[1];
+    if (!ip) continue;
+    const mac = (block.match(/イーサネットアドレス:\s*([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})/) || [])[1];
+    if (!mac) continue;
+    const host = (block.match(/ホスト名:\s*(\S+)/) || [])[1] || null;
+    leases.push({ ip, mac: mac.toLowerCase(), host });
+  }
+  return leases;
+}
+
 // ── Poller factory ────────────────────────────────────────────────────────────
 
 const YAMAHA_ARP_REFRESH_MS = 60 * 1000;
 const YAMAHA_NDP_REFRESH_MS = 120 * 1000; // every 2 min
+// Leases last days, so there is nothing to gain from asking more often than
+// the ARP table -- and the command prints every lease, so it is not free.
+const YAMAHA_DHCP_REFRESH_MS = 120 * 1000;
 
 /**
  * Create an isolated Yamaha RTX poller instance. Every piece of mutable
@@ -279,6 +316,7 @@ function createYamahaPoller({ id = '', profiler = runtimeProfiler } = {}) {
   const TAG     = id ? `[yamaha:${id}]`     : '[yamaha]';
   const TAG_ARP = id ? `[yamaha-arp:${id}]` : '[yamaha-arp]';
   const TAG_NDP = id ? `[yamaha-ndp:${id}]` : '[yamaha-ndp]';
+  const TAG_DHCP = id ? `[yamaha-dhcp:${id}]` : '[yamaha-dhcp]';
 
   let yamahaShell   = null;
   let yamahaConn    = null;
@@ -292,6 +330,9 @@ function createYamahaPoller({ id = '', profiler = runtimeProfiler } = {}) {
   // Yamaha ARP table cache (IP -> MAC)
   const yamahaArpCache = new Map();
   let yamahaArpLastRefresh = 0;
+  // ip -> { mac, host } straight from the DHCP server's lease table.
+  const yamahaDhcpCache = new Map();
+  let yamahaDhcpLastRefresh = 0;
 
   // IPv6 NDP cache: MAC → IPv6 address(es)
   const yamahaNdpCache = new Map(); // mac → [ipv6, ...]
@@ -537,6 +578,32 @@ function createYamahaPoller({ id = '', profiler = runtimeProfiler } = {}) {
     return profiler.measureSync('router.yamaha.nat.parse', () => parseNatDetail(raw));
   }
 
+
+  async function refreshYamahaDhcp({ signal } = {}) {
+    if (!yamahaEnabled || !yamahaReady) return;
+    try {
+      const raw = await profiler.measureAsync('router.yamaha.dhcp.ssh', () =>
+        yamahaExec('show status dhcp', 60000, { signal }));
+      const leases = profiler.measureSync('router.yamaha.dhcp.parse', () => parseDhcpStatus(raw));
+      // A parse that suddenly returns nothing is a parse that broke, not a
+      // network where every lease expired at once. Keep what we had.
+      if (!leases.length && yamahaDhcpCache.size) {
+        logger.warn(`${TAG_DHCP} no leases parsed; keeping ${yamahaDhcpCache.size} from before`);
+        return;
+      }
+      profiler.measureSync('router.yamaha.dhcp.cache', () => {
+        yamahaDhcpCache.clear();
+        for (const lease of leases) yamahaDhcpCache.set(lease.ip, { mac: lease.mac, host: lease.host });
+      });
+      yamahaDhcpLastRefresh = Date.now();
+      const named = leases.filter(lease => lease.host).length;
+      logger.info(`${TAG_DHCP} leases refreshed: ${leases.length} (${named} named)`);
+    } catch (e) {
+      logger.error(`${TAG_DHCP} refresh failed:`, e.message);
+      if (signal?.aborted) throw e;
+    }
+  }
+
   async function refreshYamahaNdp({ signal } = {}) {
     if (!yamahaEnabled || !yamahaReady) return;
     try {
@@ -596,8 +663,12 @@ function createYamahaPoller({ id = '', profiler = runtimeProfiler } = {}) {
     detectCurrentYamaha,
     refreshYamahaArp,
     refreshYamahaNdp,
+    refreshYamahaDhcp,
     fetchNatSessions,
     getArpCache:    () => yamahaArpCache,
+    getDhcpCache:   () => yamahaDhcpCache,
+    getDhcpLease:   ip => yamahaDhcpCache.get(ip) || null,
+    getDhcpMac:     ip => yamahaDhcpCache.get(ip)?.mac || null,
     getArpMac:      ip => yamahaArpCache.get(ip) || null,
     getNdpByMac:    mac => mac ? (yamahaNdpCache.get(mac.toLowerCase()) || null) : null,
     isReady:        () => yamahaReady,
@@ -610,6 +681,7 @@ function createYamahaPoller({ id = '', profiler = runtimeProfiler } = {}) {
     getHostName:    () => yamahaHostName,
     needsArpRefresh: () => Date.now() - yamahaArpLastRefresh > YAMAHA_ARP_REFRESH_MS,
     needsNdpRefresh: () => Date.now() - yamahaNdpLastRefresh > YAMAHA_NDP_REFRESH_MS,
+    needsDhcpRefresh: () => Date.now() - yamahaDhcpLastRefresh > YAMAHA_DHCP_REFRESH_MS,
   };
 }
 
@@ -620,6 +692,7 @@ module.exports = {
   ...defaultPoller,
   createYamahaPoller,
   // Pure parsers (shared, stateless)
+  parseDhcpStatus,
   parseNatDetail,
   parseNatDescriptorCandidates,
   parseLanIp,
