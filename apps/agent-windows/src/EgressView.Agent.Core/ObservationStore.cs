@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 21;
+    private const int CurrentSchemaVersion = 22;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -138,6 +138,23 @@ public sealed partial class ObservationStore : IDisposable
           fetched_at TEXT
         );
         INSERT OR IGNORE INTO threat_cache_state(id) VALUES(1);
+        """;
+    /// What makes two observations the same connection.
+    ///
+    /// Not the flow_key the flows table uses -- that is built when a flow is
+    /// upserted and is not on an observation row. These are the columns a
+    /// reader would point at and say "that is one connection", and they are
+    /// the same ones the flows table keys on. UDP deliberately omits the
+    /// remote end: Windows' startup snapshot only identifies its local socket,
+    /// so including the remote end here would make the chart disagree with the
+    /// summary above it whenever one UDP socket talks to several peers.
+    private const string FlowIdentity =
+        "CASE WHEN protocol='UDP' " +
+        "THEN protocol||CHAR(31)||local_address||CHAR(31)||local_port||CHAR(31)||process_id " +
+        "ELSE protocol||CHAR(31)||local_address||CHAR(31)||local_port||CHAR(31)||remote_address||CHAR(31)||remote_port||CHAR(31)||process_id END";
+
+    private const string Version22Schema = """
+        ALTER TABLE chart_hourly ADD COLUMN flow_count INTEGER NOT NULL DEFAULT 0;
         """;
     private const string Version21Schema = """
         ALTER TABLE geo_locations ADD COLUMN source TEXT NOT NULL DEFAULT 'hub';
@@ -323,7 +340,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -352,7 +369,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 17) { MigrateVersion17To18(); version = 18; }
         if (version == 18) { MigrateVersion18To19(); version = 19; }
         if (version == 19) { MigrateVersion19To20(); version = 20; }
-        if (version == 20) MigrateVersion20To21();
+        if (version == 20) { MigrateVersion20To21(); version = 21; }
+        if (version == 21) MigrateVersion21To22();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -411,6 +429,47 @@ public sealed partial class ObservationStore : IDisposable
         {
             Execute("BEGIN IMMEDIATE; " + Version21Schema + " UPDATE schema_version SET version=21 WHERE version=20; COMMIT;");
             PruneMigrationBackups(21);
+        }
+        catch { TryRollback(); throw; }
+    }
+
+    /// The chart learns to count connections rather than rows.
+    ///
+    /// The timeline plotted observation_count and the legend called it
+    /// connections. While the collector wrote a row per packet those were not
+    /// close: measured on one machine, a single minute held 310,764 rows and
+    /// 215 connections, and the chart drew 310,764 -- a spike 1,445 times the
+    /// truth that flattened every other bar on the screen, while the summary
+    /// above it said 2,647 connections for the same hour. Two numbers on one
+    /// screen, the same name, two orders of magnitude apart.
+    ///
+    /// Buckets already folded have no count to convert to, because the rows
+    /// they were made from are summarised away. Those inside the raw retention
+    /// window are dropped and folded again from the observations, which still
+    /// exist. Older ones keep a flow_count of zero, and the chart reads that
+    /// as "this hour cannot say" rather than drawing a zero as a fact.
+    private void MigrateVersion21To22()
+    {
+        CreateMigrationBackup(22);
+        try
+        {
+            Execute("BEGIN IMMEDIATE");
+            Execute(Version22Schema);
+            // Everything the observations can still rebuild, rebuilt. The
+            // watermark moves back with it, so the ordinary fold does the work
+            // on its own schedule instead of this migration holding the
+            // database while it recomputes.
+            var oldestRaw = NullableScalarText("SELECT MIN(observed_at) FROM observations");
+            if (oldestRaw is not null)
+            {
+                var oldest = DateTimeOffset.Parse(oldestRaw).ToUniversalTime();
+                var boundary = new DateTimeOffset(oldest.Year, oldest.Month, oldest.Day, oldest.Hour, 0, 0, TimeSpan.Zero);
+                Execute($"DELETE FROM chart_hourly WHERE bucket_start>='{boundary:O}'");
+                Execute($"UPDATE chart_hourly_state SET folded_through='{boundary:O}' WHERE folded_through>'{boundary:O}'");
+            }
+            Execute("UPDATE schema_version SET version=22 WHERE version=21");
+            Execute("COMMIT");
+            PruneMigrationBackups(22);
         }
         catch { TryRollback(); throw; }
     }
@@ -1557,9 +1616,10 @@ public sealed partial class ObservationStore : IDisposable
             try
             {
                 Execute($"""
-                    INSERT INTO chart_hourly(bucket_start,application,layer,observation_count,bytes_sent,bytes_received,bytes_unknown)
+                    INSERT INTO chart_hourly(bucket_start,application,layer,observation_count,flow_count,bytes_sent,bytes_received,bytes_unknown)
                     SELECT substr(observed_at,1,13) || ':00:00.0000000+00:00',
                            COALESCE(NULLIF(process_name,''),'Unknown'),layer,COUNT(*),
+                           COUNT(DISTINCT {FlowIdentity}),
                            SUM(COALESCE(bytes_sent,0)),SUM(COALESCE(bytes_received,0)),
                            SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
                     FROM observations
@@ -1567,6 +1627,12 @@ public sealed partial class ObservationStore : IDisposable
                     GROUP BY 1,2,layer
                     ON CONFLICT(bucket_start,application,layer) DO UPDATE SET
                       observation_count=observation_count+excluded.observation_count,
+                      -- Added, not replaced, for the same reason the others
+                      -- are: a bucket can be folded in more than one pass.
+                      -- This over-counts a connection that spans two passes,
+                      -- which is the error of one, against a replacement that
+                      -- would throw away everything the earlier pass saw.
+                      flow_count=flow_count+excluded.flow_count,
                       bytes_sent=bytes_sent+excluded.bytes_sent,
                       bytes_received=bytes_received+excluded.bytes_received,
                       bytes_unknown=bytes_unknown+excluded.bytes_unknown;
@@ -2007,7 +2073,24 @@ public sealed partial class ObservationStore : IDisposable
             // into one bucket the reader can see and question instead.
             const string app = "COALESCE(NULLIF(process_name,''),'Unknown')";
             var where = $"last_seen>='{fromText}' AND first_seen<'{toText}' AND layer='logical'";
-            var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),COALESCE(SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),0),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END),COALESCE(SUM(COALESCE(bytes_sent,0)),0),COALESCE(SUM(COALESCE(bytes_received,0)),0) FROM flows WHERE {where}";
+
+            // The hours this period reads from folded aggregates rather than
+            // raw rows: whole hours inside the period, up to the fold
+            // watermark. Raw observations cover everything outside it, so the
+            // two together are the period exactly once.
+            var fromUtc = from.ToUniversalTime();
+            var toUtc = to.ToUniversalTime();
+            var aggregateStart = new DateTimeOffset(fromUtc.Year, fromUtc.Month, fromUtc.Day, fromUtc.Hour, 0, 0, TimeSpan.Zero);
+            if (aggregateStart < fromUtc) aggregateStart = aggregateStart.AddHours(1);
+            var aggregateEnd = new DateTimeOffset(toUtc.Year, toUtc.Month, toUtc.Day, toUtc.Hour, 0, 0, TimeSpan.Zero);
+            var foldWatermarkText = NullableScalarText("SELECT MAX(folded_through) FROM chart_hourly_state");
+            var foldWatermark = foldWatermarkText is null ? aggregateStart : DateTimeOffset.Parse(foldWatermarkText).ToUniversalTime();
+            if (aggregateEnd > foldWatermark) aggregateEnd = foldWatermark;
+            if (aggregateEnd < aggregateStart) aggregateEnd = aggregateStart;
+            // How many connections, applications and destinations the period
+            // touched: properties of the flows themselves, so counted from
+            // flows. A flow that outlived the period still touched it.
+            var totalsSql = $"SELECT COUNT(*),COUNT(DISTINCT {app}),COUNT(DISTINCT remote_address),SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows WHERE {where}";
             CheckOperation(WinSqlite.Prepare(db, totalsSql, -1, out var totalsStatement, 0));
             long connections; int applications; int destinations; long bytes; long unknown; long sent; long received;
             try
@@ -2016,16 +2099,72 @@ public sealed partial class ObservationStore : IDisposable
                 connections = WinSqlite.ColumnInt64(totalsStatement, 0);
                 applications = (int)WinSqlite.ColumnInt64(totalsStatement, 1);
                 destinations = (int)WinSqlite.ColumnInt64(totalsStatement, 2);
-                bytes = WinSqlite.ColumnInt64(totalsStatement, 3);
-                unknown = WinSqlite.ColumnInt64(totalsStatement, 4);
-                sent = WinSqlite.ColumnInt64(totalsStatement, 5);
-                received = WinSqlite.ColumnInt64(totalsStatement, 6);
+                unknown = WinSqlite.ColumnInt64(totalsStatement, 3);
             }
             finally { WinSqlite.Finalize(totalsStatement); }
 
+            // Bytes are not. A flow row carries its whole life's total, so
+            // summing the flows that overlap a period charges the period for
+            // traffic that happened outside it -- an svchost connection opened
+            // eighteen hours ago reported its eighteen hours into every hour it
+            // touched. Measured on one machine, the last hour read 980 MB where
+            // the hour's own traffic was 650 MB, so a fresh 30 MB download moved
+            // a figure that was half history by three percent, and looked to the
+            // reader like nothing had been captured at all.
+            //
+            // An observation carries one event's bytes at one time, and a folded
+            // hour is their sum, so both fall in the period they belong to.
+            var bytesSql = $"""
+                SELECT COALESCE(SUM(sent),0),COALESCE(SUM(received),0) FROM (
+                  SELECT bytes_sent AS sent,bytes_received AS received FROM chart_hourly
+                  WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
+                  UNION ALL
+                  SELECT bytes_sent,bytes_received FROM hourly_summary h
+                  WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
+                    AND NOT EXISTS(SELECT 1 FROM chart_hourly c WHERE c.bucket_start=h.bucket_start AND c.layer=h.layer)
+                  UNION ALL
+                  SELECT COALESCE(bytes_sent,0),COALESCE(bytes_received,0) FROM observations
+                  WHERE observed_at>='{fromText}' AND observed_at<'{toText}' AND layer='logical'
+                    AND (observed_at<'{aggregateStart:O}' OR observed_at>='{aggregateEnd:O}')
+                )
+                """;
+            CheckOperation(WinSqlite.Prepare(db, bytesSql, -1, out var bytesStatement, 0));
+            try
+            {
+                CheckQueryRow(WinSqlite.Step(bytesStatement));
+                sent = WinSqlite.ColumnInt64(bytesStatement, 0);
+                received = WinSqlite.ColumnInt64(bytesStatement, 1);
+                bytes = sent + received;
+            }
+            finally { WinSqlite.Finalize(bytesStatement); }
+
             var links = new List<AppDestinationAggregate>();
             const string qualifiedApp = "COALESCE(NULLIF(f.process_name,''),'Unknown')";
-            var linksSql = $"SELECT {qualifiedApp},f.remote_address,COALESCE(NULLIF(f.remote_hostname,''),f.remote_address),COUNT(*),COALESCE(SUM(COALESCE(f.bytes_sent,0)+COALESCE(f.bytes_received,0)),0),SUM(CASE WHEN f.bytes_sent IS NULL OR f.bytes_received IS NULL THEN 1 ELSE 0 END) FROM flows f WHERE f.last_seen>='{fromText}' AND f.first_seen<'{toText}' AND f.layer='logical' GROUP BY 1,2,3 ORDER BY 4 DESC,1,2 LIMIT 512";
+            // Per destination, the same correction, from raw observations --
+            // there is no per-destination aggregate to fall back on, so beyond
+            // the raw retention window the bytes are genuinely gone and zero is
+            // the honest answer where the old sum invented one.
+            //
+            // One row per application and destination address now, named by
+            // whichever hostname was seen for it. Grouping by the name as well
+            // split a destination in two whenever one address answered to two
+            // names, and half a destination is not something a reader can use.
+            var linksSql = $"""
+                WITH measured AS (
+                  SELECT {app} AS application,remote_address,
+                         SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)) AS bytes
+                  FROM observations
+                  WHERE observed_at>='{fromText}' AND observed_at<'{toText}' AND layer='logical'
+                  GROUP BY 1,2
+                )
+                SELECT {qualifiedApp},f.remote_address,MAX(COALESCE(NULLIF(f.remote_hostname,''),f.remote_address)),
+                       COUNT(*),COALESCE(MAX(measured.bytes),0),
+                       SUM(CASE WHEN f.bytes_sent IS NULL OR f.bytes_received IS NULL THEN 1 ELSE 0 END)
+                FROM flows f
+                LEFT JOIN measured ON measured.application={qualifiedApp} AND measured.remote_address=f.remote_address
+                WHERE f.last_seen>='{fromText}' AND f.first_seen<'{toText}' AND f.layer='logical'
+                GROUP BY 1,2 ORDER BY 4 DESC,1,2 LIMIT 512
+                """;
             CheckOperation(WinSqlite.Prepare(db, linksSql, -1, out var linksStatement, 0));
             try
             {
@@ -2038,35 +2177,35 @@ public sealed partial class ObservationStore : IDisposable
             var durationSeconds = Math.Max(1, (to - from).TotalSeconds);
             var timeline = new List<AppTimelineAggregate>();
             var widthSeconds = durationSeconds / bucketCount;
-            var fromUtc = from.ToUniversalTime();
-            var toUtc = to.ToUniversalTime();
-            var aggregateStart = new DateTimeOffset(fromUtc.Year, fromUtc.Month, fromUtc.Day, fromUtc.Hour, 0, 0, TimeSpan.Zero);
-            if (aggregateStart < fromUtc) aggregateStart = aggregateStart.AddHours(1);
-            var aggregateEnd = new DateTimeOffset(toUtc.Year, toUtc.Month, toUtc.Day, toUtc.Hour, 0, 0, TimeSpan.Zero);
-            var watermarkText = NullableScalarText("SELECT MAX(folded_through) FROM chart_hourly_state");
-            var watermark = watermarkText is null ? aggregateStart : DateTimeOffset.Parse(watermarkText).ToUniversalTime();
-            aggregateEnd = aggregateEnd < watermark ? aggregateEnd : watermark;
-            if (widthSeconds < 3600 || aggregateEnd <= aggregateStart) aggregateEnd = aggregateStart;
+            // Buckets narrower than an hour cannot be filled from hourly rows,
+            // so the chart falls back to raw observations for the whole period.
+            // The totals above do not: they are not drawn in buckets.
+            if (widthSeconds < 3600) aggregateEnd = aggregateStart;
             var widthText = widthSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
             var timelineSql = $"""
                 WITH combined AS (
                   SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(bucket_start)-julianday('{fromText}'))*86400.0/{widthText} AS INTEGER))) AS bucket,
-                         application,SUM(observation_count) AS connections,
+                         application,SUM(flow_count) AS connections,
                          SUM(bytes_sent+bytes_received) AS bytes,SUM(bytes_unknown) AS unknown
                   FROM chart_hourly
                   WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
                   GROUP BY bucket,application
                   UNION ALL
                   SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(observed_at)-julianday('{fromText}'))*86400.0/{widthText} AS INTEGER))) AS bucket,
-                         {app},COUNT(*),SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),
+                         {app},COUNT(DISTINCT {FlowIdentity}),
+                         SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),
                          SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
                   FROM observations
                   WHERE observed_at>='{fromText}' AND observed_at<'{toText}' AND layer='logical'
                     AND (observed_at<'{aggregateStart:O}' OR observed_at>='{aggregateEnd:O}')
                   GROUP BY bucket,2
                   UNION ALL
+                  -- Hours the per-application fold never covered. There is no
+                  -- connection count to recover from a protocol summary, so
+                  -- these contribute bytes and nothing to the bars; a drawn
+                  -- zero would be read as "nothing happened".
                   SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(bucket_start)-julianday('{fromText}'))*86400.0/{widthText} AS INTEGER))) AS bucket,
-                         'Other',SUM(observation_count),SUM(bytes_sent+bytes_received),SUM(bytes_unknown)
+                         'Other',0,SUM(bytes_sent+bytes_received),SUM(bytes_unknown)
                   FROM hourly_summary h
                   WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
                     AND NOT EXISTS(SELECT 1 FROM chart_hourly c WHERE c.bucket_start=h.bucket_start AND c.layer=h.layer)

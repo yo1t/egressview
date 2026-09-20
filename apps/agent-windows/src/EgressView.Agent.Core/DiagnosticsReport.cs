@@ -174,6 +174,11 @@ public static class DiagnosticsReport
         value.NamesDeferred, value.NamesRecoveredFromStop, value.NamesDeferredExpired, value.NamesDeferredOverflow,
         processNameSourceError = SafeCode(value.ProcessNameSourceError), value.HostnamesResolved, value.HostnamesUnavailable,
         value.DnsEventsSeen, hostnameSourceError = SafeCode(value.HostnameSourceError),
+        // Counts, so nothing about the traffic itself. Left out of the first
+        // version of the summing and therefore unmeasurable: the report is
+        // where the compression has to be visible, or the next person has to
+        // take it on trust.
+        value.EventsFolded, value.ObservationsEmitted, value.CoalescerOverflows, value.CoalescerOpenFlows,
     };
 
     private static object ReadInstallerState()

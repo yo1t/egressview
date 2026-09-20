@@ -40,18 +40,22 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
 
     /// Total buffer space for the session, and the size of one buffer.
     ///
-    /// Both were left at the defaults, and on a busy machine that is not
-    /// enough: measured here, 831,786 of 4,400,951 events were lost -- about
-    /// nineteen in a hundred. The two ETW counters say which end failed.
-    /// RealTimeBuffersLost was zero, so nothing failed to reach this process;
-    /// EventsLost was not, which is the count of events a provider could not
-    /// write because every buffer was already in use.
+    /// These were raised to 64 MB to cure event loss, and that was the wrong
+    /// answer to a correct measurement. Widening the receptacle does not make
+    /// the consumer faster; it converts loss into delay, and the delay was
+    /// unbounded. Measured after that change: 7,119,190 events lost anyway,
+    /// and what survived was written so far behind the clock that the Agent
+    /// showed traffic from thirty-eight minutes earlier while reporting itself
+    /// as running -- event time advancing at about one part in a thousand of
+    /// real time, which never catches up. Loss is the better failure of the
+    /// two, because the Agent stays current and says so.
     ///
-    /// So the fix is buffers, not a faster reader. 64 MB of them, in 128 KB
-    /// pieces rather than the default 64 KB, because fewer larger buffers are
-    /// returned to the provider in fewer round trips.
-    private const int SessionBufferMB = 64;
-    private const int SessionBufferQuantumKB = 128;
+    /// The consumer is now fast enough not to need either, because it no
+    /// longer writes a row per packet -- see ObservationCoalescer. Back to a
+    /// modest, bounded reserve: enough to ride out a burst, too small to hide
+    /// a consumer that has stopped keeping up.
+    private const int SessionBufferMB = 16;
+    private const int SessionBufferQuantumKB = 64;
 
     /// Whether destination names are read from Windows DNS metadata.
     ///
@@ -148,6 +152,10 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
     /// Thirty seconds. Long enough for a trace session to reach steady state,
     /// short enough that a real shortfall is not hidden for long.
     private static readonly TimeSpan StartupSettlingPeriod = TimeSpan.FromSeconds(30);
+
+    /// Sums a flow's packet events within a second into one row. See
+    /// ObservationCoalescer for why a row per packet could not work.
+    private readonly ObservationCoalescer coalescer = new();
 
     private int startingEventsLost;
     private bool startupSettled;
@@ -248,6 +256,10 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
         EtwConnectionAccepted = ConnectionAccepted,
         EtwConnectionDisconnected = ConnectionDisconnected,
         EtwConnectionClosed = ConnectionClosed,
+        EventsFolded = coalescer.Folded,
+        ObservationsEmitted = coalescer.Emitted,
+        CoalescerOverflows = coalescer.Overflows,
+        CoalescerOpenFlows = coalescer.OpenFlows,
         InterfaceUnresolved = InterfaceUnresolved,
         InboundMulticastIgnored = InboundMulticastIgnored,
         EtwEventsLost = EventsLost,
@@ -297,6 +309,11 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             return;
         }
         Record(e);
+        // On the event timeline, not the wall clock, for the same reason the
+        // deferred names expire that way: under load the callback arrives well
+        // after the event, and a bucket judged against now would be closed
+        // before the events that belong in it had been handed over.
+        Submit(coalescer.Expire(eventAt));
         Submit(deferredNames.Expire(eventAt));
     }
 
@@ -413,7 +430,11 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             && processNames.TryGetUnresolvedStart(pid, out var processStartedAt)
             && deferredNames.TryDefer(observation, processStartedAt, observation.ObservedAt))
             return;
-        pipeline.TrySubmit(observation);
+        // Deferred observations go straight to the pipeline when they are
+        // released, and are left out of the summing on purpose: they are a few
+        // hundred against millions, and folding a row whose bucket has already
+        // been emitted would be work for no reduction.
+        Submit(coalescer.Add(observation));
     }
 
     private static bool IsVpnTransport(string? processName, InterfaceInfo? localInterface)
@@ -473,6 +494,7 @@ public sealed class EtwNetworkCollector : IAsyncDisposable
             catch (TimeoutException) { StopTimedOut = true; }
         }
         Submit(deferredNames.Drain());
+        Submit(coalescer.Drain());
         session.Dispose();
         session = null;
         processing = null;
