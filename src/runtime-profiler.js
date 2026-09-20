@@ -1,6 +1,7 @@
 'use strict';
 
 const { monitorEventLoopDelay, performance, PerformanceObserver } = require('node:perf_hooks');
+const { createStallSampler } = require('./stall-sampler');
 
 const DEFAULT_INTERVAL_MS = 60_000;
 const NS_PER_MS = 1e6;
@@ -20,6 +21,10 @@ const RECENT_OPERATION_LIMIT = 200;
 // would push the one collection that mattered out of the ring before anything
 // read it. Only pauses long enough to be part of a stall are worth keeping.
 const GC_PAUSE_MIN_MS = 1;
+// Sampling costs a few percent of one core, so it stays off unless an operator
+// is chasing a stall. When it is on, every stall report is followed by the
+// stacks the main thread was actually executing.
+const DEFAULT_STALL_SAMPLE_INTERVAL_US = 1000;
 
 function round(value, digits = 1) {
   const factor = 10 ** digits;
@@ -33,6 +38,7 @@ function createRuntimeProfiler(deps = {}) {
   const createHistogram = deps.createHistogram || (() => monitorEventLoopDelay({ resolution: 20 }));
   const scheduleInterval = deps.scheduleInterval || setInterval;
   const clearScheduledInterval = deps.clearScheduledInterval || clearInterval;
+  const makeStallSampler = deps.createStallSampler || createStallSampler;
 
   let logger = console;
   let enabled = false;
@@ -58,6 +64,7 @@ function createRuntimeProfiler(deps = {}) {
   let watchdogIntervalMs = DEFAULT_WATCHDOG_INTERVAL_MS;
   let stallThresholdMs = DEFAULT_STALL_THRESHOLD_MS;
   let stallCount = 0;
+  let stallSampler = null;
 
   function remember(list, entry, limit) {
     list.push(entry);
@@ -126,6 +133,30 @@ function createRuntimeProfiler(deps = {}) {
       overlapping: whatOverlapped(gapStart, firedAt),
       rssMb: round(memoryUsage().rss / 1024 / 1024),
     });
+    reportStallStacks(gapStart, firedAt, round(lateBy));
+  }
+
+  /**
+   * The stacks the main thread ran during the gap, if sampling is on.
+   *
+   * This lands a moment after the stall line above, because reading samples
+   * out of V8 means stopping the profile and that is asynchronous. It carries
+   * `atMs` so the two lines can be matched in the journal.
+   */
+  function reportStallStacks(gapStart, gapEnd, atMs) {
+    if (!stallSampler) return;
+    stallSampler.cut({ fromMs: gapStart, toMs: gapEnd })
+      .then(summary => {
+        if (!summary || !summary.frames.length) return;
+        const warn = typeof logger.warn === 'function' ? logger.warn : logger.info;
+        warn.call(logger, '[runtime-stall-stack]', {
+          atMs,
+          sampledMs: summary.totalMs,
+          samples: summary.samples,
+          frames: summary.frames,
+        });
+      })
+      .catch(() => { /* a diagnostic must never break the server */ });
   }
 
   function record(name, wallMs, cpuMs = null) {
@@ -219,6 +250,9 @@ function createRuntimeProfiler(deps = {}) {
     // has to be explained by what ran just before it.
     gcPauses = gcPauses.slice(-RECENT_OPERATION_LIMIT);
     histogram.reset();
+    // Cut the rolling profile loose each window: samples nobody asked about
+    // would otherwise accumulate for as long as the Hub runs.
+    stallSampler?.cut({ summarise: false }).catch(() => { /* not worth a log */ });
     windowStartedAt = endedAt;
     windowCpuStart = cpuUsage();
     return snapshot;
@@ -258,6 +292,16 @@ function createRuntimeProfiler(deps = {}) {
         gcObserver.observe({ entryTypes: ['gc'] });
       } catch { gcObserver = null; }
     }
+    const sampleStalls = options.stallProfile ?? process.env.EGRESSVIEW_STALL_PROFILE === 'true';
+    if (sampleStalls) {
+      const sampler = makeStallSampler({ now });
+      sampler.start({
+        samplingIntervalUs: options.stallSampleIntervalUs || DEFAULT_STALL_SAMPLE_INTERVAL_US,
+      })
+        .then(ok => { stallSampler = ok ? sampler : null; })
+        .catch(() => { stallSampler = null; });
+    }
+
     watchdogExpectedAt = now() + watchdogIntervalMs;
     watchdogTimer = scheduleInterval(watchdogTick, watchdogIntervalMs);
     watchdogTimer?.unref?.();
@@ -270,6 +314,8 @@ function createRuntimeProfiler(deps = {}) {
     watchdogTimer = null;
     try { gcObserver?.disconnect(); } catch { /* already gone */ }
     gcObserver = null;
+    try { stallSampler?.stop(); } catch { /* already gone */ }
+    stallSampler = null;
     recentOperations = [];
     gcPauses = [];
     inFlight.clear();
