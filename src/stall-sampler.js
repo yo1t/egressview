@@ -12,6 +12,12 @@
 // from inside the process, so there is no debugger port to open on a
 // production host and no signal to send to a live PID.
 
+// Reading samples out of V8 means stopping the profile, and that runs on the
+// main thread: on the production Hub a cut of one window measured around
+// 170 ms. Measured 2026-09-20, twenty seconds of profile cut in 6.9 ms at 1 ms
+// sampling and 6.3 ms at 5 ms -- so the cost tracks how long the profile ran,
+// not how many samples it holds, and coarsening the interval would buy
+// resolution away for nothing.
 const DEFAULT_SAMPLING_INTERVAL_US = 1000;
 const DEFAULT_TOP_FRAMES = 3;
 const DEFAULT_STACK_DEPTH = 5;
@@ -152,11 +158,16 @@ function createStallSampler(deps = {}) {
    * Stop the profile, summarise the given span, and start profiling again.
    * Returns null when there is nothing to report, including when a cut is
    * already in progress -- two stalls in a row should not stack up sessions.
+   *
+   * The returned `cutMs` is what this cost the loop. A diagnostic that stops
+   * the thing it is measuring has to say so, in the same line as its finding,
+   * or the next reader spends an afternoon chasing its own instrument.
    */
   async function cut({ fromMs, toMs, summarise = true } = {}) {
     if (!session || !running || cutting) return null;
     cutting = true;
     const profileStartedAtMs = startedAtMs;
+    const cutBeganAt = now();
     try {
       const { profile } = await post('Profiler.stop');
       running = false;
@@ -164,7 +175,8 @@ function createStallSampler(deps = {}) {
         ? summariseStallSamples(profile, { startedAtMs: profileStartedAtMs, fromMs, toMs })
         : null;
       await beginProfile();
-      return summary;
+      if (!summary) return { cutMs: round(now() - cutBeganAt) };
+      return { ...summary, cutMs: round(now() - cutBeganAt) };
     } catch {
       running = false;
       return null;

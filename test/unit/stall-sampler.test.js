@@ -66,12 +66,35 @@ describe('停止サンプラ', () => {
     });
     assert.equal(await sampler.start(), true);
     assert.equal(sampler.isRunning(), true);
-    await sampler.cut({ fromMs: 1180, toMs: 1420 });
+    const summary = await sampler.cut({ fromMs: 1180, toMs: 1420 });
     assert.equal(sampler.isRunning(), true);
+    // What the cut cost the loop is reported, not hidden: on the production
+    // Hub it was 671 ms and showed up as a stall of its own.
+    assert.equal(typeof summary.cutMs, 'number');
+    assert.equal(summary.frames[0].stack[0], 'matchThreats threats.js:12');
     assert.deepEqual(calls, [
       'connect', 'Profiler.enable', 'Profiler.setSamplingInterval', 'Profiler.start',
       'Profiler.stop', 'Profiler.start',
     ]);
+  });
+
+  it('要約しない切り出しでも、かかった時間だけは返す', async () => {
+    let clock = 0;
+    const sampler = createStallSampler({
+      now: () => (clock += 7),
+      createSession: () => ({
+        connect: () => {},
+        disconnect: () => {},
+        post: (method, params, callback) => {
+          const cb = typeof params === 'function' ? params : callback;
+          cb(null, method === 'Profiler.stop' ? { profile: buildProfile() } : {});
+        },
+      }),
+    });
+    await sampler.start();
+    const result = await sampler.cut({ summarise: false });
+    assert.equal(result.frames, undefined);
+    assert.ok(result.cutMs > 0);
   });
 
   it('インスペクタが使えなければ黙って諦める', async () => {

@@ -368,6 +368,11 @@ const {
 // partial connections-update so connected clients see updated threat badges
 // without needing to manually trigger an API fetch.
 
+// How much of the re-match result goes into one transaction, and one
+// broadcast, before the loop gets a turn. See the comment at the call site.
+const THREAT_PERSIST_BATCH = 500;
+const THREAT_EMIT_BATCH = 2000;
+
 async function reMatchAndNotify() {
   const startedAt = Date.now();
   const connectionHistory = history.getConnectionHistory();
@@ -390,9 +395,32 @@ async function reMatchAndNotify() {
     // These entries were changed in place without their lastSeen moving, so the
     // periodic snapshot no longer covers them. Whoever changes an entry
     // persists it -- the same rule the enrichment queue follows.
-    history.appendHistoryLogs(updated);
+    //
+    // In batches, because the loop above already yields every 5,000 entries and
+    // then handed the whole result to one transaction and one broadcast.
+    // Measured on the production Hub at startup (P3-139): 2,575 ms inside
+    // writeEntry and 576 ms encoding the broadcast, in a single 4.6 second
+    // stall -- arriving exactly when clients are reconnecting after a restart.
+    //
+    // Each batch is still atomic. This is not the poll's persist path, whose
+    // all-or-nothing contract P3-112 broke by splitting it: these entries are
+    // re-derived by the next re-match, so a batch that does not land is
+    // recovered rather than lost.
+    for (let i = 0; i < updated.length; i += THREAT_PERSIST_BATCH) {
+      const batch = updated.slice(i, i + THREAT_PERSIST_BATCH);
+      runtimeProfiler.measureSync('threatIntel.persist', () => history.appendHistoryLogs(batch));
+      await new Promise(r => setImmediate(r));
+    }
     logger.info(`[threat-intel] Re-matched ${updated.length} connections, notifying clients`);
-    io.emit('connections-update', { connections: updated, serverTime: Date.now(), partial: true, delta: true });
+    for (let i = 0; i < updated.length; i += THREAT_EMIT_BATCH) {
+      const batch = updated.slice(i, i + THREAT_EMIT_BATCH);
+      runtimeProfiler.measureSync('threatIntel.emit', () => {
+        io.emit('connections-update', {
+          connections: batch, serverTime: Date.now(), partial: true, delta: true,
+        });
+      });
+      await new Promise(r => setImmediate(r));
+    }
   } else {
     logger.debug('[threat-intel] Re-match complete, no threat changes');
   }
