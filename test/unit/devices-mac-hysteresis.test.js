@@ -17,7 +17,7 @@ const devices = require('../../src/devices');
 // and hysteresis only applies when both sides name real hardware.
 const MAC_A = '7C:DF:A1:5D:E7:2C';
 const MAC_B = '3C:A9:AB:09:77:F1';
-const IP = '192.168.41.55';
+const IP = '192.0.2.55';
 
 let dir;
 beforeEach(() => {
