@@ -899,15 +899,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 24, "v1 database migrates through v2-v24");
+        Assert(migrated.SchemaVersion == 25, "v1 database migrates through v2-v25");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v24.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v25.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 24, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 25, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -918,13 +918,19 @@ try
             new NetworkObservation(now.AddDays(-13), 2, "TCP", "10.0.0.1", 40002, "203.0.113.2", 443, 1, 1, ObservationLayer.Logical, null, "etw", "FreshRaw"),
             new NetworkObservation(now.AddDays(-31), 3, "TCP", "10.0.0.1", 40003, "203.0.113.3", 443, 1, 1, ObservationLayer.Logical, null, "etw", "OldAggregate")
         ]);
-        retentionStore.FoldCompletedHoursForCharts(now);
+        // Bounded passes, run to completion: a single call folds only a few
+        // hours, and retention below deletes raw observations old enough to
+        // go. An hour pruned before it was summarised is gone for good.
+        while (retentionStore.PendingChartFoldHours(now) > 0) retentionStore.FoldCompletedHoursForCharts(now);
         var oldCoverage = retentionStore.BeginCoverage([], now.AddDays(-31));
         retentionStore.EndCoverage(oldCoverage, now.AddDays(-31).AddMinutes(1));
         retentionStore.BeginSleepPeriod(now.AddDays(-31));
         retentionStore.EndSleepPeriod(now.AddDays(-31).AddMinutes(1));
         var result = retentionStore.PruneRetentionBatch(now, batchSize: 1);
-        Assert(result.ObservationsDeleted == 1 && result.FlowsDeleted == 1 && result.HourlySummariesDeleted == 1 && result.CoverageSessionsDeleted == 1 && result.ChartSummariesDeleted == 1 && result.SleepPeriodsDeleted == 1,
+        // Two chart rows for one aged-out hour: the per-application summary
+        // and the per-destination one, which are pruned together because a
+        // period that kept one without the other would disagree with itself.
+        Assert(result.ObservationsDeleted == 1 && result.FlowsDeleted == 1 && result.HourlySummariesDeleted == 1 && result.CoverageSessionsDeleted == 1 && result.ChartSummariesDeleted == 2 && result.SleepPeriodsDeleted == 1,
             "retention prunes raw data at 14 days and aggregates at 30 days in bounded batches");
         var second = retentionStore.PruneRetentionBatch(now, batchSize: 10);
         Assert(second.ObservationsDeleted == 1 && second.FlowsDeleted == 1,
@@ -992,8 +998,13 @@ try
             new NetworkObservation(from.AddHours(2).AddMinutes(10), 42, "TCP", "10.0.0.1", 51000,
                 "203.0.113.42", 443, 30, 40, ObservationLayer.Logical, null, "etw", "LongLived")
         ]);
-        Assert(timelineStore.FoldCompletedHoursForCharts(from.AddHours(3)) == 2 &&
-            timelineStore.FoldCompletedHoursForCharts(from.AddHours(3)) == 0,
+        // Ten minutes past the hour, because an hour is left to settle before
+        // it is folded: an observation arriving after its hour was summarised
+        // would belong to a summarised hour, and a summarised hour is not read
+        // raw, so it would be counted nowhere at all.
+        var settled = from.AddHours(3).AddMinutes(10);
+        Assert(timelineStore.FoldCompletedHoursForCharts(settled) == 2 &&
+            timelineStore.FoldCompletedHoursForCharts(settled) == 0,
             "completed chart hours fold once and the watermark makes the operation idempotent");
         var timeline = timelineStore.ReadPeriodAnalysis(from, from.AddHours(12), bucketCount: 12);
         Assert(timeline.Connections == 1 && timeline.Timeline.Sum(item => item.Connections) == 2 &&
@@ -1029,7 +1040,45 @@ try
             "timeline combines folded complete hours with the current raw hour without gaps or duplicates");
     }
 
-        // A long period is drawn from the folded hours, not from a day of rows.
+        // Per-destination bytes come from an aggregate, not from a day of rows.
+    //
+    // The links query had no aggregate to read, so a period scanned every raw
+    // observation in it. Measured on one machine, a day held 6,500,653 of them
+    // and that one query took 5.33 seconds, on the single pipe the window also
+    // asks "is the agent running".
+    using (var destStore = new ObservationStore(Path.Combine(directory, "hourly-destinations.db")))
+    {
+        var from = new DateTimeOffset(2026, 9, 23, 0, 0, 0, TimeSpan.Zero);
+        NetworkObservation To(string address, int hour, int minute, long sent, long received, string? name = null) =>
+            new(from.AddHours(hour).AddMinutes(minute), 31, "TCP", "10.0.0.1", 50000 + minute, address, 443,
+                sent, received, ObservationLayer.Logical, null, "etw", "Talker", name);
+        destStore.WriteBatch([
+            To("203.0.113.40", 0, 5, 10, 20, "one.example"),
+            To("203.0.113.40", 0, 6, 1, 2),
+            To("203.0.113.41", 0, 7, 100, 200, "two.example"),
+            To("203.0.113.40", 1, 5, 1000, 2000),
+        ]);
+        while (destStore.PendingChartFoldHours(from.AddHours(3)) > 0)
+            destStore.FoldCompletedHoursForCharts(from.AddHours(3));
+
+        var period = destStore.ReadPeriodAnalysis(from, from.AddHours(24), bucketCount: 60);
+        var first = period.Links.Single(link => link.Destination == "203.0.113.40");
+        Assert(first.Bytes == 3033 && period.Links.Single(link => link.Destination == "203.0.113.41").Bytes == 300,
+            "a destination's bytes survive being summarised, hour by hour, and add back up");
+        Assert(first.DestinationName == "one.example",
+            "and the name it answered to is kept with them");
+        Assert(period.Links.Sum(link => link.Bytes) == period.Bytes,
+            "the destinations and the period total tell the same story");
+
+        // The hour still being written has no folded row, and must be read raw
+        // rather than left out.
+        destStore.WriteBatch([To("203.0.113.42", 2, 30, 7, 8)]);
+        var withCurrent = destStore.ReadPeriodAnalysis(from, from.AddHours(3), bucketCount: 60);
+        Assert(withCurrent.Links.Single(link => link.Destination == "203.0.113.42").Bytes == 15,
+            "the hour still in progress is read from the observations, so nothing is missing from the end");
+    }
+
+    // A long period is drawn from the folded hours, not from a day of rows.
     //
     // Sixty buckets over a day is a bucket of twenty-four minutes, and an
     // hourly row cannot be cut into those, so every period the UI offers fell
@@ -2973,7 +3022,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 24 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 25 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }

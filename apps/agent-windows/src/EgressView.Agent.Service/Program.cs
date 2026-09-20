@@ -324,8 +324,18 @@ internal sealed class AgentWindowsService : ServiceBase
         {
             try
             {
-                var rows = store.FoldCompletedHoursForCharts(DateTimeOffset.UtcNow);
-                if (rows > 0) store.AddCounter("chart-hourly-rows-folded", rows);
+                // Folded in bounded passes, run back to back until the
+                // aggregate has caught up. The bound limits how long one
+                // transaction holds the lock every other reader needs; it is
+                // not a limit on how far behind the chart may be, and a
+                // database rebuilding its history must not stay hours behind
+                // for hours.
+                while (!cancellationToken.IsCancellationRequested && store.PendingChartFoldHours(DateTimeOffset.UtcNow) > 0)
+                {
+                    var rows = store.FoldCompletedHoursForCharts(DateTimeOffset.UtcNow);
+                    if (rows > 0) store.AddCounter("chart-hourly-rows-folded", rows);
+                    await Task.Yield();
+                }
             }
             catch
             {
@@ -414,8 +424,16 @@ internal sealed class AgentWindowsService : ServiceBase
             {
                 // Preserve application-level history before raw retention can
                 // remove it during the first maintenance pass after upgrade.
-                var chartRows = store.FoldCompletedHoursForCharts(DateTimeOffset.UtcNow);
-                if (chartRows > 0) store.AddCounter("chart-hourly-rows-folded", chartRows);
+                //
+                // Every pending hour, not one bounded pass: pruning deletes
+                // raw observations old enough to go, and an hour deleted
+                // before it was summarised is gone from the charts for good.
+                while (!cancellationToken.IsCancellationRequested && store.PendingChartFoldHours(DateTimeOffset.UtcNow) > 0)
+                {
+                    var chartRows = store.FoldCompletedHoursForCharts(DateTimeOffset.UtcNow);
+                    if (chartRows > 0) store.AddCounter("chart-hourly-rows-folded", chartRows);
+                    await Task.Yield();
+                }
                 RetentionMaintenanceResult result;
                 do
                 {
