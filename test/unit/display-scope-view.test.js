@@ -16,10 +16,10 @@ function translation(key) {
     'source.all': 'All sources',
     'source.selector.label': 'Collection source to display',
     'source.group.routers': 'Routers',
-    'source.group.agents': 'Mac Agents',
+    'source.group.agents': 'Agents',
     'source.router.fallback': 'Router',
     'source.router.idFallback': 'Router {id}',
-    'source.agent.fallback': 'Mac Agent {id}',
+    'source.agent.fallback': 'Agent {id}',
     'source.online': 'Online',
     'source.offline': 'Offline',
     // P3-55: offline now says how long ago, so a sleeping Mac reads
@@ -139,7 +139,7 @@ describe('display source scope', () => {
     assert.deepEqual(agents.map(item => item.label), [
       'MacBook (aaaaaaaa) · Online',
       'macbook (bbbbbbbb) · Offline · last seen never seen',
-      'Mac Agent cccccccc · Offline · last seen never seen',
+      'Agent cccccccc · Offline · last seen never seen',
     ]);
     context.routersResult = routers;
     context.agentsResult = agents;
