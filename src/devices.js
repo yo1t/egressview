@@ -125,6 +125,12 @@ function getDiscardedRedirects() {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 function initDb(dbPath) {
+  // The hysteresis below is a debounce over a particular database. Opening a
+  // different one -- a test, or a restore from backup -- starts a new world,
+  // and carrying counters across would hold an identity steady on evidence
+  // that no longer exists.
+  pendingMacSwitch.clear();
+  heldMacSwitches.clear();
   _dbPath = dbPath || DB_PATH;
   db = new Database(_dbPath);
   applyWalPragmas(db);
@@ -330,6 +336,91 @@ function initDb(dbPath) {
  * Upsert a device into the summary devices table.
  * Returns the canonical deviceId for this device.
  */
+// ─── MAC hysteresis ───────────────────────────────────────────────────────────
+
+// How many consecutive polls must agree before a device is allowed to change
+// which hardware it is. The routers poll about every two minutes, so three
+// agreeing reports is roughly six minutes of the new MAC being the only answer.
+const MAC_SWITCH_CONFIRMATIONS = 3;
+// A debounce, not a record: it is rebuilt from the next few polls after a
+// restart, and it must not grow without bound on a large network.
+const MAC_SWITCH_PENDING_LIMIT = 500;
+
+// ip -> { mac, count }: how many polls in a row have reported this new MAC.
+const pendingMacSwitch = new Map();
+// Switches held back, so the flapping is visible rather than merely absent.
+// Key: "ip recorded>proposed".
+const heldMacSwitches = new Map();
+
+function _rememberPendingMac(ip, mac) {
+  const current = pendingMacSwitch.get(ip);
+  const next = current && _sameMac(current.mac, mac)
+    ? { mac, count: current.count + 1 }
+    : { mac, count: 1 };
+  pendingMacSwitch.set(ip, next);
+  if (pendingMacSwitch.size > MAC_SWITCH_PENDING_LIMIT) {
+    const oldest = pendingMacSwitch.keys().next().value;
+    if (oldest !== ip) pendingMacSwitch.delete(oldest);
+  }
+  return next.count;
+}
+
+function _countHeldMacSwitch(ip, recorded, proposed) {
+  const key = `${ip} ${recorded}>${proposed}`;
+  heldMacSwitches.set(key, (heldMacSwitches.get(key) || 0) + 1);
+}
+
+/**
+ * Which IPs keep being reported as two different machines, most often first.
+ *
+ * An empty answer means the network settled. A large one means the hysteresis
+ * is holding something back every poll, which is a fact about the network the
+ * operator should be able to see rather than a problem quietly absorbed here.
+ */
+function getHeldMacSwitches() {
+  return [...heldMacSwitches.entries()]
+    .map(([key, count]) => {
+      const [ip, pair] = key.split(' ');
+      const [recorded, proposed] = pair.split('>');
+      return { ip, recorded, proposed, count };
+    })
+    .sort((a, b) => b.count - a.count);
+}
+
+/**
+ * The MAC to record for this IP, which is not always the one just reported.
+ *
+ * A device does not change which hardware it is between one poll and the next.
+ * When an IP that already has a globally unique MAC is reported with a
+ * different globally unique MAC, one of the two reports is wrong, and taking
+ * the newer one on sight is what made two IPs on the production Hub alternate
+ * between two identities every two minutes -- the operator saw the vendor and
+ * name change under them, every flip wrote another observation row, and the
+ * merge logic absorbed live hardware into the wrong device eleven times.
+ *
+ * So the change has to be argued for: the same new MAC, in three polls in a
+ * row, before the identity moves. A genuine re-assignment still lands, about
+ * six minutes later. Flapping never does.
+ *
+ * The observation written further down is left alone on purpose. What the
+ * router said is evidence, and holding an identity steady is not a licence to
+ * record something the router did not report.
+ */
+function _macForRecord(ip, recordedMac, reportedMac) {
+  if (!ip || !isStableMac(reportedMac)) return reportedMac;
+  if (!isStableMac(recordedMac) || _sameMac(recordedMac, reportedMac)) {
+    pendingMacSwitch.delete(ip);
+    return reportedMac;
+  }
+  const agreed = _rememberPendingMac(ip, reportedMac);
+  if (agreed >= MAC_SWITCH_CONFIRMATIONS) {
+    pendingMacSwitch.delete(ip);
+    return reportedMac;
+  }
+  _countHeldMacSwitch(ip, recordedMac, reportedMac);
+  return recordedMac;
+}
+
 function upsert(d) {
   if (!db) return null;
   const now = Date.now();
@@ -416,10 +507,17 @@ function observeDevice(d) {
   }
 
   // ── 3. Upsert summary table ───────────────────────────────────────────────
+  // What this IP is, not merely what the last poll called it. See
+  // _macForRecord: an identity that changes every two minutes is not an
+  // identity, and it was the source of eleven wrong merges on production.
+  const macForRecord = _macForRecord(d.ip, existingDevice?.mac || null, d.mac || null);
+  const heldBack = macForRecord !== (d.mac || null);
   const deviceId = upsert({
     ip:          d.ip,
-    mac:         d.mac         || null,
-    vendor:      d.vendor      || null,
+    mac:         macForRecord   || null,
+    // The vendor is derived from the MAC, so it follows it. Keeping the new
+    // vendor beside the old MAC would state something neither report made.
+    vendor:      (heldBack ? existingDevice?.vendor : d.vendor) || null,
     dnsName:     d.dnsName     || null,
     mdnsName:    d.mdnsName    || null,
     netbiosName: d.netbiosName || null,
@@ -887,6 +985,8 @@ module.exports = {
   pruneObservations,
   getDiscardedRedirects,
   chooseForIp,
+  getHeldMacSwitches,
+  MAC_SWITCH_CONFIRMATIONS,
   _initForTest,
   _observationsForTest,
 };
