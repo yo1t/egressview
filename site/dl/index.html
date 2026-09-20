@@ -205,6 +205,12 @@
       <span class="btn-meta" id="meta-macos">Apple silicon · macOS 13 or later</span>
       <span class="btn-meta" id="meta-windows">x64 · Windows 10 or later</span>
     </div>
+    <!-- Filled from the manifest with whatever builds the main buttons did not
+         offer. Empty, and so invisible, when a release has only one. -->
+    <div class="cta cta-meta">
+      <span class="btn-meta" id="alternates-macos"></span>
+      <span class="btn-meta" id="alternates-windows"></span>
+    </div>
   </div>
 </header>
 
@@ -378,10 +384,15 @@ Get-FileHash -Algorithm SHA256 $HOME\Downloads\EgressView-Agent-Windows-<span id
     windows: {
       en: v => 'Download ' + v + ' for Windows',
       ja: v => v + ' をダウンロード（Windows）',
-      metaEn: mb => 'x64 · Windows 10 or later' + (mb ? ' · ' + mb + ' MB' : ''),
-      metaJa: mb => 'x64 · Windows 10以降' + (mb ? ' · ' + mb + ' MB' : ''),
+      metaEn: (mb, arch) => (arch || 'x64') + ' · Windows 10 or later' + (mb ? ' · ' + mb + ' MB' : ''),
+      metaJa: (mb, arch) => (arch || 'x64') + ' · Windows 10以降' + (mb ? ' · ' + mb + ' MB' : ''),
       soonEn: 'Windows build in preparation', soonJa: 'Windows版は準備中',
-      arch: p => p.arch === 'x64',
+      // Whichever build matches the machine asking. Windows on ARM reports
+      // itself as x64 in the user-agent string on purpose -- browsers lie
+      // there so that sniffing sites keep working -- so the only honest
+      // answer comes from the client hint, and when that is unavailable the
+      // page offers the other build rather than guessing silently.
+      arch: p => p.arch === (window.__egvWindowsArch || 'x64'),
     },
   };
   const painters = [];
@@ -409,13 +420,19 @@ Get-FileHash -Algorithm SHA256 $HOME\Downloads\EgressView-Agent-Windows-<span id
     fetch('/' + platform + '/manifest.json', {cache: 'no-store'})
       .then(r => r.ok ? r.json() : Promise.reject(r.status))
       .then(m => {
-        const pkg = (m.packages || []).find(t.arch) || (m.packages || [])[0];
+        const all = m.packages || [];
+        const pkg = all.find(t.arch) || all[0];
         if (!pkg) { unavailable(); return; }
         link.href = pkg.url;
         const mb = (pkg.sizeBytes / 1048576).toFixed(1);
+        // Every build this release has, not only the one that matched. A
+        // person downloading for a machine they are not sitting at cannot be
+        // served by detection, and on Windows the detection can fail closed.
+        const others = all.filter(p => p !== pkg);
         const paint = lang => {
           label.textContent = lang === 'ja' ? t.ja(m.version) : t.en(m.version);
-          meta.textContent = lang === 'ja' ? t.metaJa(mb) : t.metaEn(mb);
+          meta.textContent = lang === 'ja' ? t.metaJa(mb, pkg.arch) : t.metaEn(mb, pkg.arch);
+          alternates(platform, others, lang);
         };
         painters.push(paint);
         paint(document.documentElement.lang === 'ja' ? 'ja' : 'en');
@@ -425,8 +442,36 @@ Get-FileHash -Algorithm SHA256 $HOME\Downloads\EgressView-Agent-Windows-<span id
       .catch(unavailable);
   }
 
-  load('macos');
-  load('windows');
+  // Links to the builds the main button did not offer.
+  function alternates(platform, packages, lang) {
+    const host = document.getElementById('alternates-' + platform);
+    if (!host) return;
+    host.textContent = '';
+    if (!packages.length) return;
+    host.appendChild(document.createTextNode(lang === 'ja' ? '他のCPU: ' : 'Other CPU: '));
+    packages.forEach((p, index) => {
+      if (index) host.appendChild(document.createTextNode(' · '));
+      const a = document.createElement('a');
+      a.href = p.url;
+      a.textContent = p.arch + ' (' + (p.sizeBytes / 1048576).toFixed(1) + ' MB)';
+      host.appendChild(a);
+    });
+  }
+
+  // Windows on ARM reports x64 in the user-agent string, so the architecture
+  // has to be asked for rather than read off it. The hint is asynchronous and
+  // Chromium-only; everywhere else the page keeps its x64 default and the
+  // alternate link above carries the ARM build.
+  const started = navigator.userAgentData && navigator.userAgentData.getHighEntropyValues
+    ? navigator.userAgentData.getHighEntropyValues(['architecture'])
+        .then(h => { if (h && /arm/i.test(h.architecture || '')) window.__egvWindowsArch = 'arm64'; })
+        .catch(() => {})
+    : Promise.resolve();
+
+  started.then(() => {
+    load('macos');
+    load('windows');
+  });
   if (window.__egvSetMetaHook) window.__egvSetMetaHook(lang => painters.forEach(p => p(lang)));
 
   // The machine you are on goes first. Both stay visible: downloading for a
