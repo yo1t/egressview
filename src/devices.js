@@ -488,6 +488,43 @@ function isDeviceAddress(ip) {
   return !NOT_A_DEVICE.some(rule => rule.re.test(ip));
 }
 
+/**
+ * Correct what a device *is*, without claiming to have seen it.
+ *
+ * A DHCP lease is not a sighting. It says an address was assigned, and it
+ * stays assigned for days after the machine is switched off. Feeding leases
+ * through observeDevice() made every leased device permanently "seen just
+ * now": on the production Hub a printer that had last been seen two hours
+ * earlier read as zero minutes, and active / stale / archived stopped meaning
+ * anything (P3-138).
+ *
+ * So the lease updates identity and nothing else. It does not move lastSeen,
+ * and it does not create a row: a device becomes visible when something
+ * actually observes it -- ARP, or its own traffic -- and until then there is
+ * no evidence it is here.
+ *
+ * @returns {boolean} whether a row was updated
+ */
+function updateIdentity({ ip, mac = null, vendor = null, dnsName = null } = {}) {
+  if (!db || !isDeviceAddress(ip)) return false;
+  const existing = stmtSelectIp.get(ip);
+  if (!existing || existing.archivedAt != null) return false;
+  const next = {
+    mac: mac || existing.mac,
+    // The vendor is read from the MAC, so it travels with it. A caller that
+    // corrects the MAC and leaves the old vendor states something no source
+    // reported.
+    vendor: mac && mac !== existing.mac ? vendor : (existing.vendor || vendor),
+    dnsName: dnsName || existing.dnsName,
+  };
+  if (next.mac === existing.mac && next.vendor === existing.vendor && next.dnsName === existing.dnsName) {
+    return false;
+  }
+  return db.prepare(
+    'UPDATE devices SET mac = ?, vendor = ?, dnsName = ? WHERE deviceId = ?'
+  ).run(next.mac, next.vendor, next.dnsName, existing.deviceId).changes > 0;
+}
+
 function observeDevice(d) {
   if (!db) return null;
   // The list is of devices, so an address that cannot name one does not make a
@@ -1023,6 +1060,7 @@ module.exports = {
   getDiscardedRedirects,
   chooseForIp,
   isDeviceAddress,
+  updateIdentity,
   getHeldMacSwitches,
   MAC_SWITCH_CONFIRMATIONS,
   _initForTest,

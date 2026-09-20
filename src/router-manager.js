@@ -6,6 +6,7 @@ const { createRouterPollScheduler } = require('./router-poll-scheduler');
 const { createYamahaAdapter } = require('./pollers/yamaha-adapter');
 const { createCiscoAdapter } = require('./pollers/cisco-adapter');
 const { createConntrackAdapter } = require('./pollers/conntrack-adapter');
+const { getOuiVendor } = require('./device-identify');
 const { MAX_ROUTERS, normalizeRouterRecord, publicRouter } = require('./router-config');
 const { isAllowedRouterIp } = require('./utils');
 const { normalizeRouterHostName } = require('./pollers/router-prompt');
@@ -55,15 +56,17 @@ function createRouterManager({
         () => adapter.refreshDhcp({ signal }),
       );
       signal?.throwIfAborted();
+      // Identity only. A lease is not a sighting: it stays assigned for days
+      // after the machine is switched off, and feeding leases through
+      // observeDevice() made every leased device read as seen just now.
       for (const [ip, lease] of adapter.getDhcpCache()) {
-        devices?.observeDevice({
+        devices?.updateIdentity?.({
           ip,
           mac: lease.mac,
+          vendor: getOuiVendor(lease.mac),
           // The name the client gave when it asked for the address. It is the
           // device's own claim, like every other name here.
-          dnsName: lease.host || undefined,
-          lastSeen: now,
-          source: `dhcp:${id}`,
+          dnsName: lease.host || null,
         });
       }
     }
