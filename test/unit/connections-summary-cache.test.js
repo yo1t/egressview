@@ -123,8 +123,9 @@ describe('高くついた答えほど長く使い回す（P3-139）', () => {
     const earned = ttl(3677);
     assert.ok(earned > 64_000, `全範囲の答えのTTLが短すぎる: ${earned} ms`);
     assert.equal(earned, 110_310);
-    // ...but not unbounded. Two minutes is as stale as this may ever get.
-    assert.equal(ttl(60_000), 120_000);
+    // ...but not unbounded. Five minutes is as stale as this may ever get,
+    // which is also the coarsest grid a key can sit on.
+    assert.equal(ttl(60_000), 5 * 60_000);
   });
 
   it('安く済んだ答えには、最低限のTTLしか与えない', () => {
@@ -138,6 +139,20 @@ describe('高くついた答えほど長く使い回す（P3-139）', () => {
   it('その間のコストには、比例したTTLを与える', () => {
     assert.equal(ttl(1000), 30_000);
     assert.equal(ttl(2000), 60_000);
+  });
+
+  it('答えは、自分の鍵が生きているあいだは生きている', () => {
+    // The measured gap after the grid was fixed: a three-minute grid and a
+    // seventy-two-second TTL recomputed the same window inside its own cell.
+    assert.equal(ttl(2403, 180_000), 180_000);
+    // A cheap answer on a coarse grid is still held for the whole cell: two
+    // requests naming the same window get the same answer, which is what the
+    // grid already decided.
+    assert.equal(ttl(5, 180_000), 180_000);
+    // An expensive answer still earns more than its key's lifetime.
+    assert.equal(ttl(3677, 60_000), 110_310);
+    // A fine grid changes nothing: live and 15m views keep the short TTL.
+    assert.equal(ttl(5, 10_000), 10_000);
   });
 
   it('全範囲の要約は、2回目に作り直さない', async () => {
