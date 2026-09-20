@@ -5,7 +5,7 @@ namespace EgressView.Agent.Core;
 
 public sealed partial class ObservationStore : IDisposable
 {
-    private const int CurrentSchemaVersion = 23;
+    private const int CurrentSchemaVersion = 24;
     public static readonly int[] AllowedRetentionDays = [1, 7, 30, 90];
     public const int DefaultRawRetentionDays = 14;
     public static readonly TimeSpan CoverageHeartbeatInterval = TimeSpan.FromSeconds(5);
@@ -153,6 +153,12 @@ public sealed partial class ObservationStore : IDisposable
         "THEN protocol||CHAR(31)||local_address||CHAR(31)||local_port||CHAR(31)||process_id " +
         "ELSE protocol||CHAR(31)||local_address||CHAR(31)||local_port||CHAR(31)||remote_address||CHAR(31)||remote_port||CHAR(31)||process_id END";
 
+    private const string Version24Schema = """
+        UPDATE delivery_queue SET first_observed_at=last_observed_at, last_observed_at=first_observed_at
+          WHERE last_observed_at<first_observed_at;
+        UPDATE flows SET first_seen=last_seen, last_seen=first_seen
+          WHERE last_seen<first_seen;
+        """;
     private const string Version23Schema = """
         ALTER TABLE delivery_state ADD COLUMN blocked_batch_id TEXT;
         ALTER TABLE delivery_state ADD COLUMN blocked_batch_rejections INTEGER NOT NULL DEFAULT 0;
@@ -344,7 +350,7 @@ public sealed partial class ObservationStore : IDisposable
             var existingTables = ScalarInt64("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             if (existingTables != 0)
                 throw new ObservationStoreException(StoreFailureKind.SchemaInvalid, "Database has tables but no schema version; refusing to treat existing data as a new database.");
-            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
+            Execute($"BEGIN IMMEDIATE; {Version1Schema} {Version2Schema} {Version3Schema} {Version4Schema} {Version5Schema} {Version6Schema} {Version7Schema} {Version8Schema} {Version9Schema} {Version10Schema} {Version11Schema} {Version12Schema} {Version13Schema} {Version14Schema} {Version15Schema} {Version16Schema} {Version17Schema} {Version18Schema} {Version19Schema} {Version20Schema} {Version21Schema} {Version22Schema} {Version23Schema} {Version24Schema} UPDATE schema_version SET version={CurrentSchemaVersion}; COMMIT;");
             return;
         }
 
@@ -375,7 +381,8 @@ public sealed partial class ObservationStore : IDisposable
         if (version == 19) { MigrateVersion19To20(); version = 20; }
         if (version == 20) { MigrateVersion20To21(); version = 21; }
         if (version == 21) { MigrateVersion21To22(); version = 22; }
-        if (version == 22) MigrateVersion22To23();
+        if (version == 22) { MigrateVersion22To23(); version = 23; }
+        if (version == 23) MigrateVersion23To24();
         ValidateSchema();
         PruneMigrationBackups(CurrentSchemaVersion);
     }
@@ -495,6 +502,34 @@ public sealed partial class ObservationStore : IDisposable
         {
             Execute("BEGIN IMMEDIATE; " + Version23Schema + " UPDATE schema_version SET version=23 WHERE version=22; COMMIT;");
             PruneMigrationBackups(23);
+        }
+        catch { TryRollback(); throw; }
+    }
+
+    /// A flow's first and last times are put back in order.
+    ///
+    /// Both upserts assigned the last time from whichever observation arrived
+    /// most recently, which is only correct if observations arrive in time
+    /// order. They do not: ETW callbacks are not strictly ordered, and the
+    /// per-second summing emits a bucket when the event timeline passes it
+    /// rather than when its own traffic happened. A later arrival carrying an
+    /// earlier time moved last_observed_at behind first_observed_at.
+    ///
+    /// The Hub checks exactly that, and answers 400 for the whole batch. On
+    /// this machine 31 of 10,000 queued observations were inverted -- about
+    /// one in three hundred, which is enough that half of all 200-observation
+    /// batches carried one, and every one of those was refused. Delivery
+    /// stopped for hours at a time and the queue overflowed at the far end.
+    ///
+    /// Swapped rather than clamped: both times are real, they are simply
+    /// recorded the wrong way round, and the smaller one is the first.
+    private void MigrateVersion23To24()
+    {
+        CreateMigrationBackup(24);
+        try
+        {
+            Execute("BEGIN IMMEDIATE; " + Version24Schema + " UPDATE schema_version SET version=24 WHERE version=23; COMMIT;");
+            PruneMigrationBackups(24);
         }
         catch { TryRollback(); throw; }
     }
@@ -866,7 +901,12 @@ public sealed partial class ObservationStore : IDisposable
                       process_id,first_seen,last_seen,origin,bytes_sent,bytes_received,layer,interface_id,process_name,remote_hostname)
                     VALUES(?,?,?,?,?,?,?,?,?,'etw',?,?,?,?,?,?)
                     ON CONFLICT(flow_key) DO UPDATE SET
-                      last_seen=excluded.last_seen,
+                      -- The earliest and the latest, not the latest arrival.
+                      -- Observations do not reach here in time order, and
+                      -- assigning last_seen from whatever turned up last moved
+                      -- it behind first_seen. See the v24 migration.
+                      first_seen=MIN(flows.first_seen,excluded.first_seen),
+                      last_seen=MAX(flows.last_seen,excluded.last_seen),
                       origin=CASE WHEN flows.origin='snapshot' THEN 'both' ELSE flows.origin END,
                       bytes_sent=CASE WHEN flows.bytes_sent IS NULL THEN excluded.bytes_sent ELSE flows.bytes_sent+excluded.bytes_sent END,
                       bytes_received=CASE WHEN flows.bytes_received IS NULL THEN excluded.bytes_received ELSE flows.bytes_received+excluded.bytes_received END,

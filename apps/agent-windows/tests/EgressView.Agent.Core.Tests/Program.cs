@@ -862,15 +862,15 @@ try
     ObservationStore.CreateVersion1FixtureForTesting(legacyDatabase);
     using (var migrated = new ObservationStore(legacyDatabase))
     {
-        Assert(migrated.SchemaVersion == 23, "v1 database migrates through v2-v23");
+        Assert(migrated.SchemaVersion == 24, "v1 database migrates through v2-v24");
         Assert(!migrated.DeliveryEnabled, "delivery is opt-in after migration");
         Assert(migrated.Inspect().Integrity == "ok", "migrated database integrity is ok");
     }
     var migrationBackups = Directory.GetFiles(directory, "legacy-v1.db.pre-v*.bak");
-    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v23.bak", StringComparison.Ordinal),
+    Assert(migrationBackups.Length == 1 && migrationBackups.Single().EndsWith("pre-v24.bak", StringComparison.Ordinal),
         "migration retains only the newest consistent backup generation");
     using (var migratedAgain = new ObservationStore(legacyDatabase))
-        Assert(migratedAgain.SchemaVersion == 23, "migration is idempotent on restart");
+        Assert(migratedAgain.SchemaVersion == 24, "migration is idempotent on restart");
 
     var retentionDatabase = Path.Combine(directory, "retention.db");
     using (var retentionStore = new ObservationStore(retentionDatabase))
@@ -1162,6 +1162,40 @@ try
         Assert(reopenedDelivery.PrepareDeliveryBatch(deliveryStarted.AddSeconds(4))!.BatchId == activeBatchId, "active batch survives service restart");
         reopenedDelivery.AcknowledgeDelivery(activeBatchId, deliveryStarted.AddSeconds(5));
         Assert(reopenedDelivery.ReadDeliveryStatus().Pending == 0 && reopenedDelivery.ReadDeliveryStatus().LastAcknowledgedAt == deliveryStarted.AddSeconds(5), "ACK removes only the matching durable batch");
+    }
+
+    // A flow's times must come out in order however its observations arrive.
+    //
+    // Both upserts assigned the last time from whichever observation arrived
+    // most recently, which is only right if they arrive in time order. They do
+    // not: ETW callbacks are not strictly ordered, and the per-second summing
+    // emits a bucket when the event timeline passes it rather than when its
+    // own traffic happened. The Hub checks first <= last and answers 400 for
+    // the whole batch. Measured here: 31 of 10,000 queued observations were
+    // inverted -- about one in three hundred, enough that half of all
+    // 200-observation batches carried one and every one of those was refused.
+    using (var orderStore = new ObservationStore(Path.Combine(directory, "out-of-order.db")))
+    {
+        var late = new DateTimeOffset(2026, 9, 21, 10, 0, 1, TimeSpan.Zero);
+        var early = late.AddMilliseconds(-420);
+        NetworkObservation At(DateTimeOffset when, long sent) =>
+            new(when, 64, "TCP", "10.0.0.1", 50002, "203.0.113.12", 443, sent, 0,
+                ObservationLayer.Logical, "if", "etw", "OutOfOrder");
+
+        // The later time first, the earlier one second: the order the Agent
+        // actually sees them in when a bucket closes late.
+        orderStore.WriteBatch([At(late, 1)]);
+        orderStore.WriteBatch([At(early, 2)]);
+        orderStore.QueueForDelivery([At(late, 1)], late);
+        orderStore.QueueForDelivery([At(early, 2)], late);
+
+        var flow = orderStore.ReadRecentFlows(50).Single(item => item.ProcessName == "OutOfOrder");
+        Assert(flow.FirstSeen == early && flow.LastSeen == late,
+            "a flow keeps the earliest and the latest time, not the times of the last observation to arrive");
+
+        var queued = orderStore.PrepareDeliveryBatch(late.AddSeconds(1))!.Observations.Single();
+        Assert(queued.FirstObservedAt <= queued.LastObservedAt && queued.FirstObservedAt == early && queued.LastObservedAt == late,
+            "and so does the observation queued for the Hub, which refuses the whole batch over one inverted pair");
     }
 
     // A batch the Hub will never accept must not stop the ones behind it,
@@ -2863,7 +2897,7 @@ try
         // and the new ending have to coexist.
         using (var reopened = new ObservationStore(shutdownDatabase))
         {
-            Assert(reopened.SchemaVersion == 23 && reopened.ReadRunHistory().Count == 3,
+            Assert(reopened.SchemaVersion == 24 && reopened.ReadRunHistory().Count == 3,
                 "reopening keeps every run recorded under the older vocabulary");
         }
     }
