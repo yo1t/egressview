@@ -665,6 +665,43 @@ try
         Assert(unsafeReport.Contains("IOException", StringComparison.Ordinal) && !unsafeReport.Contains("secret", StringComparison.Ordinal),
             "free-text collector failures are reduced to a safe classification before export");
 
+        // Why delivery is where it is, in the bundle and not only on screen.
+        //
+        // This existed and reached the window over IPC. A Hub that answered
+        // 400 to every batch carrying one malformed observation stopped
+        // delivery for hours, and the bundle -- the thing a person sends when
+        // they cannot work out what is wrong -- showed a pending count and a
+        // capability that said "agreed". Finding the reason took reading the
+        // live database and the Hub's own schema by hand.
+        var stalled = DiagnosticsReport.Create(
+            new CollectorSnapshot("healthy", 20, 20, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 32),
+            reopened, "test",
+            deliveryRuntime: new DeliveryRuntimeStatus("contract-rejected",
+                LastAttemptAt: DateTimeOffset.UtcNow, NextRetryAt: DateTimeOffset.UtcNow.AddMinutes(5),
+                LastFailure: "contract-rejected", LastFailureAt: DateTimeOffset.UtcNow, LastStatusCode: 400));
+        using (var stalledJson = JsonDocument.Parse(stalled))
+        {
+            Assert(stalledJson.RootElement.GetProperty("delivery").TryGetProperty("runtime", out var runtime),
+                "diagnostics carry the delivery runtime at all, which is the whole point of this");
+            Assert(runtime.GetProperty("state").GetString() == "contract-rejected" &&
+                runtime.GetProperty("lastFailure").GetString() == "contract-rejected" &&
+                runtime.GetProperty("lastStatusCode").GetInt32() == 400 &&
+                runtime.TryGetProperty("nextRetryAt", out _),
+                "diagnostics say why delivery stopped and what the Hub answered, not only how much is pending");
+        }
+        Assert(JsonDocument.Parse(report).RootElement.GetProperty("delivery")
+                .GetProperty("runtime").ValueKind == JsonValueKind.Null,
+            "and say nothing rather than guessing when the caller has no delivery controller to ask");
+
+        // The failure is free text on the way in. A path or a host reaching it
+        // must be reduced the way collector failures already are.
+        var leaky = DiagnosticsReport.Create(
+            new CollectorSnapshot("healthy", 20, 20, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 32),
+            reopened, "test",
+            deliveryRuntime: new DeliveryRuntimeStatus("retryable", LastFailure: "retryable: https://hub.secret.example/api"));
+        Assert(leaky.Contains("retryable", StringComparison.Ordinal) && !leaky.Contains("secret", StringComparison.Ordinal),
+            "a free-text delivery failure is reduced to a safe classification before export");
+
         var beforeBackup = reopened.ReadStorageBytes();
         File.WriteAllBytes(database + ".pre-v99.bak", new byte[123]);
         Assert(reopened.ReadStorageBytes() == beforeBackup + 123,
@@ -992,7 +1029,46 @@ try
             "timeline combines folded complete hours with the current raw hour without gaps or duplicates");
     }
 
-        // The chart counts connections, because that is what its legend says.
+        // A long period is drawn from the folded hours, not from a day of rows.
+    //
+    // Sixty buckets over a day is a bucket of twenty-four minutes, and an
+    // hourly row cannot be cut into those, so every period the UI offers fell
+    // back to raw observations and the fold was never used for the chart at
+    // all. Measured on one machine, a day held 6,500,653 observations and the
+    // timeline query took 14.9 seconds -- against a window that refreshes
+    // every five, on the single pipe that also answers "is the agent running".
+    using (var wideStore = new ObservationStore(Path.Combine(directory, "hourly-buckets.db")))
+    {
+        var from = new DateTimeOffset(2026, 9, 22, 0, 0, 0, TimeSpan.Zero);
+        var rows = new List<NetworkObservation>();
+        for (var hour = 0; hour < 20; hour++)
+            rows.Add(new NetworkObservation(from.AddHours(hour).AddMinutes(5), 12, "TCP", "10.0.0.1", 50000 + hour,
+                "203.0.113.30", 443, 100, 200, ObservationLayer.Logical, null, "etw", "Wide"));
+        wideStore.WriteBatch(rows);
+        Assert(wideStore.FoldCompletedHoursForCharts(from.AddHours(21)) > 0, "the hours fold");
+
+        var day = wideStore.ReadPeriodAnalysis(from, from.AddHours(24), bucketCount: 60);
+        Assert(day.Timeline.Select(item => item.Bucket).Distinct().Count() == 20 &&
+            day.Timeline.Select(item => item.Bucket).Max() <= 23,
+            "a day is drawn in hourly bars, so the folded hours can fill them");
+        // Each hour's traffic in its own hour. julianday returns a fractional
+        // day that cannot hold an exact hour: 04:00 came back as 14,399.999987
+        // seconds after midnight, which truncates into the bucket before it,
+        // and every other bar landed one place to the left of its traffic.
+        Assert(day.Timeline.Select(item => item.Bucket).OrderBy(bucket => bucket)
+                .SequenceEqual(Enumerable.Range(0, 20)),
+            "and each hour lands in its own bar rather than one to the left of it");
+        Assert(day.Timeline.Sum(item => item.Connections) == 20 && day.Timeline.Sum(item => item.Bytes) == 6000,
+            "and every hour's traffic is still counted exactly once");
+
+        // Short enough to read raw, where the finer resolution is worth having
+        // and costs little.
+        var sixHours = wideStore.ReadPeriodAnalysis(from, from.AddHours(6), bucketCount: 60);
+        Assert(sixHours.Timeline.Select(item => item.Bucket).Max() > 23,
+            "a shorter period keeps its finer buckets rather than being widened to hours");
+    }
+
+    // The chart counts connections, because that is what its legend says.
     //
     // It plotted observation_count. While the collector wrote a row per packet
     // those were nowhere near each other: measured on one machine, a single

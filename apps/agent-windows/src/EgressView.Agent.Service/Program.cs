@@ -283,7 +283,7 @@ internal sealed class AgentWindowsService : ServiceBase
         await integrity;
         File.WriteAllText(Path.Combine(root, "diagnostics.json"),
             DiagnosticsReport.Create(monitoring.Snapshot(), store, DiagnosticsReport.CurrentVersion, monitoring.Enabled,
-                capabilityStatus: deliveryController.CapabilityStatus));
+                capabilityStatus: deliveryController.CapabilityStatus, deliveryRuntime: deliveryController.Status));
         bodyCompleted = true;
         }
         // Everything above has been disposed by here, so this is the first

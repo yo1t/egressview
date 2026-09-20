@@ -2124,6 +2124,10 @@ public sealed partial class ObservationStore : IDisposable
         }
     }
 
+    /// The fewest hourly bars worth drawing. Under this a period is read raw,
+    /// which is cheap at that length and keeps the finer resolution.
+    private const int MinimumHourlyBuckets = 12;
+
     public PeriodAnalysis ReadPeriodAnalysis(DateTimeOffset from, DateTimeOffset to, int bucketCount = 60)
     {
         if (from >= to) throw new ArgumentOutOfRangeException(nameof(from));
@@ -2242,21 +2246,52 @@ public sealed partial class ObservationStore : IDisposable
             var durationSeconds = Math.Max(1, (to - from).TotalSeconds);
             var timeline = new List<AppTimelineAggregate>();
             var widthSeconds = durationSeconds / bucketCount;
-            // Buckets narrower than an hour cannot be filled from hourly rows,
-            // so the chart falls back to raw observations for the whole period.
-            // The totals above do not: they are not drawn in buckets.
+            // A long period is drawn from the folded hours, by widening its
+            // buckets to an hour rather than by reading a day of raw rows.
+            //
+            // Sixty buckets over a day is a bucket of twenty-four minutes, and
+            // an hourly row cannot be cut into those, so every period the UI
+            // offers fell back to raw observations and the fold was never used
+            // for the chart at all. Measured on this machine, a day held
+            // 6,500,653 observations and the timeline query took 14.9 seconds
+            // -- against a window that refreshes every five, on the single
+            // pipe that also answers "is the agent running", which is why the
+            // screen said it could not get the status.
+            //
+            // Twenty-four bars for a day is a better chart than sixty anyway.
+            // Below this the period is short enough to read raw: six hours
+            // measured 0.28 seconds.
+            var hours = durationSeconds / 3600.0;
+            if (widthSeconds < 3600 && hours >= MinimumHourlyBuckets)
+            {
+                bucketCount = (int)Math.Floor(hours);
+                widthSeconds = durationSeconds / bucketCount;
+            }
+            // Still narrower than an hour, so the hourly rows cannot fill it
+            // and the raw observations must. The totals above are unaffected:
+            // they are not drawn in buckets.
             if (widthSeconds < 3600) aggregateEnd = aggregateStart;
             var widthText = widthSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            // Whole seconds, not a difference of julian days.
+            //
+            // julianday returns a fractional day, and the fraction cannot hold
+            // an exact hour: measured here, 04:00 came back as 14,399.999987
+            // seconds after midnight, which divided by an hour and truncated
+            // is bucket 3. Every other hourly bar landed one place to the left
+            // of where its traffic happened. Epoch seconds are integers and
+            // the subtraction is exact; sub-second precision is not something
+            // a bucket a second or wider can show.
+            var fromEpoch = from.ToUniversalTime().ToUnixTimeSeconds();
             var timelineSql = $"""
                 WITH combined AS (
-                  SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(bucket_start)-julianday('{fromText}'))*86400.0/{widthText} AS INTEGER))) AS bucket,
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST((CAST(strftime('%s',bucket_start) AS INTEGER)-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
                          application,SUM(flow_count) AS connections,
                          SUM(bytes_sent+bytes_received) AS bytes,SUM(bytes_unknown) AS unknown
                   FROM chart_hourly
                   WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
                   GROUP BY bucket,application
                   UNION ALL
-                  SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(observed_at)-julianday('{fromText}'))*86400.0/{widthText} AS INTEGER))) AS bucket,
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST((CAST(strftime('%s',observed_at) AS INTEGER)-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
                          {app},COUNT(DISTINCT {FlowIdentity}),
                          SUM(COALESCE(bytes_sent,0)+COALESCE(bytes_received,0)),
                          SUM(CASE WHEN bytes_sent IS NULL OR bytes_received IS NULL THEN 1 ELSE 0 END)
@@ -2269,7 +2304,7 @@ public sealed partial class ObservationStore : IDisposable
                   -- connection count to recover from a protocol summary, so
                   -- these contribute bytes and nothing to the bars; a drawn
                   -- zero would be read as "nothing happened".
-                  SELECT MIN({bucketCount - 1},MAX(0,CAST((julianday(bucket_start)-julianday('{fromText}'))*86400.0/{widthText} AS INTEGER))) AS bucket,
+                  SELECT MIN({bucketCount - 1},MAX(0,CAST((CAST(strftime('%s',bucket_start) AS INTEGER)-{fromEpoch})/{widthText} AS INTEGER))) AS bucket,
                          'Other',0,SUM(bytes_sent+bytes_received),SUM(bytes_unknown)
                   FROM hourly_summary h
                   WHERE bucket_start>='{aggregateStart:O}' AND bucket_start<'{aggregateEnd:O}' AND layer='logical'
