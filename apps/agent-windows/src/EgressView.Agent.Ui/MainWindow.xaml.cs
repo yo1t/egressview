@@ -132,20 +132,38 @@ public partial class MainWindow : Window
 
     internal Task RefreshStatusFromTrayAsync() => RefreshStatusAsync();
 
-    internal void ApplyMonitoringStatusFromTray(bool enabled, bool healthy, bool hasActiveCoverage, string? issueCode, string? issueAction)
-    {
+    /// How much of the period was actually watched: a proportion, or nothing
+    /// when there is no answer yet.
+    ///
+    /// The card was written from three places, and two of them put a word in
+    /// it -- "monitoring", "needs attention", "monitoring stopped" -- while the
+    /// third put a percentage. Whichever updater ran last won, so the same
+    /// state showed "99.1%" and "monitoring" by turns while the sentence under
+    /// the card went on quoting the percentage either way: one screen giving
+    /// two answers to the same question.
+    ///
+    /// The word was never this card's to show. It is the badge's, and the
+    /// badge already carries it twice on this screen -- beside the title and
+    /// under the period summary. Taking a ratio rather than a string is what
+    /// stops it coming back.
+    private void SetCoverage(double? ratio) =>
+        CoverageValue.Text = ratio is not { } value ? "—"
+            : value >= 0.999999999
+                ? "100%"
+                : $"{Math.Min(value, 0.999):P1}";
+
+    internal void ApplyMonitoringStatusFromTray(bool enabled, bool healthy, bool hasActiveCoverage, string? issueCode, string? issueAction) =>
+        // The state goes to the badge. Whether monitoring is running says
+        // nothing about how much of the period was covered, which is what this
+        // card is asked for, and the analysis answers that on its own.
         SetMonitoringState(healthy, enabled, issueCode, issueAction);
-        CoverageValue.Text = !enabled
-            ? LocalizationManager.Text("MonitoringStopped")
-            : hasActiveCoverage
-                ? LocalizationManager.Text("Monitoring")
-                : LocalizationManager.Text("NeedsAttention");
-    }
 
     internal void ApplyMonitoringUnavailableFromTray(DateTimeOffset? lastConfirmedAt)
     {
         SetMonitoringUnavailable(lastConfirmedAt);
-        CoverageValue.Text = LocalizationManager.Text("StatusUnavailable");
+        // Not the last figure: it was true of a period this one cannot vouch
+        // for. The badge says the status could not be read.
+        SetCoverage(null);
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAllAsync();
@@ -280,9 +298,7 @@ public partial class MainWindow : Window
         OutboundAnomalyCount.Text = data.OutboundAnomalies > 0
             ? data.OutboundAnomalies.ToString("N0")
             : data.OutboundBaselineReady ? "0" : "—";
-        CoverageValue.Text = data.CoverageRatio >= 0.999999999
-            ? "100%"
-            : $"{Math.Min(data.CoverageRatio, 0.999):P1}";
+        SetCoverage(data.CoverageRatio);
         StorageSummary.Text = string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("StorageSummary"), data.StoredFlows.ToString("N0"), FlowRow.FormatBytes(data.StorageBytes));
         MonitoringSince.Text = data.MonitoringStartedAt is { } started ? string.Format(CultureInfo.CurrentCulture, LocalizationManager.Text("MonitoringSince"), started.LocalDateTime.ToString("g")) : string.Empty;
         var coverageNote = data.CoverageRatio < 0.999999999
@@ -644,9 +660,6 @@ public partial class MainWindow : Window
             var (issueCode, issueAction) = FirstHealthIssue(health);
             SetMonitoringState(healthy, monitoringEnabled, issueCode, issueAction);
             if (System.Windows.Application.Current is App trayApp) trayApp.UpdateTrayState(monitoringEnabled, healthy, issueCode, issueAction);
-            var coverage = data.GetProperty("coverage");
-            CoverageValue.Text = !monitoringEnabled ? LocalizationManager.Text("MonitoringStopped") :
-                coverage.GetProperty("active").GetInt64() > 0 ? LocalizationManager.Text("Monitoring") : LocalizationManager.Text("NeedsAttention");
             loadingDeliveryState = true;
             // Remembered as well as applied: the settings tab is built the
             // first time it is shown, so the control does not exist yet when
@@ -665,7 +678,7 @@ public partial class MainWindow : Window
         {
             var lastConfirmedAt = (System.Windows.Application.Current as App)?.MonitoringStatus.Current.LastConfirmedAt;
             SetMonitoringUnavailable(lastConfirmedAt);
-            CoverageValue.Text = LocalizationManager.Text("StatusUnavailable");
+            SetCoverage(null);
             if (System.Windows.Application.Current is App app) app.UpdateTrayUnavailable();
         }
     }
@@ -1048,6 +1061,27 @@ public partial class MainWindow : Window
             : LocalizationManager.Text("Checking");
     }
 
+    /// The card widths, worked out from the height the way the Mac Agent
+    /// works them out.
+    ///
+    /// The globe is drawn from the smaller side of its box, so a card much
+    /// wider than it is tall spends the difference on nothing: it is given
+    /// very nearly a square. The sankey keeps its name columns at a fixed
+    /// width, so narrowing the card takes width off the ribbons and not off
+    /// the names -- which is the point, the ribbons had more room than they
+    /// needed once the names moved out of the canvas.
+    ///
+    /// Done here rather than in the XAML because both numbers depend on the
+    /// height, and a star column cannot be told about one.
+    private void DashboardGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var width = Math.Max(1, DashboardGrid.ActualWidth);
+        var topHeight = DashboardTopRow.ActualHeight;
+        if (topHeight > 1)
+            GlobeColumn.Width = new GridLength(Math.Min(topHeight + 14, width * 0.5));
+        SankeyColumn.Width = new GridLength(Math.Min(Math.Max(width * 0.48, 336), Math.Max(340, width - 340)));
+    }
+
     private void Rotate_Click(object sender, RoutedEventArgs e)
     {
         Globe.IsRotating = !Globe.IsRotating;
@@ -1172,7 +1206,7 @@ public partial class MainWindow : Window
         PopulateAiModels();
         ShowAgentVersion();
         Globe.FramesPerSecond = AgentSettings.GlobeFrameRate;
-        Globe.DegreesPerSecond = AgentSettings.GlobeSpinSpeed switch { "slow" => 2, "fast" => 14, _ => 6 };
+        Globe.DegreesPerSecond = AgentSettings.GlobeSpinSpeed switch { "slow" => 2, "fast" => 16, _ => 6 };
         loadingSettings = false;
     }
 

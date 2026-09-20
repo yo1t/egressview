@@ -21,7 +21,11 @@ public sealed class WorldGlobeControl : FrameworkElement
     // Match the Mac Agent and stay still until the person explicitly asks
     // for motion. Reprojecting the complete atlas and every route at 5 fps
     // is expensive on software-rendered or remote Windows sessions.
-    private bool rotating;
+    /// A still globe hides half the destinations behind it with no sign
+    /// that they are there, so it turns until someone stops it. The Mac Agent
+    /// has done this since it shipped; this one opened stopped, and the half
+    /// of the world facing away was simply missing.
+    private bool rotating = true;
     private double degreesPerSecond = 6;
     private IReadOnlyList<EgressView.Agent.Core.GlobePoint> points = [];
     private IReadOnlySet<string> visitedCountryCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

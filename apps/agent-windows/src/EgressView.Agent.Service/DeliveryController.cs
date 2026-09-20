@@ -68,7 +68,7 @@ internal sealed class DeliveryController : IDisposable
                             new(Environment.MachineName, "windows", Environment.OSVersion.VersionString, "0.1.0-dev"), cancellationToken);
                     }
                     finally { sendGate.Release(); }
-                    delay = result.Kind switch
+                    delay = result.Narrowed ? NarrowingDelay : result.Kind switch
                     {
                         DeliveryAttemptKind.Acknowledged => TimeSpan.Zero,
                         DeliveryAttemptKind.Empty => TimeSpan.FromSeconds(15),
@@ -80,8 +80,17 @@ internal sealed class DeliveryController : IDisposable
                     var state = State(result.Kind);
                     SetState(state, delay > TimeSpan.Zero ? DateTimeOffset.UtcNow + delay : null, attemptedAt,
                         IsFailure(result.Kind) ? state : null, result.StatusCode);
-                    retry = result.Kind is DeliveryAttemptKind.Retryable or DeliveryAttemptKind.Rejected or DeliveryAttemptKind.InvalidAcknowledgement
-                        ? TimeSpan.FromSeconds(Math.Min(retry.TotalSeconds * 2, 300)) : TimeSpan.FromSeconds(5);
+                    // A refusal that halved the batch is not a reason to wait
+                    // longer. Backoff protects a server in trouble, and this
+                    // one answered: it said no to a payload we have already
+                    // changed. Measured before this was separated out, an
+                    // eight-step bisection ran at the retry ceiling and took
+                    // long enough for the queue to reach its own ceiling and
+                    // start dropping at the far end -- trading the loss the
+                    // halving had just prevented for a different one.
+                    retry = result.Narrowed ? retry
+                        : result.Kind is DeliveryAttemptKind.Retryable or DeliveryAttemptKind.Rejected or DeliveryAttemptKind.InvalidAcknowledgement
+                            ? TimeSpan.FromSeconds(Math.Min(retry.TotalSeconds * 2, 300)) : TimeSpan.FromSeconds(5);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
@@ -97,6 +106,14 @@ internal sealed class DeliveryController : IDisposable
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
         }
     }
+
+    /// How long to wait between the steps of a bisection.
+    ///
+    /// Short, because each step is one request against a Hub that is
+    /// answering, and there are only about eight of them between a full batch
+    /// and the one observation in it that cannot be delivered. Not zero, so a
+    /// Hub refusing everything cannot be bisected in a tight loop.
+    private static readonly TimeSpan NarrowingDelay = TimeSpan.FromSeconds(2);
 
     private void SetState(string state, DateTimeOffset? nextRetryAt, DateTimeOffset? lastAttemptAt = null,
         string? failure = null, int? statusCode = null)

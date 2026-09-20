@@ -8,7 +8,13 @@ namespace EgressView.Agent.Core;
 
 public sealed record DeliveryMetadata(string HostName, string Platform, string OsVersion, string AgentVersion);
 public enum DeliveryAttemptKind { Empty, Acknowledged, AuthorizationRequired, RateLimited, Retryable, Rejected, InvalidAcknowledgement, Incompatible }
-public sealed record DeliveryAttempt(DeliveryAttemptKind Kind, TimeSpan? RetryAfter = null, int? StatusCode = null);
+/// <param name="Narrowed">
+/// Whether this refusal halved the batch, so the next attempt carries a
+/// different payload. Backing off after one is time spent waiting for a
+/// server that is answering perfectly well; the bisection is ours, not its.
+/// </param>
+public sealed record DeliveryAttempt(DeliveryAttemptKind Kind, TimeSpan? RetryAfter = null, int? StatusCode = null,
+    bool Narrowed = false);
 public sealed record DeliveryRuntimeStatus(string State, DateTimeOffset? LastAttemptAt = null,
     DateTimeOffset? NextRetryAt = null, string? LastFailure = null, DateTimeOffset? LastFailureAt = null,
     int? LastStatusCode = null);
@@ -72,19 +78,37 @@ public sealed class DeliverySender
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
                 return new(DeliveryAttemptKind.RateLimited, ParseRetryAfter(response), status);
             if (status >= 500) return new(DeliveryAttemptKind.Retryable, StatusCode: status);
-            if (response.StatusCode != HttpStatusCode.OK) return new(DeliveryAttemptKind.Rejected, StatusCode: status);
+            if (response.StatusCode != HttpStatusCode.OK)
+                return Refused(store, batch.BatchId, DeliveryAttemptKind.Rejected, status);
             AgentIngestAcknowledgement? acknowledgement;
             try { acknowledgement = await response.Content.ReadFromJsonAsync<AgentIngestAcknowledgement>(Json, cancellationToken); }
-            catch (JsonException) { return new(DeliveryAttemptKind.InvalidAcknowledgement); }
+            catch (JsonException) { return Refused(store, batch.BatchId, DeliveryAttemptKind.InvalidAcknowledgement, status); }
             if (acknowledgement is null || acknowledgement.BatchId != batch.BatchId
                 || acknowledgement.Accepted < 0 || acknowledgement.Duplicate < 0 || acknowledgement.Rejected < 0
                 || (long)acknowledgement.Accepted + acknowledgement.Duplicate + acknowledgement.Rejected != batch.Observations.Count)
-                return new(DeliveryAttemptKind.InvalidAcknowledgement);
+                return Refused(store, batch.BatchId, DeliveryAttemptKind.InvalidAcknowledgement, status);
             if (acknowledgement.Rejected != 0)
-                return new(DeliveryAttemptKind.Rejected);
+                return Refused(store, batch.BatchId, DeliveryAttemptKind.Rejected, status);
             store.AcknowledgeDelivery(batch.BatchId, timeProvider.GetUtcNow());
             return new(DeliveryAttemptKind.Acknowledged);
         }
+    }
+
+    /// A refusal of the batch's contents, counted against the batch.
+    ///
+    /// Separated from the transport failures above it because only these say
+    /// anything about the batch. Retrying an identical payload against the
+    /// same answer is what left one batch claimed for three hours while the
+    /// queue behind it overflowed.
+    private static DeliveryAttempt Refused(ObservationStore store, Guid batchId, DeliveryAttemptKind kind, int status)
+    {
+        var narrowed = false;
+        try { narrowed = store.RecordDeliveryBatchRejection(batchId) == DeliveryRefusal.Split; }
+        // The attempt's own outcome is what the caller acts on. Failing to
+        // write the count must not turn a refusal into an exception that the
+        // controller reports as a transport problem.
+        catch (Exception) { }
+        return new(kind, StatusCode: status, Narrowed: narrowed);
     }
 
     private async Task<AgentCapabilityOutcome> NegotiateAsync(AgentCredential credential, CancellationToken cancellationToken)

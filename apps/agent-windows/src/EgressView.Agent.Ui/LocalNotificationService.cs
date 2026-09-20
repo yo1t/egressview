@@ -4,7 +4,13 @@ using EgressView.Agent.Core;
 
 namespace EgressView.Agent.Ui;
 
-internal sealed record NotificationHistoryEntry(DateTimeOffset Date, string Kind, string Title, string Body, bool Delivered, string Outcome = "shown");
+/// <param name="Repeats">
+/// How many identical suppressed attempts this row stands for. One for
+/// everything shown, and for the first of a run. Entries written before this
+/// existed deserialize as zero, which reads the same as one and is not worth a
+/// migration.
+/// </param>
+internal sealed record NotificationHistoryEntry(DateTimeOffset Date, string Kind, string Title, string Body, bool Delivered, string Outcome = "shown", int Repeats = 1);
 
 internal sealed class LocalNotificationService
 {
@@ -79,12 +85,25 @@ internal sealed class LocalNotificationService
 
     private void Add(NotificationHistoryEntry item)
     {
+        // A run of identical suppressed attempts is one fact with a count, not
+        // one row per refresh. Folding it here is what stops the agent's own
+        // five-second re-evaluation from evicting the notifications a reader
+        // came to the list to find.
+        var newest = history.Count > 0 ? history[0] : null;
+        if (newest is not null && NotificationHistoryPolicy.RepeatsNewest(
+                item.Kind, item.Body, item.Outcome, newest.Kind, newest.Body, newest.Outcome))
+        {
+            history[0] = newest with { Date = item.Date, Repeats = Math.Max(1, newest.Repeats) + 1 };
+            Save();
+            return;
+        }
         history.Insert(0, item);
-        if (history.Count > 100) history.RemoveRange(100, history.Count - 100);
+        if (history.Count > NotificationHistoryPolicy.Capacity)
+            history.RemoveRange(NotificationHistoryPolicy.Capacity, history.Count - NotificationHistoryPolicy.Capacity);
         Save();
     }
 
-    private static string Redact(string body) => body.IndexOfAny(['.', ':']) >= 0 ? "EgressView Agent status changed. Open the app for details." : body;
+    private static string Redact(string body) => NotificationRedaction.Apply(body);
 
     private static string DecisionName(NotificationDecision decision) => decision switch
     {
