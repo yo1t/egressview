@@ -162,10 +162,11 @@ describe('外れた理由を、外れた数と一緒に記録する（P3-139）'
     connectionsRoutes._resetReadCacheForTest();
     const app = mount({ summarizeByTimeRange: () => ({ byDst: [], byDevice: [], total: 0 }) });
 
-    // Two rolling requests far enough apart to land in different quanta.
+    // Two rolling requests far enough apart to land in different cells of the
+    // grid this span uses -- five minutes, for a window this wide.
     const base = freshBase();
     await request(app, `/api/connections/summary?from=${base}`);
-    await request(app, `/api/connections/summary?from=${base + 20_000}`);
+    await request(app, `/api/connections/summary?from=${base + 6 * 60_000}`);
 
     const snapshot = connectionsRoutes.summaryCacheSnapshot();
     assert.equal(snapshot.misses, 2);
@@ -196,5 +197,60 @@ describe('外れた理由を、外れた数と一緒に記録する（P3-139）'
     assert.equal(label(now - 14 * 86_400_000, null), '<=14d');
     assert.equal(label(now - 30 * 86_400_000, null), '>14d');
     assert.equal(label(null, now), 'open-start');
+  });
+});
+
+// P3-139. The miss reasons said expired=0, keyNeverSeen=89: the key never
+// repeated, so no TTL could ever be reached. The grid the key snaps to has to
+// be coarser than the interval between requests, and the summary is asked for
+// about once a minute.
+describe('鍵が繰り返すだけの粗さを持たせる（P3-139）', () => {
+  const quantum = connectionsRoutes._summaryCacheQuantum;
+  const now = Date.now();
+
+  it('1分に1回の要求なら、直近1時間の鍵は繰り返す', () => {
+    assert.equal(quantum(now - 3_600_000, null), 60_000);
+  });
+
+  it('短い窓ほど格子は細かい。5分の窓を5分ずらしては意味がない', () => {
+    assert.equal(quantum(now - 5 * 60_000, null), 10_000);
+    assert.equal(quantum(now - 15 * 60_000, null), 10_000);
+    assert.equal(quantum(now - 60_000, null), 10_000);
+  });
+
+  it('長い窓でも、ずれは5分で頭打ちにする', () => {
+    assert.equal(quantum(now - 6 * 3_600_000, null), 180_000);
+    assert.equal(quantum(now - 12 * 3_600_000, null), 5 * 60_000);
+    assert.equal(quantum(now - 14 * 86_400_000, null), 5 * 60_000);
+    assert.equal(quantum(now - 365 * 86_400_000, null), 5 * 60_000);
+  });
+
+  it('範囲が無い要求の鍵は、そもそも動かない', () => {
+    assert.equal(quantum(null, null), 10_000);
+  });
+
+  it('窓が滑っても格子は動かない', () => {
+    // A ratio of the span was tried first: the span is `now - from`, so it
+    // changed with every request, the grid changed with it, and the key moved
+    // anyway. Two requests a minute apart must land on the same grid.
+    assert.equal(quantum(now - 3_600_000, null), quantum(now - 3_600_000 + 60_000, null));
+  });
+
+  it('1分違いで届いた直近1時間の要求は、同じ答えを共有する', async () => {
+    connectionsRoutes._resetReadCacheForTest();
+    let calls = 0;
+    const app = mount({
+      summarizeByTimeRange: () => {
+        calls += 1;
+        return { byDst: [], byDevice: [], total: 0 };
+      },
+    });
+    // Both land in the same one-minute cell, as two polls seconds apart do.
+    const base = Math.floor((now - 3_600_000) / 60_000) * 60_000 + 1_000;
+    await request(app, `/api/connections/summary?from=${base}`);
+    const second = await request(app, `/api/connections/summary?from=${base + 30_000}`);
+    assert.equal(second.body.cached, true);
+    assert.equal(calls, 1);
+    assert.equal(connectionsRoutes.summaryCacheSnapshot().hits, 1);
   });
 });
