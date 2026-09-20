@@ -183,6 +183,7 @@ public sealed record CollectorSnapshot(
     // not (it was already running before collection began).
     long NamesFromStartEvents = 0,
     long NamesFromCache = 0,
+    long NamesFromLiveQueries = 0,
     long NamesNeverSeen = 0,
     long NamesNeverSeenAtStartup = 0,
     long NamesNeverSeenAfterStartup = 0,
